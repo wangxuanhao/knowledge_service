@@ -1,0 +1,205 @@
+@prefix mt:   <http://meituan.com/kg#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+
+# ============================================================
+# 美团规则知识图谱本体（OWL） —— 单一来源
+# 依据：图谱设计.md §4（类层级 / ObjectProperty / DataProperty / SHACL）
+# 用法：16/17/18 启动时读本文件生成 ENTITY_TYPES / RELATION_TYPES / 分组，
+#       并把抽取结果断言成个体后，用 SPARQL 查询 / 按 domain/range 校验。
+# ============================================================
+
+mt: a owl:Ontology ;
+    rdfs:label "美团规则知识图谱本体" ;
+    rdfs:comment "Platform/Merchant/User 等类 + 21 核心关系 + 结构归属 partOf；含 SHACL 形状" .
+
+# ===== 顶层 =====
+mt:Entity a owl:Class ; rdfs:label "Entity" ; rdfs:comment "实体（顶层类）" .
+
+# ===== 主体 Actor =====
+mt:Actor a owl:Class ; rdfs:label "Actor" ; rdfs:comment "主体" ;
+    rdfs:subClassOf mt:Entity .
+mt:Platform a owl:Class ; rdfs:label "Platform" ;
+    rdfs:comment "平台（美团/大众点评/我们）" ;
+    rdfs:subClassOf mt:Actor .
+mt:User a owl:Class ; rdfs:label "User" ;
+    rdfs:comment "消费者/用户" ;
+    rdfs:subClassOf mt:Actor .
+mt:Merchant a owl:Class ; rdfs:label "Merchant" ;
+    rdfs:comment "商家/商户（含主播、店铺经营者）" ;
+    rdfs:subClassOf mt:Actor .
+mt:FulfillmentService a owl:Class ; rdfs:label "FulfillmentService" ;
+    rdfs:comment "履约服务（客服/骑手/司机/代运营）" ;
+    rdfs:subClassOf mt:Actor .
+mt:ExternalOrg a owl:Class ; rdfs:label "ExternalOrg" ;
+    rdfs:comment "监管/外部组织（第三方/合作商/关联/供应商/支付/物流/监管/保险）" ;
+    rdfs:subClassOf mt:Actor .
+
+# ===== 交易客体 TransactionObject =====
+mt:TransactionObject a owl:Class ; rdfs:label "TransactionObject" ;
+    rdfs:comment "交易客体" ; rdfs:subClassOf mt:Entity .
+mt:Product a owl:Class ; rdfs:label "Product" ; rdfs:comment "商品/服务" ;
+    rdfs:subClassOf mt:TransactionObject .
+mt:Order a owl:Class ; rdfs:label "Order" ; rdfs:comment "订单" ;
+    rdfs:subClassOf mt:TransactionObject .
+mt:Payment a owl:Class ; rdfs:label "Payment" ; rdfs:comment "资金结算" ;
+    rdfs:subClassOf mt:TransactionObject .
+mt:Promotion a owl:Class ; rdfs:label "Promotion" ; rdfs:comment "营销权益" ;
+    rdfs:subClassOf mt:TransactionObject .
+
+# ===== 内容 ContentEntity =====
+mt:ContentEntity a owl:Class ; rdfs:label "ContentEntity" ;
+    rdfs:comment "内容" ; rdfs:subClassOf mt:Entity .
+mt:Content a owl:Class ; rdfs:label "Content" ; rdfs:comment "信息内容" ;
+    rdfs:subClassOf mt:ContentEntity .
+mt:Review a owl:Class ; rdfs:label "Review" ; rdfs:comment "评价/口碑" ;
+    rdfs:subClassOf mt:ContentEntity .
+
+# ===== 数据 DataEntity =====
+mt:DataEntity a owl:Class ; rdfs:label "DataEntity" ;
+    rdfs:comment "数据" ; rdfs:subClassOf mt:Entity .
+mt:PersonalData a owl:Class ; rdfs:label "PersonalData" ; rdfs:comment "个人信息" ;
+    rdfs:subClassOf mt:DataEntity .
+
+# ===== 规则 =====
+mt:RuleDocument a owl:Class ; rdfs:label "RuleDocument" ;
+    rdfs:comment "规则/协议/政策" ; rdfs:subClassOf mt:Entity .
+
+# ===== 文档结构（大纲层级，非业务实体） =====
+# 章/节/条是文档内部结构部件：解析 .md/.txt 大纲时把标题节点归入这些类，
+# 配合 partOf 边组成 文档→章→节→条 的树；它们不是 NER 标注类型。
+mt:DocumentPart a owl:Class ; rdfs:label "DocumentPart" ;
+    rdfs:comment "规则文档结构部件（章/节/条）" ; rdfs:subClassOf mt:Entity .
+mt:Chapter a owl:Class ; rdfs:label "Chapter" ;
+    rdfs:comment "章（第X章）" ; rdfs:subClassOf mt:DocumentPart .
+mt:Section a owl:Class ; rdfs:label "Section" ;
+    rdfs:comment "节（第X节 / 一、…）" ; rdfs:subClassOf mt:DocumentPart .
+mt:Article a owl:Class ; rdfs:label "Article" ;
+    rdfs:comment "条（第X条 / 1.1）" ; rdfs:subClassOf mt:DocumentPart .
+
+# ===== 治理 GovernanceEntity =====
+mt:GovernanceEntity a owl:Class ; rdfs:label "GovernanceEntity" ;
+    rdfs:comment "治理" ; rdfs:subClassOf mt:Entity .
+mt:Violation a owl:Class ; rdfs:label "Violation" ;
+    rdfs:comment "违规行为" ; rdfs:subClassOf mt:GovernanceEntity .
+mt:Penalty a owl:Class ; rdfs:label "Penalty" ;
+    rdfs:comment "处理措施" ; rdfs:subClassOf mt:GovernanceEntity .
+mt:Remedy a owl:Class ; rdfs:label "Remedy" ;
+    rdfs:comment "救济途径" ; rdfs:subClassOf mt:GovernanceEntity .
+
+# ===== 外部引用 ExternalReference =====
+mt:ExternalReference a owl:Class ; rdfs:label "ExternalReference" ;
+    rdfs:comment "外部引用" ; rdfs:subClassOf mt:Entity .
+mt:Law a owl:Class ; rdfs:label "Law" ; rdfs:comment "法律法规" ;
+    rdfs:subClassOf mt:ExternalReference .
+mt:Qualification a owl:Class ; rdfs:label "Qualification" ; rdfs:comment "经营资质" ;
+    rdfs:subClassOf mt:ExternalReference .
+
+# ============================================================
+# ObjectProperty（规则类 / 数据类 / 治理类 / 权利义务 / 交易 / 入驻 / 结构）
+# ============================================================
+mt:publishes a owl:ObjectProperty ; rdfs:comment "平台发布规则" ;
+    rdfs:domain mt:Platform ; rdfs:range mt:RuleDocument .
+mt:hasLegalBasis a owl:ObjectProperty ; rdfs:comment "规则的法律依据" ;
+    rdfs:domain mt:RuleDocument ; rdfs:range mt:Law .
+mt:appliesTo a owl:ObjectProperty ; rdfs:comment "规则适用于…" ;
+    rdfs:domain mt:RuleDocument ; rdfs:range mt:Actor .
+mt:prohibits a owl:ObjectProperty ; rdfs:comment "规则禁止…" ;
+    rdfs:domain mt:RuleDocument ; rdfs:range mt:Violation .
+mt:requiresBehavior a owl:ObjectProperty ; rdfs:comment "规则要求…" ;
+    rdfs:domain mt:RuleDocument ; rdfs:range mt:Actor .
+
+mt:collects a owl:ObjectProperty ; rdfs:comment "平台收集个人信息" ;
+    rdfs:domain mt:Platform ; rdfs:range mt:PersonalData .
+mt:sharesWith a owl:ObjectProperty ; rdfs:comment "平台共享给外部组织" ;
+    rdfs:domain mt:Platform ; rdfs:range mt:ExternalOrg .
+mt:agreesTo a owl:ObjectProperty ; rdfs:comment "用户同意规则" ;
+    rdfs:domain mt:User ; rdfs:range mt:RuleDocument .
+
+mt:commits a owl:ObjectProperty ; rdfs:comment "商户实施违规" ;
+    rdfs:domain mt:Merchant ; rdfs:range mt:Violation .
+mt:detects a owl:ObjectProperty ; rdfs:comment "平台发现违规" ;
+    rdfs:domain mt:Platform ; rdfs:range mt:Violation .
+mt:triggers a owl:ObjectProperty ; rdfs:comment "违规触发处罚" ;
+    rdfs:domain mt:Violation ; rdfs:range mt:Penalty .
+mt:handles a owl:ObjectProperty ; rdfs:comment "平台处置处罚" ;
+    rdfs:domain mt:Platform ; rdfs:range mt:Penalty .
+
+mt:hasRight a owl:ObjectProperty ; rdfs:comment "用户享有权利" ;
+    rdfs:domain mt:User ; rdfs:range mt:Remedy .
+mt:hasObligation a owl:ObjectProperty ; rdfs:comment "商户负有义务" ;
+    rdfs:domain mt:Merchant ; rdfs:range mt:Actor .
+
+mt:purchases a owl:ObjectProperty ; rdfs:comment "用户购买商品" ;
+    rdfs:domain mt:User ; rdfs:range mt:Product .
+mt:provides a owl:ObjectProperty ; rdfs:comment "商户提供服务" ;
+    rdfs:domain mt:Merchant ; rdfs:range mt:Product .
+mt:contains a owl:ObjectProperty ; rdfs:comment "订单包含商品" ;
+    rdfs:domain mt:Order ; rdfs:range mt:Product .
+mt:delivers a owl:ObjectProperty ; rdfs:comment "履约配送订单" ;
+    rdfs:domain mt:FulfillmentService ; rdfs:range mt:Order .
+mt:refunds a owl:ObjectProperty ; rdfs:comment "平台退款结算" ;
+    rdfs:domain mt:Platform ; rdfs:range mt:Payment .
+
+mt:onboards a owl:ObjectProperty ; rdfs:comment "商户入驻平台" ;
+    rdfs:domain mt:Merchant ; rdfs:range mt:Platform .
+mt:reviews a owl:ObjectProperty ; rdfs:comment "平台审核资质" ;
+    rdfs:domain mt:Platform ; rdfs:range mt:Qualification .
+mt:isAffiliate a owl:ObjectProperty ; rdfs:comment "平台关联组织" ;
+    rdfs:domain mt:Platform ; rdfs:range mt:ExternalOrg .
+
+# 结构归属（章节/条款）——图数据里的"标题节点 → 所属章节/序号"
+mt:partOf a owl:ObjectProperty ; rdfs:comment "归属于…（章节/条款）" ;
+    rdfs:domain mt:Entity ; rdfs:range mt:Entity .
+
+# A-Box 物化边：build_dataset 把"个体 → 其直接所属类"写成 mt:instanceOf，
+# 配合 TBox 的 rdfs:subClassOf，可无推理器直接做"instanceOf/subClassOf*"层级查询。
+mt:instanceOf a owl:ObjectProperty ; rdfs:comment "个体所属的类（物化，便于层级遍历）" ;
+    rdfs:domain mt:Entity ; rdfs:range mt:Entity .
+
+# ============================================================
+# DataProperty
+# ============================================================
+mt:name a owl:DatatypeProperty ; rdfs:comment "实体显示名" ;
+    rdfs:domain mt:Entity ; rdfs:range xsd:string .
+mt:aliases a owl:DatatypeProperty ; rdfs:comment "别名（JSON 数组）" ;
+    rdfs:domain mt:Entity ; rdfs:range xsd:string .
+mt:category a owl:DatatypeProperty ; rdfs:comment "违规/处罚分类" ;
+    rdfs:domain mt:GovernanceEntity ; rdfs:range xsd:string .
+mt:confidence a owl:DatatypeProperty ; rdfs:comment "抽取置信度" ;
+    rdfs:domain mt:Entity ; rdfs:range xsd:float .
+mt:ruleId a owl:DatatypeProperty ; rdfs:comment "规则 ID" ;
+    rdfs:domain mt:RuleDocument ; rdfs:range xsd:string .
+mt:filePath a owl:DatatypeProperty ; rdfs:comment "来源文件路径" ;
+    rdfs:domain mt:RuleDocument ; rdfs:range xsd:string .
+mt:title a owl:DatatypeProperty ; rdfs:comment "规则标题" ;
+    rdfs:domain mt:RuleDocument ; rdfs:range xsd:string .
+mt:categoryL1 a owl:DatatypeProperty ; rdfs:comment "一级分类（业务线）" ;
+    rdfs:domain mt:RuleDocument ; rdfs:range xsd:string .
+# 扩展（graph.json 导入用）：来源文件名 / 原文片段（段落/条款正文）
+mt:sourceFile a owl:DatatypeProperty ; rdfs:comment "来源文件名（扩展）" ;
+    rdfs:domain mt:Entity ; rdfs:range xsd:string .
+mt:passage a owl:DatatypeProperty ; rdfs:comment "命中的原文段落（扩展）" ;
+    rdfs:domain mt:Entity ; rdfs:range xsd:string .
+
+# ============================================================
+# SHACL 约束（图谱设计.md §4.4）
+# ============================================================
+mt:RuleDocumentShape
+    a sh:NodeShape ;
+    sh:targetClass mt:RuleDocument ;
+    sh:property [
+        sh:path mt:title ; sh:datatype xsd:string ;  # 文档标题来自 document 记录，抽取实体不产生该属性，故不作 minCount 强制
+    ] , [
+        sh:path mt:appliesTo ;  # 抽取片段可能只出现规则名称，不在片段落库阶段作 minCount 强制
+    ] .
+
+mt:ViolationShape
+    a sh:NodeShape ;
+    sh:targetClass mt:Violation ;
+    sh:property [
+        sh:path mt:triggers ;  # 抽取片段可能未同时出现处罚，不在片段落库阶段作 minCount 强制
+    ] .

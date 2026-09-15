@@ -1,0 +1,78 @@
+/* Mindmap Controls Styles */
+#tab-mindmap .row {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+#tab-mindmap .row label {
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    width: auto;
+}
+
+#tab-mindmap .row label span,
+#tab-mindmap .row label::before {
+    font-size: 11px;
+    color: #6b7f75;
+    margin-bottom: 4px;
+}
+
+/* 筛选名称 / 类型 */
+#tab-mindmap .row label:first-child {
+    width: 200px;
+}
+
+/* 根实体 ID */
+#tab-mindmap .row label:nth-child(2) {
+    width: 280px;
+}
+
+/* 深度 */
+#tab-mindmap .row label:nth-child(3) {
+    width: 90px;
+}
+
+#tab-mindmap .row input {
+    margin: 0;
+    height: 38px;
+}
+
+#tab-mindmap .row select {
+    margin: 0;
+    height: 38px;
+}
+
+#tab-mindmap .row button {
+    height: 38px;
+    padding: 0 20px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* Mindmap Canvas */
+#mindmap-canvas {
+    height: calc(100dvh - 290px);
+    min-height: 350px;
+    border: 1px solid #e5ebe5;
+    border-radius: 8px;
+    background: #fafcfa;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+    #tab-mindmap .row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    #tab-mindmap .row label {
+        width: 100% !important;
+    }
+
+    #tab-mindmap .row button {
+        width: 100%;
+    }
+}

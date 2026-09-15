@@ -1,0 +1,323 @@
+/* Project Management Styles — matches dashboard/tasks/ontology-modal design language */
+.projects-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.projects-header h2 {
+    margin: 0 0 4px;
+}
+
+.projects-header .subtle {
+    margin: 0;
+}
+
+/* Create form (reuses legacy ids: create-name / default-ontology / create-project / cancel-project) */
+.projects-create-form {
+    background: white;
+    border: 1px solid #dce5df;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 16px;
+    align-items: end;
+}
+
+.projects-create-form label {
+    margin-bottom: 0;
+}
+
+.projects-create-form .check {
+    margin-top: 0;
+    align-self: center;
+}
+
+.projects-create-form .row {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+}
+
+/* Project cards */
+.projects-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+}
+
+.project-card {
+    background: white;
+    border: 1px solid #dce5df;
+    border-radius: 12px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    transition: all 0.2s;
+}
+
+.project-card:hover {
+    border-color: #b3d4c5;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.project-card.current {
+    border-color: #216952;
+    background: linear-gradient(135deg, #f0faf3 0%, #e8f5eb 100%);
+}
+
+.project-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.project-card-head h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #244238;
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.project-current-badge {
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 600;
+    color: #216952;
+    background: #dcfce7;
+    padding: 3px 10px;
+    border-radius: 12px;
+}
+
+.project-created {
+    font-size: 12px;
+    color: #6b7f75;
+    margin: 0;
+}
+
+.project-counts {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    padding: 12px 0;
+    border-top: 1px solid #e5ebe5;
+    border-bottom: 1px solid #e5ebe5;
+}
+
+.project-count {
+    text-align: center;
+}
+
+.project-count strong {
+    display: block;
+    font-size: 18px;
+    font-weight: 700;
+    color: #244238;
+}
+
+.project-count span {
+    font-size: 11px;
+    color: #6b7f75;
+}
+
+.project-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: auto;
+}
+
+.project-actions button {
+    flex: 1;
+    font-size: 12px;
+    padding: 8px 12px;
+}
+
+/* Empty state */
+.projects-empty {
+    text-align: center;
+    padding: 48px 20px;
+    color: #6b7f75;
+    background: #f8faf7;
+    border: 1px dashed #d1d5db;
+    border-radius: 12px;
+}
+
+.projects-empty-icon {
+    font-size: 40px;
+    margin-bottom: 12px;
+    opacity: 0.5;
+}
+
+.projects-empty-title {
+    font-size: 14px;
+    font-weight: 550;
+    color: #374151;
+    margin-bottom: 6px;
+}
+
+.projects-empty-text {
+    font-size: 12px;
+}
+
+/* Modals — follows ontology-modal.css pattern */
+.projects-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.projects-modal-overlay.active {
+    display: flex;
+    opacity: 1;
+}
+
+.projects-modal {
+    background: white;
+    border: 1px solid #dce5df;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 480px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    transform: translateY(20px);
+    transition: transform 0.2s;
+}
+
+.projects-modal-overlay.active .projects-modal {
+    transform: translateY(0);
+}
+
+.projects-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 20px;
+    border-bottom: 1px solid #e5ebe5;
+    background: #f8faf7;
+    border-radius: 12px 12px 0 0;
+}
+
+.projects-modal-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #294d3e;
+    margin: 0;
+}
+
+.projects-modal-close {
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: transparent;
+    color: #6b7f75;
+    cursor: pointer;
+    border-radius: 6px;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+.projects-modal-close:hover {
+    background: #e8f0eb;
+    color: #294d3e;
+}
+
+.projects-modal-body {
+    padding: 20px;
+}
+
+.projects-modal-body label {
+    margin-bottom: 0;
+}
+
+.projects-modal-footer {
+    display: flex;
+    gap: 10px;
+    padding: 16px 20px;
+    border-top: 1px solid #e5ebe5;
+    background: #fafcfa;
+    border-radius: 0 0 12px 12px;
+}
+
+.projects-modal-footer button {
+    flex: 1;
+}
+
+.projects-modal-footer .secondary {
+    flex: 0 0 auto;
+}
+
+/* Delete confirmation */
+.projects-delete-warning {
+    background: #fef3f2;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 12px;
+    color: #991b1b;
+    line-height: 1.7;
+    margin-bottom: 14px;
+}
+
+.projects-confirm-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: #fef3f2;
+    border: 1px solid #fecaca;
+    border-radius: 6px;
+    margin-top: 14px;
+}
+
+.projects-confirm-row input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: #dc2626;
+}
+
+.projects-confirm-row label {
+    margin: 0;
+    font-size: 12px;
+    color: #991b1b;
+    cursor: pointer;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .projects-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 600px) {
+    .projects-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .projects-create-form {
+        grid-template-columns: 1fr;
+    }
+
+    .projects-modal {
+        width: 95%;
+    }
+}

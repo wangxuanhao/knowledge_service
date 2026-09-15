@@ -1,0 +1,1517 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>知序 · 本体管理</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #0a0f1a;
+            --bg-secondary: #111827;
+            --bg-tertiary: #1f2937;
+            --bg-card: #1a2332;
+            --border-color: #2d3748;
+            --border-active: #3b82f6;
+            --text-primary: #f3f4f6;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            --accent-blue: #3b82f6;
+            --accent-purple: #8b5cf6;
+            --accent-emerald: #10b981;
+            --accent-amber: #f59e0b;
+            --accent-rose: #f43f5e;
+            --gradient-blue: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            --gradient-emerald: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
+            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+            --radius: 8px;
+            --radius-lg: 12px;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.5;
+            min-height: 100vh;
+        }
+
+        /* Layout */
+        .app-container {
+            display: grid;
+            grid-template-columns: 260px 1fr 340px;
+            grid-template-rows: auto 1fr;
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            grid-column: 1 / -1;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .header-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header-brand h1 {
+            font-size: 20px;
+            font-weight: 600;
+            background: var(--gradient-blue);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header-brand span {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .project-selector {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 8px 12px;
+            color: var(--text-primary);
+            font-size: 13px;
+            min-width: 180px;
+        }
+
+        .project-selector:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border-radius: var(--radius);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+        }
+
+        .btn-primary {
+            background: var(--gradient-blue);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+        }
+
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border-color);
+        }
+
+        .btn-ghost {
+            background: transparent;
+            color: var(--text-secondary);
+        }
+
+        .btn-ghost:hover {
+            color: var(--text-primary);
+            background: var(--bg-tertiary);
+        }
+
+        .btn-danger {
+            background: var(--accent-rose);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #e11d48;
+        }
+
+        /* Sidebar - Term Categories */
+        .sidebar {
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .sidebar-section {
+            margin-bottom: 28px;
+        }
+
+        .sidebar-section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .sidebar-section-title {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+        }
+
+        .sidebar-count {
+            font-size: 11px;
+            color: var(--text-muted);
+            background: var(--bg-tertiary);
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+
+        .term-type-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .term-type-card:hover {
+            border-color: var(--accent-blue);
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        .term-type-card.active {
+            border-color: var(--accent-blue);
+            background: rgba(59, 130, 246, 0.15);
+        }
+
+        .term-type-card-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .term-type-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+
+        .term-type-icon.class {
+            background: rgba(139, 92, 246, 0.2);
+            color: var(--accent-purple);
+        }
+
+        .term-type-icon.relation {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--accent-emerald);
+        }
+
+        .term-type-icon.attribute {
+            background: rgba(245, 158, 11, 0.2);
+            color: var(--accent-amber);
+        }
+
+        .term-type-name {
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .term-type-meta {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        /* Main Content - Term Grid */
+        .main-content {
+            padding: 24px;
+            overflow-y: auto;
+        }
+
+        .content-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        .content-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .content-subtitle {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .search-box {
+            position: relative;
+        }
+
+        .search-box input {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 10px 14px 10px 38px;
+            color: var(--text-primary);
+            font-size: 13px;
+            width: 280px;
+        }
+
+        .search-box input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+
+        .search-box::before {
+            content: "🔍";
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 14px;
+        }
+
+        .term-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 16px;
+        }
+
+        .term-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+        .term-card:hover {
+            border-color: var(--accent-blue);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .term-card.selected {
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+        }
+
+        .term-card-header {
+            display: flex;
+            align-items: start;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .term-card-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        .term-card-icon.class {
+            background: var(--gradient-blue);
+        }
+
+        .term-card-icon.relation {
+            background: var(--gradient-emerald);
+        }
+
+        .term-card-icon.attribute {
+            background: linear-gradient(135deg, #f59e0b 0%, #f97316 100%);
+        }
+
+        .term-card-status {
+            font-size: 10px;
+            padding: 4px 8px;
+            border-radius: 12px;
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--accent-emerald);
+        }
+
+        .term-card-name {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .term-card-uri {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--text-muted);
+            word-break: break-all;
+            margin-bottom: 12px;
+        }
+
+        .term-card-description {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .term-card-meta {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .term-meta-item {
+            font-size: 11px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .term-meta-item .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+        }
+
+        .term-meta-item .dot.parent {
+            background: var(--accent-purple);
+        }
+
+        .term-meta-item .dot.domain {
+            background: var(--accent-emerald);
+        }
+
+        .term-meta-item .dot.range {
+            background: var(--accent-amber);
+        }
+
+        /* Detail Panel */
+        .detail-panel {
+            background: var(--bg-secondary);
+            border-left: 1px solid var(--border-color);
+            padding: 24px;
+            overflow-y: auto;
+        }
+
+        .detail-empty {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            color: var(--text-muted);
+        }
+
+        .detail-empty-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .detail-empty-text {
+            font-size: 14px;
+        }
+
+        .detail-header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 24px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .detail-icon {
+            width: 56px;
+            height: 56px;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+
+        .detail-icon.class {
+            background: var(--gradient-blue);
+        }
+
+        .detail-icon.relation {
+            background: var(--gradient-emerald);
+        }
+
+        .detail-icon.attribute {
+            background: linear-gradient(135deg, #f59e0b 0%, #f97316 100%);
+        }
+
+        .detail-title-group h2 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .detail-title-group .uri {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--text-muted);
+            word-break: break-all;
+        }
+
+        .detail-section {
+            margin-bottom: 24px;
+        }
+
+        .detail-section-title {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+
+        .detail-field {
+            background: var(--bg-tertiary);
+            border-radius: var(--radius);
+            padding: 12px;
+            margin-bottom: 8px;
+        }
+
+        .detail-field-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+
+        .detail-field-value {
+            font-size: 14px;
+            color: var(--text-primary);
+        }
+
+        .detail-field-value.mono {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+        }
+
+        .impact-card {
+            background: var(--bg-tertiary);
+            border-left: 3px solid var(--accent-amber);
+            border-radius: var(--radius);
+            padding: 12px;
+            margin-bottom: 8px;
+        }
+
+        .impact-card-header {
+            font-size: 12px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .impact-stat {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            padding: 4px 0;
+        }
+
+        .impact-stat-label {
+            color: var(--text-secondary);
+        }
+
+        .impact-stat-value {
+            font-weight: 500;
+        }
+
+        .detail-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 24px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            width: 90%;
+            max-width: 540px;
+            max-height: 90vh;
+            overflow-y: auto;
+            transform: translateY(20px);
+            transition: transform 0.3s;
+        }
+
+        .modal-overlay.active .modal {
+            transform: translateY(0);
+        }
+
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .modal-title {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 20px;
+            padding: 4px;
+        }
+
+        .modal-close:hover {
+            color: var(--text-primary);
+        }
+
+        .modal-body {
+            padding: 24px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+
+        .form-input,
+        .form-select,
+        .form-textarea {
+            width: 100%;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 10px 14px;
+            color: var(--text-primary);
+            font-size: 14px;
+            font-family: inherit;
+        }
+
+        .form-input:focus,
+        .form-select:focus,
+        .form-textarea:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+
+        .form-input.mono {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+        }
+
+        .form-textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .form-hint {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 6px;
+        }
+
+        .modal-footer {
+            padding: 16px 24px;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
+        /* Version Badge */
+        .version-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        .version-badge .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent-emerald);
+        }
+
+        /* Loading State */
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border-color);
+            border-top-color: var(--accent-blue);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-muted);
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .empty-state-title {
+            font-size: 16px;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state-text {
+            font-size: 13px;
+        }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .app-container {
+                grid-template-columns: 220px 1fr 300px;
+            }
+        }
+
+        @media (max-width: 1000px) {
+            .app-container {
+                grid-template-columns: 1fr;
+            }
+
+            .sidebar {
+                display: none;
+            }
+
+            .detail-panel {
+                display: none;
+            }
+
+            .detail-panel.active {
+                display: block;
+                position: fixed;
+                top: 0;
+                right: 0;
+                bottom: 0;
+                width: 340px;
+                z-index: 100;
+            }
+        }
+
+        /* Toast Notification */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 12px 20px;
+            font-size: 13px;
+            box-shadow: var(--shadow-lg);
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s;
+            z-index: 1001;
+        }
+
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .toast.success {
+            border-color: var(--accent-emerald);
+        }
+
+        .toast.error {
+            border-color: var(--accent-rose);
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-brand">
+                <h1>知序</h1>
+                <span>本体管理</span>
+            </div>
+            <div class="header-actions">
+                <select class="project-selector" id="project-selector">
+                    <option value="">选择项目</option>
+                </select>
+                <div class="version-badge">
+                    <span class="dot"></span>
+                    <span id="version-label">v1.0</span>
+                </div>
+                <button class="btn btn-primary" id="btn-add-term">
+                    <span>+</span> 添加术语
+                </button>
+            </div>
+        </header>
+
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <!-- Entity Classes -->
+            <div class="sidebar-section">
+                <div class="sidebar-section-header">
+                    <span class="sidebar-section-title">实体类</span>
+                    <span class="sidebar-count" id="class-count">0</span>
+                </div>
+                <div id="class-list"></div>
+            </div>
+
+            <!-- Relations -->
+            <div class="sidebar-section">
+                <div class="sidebar-section-header">
+                    <span class="sidebar-section-title">关系</span>
+                    <span class="sidebar-count" id="relation-count">0</span>
+                </div>
+                <div id="relation-list"></div>
+            </div>
+
+            <!-- Attributes -->
+            <div class="sidebar-section">
+                <div class="sidebar-section-header">
+                    <span class="sidebar-section-title">属性</span>
+                    <span class="sidebar-count" id="attribute-count">0</span>
+                </div>
+                <div id="attribute-list"></div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="content-header">
+                <div>
+                    <h1 class="content-title" id="content-title">全部术语</h1>
+                    <p class="content-subtitle" id="content-subtitle">管理和维护项目本体</p>
+                </div>
+                <div class="search-box">
+                    <input type="text" id="search-input" placeholder="搜索术语...">
+                </div>
+            </div>
+            <div class="term-grid" id="term-grid"></div>
+        </main>
+
+        <!-- Detail Panel -->
+        <aside class="detail-panel" id="detail-panel">
+            <div class="detail-empty" id="detail-empty">
+                <div class="detail-empty-icon">📋</div>
+                <p class="detail-empty-text">选择一个术语查看详情</p>
+            </div>
+            <div id="detail-content" style="display: none;"></div>
+        </aside>
+    </div>
+
+    <!-- Add/Edit Modal -->
+    <div class="modal-overlay" id="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title" id="modal-title">添加术语</h3>
+                <button class="modal-close" id="modal-close">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">术语类型</label>
+                    <select class="form-select" id="term-kind">
+                        <option value="class">实体类</option>
+                        <option value="relation">关系</option>
+                        <option value="attribute">属性</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">完整 IRI</label>
+                    <input type="text" class="form-input mono" id="term-uri" placeholder="urn:my:Merchant">
+                    <p class="form-hint">IRI 是稳定标识，创建后不可直接更名</p>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">显示名称</label>
+                    <input type="text" class="form-input" id="term-label" placeholder="商户">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">说明</label>
+                    <textarea class="form-textarea" id="term-description" placeholder="可选的描述信息"></textarea>
+                </div>
+                <div class="form-group" id="parent-group">
+                    <label class="form-label">父类</label>
+                    <select class="form-select" id="term-parent"></select>
+                </div>
+                <div class="form-group" id="domain-group">
+                    <label class="form-label">定义域</label>
+                    <select class="form-select" id="term-domain"></select>
+                </div>
+                <div class="form-group" id="range-group">
+                    <label class="form-label">值域 / 数据类型</label>
+                    <select class="form-select" id="term-range"></select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="modal-cancel">取消</button>
+                <button class="btn btn-primary" id="modal-save">保存为新版本</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <script>
+        // State Management
+        const state = {
+            currentProject: null,
+            ontology: null,
+            selectedTerm: null,
+            filter: 'all',
+            searchQuery: ''
+        };
+
+        // DOM Helpers
+        const $ = (id) => document.getElementById(id);
+        const $$ = (sel) => document.querySelectorAll(sel);
+
+        // API Helper
+        async function api(url, options = {}) {
+            const response = await fetch(url, {
+                ...options,
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                }
+            });
+            if (!response.ok) throw new Error(`API Error: ${response.statusText}`);
+            return response.json();
+        }
+
+        // Toast Notification
+        function showToast(message, type = 'success') {
+            const toast = $('toast');
+            toast.textContent = message;
+            toast.className = `toast ${type} show`;
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        // Render Functions
+        function renderSidebar() {
+            if (!state.ontology) return;
+
+            const summary = state.ontology.summary;
+
+            // Classes
+            const classList = $('class-list');
+            classList.innerHTML = (summary.classes || []).map(c => `
+                <div class="term-type-card ${state.filter === 'class:' + c.id ? 'active' : ''}"
+                     data-type="class" data-uri="${c.id}">
+                    <div class="term-type-card-header">
+                        <div class="term-type-icon class">📦</div>
+                        <div>
+                            <div class="term-type-name">${c.label}</div>
+                            <div class="term-type-meta">${c.parents?.length ? '继承 ' + c.parents.length + ' 个父类' : '根类'}</div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            // Relations
+            const relationList = $('relation-list');
+            relationList.innerHTML = (summary.relations || []).map(r => `
+                <div class="term-type-card ${state.filter === 'relation:' + r.id ? 'active' : ''}"
+                     data-type="relation" data-uri="${r.id}">
+                    <div class="term-type-card-header">
+                        <div class="term-type-icon relation">🔗</div>
+                        <div>
+                            <div class="term-type-name">${r.label}</div>
+                            <div class="term-type-meta">${r.domain?.[0] || '任意'} → ${r.range?.[0] || '任意'}</div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            // Attributes
+            const attributeList = $('attribute-list');
+            attributeList.innerHTML = (summary.attributes || []).map(a => `
+                <div class="term-type-card ${state.filter === 'attribute:' + a.id ? 'active' : ''}"
+                     data-type="attribute" data-uri="${a.id}">
+                    <div class="term-type-card-header">
+                        <div class="term-type-icon attribute">🏷️</div>
+                        <div>
+                            <div class="term-type-name">${a.label}</div>
+                            <div class="term-type-meta">${a.domain?.[0] || '任意'} → ${a.range?.split('#').pop() || '未指定'}</div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            // Update counts
+            $('class-count').textContent = (summary.classes || []).length;
+            $('relation-count').textContent = (summary.relations || []).length;
+            $('attribute-count').textContent = (summary.attributes || []).length;
+
+            // Add click handlers
+            $$('.term-type-card').forEach(card => {
+                card.addEventListener('click', () => {
+                    state.filter = `${card.dataset.type}:${card.dataset.uri}`;
+                    renderTermGrid();
+                    renderSidebar();
+                });
+            });
+        }
+
+        function renderTermGrid() {
+            const grid = $('term-grid');
+            let terms = [];
+
+            if (!state.ontology) {
+                grid.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📦</div>
+                        <h3 class="empty-state-title">尚未加载本体</h3>
+                        <p class="empty-state-text">请先选择项目并加载本体</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const summary = state.ontology.summary;
+
+            // Collect all terms
+            if (state.filter === 'all' || state.filter.startsWith('class:')) {
+                (summary.classes || []).forEach(c => terms.push({ ...c, kind: 'class' }));
+            }
+            if (state.filter === 'all' || state.filter.startsWith('relation:')) {
+                (summary.relations || []).forEach(r => terms.push({ ...r, kind: 'relation' }));
+            }
+            if (state.filter === 'all' || state.filter.startsWith('attribute:')) {
+                (summary.attributes || []).forEach(a => terms.push({ ...a, kind: 'attribute' }));
+            }
+
+            // Apply filter
+            if (state.filter.includes(':')) {
+                const [type, uri] = state.filter.split(':');
+                terms = terms.filter(t => t.kind === type && t.id === uri);
+            }
+
+            // Apply search
+            if (state.searchQuery) {
+                const q = state.searchQuery.toLowerCase();
+                terms = terms.filter(t =>
+                    t.label.toLowerCase().includes(q) ||
+                    t.id.toLowerCase().includes(q)
+                );
+            }
+
+            if (terms.length === 0) {
+                grid.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">🔍</div>
+                        <h3 class="empty-state-title">未找到术语</h3>
+                        <p class="empty-state-text">${state.searchQuery ? '尝试其他搜索词' : '点击"添加术语"创建新术语'}</p>
+                    </div>
+                `;
+                return;
+            }
+
+            grid.innerHTML = terms.map(term => `
+                <div class="term-card ${state.selectedTerm?.id === term.id ? 'selected' : ''}"
+                     data-uri="${term.id}" data-kind="${term.kind}">
+                    <div class="term-card-header">
+                        <div class="term-card-icon ${term.kind}">
+                            ${term.kind === 'class' ? '📦' : term.kind === 'relation' ? '🔗' : '🏷️'}
+                        </div>
+                        <span class="term-card-status">活跃</span>
+                    </div>
+                    <h3 class="term-card-name">${term.label}</h3>
+                    <p class="term-card-uri">${term.id}</p>
+                    ${term.description ? `<p class="term-card-description">${term.description}</p>` : ''}
+                    <div class="term-card-meta">
+                        ${term.parents?.length ? `
+                            <span class="term-meta-item">
+                                <span class="dot parent"></span>
+                                继承
+                            </span>
+                        ` : ''}
+                        ${term.domain?.length ? `
+                            <span class="term-meta-item">
+                                <span class="dot domain"></span>
+                                定义域
+                            </span>
+                        ` : ''}
+                        ${term.range?.length ? `
+                            <span class="term-meta-item">
+                                <span class="dot range"></span>
+                                值域
+                            </span>
+                        ` : ''}
+                    </div>
+                </div>
+            `).join('');
+
+            // Add click handlers
+            $$('.term-card').forEach(card => {
+                card.addEventListener('click', () => {
+                    const uri = card.dataset.uri;
+                    const kind = card.dataset.kind;
+                    selectTerm(kind, uri);
+                });
+            });
+        }
+
+        function renderDetailPanel() {
+            const panel = $('detail-panel');
+            const emptyState = $('detail-empty');
+            const content = $('detail-content');
+
+            if (!state.selectedTerm) {
+                emptyState.style.display = 'flex';
+                content.style.display = 'none';
+                return;
+            }
+
+            emptyState.style.display = 'none';
+            content.style.display = 'block';
+
+            const term = state.selectedTerm;
+
+            content.innerHTML = `
+                <div class="detail-header">
+                    <div class="detail-icon ${term.kind}">
+                        ${term.kind === 'class' ? '📦' : term.kind === 'relation' ? '🔗' : '🏷️'}
+                    </div>
+                    <div class="detail-title-group">
+                        <h2>${term.label}</h2>
+                        <p class="uri">${term.id}</p>
+                    </div>
+                </div>
+
+                <div class="detail-section">
+                    <h3 class="detail-section-title">基本信息</h3>
+                    <div class="detail-field">
+                        <div class="detail-field-label">类型</div>
+                        <div class="detail-field-value">${term.kind === 'class' ? '实体类' : term.kind === 'relation' ? '关系' : '属性'}</div>
+                    </div>
+                    ${term.description ? `
+                        <div class="detail-field">
+                            <div class="detail-field-label">说明</div>
+                            <div class="detail-field-value">${term.description}</div>
+                        </div>
+                    ` : ''}
+                </div>
+
+                <div class="detail-section">
+                    <h3 class="detail-section-title">约束关系</h3>
+                    ${term.parents?.length ? `
+                        <div class="detail-field">
+                            <div class="detail-field-label">父类</div>
+                            <div class="detail-field-value mono">${term.parents.join(', ')}</div>
+                        </div>
+                    ` : ''}
+                    ${term.domain?.length ? `
+                        <div class="detail-field">
+                            <div class="detail-field-label">定义域</div>
+                            <div class="detail-field-value mono">${term.domain.join(', ')}</div>
+                        </div>
+                    ` : ''}
+                    ${term.range?.length ? `
+                        <div class="detail-field">
+                            <div class="detail-field-label">值域</div>
+                            <div class="detail-field-value mono">${term.range.join(', ')}</div>
+                        </div>
+                    ` : ''}
+                </div>
+
+                <div class="detail-section">
+                    <h3 class="detail-section-title">变更影响</h3>
+                    <div class="impact-card">
+                        <div class="impact-card-header">知识引用</div>
+                        <div class="impact-stat">
+                            <span class="impact-stat-label">受影响记录</span>
+                            <span class="impact-stat-value" id="impact-records">加载中...</span>
+                        </div>
+                        <div class="impact-stat">
+                            <span class="impact-stat-label">约束引用</span>
+                            <span class="impact-stat-value" id="impact-constraints">加载中...</span>
+                        </div>
+                        <div class="impact-stat">
+                            <span class="impact-stat-label">待审核映射</span>
+                            <span class="impact-stat-value" id="impact-pending">加载中...</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="detail-actions">
+                    <button class="btn btn-secondary" id="btn-edit-term">修改术语</button>
+                    <button class="btn btn-danger" id="btn-retire-term">停用术语</button>
+                </div>
+            `;
+
+            // Load impact data
+            loadTermImpact(term.id);
+
+            // Add action handlers
+            $('btn-edit-term').addEventListener('click', () => openEditModal(term));
+            $('btn-retire-term').addEventListener('click', () => retireTerm(term));
+        }
+
+        async function loadTermImpact(uri) {
+            try {
+                const impact = await api(`/api/projects/${state.currentProject}/ontology/term-impact?uri=${encodeURIComponent(uri)}`);
+                $('impact-records').textContent = impact.record_count;
+                $('impact-constraints').textContent = impact.constraint_count;
+                $('impact-pending').textContent = impact.pending_review_count;
+            } catch (e) {
+                $('impact-records').textContent = '-';
+                $('impact-constraints').textContent = '-';
+                $('impact-pending').textContent = '-';
+            }
+        }
+
+        // Term Selection
+        async function selectTerm(kind, uri) {
+            const collection = state.ontology.summary[{
+                class: 'classes',
+                relation: 'relations',
+                attribute: 'attributes'
+            }[kind]];
+
+            const term = collection.find(t => t.id === uri);
+            if (term) {
+                state.selectedTerm = { ...term, kind };
+                renderTermGrid();
+                renderDetailPanel();
+            }
+        }
+
+        // Modal Functions
+        function openAddModal() {
+            state.editingTerm = null;
+            $('modal-title').textContent = '添加术语';
+            $('term-kind').value = 'class';
+            $('term-uri').value = '';
+            $('term-label').value = '';
+            $('term-description').value = '';
+            updateFormFields('class');
+            $('modal-overlay').classList.add('active');
+        }
+
+        function openEditModal(term) {
+            state.editingTerm = term;
+            $('modal-title').textContent = '修改术语';
+            $('term-kind').value = term.kind;
+            $('term-kind').disabled = true;
+            $('term-uri').value = term.id;
+            $('term-uri').disabled = true;
+            $('term-label').value = term.label;
+            $('term-description').value = term.description || '';
+            updateFormFields(term.kind, term);
+            $('modal-overlay').classList.add('active');
+        }
+
+        function closeModal() {
+            $('modal-overlay').classList.remove('active');
+            $('term-kind').disabled = false;
+            $('term-uri').disabled = false;
+        }
+
+        function updateFormFields(kind, values = {}) {
+            const parentGroup = $('parent-group');
+            const domainGroup = $('domain-group');
+            const rangeGroup = $('range-group');
+
+            parentGroup.style.display = kind === 'class' ? 'block' : 'none';
+            domainGroup.style.display = kind !== 'class' ? 'block' : 'none';
+            rangeGroup.style.display = kind !== 'class' ? 'block' : 'none';
+
+            // Populate parent options
+            if (kind === 'class') {
+                $('term-parent').innerHTML = '<option value="">不指定</option>' +
+                    (state.ontology.summary.classes || []).map(c =>
+                        `<option value="${c.id}" ${values.parent === c.id ? 'selected' : ''}>${c.label}</option>`
+                    ).join('');
+            }
+
+            // Populate domain options
+            if (kind !== 'class') {
+                $('term-domain').innerHTML = '<option value="">不限</option>' +
+                    (state.ontology.summary.classes || []).map(c =>
+                        `<option value="${c.id}" ${values.domain === c.id ? 'selected' : ''}>${c.label}</option>`
+                    ).join('');
+            }
+
+            // Populate range options
+            if (kind !== 'class') {
+                if (kind === 'attribute') {
+                    const datatypes = [
+                        ['http://www.w3.org/2000/01/rdf-schema#Literal', '任意字面量'],
+                        ['http://www.w3.org/2001/XMLSchema#string', '字符串'],
+                        ['http://www.w3.org/2001/XMLSchema#boolean', '布尔值'],
+                        ['http://www.w3.org/2001/XMLSchema#integer', '整数'],
+                        ['http://www.w3.org/2001/XMLSchema#decimal', '小数'],
+                        ['http://www.w3.org/2001/XMLSchema#double', '浮点数'],
+                        ['http://www.w3.org/2001/XMLSchema#date', '日期'],
+                        ['http://www.w3.org/2001/XMLSchema#dateTime', '日期时间']
+                    ];
+                    $('term-range').innerHTML = '<option value="">不指定</option>' +
+                        datatypes.map(([id, label]) =>
+                            `<option value="${id}" ${values.range === id ? 'selected' : ''}>${label}</option>`
+                        ).join('');
+                } else {
+                    $('term-range').innerHTML = '<option value="">不限</option>' +
+                        (state.ontology.summary.classes || []).map(c =>
+                            `<option value="${c.id}" ${values.range === c.id ? 'selected' : ''}>${c.label}</option>`
+                        ).join('');
+                }
+            }
+        }
+
+        async function saveTerm() {
+            const kind = $('term-kind').value;
+            const uri = $('term-uri').value;
+            const label = $('term-label').value;
+            const description = $('term-description').value;
+
+            if (!uri || !label) {
+                showToast('请填写 IRI 和显示名称', 'error');
+                return;
+            }
+
+            try {
+                if (state.editingTerm) {
+                    // Update existing term
+                    await api(`/api/projects/${state.currentProject}/ontology/term?uri=${encodeURIComponent(state.editingTerm.id)}`, {
+                        method: 'PUT',
+                        body: JSON.stringify({
+                            label,
+                            description,
+                            parent: kind === 'class' ? $('term-parent').value : '',
+                            domain: kind !== 'class' ? $('term-domain').value : '',
+                            range: kind !== 'class' ? $('term-range').value : '',
+                            expected_ontology_id: state.ontology.id
+                        })
+                    });
+                    showToast('术语已修改');
+                } else {
+                    // Add new term
+                    await api(`/api/projects/${state.currentProject}/ontology/terms`, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            kind,
+                            uri,
+                            label,
+                            description,
+                            parent: kind === 'class' ? $('term-parent').value : '',
+                            domain: kind !== 'class' ? $('term-domain').value : '',
+                            range: kind !== 'class' ? $('term-range').value : '',
+                            expected_ontology_id: state.ontology.id
+                        })
+                    });
+                    showToast('术语已添加');
+                }
+
+                closeModal();
+                await loadOntology();
+            } catch (e) {
+                showToast('保存失败: ' + e.message, 'error');
+            }
+        }
+
+        async function retireTerm(term) {
+            if (!confirm(`确定要停用 "${term.label}" 吗？\n\n停用后该术语将从新本体版本移除，但旧版本和引用旧版本的知识将继续保留。`)) {
+                return;
+            }
+
+            try {
+                await api(`/api/projects/${state.currentProject}/ontology/term-retire?uri=${encodeURIComponent(term.id)}`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        expected_ontology_id: state.ontology.id,
+                        confirm_references: true
+                    })
+                });
+
+                state.selectedTerm = null;
+                showToast('术语已停用');
+                await loadOntology();
+            } catch (e) {
+                showToast('停用失败: ' + e.message, 'error');
+            }
+        }
+
+        // Data Loading
+        async function loadProjects() {
+            try {
+                const projects = await api('/api/projects');
+                const selector = $('project-selector');
+                selector.innerHTML = '<option value="">选择项目</option>' +
+                    projects.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+
+                // Restore last selection
+                const saved = sessionStorage.getItem('knowledge-project');
+                if (saved && projects.some(p => p.id === saved)) {
+                    selector.value = saved;
+                }
+            } catch (e) {
+                console.error('Failed to load projects:', e);
+            }
+        }
+
+        async function loadOntology() {
+            if (!state.currentProject) return;
+
+            try {
+                state.ontology = await api(`/api/projects/${state.currentProject}/ontology`);
+                $('version-label').textContent = `v${state.ontology.version || '?'}`;
+                renderSidebar();
+                renderTermGrid();
+                renderDetailPanel();
+            } catch (e) {
+                console.error('Failed to load ontology:', e);
+                showToast('加载本体失败', 'error');
+            }
+        }
+
+        // Event Listeners
+        function initEventListeners() {
+            // Project selector
+            $('project-selector').addEventListener('change', (e) => {
+                state.currentProject = e.target.value;
+                state.selectedTerm = null;
+                state.filter = 'all';
+                sessionStorage.setItem('knowledge-project', state.currentProject);
+                loadOntology();
+            });
+
+            // Add term button
+            $('btn-add-term').addEventListener('click', openAddModal);
+
+            // Modal close
+            $('modal-close').addEventListener('click', closeModal);
+            $('modal-cancel').addEventListener('click', closeModal);
+            $('modal-overlay').addEventListener('click', (e) => {
+                if (e.target === $('modal-overlay')) closeModal();
+            });
+
+            // Modal save
+            $('modal-save').addEventListener('click', saveTerm);
+
+            // Term kind change
+            $('term-kind').addEventListener('change', (e) => {
+                updateFormFields(e.target.value);
+            });
+
+            // Search
+            $('search-input').addEventListener('input', (e) => {
+                state.searchQuery = e.target.value;
+                renderTermGrid();
+            });
+
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') closeModal();
+                if (e.key === 'n' && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    openAddModal();
+                }
+            });
+        }
+
+        // Initialize
+        async function init() {
+            initEventListeners();
+            await loadProjects();
+
+            // Auto-select if only one project
+            if (state.currentProject) {
+                await loadOntology();
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>

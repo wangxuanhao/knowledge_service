@@ -1,0 +1,144 @@
+"""Document-versioned review decisions, atomically committed with approved facts."""
+import copy
+import hashlib
+from typing import Literal
+from fastapi import APIRouter
+from pydantic import Field, field_validator
+from .models import Request
+from .governance import writable
+from .ontology import Ontology
+from .time import utc_now
+
+
+class Decision(Request):
+    action: Literal['approve','reject']
+    target_type: str = ''
+    note: str = Field(min_length=1,max_length=2000)
+    expected_version: int = Field(ge=1)
+    expected_ontology_id: str | None = None
+    expected_entity_version: int | None = Field(default=None,ge=1)
+
+    @field_validator('note')
+    @classmethod
+    def meaningful_note(cls, value):
+        if not value.strip():raise ValueError('请填写审核理由')
+        return value.strip()
+
+
+def decide(service,p,doc_id,candidate_id,request):
+    with service.lock:
+        rows={r['id']:r for r in service.repository.current_records(p)}
+        doc=rows.get(doc_id)
+        if not doc or doc['kind']!='document':raise KeyError(doc_id)
+        if doc['version']!=request.expected_version:raise ValueError('Version conflict: 请刷新审核清单')
+        revised=writable(doc);revised['metadata']=copy.deepcopy(doc['metadata'])
+        candidate=next((c for c in revised['metadata'].get('review_candidates',[]) if c['id']==candidate_id),None)
+        if not candidate:raise KeyError(candidate_id)
+        if candidate['status']!='pending':raise ValueError('该候选已经审核，不能重复操作')
+        if doc.get('metadata',{}).get('_deleted') or doc['metadata'].get('status')!='ready':raise ValueError('来源文档不可用')
+        candidate.update(note=request.note,reviewed_at=utc_now())
+        if request.action=='reject':
+            candidate['status']='rejected'
+            if candidate.get('kind')=='validation':candidate['resolution']='remediation_required'
+            service.repository.put_record(p,revised,expected_version=doc['version'])
+            return {'status':'rejected',**({'resolution':'remediation_required'} if candidate.get('kind')=='validation' else {})}
+        if hashlib.sha256(doc['text'].encode('utf-8')).hexdigest()!=candidate['source_hash']:
+            raise ValueError('原文已更改，请重新提取后审核')
+        ontology=service.repository.get_ontology(p)
+        if request.expected_ontology_id and request.expected_ontology_id!=ontology['id']:
+            raise ValueError('Version conflict: 本体已更新，请刷新审核清单')
+        kind=candidate.get('kind','relation')
+        if kind=='validation':
+            candidate.update(status='approved',resolution='accepted_exception',approved_ontology_id=ontology['id'])
+            service.repository.put_record(p,revised,expected_version=doc['version'])
+            return {'status':'approved','resolution':'accepted_exception','record_id':candidate.get('record_id')}
+        model=Ontology(ontology['turtle'])
+        target=str(model.resolve(request.target_type,{'entity':model.classes,'relation':model.relations,'attribute':model.attributes}[kind]))
+        def endpoint(key):
+            rid=candidate[key];seen=set()
+            while rid not in seen:
+                seen.add(rid);row=rows.get(rid)
+                if not row or row['kind']!='entity':break
+                meta=row.get('metadata',{})
+                if meta.get('_deleted') and meta.get('merged_into'):
+                    rid=meta['merged_into'];continue
+                if not meta.get('_deleted'):return rid
+                break
+            raise ValueError('关联实体尚未批准、已拒绝或已删除，请先处理实体候选')
+        record_id=candidate['record_id'] if kind=='entity' else 'reviewrel_'+candidate_id
+        expected={record_id:0}
+        common=dict(source_id=doc_id,ontology_id=ontology['id'],
+            valid_from=candidate.get('valid_from',doc.get('valid_from')),
+            valid_until=candidate.get('valid_until',doc.get('valid_until')),
+            metadata={'review_id':candidate_id,'review_note':request.note,'confidence':candidate.get('confidence'),
+                'start_char':candidate['start_char'],'end_char':candidate['end_char'],'chunk_id':candidate['chunk_id']})
+        if kind=='entity':
+            record=dict(**common,id=record_id,kind='entity',type=target,text=candidate['text'])
+        elif kind=='attribute':
+            record_id=endpoint('entity_id');original=rows[record_id]
+            if request.expected_entity_version!=original['version']:
+                raise ValueError('Version conflict: 请刷新并核对实体当前属性')
+            from .review_validation import validate_attribute
+            validate_attribute(model,original['type'],target,candidate['value'])
+            props=copy.deepcopy(original.get('properties',{}))
+            for key,value in props.items():
+                try:resolved=str(model.resolve(key,model.attributes))
+                except ValueError:continue
+                if resolved==target and value!=candidate['value']:
+                    raise ValueError('实体已有不同属性值，不会覆盖；请先通过知识编辑核对处理')
+            record=writable(original);record['properties']={**props,target:candidate['value']}
+            record['ontology_id']=ontology['id']
+            record['metadata']=copy.deepcopy(original['metadata'])
+            record['metadata']['attribute_reviews']=[*record['metadata'].get('attribute_reviews',[]),
+                {'review_id':candidate_id,'source_id':doc_id,'source_version_id':doc['version_id'],
+                 'attribute':target,'value':candidate['value'],'note':request.note,'reviewed_at':candidate['reviewed_at'],
+                 'evidence':candidate.get('attribute_evidence',candidate.get('evidence',''))}]
+            expected={record_id:original['version']}
+        else:
+            record=dict(**common,id=record_id,kind='relation',type=target,
+                subject_id=endpoint('subject_id'),object_id=endpoint('object_id'),
+                text=doc['text'][candidate['start_char']:candidate['end_char']])
+            record['metadata']['original_predicate']=candidate['predicate']
+        candidate.update(status='approved',target_type=target,approved_ontology_id=ontology['id'],record_id=record_id)
+        # Validation/embedding failures leave the review pending. Approval and relation share one SQLite transaction.
+        service.write(p,[record],completion=(revised,doc['version']),expected_versions=expected)
+        return {'status':'approved','record_id':record_id}
+
+
+def install(app,service):
+    router=APIRouter(prefix='/api/projects/{p}')
+    @router.get('/reviews')
+    def listing(p:str):
+        result=[]
+        rows=service.repository.current_records(p)
+        by_id={r['id']:r for r in rows}
+        for doc in rows:
+            if doc['kind']!='document' or doc.get('metadata',{}).get('_deleted'):continue
+            for c in doc.get('metadata',{}).get('review_candidates',[]):
+                changed=hashlib.sha256(doc['text'].encode('utf-8')).hexdigest()!=c['source_hash']
+                dependencies=[]
+                for key in ('entity_id','subject_id','object_id'):
+                    if key not in c:continue
+                    rid=c[key];seen=set()
+                    while rid not in seen:
+                        seen.add(rid);row=by_id.get(rid)
+                        if row and row.get('metadata',{}).get('_deleted') and row['metadata'].get('merged_into'):
+                            rid=row['metadata']['merged_into'];continue
+                        break
+                    row=by_id.get(rid)
+                    dependencies.append(row if row and not row.get('metadata',{}).get('_deleted') else None)
+                entity=dependencies[0] if c.get('kind')=='attribute' and dependencies else None
+                result.append({**c,'kind':c.get('kind','relation'),'blocked':any(r is None for r in dependencies),
+                    'entity_version':entity['version'] if entity else None,
+                    'entity_type':entity.get('type') if entity else None,
+                    'subject_type':dependencies[0].get('type') if c.get('kind')=='relation' and len(dependencies)>0 and dependencies[0] else c.get('subject_type'),
+                    'object_type':dependencies[1].get('type') if c.get('kind')=='relation' and len(dependencies)>1 and dependencies[1] else c.get('object_type'),
+                    'current_properties':entity.get('properties',{}) if entity else {},
+                    'document_id':doc['id'],'document_title':doc['metadata'].get('title',doc['id']),
+                    'document_version':doc['version'],'source_changed':changed,
+                    'evidence':c.get('evidence', '' if changed else doc['text'][c['start_char']:c['end_char']])})
+        return {'reviews':result}
+    @router.post('/reviews/{doc_id}/{candidate_id}')
+    def decision(p:str,doc_id:str,candidate_id:str,request:Decision):
+        return decide(service,p,doc_id,candidate_id,request)
+    app.include_router(router)

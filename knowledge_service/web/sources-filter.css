@@ -1,0 +1,140 @@
+/* Source Document Filter Styles */
+.source-filter-bar {
+    display: flex;
+    gap: 10px;
+    padding: 16px;
+    background: #f8faf7;
+    border: 1px solid #dce5df;
+    border-radius: 8px;
+    margin-bottom: 16px;
+}
+
+.source-filter-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #365a4c;
+    background: white;
+    border: 1px solid #dce5df;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.source-filter-btn:hover {
+    border-color: #216952;
+    background: #edf6ef;
+}
+
+.source-filter-btn.active {
+    background: #216952;
+    color: white;
+    border-color: #216952;
+}
+
+.source-filter-btn.active .filter-dot.ready {
+    background: white;
+}
+
+.source-filter-btn.active .filter-dot.processing {
+    background: white;
+}
+
+.source-filter-btn.active .filter-dot.failed {
+    background: white;
+}
+
+.filter-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.filter-dot.ready {
+    background: #10b981;
+}
+
+.filter-dot.processing {
+    background: #f59e0b;
+}
+
+.filter-dot.failed {
+    background: #ef4444;
+}
+
+.filter-count {
+    background: rgba(255, 255, 255, 0.2);
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-size: 11px;
+}
+
+.source-filter-btn:not(.active) .filter-count {
+    background: #f1f5f9;
+}
+
+.source-state {
+    display: inline-block;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-weight: 500;
+}
+
+.source-state.ready {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.source-state.processing {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.source-state.failed {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.source-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: #f7faf6;
+    color: #355247;
+    border: 1px solid #dce5df;
+    border-radius: 7px;
+    padding: 12px;
+    margin-bottom: 8px;
+    overflow-wrap: anywhere;
+}
+
+.source-item b {
+    display: block;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.source-item small {
+    display: block;
+    margin-top: 6px;
+    font-size: 10px;
+}
+
+.source-item[aria-current="true"] {
+    background: #e8f3ec;
+    border-color: #62937d;
+    box-shadow: inset 3px 0 #216952;
+}
+
+.source-placeholder {
+    padding: 18px;
+    color: #718579;
+    background: #f2f6f1;
+    border-radius: 7px;
+    text-align: center;
+}

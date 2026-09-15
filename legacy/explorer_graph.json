@@ -1,0 +1,353 @@
+{
+  "nodes": [
+    {
+      "id": "字节跳动",
+      "label": "字节跳动",
+      "type": "COMPANY",
+      "group": "COMPANY",
+      "confidence": 0.95
+    },
+    {
+      "id": "阿里巴巴",
+      "label": "阿里巴巴",
+      "type": "COMPANY",
+      "group": "COMPANY",
+      "confidence": 0.95
+    },
+    {
+      "id": "腾讯",
+      "label": "腾讯",
+      "type": "COMPANY",
+      "group": "COMPANY",
+      "confidence": 0.95
+    },
+    {
+      "id": "百度",
+      "label": "百度",
+      "type": "COMPANY",
+      "group": "COMPANY",
+      "confidence": 0.95
+    },
+    {
+      "id": "华为",
+      "label": "华为",
+      "type": "COMPANY",
+      "group": "COMPANY",
+      "confidence": 0.95
+    },
+    {
+      "id": "张一鸣",
+      "label": "张一鸣",
+      "type": "PERSON",
+      "group": "PERSON",
+      "confidence": 0.95
+    },
+    {
+      "id": "马云",
+      "label": "马云",
+      "type": "PERSON",
+      "group": "PERSON",
+      "confidence": 0.95
+    },
+    {
+      "id": "马化腾",
+      "label": "马化腾",
+      "type": "PERSON",
+      "group": "PERSON",
+      "confidence": 0.95
+    },
+    {
+      "id": "李彦宏",
+      "label": "李彦宏",
+      "type": "PERSON",
+      "group": "PERSON",
+      "confidence": 0.95
+    },
+    {
+      "id": "任正非",
+      "label": "任正非",
+      "type": "PERSON",
+      "group": "PERSON",
+      "confidence": 0.95
+    },
+    {
+      "id": "豆包",
+      "label": "豆包",
+      "type": "AIMODEL",
+      "group": "AIMODEL",
+      "confidence": 0.95
+    },
+    {
+      "id": "通义千问",
+      "label": "通义千问",
+      "type": "AIMODEL",
+      "group": "AIMODEL",
+      "confidence": 0.95
+    },
+    {
+      "id": "混元大模型",
+      "label": "混元大模型",
+      "type": "AIMODEL",
+      "group": "AIMODEL",
+      "confidence": 0.95
+    },
+    {
+      "id": "文心一言",
+      "label": "文心一言",
+      "type": "AIMODEL",
+      "group": "AIMODEL",
+      "confidence": 0.95
+    },
+    {
+      "id": "盘古大模型",
+      "label": "盘古大模型",
+      "type": "AIMODEL",
+      "group": "AIMODEL",
+      "confidence": 0.95
+    },
+    {
+      "id": "抖音",
+      "label": "抖音",
+      "type": "PRODUCT",
+      "group": "PRODUCT",
+      "confidence": 0.95
+    },
+    {
+      "id": "淘宝",
+      "label": "淘宝",
+      "type": "PRODUCT",
+      "group": "PRODUCT",
+      "confidence": 0.95
+    },
+    {
+      "id": "微信",
+      "label": "微信",
+      "type": "PRODUCT",
+      "group": "PRODUCT",
+      "confidence": 0.95
+    },
+    {
+      "id": "北京",
+      "label": "北京",
+      "type": "CITY",
+      "group": "CITY",
+      "confidence": 0.95
+    },
+    {
+      "id": "杭州",
+      "label": "杭州",
+      "type": "CITY",
+      "group": "CITY",
+      "confidence": 0.95
+    },
+    {
+      "id": "深圳",
+      "label": "深圳",
+      "type": "CITY",
+      "group": "CITY",
+      "confidence": 0.95
+    },
+    {
+      "id": "人工智能",
+      "label": "人工智能",
+      "type": "TECH",
+      "group": "TECH",
+      "confidence": 0.95
+    },
+    {
+      "id": "大语言模型",
+      "label": "大语言模型",
+      "type": "TECH",
+      "group": "TECH",
+      "confidence": 0.95
+    },
+    {
+      "id": "智能驾驶",
+      "label": "智能驾驶",
+      "type": "TECH",
+      "group": "TECH",
+      "confidence": 0.95
+    }
+  ],
+  "edges": [
+    {
+      "from": "字节跳动",
+      "to": "张一鸣",
+      "label": "founded_by",
+      "confidence": 0.9
+    },
+    {
+      "from": "阿里巴巴",
+      "to": "马云",
+      "label": "founded_by",
+      "confidence": 0.9
+    },
+    {
+      "from": "腾讯",
+      "to": "马化腾",
+      "label": "founded_by",
+      "confidence": 0.9
+    },
+    {
+      "from": "百度",
+      "to": "李彦宏",
+      "label": "founded_by",
+      "confidence": 0.9
+    },
+    {
+      "from": "华为",
+      "to": "任正非",
+      "label": "founded_by",
+      "confidence": 0.9
+    },
+    {
+      "from": "字节跳动",
+      "to": "豆包",
+      "label": "develops",
+      "confidence": 0.9
+    },
+    {
+      "from": "阿里巴巴",
+      "to": "通义千问",
+      "label": "develops",
+      "confidence": 0.9
+    },
+    {
+      "from": "腾讯",
+      "to": "混元大模型",
+      "label": "develops",
+      "confidence": 0.9
+    },
+    {
+      "from": "百度",
+      "to": "文心一言",
+      "label": "develops",
+      "confidence": 0.9
+    },
+    {
+      "from": "华为",
+      "to": "盘古大模型",
+      "label": "develops",
+      "confidence": 0.9
+    },
+    {
+      "from": "字节跳动",
+      "to": "抖音",
+      "label": "develops",
+      "confidence": 0.9
+    },
+    {
+      "from": "阿里巴巴",
+      "to": "淘宝",
+      "label": "develops",
+      "confidence": 0.9
+    },
+    {
+      "from": "腾讯",
+      "to": "微信",
+      "label": "develops",
+      "confidence": 0.9
+    },
+    {
+      "from": "字节跳动",
+      "to": "北京",
+      "label": "located_in",
+      "confidence": 0.9
+    },
+    {
+      "from": "阿里巴巴",
+      "to": "杭州",
+      "label": "located_in",
+      "confidence": 0.9
+    },
+    {
+      "from": "腾讯",
+      "to": "深圳",
+      "label": "located_in",
+      "confidence": 0.9
+    },
+    {
+      "from": "百度",
+      "to": "北京",
+      "label": "located_in",
+      "confidence": 0.9
+    },
+    {
+      "from": "华为",
+      "to": "深圳",
+      "label": "located_in",
+      "confidence": 0.9
+    },
+    {
+      "from": "豆包",
+      "to": "大语言模型",
+      "label": "is_a",
+      "confidence": 0.9
+    },
+    {
+      "from": "通义千问",
+      "to": "大语言模型",
+      "label": "is_a",
+      "confidence": 0.9
+    },
+    {
+      "from": "文心一言",
+      "to": "大语言模型",
+      "label": "is_a",
+      "confidence": 0.9
+    },
+    {
+      "from": "混元大模型",
+      "to": "大语言模型",
+      "label": "is_a",
+      "confidence": 0.9
+    },
+    {
+      "from": "盘古大模型",
+      "to": "大语言模型",
+      "label": "is_a",
+      "confidence": 0.9
+    },
+    {
+      "from": "大语言模型",
+      "to": "人工智能",
+      "label": "belongs_to",
+      "confidence": 0.9
+    },
+    {
+      "from": "智能驾驶",
+      "to": "人工智能",
+      "label": "belongs_to",
+      "confidence": 0.9
+    },
+    {
+      "from": "字节跳动",
+      "to": "阿里巴巴",
+      "label": "competes_with",
+      "confidence": 0.9
+    },
+    {
+      "from": "字节跳动",
+      "to": "腾讯",
+      "label": "competes_with",
+      "confidence": 0.9
+    },
+    {
+      "from": "百度",
+      "to": "字节跳动",
+      "label": "competes_with",
+      "confidence": 0.9
+    },
+    {
+      "from": "腾讯",
+      "to": "阿里巴巴",
+      "label": "competes_with",
+      "confidence": 0.9
+    }
+  ],
+  "metadata": {
+    "total_nodes": 24,
+    "total_edges": 29,
+    "description": "中国科技公司知识图谱（示例数据）"
+  }
+}
