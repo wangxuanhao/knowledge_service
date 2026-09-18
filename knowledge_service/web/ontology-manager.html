@@ -907,9 +907,9 @@
                     </select>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">完整 IRI</label>
-                    <input type="text" class="form-input mono" id="term-uri" placeholder="urn:my:Merchant">
-                    <p class="form-hint">IRI 是稳定标识，创建后不可直接更名</p>
+                    <label class="form-label">技术标识 IRI</label>
+                    <input type="text" class="form-input mono" id="term-uri" placeholder="保存时由后端根据名称生成" readonly>
+                    <p class="form-hint">新增时由系统生成；创建后作为稳定标识，不随显示名称修改</p>
                 </div>
                 <div class="form-group">
                     <label class="form-label">显示名称</label>
@@ -924,12 +924,12 @@
                     <select class="form-select" id="term-parent"></select>
                 </div>
                 <div class="form-group" id="domain-group">
-                    <label class="form-label">定义域</label>
-                    <select class="form-select" id="term-domain"></select>
+                    <label class="form-label">定义域（可多选）</label>
+                    <select class="form-select" id="term-domain" multiple size="4"></select>
                 </div>
                 <div class="form-group" id="range-group">
-                    <label class="form-label">值域 / 数据类型</label>
-                    <select class="form-select" id="term-range"></select>
+                    <label class="form-label">值域 / 数据类型（可多选）</label>
+                    <select class="form-select" id="term-range" multiple size="4"></select>
                 </div>
             </div>
             <div class="modal-footer">
@@ -999,6 +999,8 @@
             `).join('');
 
             // Relations
+            const fmtTypes = arr => Array.isArray(arr) && arr.length
+                ? arr.map(x => String(x).split('/').pop().split('#').pop()).join('、') : '任意';
             const relationList = $('relation-list');
             relationList.innerHTML = (summary.relations || []).map(r => `
                 <div class="term-type-card ${state.filter === 'relation:' + r.id ? 'active' : ''}"
@@ -1007,7 +1009,7 @@
                         <div class="term-type-icon relation">🔗</div>
                         <div>
                             <div class="term-type-name">${r.label}</div>
-                            <div class="term-type-meta">${r.domain?.[0] || '任意'} → ${r.range?.[0] || '任意'}</div>
+                            <div class="term-type-meta">${fmtTypes(r.domain)} → ${fmtTypes(r.range)}</div>
                         </div>
                     </div>
                 </div>
@@ -1022,7 +1024,7 @@
                         <div class="term-type-icon attribute">🏷️</div>
                         <div>
                             <div class="term-type-name">${a.label}</div>
-                            <div class="term-type-meta">${a.domain?.[0] || '任意'} → ${a.range?.split('#').pop() || '未指定'}</div>
+                            <div class="term-type-meta">${fmtTypes(a.domain)} → ${fmtTypes(a.range).replace('任意', '未指定')}</div>
                         </div>
                     </div>
                 </div>
@@ -1273,6 +1275,7 @@
             $('modal-title').textContent = '添加术语';
             $('term-kind').value = 'class';
             $('term-uri').value = '';
+            $('term-uri').readOnly = true;
             $('term-label').value = '';
             $('term-description').value = '';
             updateFormFields('class');
@@ -1296,6 +1299,7 @@
             $('modal-overlay').classList.remove('active');
             $('term-kind').disabled = false;
             $('term-uri').disabled = false;
+            $('term-uri').readOnly = true;
         }
 
         function updateFormFields(kind, values = {}) {
@@ -1319,7 +1323,7 @@
             if (kind !== 'class') {
                 $('term-domain').innerHTML = '<option value="">不限</option>' +
                     (state.ontology.summary.classes || []).map(c =>
-                        `<option value="${c.id}" ${values.domain === c.id ? 'selected' : ''}>${c.label}</option>`
+                        `<option value="${c.id}" ${(values.domain||[]).includes(c.id) ? 'selected' : ''}>${c.label}</option>`
                     ).join('');
             }
 
@@ -1338,15 +1342,20 @@
                     ];
                     $('term-range').innerHTML = '<option value="">不指定</option>' +
                         datatypes.map(([id, label]) =>
-                            `<option value="${id}" ${values.range === id ? 'selected' : ''}>${label}</option>`
+                            `<option value="${id}" ${(values.range||[]).includes(id) ? 'selected' : ''}>${label}</option>`
                         ).join('');
                 } else {
                     $('term-range').innerHTML = '<option value="">不限</option>' +
                         (state.ontology.summary.classes || []).map(c =>
-                            `<option value="${c.id}" ${values.range === c.id ? 'selected' : ''}>${c.label}</option>`
+                            `<option value="${c.id}" ${(values.range||[]).includes(c.id) ? 'selected' : ''}>${c.label}</option>`
                         ).join('');
                 }
             }
+        }
+
+        // relations 的 domain/range 是数组（ontology.py:130），用多选下拉收集
+        function selectedTermValues(sel) {
+            return Array.from(sel.selectedOptions || []).map(o => o.value).filter(Boolean);
         }
 
         async function saveTerm() {
@@ -1355,40 +1364,35 @@
             const label = $('term-label').value;
             const description = $('term-description').value;
 
-            if (!uri || !label) {
-                showToast('请填写 IRI 和显示名称', 'error');
+            if (!label) {
+                showToast('请填写显示名称', 'error');
                 return;
             }
 
             try {
+                const isRelation = kind === 'relation';
+                const payload = {
+                    label,
+                    description,
+                    parent: kind === 'class' ? $('term-parent').value : '',
+                    domain: !isRelation && kind !== 'class' ? $('term-domain').value : '',
+                    range: kind === 'attribute' ? $('term-range').value : '',
+                    domains: isRelation ? selectedTermValues($('term-domain')) : [],
+                    ranges: isRelation ? selectedTermValues($('term-range')) : [],
+                    expected_ontology_id: state.ontology.id
+                };
                 if (state.editingTerm) {
                     // Update existing term
                     await api(`/api/projects/${state.currentProject}/ontology/term?uri=${encodeURIComponent(state.editingTerm.id)}`, {
                         method: 'PUT',
-                        body: JSON.stringify({
-                            label,
-                            description,
-                            parent: kind === 'class' ? $('term-parent').value : '',
-                            domain: kind !== 'class' ? $('term-domain').value : '',
-                            range: kind !== 'class' ? $('term-range').value : '',
-                            expected_ontology_id: state.ontology.id
-                        })
+                        body: JSON.stringify(payload)
                     });
                     showToast('术语已修改');
                 } else {
                     // Add new term
                     await api(`/api/projects/${state.currentProject}/ontology/terms`, {
                         method: 'POST',
-                        body: JSON.stringify({
-                            kind,
-                            uri,
-                            label,
-                            description,
-                            parent: kind === 'class' ? $('term-parent').value : '',
-                            domain: kind !== 'class' ? $('term-domain').value : '',
-                            range: kind !== 'class' ? $('term-range').value : '',
-                            expected_ontology_id: state.ontology.id
-                        })
+                        body: JSON.stringify({...payload, kind})
                     });
                     showToast('术语已添加');
                 }

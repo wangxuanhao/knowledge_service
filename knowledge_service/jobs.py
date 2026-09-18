@@ -1,4 +1,4 @@
-"""Single-process background jobs with durable receipts, not a distributed queue."""
+"""单进程后台任务，带持久化收据，而非分布式队列。"""
 from concurrent.futures import ThreadPoolExecutor
 import threading
 import time
@@ -23,14 +23,14 @@ class Jobs:
         self.executor=ThreadPoolExecutor(max_workers=1,thread_name_prefix='knowledge-job')
         for job in self.repo.list_artifacts('job'):
             if job['status'] in ('queued','running'):
-                job.update(status='interrupted',updated_at=utc_now(),error='Service restarted before completion; inspect receipt before retry')
+                job.update(status='interrupted',updated_at=utc_now(),error='服务在完成前重启；重试前请检查收据')
                 self.repo.save_artifact('job',job)
 
     def submit(self,kind,fn,project_id=None):
         with self.lock:
             pending=[j for j in self.repo.list_artifacts('job') if j['status'] in ('queued','running')]
-            if len(pending)>=100: raise RuntimeError('Job queue full')
-            job=dict(id=str(uuid4()),kind=kind,project_id=project_id,status='queued',progress=0,logs=['Queued'],created_at=utc_now())
+            if len(pending)>=100: raise RuntimeError('任务队列已满')
+            job=dict(id=str(uuid4()),kind=kind,project_id=project_id,status='queued',progress=0,logs=['已排队'],created_at=utc_now())
             self.repo.save_artifact('job',job)
             self.executor.submit(self._run,job,fn)
             return dict(job)

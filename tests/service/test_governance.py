@@ -44,13 +44,13 @@ def test_alias_merge_and_restore_preserve_history(system):
 
 def test_merge_conflicts_and_time_incompatibility(system):
     service, governance, p = system
-    with pytest.raises(ValueError,match='Version conflict'):
+    with pytest.raises(ValueError, match='版本冲突'):
         governance.merge(p,'a','b',{'a':20,'b':1})
     row = service.repository.current_records(p)[0]
     row = {k:v for k,v in row.items() if k not in {'version','version_id','project_id','recorded_at','superseded_at'}}
     row['valid_until']='2030-01-01'
     service.repository.put_record(p,row)
-    with pytest.raises(ValueError,match='interval'):
+    with pytest.raises(ValueError,match='区间'):
         governance.merge(p,'a','b',{'a':2,'b':1})
 
 

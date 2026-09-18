@@ -3,7 +3,23 @@ from fastapi.testclient import TestClient
 from knowledge_service.api import create_app
 from knowledge_service.embeddings import HashingEncoder
 from knowledge_service.ontology import Ontology
-from knowledge_service.ontology_discovery import _candidate_mindmap, _induce
+from knowledge_service.ontology_discovery import _candidate_mindmap, _induce, _validated_materialization
+
+
+def test_discovery_generates_readable_unicode_iris_for_every_term_kind():
+    candidates=[
+        {'id':'entity','kind':'entity','text':'平台规范','proposed_type':'规则 文件'},
+        {'id':'other','kind':'entity','text':'数据平台','proposed_type':'数据平台'},
+        {'id':'relation','kind':'relation','subject_id':'entity','object_id':'other',
+         'subject':'平台规范','object':'数据平台','proposed_type':'适用于'},
+        {'id':'attribute','kind':'attribute','entity_id':'entity','proposed_type':'发布日期','value':'2026-09-16'},
+    ]
+    _,mappings,_=_induce('project-id','中文本体',candidates)
+
+    assert mappings['entity_types']['规则 文件'].endswith(':规则-文件')
+    assert mappings['relation_types']['适用于'].endswith(':适用于')
+    assert mappings['attributes']['发布日期'].endswith(':发布日期')
+    assert all('%' not in iri for group in mappings.values() for iri in group.values())
 
 
 def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,monkeypatch):
@@ -62,14 +78,32 @@ def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,
         assert all(item['description'] for item in summary['classes']+summary['relations'])
         assert {node['status'] for node in client.get(
             base+'/ontology-discovery/candidate-mindmap').json()['nodes']}=={'included_in_draft'}
-        published=client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={}).json()
+        import time
+        resp=client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={})
+        assert resp.status_code==202,resp.text
+        job=resp.json()
+        assert job['kind']=='ontology_publish'
+        for _ in range(200):
+            job=client.get('/api/jobs/'+job['id']).json()
+            if job['status'] in ('completed','failed','interrupted'):break
+            time.sleep(0.1)
+        assert job['status']=='completed',job.get('error')
+        published=job['result']
         assert published['status']=='published'
-        assert published['mapped_entities']==0 and published['mapped_relations']==0
-        assert published['mapped_attributes']==0
-        assert published['requires_controlled_reingest'] is True
+        assert published['mapped_entities']==2 and published['mapped_relations']==1
+        assert published['mapped_attributes']==1
+        assert published['requires_controlled_reingest'] is False
         graph=client.post(base+'/records/query',json={}).json()['records']
         formal=[row for row in graph if row['kind'] in ('entity','relation')]
-        assert formal==[]
+        assert len(formal)==3
+        assert all(row['metadata']['discovery_candidate_id'] for row in formal)
+        relation=next(row for row in formal if row['kind']=='relation')
+        assert {relation['subject_id'],relation['object_id']}<=set(row['id'] for row in formal)
+        merchant=next(row for row in formal if row['kind']=='entity' and row['text']=='测试商户')
+        assert list(merchant['properties'].values())==[20]
+        overview=client.get(base+'/ontology-discovery').json()
+        assert overview['candidate_status_counts']['materialized']==4
+        assert overview['candidate_status_counts']['approved']==0
         ontology=client.get(base+'/ontology').json()
         assert ontology['metadata']['source_draft_id']==draft['id']
         assert client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={}).status_code==409
@@ -138,12 +172,22 @@ def test_missing_ontology_reports_clear_state_without_project_id(tmp_path,monkey
         assert overview['published'] is False and overview['unpublished_candidate_count']==1
         assert overview['candidate_status_counts']['included_in_draft']==1
 
-        published=client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={}).json()
+        import time
+        resp=client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={})
+        assert resp.status_code==202,resp.text
+        job=resp.json()
+        for _ in range(200):
+            job=client.get('/api/jobs/'+job['id']).json()
+            if job['status'] in ('completed','failed','interrupted'):break
+            time.sleep(0.1)
+        assert job['status']=='completed',job.get('error')
+        published=job['result']
         overview=client.get(base+'/ontology-discovery').json()
         assert overview['published'] is True and overview['ontology_id']==published['ontology_id']
         assert overview['unpublished_candidate_count']==0
-        assert overview['candidate_status_counts']['approved']==1
-        assert overview['requires_controlled_reingest'] is True
+        assert overview['candidate_status_counts']['materialized']==1
+        assert overview['candidate_status_counts']['approved']==0
+        assert overview['requires_controlled_reingest'] is False
         assert client.get(base+'/ontology').status_code==200
 
         document=next(row for row in app.state.service.repository.current_records(pid)
@@ -234,4 +278,119 @@ def test_induction_keeps_distinct_chinese_types_when_semantica_normalizes_names(
     summary=Ontology(turtle).summary()
     assert {x['label_zh'] for x in summary['classes']}=={'平台品牌','直播平台'}
     assert {x['label_zh'] for x in summary['relations']}=={'运营'}
+    assert all(not x['domain'] and not x['range'] for x in summary['relations'])
     assert set(mappings['entity_types'])=={'平台品牌','直播平台'}
+
+
+def test_open_induction_removes_legacy_inferred_relation_ranges_from_parent():
+    baseline='''
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        <urn:knowledge:ontology:project:%E8%BF%90%E8%90%A5> a owl:ObjectProperty ;
+            rdfs:label "运营"@zh ;
+            rdfs:domain <urn:old:PlatformBrand> ;
+            rdfs:range <urn:old:LivePlatform> .
+    '''
+    candidates=[
+        {'id':'a','kind':'entity','text':'美团','proposed_type':'平台品牌'},
+        {'id':'b','kind':'entity','text':'直播间','proposed_type':'直播平台'},
+        {'id':'r','kind':'relation','subject_id':'a','object_id':'b','subject':'美团','object':'直播间',
+         'proposed_type':'运营'},
+    ]
+    turtle,_,_=_induce('project','开放本体',candidates,baseline_turtle=baseline)
+    relation=next(item for item in Ontology(turtle).summary()['relations'] if item['label_zh']=='运营')
+    assert relation['domain']==[] and relation['range']==[]
+
+
+def test_review_can_exclude_candidate_before_publish_and_reports_it(tmp_path,monkeypatch):
+    from knowledge_service.semantica_adapter import SemanticaExtractor
+    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False:[
+        {'id':'keep','kind':'entity','text':'保留实体','proposed_type':'主体','confidence':.9},
+        {'id':'drop','kind':'entity','text':'排除实体','proposed_type':'主体','confidence':.4}])
+    app=create_app(tmp_path/'review.sqlite',HashingEncoder())
+    with TestClient(app) as client:
+        project=client.post('/api/projects',json={'name':'审核','use_default_ontology':False,
+            'ontology_mode':'discovery'}).json();base=f"/api/projects/{project['id']}"
+        client.post(base+'/documents',json={'title':'原文','text':'测试','extraction_mode':'discovery','resolve_entities':False})
+        draft=client.post(base+'/ontology-discovery/drafts',json={'name':'审核草案'}).json()
+        excluded=next(item['id'] for item in draft['candidate_snapshot'] if item['text']=='排除实体')
+        reviewed=client.put(base+f"/ontology-discovery/drafts/{draft['id']}",json={'excluded_candidate_ids':[excluded]})
+        assert reviewed.status_code==200 and reviewed.json()['revision']==2
+        import time
+        resp=client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={})
+        assert resp.status_code==202,resp.text
+        job=resp.json()
+        for _ in range(200):
+            job=client.get('/api/jobs/'+job['id']).json()
+            if job['status'] in ('completed','failed','interrupted'):break
+            time.sleep(0.1)
+        assert job['status']=='completed',job.get('error')
+        published=job['result']
+        assert published['mapped_entities']==1 and published['requires_controlled_reingest'] is False
+        overview=client.get(base+'/ontology-discovery').json()
+        assert overview['candidate_status_counts']['pending']==1
+        assert overview['candidate_status_counts']['approved']==0
+        assert overview['requires_candidate_review'] is True
+        formal=[row for row in app.state.service.repository.current_records(project['id']) if row['kind']=='entity']
+        assert [row['text'] for row in formal]==['保留实体']
+
+
+def test_draft_review_can_rename_and_remove_ontology_terms(tmp_path,monkeypatch):
+    from knowledge_service.semantica_adapter import SemanticaExtractor
+    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False:[
+        {'id':'a','kind':'entity','text':'甲','proposed_type':'旧类型','confidence':.9},
+        {'id':'b','kind':'entity','text':'乙','proposed_type':'删除类型','confidence':.9}])
+    app=create_app(tmp_path/'term-review.sqlite',HashingEncoder())
+    with TestClient(app) as client:
+        project=client.post('/api/projects',json={'name':'术语审核','use_default_ontology':False,
+            'ontology_mode':'discovery'}).json();base=f"/api/projects/{project['id']}"
+        client.post(base+'/documents',json={'title':'原文','text':'甲乙','extraction_mode':'discovery','resolve_entities':False})
+        draft=client.post(base+'/ontology-discovery/drafts',json={'name':'草案'}).json()
+        reviewed=client.put(base+f"/ontology-discovery/drafts/{draft['id']}",json={
+            'excluded_candidate_ids':[],'excluded_terms':['删除类型'],'term_labels':{'旧类型':'正式类型'}})
+        assert reviewed.status_code==200,reviewed.text
+        body=reviewed.json();summary=Ontology(body['turtle']).summary()
+        assert {item['label_zh'] for item in summary['classes']}=={'正式类型'}
+        restored=client.put(base+f"/ontology-discovery/drafts/{draft['id']}",json={
+            'excluded_candidate_ids':[],'excluded_terms':[],'term_labels':{'旧类型':'正式类型'}})
+        assert {item['label_zh'] for item in Ontology(restored.json()['turtle']).summary()['classes']}=={
+            '正式类型','删除类型'}
+        reviewed=client.put(base+f"/ontology-discovery/drafts/{draft['id']}",json={
+            'excluded_candidate_ids':[],'excluded_terms':['删除类型'],'term_labels':{'旧类型':'正式类型'}})
+        assert reviewed.status_code==200
+        import time
+        resp=client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={})
+        assert resp.status_code==202,resp.text
+        job=resp.json()
+        for _ in range(200):
+            job=client.get('/api/jobs/'+job['id']).json()
+            if job['status'] in ('completed','failed','interrupted'):break
+            time.sleep(0.1)
+        assert job['status']=='completed',job.get('error')
+        assert job['result']['mapped_entities']==1
+
+
+def test_induction_does_not_invent_name_attribute_without_attribute_candidates():
+    turtle,mappings,_=_induce('project','无属性',[{'id':'a','kind':'entity','text':'甲','proposed_type':'主体'}])
+    assert mappings['attributes']=={}
+    assert Ontology(turtle).summary()['attributes']==[]
+
+
+def test_materialization_validation_keeps_invalid_relation_pending():
+    turtle='''
+        @prefix ex: <urn:test:> .
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        ex:A a owl:Class . ex:B a owl:Class . ex:C a owl:Class .
+        ex:links a owl:ObjectProperty ; rdfs:domain ex:A ; rdfs:range ex:B .
+    '''
+    def entity(identifier,type_iri):
+        return {'id':identifier,'kind':'entity','type':type_iri,'text':identifier,'ontology_id':'draft',
+            'properties':{},'metadata':{'discovery_candidate_id':'candidate-'+identifier}}
+    records=[entity('source','urn:test:C'),entity('target','urn:test:B'),
+        {'id':'edge','kind':'relation','type':'urn:test:links','text':'bad edge','ontology_id':'draft',
+         'subject_id':'source','object_id':'target','metadata':{'discovery_candidate_id':'candidate-edge'}}]
+    accepted,skipped,report=_validated_materialization(turtle,records,[])
+    assert [row['kind'] for row in accepted]==['entity','entity']
+    assert skipped[0]['candidate_id']=='candidate-edge'
+    assert report=={'conforms':True,'accepted_count':2,'skipped_count':1}

@@ -17,7 +17,7 @@ def test_ranks_only_supplied_candidates():
 
 
 def test_model_mismatch_is_not_silently_ranked():
-    with pytest.raises(ValueError, match='model'):
+    with pytest.raises(ValueError, match='模型'):
         rank_candidates([dict(id='a', embedding=[1, 0], embedding_model='other')], 'x', 1, Encoder())
-    with pytest.raises(ValueError, match='dimension'):
+    with pytest.raises(ValueError, match='维度'):
         rank_candidates([dict(id='a', embedding=[1, 0, 0], embedding_model='test-v1')], 'x', 1, Encoder())

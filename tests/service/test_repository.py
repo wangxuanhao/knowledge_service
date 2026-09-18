@@ -1,5 +1,8 @@
+import sqlite3
+
 import pytest
 
+import knowledge_service.repository as repository_module
 from knowledge_service.repository import Repository
 from knowledge_service.filters import matches_filter, validate_filter
 from knowledge_service.time import normalize_time
@@ -95,7 +98,7 @@ def test_correction_replaces_interval_but_history_retains_original(tmp_path):
     old = repo.get_record(p, 'policy', valid_at='2022-01-01', known_at=initial['recorded_at'])
     assert old['valid_until'] == normalize_time('2030-01-01')
     assert old['embedding_model'] == 'model-a'
-    assert old['embedding'] == [1., 2.]
+    assert 'embedding' not in old  # 删列后向量不存 SQLite
     with pytest.raises(ValueError):
         repo.put_batch(p, [{'id': 'policy', 'kind': 'entity', 'text': 'uncommitted'}, {'kind': 'entity', 'text': 'bad date', 'valid_from': '2025-01-01T00:00:00'}])
     assert len(repo.history(p, 'policy')) == 2
@@ -137,7 +140,7 @@ def test_batch_expected_versions_conflict_rolls_back_and_shared_timestamp(tmp_pa
     p = repo.create_project('a')['id']
     repo.put_record(p, {'id': 'doc', 'kind': 'document', 'text': 'uploaded'})
     batch = [{'id': 'entity', 'kind': 'entity', 'text': 'derived'}, {'id': 'doc', 'kind': 'document', 'text': 'complete'}]
-    with pytest.raises(ValueError, match='conflict'):
+    with pytest.raises(ValueError, match='冲突'):
         repo.put_batch(p, batch, expected_versions={'doc': 0, 'entity': 0})
     assert [r['text'] for r in repo.current_records(p)] == ['uploaded']
     saved = repo.put_batch(p, batch, expected_versions={'doc': 1, 'entity': 0})
@@ -145,3 +148,57 @@ def test_batch_expected_versions_conflict_rolls_back_and_shared_timestamp(tmp_pa
     assert repo.history(p, 'doc')[0]['superseded_at'] == saved[0]['recorded_at']
     with pytest.raises(ValueError):
         repo.put_batch(p, batch, expected_versions={'not-in-batch': 1})
+
+
+def test_schema_migration_receives_active_connection_and_runs_once(tmp_path, monkeypatch):
+    path = tmp_path / 'migrations.sqlite'
+    connections = []
+
+    def add_probe_table(db):
+        connections.append(db)
+        db.execute('CREATE TABLE migration_probe (value TEXT NOT NULL)')
+        db.execute("INSERT INTO migration_probe VALUES ('applied')")
+
+    monkeypatch.setattr(
+        repository_module,
+        '_SCHEMA_MIGRATIONS',
+        (*repository_module._SCHEMA_MIGRATIONS, (999, add_probe_table)),
+    )
+
+    first = Repository(path)
+    assert connections == [first._db]
+    first.close()
+    second = Repository(path)
+    assert connections == [connections[0]]
+    assert [row['value'] for row in second._db.execute('SELECT value FROM migration_probe')] == ['applied']
+    assert second._db.execute(
+        'SELECT COUNT(*) FROM schema_migrations WHERE version=?', (999,)
+    ).fetchone()[0] == 1
+    second.close()
+
+
+def test_failed_schema_migration_rolls_back_changes_and_version_marker(tmp_path, monkeypatch):
+    path = tmp_path / 'failed-migration.sqlite'
+    Repository(path).close()
+
+    def fail_after_schema_and_data_changes(db):
+        db.execute('CREATE TABLE failed_migration_probe (value TEXT NOT NULL)')
+        db.execute("INSERT INTO failed_migration_probe VALUES ('uncommitted')")
+        raise RuntimeError('migration failed')
+
+    monkeypatch.setattr(
+        repository_module,
+        '_SCHEMA_MIGRATIONS',
+        (*repository_module._SCHEMA_MIGRATIONS, (1000, fail_after_schema_and_data_changes)),
+    )
+
+    with pytest.raises(RuntimeError, match='migration failed'):
+        Repository(path)
+
+    with sqlite3.connect(path) as db:
+        assert db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='failed_migration_probe'"
+        ).fetchone() is None
+        assert db.execute(
+            'SELECT COUNT(*) FROM schema_migrations WHERE version=?', (1000,)
+        ).fetchone()[0] == 0

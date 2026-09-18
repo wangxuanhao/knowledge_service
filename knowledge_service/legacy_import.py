@@ -1,7 +1,7 @@
-"""Read-only migration of saved projects and rule-demo graph outputs.
+"""已保存项目与规则演示图谱输出的只读迁移。
 
-Legacy facts use a declared, unconstrained vocabulary. Validation findings and
-the original payloads remain in an audit document; import never invents dates.
+旧数据事实使用已声明的、不受约束的词汇表。校验结果与
+原始载荷保留在审计文档中；导入从不虚构日期。
 """
 from __future__ import annotations
 
@@ -24,28 +24,28 @@ class LegacyImporter:
 
     def _folder(self, name, kind):
         if kind not in ('project', 'output'):
-            raise ValueError('Legacy kind must be project or output')
+            raise ValueError('旧数据种类必须是 project 或 output')
         if not isinstance(name, str) or not name or name in ('.', '..') or any(c in name for c in '/\\:'):
-            raise ValueError('Invalid legacy project name')
+            raise ValueError('无效的旧数据项目名称')
         base = self.root / 'data' / ('projects' if kind == 'project' else 'rule_demo_output')
         if not base.resolve().is_relative_to(self.root):
-            raise ValueError('Legacy directory escape')
+            raise ValueError('旧数据目录越界')
         folder = base / name
         if not folder.resolve().is_relative_to(base.resolve()):
-            raise ValueError('Legacy directory escape')
+            raise ValueError('旧数据目录越界')
         if not folder.is_dir():
-            raise ValueError('Legacy project does not exist')
+            raise ValueError('旧数据项目不存在')
         return folder.resolve()
 
     @staticmethod
     def _read(folder, relative, default=None):
         path = folder / relative
         if not path.resolve().is_relative_to(folder):
-            raise ValueError('Legacy file escape')
+            raise ValueError('旧数据文件越界')
         if not path.exists():
             return default
         if path.stat().st_size > 100 * 1024 * 1024:
-            raise ValueError('Legacy file exceeds 100 MiB limit')
+            raise ValueError('旧数据文件超过 100 MiB 限制')
         raw = path.read_text(encoding='utf-8-sig')
         return raw if path.suffix == '.graphml' else json.loads(raw)
 
@@ -64,7 +64,7 @@ class LegacyImporter:
         if graph is None and 'graph.graphml' in files:
             raw = files['graph.graphml']
             if '<!DOCTYPE' in raw.upper() or '<!ENTITY' in raw.upper():
-                raise ValueError('GraphML document declarations are not supported')
+                raise ValueError('不支持 GraphML 文档声明')
             xml = ElementTree.fromstring(raw)
             ns = '{http://graphml.graphdrawing.org/xmlns}'
             keys = {k.attrib['id']: (k.attrib.get('attr.name', k.attrib['id']), k.attrib.get('attr.type'))
@@ -85,11 +85,11 @@ class LegacyImporter:
             graph = {'nodes': [attributes(n) for n in xml.iter(ns + 'node')],
                      'edges': [attributes(e) for e in xml.iter(ns + 'edge')]}
         if not isinstance(graph, dict) or not isinstance(graph.get('nodes'), list):
-            raise ValueError('Legacy project requires a graph with nodes')
+            raise ValueError('旧数据项目需要包含节点的图谱')
         edges = graph.get('edges', graph.get('links', []))
         segments = files.get('segments.json', files.get('faiss/segments.json', []))
         if not isinstance(edges, list) or not isinstance(segments, list):
-            raise ValueError('Legacy edges and segments must be lists')
+            raise ValueError('旧数据边和片段必须是列表')
         return files, graph['nodes'], edges, segments
 
     def _key(self, name, kind):
@@ -121,7 +121,7 @@ class LegacyImporter:
                                    'edges': len(edges), 'segments': len(segments),
                                    'imported_project_id': project['id'] if audit else None})
                 except (ValueError, OSError, ElementTree.ParseError):
-                    # Invalid entries cannot be imported and are not offered as choices.
+                    # 无效条目无法导入，也不会作为可选项提供。
                     continue
         return result
 
@@ -137,16 +137,16 @@ class LegacyImporter:
             rows, turtle, validation, warnings = self._prepare(files, nodes, edges, segments)
             counts = {'nodes': len(nodes), 'edges': len(edges), 'segments': len(segments),
                       'documents': sum(r['kind'] == 'document' for r in rows)}
-            rows.append({'id': 'legacy:audit', 'kind': 'document', 'text': f'Legacy import audit: {name}',
+            rows.append({'id': 'legacy:audit', 'kind': 'document', 'text': f'旧数据导入审计：{name}',
                          'metadata': {'_audit': True, 'legacy_import_complete': True, 'legacy_files': files, 'counts': counts,
                                       'validation': validation, 'warnings': warnings}})
-            # Re-encode every searchable row using the currently configured model.
+            # 使用当前配置的模型对所有可检索行重新编码。
             for offset in range(0, len(rows) if build_vectors else 0, 64):
-                if progress: progress(f'Encoding legacy records {offset}/{len(rows)}',10+int(80*offset/max(1,len(rows))))
+                if progress: progress(f'正在编码旧数据记录 {offset}/{len(rows)}',10+int(80*offset/max(1,len(rows))))
                 batch = rows[offset:offset + 64]
                 vectors = self.service.encoder.encode([r['text'] for r in batch])
                 if len(vectors) != len(batch):
-                    raise RuntimeError('Embedding output count mismatch')
+                    raise RuntimeError('embedding 输出数量不匹配')
                 for row, vector in zip(batch, vectors):
                     row.update(embedding=vector, embedding_model=self.service.encoder.identity)
             repository = self.service.repository
@@ -160,12 +160,13 @@ class LegacyImporter:
             for row in rows:
                 if row['kind'] in ('entity', 'relation'):
                     row['ontology_id'] = ontology['id']
-            repository.put_batch(project['id'], rows, expected_versions={r['id']: 0 for r in rows})
+            repository.put_batch(project['id'], rows,
+                expected_versions={r['id']: 0 for r in rows},formal_operation='legacy_import')
             return {'project': project, 'counts': counts, 'warnings': warnings, 'already_imported': False}
 
     def _prepare(self, files, nodes, edges, segments):
-        warnings = ['Legacy business validity is unknown; import time is not an effective date.',
-                    'Legacy vectors were not reused; records were encoded with the configured model.']
+        warnings = ['旧数据的业务有效性未知；导入时间不是生效日期。',
+                    '未复用旧数据向量；记录已用当前配置的模型重新编码。']
         rows, node_ids = [], {}
         vocabulary = Graph()
         def term(value, kind):
@@ -179,7 +180,7 @@ class LegacyImporter:
         source_names = set(sources)
         for raw in [*nodes, *edges, *segments]:
             if not isinstance(raw, dict):
-                raise ValueError('Legacy graph and segments must contain objects')
+                raise ValueError('旧数据图谱和片段必须包含对象')
             if isinstance(raw.get('source_file'), str) and raw['source_file']:
                 source_names.add(raw['source_file'])
         source_ids = {}
@@ -193,7 +194,7 @@ class LegacyImporter:
                                       'legacy': {'source_content': 'original' if isinstance(original, str) else 'segments_only',
                                                  'raw': original}}})
             if not isinstance(original, str):
-                warnings.append(f'Source {source}: full original unavailable; retained available segments and evidence.')
+                warnings.append(f'来源 {source}：完整原文不可用；已保留可用的片段与证据。')
         def record(identifier, kind, text, raw, **extra):
             metadata = {**(raw.get('metadata') if isinstance(raw.get('metadata'), dict) else {}),
                         'legacy': {'raw': raw}, 'status': 'ready'}
@@ -208,7 +209,7 @@ class LegacyImporter:
         for index, raw in enumerate(nodes):
             original = str(raw.get('id', raw.get('text', index)))
             if original in node_ids:
-                raise ValueError(f'Duplicate legacy node ID: {original}')
+                raise ValueError(f'重复的旧数据节点 ID：{original}')
             identifier = f'legacy:entity:{index}'
             node_ids[original] = identifier
             record(identifier, 'entity', raw.get('text', original), raw,
@@ -226,7 +227,7 @@ class LegacyImporter:
                     record(node_ids[endpoint], 'entity', endpoint,
                            {'id': endpoint, 'unresolved_endpoint': True},
                            type=term('UnresolvedLegacyEndpoint', 'entity'))
-                    warnings.append(f'Legacy endpoint {endpoint} was missing; retained as an unresolved entity.')
+                    warnings.append(f'旧数据端点 {endpoint} 缺失；已作为未解析实体保留。')
             predicate = raw.get('predicate', raw.get('type', raw.get('relation', 'relatedTo')))
             record(f'legacy:relation:{index}', 'relation', raw.get('text', f'{source} {predicate} {target}'), raw,
                    type=term(predicate, 'relation'), subject_id=node_ids[source], object_id=node_ids[target],
@@ -235,10 +236,10 @@ class LegacyImporter:
             record(f'legacy:chunk:{index}', 'chunk', raw.get('text', ''), raw)
         turtle = vocabulary.serialize(format='turtle')
         validation = Ontology(turtle).validate(rows)
-        validation['policy'] = 'Declared legacy vocabulary without retroactive domain/range or SHACL constraints'
+        validation['policy'] = '已声明的旧数据词汇表，不做追溯性的 domain/range 或 SHACL 约束'
         default_path = Path(__file__).parent / 'resources/default_ontology.ttl'
         baseline = [{**r, 'type': unquote(r['type'].rsplit('/', 1)[-1])} if r.get('type') else r for r in rows]
         validation['default_ontology'] = Ontology(default_path.read_text(encoding='utf-8')).validate(baseline)
         if not validation['default_ontology']['conforms']:
-            warnings.append('Legacy facts do not conform to the default ontology; findings are retained in the audit without dropping facts.')
+            warnings.append('旧数据事实不符合默认本体；校验结果保留在审计中，不会丢弃事实。')
         return rows, turtle, validation, warnings

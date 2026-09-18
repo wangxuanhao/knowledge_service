@@ -58,6 +58,23 @@ def test_delete_project_removes_all_children(tmp_path):
         repo.get_project(pid)
 
 
+def test_delete_project_cleans_fts_index(tmp_path):
+    """record_fts 是 FTS5 虚拟表，无外键不参与级联，删除项目必须显式清掉全文索引。"""
+    repo = Repository(tmp_path / 'db')
+    pid = repo.create_project('to-delete-fts')['id']
+    repo.put_record(pid, {'id': 'e1', 'kind': 'entity', 'text': '美团商户规则'})
+    repo.put_record(pid, {'id': 'c1', 'kind': 'chunk', 'text': '退款需要原始凭证'})
+    with repo._lock:
+        before = repo._db.execute('SELECT COUNT(*) FROM record_fts WHERE project_id=?', (pid,)).fetchone()[0]
+    assert before == 2  # 删除前该项目的全文索引存在
+    repo.delete_project(pid)
+    with repo._lock:
+        rows = repo._db.execute('SELECT COUNT(*) FROM record_fts WHERE project_id=?', (pid,)).fetchone()[0]
+    assert rows == 0  # 删除后该项目的全文索引必须清零
+    with pytest.raises(KeyError):
+        repo.keyword_candidates(pid, '美团')  # 项目已删，入口先按 project_id 校验并抛错
+
+
 def test_delete_project_leaves_other_projects_untouched(tmp_path):
     repo = Repository(tmp_path / 'db')
     p1 = repo.create_project('keep')['id']

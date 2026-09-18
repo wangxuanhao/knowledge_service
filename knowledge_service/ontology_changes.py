@@ -1,4 +1,4 @@
-"""Governed ontology changes linked to extracted knowledge candidates."""
+"""与抽取知识候选关联的受治理本体变更。"""
 from __future__ import annotations
 
 import copy
@@ -11,7 +11,7 @@ from rdflib import RDF, RDFS, URIRef, Literal as RDFLiteral
 from rdflib.namespace import OWL
 
 from .models import Request
-from .ontology import Ontology, local_name
+from .ontology import Ontology, generated_term_iri, local_name
 from .time import utc_now
 from .workspace_api import _absolute_iri, _set_term_constraints, _term_kind, _term_impact
 
@@ -24,7 +24,7 @@ class ProposalCreate(Request):
     candidate_id:str
     operation:Literal['add','update']='add'
     kind:Literal['class','relation','attribute']
-    uri:str=Field(min_length=1,max_length=500)
+    uri:str=Field(default='',max_length=500)
     label:str=Field(min_length=1,max_length=200)
     label_zh:str=Field(default='',max_length=200)
     description:str=Field(default='',max_length=2000)
@@ -124,13 +124,18 @@ def install(app,service):
     def create(p:str,request:ProposalCreate):
         with service.lock:
             latest=service.repository.get_ontology(p)
-            if latest['id']!=request.expected_ontology_id:raise ValueError('Version conflict: 本体已更新，请刷新后再创建草案')
+            if latest['id']!=request.expected_ontology_id:raise ValueError('版本冲突：本体已更新，请刷新后再创建草案')
             document,candidate=_document_and_candidate(service,p,request.document_id,request.candidate_id)
-            if document['version']!=request.expected_document_version:raise ValueError('Version conflict: 审核候选已更新，请刷新')
+            if document['version']!=request.expected_document_version:raise ValueError('版本冲突：审核候选已更新，请刷新')
             expected=KIND_FOR_CANDIDATE.get(candidate.get('kind','relation'))
             if request.kind!=expected:raise ValueError(f'该知识候选只能申请 {expected} 类型的本体变更')
-            if not _absolute_iri(request.uri):raise ValueError('请提供有效的完整本体 IRI')
-            proposal={**request.model_dump(),'id':str(uuid4()),'project_id':p,'status':'pending','revision':1,
+            uri=request.uri.strip()
+            if request.operation=='add' and not uri:
+                uri=generated_term_iri(p,request.label_zh or request.label)
+            if not _absolute_iri(uri):
+                message='调整现有定义时必须选择有效的本体术语' if request.operation=='update' else '无法生成有效的本体 IRI'
+                raise ValueError(message)
+            proposal={**request.model_dump(),'uri':uri,'id':str(uuid4()),'project_id':p,'status':'pending','revision':1,
                 'created_at':utc_now(),'updated_at':utc_now()}
             if any(item.get('status')=='pending' and item.get('document_id')==request.document_id and
                    item.get('candidate_id')==request.candidate_id
@@ -153,14 +158,14 @@ def install(app,service):
             proposal=service.repository.get_artifact('ontology_change',proposal_id)
             if proposal.get('project_id')!=p:raise KeyError(proposal_id)
             if proposal['status']!='pending':raise ValueError('该本体变更草案已经处理')
-            if proposal['revision']!=request.expected_revision:raise ValueError('Version conflict: 草案已更新，请刷新')
+            if proposal['revision']!=request.expected_revision:raise ValueError('版本冲突：草案已更新，请刷新')
             proposal.update(decision_note=request.note,decided_at=utc_now(),updated_at=utc_now(),revision=proposal['revision']+1)
             if request.action=='reject':
                 proposal['status']='rejected';service.repository.save_artifact('ontology_change',proposal)
                 return {'proposal':proposal,'ontology':None}
             latest=service.repository.get_ontology(p)
             if latest['id']!=request.expected_ontology_id or latest['id']!=proposal['expected_ontology_id']:
-                raise ValueError('Version conflict: 本体已更新，请重新评估草案影响')
+                raise ValueError('版本冲突：本体已更新，请重新评估草案影响')
             if proposal.get('impact',{}).get('risk')=='high' and not request.confirm_impact:
                 raise ValueError('高影响本体变更必须明确确认影响范围')
             document,candidate=_document_and_candidate(service,p,proposal['document_id'],proposal['candidate_id'])

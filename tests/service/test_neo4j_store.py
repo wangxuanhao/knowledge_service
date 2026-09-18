@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from knowledge_service.api import create_app
 from knowledge_service.embeddings import HashingEncoder
-from knowledge_service.neo4j_store import Neo4jProjection
+from knowledge_service.neo4j_store import Neo4jProjection, digest
 from knowledge_service.repository import Repository
 
 
@@ -56,7 +56,7 @@ def test_snapshot_preserves_versions_and_namespace(tmp_path):
     assert len(snapshot['records']) == 2
     assert snapshot['records'][0]['superseded_at']
     assert 'embedding' not in snapshot['records'][0]
-    assert repo.history(pid, 'e')[0]['embedding'] == [1.0]
+    assert 'embedding' not in repo.history(pid, 'e')[0]  # 删列后向量不存 SQLite
     repo.close()
     repo = Repository(path)
     assert repo.export_projection(pid) == snapshot
@@ -88,7 +88,7 @@ def test_sync_scope_idempotence_and_failure(tmp_path):
     assert projection.project_status(pid)['local_changes_pending']
     before = repo.export_projection(pid)
     driver.fail = True
-    with pytest.raises(RuntimeError, match='local data preserved') as error:
+    with pytest.raises(RuntimeError, match='本地数据已保留') as error:
         projection.sync(pid)
     assert 'secret-password' not in str(error.value)
     assert repo.export_projection(pid) == before
@@ -128,4 +128,30 @@ def test_receipt_cannot_hide_remote_deletion_or_changed_content(tmp_path):
     assert projection.project_status(p)['verification']['remote']['entities'] == 0
     projection.sync(p)
     assert projection.project_status(p)['in_sync']
+    repo.close()
+
+
+def test_delete_project_removes_only_that_projects_nodes(tmp_path):
+    """delete_project 按 namespace+project_id 精确下发远端删除，不波及同库其他项目。"""
+    repo = Repository(tmp_path / 'del.sqlite')
+    gone = repo.create_project('删除项目')['id']
+    repo.put_record(gone, {'id': 'g', 'kind': 'entity', 'text': 'gone'})
+    driver = Driver()
+    projection = Neo4jProjection(repo, driver, settings={})
+    projection.sync(gone)
+    # 模拟远端库里还存在另一个项目的数据（driver 不区分项目，手动塞一条）
+    driver.records[digest(['other-ns', 'keep-pid', 'k'])] = {
+        'project_id': 'keep-pid', 'namespace': repo.storage_namespace, 'id': 'k', 'kind': 'entity', 'text': 'kept'}
+    driver.calls.clear()
+
+    projection.delete_project(gone)
+
+    deletes = [params for query, params in driver.calls
+               if 'DETACH DELETE p, r, v, o' in query]
+    assert len(deletes) == 1
+    assert deletes[0]['pid'] == gone
+    assert deletes[0]['ns'] == repo.storage_namespace
+    # 只有一条 DETACH DELETE 查询，且没有针对其他项目的删除
+    assert not any('keep-pid' in str(params) for query, params in driver.calls
+                   if 'DETACH DELETE' in query)
     repo.close()

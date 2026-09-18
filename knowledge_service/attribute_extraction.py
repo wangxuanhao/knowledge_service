@@ -1,7 +1,7 @@
-"""Opt-in attribute proposals through Semantica's provider; never auto-published.
+"""通过 Semantica 提供方生成的可选属性提案；绝不自动发布。
 
-Provider output is untrusted.  A malformed proposal is isolated here instead of
-aborting an otherwise usable document extraction.
+提供方输出不可信。格式错误的提案在这里被隔离，而不会
+中止本可用的文档抽取。
 """
 import json
 import re
@@ -19,8 +19,8 @@ class AttributeProposal(BaseModel):
 
 
 class AttributeResponse(BaseModel):
-    # Keep the envelope typed while validating each untrusted item separately.
-    # Otherwise one bad list item makes Pydantic reject all valid proposals.
+    # 逐个校验不可信项的同时保持信封类型化。
+    # 否则一个坏列表项会让 Pydantic 拒绝所有有效提案。
     attributes: list[Any] = Field(default_factory=list,max_length=500)
 
 
@@ -30,7 +30,7 @@ class AttributeExtractionBatch(BaseModel):
 
 
 def _locate_evidence(text: str, evidence: str):
-    """Return the actual source slice and match quality, tolerating whitespace only."""
+    """返回实际源文本片段与匹配质量，仅容忍空白差异。"""
     if evidence in text:
         return evidence, 'exact'
     source_chars=[];source_positions=[]

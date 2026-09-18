@@ -116,7 +116,7 @@
     }
   }
 
-  async function load(){
+  async function loadOnce(){
     const request=++serial,p=current;
     if(!p){refresh.disabled=false;summary.textContent='尚未选择项目';message('选择项目后自动展示原文','请在左侧选择已有项目，或创建项目后通过"知识写入"添加文档。');return;}
     let filter,stamp;
@@ -141,6 +141,25 @@
     }catch(error){if(request===serial&&p===current){summary.textContent='原文加载失败';message('暂时无法读取原文',error.message+'；请点击右上角"刷新"重试。');}}
     finally{if(request===serial)refresh.disabled=false;}
   }
+  let inFlight=null;
+  async function load(){
+    if(inFlight)return inFlight;
+    inFlight=loadOnce().finally(()=>{inFlight=null;});
+    return inFlight;
+  }
+  // Cross-menu deep link: the knowledge chat opens the exact cited source instead of a raw record dump.
+  window.selectSource=async sourceId=>{
+    if(!sourceId)throw Error('该证据没有可定位的来源');
+    await load();
+    if(!allDocuments.some(item=>item.id===sourceId)){
+      currentFilter='all';
+      document.querySelectorAll('.source-filter-btn').forEach(button=>button.classList.toggle('active',button.dataset.filter==='all'));
+      renderDocumentList();
+    }
+    const button=[...list.querySelectorAll('button')].find(item=>allDocuments[Number(item.dataset.source)]?.id===sourceId);
+    if(!button)throw Error('当前范围没有这条原文');
+    button.click();
+  };
   refresh.onclick=load;
   document.querySelector('[data-tab="sources"]').addEventListener('click',load);
   for(const id of ['apply-scope','reset-scope'])$(id).addEventListener('click',()=>{if(visible())load();});

@@ -1,8 +1,9 @@
-"""Open-schema candidate aggregation, Semantica induction and versioned publication."""
+"""开放模式候选聚合、Semantica 归纳与带版本发布。"""
 from collections import Counter,defaultdict
+from copy import deepcopy
 import hashlib
 import re
-from urllib.parse import quote,unquote
+from urllib.parse import unquote
 from uuid import uuid4
 
 from fastapi import APIRouter
@@ -10,8 +11,9 @@ from pydantic import Field
 from rdflib import Graph,Literal,Namespace,RDF,RDFS,URIRef
 from rdflib.namespace import OWL,XSD
 
+from .diagnostics import timed
 from .models import Request
-from .ontology import Ontology
+from .ontology import Ontology, readable_iri_segment
 from .time import utc_now
 
 
@@ -28,14 +30,102 @@ class DraftRequest(Request):
     name:str=Field(default='发现本体',min_length=1,max_length=200)
 
 
-def _candidates(repository,project_id):
+class DraftReview(Request):
+    excluded_candidate_ids:list[str]=Field(default_factory=list,max_length=10000)
+    excluded_terms:list[str]=Field(default_factory=list,max_length=1000)
+    term_labels:dict[str,str]=Field(default_factory=dict)
+
+
+def _formal_id(project_id,candidate):
+    identity='|'.join((project_id,str(candidate.get('document_version_id','')),str(candidate.get('id',''))))
+    return 'discovery-'+hashlib.sha256(identity.encode()).hexdigest()[:28]
+
+
+def _materialize_candidates(project_id,draft,ontology_id):
+    """把已审核候选转换为可追溯的正式记录，无需再次调用模型。"""
+    candidates=draft.get('candidate_snapshot') or []
+    excluded=set(draft.get('excluded_candidate_ids') or [])
+    mappings=draft.get('mappings') or {};entity_types=mappings.get('entity_types') or {}
+    relation_types=mappings.get('relation_types') or {};attribute_types=mappings.get('attributes') or {}
+    entities=[item for item in candidates if item.get('kind')=='entity' and item.get('id') not in excluded]
+    by_document=defaultdict(dict);records=[];skipped=[]
+    for item in entities:
+        type_iri=entity_types.get(item.get('proposed_type'))
+        if not type_iri or not str(item.get('text','')).strip():
+            skipped.append({'candidate_id':item.get('id'),'kind':'entity','reason':'实体名称或类型未通过审核'});continue
+        record_id=_formal_id(project_id,item);document_key=item.get('document_version_id') or item.get('document_id')
+        by_document[document_key][item.get('id')]=record_id
+        records.append({'id':record_id,'kind':'entity','type':type_iri,'text':item['text'],
+            'source_id':item.get('document_id'),'ontology_id':ontology_id,
+            'valid_from':item.get('valid_from'),'valid_until':item.get('valid_until'),'properties':{},
+            'metadata':{'discovery_candidate_id':item.get('id'),'discovery_candidate_ids':[item.get('id')],
+                'discovery_draft_id':draft.get('id'),'confidence':item.get('confidence'),
+                'evidence':item.get('evidence'),'chunk_id':item.get('chunk_id')}})
+    record_by_id={record['id']:record for record in records}
+    for item in candidates:
+        if item.get('kind')!='attribute' or item.get('id') in excluded:continue
+        document_key=item.get('document_version_id') or item.get('document_id')
+        entity_id=by_document[document_key].get(item.get('entity_id'));attribute=attribute_types.get(item.get('proposed_type'))
+        if entity_id and attribute:
+            record_by_id[entity_id]['properties'][attribute]=item.get('value')
+            record_by_id[entity_id]['metadata']['discovery_candidate_ids'].append(item.get('id'))
+        else:skipped.append({'candidate_id':item.get('id'),'kind':'attribute','reason':'属性或所属实体未通过审核'})
+    for item in candidates:
+        if item.get('kind')!='relation' or item.get('id') in excluded:continue
+        document_key=item.get('document_version_id') or item.get('document_id');local=by_document[document_key]
+        subject=local.get(item.get('subject_id'));obj=local.get(item.get('object_id'));type_iri=relation_types.get(item.get('proposed_type'))
+        if not subject or not obj or not type_iri:
+            skipped.append({'candidate_id':item.get('id'),'kind':'relation','reason':'关系类型或端点未通过审核'});continue
+        records.append({'id':_formal_id(project_id,item),'kind':'relation','type':type_iri,
+            'text':f"{item.get('subject') or record_by_id[subject]['text']} {item.get('proposed_type')} {item.get('object') or record_by_id[obj]['text']}",
+            'subject_id':subject,'object_id':obj,'source_id':item.get('document_id'),'ontology_id':ontology_id,
+            'valid_from':item.get('valid_from'),'valid_until':item.get('valid_until'),
+            'metadata':{'discovery_candidate_id':item.get('id'),'discovery_candidate_ids':[item.get('id')],
+                'discovery_draft_id':draft.get('id'),'confidence':item.get('confidence'),
+                'evidence':item.get('evidence'),'chunk_id':item.get('chunk_id')}})
+    return records,skipped
+
+
+def _validated_materialization(turtle,records,skipped):
+    """发布前只保留符合已审核本体的记录。"""
+    ontology=Ontology(turtle);accepted_entities=[];accepted_relations=[]
+    for record in (row for row in records if row['kind']=='entity'):
+        report=ontology.validate_timeline([*accepted_entities,record],enforce_relationship_constraints=True)
+        if report['conforms']:
+            accepted_entities.append(record);continue
+        skipped.append({'candidate_id':record['metadata']['discovery_candidate_id'],'kind':'entity',
+            'reason':report['errors'][0]['message'] if report.get('errors') else '实体未通过本体校验'})
+    accepted_entity_ids={row['id'] for row in accepted_entities}
+    for record in (row for row in records if row['kind']=='relation'):
+        if record.get('subject_id') not in accepted_entity_ids or record.get('object_id') not in accepted_entity_ids:
+            skipped.append({'candidate_id':record['metadata']['discovery_candidate_id'],'kind':'relation',
+                'reason':'关系端点实体未通过本体校验'});continue
+        report=ontology.validate_timeline(
+            [*accepted_entities,*accepted_relations,record],enforce_relationship_constraints=True)
+        if report['conforms']:
+            accepted_relations.append(record);continue
+        skipped.append({'candidate_id':record['metadata']['discovery_candidate_id'],'kind':'relation',
+            'reason':report['errors'][0]['message'] if report.get('errors') else '关系未通过本体校验'})
+    accepted=[*accepted_entities,*accepted_relations]
+    return accepted,skipped,{'conforms':True,'accepted_count':len(accepted),'skipped_count':len(skipped)}
+
+
+def _candidates(repository,project_id,records=None):
+    """把每个当前文档的 `metadata.discovery_candidates` 摊平。
+
+    PERF：全量 `current_records` 扫描（SELECT * + 解码每个载荷的 JSON）。
+    `_candidate_lifecycle` 在同一请求中也需要这些行，因此调用方通过 `records`
+    传入已经读过的列表，避免第二次扫描。
+    """
     result=[]
-    for document in repository.current_records(project_id):
-        if document['kind']!='document' or document.get('metadata',{}).get('_deleted'):continue
-        for item in document.get('metadata',{}).get('discovery_candidates',[]):
-            result.append({**item,'document_id':document['id'],'document_version_id':document['version_id'],
-                'document_title':document['metadata'].get('title',document['id']),
-                'valid_from':document.get('valid_from'),'valid_until':document.get('valid_until')})
+    with timed('候选发现') as record:
+        for document in (repository.current_records(project_id, vectors='none', kinds=['document']) if records is None else records):
+            if document['kind']!='document' or document.get('metadata',{}).get('_deleted'):continue
+            for item in document.get('metadata',{}).get('discovery_candidates',[]):
+                result.append({**item,'document_id':document['id'],'document_version_id':document['version_id'],
+                    'document_title':document['metadata'].get('title',document['id']),
+                    'valid_from':document.get('valid_from'),'valid_until':document.get('valid_until')})
+        record['candidates']=len(result)
     return result
 
 
@@ -57,21 +147,31 @@ def _summary(candidates):
         'relation_types':[{'name':name,'count':len(values),'examples':values[:3]} for name,values in sorted(relations.items())]}
 
 
-def _candidate_lifecycle(repository,project_id,candidates,drafts):
+def _candidate_lifecycle(repository,project_id,candidates,drafts,records=None):
+    """对每个候选分类：pending / in draft / approved / materialized。
+
+    PERF：复用调用方已经执行过的 `current_records` 扫描（通过 `records` 传入），
+    避免为同一请求第二次读取每个载荷。
+    """
     candidate_ids={item['id'] for item in candidates}
     materialized_ids=set()
-    for record in repository.current_records(project_id):
-        if record['kind'] not in ('entity','relation') or record.get('metadata',{}).get('_deleted'):continue
-        metadata=record.get('metadata',{})
-        if metadata.get('discovery_candidate_id'):
-            materialized_ids.add(metadata['discovery_candidate_id'])
-        materialized_ids.update(metadata.get('discovery_candidate_ids') or [])
+    with timed('候选生命周期', candidates=len(candidates), drafts=len(drafts),
+               reused_records=records is not None) as record:
+        for record_row in (repository.current_records(project_id, vectors='none') if records is None else records):
+            if record_row['kind'] not in ('entity','relation') or record_row.get('metadata',{}).get('_deleted'):continue
+            metadata=record_row.get('metadata',{})
+            if metadata.get('discovery_candidate_id'):
+                materialized_ids.add(metadata['discovery_candidate_id'])
+            materialized_ids.update(metadata.get('discovery_candidate_ids') or [])
+        record['materialized']=len(materialized_ids)
     published_ids=set();included_ids=set()
     for draft in drafts:
+        included=set(draft.get('candidate_ids') or [])-set(draft.get('excluded_candidate_ids') or [])
+        included-= {item.get('candidate_id') for item in draft.get('skipped_candidates') or []}
         if draft.get('status')=='published':
-            published_ids.update(draft.get('candidate_ids') or [])
+            published_ids.update(included)
         elif draft.get('status')=='draft':
-            included_ids.update(draft.get('candidate_ids') or [])
+            included_ids.update(included)
     materialized_ids &= candidate_ids
     published_ids = (published_ids & candidate_ids) - materialized_ids
     included_ids = (included_ids & candidate_ids) - published_ids - materialized_ids
@@ -85,7 +185,13 @@ def _candidate_lifecycle(repository,project_id,candidates,drafts):
 
 
 def _candidate_mindmap(candidates,states,limit=500):
-    """Aggregate open occurrences for visualization without creating canonical knowledge."""
+    """聚合开放出现以便可视化，而不创建规范知识。
+
+    响应大小随候选数量增长，而非随 ``limit``：每个被选中的节点携带最多
+    10 条证据记录（每条最长 500 字符）和最多 30 个属性，所以 ``limit=500``
+    仍可能序列化出数兆字节。浏览器随后把这些节点喂给 ECharts 的 *force*
+    布局，并给每个节点和边加标签——这是延迟中属于客户端的那一半。
+    """
     entity_groups={};candidate_to_node={};text_to_nodes=defaultdict(list)
     for item in candidates:
         if item['kind']!='entity':continue
@@ -147,7 +253,7 @@ def _candidate_mindmap(candidates,states,limit=500):
 
 
 def _quality_warnings(candidates):
-    """Flag weak open vocabularies before they become a published contract."""
+    """在弱开放词汇变成已发布契约之前给出告警。"""
     entities=[x for x in candidates if x['kind']=='entity']
     relations=[x for x in candidates if x['kind']=='relation']
     generic={'person','org','gpe','date','event','product','concept','unknown','entity'}
@@ -166,11 +272,11 @@ def _quality_warnings(candidates):
 
 
 def _iri(base,name):
-    return URIRef(base+quote(str(name).strip().replace(' ','_'),safe='_-~.'))
+    return URIRef(base+readable_iri_segment(name))
 
 
 def _machine_name(prefix,value):
-    """Create a stable ASCII name for Semantica while labels keep source language."""
+    """为 Semantica 生成稳定的 ASCII 名称，而标签保留源语言。"""
     value=str(value).strip()
     if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]*',value):return value
     return prefix+'_'+hashlib.sha256(value.encode('utf-8')).hexdigest()[:12]
@@ -274,6 +380,8 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
     for item in inferred.get('properties',[]):
         machine_source=str(item.get('metadata',{}).get('inferred_from') or item.get('name'))
         is_object=item.get('type')=='object'
+        if not is_object and machine_source not in reverse_attribute:
+            continue
         source=(reverse_relation if is_object else reverse_attribute).get(machine_source,machine_source)
         lookup=relation_lookup if is_object else attribute_lookup
         uri=lookup.get(str(source).strip().casefold()) or _iri(base,source)
@@ -281,16 +389,19 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
         graph.add((uri,RDFS.label,Literal(source,lang=_literal_language(source))))
         graph.add((uri,RDFS.comment,Literal(_definition('relation' if is_object else 'attribute',source),lang='zh')))
         target=relation_map if is_object else attribute_map;target[source]=str(uri)
-        domains=item.get('domain',[]) if isinstance(item.get('domain',[]),list) else [item.get('domain')]
-        ranges=item.get('range',[]) if isinstance(item.get('range',[]),list) else [item.get('range')]
-        for value in domains:
-            resolved=class_lookup.get(str(value).lower()) if value else None
-            if resolved:graph.add((uri,RDFS.domain,resolved))
-        for value in ranges:
-            if not value:continue
-            resolved=class_lookup.get(str(value).lower())
-            if resolved:graph.add((uri,RDFS.range,resolved))
-            elif not is_object and str(value).startswith('xsd:'):graph.add((uri,RDFS.range,getattr(XSD,str(value).split(':',1)[1])))
+        # 发现模式下，观测到的关系端点类型是证据而非约束。
+        # 数据类型属性仍需要适用的类和值数据类型。
+        if not is_object:
+            domains=item.get('domain',[]) if isinstance(item.get('domain',[]),list) else [item.get('domain')]
+            ranges=item.get('range',[]) if isinstance(item.get('range',[]),list) else [item.get('range')]
+            for value in domains:
+                resolved=class_lookup.get(str(value).lower()) if value else None
+                if resolved:graph.add((uri,RDFS.domain,resolved))
+            for value in ranges:
+                if not value:continue
+                resolved=class_lookup.get(str(value).lower())
+                if resolved:graph.add((uri,RDFS.range,resolved))
+                elif str(value).startswith('xsd:'):graph.add((uri,RDFS.range,getattr(XSD,str(value).split(':',1)[1])))
     for source in sorted({x['proposed_type'] for x in candidates if x['kind']=='relation'}):
         if source not in relation_map:
             uri=relation_lookup.get(str(source).strip().casefold()) or _iri(base,source);relation_map[source]=str(uri)
@@ -301,6 +412,11 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
             uri=attribute_lookup.get(str(source).strip().casefold()) or _iri(base,source);attribute_map[source]=str(uri)
             graph.add((uri,RDF.type,OWL.DatatypeProperty));graph.add((uri,RDFS.label,Literal(source,lang=_literal_language(source))))
             graph.add((uri,RDFS.comment,Literal(_definition('attribute',source),lang='zh')))
+    # 父发现版本可能包含旧代码推断出的端点值域。
+    # 对本开放候选集中观测到的每条关系都移除它们。显式约束属于
+    # 引导式/非开放本体工作流及其审核队列。
+    for iri in relation_map.values():
+        predicate=URIRef(iri);graph.remove((predicate,RDFS.domain,None));graph.remove((predicate,RDFS.range,None))
     turtle=graph.serialize(format='turtle')
     Ontology(turtle)
     return turtle,{'entity_types':class_map,'relation_types':relation_map,'attributes':attribute_map},inferred
@@ -312,10 +428,13 @@ def install(app,service):
     @router.get('')
     def overview(p:str):
         service.repository.get_project(p)
-        candidates=_candidates(service.repository,p)
+        # 一次 current_records 扫描同时供给候选摊平与生命周期分类；
+        # 过去两者各自读取整个项目。二者都不看向量，因此完全跳过 float32 列。
+        records=service.repository.current_records(p, vectors='none')
+        candidates=_candidates(service.repository,p,records)
         drafts=service.repository.list_artifacts('ontology_discovery_draft',p)
         ontologies=service.repository.list_ontologies(p)
-        states,status_counts=_candidate_lifecycle(service.repository,p,candidates,drafts)
+        states,status_counts=_candidate_lifecycle(service.repository,p,candidates,drafts,records)
         enriched_drafts=[]
         for draft in drafts:
             try:summary=draft.get('summary') or Ontology(draft.get('turtle','')).summary()
@@ -324,19 +443,30 @@ def install(app,service):
         return {**_summary(candidates),
             'drafts':enriched_drafts,
             'quality_warnings':_quality_warnings(candidates),
+            'relation_constraint_policy':'open_no_domain_range',
             'published':bool(ontologies),
             'ontology_id':ontologies[-1]['id'] if ontologies else None,
             'candidate_status_counts':status_counts,
             'unpublished_candidate_count':status_counts['pending']+status_counts['included_in_draft'],
-            'requires_controlled_reingest':bool(status_counts['approved'])}
+            'requires_candidate_review':bool(status_counts['pending']+status_counts['included_in_draft']+status_counts['approved']),
+            'requires_controlled_reingest':False}
 
     @router.get('/candidate-mindmap')
     def candidate_mindmap(p:str,limit:int=500):
+        # PERF：过去的两次读取曾是三次——`_candidates` 和 `_candidate_lifecycle`
+        # 各自扫描全部当前记录，`list_artifacts` 还会解码每个项目的草案。
+        # 计时日志会分别列出剩余的每次读取。
         service.repository.get_project(p)
-        candidates=_candidates(service.repository,p)
-        drafts=service.repository.list_artifacts('ontology_discovery_draft',p)
-        states,_=_candidate_lifecycle(service.repository,p,candidates,drafts)
-        return _candidate_mindmap(candidates,states,limit)
+        with timed('候选脑图', limit=limit) as record:
+            # 两种聚合都不看向量，因此完全跳过 float32 列。
+            records=service.repository.current_records(p, vectors='none')
+            candidates=_candidates(service.repository,p,records)
+            drafts=service.repository.list_artifacts('ontology_discovery_draft',p)
+            states,_=_candidate_lifecycle(service.repository,p,candidates,drafts,records)
+            payload=_candidate_mindmap(candidates,states,limit)
+            record['nodes']=len(payload.get('nodes') or [])
+            record['edges']=len(payload.get('edges') or [])
+            return payload
 
     @router.post('/drafts',status_code=201)
     def create_draft(p:str,request:DraftRequest):
@@ -352,6 +482,7 @@ def install(app,service):
             'generator_backend':'semantica','created_at':utc_now(),'candidate_ids':candidate_ids,
             'candidate_snapshot':candidates,
             'candidate_count':len(candidates),'turtle':turtle,'mappings':mappings,'summary':summary,
+            'review_base_turtle':turtle,'review_base_mappings':deepcopy(mappings),
             'parent_ontology_id':parent['id'] if parent else None,'diff':diff,
             'quality_warnings':_quality_warnings(candidates),
             'inference':{'metadata':inferred.get('metadata',{}),'validation':inferred.get('validation',{})},
@@ -359,14 +490,88 @@ def install(app,service):
                 'source_draft_id':draft_id,'diff':diff,'candidate_ids':candidate_ids}}
         return service.repository.save_artifact('ontology_discovery_draft',draft)
 
-    @router.post('/drafts/{draft_id}/publish')
+    @router.post('/drafts/{draft_id}/publish', status_code=202)
     def publish(p:str,draft_id:str):
-        with service.lock:
-            draft=service.repository.get_artifact('ontology_discovery_draft',draft_id)
-            if draft.get('project_id')!=p:raise KeyError(draft_id)
-            if draft.get('status')!='draft':raise ValueError('Version conflict: 该发现草案已经发布，不能重复发布')
-            _,published=service.repository.publish_ontology_draft(
-                p,draft,draft.get('parent_ontology_id'))
+        """提交发布任务：物化→校验→发布本体→写正式图谱，进度上报到后台任务卡。"""
+        service.repository.get_project(p)
+        draft=service.repository.get_artifact('ontology_discovery_draft',draft_id)
+        if draft.get('project_id')!=p:raise KeyError(draft_id)
+        if draft.get('status')!='draft':raise ValueError('版本冲突：该发现草案已经发布，不能重复发布')
+        # 提交前乐观锁：父本体已变化时直接拒绝，避免任务跑一半才失败
+        ontologies=service.repository.list_ontologies(p)
+        latest_id=ontologies[-1]['id'] if ontologies else None
+        if latest_id!=draft.get('parent_ontology_id'):
+            raise ValueError('版本冲突：本体已更新，请基于当前版本重新生成发现草案')
+        def run(progress):
+            progress('物化候选 → 正式记录雏形（不调 LLM）',5)
+            provisional_records,skipped=_materialize_candidates(p,draft,f"draft:{draft_id}")
+            progress(f'候选物化完成 · {len(provisional_records)} 条待校验',15)
+            records,skipped,validation=_validated_materialization(draft['turtle'],provisional_records,skipped)
+            progress(f'本体校验完成 · {len(records)} 条通过 · {len(skipped)} 条跳过',40)
+            with service.lock:
+                ontology,published=service.repository.publish_ontology_draft(
+                    p,draft,draft.get('parent_ontology_id'))
+                for record in records:record['ontology_id']=ontology['id']
+                entity_records=[row for row in records if row['kind']=='entity']
+                relation_records=[row for row in records if row['kind']=='relation']
+                saved=service.write(p,entity_records,relation_constraint_mode='strict') if entity_records else []
+                progress(f'实体写入完成 · {len(saved)} 条',70)
+                if relation_records:
+                    # 关系优先整批写入：一次 write 内合并向量化、SQLite 落库与 Milvus flush，
+                    # 免去逐条 write 重复「全量读当前记录 + 单条编码 + flush」的固定开销。
+                    try:
+                        saved.extend(service.write(p,relation_records,relation_constraint_mode='strict'))
+                    except (ValueError,KeyError):
+                        # 整批因个别非法关系失败（本体校验在落库之前，零写入）→ 降级逐条定位并跳过，
+                        # 合法关系仍正常写入，语义与旧版一致；逐条路径仅在罕见异常时触发。
+                        for i,relation in enumerate(relation_records):
+                            try:saved.extend(service.write(p,[relation],relation_constraint_mode='strict'))
+                            except (ValueError,KeyError) as exc:
+                                skipped.append({'candidate_id':relation['metadata']['discovery_candidate_id'],
+                                    'kind':'relation','reason':str(exc)})
+                            if (i+1)%20==0 or i+1==len(relation_records):
+                                progress(f'关系写入 {i+1}/{len(relation_records)} · 累计通过 {sum(1 for r in saved if r["kind"]=="relation")}',
+                                    70+int(25*(i+1)/max(1,len(relation_records))))
+                progress(f'关系写入完成 · 累计通过 {sum(1 for r in saved if r["kind"]=="relation")} 条',95)
+                counts=Counter(row['kind'] for row in saved)
+                published.update(mapped_entities=counts['entity'],mapped_relations=counts['relation'],
+                    mapped_attributes=sum(len(row.get('properties') or {}) for row in saved if row['kind']=='entity'),
+                    skipped_candidates=skipped,validation=validation,
+                    requires_candidate_review=bool(skipped or published.get('excluded_candidate_ids')),
+                    requires_controlled_reingest=False)
+                service.repository.save_artifact('ontology_discovery_draft',published)
+            progress('发布完成 · 正式知识已写入',100)
             return published
+        return app.state.jobs.submit('ontology_publish', run, p)
+
+    @router.put('/drafts/{draft_id}')
+    def review_draft(p:str,draft_id:str,request:DraftReview):
+        draft=service.repository.get_artifact('ontology_discovery_draft',draft_id)
+        if draft.get('project_id')!=p:raise KeyError(draft_id)
+        if draft.get('status')!='draft':raise ValueError('版本冲突：已发布草案不能编辑')
+        known={item.get('id') for item in draft.get('candidate_snapshot',[])}
+        unknown=set(request.excluded_candidate_ids)-known
+        if unknown:raise ValueError('审核结果包含未知候选')
+        base_turtle=draft.get('review_base_turtle') or draft['turtle']
+        base_mappings=deepcopy(draft.get('review_base_mappings') or draft.get('mappings') or {})
+        known_terms={source for group in base_mappings.values() for source in group}
+        if set(request.excluded_terms)-known_terms or set(request.term_labels)-known_terms:
+            raise ValueError('审核结果包含未知本体术语')
+        graph=Graph();graph.parse(data=base_turtle,format='turtle');mappings=deepcopy(base_mappings)
+        iri_by_source={source:URIRef(iri) for group in base_mappings.values() for source,iri in group.items()}
+        for source,label in request.term_labels.items():
+            label=label.strip()
+            if not label:raise ValueError('本体术语名称不能为空')
+            iri=iri_by_source[source];graph.remove((iri,RDFS.label,None));graph.add((iri,RDFS.label,Literal(label,lang=_literal_language(label))))
+        for source in request.excluded_terms:
+            iri=iri_by_source[source];graph.remove((iri,None,None));graph.remove((None,None,iri))
+            for group in mappings.values():group.pop(source,None)
+        turtle=graph.serialize(format='turtle');summary=Ontology(turtle).summary()
+        draft.update(excluded_candidate_ids=request.excluded_candidate_ids,excluded_terms=request.excluded_terms,
+            term_labels=request.term_labels,turtle=turtle,summary=summary,mappings=mappings,
+            review_base_turtle=base_turtle,review_base_mappings=base_mappings,
+            diff=_ontology_diff(None if not draft.get('parent_ontology_id') else service.repository.get_ontology(p,draft['parent_ontology_id'])['turtle'],turtle),
+            revision=draft.get('revision',1)+1,reviewed_at=utc_now())
+        return service.repository.save_artifact('ontology_discovery_draft',draft)
 
     app.include_router(router)

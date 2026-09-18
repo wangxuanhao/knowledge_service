@@ -107,7 +107,7 @@ def test_symlink_file_escape_rejected(legacy, tmp_path):
         (folder / 'graph.json').symlink_to(outside)
     except OSError:
         pytest.skip('Symlink creation unavailable on this Windows host')
-    with pytest.raises(ValueError, match='escape'):
+    with pytest.raises(ValueError, match='越界'):
         importer_type()(service, root).import_project('原名')
 
 

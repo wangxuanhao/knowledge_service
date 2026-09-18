@@ -1,4 +1,4 @@
-"""Document-versioned review decisions, atomically committed with approved facts."""
+"""文档版本化的审核决策，与已批准事实原子化提交。"""
 import copy
 import hashlib
 from typing import Literal
@@ -30,27 +30,38 @@ def decide(service,p,doc_id,candidate_id,request):
         rows={r['id']:r for r in service.repository.current_records(p)}
         doc=rows.get(doc_id)
         if not doc or doc['kind']!='document':raise KeyError(doc_id)
-        if doc['version']!=request.expected_version:raise ValueError('Version conflict: 请刷新审核清单')
+        if doc['version']!=request.expected_version:raise ValueError('版本冲突：请刷新审核清单')
         revised=writable(doc);revised['metadata']=copy.deepcopy(doc['metadata'])
         candidate=next((c for c in revised['metadata'].get('review_candidates',[]) if c['id']==candidate_id),None)
         if not candidate:raise KeyError(candidate_id)
         if candidate['status']!='pending':raise ValueError('该候选已经审核，不能重复操作')
         if doc.get('metadata',{}).get('_deleted') or doc['metadata'].get('status')!='ready':raise ValueError('来源文档不可用')
         candidate.update(note=request.note,reviewed_at=utc_now())
+        try: assertion=service.repository.get_assertion(p,candidate_id)
+        except KeyError: assertion=None
         if request.action=='reject':
             candidate['status']='rejected'
             if candidate.get('kind')=='validation':candidate['resolution']='remediation_required'
-            service.repository.put_record(p,revised,expected_version=doc['version'])
+            decisions=[] if assertion is None else [{'id':candidate_id,
+                'expected_version':assertion['decision_version'],'status':'rejected',
+                'reason':request.note,'actor':'reviewer'}]
+            service.write(p,[],completion=(revised,doc['version']),operation='approve_review',
+                assertion_decisions=decisions)
             return {'status':'rejected',**({'resolution':'remediation_required'} if candidate.get('kind')=='validation' else {})}
         if hashlib.sha256(doc['text'].encode('utf-8')).hexdigest()!=candidate['source_hash']:
             raise ValueError('原文已更改，请重新提取后审核')
         ontology=service.repository.get_ontology(p)
         if request.expected_ontology_id and request.expected_ontology_id!=ontology['id']:
-            raise ValueError('Version conflict: 本体已更新，请刷新审核清单')
+            raise ValueError('版本冲突：本体已更新，请刷新审核清单')
         kind=candidate.get('kind','relation')
         if kind=='validation':
             candidate.update(status='approved',resolution='accepted_exception',approved_ontology_id=ontology['id'])
-            service.repository.put_record(p,revised,expected_version=doc['version'])
+            decisions=[] if assertion is None else [{'id':candidate_id,
+                'expected_version':assertion['decision_version'],'status':'accepted',
+                'reason':request.note,'actor':'reviewer',
+                'canonical_record_id':candidate.get('record_id')}]
+            service.write(p,[],completion=(revised,doc['version']),operation='approve_review',
+                assertion_decisions=decisions)
             return {'status':'approved','resolution':'accepted_exception','record_id':candidate.get('record_id')}
         model=Ontology(ontology['turtle'])
         target=str(model.resolve(request.target_type,{'entity':model.classes,'relation':model.relations,'attribute':model.attributes}[kind]))
@@ -77,7 +88,7 @@ def decide(service,p,doc_id,candidate_id,request):
         elif kind=='attribute':
             record_id=endpoint('entity_id');original=rows[record_id]
             if request.expected_entity_version!=original['version']:
-                raise ValueError('Version conflict: 请刷新并核对实体当前属性')
+                raise ValueError('版本冲突：请刷新并核对实体当前属性')
             from .review_validation import validate_attribute
             validate_attribute(model,original['type'],target,candidate['value'])
             props=copy.deepcopy(original.get('properties',{}))
@@ -100,8 +111,12 @@ def decide(service,p,doc_id,candidate_id,request):
                 text=doc['text'][candidate['start_char']:candidate['end_char']])
             record['metadata']['original_predicate']=candidate['predicate']
         candidate.update(status='approved',target_type=target,approved_ontology_id=ontology['id'],record_id=record_id)
-        # Validation/embedding failures leave the review pending. Approval and relation share one SQLite transaction.
-        service.write(p,[record],completion=(revised,doc['version']),expected_versions=expected)
+        # 校验/向量化失败会保持审核为待处理状态。批准与关系写入共享同一个 SQLite 事务。
+        decisions=[] if assertion is None else [{'id':candidate_id,
+            'expected_version':assertion['decision_version'],'status':'accepted',
+            'reason':request.note,'actor':'reviewer','canonical_record_id':record_id}]
+        service.write(p,[record],completion=(revised,doc['version']),expected_versions=expected,
+            operation='approve_review',assertion_decisions=decisions,suppress_auto_assertions=bool(assertion))
         return {'status':'approved','record_id':record_id}
 
 

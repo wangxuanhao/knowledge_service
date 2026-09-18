@@ -1,3 +1,3 @@
-"""Versioned knowledge, ontology and retrieval service."""
+"""版本化知识、本体与检索服务。"""
 
 __version__ = "1.1.0"

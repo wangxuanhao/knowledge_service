@@ -46,3 +46,30 @@ def test_document_job_and_stream(tmp_path):
         assert len(client.get(base+'/jobs').json()['jobs'])==1
         response=client.post(base+'/qa/stream',json={'query':'原文','generate':False})
         assert response.status_code==200 and 'event: evidence' in response.text and 'event: done' in response.text
+
+
+def test_qa_stream_reads_scoped_records_once_and_returns_evidence_with_answer(tmp_path, monkeypatch):
+    with TestClient(create_app(tmp_path/'qa-once.sqlite',HashingEncoder())) as client:
+        p=client.post('/api/projects',json={'name':'qa-once'}).json()['id']
+        base=f'/api/projects/{p}'
+        assert client.post(base+'/documents',json={
+            'title':'退款规则','text':'退款需要原始凭证','extract':False,
+        }).status_code==201
+        repository=client.app.state.service.repository
+        original_query=repository.query
+        calls=[]
+
+        def counted_query(*args, **kwargs):
+            calls.append((args, kwargs))
+            return original_query(*args, **kwargs)
+
+        monkeypatch.setattr(repository,'query',counted_query)
+        response=client.post(base+'/qa/stream',json={
+            'query':'退款','generate':False,'retrieval_mode':'keyword',
+        })
+
+        assert response.status_code==200
+        assert len(calls)==1
+        assert 'event: evidence' in response.text
+        assert '退款需要原始凭证' in response.text
+        assert 'event: done' in response.text

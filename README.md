@@ -1,6 +1,6 @@
 # 知识图谱服务
 
-> 更新日期：2026-09-10。以新版服务为基础逐项恢复历史能力；旧脚本和旧数据继续保留，但不保证旧 API 兼容。尚未接入的能力见下文，能力对标记录见 [能力对标与修正](docs/2026-09-09-能力对标与修正.md)。
+> 更新日期：2026-09-18。以新版服务为基础逐项恢复历史能力；旧版脚本（apps/legacy/kgcore/ontology）已移除，需要时可从 git 历史恢复。尚未接入的能力见下文，能力对标记录见 [能力对标与修正](docs/2026-09-09-能力对标与修正.md)。
 
 新增独立服务层 `knowledge_service/`：双时态版本、本体/SHACL、嵌套 metadata 前置过滤、检索与证据问答，包含管理工作台。
 
@@ -17,7 +17,7 @@ python -u -m knowledge_service --port 8100
 
 工作台：[http://127.0.0.1:8100/](http://127.0.0.1:8100/)；[交互 API 文档](http://127.0.0.1:8100/docs)。默认只监听本机，启动终端按 `Ctrl+C` 停止。修改后端代码或 `.env` 后需要重启；前端修改需要刷新页面，刷新前请保留未提交内容。
 
-新服务不调用下面的编号脚本。旧项目可通过“总览 / 本地项目”手动导入，原文件保留；切换“当前知识项目”是切换服务中的项目，不等于重新导入。
+新服务不调用历史编号脚本（已移除）。旧项目可通过“总览 / 本地项目”手动导入，原文件保留；切换“当前知识项目”是切换服务中的项目，不等于重新导入。
 
 ### 配置与存储
 
@@ -110,6 +110,27 @@ python -u -m knowledge_service --port 8100
 - 重启后原 queued/running 任务标为 interrupted，不自动重试。强制停服前的原文收据可能仍显示 processing；重传前先核对，避免重复数据。
 - 尚未逐次记录 Semantica 内部 HTTP 重试和 token 用量；长时间等待需要结合执行位置定位。
 
+### 读接口的阶段耗时日志
+
+上面是写入任务的日志。读接口（检索、交互图谱、候选脑图、原文数据源）不属于任何任务，耗时走另一条通道，**默认开启**，直接打印在启动终端：
+
+```
+10:33:31 INFO knowledge_service.timing · repository.query · 38.3 ms · embeddings=True kinds=0 filtered=False rows=2401 kept=2401
+10:33:31 INFO knowledge_service.timing · service.scoped · 42.3 ms · embeddings=True kinds=0 raw=2401 live=2401 kept=2401
+10:33:31 INFO knowledge_service.timing · explorer.graph · 43.5 ms · seeded=True hops=1 rows=2401 graph_nodes=1100 graph_edges=1000 selected=3 returned_nodes=3 returned_edges=2
+```
+
+- `KG_LOG_LEVEL`（默认 `INFO`）控制级别；`KG_SLOW_MS=200` 只打印慢于 200 ms 的阶段。
+- 单次读取达到 2000 行会额外打 `WARNING`：说明这次请求为**整个项目**付了钱，而不是为返回结果付钱。
+- 第三行是判断「慢在哪」的关键：返回 3 个节点、读了 2401 行，说明耗时全在扫描而不是图谱计算。
+- 分不清服务端还是浏览器时：`POST /subgraph` 的响应带 `timing_ms.total`，图谱摘要会显示「服务 N ms」；浏览器侧用 `localStorage.kgDebug='1'` 或访问 `?debug=1` 打开 `[kg]` 前缀的前端计时（默认静默），可看到 `subgraph`／`graph-layout`／`fit-graph` 各占多少毫秒。
+
+日志里能直接看到的已知读放大：
+
+- `repository.query` 只按系统时间下推，`kinds`、业务有效期和 metadata 都在 Python 侧过滤，成本与项目全量版本历史成正比。`/subgraph`、`/entity-options`、`/dashboard`、`/sources`、`/records/query` 共用这条路径。
+- 候选脑图与 `/ontology-discovery` 每次请求把「当前记录」扫两遍（`_candidates` 一次、`_candidate_lifecycle` 一次）。
+- `repository.list_artifacts` 先解码所有项目的草案、再按项目过滤；草案里嵌了完整候选快照，所以这一步的解码量远大于返回值（日志的 `decoded=` 与 `kept=` 对比可见）。
+
 详见 [解析日志定位](docs/解析日志定位.md)。数据契约与更多 API 说明见 [服务使用说明](docs/KNOWLEDGE_SERVICE.md)；其中早期 `.venv-service` 安装记录供参考，当前环境与配置以上述 conda 说明为准。
 
 ## 知识审核与本体变更
@@ -153,66 +174,36 @@ python -u -m knowledge_service --port 8100
 
 ---
 
-## 历史脚本项目（15–18，原说明保留）
-
-把"规则/协议文字"变成**知识图谱 + 本体 + 可检索 RDF/SPARQL** 的最小项目。
-入口见 [`docs/USAGE.md`](docs/USAGE.md)；**Web 服务（16）现状与构建顺序看
-[`docs/16_Web服务_现状与使用指南.md`](docs/16_Web服务_现状与使用指南.md)**；深度解释见
-[`docs/17_rule_demo_semantica_api_知识图谱链路说明.md`](docs/17_rule_demo_semantica_api_知识图谱链路说明.md)。
-
 ## 目录地图
 
 ```
 知识图谱/
-├─ apps/        可直接运行的 4 个脚本（15 开放抽取 / 16 Web / 17 闭集抽取 / 18 本体CLI）
 ├─ knowledge_service/ 新版服务：API、SQLite、本体、抽取、切片、诊断日志和工作台
 ├─ tests/service/     新版服务回归测试
-├─ kgcore/      复用库（ontology_owl 本体引擎 · kg_eval 评测 · kg_project 项目存取 · paths 统一路径）
-├─ ontology/    正式本体 meituan_ontology.ttl（唯一要手改的"说明书"）
-├─ docs/        说明文档（USAGE 模块地图 · 17 链路解释 · 图谱设计稿）
-├─ data/        输入/输出：model(bge-m3) · rule_demo/rule_txt · rule_demo_output ·
-│               projects(Web项目/graph.json) · kg_web(前端) · gold(评测答案)
-└─ legacy/      早期教学脚本(01–14)与示例文件，已归档不再与主线混
+├─ docs/              说明文档（KNOWLEDGE_SERVICE · 能力对标 · 图谱设计稿）
+├─ data/              运行数据：model(bge-m3) · service(知识库与日志) · rule_demo 等
+└─ scripts/           主服务验收与运维脚本（smoke_service / verify_parity / sync_local_neo4j）
 ```
+
+> 历史旧版脚本（apps/legacy/kgcore/ontology）已移除，需要时可从 git 历史恢复。
 
 ## 快速开始（仓库根执行）
 
 ```powershell
 conda activate llm_model
-$py = (Get-Command python).Source
-
-& $py apps/18_ontology_owl_sparql.py info                                  # 看本体/白名单
-& $py apps/17_rule_demo_semantica_api.py                                   # 跑抽取（data/rule_demo → data/rule_demo_output）
-& $py apps/18_ontology_owl_sparql.py demo  --graph <run>/graph.json        # SPARQL 能力问答
-& $py apps/18_ontology_owl_sparql.py eval  --pred <run>/graph.json         # 生成/比对 gold（评测尺子）
-& $py apps/16_kg_web_server.py                                             # Web 可视化（或 apps/start_kg_server.cmd）
+python -u -m knowledge_service --port 8100
 ```
+
+- 工作台：[http://127.0.0.1:8100/](http://127.0.0.1:8100/)；[交互 API 文档](http://127.0.0.1:8100/docs)。
+- 服务验收：`python scripts/smoke_service.py`（针对运行中的 8100 服务）。
 
 > 环境：conda env `llm_model`（Python 3.12，当前 Semantica 0.6.8，另含 rdflib、sentence-transformers、faiss）。
 > 向量模型 `data/model`（bge-m3）与本体文件可本地读取；LLM 抽取和生成式问答是否联网取决于供应商配置，并非整个流程默认全离线。
-
-## 新手三分钟路线
-
-1. **先看效果**：起 Web → `apps/start_kg_server.cmd` → 开 `http://127.0.0.1:8000`，选一个历史项目随便点（看板/图谱/问答/数据源）。
-2. **再看服务总览**：读 `docs/16_Web服务_现状与使用指南.md`（数据→实体→图的构建顺序 + 每个菜单怎么用 + 运维日志/回滚）。
-3. **理解抽取器链路**：读 `docs/17_rule_demo_semantica_api_知识图谱链路说明.md`（概念 + 三种本体模式）。
-4. **正式跑一版**：`& $py apps/17_rule_demo_semantica_api.py` → 图谱页「📥 载入数据」→ 看 `data/rule_demo_output/run_<时间>/ontology_summary.md`。
-5. **养成"尺子"习惯**：先 `18 eval --gen-template` 建一份 gold，之后每次改版 `18 eval` 对分。
-
-## 一句话选工具
-
-| 你要… | 用 |
-|---|---|
-| 看图/问答/体检（网页） | 16 |
-| 正式受控抽取 | 17 |
-| 扫新概念（开放） | 15 |
-| 查本体 / 跑 SPARQL / 评测打分 | 18 |
 
 ## 文档索引
 
 | 文档 | 内容 |
 |---|---|
-| `docs/USAGE.md` | 模块地图 + 15/16/17/18 各怎么用 + REST 清单 + 常见坑 |
-| `docs/16_Web服务_现状与使用指南.md` | ⭐ 最新：数据→实体→图的构建顺序 + 8 个菜单怎么用 + 问答/增量回滚/运维日志 |
-| `docs/17_rule_demo_semantica_api_知识图谱链路说明.md` | 概念（实体/关系/本体）+ 链路 + 三种模式 + 生产级差距 |
-| `docs/图谱设计.md` | 设计稿（§4 本体来源、§7 评测口径） |
+| `docs/KNOWLEDGE_SERVICE.md` | 数据契约、API 与更多服务说明 |
+| `docs/2026-09-09-能力对标与修正.md` | 新版服务能力对标记录 |
+| `docs/图谱设计.md` | 图谱设计稿（§4 本体来源、§7 评测口径） |

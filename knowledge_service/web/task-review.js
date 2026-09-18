@@ -1,7 +1,7 @@
 /* Project-scoped task summaries and explicit ontology relation review. */
 (() => {
   const states={queued:'排队中',running:'处理中',completed:'已完成',failed:'失败',interrupted:'已中断'};
-  const kinds={ingest:'文档解析',neo4j_sync:'Neo4j 同步',legacy_import:'旧项目导入'};
+  const kinds={ingest:'文档解析',neo4j_sync:'Neo4j 同步',legacy_import:'旧项目导入',ontology_publish:'本体发布',semantic_index:'语义索引'};
   const beijingTime=value=>{
     if(!value)return '—';
     const date=new Date(value);
@@ -57,7 +57,7 @@
         const kind=r.kind||'relation',terms=ontology.summary[{entity:'classes',relation:'relations',attribute:'attributes'}[kind]]||[];
         const heading=kind==='validation'?`${esc(r.text||r.record_id||'图谱记录')} · ${esc(r.path_label||safeLabel(r.path)||'图级约束')}`:kind==='entity'?`${esc(r.text)} · ${typeHint(r.proposed_type)}`:kind==='attribute'?`${esc(r.subject)} · ${typeHint(r.proposed_type)} = ${esc(JSON.stringify(r.value))}`:`${esc(r.subject)} → ${typeHint(r.predicate)} → ${esc(r.object)}`;
         const issues=(r.constraint_issues||[]).map(x=>`${x.endpoint==='subject_id'?'主语':'宾语'}：实际 ${safeLabel(x.actual_type)}，期望 ${x.expected_types.map(safeLabel).join(' / ')}`).join('；');
-        const proposed=r.proposed_type||r.predicate||'',base=(ontology.summary.classes?.[0]?.id||'urn:knowledge:Term').replace(/[^\/#]+$/,'');
+        const proposed=r.proposed_type||r.predicate||'';
         const changeKind={entity:'class',relation:'relation',attribute:'attribute'}[kind],domainType=r.entity_type||r.subject_type||'',rangeType=r.object_type||'';
         const optionsFor=selected=>(ontology.summary.classes||[]).map(x=>`<option value="${esc(x.id)}" ${x.id===selected?'selected':''}>${esc(x.label)}</option>`).join('');
         const classOptions=optionsFor('');
@@ -65,11 +65,18 @@
         const validationDetails=kind==='validation'?`<div class="constraint-exception"><b>限制：${esc(r.constraint||'SHACLConstraint')}</b><span>字段 / 关系：${esc(r.path_label||r.path||'图级约束')}</span><span>级别：${esc(r.severity||'Violation')}</span><span>实际值：${esc(r.actual_value??'缺失')}</span><p>${esc(r.message)}</p></div>`:'';
         const mapping=kind==='validation'?'':`<label>映射到当前本体${labels[kind]}<select class="review-target"><option value="">请选择，不自动匹配</option>${terms.map(t=>`<option value="${esc(t.id)}" ${t.id===r.proposed_type||t.id===r.ontology_change?.target_type?'selected':''}>${esc(ontoName(t))} · ${esc(t.name)}</option>`).join('')}</select></label>`;
         const actions=kind==='validation'?'<button data-action="approve">确认例外</button><button data-action="reject" class="secondary">标记需整改</button>':`<button data-action="approve" ${r.blocked?'disabled':''}>批准并写入</button><button data-action="reject" class="secondary">拒绝</button><button data-action="propose" class="secondary">申请本体变更</button>`;
-        const changeEditor=kind==='validation'?'':`<details class="ontology-change-editor"><summary>本体变更草案</summary><div class="change-fields"><label>操作<select class="change-operation"><option value="add">新增定义</option><option value="update">调整现有定义</option></select></label><label>完整 IRI<input class="change-uri" value="${esc(base+proposed)}"></label><label>显示名称<input class="change-label" value="${esc(proposed)}"></label><label>中文名称<input class="change-label-zh" maxlength="200"></label><label>定义说明<input class="change-description" placeholder="该术语表达什么"></label>${kind==='entity'?`<label>父类<select class="change-parent"><option value="">不指定</option>${classOptions}</select></label>`:`<label>定义域<select class="change-domain"><option value="">不指定</option>${optionsFor(domainType)}</select></label><label>值域<select class="change-range"><option value="">不指定</option>${kind==='attribute'?'<option value="http://www.w3.org/2001/XMLSchema#string">字符串</option><option value="http://www.w3.org/2001/XMLSchema#integer">整数</option><option value="http://www.w3.org/2001/XMLSchema#decimal">小数</option><option value="http://www.w3.org/2001/XMLSchema#boolean">布尔值</option>':optionsFor(rangeType)}</select></label>`}<label class="change-rationale">变更理由<input maxlength="2000" placeholder="为什么现有本体无法表达这条知识"></label><button data-submit-proposal>提交草案</button></div></details>`;
+        const existingOptions=terms.map(t=>`<option value="${esc(t.id)}" ${t.id===r.proposed_type||t.id===r.ontology_change?.target_type?'selected':''}>${esc(ontoName(t))} · ${esc(t.name)}</option>`).join('');
+        const changeEditor=kind==='validation'?'':`<details class="ontology-change-editor"><summary>本体变更草案</summary><div class="change-fields"><label>操作<select class="change-operation"><option value="add">新增定义</option><option value="update">调整现有定义</option></select></label><label class="change-existing-label" hidden>要调整的现有术语<select class="change-existing"><option value="">请选择现有术语</option>${existingOptions}</select></label><label>技术标识 IRI<input class="change-uri-preview" value="保存时由后端根据名称生成" readonly></label><label>显示名称<input class="change-label" value="${esc(proposed)}"></label><label>中文名称<input class="change-label-zh" maxlength="200"></label><label>定义说明<input class="change-description" placeholder="该术语表达什么"></label>${kind==='entity'?`<label>父类<select class="change-parent"><option value="">不指定</option>${classOptions}</select></label>`:`<label>定义域<select class="change-domain"><option value="">不指定</option>${optionsFor(domainType)}</select></label><label>值域<select class="change-range"><option value="">不指定</option>${kind==='attribute'?'<option value="http://www.w3.org/2001/XMLSchema#string">字符串</option><option value="http://www.w3.org/2001/XMLSchema#integer">整数</option><option value="http://www.w3.org/2001/XMLSchema#decimal">小数</option><option value="http://www.w3.org/2001/XMLSchema#boolean">布尔值</option>':optionsFor(rangeType)}</select></label>`}<label class="change-rationale">变更理由<input maxlength="2000" placeholder="为什么现有本体无法表达这条知识"></label><button data-submit-proposal>提交草案</button></div></details>`;
         return `<article class="review-item ${kind==='validation'?'validation-review':''}" data-review="${i}"><small>${labels[kind]}</small><h3>${heading}</h3><p>${esc(r.document_title)} · ${esc(r.reason)}</p>${validationDetails}${issues?`<p class="constraint-conflict">${esc(issues)}</p>`:''}${changeState}<small>抽取本体 ${esc(r.ontology_id)} · 原文字符 ${r.start_char}–${r.end_char}</small>${r.blocked?'<p class="error">关联实体尚未入图或已删除，请先审核实体；拒绝实体不会自动拒绝这些依赖候选。</p>':''}<details><summary>查看原文证据</summary><pre>${esc(r.attribute_evidence||r.evidence)}</pre></details>${kind==='attribute'?`<details><summary>实体当前属性（v${esc(r.entity_version||'—')}）</summary><pre>${esc(JSON.stringify(r.current_properties||{},null,2))}</pre></details>`:''}${mapping}<label>审核理由（必填）<input class="review-note" maxlength="2000" placeholder="填写确认例外、整改或知识审核理由"></label><div class="review-actions">${actions}</div>${changeEditor}</article>`;
       }).join('')+(done.length?`<details><summary>查看已审核记录</summary>${done.map(r=>`<p>${esc(labels[r.kind||'relation'])} · ${esc(r.document_title)} · ${esc(r.path_label||safeLabel(r.proposed_type)||safeLabel(r.predicate)||'')} · ${r.kind==='validation'?(r.resolution==='accepted_exception'?'已确认例外':'需整改'):(r.status==='approved'?'已批准':'已拒绝')} · ${esc(r.target_type||'')} · ${esc(r.note)} · ${esc(r.reviewed_at)}</p>`).join('')}</details>`:'');
       host.querySelectorAll('[data-review]').forEach(article=>{
         const r=pending[Number(article.dataset.review)];
+        const operation=article.querySelector('.change-operation'),existingLabel=article.querySelector('.change-existing-label');
+        if(operation&&existingLabel){
+          const existing=article.querySelector('.change-existing'),preview=article.querySelector('.change-uri-preview');
+          const syncChangeTarget=()=>{const updating=operation.value==='update';existingLabel.hidden=!updating;preview.value=updating?(existing.value||'请选择现有术语'):'保存时由后端根据名称生成';};
+          operation.onchange=syncChangeTarget;existing.onchange=syncChangeTarget;syncChangeTarget();
+        }
         if(r.source_changed){
           article.querySelector('h3').insertAdjacentHTML('afterend','<p class="error">原文已变更。下方保留抽取时片段，不能直接批准，请重新提取。</p>');
           article.querySelector('[data-action="approve"]').disabled=true;
@@ -93,12 +100,13 @@
       host.querySelectorAll('[data-submit-proposal]').forEach(button=>button.onclick=async()=>{
         const article=button.closest('[data-review]'),r=pending[Number(article.dataset.review)],editor=button.closest('.ontology-change-editor');
         const kind={entity:'class',relation:'relation',attribute:'attribute'}[r.kind||'relation'];
-        const body={document_id:r.document_id,candidate_id:r.id,operation:editor.querySelector('.change-operation').value,
-          kind,uri:editor.querySelector('.change-uri').value.trim(),label:editor.querySelector('.change-label').value.trim(),label_zh:editor.querySelector('.change-label-zh').value.trim(),description:editor.querySelector('.change-description').value.trim(),
+        const operation=editor.querySelector('.change-operation').value;
+        const body={document_id:r.document_id,candidate_id:r.id,operation,
+          kind,uri:operation==='update'?editor.querySelector('.change-existing').value:'',label:editor.querySelector('.change-label').value.trim(),label_zh:editor.querySelector('.change-label-zh').value.trim(),description:editor.querySelector('.change-description').value.trim(),
           rationale:editor.querySelector('.change-rationale input').value.trim(),expected_ontology_id:ontology.id,
           expected_document_version:r.document_version,parent:editor.querySelector('.change-parent')?.value||'',
           domain:editor.querySelector('.change-domain')?.value||'',range:editor.querySelector('.change-range')?.value||''};
-        if(!body.uri||!body.label||!body.rationale){status('本体 IRI、显示名称和变更理由均为必填',true);return;}
+        if((operation==='update'&&!body.uri)||!body.label||!body.rationale){status(operation==='update'?'请选择要调整的现有术语，并填写显示名称和变更理由':'请填写显示名称和变更理由',true);return;}
         button.disabled=true;
         try{await api('/api/projects/'+encodeURIComponent(p)+'/ontology-change-proposals',body);status('本体变更草案已提交，需单独批准后才会生成新本体版本。');await reviews();}
         catch(error){status(error.message,true);button.disabled=false;}

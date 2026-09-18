@@ -1,4 +1,4 @@
-"""Load local configuration without logging credentials or overwriting shell values."""
+"""加载本地配置，不记录凭据，也不覆盖 shell 环境变量。"""
 import os
 from pathlib import Path
 
@@ -9,8 +9,8 @@ def load_environment(root=None):
     local = root / '.env'
     reference = root / '.env.example'
     loaded = []
-    # Compatibility for the user's existing Neo4j settings in .env.example.
-    # Only Neo4j keys are accepted there, not example model/provider values.
+    # 兼容用户 .env.example 中已有的 Neo4j 配置。
+    # 该文件只接受 Neo4j 相关键，不接受示例模型/提供商值。
     for path, prefix in ((local, 'KG_'), (reference, 'KG_NEO4J_')):
         if not path.is_file():
             continue

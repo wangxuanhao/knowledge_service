@@ -1,4 +1,4 @@
-"""Versioned entity governance: Semantica advice, transactional service writes."""
+"""版本化实体治理：Semantica 建议、事务化服务写入。"""
 import json
 from uuid import uuid4
 
@@ -22,7 +22,7 @@ class Governance:
     def alias(self,p,entity_id,alias,expected_version):
         alias = alias.strip()
         if not alias or len(alias)>500:
-            raise ValueError('Alias must contain 1..500 characters')
+            raise ValueError('别名必须包含 1..500 个字符')
         with self.service.lock:
             rows=self._rows(p)
             row=rows.get(entity_id)
@@ -32,16 +32,18 @@ class Governance:
                 if other['id']!=entity_id and other['kind']=='entity' and not other.get('metadata',{}).get('_deleted'):
                     names=[other['text'],*other.get('metadata',{}).get('aliases',[])]
                     if alias.casefold() in [x.casefold() for x in names if isinstance(x,str)]:
-                        raise ValueError('Alias already belongs to another entity; resolve or merge explicitly')
+                        raise ValueError('该别名已属于另一个实体；请显式解析或合并')
             updated=writable(row)
             updated['metadata']={**row.get('metadata',{}),'aliases':list(dict.fromkeys([*row.get('metadata',{}).get('aliases',[]),alias]))}
             return public(self.service.write(p,[updated],expected_versions={entity_id:expected_version})[0])
 
     def resolve(self,p,text,scope=None,threshold=0.7):
         if not isinstance(text,str) or not text.strip() or not 0<=threshold<=1:
-            raise ValueError('Text and threshold 0..1 required')
+            raise ValueError('需要文本且阈值在 0..1 之间')
         from semantica.deduplication import DuplicateDetector
-        rows=[r for r in self.service.scoped(p,scope or {}) if r['kind']=='entity']
+        # 解析按已存向量排序，因此本次读取必须携带向量；
+        # KnowledgeService.scoped 默认已不再包含向量。
+        rows=[r for r in self.service.scoped(p,{**(scope or {}),'_include_embeddings':True}) if r['kind']=='entity']
         exact=[]
         for row in rows:
             names=[row['text'],*row.get('metadata',{}).get('aliases',[])]
@@ -54,8 +56,7 @@ class Governance:
             return {'status':'exact_duplicates','canonical':None,
                 'candidates':[{**public(row),'score':1.0,'reasons':['exact_name_or_alias']} for row in exact[:12]],
                 'backend':'semantica+aliases'}
-        # Detector is run against lexical candidates only, avoiding quadratic
-        # comparisons between every existing pair and any external embedding.
+        # 检测器仅对词法候选运行，避免对每个已有配对与外部向量做平方级比较。
         probe={'id':'__probe__','name':text,'text':text}
         detector=DuplicateDetector(similarity_threshold=threshold,confidence_threshold=0,use_clustering=False)
         candidates=[]
@@ -64,14 +65,15 @@ class Governance:
             matches=detector.detect_duplicates([probe,existing])
             if matches:
                 candidates.append({**public(row),'score':matches[0].similarity_score,'reasons':matches[0].reasons})
-        # Supplement semantic candidates with the project's actual embedding.
+        # 用项目实际向量补充语义候选。
         from .retrieval import rank_candidates
         hits=rank_candidates(rows,text,min(12,len(rows)),self.service.encoder) if rows else []
         seen={r['id'] for r in candidates}
         candidates += [{**r,'reasons':['local_embedding']} for r in hits if r['score']>=threshold and r['id'] not in seen]
         return {'status':'candidates','canonical':None,'candidates':sorted(candidates,key=lambda r:r['score'],reverse=True)[:12],'backend':'semantica+project_embedding'}
 
-    def _commit(self,p,before,updates,operation,backend='service'):
+    def _commit(self,p,before,updates,operation,backend='service',redirects=None,reversal_of=None,
+                resolution_decisions=None):
         op_id=str(uuid4())
         expected={r['id']:r['version'] for r in before}
         for row in updates:
@@ -80,31 +82,37 @@ class Governance:
                    metadata={'_audit':True,'operation':operation,'operation_id':op_id,'backend':backend,'created_at':utc_now(),
                              'before':[public(r) for r in before]})
         expected[audit['id']]=0
-        saved=self.service.write(p,[*updates,audit],expected_versions=expected)
+        formal_operation={'merge':'merge_rewrite','undo':'merge_reversal',
+                          'delete':'retract_source'}.get(operation,'manual_write')
+        ledger={'id':op_id,'operation':formal_operation,'redirects':redirects or {},
+                'before_state':[public(r) for r in before],
+                'expected_versions':expected,'reversal_of':reversal_of}
+        saved=self.service.write(p,[*updates,audit],expected_versions=expected,
+            operation=formal_operation,ledger=ledger,resolution_decisions=resolution_decisions)
         return {'operation_id':op_id,'backend':backend,'records':[public(r) for r in saved if r['id']!=audit['id']]}
 
-    def merge(self,p,keep_id,drop_id,expected_versions):
+    def merge(self,p,keep_id,drop_id,expected_versions,resolution_decision=None):
         if keep_id==drop_id:
-            raise ValueError('Select two distinct entities')
+            raise ValueError('请选择两个不同的实体')
         with self.service.lock:
             rows=self._rows(p)
             keep,drop=rows.get(keep_id),rows.get(drop_id)
             if not keep or not drop:
                 raise KeyError(keep_id if not keep else drop_id)
             if any(r['kind']!='entity' or r.get('metadata',{}).get('_deleted') for r in (keep,drop)):
-                raise ValueError('Merge requires two live entities')
+                raise ValueError('合并需要两个有效实体')
             if expected_versions!={keep_id:keep['version'],drop_id:drop['version']}:
-                raise ValueError('Version conflict: refresh entity versions')
+                raise ValueError('版本冲突：请刷新实体版本')
             if keep['type']!=drop['type']:
-                raise ValueError('Merge requires the same stable type IRI')
+                raise ValueError('合并要求相同的稳定类型 IRI')
             if any(keep.get(k)!=drop.get(k) for k in ('valid_from','valid_until')):
-                raise ValueError('Merge requires equal business intervals; correct intervals explicitly')
+                raise ValueError('合并要求相同的业务时间区间；请显式修正区间')
             from semantica.deduplication import EntityMerger
             operation=EntityMerger(preserve_provenance=True).merge_entity_group([
                 {'id':r['id'],'name':r['text'],'type':r['type'],'properties':r.get('properties',{})} for r in (keep,drop)],strategy='keep_first')
             updated=writable(keep)
-            # Preserve conflicting metadata/properties in original immutable
-            # versions and merged_sources; selected canonical values win.
+            # 将冲突的元数据/属性保留在原始不可变版本和 merged_sources 中；
+            # 选定的规范值优先。
             updated['properties']={**drop.get('properties',{}),**keep.get('properties',{})}
             aliases=[*keep.get('metadata',{}).get('aliases',[]),drop['text'],*drop.get('metadata',{}).get('aliases',[])]
             ontology_versions=list(dict.fromkeys(value for value in [
@@ -124,17 +132,19 @@ class Governance:
                     for key in ('subject_id','object_id'):
                         if edge[key]==drop_id: edge[key]=keep_id
                     updates.append(edge)
-            return self._commit(p,before,updates,'merge','semantica')
+            decisions=[resolution_decision] if resolution_decision else None
+            return self._commit(p,before,updates,'merge','semantica',redirects={drop_id:keep_id},
+                resolution_decisions=decisions)
 
     def delete(self,p,record_id,expected_version):
         with self.service.lock:
             rows=self._rows(p)
             row=rows.get(record_id)
             if not row: raise KeyError(record_id)
-            if row['version']!=expected_version: raise ValueError('Version conflict: refresh record')
+            if row['version']!=expected_version: raise ValueError('版本冲突：请刷新记录')
             affected=[row]+[r for r in rows.values() if r['id']!=record_id and
                 (r.get('source_id')==record_id or r['kind']=='relation' and record_id in (r.get('subject_id'),r.get('object_id')))]
-            # If deleting a document also deletes sourced entities, remove their incident edges.
+            # 若删除文档同时删除其来源实体，则一并移除相关关系边。
             deleted_ids={r['id'] for r in affected}
             affected += [r for r in rows.values() if r['id'] not in deleted_ids and r['kind']=='relation' and
                          deleted_ids.intersection((r.get('subject_id'),r.get('object_id')))]
@@ -153,8 +163,8 @@ class Governance:
             before=audit['metadata']['before']
             current=[rows[r['id']] for r in before]
             if any(r.get('metadata',{}).get('_operation_id')!=operation_id for r in current):
-                raise ValueError('Version conflict: affected records changed; undo would overwrite newer edits')
-            result=self._commit(p,current,[writable(r) for r in before],'undo')
+                raise ValueError('版本冲突：受影响记录已变更；撤销会覆盖更新的编辑')
+            result=self._commit(p,current,[writable(r) for r in before],'undo',reversal_of=operation_id)
             return {**result,'restored':len(before)}
 
     def restore(self,p,record_id,version,expected_version):

@@ -22,6 +22,9 @@
     const keepStep=step('02','选择保留的实体','合并完成后，这个实体继续存在并作为规范实体',['keep-id','alias-name','add-alias']);
     const mergeStep=step('03','选择另一个重复实体','第二个实体会停用，其来源和关系转到保留实体',['drop-id','merge-confirm','merge-entities','load-operations'],true);
     controls.replaceChildren(searchStep,keepStep,mergeStep);
+    // 查重结果显示在「01 按名称查找」步骤下方，与三步流程同区，不再脱离标题
+    const resultPanel=governance.querySelector('#resolve-result');
+    if(resultPanel)searchStep.append(resultPanel);
     const keepInput=$('keep-id'),dropInput=$('drop-id'),mergeButton=$('merge-entities'),confirm=$('merge-confirm'),aliasInput=$('alias-name'),aliasButton=$('add-alias');
     keepInput.closest('label').classList.add('governance-technical-id');dropInput.closest('label').classList.add('governance-technical-id');
     const selectedCard=(role,id)=>{const card=document.createElement('div');card.className='governance-selection is-empty';card.innerHTML=`<div><small>${role}</small><strong id="${id}-name">尚未选择</strong><span id="${id}-description">请先从查重结果中选择</span></div><button type="button" id="clear-${id}" class="secondary" disabled>清除</button>`;return card;};

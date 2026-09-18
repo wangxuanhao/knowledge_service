@@ -1,4 +1,4 @@
-"""Explicit embedding backends; demonstration hashing is labelled as non-semantic."""
+"""显式 embedding 后端；演示哈希被标记为非语义。"""
 import hashlib
 import os
 import threading
@@ -38,9 +38,9 @@ class LocalEncoder:
                     from sentence_transformers import SentenceTransformer
                     self._model = SentenceTransformer(self.path, local_files_only=True)
                 except Exception as exc:
-                    raise RuntimeError(f'Local embedding model unavailable: {exc}') from exc
+                    raise RuntimeError(f'本地 embedding 模型不可用：{exc}') from exc
             batch_size=int(os.environ.get('KG_EMBEDDING_BATCH_SIZE','4'))
-            if not 1<=batch_size<=64: raise ValueError('KG_EMBEDDING_BATCH_SIZE must be 1..64')
+            if not 1<=batch_size<=64: raise ValueError('KG_EMBEDDING_BATCH_SIZE 必须在 1..64 之间')
             return self._model.encode(texts, normalize_embeddings=True,batch_size=batch_size).tolist()
 
 
@@ -55,7 +55,7 @@ class RemoteEncoder:
 
     def encode(self, texts):
         if not all([self.url, self.model, self.key]):
-            raise RuntimeError('Configure KG_EMBEDDING_BASE_URL, KG_EMBEDDING_MODEL, KG_EMBEDDING_API_KEY')
+            raise RuntimeError('请配置 KG_EMBEDDING_BASE_URL、KG_EMBEDDING_MODEL、KG_EMBEDDING_API_KEY')
         try:
             with httpx.Client(timeout=120) as client:
                 response = client.post(self.url + '/embeddings', headers={'Authorization': f'Bearer {self.key}'},
@@ -63,10 +63,10 @@ class RemoteEncoder:
                 response.raise_for_status()
                 data = sorted(response.json()['data'], key=lambda row: row['index'])
                 if len(data) != len(texts):
-                    raise RuntimeError('Embedding provider returned wrong number of vectors')
+                    raise RuntimeError('embedding 提供商返回的向量数量不正确')
                 return [row['embedding'] for row in data]
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
-            raise RuntimeError(f'Embedding provider unavailable or invalid response ({type(exc).__name__})') from exc
+            raise RuntimeError(f'embedding 提供商不可用或返回无效响应（{type(exc).__name__}）') from exc
 
 
 def configured_encoder():
@@ -78,4 +78,4 @@ def configured_encoder():
         return RemoteEncoder()
     if backend == 'demo':
         return HashingEncoder()
-    raise ValueError('KG_EMBEDDING_BACKEND must be local, openai or demo')
+    raise ValueError('KG_EMBEDDING_BACKEND 必须是 local、openai 或 demo')

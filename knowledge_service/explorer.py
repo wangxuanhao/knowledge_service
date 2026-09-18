@@ -1,6 +1,8 @@
-"""Scoped graph exploration, project snapshots and deterministic evaluation."""
+"""受限范围图探索、项目快照与确定性评估。"""
 from collections import Counter,defaultdict,deque
+from time import perf_counter
 from uuid import uuid4
+from .diagnostics import timed
 from .service import public
 from .governance import writable
 from .time import utc_now
@@ -12,20 +14,44 @@ class Explorer:
         self.repo=service.repository
 
     def graph(self,p,scope,node_id=None,hops=1):
-        rows=self.service.scoped(p,scope)
-        nodes={r['id']:r for r in rows if r['kind']=='entity'}
-        edges=[r for r in rows if r['kind']=='relation' and r['subject_id'] in nodes and r['object_id'] in nodes]
-        if node_id:
-            if node_id not in nodes: raise KeyError(node_id)
-            selected={node_id};frontier={node_id}
-            for _ in range(max(0,min(5,hops))):
-                following={r[k] for r in edges if r['subject_id'] in frontier or r['object_id'] in frontier for k in ('subject_id','object_id')}
-                frontier=following-selected;selected|=frontier
-            nodes={i:r for i,r in nodes.items() if i in selected}
-            edges=[r for r in edges if r['subject_id'] in selected and r['object_id'] in selected]
-        return {'nodes':[public(r) for r in nodes.values()],'edges':[public(r) for r in edges]}
+        """返回以 ``node_id`` 为中心的局部子图（省略时返回整个范围）。
+
+        PERF：种子点只在读完整范围之后才收窄。带种子的请求只返回几 KB，
+        因此计时行显示扫描占主导、构图开销可忽略——不要把小的响应当作廉价请求。
+        下面的跳数循环每跳会重新扫描每条边一次，所以 `hops=3` 在扫描之外还要
+        多付出三次全量边的遍历。
+        """
+        started=perf_counter()
+        with timed('图谱探索', seeded=bool(node_id), hops=hops) as record:
+            # 图只包含实体和关系（一条边需要两端都是实体），下面的过滤已经丢弃其他一切，
+            # 所以把读取范围收窄到这两类等价——只是让 Repository.query 跳过占大部分字节的
+            # chunk/document 载荷。
+            rows=self.service.scoped(p,{**scope,'kinds':['entity','relation']})
+            record['rows']=len(rows)
+            nodes={r['id']:r for r in rows if r['kind']=='entity'}
+            edges=[r for r in rows if r['kind']=='relation' and r['subject_id'] in nodes and r['object_id'] in nodes]
+            record['graph_nodes']=len(nodes)
+            record['graph_edges']=len(edges)
+            if node_id:
+                if node_id not in nodes: raise KeyError(node_id)
+                selected={node_id};frontier={node_id}
+                for _ in range(max(0,min(5,hops))):
+                    following={r[k] for r in edges if r['subject_id'] in frontier or r['object_id'] in frontier for k in ('subject_id','object_id')}
+                    frontier=following-selected;selected|=frontier
+                nodes={i:r for i,r in nodes.items() if i in selected}
+                edges=[r for r in edges if r['subject_id'] in selected and r['object_id'] in selected]
+                record['selected']=len(selected)
+                record['returned_nodes']=len(nodes)
+                record['returned_edges']=len(edges)
+            # 上报该字段以便浏览器在图谱摘要中区分服务端读取与客户端布局；
+            # 上面的日志行仍是权威数字（它还包括序列化）。调用方过去从这里读
+            # `timing_ms.total`，而 /subgraph 从不返回它，所以 renderGraph 中的该分支是死代码。
+            return {'nodes':[public(r) for r in nodes.values()],'edges':[public(r) for r in edges],
+                    'timing_ms':{'total':round((perf_counter()-started)*1000,1)}}
 
     def dashboard(self,p,scope):
+        # PERF：该端点的全部成本来自下面共享的 `service.scoped` 读取（见其打印的计时行）；
+        # 之后的计数开销很小。
         rows=self.service.scoped(p,scope)
 
         # 计算每个文档的派生知识数量
@@ -53,6 +79,8 @@ class Explorer:
         }
 
     def sources(self,p,scope):
+        # PERF：与 /dashboard 相同的共享扫描。响应很大是因为每个文档携带完整文本，
+        # 但延迟来自扫描本身，而不是载荷。
         rows=self.service.scoped(p,scope)
         return {'documents':[{**public(r),'derived_count':sum(x.get('source_id')==r['id'] for x in rows)}
                              for r in rows if r['kind']=='document']}
@@ -92,7 +120,7 @@ class Explorer:
             for i,row in current.items():
                 if i not in target and not row.get('metadata',{}).get('_audit'):
                     target[i]={**writable(row),'metadata':{**row.get('metadata',{}),'_deleted':True}}
-            # Save recovery point first; restores create new versions, never erase history.
+            # 先保存恢复点；恢复会创建新版本，绝不抹除历史。
             backup=self.snapshot(p,'恢复前自动备份 · '+snapshot['name'],kind='auto')
             for row in target.values():row['metadata']={**row.get('metadata',{}),'restored_from_snapshot':snapshot_id}
             saved=self.service.write(p,list(target.values()),expected_versions={i:current[i]['version'] if i in current else 0 for i in target})

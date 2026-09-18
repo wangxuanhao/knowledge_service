@@ -64,7 +64,7 @@ def test_extraction_uses_ontology_ids_and_linked_stable_ids(monkeypatch):
     def failure(*args, **kwargs):
         raise RuntimeError('provider failed')
     monkeypatch.setattr(methods, 'extract_entities_llm', failure)
-    with pytest.raises(RuntimeError, match='extraction failed'):
+    with pytest.raises(RuntimeError, match='抽取失败'):
         mod.SemanticaExtractor().extract('Alice works at Acme', ont)
 
 

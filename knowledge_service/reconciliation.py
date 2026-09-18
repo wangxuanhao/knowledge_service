@@ -1,4 +1,4 @@
-"""Opt-in incremental entity fusion without discarding source occurrences."""
+"""可选的增量实体融合，不丢弃来源出现记录。"""
 from .governance import writable
 from .service import public
 from .diagnostics import event
@@ -15,17 +15,29 @@ def reconcile(service,p,derived,request,receipt):
     merger=EntityMerger(preserve_provenance=True)
     for row in derived:
         if row['kind']!='entity':continue
-        # A stable type IRI is the cross-version contract. Ontology version IDs
-        # describe extraction provenance and must not split the same entity when
-        # the type itself survived unchanged across ontology releases.
+        # 稳定的类型 IRI 是跨版本契约。本体版本 ID 描述抽取来源，
+        # 当类型本身在各本体版本间保持不变时，不得据此拆分同一实体。
         eligible=[r for r in pool.values() if all(r.get(k)==row.get(k) for k in ('type','valid_from','valid_until'))]
         target=next((r for r in eligible if row['text'].casefold() in
                     [n.casefold() for n in [r['text'],*r.get('metadata',{}).get('aliases',[])] if isinstance(n,str)]),None)
-        if target is None and request.get('auto_merge') and eligible:
-            from .retrieval import rank_candidates
-            persisted=[r for r in eligible if r.get('embedding')]
-            hits=rank_candidates(persisted,row['text'],1,service.encoder)
-            if hits and hits[0]['score']>=request.get('merge_threshold',.88):target=pool[hits[0]['id']]
+        if target is None and eligible:
+            from .entity_resolution import EntityResolver
+            probe={**row,'_auto_merge':bool(request.get('auto_merge'))}
+            outcome=EntityResolver(service.repository,service.encoder).resolve(
+                p,probe,review_threshold=request.get('review_threshold',.72),
+                merge_threshold=request.get('merge_threshold',.88))
+            if outcome.status=='aligned' and outcome.canonical_id in pool:
+                target=pool[outcome.canonical_id]
+            elif outcome.status=='review' and outcome.candidate_id in pool:
+                import hashlib,json
+                identity=json.dumps([receipt['version_id'],row['id'],outcome.candidate_id],
+                    ensure_ascii=False,separators=(',',':')).encode('utf-8')
+                request.setdefault('_resolution_reviews',[]).append({
+                    'id':'resolution_'+hashlib.sha256(identity).hexdigest(),
+                    'source_entity_id':row['id'],'candidate_entity_id':outcome.candidate_id,
+                    'score':outcome.score,'payload':{'reason':outcome.reason,
+                        'document_id':receipt['id'],'document_version_id':receipt['version_id'],
+                        'mention':row['text'],'candidate':pool[outcome.candidate_id]['text']}})
         if target is None:
             pool[row['id']]=row
             continue
@@ -34,8 +46,8 @@ def reconcile(service,p,derived,request,receipt):
             advisory=merger.merge_entity_group([{'id':r['id'],'name':r['text'],'type':r['type'],'properties':r.get('properties',{})} for r in (target,row)],strategy='keep_first')
             advice_metadata=getattr(advisory,'metadata',{}) or {}
         except Exception as exc:
-            # Exact alias matching above is deterministic; Semantica advice is
-            # supplementary and must not invalidate an otherwise safe merge.
+            # 上面的精确别名匹配是确定性的；Semantica 建议只是补充，
+            # 不得使本来安全的合并失效。
             event(f'实体融合建议不可用 · 已按精确同名规则继续 · {type(exc).__name__}')
         target_id=target['id'];redirects[row['id']]=target_id
         occurrence={**public(row),'source_id':receipt['id'],'source_version_id':receipt['version_id']}

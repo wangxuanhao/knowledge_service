@@ -17,6 +17,14 @@ def project(client):
     return result.json()['id']
 
 
+def test_packaged_echarts_asset_is_served(client):
+    response = client.get('/vendor/echarts.min.js')
+
+    assert response.status_code == 200, response.text
+    assert response.headers['content-type'].startswith('application/javascript')
+    assert b'echarts' in response.content.lower()
+
+
 def test_filtered_ingestion_search_and_restart(client):
     p = project(client)
     for city in ['北京','上海']:
@@ -93,7 +101,7 @@ def test_relationships_cannot_leak_filtered_or_inactive_endpoints(client):
     graph = client.post(path+'/graph',json=scope).json()
     assert [n['id'] for n in graph['nodes']] == ['b']
     assert graph['edges'] == []
-    result = client.post(path+'/search',json={**scope,'query':'规则'}).json()
+    result = client.post(path+'/search',json={**scope,'query':'商户'}).json()
     assert {r['id'] for r in result['hits']} == {'b'}
 
 

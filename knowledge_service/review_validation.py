@@ -1,4 +1,4 @@
-"""Strict checks for reviewed attribute values without changing legacy imports."""
+"""对审核的属性值进行严格校验，且不改变旧数据导入行为。"""
 import math
 from rdflib import Literal, RDFS
 from rdflib.namespace import XSD

@@ -6,7 +6,11 @@
   document.body.appendChild(dialog);
   const panel=$('revision').closest('.panel');
   panel.id='record-edit-view';
-  dialog.appendChild(panel);
+  const structured=document.createElement('section');structured.id='record-structured-edit';
+  dialog.appendChild(structured);
+  const advancedEdit=document.createElement('details');advancedEdit.id='record-advanced-edit';
+  advancedEdit.innerHTML='<summary>高级：编辑完整记录 JSON</summary>';
+  advancedEdit.appendChild(panel);dialog.appendChild(advancedEdit);
   // The raw response remains available, but is no longer the only history UI.
   const raw=document.createElement('details');
   raw.innerHTML='<summary>完整历史 JSON</summary>';
@@ -15,30 +19,80 @@
   $('revision').setAttribute('aria-label','记录内容 JSON');
   const message=document.createElement('p');message.id='record-dialog-message';message.setAttribute('role','status');
   dialog.querySelector('.record-dialog-heading').after(message);
-  let request=0;
+  let request=0,activeRow=null;
   function close(){request++;dialog.close();}
   $('close-record-dialog').onclick=close;
   dialog.addEventListener('cancel',()=>{request++;});
   function open(mode,title){
     $('record-dialog-title').textContent=title;
     $('record-dialog-message').textContent='';
-    panel.hidden=mode!=='edit';
+    structured.hidden=mode!=='edit';advancedEdit.hidden=mode!=='edit';advancedEdit.open=false;
     $('record-history-view').hidden=mode!=='history';
     raw.hidden=mode!=='history';raw.open=false;
     $('record-dialog-help').textContent=mode==='edit'
-      ?'修改内容后点击“保存新版本”才会写入。旧版本保留；预期版本用于防止覆盖别人的修改。'
+      ?'保存新版本：不改动原记录，系统创建版本+1 的新版本，旧版本保留可随时恢复。预期版本用于防止覆盖别人的修改（版本号不一致会拒绝保存）。'
       :'这里按系统记录时间展示历次版本。有效期是知识在业务上何时成立，与录入时间不同。查看历史不会修改数据。';
     if(!dialog.open)dialog.showModal();
     dialog.scrollTop=0;
   }
-  const populate=editRecord;
+  function populateRaw(row){
+    const fields=['id','kind','text','type','metadata','properties','source_id','subject_id','object_id','ontology_id','valid_from','valid_until'];
+    $('revision').value=JSON.stringify(Object.fromEntries(fields.filter(key=>row[key]!==undefined).map(key=>[key,row[key]])),null,2);
+    $('revision-id').value=row.id;$('revision-version').value=row.version;$('keep-id').value=row.id;
+  }
+  const option=(value,label,selected)=>`<option value="${esc(value)}"${value===selected?' selected':''}>${esc(label)}</option>`;
+  async function renderStructured(row){
+    const serial=request,p=current;structured.innerHTML='<p class="subtle">正在加载可选类型和实体…</p>';
+    try{
+      const [ontology,records]=await Promise.all([
+        api(endpoint('/ontology'),undefined,'GET'),
+        api(endpoint('/records/query?limit=1000'),{kinds:['entity']})
+      ]);
+      if(serial!==request||p!==current||activeRow?.id!==row.id)return;
+      const collection=row.kind==='entity'?ontology.summary.classes:ontology.summary.relations;
+      const labels=new Map(collection.map(item=>[item.id,item.label_zh||item.label||item.name]));
+      if(row.type&&!labels.has(row.type))labels.set(row.type,labelOf(row.type));
+      const entities=records.records||[];const entityLabels=new Map(entities.map(item=>[item.id,item.text]));
+      for(const id of [row.subject_id,row.object_id])if(id&&!entityLabels.has(id))entityLabels.set(id,id);
+      const typeOptions=[...labels].map(([id,label])=>option(id,label,row.type)).join('');
+      if(row.kind==='entity'){
+        structured.innerHTML=`<div class="record-structured-heading"><h3>维护具体实体</h3><p>这里修改的是图谱中的一个实体，不会修改本体类定义。</p></div><label>实体名称<input id="structured-record-text" value="${esc(row.text)}"></label><label>实体类型<select id="structured-record-type">${typeOptions}</select></label><div class="record-time-fields"><label>业务生效时间<input id="structured-valid-from" value="${esc(row.valid_from||'')}" placeholder="可留空"></label><label>业务失效时间<input id="structured-valid-until" value="${esc(row.valid_until||'')}" placeholder="可留空"></label></div><button id="save-structured-record">保存实体修改为新版本</button>`;
+      }else if(row.kind==='relation'){
+        const entityOptions=selected=>[...entityLabels].map(([id,label])=>option(id,label,selected)).join('');
+        structured.innerHTML=`<div class="record-structured-heading"><h3>维护实体关系</h3><p>可修改关系类型、起点实体或终点实体；这不会修改本体中的关系类型定义。</p></div><label>关系显示文本<input id="structured-record-text" value="${esc(row.text)}"></label><label>关系类型<select id="structured-record-type">${typeOptions}</select></label><div class="record-endpoints"><label>起点实体<select id="structured-subject">${entityOptions(row.subject_id)}</select></label><span>→</span><label>终点实体<select id="structured-object">${entityOptions(row.object_id)}</select></label></div><div class="record-time-fields"><label>业务生效时间<input id="structured-valid-from" value="${esc(row.valid_from||'')}" placeholder="可留空"></label><label>业务失效时间<input id="structured-valid-until" value="${esc(row.valid_until||'')}" placeholder="可留空"></label></div><button id="save-structured-record">保存关系修改为新版本</button>`;
+      }else{
+        const kindLabel=row.kind==='document'?'文档收据':'原文片段';
+        const reason=row.kind==='document'
+          ?'文档是知识抽取的原始来源，本身不参与图谱编辑。'
+          :'原文片段随文档解析自动生成，不支持直接编辑。';
+        const advice=row.kind==='document'
+          ?'如需修正内容，请通过「知识写入」重新上传并解析；不要在这里手改收据。'
+          :'如需调整，请修改源文档后重新解析，或用下方高级 JSON 保存修正版本。';
+        structured.innerHTML=`<div class="record-structured-heading"><h3>${kindLabel}</h3><p>${reason}</p><p>${advice}</p><p class="subtle">下方「高级：编辑完整记录 JSON」保存后会创建版本+1 的新版本，旧版本保留可恢复。</p></div>`;
+        return;
+      }
+      $('save-structured-record').onclick=async()=>{
+        const button=$('save-structured-record');button.disabled=true;
+        try{
+          const fields=['id','kind','metadata','properties','source_id','subject_id','object_id','ontology_id','valid_from','valid_until'];
+          const record=Object.fromEntries(fields.filter(key=>activeRow[key]!==undefined).map(key=>[key,activeRow[key]]));
+          record.text=$('structured-record-text').value.trim();record.type=$('structured-record-type').value;
+          record.valid_from=$('structured-valid-from').value.trim()||null;record.valid_until=$('structured-valid-until').value.trim()||null;
+          if(activeRow.kind==='relation'){record.subject_id=$('structured-subject').value;record.object_id=$('structured-object').value;}
+          const saved=await api(endpoint('/records/'+encodeURIComponent(activeRow.id)),{record,expected_version:activeRow.version},'PUT');
+          activeRow=saved;populateRaw(saved);wb.records.set(saved.id,saved);$('record-dialog-message').classList.remove('error');$('record-dialog-message').textContent=`已保存版本 ${saved.version}；旧版本仍可恢复。`;status(`已保存 ${saved.kind==='relation'?'关系':'实体'}的新版本 ${saved.version}。`);
+          $('draw-graph').click();button.disabled=false;
+        }catch(error){$('record-dialog-message').textContent=error.message;$('record-dialog-message').classList.add('error');button.disabled=false;}
+      };
+    }catch(error){if(serial===request)structured.innerHTML=`<p class="error">结构化编辑加载失败：${esc(error.message)}。仍可使用下方高级 JSON 编辑器。</p>`;}
+  }
   editRecord=row=>{
     request++;
     if(!row){status('记录已刷新，请重新查询后选择',true);return;}
-    populate(row);
+    activeRow=row;populateRaw(row);
     open('edit','编辑记录 · '+(row.text||row.id).slice(0,70));
     $('delete-confirm').checked=false;
-    $('revision').focus({preventScroll:true});
+    renderStructured(row);
   };
   historyFor=async row=>{
     const serial=++request,p=current;

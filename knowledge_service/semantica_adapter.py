@@ -1,12 +1,13 @@
-"""Semantica extraction and valid-time snapshots.
+"""Semantica 抽取与有效时间快照。
 
-SQLite resolves system-time/project/filter scope before calling this adapter.
-Semantica's graph does not replace the authoritative bitemporal repository.
+SQLite 在调用本适配器前解析系统时间/项目/过滤范围。
+Semantica 的图并不取代权威的双时态仓库。
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 from typing import TYPE_CHECKING
 
@@ -14,6 +15,8 @@ from pydantic import BaseModel,Field
 
 from .time import normalize_time
 from .diagnostics import event, stage
+
+LOG = logging.getLogger('knowledge_service.semantica_adapter')
 
 if TYPE_CHECKING:
     from .ontology import Ontology
@@ -23,7 +26,7 @@ def snapshot(records: list[dict], valid_at: str) -> dict:
     try:
         from semantica.context.context_graph import ContextGraph
     except ImportError as exc:
-        raise RuntimeError(f'Semantica snapshot dependency missing: {exc.name}; install service Semantica dependencies') from exc
+        raise RuntimeError(f'Semantica 快照依赖缺失：{exc.name}；请安装服务的 Semantica 依赖') from exc
     valid_at = normalize_time(valid_at, allow_none=False)
     graph = ContextGraph(advanced_analytics=False, extract_entities=False, extract_relationships=False)
     entities = {r['id']: r for r in records if r['kind'] == 'entity'}
@@ -37,8 +40,8 @@ def snapshot(records: list[dict], valid_at: str) -> dict:
                            id=record['id'], valid_from=record.get('valid_from'),
                            valid_until=record.get('valid_until'), record=record)
     state = graph.state_at(valid_at)
-    # Semantica 0.6.7 includes valid_until; the service contract excludes it.
-    # Preserve real state_at selection, then remove equality-boundary records.
+    # Semantica 0.6.7 会包含 valid_until；服务契约将其排除。
+    # 保留真实的 state_at 选择，然后移除落在相等边界上的记录。
     def inside_window(item):
         record = item['properties']['record']
         end = normalize_time(record.get('valid_until'))
@@ -57,7 +60,7 @@ def _stable_id(kind, *values):
 
 
 def _relation_evidence(text: str, subject: str, object_: str, radius: int = 120) -> str:
-    """Keep exact source evidence compact; never persist extraction instructions."""
+    """保留紧凑的精确源证据；绝不把抽取指令写入持久化数据。"""
     left=text.find(subject);right=text.find(object_)
     if left < 0 or right < 0:
         return text[:500]
@@ -83,10 +86,10 @@ class _GuidedRelations(BaseModel):
 
 
 def _extracted_validity(metadata):
-    """Promote model-extracted fact validity to top-level ISO fields when trustworthy.
+    """在可信时将模型抽取的事实有效期提升为顶层 ISO 字段。
 
-    Non-ISO phrases stay in metadata as valid_from_text/valid_until_text; an
-    inverted interval is dropped entirely so the repository never rejects a write.
+    非 ISO 表述作为 valid_from_text/valid_until_text 保留在 metadata 中；
+    反向区间会被整体丢弃，以免仓库拒绝写入。
     """
     if not metadata:
         return None, None
@@ -149,7 +152,7 @@ class _GuidedEntities(BaseModel):
 
 
 def _extract_entities_open(text,config):
-    """Open-vocabulary entity typing: the model names domain types instead of Semantica's fixed label list."""
+    """开放词表实体类型标注：由模型命名领域类型，而非使用 Semantica 的固定标签清单。"""
     from semantica.semantic_extract.providers import create_provider
     from semantica.semantic_extract.types import Entity
     prompt='''Extract named entities from SOURCE_DOCUMENT and return a JSON object with an entities array.
@@ -175,7 +178,7 @@ INPUT_JSON:\n'''+json.dumps({'source_document':text},ensure_ascii=False)
 
 
 def _extract_relations_open(text,entities,config):
-    """Discover source-language predicates without Semantica's generic English vocabulary."""
+    """发现源语言谓词，而不使用 Semantica 的通用英文词汇。"""
     from semantica.semantic_extract import methods
     from semantica.semantic_extract.providers import create_provider
     from semantica.semantic_extract.types import Relation
@@ -206,7 +209,7 @@ INPUT_JSON:\n'''+json.dumps(payload,ensure_ascii=False)
 
 
 def _extract_entities_guided(text,ontology_summary,entity_types,config):
-    """Give the model semantic class definitions while keeping source evidence isolated."""
+    """向模型提供语义类定义，同时保持源证据隔离。"""
     from semantica.semantic_extract.providers import create_provider
     from semantica.semantic_extract.types import Entity
     guidance=[]
@@ -240,7 +243,7 @@ INPUT_JSON:\n'''+json.dumps(payload,ensure_ascii=False)
 
 
 def _extract_relations_guided(text,entities,ontology_summary,relation_types,config):
-    """Use ontology guidance in the model prompt without passing it as source text."""
+    """在模型提示词中使用本体引导，而不把它当作源文本传入。"""
     from semantica.semantic_extract import methods
     from semantica.semantic_extract.providers import create_provider
     from semantica.semantic_extract.types import Entity,Relation
@@ -287,13 +290,13 @@ INPUT_JSON:\n'''+json.dumps(payload,ensure_ascii=False)
 
 class SemanticaExtractor:
     def discover(self, text: str, include_attributes: bool = False) -> list[dict]:
-        """Open-vocabulary Semantica extraction for projects without a schema."""
+        """为无模式的项目执行开放词表 Semantica 抽取。"""
         required = ['KG_LLM_API_KEY', 'KG_LLM_BASE_URL', 'KG_LLM_MODEL']
         missing = [key for key in required if not os.getenv(key, '').strip()]
         if missing:
-            raise RuntimeError('Semantica LLM requires ' + ', '.join(missing))
+            raise RuntimeError('Semantica LLM 需要环境变量：' + ', '.join(missing))
         if not text.strip():
-            raise ValueError('Extraction text must not be empty')
+            raise ValueError('抽取文本不能为空')
         try:
             from semantica.semantic_extract import methods
             config = dict(provider='openai', llm_model=os.environ['KG_LLM_MODEL'],
@@ -309,7 +312,7 @@ class SemanticaExtractor:
                     relations=_extract_relations_open(text,entities,config)
             event(f'开放关系发现返回 · {len(relations)} 条')
         except Exception as exc:
-            raise RuntimeError('Semantica open discovery failed; check model configuration and provider availability') from exc
+            raise RuntimeError('Semantica 开放发现失败；请检查模型配置和供应商可用性') from exc
         candidates=[]
         lookup={}
         by_text={}
@@ -362,11 +365,12 @@ class SemanticaExtractor:
         required = ['KG_LLM_API_KEY', 'KG_LLM_BASE_URL', 'KG_LLM_MODEL']
         missing = [key for key in required if not os.getenv(key, '').strip()]
         if missing:
-            raise RuntimeError('Semantica LLM requires ' + ', '.join(missing))
+            raise RuntimeError('Semantica LLM 需要环境变量：' + ', '.join(missing))
         if not text.strip():
-            raise ValueError('Extraction text must not be empty')
+            raise ValueError('抽取文本不能为空')
         if ontology is None:
-            raise ValueError('Extraction requires a project ontology')
+            raise ValueError('抽取需要项目本体')
+        LOG.info('Semantica 抽取开始：文本 %d 字符', len(text))
         summary = ontology.summary()
         try:
             event('加载 Semantica 抽取模块 · 开始')
@@ -374,11 +378,10 @@ class SemanticaExtractor:
             from semantica.semantic_extract.relation_extractor import RelationExtractor
             from semantica.semantic_extract import methods
         except ImportError as exc:
-            raise RuntimeError(f'Semantica extraction dependency missing: {exc.name}; install service Semantica dependencies') from exc
+            raise RuntimeError(f'Semantica 抽取依赖缺失：{exc.name}；请安装服务的 Semantica 依赖') from exc
 
-        # Upstream high-level methods silently switch to heuristic extraction on
-        # exceptions and empty results. Strict subclasses call its LLM methods
-        # directly so errors propagate and empty results remain empty.
+        # 上游高层方法在出现异常和空结果时会静默切换为启发式抽取。
+        # 严格子类直接调用其 LLM 方法，让错误得以传播、空结果保持为空。
         class StrictNER(NERExtractor):
             def extract_entities(self, source, **options):
                 has_semantic_guidance=any(item.get('label_zh') or item.get('description') or
@@ -398,8 +401,8 @@ class SemanticaExtractor:
         entity_types = [item['name'] for item in summary['classes']]
         relation_types = [item['name'] for item in summary['relations']]
         if not entity_types:
-            raise ValueError('Ontology must declare entity classes before extraction')
-        # Ambiguous local names must be supplied as full IRIs to the model.
+            raise ValueError('抽取前本体必须先声明实体类')
+        # 有歧义的本地名称必须以完整 IRI 提供给模型。
         if len(set(entity_types)) != len(entity_types):
             entity_types = [item['id'] for item in summary['classes']]
         if len(set(relation_types)) != len(relation_types):
@@ -424,8 +427,8 @@ class SemanticaExtractor:
                 event('跳过关系抽取 · 没有实体或本体未定义关系类型')
             event(f'关系抽取返回 · {len(relations)} 条')
         except Exception as exc:
-            # Avoid returning provider exception messages that may contain keys.
-            raise RuntimeError('Semantica LLM extraction failed; check model configuration and provider availability') from exc
+            # 避免返回可能包含密钥的供应商异常消息。
+            raise RuntimeError('Semantica LLM 抽取失败；请检查模型配置和供应商可用性') from exc
         records, lookup = {}, {}
         pending_entities=set()
         for entity in entities:
@@ -482,7 +485,7 @@ class SemanticaExtractor:
             from .attribute_extraction import extract_attributes
             with stage('LLM 实体属性抽取（结果全部待审核）'):
                 batch=extract_attributes(text,entities,ontology,config)
-            # Compatibility with custom extractors used by integrations/tests.
+            # 兼容集成/测试使用的自定义抽取器。
             attributes=getattr(batch,'attributes',batch)
             attribute_diagnostics=getattr(batch,'diagnostics',{})
             for key,value in attribute_diagnostics.items():

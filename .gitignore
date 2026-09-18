@@ -1,7 +1,10 @@
 .env
-.env.example
 .env.*.local
 *.log
-data
+data/model/*
+data/rules/*
 .omo
+.venv
+.pytest_cache
+data/service/knowledge.sqlite
 __pycache__

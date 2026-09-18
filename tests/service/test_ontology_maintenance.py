@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 from knowledge_service.api import create_app
 from knowledge_service.embeddings import HashingEncoder
+from knowledge_service.ontology import Ontology
 
 
 TTL='''@prefix : <https://test/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -8,6 +9,7 @@ TTL='''@prefix : <https://test/> . @prefix owl: <http://www.w3.org/2002/07/owl#>
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 :Thing a owl:Class ; rdfs:label "事物" .
 :Person a owl:Class ; rdfs:label "人员" ; rdfs:subClassOf :Thing .
+:Organization a owl:Class ; rdfs:label "组织" ; rdfs:subClassOf :Thing .
 :knows a owl:ObjectProperty ; rdfs:label "认识" ; rdfs:domain :Person ; rdfs:range :Person .
 :age a owl:DatatypeProperty ; rdfs:label "年龄" ; rdfs:domain :Person ; rdfs:range xsd:integer .'''
 
@@ -34,6 +36,27 @@ def test_modify_term_constraints_creates_version_and_keeps_history(tmp_path):
         assert app.state.service.repository.get_ontology(p,old['id'])['turtle']==old['turtle']
         assert c.put(base+'/ontology/term?uri=https%3A%2F%2Ftest%2Fknows',json={'label':'旧提交',
             'expected_ontology_id':old['id']}).status_code==409
+    finally:c.__exit__(None,None,None)
+
+
+def test_relation_maintenance_supports_multiple_allowed_endpoint_types_as_union(tmp_path):
+    c,app,p,base,old=setup(tmp_path)
+    try:
+        response=c.put(base+'/ontology/term?uri=https%3A%2F%2Ftest%2Fknows',json={
+            'label':'认识','domains':['https://test/Person','https://test/Organization'],
+            'ranges':['https://test/Person','https://test/Organization'],'expected_ontology_id':old['id']})
+        assert response.status_code==200,response.text
+        saved=response.json();term=next(x for x in saved['summary']['relations'] if x['id']=='https://test/knows')
+        assert set(term['domain'])=={'https://test/Person','https://test/Organization'}
+        assert set(term['range'])=={'https://test/Person','https://test/Organization'}
+        assert 'owl:unionOf' in saved['turtle']
+        ontology=Ontology(saved['turtle'])
+        records=[
+            {'id':'person','kind':'entity','type':'https://test/Person','text':'张三'},
+            {'id':'org','kind':'entity','type':'https://test/Organization','text':'机构'},
+            {'id':'edge','kind':'relation','type':'https://test/knows','text':'认识','subject_id':'person','object_id':'org'},
+        ]
+        assert ontology.validate_timeline(records)['conforms']
     finally:c.__exit__(None,None,None)
 
 
@@ -93,4 +116,30 @@ def test_add_and_update_term_persist_chinese_label(tmp_path):
         assert cleared.status_code==200,cleared.text
         term=next(x for x in cleared.json()['summary']['classes'] if x['id']=='https://test/Shop')
         assert term['label']=='Shop' and term['label_zh']==''
+    finally:c.__exit__(None,None,None)
+
+
+def test_unicode_iri_round_trips_without_percent_encoding(tmp_path):
+    c,app,p,base,old=setup(tmp_path)
+    try:
+        iri='urn:knowledge:ontology:'+p+':保护对象'
+        added=c.post(base+'/ontology/terms',json={'kind':'class','uri':iri,'label':'保护对象',
+            'label_zh':'保护对象','expected_ontology_id':old['id']})
+        assert added.status_code==201,added.text
+        assert any(item['id']==iri for item in added.json()['summary']['classes'])
+        saved=app.state.service.repository.get_ontology(p,added.json()['id'])
+        assert iri in saved['turtle']
+        reparsed=Ontology(saved['turtle'])
+        assert any(str(item)==iri for item in reparsed.classes)
+    finally:c.__exit__(None,None,None)
+
+
+def test_backend_generates_readable_unicode_iri_when_client_omits_it(tmp_path):
+    c,app,p,base,old=setup(tmp_path)
+    try:
+        added=c.post(base+'/ontology/terms',json={'kind':'class','label':'Protected Object','label_zh':'保护对象',
+            'expected_ontology_id':old['id']})
+        assert added.status_code==201,added.text
+        expected='urn:knowledge:ontology:'+p+':保护对象'
+        assert any(item['id']==expected for item in added.json()['summary']['classes'])
     finally:c.__exit__(None,None,None)

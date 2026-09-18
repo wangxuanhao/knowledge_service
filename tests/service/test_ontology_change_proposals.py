@@ -45,6 +45,23 @@ def test_candidate_can_propose_and_approve_versioned_ontology_change(tmp_path):
         assert reviews[0]['ontology_change']['ontology_id']==result['ontology']['id']
 
 
+def test_new_proposal_generates_unicode_iri_when_client_omits_it(tmp_path):
+    app=create_app(tmp_path/'proposal-generated-iri.sqlite',HashingEncoder())
+    with TestClient(app) as client:
+        project=client.post('/api/projects',json={'name':'proposal','use_default_ontology':False}).json()['id']
+        base='/api/projects/'+project
+        ontology=client.post(base+'/ontologies',json={'turtle':TTL}).json()
+        doc=app.state.service.repository.put_record(project,{'id':'doc','kind':'document','text':'平台规范',
+            'metadata':{'status':'ready','review_candidates':[{'id':'c','kind':'entity','text':'平台规范',
+                'proposed_type':'规则文件','status':'pending'}]}})
+        created=client.post(base+'/ontology-change-proposals',json={'document_id':'doc','candidate_id':'c',
+            'operation':'add','kind':'class','label':'规则文件','rationale':'新增业务类型',
+            'expected_ontology_id':ontology['id'],'expected_document_version':doc['version']})
+
+        assert created.status_code==201,created.text
+        assert created.json()['uri']==f'urn:knowledge:ontology:{project}:规则文件'
+
+
 def test_stale_or_rejected_proposal_never_changes_ontology(tmp_path):
     app=create_app(tmp_path/'proposal-safety.sqlite',HashingEncoder())
     with TestClient(app) as client:

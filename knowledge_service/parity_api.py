@@ -1,4 +1,4 @@
-"""Explorer, migration, governance and durable task HTTP contracts."""
+"""探索、迁移、治理与持久化任务的 HTTP 契约。"""
 from pydantic import Field
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse, FileResponse
@@ -59,7 +59,7 @@ def install(app,service):
     @app.get('/vendor/echarts.min.js')
     def echarts():
         from pathlib import Path
-        return FileResponse(Path(__file__).resolve().parents[1]/'data/kg_web/static/echarts.min.js',media_type='application/javascript')
+        return FileResponse(Path(__file__).resolve().parent/'web/vendor/echarts.min.js',media_type='application/javascript')
 
     @router.get('/local-projects')
     def local_projects():
@@ -70,9 +70,9 @@ def install(app,service):
     def local_import(request:LocalImport):
         from .legacy_import import LegacyImporter
         def run(progress):
-            progress('Reading legacy project; preserving original files',10)
+            progress('正在读取旧版项目；保留原始文件',10)
             result=LegacyImporter(service).import_project(request.name,request.kind,progress=progress,build_vectors=request.build_vectors)
-            progress('Project loaded; semantic indexing is separate from graph display',95)
+            progress('项目已加载；语义索引与图谱展示相互独立',95)
             return result
         return jobs.submit('legacy_import',run)
 

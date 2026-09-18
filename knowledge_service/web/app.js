@@ -1,6 +1,12 @@
 const $ = id => document.getElementById(id);
+// Browser-side counterpart of knowledge_service/diagnostics.py: shows how much of a
+// "slow page" is the server read versus the client render. Off by default so the
+// production console stays quiet — enable with localStorage.kgDebug='1' or ?debug=1.
+const kgDebug=(()=>{try{return localStorage.getItem('kgDebug')==='1'||new URLSearchParams(location.search).get('debug')==='1';}catch{return false;}})();
+const kgLog=(label,fields={})=>{if(!kgDebug)return;const detail=Object.entries(fields).map(([key,value])=>key+'='+value).join(' ');console.info('[kg] '+label+(detail?' · '+detail:''));};
+const kgTime=label=>{const started=performance.now();return fields=>kgLog(label,{...(fields||{}),ms:(performance.now()-started).toFixed(1)});};
 let current = '';
-const titles = {projects:'项目管理',search:'检索与问答',ingest:'知识写入',records:'知识与历史',ontology:'本体管理',discovery:'本体发现',dashboard:'项目总览',graph:'交互图谱',sources:'原文数据源',mindmap:'实体脑图',jobs:'后台任务',evaluation:'快照与评测'};
+const titles = {projects:'项目管理',search:'检索与交互图谱',qa:'知识问答',ingest:'知识写入',records:'知识与历史',ontology:'本体管理',discovery:'本体发现',dashboard:'项目总览',sources:'原文数据源',mindmap:'实体脑图',jobs:'后台任务',evaluation:'快照与评测'};
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = id => $(id).value.trim() ? JSON.parse($(id).value) : null;
 const iso = id => $(id).value ? new Date($(id).value).toISOString() : null;
@@ -37,13 +43,12 @@ function card(row,actions=false){
   return `<article class="card"><h3>${esc(row.text?.slice(0,110)||row.id)}</h3><div class="subtle">${esc(row.kind)} · ${typeDisplay} · 版本 ${esc(row.version)} ${row.score!==undefined?'· 匹配分 '+row.score.toFixed(3):''}</div><p>${esc(row.text)}</p><div class="subtle">有效期 ${esc(row.valid_from||'未知')} → ${esc(row.valid_until||'未知')}<br>记录时间 ${esc(row.recorded_at)}<br>来源 ${esc(row.source_id||'手工 / 原始记录')} · 本体版本 ${esc(row.ontology_id||'—')}</div><details><summary>Metadata 与属性</summary><pre>${esc(JSON.stringify({metadata:row.metadata,properties:row.properties},null,2))}</pre></details>${actions?`<div class="row"><button data-history="${esc(row.id)}">查看历史</button><button data-edit="${esc(row.id)}" class="secondary">编辑</button></div>`:''}</article>`;
 }
 async function projects(){const result=await api('/api/projects',undefined,'GET');$('project').innerHTML='<option value="">选择项目</option>'+result.projects.map(p=>`<option value="${esc(p.id)}" data-ontology-mode="${esc(p.metadata?.ontology_mode||'ontology')}">${esc(p.name)}</option>`).join('');if(current)$('project').value=current;}
-$('project').onchange=()=>{current=$('project').value;for(const id of ['hits','records','history','answer','ontology-result','ontology-summary','search-summary'])$(id).textContent='';for(const id of ['turtle','revision','revision-id'])$(id).value='';$('revision-version').value=1;$('ontology-versions').innerHTML='';status('项目已切换');};
+$('project').onchange=()=>{current=$('project').value;for(const id of ['hits','records','history','ontology-result','ontology-summary','search-summary'])$(id).textContent='';window.clearKnowledgeChat?.({notify:true});for(const id of ['turtle','revision','revision-id'])$(id).value='';$('revision-version').value=1;$('ontology-versions').innerHTML='';status('项目已切换');};
 $('project').addEventListener('change',()=>{loadOntologyTerms().catch(()=>{});});
-document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{document.querySelectorAll('.tab').forEach(t=>t.classList.add('hidden'));$('tab-'+button.dataset.tab).classList.remove('hidden');$('title').textContent=titles[button.dataset.tab];document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b===button));$('scope').classList.toggle('hidden',!['search','graph','records','sources'].includes(button.dataset.tab));});
+document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{document.querySelectorAll('.tab').forEach(t=>t.classList.add('hidden'));$('tab-'+button.dataset.tab).classList.remove('hidden');$('title').textContent=titles[button.dataset.tab];document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b===button));$('scope').classList.toggle('hidden',!['search','records','sources'].includes(button.dataset.tab));});
 // Project creation is implemented by the inline workbench form.
 bind('add-filter',async()=>{const field=$('filter-field').value.trim();if(!field)throw Error('填写 metadata 字段路径');let value=$('filter-value').value;try{value=JSON.parse(value);}catch{}const condition={field,op:$('filter-op').value,value};const previous=json('filters');$('filters').value=JSON.stringify(previous?{and:[previous,condition]}:condition,null,2);});
-async function search(answer=false){const body={...scope(),query:$('query').value,k:10};if(answer)body.generate=$('generate').checked;const result=await api(endpoint(answer?'/qa':'/search'),body);$('hits').innerHTML=result.hits.map(r=>card(r)).join('')||'<p class="subtle">当前条件没有匹配知识。</p>';$('answer').textContent=result.answer||'';$('search-summary').textContent=`筛选后 ${result.candidate_count} 条候选 · 返回 ${result.hits.length} 条 · ${result.semantic?'语义向量检索':'演示字符匹配（非语义模型）'}`;}
-bind('search',()=>search());bind('qa',()=>search(true));$('query').onkeydown=e=>{if(e.key==='Enter')$('search').click();};
+// Search lives in the linked workspace module (workspace.js); it owns #search, #query and the result rail.
 $('doc-file').onchange=async()=>{const file=$('doc-file').files[0];if(file){$('doc-title').value=file.name;$('doc-text').value=await file.text();}};
 bind('ingest',async()=>{const mode=document.getElementById('extraction-mode').value,result=await api(endpoint('/documents'),{title:$('doc-title').value,text:$('doc-text').value,metadata:readDocumentMetadata(),extract:mode!=='documents',extraction_mode:mode});status(`文档 ${result.document.id} 已处理，写入 ${result.records.length} 条知识。`);});
 bind('write-batch',async()=>{const result=await api(endpoint('/records'),json('batch'));status(`已写入 ${result.records.length} 条知识。`);});

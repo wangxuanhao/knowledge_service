@@ -52,13 +52,23 @@ class Scope(Request):
 class Search(Scope):
     query: str = Field(min_length=1, max_length=10000)
     k: int = Field(default=10, ge=1, le=100)
+    retrieval_mode: Literal['hybrid', 'semantic', 'keyword'] = 'hybrid'
+    k_entities: int = Field(default=5, ge=0, le=50)
+    k_chunks: int = Field(default=5, ge=0, le=50)
+    k_relations: int = Field(default=5, ge=0, le=50)
 
 
 class Question(Search):
     generate: bool = False
-    k_entities:int=Field(default=5,ge=1,le=50)
-    k_chunks:int=Field(default=5,ge=1,le=50)
     hops:int=Field(default=2,ge=0,le=3)
+
+
+class ResolutionReviewDecision(Request):
+    decision: Literal['merged','separate','rejected']
+    expected_version: int = Field(ge=1)
+    reason: str = Field(min_length=1,max_length=2000)
+    actor: str = Field(default='reviewer',min_length=1,max_length=200)
+    expected_entity_versions: dict[str,int] = Field(default_factory=dict)
 
 
 class Ingest(Request):
@@ -74,6 +84,7 @@ class Ingest(Request):
     ontology_id: str | None = None
     resolve_entities:bool=True
     auto_merge:bool=False
+    review_threshold:float=Field(default=.72,ge=0,le=1)
     merge_threshold:float=Field(default=.88,ge=0,le=1)
     chunk_strategy: Literal['fixed', 'paragraph', 'structural'] = 'fixed'
     chunk_size: int = Field(default=1800, ge=100, le=10000)
@@ -85,6 +96,8 @@ class Ingest(Request):
             raise ValueError('重叠长度必须小于切片长度')
         if self.auto_merge and not self.resolve_entities:
             raise ValueError('语义合并需要先开启实体消歧')
+        if self.review_threshold >= self.merge_threshold:
+            raise ValueError('审核阈值必须低于自动合并阈值')
         return self
 
     def effective_extraction_mode(self):

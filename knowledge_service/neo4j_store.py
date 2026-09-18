@@ -1,7 +1,7 @@
-"""Optional, explicit SQLite -> Neo4j projection. SQLite remains authoritative.
+"""可选、显式的 SQLite -> Neo4j 投影。SQLite 仍是权威数据源。
 
-One project sync is one remote transaction. Failed syncs never roll back local
-writes. Fixed labels and parameterized values isolate this application's data.
+一次项目同步即一次远程事务。失败的同步不会回滚本地写入。
+固定标签与参数化值隔离了本应用的数据。
 """
 import hashlib
 import json
@@ -50,13 +50,13 @@ class Neo4jProjection:
             return self.driver
         parsed = urlsplit(self.uri)
         if parsed.scheme not in {'neo4j', 'neo4j+s', 'neo4j+ssc', 'bolt', 'bolt+s', 'bolt+ssc'} or not parsed.hostname or parsed.username or parsed.password:
-            raise RuntimeError('Invalid KG_NEO4J_URI; configure credentials separately')
+            raise RuntimeError('KG_NEO4J_URI 无效；请单独配置凭据')
         if not self.password:
-            raise RuntimeError('Set KG_NEO4J_PASSWORD in the server environment; local storage is unaffected')
+            raise RuntimeError('请在服务器环境中设置 KG_NEO4J_PASSWORD；本地存储不受影响')
         try:
             from neo4j import GraphDatabase
         except ImportError:
-            raise RuntimeError('Install the optional neo4j driver in llm_model') from None
+            raise RuntimeError('请在 llm_model 环境中安装可选的 neo4j 驱动') from None
         self.driver = GraphDatabase.driver(self.uri, auth=(self.username, self.password),
                                           connection_timeout=5, connection_acquisition_timeout=10,
                                           max_transaction_retry_time=10)
@@ -71,8 +71,8 @@ class Neo4jProjection:
                     session.run('RETURN 1 AS ok').consume()
                 return {**self.status(), 'connected': True}
             except Exception as exc:
-                # Never return driver messages: they can contain connection details.
-                raise RuntimeError(f'Neo4j connection unavailable ({type(exc).__name__}); check driver, credentials and database') from None
+                # 绝不返回驱动消息：其中可能包含连接细节。
+                raise RuntimeError(f'Neo4j 连接不可用（{type(exc).__name__}）；请检查驱动、凭据和数据库') from None
 
     def close(self):
         if self.driver is not None:
@@ -94,6 +94,29 @@ class Neo4jProjection:
         return {**self.status(), 'last_sync': receipt, 'local_changes_pending': pending,
                 'verification': verification, 'in_sync': verification['verified'],
                 'sync_required': True if pending or verification['state'] == 'mismatch' else (None if verification['state'] == 'unavailable' else False)}
+
+    def delete_project(self, project_id):
+        """从 Neo4j 投影中删除整个项目：项目节点、记录/版本/本体节点及其关系。
+
+        与 SQLite 删除独立——SQLite 仍是权威源，这里只清理远端副本；
+        未配置/连接失败时抛出异常，由调用方决定是否吞掉。
+        """
+        with self.lock:
+            namespace = self.repo.storage_namespace
+            driver = self._driver()
+            with driver.session(database=self.database) as session:
+                session.run(
+                    'MATCH (p:KSProject {namespace:$ns, project_id:$pid}) '
+                    'OPTIONAL MATCH (p)-[:KS_CONTAINS]->(r:KSRecord) '
+                    'OPTIONAL MATCH (r)-[:KS_VERSION]->(v:KSVersion) '
+                    'OPTIONAL MATCH (p)-[:KS_ONTOLOGY]->(o:KSOntology) '
+                    'DETACH DELETE p, r, v, o',
+                    ns=namespace, pid=project_id).consume()
+                session.run(
+                    'MATCH (:KSRecord {namespace:$ns, project_id:$pid})-[e:KS_FACT]->() '
+                    'DELETE e',
+                    ns=namespace, pid=project_id).consume()
+            return True
 
     @staticmethod
     def _verify(tx, snapshot):
@@ -132,11 +155,11 @@ class Neo4jProjection:
                 'local': local_counts, 'remote': remote_counts, 'differences': differences}
 
     def sync(self, project_id, progress=lambda *args: None):
-        # Serialize snapshots and commits to prevent an older sync overtaking a newer one.
+        # 串行化快照与提交，防止旧同步超越新同步。
         with self.lock:
             snapshot = self.repo.export_projection(project_id)
             fingerprint = digest(snapshot)
-            progress('Local snapshot captured; connecting to Neo4j', 15)
+            progress('已捕获本地快照；正在连接 Neo4j', 15)
             try:
                 driver = self._driver()
                 with driver.session(database=self.database) as session:
@@ -146,14 +169,14 @@ class Neo4jProjection:
                     progress('远端写入完成，正在核验记录、版本和关系', 90)
                     verification = session.execute_read(self._verify, snapshot)
                     if not verification['verified']:
-                        raise RuntimeError('Remote verification mismatch')
+                        raise RuntimeError('远端核验不一致')
             except Exception as exc:
-                raise RuntimeError(f'Neo4j sync failed ({type(exc).__name__}); local data preserved, retry after checking connection and permissions') from None
+                raise RuntimeError(f'Neo4j 同步失败（{type(exc).__name__}）；本地数据已保留，检查连接与权限后重试') from None
             receipt = {'id': digest([snapshot['namespace'], project_id, self.uri, self.database]),
                        'project_id': project_id, 'fingerprint': fingerprint, 'synced_at': utc_now(),
                        'versions': len(snapshot['records']), 'ontologies': len(snapshot['ontologies']), 'verification': verification}
             self.repo.save_artifact('neo4j_sync', receipt)
-            progress('Neo4j committed; local sync receipt saved', 100)
+            progress('Neo4j 已提交；本地同步收据已保存', 100)
             return receipt
 
     @staticmethod
@@ -180,7 +203,7 @@ class Neo4jProjection:
                 rows=versions[start:start+500], project_key=project_key)
         for start in range(0, len(current), 500):
             run('UNWIND $rows AS row MATCH (r:KSRecord {key:row.key}) SET r += row.props', rows=current[start:start+500])
-        # Only rebuild edges owned by this source database/project. Never clear the database.
+        # 只重建属于本来源数据库/项目的边。绝不清空数据库。
         run('MATCH ()-[e:KS_FACT {namespace:$ns, project_id:$pid}]->() DELETE e', ns=ns, pid=pid)
         entities = {r['props']['id'] for r in current if r['props']['kind'] == 'entity' and not r['props']['deleted'] and not r['props']['audit']}
         edges = []

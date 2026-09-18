@@ -24,7 +24,12 @@ def test_linked_scope_and_ontology_and_index(tmp_path):
         assert c.post(f'/api/projects/{p}/explore',json={**body,'valid_at':'2024-01-01'}).json()['nodes']==[]
         opts=c.post(f'/api/projects/{p}/entity-options',json={'filters':body['filters']}).json()
         assert {r['id'] for r in opts['entities']}=={'a','b'}
-        assert c.post(f'/api/projects/{p}/explore',json={**body,'semantic':True}).status_code==503
+        timeline=c.get(f'/api/projects/{p}/timeline').json()
+        assert timeline['total']==1
+        assert timeline['events'][0]['changed']==4
+        assert timeline['events'][0]['created']==4
+        assert timeline['events'][0]['revised']==0
+        assert c.post(f'/api/projects/{p}/explore',json={**body,'semantic':True}).status_code==200  # 删列后 semantic 无向量降级 keyword
         records=repo.current_records(p)
         repo.store_embeddings(p,records,HashingEncoder().encode([r['text'] for r in records]),HashingEncoder.identity)
         assert len(repo.history(p,'a'))==1

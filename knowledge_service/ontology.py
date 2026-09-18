@@ -1,29 +1,53 @@
-"""Project-scoped RDF/OWL and SHACL interpretation; no network lookups."""
+"""项目范围内的 RDF/OWL 与 SHACL 解释；不做网络查询。"""
 from __future__ import annotations
 
 import re
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, unquote
 
 from rdflib import Graph, Literal, Namespace, RDF, RDFS, URIRef
+from rdflib.collection import Collection
 from rdflib.namespace import OWL, SH
 
 DATA = Namespace("urn:knowledge:")
 
 
+def readable_iri_segment(value: str) -> str:
+    """返回稳定的 Unicode IRI 片段，同时转义保留标点。"""
+    characters = []
+    for character in unicodedata.normalize('NFC', str(value).strip()):
+        category = unicodedata.category(character)
+        if category[0] in ('L', 'N') or category.startswith('M') or character in '._~-':
+            characters.append(character)
+        elif character.isspace():
+            characters.append('-')
+        else:
+            characters.append(quote(character, safe=''))
+    segment = re.sub(r'-+', '-', ''.join(characters)).strip('-')
+    if not segment:
+        raise ValueError('术语名必须包含可用 IRI 字符')
+    return segment
+
+
+def generated_term_iri(project_id: str, label: str) -> str:
+    """构建每个新本体术语所使用的规范化项目级 IRI。"""
+    return f'urn:knowledge:ontology:{project_id}:{readable_iri_segment(label)}'
+
+
 def local_name(uri):
     value = str(uri).rsplit("#", 1)[-1].rsplit("/", 1)[-1]
-    # Project ontologies use URNs (urn:knowledge:ontology:<project>:Term).
-    # A URN has no slash/hash fragment, so the old implementation leaked the
-    # entire storage identifier into every user-facing name and description.
+    # 项目本体使用 URN（urn:knowledge:ontology:<project>:Term）。
+    # URN 没有斜杠/井号片段，因此旧实现会把整个存储标识符泄漏到
+    # 每个面向用户的名称和描述中。
     return value.rsplit(":", 1)[-1] if value.startswith("urn:") else value
 
 
 def parse_shacl_focus_records(shacl_report_text: str, known_ids: set[str]) -> set[str]:
-    """Extract record IDs from SHACL focus-node IRIs that match known records.
+    """从与已知记录匹配的 SHACL focus-node IRI 中提取记录 ID。
 
-    Focus nodes look like <urn:knowledge:doc_id%3Achunk%3A0%3Aentity_xxx>
-    where DATA = Namespace("urn:knowledge:") and the id was quote(r['id'], safe='').
+    focus 节点形如 <urn:knowledge:doc_id%3Achunk%3A0%3Aentity_xxx>，
+    其中 DATA = Namespace("urn:knowledge:")，id 经过 quote(r['id'], safe='') 编码。
     """
     prefix = str(DATA)
     found: set[str] = set()
@@ -45,7 +69,7 @@ def _record_id(focus):
 
 
 def _shacl_violations(results_graph):
-    """Convert pySHACL result nodes into stable, UI-safe audit fields."""
+    """将 pySHACL 结果节点转换为稳定、UI 安全的审计字段。"""
     violations=[]
     for result in results_graph.subjects(RDF.type,SH.ValidationResult):
         path=results_graph.value(result,SH.resultPath)
@@ -72,7 +96,7 @@ class Ontology:
         try:
             self.graph.parse(data=turtle, format="turtle")
         except Exception as exc:
-            raise ValueError(f"Invalid Turtle: {exc}") from exc
+            raise ValueError(f"无效的 Turtle：{exc}") from exc
         self.classes = set(self.graph.subjects(RDF.type, OWL.Class)) | set(self.graph.subjects(RDF.type, RDFS.Class))
         self.relations = set(self.graph.subjects(RDF.type, OWL.ObjectProperty))
         self.attributes = set(self.graph.subjects(RDF.type, OWL.DatatypeProperty))
@@ -81,7 +105,7 @@ class Ontology:
         allowed = allowed if allowed is not None else self.classes | self.relations | self.attributes
         matches = [uri for uri in allowed if str(uri) == name or local_name(uri) == name]
         if len(matches) != 1:
-            raise ValueError(f"Unknown or ambiguous ontology term: {name}")
+            raise ValueError(f"未知或存在歧义的本体术语：{name}")
         return matches[0]
 
     def summary(self):
@@ -103,12 +127,20 @@ class Ontology:
                     "description": str(self.graph.value(uri, RDFS.comment) or "")}
         return {"classes": [{**item(c), "parents": [str(p) for p in self.graph.objects(c, RDFS.subClassOf)]}
                             for c in sorted(self.classes)],
-                "relations": [{**item(p), "domain": [str(v) for v in self.graph.objects(p, RDFS.domain)],
-                               "range": [str(v) for v in self.graph.objects(p, RDFS.range)]}
+                "relations": [{**item(p), "domain": [str(v) for v in self.constraint_types(p,RDFS.domain)],
+                               "range": [str(v) for v in self.constraint_types(p,RDFS.range)]}
                               for p in sorted(self.relations)],
-                "attributes": [{**item(p), "domain": [str(v) for v in self.graph.objects(p, RDFS.domain)],
+                "attributes": [{**item(p), "domain": [str(v) for v in self.constraint_types(p,RDFS.domain)],
                                 "range": [str(v) for v in self.graph.objects(p, RDFS.range)]}
                                for p in sorted(self.attributes)], "triples": len(self.graph)}
+
+    def constraint_types(self,predicate,constraint):
+        """展开用作允许端点集的命名类或 OWL 并集。"""
+        values=[]
+        for value in self.graph.objects(predicate,constraint):
+            head=self.graph.value(value,OWL.unionOf)
+            values.extend(list(Collection(self.graph,head)) if head else [value])
+        return values
 
     def parents(self, term):
         seen, pending = {term}, [term]
@@ -120,12 +152,12 @@ class Ontology:
         return seen
 
     def relation_constraint_issues(self,predicate,subject_type,object_type):
-        """Return RDFS domain/range mismatches without treating OWL inference as validation."""
+        """返回 RDFS domain/range 不匹配，而不把 OWL 推理当作校验。"""
         predicate=self.resolve(predicate,self.relations)
         actual={'subject_id':self.resolve(subject_type,self.classes),'object_id':self.resolve(object_type,self.classes)}
         issues=[]
         for key,constraint in [('subject_id',RDFS.domain),('object_id',RDFS.range)]:
-            expected=list(self.graph.objects(predicate,constraint))
+            expected=self.constraint_types(predicate,constraint)
             if expected and not any(term in self.parents(actual[key]) for term in expected):
                 issues.append({'endpoint':key,'actual_type':str(actual[key]),'expected_types':[str(x) for x in expected]})
         return issues
@@ -179,11 +211,13 @@ class Ontology:
                     for key, constraint in [('subject_id', RDFS.domain), ('object_id', RDFS.range)]:
                         endpoint = entities.get(r.get(key))
                         if not endpoint:
-                            raise ValueError(f"Missing relation endpoint: {r.get(key)}")
+                            raise ValueError(f"缺少关系端点：{r.get(key)}")
                         term = self.resolve(endpoint.get('type', ''), self.classes)
-                        for expected in self.graph.objects(predicate, constraint):
-                            if enforce_relationship_constraints and expected not in self.parents(term):
-                                raise ValueError(f"{key} type {term} does not satisfy {constraint} {expected}")
+                        expected=self.constraint_types(predicate,constraint)
+                        if enforce_relationship_constraints and expected and not any(
+                                allowed in self.parents(term) for allowed in expected):
+                            raise ValueError(f"{key} 类型 {term} 不满足 {constraint} "
+                                f"中的任何一个：{', '.join(str(value) for value in expected)}")
             except ValueError as exc:
                 errors.append({"record_id": r['id'], "message": str(exc)})
         report = ''
@@ -197,7 +231,7 @@ class Ontology:
         return {"conforms": not errors, "errors": errors, "violations":violations, "report": str(report)}
 
     def validate_timeline(self, records, enforce_relationship_constraints=True):
-        """SHACL sees only coexisting facts, once per interval where membership changes."""
+        """SHACL 只看到共存事实，在每个成员变化的区间各校验一次。"""
         from .time import normalize_time, utc_now
         rows = [{**r, 'valid_from': normalize_time(r.get('valid_from')),
                  'valid_until': normalize_time(r.get('valid_until'))} for r in records]
@@ -218,17 +252,17 @@ class Ontology:
         return {'conforms': True, 'errors': [], 'violations':[], 'segments_checked': len(instants)}
 
     def query(self, records, query):
-        # Deny remote datasets/federation and updates, even if the query starts with PREFIX.
+        # 拒绝远程数据集/联邦与更新，即使查询以 PREFIX 开头。
         if re.search(r'\b(SERVICE|FROM|LOAD|INSERT|DELETE|CLEAR|CREATE|DROP|MOVE|COPY|ADD)\b', query, re.I):
-            raise ValueError("Only local SELECT/ASK queries are allowed")
+            raise ValueError("只允许本地 SELECT/ASK 查询")
         from rdflib.plugins.sparql.parser import parseQuery
         try:
             parsed = parseQuery(query)
             if parsed[1].name not in ('SelectQuery', 'AskQuery'):
-                raise ValueError("Only SELECT/ASK supported")
+                raise ValueError("仅支持 SELECT/ASK")
             result = self.dataset(records).query(query)
         except Exception as exc:
-            raise ValueError(f"Invalid local SPARQL: {exc}") from exc
+            raise ValueError(f"无效的本地 SPARQL：{exc}") from exc
         if result.type == 'ASK':
             return {"type": "ASK", "value": bool(result.askAnswer)}
         rows = []

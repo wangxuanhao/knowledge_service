@@ -1,20 +1,23 @@
-"""Compact, scoped exploration contracts used by the linked graph workbench."""
+"""链接图谱工作台使用的紧凑、受范围限制的探索契约。"""
 from time import perf_counter
 import json
 import re
+from typing import Literal as TypingLiteral
 from pydantic import Field
-from rdflib import RDF, RDFS, URIRef, Literal
+from rdflib import BNode, RDF, RDFS, URIRef, Literal
+from rdflib.collection import Collection
 from rdflib.namespace import OWL, XSD
 
 from .models import Scope, Request
 from .service import public
-from .ontology import Ontology, local_name
-from .retrieval import rank_candidates
+from .ontology import Ontology, generated_term_iri, local_name
+from .retrieval import RetrievalEngine, has_vector
 
 
 class Explore(Scope):
     query: str = Field(default='', max_length=2000)
     semantic: bool = False
+    retrieval_mode: TypingLiteral['hybrid','semantic','keyword'] | None = None
     k: int = Field(default=15, ge=1, le=100)
     hops: int = Field(default=1, ge=0, le=3)
     entity_type: str = ''
@@ -24,12 +27,14 @@ class Explore(Scope):
 
 class TermWrite(Request):
     kind: str
-    uri: str = Field(min_length=1, max_length=500)
+    uri: str = Field(default='', max_length=500)
     label: str = Field(min_length=1, max_length=200)
     label_zh: str = Field(default='', max_length=200)
     parent: str = ''
     domain: str = ''
     range: str = ''
+    domains: list[str] = Field(default_factory=list,max_length=500)
+    ranges: list[str] = Field(default_factory=list,max_length=500)
     expected_ontology_id: str
 
 
@@ -40,6 +45,8 @@ class TermUpdate(Request):
     parent: str = ''
     domain: str = ''
     range: str = ''
+    domains: list[str] = Field(default_factory=list,max_length=500)
+    ranges: list[str] = Field(default_factory=list,max_length=500)
     expected_ontology_id: str
 
 
@@ -70,27 +77,41 @@ def _term_impact(service,p,uri,ontology):
             'pending_review_count':len(pending),'pending_review_ids':pending[:50]}
 
 
-def _set_term_constraints(ontology,node,kind,parent='',domain='',range_=''):
+def _set_term_constraints(ontology,node,kind,parent='',domain='',range_='',domains=None,ranges=None):
     for predicate in (RDFS.subClassOf,RDFS.domain,RDFS.range):
+        for old in list(ontology.graph.objects(node,predicate)):
+            head=ontology.graph.value(old,OWL.unionOf)
+            if head:
+                Collection(ontology.graph,head).clear();ontology.graph.remove((old,None,None))
         ontology.graph.remove((node,predicate,None))
     if kind=='class' and parent:
         parent_node=ontology.resolve(parent,ontology.classes)
-        if parent_node==node:raise ValueError('Class cannot inherit from itself')
-        if node in ontology.parents(parent_node):raise ValueError('Class inheritance would create a cycle')
+        if parent_node==node:raise ValueError('类不能继承自身')
+        if node in ontology.parents(parent_node):raise ValueError('类继承会形成循环（cycle）')
         ontology.graph.add((node,RDFS.subClassOf,parent_node))
-    if kind in ('relation','attribute') and domain:
-        ontology.graph.add((node,RDFS.domain,ontology.resolve(domain,ontology.classes)))
-    if kind=='relation' and range_:
-        ontology.graph.add((node,RDFS.range,ontology.resolve(range_,ontology.classes)))
+    domain_values=list(dict.fromkeys(value for value in (domains or ([domain] if domain else [])) if value))
+    range_values=list(dict.fromkeys(value for value in (ranges or ([range_] if range_ else [])) if value))
+    def add_allowed(predicate,values):
+        resolved=[ontology.resolve(value,ontology.classes) for value in values]
+        if len(resolved)==1:ontology.graph.add((node,predicate,resolved[0]))
+        elif resolved:
+            union=BNode();head=BNode();ontology.graph.add((union,OWL.unionOf,head));Collection(ontology.graph,head,resolved)
+            ontology.graph.add((node,predicate,union))
+    if kind in ('relation','attribute'):
+        add_allowed(RDFS.domain,domain_values)
+    if kind=='relation':
+        add_allowed(RDFS.range,range_values)
     if kind=='attribute' and range_:
         datatype=URIRef(range_)
         allowed={XSD.string,XSD.boolean,XSD.integer,XSD.decimal,XSD.double,XSD.date,XSD.dateTime,RDFS.Literal}
-        if datatype not in allowed:raise ValueError('Attribute range must be a supported literal datatype')
+        if datatype not in allowed:raise ValueError('属性的取值范围（range）必须是受支持的字面量数据类型')
         ontology.graph.add((node,RDFS.range,datatype))
 
 
 def explore(service, project_id, request):
     start = perf_counter()
+    requested_mode=request.get('retrieval_mode') or ('semantic' if request.get('semantic') else 'keyword')
+    request={**request,'_include_embeddings':requested_mode!='keyword'}
     rows = service.scoped(project_id, request)
     types = {request['entity_type']} if request.get('entity_type') else set()
     if types and request.get('include_subclasses', True):
@@ -111,20 +132,18 @@ def explore(service, project_id, request):
     query = request.get('query', '').strip()
     hits = []
     timings = {}
+    retrieval_result=None
     if query:
-        if request.get('semantic'):
-            hits = rank_candidates(candidates, query, request.get('k', 15), service.encoder, timings)
-        else:
-            tokens = query.casefold().split()
-            def score(row):
-                haystack = (row['text']+' '+str(row.get('type',''))+' '+ontology_labels.get(row.get('type',''),'')+
-                    ' '+' '.join(map(str,row.get('metadata',{}).get('aliases',[])))).casefold()
-                return sum(token in haystack for token in tokens) / len(tokens)
-            hits = [{**public(r), 'score': score(r)} for r in candidates if score(r) > 0]
-            hits.sort(key=lambda r: (-r['score'], r['kind'] != 'entity', r['id']))
-            # Preserve the original entity / source / relation retrieval channels.
-            per_channel = max(1, request.get('k', 15)//3)
-            hits = [r for kind in ('entity','chunk','relation') for r in [h for h in hits if h['kind']==kind][:per_channel]]
+        retrieval_scope={key:request.get(key) for key in
+            ('filters','valid_at','known_at','include_unknown')}
+        retrieval_scope['_candidate_ids']=[row['id'] for row in candidates]
+        retrieval_scope['_lexical_aliases']={row['id']:[ontology_labels.get(row.get('type',''),'')]
+            for row in candidates}
+        retrieval_result=RetrievalEngine(service.repository,service.encoder,getattr(service,'milvus_store',None)).search(
+            project_id,query,retrieval_mode=requested_mode,scope=retrieval_scope,
+            content_channels=['entity','chunk','relation'],k=request.get('k',15),
+            content_k={'entity':5,'chunk':5,'relation':5},candidates=candidates)
+        hits=retrieval_result['hits']
         selected = {r['id'] for r in hits if r['kind'] == 'entity'}
         selected |= {r[key] for r in hits if r['kind']=='relation' for key in ('subject_id','object_id')}
         for hit in hits:
@@ -142,7 +161,10 @@ def explore(service, project_id, request):
             'hits': [{**r,'type_label':ontology_labels.get(r.get('type',''),r.get('type',''))} for r in hits],
             'type_labels':{key:value for key,value in ontology_labels.items() if key.startswith(('urn:','http://','https://'))},
             'matched_ids': sorted(seeds), 'candidate_count': len(candidates),
-            'mode': 'semantic' if request.get('semantic') else 'keyword',
+            'mode': retrieval_result['active_mode'] if retrieval_result else requested_mode,
+            'requested_mode':requested_mode,
+            'degraded':retrieval_result['degraded'] if retrieval_result else False,
+            'backends':retrieval_result['backends'] if retrieval_result else {},
             'timing_ms': {'scope':round(filtered_ms,1), **timings, 'total':round((perf_counter()-start)*1000,1)}}
 
 
@@ -153,15 +175,24 @@ def install(app, service):
 
     @app.post('/api/projects/{p}/entity-options')
     def options(p: str, request: Scope):
-        rows = service.scoped(p, request.model_dump())
-        return {'entities':[{'id':r['id'],'text':r['text'],'type':r.get('type','')} for r in rows if r['kind']=='entity'],
+        # PERF：下拉只需要实体/关系，下推 kinds 跳过 document/chunk 的 payload 解码
+        rows = service.scoped(p, {**request.model_dump(), 'kinds': ['entity', 'relation']})
+        return {'entities':[{'id':r['id'],'text':r['text'],'type':r.get('type',''),
+                'source':(r.get('metadata') or {}).get('source_file') or (r.get('metadata') or {}).get('title') or ''}
+                for r in rows if r['kind']=='entity'],
                 'predicates':sorted({r['type'] for r in rows if r['kind']=='relation'}),
                 'dates':sorted({r[k][:10] for r in rows for k in ('valid_from','valid_until') if r.get(k)})}
 
+    @app.get('/api/projects/{p}/timeline')
+    def timeline(p: str, limit: int = 100):
+        return service.repository.timeline_events(p, limit)
+
     @app.post('/api/projects/{p}/metadata/facets')
     def metadata_facets(p: str, request: Scope):
-        # Discover this project's fields under the selected times, independent
-        # of the current metadata predicate so users can change that predicate.
+        # 在所选时间下发现该项目的字段，与当前 metadata 谓词无关，
+        # 以便用户能更改该谓词。
+        # PERF：又是一次完整的 `service.scoped` 读取（外加下面的深层 metadata 遍历），
+        # 在每次项目/范围切换时与 /entity-options 相邻触发。
         rows = service.scoped(p, {**request.model_dump(), 'filters':None})
         fields = {}
         truncated = False
@@ -199,18 +230,46 @@ def install(app, service):
 
     @app.post('/api/projects/{p}/indexes/rebuild', status_code=202)
     def reindex(p: str):
+        """重建语义索引（向量 + BM25）。
+
+        「换 embedding 模型后必须调用本接口重建」——Milvus 里的向量是旧模型产的，
+        与新模型的 query 向量维度/空间不同，不重建会导致检索维度报错（维度变了）
+        或静默返回错误相似度（维度相同但模型不同）。embedding_model 字段只记录向量
+        身份（元数据），检索侧不做强校验，靠本接口的「清空分区 + 全量重编码」保证一致。
+        """
         service.repository.get_project(p)
         def run(progress):
             start = perf_counter()
+            # 有意保留默认的 `vectors='list'`：该任务必须看到哪些行已带向量、
+            # 由哪个模型产生，因此不能跳过该字段。
             rows = [r for r in service.repository.current_records(p) if r['kind'] in ('entity','relation','chunk')
-                    and not r.get('metadata',{}).get('_deleted') and (not r.get('embedding') or r.get('embedding_model')!=service.encoder.identity)]
+                    and not r.get('metadata',{}).get('_deleted')]
+            if service.milvus_store is not None:
+                # Milvus 重建：清空该 project 分区后批量 upsert 全部当前活跃记录
+                # （不按 has_vector 筛选——Milvus 分区是重灌语义，全量覆盖）。
+                encoded = []
+                for offset in range(0, len(rows), 16):
+                    progress(f'向量编码 {offset}/{len(rows)}；图谱浏览仍可用', int(90*offset/max(1,len(rows))))
+                    batch = rows[offset:offset+16]
+                    vectors = service.encoder.encode([r['text'] for r in batch])
+                    for r, v in zip(batch, vectors):
+                        r['embedding'] = v
+                        r['embedding_model'] = service.encoder.identity
+                        r['project_id'] = p
+                        encoded.append(r)
+                saved = service.milvus_store.rebuild_project(p, encoded)
+                return {'indexed': saved, 'backend': 'milvus', 'total': len(rows),
+                        'elapsed_seconds': round(perf_counter()-start, 2)}
+            # SQLite 本地：只补无向量或模型不匹配的当前版本
+            stale = [r for r in rows if not has_vector(r) or r.get('embedding_model') != service.encoder.identity]
             saved = 0
-            for offset in range(0, len(rows), 16):
-                progress(f'Embedding {offset}/{len(rows)}; graph browsing remains available', int(90*offset/max(1,len(rows))))
-                batch = rows[offset:offset+16]
+            for offset in range(0, len(stale), 16):
+                progress(f'向量编码 {offset}/{len(stale)}；图谱浏览仍可用', int(90*offset/max(1,len(rows))))
+                batch = stale[offset:offset+16]
                 vectors = service.encoder.encode([r['text'] for r in batch])
                 saved += service.repository.store_embeddings(p, batch, vectors, service.encoder.identity)
-            return {'indexed': saved, 'skipped_changed_versions':len(rows)-saved, 'elapsed_seconds':round(perf_counter()-start,2)}
+            return {'indexed': saved, 'backend': 'sqlite', 'skipped_changed_versions': len(stale)-saved,
+                    'elapsed_seconds': round(perf_counter()-start, 2)}
         return app.state.jobs.submit('semantic_index', run, p)
 
     @app.post('/api/projects/{p}/ontology/terms', status_code=201)
@@ -218,20 +277,22 @@ def install(app, service):
         with service.lock:
             latest = service.repository.get_ontology(p)
             if latest['id'] != request.expected_ontology_id:
-                raise ValueError('Version conflict: reload the current ontology before editing')
+                raise ValueError('版本冲突：请先刷新当前本体再编辑')
             ontology = Ontology(latest['turtle'])
             if request.kind not in ('class','relation','attribute'):
-                raise ValueError('kind must be class, relation or attribute')
-            if not _absolute_iri(request.uri):
-                raise ValueError('Provide a valid absolute ontology IRI')
-            node = URIRef(request.uri)
+                raise ValueError('kind 必须是 class、relation 或 attribute')
+            uri=request.uri or generated_term_iri(p,request.label_zh or request.label)
+            if not _absolute_iri(uri):
+                raise ValueError('请提供有效的绝对本体 IRI')
+            node = URIRef(uri)
             if node in ontology.classes | ontology.relations | ontology.attributes:
-                raise ValueError('Term already exists; use the Turtle editor to revise it')
+                raise ValueError('术语已存在；请使用 Turtle 编辑器修改')
             ontology.graph.add((node, RDF.type, {'class':OWL.Class,'relation':OWL.ObjectProperty,'attribute':OWL.DatatypeProperty}[request.kind]))
             ontology.graph.add((node, RDFS.label, Literal(request.label)))
             if request.label_zh.strip():
                 ontology.graph.add((node, RDFS.label, Literal(request.label_zh.strip(), lang='zh')))
-            _set_term_constraints(ontology,node,request.kind,request.parent,request.domain,request.range)
+            _set_term_constraints(ontology,node,request.kind,request.parent,request.domain,request.range,
+                request.domains,request.ranges)
             turtle = ontology.graph.serialize(format='turtle')
             return service.repository.save_ontology(p, turtle, Ontology(turtle).summary())
 
@@ -246,7 +307,7 @@ def install(app, service):
     def update_term(p:str,uri:str,request:TermUpdate):
         with service.lock:
             latest=service.repository.get_ontology(p)
-            if latest['id']!=request.expected_ontology_id:raise ValueError('Version conflict: reload the current ontology before editing')
+            if latest['id']!=request.expected_ontology_id:raise ValueError('版本冲突：请先刷新当前本体再编辑')
             ontology=Ontology(latest['turtle']);node=URIRef(uri);kind=_term_kind(ontology,node)
             if not _absolute_iri(uri) or not kind:raise KeyError(uri)
             ontology.graph.remove((node,RDFS.label,None))
@@ -254,7 +315,8 @@ def install(app, service):
             if request.label_zh.strip():ontology.graph.add((node,RDFS.label,Literal(request.label_zh.strip(),lang='zh')))
             ontology.graph.remove((node,RDFS.comment,None))
             if request.description:ontology.graph.add((node,RDFS.comment,Literal(request.description)))
-            _set_term_constraints(ontology,node,kind,request.parent,request.domain,request.range)
+            _set_term_constraints(ontology,node,kind,request.parent,request.domain,request.range,
+                request.domains,request.ranges)
             turtle=ontology.graph.serialize(format='turtle')
             parsed=Ontology(turtle)
             return service.repository.save_ontology(p,turtle,parsed.summary())
@@ -263,15 +325,15 @@ def install(app, service):
     def retire_term(p:str,uri:str,request:TermRetire):
         with service.lock:
             latest=service.repository.get_ontology(p)
-            if latest['id']!=request.expected_ontology_id:raise ValueError('Version conflict: reload the current ontology before editing')
+            if latest['id']!=request.expected_ontology_id:raise ValueError('版本冲突：请先刷新当前本体再编辑')
             ontology=Ontology(latest['turtle']);node=URIRef(uri);kind=_term_kind(ontology,node)
             if not _absolute_iri(uri) or not kind:raise KeyError(uri)
             impact=_term_impact(service,p,uri,ontology)
             if (impact['record_count'] or impact['constraint_count'] or impact['pending_review_count']) and not request.confirm_references:
-                raise ValueError('Term has references; review impact and explicitly confirm retirement')
+                raise ValueError('术语存在引用；请检查影响并明确确认退休')
             safe_incoming={RDFS.subClassOf,RDFS.domain,RDFS.range}
             complex_refs=[(s,pred) for s,pred in ontology.graph.subject_predicates(node) if pred not in safe_incoming]
-            if complex_refs:raise ValueError('Term is referenced by SHACL or other ontology statements; use the Turtle editor to migrate those references')
+            if complex_refs:raise ValueError('术语被 SHACL 或其他本体语句引用；请使用 Turtle 编辑器迁移这些引用')
             ontology.graph.remove((node,None,None))
             for predicate in safe_incoming:ontology.graph.remove((None,predicate,node))
             turtle=ontology.graph.serialize(format='turtle');parsed=Ontology(turtle)

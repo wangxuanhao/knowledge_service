@@ -1,4 +1,4 @@
-"""Validated, typed predicates evaluated before any vector retrieval."""
+"""在任何向量检索之前求值的、经过校验的类型化谓词。"""
 import json
 import re
 
@@ -14,34 +14,34 @@ def validate_filter(filters, _depth=0):
     if filters is None and _depth == 0:
         return
     if _depth > 16 or not isinstance(filters, dict):
-        raise ValueError('Invalid filter or nesting exceeds 16')
+        raise ValueError('无效的过滤器或嵌套超过 16 层')
     groups = set(filters) & {'and', 'or'}
     if groups:
         if len(filters) != 1:
-            raise ValueError('Logical filter must have exactly one key')
+            raise ValueError('逻辑过滤器必须恰好有一个键')
         children = filters[next(iter(groups))]
         if not isinstance(children, list) or not children or len(children) > 100:
-            raise ValueError('Logical filters require 1 to 100 children')
+            raise ValueError('逻辑过滤器需要 1 到 100 个子过滤器')
         for child in children:
             validate_filter(child, _depth + 1)
         return
     if set(filters) != {'field', 'op', 'value'}:
-        raise ValueError('Filter requires field, op and value')
+        raise ValueError('过滤器需要 field、op 和 value')
     field, op, value = filters['field'], filters['op'], filters['value']
     if not isinstance(field, str) or len(field) > 256 or not re.fullmatch(r'[^\W\d][\w-]*(?:\.[^\W\d][\w-]*)*', field):
-        raise ValueError('Invalid field path')
+        raise ValueError('无效的字段路径')
     if not isinstance(op, str) or op not in _OPS:
-        raise ValueError('Unsupported filter operator')
+        raise ValueError('不支持的过滤器运算符')
     try:
         json.dumps(value, allow_nan=False)
     except (ValueError, TypeError) as exc:
-        raise ValueError('Filter values must be JSON') from exc
+        raise ValueError('过滤器值必须是 JSON') from exc
     if op == 'in' and not isinstance(value, list):
-        raise ValueError('in requires a list')
+        raise ValueError('in 运算符需要一个列表')
     if op == 'exists' and not isinstance(value, bool):
-        raise ValueError('exists requires a boolean')
+        raise ValueError('exists 运算符需要一个布尔值')
     if op in {'gt', 'gte', 'lt', 'lte'} and (isinstance(value, bool) or not isinstance(value, (str, int, float))):
-        raise ValueError('Comparison requires a number or string')
+        raise ValueError('比较运算需要数字或字符串')
     if field in _TIME and op != 'exists':
         for item in value if op == 'in' else [value]:
             normalize_time(item)
