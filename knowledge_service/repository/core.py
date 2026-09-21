@@ -1016,13 +1016,14 @@ class Repository:
             target_ref=target_ref)
 
     def complete_retrieval_and_begin_answer(
-            self, project_id, *, retrieval_id, answer_id, retrieval_payload,
-            answer_payload, edges, completed_at=None, answer_started_at=None):
+            self, project_id, *, retrieval_id, answer_id, retrieval_payload=None,
+            answer_payload=None, edges=None, completed_at=None, answer_started_at=None,
+            snapshot_factory=None):
         return self._provenance.complete_retrieval_and_begin_answer(
             project_id, retrieval_id=retrieval_id, answer_id=answer_id,
             retrieval_payload=retrieval_payload, answer_payload=answer_payload,
             edges=edges, completed_at=completed_at,
-            answer_started_at=answer_started_at)
+            answer_started_at=answer_started_at, snapshot_factory=snapshot_factory)
 
     # ------------------------------------------------------------------ 摄取运行（转发到 IngestRunStore）
     def create_ingest_run(self, project_id, document_id, document_version_id, retry_of=None):

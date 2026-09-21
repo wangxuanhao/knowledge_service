@@ -1,6 +1,7 @@
 """Frozen answer lineage contracts, exercised through real SQLite repositories."""
 import importlib.util
 import json
+import sqlite3
 
 import pytest
 
@@ -332,3 +333,92 @@ def test_arbitrarily_large_unknown_citation_remains_a_warning(provenance):
     trace = service.trace_answer_evidence(project, answer, 'E1')
     assert 'unknown_citation' in _codes(trace)
     assert trace['answer']['citation_status'] == 'uncited'
+
+
+def test_all_source_reads_share_the_completion_transaction(provenance, monkeypatch):
+    repo, service, project = provenance
+    record, _ = _mapped(repo, project, sources=[_source(repo, project)])
+    reads = []
+    methods = ('get_record_version', 'list_record_version_assertions', 'get_assertion',
+               'list_assertion_events', 'history', 'get_ingest_run')
+
+    def observe(name, original):
+        def read(*args, **kwargs):
+            assert repo._db.in_transaction, f'{name} escaped the completion transaction'
+            reads.append(name)
+            return original(*args, **kwargs)
+        return read
+
+    for name in methods:
+        monkeypatch.setattr(repo, name, observe(name, getattr(repo, name)))
+    run, answer, _ = _capture(service, project, [record])
+    assert set(reads) == set(methods)
+    assert not repo._db.in_transaction
+    assert repo.get_provenance_activity(project, run)['status'] == 'completed'
+    assert service.trace_answer_evidence(project, answer, 'E1')['integrity']['complete']
+
+
+def test_same_answer_cannot_capture_mixed_ingest_states(provenance, monkeypatch):
+    repo, service, project = provenance
+    _, chunk, ingest = _source(repo, project)
+    database = repo._db.execute('PRAGMA database_list').fetchone()[2]
+    original = repo.get_ingest_run
+    observed = []
+    writer_blocked = []
+
+    def concurrent_change(project_id, run_id):
+        snapshot = original(project_id, run_id)
+        observed.append(snapshot['status'])
+        if len(observed) == 1:
+            connection = sqlite3.connect(database, timeout=0.01)
+            try:
+                with connection:
+                    connection.execute("UPDATE ingest_runs SET status='completed' WHERE id=?", (ingest['id'],))
+                writer_blocked.append(False)
+            except sqlite3.OperationalError as exc:
+                assert 'locked' in str(exc)
+                writer_blocked.append(True)
+            finally:
+                connection.close()
+        return snapshot
+
+    monkeypatch.setattr(repo, 'get_ingest_run', concurrent_change)
+    _, answer, _ = _capture(service, project, [chunk, chunk])
+    assert observed == ['queued', 'queued']
+    assert writer_blocked == [True]
+    assert {_nodes(service.trace_answer_evidence(project, answer, citation), 'ingest_run')[0]
+            ['details']['status_at_capture'] for citation in ('E1', 'E2')} == {'queued'}
+    # The competing update may proceed once the capture/commit boundary ends.
+    repo.update_ingest_run(project, ingest['id'], 1, status='completed')
+    assert {_nodes(service.trace_answer_evidence(project, answer, citation), 'ingest_run')[0]
+            ['details']['status_at_capture'] for citation in ('E1', 'E2')} == {'queued'}
+
+
+def test_retrieval_errors_are_bounded_public_reason_summaries(provenance):
+    repo, service, project = provenance
+    run, _, _ = _capture(service, project, [_source(repo, project)[1]], degraded=True,
+        retrieval_errors={
+            'semantic': 'TimeoutError: Authorization: Bearer private-token ' + 'raw response ' * 100,
+            'keyword': {'error': 'provider response secret', 'api_key': 'private-key'},
+            'untrusted-header': 'secret',
+        })
+    payload = repo.get_provenance_activity(project, run)['payload']
+    assert payload['degraded'] is True
+    reasons = payload['retrieval_errors']
+    assert set(reasons) == {'semantic', 'keyword'}
+    assert reasons['semantic'] == '检索后端请求超时。'
+    assert reasons['keyword'] == '检索后端不可用。'
+    assert all(isinstance(reason, str) and len(reason) <= 240 for reason in reasons.values())
+    assert not any(value in json.dumps(payload) for value in ('private-token', 'private-key', 'raw response', 'secret'))
+
+
+@pytest.mark.parametrize('raw, summary', [
+    ('语义索引尚未就绪，请先构建语义索引', '语义索引尚未就绪。'),
+    ('嵌入模型与已存向量不一致；请显式重新编码记录', '嵌入模型与已存向量不一致。'),
+    ('嵌入维度不匹配', '嵌入向量维度不匹配。'),
+    ('ConnectionError: secret host details', '检索后端连接失败。'),
+])
+def test_retrieval_error_summaries_preserve_public_failure_category(provenance, raw, summary):
+    repo, service, project = provenance
+    run, _, _ = _capture(service, project, [], degraded=True, retrieval_errors={'semantic': raw})
+    assert repo.get_provenance_activity(project, run)['payload']['retrieval_errors'] == {'semantic': summary}

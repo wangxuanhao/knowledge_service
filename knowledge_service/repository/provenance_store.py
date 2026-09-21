@@ -354,19 +354,19 @@ class ProvenanceStore:
 
     # -------------------------------------------------------------- 原子组合入口
     def complete_retrieval_and_begin_answer(
-            self, project_id, *, retrieval_id, answer_id, retrieval_payload,
-            answer_payload, edges, completed_at=None, answer_started_at=None):
-        """在一个外层事务中完成 retrieval、创建 answer 并冻结全部边。"""
+            self, project_id, *, retrieval_id, answer_id, retrieval_payload=None,
+            answer_payload=None, edges=None, completed_at=None, answer_started_at=None,
+            snapshot_factory=None):
+        """在唯一事务中解析来源、完成 retrieval、创建 answer 并冻结全部边。
+
+        snapshot_factory 只执行读取并返回 (retrieval_payload, answer_payload,
+        edges)。它在 BEGIN IMMEDIATE 后调用，不得自行开启嵌套事务。
+        已构造 payload/edges 的调用方仍可使用原有参数。
+        """
         with self.repo._transaction():
             self.repo.get_project(project_id)
             if retrieval_id == answer_id:
                 raise ValueError('retrieval 和 answer 必须使用不同活动 ID')
-            grouped = {retrieval_id: [], answer_id: []}
-            for edge in edges:
-                edge = self._validate_edge(edge)
-                if edge['activity_id'] not in grouped:
-                    raise ValueError('版本冲突：组合提交含有其他活动的溯源边')
-                grouped[edge['activity_id']].append(edge)
             retrieval_row = self._db.execute(
                 'SELECT kind FROM provenance_activities WHERE project_id=? AND id=?',
                 (project_id, retrieval_id)).fetchone()
@@ -374,6 +374,16 @@ class ProvenanceStore:
                 raise KeyError(retrieval_id)
             if retrieval_row['kind'] != 'retrieval':
                 raise ValueError('指定活动不是 retrieval')
+            if snapshot_factory is not None:
+                if any(value is not None for value in (retrieval_payload, answer_payload, edges)):
+                    raise ValueError('来源快照工厂不能与已构造的 payload/edges 混用')
+                retrieval_payload, answer_payload, edges = snapshot_factory()
+            grouped = {retrieval_id: [], answer_id: []}
+            for edge in edges or ():
+                edge = self._validate_edge(edge)
+                if edge['activity_id'] not in grouped:
+                    raise ValueError('版本冲突：组合提交含有其他活动的溯源边')
+                grouped[edge['activity_id']].append(edge)
             retrieval = self._transition_activity(
                 project_id, retrieval_id, 'completed', retrieval_payload,
                 grouped[retrieval_id], completed_at)

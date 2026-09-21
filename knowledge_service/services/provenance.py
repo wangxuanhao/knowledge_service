@@ -50,6 +50,28 @@ def _warning(code, ref, message):
     return {'code': code, 'node_ref': ref, 'message': message}
 
 
+def _retrieval_error_summaries(errors):
+    """Keep public failure categories, never provider messages or response bodies."""
+    if not isinstance(errors, dict):
+        return {}
+    categories = (
+        (('timeout', 'timed out', '超时'), '检索后端请求超时。'),
+        (('语义索引尚未就绪',), '语义索引尚未就绪。'),
+        (('嵌入模型与已存向量不一致',), '嵌入模型与已存向量不一致。'),
+        (('嵌入维度不匹配',), '嵌入向量维度不匹配。'),
+        (('connectionerror', 'connection refused', '连接失败'), '检索后端连接失败。'),
+    )
+    summaries = {}
+    for backend in ('keyword', 'semantic'):
+        if backend not in errors or errors[backend] is None:
+            continue
+        reason = _text(errors[backend], 2000) or ''
+        reason = reason.casefold()
+        summaries[backend] = next((summary for markers, summary in categories
+                                   if any(marker in reason for marker in markers)), '检索后端不可用。')[:240]
+    return summaries
+
+
 class ProvenanceService:
     """Five-operation lifecycle boundary over the repository audit ledger."""
 
@@ -72,17 +94,26 @@ class ProvenanceService:
         return run_id
 
     def complete_retrieval(self, project_id, run_id, context, evidence):
+        answer_id = 'ans_' + uuid4().hex
+        self.repository.complete_retrieval_and_begin_answer(
+            project_id, retrieval_id=run_id, answer_id=answer_id,
+            snapshot_factory=lambda: self._capture_retrieval(
+                project_id, run_id, answer_id, context, evidence))
+        return answer_id
+
+    def _capture_retrieval(self, project_id, run_id, answer_id, context, evidence):
+        """Read every branch while the repository owns the completion transaction."""
         repo = self.repository
         retrieval = repo.get_provenance_activity(project_id, run_id)
         if retrieval['kind'] != 'retrieval':
             raise ValueError('指定活动不是 retrieval')
-        answer_id = 'ans_' + uuid4().hex
         retrieval_payload = dict(retrieval['payload'])
         retrieval_payload.update({
             'active_modes': sorted({mode for mode in context.get('active_modes', [])
                                     if mode in {'keyword', 'semantic', 'hybrid'}}),
             'backend': _text(context.get('_backend')),
             'degraded': context.get('degraded') is True,
+            'retrieval_errors': _retrieval_error_summaries(context.get('retrieval_errors')),
             'candidate_count': context.get('candidate_count') if type(context.get('candidate_count')) is int else None,
             'embedding_model': _text(context.get('embedding_model')),
             'semantic': context.get('semantic') is True,
@@ -115,13 +146,9 @@ class ProvenanceService:
                 edges.append(edge)
             graph['edges'].insert(0, used)
             graphs[citation] = graph
-        repo.complete_retrieval_and_begin_answer(
-            project_id, retrieval_id=run_id, answer_id=answer_id,
-            retrieval_payload=retrieval_payload,
-            answer_payload={'run_id': run_id, 'offered': list(graphs), 'cited': [],
-                            'graphs': graphs, 'warnings': [], 'answer': '', 'mode': None},
-            edges=edges)
-        return answer_id
+        return retrieval_payload, {
+            'run_id': run_id, 'offered': list(graphs), 'cited': [],
+            'graphs': graphs, 'warnings': [], 'answer': '', 'mode': None}, edges
 
     def complete_answer(self, project_id, answer_id, run_id, answer, mode, evidence):
         activity = self.repository.get_provenance_activity(project_id, answer_id)
