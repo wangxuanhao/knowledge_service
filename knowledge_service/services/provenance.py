@@ -329,13 +329,13 @@ class _SourceCapture:
         return False
 
     def chunk(self, chunk, anchor=None):
-        metadata = chunk.get('metadata', {})
-        ref = self.add_node(_node('chunk_version', 'chunk-version:' + chunk['version_id'], '原文片段',
+        ref = 'chunk-version:' + chunk['version_id']
+        metadata = self._chunk_metadata(chunk.get('metadata'), ref)
+        self.add_node(_node('chunk_version', ref, '原文片段',
             'captured', chunk['recorded_at'], record_id=chunk['id'], version_id=chunk['version_id'],
             text_preview=_text(chunk['text']), start_char=metadata.get('start_char'), end_char=metadata.get('end_char')))
-        version_id = metadata.get('source_version_id')
-        if not version_id:
-            self.warn('legacy_unversioned_source', ref, '片段来源没有精确文档版本。')
+        version_id = metadata['source_version_id']
+        if version_id is None:
             return ref
         try:
             document = self.repo.get_record_version(self.project, version_id)
@@ -345,8 +345,31 @@ class _SourceCapture:
         if document['kind'] != 'document' or document['id'] != chunk.get('source_id'):
             self.warn('document_version_mismatch', ref, '片段与历史文档版本身份不匹配。')
             return ref
+        if metadata['end_char'] is not None and metadata['end_char'] > len(document['text']):
+            metadata['start_char'] = metadata['end_char'] = None
+            self.nodes[ref]['details'].update(start_char=None, end_char=None)
+            self.warn('source_span_invalid', ref, '片段定位区间超出历史文档范围。')
         self.document(document, ref, anchor or metadata, metadata)
         return ref
+
+    def _chunk_metadata(self, raw, ref):
+        """Allow only typed source anchors; metadata itself is untrusted JSON."""
+        raw = raw if isinstance(raw, dict) else {}
+        start, end = raw.get('start_char'), raw.get('end_char')
+        if not (type(start) is int and type(end) is int and 0 <= start < end):
+            start = end = None
+            self.warn('source_span_invalid', ref, '片段定位区间缺失或无效。')
+        metadata = {'start_char': start, 'end_char': end}
+        for key, code, message in (
+                ('source_version_id', 'source_version_invalid', '片段来源版本标识必须是非空字符串。'),
+                ('run_id', 'ingest_run_invalid', '片段摄取运行标识必须是非空字符串。')):
+            value = raw.get(key)
+            metadata[key] = value if isinstance(value, str) and value.strip() else None
+            if key in raw and metadata[key] is None:
+                self.warn(code, ref, message)
+        if 'source_version_id' not in raw:
+            self.warn('legacy_unversioned_source', ref, '片段来源没有精确文档版本。')
+        return metadata
 
     def document(self, document, source_ref, anchor, metadata):
         text = document['text']

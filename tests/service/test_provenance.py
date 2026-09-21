@@ -422,3 +422,38 @@ def test_retrieval_error_summaries_preserve_public_failure_category(provenance, 
     repo, service, project = provenance
     run, _, _ = _capture(service, project, [], degraded=True, retrieval_errors={'semantic': raw})
     assert repo.get_provenance_activity(project, run)['payload']['retrieval_errors'] == {'semantic': summary}
+
+
+@pytest.mark.parametrize('start, end', [
+    ({'Authorization': 'REVIEW_SENTINEL'}, 15), (7, {'api_key': 'REVIEW_SENTINEL'}),
+    (True, 15), (7, False), (-1, 15), (15, 7), (7, 7), ('7', 15), (7, 9000),
+])
+def test_untrusted_chunk_positions_are_never_frozen(provenance, start, end):
+    repo, service, project = provenance
+    doc, chunk, _ = _source(repo, project)
+    malicious = repo.put_record(project, {'id': chunk['id'], 'kind': 'chunk', 'text': 'evidence',
+        'source_id': doc['id'], 'metadata': {**chunk['metadata'], 'start_char': start, 'end_char': end}},
+        expected_version=1)
+    _, answer, _ = _capture(service, project, [malicious])
+    trace = service.trace_answer_evidence(project, answer, 'E1')
+    details = _nodes(trace, 'chunk_version')[0]['details']
+    assert details['start_char'] is None and details['end_char'] is None
+    assert 'source_span_invalid' in _codes(trace)
+    stored = json.dumps([trace, repo.list_provenance_activities(project), repo.list_provenance_edges(project)])
+    assert 'REVIEW_SENTINEL' not in stored and 'Authorization' not in stored and 'api_key' not in stored
+
+
+@pytest.mark.parametrize('field', ['source_version_id', 'run_id'])
+@pytest.mark.parametrize('value', [{'Authorization': 'REVIEW_SENTINEL'}, ['REVIEW_SENTINEL'], True, 1, '', '   '])
+def test_untrusted_source_identifiers_warn_without_entering_sqlite(provenance, field, value):
+    repo, service, project = provenance
+    doc, chunk, _ = _source(repo, project)
+    malicious = repo.put_record(project, {'id': chunk['id'], 'kind': 'chunk', 'text': 'evidence',
+        'source_id': doc['id'], 'metadata': {**chunk['metadata'], field: value}}, expected_version=1)
+    run, answer, _ = _capture(service, project, [malicious])
+    trace = service.trace_answer_evidence(project, answer, 'E1')
+    assert repo.get_provenance_activity(project, run)['status'] == 'completed'
+    assert ('source_version_invalid' if field == 'source_version_id' else 'ingest_run_invalid') in _codes(trace)
+    assert not _nodes(trace, 'document_version' if field == 'source_version_id' else 'ingest_run')
+    stored = json.dumps([trace, repo.list_provenance_activities(project), repo.list_provenance_edges(project)])
+    assert 'REVIEW_SENTINEL' not in stored and 'Authorization' not in stored
