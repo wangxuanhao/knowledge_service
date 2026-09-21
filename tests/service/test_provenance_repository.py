@@ -315,19 +315,36 @@ def test_composed_retry_requires_the_complete_frozen_edge_set(tmp_path, mutation
         'considered', 'offered', 'used']
 
 
-def test_composed_retrieval_completion_rolls_back_every_write_on_bad_edge(tmp_path):
+def test_composed_retrieval_completion_rolls_back_after_partial_edge_writes(
+        tmp_path, monkeypatch):
     repo = Repository(tmp_path / 'composition-rollback.sqlite')
     project_id = repo.create_project('p')['id']
     repo.begin_provenance_activity(project_id, 'rr_1', 'retrieval', {'query': 'q'})
-    bad_edge = _edge(
-        'bad', 'missing-activity', 'answer:ans_1', 'used', 'retrieval-run:rr_1')
+    edges = [
+        _edge('considered', 'rr_1', 'retrieval-run:rr_1', 'considered',
+              'record-version:v1'),
+        _edge('used', 'ans_1', 'answer:ans_1', 'used', 'retrieval-run:rr_1'),
+        _edge('offered', 'ans_1', 'answer:ans_1#E1', 'offered', 'record-version:v1'),
+    ]
+    real_insert = repo._provenance._insert_edge
+    inserted = []
 
-    with pytest.raises(ValueError, match='conflict|冲突'):
+    def fail_after_second_insert(edge_project_id, edge, default_created_at=None):
+        result = real_insert(edge_project_id, edge, default_created_at)
+        inserted.append(result['id'])
+        if len(inserted) == 2:
+            raise RuntimeError('injected after partial edge writes')
+        return result
+
+    monkeypatch.setattr(repo._provenance, '_insert_edge', fail_after_second_insert)
+
+    with pytest.raises(RuntimeError, match='injected after partial edge writes'):
         repo.complete_retrieval_and_begin_answer(
             project_id, retrieval_id='rr_1', answer_id='ans_1',
-            retrieval_payload={'count': 1}, answer_payload={'offered': []},
-            edges=[bad_edge])
+            retrieval_payload={'count': 1}, answer_payload={'offered': ['E1']},
+            edges=edges)
 
+    assert inserted == ['considered', 'used']
     assert repo.get_provenance_activity(project_id, 'rr_1')['status'] == 'running'
     with pytest.raises(KeyError):
         repo.get_provenance_activity(project_id, 'ans_1')
