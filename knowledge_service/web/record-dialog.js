@@ -106,6 +106,13 @@
       $('record-history-view').innerHTML=`<p>共 ${versions.length} 个版本${versions.length===1?'，尚未修订过。':'，最新版本在前。'}</p>`+versions.map(v=>`<article class="record-version"><h3>版本 ${v.version}${v.superseded_at?'':' · 最新系统版本'}</h3><dl><dt>记录时间</dt><dd>${esc(v.recorded_at)}</dd><dt>被替代时间</dt><dd>${esc(v.superseded_at||'尚未被替代')}</dd><dt>业务有效期</dt><dd>${esc(v.valid_from||'未知')} → ${esc(v.valid_until||'未知')}</dd></dl><p class="version-content">${esc(v.text)}</p><details><summary>此版本的 metadata 与属性</summary><pre>${esc(JSON.stringify({metadata:v.metadata,properties:v.properties},null,2))}</pre></details></article>`).join('');
     }catch(e){if(serial===request&&dialog.open){$('record-history-view').textContent='读取失败：'+e.message;}}
   };
+  // Stable read-only entrypoint shared with frozen answer evidence.
+  window.openRecordHistory=record=>{
+    const id=typeof record==='string'?record:record?.id;
+    if(typeof id!=='string'||!id)return;
+    const text=typeof record?.text==='string'?record.text:id;
+    return historyFor({id,text});
+  };
   // Programmatic project changes also close the modal, not just DOM change events.
   const change=$('project').onchange;
   $('project').onchange=()=>{if(dialog.open)close();change();};

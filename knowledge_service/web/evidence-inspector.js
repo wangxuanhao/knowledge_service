@@ -46,10 +46,21 @@
   function openSource(doc){
     $('source-evidence-title').textContent=doc.title;
     $('source-evidence-note').textContent=`来源版本 ${doc.version} · ${doc.reason}${doc.source_content==='segments_only'?' · 旧数据只保存了片段，并非完整原文':''}`;
-    $('source-evidence-text').innerHTML=esc(doc.before)+(doc.highlight?'<mark id="source-evidence-anchor">'+esc(doc.highlight)+'</mark>':'')+esc(doc.after);
-    sourceDialog.showModal();
+    const text=$('source-evidence-text');text.replaceChildren(document.createTextNode(doc.before||''));
+    if(doc.highlight){const mark=document.createElement('mark');mark.id='source-evidence-anchor';mark.textContent=doc.highlight;text.appendChild(mark);}
+    text.appendChild(document.createTextNode(doc.after||''));
+    if(!sourceDialog.open)sourceDialog.showModal();
     requestAnimationFrame(()=>{const anchor=$('source-evidence-anchor');if(anchor)anchor.scrollIntoView({block:'center'});else $('source-evidence-text').scrollTop=0;});
   }
+  // Only the frozen document projection is accepted; no current-document lookup.
+  window.openFrozenSourceEvidence=excerpt=>{
+    if(!excerpt||typeof excerpt!=='object'||Array.isArray(excerpt))return;
+    const text=key=>typeof excerpt[key]==='string'?excerpt[key]:'';
+    const version=Number.isSafeInteger(excerpt.version)&&excerpt.version>0?excerpt.version:'未知';
+    openSource({title:text('title')||'历史来源',version,
+      reason:'回答生成时保存的历史原文片段',source_content:'segments_only',
+      before:text('excerpt_before'),highlight:text('highlight'),after:text('excerpt_after')});
+  };
   function localTime(value){if(!value)return '未记录';const d=new Date(value);return Number.isNaN(d.valueOf())?value:d.toLocaleString('zh-CN',{hour12:false});}
   const typeHint=type=>{const primary=labelOf(type),local=term(type);return primary===local?esc(primary):`${esc(primary)} <span class="subtle">${esc(local)}</span>`;};
   window.renderEvidenceInspector=async(row,options)=>{
