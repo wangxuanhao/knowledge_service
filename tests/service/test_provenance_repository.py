@@ -198,6 +198,43 @@ def test_running_activity_allows_one_terminal_transition_and_identical_retry(
         transition(project_id, 'activity', {'result': 'different'})
 
 
+@pytest.mark.parametrize('changed', [
+    {'nested': {'false': False, 'true': 1}, 'label': 'same'},
+    {'nested': {'false': 0, 'true': True}, 'label': 'same'},
+])
+def test_begin_activity_uses_strict_json_payload_identity(tmp_path, changed):
+    repo = Repository(tmp_path / 'begin-strict-json.sqlite')
+    project_id = repo.create_project('p')['id']
+    original = {'label': 'same', 'nested': {'true': True, 'false': False}}
+    reordered = {'nested': {'false': False, 'true': True}, 'label': 'same'}
+
+    first = repo.begin_provenance_activity(
+        project_id, 'activity', 'retrieval', original)
+    assert repo.begin_provenance_activity(
+        project_id, 'activity', 'retrieval', reordered) == first
+    with pytest.raises(ValueError, match='conflict|冲突'):
+        repo.begin_provenance_activity(
+            project_id, 'activity', 'retrieval', changed)
+
+
+@pytest.mark.parametrize('changed', [
+    {'nested': {'false': False, 'true': 1}, 'result': 'done'},
+    {'nested': {'false': 0, 'true': True}, 'result': 'done'},
+])
+def test_terminal_activity_uses_strict_json_payload_identity(tmp_path, changed):
+    repo = Repository(tmp_path / 'terminal-strict-json.sqlite')
+    project_id = repo.create_project('p')['id']
+    original = {'result': 'done', 'nested': {'true': True, 'false': False}}
+    reordered = {'nested': {'false': False, 'true': True}, 'result': 'done'}
+    repo.begin_provenance_activity(project_id, 'activity', 'retrieval', {})
+
+    first = repo.complete_provenance_activity(project_id, 'activity', original)
+    assert repo.complete_provenance_activity(
+        project_id, 'activity', reordered) == first
+    with pytest.raises(ValueError, match='conflict|冲突'):
+        repo.complete_provenance_activity(project_id, 'activity', changed)
+
+
 def test_activity_completion_and_edges_are_atomic_and_identical_edge_is_idempotent(tmp_path):
     repo = Repository(tmp_path / 'atomic.sqlite')
     project_id = repo.create_project('p')['id']
@@ -225,6 +262,71 @@ def test_activity_completion_and_edges_are_atomic_and_identical_edge_is_idempote
         repo.complete_provenance_activity(
             project_id, 'answer', {'text': 'done'},
             edges=[{**edge, 'payload': {'selected': False}}])
+
+
+@pytest.mark.parametrize('changed_payload', [
+    {'nested': {'false': False, 'true': 1}, 'selected': True},
+    {'nested': {'false': 0, 'true': True}, 'selected': True},
+])
+def test_existing_edge_uses_strict_json_payload_identity(tmp_path, changed_payload):
+    repo = Repository(tmp_path / 'edge-strict-json.sqlite')
+    project_id = repo.create_project('p')['id']
+    original = {'selected': True, 'nested': {'true': True, 'false': False}}
+    reordered = {'nested': {'false': False, 'true': True}, 'selected': True}
+    edge = _edge(
+        'edge', 'answer', 'answer:answer#E1', 'cites', 'record-version:v1',
+        payload=original)
+    repo.begin_provenance_activity(project_id, 'answer', 'answer', {})
+    repo.complete_provenance_activity(
+        project_id, 'answer', {'text': 'done'}, edges=[edge])
+
+    assert repo.complete_provenance_activity(
+        project_id, 'answer', {'text': 'done'},
+        edges=[{**edge, 'id': 'retry-id', 'payload': reordered}]
+    )['status'] == 'completed'
+    with pytest.raises(ValueError, match='conflict|冲突'):
+        repo.complete_provenance_activity(
+            project_id, 'answer', {'text': 'done'},
+            edges=[{**edge, 'id': 'changed-id', 'payload': changed_payload}])
+
+
+@pytest.mark.parametrize('changed_payload', [
+    {'nested': {'false': False, 'true': 1}},
+    {'nested': {'false': 0, 'true': True}},
+])
+def test_batch_duplicate_edges_use_strict_json_payload_identity(
+        tmp_path, changed_payload):
+    repo = Repository(tmp_path / 'batch-edge-strict-json.sqlite')
+    project_id = repo.create_project('p')['id']
+    original = {'nested': {'true': True, 'false': False}}
+    reordered = {'nested': {'false': False, 'true': True}}
+    edge = _edge(
+        'edge', 'same', 'answer:same#E1', 'cites', 'record-version:v1',
+        payload=original)
+    repo.begin_provenance_activity(project_id, 'same', 'answer', {})
+    completed = repo.complete_provenance_activity(
+        project_id, 'same', {'text': 'done'},
+        edges=[edge, {**edge, 'id': 'same-reordered', 'payload': reordered}])
+    assert completed['status'] == 'completed'
+    assert len(repo.list_provenance_edges(project_id, activity_id='same')) == 1
+
+    repo.begin_provenance_activity(project_id, 'conflict', 'answer', {})
+    conflict_edge = {
+        **edge,
+        'id': 'conflict-original',
+        'activity_id': 'conflict',
+        'source_ref': 'answer:conflict#E1',
+    }
+    with pytest.raises(ValueError, match='conflict|冲突'):
+        repo.complete_provenance_activity(
+            project_id, 'conflict', {'text': 'done'},
+            edges=[
+                conflict_edge,
+                {**conflict_edge, 'id': 'conflict-changed',
+                 'payload': changed_payload},
+            ])
+    assert repo.get_provenance_activity(project_id, 'conflict')['status'] == 'running'
+    assert repo.list_provenance_edges(project_id, activity_id='conflict') == []
 
 
 @pytest.mark.parametrize('retry_edges', [

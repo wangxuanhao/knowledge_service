@@ -33,6 +33,18 @@ class ProvenanceStore:
         return json.loads(_json(value))
 
     @staticmethod
+    def _canonical_json(value):
+        """生成严格 JSON 身份；bool 与 number 不混同，对象 key 顺序不敏感。"""
+        normalized = json.loads(_json(value))
+        return json.dumps(
+            normalized, ensure_ascii=False, allow_nan=False, sort_keys=True,
+            separators=(',', ':'))
+
+    @classmethod
+    def _strict_json_equal(cls, left, right):
+        return cls._canonical_json(left) == cls._canonical_json(right)
+
+    @staticmethod
     def _activity(row):
         item = dict(row)
         item['payload'] = json.loads(item['payload'])
@@ -116,7 +128,7 @@ class ProvenanceStore:
         if existing is not None:
             item = self._activity(existing)
             same = (item['kind'] == kind and item['status'] == 'running'
-                    and item['payload'] == payload
+                    and self._strict_json_equal(item['payload'], payload)
                     and (started_at is None or item['started_at'] == started_at))
             if same:
                 return item
@@ -200,7 +212,7 @@ class ProvenanceStore:
     def _edge_is_identical(self, existing, payload):
         # 复合唯一键才是边的幂等身份。重试可能重新生成 surrogate id/时间，
         # 只要同一逻辑边的审计 payload 未改变，就返回已经提交的那一行。
-        return json.loads(existing['payload']) == payload
+        return self._strict_json_equal(json.loads(existing['payload']), payload)
 
     def _insert_edge(self, project_id, edge, default_created_at=None):
         edge = self._validate_edge(edge)
@@ -241,7 +253,8 @@ class ProvenanceStore:
             payload = self._payload(edge.get('payload', {}))
             key = self._edge_key(edge)
             duplicate = proposed.get(key)
-            if duplicate is not None and duplicate[1] != payload:
+            if duplicate is not None and not self._strict_json_equal(
+                    duplicate[1], payload):
                 raise ValueError('版本冲突：同一溯源边载荷不一致')
             proposed[key] = (edge, payload)
 
@@ -277,7 +290,8 @@ class ProvenanceStore:
         current = self._activity(row)
         edges = list(edges)
         if current['status'] != 'running':
-            same = (current['status'] == status and current['payload'] == payload
+            same = (current['status'] == status
+                    and self._strict_json_equal(current['payload'], payload)
                     and (completed_at is None
                          or current['completed_at'] == completed_at))
             if not same:
