@@ -1,4 +1,5 @@
 """Real-browser contract for the linked search/graph workspace and the one-shot knowledge chat."""
+import json
 import re
 import socket
 import threading
@@ -643,3 +644,169 @@ def test_chunk_evidence_navigates_to_the_exact_source(workbench):
     assert page.locator('#source-title').inner_text() == '退款规则'
     assert page.locator('#source-list [aria-current="true"]').count() == 1
     assert workbench.errors == []
+
+
+def _provenance_stream(page):
+    """Hold the real chat reader after evidence so running answers are interactive."""
+    page.evaluate("""() => {
+      const original = window.fetch;
+      window.__qaRequests = [];
+      window.fetch = (url, options) => {
+        if (!String(url).endsWith('/qa/stream')) return original(url, options);
+        window.__qaRequests.push(JSON.parse(options.body));
+        return Promise.resolve(new Response(new ReadableStream({start(controller) {
+          window.__qaEvent = (event, data) => controller.enqueue(new TextEncoder().encode(
+            'event: ' + event + '\\ndata: ' + JSON.stringify(data) + '\\n\\n'));
+          window.__qaEnd = () => controller.close();
+        }}), {headers: {'Content-Type': 'text/event-stream'}}));
+      };
+    }""")
+
+
+def _emit(page, event, payload):
+    page.evaluate('([event, data]) => window.__qaEvent(event, data)', [event, payload])
+
+
+def _provenance_evidence(answer='answer-running'):
+    return {'answer_id': answer, 'retrieval_run_id': 'run-' + answer,
+            'channels': {'chunk': 1}, 'evidence': [{
+                'citation': 'E1', 'kind': 'chunk', 'version': 2,
+                'text': 'preview' * 60, 'text_preview': 'preview' * 60,
+                'provenance_ref': 'answer:' + answer + '#E1',
+                'metadata': {'secret': 'discard-me'}, 'properties': {'private': 1},
+                'embedding': [1, 2], 'document': 'full-document'}]}
+
+
+def _mock_provenance(page, seen):
+    def handler(route):
+        seen.append(route.request.url)
+        route.fulfill(json={'subject': {'answer_id': 'answer-running', 'citation': 'E1'},
+                            'nodes': [{'type': 'answer', 'ref': 'a', 'status': 'running',
+                                       'details': {'answer_id': 'answer-running'}}],
+                            'edges': [], 'integrity': {'complete': True, 'warnings': []}})
+    page.route('**/provenance', handler)
+
+
+def test_knowledge_chat_provenance_running_safe_done_and_history(workbench):
+    page = workbench.page
+    page.click('[data-tab="qa"]')
+    _provenance_stream(page)
+    seen = []
+    _mock_provenance(page, seen)
+    page.fill('#qa-query', 'provenance')
+    page.click('#qa')
+    _emit(page, 'evidence', _provenance_evidence())
+    toggle = page.locator('.qa-evidence-toggle')
+    toggle.click()
+    citation = page.locator('.qa-evidence-panel button.provenance-citation')
+    assert citation.count() == 1
+    assert page.locator('.qa-turn-assistant').get_attribute('data-state') == 'streaming'
+    citation.click()
+    page.wait_for_function("document.querySelector('#provenance-drawer').dataset.state === 'ready'")
+    assert 'running' in page.locator('#provenance-chain').inner_text()
+    assert len(seen) == 1 and '/answers/answer-running/evidence/E1/provenance' in seen[0]
+    assert page.locator('[data-tab="qa"]').get_attribute('class') == 'active'
+    page.keyboard.press('Escape')
+    assert page.locator('#provenance-drawer').is_hidden()
+    assert citation.evaluate('(el) => el === document.activeElement')
+
+    literal = '<img src=x onerror="window.__xss=1"> [E1] [E99]'
+    _emit(page, 'delta', {'text': literal})
+    assert page.locator('.qa-answer').inner_text() == literal
+    assert page.locator('.qa-answer button').count() == 0
+    _emit(page, 'done', {'answer_id': 'answer-running', 'retrieval_run_id': 'run-answer-running'})
+    page.evaluate('window.__qaEnd()')
+    page.wait_for_function("document.querySelector('.qa-turn-assistant').dataset.state === 'done'")
+    assert page.locator('.qa-answer button').count() == 1
+    assert page.locator('.qa-answer').inner_text() == literal
+    assert page.locator('.qa-answer img').count() == 0
+    assert page.evaluate('window.__xss || null') is None
+    key = 'kg_qa_v1_' + workbench.project
+    history = page.evaluate('(key) => JSON.parse(localStorage.getItem(key))', key)
+    assert len(history) == 2
+    assistant = history[1]
+    assert assistant['answer_id'] == 'answer-running'
+    assert assistant['retrieval_run_id'] == 'run-answer-running'
+    assert set(assistant['evidence'][0]) == {'citation', 'text_preview', 'kind', 'version', 'provenance_ref'}
+    assert len(assistant['evidence'][0]['text_preview']) == 240
+    assert 'discard-me' not in json.dumps(history) and 'full-document' not in json.dumps(history)
+
+    page.reload(wait_until='load')
+    page.wait_for_function("document.querySelectorAll('#project option').length > 1")
+    page.select_option('#project', workbench.project)
+    page.click('[data-tab="qa"]')
+    page.wait_for_function("document.querySelectorAll('.qa-answer button').length === 1")
+    assert page.locator('.qa-answer').inner_text() == literal
+    page.locator('.qa-evidence-toggle').click()
+    assert page.locator('.qa-evidence-panel button.provenance-citation').count() == 1
+    page.locator('.qa-answer button').click()
+    page.wait_for_function("document.querySelector('#provenance-drawer').dataset.state === 'ready'")
+    assert len(seen) == 2
+    page.keyboard.press('Escape')
+    page.click('#qa-clear')
+    assert page.locator('.qa-turn').count() == 0
+    assert page.locator('#provenance-drawer').is_hidden()
+    assert workbench.errors == []
+
+
+def test_knowledge_chat_provenance_legacy_and_retry_replaces_history(workbench):
+    page = workbench.page
+    page.click('[data-tab="qa"]')
+    key = 'kg_qa_v1_' + workbench.project
+    page.evaluate('([key, rows]) => {localStorage.setItem(key, JSON.stringify(rows)); clearKnowledgeChat();}',
+                  [key, [{'kind': 'user', 'text': 'old'}, {'kind': 'assistant', 'text': 'old [E1]'}]])
+    assert page.locator('.qa-answer').inner_text() == 'old [E1]'
+    assert page.locator('.qa-answer button').count() == 0
+    assert page.locator('.provenance-legacy-note').inner_text() == '该历史回答生成于溯源记录启用前'
+    page.click('#qa-clear')
+    _provenance_stream(page)
+    page.fill('#qa-query', 'retry provenance')
+    page.click('#qa')
+    _emit(page, 'evidence', _provenance_evidence('failed-answer'))
+    _emit(page, 'error', {'detail': 'retry-me'})
+    page.wait_for_function("document.querySelector('.qa-turn-assistant').dataset.state === 'error'")
+    page.locator('.qa-retry').click()
+    _emit(page, 'evidence', _provenance_evidence('new-answer'))
+    _emit(page, 'delta', {'text': 'new [E1]'})
+    _emit(page, 'done', {})
+    page.evaluate('window.__qaEnd()')
+    page.wait_for_function("document.querySelector('.qa-turn-assistant').dataset.state === 'done'")
+    requests = page.evaluate('window.__qaRequests')
+    assert len(requests) == 2 and requests[0] == requests[1]
+    history = page.evaluate('(key) => JSON.parse(localStorage.getItem(key))', key)
+    assert len(history) == 2
+    assert history[1]['answer_id'] == 'new-answer'
+    assert history[1]['retrieval_run_id'] == 'run-new-answer'
+    assert 'error' not in history[1]
+    assert page.locator('.qa-turn-user').count() == page.locator('.qa-turn-assistant').count() == 1
+
+
+def test_knowledge_chat_provenance_clear_aborts_and_ignores_stale_response(workbench):
+    page = workbench.page
+    page.click('[data-tab="qa"]')
+    _provenance_stream(page)
+    page.evaluate("""() => {
+      const original = window.fetch;
+      window.fetch = (url, options) => {
+        if (!String(url).endsWith('/provenance')) return original(url, options);
+        window.__provenanceSignal = options.signal;
+        return new Promise(resolve => window.__resolveProvenance = resolve);
+      };
+    }""")
+    page.fill('#qa-query', 'clear pending')
+    page.click('#qa')
+    _emit(page, 'evidence', _provenance_evidence())
+    page.locator('.qa-evidence-toggle').click()
+    page.locator('.qa-evidence-panel button.provenance-citation').click()
+    page.evaluate('clearKnowledgeChat({clearPersist:true})')
+    assert page.evaluate('window.__provenanceSignal.aborted')
+    page.evaluate("""() => {
+      window.__resolveProvenance(new Response(JSON.stringify({
+        subject: {answer_id:'answer-running', citation:'E1'}, nodes:[], integrity:{complete:true}
+      }), {headers:{'Content-Type':'application/json'}}));
+      window.__qaEnd();
+    }""")
+    page.wait_for_timeout(100)
+    assert page.locator('#provenance-drawer').is_hidden()
+    assert page.locator('.qa-turn').count() == 0
+    assert page.evaluate('(key) => JSON.parse(localStorage.getItem(key))', 'kg_qa_v1_' + workbench.project) is None

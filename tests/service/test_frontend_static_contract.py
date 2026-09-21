@@ -53,6 +53,9 @@ def test_assets_version_bumped_for_changed_files():
 
 def test_provenance_assets_precede_history_hydration():
     html = read('index.html')
+    assert '/assets/provenance-drawer.css?v=2' in html
+    assert '/assets/provenance-drawer.js?v=2' in html
+    assert '/assets/workbench.js?v=provenance-2' in html
     assert html.index('/assets/workbench.css') < html.index('/assets/provenance-drawer.css')
     assert html.index('/assets/ingest-mode.js') < html.index('/assets/provenance-drawer.js') < html.index('/assets/workbench.js')
 

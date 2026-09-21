@@ -243,6 +243,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
 /* Knowledge chat: one independent request per turn, decoupled from the search workspace. */
 (()=>{
   const chat=window.KnowledgeChat={};
+  const provenance=window.ProvenanceDrawer;
   const $c=id=>document.getElementById(id);
   const BOUNDARY=/[。！？!?；;]/;
   const GRAPH_HOPS=2;
@@ -279,6 +280,9 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
   const historyKey=()=>'kg_qa_v1_'+current;
   let qaHistory=(()=>{try{const v=JSON.parse(localStorage.getItem(historyKey()));return Array.isArray(v)?v:[];}catch{return [];}})();
   const persist=()=>{try{localStorage.setItem(historyKey(),JSON.stringify(qaHistory));}catch{}};
+  const evidenceSummary=rows=>(Array.isArray(rows)?rows:[]).map(row=>
+    provenance.sanitizeEvidenceSummary({...row,text_preview:row?.text_preview??row?.text}));
+  const answerContext=item=>({projectId:current,answerId:item.answer_id,evidence:item.evidence});
 
   const atEnd=()=>{const box=$c('qa-scroll');if(box)box.scrollTop=box.scrollHeight;};
   function addTurn(kind,text){
@@ -295,7 +299,15 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       const turn=addTurn(item.kind,item.kind==='user'?item.text:'');
       if(item.kind==='assistant'){
         const answer=turn.querySelector('.qa-answer');
-        if(answer)answer.textContent=item.text||'';
+        turn.dataset.state=item.error?'error':'done';
+        if(item.answer_id){
+          const evidence=evidenceSummary(item.evidence);
+          provenance.decorateAnswer(answer,item.text||'',answerContext({...item,evidence}));
+          addEvidence(turn,{...item,evidence});
+        }else{
+          if(answer)answer.textContent=item.text||'';
+          provenance.renderLegacyNote(turn);
+        }
         if(item.error){
           turn.dataset.state='error';
           const box=document.createElement('div');box.className='qa-error';box.setAttribute('role','alert');
@@ -315,14 +327,28 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-controls',panelId);
     toggle.textContent='查看 '+rows.length+' 条依据';
     const panel=document.createElement('div');panel.className='qa-evidence-panel';panel.id=panelId;panel.hidden=true;
-    panel.innerHTML=rows.map(row=>{
+    const projectId=current,answerId=payload.answer_id;
+    for(const row of rows){
+      const article=document.createElement('article');article.className='qa-evidence-item';
+      const citation=provenance.sanitizeEvidenceSummary(row).citation;
+      const link=document.createElement(answerId&&citation?'button':'b');
+      link.className='qa-citation';link.textContent='['+(row.citation||'')+']';
+      if(answerId&&citation){
+        link.type='button';link.className+=' secondary provenance-citation';
+        link.setAttribute('aria-label','查看引用 '+citation+' 的证据溯源');
+        link.onclick=()=>provenance.open({projectId,answerId,citation,trigger:link});
+      }
+      const excerpt=document.createElement('p');excerpt.textContent=row.text_preview??row.text??'';
+      const meta=document.createElement('p');meta.className='qa-evidence-meta subtle';
+      meta.textContent=(row.kind||'')+' · '+(labelOf(row.type)||'—')+' · 版本 '+(row.version??'—');
+      article.append(link,excerpt,meta);
       const seed=row.kind==='entity'?row.id:(row.kind==='relation'?row.subject_id:'');
-      const actions=[
-        seed?'<button type="button" data-evidence-node="'+esc(seed)+'">在图谱中查看</button>':'',
-        row.source_id?'<button type="button" class="secondary" data-evidence-source="'+esc(row.source_id)+'">查看来源</button>':'',
-      ].filter(Boolean).join('');
-      return '<article class="qa-evidence-item"><b class="qa-citation">['+esc(row.citation)+']</b><p>'+esc(row.text||'')+'</p><p class="qa-evidence-meta subtle">'+esc(row.kind||'')+' · '+esc(labelOf(row.type)||'—')+' · 版本 '+esc(row.version??'—')+'</p>'+(actions?'<div class="row">'+actions+'</div>':'')+'</article>';
-    }).join('');
+      const actions=document.createElement('div');actions.className='row';
+      if(seed){const button=document.createElement('button');button.type='button';button.dataset.evidenceNode=seed;button.textContent='在图谱中查看';actions.append(button);}
+      if(row.source_id){const button=document.createElement('button');button.type='button';button.className='secondary';button.dataset.evidenceSource=row.source_id;button.textContent='查看来源';actions.append(button);}
+      if(actions.childElementCount)article.append(actions);
+      panel.append(article);
+    }
     toggle.onclick=()=>{const open=toggle.getAttribute('aria-expanded')==='true';toggle.setAttribute('aria-expanded',String(!open));panel.hidden=open;};
     panel.querySelectorAll('[data-evidence-node]').forEach(node=>{node.onclick=async()=>{
       showTab('search');
@@ -340,11 +366,18 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     const box=document.createElement('div');box.className='qa-error';box.setAttribute('role','alert');
     const text=document.createElement('span');text.className='qa-error-text';text.textContent='回答失败：'+message;
     const retry=document.createElement('button');retry.type='button';retry.className='qa-retry';retry.textContent='重试';
-    retry.onclick=()=>{box.remove();replay();};
+    retry.onclick=()=>{if(!busy)replay();};
     box.append(text,retry);turn.append(box);retry.focus();atEnd();
   }
-  async function stream(body,turn){
+  async function stream(body,turn,historyIndex=qaHistory.length){
+    if(busy)return;
     const project=current,epoch=wb.epoch,mine=++serial;
+    if(turn)provenance.close(false);
+    const record={kind:'assistant',text:''};
+    qaHistory[historyIndex]=record;persist();
+    const capture=payload=>{
+      for(const key of ['answer_id','retrieval_run_id'])if(typeof payload?.[key]==='string'&&payload[key])record[key]=payload[key];
+    };
     busy=true;send.disabled=true;controller=new AbortController();
     progress.textContent='正在检索证据…';summary.textContent='';
     // 开启 LLM 组织答案时，检索完证据后还要等模型生成，明确提示避免误以为卡住
@@ -364,14 +397,15 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       if(item.event==='malformed')throw Error('服务返回了无法解析的流数据');
       if(item.event==='error')throw Error(item.data?.detail||'回答失败');
       if(item.event==='evidence'){
+        capture(item.data);record.evidence=evidenceSummary(item.data?.evidence);persist();
         const channels=item.data?.channels||{};
         summary.textContent='实体证据 '+(channels.entity??0)+' · 原文证据 '+(channels.chunk??0)+' · 图关系证据 '+(channels.graph_evidence??0);
-        addEvidence(target,item.data);
+        addEvidence(target,{...item.data,answer_id:record.answer_id});
         showRetrievalNotice(item.data);
       }else if(item.event==='delta'){
         const chunk=String(item.data?.text??'');
         text+=chunk;pending+=chunk;answer.textContent=text;speak(false);atEnd();
-      }else if(item.event==='done')finished=true;
+      }else if(item.event==='done'){capture(item.data);finished=true;}
     };
     try{
       const response=await fetch(endpoint('/qa/stream'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});
@@ -395,12 +429,15 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       if(!finished)throw Error('回答流提前结束');
       speak(true);
       target.dataset.state='done';progress.textContent='回答完成';
-      qaHistory.push({kind:'assistant',text});persist();
+      record.text=text;
+      provenance.decorateAnswer(answer,text,{projectId:project,answerId:record.answer_id,evidence:record.evidence});
+      persist();
     }catch(error){
+      if(mine!==serial||project!==current||epoch!==wb.epoch)return;
       failed=true;target.dataset.state='error';progress.textContent='';
       const emsg=error?.message||String(error);
-      qaHistory.push({kind:'assistant',text:text||'',error:emsg});persist();
-      addFailure(target,emsg,()=>stream(body,target));
+      record.text=text;record.error=emsg;persist();
+      addFailure(target,emsg,()=>stream(body,target,historyIndex));
     }finally{
       if(mine===serial){busy=false;controller=null;send.disabled=false;if(!failed&&project===current)input.focus();}
     }
@@ -413,6 +450,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
   }
   window.clearKnowledgeChat=({notify=false,clearPersist=false}={})=>{
     const had=transcript.childElementCount>0;
+    provenance.onProjectChange(current);
     serial++;busy=false;controller?.abort();controller=null;
     transcript.replaceChildren();live.textContent='';progress.textContent='';summary.textContent='';
     if(clearPersist){try{localStorage.removeItem(historyKey());}catch{}}
