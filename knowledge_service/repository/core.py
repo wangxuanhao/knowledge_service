@@ -1027,6 +1027,14 @@ class Repository:
             project_id, activity_id=activity_id, source_ref=source_ref,
             target_ref=target_ref)
 
+    def migrate_legacy_answer_graph(
+            self, project_id, *, answer_id, retrieval_id, expected_payload,
+            answer_payload, answer_edges, retrieval_edges):
+        return self._provenance.migrate_legacy_answer_graph(
+            project_id, answer_id=answer_id, retrieval_id=retrieval_id,
+            expected_payload=expected_payload, answer_payload=answer_payload,
+            answer_edges=answer_edges, retrieval_edges=retrieval_edges)
+
     def complete_retrieval_and_begin_answer(
             self, project_id, *, retrieval_id, answer_id, retrieval_payload=None,
             answer_payload=None, edges=None, completed_at=None, answer_started_at=None,

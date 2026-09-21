@@ -273,6 +273,74 @@ def test_answer_payload_keeps_only_frozen_refs_not_a_second_source_graph(provena
         doc['text'], chunk['text'], 'excerpt_before', 'excerpt_after', 'highlight', 'quote'))
 
 
+def test_edge_v0_answer_is_migrated_before_trace_without_losing_sources(provenance):
+    repo, service, project = provenance
+    document, chunk, ingest = _source(repo, project)
+    retrieval_id, answer_id, citation = 'rr_edge_v0', 'ans_edge_v0', 'E1'
+    record_ref = f"record-version:{chunk['version_id']}"
+    chunk_ref = f"chunk-version:{chunk['version_id']}"
+    document_ref = f"document-version:{document['version_id']}"
+    run_ref = f"ingest-run:{ingest['id']}"
+    citation_ref = f'answer:{answer_id}#{citation}'
+    audit = {'rank': 1, 'score': 0.75, 'channel': 'chunk', 'selected': True}
+    source = {
+        'document_id': document['id'], 'version_id': document['version_id'],
+        'version': document['version'], 'title': document['id'],
+        'excerpt_before': document['text'][:7],
+        'highlight': document['text'][7:15],
+        'excerpt_after': document['text'][15:30],
+    }
+    warning = {'code': 'legacy_warning', 'node_ref': document_ref,
+               'message': '历史链路包含已知缺口。'}
+    used = {'activity_id': answer_id, 'source_ref': f'answer:{answer_id}',
+            'relation': 'used', 'target_ref': f'retrieval-run:{retrieval_id}',
+            'ordinal': 0, 'payload': {}}
+    considered = {'activity_id': retrieval_id, 'source_ref': f'retrieval-run:{retrieval_id}',
+                  'relation': 'considered', 'target_ref': record_ref,
+                  'ordinal': 1, 'payload': audit}
+    offered = {'activity_id': answer_id, 'source_ref': citation_ref,
+               'relation': 'offered', 'target_ref': record_ref,
+               'ordinal': 2, 'payload': audit}
+    structural = [
+        {'activity_id': answer_id, 'source_ref': record_ref, 'relation': 'supported-by',
+         'target_ref': chunk_ref, 'ordinal': 3, 'payload': {}},
+        {'activity_id': answer_id, 'source_ref': chunk_ref, 'relation': 'sourced-from',
+         'target_ref': document_ref, 'ordinal': 4, 'payload': source},
+        {'activity_id': answer_id, 'source_ref': document_ref, 'relation': 'processed-by',
+         'target_ref': run_ref, 'ordinal': 5, 'payload': {
+             'run_id': ingest['id'], 'attempt': ingest['attempt'],
+             'status_at_capture': ingest['status'], 'created_at': ingest['created_at'],
+             'updated_at_at_capture': ingest['updated_at']}},
+    ]
+    graph = {'record_ref': record_ref, 'audit': audit, 'warnings': [warning],
+             'nodes': [{'type': 'document_version', 'ref': document_ref,
+                        'details': source}],
+             'edges': [used, considered, offered, *structural]}
+    repo.begin_provenance_activity(project, retrieval_id, 'retrieval', {
+        'query': 'legacy evidence', 'scope': {}, 'requested_mode': 'keyword',
+        'active_modes': ['keyword']})
+    repo.complete_retrieval_and_begin_answer(
+        project, retrieval_id=retrieval_id, answer_id=answer_id,
+        retrieval_payload={'query': 'legacy evidence', 'scope': {},
+                           'requested_mode': 'keyword', 'active_modes': ['keyword']},
+        answer_payload={'run_id': retrieval_id, 'offered': [citation], 'cited': [],
+                        'graphs': {citation: graph}, 'warnings': [],
+                        'answer': '', 'mode': None},
+        edges=[used, considered, offered, *structural])
+
+    trace = service.trace_answer_evidence(project, answer_id, citation)
+
+    occurrence = _nodes(trace, 'source_occurrence')[0]
+    assert occurrence['details']['highlight'] == document['text'][7:15]
+    assert warning in trace['integrity']['warnings']
+    assert trace['integrity']['complete'] is False
+    migrated = repo.get_provenance_activity(project, answer_id)['payload']
+    assert migrated['graph_schema'] == 'edge-v1' and 'graphs' not in migrated
+    stored = json.dumps([migrated, repo.list_provenance_edges(project)], ensure_ascii=False)
+    assert all(value not in stored for value in (
+        document['text'], source['highlight'], 'excerpt_before', 'excerpt_after'))
+
+
 def test_same_document_version_preserves_each_source_occurrence(provenance):
     repo, service, project = provenance
     text = 'alpha gap beta tail'
@@ -418,6 +486,20 @@ def test_manual_formal_record_is_complete_terminal(provenance, kind):
     trace = service.trace_answer_evidence(project, answer, 'E1')
     assert trace['integrity']['complete']
     assert _nodes(trace, 'record_version')[0]['details']['terminal_reason'] == 'manual_record'
+
+
+def test_failed_source_resolution_is_not_mislabeled_as_manual(provenance):
+    repo, service, project = provenance
+    document, chunk, _ = _source(repo, project)
+    record, _ = _mapped(repo, project, sources=[(document, chunk, None)])
+    repo._db.execute('DELETE FROM record_versions WHERE version_id=?', (chunk['version_id'],))
+    repo._db.commit()
+
+    _, answer, _ = _capture(service, project, [record])
+    trace = service.trace_answer_evidence(project, answer, 'E1')
+
+    assert 'chunk_version_missing' in _codes(trace)
+    assert _nodes(trace, 'record_version')[0]['details']['terminal_reason'] is None
 
 
 def test_mutating_assertion_and_canonical_binding_cannot_change_frozen_trace(provenance):

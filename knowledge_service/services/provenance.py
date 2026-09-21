@@ -154,6 +154,7 @@ class ProvenanceService:
 
     def complete_answer(self, project_id, answer_id, run_id, answer, mode, evidence):
         activity = self.repository.get_provenance_activity(project_id, answer_id)
+        activity = self._ensure_edge_v1(project_id, activity)
         payload = activity['payload']
         if activity['kind'] != 'answer' or payload.get('run_id') != run_id:
             raise ValueError('答案和检索运行不匹配')
@@ -171,7 +172,7 @@ class ProvenanceService:
                  if edge['relation'] != 'cites']
         next_ordinal = max((edge['ordinal'] for edge in edges), default=-1) + 1
         for citation in cited:
-            offered_edge = self._offered_edge(project_id, answer_id, citation, edges)
+            offered_edge = self._offered_edge(answer_id, citation, edges)
             edges.append({'activity_id': answer_id, 'source_ref': f'answer:{answer_id}#{citation}',
                           'relation': 'cites', 'target_ref': offered_edge['target_ref'],
                           'ordinal': next_ordinal, 'payload': {}})
@@ -183,6 +184,8 @@ class ProvenanceService:
         if status not in {'failed', 'cancelled'}:
             raise ValueError('失败活动状态必须是 failed 或 cancelled')
         activity = self.repository.get_provenance_activity(project_id, activity_id)
+        if activity['kind'] == 'answer':
+            activity = self._ensure_edge_v1(project_id, activity)
         if isinstance(public_error, dict):
             error = {'type': _text(public_error.get('type'), 100),
                      'message': _text(public_error.get('message'), 500)}
@@ -196,6 +199,7 @@ class ProvenanceService:
 
     def trace_answer_evidence(self, project_id, answer_id, citation):
         activity = self.repository.get_provenance_activity(project_id, answer_id)
+        activity = self._ensure_edge_v1(project_id, activity)
         payload = activity['payload']
         if activity['kind'] != 'answer' or citation not in payload.get('offered', ()):
             raise KeyError(citation)
@@ -203,7 +207,7 @@ class ProvenanceService:
         retrieval = self.repository.get_provenance_activity(project_id, run_id)
         request = retrieval['payload']
         answer_edges = self.repository.list_provenance_edges(project_id, activity_id=answer_id)
-        offered = self._offered_edge(project_id, answer_id, citation, answer_edges)
+        offered = self._offered_edge(answer_id, citation, answer_edges)
         graph_edges = [edge for edge in answer_edges
                        if edge['relation'] == 'used' or
                        edge['payload'].get('citation') == citation or
@@ -241,13 +245,168 @@ class ProvenanceService:
         }
 
     @staticmethod
-    def _offered_edge(project_id, answer_id, citation, edges):
+    def _offered_edge(answer_id, citation, edges):
         matches = [edge for edge in edges
                    if edge['source_ref'] == f'answer:{answer_id}#{citation}'
                    and edge['relation'] == 'offered']
         if len(matches) != 1:
             raise KeyError(citation)
         return matches[0]
+
+    def _ensure_edge_v1(self, project_id, activity):
+        payload = activity['payload']
+        if payload.get('graph_schema') == 'edge-v1' or 'graphs' not in payload:
+            return activity
+        graphs = payload.get('graphs')
+        run_id = payload.get('run_id')
+        if not isinstance(graphs, dict) or not isinstance(run_id, str) or not run_id:
+            raise ValueError('旧溯源活动格式无效，无法安全迁移')
+        answer_id = activity['id']
+        answer_edges, retrieval_edges = self._migrate_edge_v0_edges(
+            project_id, answer_id, run_id, payload, graphs)
+        migrated_payload = {key: value for key, value in payload.items() if key != 'graphs'}
+        migrated_payload['graph_schema'] = 'edge-v1'
+        return self.repository.migrate_legacy_answer_graph(
+            project_id, answer_id=answer_id, retrieval_id=run_id,
+            expected_payload=payload, answer_payload=migrated_payload,
+            answer_edges=answer_edges, retrieval_edges=retrieval_edges)
+
+    def _migrate_edge_v0_edges(self, project_id, answer_id, run_id, payload, graphs):
+        existing_answer = self.repository.list_provenance_edges(
+            project_id, activity_id=answer_id)
+        existing_retrieval = self.repository.list_provenance_edges(
+            project_id, activity_id=run_id)
+        created = {(edge['activity_id'], edge['source_ref'], edge['relation'],
+                    edge['target_ref'], edge['ordinal']): edge['created_at']
+                   for edge in [*existing_answer, *existing_retrieval]}
+        answer_edges, retrieval_edges = [], []
+
+        def append(target, activity_id, source_ref, relation, target_ref, edge_payload,
+                   legacy=None):
+            edge = {'activity_id': activity_id, 'source_ref': source_ref,
+                    'relation': relation, 'target_ref': target_ref,
+                    'ordinal': len(target), 'payload': edge_payload}
+            if legacy is not None:
+                key = (legacy.get('activity_id'), legacy.get('source_ref'),
+                       legacy.get('relation'), legacy.get('target_ref'),
+                       legacy.get('ordinal'))
+                if key in created:
+                    edge['created_at'] = created[key]
+            target.append(edge)
+
+        used = next((edge for edge in existing_answer if edge['relation'] == 'used'), None)
+        if used is None:
+            raise ValueError('旧溯源活动缺少 answer → retrieval 关联')
+        append(answer_edges, answer_id, used['source_ref'], 'used', used['target_ref'], {}, used)
+        occurrence = 0
+        for citation in payload.get('offered', ()):
+            graph = graphs.get(citation)
+            if not isinstance(citation, str) or not _CITATION.fullmatch(citation) or not isinstance(graph, dict):
+                raise ValueError('旧溯源活动的证据引用无效')
+            record_ref = graph.get('record_ref')
+            graph_edges = graph.get('edges')
+            if not isinstance(record_ref, str) or not isinstance(graph_edges, list):
+                raise ValueError('旧溯源活动的证据图无效')
+            audit = graph.get('audit') if isinstance(graph.get('audit'), dict) else {}
+            frozen = {
+                'rank': audit.get('rank') if type(audit.get('rank')) is int else None,
+                'score': audit.get('score') if type(audit.get('score')) in (int, float)
+                         and math.isfinite(audit['score']) else None,
+                'channel': _text(audit.get('channel')),
+                'selected': audit.get('selected') is True,
+                'citation': citation,
+                'warnings': self._legacy_warnings(graph.get('warnings')),
+            }
+            citation_ref = f'answer:{answer_id}#{citation}'
+            old_offered = next((edge for edge in graph_edges
+                                if edge.get('relation') == 'offered'
+                                and edge.get('source_ref') == citation_ref), None)
+            old_considered = next((edge for edge in graph_edges
+                                   if edge.get('relation') == 'considered'
+                                   and edge.get('activity_id') == run_id), None)
+            if old_offered is None or old_considered is None:
+                raise ValueError('旧溯源活动缺少 offered/considered 关联')
+            append(answer_edges, answer_id, citation_ref, 'offered', record_ref,
+                   frozen, old_offered)
+            append(retrieval_edges, run_id, f'retrieval-run:{run_id}', 'considered',
+                   record_ref, frozen, old_considered)
+            for edge in graph_edges:
+                relation = edge.get('relation')
+                if edge.get('activity_id') != answer_id or relation in {
+                        'used', 'offered', 'cites'}:
+                    continue
+                if relation == 'sourced-from' and isinstance(
+                        edge.get('target_ref'), str) and edge['target_ref'].startswith('document-version:'):
+                    occurrence += 1
+                    occurrence_ref = f'source-occurrence:{answer_id}#{citation}:legacy:{occurrence}'
+                    start, end = self._legacy_source_span(
+                        project_id, edge['source_ref'], edge['target_ref'], edge.get('payload'))
+                    append(answer_edges, answer_id, edge['source_ref'], 'sourced-from',
+                           occurrence_ref, {'start_char': start, 'end_char': end,
+                                            'citation': citation}, edge)
+                    append(answer_edges, answer_id, occurrence_ref, 'sourced-from',
+                           edge['target_ref'], {'citation': citation}, edge)
+                    continue
+                migrated = {'citation': citation}
+                if relation == 'processed-by':
+                    old_payload = edge.get('payload') if isinstance(edge.get('payload'), dict) else {}
+                    migrated.update({key: old_payload.get(key) for key in (
+                        'run_id', 'attempt', 'status_at_capture', 'created_at',
+                        'updated_at_at_capture')})
+                elif relation == 'supported-by' and isinstance(
+                        edge.get('target_ref'), str) and edge['target_ref'].startswith('assertion:'):
+                    assertion = self.repository.get_assertion(
+                        project_id, edge['target_ref'].removeprefix('assertion:'))
+                    migrated['support_origin'] = ('source' if any(assertion.get(key) for key in (
+                        'document_id', 'document_version_id', 'chunk_id')) else 'manual')
+                append(answer_edges, answer_id, edge['source_ref'], relation,
+                       edge['target_ref'], migrated, edge)
+        for edge in existing_answer:
+            if edge['relation'] == 'cites':
+                append(answer_edges, answer_id, edge['source_ref'], 'cites',
+                       edge['target_ref'], {}, edge)
+        return answer_edges, retrieval_edges
+
+    @staticmethod
+    def _legacy_warnings(raw):
+        warnings = []
+        for item in raw if isinstance(raw, list) else ():
+            if not isinstance(item, dict):
+                continue
+            code, ref, message = (_text(item.get('code'), 100),
+                                  _text(item.get('node_ref'), 500),
+                                  _text(item.get('message'), 500))
+            if all(isinstance(value, str) and value for value in (code, ref, message)):
+                warnings.append(_warning(code, ref, message))
+        return warnings
+
+    def _legacy_source_span(self, project_id, source_ref, document_ref, raw):
+        document = self.repository.get_record_version(
+            project_id, document_ref.removeprefix('document-version:'))
+        text = document['text']
+        raw = raw if isinstance(raw, dict) else {}
+        before, highlight, after = (raw.get(key) if isinstance(raw.get(key), str) else ''
+                                    for key in ('excerpt_before', 'highlight', 'excerpt_after'))
+        context = before + highlight + after
+        if highlight and context:
+            indexes, offset = [], 0
+            while True:
+                index = text.find(context, offset)
+                if index < 0:
+                    break
+                indexes.append(index)
+                offset = index + 1
+            if len(indexes) == 1:
+                start = indexes[0] + len(before)
+                return start, start + len(highlight)
+        if source_ref.startswith('chunk-version:'):
+            chunk = self.repository.get_record_version(
+                project_id, source_ref.removeprefix('chunk-version:'))
+            metadata = chunk.get('metadata') if isinstance(chunk.get('metadata'), dict) else {}
+            start, end = metadata.get('start_char'), metadata.get('end_char')
+            if type(start) is int and type(end) is int and 0 <= start < end <= len(text):
+                return start, end
+        return 0, min(len(text), 1000)
 
 
 class _SourceCapture:
@@ -315,7 +474,10 @@ class _SourceCapture:
             kind=assertion['kind'], status_at_capture=assertion['status'],
             quote=_text(assertion.get('quote'), 1000), start_char=assertion.get('start_char'),
             end_char=assertion.get('end_char')))
-        self.edge(record_ref, 'supported-by', assertion_ref)
+        has_source = any(assertion.get(key) for key in (
+            'document_id', 'document_version_id', 'chunk_id'))
+        self.edge(record_ref, 'supported-by', assertion_ref, {
+            'support_origin': 'source' if has_source else 'manual'})
         events = self.repo.list_assertion_events(self.project, assertion['id'])
         event = next((event for event in events if event['id'] == mapping['assertion_event_id']), None)
         if event is None:
@@ -326,7 +488,7 @@ class _SourceCapture:
                 from_status=event['from_status'], to_status=event['to_status'],
                 actor=_text(event['actor']), reason=_text(event['reason'], 1000), created_at=event['created_at']))
             self.edge(assertion_ref, 'decided-by', event_ref)
-        if not any(assertion.get(key) for key in ('document_id', 'document_version_id', 'chunk_id')):
+        if not has_source:
             return True
         if not assertion.get('document_version_id'):
             self.warn('legacy_unversioned_source', assertion_ref, '断言来源没有精确文档版本。')
@@ -551,9 +713,9 @@ class _TraceProjection:
         for node in nodes:
             if node['type'] != 'record_version':
                 continue
-            supports = [edge['target_ref'] for edge in outgoing.get(node['ref'], ())
-                        if edge['relation'] == 'supported-by'
-                        and edge['target_ref'] in assertion_refs]
-            if supports and all(not any(edge['relation'] == 'extracted-from'
-                                        for edge in outgoing.get(ref, ())) for ref in supports):
+            support_edges = [edge for edge in outgoing.get(node['ref'], ())
+                             if edge['relation'] == 'supported-by'
+                             and edge['target_ref'] in assertion_refs]
+            if support_edges and all(edge['payload'].get('support_origin') == 'manual'
+                                     for edge in support_edges):
                 node['details']['terminal_reason'] = 'manual_record'

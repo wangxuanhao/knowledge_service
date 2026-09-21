@@ -352,6 +352,54 @@ class ProvenanceStore:
                     ORDER BY ordinal,id''', values).fetchall()
         return [self._edge(row) for row in rows]
 
+    def migrate_legacy_answer_graph(
+            self, project_id, *, answer_id, retrieval_id, expected_payload,
+            answer_payload, answer_edges, retrieval_edges):
+        """Atomically replace an edge-v0 payload graph with its edge-v1 ledger.
+
+        This is a one-way data migration used on first legacy trace access.  The
+        compare-and-swap guard prevents a concurrent reader from overwriting an
+        already migrated activity.
+        """
+        with self.repo._transaction():
+            self.repo.get_project(project_id)
+            row = self._db.execute(
+                'SELECT * FROM provenance_activities WHERE project_id=? AND id=?',
+                (project_id, answer_id)).fetchone()
+            if row is None:
+                raise KeyError(answer_id)
+            current = self._activity(row)
+            if current['payload'].get('graph_schema') == 'edge-v1':
+                return current
+            if current['kind'] != 'answer' or not self._strict_json_equal(
+                    current['payload'], expected_payload):
+                raise ValueError('版本冲突：旧溯源活动已改变')
+            retrieval = self._db.execute(
+                '''SELECT kind FROM provenance_activities
+                   WHERE project_id=? AND id=?''',
+                (project_id, retrieval_id)).fetchone()
+            if retrieval is None or retrieval['kind'] != 'retrieval':
+                raise ValueError('旧溯源活动缺少对应检索运行')
+            grouped = ((answer_id, list(answer_edges)),
+                       (retrieval_id, list(retrieval_edges)))
+            for activity_id, edges in grouped:
+                for edge in edges:
+                    self._validate_edge(edge)
+                    if edge['activity_id'] != activity_id:
+                        raise ValueError('迁移边不属于指定溯源活动')
+            self._db.execute(
+                'UPDATE provenance_activities SET payload=? WHERE project_id=? AND id=?',
+                (_json(self._payload(answer_payload)), project_id, answer_id))
+            for activity_id, edges in grouped:
+                self._db.execute(
+                    'DELETE FROM provenance_edges WHERE project_id=? AND activity_id=?',
+                    (project_id, activity_id))
+                for edge in edges:
+                    self._insert_edge(project_id, edge)
+            return self._activity(self._db.execute(
+                'SELECT * FROM provenance_activities WHERE project_id=? AND id=?',
+                (project_id, answer_id)).fetchone())
+
     # -------------------------------------------------------------- 原子组合入口
     def complete_retrieval_and_begin_answer(
             self, project_id, *, retrieval_id, answer_id, retrieval_payload=None,
