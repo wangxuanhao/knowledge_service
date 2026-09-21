@@ -1,7 +1,12 @@
-from knowledge_service.embeddings import HashingEncoder
-from knowledge_service.ontology import Ontology
+import sqlite3
+
+import pytest
+
+from knowledge_service.integrations.embeddings import HashingEncoder
+from knowledge_service.services.formal_writes import FormalFactWriter
+from knowledge_service.services.ontology import Ontology
 from knowledge_service.repository import Repository
-from knowledge_service.service import KnowledgeService
+from knowledge_service.services.service import KnowledgeService
 
 
 def _system(tmp_path):
@@ -75,3 +80,192 @@ def test_stale_formal_write_rolls_back_record_and_assertion(tmp_path):
 
     assert repo.get_record(project_id, 'a')['text'] == '张三'
     assert len(repo.list_assertions(project_id, canonical_record_id='a')) == 1
+
+
+def _entity(record_id, text=None):
+    return {'id': record_id, 'kind': 'entity', 'type': 'Person', 'text': text or record_id}
+
+
+def _assertion(assertion_id, target):
+    return {'id': assertion_id, 'kind': 'entity', 'payload': {},
+            'canonical_record_id': target}
+
+
+def _write(repo, project_id, records=(), assertions=(), expected=None, **policy):
+    return FormalFactWriter(repo).apply(
+        'manual_write', project_id, assertions, expected or {},
+        {'records': list(records), **policy})
+
+
+def _mapping_ids(repo, project_id):
+    return {(row['record_id'], row['record_version_id'], row['assertion_id'],
+             row['assertion_event_id'])
+            for row in repo.list_record_version_assertions(project_id)}
+
+
+def test_new_entity_and_relation_freeze_exact_saved_versions_and_acceptance_events(tmp_path):
+    repo, _, project_id = _system(tmp_path)
+    result = _write(repo, project_id, [
+        _entity('a'), _entity('b'),
+        {'id': 'r', 'kind': 'relation', 'type': 'knows', 'text': 'a knows b',
+         'subject_id': 'a', 'object_id': 'b'}])
+    versions = {row['id']: row['version_id'] for row in result['accepted_records']}
+    expected = set()
+    for assertion in result['assertion_updates']:
+        event = repo.list_assertion_events(project_id, assertion['id'])[-1]
+        assert event['decision_version'] == assertion['decision_version']
+        assert event['to_status'] == 'accepted'
+        target = assertion['canonical_record_id']
+        expected.add((target, versions[target], assertion['id'], event['id']))
+    assert len(expected) == 3
+    assert _mapping_ids(repo, project_id) == expected
+
+
+def test_record_revision_keeps_old_and_new_support_on_their_exact_versions(tmp_path):
+    repo, _, project_id = _system(tmp_path)
+    first = _write(repo, project_id, [_entity('a', 'old')])
+    old_mappings = _mapping_ids(repo, project_id)
+    second = _write(repo, project_id, [_entity('a', 'new')], expected={'a': 1})
+
+    assert len(old_mappings) == 1
+    assert old_mappings < _mapping_ids(repo, project_id)
+    for result in (first, second):
+        record = result['accepted_records'][0]
+        assertion = result['assertion_updates'][0]
+        mappings = repo.list_record_version_assertions(
+            project_id, record_version_id=record['version_id'])
+        assert [row['assertion_id'] for row in mappings] == [assertion['id']]
+
+
+def test_duplicate_relation_support_uses_selected_existing_version(tmp_path):
+    repo, _, project_id = _system(tmp_path)
+    relation = {'id': 'r', 'kind': 'relation', 'type': 'knows', 'text': 'a knows b',
+                'subject_id': 'a', 'object_id': 'b'}
+    first = _write(repo, project_id, [relation])['accepted_records'][0]
+    second = _write(repo, project_id, [{**relation, 'id': 'duplicate'}])
+    assertion = second['assertion_updates'][0]
+    mappings = repo.list_record_version_assertions(project_id, assertion_id=assertion['id'])
+
+    assert len(mappings) == 1
+    assert mappings[0]['record_id'] == 'r'
+    assert mappings[0]['record_version_id'] == first['version_id']
+    assert mappings[0]['assertion_event_id'] == repo.list_assertion_events(
+        project_id, assertion['id'])[-1]['id']
+
+
+def test_assertion_only_approval_selects_version_before_transition(tmp_path, monkeypatch):
+    repo, _, project_id = _system(tmp_path)
+    target = repo.put_record(project_id, _entity('a', 'approved version'))
+    pending = repo.create_assertion(project_id, {
+        'id': 'pending', 'kind': 'entity', 'payload': {}})
+    transition = repo._transition_assertion
+
+    def transition_then_revise(*args, **kwargs):
+        accepted = transition(*args, **kwargs)
+        repo._put(project_id, _entity('a', 'later version'), 1)
+        return accepted
+
+    monkeypatch.setattr(repo, '_transition_assertion', transition_then_revise)
+    result = FormalFactWriter(repo).apply('approve_review', project_id, [], {}, {
+        'records': [], 'assertion_decisions': [{
+            'id': pending['id'], 'expected_version': 1, 'status': 'accepted',
+            'canonical_record_id': 'a', 'reason': 'review accepted', 'actor': 'reviewer'}]})
+
+    assert result['accepted_records'] == []
+    mappings = repo.list_record_version_assertions(project_id, assertion_id='pending')
+    assert len(mappings) == 1
+    assert mappings[0]['record_version_id'] == target['version_id']
+    assert repo.get_record(project_id, 'a')['version_id'] != target['version_id']
+
+
+def test_identical_assertion_replay_is_idempotent_but_new_version_conflicts(tmp_path):
+    repo, _, project_id = _system(tmp_path)
+    assertion = _assertion('support', 'a')
+    _write(repo, project_id, [_entity('a')], [assertion], suppress_auto_assertions=True)
+    before = _mapping_ids(repo, project_id)
+    events = repo.list_assertion_events(project_id)
+    _write(repo, project_id, assertions=[assertion])
+
+    assert len(before) == 1
+    assert _mapping_ids(repo, project_id) == before
+    assert repo.list_assertion_events(project_id) == events
+    with pytest.raises(ValueError, match='冲突'):
+        _write(repo, project_id, [_entity('a', 'revision')], [assertion],
+               expected={'a': 1}, suppress_auto_assertions=True)
+    assert repo.get_record(project_id, 'a')['version'] == 1
+    assert _mapping_ids(repo, project_id) == before
+    assert repo.list_assertion_events(project_id) == events
+
+
+def test_previously_accepted_unmapped_assertion_cannot_guess_a_historical_version(tmp_path):
+    repo, _, project_id = _system(tmp_path)
+    repo.put_record(project_id, _entity('a', 'original'))
+    assertion = _assertion('legacy-support', 'a')
+    repo.create_assertion(project_id, {key: value for key, value in assertion.items()
+                                      if key != 'canonical_record_id'})
+    repo.transition_assertion(project_id, 'legacy-support', 1, 'accepted',
+                              'legacy acceptance', 'reviewer', 'a')
+    repo.put_record(project_id, _entity('a', 'later revision'), expected_version=1)
+
+    with pytest.raises(ValueError, match='冲突'):
+        _write(repo, project_id, assertions=[assertion])
+    assert repo.list_record_version_assertions(project_id) == []
+    assert len(repo.list_assertion_events(project_id, 'legacy-support')) == 2
+
+
+@pytest.mark.parametrize('write_target', [False, True])
+def test_merge_rebind_freezes_new_event_without_redirecting_old_mapping(tmp_path, write_target):
+    repo, _, project_id = _system(tmp_path)
+    _write(repo, project_id, [_entity('source'), _entity('target')])
+    before = _mapping_ids(repo, project_id)
+    source_assertion = repo.list_assertions(project_id, canonical_record_id='source')[0]
+    result = FormalFactWriter(repo).apply('merge_rewrite', project_id, [], {}, {
+        'records': [_entity('target', 'merged')] if write_target else [],
+        'ledger': {'id': 'merge', 'redirects': {'source': 'target'}}})
+    target = (result['accepted_records'][0] if write_target
+              else repo.get_record(project_id, 'target'))
+    event = repo.list_assertion_events(project_id, source_assertion['id'])[-1]
+
+    assert event['decision_version'] == source_assertion['decision_version'] + 1
+    assert event['canonical_record_id'] == 'target'
+    assert _mapping_ids(repo, project_id) == before | {(
+        'target', target['version_id'], source_assertion['id'], event['id'])}
+
+
+def test_mapping_failure_rolls_back_records_assertions_events_and_prior_mappings(tmp_path, monkeypatch):
+    repo, _, project_id = _system(tmp_path)
+    insert_mapping = repo._provenance._insert_mapping
+    inserted = []
+
+    def insert_then_fail(*args, **kwargs):
+        result = insert_mapping(*args, **kwargs)
+        inserted.append(result)
+        if len(inserted) == 2:
+            raise RuntimeError('mapping failed after insert')
+        return result
+
+    monkeypatch.setattr(repo._provenance, '_insert_mapping', insert_then_fail)
+    with pytest.raises(RuntimeError, match='mapping failed after insert'):
+        _write(repo, project_id, [_entity('a'), _entity('b')])
+    assert len(inserted) == 2
+    assert repo.current_records(project_id) == []
+    assert repo.list_assertions(project_id) == []
+    assert repo.list_assertion_events(project_id) == []
+    assert repo.list_record_version_assertions(project_id) == []
+
+
+def test_wrong_assertion_event_fk_rolls_back_formal_write(tmp_path, monkeypatch):
+    repo, _, project_id = _system(tmp_path)
+    insert_mapping = repo._provenance._insert_mapping
+
+    def use_wrong_event(project_id, record_id, version_id, assertion_id, event_id, created_at=None):
+        return insert_mapping(project_id, record_id, version_id, assertion_id,
+                              'nonexistent-event', created_at)
+
+    monkeypatch.setattr(repo._provenance, '_insert_mapping', use_wrong_event)
+    with pytest.raises(sqlite3.IntegrityError):
+        _write(repo, project_id, [_entity('a')])
+    assert repo.current_records(project_id) == []
+    assert repo.list_assertions(project_id) == []
+    assert repo.list_assertion_events(project_id) == []
+    assert repo.list_record_version_assertions(project_id) == []
