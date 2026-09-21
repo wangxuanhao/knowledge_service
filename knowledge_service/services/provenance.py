@@ -223,6 +223,7 @@ class ProvenanceService:
         compatible = owned or [edge for edge in considered
                                if 'answer_id' not in edge['payload']]
         graph_edges += compatible[:1]
+        retrieval_edge_missing = not compatible
         citation_status = ('cited' if citation in payload['cited'] else
                            'uncited' if activity['status'] == 'completed' else 'offered')
         nodes = _TraceProjection(
@@ -236,6 +237,10 @@ class ProvenanceService:
         ]
         warnings = [dict(warning) for warning in offered['payload'].get('warnings', ())]
         warnings += [dict(warning) for warning in payload['warnings']]
+        if retrieval_edge_missing:
+            warnings.append(_warning(
+                'retrieval_edge_missing', f'retrieval-run:{run_id}',
+                '检索运行缺少该答案证据对应的 considered 关联。'))
         warnings.sort(key=lambda item: (item['node_ref'], item['code'], item['message']))
         return {
             'schema_version': '1.0',
@@ -269,15 +274,14 @@ class ProvenanceService:
         if not isinstance(graphs, dict) or not isinstance(run_id, str) or not run_id:
             raise ValueError('旧溯源活动格式无效，无法安全迁移')
         answer_id = activity['id']
-        answer_edges, retrieval_edges, replace_ids = self._migrate_edge_v0_edges(
+        answer_edges, retrieval_edges = self._migrate_edge_v0_edges(
             project_id, answer_id, run_id, payload, graphs)
         migrated_payload = {key: value for key, value in payload.items() if key != 'graphs'}
         migrated_payload['graph_schema'] = 'edge-v1'
         return self.repository.migrate_legacy_answer_graph(
             project_id, answer_id=answer_id, retrieval_id=run_id,
             expected_payload=payload, answer_payload=migrated_payload,
-            answer_edges=answer_edges, retrieval_edges=retrieval_edges,
-            retrieval_replace_edge_ids=replace_ids)
+            answer_edges=answer_edges, retrieval_edges=retrieval_edges)
 
     def _migrate_edge_v0_edges(self, project_id, answer_id, run_id, payload, graphs):
         existing_answer = self.repository.list_provenance_edges(
@@ -288,7 +292,7 @@ class ProvenanceService:
             (edge['activity_id'], edge['source_ref'], edge['relation'],
              edge['target_ref'], edge['ordinal']): edge
             for edge in [*existing_answer, *existing_retrieval]}
-        answer_edges, retrieval_edges, replace_ids = [], [], []
+        answer_edges, retrieval_edges = [], []
 
         def append(target, activity_id, source_ref, relation, target_ref, edge_payload,
                    legacy=None, ordinal=None):
@@ -340,12 +344,6 @@ class ProvenanceService:
                 raise ValueError('旧溯源活动缺少 offered/considered 关联')
             append(answer_edges, answer_id, citation_ref, 'offered', record_ref,
                    frozen, old_offered)
-            old_key = (old_considered.get('activity_id'), old_considered.get('source_ref'),
-                       old_considered.get('relation'), old_considered.get('target_ref'),
-                       old_considered.get('ordinal'))
-            old_row = existing_by_key.get(old_key)
-            if old_row is not None and 'answer_id' not in old_row['payload']:
-                replace_ids.append(old_row['id'])
             append(retrieval_edges, run_id, f'retrieval-run:{run_id}', 'considered',
                    record_ref, frozen, old_considered,
                    ordinal=old_considered.get('ordinal')
@@ -385,7 +383,7 @@ class ProvenanceService:
             if edge['relation'] == 'cites':
                 append(answer_edges, answer_id, edge['source_ref'], 'cites',
                        edge['target_ref'], {}, edge)
-        return answer_edges, retrieval_edges, replace_ids
+        return answer_edges, retrieval_edges
 
     @staticmethod
     def _legacy_warnings(raw):

@@ -354,8 +354,7 @@ class ProvenanceStore:
 
     def migrate_legacy_answer_graph(
             self, project_id, *, answer_id, retrieval_id, expected_payload,
-            answer_payload, answer_edges, retrieval_edges,
-            retrieval_replace_edge_ids):
+            answer_payload, answer_edges, retrieval_edges):
         """Atomically replace an edge-v0 payload graph with its edge-v1 ledger.
 
         This is a one-way data migration used on first legacy trace access.  The
@@ -388,18 +387,6 @@ class ProvenanceStore:
                     self._validate_edge(edge)
                     if edge['activity_id'] != activity_id:
                         raise ValueError('迁移边不属于指定溯源活动')
-            if not isinstance(retrieval_replace_edge_ids, (list, tuple, set)) or any(
-                    not isinstance(edge_id, str) or not edge_id
-                    for edge_id in retrieval_replace_edge_ids):
-                raise ValueError('待替换 retrieval 边标识无效')
-            replace_ids = set(retrieval_replace_edge_ids)
-            if replace_ids:
-                rows = self._db.execute(
-                    f'''SELECT id,activity_id FROM provenance_edges
-                        WHERE project_id=? AND id IN ({','.join('?' for _ in replace_ids)})''',
-                    (project_id, *sorted(replace_ids))).fetchall()
-                if any(row['activity_id'] != retrieval_id for row in rows):
-                    raise ValueError('待替换边不属于指定 retrieval')
             self._db.execute(
                 'UPDATE provenance_activities SET payload=? WHERE project_id=? AND id=?',
                 (_json(self._payload(answer_payload)), project_id, answer_id))
@@ -408,12 +395,6 @@ class ProvenanceStore:
                 (project_id, answer_id))
             for edge in answer_edges:
                 self._insert_edge(project_id, edge)
-            if replace_ids:
-                self._db.execute(
-                    f'''DELETE FROM provenance_edges
-                        WHERE project_id=? AND activity_id=?
-                          AND id IN ({','.join('?' for _ in replace_ids)})''',
-                    (project_id, retrieval_id, *sorted(replace_ids)))
             existing = {self._edge_key(row) for row in self._db.execute(
                 '''SELECT * FROM provenance_edges
                    WHERE project_id=? AND activity_id=?''',
