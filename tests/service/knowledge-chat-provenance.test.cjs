@@ -83,10 +83,28 @@ test('retry replaces failed assistant history and new identifiers without duplic
   const env=setup();env.submit();env.emit('evidence',evidence('old'));env.emit('error',{detail:'failed'});await settle();
   assert.equal(env.history()[1].error,'failed');
   env.get('qa-transcript').querySelector('.qa-retry').dispatch('click');
-  env.emit('evidence',evidence('new'));env.emit('delta',{text:'ok [E1]'});env.emit('done',{});env.streams.at(-1).close();await settle();
+  env.emit('evidence',evidence('new'));env.emit('delta',{text:'ok [E1]'});await settle();
+  assert.equal(env.history()[1].error,'failed','pending retry must not overwrite the last terminal history');
+  assert.equal(env.history()[1].answer_id,'old');
+  env.emit('done',{});env.streams.at(-1).close();await settle();
   assert.equal(env.requests.length,2);assert.deepEqual(env.requests[0],env.requests[1]);
   assert.equal(env.history().length,2);assert.equal(env.history()[1].answer_id,'new');assert.equal(env.history()[1].retrieval_run_id,'run-new');
   assert.equal(env.history()[1].error,undefined);assert.equal(env.get('qa-transcript').children.length,2);
+});
+
+test('interrupted streams restore only the submitted question, never a blank completed answer',async()=>{
+  for(const phase of ['submit','evidence','partial']){
+    const env=setup();env.submit();
+    if(phase!=='submit')env.emit('evidence',evidence('pending'));
+    if(phase==='partial')env.emit('delta',{text:'unfinished answer [E1]'});
+    await settle();
+    assert.deepEqual(env.history(),[{kind:'user',text:'question'}],phase+' must not persist a pending assistant');
+    env.window.clearKnowledgeChat();
+    assert.equal(env.get('qa-transcript').querySelectorAll('.qa-turn-user').length,1);
+    assert.equal(env.get('qa-transcript').querySelectorAll('.qa-turn-assistant').length,0);
+    env.streams.at(-1).close();await settle();
+    assert.deepEqual(env.history(),[{kind:'user',text:'question'}],'interrupted reader must not persist a terminal state');
+  }
 });
 
 test('legacy text stays inert and clearing/project change cancels requests without stale persistence',async()=>{

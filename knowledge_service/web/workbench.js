@@ -374,7 +374,8 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     const project=current,epoch=wb.epoch,mine=++serial;
     if(turn)provenance.close(false);
     const record={kind:'assistant',text:''};
-    qaHistory[historyIndex]=record;persist();
+    // Reserve the retry slot in memory; only terminal answers belong in saved history.
+    qaHistory[historyIndex]=record;
     const capture=payload=>{
       for(const key of ['answer_id','retrieval_run_id'])if(typeof payload?.[key]==='string'&&payload[key])record[key]=payload[key];
     };
@@ -397,7 +398,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       if(item.event==='malformed')throw Error('服务返回了无法解析的流数据');
       if(item.event==='error')throw Error(item.data?.detail||'回答失败');
       if(item.event==='evidence'){
-        capture(item.data);record.evidence=evidenceSummary(item.data?.evidence);persist();
+        capture(item.data);record.evidence=evidenceSummary(item.data?.evidence);
         const channels=item.data?.channels||{};
         summary.textContent='实体证据 '+(channels.entity??0)+' · 原文证据 '+(channels.chunk??0)+' · 图关系证据 '+(channels.graph_evidence??0);
         addEvidence(target,{...item.data,answer_id:record.answer_id});
