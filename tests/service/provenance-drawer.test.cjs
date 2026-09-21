@@ -79,8 +79,9 @@ function setup(fetch,{narrow=false,qa=false}={}){
 function flatten(n){return [n,...n.children.flatMap(flatten)];}
 function payload(answer='a') {return {subject:{answer_id:answer,citation:'E1'},nodes:[
   {type:'record_version',ref:'r',label:'<script>literal</script>',details:{record_id:'record',version:2,text_preview:'safe',metadata:'SECRET'}},
-  {type:'document_version',ref:'d',label:'doc',details:{title:'doc',version:1,excerpt_before:'before',highlight:'<img>',excerpt_after:'after'}}],
-  edges:[{source_ref:'r',target_ref:'d',relation:'sourced-from'}],integrity:{complete:false,warnings:[{code:'missing',node_ref:'d',message:'历史缺口'}]}};}
+  {type:'document_version',ref:'d',label:'doc',details:{title:'doc',version:1}},
+  {type:'source_occurrence',ref:'o',label:'原文定位',details:{title:'doc',version:1,version_id:'dv1',source_content:'full_version',excerpt_before:'before',highlight:'<img>',excerpt_after:'after'}}],
+  edges:[{source_ref:'r',target_ref:'o',relation:'sourced-from'},{source_ref:'o',target_ref:'d',relation:'sourced-from'}],integrity:{complete:false,warnings:[{code:'missing',node_ref:'d',message:'历史缺口'}]}};}
 function deferred(){let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};}
 
 test('drawer is initially hidden, accessible and renders fixed fields, branches, warnings, and raw JSON',async()=>{

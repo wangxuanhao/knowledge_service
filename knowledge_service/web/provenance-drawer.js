@@ -35,14 +35,16 @@
   if(typeof window==='undefined'||typeof document==='undefined')return;
 
   const nodeLabels={answer:'答案',retrieval:'检索',record_version:'记录版本',assertion:'断言',
-    review_event:'审核决定',chunk_version:'原文片段',document_version:'历史文档',ingest_run:'摄取运行'};
+    review_event:'审核决定',chunk_version:'原文片段',source_occurrence:'原文定位',
+    document_version:'历史文档',ingest_run:'摄取运行'};
   const detailFields={
     answer:['answer_id','citation','mode'],retrieval:['run_id'],
     record_version:['record_id','version','kind','text_preview','valid_from','valid_until','recorded_at','terminal_reason'],
     assertion:['assertion_id','kind','status_at_capture','quote','start_char','end_char'],
     review_event:['event_id','from_status','to_status','actor','reason','created_at'],
     chunk_version:['record_id','version_id','text_preview','start_char','end_char'],
-    document_version:['document_id','version_id','version','title','excerpt_before','highlight','excerpt_after'],
+    source_occurrence:['document_id','version_id','version','title','source_content','start_char','end_char','excerpt_before','highlight','excerpt_after'],
+    document_version:['document_id','version_id','version','title','source_content'],
     ingest_run:['run_id','attempt','status_at_capture','created_at','updated_at_at_capture']
   };
   const fieldLabels={answer_id:'答案标识',citation:'引用',mode:'生成模式',run_id:'运行标识',record_id:'记录标识',
@@ -50,7 +52,8 @@
     terminal_reason:'链路终点',assertion_id:'断言标识',status_at_capture:'生成答案时的状态',quote:'证据原文',
     start_char:'起始位置',end_char:'结束位置',event_id:'事件标识',from_status:'此前状态',to_status:'决定状态',
     actor:'操作人',reason:'原因',created_at:'创建时间',version_id:'版本标识',document_id:'文档标识',title:'标题',
-    excerpt_before:'前文',highlight:'定位原文',excerpt_after:'后文',attempt:'尝试次数',updated_at_at_capture:'当时更新时间'};
+    source_content:'原文完整性',excerpt_before:'前文',highlight:'定位原文',excerpt_after:'后文',
+    attempt:'尝试次数',updated_at_at_capture:'当时更新时间'};
   const scalar=value=>typeof value==='string'||typeof value==='number'||typeof value==='boolean'?String(value):'';
   const list=value=>Array.isArray(value)?value:[];
   const element=(tag,text,className)=>{
@@ -163,8 +166,8 @@
         fields.append(element('dt',fieldLabels[key]),element('dd',value));
       }
       card.appendChild(fields);
-      if(node.type==='document_version'){
-        const excerpt=Object.fromEntries(detailFields.document_version.map(key=>[key,details[key]]).filter(([,value])=>scalar(value)!==''));
+      if(node.type==='source_occurrence'){
+        const excerpt=Object.fromEntries(detailFields.source_occurrence.map(key=>[key,details[key]]).filter(([,value])=>scalar(value)!==''));
         card.appendChild(button('查看历史原文',()=>{
           if(typeof window.openFrozenSourceEvidence==='function')window.openFrozenSourceEvidence(excerpt);
           else status.textContent='原文查看器尚未就绪，请稍后重试。';

@@ -1,5 +1,16 @@
 /* Evidence first, internals on demand. Raw document text is always escaped. */
 (() => {
+  function frozenSourceDocument(excerpt){
+    if(!excerpt||typeof excerpt!=='object'||Array.isArray(excerpt))return null;
+    const text=key=>typeof excerpt[key]==='string'?excerpt[key]:'';
+    const version=Number.isSafeInteger(excerpt.version)&&excerpt.version>0?excerpt.version:'未知';
+    const source_content=excerpt.source_content==='full_version'?'full_version':'segments_only';
+    return {title:text('title')||'历史来源',version,source_content,
+      reason:source_content==='full_version'?'回答生成时冻结的历史原文定位':'回答生成时保存的历史原文片段',
+      before:text('excerpt_before'),highlight:text('highlight'),after:text('excerpt_after')};
+  }
+  if(typeof module!=='undefined'&&module.exports)module.exports={frozenSourceDocument};
+  if(typeof window==='undefined'||typeof document==='undefined')return;
   const host=$('graph-detail');let serial=0;
   const sourceDialog=document.createElement('dialog');sourceDialog.id='source-evidence-dialog';
   sourceDialog.setAttribute('aria-labelledby','source-evidence-title');
@@ -54,12 +65,8 @@
   }
   // Only the frozen document projection is accepted; no current-document lookup.
   window.openFrozenSourceEvidence=excerpt=>{
-    if(!excerpt||typeof excerpt!=='object'||Array.isArray(excerpt))return;
-    const text=key=>typeof excerpt[key]==='string'?excerpt[key]:'';
-    const version=Number.isSafeInteger(excerpt.version)&&excerpt.version>0?excerpt.version:'未知';
-    openSource({title:text('title')||'历史来源',version,
-      reason:'回答生成时保存的历史原文片段',source_content:'segments_only',
-      before:text('excerpt_before'),highlight:text('highlight'),after:text('excerpt_after')});
+    // excerpt_before / excerpt_after stay local; this path never fetches current state.
+    const frozen=frozenSourceDocument(excerpt);if(frozen)openSource(frozen);
   };
   function localTime(value){if(!value)return '未记录';const d=new Date(value);return Number.isNaN(d.valueOf())?value:d.toLocaleString('zh-CN',{hour12:false});}
   const typeHint=type=>{const primary=labelOf(type),local=term(type);return primary===local?esc(primary):`${esc(primary)} <span class="subtle">${esc(local)}</span>`;};

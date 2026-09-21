@@ -185,7 +185,9 @@ def _mapped(repo, project, *, kind='entity', sources=()):
         if source:
             doc, chunk, _ = source
             item.update(document_id=doc['id'], document_version_id=doc['version_id'],
-                        chunk_id=chunk['id'], quote='evidence', start_char=7, end_char=15)
+                        chunk_id=chunk['id'], quote=chunk['text'],
+                        start_char=chunk['metadata']['start_char'],
+                        end_char=chunk['metadata']['end_char'])
         assertion = repo.create_assertion(project, item)
         assertion = repo.transition_assertion(project, assertion['id'], 1, 'accepted',
                                               'approved', 'reviewer', canonical_record_id=record['id'])
@@ -254,6 +256,51 @@ def test_freezes_all_exact_support_branches_and_fixed_contract(provenance, kind)
     assert trace == service.trace_answer_evidence(project, answer, 'E1')
 
 
+def test_answer_payload_keeps_only_frozen_refs_not_a_second_source_graph(provenance):
+    repo, service, project = provenance
+    doc, chunk, _ = _source(repo, project)
+    record, _ = _mapped(repo, project, sources=[(doc, chunk, None)])
+    _, answer, _ = _capture(service, project, [record])
+
+    payload = repo.get_provenance_activity(project, answer)['payload']
+    encoded = json.dumps(payload, ensure_ascii=False)
+
+    assert set(payload) == {
+        'run_id', 'offered', 'cited', 'warnings', 'answer', 'mode', 'graph_schema'}
+    assert payload['graph_schema'] == 'edge-v1'
+    assert 'graphs' not in payload
+    assert all(value not in encoded for value in (
+        doc['text'], chunk['text'], 'excerpt_before', 'excerpt_after', 'highlight', 'quote'))
+
+
+def test_same_document_version_preserves_each_source_occurrence(provenance):
+    repo, service, project = provenance
+    text = 'alpha gap beta tail'
+    document = repo.put_record(project, {
+        'id': 'doc:shared', 'kind': 'document', 'text': text,
+        'metadata': {'title': '共享历史文档'}})
+    run = repo.create_ingest_run(project, document['id'], document['version_id'])
+    chunks = [repo.put_record(project, {
+        'id': f'chunk:shared:{index}', 'kind': 'chunk', 'text': expected,
+        'source_id': document['id'], 'metadata': {
+            'source_version_id': document['version_id'], 'run_id': run['id'],
+            'start_char': start, 'end_char': end}})
+        for index, (expected, start, end) in enumerate((('alpha', 0, 5), ('beta', 10, 14)), 1)]
+    record, _ = _mapped(repo, project, sources=[
+        (document, chunks[0], run), (document, chunks[1], run)])
+
+    _, answer, _ = _capture(service, project, [record])
+    trace = service.trace_answer_evidence(project, answer, 'E1')
+
+    occurrences = _nodes(trace, 'source_occurrence')
+    assert len(_nodes(trace, 'document_version')) == 1
+    assert len(occurrences) == 2
+    assert {node['details']['highlight'] for node in occurrences} == {'alpha', 'beta'}
+    assert {node['details']['source_content'] for node in occurrences} == {'full_version'}
+    assert all(node['details']['version_id'] == document['version_id'] for node in occurrences)
+    assert len({node['ref'] for node in occurrences}) == 2
+
+
 @pytest.mark.parametrize('relation', ['offered', 'extracted-from'])
 def test_partial_source_graph_failure_rolls_back_entire_retrieval(provenance, monkeypatch, relation):
     repo, service, project = provenance
@@ -295,7 +342,7 @@ def test_direct_chunk_uses_exact_history_and_no_review_warning(provenance):
     assert before['integrity']['complete']
     assert not _nodes(before, 'assertion') and not _nodes(before, 'review_event')
     assert _nodes(before, 'chunk_version')[0]['ref'] == f"chunk-version:{chunk['version_id']}"
-    details = _nodes(before, 'document_version')[0]['details']
+    details = _nodes(before, 'source_occurrence')[0]['details']
     assert details['version_id'] == doc['version_id']
     assert details['highlight'] == doc['text'][7:15]
     assert len(details['excerpt_before']) <= 240 and len(details['excerpt_after']) <= 240
@@ -395,6 +442,7 @@ def test_answer_citations_are_strict_deduplicated_and_offered_only(provenance):
     assert second['answer']['citation_status'] == 'uncited'
     cites = [edge for edge in repo.list_provenance_edges(project) if edge['relation'] == 'cites']
     assert len(cites) == 1 and cites[0]['source_ref'] == f'answer:{answer}#E1'
+    assert any(edge['relation'] == 'cites' for edge in first['edges'])
     assert 'unknown_citation' in _codes(first)
     assert all(set(warning) == {'code', 'node_ref', 'message'} for warning in first['integrity']['warnings'])
 
@@ -499,6 +547,7 @@ def test_all_source_reads_share_the_completion_transaction(provenance, monkeypat
     assert set(reads) == set(methods)
     assert not repo._db.in_transaction
     assert repo.get_provenance_activity(project, run)['status'] == 'completed'
+    monkeypatch.undo()
     assert service.trace_answer_evidence(project, answer, 'E1')['integrity']['complete']
 
 
