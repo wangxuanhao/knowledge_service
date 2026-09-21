@@ -511,6 +511,10 @@ class Repository:
             return {'namespace': namespace, 'schema_version': schema_version,
                     'project': project, 'records': records,
                     'ontologies': self.list_ontologies(project_id),
+                    'provenance': {
+                        'record_version_assertions': self.list_record_version_assertions(project_id),
+                        'activities': self.list_provenance_activities(project_id),
+                        'edges': self.list_provenance_edges(project_id)},
                     'governance': {'assertions': assertions, 'assertion_events': assertion_events,
                         'fact_keys': fact_keys, 'ingest_runs': ingest_runs,
                         'resolution_reviews': resolution_reviews, 'merge_operations': merge_operations}}
@@ -569,6 +573,13 @@ class Repository:
             assertions_deleted = self._db.execute(
                 'SELECT COUNT(*) FROM assertions WHERE project_id=?', (project_id,)
             ).fetchone()[0]
+            # Delete dependants before their FK parents, preserving exact counts
+            # before record/project cascades remove them.
+            provenance_deleted = {
+                table: self._db.execute(
+                    f'DELETE FROM {table} WHERE project_id=?', (project_id,)).rowcount
+                for table in ('provenance_edges', 'provenance_activities', 'record_version_assertions')
+            }
             r = self._db.execute('DELETE FROM record_versions WHERE project_id=?', (project_id,))
             records_deleted = r.rowcount
             # record_fts 是 FTS5 虚拟表，无外键不参与级联，必须显式删除，
@@ -580,7 +591,8 @@ class Repository:
             artifacts_deleted = a.rowcount
             self._db.execute('DELETE FROM projects WHERE id=?', (project_id,))
         return {'records': records_deleted, 'ontologies': ontologies_deleted,
-                'artifacts': artifacts_deleted, 'assertions': assertions_deleted}
+                'artifacts': artifacts_deleted, 'assertions': assertions_deleted,
+                **provenance_deleted}
 
     def list_projects(self):
         with self._lock:

@@ -17,6 +17,147 @@ def test_provenance_service_module_exists():
 
 
 @pytest.fixture
+def provenance_api(tmp_path):
+    from fastapi.testclient import TestClient
+    from knowledge_service.api import create_app
+    from knowledge_service.integrations.embeddings import HashingEncoder
+    from knowledge_service.services.provenance import ProvenanceService
+    app = create_app(tmp_path / 'api.sqlite', encoder=HashingEncoder())
+    with TestClient(app) as client:
+        repo = app.state.service.repository
+        project = repo.create_project('provenance-api')['id']
+        yield client, repo, ProvenanceService(repo), project
+
+
+def test_health_advertises_unified_provenance(provenance_api):
+    client, _, _, _ = provenance_api
+    response = client.get('/api/health')
+    assert response.status_code == 200
+    assert 'unified_provenance' in response.json()['capabilities']
+
+
+@pytest.mark.parametrize('status', ['running', 'failed', 'completed'])
+def test_provenance_api_returns_frozen_contract_and_answer_status(provenance_api, status):
+    client, repo, service, project = provenance_api
+    doc, chunk, _ = _source(repo, project)
+    record, _ = _mapped(repo, project, sources=[(doc, chunk, None)])
+    run, answer, evidence = _capture(service, project, [record])
+    if status == 'completed':
+        service.complete_answer(project, answer, run, 'fact [E1]', 'llm', evidence)
+    elif status == 'failed':
+        service.fail_activity(project, answer, 'failed', 'public error')
+    repo.put_record(project, {'id': record['id'], 'kind': 'entity', 'text': 'later fact'})
+    repo.put_record(project, {'id': doc['id'], 'kind': 'document', 'text': 'later document'})
+    before = repo.export_projection(project)
+    response = client.get(f'/api/projects/{project}/answers/{answer}/evidence/E1/provenance')
+    assert response.status_code == 200, response.text
+    trace = response.json()
+    assert set(trace) == {'schema_version', 'subject', 'answer', 'retrieval', 'nodes', 'edges', 'integrity'}
+    assert trace['schema_version'] == '1.0'
+    assert trace['answer'] == {'status': status, 'citation_status': 'cited' if status == 'completed' else 'offered'}
+    assert _nodes(trace, 'record_version')[0]['ref'] == f"record-version:{record['version_id']}"
+    assert _nodes(trace, 'chunk_version')[0]['ref'] == f"chunk-version:{chunk['version_id']}"
+    assert _nodes(trace, 'document_version')[0]['ref'] == f"document-version:{doc['version_id']}"
+    assert trace == service.trace_answer_evidence(project, answer, 'E1')
+    assert repo.export_projection(project) == before
+
+
+def test_provenance_api_uncited_missing_citations_and_project_isolation(provenance_api):
+    client, repo, service, project = provenance_api
+    record, _ = _mapped(repo, project)
+    run, answer, evidence = _capture(service, project, [record])
+    service.complete_answer(project, answer, run, 'no citation', 'llm', evidence)
+    base = f'/api/projects/{project}/answers/{answer}/evidence'
+    response = client.get(f'{base}/E1/provenance')
+    assert response.status_code == 200
+    assert response.json()['answer'] == {'status': 'completed', 'citation_status': 'uncited'}
+    for citation in ['E2', 'e1', 'E0', 'E01', 'E-1', 'E1x', 'E1%0A']:
+        missing = client.get(f'{base}/{citation}/provenance')
+        assert missing.status_code == 404, (citation, missing.text)
+        assert missing.json() == {'code': 'provenance_citation_not_found', 'detail': '未找到该答案的证据引用。'}
+    other = repo.create_project('other')['id']
+    unknown = client.get(f'/api/projects/{project}/answers/unknown/evidence/E1/provenance')
+    crossed = client.get(f'/api/projects/{other}/answers/{answer}/evidence/E1/provenance')
+    absent_project = client.get(f'/api/projects/unknown/answers/{answer}/evidence/E1/provenance')
+    retrieval = client.get(f'/api/projects/{project}/answers/{run}/evidence/E1/provenance')
+    for missing in [unknown, crossed, absent_project, retrieval]:
+        assert missing.status_code == 404
+        assert missing.json() == {'code': 'provenance_answer_not_found', 'detail': '未找到该项目的答案。'}
+
+
+def test_export_projection_includes_deterministic_project_scoped_provenance(provenance):
+    repo, service, project = provenance
+    record, _ = _mapped(repo, project, sources=[_source(repo, project)])
+    run, answer, evidence = _capture(service, project, [record])
+    service.complete_answer(project, answer, run, 'fact [E1]', 'llm', evidence)
+    repo.put_record(project, {'id': record['id'], 'kind': 'entity', 'text': 'updated'})
+    other = repo.create_project('other')['id']
+    other_doc, _, _ = _source(repo, other, 'other')
+    _capture(service, other, [other_doc])
+    exported = repo.export_projection(project)
+    assert set(exported) == {'namespace', 'schema_version', 'project', 'records', 'ontologies', 'governance', 'provenance'}
+    assert set(exported['governance']) == {'assertions', 'assertion_events', 'fact_keys', 'ingest_runs', 'resolution_reviews', 'merge_operations'}
+    assert [r['version'] for r in exported['records'] if r['id'] == record['id']] == [1, 2]
+    assert exported['provenance'] == {
+        'record_version_assertions': repo.list_record_version_assertions(project),
+        'activities': repo.list_provenance_activities(project),
+        'edges': repo.list_provenance_edges(project),
+    }
+    assert len(exported['provenance']['record_version_assertions']) == 1
+    assert len(exported['provenance']['activities']) == 2
+    for rows in exported['provenance'].values():
+        assert rows and all(row['project_id'] == project for row in rows)
+    assert repo.export_projection(other)['provenance']['record_version_assertions'] == []
+    assert json.loads(json.dumps(exported, allow_nan=False)) == exported
+    assert repo.export_projection(project) == exported
+
+
+def test_project_export_api_returns_the_complete_repository_snapshot(provenance_api):
+    client, repo, service, project = provenance_api
+    record, _ = _mapped(repo, project)
+    _capture(service, project, [record])
+    repo.put_record(project, {'id': record['id'], 'kind': 'entity', 'text': 'updated'})
+    other = repo.create_project('other')['id']
+    other_doc, _, _ = _source(repo, other, 'other')
+    _capture(service, other, [other_doc])
+    for project_id in [project, other]:
+        response = client.get(f'/api/projects/{project_id}/export')
+        assert response.status_code == 200
+        assert response.json() == repo.export_projection(project_id)
+    assert client.get('/api/projects/missing/export').status_code == 404
+
+
+def test_delete_project_reports_provenance_counts_and_preserves_other_project(provenance_api):
+    client, repo, service, project = provenance_api
+    record, _ = _mapped(repo, project, sources=[_source(repo, project)])
+    _, answer, _ = _capture(service, project, [record])
+    edge_count = len(repo.list_provenance_edges(project))
+    other = repo.create_project('keep')['id']
+    other_record = repo.put_record(other, {'id': 'other-record', 'kind': 'entity', 'text': 'keep'})
+    assertion = repo.create_assertion(other, {'id': 'other-assertion', 'kind': 'entity', 'payload': {}})
+    repo.transition_assertion(other, assertion['id'], 1, 'accepted', 'approved', 'reviewer',
+                              canonical_record_id=other_record['id'])
+    event = repo.list_assertion_events(other, assertion['id'])[-1]
+    repo.add_record_version_assertion(other, other_record['id'], other_record['version_id'],
+                                      assertion['id'], event['id'])
+    _, other_answer, _ = _capture(service, other, [other_record])
+    preserved = repo.export_projection(other)
+    other_trace = service.trace_answer_evidence(other, other_answer, 'E1')
+    response = client.delete(f'/api/projects/{project}')
+    assert response.status_code == 200, response.text
+    assert response.json()['deleted'] == {
+        'records': 3, 'ontologies': 0, 'artifacts': 0, 'assertions': 1,
+        'record_version_assertions': 1, 'provenance_activities': 2,
+        'provenance_edges': edge_count,
+    }
+    assert client.get(f'/api/projects/{project}/answers/{answer}/evidence/E1/provenance').status_code == 404
+    with pytest.raises(KeyError):
+        repo.export_projection(project)
+    assert repo.export_projection(other) == preserved
+    assert service.trace_answer_evidence(other, other_answer, 'E1') == other_trace
+
+
+@pytest.fixture
 def provenance(tmp_path):
     from knowledge_service.services.provenance import ProvenanceService
     repo = Repository(tmp_path / 'provenance.sqlite')
