@@ -92,6 +92,32 @@
     tabButtons.push(tab);tabs.appendChild(tab);
   });
   selectTab(0);root.append(header,status,tabs,chain,rawPanel);document.body.appendChild(root);
+  const narrowScreen=typeof window.matchMedia==='function'?window.matchMedia('(max-width: 760px)'):null;
+  function syncLayout(){
+    let target=document.body;
+    if(narrowScreen?narrowScreen.matches:window.innerWidth<=760){
+      const scroll=document.getElementById('qa-scroll'),transcript=document.getElementById('qa-transcript');
+      if(scroll){
+        let mount=document.getElementById('qa-provenance-mount');
+        if(!mount){
+          mount=element('div');mount.id='qa-provenance-mount';
+          if(transcript?.parentNode===scroll)transcript.after(mount);
+          else scroll.appendChild(mount);
+        }
+        target=mount;
+      }
+    }
+    if(root.parentNode!==target){
+      // Moving the same node preserves the open request and tab state. Reparenting
+      // can blur a focused descendant, so restore it without jumping the scroll.
+      const focused=root.contains(document.activeElement)?document.activeElement:null;
+      target.appendChild(root);
+      if(focused&&!root.hidden)focused.focus({preventScroll:true});
+    }
+  }
+  narrowScreen?.addEventListener('change',syncLayout);
+  window.addEventListener?.('resize',syncLayout);
+  syncLayout();
   let serial=0,controller=null,active=null,restoreFocus=null;
   function setState(state,message){root.dataset.state=state;status.textContent=message;root.setAttribute('aria-busy',String(state==='loading'));}
   function cancelRequest(){serial++;controller?.abort();controller=null;}
@@ -168,6 +194,7 @@
     cancelRequest();const ticket=serial,context={projectId,answerId,citation};active=context;
     if(options.trigger)restoreFocus=options.trigger;
     else if(!root.contains(document.activeElement))restoreFocus=document.activeElement;
+    syncLayout();
     root.hidden=false;title.textContent='证据溯源 · ['+citation+']';
     chain.replaceChildren();raw.textContent='';selectTab(0);setState('loading','正在读取历史证据链…');closeButton.focus();
     controller=new AbortController();const signal=controller.signal;

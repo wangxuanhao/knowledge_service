@@ -79,3 +79,15 @@ def test_provenance_reuses_read_only_history_and_frozen_source_entrypoints():
     assert 'excerpt_before' in frozen and 'excerpt_after' in frozen
     assert 'createTextNode' in js and "createElement('mark')" in js
     assert 'window.openRecordHistory' in read('record-dialog.js')
+
+
+def test_narrow_provenance_panel_uses_answer_flow_instead_of_fixed_overlay():
+    import re
+    css = read('provenance-drawer.css')
+    mobile = css.split('@media(max-width:760px)', 1)[1]
+    panel = re.search(r'\.provenance-drawer\s*\{([^}]+)\}', mobile).group(1)
+    assert re.search(r'position\s*:\s*(?:static|relative)\b', panel)
+    assert re.search(r'inset\s*:\s*auto\b', panel)
+    js = read('provenance-drawer.js')
+    for marker in ('matchMedia', 'qa-transcript', 'qa-provenance-mount', 'qa-scroll'):
+        assert marker in js, marker

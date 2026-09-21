@@ -40,7 +40,14 @@ class Element{
   constructor(tag,doc){this.tagName=tag.toUpperCase();this.ownerDocument=doc;this.children=[];this.attrs={};this.dataset={};this.hidden=false;this.listeners={};this._text='';this.isConnected=true;}
   setAttribute(k,v){this.attrs[k]=String(v);if(k==='id')this.id=v;}
   getAttribute(k){return this.attrs[k]??null;}
-  appendChild(n){this.children.push(n);n.parentNode=this;return n;}
+  appendChild(n){
+    if(n.parentNode){
+      n.parentNode.children=n.parentNode.children.filter(child=>child!==n);
+      if(n.contains(this.ownerDocument.activeElement))this.ownerDocument.activeElement=this.ownerDocument.body;
+    }
+    this.children.push(n);n.parentNode=this;return n;
+  }
+  after(n){const parent=this.parentNode;parent.appendChild(n);parent.children.pop();parent.children.splice(parent.children.indexOf(this)+1,0,n);}
   append(...nodes){nodes.forEach(n=>this.appendChild(n));}
   replaceChildren(...nodes){this.children=[];this._text='';this.append(...nodes);}
   set textContent(v){this.children=[];this._text=String(v);}
@@ -50,15 +57,24 @@ class Element{
   focus(){this.ownerDocument.activeElement=this;}
   contains(n){return n===this||this.children.some(c=>c.contains?.(n));}
 }
-function setup(fetch){
+function setup(fetch,{narrow=false,qa=false}={}){
   const doc={listeners:{},createElement(tag){return new Element(tag,this);},createTextNode(text){const e=new Element('#text',this);e.textContent=text;return e;},
     getElementById(id){return flatten(this.body).find(n=>n.id===id)||null;},addEventListener(k,fn){(this.listeners[k]??=[]).push(fn);}};
   doc.body=doc.createElement('body');doc.activeElement=doc.body;
-  const window={document:doc,fetch,AbortController};
+  if(qa){
+    const scroll=doc.createElement('div');scroll.id='qa-scroll';doc.body.appendChild(scroll);
+    const transcript=doc.createElement('ol');transcript.id='qa-transcript';scroll.appendChild(transcript);
+    const summary=doc.createElement('p');summary.id='qa-summary';scroll.appendChild(summary);
+  }
+  const media={matches:narrow,listeners:[],addEventListener(type,fn){if(type==='change')this.listeners.push(fn);},
+    change(matches){this.matches=matches;this.listeners.forEach(fn=>fn({matches}));}};
+  const window={document:doc,fetch,AbortController,innerWidth:narrow?500:1200,matchMedia:()=>media,
+    listeners:{},addEventListener(type,fn){(this.listeners[type]??=[]).push(fn);},
+    resize(){(this.listeners.resize||[]).forEach(fn=>fn());}};
   const context={window,document:doc,fetch,AbortController,console,current:'p'};
   assert.ok(fs.existsSync(filename),'provenance drawer module exists');
   vm.runInNewContext(fs.readFileSync(filename,'utf8'),context);
-  return {drawer:window.ProvenanceDrawer,doc,context,window};
+  return {drawer:window.ProvenanceDrawer,doc,context,window,media};
 }
 function flatten(n){return [n,...n.children.flatMap(flatten)];}
 function payload(answer='a') {return {subject:{answer_id:answer,citation:'E1'},nodes:[
@@ -124,4 +140,32 @@ test('decoration only activates offered citations and legacy note remains litera
   assert.equal(host.textContent,'<img>[E1] [E2] [E1]');
   assert.equal(flatten(host).filter(n=>n.tagName==='BUTTON').length,2);
   drawer.renderLegacyNote(host);assert.ok(host.textContent.includes('该历史回答生成于溯源记录启用前'));
+});
+
+test('narrow drawer mounts below answers and layout changes retain focus, tabs and the active request',async()=>{
+  const request=deferred();let signal;
+  const {drawer,doc,window,media}=setup((url,options)=>{signal=options.signal;return request.promise;},{narrow:true,qa:true});
+  const root=doc.getElementById('provenance-drawer'),scroll=doc.getElementById('qa-scroll');
+  assert.equal(root.parentNode?.id,'qa-provenance-mount');
+  assert.equal(scroll.children[1],root.parentNode,'mount follows transcript');
+  assert.equal(root.hidden,true);
+  const trigger=doc.createElement('button');doc.getElementById('qa-transcript').appendChild(trigger);trigger.focus();
+  const pending=drawer.open({projectId:'p',answerId:'a',citation:'E1',trigger});
+  const focused=doc.activeElement;assert.equal(root.contains(focused),true);
+  media.change(false);
+  assert.equal(root.parentNode,doc.body);assert.equal(root.hidden,false);
+  assert.equal(doc.activeElement,focused);assert.equal(signal.aborted,false);
+  assert.equal(root.dataset.state,'loading');
+  media.matches=true;window.resize();
+  assert.equal(root.parentNode.id,'qa-provenance-mount');
+  assert.equal(doc.activeElement,focused);assert.equal(signal.aborted,false);
+  request.resolve({ok:true,json:async()=>payload()});await pending;
+  assert.equal(root.dataset.state,'partial');
+  const apiTab=doc.getElementById('provenance-tab-1');apiTab.dispatch('click');apiTab.focus();
+  media.change(false);
+  assert.equal(doc.activeElement,apiTab);assert.equal(apiTab.getAttribute('aria-selected'),'true');
+  assert.equal(doc.getElementById('provenance-chain').hidden,true);
+  assert.equal(doc.getElementById('provenance-raw').textContent,JSON.stringify(payload(),null,2));
+  drawer.close();assert.equal(root.hidden,true);assert.equal(doc.activeElement,trigger);assert.equal(signal.aborted,true);
+  media.change(true);assert.equal(root.hidden,true);assert.equal(doc.activeElement,trigger);
 });
