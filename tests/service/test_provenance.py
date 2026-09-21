@@ -2,6 +2,8 @@
 import importlib.util
 import json
 import sqlite3
+from contextlib import contextmanager
+from types import SimpleNamespace
 
 import pytest
 
@@ -457,3 +459,189 @@ def test_untrusted_source_identifiers_warn_without_entering_sqlite(provenance, f
     assert not _nodes(trace, 'document_version' if field == 'source_version_id' else 'ingest_run')
     stored = json.dumps([trace, repo.list_provenance_activities(project), repo.list_provenance_edges(project)])
     assert 'REVIEW_SENTINEL' not in stored and 'Authorization' not in stored
+
+
+def _sse_item(raw):
+    name, data = raw.strip().split('\n', 1)
+    return name.removeprefix('event: '), json.loads(data.removeprefix('data: '))
+
+
+def _qa_stream(provenance, monkeypatch, *, empty=False, generate=False):
+    from knowledge_service.services import answers
+    repo, _, project = provenance
+    rows = [] if empty else [_source(repo, project)[1]]
+    context = {'hits': rows, 'evidence_rows': rows, 'candidate_count': len(rows),
+               'filter_stage': 'before_ranking', 'embedding_model': 'test', 'semantic': False,
+               'requested_mode': 'keyword', 'active_modes': ['keyword'], 'degraded': False,
+               '_backend': 'local', 'retrieval_errors': {}, 'valid_at': None, 'known_at': None,
+               'channels': {'entity': 0, 'chunk': len(rows), 'graph_evidence': 0}}
+    monkeypatch.setattr(answers, 'question_context', lambda *args: dict(context))
+    stream = answers.stream_events(SimpleNamespace(repository=repo), project,
+                                   {'query': 'evidence', 'retrieval_mode': 'keyword', 'generate': generate})
+    return stream, context
+
+
+def _llm_response(monkeypatch, *, text='[E1] [E1] [E99]', error=None):
+    from knowledge_service.services import answers
+    for key, value in {'KG_LLM_BASE_URL': 'https://provider.invalid',
+                       'KG_LLM_API_KEY': 'private-key', 'KG_LLM_MODEL': 'test'}.items():
+        monkeypatch.setenv(key, value)
+
+    @contextmanager
+    def response(*args, **kwargs):
+        if error:
+            raise error
+        yield SimpleNamespace(raise_for_status=lambda: None, iter_lines=lambda: iter([
+            'data: ' + json.dumps({'choices': [{'delta': {'content': text}}]}), 'data: [DONE]']))
+
+    @contextmanager
+    def client(*args, **kwargs):
+        yield SimpleNamespace(stream=response)
+
+    monkeypatch.setattr(answers.httpx, 'Client', client)
+
+
+def test_sse_starts_retrieval_before_context_and_marks_retrieval_error(provenance, monkeypatch):
+    from knowledge_service.services import answers
+    repo, _, project = provenance
+    stream, _ = _qa_stream(provenance, monkeypatch)
+    observed = []
+
+    def broken_context(*args):
+        observed.extend(repo.list_provenance_activities(project))
+        raise ValueError('无效查询范围')
+
+    monkeypatch.setattr(answers, 'question_context', broken_context)
+    assert [_sse_item(item) for item in stream] == [('error', {'detail': '无效查询范围'})]
+    assert len(observed) == 1 and observed[0]['status'] == 'running'
+    activity = repo.get_provenance_activity(project, observed[0]['id'])
+    assert activity['kind'] == 'retrieval' and activity['status'] == 'failed'
+    assert repo.list_provenance_edges(project) == []
+
+
+@pytest.mark.parametrize('relation', ['offered', 'supported-by'])
+def test_sse_retrieval_write_failure_rolls_back_before_evidence(provenance, monkeypatch, relation):
+    from knowledge_service.repository.provenance_store import ProvenanceStore
+    repo, _, project = provenance
+    stream, _ = _qa_stream(provenance, monkeypatch)
+    original = ProvenanceStore._insert_edge
+    inserted = []
+
+    def broken_insert(self, project_id, edge, *args, **kwargs):
+        if edge['relation'] == relation:
+            raise sqlite3.OperationalError('injected write failure')
+        inserted.append(edge['relation'])
+        return original(self, project_id, edge, *args, **kwargs)
+
+    monkeypatch.setattr(ProvenanceStore, '_insert_edge', broken_insert)
+    assert [name for name, _ in map(_sse_item, stream)] == ['error']
+    assert inserted  # Failure occurs after writes inside the transaction.
+    activities = repo.list_provenance_activities(project)
+    assert len(activities) == 1 and activities[0]['kind'] == 'retrieval'
+    assert activities[0]['status'] == 'failed'
+    assert repo.list_provenance_edges(project) == []
+
+
+def test_sse_evidence_is_committed_and_trace_running_until_done(provenance, monkeypatch):
+    repo, service, project = provenance
+    stream, context = _qa_stream(provenance, monkeypatch)
+    name, payload = _sse_item(next(stream))
+    assert name == 'evidence'
+    assert {key: payload[key] for key in context if key != 'evidence_rows'} == {
+        key: value for key, value in context.items() if key != 'evidence_rows'}
+    assert not repo._db.in_transaction
+    answer, run = payload['answer_id'], payload['retrieval_run_id']
+    row = payload['evidence'][0]
+    assert row == {**context['evidence_rows'][0], 'citation': 'E1',
+                   'provenance_ref': f'answer:{answer}#E1'}
+    assert repo.get_provenance_activity(project, run)['status'] == 'completed'
+    assert service.trace_answer_evidence(project, answer, 'E1')['answer'] == {
+        'status': 'running', 'citation_status': 'offered'}
+    assert _sse_item(next(stream))[0] == 'delta'
+    assert service.trace_answer_evidence(project, answer, 'E1')['answer']['status'] == 'running'
+    name, done = _sse_item(next(stream))
+    assert (name, done) == ('done', {'answer': '[E1] evidence\n\n', 'mode': 'evidence_only',
+        'answer_id': answer, 'retrieval_run_id': run, 'provenance_complete': True})
+    assert not repo._db.in_transaction
+    assert service.trace_answer_evidence(project, answer, 'E1')['answer'] == {
+        'status': 'completed', 'citation_status': 'cited'}
+    stream.close()
+    assert repo.get_provenance_activity(project, answer)['status'] == 'completed'
+
+
+def test_sse_llm_citations_are_committed_before_done(provenance, monkeypatch):
+    repo, service, project = provenance
+    _llm_response(monkeypatch)
+    stream, _ = _qa_stream(provenance, monkeypatch, generate=True)
+    evidence = _sse_item(next(stream))[1]
+    assert _sse_item(next(stream)) == ('delta', {'text': '[E1] [E1] [E99]'})
+    name, done = _sse_item(next(stream))
+    assert name == 'done' and done['mode'] == 'llm' and done['provenance_complete'] is True
+    assert done['answer'] == '[E1] [E1] [E99]'
+    trace = service.trace_answer_evidence(project, evidence['answer_id'], 'E1')
+    assert trace['answer']['status'] == 'completed'
+    assert 'unknown_citation' in _codes(trace)
+    cites = [edge for edge in repo.list_provenance_edges(project) if edge['relation'] == 'cites']
+    assert len(cites) == 1 and cites[0]['source_ref'] == f"answer:{done['answer_id']}#E1"
+    stream.close()
+
+
+def test_sse_answer_commit_failure_never_emits_done(provenance, monkeypatch):
+    from knowledge_service.repository.provenance_store import ProvenanceStore
+    repo, service, project = provenance
+    stream, _ = _qa_stream(provenance, monkeypatch)
+    payload = _sse_item(next(stream))[1]
+    original = ProvenanceStore._insert_edge
+
+    def broken_cite(self, project_id, edge, *args, **kwargs):
+        if edge['relation'] == 'cites':
+            raise sqlite3.OperationalError('injected cite failure')
+        return original(self, project_id, edge, *args, **kwargs)
+
+    monkeypatch.setattr(ProvenanceStore, '_insert_edge', broken_cite)
+    assert [name for name, _ in map(_sse_item, stream)] == ['delta', 'error']
+    assert service.trace_answer_evidence(project, payload['answer_id'], 'E1')['answer'] == {
+        'status': 'failed', 'citation_status': 'offered'}
+    assert not any(edge['relation'] == 'cites' for edge in repo.list_provenance_edges(project))
+
+
+@pytest.mark.parametrize('after_delta', [False, True])
+def test_sse_close_cancels_running_answer_without_error_event(provenance, monkeypatch, after_delta):
+    repo, service, project = provenance
+    stream, _ = _qa_stream(provenance, monkeypatch)
+    payload = _sse_item(next(stream))[1]
+    if after_delta:
+        next(stream)
+    stream.close()  # Yielding an error here would raise RuntimeError: ignored GeneratorExit.
+    assert service.trace_answer_evidence(project, payload['answer_id'], 'E1')['answer'] == {
+        'status': 'cancelled', 'citation_status': 'offered'}
+    assert repo.get_provenance_activity(project, payload['retrieval_run_id'])['status'] == 'completed'
+
+
+def test_sse_provider_error_persists_only_public_message_and_type(provenance, monkeypatch, caplog):
+    repo, _, project = provenance
+    _llm_response(monkeypatch, error=RuntimeError(
+        'Authorization: Bearer private-key; full_response=PROVIDER_SECRET'))
+    stream, _ = _qa_stream(provenance, monkeypatch, generate=True)
+    items = list(map(_sse_item, stream))
+    assert [name for name, _ in items] == ['evidence', 'error']
+    stored = json.dumps([repo.list_provenance_activities(project), repo.list_provenance_edges(project)])
+    assert all(secret not in stored for secret in ('private-key', 'PROVIDER_SECRET', 'Authorization'))
+    activity = repo.get_provenance_activity(project, items[0][1]['answer_id'])
+    assert activity['status'] == 'failed'
+    assert set(activity['payload']['error']) == {'type', 'message'}
+    assert activity['payload']['error']['type'] == 'RuntimeError'
+    assert caplog.records[-1].exc_info is not None
+
+
+def test_sse_empty_evidence_commits_empty_offered_and_completes(provenance, monkeypatch):
+    repo, _, project = provenance
+    stream, _ = _qa_stream(provenance, monkeypatch, empty=True, generate=True)
+    items = list(map(_sse_item, stream))
+    assert [name for name, _ in items] == ['evidence', 'delta', 'done']
+    done = items[-1][1]
+    assert done['provenance_complete'] is True and done['mode'] == 'evidence_only'
+    assert done['answer'] == '当前查询范围没有证据。'
+    answer = repo.get_provenance_activity(project, done['answer_id'])
+    assert answer['status'] == 'completed' and answer['payload']['offered'] == []
+    assert answer['payload']['cited'] == []
