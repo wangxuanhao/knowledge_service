@@ -1,4 +1,5 @@
 """先独立检索实体/来源，再提供限定范围内的图谱证据与 SSE 流式输出。"""
+import asyncio
 import json
 import logging
 import os
@@ -66,7 +67,7 @@ def stream_events(service,p,request):
             if service.repository.get_provenance_activity(p,activity_id)['status']=='running':
                 provenance.fail_activity(p,activity_id,status,public_error)
         except Exception:
-            # A cleanup failure must not replace the original stream error or GeneratorExit.
+            # A cleanup failure must not replace the original stream error or cancellation.
             logger.exception('knowledge问答溯源终态保存失败')
 
     try:
@@ -105,8 +106,8 @@ def stream_events(service,p,request):
         provenance.complete_answer(p,answer_id,run_id,answer,mode,evidence)
         yield event('done',{'answer':answer,'mode':mode,'answer_id':answer_id,
                            'retrieval_run_id':run_id,'provenance_complete':True})
-    except GeneratorExit:
-        finish_running('cancelled',{'type':'GeneratorExit','message':'回答流已取消。'})
+    except (GeneratorExit,asyncio.CancelledError) as exc:
+        finish_running('cancelled',{'type':type(exc).__name__,'message':'回答流已取消。'})
         raise
     except Exception as exc:
         # 把完整 traceback 打到服务日志，便于定位（原来只返回类型名，TypeError 无处查）

@@ -1,4 +1,5 @@
 """Frozen answer lineage contracts, exercised through real SQLite repositories."""
+import asyncio
 import importlib.util
 import json
 import sqlite3
@@ -616,6 +617,27 @@ def test_sse_close_cancels_running_answer_without_error_event(provenance, monkey
     assert service.trace_answer_evidence(project, payload['answer_id'], 'E1')['answer'] == {
         'status': 'cancelled', 'citation_status': 'offered'}
     assert repo.get_provenance_activity(project, payload['retrieval_run_id'])['status'] == 'completed'
+
+
+@pytest.mark.parametrize('after_delta', [False, True])
+def test_sse_async_cancel_marks_answer_cancelled_and_reraises_original(provenance, monkeypatch, after_delta):
+    repo, service, project = provenance
+    stream, _ = _qa_stream(provenance, monkeypatch)
+    name, payload = _sse_item(next(stream))
+    assert name == 'evidence'
+    if after_delta:
+        assert _sse_item(next(stream))[0] == 'delta'
+    cancellation = asyncio.CancelledError('consumer disconnected')
+    with pytest.raises(asyncio.CancelledError) as raised:
+        stream.throw(cancellation)
+    assert raised.value is cancellation
+    assert list(stream) == []
+    stream.close()
+    assert service.trace_answer_evidence(project, payload['answer_id'], 'E1')['answer'] == {
+        'status': 'cancelled', 'citation_status': 'offered'}
+    assert repo.get_provenance_activity(project, payload['retrieval_run_id'])['status'] == 'completed'
+    assert repo.get_provenance_activity(project, payload['answer_id'])['payload']['error'] == {
+        'type': 'CancelledError', 'message': '回答流已取消。'}
 
 
 def test_sse_provider_error_persists_only_public_message_and_type(provenance, monkeypatch, caplog):
