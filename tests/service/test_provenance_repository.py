@@ -227,6 +227,33 @@ def test_activity_completion_and_edges_are_atomic_and_identical_edge_is_idempote
             edges=[{**edge, 'payload': {'selected': False}}])
 
 
+@pytest.mark.parametrize('retry_edges', [
+    [],
+    [_edge('different', 'answer', 'answer:answer#E2', 'cites', 'record-version:v2')],
+    [
+        _edge('edge-1', 'answer', 'answer:answer#E1', 'cites', 'record-version:v1',
+              payload={'selected': True}),
+        _edge('extra', 'answer', 'answer:answer#E2', 'cites', 'record-version:v2'),
+    ],
+])
+def test_terminal_activity_retry_requires_the_complete_frozen_edge_set(
+        tmp_path, retry_edges):
+    repo = Repository(tmp_path / 'terminal-edge-set.sqlite')
+    project_id = repo.create_project('p')['id']
+    edge = _edge(
+        'edge-1', 'answer', 'answer:answer#E1', 'cites', 'record-version:v1',
+        payload={'selected': True})
+    repo.begin_provenance_activity(project_id, 'answer', 'answer', {})
+    repo.complete_provenance_activity(
+        project_id, 'answer', {'text': 'done'}, edges=[edge])
+
+    with pytest.raises(ValueError, match='conflict|冲突'):
+        repo.complete_provenance_activity(
+            project_id, 'answer', {'text': 'done'}, edges=retry_edges)
+
+    assert repo.list_provenance_edges(project_id, activity_id='answer')[0]['id'] == 'edge-1'
+
+
 def test_complete_retrieval_and_begin_answer_owns_one_atomic_transaction(tmp_path):
     repo = Repository(tmp_path / 'composition.sqlite')
     project_id = repo.create_project('p')['id']
@@ -246,6 +273,47 @@ def test_complete_retrieval_and_begin_answer_owns_one_atomic_transaction(tmp_pat
     assert [row['id'] for row in repo.list_provenance_edges(project_id)] == [
         'considered', 'offered', 'used']
 
+    retried = [{**edge, 'id': f'retry-{index}'} for index, edge in enumerate(edges)]
+    assert repo.complete_retrieval_and_begin_answer(
+        project_id, retrieval_id='rr_1', answer_id='ans_1',
+        retrieval_payload={'count': 1}, answer_payload={'offered': ['E1']},
+        edges=retried) == (retrieval, answer)
+
+
+@pytest.mark.parametrize('mutation', ['missing', 'extra', 'changed'])
+def test_composed_retry_requires_the_complete_frozen_edge_set(tmp_path, mutation):
+    repo = Repository(tmp_path / f'composition-{mutation}.sqlite')
+    project_id = repo.create_project('p')['id']
+    repo.begin_provenance_activity(project_id, 'rr_1', 'retrieval', {'query': 'q'})
+    edges = [
+        _edge('considered', 'rr_1', 'retrieval-run:rr_1', 'considered',
+              'record-version:v1', payload={'rank': 1}),
+        _edge('used', 'ans_1', 'answer:ans_1', 'used', 'retrieval-run:rr_1'),
+        _edge('offered', 'ans_1', 'answer:ans_1#E1', 'offered', 'record-version:v1'),
+    ]
+    repo.complete_retrieval_and_begin_answer(
+        project_id, retrieval_id='rr_1', answer_id='ans_1',
+        retrieval_payload={'count': 1}, answer_payload={'offered': ['E1']}, edges=edges)
+    if mutation == 'missing':
+        retried = edges[:-1]
+    elif mutation == 'extra':
+        retried = [
+            *edges,
+            _edge('extra', 'rr_1', 'retrieval-run:rr_1', 'considered',
+                  'record-version:v2', ordinal=1),
+        ]
+    else:
+        retried = [*edges[:-1], {**edges[-1], 'payload': {'changed': True}}]
+
+    with pytest.raises(ValueError, match='conflict|冲突'):
+        repo.complete_retrieval_and_begin_answer(
+            project_id, retrieval_id='rr_1', answer_id='ans_1',
+            retrieval_payload={'count': 1}, answer_payload={'offered': ['E1']},
+            edges=retried)
+
+    assert [row['id'] for row in repo.list_provenance_edges(project_id)] == [
+        'considered', 'offered', 'used']
+
 
 def test_composed_retrieval_completion_rolls_back_every_write_on_bad_edge(tmp_path):
     repo = Repository(tmp_path / 'composition-rollback.sqlite')
@@ -254,7 +322,7 @@ def test_composed_retrieval_completion_rolls_back_every_write_on_bad_edge(tmp_pa
     bad_edge = _edge(
         'bad', 'missing-activity', 'answer:ans_1', 'used', 'retrieval-run:rr_1')
 
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(ValueError, match='conflict|冲突'):
         repo.complete_retrieval_and_begin_answer(
             project_id, retrieval_id='rr_1', answer_id='ans_1',
             retrieval_payload={'count': 1}, answer_payload={'offered': []},

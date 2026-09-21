@@ -192,13 +192,17 @@ class ProvenanceStore:
             (project_id, edge['activity_id'], edge['source_ref'], edge['relation'],
              edge['target_ref'], edge['ordinal'])).fetchone()
 
+    @staticmethod
+    def _edge_key(edge):
+        return (edge['activity_id'], edge['source_ref'], edge['relation'],
+                edge['target_ref'], edge['ordinal'])
+
     def _edge_is_identical(self, existing, payload):
         # 复合唯一键才是边的幂等身份。重试可能重新生成 surrogate id/时间，
         # 只要同一逻辑边的审计 payload 未改变，就返回已经提交的那一行。
         return json.loads(existing['payload']) == payload
 
-    def _insert_edge(self, project_id, edge, default_created_at=None,
-                     *, existing_only=False):
+    def _insert_edge(self, project_id, edge, default_created_at=None):
         edge = self._validate_edge(edge)
         payload = self._payload(edge.get('payload', {}))
         existing = self._matching_edge(project_id, edge)
@@ -206,8 +210,6 @@ class ProvenanceStore:
             if self._edge_is_identical(existing, payload):
                 return self._edge(existing)
             raise ValueError('版本冲突：溯源边已存在')
-        if existing_only:
-            raise ValueError('版本冲突：终态活动不能追加溯源边')
         edge_id = edge.get('id') or str(uuid4())
         created_at = edge.get('created_at') or default_created_at or utc_now()
         try:
@@ -228,6 +230,40 @@ class ProvenanceStore:
         return self._edge(self._db.execute(
             'SELECT * FROM provenance_edges WHERE id=?', (edge_id,)).fetchone())
 
+    def _reconcile_activity_edges(self, project_id, activity_id, edges,
+                                  *, allow_insert, default_created_at=None):
+        """校验调用方给出的完整冻结边集合，并在首次终态提交时补入新边。"""
+        proposed = {}
+        for edge in edges:
+            edge = self._validate_edge(edge)
+            if edge['activity_id'] != activity_id:
+                raise ValueError('版本冲突：溯源边不属于该活动')
+            payload = self._payload(edge.get('payload', {}))
+            key = self._edge_key(edge)
+            duplicate = proposed.get(key)
+            if duplicate is not None and duplicate[1] != payload:
+                raise ValueError('版本冲突：同一溯源边载荷不一致')
+            proposed[key] = (edge, payload)
+
+        rows = self._db.execute(
+            '''SELECT * FROM provenance_edges
+               WHERE project_id=? AND activity_id=?''',
+            (project_id, activity_id)).fetchall()
+        existing = {self._edge_key(row): row for row in rows}
+        existing_keys, proposed_keys = set(existing), set(proposed)
+        if existing_keys - proposed_keys:
+            raise ValueError('版本冲突：终态提交缺少已冻结的溯源边')
+        if not allow_insert and proposed_keys - existing_keys:
+            raise ValueError('版本冲突：终态活动不能追加溯源边')
+
+        for key, (edge, payload) in proposed.items():
+            row = existing.get(key)
+            if row is not None:
+                if not self._edge_is_identical(row, payload):
+                    raise ValueError('版本冲突：溯源边已存在')
+                continue
+            self._insert_edge(project_id, edge, default_created_at)
+
     def _transition_activity(self, project_id, activity_id, status, payload, edges,
                              completed_at=None):
         if status not in _TERMINAL_STATUSES:
@@ -246,8 +282,8 @@ class ProvenanceStore:
                          or current['completed_at'] == completed_at))
             if not same:
                 raise ValueError('版本冲突：溯源活动已经结束')
-            for edge in edges:
-                self._insert_edge(project_id, edge, existing_only=True)
+            self._reconcile_activity_edges(
+                project_id, activity_id, edges, allow_insert=False)
             return current
 
         completed_at = completed_at or utc_now()
@@ -258,8 +294,9 @@ class ProvenanceStore:
             (status, _json(payload), completed_at, project_id, activity_id))
         if cursor.rowcount != 1:
             raise ValueError('版本冲突：溯源活动已经结束')
-        for edge in edges:
-            self._insert_edge(project_id, edge, completed_at)
+        self._reconcile_activity_edges(
+            project_id, activity_id, edges, allow_insert=True,
+            default_created_at=completed_at)
         return self._activity(self._db.execute(
             'SELECT * FROM provenance_activities WHERE project_id=? AND id=?',
             (project_id, activity_id)).fetchone())
@@ -308,6 +345,14 @@ class ProvenanceStore:
         """在一个外层事务中完成 retrieval、创建 answer 并冻结全部边。"""
         with self.repo._transaction():
             self.repo.get_project(project_id)
+            if retrieval_id == answer_id:
+                raise ValueError('retrieval 和 answer 必须使用不同活动 ID')
+            grouped = {retrieval_id: [], answer_id: []}
+            for edge in edges:
+                edge = self._validate_edge(edge)
+                if edge['activity_id'] not in grouped:
+                    raise ValueError('版本冲突：组合提交含有其他活动的溯源边')
+                grouped[edge['activity_id']].append(edge)
             retrieval_row = self._db.execute(
                 'SELECT kind FROM provenance_activities WHERE project_id=? AND id=?',
                 (project_id, retrieval_id)).fetchone()
@@ -316,10 +361,16 @@ class ProvenanceStore:
             if retrieval_row['kind'] != 'retrieval':
                 raise ValueError('指定活动不是 retrieval')
             retrieval = self._transition_activity(
-                project_id, retrieval_id, 'completed', retrieval_payload, (), completed_at)
+                project_id, retrieval_id, 'completed', retrieval_payload,
+                grouped[retrieval_id], completed_at)
+            answer_existed = self._db.execute(
+                '''SELECT 1 FROM provenance_activities
+                   WHERE project_id=? AND id=?''',
+                (project_id, answer_id)).fetchone() is not None
             answer = self._begin_activity(
                 project_id, answer_id, 'answer', answer_payload, answer_started_at)
             edge_time = retrieval['completed_at']
-            for edge in edges:
-                self._insert_edge(project_id, edge, edge_time)
+            self._reconcile_activity_edges(
+                project_id, answer_id, grouped[answer_id],
+                allow_insert=not answer_existed, default_created_at=edge_time)
             return retrieval, answer
