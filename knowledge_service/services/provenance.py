@@ -133,7 +133,8 @@ class ProvenanceService:
                      'channel': _text(item.get('channel') or item.get('kind')), 'selected': True}
             record_ref = graph['record_ref']
             citation_ref = f'answer:{answer_id}#{citation}'
-            frozen = {**audit, 'citation': citation, 'warnings': graph['warnings']}
+            frozen = {**audit, 'answer_id': answer_id, 'citation': citation,
+                      'warnings': graph['warnings']}
             initial = [
                 {'activity_id': run_id, 'source_ref': f'retrieval-run:{run_id}',
                  'relation': 'considered', 'target_ref': record_ref, 'payload': frozen},
@@ -213,9 +214,15 @@ class ProvenanceService:
                        edge['payload'].get('citation') == citation or
                        (edge['relation'] == 'cites' and
                         edge['source_ref'] == f'answer:{answer_id}#{citation}')]
-        graph_edges += [edge for edge in self.repository.list_provenance_edges(
+        considered = [edge for edge in self.repository.list_provenance_edges(
             project_id, activity_id=run_id)
-            if edge['relation'] == 'considered' and edge['payload'].get('citation') == citation]
+            if edge['relation'] == 'considered'
+            and edge['target_ref'] == offered['target_ref']
+            and edge['payload'].get('citation') == citation]
+        owned = [edge for edge in considered if edge['payload'].get('answer_id') == answer_id]
+        compatible = owned or [edge for edge in considered
+                               if 'answer_id' not in edge['payload']]
+        graph_edges += compatible[:1]
         citation_status = ('cited' if citation in payload['cited'] else
                            'uncited' if activity['status'] == 'completed' else 'offered')
         nodes = _TraceProjection(
@@ -262,36 +269,40 @@ class ProvenanceService:
         if not isinstance(graphs, dict) or not isinstance(run_id, str) or not run_id:
             raise ValueError('旧溯源活动格式无效，无法安全迁移')
         answer_id = activity['id']
-        answer_edges, retrieval_edges = self._migrate_edge_v0_edges(
+        answer_edges, retrieval_edges, replace_ids = self._migrate_edge_v0_edges(
             project_id, answer_id, run_id, payload, graphs)
         migrated_payload = {key: value for key, value in payload.items() if key != 'graphs'}
         migrated_payload['graph_schema'] = 'edge-v1'
         return self.repository.migrate_legacy_answer_graph(
             project_id, answer_id=answer_id, retrieval_id=run_id,
             expected_payload=payload, answer_payload=migrated_payload,
-            answer_edges=answer_edges, retrieval_edges=retrieval_edges)
+            answer_edges=answer_edges, retrieval_edges=retrieval_edges,
+            retrieval_replace_edge_ids=replace_ids)
 
     def _migrate_edge_v0_edges(self, project_id, answer_id, run_id, payload, graphs):
         existing_answer = self.repository.list_provenance_edges(
             project_id, activity_id=answer_id)
         existing_retrieval = self.repository.list_provenance_edges(
             project_id, activity_id=run_id)
-        created = {(edge['activity_id'], edge['source_ref'], edge['relation'],
-                    edge['target_ref'], edge['ordinal']): edge['created_at']
-                   for edge in [*existing_answer, *existing_retrieval]}
-        answer_edges, retrieval_edges = [], []
+        existing_by_key = {
+            (edge['activity_id'], edge['source_ref'], edge['relation'],
+             edge['target_ref'], edge['ordinal']): edge
+            for edge in [*existing_answer, *existing_retrieval]}
+        answer_edges, retrieval_edges, replace_ids = [], [], []
 
         def append(target, activity_id, source_ref, relation, target_ref, edge_payload,
-                   legacy=None):
+                   legacy=None, ordinal=None):
             edge = {'activity_id': activity_id, 'source_ref': source_ref,
                     'relation': relation, 'target_ref': target_ref,
-                    'ordinal': len(target), 'payload': edge_payload}
+                    'ordinal': len(target) if ordinal is None else ordinal,
+                    'payload': edge_payload}
             if legacy is not None:
                 key = (legacy.get('activity_id'), legacy.get('source_ref'),
                        legacy.get('relation'), legacy.get('target_ref'),
                        legacy.get('ordinal'))
-                if key in created:
-                    edge['created_at'] = created[key]
+                existing = existing_by_key.get(key)
+                if existing is not None:
+                    edge['created_at'] = existing['created_at']
             target.append(edge)
 
         used = next((edge for edge in existing_answer if edge['relation'] == 'used'), None)
@@ -314,6 +325,7 @@ class ProvenanceService:
                          and math.isfinite(audit['score']) else None,
                 'channel': _text(audit.get('channel')),
                 'selected': audit.get('selected') is True,
+                'answer_id': answer_id,
                 'citation': citation,
                 'warnings': self._legacy_warnings(graph.get('warnings')),
             }
@@ -328,8 +340,16 @@ class ProvenanceService:
                 raise ValueError('旧溯源活动缺少 offered/considered 关联')
             append(answer_edges, answer_id, citation_ref, 'offered', record_ref,
                    frozen, old_offered)
+            old_key = (old_considered.get('activity_id'), old_considered.get('source_ref'),
+                       old_considered.get('relation'), old_considered.get('target_ref'),
+                       old_considered.get('ordinal'))
+            old_row = existing_by_key.get(old_key)
+            if old_row is not None and 'answer_id' not in old_row['payload']:
+                replace_ids.append(old_row['id'])
             append(retrieval_edges, run_id, f'retrieval-run:{run_id}', 'considered',
-                   record_ref, frozen, old_considered)
+                   record_ref, frozen, old_considered,
+                   ordinal=old_considered.get('ordinal')
+                   if type(old_considered.get('ordinal')) is int else None)
             for edge in graph_edges:
                 relation = edge.get('relation')
                 if edge.get('activity_id') != answer_id or relation in {
@@ -365,7 +385,7 @@ class ProvenanceService:
             if edge['relation'] == 'cites':
                 append(answer_edges, answer_id, edge['source_ref'], 'cites',
                        edge['target_ref'], {}, edge)
-        return answer_edges, retrieval_edges
+        return answer_edges, retrieval_edges, replace_ids
 
     @staticmethod
     def _legacy_warnings(raw):

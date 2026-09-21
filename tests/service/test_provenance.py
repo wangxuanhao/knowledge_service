@@ -341,6 +341,88 @@ def test_edge_v0_answer_is_migrated_before_trace_without_losing_sources(provenan
         document['text'], source['highlight'], 'excerpt_before', 'excerpt_after'))
 
 
+@pytest.mark.parametrize('migration_order', [('first', 'second'), ('second', 'first')])
+def test_shared_legacy_retrieval_migrations_preserve_and_isolate_considered_edges(
+        provenance, migration_order):
+    repo, service, project = provenance
+    retrieval_id, citation = 'rr_shared_edge_v0', 'E1'
+    sources = {'first': _source(repo, project, 'shared-first'),
+               'second': _source(repo, project, 'shared-second')}
+    cases, considered_edges = {}, []
+    retrieval_payload = {'query': 'shared legacy evidence', 'scope': {},
+                         'requested_mode': 'keyword', 'active_modes': ['keyword']}
+    repo.begin_provenance_activity(project, retrieval_id, 'retrieval', retrieval_payload)
+
+    for retrieval_ordinal, (name, (document, chunk, ingest)) in enumerate(sources.items()):
+        answer_id = f'ans_shared_{name}'
+        record_ref = f"record-version:{chunk['version_id']}"
+        chunk_ref = f"chunk-version:{chunk['version_id']}"
+        document_ref = f"document-version:{document['version_id']}"
+        citation_ref = f'answer:{answer_id}#{citation}'
+        audit = {'rank': 1, 'score': 0.5, 'channel': 'chunk', 'selected': True}
+        source = {'document_id': document['id'], 'version_id': document['version_id'],
+                  'version': document['version'], 'title': document['id'],
+                  'excerpt_before': document['text'][:7],
+                  'highlight': document['text'][7:15],
+                  'excerpt_after': document['text'][15:30]}
+        considered = {'activity_id': retrieval_id,
+                      'source_ref': f'retrieval-run:{retrieval_id}',
+                      'relation': 'considered', 'target_ref': record_ref,
+                      'ordinal': retrieval_ordinal, 'payload': audit}
+        answer_edges = [
+            {'activity_id': answer_id, 'source_ref': f'answer:{answer_id}',
+             'relation': 'used', 'target_ref': f'retrieval-run:{retrieval_id}',
+             'ordinal': 0, 'payload': {}},
+            {'activity_id': answer_id, 'source_ref': citation_ref,
+             'relation': 'offered', 'target_ref': record_ref,
+             'ordinal': 1, 'payload': audit},
+            {'activity_id': answer_id, 'source_ref': record_ref,
+             'relation': 'supported-by', 'target_ref': chunk_ref,
+             'ordinal': 2, 'payload': {}},
+            {'activity_id': answer_id, 'source_ref': chunk_ref,
+             'relation': 'sourced-from', 'target_ref': document_ref,
+             'ordinal': 3, 'payload': source},
+            {'activity_id': answer_id, 'source_ref': document_ref,
+             'relation': 'processed-by', 'target_ref': f"ingest-run:{ingest['id']}",
+             'ordinal': 4, 'payload': {
+                 'run_id': ingest['id'], 'attempt': ingest['attempt'],
+                 'status_at_capture': ingest['status'], 'created_at': ingest['created_at'],
+                 'updated_at_at_capture': ingest['updated_at']}},
+        ]
+        graph = {'record_ref': record_ref, 'audit': audit, 'warnings': [],
+                 'nodes': [], 'edges': [answer_edges[0], considered, *answer_edges[1:]]}
+        answer_payload = {'run_id': retrieval_id, 'offered': [citation], 'cited': [],
+                          'graphs': {citation: graph}, 'warnings': [],
+                          'answer': '', 'mode': None}
+        repo.begin_provenance_activity(project, answer_id, 'answer', answer_payload)
+        repo.complete_provenance_activity(project, answer_id, answer_payload, answer_edges)
+        cases[name] = {'answer_id': answer_id, 'record_ref': record_ref}
+        considered_edges.append(considered)
+    repo.complete_provenance_activity(
+        project, retrieval_id, retrieval_payload, considered_edges)
+
+    traces = {}
+    for name in migration_order:
+        case = cases[name]
+        traces[name] = service.trace_answer_evidence(
+            project, case['answer_id'], citation)
+        assert traces[name]['integrity']['complete'] is True
+        considered = [edge for edge in traces[name]['edges']
+                      if edge['relation'] == 'considered']
+        assert len(considered) == 1
+        assert considered[0]['target_ref'] == case['record_ref']
+        assert considered[0]['payload']['answer_id'] == case['answer_id']
+
+    for name, case in cases.items():
+        repeated = service.trace_answer_evidence(project, case['answer_id'], citation)
+        considered = [edge for edge in repeated['edges'] if edge['relation'] == 'considered']
+        assert len(considered) == 1 and considered[0]['target_ref'] == case['record_ref']
+    stored = [edge for edge in repo.list_provenance_edges(project, activity_id=retrieval_id)
+              if edge['relation'] == 'considered']
+    assert {edge['payload'].get('answer_id') for edge in stored} == {
+        case['answer_id'] for case in cases.values()}
+
+
 def test_same_document_version_preserves_each_source_occurrence(provenance):
     repo, service, project = provenance
     text = 'alpha gap beta tail'
