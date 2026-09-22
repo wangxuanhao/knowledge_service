@@ -128,8 +128,10 @@ def list_reviews(service, p):
                         pass
             attribute_values = public_attribute_values(current)
             if candidate.get('status') == 'contradicting' and conflict is None:
+                conflicting = [row for row in current
+                               if not _same_attribute_value(row, candidate.get('value'))]
                 conflict = {'code': candidate.get('conflict_code', 'attribute_max_count_one'),
-                            'current_values': attribute_values}
+                            'current_values': public_attribute_values(conflicting)}
             result.append({**candidate, 'kind': candidate.get('kind', 'relation'),
                 'blocked': any(row is None for row in dependencies),
                 'entity_version': entity['version'] if entity else None,

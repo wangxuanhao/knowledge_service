@@ -238,13 +238,15 @@ def test_approve_replace_cannot_remap_a_registered_conflict_predicate(tmp_path,m
                    for record_id in ('old-count','old-score'))
 
 
-def test_approve_replace_accepts_when_registered_conflict_has_disappeared(tmp_path,monkeypatch):
+@pytest.mark.parametrize('equal_value_exists',[False,True])
+def test_approve_replace_accepts_when_registered_conflict_has_disappeared(
+        tmp_path,monkeypatch,equal_value_exists):
     def extract(self,text,ontology):
         self.review_candidates=[dict(kind='entity',record_id='person-1',text='甲',proposed_type='Person'),
             dict(kind='attribute',entity_id='person-1',subject='甲',proposed_type='count',value=2)]
         return []
     monkeypatch.setattr(SemanticaExtractor,'extract',extract)
-    app=create_app(tmp_path/'attribute-conflict-gone.sqlite',HashingEncoder())
+    app=create_app(tmp_path/f'attribute-conflict-gone-{equal_value_exists}.sqlite',HashingEncoder())
     with TestClient(app) as client:
         p=client.post('/api/projects',json={'name':'conflict-gone','use_default_ontology':False}).json()['id']
         base='/api/projects/'+p;service=app.state.service;repo=service.repository
@@ -268,13 +270,22 @@ def test_approve_replace_accepts_when_registered_conflict_has_disappeared(tmp_pa
         old=repo.history(p,'old-count')[-1]
         tombstone=writable(old);tombstone['metadata']={**old['metadata'],'_deleted':True}
         service.write(p,[tombstone],expected_versions={'old-count':old['version']})
+        if equal_value_exists:
+            assert client.post(base+'/records',json={'records':[{
+                'id':'equal-count','kind':'attribute','type':'https://test/count',
+                'subject_id':entity_id,'value':2,
+                'datatype':'http://www.w3.org/2001/XMLSchema#integer',
+                'text':'甲 · count = 2','ontology_id':ontology['id']}]}).status_code==201
         item=next(r for r in client.get(base+'/reviews').json()['reviews'] if r['kind']=='attribute')
         assert item['status']=='contradicting' and item['conflict']['current_values']==[]
+        assert [(value['record_id'],value['value']) for value in item['current_values']]==(
+            [('equal-count',2)] if equal_value_exists else [])
         response=client.post(endpoint,json={'action':'approve_replace','note':'旧冲突已撤回，接受候选',
             'target_type':'count','expected_version':item['document_version'],
             'expected_entity_version':item['entity_version'],'expected_attribute_versions':{}})
         assert response.status_code==200,response.text
         new_id=response.json()['record_id']
+        assert new_id==('equal-count' if equal_value_exists else 'reviewattr_'+item['id'])
         assertion=repo.get_assertion(p,item['id'])
         assert assertion['status']=='accepted' and assertion['canonical_record_id']==new_id
         events=repo.list_assertion_events(p,item['id'])
