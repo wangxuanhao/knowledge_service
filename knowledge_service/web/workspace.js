@@ -1,6 +1,7 @@
 /* Linked graph workspace: preserve existing editing/governance controls. */
 (() => {
   const ui = {request:0, options:[], ontology:null, graph:null, busy:false};
+  const graphRequests=GraphTypeFilter.createGraphRequestGate();
   const get = id => document.getElementById(id);
   const make = (tag, html, className='') => {const e=document.createElement(tag);e.innerHTML=html;e.className=className;return e;};
   const act = (id, fn) => {get(id).onclick=async()=>{get(id).disabled=true;try{await fn();}catch(e){status(e.message,true);}finally{get(id).disabled=false;}};};
@@ -158,7 +159,7 @@
   let entityTimer;
   get('graph-entity-filter').oninput=choices;
   get('graph-entity-filter').onkeydown=e=>{if(e.key==='Enter'&&get('graph-entity-choice').value)get('graph-entity-choice').onchange();};
-  get('graph-entity-choice').onchange=async()=>{clearTimeout(entityTimer);const id=get('graph-entity-choice').value;if(!id)return;get('graph-node').value=id;ui.request++;const hops=Number(get('graph-hops').value);try{await drawGraph(id,hops);const row=wb.nodes.get(id);if(row){inspect(row);status('已定位：'+row.text+' · 展示 '+hops+' 跳邻域');}}catch(e){status(e.message,true);}};
+  get('graph-entity-choice').onchange=async()=>{clearTimeout(entityTimer);const id=get('graph-entity-choice').value;if(!id)return;get('graph-node').value=id;ui.request++;const hops=Number(get('graph-hops').value);try{if(!await drawGraph(id,hops))return;const row=wb.nodes.get(id);if(row){inspect(row);status('已定位：'+row.text+' · 展示 '+hops+' 跳邻域');}}catch(e){status(e.message,true);}};
 
   async function options(){
     const p=current, stamp=JSON.stringify(scope());if(!p)return;
@@ -205,7 +206,7 @@
         const entity=wb.nodes.get(row.subject_id);if(entity)inspect(entity);return;
       }
       if(row.kind==='entity'&&(base.attribute_mode!=='expanded'||base.selected_node_id!==row.id)){
-        try{await drawGraph(row.id,Number(get('graph-hops').value));const selected=wb.nodes.get(row.id);if(selected)inspect(selected);}
+        try{if(!await drawGraph(row.id,Number(get('graph-hops').value)))return;const selected=wb.nodes.get(row.id);if(selected)inspect(selected);}
         catch(error){status(error.message,true);}
         return;
       }
@@ -282,16 +283,26 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
   window.drawGraph=async(node=null,hops=1)=>{
     // node 省略时渲染当前 scope 的全图（后端 node_id=null 返回全 scope，见 explorer.py:16）
     const id=node||get('graph-node').value||get('graph-entity-choice').value||null;
+    const project=current,scopeSnapshot={...scope(),valid_at:null};
+    const ticket=graphRequests.begin(project,scopeSnapshot,id);
     const done=kgTime('subgraph');
-    const result=await scopedRead('/subgraph',{node_id:id,hops,valid_at:null,
-      attribute_mode:id?'expanded':'summary'});
+    let result;
+    try{result=await scopedRead('/subgraph',{node_id:id,hops,valid_at:null,
+      attribute_mode:id?'expanded':'summary'});}
+    catch(error){
+      if(!graphRequests.isCurrent(ticket,current,{...scope(),valid_at:null},id))return null;
+      throw error;
+    }
+    if(!graphRequests.isCurrent(ticket,current,{...scope(),valid_at:null},id))return null;
     done({node:id||'all',hops,nodes:result.nodes.length,edges:result.edges.length,server_ms:result.timing_ms?.total??'—'});
     renderGraph(result);
     // 开放本体发现的提示条要跟着图谱一起刷新：这原本只在 workbench.js 的旧 drawGraph 副本里做，
     // 收敛成单一份实现后带到这里，避免 discovery 模式下提示停留在旧状态。
     renderDiscoveryHint().catch(()=>{});
+    return result;
   };
   function clearGraphWorkspace({preserveSearchResults=false}={}){
+    graphRequests.invalidate();
     ui.graph=null;wb.nodes.clear();wb.chart?.clear();
     get('graph-node').value='';get('graph-entity-choice').value='';get('graph-detail').replaceChildren();
     get('graph-summary').textContent='从左侧检索结果选择实体或关系';
@@ -305,7 +316,7 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
     const id=get('graph-node').value;
     if(!id)throw Error('请先选择实体或点击图中的节点，再展开邻域。');
     const hops=Number(get('graph-hops').value);
-    await window.drawGraph(id,hops);
+    if(!await window.drawGraph(id,hops))return;
     status('已展开 '+hops+' 跳邻域');
   });
   act('apply-scope',async()=>{details.open=false;clearGraphWorkspace({preserveSearchResults:true});window.clearKnowledgeChat?.({notify:true});await Promise.all([options(),discoverMetadata()]);if(!get('tab-mindmap').classList.contains('hidden')&&get('mindmap-root').value)await get('draw-mindmap').onclick();});

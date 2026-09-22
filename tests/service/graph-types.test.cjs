@@ -1,6 +1,6 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {selectType,entityNodes,relationEdges,isAttributeNode}=require('../../knowledge_service/web/graph-types.js');
+const {selectType,entityNodes,relationEdges,isAttributeNode,createGraphRequestGate}=require('../../knowledge_service/web/graph-types.js');
 test('type buttons select matching entities, not neighbours or the inverse category',()=>{
   const graph={nodes:[{id:'p',type:'a/Platform'},{id:'l',type:'Law'},{id:'p2',type:'b/Platform'}],edges:[{id:'e',subject_id:'p',object_id:'l'}]};
   assert.deepEqual(selectType(graph,'a/Platform').nodes.map(n=>n.id),['p']);
@@ -24,4 +24,49 @@ test('attribute value nodes stay out of entity types, counts, and relation filte
   assert.deepEqual(selectType(graph,'Person').nodes.map(node=>node.id),['p']);
   assert.deepEqual(selectType(graph,'Person').edges,[]);
   assert.equal(selectType(graph,'').nodes.length,2);
+});
+
+function deferred(){
+  let resolve;
+  const promise=new Promise(done=>{resolve=done;});
+  return {promise,resolve};
+}
+
+test('newer graph request wins when responses resolve out of order',async()=>{
+  const gate=createGraphRequestGate();
+  const scope={known_at:null,include_unknown:true,filters:{and:[{field:'city',op:'eq',value:'北京'}]}};
+  let rendered='initial';
+  const draw=async(node,pending)=>{
+    const ticket=gate.begin('project',scope,node);
+    const result=await pending.promise;
+    if(gate.isCurrent(ticket,'project',scope,node))rendered=result;
+  };
+  const slow=deferred(),fast=deferred();
+  const first=draw('A',slow),second=draw('B',fast);
+  fast.resolve('B');await second;
+  slow.resolve('A');await first;
+  assert.equal(rendered,'B');
+});
+
+test('invalidating graph requests keeps cleared state after a pending response',async()=>{
+  const gate=createGraphRequestGate();
+  const scope={filters:null,known_at:null,include_unknown:true};
+  const pending=deferred();let rendered='graph';
+  const ticket=gate.begin('project',scope,'A');
+  const request=pending.promise.then(result=>{
+    if(gate.isCurrent(ticket,'project',scope,'A'))rendered=result;
+  });
+  gate.invalidate();rendered='empty hint';
+  pending.resolve('stale graph');await request;
+  assert.equal(rendered,'empty hint');
+});
+
+test('workspace gates graph rendering and invalidates requests when clearing',()=>{
+  const workspace=require('node:fs').readFileSync(
+    require('node:path').resolve(__dirname,'../../knowledge_service/web/workspace.js'),'utf8');
+  assert.ok(workspace.includes('graphRequests.begin('));
+  assert.ok(workspace.includes('graphRequests.isCurrent('));
+  const clear=workspace.slice(workspace.indexOf('function clearGraphWorkspace'),
+    workspace.indexOf("act('search'"));
+  assert.ok(clear.includes('graphRequests.invalidate()'));
 });

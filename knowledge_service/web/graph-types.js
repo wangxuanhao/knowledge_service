@@ -8,11 +8,32 @@
   }
   function entityNodes(graph){return graph.nodes.filter(node=>!isAttributeNode(node));}
   function relationEdges(graph){return graph.edges.filter(edge=>!isAttributeEdge(edge));}
+  function stableJson(value){
+    if(Array.isArray(value))return value.map(stableJson);
+    if(value&&typeof value==='object')return Object.fromEntries(
+      Object.keys(value).sort().filter(key=>value[key]!==undefined)
+        .map(key=>[key,stableJson(value[key])]));
+    return value;
+  }
+  function createGraphRequestGate(){
+    let generation=0;
+    const snapshot=(project,scope,node)=>({project:project||'',
+      scope:JSON.stringify(stableJson(scope||{})),node:node||null});
+    return {
+      begin(project,scope,node){return {generation:++generation,...snapshot(project,scope,node)};},
+      invalidate(){generation+=1;},
+      isCurrent(ticket,project,scope,node){
+        if(!ticket||ticket.generation!==generation)return false;
+        const current=snapshot(project,scope,node);
+        return ticket.project===current.project&&ticket.scope===current.scope&&ticket.node===current.node;
+      },
+    };
+  }
   function selectType(graph,type){
     if(!type)return graph;
     const nodes=entityNodes(graph).filter(n=>n.type===type), ids=new Set(nodes.map(n=>n.id));
     return {...graph,nodes,edges:relationEdges(graph).filter(e=>ids.has(e.subject_id)&&ids.has(e.object_id))};
   }
-  root.GraphTypeFilter={selectType,entityNodes,relationEdges,isAttributeNode,isAttributeEdge};
-  if(typeof module!=='undefined')module.exports={selectType,entityNodes,relationEdges,isAttributeNode,isAttributeEdge};
+  root.GraphTypeFilter={selectType,entityNodes,relationEdges,isAttributeNode,isAttributeEdge,createGraphRequestGate};
+  if(typeof module!=='undefined')module.exports={selectType,entityNodes,relationEdges,isAttributeNode,isAttributeEdge,createGraphRequestGate};
 })(globalThis);
