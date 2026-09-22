@@ -366,9 +366,9 @@ Semantica EntityMerger 继续提供合并建议，但不能通过字典优先级
 
 新快照除属性事实 payload 外，还冻结每个属性 record version 的 assertion ID、精确 accepted event 和支撑映射。恢复时走 FormalFactWriter，创建新系统版本，不抹除恢复后的历史；兼容 `properties` 由恢复后的属性事实重新派生。
 
-恢复不能把已是 `rejected` 或 `superseded` 的原 assertion 转回 accepted。每个恢复后的属性事实创建一条新的 accepted governance assertion：
+恢复命令必须带 `restore_request_id` 幂等键。相同项目、snapshot 和 request ID 的重试返回第一次保存的恢复收据，不创建新 record version、assertion 或 event；用户有意再次执行同一快照恢复时必须生成新的 request ID。恢复不能把已是 `rejected` 或 `superseded` 的原 assertion 转回 accepted。每个恢复后的属性事实创建一条新的 accepted governance assertion：
 
-- ID 由 `snapshot_id + restored_record_id + restored_version_id` 确定性生成，保证重试幂等；
+- ID 由 `snapshot_id + restore_request_id + restored_record_id` 确定性生成，保证网络重试幂等并允许用户显式再次恢复；
 - actor=`snapshot-restore`，payload.role=`governance`；
 - payload 保存 snapshot ID、原 record version、冻结的 assertion/event refs 和恢复操作 ID；
 - quote 明确写“由快照恢复决定重新采用”，不冒充原文证据；
@@ -445,7 +445,7 @@ SQLite 仍是权威源。Neo4j 使用事实节点保留版本和 provenance 所�
 - 实体响应暂时继续包含派生 `properties`，同时新增 `attributes`。
 - 旧前端仍可显示 JSON；新前端只使用 `attributes` 编辑和审核。
 - 导出包含一等属性记录；导入旧 property bag 时走确定性回填。
-- `properties` 的写兼容只保留在 legacy import 和迁移 Adapter 内，公开写接口禁止新增嵌套属性。
+- 一个发布周期内，公开实体写接口仍接受 legacy `properties` 输入，但绝不再把它直接持久化进 entity。`LegacyPropertyWriteAdapter` 把新增或变化的键转换为带 actor=`legacy-api` 的属性提案，并在同一 FormalFactWriter 事务中按正常冲突策略提交；响应返回 deprecation warning。省略某个键不解释为删除，删除必须使用新的显式属性命令。一个发布周期后，公开实体写接口拒绝 properties 变化；此后写兼容只保留在 legacy import 和迁移 Adapter 内。
 
 ## 错误处理与不变式
 
@@ -532,7 +532,7 @@ SQLite 仍是权威源。Neo4j 使用事实节点保留版本和 provenance 所�
 5. 补齐实体合并、来源撤回、快照恢复和 provenance。
 6. 增加结构化属性查询、RDF、Milvus 和 Neo4j 投影。
 7. 上线属性表格、多值冲突审核和按需属性节点展开。
-8. 观测一个版本周期后，移除公开接口对 entity properties 写入的兼容路径。
+8. 观测一个版本周期后，移除 `LegacyPropertyWriteAdapter` 的公开路由接入并拒绝 entity properties 变化；内部 legacy import 和迁移 Adapter 保留。
 
 每一步都必须产生可运行、可测试的中间状态；不能要求一次性切换所有读取和展示路径。
 
