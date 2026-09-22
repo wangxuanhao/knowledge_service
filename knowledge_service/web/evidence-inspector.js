@@ -1,5 +1,24 @@
 /* Evidence first, internals on demand. Raw document text is always escaped. */
 (() => {
+  const escapeHtml=value=>String(value??'').replace(/[&<>"']/g,char=>({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  function attributeDetailsHtml(groups,escape=escapeHtml){
+    if(!Array.isArray(groups)||!groups.length)return '';
+    const datatypeName=value=>String(value||'').split(/[#/]/).pop()||'—';
+    const displayValue=value=>typeof value==='string'?value:JSON.stringify(value);
+    const validity=value=>value.valid_from||value.valid_until?
+      `${value.valid_from||'…'} → ${value.valid_until||'…'}`:'未限定';
+    const rows=groups.flatMap(group=>(group.values||[]).map(value=>{
+      const predicate=group.predicate||group.type||value.predicate||value.type||'';
+      const label=group.label||predicate;
+      const contradicting=value.status==='contradicting';
+      const state=contradicting?`<strong>冲突候选</strong>${value.conflict?.reason?`<small>${escape(value.conflict.reason)}</small>`:''}`:'当前值';
+      const support=contradicting?'—':`${Number(value.accepted_support_count)||0} 条支撑`;
+      return `<tr><th scope="row"><span>${escape(label)}</span><small>${escape(predicate)}</small></th><td>${escape(displayValue(value.value))}</td><td title="${escape(value.datatype||'')}">${escape(datatypeName(value.datatype))}</td><td>${escape(validity(value))}</td><td>${escape(support)}</td><td class="attribute-state ${contradicting?'is-conflict':''}">${state}</td></tr>`;
+    }));
+    if(!rows.length)return '';
+    return `<table class="entity-attributes" aria-label="正式属性"><thead><tr><th>属性</th><th>值</th><th>数据类型</th><th>有效期</th><th>来源</th><th>状态</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+  }
   function frozenSourceDocument(excerpt){
     if(!excerpt||typeof excerpt!=='object'||Array.isArray(excerpt))return null;
     const text=key=>typeof excerpt[key]==='string'?excerpt[key]:'';
@@ -9,7 +28,7 @@
       reason:source_content==='full_version'?'回答生成时冻结的历史原文定位':'回答生成时保存的历史原文片段',
       before:text('excerpt_before'),highlight:text('highlight'),after:text('excerpt_after')};
   }
-  if(typeof module!=='undefined'&&module.exports)module.exports={frozenSourceDocument};
+  if(typeof module!=='undefined'&&module.exports)module.exports={frozenSourceDocument,attributeDetailsHtml};
   if(typeof window==='undefined'||typeof document==='undefined')return;
   const host=$('graph-detail');let serial=0;
   const sourceDialog=document.createElement('dialog');sourceDialog.id='source-evidence-dialog';
@@ -74,7 +93,10 @@
     const ticket=++serial,p=current,stamp=JSON.stringify(scope());
     const name=id=>options.find(n=>n.id===id)?.text||id;
     const aliases=Array.isArray(row.metadata?.aliases)?row.metadata.aliases:[];
-    host.innerHTML=`<section class="evidence-identity"><span class="evidence-kind">${esc({entity:'实体',relation:'关系',chunk:'原文片段',document:'文档'}[row.kind]||row.kind)} · ${typeHint(row.type)}</span><h3>${esc(row.text)}</h3>${row.kind==='relation'?`<div class="relation-path"><b>${esc(name(row.subject_id))}</b><span>↓ ${typeHint(row.type)}</span><b>${esc(name(row.object_id))}</b></div>`:''}${aliases.length?'<p class="evidence-aliases">别名：'+aliases.map(esc).join('、')+'</p>':''}<div class="evidence-action-groups"><div class="evidence-actions"><button data-action="edit">编辑</button>${row.kind==='entity'?'<button data-action="add-relation">新增关系</button>':''}<button data-action="history" class="secondary">版本历史 · v${row.version}</button>${row.kind==='entity'?'<button data-action="mindmap" class="secondary">展开脑图</button>':''}</div>${row.kind==='entity'||row.kind==='relation'?'<div class="evidence-danger"><span>危险操作</span></div>':''}</div></section><section class="evidence-sources"><h4>原文证据</h4><div id="inspector-source-list" aria-live="polite">正在查找来源…</div></section><section class="evidence-time"><h4>时间</h4><dl><dt>业务生效</dt><dd>${esc(row.valid_from?localTime(row.valid_from):'未知')}</dd><dt>业务失效</dt><dd>${esc(row.valid_until?localTime(row.valid_until):'未设定')}</dd><dt>系统记录</dt><dd>${esc(localTime(row.recorded_at))}</dd></dl></section><details class="evidence-technical"><summary>Metadata / 属性 / 技术标识</summary><pre>${esc(JSON.stringify({id:row.id,type:row.type,source_id:row.source_id,ontology_id:row.ontology_id,metadata:row.metadata,properties:row.properties},null,2))}</pre></details>`;
+    const formalAttributes=row.kind==='entity'?attributeDetailsHtml(row.attributes,esc):'';
+    const legacyAttributes=row.kind==='entity'&&!formalAttributes&&row.properties&&Object.keys(row.properties).length?
+      `<section class="evidence-attributes"><h4>兼容属性</h4><dl>${Object.entries(row.properties).map(([key,value])=>`<dt>${esc(key)}</dt><dd>${esc(typeof value==='string'?value:JSON.stringify(value))}</dd>`).join('')}</dl></section>`:'';
+    host.innerHTML=`<section class="evidence-identity"><span class="evidence-kind">${esc({entity:'实体',relation:'关系',chunk:'原文片段',document:'文档'}[row.kind]||row.kind)} · ${typeHint(row.type)}</span><h3>${esc(row.text)}</h3>${row.kind==='relation'?`<div class="relation-path"><b>${esc(name(row.subject_id))}</b><span>↓ ${typeHint(row.type)}</span><b>${esc(name(row.object_id))}</b></div>`:''}${aliases.length?'<p class="evidence-aliases">别名：'+aliases.map(esc).join('、')+'</p>':''}<div class="evidence-action-groups"><div class="evidence-actions"><button data-action="edit">编辑</button>${row.kind==='entity'?'<button data-action="add-relation">新增关系</button>':''}<button data-action="history" class="secondary">版本历史 · v${row.version}</button>${row.kind==='entity'?'<button data-action="mindmap" class="secondary">展开脑图</button>':''}</div>${row.kind==='entity'||row.kind==='relation'?'<div class="evidence-danger"><span>危险操作</span></div>':''}</div></section>${formalAttributes?`<section class="evidence-attributes"><h4>实体属性</h4>${formalAttributes}</section>`:legacyAttributes}<section class="evidence-sources"><h4>原文证据</h4><div id="inspector-source-list" aria-live="polite">正在查找来源…</div></section><section class="evidence-time"><h4>时间</h4><dl><dt>业务生效</dt><dd>${esc(row.valid_from?localTime(row.valid_from):'未知')}</dd><dt>业务失效</dt><dd>${esc(row.valid_until?localTime(row.valid_until):'未设定')}</dd><dt>系统记录</dt><dd>${esc(localTime(row.recorded_at))}</dd></dl></section><details class="evidence-technical"><summary>Metadata / 属性 / 技术标识</summary><pre>${esc(JSON.stringify({id:row.id,type:row.type,source_id:row.source_id,ontology_id:row.ontology_id,metadata:row.metadata,properties:row.properties},null,2))}</pre></details>`;
     host.querySelector('[data-action="edit"]').onclick=()=>editRecord(row);
     host.querySelector('[data-action="edit"]').textContent=row.kind==='relation'?'编辑这条关系':row.kind==='entity'?'编辑这个实体':'编辑';
     host.querySelector('[data-action="history"]').onclick=()=>historyFor(row);

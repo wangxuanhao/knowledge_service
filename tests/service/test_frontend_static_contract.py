@@ -55,7 +55,7 @@ def test_provenance_assets_precede_history_hydration():
     html = read('index.html')
     assert '/assets/provenance-drawer.css?v=2' in html
     assert '/assets/provenance-drawer.js?v=3' in html
-    assert '/assets/evidence-inspector.js?v=provenance-2' in html
+    assert '/assets/evidence-inspector.js?v=attribute-facts-1' in html
     assert '/assets/workbench.js?v=provenance-2' in html
     assert html.index('/assets/workbench.css') < html.index('/assets/provenance-drawer.css')
     assert html.index('/assets/ingest-mode.js') < html.index('/assets/provenance-drawer.js') < html.index('/assets/workbench.js')

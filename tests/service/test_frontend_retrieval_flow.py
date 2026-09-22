@@ -21,7 +21,10 @@ SEARCH_BODY_FIELDS = {
     'query', 'retrieval_mode', 'filters', 'valid_at', 'known_at', 'include_unknown',
     'k_entities', 'k_chunks', 'k_relations',
 }
-SUBGRAPH_BODY_FIELDS = {'node_id', 'hops', 'filters', 'valid_at', 'known_at', 'include_unknown'}
+SUBGRAPH_BODY_FIELDS = {
+    'node_id', 'hops', 'filters', 'valid_at', 'known_at', 'include_unknown',
+    'attribute_mode',
+}
 
 
 def _browser_path():

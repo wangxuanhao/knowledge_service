@@ -1,4 +1,5 @@
 """探索、迁移、治理与持久化任务的 HTTP 契约。"""
+from typing import Literal
 from pydantic import Field
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse, FileResponse
@@ -17,6 +18,7 @@ class LocalImport(Request):
 class Subgraph(Scope):
     node_id:str|None=None
     hops:int=Field(default=1,ge=0,le=5)
+    attribute_mode:Literal['none','summary','expanded']='summary'
 
 class Mindmap(Scope):
     root_id:str
@@ -114,7 +116,9 @@ def install(app,service):
     def sources(p:str,request:Scope):return explorer.sources(p,request.model_dump())
 
     @router.post('/projects/{p}/subgraph')
-    def subgraph(p:str,request:Subgraph):return explorer.graph(p,request.model_dump(),request.node_id,request.hops)
+    def subgraph(p:str,request:Subgraph):return explorer.graph(
+        p,request.model_dump(exclude={'node_id','hops','attribute_mode'}),
+        request.node_id,request.hops,request.attribute_mode)
 
     @router.post('/projects/{p}/mindmap')
     def mindmap(p:str,request:Mindmap):return explorer.mindmap(p,request.model_dump(),request.root_id,request.depth)

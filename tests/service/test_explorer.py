@@ -3,6 +3,164 @@ from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
 
 
+ATTRIBUTE_TTL = '''
+@prefix ex: <https://test/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+ex:Person a owl:Class ; rdfs:label "人员"@zh .
+ex:knows a owl:ObjectProperty ; rdfs:domain ex:Person ; rdfs:range ex:Person .
+ex:age a owl:DatatypeProperty ; rdfs:label "年龄"@zh ;
+  rdfs:domain ex:Person ; rdfs:range xsd:integer .
+'''
+
+
+def _assertion(repo, project_id, assertion_id, status, *, subject_id, value):
+    datatype = 'http://www.w3.org/2001/XMLSchema#integer'
+    repo.create_assertion(project_id, {
+        'id': assertion_id, 'kind': 'attribute',
+        'document_id': 'candidate-source', 'document_version_id': 'candidate-source-v1',
+        'chunk_id': 'candidate-chunk', 'quote': f'年龄 {value}',
+        'payload': {'subject_id': subject_id, 'type': 'https://test/age',
+                    'value': value, 'datatype': datatype,
+                    'valid_from': None, 'valid_until': None},
+        'actor': 'test',
+    })
+    repo.transition_assertion(
+        project_id, assertion_id, 1, status, 'test decision', 'test')
+
+
+def test_subgraph_attribute_modes_group_values_and_expand_only_selected_entity(tmp_path):
+    app = create_app(tmp_path/'attribute-explorer.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project_id = client.post('/api/projects', json={
+            'name': 'attribute explorer', 'use_default_ontology': False,
+        }).json()['id']
+        base = f'/api/projects/{project_id}'
+        ontology = client.post(base+'/ontologies', json={'turtle': ATTRIBUTE_TTL}).json()
+        service = app.state.service
+        datatype = 'http://www.w3.org/2001/XMLSchema#integer'
+        saved = service.write(project_id, [
+            {'id': 'a', 'kind': 'entity', 'type': 'https://test/Person', 'text': '甲'},
+            {'id': 'b', 'kind': 'entity', 'type': 'https://test/Person', 'text': '乙'},
+            {'id': 'a-knows-b', 'kind': 'relation', 'type': 'https://test/knows',
+             'text': '甲认识乙', 'subject_id': 'a', 'object_id': 'b'},
+            {'id': 'a-age-one', 'kind': 'attribute', 'type': 'https://test/age',
+             'text': '甲年龄十九', 'subject_id': 'a', 'value': 19, 'datatype': datatype,
+             'ontology_id': ontology['id']},
+            {'id': 'a-age-two', 'kind': 'attribute', 'type': 'https://test/age',
+             'text': '甲年龄二十一', 'subject_id': 'a', 'value': 21, 'datatype': datatype,
+             'ontology_id': ontology['id']},
+            {'id': 'b-age', 'kind': 'attribute', 'type': 'https://test/age',
+             'text': '乙年龄三十', 'subject_id': 'b', 'value': 30, 'datatype': datatype,
+             'ontology_id': ontology['id']},
+        ])
+        first_age = next(row for row in saved if row['id'] == 'a-age-one')
+        service.write(project_id, [{
+            'id': 'a-age-one', 'kind': 'attribute', 'type': 'https://test/age',
+            'text': '甲年龄二十', 'subject_id': 'a', 'value': 20, 'datatype': datatype,
+            'ontology_id': ontology['id'],
+        }], expected_versions={'a-age-one': first_age['version']})
+
+        repo = service.repository
+        _assertion(repo, project_id, 'conflict-a', 'contradicting', subject_id='a', value=99)
+        _assertion(repo, project_id, 'rejected-a', 'rejected', subject_id='a', value=98)
+        _assertion(repo, project_id, 'conflict-b', 'contradicting', subject_id='b', value=31)
+        scoped_calls = []
+        original_scoped = service.scoped
+
+        def counted_scoped(project, scope):
+            scoped_calls.append(dict(scope))
+            return original_scoped(project, scope)
+
+        service.scoped = counted_scoped
+
+        summary = client.post(base+'/subgraph', json={}).json()
+        entity_a = next(row for row in summary['nodes'] if row['id'] == 'a')
+        assert len(entity_a['attributes']) == 1
+        group = entity_a['attributes'][0]
+        assert group['predicate'] == 'https://test/age'
+        assert group['label'] == '年龄'
+        assert [(value['value'], value['status']) for value in group['values']] == [
+            (20, 'accepted'), (21, 'accepted'), (99, 'contradicting')]
+        conflict = next(value for value in group['values'] if value['status'] == 'contradicting')
+        assert conflict['candidate_id'] == conflict['assertion_id'] == 'conflict-a'
+        assert conflict['provenance'] == {
+            'document_id': 'candidate-source',
+            'document_version_id': 'candidate-source-v1',
+            'chunk_id': 'candidate-chunk', 'source_hash': None,
+            'start_char': None, 'end_char': None, 'quote': '年龄 99',
+        }
+        assert next(value for value in group['values'] if value['record_id'] == 'a-age-one')[
+            'accepted_support_count'] == 1
+        assert all(row['kind'] == 'entity' for row in summary['nodes'])
+        assert all(edge['kind'] == 'relation' for edge in summary['edges'])
+
+        hidden = client.post(base+'/subgraph', json={'attribute_mode': 'none'}).json()
+        assert all('attributes' not in row for row in hidden['nodes'])
+        assert all(row['kind'] == 'entity' for row in hidden['nodes'])
+
+        expanded = client.post(base+'/subgraph', json={
+            'node_id': 'a', 'hops': 1, 'attribute_mode': 'expanded',
+        }).json()
+        attribute_nodes = [row for row in expanded['nodes'] if row['kind'] == 'attribute_value']
+        assert [(row['value'], row['status']) for row in attribute_nodes] == [
+            (20, 'accepted'), (21, 'accepted'), (99, 'contradicting')]
+        assert {row['subject_id'] for row in attribute_nodes} == {'a'}
+        assert len({row['id'] for row in attribute_nodes}) == 3
+        attribute_edges = [edge for edge in expanded['edges'] if edge['type'] == 'KS_ATTRIBUTE']
+        assert len(attribute_edges) == 3
+        assert {edge['subject_id'] for edge in attribute_edges} == {'a'}
+        assert {edge['object_id'] for edge in attribute_edges} == {
+            row['id'] for row in attribute_nodes}
+        assert all(row['value'] not in (30, 31) for row in attribute_nodes)
+        expanded_again = client.post(base+'/subgraph', json={
+            'node_id': 'a', 'hops': 1, 'attribute_mode': 'expanded',
+        }).json()
+        assert [row['id'] for row in expanded_again['nodes'] if row['kind'] == 'attribute_value'] == [
+            row['id'] for row in attribute_nodes]
+        assert len(scoped_calls) == 4
+        assert scoped_calls[0]['kinds'] == scoped_calls[2]['kinds'] == scoped_calls[3]['kinds'] == [
+            'entity', 'relation', 'attribute']
+        assert scoped_calls[1]['kinds'] == ['entity', 'relation']
+        assert all(not {'node_id', 'hops', 'attribute_mode'} & call.keys()
+                   for call in scoped_calls)
+
+        assert client.post(base+'/subgraph', json={'attribute_mode': 'invalid'}).status_code == 422
+
+
+def test_subgraph_summary_does_not_require_a_published_ontology(tmp_path):
+    app = create_app(tmp_path/'ontology-free-explorer.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project_id = client.post('/api/projects', json={
+            'name': 'documents only', 'use_default_ontology': False,
+        }).json()['id']
+        repo = app.state.service.repository
+        repo.put_record(project_id, {
+            'id': 'a', 'kind': 'entity', 'type': 'https://unpublished.test/Person',
+            'text': '甲', 'metadata': {},
+        })
+        repo.put_record(project_id, {
+            'id': 'age', 'kind': 'attribute', 'type': 'https://unpublished.test/age',
+            'text': '甲年龄二十', 'subject_id': 'a', 'value': 20,
+            'datatype': 'http://www.w3.org/2001/XMLSchema#integer', 'metadata': {},
+        })
+        base = f'/api/projects/{project_id}/subgraph'
+        summary = client.post(base, json={})
+        hidden = client.post(base, json={
+            'node_id': 'a', 'attribute_mode': 'none',
+        })
+        expanded = client.post(base, json={
+            'node_id': 'a', 'attribute_mode': 'expanded',
+        })
+        assert [response.status_code for response in (summary, hidden, expanded)] == [200, 200, 200]
+        group = summary.json()['nodes'][0]['attributes'][0]
+        assert group['predicate'] == group['label'] == 'https://unpublished.test/age'
+        assert 'attributes' not in hidden.json()['nodes'][0]
+        assert [row['value'] for row in expanded.json()['nodes']
+                if row['kind'] == 'attribute_value'] == [20]
+
+
 def test_explorer_scope_sources_snapshot_and_evaluation(tmp_path):
     with TestClient(create_app(tmp_path/'x.sqlite',HashingEncoder())) as client:
         p=client.post('/api/projects',json={'name':'explorer'}).json()['id']

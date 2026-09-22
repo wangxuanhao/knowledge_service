@@ -1,7 +1,10 @@
 """受限范围图探索、项目快照与确定性评估。"""
 from collections import Counter,defaultdict,deque
+import hashlib
+import json
 from time import perf_counter
 from uuid import uuid4
+from ..repository import OntologyNotPublished
 from ..utils.diagnostics import timed
 from .service import public
 from .governance import writable
@@ -14,7 +17,116 @@ class Explorer:
         self.service=service
         self.repo=service.repository
 
-    def graph(self,p,scope,node_id=None,hops=1):
+    @staticmethod
+    def _virtual_id(prefix, identity, used):
+        """Return a deterministic response-only ID that cannot shadow a real node."""
+        encoded=json.dumps(identity,ensure_ascii=False,allow_nan=False,sort_keys=True,
+                           separators=(',',':')).encode('utf-8')
+        digest=hashlib.sha256(encoded).hexdigest()
+        candidate=f'__ks_{prefix}__:{digest}'
+        salt=0
+        while candidate in used:
+            salt+=1
+            candidate=f'__ks_{prefix}__:{digest}:{salt}'
+        used.add(candidate)
+        return candidate
+
+    def _entity_attributes(self,p,attributes,entity_ids,labels):
+        """Project current attributes and unresolved conflicts for graph entities."""
+        ontology_cache={}
+        try:
+            from .ontology import Ontology
+            current_ontology=self.repo.get_ontology(p)
+            ontology=Ontology(current_ontology['turtle'])
+            ontology_cache[current_ontology['id']]=ontology
+        except (KeyError,OntologyNotPublished):
+            ontology=None
+        def stable_predicate(value,ontology_id=None):
+            if value.startswith(('urn:','http://','https://')):return value
+            model=ontology
+            if ontology_id and ontology_id not in ontology_cache:
+                try:ontology_cache[ontology_id]=Ontology(self.repo.get_ontology(p,ontology_id)['turtle'])
+                except (KeyError,OntologyNotPublished):ontology_cache[ontology_id]=None
+            if ontology_id:model=ontology_cache.get(ontology_id) or model
+            if model is not None:
+                try:return str(model.resolve(value,model.attributes))
+                except ValueError:pass
+            return value
+        assertions=self.repo.list_assertions(p)
+        assertions_by_id={row['id']:row for row in assertions}
+        mappings=self.repo.list_record_version_assertions(p)
+        support_by_version=defaultdict(set)
+        for mapping in mappings:
+            assertion=assertions_by_id.get(mapping['assertion_id'])
+            if (assertion and assertion['status']=='accepted' and
+                    assertion.get('canonical_record_id')==mapping['record_id']):
+                support_by_version[mapping['record_version_id']].add(assertion['id'])
+
+        grouped=defaultdict(list)
+        for row in attributes:
+            if row.get('subject_id') not in entity_ids:
+                continue
+            predicate=stable_predicate(row['type'],row.get('ontology_id'))
+            grouped[(row['subject_id'],predicate)].append({
+                'record_id':row['id'],'assertion_id':None,'candidate_id':None,
+                'predicate':predicate,'type':predicate,'value':row['value'],
+                'datatype':row['datatype'],'valid_from':row.get('valid_from'),
+                'valid_until':row.get('valid_until'),
+                'accepted_support_count':len(support_by_version.get(row['version_id'],())),
+                'status':'accepted','conflict_state':'clear','conflict':None,
+            })
+
+        for assertion in assertions:
+            if assertion['kind']!='attribute' or assertion['status']!='contradicting':
+                continue
+            payload=assertion.get('payload',{})
+            subject_id=payload.get('subject_id') or payload.get('entity_id')
+            predicate=(payload.get('type') or payload.get('conflict_predicate') or
+                       payload.get('target_type') or payload.get('proposed_type'))
+            if subject_id not in entity_ids or not predicate or payload.get('value') is None:
+                continue
+            predicate=stable_predicate(predicate,payload.get('ontology_id'))
+            datatype=payload.get('datatype')
+            if not datatype:
+                from ..utils.attributes import primitive_datatype
+                try:datatype=primitive_datatype(payload['value'])
+                except ValueError:continue
+            grouped[(subject_id,predicate)].append({
+                'record_id':assertion.get('canonical_record_id'),
+                'assertion_id':assertion['id'],'candidate_id':assertion['id'],
+                'predicate':predicate,'type':predicate,'value':payload['value'],
+                'datatype':datatype,'valid_from':payload.get('valid_from'),
+                'valid_until':payload.get('valid_until'),'accepted_support_count':0,
+                'status':'contradicting','conflict_state':'contradicting',
+                'conflict':{
+                    'code':payload.get('conflict_code','attribute_conflict'),
+                    'reason':assertion.get('decision_reason'),
+                },
+                'provenance':{key:assertion.get(key) for key in (
+                    'document_id','document_version_id','chunk_id','source_hash',
+                    'start_char','end_char','quote')},
+            })
+
+        result=defaultdict(list)
+        for (subject_id,predicate),values in grouped.items():
+            conflicts=[value['candidate_id'] for value in values
+                       if value['status']=='contradicting']
+            for value in values:
+                if value['status']=='accepted' and conflicts:
+                    value['conflict_state']='contested'
+                    value['conflict']={'candidate_ids':conflicts}
+            values.sort(key=lambda value:(value['status']!='accepted',
+                value.get('record_id') or value.get('candidate_id') or ''))
+            result[subject_id].append({
+                'predicate':predicate,'type':predicate,
+                'label':labels.get(predicate,predicate),'values':values,
+                'conflict':bool(conflicts),'conflict_candidate_ids':conflicts,
+            })
+        for groups in result.values():
+            groups.sort(key=lambda group:(group['label'],group['predicate']))
+        return result
+
+    def graph(self,p,scope,node_id=None,hops=1,attribute_mode='summary'):
         """返回以 ``node_id`` 为中心的局部子图（省略时返回整个范围）。
 
         PERF：种子点只在读完整范围之后才收窄。带种子的请求只返回几 KB，
@@ -24,13 +136,19 @@ class Explorer:
         """
         started=perf_counter()
         with timed('图谱探索', seeded=bool(node_id), hops=hops) as record:
-            # 图只包含实体和关系（一条边需要两端都是实体），下面的过滤已经丢弃其他一切，
-            # 所以把读取范围收窄到这两类等价——只是让 Repository.query 跳过占大部分字节的
-            # chunk/document 载荷。
-            rows=self.service.scoped(p,{**scope,'kinds':['entity','relation']})
+            # 图始终读取实体和关系；属性模式开启时在同一次范围读取中追加正式属性。
+            # chunk/document 载荷仍不参与图谱响应。
+            if attribute_mode not in {'none','summary','expanded'}:
+                raise ValueError('不支持的属性展示模式')
+            record_scope={key:value for key,value in scope.items()
+                          if key not in {'node_id','hops','attribute_mode'}}
+            graph_kinds=['entity','relation']
+            if attribute_mode!='none':graph_kinds.append('attribute')
+            rows=self.service.scoped(p,{**record_scope,'kinds':graph_kinds})
             record['rows']=len(rows)
             nodes={r['id']:r for r in rows if r['kind']=='entity'}
             edges=[r for r in rows if r['kind']=='relation' and r['subject_id'] in nodes and r['object_id'] in nodes]
+            attributes=[r for r in rows if r['kind']=='attribute' and r['subject_id'] in nodes]
             record['graph_nodes']=len(nodes)
             record['graph_edges']=len(edges)
             if node_id:
@@ -44,10 +162,39 @@ class Explorer:
                 record['selected']=len(selected)
                 record['returned_nodes']=len(nodes)
                 record['returned_edges']=len(edges)
+            labels=self.service.ontology_labels(p) if attribute_mode!='none' else {}
+            grouped=(self._entity_attributes(p,attributes,set(nodes),labels)
+                     if attribute_mode!='none' else {})
+            presented=[]
+            for row in nodes.values():
+                item=public(row)
+                if attribute_mode!='none':item['attributes']=grouped.get(row['id'],[])
+                presented.append(item)
+            presented_edges=[public(r) for r in edges]
+            if attribute_mode=='expanded' and node_id in nodes:
+                used={row['id'] for row in presented}|{edge['id'] for edge in presented_edges}
+                for group in grouped.get(node_id,[]):
+                    for value in group['values']:
+                        identity=[node_id,group['predicate'],value['datatype'],value['value'],
+                                  value['status'],value.get('record_id'),value.get('candidate_id')]
+                        virtual_id=self._virtual_id('attribute',identity,used)
+                        virtual={**value,'id':virtual_id,'kind':'attribute_value',
+                                 'type':'KS_ATTRIBUTE_VALUE','virtual':True,
+                                 'subject_id':node_id,'predicate_label':group['label'],
+                                 'text':f"{group['label']}: {json.dumps(value['value'],ensure_ascii=False)}"}
+                        presented.append(virtual)
+                        edge_id=self._virtual_id('attribute_edge',[node_id,virtual_id],used)
+                        presented_edges.append({
+                            'id':edge_id,'kind':'attribute_edge','type':'KS_ATTRIBUTE',
+                            'type_label':group['label'],'text':group['label'],
+                            'subject_id':node_id,'object_id':virtual_id,'virtual':True,
+                            'predicate':group['predicate'],'status':value['status'],
+                        })
             # 上报该字段以便浏览器在图谱摘要中区分服务端读取与客户端布局；
             # 上面的日志行仍是权威数字（它还包括序列化）。调用方过去从这里读
             # `timing_ms.total`，而 /subgraph 从不返回它，所以 renderGraph 中的该分支是死代码。
-            return {'nodes':[public(r) for r in nodes.values()],'edges':[public(r) for r in edges],
+            return {'nodes':presented,'edges':presented_edges,
+                    'attribute_mode':attribute_mode,'selected_node_id':node_id,
                     'timing_ms':{'total':round((perf_counter()-started)*1000,1)}}
 
     def dashboard(self,p,scope):
@@ -87,7 +234,7 @@ class Explorer:
                              for r in rows if r['kind']=='document']}
 
     def mindmap(self,p,scope,root_id,depth=3):
-        graph=self.graph(p,scope,root_id,depth)
+        graph=self.graph(p,scope,root_id,depth,attribute_mode='none')
         nodes={r['id']:r for r in graph['nodes']};adj=defaultdict(list)
         for edge in graph['edges']:
             adj[edge['subject_id']].append((edge['object_id'],edge['type']))
@@ -128,7 +275,7 @@ class Explorer:
             return {'restored':len(saved),'recovery_snapshot_id':backup['id'],'recovery_snapshot_name':backup['name']}
 
     def evaluate(self,p,scope,entities,relations):
-        graph=self.graph(p,scope)
+        graph=self.graph(p,scope,attribute_mode='none')
         names={r['id']:r['text'] for r in graph['nodes']}
         actual_entities=set(names.values())
         actual_relations={(names[r['subject_id']],r['type'].rsplit('#',1)[-1].rsplit('/',1)[-1],names[r['object_id']]) for r in graph['edges']}

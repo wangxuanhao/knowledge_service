@@ -173,6 +173,11 @@
     }
   }
   function inspect(row){
+    if(GraphTypeFilter.isAttributeNode(row)){
+      const entity=wb.nodes.get(row.subject_id);
+      if(entity)return inspect(entity);
+      return;
+    }
     get('graph-node').value=row.kind==='entity'?row.id:row.subject_id;
     if(row.kind==='entity'){get('mindmap-root').value=row.id;get('graph-entity-choice').value=row.id;}
     window.renderEvidenceInspector(row,ui.options);
@@ -185,21 +190,35 @@
     result=GraphTypeFilter.selectType(base,selectedType);
     let bar=get('graph-type-buttons');
     if(!bar){bar=make('section','','graph-type-buttons');bar.id='graph-type-buttons';get('graph-canvas').after(bar);}
-    const groups=[...new Set(base.nodes.map(n=>n.type))];
+    const baseEntities=GraphTypeFilter.entityNodes(base);
+    const groups=[...new Set(baseEntities.map(n=>n.type))];
     const dot=(type,i)=>type?`<i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${catColor(i)};margin-right:5px;vertical-align:middle"></i>`:'';
-    bar.innerHTML='<small>按实体类型查看 · 只显示所选类型，不展开邻居</small><div>'+['',...groups].map((type,i)=>`<button class="secondary" data-type-index="${i}" aria-pressed="${type===selectedType}" title="${esc(type?term(type):'恢复当前检索范围全部类型')}">${dot(type,i)}${esc(type?displayType(type):'全部类型')} <b>${type?base.nodes.filter(n=>n.type===type).length:base.nodes.length}</b></button>`).join('')+'</div>';
-    bar.querySelectorAll('button').forEach(button=>button.onclick=()=>{get('graph-detail').textContent='';get('graph-node').value='';get('graph-entity-choice').value='';renderGraph(base,['',...groups][Number(button.dataset.typeIndex)],base);});
+    bar.innerHTML='<small>按实体类型查看 · 只显示所选类型，不展开邻居</small><div>'+['',...groups].map((type,i)=>`<button class="secondary" data-type-index="${i}" aria-pressed="${type===selectedType}" title="${esc(type?term(type):'恢复当前检索范围全部类型')}">${dot(type,i)}${esc(type?displayType(type):'全部类型')} <b>${type?baseEntities.filter(n=>n.type===type).length:baseEntities.length}</b></button>`).join('')+'</div>';
+    bar.querySelectorAll('button').forEach(button=>button.onclick=()=>renderGraph(base,['',...groups][Number(button.dataset.typeIndex)],base));
     ui.graph=result;wb.nodes=new Map(result.nodes.map(n=>[n.id,n]));
-    const chart=initChart(), types=[...new Set(result.nodes.map(n=>n.type_label||displayType(n.type)))], matched=new Set(result.matched_ids||[]);
+    const chart=initChart(), types=[...new Set(result.nodes.map(n=>GraphTypeFilter.isAttributeNode(n)?'属性值':(n.type_label||displayType(n.type))))], matched=new Set(result.matched_ids||[]);
     chart.resize();
-    chart.off('click');chart.on('click',p=>{const row=p.dataType==='edge'?result.edges.find(e=>e.id===p.data.id):wb.nodes.get(p.data.id);if(row)inspect(row);});
+    chart.off('click');chart.on('click',async p=>{
+      const row=p.dataType==='edge'?result.edges.find(e=>e.id===p.data.id):wb.nodes.get(p.data.id);
+      if(!row)return;
+      if(GraphTypeFilter.isAttributeEdge(row)||GraphTypeFilter.isAttributeNode(row)){
+        const entity=wb.nodes.get(row.subject_id);if(entity)inspect(entity);return;
+      }
+      if(row.kind==='entity'&&(base.attribute_mode!=='expanded'||base.selected_node_id!==row.id)){
+        try{await drawGraph(row.id,Number(get('graph-hops').value));const selected=wb.nodes.get(row.id);if(selected)inspect(selected);}
+        catch(error){status(error.message,true);}
+        return;
+      }
+      inspect(row);
+    });
     const showLabels=get('graph-labels').checked;
     // The force layout plus the fit pass below are the client half of "the graph feels
     // slow"; the server half is the `subgraph` line logged by drawGraph.
     const layoutDone=kgTime('graph-layout');
     const catIndex=label=>Math.max(0,types.indexOf(label));
-chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(p.data.rawType&&p.data.rawType!==p.data.name?p.data.name+' ('+p.data.rawType+')':p.data.name):p.data.name+' · '+p.data.categoryName)},legend:[{show:types.length>1,type:'scroll',data:types,bottom:0,textStyle:{fontSize:11}}],series:[{type:'graph',layout:'force',roam:true,draggable:true,center:['50%','50%'],zoom:.85,label:{show:showLabels,position:'right',fontSize:11,width:110,overflow:'truncate'},edgeSymbol:['none','arrow'],edgeLabel:{show:result.nodes.length<=20,formatter:'{c}',fontSize:10},emphasis:{focus:'adjacency',label:{show:showLabels},edgeLabel:{show:true}},force:{repulsion:320,edgeLength:100,gravity:.1,initLayout:'circular',layoutAnimation:false},categories:types.map((name,index)=>({name,itemStyle:{color:catColor(index)}})),data:result.nodes.map(n=>{const label=n.type_label||displayType(n.type);const index=catIndex(label);return {id:n.id,name:n.text,category:index,categoryName:label,symbolSize:matched.has(n.id)?34:22,itemStyle:{color:catColor(index),...(matched.has(n.id)?{borderColor:'#df7d37',borderWidth:4}:{})}}}),links:result.edges.map(e=>({id:e.id,source:e.subject_id,target:e.object_id,name:e.type_label||displayType(e.type),value:e.type_label||displayType(e.type),rawType:term(e.type)})),lineStyle:{opacity:.35,curveness:.12}}]},true);
-    chart.resize();fitGraph(chart);layoutDone({nodes:result.nodes.length,edges:result.edges.length});get('graph-summary').textContent=`${selectedType?'只看 '+labelOf(selectedType)+' · ':''}${result.nodes.length} 实体 / ${result.edges.length} 关系${selectedType?' · 隐藏其他类型及跨类型连线':''}${matched.size?' · 橙色边框为检索命中':''}${result.timing_ms?' · 服务 '+result.timing_ms.total+' ms':''}`;
+chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(p.data.rawType&&p.data.rawType!==p.data.name?p.data.name+' ('+p.data.rawType+')':p.data.name):p.data.name+' · '+p.data.categoryName)},legend:[{show:types.length>1,type:'scroll',data:types,bottom:0,textStyle:{fontSize:11}}],series:[{type:'graph',layout:'force',roam:true,draggable:true,center:['50%','50%'],zoom:.85,label:{show:showLabels,position:'right',fontSize:11,width:110,overflow:'truncate'},edgeSymbol:['none','arrow'],edgeLabel:{show:result.nodes.length<=20,formatter:'{c}',fontSize:10},emphasis:{focus:'adjacency',label:{show:showLabels},edgeLabel:{show:true}},force:{repulsion:320,edgeLength:100,gravity:.1,initLayout:'circular',layoutAnimation:false},categories:types.map((name,index)=>({name,itemStyle:{color:name==='属性值'?'#8c7b68':catColor(index)}})),data:result.nodes.map(n=>{const attribute=GraphTypeFilter.isAttributeNode(n),label=attribute?'属性值':(n.type_label||displayType(n.type));const index=catIndex(label);return {id:n.id,name:n.text,category:index,categoryName:label,symbol:attribute?'roundRect':'circle',symbolSize:attribute?[72,22]:(matched.has(n.id)?34:22),itemStyle:{color:attribute?'#8c7b68':catColor(index),...(attribute&&n.status==='contradicting'?{borderColor:'#b42318',borderWidth:2,borderType:'dashed'}:{}),...(matched.has(n.id)?{borderColor:'#df7d37',borderWidth:4}:{})}}}),links:result.edges.map(e=>{const attribute=GraphTypeFilter.isAttributeEdge(e);return {id:e.id,source:e.subject_id,target:e.object_id,name:e.type_label||displayType(e.type),value:e.type_label||displayType(e.type),rawType:term(e.type),lineStyle:attribute?{type:'dashed',opacity:.55,width:1}:undefined};}),lineStyle:{opacity:.35,curveness:.12}}]},true);
+    const visibleEntities=GraphTypeFilter.entityNodes(result),visibleRelations=GraphTypeFilter.relationEdges(result),attributeCount=result.nodes.length-visibleEntities.length;
+    chart.resize();fitGraph(chart);layoutDone({nodes:result.nodes.length,edges:result.edges.length});get('graph-summary').textContent=`${selectedType?'只看 '+labelOf(selectedType)+' · ':''}${visibleEntities.length} 实体 / ${visibleRelations.length} 关系${attributeCount?' · '+attributeCount+' 个属性值':''}${selectedType?' · 隐藏其他类型及跨类型连线':''}${matched.size?' · 橙色边框为检索命中':''}${result.timing_ms?' · 服务 '+result.timing_ms.total+' ms':''}`;
     // Compact, discrete history navigation; no drag/playback re-query loop.
     const tl=createTimeline();get('graph-type-buttons')?.after(tl);
     // The type and timeline rows reduce the remaining flex height after ECharts has
@@ -264,7 +283,8 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
     // node 省略时渲染当前 scope 的全图（后端 node_id=null 返回全 scope，见 explorer.py:16）
     const id=node||get('graph-node').value||get('graph-entity-choice').value||null;
     const done=kgTime('subgraph');
-    const result=await scopedRead('/subgraph',{node_id:id,hops,valid_at:null});
+    const result=await scopedRead('/subgraph',{node_id:id,hops,valid_at:null,
+      attribute_mode:id?'expanded':'summary'});
     done({node:id||'all',hops,nodes:result.nodes.length,edges:result.edges.length,server_ms:result.timing_ms?.total??'—'});
     renderGraph(result);
     // 开放本体发现的提示条要跟着图谱一起刷新：这原本只在 workbench.js 的旧 drawGraph 副本里做，
