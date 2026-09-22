@@ -9,12 +9,13 @@ from uuid import uuid4
 
 import httpx
 
-from ..models import RecordWrite, primitive_datatype
+from ..models import RecordWrite
 from .ontology import Ontology
 from .retrieval import RetrievalEngine
 from ..utils.ingest_runs import readiness
 from ..core.time import normalize_time, utc_now
 from ..utils.diagnostics import event, stage, timed
+from ..utils.attributes import primitive_datatype
 
 SYSTEM = {'project_id', 'version', 'version_id', 'recorded_at', 'superseded_at', 'embedding', 'embedding_model'}
 

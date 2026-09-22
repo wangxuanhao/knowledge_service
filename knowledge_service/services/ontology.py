@@ -10,7 +10,7 @@ from rdflib import BNode, Graph, Literal, Namespace, RDF, RDFS, URIRef
 from rdflib.collection import Collection
 from rdflib.namespace import OWL, SH, XSD
 
-from ..models import primitive_datatype
+from ..utils.attributes import primitive_datatype
 
 DATA = Namespace("urn:knowledge:")
 

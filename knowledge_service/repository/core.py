@@ -24,7 +24,7 @@ from ..utils.diagnostics import timed, warn_scan
 from ..utils.filters import matches_filter, validate_filter
 from ..utils.ingest_runs import merge_readiness, readiness
 from ..core.time import normalize_time, utc_now
-from ..models import primitive_datatype
+from ..utils.attributes import primitive_datatype
 
 
 def _json(value):

@@ -46,8 +46,11 @@ def test_ontology_validates_attribute_domain_range_and_emits_typed_literal():
     records[0]['type'] = 'Rule'
     assert not ontology.validate(records)['conforms']
     records[0]['type'] = 'Merchant'
+    records[1]['value'] = '20'
     records[1]['datatype'] = 'http://www.w3.org/2001/XMLSchema#string'
-    assert not ontology.validate(records)['conforms']
+    range_result = ontology.validate(records)
+    assert not range_result['conforms']
+    assert 'range' in range_result['errors'][0]['message']
 
 
 def test_local_sparql_and_no_remote_service():

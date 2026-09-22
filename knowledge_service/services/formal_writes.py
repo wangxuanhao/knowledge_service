@@ -258,7 +258,31 @@ class FormalFactWriter:
                                 saved = self.repository._record(row)
                                 selected_versions[canonical_id] = saved['version_id']
                                 canonical_by_input[original['id']] = canonical_id
-                                if operation=='legacy_import':
+                                if old_key:
+                                    source_row = self.repository._db.execute(
+                                        '''SELECT * FROM record_versions WHERE project_id=? AND id=?
+                                           AND superseded_at IS NULL''',
+                                        (project_id, record['id'])).fetchone()
+                                    if source_row is None:
+                                        raise RuntimeError('旧事实键指向不存在的源记录')
+                                    source_record = self.repository._record(source_row)
+                                    source_tombstone = {
+                                        key: value for key, value in source_record.items()
+                                        if key not in {'project_id', 'version', 'version_id',
+                                                       'recorded_at', 'superseded_at'}
+                                    }
+                                    source_tombstone['metadata'] = {
+                                        **source_tombstone.get('metadata', {}), '_deleted': True,
+                                        'merged_into_fact': canonical_id, 'fact_collision': True,
+                                    }
+                                    self.repository._db.execute(
+                                        '''UPDATE fact_keys SET retired_at=? WHERE project_id=?
+                                           AND canonical_record_id=? AND retired_at IS NULL''',
+                                        (utc_now(), project_id, record['id']))
+                                    result_records.append(self.repository._put(
+                                        project_id, source_tombstone, expected_version, ts))
+                                    result_records.append(saved)
+                                elif operation=='legacy_import':
                                     record['metadata']={**record.get('metadata',{}),'_deleted':True,
                                         'merged_into_fact':canonical_id,'legacy_parallel_occurrence':True}
                                     result_records.append(self.repository._put(

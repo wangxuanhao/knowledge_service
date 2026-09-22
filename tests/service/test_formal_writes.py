@@ -204,6 +204,38 @@ def _mapping_ids(repo, project_id):
             for row in repo.list_record_version_assertions(project_id)}
 
 
+def test_attribute_revision_collision_reuses_target_and_tombstones_source(tmp_path):
+    repo, _, project_id = _system(tmp_path)
+    datatype = 'http://www.w3.org/2001/XMLSchema#integer'
+    attribute = {
+        'kind': 'attribute', 'type': 'age', 'text': '年龄',
+        'subject_id': 'person', 'datatype': datatype,
+    }
+    _write(repo, project_id, [
+        _entity('person'),
+        {**attribute, 'id': 'a20', 'value': 20},
+        {**attribute, 'id': 'a21', 'value': 21},
+    ])
+
+    result = _write(
+        repo, project_id, [{**attribute, 'id': 'a20', 'value': 21}],
+        expected={'a20': 1})
+
+    source = repo.get_record(project_id, 'a20')
+    target = repo.get_record(project_id, 'a21')
+    assert source['version'] == 2
+    assert source['value'] == 20
+    assert source['metadata']['_deleted'] is True
+    assert source['metadata']['merged_into_fact'] == 'a21'
+    assert target['value'] == 21
+    assert not target.get('metadata', {}).get('_deleted')
+    assert [row['canonical_record_id'] for row in repo.list_fact_keys(project_id)] == ['a21']
+    retired = repo.list_fact_keys(project_id, include_retired=True)
+    assert next(row for row in retired if row['canonical_record_id'] == 'a20')['retired_at']
+    assert any(row['canonical_record_id'] == 'a21' and row['payload']['id'] == 'a20'
+               and row['payload']['value'] == 21 for row in result['assertion_updates'])
+
+
 def test_new_entity_and_relation_freeze_exact_saved_versions_and_acceptance_events(tmp_path):
     repo, _, project_id = _system(tmp_path)
     result = _write(repo, project_id, [
