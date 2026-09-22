@@ -240,13 +240,16 @@ Semantica 不能直接创建、接受、拒绝、覆盖或撤回正式属性事�
 迁移按当前活跃实体的每个 `properties` 项生成属性事实：
 
 1. 用实体 `ontology_id` 解析属性 IRI、datatype 和本体策略；
-2. 标量生成一条事实，数组的每个元素生成一条事实；
-3. 创建 actor=`legacy-property-backfill` 的 accepted assertion；
-4. quote 明确标记为“历史属性包回填”，不伪造原文证据；
-5. 无法解析的属性保留在 legacy properties，不猜测 IRI，并输出迁移诊断；
-6. 回填幂等，重复运行不得创建新事实或新 assertion。
+2. 标量生成一条事实和 actor=`legacy-property-backfill` 的 accepted assertion；
+3. 数组只有在 `valueMode=set` 时才为每个不同元素生成事实和 accepted assertion；完全相同的重复元素折叠为一个事实，但保留 occurrence 诊断；
+4. 数组遇到 `single`、`temporal_single` 或默认 `unknown` 时不任意选择“第一个值”。每个不同元素创建 migration assertion，并转为 contradicting；原数组移入当前实体新版本的 `metadata.legacy_unresolved_properties` 兼容区，同时创建迁移审核项，等待先确认本体策略或人工选择；
+5. quote 明确标记为“历史属性包回填”，不伪造原文证据；
+6. 无法解析的属性也移入 `metadata.legacy_unresolved_properties`，不猜测 IRI，并输出迁移诊断；
+7. 回填幂等，重复运行不得创建新事实、新实体版本或新 assertion。
 
 历史实体版本保持不可变。新写入不再修改 `entity.properties`。
+
+未解决 legacy 属性不会出现在正式 RDF、Neo4j 属性边或属性检索通道中。兼容实体详情仍显示它们，并明确标记“待迁移审核”，防止升级后数据在 UI 中消失。审核完成后删除对应 `legacy_unresolved_properties` 项；在此之前不能把同一值同时当成 legacy 兼容值和正式属性事实。
 
 ### 兼容读取
 
@@ -296,12 +299,24 @@ Semantica 不能直接创建、接受、拒绝、覆盖或撤回正式属性事�
 
 - **保留当前值**：新 assertion 转为 rejected。
 - **接受新值并纠正旧值**：新 assertion 转为 accepted；旧事实的当前 accepted assertions 转为 superseded；旧事实写入 tombstone 版本。当前知识在所有业务时点隐藏旧值，但较早 `known_at` 仍能看到当时版本与决定。
-- **接受新值并从切换时点替代旧值**：审核者必须给出 cutover。旧事实沿用记录 ID、创建 `valid_until=cutover` 的新版本并更新 fact key；新事实的 `valid_from=cutover`。对每条仍为 accepted 的旧 assertion 产生一次 `accepted → accepted` 重绑定 event、递增 decision version，并把该 event 映射到旧事实的新精确版本；新 assertion 支撑新事实。两条区间必须无缝且不重叠。
+- **接受新值并从切换时点替代旧值**：只允许 `temporal_single`；审核者必须给出 cutover。旧事实沿用记录 ID、创建 `valid_until=cutover` 的新版本并更新 fact key；新事实的 `valid_from=cutover`。对每条仍为 accepted 的旧 assertion 产生一次 `accepted → accepted` 重绑定 event、递增 decision version，并把该 event 映射到旧事实的新精确版本；新 assertion 支撑新事实。两条区间必须无缝且不重叠。`single` 必须选择纠正旧值，或先通过本体变更改成 `temporal_single`。
 - **两个值都保留**：只允许本体已是 `set`，或同一事务中先批准 `valueMode=set` 的本体变更。
 - **调整有效时间后接受**：只允许 `temporal_single`，且调整后区间不重叠。
 - **保持冲突**：assertion 保持 contradicting，不改变正式事实。
 
 每个决定需要 reason、actor、expected decision version，并产生 assertion event。Semantica 建议只作为提示显示，不能预选危险动作。
+
+审核动作矩阵：
+
+| 动作 | `single` | `temporal_single` | `set` | `unknown` | assertion 结果 |
+|---|---|---|---|---|---|
+| 保留当前值 | 允许 | 允许 | 允许 | 允许 | 新 assertion → rejected |
+| 纠正旧值 | 允许 | 允许 | 允许，但 UI 需二次确认 | 允许 | 旧 accepted → superseded；新 contradicting → accepted |
+| 从 cutover 替代 | 禁止 | 允许 | 禁止，set 不需要替代 | 禁止 | 旧 accepted 状态保持重绑定；新 contradicting → accepted |
+| 两值并存 | 禁止 | 仅区间不重叠 | 允许 | 禁止 | 新 pending/contradicting → accepted |
+| 保持冲突 | 允许 | 允许 | 允许 | 允许 | 保持 contradicting |
+
+`set` 下正常新增不同值不先产生冲突；矩阵中的“纠正旧值”只用于审核者明确认定旧值错误的情况。
 
 属性当前可见性的必要条件是：记录当前系统版本未被 tombstone、业务时点有效，并且在请求的 `known_at` 时刻至少有一条状态为 accepted 的 assertion 支撑该精确 record version。当前查询可使用 assertions 当前行；历史 `known_at` 查询必须从 `assertion_events` 选择该时点之前每条 assertion 的最后事件，不能拿今天的状态解释过去。
 
@@ -349,7 +364,19 @@ Semantica EntityMerger 继续提供合并建议，但不能通过字典优先级
 
 ### 快照恢复
 
-快照包含属性事实及其 record versions。恢复时走 FormalFactWriter，创建新系统版本，不抹除恢复后的历史。兼容 `properties` 由恢复后的属性事实重新派生。
+新快照除属性事实 payload 外，还冻结每个属性 record version 的 assertion ID、精确 accepted event 和支撑映射。恢复时走 FormalFactWriter，创建新系统版本，不抹除恢复后的历史；兼容 `properties` 由恢复后的属性事实重新派生。
+
+恢复不能把已是 `rejected` 或 `superseded` 的原 assertion 转回 accepted。每个恢复后的属性事实创建一条新的 accepted governance assertion：
+
+- ID 由 `snapshot_id + restored_record_id + restored_version_id` 确定性生成，保证重试幂等；
+- actor=`snapshot-restore`，payload.role=`governance`；
+- payload 保存 snapshot ID、原 record version、冻结的 assertion/event refs 和恢复操作 ID；
+- quote 明确写“由快照恢复决定重新采用”，不冒充原文证据；
+- governance assertion 精确映射到恢复产生的新 record version，因此恢复后立即满足当前可见性条件。
+
+旧格式快照缺少 assertion/event refs 时仍可通过 governance assertion 恢复，但 payload 标记 `source_lineage_incomplete=true`，provenance 返回 warning。它记录的是新的治理决定，不伪造或重开历史来源。后续撤回原文来源不会自动撤销这条治理决定；用户需撤销恢复操作或显式拒绝 governance assertion。
+
+端到端示例：快照时 `attr_A@v2` 由 `ast_1/event_2` 支撑；之后 `ast_1` 因来源撤回而 superseded。恢复快照创建 `attr_A@v4` 和 `ast_restore_X/event_restore_X`，后者引用 `attr_A@v2`、`ast_1/event_2` 但不改变 `ast_1`。当前查询由 `ast_restore_X` 支撑 v4，历史查询仍按各自 known_at 看到 v2、撤回和恢复。
 
 ## 查询、检索与 RDF
 
