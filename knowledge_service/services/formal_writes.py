@@ -174,6 +174,8 @@ class FormalFactWriter:
         canonical_by_input = {}
         selected_versions = {}
         fact_redirects = []
+        ledger = policy.get('ledger')
+        assertion_moves = []
         with self.repository._transaction():
             self.repository.get_project(project_id)
             for record_id, wanted in expected.items():
@@ -225,6 +227,10 @@ class FormalFactWriter:
                                         '''UPDATE fact_keys SET retired_at=? WHERE project_id=?
                                            AND canonical_record_id=? AND retired_at IS NULL''',
                                         (utc_now(),project_id,record['id']))
+                                    # The mapped key may be retargeted to this source below.
+                                    # Do not let the generic old-key cleanup retire that newly
+                                    # surviving mapping by canonical_record_id afterwards.
+                                    old_key = None
                                 if winner == canonical_id:
                                     selected_versions[winner] = row['version_id']
                                     record['metadata']={**record.get('metadata',{}),'_deleted':True,
@@ -238,7 +244,9 @@ class FormalFactWriter:
                                 mapped_tombstone={key:value for key,value in mapped_record.items() if key not in {
                                     'project_id','version','version_id','recorded_at','superseded_at'}}
                                 mapped_tombstone['metadata']={**mapped_tombstone.get('metadata',{}),
-                                    '_deleted':True,'merged_into_fact':winner,'fact_collision':True}
+                                    '_deleted':True,'merged_into_fact':winner,'fact_collision':True,
+                                    **({'_operation_id':record['metadata']['_operation_id']}
+                                       if record.get('metadata',{}).get('_operation_id') else {})}
                                 result_records.append(self.repository._put(
                                     project_id,mapped_tombstone,mapped_record['version'],ts))
                                 self.repository._db.execute(
@@ -349,6 +357,11 @@ class FormalFactWriter:
             for item in policy.get('pending_assertions', []):
                 assertion_updates.append(self.repository._create_assertion(project_id, item))
             for decision in policy.get('assertion_decisions', []):
+                before_decision = self.repository._db.execute(
+                    'SELECT * FROM assertions WHERE project_id=? AND id=?',
+                    (project_id, decision['id'])).fetchone()
+                if before_decision is None:
+                    raise KeyError(decision['id'])
                 decision_target=decision.get('canonical_record_id')
                 if decision_target in canonical_by_input:
                     decision_target=canonical_by_input[decision_target]
@@ -365,6 +378,17 @@ class FormalFactWriter:
                 if updated['status'] == 'accepted':
                     self._map_accepted_assertion(project_id, updated, record_version_id)
                 assertion_updates.append(updated)
+                if ledger:
+                    assertion_moves.append({
+                        'id':updated['id'],'move_kind':'status',
+                        'from':before_decision['canonical_record_id'],
+                        'to':updated['canonical_record_id'],
+                        'status_before':before_decision['status'],
+                        'status_after':updated['status'],
+                        'decision_version_before':before_decision['decision_version'],
+                        'decision_version_after':updated['decision_version'],
+                        'reason':decision['reason'],'actor':decision['actor'],
+                    })
             for review in policy.get('resolution_reviews', []):
                 self.repository._create_resolution_review(project_id, review)
             for decision in policy.get('resolution_decisions', []):
@@ -426,68 +450,133 @@ class FormalFactWriter:
                         continue
                     result_records.append(self.repository._put(
                         project_id, writable, current['version'], ts))
-            ledger = policy.get('ledger')
-            assertion_moves = []
             if ledger:
                 reversal_of = ledger.get('reversal_of')
                 if reversal_of:
+                    if operation != 'merge_reversal':
+                        raise ValueError('只有合并回退操作可以反向应用断言移动账本')
                     prior = self.repository._db.execute(
                         'SELECT assertion_moves FROM merge_operations WHERE project_id=? AND id=?',
                         (project_id, reversal_of)).fetchone()
                     if prior is None:
                         raise ValueError('合并回退目标不存在')
-                    requested_moves = [{
-                        'id': move['id'], 'from': move['to'], 'to': move['from'],
-                        'expected_version': move['decision_version_after'],
-                    } for move in json.loads(prior['assertion_moves'])]
+                    grouped = {}
+                    for move in json.loads(prior['assertion_moves']):
+                        grouped.setdefault(move['id'], []).append(move)
+                    requested_moves = []
+                    for assertion_id, historical in grouped.items():
+                        row = self.repository._db.execute(
+                            'SELECT * FROM assertions WHERE project_id=? AND id=?',
+                            (project_id, assertion_id)).fetchone()
+                        if row is None:
+                            raise ValueError('版本冲突：合并后断言已变更')
+                        normalized=[]
+                        for move in historical:
+                            normalized.append({
+                                'canonical_before':move.get('from'),
+                                'canonical_after':move.get('to'),
+                                'status_before':move.get('status_before',row['status']),
+                                'status_after':move.get('status_after',row['status']),
+                                'decision_version_before':move.get(
+                                    'decision_version_before',move.get('expected_version')),
+                                'decision_version_after':move['decision_version_after'],
+                            })
+                        for previous,following in zip(normalized,normalized[1:]):
+                            if (previous['canonical_after']!=following['canonical_before'] or
+                                    previous['status_after']!=following['status_before'] or
+                                    previous['decision_version_after']!=
+                                    following['decision_version_before']):
+                                raise ValueError('版本冲突：合并断言移动账本不连续')
+                        latest=normalized[-1]
+                        if (row['canonical_record_id']!=latest['canonical_after'] or
+                                row['status']!=latest['status_after'] or
+                                row['decision_version']!=latest['decision_version_after']):
+                            raise ValueError('版本冲突：合并后断言已变更')
+                        expected=row['decision_version']
+                        canonical=row['canonical_record_id']
+                        status=row['status']
+                        for move in reversed(normalized):
+                            requested_moves.append({
+                                'id':assertion_id,'canonical_before':canonical,
+                                'canonical_after':move['canonical_before'],
+                                'status_before':status,'status_after':move['status_before'],
+                                'expected_version':expected,
+                            })
+                            canonical=move['canonical_before']
+                            status=move['status_before']
+                            expected+=1
                 else:
                     requested_moves = []
-                    for source, target in ledger.get('redirects', {}).items():
-                        rows = self.repository._db.execute(
-                            '''SELECT id,decision_version FROM assertions
-                               WHERE project_id=? AND canonical_record_id=?''',
-                            (project_id, source)).fetchall()
-                        requested_moves.extend({'id': row['id'], 'from': source, 'to': target,
-                                                'expected_version': row['decision_version']}
-                                               for row in rows)
-                    for source,target in dict.fromkeys(fact_redirects):
+                    queued_ids={move['id'] for move in assertion_moves}
+                    def queue_redirect(source,target):
                         rows=self.repository._db.execute(
-                            '''SELECT id,decision_version FROM assertions
+                            '''SELECT * FROM assertions
                                WHERE project_id=? AND canonical_record_id=?''',
                             (project_id,source)).fetchall()
-                        requested_moves.extend({'id':row['id'],'from':source,'to':target,
-                            'expected_version':row['decision_version']} for row in rows)
+                        for row in rows:
+                            if row['id'] in queued_ids:
+                                continue
+                            queued_ids.add(row['id'])
+                            requested_moves.append({
+                                'id':row['id'],'canonical_before':source,
+                                'canonical_after':target,'status_before':row['status'],
+                                'status_after':row['status'],
+                                'expected_version':row['decision_version'],
+                            })
+                    for source, target in ledger.get('redirects', {}).items():
+                        queue_redirect(source,target)
+                    for source,target in dict.fromkeys(fact_redirects):
+                        queue_redirect(source,target)
                 for move in requested_moves:
                     row = self.repository._db.execute(
                         'SELECT * FROM assertions WHERE project_id=? AND id=?',
                         (project_id, move['id'])).fetchone()
-                    if row is None or row['canonical_record_id'] != move['from'] or \
-                            row['decision_version'] != move['expected_version']:
+                    if (row is None or
+                            row['canonical_record_id']!=move['canonical_before'] or
+                            row['status']!=move['status_before'] or
+                            row['decision_version']!=move['expected_version']):
                         raise ValueError('版本冲突：合并后断言已变更')
                     new_version = row['decision_version'] + 1
-                    if row['status'] == 'accepted':
+                    if move['status_after'] == 'accepted':
                         record_version_id = self._select_record_version(
-                            project_id, move['to'], selected_versions)
+                            project_id, move['canonical_after'], selected_versions)
                     now = utc_now()
-                    self.repository._db.execute(
-                        '''UPDATE assertions SET canonical_record_id=?,decision_version=?,
-                           decision_reason=?,actor=?,decided_at=? WHERE id=?''',
-                        (move['to'], new_version, f'{operation}: 规范重指派',
-                         'merge-ledger', now, move['id']))
+                    reason=(f'{operation}: {move["canonical_before"]} -> '
+                            f'{move["canonical_after"]}; {move["status_before"]} -> '
+                            f'{move["status_after"]}')
+                    cursor=self.repository._db.execute(
+                        '''UPDATE assertions SET status=?,canonical_record_id=?,decision_version=?,
+                           decision_reason=?,actor=?,decided_at=?
+                           WHERE project_id=? AND id=? AND decision_version=?''',
+                        (move['status_after'],move['canonical_after'],new_version,reason,
+                         'merge-ledger',None if move['status_after']=='pending' else now,
+                         project_id,move['id'],move['expected_version']))
+                    if cursor.rowcount!=1:
+                        raise ValueError('版本冲突：合并后断言已变更')
                     self.repository._db.execute(
                         '''INSERT INTO assertion_events
                            (id,assertion_id,project_id,from_status,to_status,decision_version,
                             reason,actor,canonical_record_id,created_at)
                            VALUES (?,?,?,?,?,?,?,?,?,?)''',
-                        (str(uuid4()), move['id'], project_id, row['status'], row['status'],
-                         new_version, f'{operation}: {move["from"]} -> {move["to"]}',
-                         'merge-ledger', move['to'], now))
-                    if row['status'] == 'accepted':
+                        (str(uuid4()), move['id'], project_id, move['status_before'],
+                         move['status_after'],new_version,reason,'merge-ledger',
+                         move['canonical_after'],now))
+                    if move['status_after'] == 'accepted':
                         self._map_accepted_assertion(project_id, {
                             'id': move['id'], 'decision_version': new_version,
-                            'canonical_record_id': move['to'],
+                            'canonical_record_id': move['canonical_after'],
                         }, record_version_id)
-                    assertion_moves.append({**move, 'decision_version_after': new_version})
+                    assertion_moves.append({
+                        'id':move['id'],
+                        'move_kind':('status' if move['status_before']!=move['status_after']
+                                     else 'canonical'),
+                        'from':move['canonical_before'],'to':move['canonical_after'],
+                        'status_before':move['status_before'],
+                        'status_after':move['status_after'],
+                        'decision_version_before':move['expected_version'],
+                        'decision_version_after':new_version,
+                        'reason':reason,'actor':'merge-ledger',
+                    })
                 self.repository._db.execute(
                     '''INSERT INTO merge_operations
                        (id,project_id,operation,status,redirects,assertion_moves,before_state,

@@ -136,7 +136,8 @@ def test_max_count_attribute_merge_requires_valid_winner_and_supersedes_loser_at
                          attribute_winners=['age-a', 'age-b'])
     assert service.repository.export_projection(p) == before
 
-    governance.merge(p, 'a', 'b', {'a': 1, 'b': 1}, attribute_winners=['age-a'])
+    merged = governance.merge(
+        p, 'a', 'b', {'a': 1, 'b': 1}, attribute_winners=['age-a'])
 
     assert service.repository.get_record(p, 'age-a')['subject_id'] == 'a'
     loser = service.repository.get_record(p, 'age-b')
@@ -147,6 +148,27 @@ def test_max_count_attribute_merge_requires_valid_winner_and_supersedes_loser_at
                    service.repository.list_assertion_events(p, assertion['id'])]
     assert transitions[-2:] == [('accepted', 'contradicting'),
                                 ('contradicting', 'superseded')]
+    ledger = service.repository.list_merge_operations(p)[-1]
+    status_moves = [move for move in ledger['assertion_moves']
+                    if move['id'] == assertion['id']]
+    assert [(move['status_before'], move['status_after']) for move in status_moves] == [
+        ('accepted', 'contradicting'), ('contradicting', 'superseded')]
+    assert status_moves[0]['decision_version_after'] == \
+        status_moves[1]['decision_version_before']
+
+    governance.undo_merge(p, merged['operation_id'])
+    restored = service.repository.get_record(p, 'age-b')
+    assertion = service.repository.list_assertions(p, canonical_record_id='age-b')[0]
+    assert not restored.get('metadata', {}).get('_deleted')
+    assert restored['subject_id'] == 'b'
+    assert assertion['status'] == 'accepted'
+    support = service.repository.list_record_version_assertions(
+        p, record_version_id=restored['version_id'])
+    assert {item['assertion_id'] for item in support} == {assertion['id']}
+    transitions = [(event['from_status'], event['to_status']) for event in
+                   service.repository.list_assertion_events(p, assertion['id'])]
+    assert transitions[-2:] == [('superseded', 'contradicting'),
+                                ('contradicting', 'accepted')]
 
 
 def test_merge_request_defaults_attribute_winners_to_empty_list():
@@ -197,3 +219,50 @@ def test_max_count_merge_resolves_each_overlapping_validity_group(system):
     assert not current['age-early'].get('metadata', {}).get('_deleted')
     assert not current['age-late'].get('metadata', {}).get('_deleted')
     assert current['age-bridge']['metadata']['_deleted'] is True
+
+
+def test_asymmetric_equal_attribute_collision_keeps_active_key_and_converges(system):
+    service, governance, p = system
+    datatype = 'http://www.w3.org/2001/XMLSchema#string'
+    service.write(p, [
+        dict(id='z-fact', kind='attribute', type='nickname', text='保留实体昵称',
+             subject_id='a', value='same', datatype=datatype),
+        dict(id='a-fact', kind='attribute', type='nickname', text='删除实体昵称',
+             subject_id='b', value='same', datatype=datatype),
+    ])
+
+    governance.merge(p, 'a', 'b', {'a': 1, 'b': 1})
+
+    active = service.repository.list_fact_keys(p)
+    assert 'a-fact' in {row['canonical_record_id'] for row in active}
+    assert 'z-fact' not in {row['canonical_record_id'] for row in active}
+    replay = service.write(p, [
+        dict(id='later-copy', kind='attribute', type='nickname', text='后续相同昵称',
+             subject_id='a', value='same', datatype=datatype),
+    ])
+    assert replay[0]['id'] == 'a-fact'
+
+
+@pytest.mark.parametrize(('keep_fact', 'drop_fact'), [
+    ('a-fact', 'z-fact'),
+    ('z-fact', 'a-fact'),
+])
+def test_equal_attribute_collision_is_immediately_reversible(
+        system, keep_fact, drop_fact):
+    service, governance, p = system
+    datatype = 'http://www.w3.org/2001/XMLSchema#string'
+    service.write(p, [
+        dict(id=keep_fact, kind='attribute', type='nickname', text='保留实体昵称',
+             subject_id='a', value='same', datatype=datatype),
+        dict(id=drop_fact, kind='attribute', type='nickname', text='删除实体昵称',
+             subject_id='b', value='same', datatype=datatype),
+    ])
+
+    merged = governance.merge(p, 'a', 'b', {'a': 1, 'b': 1})
+    governance.undo_merge(p, merged['operation_id'])
+
+    current = {row['id']: row for row in service.repository.current_records(p)}
+    assert not current[keep_fact].get('metadata', {}).get('_deleted')
+    assert not current[drop_fact].get('metadata', {}).get('_deleted')
+    assert current[keep_fact]['subject_id'] == 'a'
+    assert current[drop_fact]['subject_id'] == 'b'

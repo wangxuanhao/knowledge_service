@@ -263,6 +263,32 @@ def test_attribute_revision_collision_reuses_target_and_tombstones_source(tmp_pa
                and row['payload']['value'] == 21 for row in result['assertion_updates'])
 
 
+def test_merge_collision_source_winner_keeps_retargeted_key_active(tmp_path):
+    repo, _, project_id = _system(tmp_path)
+    datatype = 'http://www.w3.org/2001/XMLSchema#integer'
+    attribute = {
+        'kind': 'attribute', 'type': 'age', 'text': '年龄 20',
+        'value': 20, 'datatype': datatype,
+    }
+    _write(repo, project_id, [
+        _entity('keep'), _entity('drop'),
+        {**attribute, 'id': 'z-fact', 'subject_id': 'keep'},
+        {**attribute, 'id': 'a-fact', 'subject_id': 'drop'},
+    ])
+
+    FormalFactWriter(repo).apply('merge_rewrite', project_id, [], {'a-fact': 1}, {
+        'records': [{**attribute, 'id': 'a-fact', 'subject_id': 'keep'}],
+        'ledger': {'id': 'merge-asymmetric', 'redirects': {}},
+    })
+
+    assert [row['canonical_record_id'] for row in repo.list_fact_keys(project_id)] == [
+        'a-fact']
+    replay = _write(repo, project_id, [
+        {**attribute, 'id': 'later-copy', 'subject_id': 'keep'},
+    ])
+    assert replay['accepted_records'][0]['id'] == 'a-fact'
+
+
 def test_new_entity_and_relation_freeze_exact_saved_versions_and_acceptance_events(tmp_path):
     repo, _, project_id = _system(tmp_path)
     result = _write(repo, project_id, [
