@@ -61,11 +61,45 @@ test('invalidating graph requests keeps cleared state after a pending response',
   assert.equal(rendered,'empty hint');
 });
 
+test('invalidated graph load releases busy without letting its stale owner release the next load',async()=>{
+  const gate=createGraphRequestGate();
+  const scope={filters:null,known_at:null,include_unknown:true};
+  const firstResult=deferred(),secondResult=deferred();
+  const started=[];let rendered='empty hint';
+  const autoLoad=async(project,pending)=>{
+    if(gate.isBusy())return false;
+    started.push(project);
+    const ticket=gate.begin(project,scope,null);
+    try{
+      const result=await pending.promise;
+      if(gate.isCurrent(ticket,project,scope,null))rendered=result;
+    }finally{gate.release(ticket);}
+    return true;
+  };
+
+  const first=autoLoad('A',firstResult);
+  gate.invalidate();
+  const second=autoLoad('B',secondResult);
+  assert.deepEqual(started,['A','B']);
+  assert.equal(gate.isBusy(),true);
+
+  firstResult.resolve('stale A');await first;
+  assert.equal(rendered,'empty hint');
+  assert.equal(gate.isBusy(),true);
+
+  secondResult.resolve('current B');await second;
+  assert.equal(rendered,'current B');
+  assert.equal(gate.isBusy(),false);
+});
+
 test('workspace gates graph rendering and invalidates requests when clearing',()=>{
   const workspace=require('node:fs').readFileSync(
     require('node:path').resolve(__dirname,'../../knowledge_service/web/workspace.js'),'utf8');
   assert.ok(workspace.includes('graphRequests.begin('));
   assert.ok(workspace.includes('graphRequests.isCurrent('));
+  assert.ok(workspace.includes('graphRequests.release(ticket)'));
+  assert.ok(workspace.includes('!graphRequests.isBusy()'));
+  assert.ok(!workspace.includes('ui.busy'));
   const clear=workspace.slice(workspace.indexOf('function clearGraphWorkspace'),
     workspace.indexOf("act('search'"));
   assert.ok(clear.includes('graphRequests.invalidate()'));

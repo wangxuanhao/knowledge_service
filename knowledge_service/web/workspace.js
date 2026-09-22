@@ -1,6 +1,6 @@
 /* Linked graph workspace: preserve existing editing/governance controls. */
 (() => {
-  const ui = {request:0, options:[], ontology:null, graph:null, busy:false};
+  const ui = {request:0, options:[], ontology:null, graph:null};
   const graphRequests=GraphTypeFilter.createGraphRequestGate();
   const get = id => document.getElementById(id);
   const make = (tag, html, className='') => {const e=document.createElement(tag);e.innerHTML=html;e.className=className;return e;};
@@ -286,20 +286,24 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
     const project=current,scopeSnapshot={...scope(),valid_at:null};
     const ticket=graphRequests.begin(project,scopeSnapshot,id);
     const done=kgTime('subgraph');
-    let result;
-    try{result=await scopedRead('/subgraph',{node_id:id,hops,valid_at:null,
-      attribute_mode:id?'expanded':'summary'});}
-    catch(error){
+    try{
+      let result;
+      try{result=await scopedRead('/subgraph',{node_id:id,hops,valid_at:null,
+        attribute_mode:id?'expanded':'summary'});}
+      catch(error){
+        if(!graphRequests.isCurrent(ticket,current,{...scope(),valid_at:null},id))return null;
+        throw error;
+      }
       if(!graphRequests.isCurrent(ticket,current,{...scope(),valid_at:null},id))return null;
-      throw error;
+      done({node:id||'all',hops,nodes:result.nodes.length,edges:result.edges.length,server_ms:result.timing_ms?.total??'—'});
+      renderGraph(result);
+      // 开放本体发现的提示条要跟着图谱一起刷新：这原本只在 workbench.js 的旧 drawGraph 副本里做，
+      // 收敛成单一份实现后带到这里，避免 discovery 模式下提示停留在旧状态。
+      renderDiscoveryHint().catch(()=>{});
+      return result;
+    }finally{
+      graphRequests.release(ticket);
     }
-    if(!graphRequests.isCurrent(ticket,current,{...scope(),valid_at:null},id))return null;
-    done({node:id||'all',hops,nodes:result.nodes.length,edges:result.edges.length,server_ms:result.timing_ms?.total??'—'});
-    renderGraph(result);
-    // 开放本体发现的提示条要跟着图谱一起刷新：这原本只在 workbench.js 的旧 drawGraph 副本里做，
-    // 收敛成单一份实现后带到这里，避免 discovery 模式下提示停留在旧状态。
-    renderDiscoveryHint().catch(()=>{});
-    return result;
   };
   function clearGraphWorkspace({preserveSearchResults=false}={}){
     graphRequests.invalidate();
@@ -342,11 +346,9 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
   // 挂在 click / 项目切换 / 页面恢复项目 三个时机，避免默认 active tab 不触发 click 导致空白。
   function autoLoadGraph(){
     const graphView=!get('tab-search').classList.contains('hidden');
-    if(graphView&&current&&!ui.graph&&!ui.busy){
-      ui.busy=true;
+    if(graphView&&current&&!ui.graph&&!graphRequests.isBusy()){
       drawGraph(null,Number(get('graph-hops').value)||1)
-        .catch(e=>status(e.message,true))
-        .finally(()=>{ui.busy=false;});
+        .catch(e=>status(e.message,true));
     }
   }
   document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{

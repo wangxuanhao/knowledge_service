@@ -16,12 +16,17 @@
     return value;
   }
   function createGraphRequestGate(){
-    let generation=0;
+    let generation=0,busyOwner=null;
     const snapshot=(project,scope,node)=>({project:project||'',
       scope:JSON.stringify(stableJson(scope||{})),node:node||null});
     return {
-      begin(project,scope,node){return {generation:++generation,...snapshot(project,scope,node)};},
-      invalidate(){generation+=1;},
+      begin(project,scope,node){const ticket={generation:++generation,...snapshot(project,scope,node)};busyOwner=ticket;return ticket;},
+      invalidate(){generation+=1;busyOwner=null;},
+      isBusy(){return busyOwner!==null;},
+      release(ticket){
+        if(busyOwner!==ticket||ticket?.generation!==generation)return false;
+        busyOwner=null;return true;
+      },
       isCurrent(ticket,project,scope,node){
         if(!ticket||ticket.generation!==generation)return false;
         const current=snapshot(project,scope,node);
