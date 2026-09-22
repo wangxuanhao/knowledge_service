@@ -1,12 +1,124 @@
 # 知识图谱服务
 
-> 更新日期：2026-09-18。以新版服务为基础逐项恢复历史能力；旧版脚本（apps/legacy/kgcore/ontology）已移除，需要时可从 git 历史恢复。尚未接入的能力见下文，能力对标记录见 [能力对标与修正](docs/2026-09-09-能力对标与修正.md)。
+> 更新日期：2026-09-20。基于 FastAPI 标准分层重构：`api / services / repository / core / utils / integrations`。历史旧版脚本（apps/legacy/kgcore/ontology）已移除，需要时可从 git 历史恢复。尚未接入的能力见下文，能力对标记录见 [能力对标与修正](docs/2026-09-09-能力对标与修正.md)。
 
-新增独立服务层 `knowledge_service/`：双时态版本、本体/SHACL、嵌套 metadata 前置过滤、检索与证据问答，包含管理工作台。
+独立服务层 `knowledge_service/`：双时态版本、本体/SHACL、嵌套 metadata 前置过滤、检索与证据问答，包含管理工作台。
 
 可选 [Neo4j 接入](docs/neo4j接入.md)：本地 SQLite 继续保留，按项目同步图谱与历史版本；不替换现有检索。
 
-## 启动新版服务
+---
+
+## 架构总览
+
+服务采用 **FastAPI 标准分层**，依赖方向严格单向向下（`api → services → repository`，`core/utils` 为基础设施，`integrations` 为外部系统适配），无循环依赖：
+
+```
+                     ┌──────────────────────────────────────────────┐
+                     │             api/（HTTP 路由层）               │
+                     │  create_app 装配 · 按资源拆分：               │
+                     │  projects/knowledge/workspace/parity/        │
+                     │  evidence/reviews/ontology_changes/discovery │
+                     └───────────────┬──────────────────────────────┘
+                                     │
+        ┌────────────────────────────┼────────────────────────────┐
+        ▼                            ▼                            ▼
+ ┌──────────────┐          ┌──────────────────┐          ┌────────────────┐
+ │ services/    │          │  integrations/   │          │ repository/    │
+ │（业务服务层） │          │（外部系统适配）   │          │（SQLite 存储层）│
+ │ service      │          │  embeddings      │          │ core（主存储）  │
+ │ retrieval    │          │  milvus_store    │          │ assertions_store│
+ │ ontology     │          │  neo4j_store     │          │ ingest_store   │
+ │ explorer     │          │  semantica_adapter│         │ review_store   │
+ │ governance … │          └────────┬─────────┘          └───────┬────────┘
+ └──────────────┘                   │                            │
+        │                           │                            │
+        └───────────────┬───────────┴────────────────────────────┘
+                        ▼
+              ┌────────────────────┐
+              │  core/ · utils/    │  基础设施：config/logging/time
+              │  （最底层，无依赖） │  + 工具：diagnostics/filters/
+              └────────────────────┘  assertions/ingest_runs
+```
+
+**统一出口**：外部统一从 `knowledge_service` 导入，不关心内部路径。
+
+```python
+from knowledge_service import create_app, Repository, KnowledgeService
+```
+
+**存储职责**：
+
+| 存储 | 位置 | 角色 |
+|---|---|---|
+| SQLite | `repository/` | **唯一真相源**：双时态版本、本体版本链、制品、任务收据 |
+| Milvus | `integrations/milvus_store.py` | 派生检索索引（dense + sparse），可经 `/indexes/rebuild` 重建 |
+| Neo4j | `integrations/neo4j_store.py` | 可选图谱投影副本，按项目手动同步 |
+| 编码器 | `integrations/embeddings.py` | 本地 bge-m3 / OpenAI 兼容 / demo 哈希 |
+
+SQLite 是真值，Milvus / Neo4j 是可重建副本——副本丢失或损坏不影响权威数据。
+
+---
+
+## 目录地图
+
+```
+knowledge_service/
+├── api/                        # ⚡ HTTP 路由层（统一 install(app, service) 挂载）
+│   ├── __init__.py             #   create_app 装配（lifespan/中间件/异常/路由挂载/静态）
+│   ├── projects.py             #   项目管理（列表/创建/查看/改名/删除）
+│   ├── knowledge.py            #   知识 CRUD + 摄取 + 检索/问答/图谱 + 本体/SPARQL
+│   ├── workspace.py            #   工作台 API（探索/实体选项/时间线/本体维护/索引任务）
+│   ├── parity.py               #   旧版兼容 API（本地项目导入/预览/快照）
+│   ├── evidence.py             #   证据定位
+│   ├── reviews.py              #   知识审核
+│   ├── ontology_changes.py     #   本体变更草案
+│   └── ontology_discovery.py   #   开放本体发现 API（候选/脑图/草案/发布）
+├── services/                   # 🧠 业务服务层（无路由装饰器，纯业务逻辑）
+│   ├── service.py              #   KnowledgeService 核心门面（写入/ingest/检索/问答）
+│   ├── retrieval.py            #   检索引擎（Milvus 快路径 + 本地降级）
+│   ├── ontology.py             #   本体引擎（RDF/OWL/SHACL 解释）+ 术语工具
+│   ├── ontology_discovery.py   #   开放候选聚合/归纳/物化（业务函数）
+│   ├── explorer.py             #   图谱探索/链接探索/快照/评估
+│   ├── governance.py           #   实体治理（别名/合并/删除）
+│   ├── answers.py              #   证据问答（SSE 流式）
+│   ├── formal_writes.py        #   规范图写入事务门面
+│   ├── jobs.py                 #   后台任务队列
+│   ├── evidence.py             #   证据定位（业务）
+│   ├── reviews.py              #   审核决策（业务）
+│   ├── ontology_changes.py     #   本体变更（业务：apply/impact/revalidation）
+│   ├── legacy_import.py        #   旧项目导入
+│   ├── chunking.py             #   切片
+│   ├── attribute_extraction.py #   属性抽取
+│   ├── entity_resolution.py    #   实体消歧
+│   ├── reconciliation.py       #   增量实体融合
+│   └── review_validation.py    #   审核属性校验
+├── repository/                 # 💾 SQLite 存储层
+│   ├── core.py                 #   主存储：项目/记录/本体/制品/FTS/查询/迁移
+│   ├── assertions_store.py     #   断言（审核候选）生命周期
+│   ├── ingest_store.py         #   摄取运行与阶段输出
+│   └── review_store.py         #   消歧审核与合并账本
+├── integrations/               # 🔌 外部系统适配
+│   ├── embeddings.py           #   向量编码器
+│   ├── milvus_store.py         #   Milvus 检索索引
+│   ├── neo4j_store.py          #   Neo4j 图谱投影
+│   └── semantica_adapter.py    #   Semantica 抽取适配
+├── core/                       # ⚙️ 基础设施
+│   ├── config.py               #   环境配置（load_environment）
+│   ├── logging.py              #   统一日志配置（终端 + 文件落盘）
+│   └── time.py                 #   时间工具
+├── utils/                      # 🧰 工具
+│   ├── diagnostics.py          #   诊断：任务阶段追踪 + 读路径计时
+│   ├── filters.py              #   Metadata 过滤谓词
+│   ├── assertions.py           #   断言常量/工具
+│   └── ingest_runs.py          #   摄取就绪位工具
+├── models.py                   # 📦 Pydantic 请求模型
+├── web/                        #   前端静态资源（工作台）
+├── resources/                  #   默认本体 default_ontology.ttl
+├── __init__.py                 #   统一出口
+└── __main__.py                 #   启动入口（python -m knowledge_service）
+```
+
+## 启动服务
 
 在仓库根目录执行（当前使用 conda 环境 `llm_model`，Semantica 0.6.8）：
 
@@ -17,17 +129,36 @@ python -u -m knowledge_service --port 8100
 
 工作台：[http://127.0.0.1:8100/](http://127.0.0.1:8100/)；[交互 API 文档](http://127.0.0.1:8100/docs)。默认只监听本机，启动终端按 `Ctrl+C` 停止。修改后端代码或 `.env` 后需要重启；前端修改需要刷新页面，刷新前请保留未提交内容。
 
-新服务不调用历史编号脚本（已移除）。旧项目可通过“总览 / 本地项目”手动导入，原文件保留；切换“当前知识项目”是切换服务中的项目，不等于重新导入。
+> **注意**：后端 Python 改动需重启服务（uvicorn 无 --reload）；前端静态文件改动后需同步 bump `index.html` 里该文件的 `?v=` 版本号，否则浏览器用缓存旧 JS。
 
 ### 配置与存储
 
 - 模型配置写入仓库根目录 `.env`；启动时读取 `KG_` 变量，已设置的 shell 环境变量优先。不要提交或分享真实密钥。
 - 抽取和生成式证据问答使用 `KG_LLM_BASE_URL`、`KG_LLM_MODEL`、`KG_LLM_API_KEY`，支持 DeepSeek 的 OpenAI 兼容接入，可能产生模型调用费用。
-- 本地向量模型使用 `KG_EMBEDDING_BACKEND=local`、`KG_EMBEDDING_PATH`（默认 `data/model`）。当前服务读取的是 `KG_EMBEDDING_PATH`，不是历史脚本的 `EMBEDDING_MODEL_PATH`。本地模式不需要远程 embedding 的 URL / API Key。
+- 本地向量模型使用 `KG_EMBEDDING_BACKEND=local`、`KG_EMBEDDING_PATH`（默认 `data/model`）。本地模式不需要远程 embedding 的 URL / API Key。
 - `--demo` 使用非语义哈希向量，仅用于流程验证，不代表真实语义检索，也不会自动关闭 LLM 抽取。
-- 本地权威存储是 `data/service/knowledge.sqlite`：项目、原文、知识版本、向量、任务收据等保存在 SQLite；历史项目的原始文件仍保留。
+- 本地权威存储是 `data/service/knowledge.sqlite`：项目、原文、知识版本、任务收据等保存在 SQLite；历史项目的原始文件仍保留。
+- 向量检索默认走本地 SQLite；`KG_VECTOR_BACKEND=milvus` 显式开启后走本地 Milvus（Docker `milvus-standalone`，端口 19530）。Milvus 连接失败自动降级本地，不拖垮主流程。
 - Neo4j 是按项目手动同步的图谱副本，检索仍走本地。多个项目可共用一个 database，通过项目标识隔离；切换页面项目不会自动同步。
-- 为兼容已有配置，启动器也读取 `.env.example` 中的 `KG_NEO4J_` 变量（优先级低于 `.env`）；建议将真实配置迁入 `.env`。其他示例模型变量不会从 `.env.example` 加载。
+- 配置只从 `.env` 加载（全部 `KG_` 前缀键）；`.env.example` 仅是参考模板，不作为配置源。shell 环境变量优先级最高，已设置的键不会被 `.env` 覆盖。
+
+### 环境变量一览
+
+| 变量 | 用途 | 默认 |
+|---|---|---|
+| `KG_DATABASE` | SQLite 路径 | `data/service/knowledge.sqlite` |
+| `KG_LLM_BASE_URL` / `KG_LLM_MODEL` / `KG_LLM_API_KEY` | LLM 抽取与问答 | — |
+| `KG_EMBEDDING_BACKEND` | `local` / `openai` / `demo` | `local` |
+| `KG_EMBEDDING_PATH` | 本地 bge-m3 模型目录（backend=local） | `data/model` |
+| `KG_EMBEDDING_BATCH_SIZE` | 编码批大小 1..64（backend=local） | `4` |
+| `KG_EMBEDDING_BASE_URL` / `KG_EMBEDDING_MODEL` / `KG_EMBEDDING_API_KEY` | OpenAI 兼容 embedding 提供商（backend=openai） | — |
+| `KG_VECTOR_BACKEND` | `milvus` 开启 Milvus 向量索引 | 关闭（本地） |
+| `KG_MILVUS_HOST` / `KG_MILVUS_PORT` / `KG_MILVUS_DIM` | 本地 Milvus 地址 / 端口 / 向量维度 | `localhost` / `19530` / `1024` |
+| `KG_LOG_LEVEL` | 终端日志级别（文件恒为 DEBUG） | `INFO` |
+| `KG_SLOW_MS` | 只打印慢于该毫秒的读路径阶段 | `0` |
+| `KG_NEO4J_URI` / `KG_NEO4J_USERNAME` / `KG_NEO4J_PASSWORD` / `KG_NEO4J_DATABASE` | Neo4j 投影 | — |
+
+---
 
 ## 知识写入与批量解析
 
@@ -41,13 +172,11 @@ python -u -m knowledge_service --port 8100
 
 ### 实际处理链路
 
-项目本体模式：原文收据 → 切片 → 逐片实体／关系抽取 → 项目内消歧融合 → 本体与关系校验 → 向量化 → 原子落库。
+- **项目本体模式**：原文收据 → 切片 → 逐片实体／关系抽取 → 项目内消歧融合 → 本体与关系校验 → 向量化 → 原子落库。
+- **开放本体发现**：原文收据 → 切片 → Semantica 开放实体／关系候选（可选业务属性候选）→ 多批次候选累计 → 基于当前本体版本归纳差异草案 → 人工核对并发布本体版本 → 使用该版本受控重解析原文 → 实体消歧／关系校验后进入正式图谱。开放候选始终与正式知识隔离，不参加图谱检索。
+- **仅文档检索**：原文收据 → 切片 → 向量化 → 原子落库；不调用图谱抽取模型。
 
-开放本体发现：原文收据 → 切片 → Semantica 开放实体／关系候选（可选业务属性候选）→ 多批次候选累计 → 基于当前本体版本归纳差异草案 → 人工核对并发布本体版本 → 使用该版本受控重解析原文 → 实体消歧／关系校验后进入正式图谱。开放候选始终与正式知识隔离，不参加图谱检索。
-
-“候选脑图”用于在发布前观察开放候选的结构：同类型且同名称的实体候选聚合为一个预览节点，重复三元组聚合为候选边，并展示生命周期、出现次数、属性和来源证据。该聚合不创建正式实体 ID，也不参与正式检索；“正式脑图”继续只展示已按本体解析和融合的知识。侧栏按“项目、探索与展示、建模与治理、运行与质量”组织为层级菜单，两种脑图位于同一“探索与展示”分组。
-
-仅文档检索：原文收据 → 切片 → 向量化 → 原子落库；不调用图谱抽取模型。
+“候选脑图”用于在发布前观察开放候选的结构：同类型且同名称的实体候选聚合为一个预览节点，重复三元组聚合为候选边，并展示生命周期、出现次数、属性和来源证据。该聚合不创建正式实体 ID，也不参与正式检索；“正式脑图”继续只展示已按本体解析和融合的知识。侧栏按“项目、探索与展示、建模与治理、运行与质量”组织为层级菜单。
 
 项目本体模式会把类的稳定名称、中文标签、定义和父类作为独立的本体指导交给模型；关系抽取同样接收关系定义和 domain/range。指导信息与原文分字段传递，不会作为证据写入图谱。开放模式不使用项目白名单：实体类型和关系名称要求采用原文语言及领域词汇，再由 Semantica `OntologyGenerator` 归纳草案。每个 chunk 单独交给模型，不会在最后拼成整篇再做一次联合抽取。抽取失败会保留原文收据，派生知识不会部分提交。
 
@@ -84,6 +213,8 @@ python -u -m knowledge_service --port 8100
 
 “提示”和“关闭”并不关闭 SHACL；显式 SHACL 约束仍按本体校验。结构化知识批量写入 API 继续默认严格，避免外部系统静默写入不合规事实。审核批准时也会重新执行严格校验；可映射到合适关系，或先在知识编辑中纠正实体类型后再批准。
 
+---
+
 ## 时间与筛选
 
 | 时间 | 含义 |
@@ -96,6 +227,8 @@ python -u -m knowledge_service --port 8100
 知识写入表单不再统一填写生效／失效时间，发布时间不会自动赋给实体或关系作为有效期。关系抽取会识别原文明示的事实有效期并保存时间证据；没有明确时间信号时保持为空，不会用发布时间猜测。旧接口仍保留有效期字段。文件级更新时间目前也没有统一接入，不能将版本记录时间等同于文件更新时间。
 
 图谱和检索支持项目范围、业务有效时点、系统已知时点及 Metadata 前置筛选。发布时间／添加时间可以作为 Metadata 条件使用，但专用的多时间维度筛选界面、按来源汇总筛选融合实体尚未完整接入。
+
+---
 
 ## 日志与问题定位
 
@@ -110,9 +243,17 @@ python -u -m knowledge_service --port 8100
 - 重启后原 queued/running 任务标为 interrupted，不自动重试。强制停服前的原文收据可能仍显示 processing；重传前先核对，避免重复数据。
 - 尚未逐次记录 Semantica 内部 HTTP 重试和 token 用量；长时间等待需要结合执行位置定位。
 
+### 日志落盘
+
+统一日志配置在 `core/logging.py`：终端 + 文件双通道，文件按天滚动、保留 30 天、存全量 DEBUG：
+
+- 终端级别由 `KG_LOG_LEVEL` 控制（默认 `INFO`）；
+- 文件落盘 `data/log/service.log`，任何时候都写 DEBUG（排查问题看完整链路）；
+- 幂等配置：测试多次 build app 不会叠加 handler。
+
 ### 读接口的阶段耗时日志
 
-上面是写入任务的日志。读接口（检索、交互图谱、候选脑图、原文数据源）不属于任何任务，耗时走另一条通道，**默认开启**，直接打印在启动终端：
+写入任务走任务日志；读接口（检索、交互图谱、候选脑图、原文数据源）不属于任何任务，耗时走另一条通道，**默认开启**，直接打印在启动终端：
 
 ```
 10:33:31 INFO knowledge_service.timing · repository.query · 38.3 ms · embeddings=True kinds=0 filtered=False rows=2401 kept=2401
@@ -132,6 +273,8 @@ python -u -m knowledge_service --port 8100
 - `repository.list_artifacts` 先解码所有项目的草案、再按项目过滤；草案里嵌了完整候选快照，所以这一步的解码量远大于返回值（日志的 `decoded=` 与 `kept=` 对比可见）。
 
 详见 [解析日志定位](docs/解析日志定位.md)。数据契约与更多 API 说明见 [服务使用说明](docs/KNOWLEDGE_SERVICE.md)；其中早期 `.venv-service` 安装记录供参考，当前环境与配置以上述 conda 说明为准。
+
+---
 
 ## 知识审核与本体变更
 
@@ -159,6 +302,8 @@ python -u -m knowledge_service --port 8100
 
 升级前失败的任务未保存模型关系响应，不能从日志恢复审核候选。需要人工核对后重新上传解析，可能再次产生模型费用；服务不会自动重跑。
 
+---
+
 ## 本体维护
 
 “本体管理”支持实体类、关系、实体属性的新增、修改与停用。维护遵循版本化 RDF/OWL 模型：
@@ -174,18 +319,31 @@ python -u -m knowledge_service --port 8100
 
 ---
 
-## 目录地图
+## 项目删除的行为
 
-```
-知识图谱/
-├─ knowledge_service/ 新版服务：API、SQLite、本体、抽取、切片、诊断日志和工作台
-├─ tests/service/     新版服务回归测试
-├─ docs/              说明文档（KNOWLEDGE_SERVICE · 能力对标 · 图谱设计稿）
-├─ data/              运行数据：model(bge-m3) · service(知识库与日志) · rule_demo 等
-└─ scripts/           主服务验收与运维脚本（smoke_service / verify_parity / sync_local_neo4j）
+`DELETE /api/projects/{id}` 会**物理删除**该项目的全部数据，无逻辑标记：
+
+- SQLite：`record_versions` / `ontologies` / `artifacts` / `projects` 四张主表 + 7 张关联表（断言/摄取/消歧等，经外键级联）+ FTS 全文索引；
+- Milvus：清空该项目分区向量；
+- Neo4j：删除该项目节点与关系（若配置过）。
+
+任一外部存储清理失败不阻断 SQLite 删除，只记录告警（它们都是可重建副本）。返回体带 `cleaned` 字段说明各副本清理结果。
+
+---
+
+## 测试
+
+回归测试在 `tests/service/`（39 个文件，约 200 用例），全量约 2–4 分钟：
+
+```bash
+conda activate llm_model
+python -m pytest tests/service -q
 ```
 
-> 历史旧版脚本（apps/legacy/kgcore/ontology）已移除，需要时可从 git 历史恢复。
+- 服务层测试用 `llm_model` 解释器（含 Semantica）；前端契约测试（`test_frontend_retrieval_flow.py`）需 `.venv` 的 playwright + 系统 Edge。
+- 真浏览器契约测试解释器：`.venv/Scripts/python.exe -m pytest tests/service/test_frontend_retrieval_flow.py -q`。
+
+---
 
 ## 快速开始（仓库根执行）
 
@@ -197,8 +355,10 @@ python -u -m knowledge_service --port 8100
 - 工作台：[http://127.0.0.1:8100/](http://127.0.0.1:8100/)；[交互 API 文档](http://127.0.0.1:8100/docs)。
 - 服务验收：`python scripts/smoke_service.py`（针对运行中的 8100 服务）。
 
-> 环境：conda env `llm_model`（Python 3.12，当前 Semantica 0.6.8，另含 rdflib、sentence-transformers、faiss）。
+> 环境：conda env `llm_model`（Python 3.12，当前 Semantica 0.6.8，另含 rdflib、sentence-transformers）。
 > 向量模型 `data/model`（bge-m3）与本体文件可本地读取；LLM 抽取和生成式问答是否联网取决于供应商配置，并非整个流程默认全离线。
+
+---
 
 ## 文档索引
 
@@ -206,4 +366,9 @@ python -u -m knowledge_service --port 8100
 |---|---|
 | `docs/KNOWLEDGE_SERVICE.md` | 数据契约、API 与更多服务说明 |
 | `docs/2026-09-09-能力对标与修正.md` | 新版服务能力对标记录 |
+| `docs/2026-09-09-同屏工作台与加载优化.md` | 工作台性能优化记录 |
+| `docs/2026-09-10-Semantica抽取与本体约束机制.md` | 抽取与本体约束机制 |
+| `docs/milvus-向量化改造设计.md` | Milvus 向量检索设计 |
+| `docs/neo4j接入.md` | Neo4j 投影接入说明 |
+| `docs/解析日志定位.md` | 读路径耗时日志定位 |
 | `docs/图谱设计.md` | 图谱设计稿（§4 本体来源、§7 评测口径） |

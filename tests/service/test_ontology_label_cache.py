@@ -1,7 +1,7 @@
-import knowledge_service.service as service_module
+import knowledge_service.services.service as service_module
 
 from knowledge_service.api import create_app
-from knowledge_service.embeddings import HashingEncoder
+from knowledge_service.integrations.embeddings import HashingEncoder
 
 
 TTL_ONE = '''

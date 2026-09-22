@@ -1,5 +1,5 @@
 import pytest
-from knowledge_service.chunking import split_document
+from knowledge_service.services.chunking import split_document
 from knowledge_service.models import Ingest
 
 

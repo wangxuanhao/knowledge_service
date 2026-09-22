@@ -1,10 +1,10 @@
 from fastapi.testclient import TestClient
 from knowledge_service.api import create_app
-from knowledge_service.embeddings import HashingEncoder
+from knowledge_service.integrations.embeddings import HashingEncoder
 
 
 def test_incremental_exact_fusion_retains_occurrence_and_source(monkeypatch,tmp_path):
-    from knowledge_service.semantica_adapter import SemanticaExtractor
+    from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
     monkeypatch.setattr(SemanticaExtractor,'extract',lambda self,text,ontology:[
         {'id':'x','kind':'entity','type':'Merchant','text':'同一个商户','metadata':{}}])
     with TestClient(create_app(tmp_path/'fusion.sqlite',HashingEncoder())) as client:

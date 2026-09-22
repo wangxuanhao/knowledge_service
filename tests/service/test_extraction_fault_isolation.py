@@ -1,5 +1,5 @@
-from knowledge_service.ontology import Ontology
-from knowledge_service.semantica_adapter import SemanticaExtractor
+from knowledge_service.services.ontology import Ontology
+from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
 
 TTL='''@prefix : <https://test/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
@@ -7,7 +7,7 @@ TTL='''@prefix : <https://test/> . @prefix owl: <http://www.w3.org/2002/07/owl#>
 
 
 def test_relation_with_missing_extracted_endpoint_is_skipped_not_fatal(monkeypatch):
-    import knowledge_service.semantica_adapter as adapter
+    import knowledge_service.integrations.semantica_adapter as adapter
     from semantica.semantic_extract import methods
     from semantica.semantic_extract.types import Entity, Relation
 
@@ -27,7 +27,7 @@ def test_relation_with_missing_extracted_endpoint_is_skipped_not_fatal(monkeypat
 
 def test_semantica_merge_advice_failure_does_not_abort_deterministic_alias_merge(monkeypatch):
     from semantica.deduplication import EntityMerger
-    from knowledge_service.reconciliation import reconcile
+    from knowledge_service.services.reconciliation import reconcile
 
     class Repository:
         def current_records(self,project_id):
@@ -46,7 +46,7 @@ def test_semantica_merge_advice_failure_does_not_abort_deterministic_alias_merge
 
 
 def test_stable_type_iri_allows_entity_fusion_across_ontology_versions():
-    from knowledge_service.reconciliation import reconcile
+    from knowledge_service.services.reconciliation import reconcile
 
     class Repository:
         def current_records(self,project_id):
@@ -70,7 +70,7 @@ def test_stable_type_iri_allows_entity_fusion_across_ontology_versions():
 
 
 def test_same_relation_key_fuses_across_ontology_versions():
-    from knowledge_service.reconciliation import reconcile
+    from knowledge_service.services.reconciliation import reconcile
 
     class Repository:
         def current_records(self,project_id):

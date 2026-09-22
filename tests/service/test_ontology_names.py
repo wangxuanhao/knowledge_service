@@ -1,4 +1,4 @@
-from knowledge_service.ontology import Ontology,local_name
+from knowledge_service.services.ontology import Ontology,local_name
 
 
 def test_local_name_supports_project_urns_without_breaking_urls():

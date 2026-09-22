@@ -1,8 +1,8 @@
 from copy import deepcopy
 import threading
 
-from knowledge_service.diagnostics import reporting, stage, event
-from knowledge_service.jobs import Jobs
+from knowledge_service.utils.diagnostics import reporting, stage, event
+from knowledge_service.services.jobs import Jobs
 
 
 class Repo:

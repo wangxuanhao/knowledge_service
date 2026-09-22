@@ -4,8 +4,8 @@ import pytest
 
 
 def adapter():
-    assert importlib.util.find_spec('knowledge_service.semantica_adapter'), 'Semantica adapter is not implemented'
-    from knowledge_service import semantica_adapter
+    assert importlib.util.find_spec('knowledge_service.integrations.semantica_adapter'), 'Semantica adapter is not implemented'
+    from knowledge_service.integrations import semantica_adapter
     return semantica_adapter
 
 
@@ -36,7 +36,7 @@ def test_real_snapshot_preserves_types_parallel_edges_and_end_boundary():
 
 def test_extraction_uses_ontology_ids_and_linked_stable_ids(monkeypatch):
     mod = adapter()
-    from knowledge_service.ontology import Ontology
+    from knowledge_service.services.ontology import Ontology
     ont = Ontology('@prefix ex: <https://test/> . @prefix owl: <http://www.w3.org/2002/07/owl#> . ex:Person a owl:Class . ex:Company a owl:Class . ex:worksAt a owl:ObjectProperty .')
     for key, val in [('KG_LLM_API_KEY', 'test-key'), ('KG_LLM_BASE_URL', 'http://localhost:1/v1'), ('KG_LLM_MODEL', 'test')]:
         monkeypatch.setenv(key, val)
@@ -70,7 +70,7 @@ def test_extraction_uses_ontology_ids_and_linked_stable_ids(monkeypatch):
 
 def test_unknown_relation_queued_and_next_ontology_accepts_it(monkeypatch):
     mod=adapter()
-    from knowledge_service.ontology import Ontology
+    from knowledge_service.services.ontology import Ontology
     methods=pytest.importorskip('semantica.semantic_extract.methods')
     from semantica.semantic_extract.types import Entity,Relation
     for key in ['KG_LLM_API_KEY','KG_LLM_BASE_URL','KG_LLM_MODEL']:
@@ -170,7 +170,7 @@ def test_guided_entities_keep_novel_type_for_human_review(monkeypatch):
 
 def test_guided_relations_map_temporal_fields_into_metadata(monkeypatch):
     mod=adapter()
-    from knowledge_service.ontology import Ontology
+    from knowledge_service.services.ontology import Ontology
     from semantica.semantic_extract import providers
     from semantica.semantic_extract.types import Entity
     captured={}
@@ -213,7 +213,7 @@ def test_extracted_validity_promotes_iso_and_guards_phrases_and_intervals():
 
 def test_extract_relation_record_carries_extracted_validity(monkeypatch):
     mod=adapter()
-    from knowledge_service.ontology import Ontology
+    from knowledge_service.services.ontology import Ontology
     methods=pytest.importorskip('semantica.semantic_extract.methods')
     from semantica.semantic_extract.types import Entity,Relation
     for key in ['KG_LLM_API_KEY','KG_LLM_BASE_URL','KG_LLM_MODEL']:

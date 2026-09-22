@@ -1,5 +1,5 @@
 from test_legacy_import import legacy
-from knowledge_service.legacy_import import LegacyImporter
+from knowledge_service.services.legacy_import import LegacyImporter
 
 
 def test_fast_load_never_starts_embedding_model(legacy):

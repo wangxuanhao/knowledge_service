@@ -1,6 +1,6 @@
 import pytest
 
-from knowledge_service.entity_resolution import EntityResolver
+from knowledge_service.services.entity_resolution import EntityResolver
 from knowledge_service.repository import Repository
 
 

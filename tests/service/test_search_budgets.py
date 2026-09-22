@@ -3,7 +3,7 @@ import time
 from fastapi.testclient import TestClient
 
 from knowledge_service.api import create_app
-from knowledge_service.embeddings import HashingEncoder
+from knowledge_service.integrations.embeddings import HashingEncoder
 
 
 def test_keyword_search_three_channel_response_and_performance_budget(tmp_path, monkeypatch):

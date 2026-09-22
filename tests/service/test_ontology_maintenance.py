@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 from knowledge_service.api import create_app
-from knowledge_service.embeddings import HashingEncoder
-from knowledge_service.ontology import Ontology
+from knowledge_service.integrations.embeddings import HashingEncoder
+from knowledge_service.services.ontology import Ontology
 
 
 TTL='''@prefix : <https://test/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -77,6 +77,32 @@ def test_impact_and_confirmed_retirement_preserve_old_knowledge(tmp_path):
         latest=app.state.service.repository.current_records(p)
         assert next(x for x in latest if x['id']=='p')['ontology_id']==old['id']
         assert len(app.state.service.repository.list_ontologies(p))==2
+    finally:c.__exit__(None,None,None)
+
+
+def test_impact_breaks_down_by_record_kind_and_lists_readable_names(tmp_path):
+    """停用评估必须分类计数：实体类被停用时"关系"才是受影响大头，单一总数无法判断后果。"""
+    c,app,p,base,old=setup(tmp_path)
+    try:
+        created=c.post(base+'/records',json={'records':[
+            {'id':'p1','kind':'entity','text':'张三','type':'https://test/Person'},
+            {'id':'p2','kind':'entity','text':'李四','type':'https://test/Person'},
+            {'id':'o1','kind':'entity','text':'某机构','type':'https://test/Organization'},
+            {'id':'edge','kind':'relation','text':'张三 认识 李四','type':'https://test/knows',
+             'subject_id':'p1','object_id':'p2'},
+          ]})
+        assert created.status_code==201,created.text
+        impact=c.get(base+'/ontology/term-impact?uri=https%3A%2F%2Ftest%2FPerson').json()
+        # 分类计数：2 个 Person 实体 + 1 条以 Person 为端点的关系；Organization 实体不该被算进来
+        assert impact['kind_counts']=={'entity':2,'relation':1,'attribute':0},impact['kind_counts']
+        names={x['text'] for x in impact['record_preview']}
+        assert {'张三','李四'} <= names
+        assert '某机构' not in names
+        # 明细带 kind，前端才能分组展示
+        assert {x['kind'] for x in impact['record_preview']}=={'entity','relation'}
+        # 向后兼容字段仍在
+        assert impact['record_count']==3
+        assert len(impact['record_ids'])==3 and 'constraint_count' in impact
     finally:c.__exit__(None,None,None)
 
 

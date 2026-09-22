@@ -1,8 +1,8 @@
-from knowledge_service.embeddings import HashingEncoder
-from knowledge_service.governance import Governance
-from knowledge_service.ontology import Ontology
+from knowledge_service.integrations.embeddings import HashingEncoder
+from knowledge_service.services.governance import Governance
+from knowledge_service.services.ontology import Ontology
 from knowledge_service.repository import Repository
-from knowledge_service.service import KnowledgeService
+from knowledge_service.services.service import KnowledgeService
 
 
 def test_merge_ledgers_assertion_reassignment_and_reversal(tmp_path):

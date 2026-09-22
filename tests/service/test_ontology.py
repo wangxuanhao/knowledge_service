@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 
-from knowledge_service.ontology import Ontology
+from knowledge_service.services.ontology import Ontology
 
 TTL = '''@prefix ex: <https://example.org/> .
 @prefix owl: <http://www.w3.org/2002/07/owl#> .

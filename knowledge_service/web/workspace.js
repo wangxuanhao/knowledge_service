@@ -404,18 +404,20 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
           <h4>变更影响</h4>
           <div class="impact-stats">
             <div class="impact-stat">
-              <div class="impact-stat-value" id="impact-records">-</div>
-              <div class="impact-stat-label">受影响知识</div>
+              <div class="impact-stat-value" id="impact-entities">-</div>
+              <div class="impact-stat-label">受影响实体</div>
             </div>
             <div class="impact-stat">
-              <div class="impact-stat-value" id="impact-constraints">-</div>
-              <div class="impact-stat-label">约束引用</div>
+              <div class="impact-stat-value" id="impact-relations">-</div>
+              <div class="impact-stat-label">受影响关系</div>
             </div>
             <div class="impact-stat">
-              <div class="impact-stat-value" id="impact-pending">-</div>
-              <div class="impact-stat-label">待审核映射</div>
+              <div class="impact-stat-value" id="impact-attributes">-</div>
+              <div class="impact-stat-label">受影响属性</div>
             </div>
           </div>
+          <p class="impact-secondary" id="impact-secondary"></p>
+          <p class="impact-note" id="impact-note"></p>
           <div id="impact-details" style="margin-top:10px"></div>
         </div>
         <div class="confirm-row">
@@ -514,7 +516,7 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
     get('retire-term-confirm').checked=false;
     retireBtn.disabled=true;
     get('term-impact').style.display='none';
-    get('term-impact').innerHTML='<h4>变更影响</h4><div class="impact-stats"><div class="impact-stat"><div class="impact-stat-value" id="impact-records">-</div><div class="impact-stat-label">受影响知识</div></div><div class="impact-stat"><div class="impact-stat-value" id="impact-constraints">-</div><div class="impact-stat-label">约束引用</div></div><div class="impact-stat"><div class="impact-stat-value" id="impact-pending">-</div><div class="impact-stat-label">待审核映射</div></div></div><div id="impact-details" style="margin-top:10px"></div>';
+    get('term-impact').innerHTML='<h4>变更影响</h4><div class="impact-stats"><div class="impact-stat"><div class="impact-stat-value" id="impact-entities">-</div><div class="impact-stat-label">受影响实体</div></div><div class="impact-stat"><div class="impact-stat-value" id="impact-relations">-</div><div class="impact-stat-label">受影响关系</div></div><div class="impact-stat"><div class="impact-stat-value" id="impact-attributes">-</div><div class="impact-stat-label">受影响属性</div></div></div><p class="impact-secondary" id="impact-secondary"></p><p class="impact-note" id="impact-note"></p><div id="impact-details" style="margin-top:10px"></div>';
 
     // 打开悬浮框
     modalOverlay.classList.add('active');
@@ -523,17 +525,34 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
     try{const impact=await api(endpoint('/ontology/term-impact')+'?uri='+encodeURIComponent(uri),undefined,'GET');
       if(selectedTerm?.uri!==uri)return;selectedTerm.impact=impact;
       get('term-impact').style.display='block';
-      get('impact-records').textContent=impact.record_count;
-      get('impact-constraints').textContent=impact.constraint_count;
-      get('impact-pending').textContent=impact.pending_review_count;
-      if(impact.record_ids.length){
-        get('impact-details').innerHTML=`<details><summary style="font-size:12px;color:#216952;cursor:pointer">查看受影响知识 ID</summary><pre style="margin-top:8px;padding:10px;background:#f8faf7;border-radius:6px;font-size:11px;max-height:120px;overflow:auto">${esc(impact.record_ids.join('\n'))}${impact.record_ids_truncated?'\n…仅展示前 50 条':''}</pre></details>`;
+      // 分类计数：实体类停用时"关系"常是大头（该类型只是关系端点），必须分开看
+      const kc=impact.kind_counts||{entity:0,relation:0,attribute:0};
+      get('impact-entities').textContent=kc.entity??0;
+      get('impact-relations').textContent=kc.relation??0;
+      get('impact-attributes').textContent=kc.attribute??0;
+      get('impact-secondary').innerHTML=`约束引用 ${impact.constraint_count} 处 · 待审核映射 ${impact.pending_review_count} 个`;
+      // 停用语义必须写在界面上：只摘定义、不删历史（记录 retained，时间旅行仍可见）
+      const linked=impact.linked_relation_count||0;
+      get('impact-note').innerHTML=impact.record_count
+        ? `停用后：该类型从本体移除，上述 <b>${impact.record_count}</b> 条历史知识<b>保留可查</b>（时间旅行仍可见），不会删除任何数据；此后不能再用该类型写入新知识。`
+          + (linked?`<br>其中 <b>${linked}</b> 条关系是<b>端点连带</b>受影响（该类型是它们的端点实体类型），不是关系类型本身被停用。`:'')
+        : '当前没有知识记录使用该类型，可直接停用。';
+      const preview=impact.record_preview||[];
+      if(preview.length){
+        const label={entity:'实体',relation:'关系',attribute:'属性'};
+        const byKind={entity:[],relation:[],attribute:[]};
+        preview.forEach(x=>{(byKind[x.kind]||(byKind[x.kind]=[])).push(x)});
+        const groups=Object.entries(byKind).filter(([,v])=>v.length)
+          .map(([k,v])=>`<div class="impact-detail-group"><b>${label[k]||k}（${v.length}）</b><span>${v.map(x=>esc(x.text||x.id)+(x.via==='endpoint'?'<em class="impact-via">端点连带</em>':'')).join('、')}</span></div>`).join('');
+        get('impact-details').innerHTML=`<details><summary style="font-size:12px;color:#216952;cursor:pointer">查看受影响明细</summary>${groups}${impact.record_ids_truncated?'<p class="subtle" style="font-size:11px">…仅展示前 50 条</p>':''}<details style="margin-top:8px"><summary style="font-size:11px;color:#829087;cursor:pointer">原始记录 ID</summary><pre style="margin-top:8px;padding:10px;background:#f8faf7;border-radius:6px;font-size:11px;max-height:120px;overflow:auto">${esc((impact.record_ids||[]).join('\n'))}</pre></details></details>`;
       }
     }catch(error){
       get('term-impact').style.display='block';
-      get('impact-records').textContent='错误';
-      get('impact-constraints').textContent='';
-      get('impact-pending').textContent='';
+      get('impact-entities').textContent='错误';
+      get('impact-relations').textContent='';
+      get('impact-attributes').textContent='';
+      get('impact-secondary').textContent='';
+      get('impact-note').textContent='';
       get('impact-details').innerHTML='<p style="color:#dc2626;font-size:12px">影响分析失败：'+esc(error.message)+'</p>';
     }
   }
@@ -607,12 +626,21 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
       const lifecycleHelp='<details class="discovery-lifecycle-help"><summary>这些状态如何变化？</summary><p><b>待纳入</b>：尚未进入任何草案；<b>草案中</b>：已进入未发布草案；<b>已批准</b>：已随本体版本发布但尚未正式入图；<b>已物化</b>：已有正式实体或关系明确关联该候选。继续开放发现只会增加待纳入候选，不会改动正式图谱。</p></details>';
       const compatibility=hasLifecycle?'':'<div class="discovery-hint discovery-compat"><span><b>兼容估算：</b>当前服务仍返回旧版发现数据，生命周期根据草案和映射数量推算。重启后端后会按候选 ID 精确统计。</span></div>';
       const notice=lifecycle+lifecycleHelp+compatibility+quality+(pending>0?`<div class="discovery-hint"><span>还有 <b>${pending}</b> 条候选待审核或未通过校验。它们会保留在候选区，可修改草案后再次处理，不需要重新上传原文。</span></div>`:(data.candidate_count>0&&!drafts.length?`<div class="discovery-hint"><span>已累计 ${data.candidate_count} 条候选，可继续发现或生成第一份本体草案。</span></div>`:''));
-      const schema=d=>OntologyDetails.renderTechnicalDetails(d,esc);
+      const schema=d=>`${OntologyDetails.reviewPanelHtml(d)}${OntologyDetails.renderTechnicalDetails(d,esc)}`;
       host.innerHTML=notice+`<section class="discovery-metrics"><div><strong>${data.candidate_count}</strong><span>候选总数</span></div><div><strong>${data.entity_count}</strong><span>实体候选</span></div><div><strong>${data.relation_count}</strong><span>关系候选</span></div><div><strong>${data.attribute_count||0}</strong><span>属性候选</span></div></section><div class="discovery-columns"><section><h3>实体类型簇</h3>${types.length?types.map(x=>`<div class="discovery-cluster"><b>${esc(x.name)}</b><span>${x.count} 个实例</span><small>${(x.examples||[]).map(esc).join('、')}</small><i style="--share:${Math.min(100,x.count/Math.max(1,data.entity_count)*100)}%"></i></div>`).join(''):'<p class="subtle">尚无实体候选</p>'}</section><section><h3>关系与属性簇</h3>${relations.length?relations.map(x=>`<article class="discovery-relation"><div><b>${esc(x.name)}</b><span>${x.count} 条关系</span></div><small>${x.examples.map(esc).join('；')}</small></article>`).join(''):'<p class="subtle">尚无关系候选</p>'}${attributes.map(x=>`<article class="discovery-relation"><div><b>${esc(x.name)}</b><span>${x.count} 个属性值</span></div></article>`).join('')}</section></div><section class="discovery-drafts"><h3>本体草案与发布记录</h3>${drafts.length?drafts.map(d=>`<article data-draft="${esc(d.id)}"><div><small>${d.generator_backend==='semantica'?'Semantica 归纳':'规则归纳'} · ${esc(d.created_at)}</small><h4>${esc(d.name)}</h4><span class="draft-state ${d.status}">${d.status==='published'?'已发布':'待审阅'}</span></div><p>${d.candidate_count} 个候选 · ${(Object.keys(d.mappings?.entity_types||{})).length} 类 · ${(Object.keys(d.mappings?.relation_types||{})).length} 关系 · ${(Object.keys(d.mappings?.attributes||{})).length} 属性</p>${schema(d)}<details><summary>版本差异 · Turtle 与 IRI 映射</summary><pre>${esc(JSON.stringify(d.diff||{},null,2))}</pre><pre>${esc(d.turtle)}</pre><pre>${esc(JSON.stringify(d.mappings,null,2))}</pre></details>${d.status==='draft'?'<label class="publish-check"><input type="checkbox" data-review-confirm>我已核对版本差异、类型边界、关系方向和示例证据</label><button data-publish disabled>发布本体版本</button>':`<small>本体版本 ${esc(d.ontology_id)} · 已保留候选快照 · 等待使用该本体受控重解析</small>`}</article>`).join(''):'<div class="discovery-empty">候选积累后，在上方生成第一份本体草案。</div>'}</section>`;
       host.querySelectorAll('[data-review-confirm]').forEach(check=>check.onchange=()=>{check.closest('[data-draft]').querySelector('[data-publish]').disabled=!check.checked});
       host.querySelectorAll('[data-draft]').forEach((article,index)=>{const draft=drafts[index];OntologyDetails.bindCopyButtons(article,draft);if(draft.status==='published'){const summary=article.querySelector(':scope > small');if(summary)summary.textContent=`本体版本 ${draft.ontology_id} · 已生成 ${draft.mapped_entities||0} 个正式实体、${draft.mapped_relations||0} 条正式关系 · ${(draft.skipped_candidates||[]).length} 条留待审核`;}});
-      host.querySelectorAll('[data-save-draft-review]').forEach(button=>button.onclick=async()=>{const article=button.closest('[data-draft]'),draft=drafts.find(item=>item.id===article.dataset.draft);button.disabled=true;try{const excluded_candidate_ids=[...article.querySelectorAll('[data-candidate-include]:not(:checked)')].map(input=>input.value),excluded_terms=[...article.querySelectorAll('[data-term-include]:not(:checked)')].map(input=>input.dataset.termSource),term_labels={};article.querySelectorAll('[data-term-label]').forEach(input=>{if(input.value.trim()&&input.value.trim()!==input.dataset.termSource)term_labels[input.dataset.termSource]=input.value.trim()});await api(endpoint('/ontology-discovery/drafts/'+encodeURIComponent(draft.id)),{excluded_candidate_ids,excluded_terms,term_labels},'PUT');status('草案审核修改已保存；发布时只会将勾选且通过校验的候选写入正式图谱。');await render();}catch(error){status(error.message,true);button.disabled=false;}});
-      host.querySelectorAll('[data-publish]').forEach(button=>{button.textContent='提交发布任务';button.onclick=async()=>{button.disabled=true;try{const id=button.closest('[data-draft]').dataset.draft,result=await api(endpoint('/ontology-discovery/drafts/'+encodeURIComponent(id)+'/publish'),{});const jobId=result.id||'';status(`发布任务已提交${jobId?'（'+jobId.slice(0,8)+'…）':''}，可在「后台任务」查看进度，完成后自动刷新。`);watch(result);for(let i=0;i<120;i++){await new Promise(r=>setTimeout(r,3000));const jobs=await api('/api/jobs',undefined,'GET');const job=(jobs.jobs||[]).find(j=>j.id===jobId);if(!job)break;if(job.status==='completed'){const mapped=job.result||{};status(`本体发布完成：${mapped.mapped_entities||0} 个实体、${mapped.mapped_relations||0} 条关系；${(mapped.skipped_candidates||[]).length} 条候选留待处理。`);await render();return;}if(job.status==='failed'||job.status==='interrupted'){status(`发布任务${job.status==='failed'?'失败':'中断'}：${job.error||job.stage||''}`,true);await render();return;}}status('发布任务仍在排队或执行中，可前往「后台任务」查看。',true);}catch(error){status(error.message,true);button.disabled=false;}}});
+      host.querySelectorAll('[data-draft]').forEach((article,index)=>{
+        const draft=drafts[index];
+        if(draft.status==='draft'){
+          OntologyDetails.bindReviewPanel(article,draft,async(payload)=>{
+            await api(endpoint('/ontology-discovery/drafts/'+encodeURIComponent(draft.id)),payload,'PUT');
+            status('草案审核修改已保存；发布时只将保留且通过校验的候选写入正式图谱，连带跳过的不占排除名单。');
+            await render();
+          });
+        }
+      });
+      host.querySelectorAll('[data-publish]').forEach(button=>{button.textContent='提交发布任务';button.onclick=async()=>{button.disabled=true;try{const id=button.closest('[data-draft]').dataset.draft,result=await api(endpoint('/ontology-discovery/drafts/'+encodeURIComponent(id)+'/publish'),{});const jobId=result.id||'';status(`发布任务已提交${jobId?'（'+jobId.slice(0,8)+'…）':''}，正在跳转「后台任务」查看进度。`);watch(result);showTab('jobs');for(let i=0;i<120;i++){await new Promise(r=>setTimeout(r,3000));const jobs=await api('/api/jobs',undefined,'GET');const job=(jobs.jobs||[]).find(j=>j.id===jobId);if(!job)break;if(job.status==='completed'){const mapped=job.result||{};status(`本体发布完成：${mapped.mapped_entities||0} 个实体、${mapped.mapped_relations||0} 条关系；${(mapped.skipped_candidates||[]).length} 条候选留待处理。`);await render();return;}if(job.status==='failed'||job.status==='interrupted'){status(`发布任务${job.status==='failed'?'失败':'中断'}：${job.error||job.stage||''}`,true);await render();return;}}status('发布任务仍在排队或执行中，可前往「后台任务」查看。',true);}catch(error){status(error.message,true);button.disabled=false;}}});
     }catch(error){host.innerHTML='<div class="discovery-empty error">'+esc(error.message)+'</div>';}
   }
   get('refresh-discovery').onclick=render;

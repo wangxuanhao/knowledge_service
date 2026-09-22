@@ -1,10 +1,10 @@
 import pytest
 
-from knowledge_service.ingest_runs import readiness
+from knowledge_service.utils.ingest_runs import readiness
 from knowledge_service.repository import Repository
 from fastapi.testclient import TestClient
 from knowledge_service.api import create_app
-from knowledge_service.embeddings import HashingEncoder
+from knowledge_service.integrations.embeddings import HashingEncoder
 
 
 def test_search_readiness_is_independent_from_graph_readiness():
@@ -51,7 +51,7 @@ def test_retry_attempt_links_to_prior_run(tmp_path):
 
 
 def test_late_extraction_failure_preserves_search_ready_chunks(tmp_path, monkeypatch):
-    from knowledge_service.semantica_adapter import SemanticaExtractor
+    from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
     calls = 0
 
     def fail_after_first_chunk(self, text, ontology):

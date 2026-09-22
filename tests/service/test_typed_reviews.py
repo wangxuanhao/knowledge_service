@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
 from knowledge_service.api import create_app
-from knowledge_service.embeddings import HashingEncoder
-from knowledge_service.ontology import Ontology
-from knowledge_service.semantica_adapter import SemanticaExtractor
-from knowledge_service.governance import writable
+from knowledge_service.integrations.embeddings import HashingEncoder
+from knowledge_service.services.ontology import Ontology
+from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
+from knowledge_service.services.governance import writable
 import pytest
 
 TTL='''@prefix : <https://test/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -56,11 +56,11 @@ def test_entity_relation_attribute_dependency_and_version_lifecycle(tmp_path,mon
 
 
 def test_adapter_queues_unknown_entity_and_dependent_known_relation(monkeypatch):
-    import knowledge_service.semantica_adapter as adapter
+    import knowledge_service.integrations.semantica_adapter as adapter
     from semantica.semantic_extract import methods
     from semantica.semantic_extract.types import Entity,Relation
-    from knowledge_service.attribute_extraction import AttributeProposal
-    import knowledge_service.attribute_extraction as attributes
+    from knowledge_service.services.attribute_extraction import AttributeProposal
+    import knowledge_service.services.attribute_extraction as attributes
     for key in ['KG_LLM_API_KEY','KG_LLM_BASE_URL','KG_LLM_MODEL']:monkeypatch.setenv(key,'test')
     a,b=Entity('甲','NewPerson',0,1),Entity('乙','Person',2,3)
     monkeypatch.setattr(methods,'extract_entities_llm',lambda *args,**kw:[a,b])
@@ -77,7 +77,7 @@ def test_adapter_queues_unknown_entity_and_dependent_known_relation(monkeypatch)
 def test_attribute_provider_isolates_bad_items_and_marks_unverified_evidence(monkeypatch):
     from semantica.semantic_extract import providers
     from semantica.semantic_extract.types import Entity
-    from knowledge_service.attribute_extraction import extract_attributes,AttributeResponse
+    from knowledge_service.services.attribute_extraction import extract_attributes,AttributeResponse
     class Provider:
         def generate_typed(self,prompt,schema):
             assert schema==AttributeResponse and 'ontology_attributes' in prompt
@@ -99,7 +99,7 @@ def test_attribute_provider_isolates_bad_items_and_marks_unverified_evidence(mon
 def test_attribute_provider_keeps_nonmatching_evidence_for_review(monkeypatch):
     from semantica.semantic_extract import providers
     from semantica.semantic_extract.types import Entity
-    from knowledge_service.attribute_extraction import extract_attributes,AttributeResponse
+    from knowledge_service.services.attribute_extraction import extract_attributes,AttributeResponse
     class Provider:
         def generate_typed(self,prompt,schema):
             return AttributeResponse(attributes=[dict(entity_index=0,attribute='count',value=2,

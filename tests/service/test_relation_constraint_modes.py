@@ -1,8 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
 from knowledge_service.api import create_app
-from knowledge_service.embeddings import HashingEncoder
-from knowledge_service.ontology import Ontology
+from knowledge_service.integrations.embeddings import HashingEncoder
+from knowledge_service.services.ontology import Ontology
 
 TTL='''@prefix : <https://test/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
@@ -13,7 +13,7 @@ TTL='''@prefix : <https://test/> . @prefix owl: <http://www.w3.org/2002/07/owl#>
 
 
 def test_guided_prompt_keeps_schema_guidance_but_relation_context_is_source_only(monkeypatch):
-    import knowledge_service.semantica_adapter as adapter
+    import knowledge_service.integrations.semantica_adapter as adapter
     from semantica.semantic_extract.types import Entity
     from semantica.semantic_extract import providers
     captured={}
@@ -33,7 +33,7 @@ def test_guided_prompt_keeps_schema_guidance_but_relation_context_is_source_only
 
 @pytest.fixture
 def extraction(monkeypatch):
-    import knowledge_service.semantica_adapter as adapter
+    import knowledge_service.integrations.semantica_adapter as adapter
     from semantica.semantic_extract import methods
     from semantica.semantic_extract.types import Entity,Relation
     for key in ['KG_LLM_API_KEY','KG_LLM_BASE_URL','KG_LLM_MODEL']:monkeypatch.setenv(key,'test')
@@ -46,7 +46,7 @@ def extraction(monkeypatch):
     return observed
 
 def test_adapter_constraint_modes_and_model_guidance(extraction):
-    from knowledge_service.semantica_adapter import SemanticaExtractor
+    from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
     ontology=Ontology(TTL)
     expected={'review':(2,1,False),'advisory':(3,0,True),'strict':(3,0,False),'off':(3,0,False)}
     for mode,(row_count,candidate_count,warning) in expected.items():

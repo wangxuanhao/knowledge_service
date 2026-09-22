@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
 
 from knowledge_service.api import create_app
-from knowledge_service.embeddings import HashingEncoder
-from knowledge_service.ontology import Ontology
-from knowledge_service.ontology_discovery import _candidate_mindmap, _induce, _validated_materialization
+from knowledge_service.integrations.embeddings import HashingEncoder
+from knowledge_service.services.ontology import Ontology
+from knowledge_service.services.ontology_discovery import _candidate_mindmap, _induce, _validated_materialization
 
 
 def test_discovery_generates_readable_unicode_iris_for_every_term_kind():
@@ -23,7 +23,7 @@ def test_discovery_generates_readable_unicode_iris_for_every_term_kind():
 
 
 def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,monkeypatch):
-    from knowledge_service.semantica_adapter import SemanticaExtractor
+    from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
 
     def discover(self,text,include_attributes=False):
         assert include_attributes is True
@@ -139,7 +139,7 @@ def test_candidate_mindmap_visually_clusters_repeated_occurrences_without_formal
 
 
 def test_missing_ontology_reports_clear_state_without_project_id(tmp_path,monkeypatch):
-    from knowledge_service.semantica_adapter import SemanticaExtractor
+    from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
 
     def discover(self,text,include_attributes=False):
         return [{'id':'merchant','kind':'entity','text':'测试商户','proposed_type':'Merchant','confidence':.93}]
@@ -203,7 +203,7 @@ def test_missing_ontology_reports_clear_state_without_project_id(tmp_path,monkey
 
 
 def test_cumulative_draft_reuses_existing_term_iri_and_records_diff(tmp_path,monkeypatch):
-    from knowledge_service.semantica_adapter import SemanticaExtractor
+    from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
 
     monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False:[
         {'id':'merchant','kind':'entity','text':'测试商户','proposed_type':'商户','confidence':.93},
@@ -230,7 +230,7 @@ def test_cumulative_draft_reuses_existing_term_iri_and_records_diff(tmp_path,mon
 
 
 def test_publish_rejects_draft_when_parent_ontology_changed(tmp_path,monkeypatch):
-    from knowledge_service.semantica_adapter import SemanticaExtractor
+    from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
 
     monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False:[
         {'id':'merchant','kind':'entity','text':'测试商户','proposed_type':'商户','confidence':.93}])
@@ -251,7 +251,7 @@ def test_publish_rejects_draft_when_parent_ontology_changed(tmp_path,monkeypatch
 
 
 def test_discovery_warns_before_publishing_generic_or_wrong_language_vocabulary(tmp_path,monkeypatch):
-    from knowledge_service.semantica_adapter import SemanticaExtractor
+    from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
     monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False:[
         {'id':'a','kind':'entity','text':'平台','proposed_type':'CONCEPT','confidence':.9},
         {'id':'b','kind':'entity','text':'商户','proposed_type':'ORG','confidence':.9},
@@ -303,7 +303,7 @@ def test_open_induction_removes_legacy_inferred_relation_ranges_from_parent():
 
 
 def test_review_can_exclude_candidate_before_publish_and_reports_it(tmp_path,monkeypatch):
-    from knowledge_service.semantica_adapter import SemanticaExtractor
+    from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
     monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False:[
         {'id':'keep','kind':'entity','text':'保留实体','proposed_type':'主体','confidence':.9},
         {'id':'drop','kind':'entity','text':'排除实体','proposed_type':'主体','confidence':.4}])
@@ -336,7 +336,7 @@ def test_review_can_exclude_candidate_before_publish_and_reports_it(tmp_path,mon
 
 
 def test_draft_review_can_rename_and_remove_ontology_terms(tmp_path,monkeypatch):
-    from knowledge_service.semantica_adapter import SemanticaExtractor
+    from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
     monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False:[
         {'id':'a','kind':'entity','text':'甲','proposed_type':'旧类型','confidence':.9},
         {'id':'b','kind':'entity','text':'乙','proposed_type':'删除类型','confidence':.9}])

@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from knowledge_service.api import create_app
-from knowledge_service.embeddings import HashingEncoder
+from knowledge_service.integrations.embeddings import HashingEncoder
 
 
 @pytest.fixture
@@ -163,7 +163,7 @@ def test_ingest_failure_does_not_overwrite_concurrent_revision(client, monkeypat
 
 
 def test_ingest_prefers_relation_extracted_validity_over_request(client, monkeypatch):
-    import knowledge_service.semantica_adapter as adapter
+    import knowledge_service.integrations.semantica_adapter as adapter
     p = project(client)
     base = f'/api/projects/{p}'
     ttl='@prefix : <https://test/> . @prefix owl: <http://www.w3.org/2002/07/owl#> . :Person a owl:Class . :Company a owl:Class . :worksAt a owl:ObjectProperty .'

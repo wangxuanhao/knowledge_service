@@ -1,8 +1,8 @@
 from fastapi.testclient import TestClient
 
 from knowledge_service.api import create_app
-from knowledge_service.embeddings import HashingEncoder
-from knowledge_service.ontology import Ontology
+from knowledge_service.integrations.embeddings import HashingEncoder
+from knowledge_service.services.ontology import Ontology
 
 
 TTL='''@prefix ex: <https://example.org/> .
@@ -16,7 +16,7 @@ ex:RuleShape a sh:NodeShape; sh:targetClass ex:RuleDocument;
 
 
 def test_ingest_commits_knowledge_and_creates_review_for_shacl_exception(tmp_path,monkeypatch):
-    from knowledge_service.semantica_adapter import SemanticaExtractor
+    from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
     monkeypatch.setattr(SemanticaExtractor,'extract',lambda self,text,ontology:[
         dict(id='rule',kind='entity',type='https://example.org/RuleDocument',text='规则')])
     app=create_app(tmp_path/'shacl-review.sqlite',HashingEncoder())

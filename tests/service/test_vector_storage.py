@@ -1,7 +1,7 @@
 """删列验证：向量已迁到 Milvus，SQLite 不再存 vector 列，也不在 payload 里带 embedding。"""
 import json
 
-from knowledge_service.embeddings import HashingEncoder
+from knowledge_service.integrations.embeddings import HashingEncoder
 from knowledge_service.repository import Repository
 
 

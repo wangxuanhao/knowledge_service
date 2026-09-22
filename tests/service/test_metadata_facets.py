@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 from knowledge_service.api import create_app
-from knowledge_service.embeddings import HashingEncoder
+from knowledge_service.integrations.embeddings import HashingEncoder
 
 
 def test_discovered_facets_are_project_scoped_and_typed(tmp_path):

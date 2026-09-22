@@ -1,0 +1,812 @@
+2026-09-20 15:01:49 INFO    knowledge_service.timing · 工件列表 · 181.5 ms · 类型=job 按项目=False 解码=17 保留=17
+2026-09-20 15:01:49 INFO    knowledge_service.service · 开始预热 embedding 模型（首次 encode 较慢，请稍候）…
+2026-09-20 15:02:06 INFO    knowledge_service.timing · 存储查询 · 8.2 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:02:06 INFO    knowledge_service.timing · 存储查询 · 5.6 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:02:06 INFO    knowledge_service.timing · 范围过滤 · 892.0 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:02:06 INFO    knowledge_service.timing · 范围过滤 · 892.6 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-20 15:02:06 INFO    knowledge_service.timing · 存储查询 · 0.4 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:02:06 INFO    knowledge_service.timing · 范围过滤 · 1.6 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:02:06 INFO    knowledge_service.timing · 图谱探索 · 2.2 ms · 种子=False 跳数=1 扫描=4 graph_nodes=3 graph_edges=1
+2026-09-20 15:02:09 INFO    knowledge_service.timing · 当前记录读取 · 159.9 ms · 向量=none 类型=0 扫描=442
+2026-09-20 15:02:09 INFO    knowledge_service.timing · 候选发现 · 1.5 ms · 候选=476
+2026-09-20 15:02:09 INFO    knowledge_service.timing · 工件列表 · 102.7 ms · 类型=ontology_discovery_draft 按项目=True 解码=2 保留=2
+2026-09-20 15:02:09 INFO    knowledge_service.timing · 候选生命周期 · 0.7 ms · 候选=476 草案=2 reused_records=True materialized=439
+2026-09-20 15:02:10 INFO    knowledge_service.timing · 存储查询 · 161.4 ms · 向量=True 类型=0 过滤=False 扫描=442 保留=442
+2026-09-20 15:02:10 INFO    knowledge_service.timing · 范围过滤 · 164.0 ms · 类型=0 原始=442 存活=442 保留=442
+2026-09-20 15:02:10 INFO    knowledge_service.timing · 存储查询 · 346.8 ms · 向量=True 类型=0 过滤=False 扫描=442 保留=442
+2026-09-20 15:02:10 INFO    knowledge_service.timing · 范围过滤 · 350.9 ms · 类型=2 原始=442 存活=442 保留=439
+2026-09-20 15:02:10 INFO    knowledge_service.timing · 存储查询 · 240.2 ms · 向量=True 类型=0 过滤=False 扫描=442 保留=442
+2026-09-20 15:02:10 INFO    knowledge_service.timing · 范围过滤 · 243.5 ms · 类型=2 原始=442 存活=442 保留=439
+2026-09-20 15:02:10 INFO    knowledge_service.timing · 图谱探索 · 247.3 ms · 种子=False 跳数=1 扫描=439 graph_nodes=244 graph_edges=195
+2026-09-20 15:02:12 INFO    knowledge_service.timing · 当前记录读取 · 296.7 ms · 向量=none 类型=0 扫描=442
+2026-09-20 15:02:12 INFO    knowledge_service.timing · 候选发现 · 1.1 ms · 候选=476
+2026-09-20 15:02:12 INFO    knowledge_service.timing · 工件列表 · 173.1 ms · 类型=ontology_discovery_draft 按项目=True 解码=2 保留=2
+2026-09-20 15:02:12 INFO    knowledge_service.timing · 候选生命周期 · 0.9 ms · 候选=476 草案=2 reused_records=True materialized=439
+2026-09-20 15:02:17 INFO    knowledge_service.timing · 存储查询 · 186.4 ms · 向量=True 类型=0 过滤=False 扫描=442 保留=442
+2026-09-20 15:02:17 INFO    knowledge_service.timing · 范围过滤 · 189.9 ms · 类型=3 原始=442 存活=442 保留=441
+2026-09-20 15:02:17 DEBUG   knowledge_service.service · 检索开始：query='直播' mode=hybrid 候选=441
+2026-09-20 15:02:17 INFO    knowledge_service.service · 检索完成：mode=hybrid 命中=12 后端=本地
+2026-09-20 15:02:21 INFO    knowledge_service.timing · 存储查询 · 135.8 ms · 向量=True 类型=0 过滤=False 扫描=442 保留=442
+2026-09-20 15:02:21 INFO    knowledge_service.timing · 范围过滤 · 140.3 ms · 类型=2 原始=442 存活=442 保留=439
+2026-09-20 15:02:21 INFO    knowledge_service.timing · 图谱探索 · 145.3 ms · 种子=True 跳数=1 扫描=439 graph_nodes=244 graph_edges=195 selected=55 returned_nodes=55 returned_edges=66
+2026-09-20 15:02:21 INFO    knowledge_service.timing · 存储查询 · 184.0 ms · 向量=True 类型=0 过滤=False 扫描=442 保留=442
+2026-09-20 15:02:21 INFO    knowledge_service.timing · 范围过滤 · 188.7 ms · 类型=0 原始=442 存活=442 保留=442
+2026-09-20 15:02:22 INFO    knowledge_service.timing · 当前记录读取 · 89.1 ms · 向量=none 类型=0 扫描=442
+2026-09-20 15:02:22 INFO    knowledge_service.timing · 候选发现 · 1.1 ms · 候选=476
+2026-09-20 15:02:22 INFO    knowledge_service.timing · 工件列表 · 87.5 ms · 类型=ontology_discovery_draft 按项目=True 解码=2 保留=2
+2026-09-20 15:02:22 INFO    knowledge_service.timing · 候选生命周期 · 0.7 ms · 候选=476 草案=2 reused_records=True materialized=439
+2026-09-20 15:03:08 INFO    knowledge_service.timing · 当前记录读取 · 0.1 ms · 向量=none 类型=0 扫描=0
+2026-09-20 15:03:08 INFO    knowledge_service.timing · 候选发现 · 0.0 ms · 候选=0
+2026-09-20 15:03:08 INFO    knowledge_service.timing · 工件列表 · 1.0 ms · 类型=ontology_discovery_draft 按项目=True 解码=0 保留=0
+2026-09-20 15:03:08 INFO    knowledge_service.timing · 候选生命周期 · 0.0 ms · 候选=0 草案=0 reused_records=True materialized=0
+2026-09-20 15:03:08 INFO    knowledge_service.timing · 存储查询 · 3.2 ms · 向量=True 类型=0 过滤=False 扫描=0 保留=0
+2026-09-20 15:03:08 INFO    knowledge_service.timing · 存储查询 · 1.4 ms · 向量=True 类型=0 过滤=False 扫描=0 保留=0
+2026-09-20 15:03:08 INFO    knowledge_service.timing · 范围过滤 · 602.5 ms · 类型=2 原始=0 存活=0 保留=0
+2026-09-20 15:03:08 INFO    knowledge_service.timing · 范围过滤 · 599.1 ms · 类型=0 原始=0 存活=0 保留=0
+2026-09-20 15:03:13 INFO    knowledge_service.timing · 存储查询 · 5.9 ms · 向量=True 类型=0 过滤=False 扫描=0 保留=0
+2026-09-20 15:03:13 INFO    knowledge_service.timing · 范围过滤 · 8.2 ms · 类型=0 原始=0 存活=0 保留=0
+2026-09-20 15:03:17 WARNING knowledge_service · 操作不可用：RuntimeError
+2026-09-20 15:03:32 INFO    knowledge_service.service · embedding 模型预热完成，检索已可用
+2026-09-20 15:03:44 DEBUG   knowledge_service.chunking · 切片：策略=fixed 字符数=2500 块大小=1800 重叠=200
+2026-09-20 15:04:18 DEBUG   knowledge_service.chunking · 切片：策略=fixed 字符数=2500 块大小=1800 重叠=200
+2026-09-20 15:04:24 INFO    knowledge_service.timing · 工件列表 · 276.9 ms · 类型=job 按项目=False 解码=17 保留=17
+2026-09-20 15:04:25 INFO    knowledge_service.timing · 工件列表 · 227.6 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:04:25 INFO    knowledge_service.timing · 工件列表 · 171.2 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:04:25 DEBUG   knowledge_service.chunking · 切片：策略=fixed 字符数=2500 块大小=1800 重叠=200
+2026-09-20 15:04:25 INFO    knowledge_service.timing · 工件列表 · 214.7 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:04:25 INFO    knowledge_service.timing · 工件列表 · 66.1 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:04:25 INFO    knowledge_service.timing · 当前记录读取 · 0.6 ms · 向量=list 类型=0 扫描=1
+2026-09-20 15:04:26 INFO    knowledge_service.service · 本体校验完成，开始向量化 2 条记录
+2026-09-20 15:04:26 INFO    knowledge_service.timing · 工件列表 · 208.2 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:04:26 INFO    knowledge_service.timing · 工件列表 · 4.4 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:04:29 INFO    knowledge_service.timing · 工件列表 · 248.9 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:04:29 INFO    knowledge_service.timing · 工件列表 · 39.5 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:04:32 INFO    knowledge_service.timing · 工件列表 · 259.9 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:04:32 INFO    knowledge_service.timing · 工件列表 · 10.1 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:04:35 INFO    knowledge_service.timing · 工件列表 · 11.4 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:04:35 INFO    knowledge_service.timing · 工件列表 · 239.1 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:04:38 INFO    knowledge_service.timing · 工件列表 · 33.5 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:04:38 INFO    knowledge_service.timing · 工件列表 · 231.2 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:04:41 INFO    knowledge_service.timing · 工件列表 · 0.1 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:04:41 INFO    knowledge_service.timing · 工件列表 · 260.2 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:04:44 INFO    knowledge_service.timing · 工件列表 · 0.5 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:04:44 INFO    knowledge_service.timing · 工件列表 · 356.1 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:04:45 INFO    knowledge_service.service · 写入完成：2 条记录落库并同步向量索引
+2026-09-20 15:04:47 INFO    knowledge_service.timing · 工件列表 · 214.7 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:04:47 INFO    knowledge_service.timing · 工件列表 · 230.7 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:04:50 INFO    knowledge_service.timing · 工件列表 · 161.6 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:04:50 INFO    knowledge_service.timing · 工件列表 · 1.4 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:04:53 INFO    knowledge_service.timing · 工件列表 · 154.4 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:04:53 INFO    knowledge_service.timing · 工件列表 · 188.5 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:04:56 INFO    knowledge_service.timing · 工件列表 · 157.5 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:04:56 INFO    knowledge_service.timing · 工件列表 · 213.3 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:04:59 INFO    knowledge_service.timing · 工件列表 · 155.5 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:04:59 INFO    knowledge_service.timing · 工件列表 · 156.0 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:05:02 INFO    knowledge_service.timing · 工件列表 · 147.5 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:05:02 INFO    knowledge_service.timing · 工件列表 · 159.5 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:05:05 INFO    knowledge_service.timing · 工件列表 · 186.2 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:05:05 INFO    knowledge_service.timing · 工件列表 · 43.7 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:05:08 INFO    knowledge_service.timing · 工件列表 · 189.4 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:05:08 INFO    knowledge_service.timing · 工件列表 · 3.5 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:05:11 INFO    knowledge_service.timing · 工件列表 · 165.2 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:05:11 INFO    knowledge_service.timing · 工件列表 · 2.9 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:05:14 INFO    knowledge_service.timing · 工件列表 · 159.7 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:05:14 INFO    knowledge_service.timing · 工件列表 · 12.3 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:05:17 INFO    knowledge_service.timing · 工件列表 · 186.3 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:05:17 INFO    knowledge_service.timing · 工件列表 · 202.6 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:05:20 INFO    knowledge_service.timing · 工件列表 · 139.2 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:05:20 INFO    knowledge_service.timing · 工件列表 · 153.1 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:05:23 INFO    knowledge_service.timing · 工件列表 · 152.4 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:05:23 INFO    knowledge_service.timing · 工件列表 · 152.7 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:05:26 INFO    knowledge_service.timing · 工件列表 · 168.0 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:05:26 INFO    knowledge_service.timing · 工件列表 · 1.0 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:05:29 INFO    knowledge_service.timing · 工件列表 · 157.0 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:05:29 INFO    knowledge_service.timing · 工件列表 · 178.5 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:05:33 INFO    knowledge_service.timing · 工件列表 · 0.2 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:05:33 INFO    knowledge_service.timing · 工件列表 · 254.5 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:05:35 INFO    knowledge_service.timing · 工件列表 · 0.3 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:05:35 INFO    knowledge_service.timing · 工件列表 · 242.7 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:05:38 INFO    knowledge_service.timing · 工件列表 · 228.2 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:05:38 INFO    knowledge_service.timing · 工件列表 · 40.8 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:05:41 INFO    knowledge_service.timing · 工件列表 · 0.2 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:05:41 INFO    knowledge_service.timing · 工件列表 · 252.8 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:05:44 INFO    knowledge_service.timing · 工件列表 · 0.1 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:05:44 INFO    knowledge_service.timing · 工件列表 · 303.7 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:05:47 INFO    knowledge_service.timing · 工件列表 · 0.2 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:05:47 INFO    knowledge_service.timing · 工件列表 · 358.0 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:05:50 INFO    knowledge_service.timing · 工件列表 · 277.7 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:05:50 INFO    knowledge_service.timing · 工件列表 · 0.2 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:05:53 INFO    knowledge_service.timing · 工件列表 · 30.8 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:05:53 INFO    knowledge_service.timing · 工件列表 · 206.3 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:05:56 INFO    knowledge_service.timing · 工件列表 · 190.4 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:05:56 INFO    knowledge_service.timing · 工件列表 · 4.0 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:05:59 INFO    knowledge_service.timing · 工件列表 · 163.8 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:05:59 INFO    knowledge_service.timing · 工件列表 · 13.1 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:06:02 INFO    knowledge_service.timing · 工件列表 · 192.2 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:06:02 INFO    knowledge_service.timing · 工件列表 · 44.4 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:06:05 INFO    knowledge_service.timing · 工件列表 · 201.0 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:06:05 INFO    knowledge_service.timing · 工件列表 · 3.5 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:06:08 INFO    knowledge_service.timing · 工件列表 · 0.2 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:06:08 INFO    knowledge_service.timing · 工件列表 · 202.9 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:06:11 INFO    knowledge_service.timing · 工件列表 · 48.9 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:06:11 INFO    knowledge_service.timing · 工件列表 · 173.8 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:06:14 INFO    knowledge_service.timing · 工件列表 · 141.2 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:06:14 INFO    knowledge_service.timing · 工件列表 · 2.0 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:06:17 INFO    knowledge_service.timing · 工件列表 · 175.8 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:06:17 INFO    knowledge_service.timing · 工件列表 · 13.9 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:06:20 INFO    knowledge_service.timing · 工件列表 · 182.6 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:06:20 INFO    knowledge_service.timing · 工件列表 · 13.8 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:06:23 INFO    knowledge_service.timing · 工件列表 · 0.2 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:06:23 INFO    knowledge_service.timing · 工件列表 · 212.8 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:06:26 INFO    knowledge_service.timing · 工件列表 · 170.5 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:06:26 INFO    knowledge_service.timing · 工件列表 · 33.8 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:06:29 INFO    knowledge_service.timing · 工件列表 · 158.4 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:06:29 INFO    knowledge_service.timing · 工件列表 · 2.0 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:06:32 INFO    knowledge_service.timing · 工件列表 · 158.9 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:06:32 INFO    knowledge_service.timing · 工件列表 · 1.7 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:06:35 INFO    knowledge_service.timing · 工件列表 · 191.3 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:06:35 INFO    knowledge_service.timing · 工件列表 · 2.7 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:06:38 INFO    knowledge_service.timing · 工件列表 · 138.7 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:06:38 INFO    knowledge_service.timing · 工件列表 · 1.8 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:06:41 INFO    knowledge_service.timing · 工件列表 · 164.4 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:06:41 INFO    knowledge_service.timing · 工件列表 · 16.1 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:06:44 INFO    knowledge_service.timing · 工件列表 · 0.2 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:06:44 INFO    knowledge_service.timing · 工件列表 · 159.7 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:06:47 INFO    knowledge_service.timing · 工件列表 · 199.1 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:06:47 INFO    knowledge_service.timing · 工件列表 · 199.4 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:07:49 INFO    knowledge_service.timing · 工件列表 · 186.4 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:07:49 INFO    knowledge_service.timing · 工件列表 · 1.9 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:08:49 INFO    knowledge_service.timing · 工件列表 · 26.4 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:08:49 INFO    knowledge_service.timing · 工件列表 · 178.0 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:09:49 INFO    knowledge_service.timing · 工件列表 · 14.0 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:09:49 INFO    knowledge_service.timing · 工件列表 · 170.8 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:10:44 INFO    knowledge_service.timing · 当前记录读取 · 0.4 ms · 向量=list 类型=0 扫描=3
+2026-09-20 15:10:44 INFO    knowledge_service.service · 本体校验完成，开始向量化 0 条记录
+2026-09-20 15:10:44 INFO    knowledge_service.service · 写入完成：1 条记录落库并同步向量索引
+2026-09-20 15:10:49 INFO    knowledge_service.timing · 工件列表 · 191.7 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:10:49 INFO    knowledge_service.timing · 工件列表 · 54.9 ms · 类型=job 按项目=True 解码=1 保留=1
+2026-09-20 15:18:37 INFO    knowledge_service.timing · 当前记录读取 · 51.0 ms · 向量=none 类型=0 扫描=3
+2026-09-20 15:18:37 INFO    knowledge_service.timing · 候选发现 · 1.5 ms · 候选=472
+2026-09-20 15:18:37 INFO    knowledge_service.timing · 工件列表 · 0.5 ms · 类型=ontology_discovery_draft 按项目=True 解码=0 保留=0
+2026-09-20 15:18:37 INFO    knowledge_service.timing · 候选生命周期 · 0.1 ms · 候选=472 草案=0 reused_records=True materialized=0
+2026-09-20 15:18:42 INFO    knowledge_service.timing · 当前记录读取 · 31.7 ms · 向量=none 类型=0 扫描=3
+2026-09-20 15:18:42 INFO    knowledge_service.timing · 候选发现 · 0.9 ms · 候选=472
+2026-09-20 15:18:42 INFO    knowledge_service.timing · 工件列表 · 0.4 ms · 类型=ontology_discovery_draft 按项目=True 解码=0 保留=0
+2026-09-20 15:18:42 INFO    knowledge_service.timing · 候选生命周期 · 0.0 ms · 候选=472 草案=0 reused_records=True materialized=0
+2026-09-20 15:18:42 INFO    knowledge_service.timing · 候选脑图 · 47.7 ms · 上限=500 nodes=236 edges=236
+2026-09-20 15:19:16 INFO    knowledge_service.timing · 当前记录读取 · 41.8 ms · 向量=none 类型=0 扫描=3
+2026-09-20 15:19:16 INFO    knowledge_service.timing · 候选发现 · 0.9 ms · 候选=472
+2026-09-20 15:19:16 INFO    knowledge_service.timing · 工件列表 · 0.5 ms · 类型=ontology_discovery_draft 按项目=True 解码=0 保留=0
+2026-09-20 15:19:16 INFO    knowledge_service.timing · 候选生命周期 · 0.0 ms · 候选=472 草案=0 reused_records=True materialized=0
+2026-09-20 15:19:31 INFO    knowledge_service.timing · 当前记录读取 · 36.0 ms · 向量=none 类型=1 扫描=1
+2026-09-20 15:19:31 INFO    knowledge_service.timing · 候选发现 · 40.6 ms · 候选=472
+2026-09-20 15:19:41 INFO    knowledge_service.timing · 当前记录读取 · 31.4 ms · 向量=none 类型=0 扫描=3
+2026-09-20 15:19:41 INFO    knowledge_service.timing · 候选发现 · 0.7 ms · 候选=472
+2026-09-20 15:19:41 INFO    knowledge_service.timing · 工件列表 · 38.2 ms · 类型=ontology_discovery_draft 按项目=True 解码=1 保留=1
+2026-09-20 15:19:41 INFO    knowledge_service.timing · 候选生命周期 · 0.0 ms · 候选=472 草案=1 reused_records=True materialized=0
+2026-09-20 15:19:52 INFO    knowledge_service.timing · 存储查询 · 83.0 ms · 向量=True 类型=0 过滤=False 扫描=3 保留=3
+2026-09-20 15:19:52 INFO    knowledge_service.timing · 范围过滤 · 266.6 ms · 类型=0 原始=3 存活=3 保留=3
+2026-09-20 15:19:54 WARNING knowledge_service · 操作不可用：RuntimeError
+2026-09-20 15:20:00 INFO    knowledge_service.timing · 当前记录读取 · 31.4 ms · 向量=none 类型=0 扫描=3
+2026-09-20 15:20:00 INFO    knowledge_service.timing · 候选发现 · 1.0 ms · 候选=472
+2026-09-20 15:20:00 INFO    knowledge_service.timing · 工件列表 · 31.0 ms · 类型=ontology_discovery_draft 按项目=True 解码=1 保留=1
+2026-09-20 15:20:00 INFO    knowledge_service.timing · 候选生命周期 · 0.0 ms · 候选=472 草案=1 reused_records=True materialized=0
+2026-09-20 15:20:47 INFO    knowledge_service.timing · 工件列表 · 194.9 ms · 类型=job 按项目=False 解码=18 保留=18
+2026-09-20 15:20:47 INFO    knowledge_service.timing · 工件列表 · 266.4 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:20:48 INFO    knowledge_service.timing · 工件列表 · 301.2 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:20:50 INFO    knowledge_service.timing · 工件列表 · 221.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:20:50 INFO    knowledge_service.timing · 工件列表 · 63.5 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:20:50 INFO    knowledge_service.timing · 工件列表 · 260.4 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:20:53 INFO    knowledge_service.timing · 工件列表 · 487.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:20:53 INFO    knowledge_service.timing · 工件列表 · 283.2 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:20:55 INFO    knowledge_service.timing · 工件列表 · 609.0 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:20:56 INFO    knowledge_service.timing · 工件列表 · 556.8 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:20:56 INFO    knowledge_service.timing · 工件列表 · 60.4 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:20:58 INFO    knowledge_service.timing · 工件列表 · 816.0 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:20:58 INFO    knowledge_service.timing · 工件列表 · 775.1 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:21:00 INFO    knowledge_service.timing · 工件列表 · 590.2 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:00 INFO    knowledge_service.timing · 工件列表 · 199.4 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:21:02 INFO    knowledge_service.timing · 工件列表 · 623.3 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:02 INFO    knowledge_service.timing · 工件列表 · 616.7 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:21:04 INFO    knowledge_service.timing · 工件列表 · 558.4 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:05 INFO    knowledge_service.timing · 工件列表 · 628.9 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:05 INFO    knowledge_service.timing · 工件列表 · 115.9 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:21:07 INFO    knowledge_service.timing · 工件列表 · 554.1 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:09 INFO    knowledge_service.timing · 工件列表 · 673.0 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:09 INFO    knowledge_service.timing · 工件列表 · 153.7 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:21:11 INFO    knowledge_service.timing · 工件列表 · 752.9 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:11 INFO    knowledge_service.timing · 工件列表 · 72.5 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:21:13 INFO    knowledge_service.timing · 工件列表 · 680.0 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:15 INFO    knowledge_service.timing · 工件列表 · 641.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:15 INFO    knowledge_service.timing · 工件列表 · 69.3 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:21:17 INFO    knowledge_service.timing · 工件列表 · 724.8 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:17 INFO    knowledge_service.timing · 工件列表 · 685.6 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:21:20 INFO    knowledge_service.timing · 工件列表 · 824.0 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:25 INFO    knowledge_service.timing · 工件列表 · 1944.2 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:21:25 INFO    knowledge_service.timing · 工件列表 · 2013.1 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:32 INFO    knowledge_service.timing · 工件列表 · 915.5 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:21:33 INFO    knowledge_service.timing · 工件列表 · 998.6 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:35 INFO    knowledge_service.timing · 工件列表 · 812.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:35 INFO    knowledge_service.timing · 工件列表 · 1101.6 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:21:38 INFO    knowledge_service.timing · 工件列表 · 1131.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:38 INFO    knowledge_service.timing · 工件列表 · 238.0 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:21:40 INFO    knowledge_service.timing · 工件列表 · 907.4 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:21:40 INFO    knowledge_service.timing · 工件列表 · 991.3 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:42 INFO    knowledge_service.timing · 工件列表 · 751.3 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:42 INFO    knowledge_service.timing · 工件列表 · 752.9 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:21:44 INFO    knowledge_service.timing · 工件列表 · 690.6 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:44 INFO    knowledge_service.timing · 工件列表 · 118.3 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:21:46 INFO    knowledge_service.timing · 工件列表 · 677.6 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:49 INFO    knowledge_service.timing · 工件列表 · 708.3 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:49 INFO    knowledge_service.timing · 工件列表 · 147.8 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:21:51 INFO    knowledge_service.timing · 工件列表 · 180.5 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:21:51 INFO    knowledge_service.timing · 工件列表 · 1417.2 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:53 INFO    knowledge_service.timing · 工件列表 · 511.8 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:53 INFO    knowledge_service.timing · 工件列表 · 130.3 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:21:55 INFO    knowledge_service.timing · 工件列表 · 618.8 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:56 INFO    knowledge_service.timing · 工件列表 · 403.4 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:21:56 INFO    knowledge_service.timing · 工件列表 · 232.9 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:21:58 INFO    knowledge_service.timing · 工件列表 · 868.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:00 INFO    knowledge_service.timing · 工件列表 · 878.6 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:00 INFO    knowledge_service.timing · 工件列表 · 114.2 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:22:02 INFO    knowledge_service.timing · 工件列表 · 646.1 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:04 INFO    knowledge_service.timing · 工件列表 · 731.6 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:04 INFO    knowledge_service.timing · 工件列表 · 784.7 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:22:06 INFO    knowledge_service.timing · 工件列表 · 105.2 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:22:06 INFO    knowledge_service.timing · 工件列表 · 870.8 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:08 INFO    knowledge_service.timing · 工件列表 · 752.9 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:09 INFO    knowledge_service.timing · 工件列表 · 374.7 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:22:11 INFO    knowledge_service.timing · 工件列表 · 769.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:12 INFO    knowledge_service.timing · 工件列表 · 616.4 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:12 INFO    knowledge_service.timing · 工件列表 · 199.5 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:22:15 INFO    knowledge_service.timing · 工件列表 · 199.9 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:22:15 INFO    knowledge_service.timing · 工件列表 · 1006.5 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:17 INFO    knowledge_service.timing · 工件列表 · 741.3 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:17 INFO    knowledge_service.timing · 工件列表 · 269.2 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:22:20 INFO    knowledge_service.timing · 工件列表 · 753.2 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:21 INFO    knowledge_service.timing · 工件列表 · 325.4 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:22:23 INFO    knowledge_service.timing · 工件列表 · 749.5 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:23 INFO    knowledge_service.timing · 工件列表 · 162.4 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:22:26 INFO    knowledge_service.timing · 工件列表 · 1346.3 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:26 INFO    knowledge_service.timing · 工件列表 · 114.9 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:22:28 INFO    knowledge_service.timing · 工件列表 · 699.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:31 INFO    knowledge_service.timing · 工件列表 · 1754.9 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:31 INFO    knowledge_service.timing · 工件列表 · 628.9 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:22:33 INFO    knowledge_service.timing · 工件列表 · 649.3 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:33 INFO    knowledge_service.timing · 工件列表 · 736.4 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:22:35 INFO    knowledge_service.timing · 存储查询 · 200.1 ms · 向量=True 类型=0 过滤=False 扫描=3 保留=3
+2026-09-20 15:22:35 INFO    knowledge_service.timing · 范围过滤 · 262.3 ms · 类型=0 原始=3 存活=3 保留=3
+2026-09-20 15:22:35 INFO    knowledge_service.timing · 工件列表 · 736.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:37 WARNING knowledge_service · 操作不可用：RuntimeError
+2026-09-20 15:22:46 INFO    knowledge_service.timing · 工件列表 · 9582.1 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:49 INFO    knowledge_service.timing · 工件列表 · 4141.5 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:22:49 INFO    knowledge_service.timing · 工件列表 · 2229.3 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:50 INFO    knowledge_service.timing · 工件列表 · 137.4 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:22:51 INFO    knowledge_service.timing · 工件列表 · 616.8 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:52 INFO    knowledge_service.timing · 工件列表 · 707.9 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:22:54 INFO    knowledge_service.timing · 工件列表 · 714.4 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:22:54 INFO    knowledge_service.timing · 工件列表 · 823.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:55 INFO    knowledge_service.timing · 工件列表 · 550.0 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:55 INFO    knowledge_service.timing · 工件列表 · 587.3 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:22:57 INFO    knowledge_service.timing · 工件列表 · 665.3 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:57 INFO    knowledge_service.timing · 工件列表 · 212.6 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:22:59 INFO    knowledge_service.timing · 工件列表 · 579.0 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:22:59 INFO    knowledge_service.timing · 工件列表 · 61.7 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:23:01 INFO    knowledge_service.timing · 工件列表 · 498.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:01 INFO    knowledge_service.timing · 工件列表 · 509.7 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:23:02 INFO    knowledge_service.timing · 工件列表 · 581.4 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:03 INFO    knowledge_service.timing · 工件列表 · 166.0 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:23:05 INFO    knowledge_service.timing · 工件列表 · 605.5 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:05 INFO    knowledge_service.timing · 工件列表 · 112.6 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:23:07 INFO    knowledge_service.timing · 工件列表 · 744.5 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:23:07 INFO    knowledge_service.timing · 工件列表 · 790.8 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:09 INFO    knowledge_service.timing · 工件列表 · 787.4 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:09 INFO    knowledge_service.timing · 工件列表 · 273.7 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:23:11 INFO    knowledge_service.timing · 工件列表 · 666.9 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:13 INFO    knowledge_service.timing · 工件列表 · 626.4 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:13 INFO    knowledge_service.timing · 工件列表 · 276.0 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:23:15 INFO    knowledge_service.timing · 工件列表 · 635.6 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:15 INFO    knowledge_service.timing · 工件列表 · 191.9 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:23:17 INFO    knowledge_service.timing · 工件列表 · 850.5 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:19 INFO    knowledge_service.timing · 工件列表 · 76.6 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:23:20 INFO    knowledge_service.timing · 工件列表 · 1070.5 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:21 INFO    knowledge_service.timing · 工件列表 · 453.7 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:23:22 INFO    knowledge_service.timing · 工件列表 · 637.5 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:25 INFO    knowledge_service.timing · 工件列表 · 536.1 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:25 INFO    knowledge_service.timing · 工件列表 · 563.8 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:23:27 INFO    knowledge_service.timing · 工件列表 · 650.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:27 INFO    knowledge_service.timing · 工件列表 · 61.6 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:23:28 INFO    knowledge_service.timing · 工件列表 · 556.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:30 INFO    knowledge_service.timing · 工件列表 · 683.0 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:23:30 INFO    knowledge_service.timing · 工件列表 · 743.8 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:34 INFO    knowledge_service.timing · 工件列表 · 1045.4 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:34 INFO    knowledge_service.timing · 工件列表 · 225.5 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:23:36 INFO    knowledge_service.timing · 工件列表 · 685.2 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:38 INFO    knowledge_service.timing · 工件列表 · 2721.1 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:39 INFO    knowledge_service.timing · 工件列表 · 3569.3 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:40 INFO    knowledge_service.timing · 工件列表 · 571.9 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:23:42 INFO    knowledge_service.timing · 工件列表 · 635.5 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:42 INFO    knowledge_service.timing · 工件列表 · 222.6 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:23:44 INFO    knowledge_service.timing · 工件列表 · 774.5 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:51 INFO    knowledge_service.timing · 工件列表 · 848.6 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:23:51 INFO    knowledge_service.timing · 工件列表 · 342.1 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:23:56 INFO    knowledge_service.timing · 工件列表 · 879.9 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:03 INFO    knowledge_service.timing · 工件列表 · 621.6 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:05 INFO    knowledge_service.timing · 工件列表 · 181.9 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:24:06 INFO    knowledge_service.timing · 工件列表 · 193.7 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:24:06 INFO    knowledge_service.timing · 工件列表 · 1111.6 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:09 INFO    knowledge_service.timing · 工件列表 · 682.2 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:12 INFO    knowledge_service.timing · 工件列表 · 1097.0 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:14 INFO    knowledge_service.timing · 工件列表 · 3237.2 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:14 INFO    knowledge_service.timing · 工件列表 · 2282.4 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:24:17 INFO    knowledge_service.timing · 工件列表 · 659.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:17 INFO    knowledge_service.timing · 工件列表 · 380.4 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:24:17 INFO    knowledge_service.timing · 当前记录读取 · 493.9 ms · 向量=none 类型=0 扫描=3
+2026-09-20 15:24:17 INFO    knowledge_service.timing · 候选发现 · 1.5 ms · 候选=472
+2026-09-20 15:24:18 INFO    knowledge_service.timing · 工件列表 · 412.2 ms · 类型=ontology_discovery_draft 按项目=True 解码=1 保留=1
+2026-09-20 15:24:18 INFO    knowledge_service.timing · 候选生命周期 · 0.0 ms · 候选=472 草案=1 reused_records=True materialized=0
+2026-09-20 15:24:19 INFO    knowledge_service.timing · 工件列表 · 755.8 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:20 INFO    knowledge_service.timing · 工件列表 · 118.4 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:24:22 INFO    knowledge_service.timing · 工件列表 · 689.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:22 INFO    knowledge_service.timing · 工件列表 · 58.5 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:24:23 INFO    knowledge_service.timing · 工件列表 · 64.9 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:24:24 INFO    knowledge_service.timing · 工件列表 · 711.9 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:24 INFO    knowledge_service.timing · 工件列表 · 184.8 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:24:25 INFO    knowledge_service.timing · 工件列表 · 501.9 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:26 INFO    knowledge_service.timing · 工件列表 · 195.2 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:24:28 INFO    knowledge_service.timing · 工件列表 · 655.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:28 INFO    knowledge_service.timing · 工件列表 · 835.3 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:24:30 INFO    knowledge_service.timing · 工件列表 · 759.3 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:30 INFO    knowledge_service.timing · 工件列表 · 165.7 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:24:31 INFO    knowledge_service.timing · 工件列表 · 514.0 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:32 INFO    knowledge_service.timing · 工件列表 · 189.3 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:24:34 INFO    knowledge_service.timing · 工件列表 · 757.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:36 INFO    knowledge_service.timing · 工件列表 · 600.5 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:36 INFO    knowledge_service.timing · 工件列表 · 86.4 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:24:38 INFO    knowledge_service.timing · 工件列表 · 78.5 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:24:38 INFO    knowledge_service.timing · 工件列表 · 958.1 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:40 INFO    knowledge_service.timing · 工件列表 · 694.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:42 INFO    knowledge_service.timing · 工件列表 · 66.8 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:24:42 INFO    knowledge_service.timing · 工件列表 · 799.8 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:44 INFO    knowledge_service.timing · 工件列表 · 608.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:44 INFO    knowledge_service.timing · 工件列表 · 618.3 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:24:46 INFO    knowledge_service.timing · 工件列表 · 579.4 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:48 INFO    knowledge_service.timing · 工件列表 · 605.1 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:24:48 INFO    knowledge_service.timing · 工件列表 · 722.6 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:51 INFO    knowledge_service.timing · 工件列表 · 823.0 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:51 INFO    knowledge_service.timing · 工件列表 · 168.0 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:24:53 INFO    knowledge_service.timing · 工件列表 · 496.4 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:55 INFO    knowledge_service.timing · 工件列表 · 62.6 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:24:56 INFO    knowledge_service.timing · 工件列表 · 532.2 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:57 INFO    knowledge_service.timing · 工件列表 · 1213.0 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:59 INFO    knowledge_service.timing · 工件列表 · 646.4 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:24:59 INFO    knowledge_service.timing · 工件列表 · 681.7 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:25:01 INFO    knowledge_service.timing · 工件列表 · 527.4 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:01 INFO    knowledge_service.timing · 工件列表 · 62.6 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:25:02 INFO    knowledge_service.timing · 工件列表 · 452.5 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:04 INFO    knowledge_service.timing · 工件列表 · 596.5 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:25:04 INFO    knowledge_service.timing · 工件列表 · 669.6 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:06 INFO    knowledge_service.timing · 工件列表 · 504.6 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:06 INFO    knowledge_service.timing · 工件列表 · 118.8 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:25:09 INFO    knowledge_service.timing · 工件列表 · 682.9 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:25:09 INFO    knowledge_service.timing · 工件列表 · 692.4 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:11 INFO    knowledge_service.timing · 工件列表 · 496.3 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:11 INFO    knowledge_service.timing · 工件列表 · 625.1 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:25:13 INFO    knowledge_service.timing · 工件列表 · 497.4 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:16 INFO    knowledge_service.timing · 工件列表 · 679.5 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:16 INFO    knowledge_service.timing · 工件列表 · 33.4 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:25:18 INFO    knowledge_service.timing · 工件列表 · 42.4 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:25:18 INFO    knowledge_service.timing · 工件列表 · 580.9 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:20 INFO    knowledge_service.timing · 工件列表 · 525.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:22 INFO    knowledge_service.timing · 工件列表 · 605.9 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:22 INFO    knowledge_service.timing · 工件列表 · 161.4 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:25:24 INFO    knowledge_service.timing · 工件列表 · 45.4 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:25:24 INFO    knowledge_service.timing · 工件列表 · 612.3 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:26 INFO    knowledge_service.timing · 工件列表 · 442.5 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:27 INFO    knowledge_service.timing · 工件列表 · 63.0 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:25:28 INFO    knowledge_service.timing · 工件列表 · 524.0 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:30 INFO    knowledge_service.timing · 工件列表 · 971.2 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:30 INFO    knowledge_service.timing · 工件列表 · 867.4 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:25:33 INFO    knowledge_service.timing · 工件列表 · 611.3 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:33 INFO    knowledge_service.timing · 工件列表 · 181.8 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:25:35 INFO    knowledge_service.timing · 工件列表 · 628.4 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:37 INFO    knowledge_service.timing · 工件列表 · 801.2 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:37 INFO    knowledge_service.timing · 工件列表 · 777.4 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:25:39 INFO    knowledge_service.timing · 工件列表 · 763.8 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:39 INFO    knowledge_service.timing · 工件列表 · 766.4 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:25:45 INFO    knowledge_service.timing · 工件列表 · 3386.0 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:45 INFO    knowledge_service.timing · 工件列表 · 249.6 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:25:48 INFO    knowledge_service.timing · 工件列表 · 946.6 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:49 WARNING knowledge_service · 操作不可用：RuntimeError
+2026-09-20 15:25:58 INFO    knowledge_service.timing · 工件列表 · 8833.5 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:25:59 INFO    knowledge_service.timing · 工件列表 · 1017.9 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:25:59 INFO    knowledge_service.timing · 存储查询 · 1306.1 ms · 向量=True 类型=0 过滤=False 扫描=3 保留=3
+2026-09-20 15:25:59 INFO    knowledge_service.timing · 范围过滤 · 11860.8 ms · 类型=0 原始=3 存活=3 保留=3
+2026-09-20 15:26:00 INFO    knowledge_service.timing · 存储查询 · 1212.8 ms · 向量=True 类型=0 过滤=False 扫描=3 保留=3
+2026-09-20 15:26:00 INFO    knowledge_service.timing · 范围过滤 · 6955.1 ms · 类型=2 原始=3 存活=3 保留=0
+2026-09-20 15:26:00 INFO    knowledge_service.timing · 图谱探索 · 7000.9 ms · 种子=False 跳数=1 扫描=0 graph_nodes=0 graph_edges=0
+2026-09-20 15:26:00 INFO    knowledge_service.timing · 存储查询 · 1523.8 ms · 向量=True 类型=0 过滤=False 扫描=3 保留=3
+2026-09-20 15:26:00 INFO    knowledge_service.timing · 范围过滤 · 4206.7 ms · 类型=2 原始=3 存活=3 保留=0
+2026-09-20 15:26:01 INFO    knowledge_service.timing · 工件列表 · 893.8 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:26:02 INFO    knowledge_service.timing · 当前记录读取 · 1280.1 ms · 向量=none 类型=0 扫描=3
+2026-09-20 15:26:02 INFO    knowledge_service.timing · 候选发现 · 1.1 ms · 候选=472
+2026-09-20 15:26:02 INFO    knowledge_service.timing · 存储查询 · 1287.5 ms · 向量=True 类型=0 过滤=False 扫描=3 保留=3
+2026-09-20 15:26:02 INFO    knowledge_service.timing · 范围过滤 · 2265.1 ms · 类型=0 原始=3 存活=3 保留=3
+2026-09-20 15:26:03 INFO    knowledge_service.timing · 工件列表 · 1496.8 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:26:03 INFO    knowledge_service.timing · 工件列表 · 674.8 ms · 类型=ontology_discovery_draft 按项目=True 解码=1 保留=1
+2026-09-20 15:26:04 INFO    knowledge_service.timing · 工件列表 · 1283.3 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:26:04 INFO    knowledge_service.timing · 候选生命周期 · 0.0 ms · 候选=472 草案=1 reused_records=True materialized=0
+2026-09-20 15:26:04 INFO    knowledge_service.timing · 工件列表 · 446.0 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:26:04 INFO    knowledge_service.timing · 当前记录读取 · 355.9 ms · 向量=none 类型=0 扫描=3
+2026-09-20 15:26:04 INFO    knowledge_service.timing · 候选发现 · 2.5 ms · 候选=472
+2026-09-20 15:26:06 INFO    knowledge_service.timing · 工件列表 · 814.1 ms · 类型=ontology_discovery_draft 按项目=True 解码=1 保留=1
+2026-09-20 15:26:06 INFO    knowledge_service.timing · 候选生命周期 · 0.0 ms · 候选=472 草案=1 reused_records=True materialized=0
+2026-09-20 15:26:06 INFO    knowledge_service.timing · 候选脑图 · 2230.7 ms · 上限=500 nodes=236 edges=236
+2026-09-20 15:26:07 INFO    knowledge_service.timing · 工件列表 · 936.6 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:26:07 INFO    knowledge_service.timing · 工件列表 · 213.9 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:26:08 INFO    knowledge_service.timing · 当前记录读取 · 510.5 ms · 向量=none 类型=0 扫描=3
+2026-09-20 15:26:08 INFO    knowledge_service.timing · 候选发现 · 4.1 ms · 候选=472
+2026-09-20 15:26:08 INFO    knowledge_service.timing · 工件列表 · 150.7 ms · 类型=ontology_discovery_draft 按项目=True 解码=1 保留=1
+2026-09-20 15:26:08 INFO    knowledge_service.timing · 候选生命周期 · 0.0 ms · 候选=472 草案=1 reused_records=True materialized=0
+2026-09-20 15:26:10 INFO    knowledge_service.timing · 工件列表 · 735.4 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:26:10 INFO    knowledge_service.timing · 工件列表 · 135.1 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:26:13 INFO    knowledge_service.timing · 工件列表 · 855.4 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:26:13 INFO    knowledge_service.timing · 工件列表 · 257.3 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:26:15 INFO    knowledge_service.timing · 工件列表 · 691.3 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:26:16 INFO    knowledge_service.timing · 工件列表 · 512.9 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:26:17 INFO    knowledge_service.timing · 工件列表 · 759.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:26:17 INFO    knowledge_service.timing · 工件列表 · 858.1 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:26:20 INFO    knowledge_service.timing · 工件列表 · 731.6 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:26:20 INFO    knowledge_service.timing · 工件列表 · 155.0 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:26:23 INFO    knowledge_service.timing · 工件列表 · 997.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:26:23 INFO    knowledge_service.timing · 工件列表 · 322.1 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:26:27 INFO    knowledge_service.timing · 工件列表 · 180.8 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:26:27 INFO    knowledge_service.timing · 工件列表 · 1294.2 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:26:30 INFO    knowledge_service.timing · 工件列表 · 811.4 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:26:30 INFO    knowledge_service.timing · 工件列表 · 782.8 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:26:32 INFO    knowledge_service.timing · 当前记录读取 · 208.9 ms · 向量=none 类型=0 扫描=3
+2026-09-20 15:26:32 INFO    knowledge_service.timing · 候选发现 · 10.8 ms · 候选=472
+2026-09-20 15:26:33 INFO    knowledge_service.timing · 工件列表 · 1474.1 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:26:34 INFO    knowledge_service.timing · 工件列表 · 1794.2 ms · 类型=ontology_discovery_draft 按项目=True 解码=1 保留=1
+2026-09-20 15:26:34 INFO    knowledge_service.timing · 工件列表 · 2313.6 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:26:34 INFO    knowledge_service.timing · 候选生命周期 · 0.0 ms · 候选=472 草案=1 reused_records=True materialized=0
+2026-09-20 15:26:37 INFO    knowledge_service.timing · 工件列表 · 893.0 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:26:37 INFO    knowledge_service.timing · 工件列表 · 171.5 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:26:39 INFO    knowledge_service.timing · 工件列表 · 880.1 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:26:39 INFO    knowledge_service.timing · 工件列表 · 891.5 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:26:42 INFO    knowledge_service.timing · 工件列表 · 191.3 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:26:42 INFO    knowledge_service.timing · 工件列表 · 805.4 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:26:45 INFO    knowledge_service.timing · 工件列表 · 1291.1 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:26:45 INFO    knowledge_service.timing · 工件列表 · 278.7 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:26:48 INFO    knowledge_service.timing · 工件列表 · 904.9 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:26:48 INFO    knowledge_service.timing · 工件列表 · 1265.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:26:50 INFO    knowledge_service.timing · 工件列表 · 744.1 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:26:50 INFO    knowledge_service.timing · 工件列表 · 735.6 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:26:53 INFO    knowledge_service.timing · 工件列表 · 2334.0 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:27:03 INFO    knowledge_service.timing · 工件列表 · 2110.6 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:27:06 INFO    knowledge_service.timing · 工件列表 · 3368.3 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:27:06 INFO    knowledge_service.timing · 当前记录读取 · 3382.3 ms · 向量=none 类型=0 扫描=3
+2026-09-20 15:27:06 INFO    knowledge_service.timing · 候选发现 · 1.0 ms · 候选=472
+2026-09-20 15:27:07 INFO    knowledge_service.timing · 存储查询 · 531.0 ms · 向量=True 类型=0 过滤=False 扫描=3 保留=3
+2026-09-20 15:27:07 INFO    knowledge_service.timing · 范围过滤 · 2776.7 ms · 类型=0 原始=3 存活=3 保留=3
+2026-09-20 15:27:07 INFO    knowledge_service.timing · 工件列表 · 709.7 ms · 类型=ontology_discovery_draft 按项目=True 解码=1 保留=1
+2026-09-20 15:27:07 INFO    knowledge_service.timing · 存储查询 · 968.7 ms · 向量=True 类型=0 过滤=False 扫描=3 保留=3
+2026-09-20 15:27:07 INFO    knowledge_service.timing · 候选生命周期 · 0.0 ms · 候选=472 草案=1 reused_records=True materialized=0
+2026-09-20 15:27:07 INFO    knowledge_service.timing · 范围过滤 · 3266.8 ms · 类型=2 原始=3 存活=3 保留=0
+2026-09-20 15:28:48 INFO    knowledge_service.timing · 当前记录读取 · 155.4 ms · 向量=none 类型=0 扫描=3
+2026-09-20 15:28:48 INFO    knowledge_service.timing · 候选发现 · 0.9 ms · 候选=472
+2026-09-20 15:28:48 INFO    knowledge_service.timing · 工件列表 · 127.4 ms · 类型=ontology_discovery_draft 按项目=True 解码=1 保留=1
+2026-09-20 15:28:48 INFO    knowledge_service.timing · 候选生命周期 · 0.0 ms · 候选=472 草案=1 reused_records=True materialized=0
+2026-09-20 15:28:51 INFO    knowledge_service.timing · 存储查询 · 179.9 ms · 向量=True 类型=0 过滤=False 扫描=3 保留=3
+2026-09-20 15:28:51 INFO    knowledge_service.timing · 范围过滤 · 228.8 ms · 类型=2 原始=3 存活=3 保留=0
+2026-09-20 15:28:51 INFO    knowledge_service.timing · 图谱探索 · 269.8 ms · 种子=False 跳数=1 扫描=0 graph_nodes=0 graph_edges=0
+2026-09-20 15:28:51 INFO    knowledge_service.timing · 当前记录读取 · 177.0 ms · 向量=none 类型=0 扫描=3
+2026-09-20 15:28:51 INFO    knowledge_service.timing · 候选发现 · 1.1 ms · 候选=472
+2026-09-20 15:28:52 INFO    knowledge_service.timing · 工件列表 · 94.5 ms · 类型=ontology_discovery_draft 按项目=True 解码=1 保留=1
+2026-09-20 15:28:52 INFO    knowledge_service.timing · 候选生命周期 · 0.0 ms · 候选=472 草案=1 reused_records=True materialized=0
+2026-09-20 15:28:56 WARNING knowledge_service · 操作不可用：RuntimeError
+2026-09-20 15:29:03 INFO    knowledge_service.timing · 存储查询 · 244.7 ms · 向量=True 类型=0 过滤=False 扫描=3 保留=3
+2026-09-20 15:29:03 INFO    knowledge_service.timing · 范围过滤 · 8942.0 ms · 类型=0 原始=3 存活=3 保留=3
+2026-09-20 15:29:03 INFO    knowledge_service.timing · 存储查询 · 368.7 ms · 向量=True 类型=0 过滤=False 扫描=3 保留=3
+2026-09-20 15:29:03 INFO    knowledge_service.timing · 范围过滤 · 2578.0 ms · 类型=0 原始=3 存活=3 保留=3
+2026-09-20 15:29:04 INFO    knowledge_service.timing · 工件列表 · 880.1 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:29:04 INFO    knowledge_service.timing · 工件列表 · 118.8 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:31:00 INFO    knowledge_service.timing · 当前记录读取 · 45.8 ms · 向量=list 类型=0 扫描=3
+2026-09-20 15:31:03 INFO    knowledge_service.service · 本体校验完成，开始向量化 236 条记录
+2026-09-20 15:31:39 INFO    knowledge_service.service · 写入完成：236 条记录落库并同步向量索引
+2026-09-20 15:31:39 INFO    knowledge_service.timing · 当前记录读取 · 144.9 ms · 向量=list 类型=0 扫描=239
+2026-09-20 15:31:41 INFO    knowledge_service.service · 本体校验完成，开始向量化 236 条记录
+2026-09-20 15:32:37 INFO    knowledge_service.service · 写入完成：236 条记录落库并同步向量索引
+2026-09-20 15:34:02 INFO    knowledge_service.timing · 存储查询 · 2.2 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:34:02 INFO    knowledge_service.timing · 存储查询 · 2.3 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:34:02 INFO    knowledge_service.timing · 范围过滤 · 1432.1 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:34:02 INFO    knowledge_service.timing · 范围过滤 · 1173.2 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-20 15:34:02 INFO    knowledge_service.timing · 存储查询 · 0.4 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:34:02 INFO    knowledge_service.timing · 范围过滤 · 1.6 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:34:02 INFO    knowledge_service.timing · 图谱探索 · 3.3 ms · 种子=False 跳数=1 扫描=4 graph_nodes=3 graph_edges=1
+2026-09-20 15:34:05 INFO    knowledge_service.timing · 存储查询 · 5.5 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:34:05 INFO    knowledge_service.timing · 范围过滤 · 17.0 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:34:05 INFO    knowledge_service.timing · 存储查询 · 2.1 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:34:05 INFO    knowledge_service.timing · 范围过滤 · 21.1 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-20 15:34:05 INFO    knowledge_service.timing · 存储查询 · 0.6 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:34:05 INFO    knowledge_service.timing · 范围过滤 · 1.9 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:34:05 INFO    knowledge_service.timing · 图谱探索 · 3.8 ms · 种子=False 跳数=1 扫描=4 graph_nodes=3 graph_edges=1
+2026-09-20 15:36:30 INFO    knowledge_service.timing · 存储查询 · 3.2 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:36:30 INFO    knowledge_service.timing · 存储查询 · 3.2 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:36:30 INFO    knowledge_service.timing · 范围过滤 · 794.9 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-20 15:36:30 INFO    knowledge_service.timing · 范围过滤 · 826.1 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:36:30 INFO    knowledge_service.timing · 存储查询 · 0.4 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:36:30 INFO    knowledge_service.timing · 范围过滤 · 5.6 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:36:30 INFO    knowledge_service.timing · 图谱探索 · 15.9 ms · 种子=False 跳数=1 扫描=4 graph_nodes=3 graph_edges=1
+2026-09-20 15:36:33 INFO    knowledge_service.timing · 存储查询 · 6.5 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:36:33 INFO    knowledge_service.timing · 存储查询 · 1.8 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:36:33 INFO    knowledge_service.timing · 范围过滤 · 17.0 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-20 15:36:33 INFO    knowledge_service.timing · 范围过滤 · 18.6 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:36:33 INFO    knowledge_service.timing · 存储查询 · 0.7 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:36:33 INFO    knowledge_service.timing · 范围过滤 · 12.3 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:36:33 INFO    knowledge_service.timing · 图谱探索 · 19.2 ms · 种子=False 跳数=1 扫描=4 graph_nodes=3 graph_edges=1
+2026-09-20 15:38:10 INFO    knowledge_service.timing · 存储查询 · 3.4 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:38:10 INFO    knowledge_service.timing · 存储查询 · 1.6 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:38:10 INFO    knowledge_service.timing · 范围过滤 · 993.9 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-20 15:38:10 INFO    knowledge_service.timing · 范围过滤 · 994.5 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:38:10 INFO    knowledge_service.timing · 存储查询 · 0.5 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:38:10 INFO    knowledge_service.timing · 范围过滤 · 1.7 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:38:10 INFO    knowledge_service.timing · 图谱探索 · 3.2 ms · 种子=False 跳数=1 扫描=4 graph_nodes=3 graph_edges=1
+2026-09-20 15:38:12 INFO    knowledge_service.timing · 存储查询 · 1.0 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:38:12 INFO    knowledge_service.timing · 存储查询 · 0.4 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:38:12 INFO    knowledge_service.timing · 范围过滤 · 6.4 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:38:12 INFO    knowledge_service.timing · 范围过滤 · 7.8 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-20 15:38:12 INFO    knowledge_service.timing · 存储查询 · 1.0 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:38:12 INFO    knowledge_service.timing · 范围过滤 · 3.3 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:38:12 INFO    knowledge_service.timing · 图谱探索 · 5.4 ms · 种子=False 跳数=1 扫描=4 graph_nodes=3 graph_edges=1
+2026-09-20 15:38:22 INFO    knowledge_service.timing · 工件列表 · 322.3 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 15:38:22 INFO    knowledge_service.timing · 工件列表 · 210.8 ms · 类型=job 按项目=True 解码=2 保留=2
+2026-09-20 15:38:34 INFO    knowledge_service.timing · 当前记录读取 · 202.5 ms · 向量=none 类型=0 扫描=475
+2026-09-20 15:38:34 INFO    knowledge_service.timing · 候选发现 · 9.3 ms · 候选=472
+2026-09-20 15:38:34 INFO    knowledge_service.timing · 存储查询 · 290.1 ms · 向量=True 类型=0 过滤=False 扫描=475 保留=475
+2026-09-20 15:38:34 INFO    knowledge_service.timing · 工件列表 · 274.5 ms · 类型=ontology_discovery_draft 按项目=True 解码=1 保留=1
+2026-09-20 15:38:34 INFO    knowledge_service.timing · 范围过滤 · 494.6 ms · 类型=2 原始=475 存活=475 保留=472
+2026-09-20 15:38:34 INFO    knowledge_service.timing · 候选生命周期 · 3.2 ms · 候选=472 草案=1 reused_records=True materialized=472
+2026-09-20 15:38:45 INFO    knowledge_service.timing · 当前记录读取 · 84.8 ms · 向量=none 类型=0 扫描=475
+2026-09-20 15:38:45 INFO    knowledge_service.timing · 候选发现 · 1.3 ms · 候选=472
+2026-09-20 15:38:45 INFO    knowledge_service.timing · 工件列表 · 49.3 ms · 类型=ontology_discovery_draft 按项目=True 解码=1 保留=1
+2026-09-20 15:38:45 INFO    knowledge_service.timing · 候选生命周期 · 1.2 ms · 候选=472 草案=1 reused_records=True materialized=472
+2026-09-20 15:38:55 INFO    knowledge_service.timing · 存储查询 · 140.1 ms · 向量=True 类型=0 过滤=False 扫描=475 保留=475
+2026-09-20 15:38:55 INFO    knowledge_service.timing · 范围过滤 · 142.7 ms · 类型=2 原始=475 存活=475 保留=472
+2026-09-20 15:38:55 INFO    knowledge_service.timing · 图谱探索 · 145.9 ms · 种子=False 跳数=1 扫描=472 graph_nodes=236 graph_edges=236
+2026-09-20 15:38:57 INFO    knowledge_service.timing · 当前记录读取 · 65.0 ms · 向量=none 类型=0 扫描=475
+2026-09-20 15:38:57 INFO    knowledge_service.timing · 候选发现 · 1.0 ms · 候选=472
+2026-09-20 15:38:57 INFO    knowledge_service.timing · 工件列表 · 31.7 ms · 类型=ontology_discovery_draft 按项目=True 解码=1 保留=1
+2026-09-20 15:38:57 INFO    knowledge_service.timing · 候选生命周期 · 2.4 ms · 候选=472 草案=1 reused_records=True materialized=472
+2026-09-20 15:39:06 INFO    knowledge_service.timing · 存储查询 · 159.9 ms · 向量=True 类型=0 过滤=False 扫描=475 保留=475
+2026-09-20 15:39:06 INFO    knowledge_service.timing · 范围过滤 · 163.5 ms · 类型=3 原始=475 存活=475 保留=474
+2026-09-20 15:39:06 DEBUG   knowledge_service.service · 检索开始：query='直播' mode=hybrid 候选=474
+2026-09-20 15:39:06 INFO    knowledge_service.service · 检索完成：mode=hybrid 命中=12 后端=本地
+2026-09-20 15:42:10 INFO    knowledge_service.timing · 存储查询 · 2.9 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:42:10 INFO    knowledge_service.timing · 存储查询 · 1.6 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:42:10 INFO    knowledge_service.timing · 范围过滤 · 1252.3 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:42:10 INFO    knowledge_service.timing · 范围过滤 · 1257.6 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-20 15:42:10 INFO    knowledge_service.timing · 存储查询 · 0.5 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:42:10 INFO    knowledge_service.timing · 范围过滤 · 7.8 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:42:10 INFO    knowledge_service.timing · 图谱探索 · 11.1 ms · 种子=False 跳数=1 扫描=4 graph_nodes=3 graph_edges=1
+2026-09-20 15:42:11 INFO    knowledge_service.timing · 存储查询 · 4.9 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:42:11 INFO    knowledge_service.timing · 存储查询 · 2.4 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:42:11 INFO    knowledge_service.timing · 范围过滤 · 26.8 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-20 15:42:11 INFO    knowledge_service.timing · 范围过滤 · 28.1 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:42:11 INFO    knowledge_service.timing · 存储查询 · 0.3 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:42:11 INFO    knowledge_service.timing · 范围过滤 · 1.4 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:42:11 INFO    knowledge_service.timing · 图谱探索 · 5.6 ms · 种子=False 跳数=1 扫描=4 graph_nodes=3 graph_edges=1
+2026-09-20 15:44:17 INFO    knowledge_service.timing · 存储查询 · 3.2 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:44:18 INFO    knowledge_service.timing · 存储查询 · 7.6 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:44:18 INFO    knowledge_service.timing · 范围过滤 · 1334.1 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:44:18 INFO    knowledge_service.timing · 范围过滤 · 1366.1 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-20 15:44:18 INFO    knowledge_service.timing · 存储查询 · 0.9 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:44:18 INFO    knowledge_service.timing · 范围过滤 · 6.8 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:44:18 INFO    knowledge_service.timing · 存储查询 · 3.4 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:44:18 INFO    knowledge_service.timing · 存储查询 · 4.3 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:44:18 INFO    knowledge_service.timing · 范围过滤 · 11.5 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:44:18 INFO    knowledge_service.timing · 范围过滤 · 39.8 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-20 15:44:18 INFO    knowledge_service.timing · 图谱探索 · 64.2 ms · 种子=False 跳数=1 扫描=4 graph_nodes=3 graph_edges=1
+2026-09-20 15:44:20 INFO    knowledge_service.timing · 当前记录读取 · 0.4 ms · 向量=none 类型=0 扫描=8
+2026-09-20 15:44:20 INFO    knowledge_service.timing · 候选发现 · 0.0 ms · 候选=0
+2026-09-20 15:44:20 INFO    knowledge_service.timing · 工件列表 · 1.4 ms · 类型=ontology_discovery_draft 按项目=True 解码=0 保留=0
+2026-09-20 15:44:20 INFO    knowledge_service.timing · 候选生命周期 · 1.0 ms · 候选=0 草案=0 reused_records=True materialized=0
+2026-09-20 15:46:38 INFO    knowledge_service.timing · 存储查询 · 1.1 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:46:38 INFO    knowledge_service.timing · 存储查询 · 4.2 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:46:38 INFO    knowledge_service.timing · 范围过滤 · 1010.3 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-20 15:46:38 INFO    knowledge_service.timing · 范围过滤 · 1011.7 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:46:38 INFO    knowledge_service.timing · 存储查询 · 0.4 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:46:38 INFO    knowledge_service.timing · 范围过滤 · 7.7 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:46:38 INFO    knowledge_service.timing · 图谱探索 · 11.4 ms · 种子=False 跳数=1 扫描=4 graph_nodes=3 graph_edges=1
+2026-09-20 15:46:40 INFO    knowledge_service.timing · 存储查询 · 6.0 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:46:40 INFO    knowledge_service.timing · 存储查询 · 16.4 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:46:40 INFO    knowledge_service.timing · 范围过滤 · 52.5 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:46:40 INFO    knowledge_service.timing · 范围过滤 · 55.4 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-20 15:46:40 INFO    knowledge_service.timing · 存储查询 · 1.0 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:46:40 INFO    knowledge_service.timing · 范围过滤 · 2.2 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:46:40 INFO    knowledge_service.timing · 图谱探索 · 7.3 ms · 种子=False 跳数=1 扫描=4 graph_nodes=3 graph_edges=1
+2026-09-20 15:56:57 INFO    knowledge_service.timing · 存储查询 · 0.9 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:56:57 INFO    knowledge_service.timing · 存储查询 · 1.6 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:56:57 INFO    knowledge_service.timing · 范围过滤 · 4.7 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-20 15:56:57 INFO    knowledge_service.timing · 范围过滤 · 5.9 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:56:57 INFO    knowledge_service.timing · 存储查询 · 0.4 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:56:57 INFO    knowledge_service.timing · 范围过滤 · 4.6 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:56:57 INFO    knowledge_service.timing · 图谱探索 · 9.9 ms · 种子=False 跳数=1 扫描=4 graph_nodes=3 graph_edges=1
+2026-09-20 15:56:58 INFO    knowledge_service.timing · 存储查询 · 1.1 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:56:58 INFO    knowledge_service.timing · 存储查询 · 1.8 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:56:58 INFO    knowledge_service.timing · 范围过滤 · 4.0 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:56:58 INFO    knowledge_service.timing · 范围过滤 · 4.8 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-20 15:56:58 INFO    knowledge_service.timing · 存储查询 · 0.5 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 15:56:58 INFO    knowledge_service.timing · 范围过滤 · 11.2 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 15:56:58 INFO    knowledge_service.timing · 图谱探索 · 17.4 ms · 种子=False 跳数=1 扫描=4 graph_nodes=3 graph_edges=1
+2026-09-20 15:57:05 INFO    knowledge_service.timing · 工件列表 · 0.8 ms · 类型=job 按项目=True 解码=0 保留=0
+2026-09-20 15:57:05 INFO    knowledge_service.timing · 工件列表 · 1.0 ms · 类型=job 按项目=True 解码=0 保留=0
+2026-09-20 15:57:06 INFO    knowledge_service.timing · 工件列表 · 0.4 ms · 类型=job 按项目=True 解码=0 保留=0
+2026-09-20 16:11:22 INFO    knowledge_service.timing · 存储查询 · 219.6 ms · 向量=True 类型=0 过滤=False 扫描=475 保留=475
+2026-09-20 16:11:22 INFO    knowledge_service.timing · 范围过滤 · 222.8 ms · 类型=2 原始=475 存活=475 保留=472
+2026-09-20 16:11:22 INFO    knowledge_service.timing · 当前记录读取 · 81.2 ms · 向量=none 类型=0 扫描=475
+2026-09-20 16:11:22 INFO    knowledge_service.timing · 候选发现 · 1.5 ms · 候选=472
+2026-09-20 16:11:22 INFO    knowledge_service.timing · 工件列表 · 42.4 ms · 类型=ontology_discovery_draft 按项目=True 解码=1 保留=1
+2026-09-20 16:11:22 INFO    knowledge_service.timing · 候选生命周期 · 1.2 ms · 候选=472 草案=1 reused_records=True materialized=472
+2026-09-20 16:12:29 INFO    knowledge_service.timing · 存储查询 · 165.2 ms · 向量=True 类型=0 过滤=False 扫描=475 保留=475
+2026-09-20 16:12:29 INFO    knowledge_service.timing · 范围过滤 · 170.2 ms · 类型=2 原始=475 存活=475 保留=472
+2026-09-20 16:12:29 INFO    knowledge_service.timing · 当前记录读取 · 92.8 ms · 向量=none 类型=0 扫描=475
+2026-09-20 16:12:29 INFO    knowledge_service.timing · 候选发现 · 1.3 ms · 候选=472
+2026-09-20 16:12:29 INFO    knowledge_service.timing · 工件列表 · 52.5 ms · 类型=ontology_discovery_draft 按项目=True 解码=1 保留=1
+2026-09-20 16:12:29 INFO    knowledge_service.timing · 候选生命周期 · 1.4 ms · 候选=472 草案=1 reused_records=True materialized=472
+2026-09-20 16:12:32 INFO    knowledge_service.timing · 存储查询 · 193.0 ms · 向量=True 类型=0 过滤=False 扫描=475 保留=475
+2026-09-20 16:12:32 INFO    knowledge_service.timing · 范围过滤 · 198.6 ms · 类型=2 原始=475 存活=475 保留=472
+2026-09-20 16:12:32 INFO    knowledge_service.timing · 图谱探索 · 204.6 ms · 种子=True 跳数=3 扫描=472 graph_nodes=236 graph_edges=236 selected=66 returned_nodes=66 returned_edges=77
+2026-09-20 16:12:32 INFO    knowledge_service.timing · 当前记录读取 · 136.0 ms · 向量=none 类型=0 扫描=475
+2026-09-20 16:12:32 INFO    knowledge_service.timing · 候选发现 · 1.6 ms · 候选=472
+2026-09-20 16:12:32 INFO    knowledge_service.timing · 工件列表 · 53.5 ms · 类型=ontology_discovery_draft 按项目=True 解码=1 保留=1
+2026-09-20 16:12:32 INFO    knowledge_service.timing · 候选生命周期 · 1.9 ms · 候选=472 草案=1 reused_records=True materialized=472
+2026-09-20 16:16:35 INFO    knowledge_service.timing · 存储查询 · 313.0 ms · 向量=True 类型=0 过滤=False 扫描=475 保留=475
+2026-09-20 16:16:35 INFO    knowledge_service.timing · 范围过滤 · 332.0 ms · 类型=0 原始=475 存活=475 保留=475
+2026-09-20 16:16:36 WARNING knowledge_service · 操作不可用：RuntimeError
+2026-09-20 16:17:24 INFO    knowledge_service.timing · 存储查询 · 0.9 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 16:17:24 INFO    knowledge_service.timing · 范围过滤 · 2.7 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-20 16:17:24 INFO    knowledge_service.timing · 图谱探索 · 4.4 ms · 种子=False 跳数=1 扫描=4 graph_nodes=3 graph_edges=1
+2026-09-20 16:17:24 INFO    knowledge_service.timing · 存储查询 · 0.5 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 16:17:24 INFO    knowledge_service.timing · 范围过滤 · 1.4 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-20 16:21:23 INFO    knowledge_service.timing · 存储查询 · 0.5 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 16:21:23 INFO    knowledge_service.timing · 范围过滤 · 1.6 ms · 类型=3 原始=8 存活=8 保留=6
+2026-09-20 16:21:23 DEBUG   knowledge_service.service · 检索开始：query='演示' mode=keyword 候选=6
+2026-09-20 16:21:23 INFO    knowledge_service.service · 检索完成：mode=keyword 命中=5 后端=本地
+2026-09-20 16:21:23 INFO    knowledge_service.timing · 存储查询 · 0.6 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 16:21:23 INFO    knowledge_service.timing · 范围过滤 · 5.2 ms · 类型=3 原始=8 存活=8 保留=6
+2026-09-20 16:21:23 DEBUG   knowledge_service.service · 检索开始：query='演示' mode=semantic 候选=6
+2026-09-20 16:21:23 INFO    knowledge_service.service · 检索完成：mode=semantic 命中=5 后端=本地
+2026-09-20 16:21:23 INFO    knowledge_service.timing · 存储查询 · 0.5 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-20 16:21:23 INFO    knowledge_service.timing · 范围过滤 · 2.0 ms · 类型=3 原始=8 存活=8 保留=6
+2026-09-20 16:21:23 DEBUG   knowledge_service.service · 检索开始：query='演示' mode=hybrid 候选=6
+2026-09-20 16:21:23 INFO    knowledge_service.service · 检索完成：mode=hybrid 命中=5 后端=本地
+2026-09-20 16:30:00 INFO    knowledge_service.timing · 存储查询 · 198.1 ms · 向量=True 类型=0 过滤=False 扫描=475 保留=475
+2026-09-20 16:30:00 INFO    knowledge_service.timing · 范围过滤 · 201.0 ms · 类型=0 原始=475 存活=475 保留=475
+2026-09-20 16:32:21 INFO    knowledge_service.timing · 存储查询 · 307.9 ms · 向量=True 类型=0 过滤=False 扫描=475 保留=475
+2026-09-20 16:32:21 INFO    knowledge_service.timing · 范围过滤 · 323.9 ms · 类型=3 原始=475 存活=475 保留=474
+2026-09-20 16:32:21 DEBUG   knowledge_service.service · 检索开始：query='直播' mode=hybrid 候选=474
+2026-09-20 16:32:21 INFO    knowledge_service.service · 检索完成：mode=hybrid 命中=12 后端=本地
+2026-09-20 16:33:17 DEBUG   knowledge_service.chunking · 切片：策略=fixed 字符数=4530 块大小=1800 重叠=200
+2026-09-20 16:33:22 INFO    knowledge_service.timing · 工件列表 · 1247.7 ms · 类型=job 按项目=False 解码=19 保留=19
+2026-09-20 16:33:23 INFO    knowledge_service.timing · 工件列表 · 377.9 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:33:23 INFO    knowledge_service.timing · 工件列表 · 305.4 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:33:24 DEBUG   knowledge_service.chunking · 切片：策略=fixed 字符数=4530 块大小=1800 重叠=200
+2026-09-20 16:33:24 INFO    knowledge_service.timing · 工件列表 · 364.5 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:33:24 INFO    knowledge_service.timing · 工件列表 · 273.3 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:33:25 INFO    knowledge_service.timing · 当前记录读取 · 682.7 ms · 向量=list 类型=0 扫描=476
+2026-09-20 16:33:25 INFO    knowledge_service.service · 本体校验完成，开始向量化 3 条记录
+2026-09-20 16:33:26 INFO    knowledge_service.timing · 工件列表 · 536.8 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:33:26 INFO    knowledge_service.timing · 工件列表 · 225.7 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:33:29 INFO    knowledge_service.timing · 工件列表 · 332.7 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:33:29 INFO    knowledge_service.timing · 工件列表 · 473.2 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:33:32 INFO    knowledge_service.timing · 工件列表 · 296.0 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:33:32 INFO    knowledge_service.timing · 工件列表 · 722.1 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:33:35 INFO    knowledge_service.timing · 工件列表 · 183.1 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:33:35 INFO    knowledge_service.timing · 工件列表 · 557.6 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:33:38 INFO    knowledge_service.timing · 工件列表 · 411.0 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:33:38 INFO    knowledge_service.timing · 工件列表 · 131.3 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:33:42 INFO    knowledge_service.timing · 工件列表 · 362.0 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:33:42 INFO    knowledge_service.timing · 工件列表 · 119.9 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:33:45 INFO    knowledge_service.timing · 工件列表 · 249.1 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:33:45 INFO    knowledge_service.timing · 工件列表 · 618.7 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:33:52 INFO    knowledge_service.timing · 工件列表 · 719.0 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:33:52 INFO    knowledge_service.timing · 工件列表 · 272.0 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:33:54 INFO    knowledge_service.timing · 工件列表 · 471.3 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:33:54 INFO    knowledge_service.timing · 工件列表 · 292.0 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:33:56 INFO    knowledge_service.timing · 工件列表 · 430.0 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:33:56 INFO    knowledge_service.timing · 工件列表 · 164.8 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:33:58 INFO    knowledge_service.timing · 工件列表 · 334.2 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:33:59 INFO    knowledge_service.timing · 工件列表 · 391.3 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:34:01 INFO    knowledge_service.timing · 工件列表 · 486.0 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:34:01 INFO    knowledge_service.timing · 工件列表 · 161.0 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:34:05 INFO    knowledge_service.timing · 工件列表 · 281.2 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:34:06 INFO    knowledge_service.timing · 工件列表 · 314.6 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:34:07 INFO    knowledge_service.service · 写入完成：3 条记录落库并同步向量索引
+2026-09-20 16:34:07 INFO    knowledge_service.timing · 工件列表 · 371.8 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:34:07 INFO    knowledge_service.timing · 工件列表 · 130.1 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:34:09 INFO    knowledge_service.timing · 工件列表 · 265.1 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:34:09 INFO    knowledge_service.timing · 工件列表 · 461.5 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:34:11 INFO    knowledge_service.timing · 工件列表 · 272.2 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:34:12 INFO    knowledge_service.timing · 工件列表 · 122.2 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:34:14 INFO    knowledge_service.timing · 工件列表 · 242.5 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:34:15 INFO    knowledge_service.timing · 工件列表 · 144.6 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:34:18 INFO    knowledge_service.timing · 工件列表 · 392.7 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:34:18 INFO    knowledge_service.timing · 工件列表 · 276.9 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:34:21 INFO    knowledge_service.timing · 工件列表 · 354.4 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:34:21 INFO    knowledge_service.timing · 工件列表 · 254.9 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:34:23 INFO    knowledge_service.timing · 工件列表 · 283.8 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:34:24 INFO    knowledge_service.timing · 工件列表 · 208.7 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:34:26 INFO    knowledge_service.timing · 工件列表 · 249.1 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:34:27 INFO    knowledge_service.timing · 工件列表 · 239.1 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:34:31 INFO    knowledge_service.timing · 工件列表 · 277.3 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:34:31 INFO    knowledge_service.timing · 工件列表 · 604.9 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:34:33 INFO    knowledge_service.timing · 工件列表 · 541.7 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:34:33 INFO    knowledge_service.timing · 工件列表 · 311.0 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:34:35 INFO    knowledge_service.timing · 工件列表 · 236.7 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:34:35 INFO    knowledge_service.timing · 工件列表 · 151.0 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:34:39 INFO    knowledge_service.timing · 工件列表 · 494.1 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:34:39 INFO    knowledge_service.timing · 工件列表 · 130.9 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:34:49 INFO    knowledge_service.timing · 工件列表 · 210.1 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:34:49 INFO    knowledge_service.timing · 工件列表 · 127.8 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:35:49 INFO    knowledge_service.timing · 工件列表 · 235.2 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:35:49 INFO    knowledge_service.timing · 工件列表 · 121.4 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:36:49 INFO    knowledge_service.timing · 工件列表 · 266.6 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:36:49 INFO    knowledge_service.timing · 工件列表 · 172.3 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:37:50 INFO    knowledge_service.timing · 工件列表 · 337.2 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:37:50 INFO    knowledge_service.timing · 工件列表 · 100.6 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:38:50 INFO    knowledge_service.timing · 工件列表 · 414.2 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:38:50 INFO    knowledge_service.timing · 工件列表 · 187.8 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:39:49 INFO    knowledge_service.timing · 工件列表 · 235.3 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:39:49 INFO    knowledge_service.timing · 工件列表 · 189.8 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:40:49 INFO    knowledge_service.timing · 当前记录读取 · 157.5 ms · 向量=list 类型=0 扫描=479
+2026-09-20 16:40:49 INFO    knowledge_service.service · 本体校验完成，开始向量化 0 条记录
+2026-09-20 16:40:51 INFO    knowledge_service.service · 写入完成：1 条记录落库并同步向量索引
+2026-09-20 16:40:51 INFO    knowledge_service.timing · 工件列表 · 2134.4 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:40:52 INFO    knowledge_service.timing · 工件列表 · 290.6 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:41:51 INFO    knowledge_service.timing · 工件列表 · 1651.4 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 16:41:51 INFO    knowledge_service.timing · 工件列表 · 1617.2 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 16:51:07 INFO    knowledge_service.timing · 当前记录读取 · 139.1 ms · 向量=none 类型=0 扫描=479
+2026-09-20 16:51:07 INFO    knowledge_service.timing · 候选发现 · 3.7 ms · 候选=1049
+2026-09-20 16:51:07 INFO    knowledge_service.timing · 工件列表 · 42.9 ms · 类型=ontology_discovery_draft 按项目=True 解码=1 保留=1
+2026-09-20 16:51:07 INFO    knowledge_service.timing · 候选生命周期 · 1.2 ms · 候选=1049 草案=1 reused_records=True materialized=472
+2026-09-20 16:51:31 INFO    knowledge_service.timing · 当前记录读取 · 93.0 ms · 向量=none 类型=1 扫描=2
+2026-09-20 16:51:31 INFO    knowledge_service.timing · 候选发现 · 97.0 ms · 候选=1049
+2026-09-20 16:51:33 INFO    knowledge_service.timing · 当前记录读取 · 141.4 ms · 向量=none 类型=0 扫描=479
+2026-09-20 16:51:33 INFO    knowledge_service.timing · 候选发现 · 3.1 ms · 候选=1049
+2026-09-20 16:51:33 INFO    knowledge_service.timing · 工件列表 · 130.2 ms · 类型=ontology_discovery_draft 按项目=True 解码=2 保留=2
+2026-09-20 16:51:33 INFO    knowledge_service.timing · 候选生命周期 · 1.1 ms · 候选=1049 草案=2 reused_records=True materialized=472
+2026-09-20 16:51:47 INFO    knowledge_service.timing · 存储查询 · 90.7 ms · 向量=True 类型=0 过滤=False 扫描=3 保留=3
+2026-09-20 16:51:48 INFO    knowledge_service.timing · 范围过滤 · 91.8 ms · 类型=2 原始=3 存活=3 保留=0
+2026-09-20 16:51:48 INFO    knowledge_service.timing · 图谱探索 · 92.9 ms · 种子=False 跳数=1 扫描=0 graph_nodes=0 graph_edges=0
+2026-09-20 16:51:48 INFO    knowledge_service.timing · 当前记录读取 · 142.6 ms · 向量=none 类型=0 扫描=479
+2026-09-20 16:51:48 INFO    knowledge_service.timing · 候选发现 · 5.1 ms · 候选=1049
+2026-09-20 16:51:48 INFO    knowledge_service.timing · 工件列表 · 129.5 ms · 类型=ontology_discovery_draft 按项目=True 解码=2 保留=2
+2026-09-20 16:51:48 INFO    knowledge_service.timing · 候选生命周期 · 1.2 ms · 候选=1049 草案=2 reused_records=True materialized=472
+2026-09-20 16:51:56 INFO    knowledge_service.timing · 存储查询 · 203.6 ms · 向量=True 类型=0 过滤=False 扫描=479 保留=479
+2026-09-20 16:51:56 INFO    knowledge_service.timing · 范围过滤 · 208.5 ms · 类型=2 原始=479 存活=479 保留=472
+2026-09-20 16:51:56 INFO    knowledge_service.timing · 图谱探索 · 214.6 ms · 种子=False 跳数=1 扫描=472 graph_nodes=236 graph_edges=236
+2026-09-20 16:51:57 INFO    knowledge_service.timing · 当前记录读取 · 128.6 ms · 向量=none 类型=0 扫描=479
+2026-09-20 16:51:57 INFO    knowledge_service.timing · 候选发现 · 7.2 ms · 候选=1049
+2026-09-20 16:51:57 INFO    knowledge_service.timing · 工件列表 · 143.9 ms · 类型=ontology_discovery_draft 按项目=True 解码=2 保留=2
+2026-09-20 16:51:57 INFO    knowledge_service.timing · 候选生命周期 · 1.5 ms · 候选=1049 草案=2 reused_records=True materialized=472
+2026-09-20 17:09:21 INFO    knowledge_service.timing · 存储查询 · 446.1 ms · 向量=True 类型=0 过滤=False 扫描=479 保留=479
+2026-09-20 17:09:21 INFO    knowledge_service.timing · 范围过滤 · 453.4 ms · 类型=0 原始=479 存活=479 保留=479
+2026-09-20 17:09:27 INFO    knowledge_service.timing · 当前记录读取 · 289.3 ms · 向量=none 类型=0 扫描=479
+2026-09-20 17:09:27 INFO    knowledge_service.timing · 候选发现 · 11.3 ms · 候选=1049
+2026-09-20 17:09:27 INFO    knowledge_service.timing · 工件列表 · 303.1 ms · 类型=ontology_discovery_draft 按项目=True 解码=2 保留=2
+2026-09-20 17:09:27 INFO    knowledge_service.timing · 候选生命周期 · 3.6 ms · 候选=1049 草案=2 reused_records=True materialized=472
+2026-09-20 17:10:33 INFO    knowledge_service.timing · 存储查询 · 167.8 ms · 向量=True 类型=0 过滤=False 扫描=3 保留=3
+2026-09-20 17:10:33 INFO    knowledge_service.timing · 范围过滤 · 175.6 ms · 类型=0 原始=3 存活=3 保留=3
+2026-09-20 17:10:34 INFO    knowledge_service.timing · 存储查询 · 391.7 ms · 向量=True 类型=0 过滤=False 扫描=479 保留=479
+2026-09-20 17:10:34 INFO    knowledge_service.timing · 范围过滤 · 410.5 ms · 类型=0 原始=479 存活=479 保留=479
+2026-09-20 17:10:34 INFO    knowledge_service.timing · 存储查询 · 176.9 ms · 向量=True 类型=0 过滤=False 扫描=3 保留=3
+2026-09-20 17:10:34 INFO    knowledge_service.timing · 范围过滤 · 180.8 ms · 类型=0 原始=3 存活=3 保留=3
+2026-09-20 17:11:37 INFO    knowledge_service.timing · 工件列表 · 566.3 ms · 类型=job 按项目=True 解码=3 保留=3
+2026-09-20 17:11:40 INFO    knowledge_service.timing · 工件列表 · 2081.8 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 17:12:52 INFO    knowledge_service.timing · 工件列表 · 479.8 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 17:15:16 INFO    knowledge_service.timing · 工件列表 · 286.8 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-20 17:15:18 INFO    knowledge_service.timing · 当前记录读取 · 189.6 ms · 向量=none 类型=0 扫描=479
+2026-09-20 17:15:18 INFO    knowledge_service.timing · 候选发现 · 3.5 ms · 候选=1049
+2026-09-20 17:15:18 INFO    knowledge_service.timing · 工件列表 · 140.7 ms · 类型=ontology_discovery_draft 按项目=True 解码=2 保留=2
+2026-09-20 17:15:18 INFO    knowledge_service.timing · 候选生命周期 · 13.9 ms · 候选=1049 草案=2 reused_records=True materialized=472

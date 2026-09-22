@@ -1,5 +1,5 @@
 import pytest
-from knowledge_service.retrieval import rank_candidates
+from knowledge_service.services.retrieval import rank_candidates
 
 
 class Encoder:

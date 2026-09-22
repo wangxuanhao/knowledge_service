@@ -3,14 +3,14 @@ import json
 
 import pytest
 
-from knowledge_service.embeddings import HashingEncoder
+from knowledge_service.integrations.embeddings import HashingEncoder
 from knowledge_service.repository import Repository
-from knowledge_service.service import KnowledgeService
+from knowledge_service.services.service import KnowledgeService
 
 
 def importer_type():
-    assert importlib.util.find_spec('knowledge_service.legacy_import'), 'Legacy importer is not implemented'
-    from knowledge_service.legacy_import import LegacyImporter
+    assert importlib.util.find_spec('knowledge_service.services.legacy_import'), 'Legacy importer is not implemented'
+    from knowledge_service.services.legacy_import import LegacyImporter
     return LegacyImporter
 
 

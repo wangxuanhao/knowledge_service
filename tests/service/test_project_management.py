@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from knowledge_service.api import create_app
-from knowledge_service.embeddings import HashingEncoder
+from knowledge_service.integrations.embeddings import HashingEncoder
 from knowledge_service.repository import Repository
 
 

@@ -4,8 +4,8 @@ import pytest
 
 import knowledge_service.repository as repository_module
 from knowledge_service.repository import Repository
-from knowledge_service.filters import matches_filter, validate_filter
-from knowledge_service.time import normalize_time
+from knowledge_service.utils.filters import matches_filter, validate_filter
+from knowledge_service.core.time import normalize_time
 
 
 def test_versions_temporal_boundaries_and_restart(tmp_path):

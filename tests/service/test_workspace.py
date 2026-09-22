@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 from knowledge_service.api import create_app
-from knowledge_service.embeddings import HashingEncoder
-from knowledge_service.environment import load_environment
+from knowledge_service.integrations.embeddings import HashingEncoder
+from knowledge_service.core.config import load_environment
 
 
 def test_linked_scope_and_ontology_and_index(tmp_path):

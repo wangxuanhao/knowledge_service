@@ -4,7 +4,7 @@ import os
 
 
 def main():
-    from .environment import load_environment
+    from .core.config import load_environment
     load_environment()
     parser = argparse.ArgumentParser(description='Knowledge Service — 双时态、本体与过滤检索')
     parser.add_argument('--host', default='127.0.0.1')
@@ -17,7 +17,7 @@ def main():
     # 读取路径的阶段耗时（repository.query / service.scoped / explorer.graph …）
     # 输出到本终端。默认静默，仅当提高 KG_LOG_LEVEL 时输出；使用
     # KG_SLOW_MS=200 可只查看慢阶段。
-    from .diagnostics import configure_logging
+    from .core.logging import configure_logging
     configure_logging()
     from .api import create_app
     import uvicorn

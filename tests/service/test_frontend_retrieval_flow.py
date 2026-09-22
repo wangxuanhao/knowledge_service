@@ -12,8 +12,8 @@ import pytest
 import uvicorn
 
 from knowledge_service.api import create_app
-from knowledge_service.embeddings import HashingEncoder
-from knowledge_service.ontology import Ontology
+from knowledge_service.integrations.embeddings import HashingEncoder
+from knowledge_service.services.ontology import Ontology
 
 INITIAL_GRAPH_HINT = '从左侧检索结果选择实体或关系'
 CHANNEL_LABELS = ['匹配实体', '原文片段', '关系链路']

@@ -1,13 +1,13 @@
 import pytest
 from knowledge_service.repository import Repository
-from knowledge_service.embeddings import HashingEncoder
-from knowledge_service.service import KnowledgeService
-from knowledge_service.ontology import Ontology
+from knowledge_service.integrations.embeddings import HashingEncoder
+from knowledge_service.services.service import KnowledgeService
+from knowledge_service.services.ontology import Ontology
 
 
 @pytest.fixture
 def system(tmp_path):
-    from knowledge_service.governance import Governance
+    from knowledge_service.services.governance import Governance
     repo = Repository(tmp_path/'govern.sqlite')
     service = KnowledgeService(repo, HashingEncoder())
     project = repo.create_project('govern')['id']

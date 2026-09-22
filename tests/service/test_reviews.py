@@ -1,9 +1,9 @@
 import pytest
 from fastapi.testclient import TestClient
 from knowledge_service.api import create_app
-from knowledge_service.embeddings import HashingEncoder
-from knowledge_service.governance import writable
-from knowledge_service.ontology import Ontology
+from knowledge_service.integrations.embeddings import HashingEncoder
+from knowledge_service.services.governance import writable
+from knowledge_service.services.ontology import Ontology
 
 TTL = '''@prefix : <https://test/> .
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -12,7 +12,7 @@ TTL = '''@prefix : <https://test/> .
 
 @pytest.fixture
 def review(tmp_path, monkeypatch):
-    from knowledge_service.semantica_adapter import SemanticaExtractor
+    from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
     def extract(self, text, ontology):
         self.review_candidates = [dict(predicate='isSubordinateTo', subject_id='a', object_id='b',
             subject='甲', object='乙', confidence=.8, reason='未知关系')]

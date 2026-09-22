@@ -321,3 +321,47 @@
         width: 95%;
     }
 }
+/* 项目 ID：等宽展示 + 一键复制，方便拿 ID 去查接口/日志/向量库分区 */
+.project-id {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 6px 0 12px;
+    padding: 6px 8px;
+    border: 1px solid #e2ebe5;
+    border-radius: 7px;
+    background: #f8fbf8;
+    font-size: 11px;
+    color: #60756a;
+}
+
+.project-id > span {
+    flex: none;
+    color: #829087;
+}
+
+.project-id > code {
+    flex: 1;
+    min-width: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: #244f3d;
+    overflow-wrap: anywhere;
+    user-select: all;
+}
+
+.project-id-copy {
+    flex: none;
+    padding: 3px 10px;
+    border: 1px solid #c9dbd0;
+    border-radius: 6px;
+    background: #fff;
+    color: #28634d;
+    font: inherit;
+    font-size: 10px;
+    cursor: pointer;
+}
+
+.project-id-copy:hover {
+    background: #f0f7f3;
+}

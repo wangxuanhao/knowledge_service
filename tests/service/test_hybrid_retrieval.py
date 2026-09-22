@@ -1,5 +1,5 @@
 from knowledge_service.repository import Repository
-from knowledge_service.retrieval import RetrievalEngine, rrf_fuse
+from knowledge_service.services.retrieval import RetrievalEngine, rrf_fuse
 
 
 class Encoder:

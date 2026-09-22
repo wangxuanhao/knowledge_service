@@ -1,8 +1,8 @@
 import pytest
 from knowledge_service.repository import Repository
-from knowledge_service.service import KnowledgeService
-from knowledge_service.embeddings import HashingEncoder
-from knowledge_service.evidence import evidence
+from knowledge_service.services.service import KnowledgeService
+from knowledge_service.integrations.embeddings import HashingEncoder
+from knowledge_service.services.evidence import evidence
 
 
 def test_evidence_pins_source_version_and_scopes_records(tmp_path):

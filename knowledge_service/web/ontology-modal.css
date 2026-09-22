@@ -296,3 +296,59 @@
         gap: 8px;
     }
 }
+
+/* 变更影响：次要指标 + 停用语义说明 + 可读明细分组（替代原「一堆 UUID」） */
+.impact-secondary {
+    margin: 10px 0 0;
+    font-size: 12px;
+    color: #60756a;
+}
+
+.impact-note {
+    margin: 8px 0 0;
+    padding: 9px 11px;
+    border: 1px solid #e6d9bf;
+    border-radius: 7px;
+    background: #fffdf6;
+    font-size: 12px;
+    line-height: 1.75;
+    color: #6c5a36;
+}
+
+.impact-note b {
+    color: #865b1e;
+}
+
+.impact-detail-group {
+    margin-top: 9px;
+    padding: 9px 11px;
+    border: 1px solid #e4ebe6;
+    border-radius: 7px;
+    background: #f8fbf8;
+    font-size: 12px;
+    line-height: 1.7;
+}
+
+.impact-detail-group b {
+    display: block;
+    margin-bottom: 3px;
+    color: #244f3d;
+    font-size: 11px;
+}
+
+.impact-detail-group span {
+    color: #3d5a4c;
+    overflow-wrap: anywhere;
+}
+
+.impact-via {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: #fbeee8;
+    color: #a04b2d;
+    font-size: 10px;
+    font-style: normal;
+    vertical-align: 1px;
+}

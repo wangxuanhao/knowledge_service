@@ -6,12 +6,12 @@ from time import perf_counter
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
-from knowledge_service.environment import load_environment
+from knowledge_service.core.config import load_environment
 from knowledge_service.repository import Repository
-from knowledge_service.service import KnowledgeService
-from knowledge_service.embeddings import HashingEncoder
-from knowledge_service.legacy_import import LegacyImporter
-from knowledge_service.neo4j_store import Neo4jProjection, digest
+from knowledge_service.services.service import KnowledgeService
+from knowledge_service.integrations.embeddings import HashingEncoder
+from knowledge_service.services.legacy_import import LegacyImporter
+from knowledge_service.integrations.neo4j_store import Neo4jProjection, digest
 
 
 def main():

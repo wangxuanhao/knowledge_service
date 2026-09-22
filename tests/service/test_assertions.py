@@ -1,7 +1,7 @@
 import pytest
 
 import knowledge_service.repository as repository_module
-from knowledge_service.assertions import occurrence_id
+from knowledge_service.utils.assertions import occurrence_id
 from knowledge_service.repository import Repository
 
 
