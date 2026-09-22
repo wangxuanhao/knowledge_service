@@ -118,7 +118,8 @@ def list_reviews(service, p):
             current = []
             conflict = None
             if entity and model:
-                predicate = candidate.get('target_type') or candidate.get('proposed_type')
+                predicate = (candidate.get('conflict_predicate') or
+                             candidate.get('target_type') or candidate.get('proposed_type'))
                 if predicate:
                     try:
                         conflict, current = attribute_conflict(
@@ -211,6 +212,13 @@ def decide(service, p, doc_id, candidate_id, request):
         target = str(model.resolve(request.target_type,
                      {'entity': model.classes, 'relation': model.relations,
                       'attribute': model.attributes}[kind]))
+        if request.action == 'approve_replace':
+            locked_predicate = candidate.get('conflict_predicate') or candidate.get('target_type')
+            if not locked_predicate:
+                raise ValueError('冲突候选缺少已登记的属性谓词')
+            locked_predicate = str(model.resolve(locked_predicate, model.attributes))
+            if target != locked_predicate:
+                raise ValueError('冲突属性已经锁定，不能在替换时重新映射')
 
         def endpoint(key):
             rid = candidate[key]; seen = set()
@@ -249,15 +257,13 @@ def decide(service, p, doc_id, candidate_id, request):
             if conflict and request.action == 'approve':
                 candidate.update(status='contradicting', target_type=target,
                                  approved_ontology_id=ontology['id'],
-                                 conflict_code=conflict['code'])
+                                 conflict_code=conflict['code'], conflict_predicate=target)
                 decisions = [] if assertion is None else [{'id': candidate_id,
                     'expected_version': assertion['decision_version'], 'status': 'contradicting',
                     'reason': request.note, 'actor': 'reviewer'}]
                 service.write(p, [], completion=(revised, doc['version']),
                               operation='approve_review', assertion_decisions=decisions)
                 return {'status': 'contradicting', 'conflict': conflict}
-            if request.action == 'approve_replace' and not conflict:
-                raise ValueError('当前属性值已无单值冲突，请刷新审核清单')
             evidence = candidate.get('attribute_evidence', candidate.get('evidence', ''))
             record = dict(**common, id=record_id, kind='attribute', type=target,
                 subject_id=entity_id, value=candidate['value'],
@@ -285,7 +291,8 @@ def decide(service, p, doc_id, candidate_id, request):
             'reason': request.note, 'actor': 'reviewer', 'canonical_record_id': record_id}]
         records = [record]
         if kind == 'attribute' and request.action == 'approve_replace':
-            conflicting_ids = {item['record_id'] for item in conflict['current_values']}
+            conflicting_ids = {item['record_id'] for item in
+                               (conflict['current_values'] if conflict else [])}
             actual_versions = {row['id']: row['version'] for row in current_attributes
                                if row['id'] in conflicting_ids}
             if request.expected_attribute_versions != actual_versions:

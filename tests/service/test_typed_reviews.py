@@ -18,6 +18,10 @@ TTL_MAX_ONE=TTL+'''\n@prefix sh: <http://www.w3.org/ns/shacl#> .
 :PersonShape a sh:NodeShape ; sh:targetClass :Person ;
   sh:property [ sh:path :count ; sh:maxCount 1 ] .'''
 
+TTL_TWO_SINGLE=TTL_MAX_ONE+'''\n:score a owl:DatatypeProperty ; rdfs:domain :Person ; rdfs:range xsd:integer .
+:ScoreShape a sh:NodeShape ; sh:targetClass :Person ;
+  sh:property [ sh:path :score ; sh:maxCount 1 ] .'''
+
 
 def test_entity_relation_attribute_dependency_and_version_lifecycle(tmp_path,monkeypatch):
     def extract(self,text,ontology):
@@ -189,6 +193,92 @@ def test_approve_replace_supersedes_supports_and_tombstones_old_attribute_atomic
         candidate_assertion=repo.get_assertion(p,item['id'])
         assert candidate_assertion['status']=='accepted'
         assert candidate_assertion['canonical_record_id']==new_id
+        current=[r for r in repo.current_records(p)
+                 if r['kind']=='attribute' and not r['metadata'].get('_deleted')]
+        assert [(r['id'],r['value']) for r in current]==[(new_id,2)]
+
+
+def test_approve_replace_cannot_remap_a_registered_conflict_predicate(tmp_path,monkeypatch):
+    def extract(self,text,ontology):
+        self.review_candidates=[dict(kind='entity',record_id='person-1',text='甲',proposed_type='Person'),
+            dict(kind='attribute',entity_id='person-1',subject='甲',proposed_type='count',value=2)]
+        return []
+    monkeypatch.setattr(SemanticaExtractor,'extract',extract)
+    app=create_app(tmp_path/'attribute-predicate-lock.sqlite',HashingEncoder())
+    with TestClient(app) as client:
+        p=client.post('/api/projects',json={'name':'predicate-lock','use_default_ontology':False}).json()['id']
+        base='/api/projects/'+p;repo=app.state.service.repository
+        ontology=client.post(base+'/ontologies',json={'turtle':TTL_TWO_SINGLE}).json()
+        assert client.post(base+'/documents',json={
+            'title':'候选','text':'甲数量2','resolve_entities':False}).status_code==201
+        entity=next(r for r in client.get(base+'/reviews').json()['reviews'] if r['kind']=='entity')
+        approved=client.post(base+'/reviews/'+entity['document_id']+'/'+entity['id'],json={
+            'action':'approve','note':'确认实体','target_type':'Person',
+            'expected_version':entity['document_version']})
+        entity_id=approved.json()['record_id']
+        assert client.post(base+'/records',json={'records':[
+            {'id':'old-count','kind':'attribute','type':'https://test/count','subject_id':entity_id,
+             'value':1,'datatype':'http://www.w3.org/2001/XMLSchema#integer','text':'甲 · count = 1',
+             'ontology_id':ontology['id']},
+            {'id':'old-score','kind':'attribute','type':'https://test/score','subject_id':entity_id,
+             'value':9,'datatype':'http://www.w3.org/2001/XMLSchema#integer','text':'甲 · score = 9',
+             'ontology_id':ontology['id']}]}).status_code==201
+        item=next(r for r in client.get(base+'/reviews').json()['reviews'] if r['kind']=='attribute')
+        endpoint=base+'/reviews/'+item['document_id']+'/'+item['id']
+        assert client.post(endpoint,json={'action':'approve','note':'登记 count 冲突','target_type':'count',
+            'expected_version':item['document_version'],
+            'expected_entity_version':item['entity_version']}).status_code==200
+        item=next(r for r in client.get(base+'/reviews').json()['reviews'] if r['kind']=='attribute')
+        response=client.post(endpoint,json={'action':'approve_replace','note':'尝试改为 score','target_type':'score',
+            'expected_version':item['document_version'],'expected_entity_version':item['entity_version'],
+            'expected_attribute_versions':{'old-score':1}})
+        assert response.status_code==422,response.text
+        assert repo.get_assertion(p,item['id'])['status']=='contradicting'
+        assert all(not repo.history(p,record_id)[-1]['metadata'].get('_deleted')
+                   for record_id in ('old-count','old-score'))
+
+
+def test_approve_replace_accepts_when_registered_conflict_has_disappeared(tmp_path,monkeypatch):
+    def extract(self,text,ontology):
+        self.review_candidates=[dict(kind='entity',record_id='person-1',text='甲',proposed_type='Person'),
+            dict(kind='attribute',entity_id='person-1',subject='甲',proposed_type='count',value=2)]
+        return []
+    monkeypatch.setattr(SemanticaExtractor,'extract',extract)
+    app=create_app(tmp_path/'attribute-conflict-gone.sqlite',HashingEncoder())
+    with TestClient(app) as client:
+        p=client.post('/api/projects',json={'name':'conflict-gone','use_default_ontology':False}).json()['id']
+        base='/api/projects/'+p;service=app.state.service;repo=service.repository
+        ontology=client.post(base+'/ontologies',json={'turtle':TTL_MAX_ONE}).json()
+        assert client.post(base+'/documents',json={
+            'title':'候选','text':'甲数量2','resolve_entities':False}).status_code==201
+        entity=next(r for r in client.get(base+'/reviews').json()['reviews'] if r['kind']=='entity')
+        approved=client.post(base+'/reviews/'+entity['document_id']+'/'+entity['id'],json={
+            'action':'approve','note':'确认实体','target_type':'Person',
+            'expected_version':entity['document_version']})
+        entity_id=approved.json()['record_id']
+        assert client.post(base+'/records',json={'records':[{
+            'id':'old-count','kind':'attribute','type':'https://test/count','subject_id':entity_id,
+            'value':1,'datatype':'http://www.w3.org/2001/XMLSchema#integer','text':'甲 · count = 1',
+            'ontology_id':ontology['id']}]}).status_code==201
+        item=next(r for r in client.get(base+'/reviews').json()['reviews'] if r['kind']=='attribute')
+        endpoint=base+'/reviews/'+item['document_id']+'/'+item['id']
+        assert client.post(endpoint,json={'action':'approve','note':'登记 count 冲突','target_type':'count',
+            'expected_version':item['document_version'],
+            'expected_entity_version':item['entity_version']}).status_code==200
+        old=repo.history(p,'old-count')[-1]
+        tombstone=writable(old);tombstone['metadata']={**old['metadata'],'_deleted':True}
+        service.write(p,[tombstone],expected_versions={'old-count':old['version']})
+        item=next(r for r in client.get(base+'/reviews').json()['reviews'] if r['kind']=='attribute')
+        assert item['status']=='contradicting' and item['conflict']['current_values']==[]
+        response=client.post(endpoint,json={'action':'approve_replace','note':'旧冲突已撤回，接受候选',
+            'target_type':'count','expected_version':item['document_version'],
+            'expected_entity_version':item['entity_version'],'expected_attribute_versions':{}})
+        assert response.status_code==200,response.text
+        new_id=response.json()['record_id']
+        assertion=repo.get_assertion(p,item['id'])
+        assert assertion['status']=='accepted' and assertion['canonical_record_id']==new_id
+        events=repo.list_assertion_events(p,item['id'])
+        assert (events[-1]['from_status'],events[-1]['to_status'])==('contradicting','accepted')
         current=[r for r in repo.current_records(p)
                  if r['kind']=='attribute' and not r['metadata'].get('_deleted')]
         assert [(r['id'],r['value']) for r in current]==[(new_id,2)]

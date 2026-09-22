@@ -115,7 +115,8 @@ test('SHACL exception review names the failed constraint without requiring ontol
 
 test('single-value attribute conflict offers keep-old and accept-new actions',async()=>{
   const candidate={id:'attribute-1',kind:'attribute',status:'contradicting',subject:'甲',
-    proposed_type:'https://test/count',target_type:'https://test/count',value:2,
+    proposed_type:'https://test/count',target_type:'https://test/count',
+    conflict_predicate:'https://test/count',value:2,
     reason:'属性候选',document_title:'原文.md',ontology_id:'ont',start_char:0,end_char:4,
     evidence:'甲数量2',document_id:'doc',document_version:3,entity_version:1,
     current_values:[{record_id:'old-count',value:1,datatype:'http://www.w3.org/2001/XMLSchema#integer',version:1}],
@@ -127,6 +128,8 @@ test('single-value attribute conflict offers keep-old and accept-new actions',as
   assert.match(html,/保留旧值\/拒绝候选/);
   assert.match(html,/data-action="approve_replace"[^>]*>接受新值/);
   assert.match(html,/当前正式属性值/);
+  assert.match(html,/冲突属性已锁定.*count/);
+  assert.doesNotMatch(html,/select class="review-target"/);
   assert.doesNotMatch(html,/批准并写入/);
 });
 
