@@ -190,6 +190,16 @@ class Ontology:
         for prefix, ns in self.graph.namespaces():
             graph.bind(prefix, ns)
         graph += self.graph
+        formal_attribute_pairs = set()
+        for r in records:
+            if (r['kind'] != 'attribute' or
+                    r.get('metadata', {}).get('_deleted')):
+                continue
+            try:
+                predicate = self.resolve(r.get('type', ''), self.attributes)
+            except ValueError:
+                continue
+            formal_attribute_pairs.add((r.get('subject_id'), predicate))
         for r in records:
             if r['kind'] != 'entity':
                 continue
@@ -208,12 +218,15 @@ class Ontology:
                     if not field.startswith(('http://', 'https://', 'urn:')):
                         continue
                     predicate = URIRef(field)
+                if (r['id'], predicate) in formal_attribute_pairs:
+                    continue
                 for v in value if isinstance(value, list) else [value]:
                     if isinstance(v, (str, int, float, bool)):
                         graph.add((node, predicate, Literal(v)))
         ids = {r['id'] for r in records if r['kind'] == 'entity'}
         for r in records:
-            if r['kind'] != 'attribute' or r.get('subject_id') not in ids:
+            if (r['kind'] != 'attribute' or r.get('subject_id') not in ids or
+                    r.get('metadata', {}).get('_deleted')):
                 continue
             try:
                 predicate = self.resolve(r.get('type', ''), self.attributes)

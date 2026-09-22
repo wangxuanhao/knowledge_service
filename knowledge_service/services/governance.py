@@ -255,6 +255,12 @@ class Governance:
             deleted_ids={r['id'] for r in affected}
             affected += [r for r in rows.values() if r['id'] not in deleted_ids and r['kind']=='relation' and
                          deleted_ids.intersection((r.get('subject_id'),r.get('object_id')))]
+            affected_ids={r['id'] for r in affected}
+            deleted_entity_ids={r['id'] for r in affected if r['kind']=='entity'}
+            affected += [r for r in rows.values() if r['id'] not in affected_ids and
+                         r['kind']=='attribute' and
+                         not r.get('metadata',{}).get('_deleted') and
+                         r.get('subject_id') in deleted_entity_ids]
             updates=[{**writable(r),'metadata':{**r.get('metadata',{}),'_deleted':True}} for r in affected]
             result=self._commit(p,affected,updates,'delete')
             return {**result,'deleted':len(affected)}

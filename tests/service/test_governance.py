@@ -83,6 +83,52 @@ def test_delete_cascades_edges_and_restore(system):
     assert {r['id'] for r in service.scoped(p,{})} == {'a','b','c','r'}
 
 
+def test_delete_entity_cascades_formal_attributes_and_restores_audited_transaction(system):
+    service, governance, p = system
+    service.write(p, [
+        dict(id='age-b', kind='attribute', type='age', text='年龄 20',
+             subject_id='b', value=20,
+             datatype='http://www.w3.org/2001/XMLSchema#integer'),
+    ])
+
+    result = governance.delete(p, 'b', 1)
+
+    assert result['deleted'] == 3
+    current = {row['id']: row for row in service.repository.current_records(p)}
+    assert current['b']['metadata']['_deleted'] is True
+    assert current['r']['metadata']['_deleted'] is True
+    assert current['age-b']['metadata']['_deleted'] is True
+    audit = current['audit:' + result['operation_id']]
+    assert {row['id'] for row in audit['metadata']['before']} == {'b', 'r', 'age-b'}
+
+    restored = governance.undo_merge(p, result['operation_id'])
+
+    assert restored['restored'] == 3
+    restored_rows = {row['id']: row for row in service.repository.current_records(p)}
+    assert all(not restored_rows[record_id].get('metadata', {}).get('_deleted')
+               for record_id in ('b', 'r', 'age-b'))
+
+
+def test_delete_document_cascade_includes_attributes_of_derived_entities(system):
+    service, governance, p = system
+    document = service.repository.put_record(
+        p, dict(id='source-doc', kind='document', text='来源文档'))
+    service.repository.put_record(
+        p, dict(id='derived-person', kind='entity', type='Person', text='王五',
+                source_id=document['id']))
+    service.repository.put_record(
+        p, dict(id='derived-age', kind='attribute', type='age', text='年龄 30',
+                subject_id='derived-person', value=30,
+                datatype='http://www.w3.org/2001/XMLSchema#integer'))
+
+    result = governance.delete(p, document['id'], document['version'])
+
+    assert result['deleted'] == 3
+    current = {row['id']: row for row in service.repository.current_records(p)}
+    assert all(current[record_id]['metadata']['_deleted'] is True
+               for record_id in ('source-doc', 'derived-person', 'derived-age'))
+
+
 def test_merge_rewrites_attributes_converges_equal_values_and_keeps_unconstrained_values(system):
     service, governance, p = system
     integer = 'http://www.w3.org/2001/XMLSchema#integer'
