@@ -121,6 +121,33 @@ def test_attribute_retraction_counts_support_for_current_version_only(tmp_path):
     assert [row['document_version_id'] for row in old_support] == [source_20['version_id']]
 
 
+def test_attribute_retraction_keeps_multi_supported_fact_until_last_source(tmp_path):
+    repo, service, project_id = _system(tmp_path)
+    service.write(project_id, [
+        {'id': 'person', 'kind': 'entity', 'type': 'Person', 'text': '张三'}])
+    documents = [repo.put_record(project_id, {
+        'id': f'doc-{index}', 'kind': 'document', 'text': '年龄 20'})
+        for index in (1, 2)]
+    datatype = 'http://www.w3.org/2001/XMLSchema#integer'
+    for index, document in enumerate(documents, 1):
+        service.write(project_id, [{
+            'id': f'age-{index}', 'kind': 'attribute', 'type': 'age', 'text': '年龄 20',
+            'subject_id': 'person', 'value': 20, 'datatype': datatype,
+            'source_id': document['id'], 'metadata': {'chunk_id': f'age-{index}'},
+        }])
+    fact = next(row for row in repo.current_records(project_id)
+                if row['kind'] == 'attribute')
+
+    for index, document in enumerate(documents, 1):
+        service.write(project_id, [{
+            'id': document['id'], 'kind': 'document', 'text': document['text'],
+            'metadata': {'_deleted': True},
+        }], expected_versions={document['id']: document['version']},
+            operation='retract_source')
+        current = repo.get_record(project_id, fact['id'])
+        assert bool(current.get('metadata', {}).get('_deleted')) is (index == 2)
+
+
 def test_same_relation_key_reuses_immutable_fact_and_adds_support(tmp_path):
     repo, service, project_id = _system(tmp_path)
     service.write(project_id, [

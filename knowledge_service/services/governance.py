@@ -73,7 +73,7 @@ class Governance:
         return {'status':'candidates','canonical':None,'candidates':sorted(candidates,key=lambda r:r['score'],reverse=True)[:12],'backend':'semantica+project_embedding'}
 
     def _commit(self,p,before,updates,operation,backend='service',redirects=None,reversal_of=None,
-                resolution_decisions=None):
+                resolution_decisions=None,assertion_decisions=None):
         op_id=str(uuid4())
         expected={r['id']:r['version'] for r in before}
         for row in updates:
@@ -88,10 +88,60 @@ class Governance:
                 'before_state':[public(r) for r in before],
                 'expected_versions':expected,'reversal_of':reversal_of}
         saved=self.service.write(p,[*updates,audit],expected_versions=expected,
-            operation=formal_operation,ledger=ledger,resolution_decisions=resolution_decisions)
+            operation=formal_operation,ledger=ledger,resolution_decisions=resolution_decisions,
+            assertion_decisions=assertion_decisions)
         return {'operation_id':op_id,'backend':backend,'records':[public(r) for r in saved if r['id']!=audit['id']]}
 
-    def merge(self,p,keep_id,drop_id,expected_versions,resolution_decision=None):
+    @staticmethod
+    def _attribute_identity(row):
+        return json.dumps([row.get('datatype'),row.get('value')],ensure_ascii=False,
+                          allow_nan=False,sort_keys=True,separators=(',',':'))
+
+    def _attribute_conflicts(self,p,keep,attributes):
+        from .ontology import Ontology
+        ontologies={}
+        by_predicate={}
+        for row in attributes:
+            by_predicate.setdefault(row['type'],[]).append(row)
+        conflicts=[]
+        for predicate,candidates in by_predicate.items():
+            constrained=False
+            for row in candidates:
+                ontology_id=row.get('ontology_id')
+                if ontology_id not in ontologies:
+                    ontologies[ontology_id]=Ontology(
+                        self.repo.get_ontology(p,ontology_id)['turtle'])
+                if ontologies[ontology_id].attribute_max_count_one(predicate,keep['type']):
+                    constrained=True
+                    break
+            if not constrained:
+                continue
+            by_id={row['id']:row for row in candidates}
+            instants=sorted({row.get('valid_from') for row in candidates
+                             if row.get('valid_from')})
+            if any(not row.get('valid_from') for row in candidates):
+                instants.insert(0,None)
+            active_sets=set()
+            for instant in instants:
+                active=frozenset(row['id'] for row in candidates if
+                    (instant is None and not row.get('valid_from')) or
+                    (instant is not None and
+                     (not row.get('valid_from') or row['valid_from']<=instant) and
+                     (not row.get('valid_until') or instant<row['valid_until'])))
+                if len(active)>1 and len({self._attribute_identity(by_id[record_id])
+                                          for record_id in active})>1:
+                    active_sets.add(active)
+            maximal=[group for group in active_sets
+                     if not any(group<other for other in active_sets)]
+            for group in sorted(maximal,key=lambda item:sorted(item)):
+                rows=[by_id[record_id] for record_id in sorted(group)]
+                conflicts.append({'predicate':predicate,'record_ids':[r['id'] for r in rows],
+                    'values':[{key:r.get(key) for key in
+                               ('id','value','datatype','valid_from','valid_until')} for r in rows]})
+        return conflicts
+
+    def merge(self,p,keep_id,drop_id,expected_versions,resolution_decision=None,
+              attribute_winners=None):
         if keep_id==drop_id:
             raise ValueError('请选择两个不同的实体')
         with self.service.lock:
@@ -107,6 +157,29 @@ class Governance:
                 raise ValueError('合并要求相同的稳定类型 IRI')
             if any(keep.get(k)!=drop.get(k) for k in ('valid_from','valid_until')):
                 raise ValueError('合并要求相同的业务时间区间；请显式修正区间')
+            attributes=[r for r in rows.values() if r['kind']=='attribute' and
+                        not r.get('metadata',{}).get('_deleted') and
+                        r.get('subject_id') in {keep_id,drop_id}]
+            conflicts=self._attribute_conflicts(p,keep,attributes)
+            winners=list(attribute_winners or [])
+            conflict_ids={record_id for conflict in conflicts
+                          for record_id in conflict['record_ids']}
+            unrelated=sorted(set(winners)-conflict_ids)
+            details=json.dumps(conflicts,ensure_ascii=False,sort_keys=True)
+            if len(winners)!=len(set(winners)):
+                raise ValueError(f'属性胜出记录不能重复；冲突详情：{details}')
+            if unrelated:
+                raise ValueError(f'属性胜出记录与冲突无关：{", ".join(unrelated)}；冲突详情：{details}')
+            selected=[]
+            for conflict in conflicts:
+                choices=[record_id for record_id in winners
+                         if record_id in conflict['record_ids']]
+                if len(choices)!=1:
+                    raise ValueError('每个 maxCount 1 属性冲突组必须选择恰好一个现有记录 ID；'
+                                     f'候选 {", ".join(conflict["record_ids"])}；冲突详情：{details}')
+                selected.append((choices[0],conflict))
+            if winners and not conflicts:
+                raise ValueError(f'属性胜出记录与任何 maxCount 1 冲突无关：{", ".join(winners)}')
             from semantica.deduplication import EntityMerger
             operation=EntityMerger(preserve_provenance=True).merge_entity_group([
                 {'id':r['id'],'name':r['text'],'type':r['type'],'properties':r.get('properties',{})} for r in (keep,drop)],strategy='keep_first')
@@ -132,9 +205,43 @@ class Governance:
                     for key in ('subject_id','object_id'):
                         if edge[key]==drop_id: edge[key]=keep_id
                     updates.append(edge)
+            attribute_by_id={row['id']:row for row in attributes}
+            losing={}
+            for winner_id,conflict in selected:
+                winner=attribute_by_id[winner_id]
+                winner_value=self._attribute_identity(winner)
+                for record_id in conflict['record_ids']:
+                    if self._attribute_identity(attribute_by_id[record_id])!=winner_value:
+                        losing[record_id]=winner_id
+            assertion_decisions=[]
+            for row in attributes:
+                if row['id'] in losing:
+                    before.append(row)
+                    loser=writable(row)
+                    loser['metadata']={**row.get('metadata',{}),'_deleted':True,
+                        'superseded_by_attribute':losing[row['id']],
+                        'merge_conflict':'shacl_max_count_1'}
+                    updates.append(loser)
+                    for assertion in self.repo.list_assertions(
+                            p,status='accepted',canonical_record_id=row['id']):
+                        reason=(f'实体合并后的 {row["type"]} 违反 maxCount 1；'
+                                f'已选择属性记录 {losing[row["id"]]}')
+                        assertion_decisions.extend([
+                            {'id':assertion['id'],'expected_version':assertion['decision_version'],
+                             'status':'contradicting','reason':reason,'actor':'merge-governance',
+                             'canonical_record_id':row['id']},
+                            {'id':assertion['id'],'expected_version':assertion['decision_version']+1,
+                             'status':'superseded','reason':reason,'actor':'merge-governance',
+                             'canonical_record_id':row['id']},
+                        ])
+                elif row.get('subject_id')==drop_id:
+                    before.append(row)
+                    attribute=writable(row)
+                    attribute['subject_id']=keep_id
+                    updates.append(attribute)
             decisions=[resolution_decision] if resolution_decision else None
             return self._commit(p,before,updates,'merge','semantica',redirects={drop_id:keep_id},
-                resolution_decisions=decisions)
+                resolution_decisions=decisions,assertion_decisions=assertion_decisions)
 
     def delete(self,p,record_id,expected_version):
         with self.service.lock:

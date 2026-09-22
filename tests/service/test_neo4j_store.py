@@ -12,7 +12,7 @@ class Driver:
     def __init__(self):
         self.calls = []
         self.fail = False
-        self.records = {}; self.versions = {}; self.edges = {}; self.fingerprint = None; self.result = []
+        self.records = {}; self.versions = {}; self.edges = {}; self.attributes = {}; self.attribute_edges = {}; self.fingerprint = None; self.result = []
 
     def session(self, **kwargs): return self
     def __enter__(self): return self
@@ -29,14 +29,26 @@ class Driver:
             for row in params['rows']: self.versions[row['version_key']] = dict(row['props'])
         if 'SET r += row.props' in query:
             for row in params['rows']: self.records[row['key']] = dict(row['props'])
-        if 'DELETE e' in query: self.edges.clear()
+        if 'SET r:AttributeFact' in query:
+            for row in params['rows']: self.attributes[row['key']] = dict(row['props'])
+        if 'KS_FACT' in query and 'DELETE e' in query: self.edges.clear()
+        if 'KS_ATTRIBUTE' in query and 'DELETE e' in query: self.attribute_edges.clear()
         if 'MERGE (a)-[e:KS_FACT' in query:
             for row in params['rows']: self.edges[row['key']] = dict(row['props'])
+        if 'MERGE (a)-[e:KS_ATTRIBUTE' in query:
+            for row in params['rows']: self.attribute_edges[row['key']] = dict(row['props'])
         if 'RETURN p.fingerprint' in query:
             self.result = [{'fingerprint': self.fingerprint}] if self.fingerprint else []
         if 'RETURN properties(r)' in query:
-            group = self.versions if ':KSVersion' in query else self.edges if ':KS_FACT' in query else self.records
-            self.result = [{'props': r, 'subject': r.get('subject_id'), 'object': r.get('object_id'), 'subject_ns':r['namespace'], 'object_ns':r['namespace'], 'subject_project':r['project_id'], 'object_project':r['project_id']} for r in group.values()]
+            group = (self.versions if ':KSVersion' in query else
+                     self.attribute_edges if ':KS_ATTRIBUTE' in query else
+                     self.edges if ':KS_FACT' in query else
+                     self.attributes if ':AttributeFact' in query else self.records)
+            self.result = [{'props': r, 'subject': r.get('subject_id'),
+                            'object': r.get('object_id'), 'attribute': r.get('id'),
+                            'subject_ns':r['namespace'], 'object_ns':r['namespace'],
+                            'subject_project':r['project_id'], 'object_project':r['project_id']}
+                           for r in group.values()]
         return self
     def __iter__(self): return iter(self.result)
     def execute_read(self, fn, *args): return fn(self, *args)
@@ -154,4 +166,30 @@ def test_delete_project_removes_only_that_projects_nodes(tmp_path):
     # 只有一条 DETACH DELETE 查询，且没有针对其他项目的删除
     assert not any('keep-pid' in str(params) for query, params in driver.calls
                    if 'DETACH DELETE' in query)
+    repo.close()
+
+
+def test_current_attribute_projects_as_typed_node_and_entity_edge(tmp_path):
+    repo = Repository(tmp_path / 'attributes.sqlite')
+    project_id = repo.create_project('属性投影')['id']
+    repo.put_batch(project_id, [
+        {'id': 'person', 'kind': 'entity', 'text': '张三'},
+        {'id': 'age', 'kind': 'attribute', 'type': 'http://ex/age', 'text': '年龄 20',
+         'subject_id': 'person', 'value': 20,
+         'datatype': 'http://www.w3.org/2001/XMLSchema#integer'},
+    ])
+    driver = Driver()
+    projection = Neo4jProjection(repo, driver, settings={})
+
+    projection.sync(project_id)
+
+    attribute = next(iter(driver.attributes.values()))
+    assert attribute['id'] == 'age'
+    assert attribute['value_json'] == '20'
+    assert attribute['datatype'] == 'http://www.w3.org/2001/XMLSchema#integer'
+    assert next(iter(driver.attribute_edges.values()))['id'] == 'age'
+    verification = projection.project_status(project_id)['verification']
+    assert verification['verified']
+    assert verification['remote']['attribute_nodes'] == 1
+    assert verification['remote']['attribute_edges'] == 1
     repo.close()

@@ -21,10 +21,14 @@ def digest(value):
 
 
 def record_properties(record, ns, pid):
-    props = {k: record.get(k) for k in ('id', 'kind', 'text', 'type', 'version', 'version_id', 'recorded_at', 'superseded_at', 'valid_from', 'valid_until', 'source_id', 'subject_id', 'object_id', 'ontology_id')}
+    props = {k: record.get(k) for k in ('id', 'kind', 'text', 'type', 'datatype',
+             'version', 'version_id', 'recorded_at', 'superseded_at', 'valid_from',
+             'valid_until', 'source_id', 'subject_id', 'object_id', 'ontology_id')}
     props.update(namespace=ns, project_id=pid, metadata_json=encoded(record.get('metadata', {})),
                  payload_json=encoded(record), deleted=bool(record.get('metadata', {}).get('_deleted')),
                  audit=bool(record.get('metadata', {}).get('_audit')))
+    if record.get('kind') == 'attribute':
+        props['value_json'] = encoded(record.get('value'))
     return props
 
 
@@ -106,15 +110,17 @@ class Neo4jProjection:
             driver = self._driver()
             with driver.session(database=self.database) as session:
                 session.run(
+                    'MATCH ()-[e:KS_FACT {namespace:$ns, project_id:$pid}]->() DELETE e',
+                    ns=namespace, pid=project_id).consume()
+                session.run(
+                    'MATCH ()-[e:KS_ATTRIBUTE {namespace:$ns, project_id:$pid}]->() DELETE e',
+                    ns=namespace, pid=project_id).consume()
+                session.run(
                     'MATCH (p:KSProject {namespace:$ns, project_id:$pid}) '
                     'OPTIONAL MATCH (p)-[:KS_CONTAINS]->(r:KSRecord) '
                     'OPTIONAL MATCH (r)-[:KS_VERSION]->(v:KSVersion) '
                     'OPTIONAL MATCH (p)-[:KS_ONTOLOGY]->(o:KSOntology) '
                     'DETACH DELETE p, r, v, o',
-                    ns=namespace, pid=project_id).consume()
-                session.run(
-                    'MATCH (:KSRecord {namespace:$ns, project_id:$pid})-[e:KS_FACT]->() '
-                    'DELETE e',
                     ns=namespace, pid=project_id).consume()
             return True
 
@@ -125,11 +131,15 @@ class Neo4jProjection:
         current = [r for r in all_rows if r['superseded_at'] is None]
         entities = {r['id'] for r in current if r['kind'] == 'entity' and not r['deleted'] and not r['audit']}
         edges = [r for r in current if r['kind'] == 'relation' and not r['deleted'] and not r['audit'] and r['subject_id'] in entities and r['object_id'] in entities]
+        attributes = [r for r in current if r['kind'] == 'attribute' and not r['deleted']
+                      and not r['audit'] and r['subject_id'] in entities]
         params = dict(ns=ns, pid=pid)
         project = list(tx.run('MATCH (p:KSProject {namespace:$ns, project_id:$pid}) RETURN p.fingerprint AS fingerprint', **params))
         groups = [('records', current, 'id', 'MATCH (r:KSRecord {namespace:$ns, project_id:$pid}) RETURN properties(r) AS props'),
                   ('versions', all_rows, 'version_id', 'MATCH (r:KSVersion {namespace:$ns, project_id:$pid}) RETURN properties(r) AS props'),
-                  ('relations', edges, 'id', 'MATCH (a)-[r:KS_FACT {namespace:$ns, project_id:$pid}]->(b) RETURN properties(r) AS props, a.id AS subject, b.id AS object, a.namespace AS subject_ns, b.namespace AS object_ns, a.project_id AS subject_project, b.project_id AS object_project')]
+                  ('relations', edges, 'id', 'MATCH (a)-[r:KS_FACT {namespace:$ns, project_id:$pid}]->(b) RETURN properties(r) AS props, a.id AS subject, b.id AS object, a.namespace AS subject_ns, b.namespace AS object_ns, a.project_id AS subject_project, b.project_id AS object_project'),
+                  ('attribute_nodes', attributes, 'id', 'MATCH (r:KSRecord:AttributeFact {namespace:$ns, project_id:$pid}) RETURN properties(r) AS props'),
+                  ('attribute_edges', attributes, 'id', 'MATCH (a)-[r:KS_ATTRIBUTE {namespace:$ns, project_id:$pid}]->(b:AttributeFact) RETURN properties(r) AS props, a.id AS subject, b.id AS attribute, a.namespace AS subject_ns, b.namespace AS object_ns, a.project_id AS subject_project, b.project_id AS object_project')]
         differences = {}; remote_counts = {}; local_counts = {}; remote_entities = 0
         for name, expected, key, query in groups:
             found = list(tx.run(query, **params)); actual = []
@@ -138,6 +148,9 @@ class Neo4jProjection:
                 props = dict(row['props'])
                 if name == 'relations':
                     props['subject_id'], props['object_id'] = row['subject'], row['object']
+                    endpoints_ok &= row['subject_ns'] == row['object_ns'] == ns and row['subject_project'] == row['object_project'] == pid
+                elif name == 'attribute_edges':
+                    props['subject_id'], props['id'] = row['subject'], row['attribute']
                     endpoints_ok &= row['subject_ns'] == row['object_ns'] == ns and row['subject_project'] == row['object_project'] == pid
                 actual.append(props)
             if name == 'records':
@@ -203,8 +216,21 @@ class Neo4jProjection:
                 rows=versions[start:start+500], project_key=project_key)
         for start in range(0, len(current), 500):
             run('UNWIND $rows AS row MATCH (r:KSRecord {key:row.key}) SET r += row.props', rows=current[start:start+500])
+        run('MATCH (r:KSRecord {namespace:$ns, project_id:$pid}) REMOVE r:Entity:AttributeFact',
+            ns=ns, pid=pid)
+        entity_rows=[row for row in current if row['props']['kind']=='entity'
+                     and not row['props']['deleted'] and not row['props']['audit']]
+        attribute_rows=[row for row in current if row['props']['kind']=='attribute'
+                        and not row['props']['deleted'] and not row['props']['audit']]
+        for start in range(0,len(entity_rows),500):
+            run('UNWIND $rows AS row MATCH (r:KSRecord {key:row.key}) SET r:Entity',
+                rows=entity_rows[start:start+500])
+        for start in range(0,len(attribute_rows),500):
+            run('UNWIND $rows AS row MATCH (r:KSRecord {key:row.key}) SET r:AttributeFact',
+                rows=attribute_rows[start:start+500])
         # 只重建属于本来源数据库/项目的边。绝不清空数据库。
         run('MATCH ()-[e:KS_FACT {namespace:$ns, project_id:$pid}]->() DELETE e', ns=ns, pid=pid)
+        run('MATCH ()-[e:KS_ATTRIBUTE {namespace:$ns, project_id:$pid}]->() DELETE e', ns=ns, pid=pid)
         entities = {r['props']['id'] for r in current if r['props']['kind'] == 'entity' and not r['props']['deleted'] and not r['props']['audit']}
         edges = []
         for row in current:
@@ -215,6 +241,18 @@ class Neo4jProjection:
         for start in range(0, len(edges), 500):
             run('UNWIND $rows AS row MATCH (a:KSRecord {key:row.subject}), (b:KSRecord {key:row.object}) '
                 'MERGE (a)-[e:KS_FACT {key:row.key}]->(b) SET e += row.props', rows=edges[start:start+500])
+        attribute_edges=[]
+        for row in attribute_rows:
+            props=row['props']
+            if props['subject_id'] in entities:
+                attribute_edges.append({'key':row['key'],
+                    'subject':digest([ns,pid,props['subject_id']]),
+                    'attribute':row['key'],'props':props})
+        for start in range(0,len(attribute_edges),500):
+            run('UNWIND $rows AS row MATCH (a:KSRecord:Entity {key:row.subject}), '
+                '(b:KSRecord:AttributeFact {key:row.attribute}) '
+                'MERGE (a)-[e:KS_ATTRIBUTE {key:row.key}]->(b) SET e += row.props',
+                rows=attribute_edges[start:start+500])
         for ontology in snapshot['ontologies']:
             run('MATCH (p:KSProject {key:$project_key}) MERGE (o:KSOntology {key:$key}) '
                 'SET o.id=$id, o.turtle=$turtle, o.payload_json=$payload MERGE (p)-[:KS_ONTOLOGY]->(o)',

@@ -35,6 +35,7 @@ class Merge(Request):
     keep_id:str
     drop_id:str
     expected_versions:dict[str,int]
+    attribute_winners:list[str]=[]
 
 class Delete(Request):
     record_id:str
@@ -125,7 +126,9 @@ def install(app,service):
     def alias(p:str,request:Alias):return governance.alias(p,request.entity_id,request.alias,request.expected_version)
 
     @router.post('/projects/{p}/merge')
-    def merge(p:str,request:Merge):return governance.merge(p,request.keep_id,request.drop_id,request.expected_versions)
+    def merge(p:str,request:Merge):return governance.merge(
+        p,request.keep_id,request.drop_id,request.expected_versions,
+        attribute_winners=request.attribute_winners)
 
     @router.post('/projects/{p}/delete')
     def delete(p:str,request:Delete):return governance.delete(p,request.record_id,request.expected_version)

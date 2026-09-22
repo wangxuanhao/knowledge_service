@@ -53,6 +53,26 @@ def test_ontology_validates_attribute_domain_range_and_emits_typed_literal():
     assert 'range' in range_result['errors'][0]['message']
 
 
+def test_formal_attribute_suppresses_only_identical_legacy_typed_literal():
+    ttl = TTL + '''@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+    ex:employeeCount a owl:DatatypeProperty; rdfs:domain ex:Merchant; rdfs:range xsd:integer .'''
+    ontology = Ontology(ttl)
+    subject = URIRef('urn:knowledge:merchant')
+    predicate = URIRef('https://example.org/employeeCount')
+    records = [
+        dict(id='merchant', kind='entity', type='Merchant', text='商户',
+             properties={'employeeCount': [20, 21]}),
+        dict(id='headcount', kind='attribute', type='employeeCount', text='员工数 20',
+             subject_id='merchant', value=20, datatype=str(XSD.integer)),
+    ]
+
+    graph = ontology.dataset(records)
+
+    assert list(graph.triples((subject, predicate, Literal(20, datatype=XSD.integer)))) == [
+        (subject, predicate, Literal(20, datatype=XSD.integer))]
+    assert (subject, predicate, Literal(21, datatype=XSD.integer)) in graph
+
+
 def test_local_sparql_and_no_remote_service():
     ontology = Ontology(TTL)
     result = ontology.query([], 'SELECT ?c WHERE { ?c a <http://www.w3.org/2002/07/owl#Class> }')

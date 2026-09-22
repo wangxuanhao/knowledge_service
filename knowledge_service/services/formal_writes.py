@@ -311,6 +311,13 @@ class FormalFactWriter:
                 result_records.append(saved)
                 canonical_by_input[original['id']] = canonical_id
                 selected_versions[canonical_id] = saved['version_id']
+                if (operation == 'merge_rewrite' and expected_version is not None and
+                        record['kind'] in {'relation', 'attribute'} and
+                        not record.get('metadata', {}).get('_deleted')):
+                    # Rewriting an endpoint/subject creates a new current fact version even
+                    # when its canonical record ID is unchanged.  A self-redirect records a
+                    # fresh accepted event and freezes existing support on that exact version.
+                    fact_redirects.append((canonical_id, canonical_id))
                 if (not policy.get('suppress_auto_assertions') and
                         operation in {'extract','manual_write','approve_review','legacy_import','adopt_discovery'} and
                         original['kind'] in {'entity', 'relation', 'attribute'} and
@@ -443,7 +450,7 @@ class FormalFactWriter:
                         requested_moves.extend({'id': row['id'], 'from': source, 'to': target,
                                                 'expected_version': row['decision_version']}
                                                for row in rows)
-                    for source,target in fact_redirects:
+                    for source,target in dict.fromkeys(fact_redirects):
                         rows=self.repository._db.execute(
                             '''SELECT id,decision_version FROM assertions
                                WHERE project_id=? AND canonical_record_id=?''',
