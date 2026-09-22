@@ -100,23 +100,29 @@ def test_list_projects_includes_counts(tmp_path):
     repo = Repository(tmp_path / 'db')
     p1 = repo.create_project('alpha')['id']
     p2 = repo.create_project('beta')['id']
-    # p1: 2 documents, 1 entity
+    # p1: 2 documents, 1 entity, 1 formal attribute
     repo.put_record(p1, {'id': 'd1', 'kind': 'document', 'text': 'doc1'})
     repo.put_record(p1, {'id': 'd2', 'kind': 'document', 'text': 'doc2'})
     repo.put_record(p1, {'id': 'e1', 'kind': 'entity', 'text': 'ent1'})
+    repo.put_record(p1, {'id': 'a1', 'kind': 'attribute', 'type': 'age',
+                         'text': 'age 20', 'subject_id': 'e1', 'value': 20,
+                         'datatype': 'http://www.w3.org/2001/XMLSchema#integer'})
     # p2: 1 relation
     repo.put_record(p2, {'id': 'r1', 'kind': 'relation', 'text': 'rel1', 'subject_id': 'e1', 'object_id': 'e1'})
     projects = repo.list_projects()
     by_id = {p['id']: p for p in projects}
-    assert by_id[p1]['counts'] == {'documents': 2, 'entities': 1, 'relations': 0, 'chunks': 0}
-    assert by_id[p2]['counts'] == {'documents': 0, 'entities': 0, 'relations': 1, 'chunks': 0}
+    assert by_id[p1]['counts'] == {
+        'documents': 2, 'entities': 1, 'relations': 0, 'attributes': 1, 'chunks': 0}
+    assert by_id[p2]['counts'] == {
+        'documents': 0, 'entities': 0, 'relations': 1, 'attributes': 0, 'chunks': 0}
 
 
 def test_list_projects_zero_counts_for_empty_project(tmp_path):
     repo = Repository(tmp_path / 'db')
     pid = repo.create_project('empty')['id']
     projects = repo.list_projects()
-    assert projects[0]['counts'] == {'documents': 0, 'entities': 0, 'relations': 0, 'chunks': 0}
+    assert projects[0]['counts'] == {
+        'documents': 0, 'entities': 0, 'relations': 0, 'attributes': 0, 'chunks': 0}
 
 
 def test_list_projects_counts_exclude_superseded(tmp_path):
@@ -200,4 +206,5 @@ def test_api_list_projects_includes_counts(client):
     assert r.status_code == 200
     projects = r.json()['projects']
     target = next(p for p in projects if p['id'] == pid)
-    assert target['counts'] == {'documents': 2, 'entities': 0, 'relations': 0, 'chunks': 0}
+    assert target['counts'] == {
+        'documents': 2, 'entities': 0, 'relations': 0, 'attributes': 0, 'chunks': 0}
