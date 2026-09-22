@@ -56,7 +56,7 @@ Semantica 的 graph store、triplet store、provenance、version storage 和 con
 
 ```json
 {
-  "id": "fact_<sha256>",
+  "id": "attr_<uuid-or-stable-import-id>",
   "kind": "attribute",
   "subject_id": "entity_123",
   "type": "https://example.org/registeredCapital",
@@ -90,6 +90,62 @@ Semantica 的 graph store、triplet store、provenance、version storage 和 con
 - `valid_until`
 
 相同事实键复用已有规范记录，并把新来源连接为另一条 accepted assertion。不同事实键永远不能因为文本相似而自动合并。
+
+属性记录的 `id` 与事实键不是同一个概念：
+
+- `id` 是记录谱系身份，首次创建后保持稳定；
+- `version_id` 标识该记录某次不可变的系统版本；
+- `fact_key` 标识该记录当前版本的规范语义状态。
+
+显式审核决定可以修订 `subject_id` 或业务有效区间，此时沿用记录 `id`、创建新的 `version_id`、退休旧 fact key 并为同一记录安装新 fact key。旧版本始终通过旧 `version_id` 寻址，旧 `record_version_assertions` 映射不可改写。
+
+若新 fact key 已映射到另一条当前属性记录，则执行确定性碰撞处理：保留字典序较小的记录 `id` 作为规范记录，将另一条记录写入 tombstone 版本，并通过新的 assertion event 把当前支撑重指向保留记录的精确当前版本。历史版本和历史支撑映射不移动。
+
+### 规范化字节规则
+
+事实键不能依赖 Python `repr`、数据库 JSON 输出或调用入口。键输入固定为以下 JSON 数组：
+
+```json
+[
+  "subject IRI/id",
+  "attribute IRI",
+  {"datatype": "datatype IRI", "lexical": "canonical lexical form"},
+  "unit-or-null",
+  "language-or-null",
+  "valid-from-or-null",
+  "valid-until-or-null"
+]
+```
+
+使用 `json.dumps(..., ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)` 后按 UTF-8 编码。字段规则如下：
+
+- subject ID 和属性 IRI 使用解析后的精确字符串，不做大小写折叠；
+- 所有字符串先做 Unicode NFC；普通 `xsd:string` 保留其内部和首尾空白，避免改变业务值；
+- `xsd:boolean` lexical 固定为 `true` 或 `false`；
+- `xsd:integer` lexical 为无前导 `+` 和无多余前导零的十进制整数；
+- `xsd:decimal` 使用 `Decimal(str(value))` 生成无指数、无多余尾零的十进制 lexical，所有零归一为 `0`；
+- `xsd:double` 拒绝 NaN/Infinity，所有正负零归一为 `0x0.0p+0`，其他值使用 Python `float.hex()` 的小写结果；
+- `xsd:date` 固定为 ISO `YYYY-MM-DD`；`xsd:dateTime` 复用项目时间规范化，固定为 UTC RFC3339；
+- datatype 已声明时按声明校验和生成 lexical；未声明或为 `rdfs:Literal` 时按严格 Python 类型依次推导 boolean、integer、double、string，必须先判断 bool 以避免把它当成 int；
+- unit 做 Unicode NFC 和首尾空白去除，保持大小写，因为 SI 单位大小写有语义；空字符串归一为 null；
+- language 做 Unicode NFC、下划线转连字符并转小写；空字符串归一为 null；
+- `valid_from`、`valid_until` 使用项目现有 UTC 时间规范化；
+- 原始 lexical 和抽取词面保存在 assertion payload，不参与事实键。
+
+上述规则提供固定测试向量，所有入口、回填和投影只能调用同一规范化实现。
+
+最低固定向量包括：
+
+| 输入 | datatype | canonical lexical |
+|---|---|---|
+| `true` | `xsd:boolean` | `true` |
+| `1` | `xsd:integer` | `1` |
+| `1`、`1.0` | `xsd:decimal` | `1` |
+| `-0.0` | `xsd:double` | `0x0.0p+0` |
+| `1.5` | `xsd:double` | `0x1.8000000000000p+0` |
+| `"e\u0301"` | `xsd:string` | NFC 后的 `"é"` |
+| `"ZH_cn"` language | — | `zh-cn` |
+| `" kg "` unit | — | `kg` |
 
 ### 冲突分组
 
@@ -134,6 +190,8 @@ plan_attribute_facts(
 - 校验错误。
 
 调用方不自行比较属性值，不自行判断时间冲突，不自行生成事实 ID。该 Seam 同时服务受控审核、开放发现发布、手工写入和旧数据迁移。
+
+调用方可以用当前快照生成预检计划供 UI 展示，但预检计划不具有提交权威性。FormalFactWriter 在持有 SQLite `BEGIN IMMEDIATE` 写事务后，必须重新读取受影响的 `subject_id + type` 冲突组，并用同一属性策略 Module 重新规划；只有事务内计划可以决定 accepted、contradicting、复用或新建。SQLite 的串行写锁与事务内重规划共同防止两个并发请求同时接受不同的 `single` 值，不新增独立冲突组版本表。
 
 ### 正式写入 Module
 
@@ -228,7 +286,7 @@ Semantica 不能直接创建、接受、拒绝、覆盖或撤回正式属性事�
 
 ### 手工属性写入
 
-实体详情页通过专用命令提交属性候选，而不是编辑整份实体 JSON。命令必须包含实体期望版本或当前属性事实期望版本，防止审核期间的并发覆盖。手工写入也创建 assertion，actor 和 reason 必填。
+实体详情页通过专用命令提交属性候选，而不是编辑整份实体 JSON。命令携带调用方观察到的实体版本和相关属性事实版本，用于尽早报告陈旧页面；真正的并发正确性由 FormalFactWriter 在 `BEGIN IMMEDIATE` 事务内重新读取并规划整个 `subject_id + type` 冲突组保证。手工写入也创建 assertion，actor 和 reason 必填。
 
 ## 冲突决策
 
@@ -237,12 +295,19 @@ Semantica 不能直接创建、接受、拒绝、覆盖或撤回正式属性事�
 审核界面提供以下显式动作：
 
 - **保留当前值**：新 assertion 转为 rejected。
-- **接受新值并替代旧值**：新事实 accepted；旧事实的支撑 assertion 保留历史，旧事实建立新版本并按决定的业务时间失效。
+- **接受新值并纠正旧值**：新 assertion 转为 accepted；旧事实的当前 accepted assertions 转为 superseded；旧事实写入 tombstone 版本。当前知识在所有业务时点隐藏旧值，但较早 `known_at` 仍能看到当时版本与决定。
+- **接受新值并从切换时点替代旧值**：审核者必须给出 cutover。旧事实沿用记录 ID、创建 `valid_until=cutover` 的新版本并更新 fact key；新事实的 `valid_from=cutover`。对每条仍为 accepted 的旧 assertion 产生一次 `accepted → accepted` 重绑定 event、递增 decision version，并把该 event 映射到旧事实的新精确版本；新 assertion 支撑新事实。两条区间必须无缝且不重叠。
 - **两个值都保留**：只允许本体已是 `set`，或同一事务中先批准 `valueMode=set` 的本体变更。
 - **调整有效时间后接受**：只允许 `temporal_single`，且调整后区间不重叠。
 - **保持冲突**：assertion 保持 contradicting，不改变正式事实。
 
 每个决定需要 reason、actor、expected decision version，并产生 assertion event。Semantica 建议只作为提示显示，不能预选危险动作。
+
+属性当前可见性的必要条件是：记录当前系统版本未被 tombstone、业务时点有效，并且在请求的 `known_at` 时刻至少有一条状态为 accepted 的 assertion 支撑该精确 record version。当前查询可使用 assertions 当前行；历史 `known_at` 查询必须从 `assertion_events` 选择该时点之前每条 assertion 的最后事件，不能拿今天的状态解释过去。
+
+属性版本发生业务区间修订时，FormalFactWriter 为每条仍 accepted 的支撑 assertion 写入 `accepted → accepted` 重绑定 event，并建立到新 record version 的映射。这个内部重绑定是状态保持事件，不开放为普通审核动作。
+
+tombstone 版本表达当前系统认定该事实已删除，不需要正向 accepted 支撑；删除原因、actor、被替代事实和操作 ID记录在 assertion events 与操作 ledger。旧 record version、旧 accepted event 和旧支撑映射保持不可变，因此历史 provenance 仍可精确解析。
 
 ## 本体维护
 
@@ -278,7 +343,9 @@ Semantica EntityMerger 继续提供合并建议，但不能通过字典优先级
 
 ### 来源撤回
 
-文档撤回后，其 attribute assertions 转为 superseded。若属性事实仍有 accepted 支撑则保持；失去最后一个 accepted 支撑时，属性事实生成 tombstone 版本并从当前读取投影中消失。
+文档撤回后，其 attribute assertions 转为 superseded。若属性事实在事务内仍有其他 accepted assertion 支撑当前精确版本则保持；失去最后一个 accepted 支撑时，属性事实生成 tombstone 版本并从当前读取投影中消失。历史 `known_at` 查询仍根据撤回前的 assertion event 和 record version 显示当时知识。
+
+纠正替代已经把旧 assertions 转为 superseded，之后撤回来源是幂等操作。时间切换替代保留旧 assertions 为 accepted，并通过状态保持 event 支撑闭合区间版本；撤回其中一个来源只移除该来源，最后一个来源撤回才 tombstone 该历史区间事实。
 
 ### 快照恢复
 
@@ -367,6 +434,9 @@ SQLite 仍是权威源。Neo4j 使用事实节点保留版本和 provenance 所�
 8. 发现发布要么全部提交，要么本体、草案和正式事实全部不变。
 9. Neo4j、Milvus 或 Semantica 失败不能回滚已提交的 SQLite 真值；投影通过重建恢复。
 10. 任何自动化流程都不能用最后写入覆盖不同属性值。
+11. 记录 ID 表达谱系，fact key 表达当前语义；身份字段修订必须退休旧键、创建新版本并保留旧版本映射。
+12. 属性冲突组的最终规划必须发生在 SQLite 写事务和最新快照内，事务外预检不能直接提交。
+13. 状态保持的 assertion 重绑定必须增加 decision version、产生 event，并只由 FormalFactWriter 内部使用。
 
 错误返回稳定机器码与中文消息，至少覆盖：`attribute_subject_missing`、`attribute_type_unknown`、`attribute_domain_mismatch`、`attribute_datatype_mismatch`、`attribute_unit_unsupported`、`attribute_cardinality_conflict`、`attribute_version_conflict`。
 
