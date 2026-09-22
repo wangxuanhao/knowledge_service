@@ -118,35 +118,13 @@ def install(app, service):
             progress(f'候选物化完成 · {len(provisional_records)} 条待校验',15)
             records,skipped,validation=_validated_materialization(draft['turtle'],provisional_records,skipped)
             progress(f'本体校验完成 · {len(records)} 条通过 · {len(skipped)} 条跳过',40)
-            with service.lock:
+            with service.lock,service.repository._transaction():
                 ontology,published=service.repository.publish_ontology_draft(
                     p,draft,draft.get('parent_ontology_id'))
                 for record in records:record['ontology_id']=ontology['id']
-                entity_records=[row for row in records if row['kind']=='entity']
-                attribute_records=[row for row in records if row['kind']=='attribute']
-                relation_records=[row for row in records if row['kind']=='relation']
-                saved=service.write(p,entity_records,relation_constraint_mode='strict') if entity_records else []
-                progress(f'实体写入完成 · {len(saved)} 条',70)
-                if attribute_records:
-                    saved.extend(service.write(p,attribute_records,relation_constraint_mode='strict'))
-                progress(f'属性写入完成 · {len({row["id"] for row in saved if row["kind"]=="attribute"})} 条',80)
-                if relation_records:
-                    # 关系优先整批写入：一次 write 内合并向量化、SQLite 落库与 Milvus flush，
-                    # 免去逐条 write 重复「全量读当前记录 + 单条编码 + flush」的固定开销。
-                    try:
-                        saved.extend(service.write(p,relation_records,relation_constraint_mode='strict'))
-                    except (ValueError,KeyError):
-                        # 整批因个别非法关系失败（本体校验在落库之前，零写入）→ 降级逐条定位并跳过，
-                        # 合法关系仍正常写入，语义与旧版一致；逐条路径仅在罕见异常时触发。
-                        for i,relation in enumerate(relation_records):
-                            try:saved.extend(service.write(p,[relation],relation_constraint_mode='strict'))
-                            except (ValueError,KeyError) as exc:
-                                skipped.append({'candidate_id':relation['metadata']['discovery_candidate_id'],
-                                    'kind':'relation','reason':str(exc)})
-                            if (i+1)%20==0 or i+1==len(relation_records):
-                                progress(f'关系写入 {i+1}/{len(relation_records)} · 累计通过 {sum(1 for r in saved if r["kind"]=="relation")}',
-                                    80+int(15*(i+1)/max(1,len(relation_records))))
-                progress(f'关系写入完成 · 累计通过 {sum(1 for r in saved if r["kind"]=="relation")} 条',95)
+                saved=service.write(p,records,relation_constraint_mode='strict',
+                    defer_milvus_sync=True) if records else []
+                progress(f'正式知识写入完成 · {len(saved)} 条',90)
                 counts=Counter(row['kind'] for row in saved)
                 published.update(mapped_entities=counts['entity'],mapped_relations=counts['relation'],
                     mapped_attributes=len({row['id'] for row in saved if row['kind']=='attribute'}),
@@ -154,6 +132,7 @@ def install(app, service):
                     requires_candidate_review=bool(skipped or published.get('excluded_candidate_ids')),
                     requires_controlled_reingest=False)
                 service.repository.save_artifact('ontology_discovery_draft',published)
+            service._sync_milvus(p,saved)
             progress('发布完成 · 正式知识已写入',100)
             return published
         return app.state.jobs.submit('ontology_publish', run, p)

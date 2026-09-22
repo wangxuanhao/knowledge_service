@@ -50,7 +50,8 @@ class KnowledgeService:
               relation_constraint_mode='strict', shacl_mode='strict', shacl_review_out=None,
               operation='manual_write', assertions=None, pending_assertions=None,
               assertion_decisions=None, resolution_reviews=None, ledger=None,
-              resolution_decisions=None,suppress_auto_assertions=False, recorded_at=None):
+              resolution_decisions=None,suppress_auto_assertions=False, recorded_at=None,
+              defer_milvus_sync=False):
         # 批次系统时间点：整批共享一个 recorded_at（未指定则取当前时刻一次），
         # 让 timeline 把"一次写入操作"当成一个时间点，而不是按记录数拆散。
         batch_time = recorded_at or utc_now()
@@ -184,8 +185,10 @@ class KnowledgeService:
                  'resolution_decisions':resolution_decisions or [],
                  'suppress_auto_assertions': suppress_auto_assertions}, recorded_at=batch_time)
             accepted = result['accepted_records']
-            self._sync_milvus(project_id, accepted)
-            LOG.info('写入完成：%d 条记录落库并同步向量索引', len(accepted))
+            if not defer_milvus_sync:
+                self._sync_milvus(project_id, accepted)
+            LOG.info('写入完成：%d 条记录落库%s',len(accepted),
+                '，向量索引等待事务提交后同步' if defer_milvus_sync else '并同步向量索引')
             return accepted
 
     def _sync_milvus(self, project_id, records):

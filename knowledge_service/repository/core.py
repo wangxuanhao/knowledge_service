@@ -523,6 +523,17 @@ class Repository:
     @contextmanager
     def _transaction(self):
         with self._lock:
+            if self._db.in_transaction:
+                savepoint='nested_'+uuid4().hex
+                self._db.execute(f'SAVEPOINT {savepoint}')
+                try:
+                    yield
+                    self._db.execute(f'RELEASE SAVEPOINT {savepoint}')
+                except BaseException:
+                    self._db.execute(f'ROLLBACK TO SAVEPOINT {savepoint}')
+                    self._db.execute(f'RELEASE SAVEPOINT {savepoint}')
+                    raise
+                return
             self._db.execute('BEGIN IMMEDIATE')
             try:
                 yield

@@ -116,6 +116,90 @@ def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,
         assert client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={}).status_code==409
 
 
+def test_failed_discovery_publish_rolls_back_ontology_records_and_remains_retryable(tmp_path,monkeypatch):
+    from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
+
+    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False:[
+        {'id':'merchant','kind':'entity','text':'测试商户','proposed_type':'Merchant','confidence':.93},
+        {'id':'rule','kind':'entity','text':'平台规则','proposed_type':'RuleDocument','confidence':.91},
+        {'id':'edge','kind':'relation','subject_id':'rule','object_id':'merchant','subject':'平台规则',
+         'object':'测试商户','proposed_type':'appliesTo','confidence':.89},
+        {'id':'attr','kind':'attribute','entity_id':'merchant','subject':'测试商户',
+         'proposed_type':'employeeCount','value':20,'confidence':.86,
+         'attribute_evidence':'员工20人','evidence_status':'exact'},
+    ])
+
+    app=create_app(tmp_path/'atomic-discovery.sqlite',HashingEncoder())
+    with TestClient(app) as client:
+        class MilvusSpy:
+            def __init__(self):self.upserts=[]
+            def upsert(self,rows,flush=False):self.upserts.append([row['id'] for row in rows])
+            def delete(self,*args,**kwargs):pass
+        milvus=MilvusSpy()
+        project=client.post('/api/projects',json={
+            'name':'原子发布','use_default_ontology':False,'ontology_mode':'discovery'}).json()
+        pid=project['id'];base=f'/api/projects/{pid}'
+        client.post(base+'/documents',json={'title':'原文','text':'平台规则适用于测试商户，员工20人。',
+            'extraction_mode':'discovery','extract_attributes':True,'resolve_entities':False})
+        draft=client.post(base+'/ontology-discovery/drafts',json={'name':'原子本体'}).json()
+        app.state.service.milvus_store=milvus
+        repository=app.state.service.repository
+        original_put=repository._put
+        fail_once={'enabled':True}
+        def fail_attribute_write(project_id,record,expected_version=None,recorded_at=None):
+            if fail_once['enabled'] and record['kind']=='attribute':
+                fail_once['enabled']=False
+                raise RuntimeError('injected attribute write failure')
+            return original_put(project_id,record,expected_version,recorded_at)
+        monkeypatch.setattr(repository,'_put',fail_attribute_write)
+
+        import time
+        failed=client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={}).json()
+        for _ in range(200):
+            failed=client.get('/api/jobs/'+failed['id']).json()
+            if failed['status'] in ('completed','failed','interrupted'):break
+            time.sleep(0.1)
+        assert failed['status']=='failed'
+        assert app.state.service.repository.list_ontologies(pid)==[]
+        assert app.state.service.repository.get_artifact(
+            'ontology_discovery_draft',draft['id'])['status']=='draft'
+        assert not [row for row in app.state.service.repository.current_records(pid)
+            if row['kind'] in ('entity','attribute','relation')]
+        assert milvus.upserts==[]
+
+        original_save_artifact=repository.save_artifact
+        fail_final_save={'enabled':True}
+        def fail_published_draft_save(kind,item):
+            if fail_final_save['enabled'] and item.get('status')=='published':
+                fail_final_save['enabled']=False
+                raise RuntimeError('injected final draft save failure')
+            return original_save_artifact(kind,item)
+        monkeypatch.setattr(repository,'save_artifact',fail_published_draft_save)
+        failed_after_write=client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={}).json()
+        for _ in range(200):
+            failed_after_write=client.get('/api/jobs/'+failed_after_write['id']).json()
+            if failed_after_write['status'] in ('completed','failed','interrupted'):break
+            time.sleep(0.1)
+        assert failed_after_write['status']=='failed'
+        assert repository.list_ontologies(pid)==[]
+        assert repository.get_artifact('ontology_discovery_draft',draft['id'])['status']=='draft'
+        assert not [row for row in repository.current_records(pid)
+            if row['kind'] in ('entity','attribute','relation')]
+        assert milvus.upserts==[]
+
+        retried=client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={})
+        assert retried.status_code==202,retried.text
+        job=retried.json()
+        for _ in range(200):
+            job=client.get('/api/jobs/'+job['id']).json()
+            if job['status'] in ('completed','failed','interrupted'):break
+            time.sleep(0.1)
+        assert job['status']=='completed',job.get('error')
+        assert {key:job['result'][key] for key in ('mapped_entities','mapped_attributes','mapped_relations')}=={
+            'mapped_entities':2,'mapped_attributes':1,'mapped_relations':1}
+        assert len(milvus.upserts)==1
+
+
 def test_legacy_extract_boolean_remains_backward_compatible():
     from knowledge_service.models import Ingest
     assert Ingest(title='a',text='b',extract=False).effective_extraction_mode()=='documents'
