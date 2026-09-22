@@ -123,9 +123,13 @@ def install(app, service):
                     p,draft,draft.get('parent_ontology_id'))
                 for record in records:record['ontology_id']=ontology['id']
                 entity_records=[row for row in records if row['kind']=='entity']
+                attribute_records=[row for row in records if row['kind']=='attribute']
                 relation_records=[row for row in records if row['kind']=='relation']
                 saved=service.write(p,entity_records,relation_constraint_mode='strict') if entity_records else []
                 progress(f'实体写入完成 · {len(saved)} 条',70)
+                if attribute_records:
+                    saved.extend(service.write(p,attribute_records,relation_constraint_mode='strict'))
+                progress(f'属性写入完成 · {len({row["id"] for row in saved if row["kind"]=="attribute"})} 条',80)
                 if relation_records:
                     # 关系优先整批写入：一次 write 内合并向量化、SQLite 落库与 Milvus flush，
                     # 免去逐条 write 重复「全量读当前记录 + 单条编码 + flush」的固定开销。
@@ -141,11 +145,11 @@ def install(app, service):
                                     'kind':'relation','reason':str(exc)})
                             if (i+1)%20==0 or i+1==len(relation_records):
                                 progress(f'关系写入 {i+1}/{len(relation_records)} · 累计通过 {sum(1 for r in saved if r["kind"]=="relation")}',
-                                    70+int(25*(i+1)/max(1,len(relation_records))))
+                                    80+int(15*(i+1)/max(1,len(relation_records))))
                 progress(f'关系写入完成 · 累计通过 {sum(1 for r in saved if r["kind"]=="relation")} 条',95)
                 counts=Counter(row['kind'] for row in saved)
                 published.update(mapped_entities=counts['entity'],mapped_relations=counts['relation'],
-                    mapped_attributes=sum(len(row.get('properties') or {}) for row in saved if row['kind']=='entity'),
+                    mapped_attributes=len({row['id'] for row in saved if row['kind']=='attribute'}),
                     skipped_candidates=skipped,validation=validation,
                     requires_candidate_review=bool(skipped or published.get('excluded_candidate_ids')),
                     requires_controlled_reingest=False)

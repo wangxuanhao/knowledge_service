@@ -35,6 +35,9 @@ def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,
             {'id':'attr','kind':'attribute','entity_id':'merchant','subject':'测试商户',
              'proposed_type':'employeeCount','value':20,'confidence':.86,
              'attribute_evidence':'员工20人','evidence_status':'exact'},
+            {'id':'attr-later','kind':'attribute','entity_id':'merchant','subject':'测试商户',
+             'proposed_type':'employeeCount','value':21,'confidence':.84,
+             'attribute_evidence':'后续增长到21人','evidence_status':'exact'},
         ]
 
     monkeypatch.setattr(SemanticaExtractor,'discover',discover)
@@ -48,13 +51,13 @@ def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,
             'title':'开放原文','text':'平台规则适用于测试商户，员工20人。','extraction_mode':'discovery',
             'extract_attributes':True,'resolve_entities':False})
         assert ingested.status_code==201,ingested.text
-        assert ingested.json()['discovery_candidates']==4
+        assert ingested.json()['discovery_candidates']==5
         rows=client.post(base+'/records/query',json={}).json()['records']
         assert {row['kind'] for row in rows}=={'document','chunk'}
 
         overview=client.get(base+'/ontology-discovery').json()
-        assert overview['candidate_count']==4
-        assert overview['attribute_count']==1
+        assert overview['candidate_count']==5
+        assert overview['attribute_count']==2
         assert overview['entity_types'][0]['name'] in {'Merchant','RuleDocument'}
         assert overview['relation_types']==[{'name':'appliesTo','count':1,'examples':['平台规则 → 测试商户']}]
         assert [x['code'] for x in overview['quality_warnings']]==['relation_language_mismatch']
@@ -69,7 +72,7 @@ def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,
         draft=client.post(base+'/ontology-discovery/drafts',json={'name':'开放领域本体'}).json()
         assert draft['status']=='draft' and draft['generator_backend']=='semantica'
         assert draft['parent_ontology_id'] is None
-        assert len(draft['candidate_snapshot'])==4
+        assert len(draft['candidate_snapshot'])==5
         assert Ontology(draft['turtle']).summary()['classes']
         assert draft['mappings']['entity_types']['Merchant']
         assert draft['mappings']['attributes']['employeeCount']
@@ -91,18 +94,22 @@ def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,
         published=job['result']
         assert published['status']=='published'
         assert published['mapped_entities']==2 and published['mapped_relations']==1
-        assert published['mapped_attributes']==1
+        assert published['mapped_attributes']==2
         assert published['requires_controlled_reingest'] is False
         graph=client.post(base+'/records/query',json={}).json()['records']
-        formal=[row for row in graph if row['kind'] in ('entity','relation')]
-        assert len(formal)==3
+        formal=[row for row in graph if row['kind'] in ('entity','relation','attribute')]
+        assert len(formal)==5
         assert all(row['metadata']['discovery_candidate_id'] for row in formal)
         relation=next(row for row in formal if row['kind']=='relation')
         assert {relation['subject_id'],relation['object_id']}<=set(row['id'] for row in formal)
         merchant=next(row for row in formal if row['kind']=='entity' and row['text']=='测试商户')
-        assert list(merchant['properties'].values())==[20]
+        assert merchant['properties']=={}
+        attributes=[row for row in formal if row['kind']=='attribute']
+        assert {row['value'] for row in attributes}=={20,21}
+        assert {row['subject_id'] for row in attributes}=={merchant['id']}
+        assert len({row['id'] for row in attributes})==2
         overview=client.get(base+'/ontology-discovery').json()
-        assert overview['candidate_status_counts']['materialized']==4
+        assert overview['candidate_status_counts']['materialized']==5
         assert overview['candidate_status_counts']['approved']==0
         ontology=client.get(base+'/ontology').json()
         assert ontology['metadata']['source_draft_id']==draft['id']
@@ -381,16 +388,26 @@ def test_materialization_validation_keeps_invalid_relation_pending():
         @prefix ex: <urn:test:> .
         @prefix owl: <http://www.w3.org/2002/07/owl#> .
         @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
         ex:A a owl:Class . ex:B a owl:Class . ex:C a owl:Class .
         ex:links a owl:ObjectProperty ; rdfs:domain ex:A ; rdfs:range ex:B .
+        ex:count a owl:DatatypeProperty ; rdfs:domain ex:C ; rdfs:range xsd:integer .
     '''
     def entity(identifier,type_iri):
         return {'id':identifier,'kind':'entity','type':type_iri,'text':identifier,'ontology_id':'draft',
             'properties':{},'metadata':{'discovery_candidate_id':'candidate-'+identifier}}
     records=[entity('source','urn:test:C'),entity('target','urn:test:B'),
+        {'id':'valid-count','kind':'attribute','type':'urn:test:count','text':'source count 2',
+         'ontology_id':'draft','subject_id':'source','value':2,
+         'datatype':'http://www.w3.org/2001/XMLSchema#integer',
+         'metadata':{'discovery_candidate_id':'candidate-valid-count'}},
+        {'id':'bad-count','kind':'attribute','type':'urn:test:count','text':'source count two',
+         'ontology_id':'draft','subject_id':'source','value':'two',
+         'datatype':'http://www.w3.org/2001/XMLSchema#string',
+         'metadata':{'discovery_candidate_id':'candidate-bad-count'}},
         {'id':'edge','kind':'relation','type':'urn:test:links','text':'bad edge','ontology_id':'draft',
          'subject_id':'source','object_id':'target','metadata':{'discovery_candidate_id':'candidate-edge'}}]
     accepted,skipped,report=_validated_materialization(turtle,records,[])
-    assert [row['kind'] for row in accepted]==['entity','entity']
-    assert skipped[0]['candidate_id']=='candidate-edge'
-    assert report=={'conforms':True,'accepted_count':2,'skipped_count':1}
+    assert [row['id'] for row in accepted]==['source','target','valid-count']
+    assert {item['candidate_id'] for item in skipped}=={'candidate-bad-count','candidate-edge'}
+    assert report=={'conforms':True,'accepted_count':3,'skipped_count':2}

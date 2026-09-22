@@ -132,6 +132,29 @@ def test_open_discovery_matches_relations_by_text_when_types_differ(monkeypatch)
     assert next(c for c in candidates if c['kind']=='relation')['proposed_type']=='包含'
 
 
+def test_ontology_induction_exposes_stable_attribute_fields_at_entity_top_level(monkeypatch):
+    pytest.importorskip('semantica.ontology')
+    from semantica.ontology import OntologyGenerator
+    from knowledge_service.services.ontology_discovery import _induce
+
+    captured={}
+    original=OntologyGenerator.generate_ontology
+    def capture(self,data,*args,**kwargs):
+        captured['data']=data
+        return original(self,data,*args,**kwargs)
+    monkeypatch.setattr(OntologyGenerator,'generate_ontology',capture)
+
+    _induce('project','属性本体',[
+        {'id':'merchant','kind':'entity','text':'测试商户','proposed_type':'商户'},
+        {'id':'count','kind':'attribute','entity_id':'merchant','proposed_type':'员工数量','value':20},
+    ])
+
+    sample=captured['data']['entities'][0]
+    property_name=next(key for key in sample if key.startswith('AttributeType_'))
+    assert sample[property_name]==20
+    assert sample['properties'][property_name]==20
+
+
 def test_guided_entities_receive_definitions_without_source_contamination(monkeypatch):
     mod=adapter()
     providers=pytest.importorskip('semantica.semantic_extract.providers')

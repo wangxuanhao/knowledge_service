@@ -6,6 +6,7 @@
 from collections import Counter,defaultdict
 from copy import deepcopy
 import hashlib
+import json
 import re
 from urllib.parse import unquote
 from uuid import uuid4
@@ -15,6 +16,7 @@ from rdflib.namespace import OWL,XSD
 
 from ..services.ontology import Ontology, readable_iri_segment
 from ..core.time import utc_now
+from ..utils.attributes import primitive_datatype
 from ..utils.diagnostics import timed
 
 
@@ -57,10 +59,22 @@ def _materialize_candidates(project_id,draft,ontology_id):
         if item.get('kind')!='attribute' or item.get('id') in excluded:continue
         document_key=item.get('document_version_id') or item.get('document_id')
         entity_id=by_document[document_key].get(item.get('entity_id'));attribute=attribute_types.get(item.get('proposed_type'))
-        if entity_id and attribute:
-            record_by_id[entity_id]['properties'][attribute]=item.get('value')
-            record_by_id[entity_id]['metadata']['discovery_candidate_ids'].append(item.get('id'))
-        else:skipped.append({'candidate_id':item.get('id'),'kind':'attribute','reason':'属性或所属实体未通过审核'})
+        if not entity_id or not attribute:
+            skipped.append({'candidate_id':item.get('id'),'kind':'attribute','reason':'属性或所属实体未通过审核'});continue
+        try:datatype=primitive_datatype(item.get('value'))
+        except ValueError as exc:
+            skipped.append({'candidate_id':item.get('id'),'kind':'attribute','reason':str(exc)});continue
+        value_text=json.dumps(item.get('value'),ensure_ascii=False,allow_nan=False,separators=(',',':'))
+        records.append({'id':_formal_id(project_id,item),'kind':'attribute','type':attribute,
+            'text':f"{item.get('subject') or record_by_id[entity_id]['text']} · {item.get('proposed_type')} = {value_text}",
+            'subject_id':entity_id,'value':item.get('value'),'datatype':datatype,
+            'source_id':item.get('document_id'),'ontology_id':ontology_id,
+            'valid_from':item.get('valid_from'),'valid_until':item.get('valid_until'),'properties':{},
+            'metadata':{'discovery_candidate_id':item.get('id'),'discovery_candidate_ids':[item.get('id')],
+                'discovery_draft_id':draft.get('id'),'confidence':item.get('confidence'),
+                'evidence':item.get('attribute_evidence') or item.get('evidence'),
+                'attribute_evidence':item.get('attribute_evidence'),
+                'evidence_status':item.get('evidence_status'),'chunk_id':item.get('chunk_id')}})
     for item in candidates:
         if item.get('kind')!='relation' or item.get('id') in excluded:continue
         document_key=item.get('document_version_id') or item.get('document_id');local=by_document[document_key]
@@ -79,7 +93,7 @@ def _materialize_candidates(project_id,draft,ontology_id):
 
 def _validated_materialization(turtle,records,skipped):
     """发布前只保留符合已审核本体的记录。"""
-    ontology=Ontology(turtle);accepted_entities=[];accepted_relations=[]
+    ontology=Ontology(turtle);accepted_entities=[];accepted_attributes=[];accepted_relations=[]
     for record in (row for row in records if row['kind']=='entity'):
         report=ontology.validate_timeline([*accepted_entities,record],enforce_relationship_constraints=True)
         if report['conforms']:
@@ -87,17 +101,27 @@ def _validated_materialization(turtle,records,skipped):
         skipped.append({'candidate_id':record['metadata']['discovery_candidate_id'],'kind':'entity',
             'reason':report['errors'][0]['message'] if report.get('errors') else '实体未通过本体校验'})
     accepted_entity_ids={row['id'] for row in accepted_entities}
+    for record in (row for row in records if row['kind']=='attribute'):
+        if record.get('subject_id') not in accepted_entity_ids:
+            skipped.append({'candidate_id':record['metadata']['discovery_candidate_id'],'kind':'attribute',
+                'reason':'属性主体实体未通过本体校验'});continue
+        report=ontology.validate_timeline(
+            [*accepted_entities,*accepted_attributes,record],enforce_relationship_constraints=True)
+        if report['conforms']:
+            accepted_attributes.append(record);continue
+        skipped.append({'candidate_id':record['metadata']['discovery_candidate_id'],'kind':'attribute',
+            'reason':report['errors'][0]['message'] if report.get('errors') else '属性未通过本体校验'})
     for record in (row for row in records if row['kind']=='relation'):
         if record.get('subject_id') not in accepted_entity_ids or record.get('object_id') not in accepted_entity_ids:
             skipped.append({'candidate_id':record['metadata']['discovery_candidate_id'],'kind':'relation',
                 'reason':'关系端点实体未通过本体校验'});continue
         report=ontology.validate_timeline(
-            [*accepted_entities,*accepted_relations,record],enforce_relationship_constraints=True)
+            [*accepted_entities,*accepted_attributes,*accepted_relations,record],enforce_relationship_constraints=True)
         if report['conforms']:
             accepted_relations.append(record);continue
         skipped.append({'candidate_id':record['metadata']['discovery_candidate_id'],'kind':'relation',
             'reason':report['errors'][0]['message'] if report.get('errors') else '关系未通过本体校验'})
-    accepted=[*accepted_entities,*accepted_relations]
+    accepted=[*accepted_entities,*accepted_attributes,*accepted_relations]
     return accepted,skipped,{'conforms':True,'accepted_count':len(accepted),'skipped_count':len(skipped)}
 
 
@@ -149,7 +173,7 @@ def _candidate_lifecycle(repository,project_id,candidates,drafts,records=None):
     with timed('候选生命周期', candidates=len(candidates), drafts=len(drafts),
                reused_records=records is not None) as record:
         for record_row in (repository.current_records(project_id, vectors='none') if records is None else records):
-            if record_row['kind'] not in ('entity','relation') or record_row.get('metadata',{}).get('_deleted'):continue
+            if record_row['kind'] not in ('entity','relation','attribute') or record_row.get('metadata',{}).get('_deleted'):continue
             metadata=record_row.get('metadata',{})
             if metadata.get('discovery_candidate_id'):
                 materialized_ids.add(metadata['discovery_candidate_id'])
@@ -321,18 +345,26 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
         {x['proposed_type'] for x in candidates if x['kind']=='entity'}}
     relation_machine={source:_machine_name('RelationType',source) for source in
         {x['proposed_type'] for x in candidates if x['kind']=='relation'}}
-    attribute_machine={source:_machine_name('AttributeType',source) for source in
-        {x['proposed_type'] for x in candidates if x['kind']=='attribute'}}
+    sample_fields={'type','entity_type','name','text','confidence','properties'}
+    attribute_machine={}
+    for source in {x['proposed_type'] for x in candidates if x['kind']=='attribute'}:
+        machine=_machine_name('AttributeType',source)
+        if machine in sample_fields:machine='AttributeType_'+hashlib.sha256(str(source).encode('utf-8')).hexdigest()[:12]
+        attribute_machine[source]=machine
     reverse_entity={value:key for key,value in entity_machine.items()}
     reverse_relation={value:key for key,value in relation_machine.items()}
     reverse_attribute={value:key for key,value in attribute_machine.items()}
     attributes=defaultdict(dict)
     for item in candidates:
         if item['kind']=='attribute':attributes[item.get('entity_id')][attribute_machine[item['proposed_type']]]=item.get('value')
-    entities=[{'type':entity_machine[x['proposed_type']],'entity_type':entity_machine[x['proposed_type']],
-        'name':x['text'],'text':x['text'],
-        'confidence':x.get('confidence',1),'properties':attributes.get(x['id'],{})}
-        for x in candidates if x['kind']=='entity']
+    entities=[]
+    for item in candidates:
+        if item['kind']!='entity':continue
+        properties=attributes.get(item['id'],{})
+        entities.append({'type':entity_machine[item['proposed_type']],
+            'entity_type':entity_machine[item['proposed_type']],
+            'name':item['text'],'text':item['text'],'confidence':item.get('confidence',1),
+            'properties':properties,**properties})
     relationships=[]
     for item in candidates:
         if item['kind']!='relation':continue
