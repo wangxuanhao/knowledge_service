@@ -289,9 +289,12 @@ class FormalFactWriter:
                                         project_id,record,expected_version,ts))
                                 else:
                                     result_records.append(saved)
-                                source = self._source_assertion(operation, original, expected_version or 0, ordinal)
-                                explicit_assertions.append((
-                                    {**source, 'canonical_record_id': canonical_id}, saved['version_id']))
+                                if not policy.get('suppress_auto_assertions'):
+                                    source = self._source_assertion(
+                                        operation, original, expected_version or 0, ordinal)
+                                    explicit_assertions.append((
+                                        {**source, 'canonical_record_id': canonical_id},
+                                        saved['version_id']))
                                 continue
                         if old_key and old_key['fact_key'] != fact_key:
                             self.repository._db.execute(
