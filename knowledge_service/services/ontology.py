@@ -10,6 +10,8 @@ from rdflib import BNode, Graph, Literal, Namespace, RDF, RDFS, URIRef
 from rdflib.collection import Collection
 from rdflib.namespace import OWL, SH, XSD
 
+from ..models import primitive_datatype
+
 DATA = Namespace("urn:knowledge:")
 
 
@@ -162,6 +164,27 @@ class Ontology:
                 issues.append({'endpoint':key,'actual_type':str(actual[key]),'expected_types':[str(x) for x in expected]})
         return issues
 
+    def attribute_max_count_one(self, predicate, subject_type=None):
+        """Whether a matching SHACL property shape declares ``sh:maxCount 1``."""
+        predicate = self.resolve(predicate, self.attributes)
+        actual_types = None
+        if subject_type is not None:
+            actual_types = self.parents(self.resolve(subject_type, self.classes))
+        for shape in self.graph.subjects(SH.path, predicate):
+            maximum = self.graph.value(shape, SH.maxCount)
+            try:
+                if maximum is None or int(maximum) != 1:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            owners = set(self.graph.subjects(SH.property, shape))
+            targets = set(self.graph.objects(shape, SH.targetClass))
+            for owner in owners:
+                targets.update(self.graph.objects(owner, SH.targetClass))
+            if actual_types is None or not targets or targets & actual_types:
+                return True
+        return False
+
     def dataset(self, records):
         graph = Graph()
         for prefix, ns in self.graph.namespaces():
@@ -189,6 +212,18 @@ class Ontology:
                     if isinstance(v, (str, int, float, bool)):
                         graph.add((node, predicate, Literal(v)))
         ids = {r['id'] for r in records if r['kind'] == 'entity'}
+        for r in records:
+            if r['kind'] != 'attribute' or r.get('subject_id') not in ids:
+                continue
+            try:
+                predicate = self.resolve(r.get('type', ''), self.attributes)
+                datatype = primitive_datatype(r.get('value'))
+                if r.get('datatype') != datatype:
+                    continue
+            except ValueError:
+                continue
+            graph.add((DATA[quote(r['subject_id'], safe='')], predicate,
+                       Literal(r['value'], datatype=URIRef(datatype))))
         for r in records:
             if r['kind'] == 'relation' and r.get('subject_id') in ids and r.get('object_id') in ids:
                 try:
@@ -218,6 +253,26 @@ class Ontology:
                                 allowed in self.parents(term) for allowed in expected):
                             raise ValueError(f"{key} 类型 {term} 不满足 {constraint} "
                                 f"中的任何一个：{', '.join(str(value) for value in expected)}")
+                elif r['kind'] == 'attribute':
+                    predicate = self.resolve(r.get('type', ''), self.attributes)
+                    subject = entities.get(r.get('subject_id'))
+                    if not subject:
+                        raise ValueError(f"缺少属性主体：{r.get('subject_id')}")
+                    subject_type = self.resolve(subject.get('type', ''), self.classes)
+                    domains = self.constraint_types(predicate, RDFS.domain)
+                    if domains and not any(
+                            allowed in self.parents(subject_type) for allowed in domains):
+                        raise ValueError(
+                            f"subject_id 类型 {subject_type} 不满足属性 domain 中的任何一个："
+                            f"{', '.join(str(value) for value in domains)}")
+                    datatype = primitive_datatype(r.get('value'))
+                    if r.get('datatype') != datatype:
+                        raise ValueError('属性 datatype 必须与值的原始类型一致')
+                    ranges = self.constraint_types(predicate, RDFS.range)
+                    if ranges and URIRef(datatype) not in ranges and RDFS.Literal not in ranges:
+                        raise ValueError(
+                            f"属性值类型 {datatype} 不满足 range 中的任何一个："
+                            f"{', '.join(str(value) for value in ranges)}")
             except ValueError as exc:
                 errors.append({"record_id": r['id'], "message": str(exc)})
         report = ''

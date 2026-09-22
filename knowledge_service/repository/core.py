@@ -24,6 +24,7 @@ from ..utils.diagnostics import timed, warn_scan
 from ..utils.filters import matches_filter, validate_filter
 from ..utils.ingest_runs import merge_readiness, readiness
 from ..core.time import normalize_time, utc_now
+from ..models import primitive_datatype
 
 
 def _json(value):
@@ -605,12 +606,15 @@ class Repository:
         for cr in counts_rows:
             pid, kind, n = cr['project_id'], cr['kind'], cr['n']
             if pid not in counts_map:
-                counts_map[pid] = {'documents': 0, 'entities': 0, 'relations': 0, 'chunks': 0}
+                counts_map[pid] = {'documents': 0, 'entities': 0, 'relations': 0,
+                                   'attributes': 0, 'chunks': 0}
             key = kind + 's' if kind != 'entity' else 'entities'
             if key in counts_map[pid]:
                 counts_map[pid][key] = n
         return [{**dict(row), 'metadata': json.loads(row['metadata']),
-                 'counts': counts_map.get(row['id'], {'documents': 0, 'entities': 0, 'relations': 0, 'chunks': 0})}
+                 'counts': counts_map.get(row['id'], {'documents': 0, 'entities': 0,
+                                                       'relations': 0, 'attributes': 0,
+                                                       'chunks': 0})}
                 for row in rows]
 
     def _validate_record(self, record):
@@ -619,17 +623,24 @@ class Repository:
         if set(record) & {'version', 'version_id', 'recorded_at', 'superseded_at', 'project_id'}:
             raise ValueError('系统版本字段不能由客户端提供')
         record = json.loads(_json(record))
-        if record.get('kind') not in {'document', 'entity', 'relation', 'chunk'} or not isinstance(record.get('text'), str):
+        if record.get('kind') not in {'document', 'entity', 'relation', 'attribute', 'chunk'} or not isinstance(record.get('text'), str):
             raise ValueError('记录需要受支持的 kind 和字符串文本')
         record.setdefault('id', str(uuid4()))
         if not isinstance(record['id'], str) or not record['id']:
             raise ValueError('记录 ID 必须是非空字符串')
-        for key in ('type', 'source_id', 'subject_id', 'object_id', 'embedding_model', 'ontology_id'):
+        for key in ('type', 'source_id', 'subject_id', 'object_id', 'embedding_model',
+                    'ontology_id', 'datatype'):
             if record.get(key) is not None and not isinstance(record[key], str):
                 raise ValueError(f'{key} 必须是字符串')
         record.setdefault('metadata', {})
         if not isinstance(record['metadata'], dict) or ('properties' in record and not isinstance(record['properties'], dict)):
             raise ValueError('元数据和属性必须是对象')
+        if record['kind'] == 'attribute':
+            if (not record.get('subject_id') or not record.get('type') or
+                    record.get('value') is None or not record.get('datatype')):
+                raise ValueError('属性记录需要 subject_id、type、value 和 datatype')
+            if record['datatype'] != primitive_datatype(record['value']):
+                raise ValueError('属性 datatype 必须与值的原始类型一致')
         for key in ('valid_from', 'valid_until'):
             record[key] = normalize_time(record.get(key))
         if record['valid_from'] and record['valid_until'] and record['valid_from'] >= record['valid_until']:
@@ -833,7 +844,7 @@ class Repository:
         payload，成本与目标类型成正比而非全项目。
         """
         if kinds is not None and (not isinstance(kinds, (list, tuple, set)) or any(
-                k not in {'document', 'entity', 'relation', 'chunk'} for k in kinds)):
+                k not in {'document', 'entity', 'relation', 'attribute', 'chunk'} for k in kinds)):
             raise ValueError('无效的记录类型')
         self.get_project(project_id)
         with timed('当前记录读取', vectors=vectors, kinds=len(kinds) if kinds else 0) as stage:
@@ -894,7 +905,7 @@ class Repository:
         now = utc_now()
         valid_at = normalize_time(valid_at) or now
         known_at = normalize_time(known_at) or now
-        if kinds is not None and (not isinstance(kinds, (list, tuple, set)) or any(k not in {'document', 'entity', 'relation', 'chunk'} for k in kinds)):
+        if kinds is not None and (not isinstance(kinds, (list, tuple, set)) or any(k not in {'document', 'entity', 'relation', 'attribute', 'chunk'} for k in kinds)):
             raise ValueError('无效的记录类型')
         self.get_project(project_id)
         with timed('存储查询', embeddings=include_embeddings,

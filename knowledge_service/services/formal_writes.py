@@ -22,6 +22,16 @@ _SOURCE_METADATA = frozenset({
 })
 
 
+def _deterministic_json(value):
+    return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
+
+
+def _typed_value_identity(record):
+    if record.get('kind') != 'attribute':
+        return None
+    return [record.get('datatype'), _deterministic_json(record.get('value'))]
+
+
 def canonical_relation_key(record):
     required = ('type', 'subject_id', 'object_id')
     if any(not isinstance(record.get(key), str) or not record[key] for key in required):
@@ -30,7 +40,20 @@ def canonical_relation_key(record):
         record['type'], record['subject_id'], record['object_id'],
         record.get('valid_from'), record.get('valid_until'),
     ]
-    encoded = json.dumps(identity, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+    encoded = _deterministic_json(identity).encode('utf-8')
+    return 'fact_' + hashlib.sha256(encoded).hexdigest()
+
+
+def canonical_attribute_key(record):
+    required = ('subject_id', 'type', 'datatype')
+    if (any(not isinstance(record.get(key), str) or not record[key] for key in required)
+            or record.get('value') is None):
+        raise ValueError('规范属性键需要主体、谓词、值和数据类型')
+    identity = [
+        record['subject_id'], record['type'], record['value'], record['datatype'],
+        record.get('valid_from'), record.get('valid_until'),
+    ]
+    encoded = _deterministic_json(identity).encode('utf-8')
     return 'fact_' + hashlib.sha256(encoded).hexdigest()
 
 
@@ -40,7 +63,8 @@ def _manual_assertion_id(namespace, operation, record, expected_version):
         'version': expected_version + 1, 'kind': record['kind'],
         'type': record.get('type'), 'subject_id': record.get('subject_id'),
         'object_id': record.get('object_id'), 'text': record.get('text'),
-    }, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode('utf-8')
+        'typed_value': _typed_value_identity(record),
+    }, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(',', ':')).encode('utf-8')
     return 'ast_manual_' + hashlib.sha256(payload).hexdigest()
 
 
@@ -57,6 +81,9 @@ class FormalFactWriter:
         chunk_id = metadata.get('chunk_id')
         raw_terms = [str(record.get(key, '')) for key in
                      ('subject_id', 'type', 'object_id', 'text')]
+        typed_value = _typed_value_identity(record)
+        if typed_value is not None:
+            raw_terms.extend(typed_value)
         if document_version_id and chunk_id:
             assertion_id = occurrence_id(
                 self.repository.storage_namespace, document_version_id, chunk_id,
@@ -86,7 +113,7 @@ class FormalFactWriter:
     @staticmethod
     def _canonical_record(record):
         canonical = dict(record)
-        if canonical['kind'] in {'entity', 'relation'}:
+        if canonical['kind'] in {'entity', 'relation', 'attribute'}:
             canonical.pop('source_id', None)
             canonical['metadata'] = {
                 key: value for key, value in canonical.get('metadata', {}).items()
@@ -165,7 +192,7 @@ class FormalFactWriter:
                 record = self._canonical_record(original)
                 expected_version = expected.get(record['id'])
                 canonical_id = record['id']
-                if record['kind'] == 'relation':
+                if record['kind'] in {'relation', 'attribute'}:
                     old_key = self.repository._db.execute(
                         '''SELECT fact_key FROM fact_keys
                            WHERE project_id=? AND canonical_record_id=? AND retired_at IS NULL''',
@@ -177,7 +204,8 @@ class FormalFactWriter:
                                    WHERE project_id=? AND canonical_record_id=? AND retired_at IS NULL''',
                                 (utc_now(), project_id, record['id']))
                     else:
-                        fact_key = canonical_relation_key(record)
+                        fact_key = (canonical_relation_key(record) if record['kind'] == 'relation'
+                                    else canonical_attribute_key(record))
                         mapped = self.repository._db.execute(
                             '''SELECT canonical_record_id FROM fact_keys
                                WHERE project_id=? AND fact_key=? AND retired_at IS NULL''',
@@ -189,7 +217,7 @@ class FormalFactWriter:
                                    AND superseded_at IS NULL''',
                                 (project_id, canonical_id)).fetchone()
                             if row is None:
-                                raise RuntimeError('事实键指向不存在的规范关系')
+                                raise RuntimeError('事实键指向不存在的规范记录')
                             if operation == 'merge_rewrite' and expected_version:
                                 winner=min(canonical_id,record['id'])
                                 if old_key:
@@ -258,7 +286,7 @@ class FormalFactWriter:
                 selected_versions[canonical_id] = saved['version_id']
                 if (not policy.get('suppress_auto_assertions') and
                         operation in {'extract','manual_write','approve_review','legacy_import','adopt_discovery'} and
-                        original['kind'] in {'entity', 'relation'} and
+                        original['kind'] in {'entity', 'relation', 'attribute'} and
                         not record.get('metadata', {}).get('_deleted')):
                     source = self._source_assertion(operation, original, expected_version or 0, ordinal)
                     explicit_assertions.append((
@@ -327,22 +355,30 @@ class FormalFactWriter:
                             '来源文档已撤回', 'formal-writer',
                             row['canonical_record_id'])
                 for canonical_id in sorted(affected_canonical):
-                    support = self.repository._db.execute(
-                        '''SELECT COUNT(*) FROM assertions WHERE project_id=?
-                           AND canonical_record_id=? AND status='accepted' ''',
-                        (project_id, canonical_id)).fetchone()[0]
-                    if support:
-                        continue
                     current_row = self.repository._db.execute(
                         '''SELECT * FROM record_versions WHERE project_id=? AND id=?
                            AND superseded_at IS NULL''',
                         (project_id, canonical_id)).fetchone()
                     if current_row is None:
                         continue
+                    support = self.repository._db.execute(
+                        '''SELECT COUNT(DISTINCT assertions.id)
+                           FROM assertions
+                           JOIN record_version_assertions AS support
+                             ON support.project_id=assertions.project_id
+                            AND support.assertion_id=assertions.id
+                            AND support.record_id=assertions.canonical_record_id
+                           WHERE assertions.project_id=?
+                             AND assertions.canonical_record_id=?
+                             AND assertions.status='accepted'
+                             AND support.record_version_id=?''',
+                        (project_id, canonical_id, current_row['version_id'])).fetchone()[0]
+                    if support:
+                        continue
                     current = self.repository._record(current_row)
                     writable = {key: value for key, value in current.items() if key not in {
                         'project_id','version','version_id','recorded_at','superseded_at'}}
-                    if current['kind'] == 'relation':
+                    if current['kind'] in {'relation', 'attribute'}:
                         writable['metadata'] = {**current.get('metadata', {}), '_deleted': True,
                             'unsupported_reason': '最后一个已接受的来源已被撤回'}
                         self.repository._db.execute(

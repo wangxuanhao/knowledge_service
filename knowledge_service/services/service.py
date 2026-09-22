@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import httpx
 
-from ..models import RecordWrite
+from ..models import RecordWrite, primitive_datatype
 from .ontology import Ontology
 from .retrieval import RetrievalEngine
 from ..utils.ingest_runs import readiness
@@ -72,13 +72,38 @@ class KnowledgeService:
                     row[key] = normalize_time(row.get(key))
                 if row['valid_from'] and row['valid_until'] and row['valid_from'] >= row['valid_until']:
                     raise ValueError('业务时间区间必须具有正时长')
-                if row['kind'] in ('entity', 'relation'):
+                is_new = row['id'] not in current
+                if row['kind'] in ('entity', 'relation', 'attribute'):
                     try:
                         ontology_version = self.repository.get_ontology(project_id, row.get('ontology_id'))
                     except KeyError as exc:
-                        raise ValueError('写入实体或关系前，请先保存项目本体') from exc
+                        raise ValueError('写入实体、关系或属性前，请先保存项目本体') from exc
                     row['ontology_id'] = ontology_version['id']
                 prepared.append(row)
+                if row['kind'] == 'entity' and is_new and row.get('properties'):
+                    properties = row['properties']
+                    row['properties'] = {}
+                    from .formal_writes import canonical_attribute_key
+                    for field, value in properties.items():
+                        datatype = primitive_datatype(value)
+                        attribute = {
+                            'kind': 'attribute', 'type': field, 'value': value,
+                            'datatype': datatype, 'subject_id': row['id'],
+                            'text': f"{row['text']} · {field} = {json.dumps(value, ensure_ascii=False, allow_nan=False)}",
+                            'metadata': dict(row.get('metadata', {})), 'properties': {},
+                            'ontology_id': row['ontology_id'],
+                            'valid_from': row.get('valid_from'),
+                            'valid_until': row.get('valid_until'),
+                        }
+                        if row.get('source_id'):
+                            attribute['source_id'] = row['source_id']
+                        attribute['id'] = 'attr_' + canonical_attribute_key(attribute)[len('fact_'):]
+                        if attribute['id'] in ids:
+                            raise ValueError('批次中存在重复 ID')
+                        if attribute['id'] in current:
+                            raise ValueError('版本冲突：请使用修订接口处理已有记录')
+                        ids.add(attribute['id'])
+                        prepared.append(attribute)
             prospective = {**current, **{r['id']: r for r in prepared}}
             prospective = {k:r for k,r in prospective.items() if not r.get('metadata',{}).get('_deleted')}
             for row in prepared:
@@ -93,9 +118,10 @@ class KnowledgeService:
                     row['metadata'] = {**source_metadata, **row['metadata']}
                     row['metadata']['source_version_id'] = source.get('version_id')
             for row in prospective.values():
-                if row['kind'] != 'relation':
+                if row['kind'] not in {'relation', 'attribute'}:
                     continue
-                for key in ('subject_id', 'object_id'):
+                keys = ('subject_id', 'object_id') if row['kind'] == 'relation' else ('subject_id',)
+                for key in keys:
                     endpoint = prospective.get(row.get(key))
                     if not endpoint or endpoint['kind'] != 'entity':
                         raise ValueError(f'缺少实体端点 {row.get(key)}')
@@ -103,16 +129,21 @@ class KnowledgeService:
                         raise ValueError('关系有效区间必须在端点有效区间之内')
                     if endpoint.get('valid_until') and (not row.get('valid_until') or row['valid_until'] > endpoint['valid_until']):
                         raise ValueError('关系有效区间必须在端点有效区间之内')
-            versions = {r.get('ontology_id') for r in prepared if r['kind'] in ('entity', 'relation') and r['id'] in prospective}
+            versions = {r.get('ontology_id') for r in prepared
+                        if r['kind'] in ('entity', 'relation', 'attribute') and r['id'] in prospective}
             # 在每个受影响的本体下重新校验预期图谱；端点类型变更不能静默使关系失效。
             versions |= {r.get('ontology_id') for r in prospective.values() if r['kind'] == 'relation'
                          and (r.get('subject_id') in ids or r.get('object_id') in ids)}
+            versions |= {r.get('ontology_id') for r in prospective.values() if r['kind'] == 'attribute'
+                         and r.get('subject_id') in ids}
             shacl_reviews=[]
             for version in versions:
                 event(f'本体时间一致性校验 · 版本 {version}')
                 ontology = Ontology(self.repository.get_ontology(project_id, version)['turtle'])
                 relevant = [r for r in prospective.values() if r.get('ontology_id') == version]
-                endpoint_ids = {r.get(k) for r in relevant if r['kind'] == 'relation' for k in ('subject_id', 'object_id')}
+                endpoint_ids = {r.get(k) for r in relevant if r['kind'] == 'relation'
+                                for k in ('subject_id', 'object_id')}
+                endpoint_ids |= {r.get('subject_id') for r in relevant if r['kind'] == 'attribute'}
                 relevant_ids = {r['id'] for r in relevant}
                 relevant += [r for r in prospective.values() if r['id'] in endpoint_ids - relevant_ids]
                 report = ontology.validate_timeline(relevant,enforce_relationship_constraints=relation_constraint_mode=='strict')
@@ -206,8 +237,10 @@ class KnowledgeService:
             record['raw'] = len(rows)
             rows = [r for r in rows if not r.get('metadata',{}).get('_deleted') and not r.get('metadata',{}).get('_audit')]
             entity_ids = {r['id'] for r in rows if r['kind'] == 'entity'}
-            rows = [r for r in rows if r['kind'] != 'relation' or
-                    (r.get('subject_id') in entity_ids and r.get('object_id') in entity_ids)]
+            rows = [r for r in rows if (
+                r['kind'] != 'relation' or
+                (r.get('subject_id') in entity_ids and r.get('object_id') in entity_ids)
+            ) and (r['kind'] != 'attribute' or r.get('subject_id') in entity_ids)]
             record['live'] = len(rows)
             kinds = scope.get('kinds')
             result = [r for r in rows if kinds is None or r['kind'] in kinds]

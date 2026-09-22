@@ -1,9 +1,26 @@
+import math
 from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Request(BaseModel):
     model_config = ConfigDict(extra='forbid')
+
+
+_XSD = 'http://www.w3.org/2001/XMLSchema#'
+
+
+def primitive_datatype(value: str | bool | int | float) -> str:
+    """Return the one canonical XSD datatype for a supported primitive value."""
+    if type(value) is str:
+        return _XSD + 'string'
+    if type(value) is bool:
+        return _XSD + 'boolean'
+    if type(value) is int:
+        return _XSD + 'integer'
+    if type(value) is float and math.isfinite(value):
+        return _XSD + 'double'
+    raise ValueError('属性值必须是字符串、布尔值、整数或有限浮点数')
 
 
 class ProjectCreate(Request):
@@ -19,7 +36,7 @@ class ProjectUpdate(Request):
 
 class RecordWrite(Request):
     id: str | None = Field(default=None, min_length=1, max_length=200)
-    kind: Literal['document', 'entity', 'relation', 'chunk']
+    kind: Literal['document', 'entity', 'relation', 'attribute', 'chunk']
     text: str = Field(min_length=1, max_length=1_000_000)
     type: str = ''
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -27,9 +44,21 @@ class RecordWrite(Request):
     source_id: str | None = None
     subject_id: str | None = None
     object_id: str | None = None
+    value: str | bool | int | float | None = None
+    datatype: str | None = None
     ontology_id: str | None = None
     valid_from: str | None = None
     valid_until: str | None = None
+
+    @model_validator(mode='after')
+    def check_attribute(self):
+        if self.kind != 'attribute':
+            return self
+        if not self.subject_id or not self.type or self.value is None or not self.datatype:
+            raise ValueError('属性记录需要 subject_id、type、value 和 datatype')
+        if self.datatype != primitive_datatype(self.value):
+            raise ValueError('属性 datatype 必须与值的原始类型一致')
+        return self
 
 
 class Revision(Request):
@@ -46,7 +75,7 @@ class Scope(Request):
     valid_at: str | None = None
     known_at: str | None = None
     include_unknown: bool = True
-    kinds: list[Literal['document', 'entity', 'relation', 'chunk']] | None = None
+    kinds: list[Literal['document', 'entity', 'relation', 'attribute', 'chunk']] | None = None
 
 
 class Search(Scope):

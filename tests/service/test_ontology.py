@@ -1,5 +1,7 @@
 import pytest
 from pathlib import Path
+from rdflib import Literal, URIRef
+from rdflib.namespace import XSD
 
 from knowledge_service.services.ontology import Ontology
 
@@ -19,6 +21,32 @@ def test_ontology_accepts_subclass_and_rejects_wrong_relation():
                dict(id='a', kind='relation', type='appliesTo', subject_id='r', object_id='m')]
     assert ontology.validate(records)['conforms']
     records[-1]['subject_id'] = 'm'
+    assert not ontology.validate(records)['conforms']
+
+
+def test_ontology_validates_attribute_domain_range_and_emits_typed_literal():
+    ttl = TTL + '''@prefix sh: <http://www.w3.org/ns/shacl#> .
+    @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+    ex:employeeCount a owl:DatatypeProperty; rdfs:domain ex:Merchant; rdfs:range xsd:integer .
+    ex:MerchantShape a sh:NodeShape; sh:targetClass ex:Merchant;
+      sh:property [sh:path ex:employeeCount; sh:maxCount 1; sh:datatype xsd:integer] .'''
+    ontology = Ontology(ttl)
+    records = [
+        dict(id='merchant', kind='entity', type='Merchant', text='商户'),
+        dict(id='headcount', kind='attribute', type='employeeCount', text='员工数 20',
+             subject_id='merchant', value=20,
+             datatype='http://www.w3.org/2001/XMLSchema#integer'),
+    ]
+
+    assert ontology.validate(records)['conforms']
+    assert ontology.attribute_max_count_one('employeeCount', 'Merchant')
+    assert (URIRef('urn:knowledge:merchant'), URIRef('https://example.org/employeeCount'),
+            Literal(20, datatype=XSD.integer)) in ontology.dataset(records)
+
+    records[0]['type'] = 'Rule'
+    assert not ontology.validate(records)['conforms']
+    records[0]['type'] = 'Merchant'
+    records[1]['datatype'] = 'http://www.w3.org/2001/XMLSchema#string'
     assert not ontology.validate(records)['conforms']
 
 

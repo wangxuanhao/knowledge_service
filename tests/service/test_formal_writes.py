@@ -15,9 +15,83 @@ def _system(tmp_path):
     project_id = repo.create_project('正式图谱')['id']
     ttl = ('@prefix ex: <http://ex/> . '
            '@prefix owl: <http://www.w3.org/2002/07/owl#> . '
-           'ex:Person a owl:Class . ex:knows a owl:ObjectProperty .')
+           '@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> . '
+           '@prefix xsd: <http://www.w3.org/2001/XMLSchema#> . '
+           'ex:Person a owl:Class . ex:knows a owl:ObjectProperty . '
+           'ex:age a owl:DatatypeProperty; rdfs:domain ex:Person; rdfs:range xsd:integer .')
     repo.save_ontology(project_id, ttl, Ontology(ttl).summary())
     return repo, service, project_id
+
+
+def test_entity_property_becomes_supported_attribute_and_same_fact_reuses_it(tmp_path):
+    repo, service, project_id = _system(tmp_path)
+    first_source = repo.put_record(
+        project_id, {'id': 'doc-1', 'kind': 'document', 'text': '张三今年 20 岁'})
+    second_source = repo.put_record(
+        project_id, {'id': 'doc-2', 'kind': 'document', 'text': '年龄资料也记载为 20'})
+
+    created = service.write(project_id, [{
+        'id': 'person', 'kind': 'entity', 'type': 'Person', 'text': '张三',
+        'properties': {'age': 20}, 'source_id': 'doc-1',
+        'metadata': {'chunk_id': 'chunk-1'},
+    }])
+    attribute = next(row for row in created if row['kind'] == 'attribute')
+    assert next(row for row in created if row['kind'] == 'entity')['properties'] == {}
+    assert attribute['value'] == 20
+    assert attribute['datatype'] == 'http://www.w3.org/2001/XMLSchema#integer'
+    assert attribute['subject_id'] == 'person'
+    assert 'source_id' not in attribute
+    assert 'chunk_id' not in attribute['metadata']
+
+    replay = service.write(project_id, [{
+        'id': 'duplicate-age', 'kind': 'attribute', 'type': 'age',
+        'text': '年龄资料也记载为 20', 'subject_id': 'person', 'value': 20,
+        'datatype': 'http://www.w3.org/2001/XMLSchema#integer', 'source_id': 'doc-2',
+        'metadata': {'chunk_id': 'chunk-2'},
+    }])
+
+    assert replay[0]['id'] == attribute['id']
+    current = [row for row in repo.current_records(project_id) if row['kind'] == 'attribute']
+    assert [row['id'] for row in current] == [attribute['id']]
+    support = repo.list_assertions(
+        project_id, status='accepted', canonical_record_id=attribute['id'])
+    assert len(support) == 2
+    assert {row['document_version_id'] for row in support} == {
+        first_source['version_id'], second_source['version_id']}
+    assert repo.list_fact_keys(project_id)[0]['canonical_record_id'] == attribute['id']
+
+
+def test_attribute_retraction_counts_support_for_current_version_only(tmp_path):
+    repo, service, project_id = _system(tmp_path)
+    service.write(project_id, [
+        {'id': 'person', 'kind': 'entity', 'type': 'Person', 'text': '张三'}])
+    source_20 = repo.put_record(
+        project_id, {'id': 'doc-20', 'kind': 'document', 'text': '年龄 20'})
+    source_21 = repo.put_record(
+        project_id, {'id': 'doc-21', 'kind': 'document', 'text': '年龄 21'})
+    datatype = 'http://www.w3.org/2001/XMLSchema#integer'
+    first = service.write(project_id, [{
+        'id': 'age-fact', 'kind': 'attribute', 'type': 'age', 'text': '年龄',
+        'subject_id': 'person', 'value': 20, 'datatype': datatype,
+        'source_id': 'doc-20', 'metadata': {'chunk_id': 'age'},
+    }])[0]
+    service.write(project_id, [{
+        'id': 'age-fact', 'kind': 'attribute', 'type': 'age', 'text': '年龄',
+        'subject_id': 'person', 'value': 21, 'datatype': datatype,
+        'source_id': 'doc-21', 'metadata': {'chunk_id': 'age'},
+    }], expected_versions={'age-fact': first['version']})
+
+    service.write(project_id, [{
+        'id': 'doc-21', 'kind': 'document', 'text': source_21['text'],
+        'metadata': {'_deleted': True},
+    }], expected_versions={'doc-21': source_21['version']}, operation='retract_source')
+
+    current = repo.get_record(project_id, 'age-fact')
+    assert current['value'] == 21
+    assert current['metadata']['_deleted'] is True
+    old_support = repo.list_assertions(
+        project_id, status='accepted', canonical_record_id='age-fact')
+    assert [row['document_version_id'] for row in old_support] == [source_20['version_id']]
 
 
 def test_same_relation_key_reuses_immutable_fact_and_adds_support(tmp_path):
