@@ -132,10 +132,11 @@ def test_failed_discovery_publish_rolls_back_ontology_records_and_remains_retrya
     app=create_app(tmp_path/'atomic-discovery.sqlite',HashingEncoder())
     with TestClient(app) as client:
         class MilvusSpy:
-            def __init__(self):self.upserts=[]
-            def upsert(self,rows,flush=False):self.upserts.append([row['id'] for row in rows])
+            def __init__(self,lock):self.lock=lock;self.upserts=[];self.lock_owned=[]
+            def upsert(self,rows,flush=False):
+                self.upserts.append([row['id'] for row in rows]);self.lock_owned.append(self.lock._is_owned())
             def delete(self,*args,**kwargs):pass
-        milvus=MilvusSpy()
+        milvus=MilvusSpy(app.state.service.lock)
         project=client.post('/api/projects',json={
             'name':'原子发布','use_default_ontology':False,'ontology_mode':'discovery'}).json()
         pid=project['id'];base=f'/api/projects/{pid}'
@@ -198,6 +199,7 @@ def test_failed_discovery_publish_rolls_back_ontology_records_and_remains_retrya
         assert {key:job['result'][key] for key in ('mapped_entities','mapped_attributes','mapped_relations')}=={
             'mapped_entities':2,'mapped_attributes':1,'mapped_relations':1}
         assert len(milvus.upserts)==1
+        assert milvus.lock_owned==[True]
 
 
 def test_legacy_extract_boolean_remains_backward_compatible():

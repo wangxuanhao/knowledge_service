@@ -118,21 +118,22 @@ def install(app, service):
             progress(f'候选物化完成 · {len(provisional_records)} 条待校验',15)
             records,skipped,validation=_validated_materialization(draft['turtle'],provisional_records,skipped)
             progress(f'本体校验完成 · {len(records)} 条通过 · {len(skipped)} 条跳过',40)
-            with service.lock,service.repository._transaction():
-                ontology,published=service.repository.publish_ontology_draft(
-                    p,draft,draft.get('parent_ontology_id'))
-                for record in records:record['ontology_id']=ontology['id']
-                saved=service.write(p,records,relation_constraint_mode='strict',
-                    defer_milvus_sync=True) if records else []
-                progress(f'正式知识写入完成 · {len(saved)} 条',90)
-                counts=Counter(row['kind'] for row in saved)
-                published.update(mapped_entities=counts['entity'],mapped_relations=counts['relation'],
-                    mapped_attributes=len({row['id'] for row in saved if row['kind']=='attribute'}),
-                    skipped_candidates=skipped,validation=validation,
-                    requires_candidate_review=bool(skipped or published.get('excluded_candidate_ids')),
-                    requires_controlled_reingest=False)
-                service.repository.save_artifact('ontology_discovery_draft',published)
-            service._sync_milvus(p,saved)
+            with service.lock:
+                with service.repository._transaction():
+                    ontology,published=service.repository.publish_ontology_draft(
+                        p,draft,draft.get('parent_ontology_id'))
+                    for record in records:record['ontology_id']=ontology['id']
+                    saved=service.write(p,records,relation_constraint_mode='strict',
+                        defer_milvus_sync=True) if records else []
+                    progress(f'正式知识写入完成 · {len(saved)} 条',90)
+                    counts=Counter(row['kind'] for row in saved)
+                    published.update(mapped_entities=counts['entity'],mapped_relations=counts['relation'],
+                        mapped_attributes=len({row['id'] for row in saved if row['kind']=='attribute'}),
+                        skipped_candidates=skipped,validation=validation,
+                        requires_candidate_review=bool(skipped or published.get('excluded_candidate_ids')),
+                        requires_controlled_reingest=False)
+                    service.repository.save_artifact('ontology_discovery_draft',published)
+                service._sync_milvus(p,saved)
             progress('发布完成 · 正式知识已写入',100)
             return published
         return app.state.jobs.submit('ontology_publish', run, p)
