@@ -52,10 +52,10 @@
 
 具体改动：
 
-- `RecordWrite.kind`、`Scope.kinds` 和仓储校验增加 `attribute`；
+- `RecordWrite.kind`、`Scope.kinds` 和仓储校验增加 `attribute`，`RecordWrite` 同时增加并校验 `value`、`datatype`；
 - `FormalFactWriter` 增加属性事实键、自动来源断言、版本支撑和来源撤回；
 - 属性批准不再修改实体 `properties`，因此不会为了一个属性创建整个实体的新版本；
-- 旧实体上已有的 `properties` 暂时只保留兼容读取，不做大规模历史迁移。
+- 旧实体上已有的 `properties` 暂时只保留兼容读取，不做大规模历史迁移；新的实体写入若携带非空标量 `properties`，由 `KnowledgeService.write` 在同一批次转换为 attribute 记录，并以空 `properties` 保存实体，避免继续产生第二条权威写入路径；非标量值直接拒绝。
 
 ## 审核与本体发现
 
@@ -63,7 +63,7 @@
 
 - 通过属性候选时创建正式 attribute 记录；
 - 相同事实把候选 assertion 接到已有记录版本；
-- 单值冲突把候选标记为 `contradicting`，由审核动作决定保留旧值或接受新值；
+- 单值冲突把候选标记为 `contradicting`，由审核动作决定保留旧值或接受新值；接受新值时，把冲突旧事实的全部 accepted 支撑 assertion 转为 `superseded`，最后支撑消失后为旧属性记录写 tombstone，再接受新事实；
 - 审核原因、actor、证据和 assertion event 继续使用现有账本。
 
 开放本体发现：
