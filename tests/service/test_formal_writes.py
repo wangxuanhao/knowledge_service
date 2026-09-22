@@ -1,8 +1,11 @@
 import sqlite3
+from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 
 from knowledge_service.integrations.embeddings import HashingEncoder
+from knowledge_service.models import RecordWrite
 from knowledge_service.services.formal_writes import FormalFactWriter
 from knowledge_service.services.ontology import Ontology
 from knowledge_service.repository import Repository
@@ -21,6 +24,30 @@ def _system(tmp_path):
            'ex:age a owl:DatatypeProperty; rdfs:domain ex:Person; rdfs:range xsd:integer .')
     repo.save_ontology(project_id, ttl, Ontology(ttl).summary())
     return repo, service, project_id
+
+
+@pytest.mark.parametrize(('value', 'datatype'), [
+    (b'20', 'http://www.w3.org/2001/XMLSchema#string'),
+    (Decimal('20.5'), 'http://www.w3.org/2001/XMLSchema#double'),
+])
+def test_attribute_value_rejects_non_native_scalars_before_coercion(value, datatype):
+    with pytest.raises(ValidationError):
+        RecordWrite.model_validate({
+            'kind': 'attribute', 'type': 'age', 'text': '年龄', 'subject_id': 'person',
+            'value': value, 'datatype': datatype,
+        })
+
+
+def test_attribute_value_preserves_bool_int_and_finite_float_types():
+    base = {'kind': 'attribute', 'type': 'age', 'text': '年龄', 'subject_id': 'person'}
+    cases = [
+        (True, 'http://www.w3.org/2001/XMLSchema#boolean', bool),
+        (20, 'http://www.w3.org/2001/XMLSchema#integer', int),
+        (20.5, 'http://www.w3.org/2001/XMLSchema#double', float),
+    ]
+    for value, datatype, expected_type in cases:
+        record = RecordWrite.model_validate({**base, 'value': value, 'datatype': datatype})
+        assert type(record.value) is expected_type
 
 
 def test_entity_property_becomes_supported_attribute_and_same_fact_reuses_it(tmp_path):

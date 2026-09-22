@@ -1,6 +1,6 @@
 import math
 from typing import Any, Literal
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Request(BaseModel):
@@ -49,6 +49,13 @@ class RecordWrite(Request):
     ontology_id: str | None = None
     valid_from: str | None = None
     valid_until: str | None = None
+
+    @field_validator('value', mode='before')
+    @classmethod
+    def check_native_attribute_value(cls, value):
+        if value is not None and type(value) not in (str, bool, int, float):
+            raise ValueError('属性值必须使用原生字符串、布尔值、整数或浮点数')
+        return value
 
     @model_validator(mode='after')
     def check_attribute(self):
