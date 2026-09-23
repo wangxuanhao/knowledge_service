@@ -32,9 +32,10 @@ Modify:
 - `knowledge_service/repository/__init__.py` — export migrations used by upgrade tests.
 - `knowledge_service/repository/provenance_store.py` — ontology activity/edge kinds and append helpers.
 - `knowledge_service/services/ontology.py` — active/deprecated summaries and common hierarchy queries.
+- `knowledge_service/services/formal_writes.py` — reject new formal facts that use deprecated classes/properties.
 - `knowledge_service/services/ontology_discovery.py` — Semantica hierarchy adapter and discovery-to-draft conversion.
 - `knowledge_service/services/ontology_changes.py` — candidate proposal compatibility adapter.
-- `knowledge_service/services/legacy_import.py` — existing-project import creates a draft; trusted empty-project restore remains explicit.
+- `knowledge_service/services/legacy_import.py` — existing-project import creates a draft; trusted empty-project restore and full-governance import use explicit ordered paths.
 - `knowledge_service/api/__init__.py` — install the new router.
 - `knowledge_service/api/workspace.py` — old structured writes delegate to drafts.
 - `knowledge_service/api/knowledge.py` — old Turtle POST delegates to Turtle diff draft.
@@ -43,6 +44,7 @@ Modify:
 - `knowledge_service/api/projects.py` — trusted bootstrap calls the private insert primitive with provenance.
 - `knowledge_service/web/index.html` — one “本体工作台” entry and versioned assets.
 - `knowledge_service/web/workspace.js` — route current ontology screens into the unified workbench.
+- `knowledge_service/web/candidate-mindmap.js` and `.css` — reuse the existing candidate graph inside the discovery stage instead of duplicating it.
 - `tests/service/test_frontend_static_contract.py` — asset/order/no-duplicate-entry contract.
 - `tests/service/test_ontology_maintenance.py`, `test_ontology_discovery.py`, `test_ontology_change_proposals.py` — compatibility behavior now returns drafts and publishes through governance.
 - `tests/service/test_project_management.py`, `test_provenance_repository.py` — lifecycle/migration expectations.
@@ -78,6 +80,7 @@ Extend the existing four failing tests so they wait on the intended UI state rat
 Run:
 
 ```powershell
+Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue
 .\.venv\Scripts\python.exe -m pytest tests/service/test_frontend_retrieval_flow.py::test_search_updates_only_the_result_rail_and_ignores_graph_keys tests/service/test_frontend_retrieval_flow.py::test_project_and_scope_changes_clear_isolated_state tests/service/test_frontend_retrieval_flow.py::test_knowledge_chat_keyboard_ime_and_scope_change tests/service/test_repository.py::test_correction_replaces_interval_but_history_retains_original -vv
 ```
 
@@ -113,7 +116,7 @@ Assert migration 13 creates `ontology_drafts`, `ontology_operations`, `ontology_
 
 - [ ] **Step 2: Run the new repository tests and verify schema/method failures.**
 
-Run: `.\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_draft_repository.py -vv`
+Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_draft_repository.py -vv`
 
 Expected: FAIL because migration 13 and `OntologyDraftStore` do not exist.
 
@@ -151,11 +154,15 @@ Expose `create`, `get`, `list`, `append_operations`, `compare_and_set`, `append_
 
 Instantiate `self._ontology_drafts`; include drafts/operations/decisions in full export, explicit project deletion counts/order, and migration exports. Mark light projection exports with `governance_history_included=false` if applicable.
 
-- [ ] **Step 6: Run repository, migration, project deletion and export tests.**
+- [ ] **Step 6: Implement and test ordered full-governance restore.**
+
+Restore in dependency order: project → immutable ontology versions → drafts → operations → decisions → publish requests → provenance activities/edges. Verify stable IDs, base/published ontology references and decision/operation fingerprints survive export/import. Reject partial “full” backups that declare `governance_history_included=true` but omit a required section.
+
+- [ ] **Step 7: Run repository, migration, project deletion and export/import tests.**
 
 Expected: all selected tests pass, including dual-connection CAS.
 
-- [ ] **Step 7: Commit.**
+- [ ] **Step 8: Commit.**
 
 ```powershell
 git add knowledge_service/repository tests/service/test_ontology_draft_repository.py tests/service/test_project_management.py
@@ -175,7 +182,7 @@ Cover 0..N parents, cycle/self/duplicate rejection, per-language annotation add/
 
 - [ ] **Step 2: Add retirement/restore invariant tests.**
 
-Assert retirement adds `owl:deprecated true` without deleting declarations/labels/edges; restore removes only that marker; `dcterms:isReplacedBy` is structured; active subclass/domain/range/SHACL dependencies on deprecated terms produce the exact error/warning matrix.
+Assert retirement adds `owl:deprecated true` without deleting declarations/labels/edges; `dcterms:isReplacedBy` is structured; active subclass/domain/range/SHACL dependencies on deprecated terms produce the exact error/warning matrix. A restore command must require `source_ontology_id`, load that immutable version, and reconstruct exactly the user-selected annotations, parents, domain/range and datatype before removing the deprecation marker. Assert the preview shows the complete restored definition and its newly reactivated constraint impact.
 
 - [ ] **Step 3: Add canonical Turtle diff tests.**
 
@@ -183,20 +190,24 @@ Assert isomorphic blank-node graphs yield zero operations; supported union/SHACL
 
 - [ ] **Step 4: Run and confirm failures.**
 
-Run: `.\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_operations.py -vv`
+Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_operations.py -vv`
 
 - [ ] **Step 5: Implement normalized operation data and compiler.**
 
-Use stable SHA-256 fingerprints over canonical JSON. Keep all graph mutation in `apply_operations(base_turtle, operations)`. Add `active_only=True` to ontology summaries without hiding deprecated terms from version/history views.
+Use stable SHA-256 fingerprints over canonical JSON. Keep all graph mutation in `apply_operations(base_turtle, operations)`. Resolve restore templates only from the requested immutable `source_ontology_id`; store the selected definition in the operation fingerprint so later source/version drift cannot change it. Add `active_only=True` to ontology summaries without hiding deprecated terms from version/history views.
 
 - [ ] **Step 6: Implement graph validation and risk primitives.**
 
 Return structured `{code,severity,message,operation_ids,term_iris}` issues. Constants: descendants >50, constraints >10, pending candidates >20 => high; formal record impact => high; source discovery/AI/import => minimum medium; warning => minimum medium; restore/retire/advanced patch => high.
 
-- [ ] **Step 7: Run tests and commit.**
+- [ ] **Step 7: Enforce deprecation in formal knowledge writes.**
+
+Add tests to `tests/service/test_formal_writes.py` proving new entity, relation and attribute writes reject deprecated target types/properties by default while historical records bound to older ontology IDs remain readable and valid against their own version. Implement the check in `services/formal_writes.py` through `Ontology.is_active_term`, not through UI filtering.
+
+- [ ] **Step 8: Run tests and commit.**
 
 ```powershell
-git add knowledge_service/services/ontology.py knowledge_service/services/ontology_operations.py tests/service/test_ontology_operations.py
+git add knowledge_service/services/ontology.py knowledge_service/services/ontology_operations.py knowledge_service/services/formal_writes.py tests/service/test_ontology_operations.py tests/service/test_formal_writes.py
 git commit -m "feat: compile governed ontology operations"
 ```
 
@@ -208,7 +219,7 @@ git commit -m "feat: compile governed ontology operations"
 
 - [ ] **Step 1: Write lifecycle tests for create/command/submit.**
 
-Test nullable-base first draft, command CAS, immutable supersession, editing/submitted transitions, source context, preview overlay, and close reason/actor.
+Test nullable-base first draft, command CAS, immutable supersession, editing/submitted transitions, source context, preview overlay, and close reason/actor. For `restore_term`, require `source_ontology_id` plus an explicit field/edge selection, reject missing or cross-project source versions, and preserve the resolved template in the immutable operation.
 
 - [ ] **Step 2: Write decision and validation tests.**
 
@@ -220,7 +231,7 @@ Test `stale_base` after another ontology publishes, `stale_source` after a docum
 
 - [ ] **Step 4: Run and verify service tests fail.**
 
-Run: `.\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_drafts.py -vv`
+Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_drafts.py -vv`
 
 - [ ] **Step 5: Implement the deep service interface.**
 
@@ -246,7 +257,7 @@ git commit -m "feat: add ontology draft lifecycle"
 
 - [ ] **Step 1: Write migration 14 preservation tests.**
 
-Seed migration-12 retrieval/answer rows, run migration 14, and assert rows survive while activity kinds `ontology_draft`/`ontology_publish` and relations `published-from`, `contains-operation`, `proposed-by`, `supported-by`, `based-on` are accepted. Force migration failure and assert rollback.
+Seed migration-12 retrieval/answer rows, including existing `decided-by` edges, run migration 14, and assert rows survive while activity kinds `ontology_draft`/`ontology_publish` and relations `published-from`, `contains-operation`, `decided-by`, `proposed-by`, `supported-by`, `based-on` are accepted. Force migration failure and assert rollback.
 
 - [ ] **Step 2: Write atomic publish and idempotency tests.**
 
@@ -258,7 +269,7 @@ Copy existing rows unchanged into expanded CHECK-constrained tables inside the m
 
 - [ ] **Step 4: Implement one repository publish transaction.**
 
-Recheck base/source/revision and validation fingerprint inside the transaction; insert the ontology through a private `_insert_ontology_version`; persist publish request, draft terminal state, ontology activities and stable refs (`ontology-draft:`, `ontology-operation:`, `ontology-decision:`, `ontology-version:`).
+Recheck base/source/revision and validation fingerprint inside the transaction; insert the ontology through a private `_insert_ontology_version`; persist publish request, draft terminal state, ontology activities and stable refs (`ontology-draft:`, `ontology-operation:`, `ontology-decision:`, `ontology-version:`). For Milvus-backed source changes, persist a fingerprinted pending sync artifact/job in this same transaction; execute it only after commit so a process crash cannot lose the retry record.
 
 - [ ] **Step 5: Restrict direct ontology insertion.**
 
@@ -288,7 +299,7 @@ Cover cursor pagination, draft overlay and HTTP IRI values containing `/` and `#
 
 - [ ] **Step 3: Run and confirm route failures.**
 
-Run: `.\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_draft_api.py -vv`
+Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_draft_api.py -vv`
 
 - [ ] **Step 4: Implement thin Pydantic models/routes.**
 
@@ -352,12 +363,14 @@ git commit -m "feat: route ontology writes through unified governance"
 - Create: `knowledge_service/web/ontology-workbench.js`
 - Modify: `knowledge_service/web/index.html`
 - Modify: `knowledge_service/web/workspace.js`
+- Modify: `knowledge_service/web/candidate-mindmap.js`
+- Modify: `knowledge_service/web/candidate-mindmap.css`
 - Modify: `tests/service/test_frontend_static_contract.py`
 - Modify: `tests/test_web_ui_contract.py`
 
 - [ ] **Step 1: Write static contract failures.**
 
-Assert one visible “本体工作台” entry, versioned CSS/JS loaded after shared tokens, selectors namespaced under `.ontology-workbench`, no inline event handlers, no second formal `ontology-manager.html` entry, and the five lifecycle stage controls.
+Assert one visible “本体工作台” entry, versioned CSS/JS loaded after shared tokens, selectors namespaced under `.ontology-workbench`, no inline event handlers, no second formal `ontology-manager.html` entry, and the five lifecycle stage controls. Assert the discovery stage still exposes statistics, clustering, candidate mind map, source/confidence filters and evidence inspection hooks.
 
 - [ ] **Step 2: Implement semantic shell markup/rendering.**
 
@@ -367,7 +380,11 @@ Use the existing dark-green navigation, light canvas, green primary action and a
 
 State contains project, ontology/draft ids, revision, selected canonical IRI, display path, mode, filters and cursor maps. Render all external strings with DOM text nodes/escaping.
 
-- [ ] **Step 4: Run static tests and commit.**
+- [ ] **Step 4: Embed the existing discovery experience as stage one.**
+
+Move/reuse the current discovery statistics, clustering, candidate mind map, candidate filtering, confidence/source evidence and “generate cumulative draft” controls inside the workbench shell. Preserve existing API calls and test hooks during the transition; generating a draft now selects it and advances to design rather than opening a parallel ontology page.
+
+- [ ] **Step 5: Run static tests and commit.**
 
 ```powershell
 git add knowledge_service/web tests/service/test_frontend_static_contract.py tests/test_web_ui_contract.py
@@ -385,6 +402,8 @@ git commit -m "feat: add unified ontology workbench shell"
 
 Test lazy roots/children loading, virtualized rows, search, repeated IRI reference rows with shared selection, display path plus “N other parents”, draft overlay and no eager full-summary tree build.
 
+Also cover discovery-stage regression: statistics/clusters render, candidate filters narrow the mind map and queue, selecting a candidate reveals source evidence/confidence, and generating a discovery draft carries the same candidate/document refs into design.
+
 - [ ] **Step 2: Write editor behavior tests.**
 
 Test add class/relation/attribute, multiple parent chips, independent domain/range OR chips, datatype, multilingual annotations, retirement dependency preview, restore source-version selection and request-changes adjustment.
@@ -395,7 +414,7 @@ Object mode is default/authoritative. Hierarchy uses paginated expansion and ref
 
 - [ ] **Step 4: Verify responsive and keyboard behavior.**
 
-Run: `.\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_workbench_ui.py -vv`
+Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_workbench_ui.py -vv`
 
 - [ ] **Step 5: Commit.**
 
@@ -472,6 +491,7 @@ git commit -m "docs: complete ontology governance migration"
 - [ ] **Step 1: Run focused backend suites.**
 
 ```powershell
+Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue
 .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_draft_repository.py tests/service/test_ontology_operations.py tests/service/test_ontology_drafts.py tests/service/test_ontology_draft_api.py tests/service/test_ontology_maintenance.py tests/service/test_ontology_discovery.py tests/service/test_ontology_change_proposals.py tests/service/test_provenance_repository.py -q
 ```
 
@@ -480,6 +500,7 @@ Expected: all pass.
 - [ ] **Step 2: Run frontend contracts and browser tests.**
 
 ```powershell
+Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue
 .\.venv\Scripts\python.exe -m pytest tests/service/test_frontend_static_contract.py tests/test_web_ui_contract.py tests/service/test_ontology_workbench_ui.py tests/service/test_ontology_draft_review_ui.py tests/service/test_frontend_retrieval_flow.py -q
 ```
 
@@ -505,6 +526,7 @@ Expected: no failures; skipped tests must be explained by optional integrations 
 - [ ] **Step 5: Run syntax/diff checks and inspect the page.**
 
 ```powershell
+Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue
 .\.venv\Scripts\python.exe -m compileall -q knowledge_service
 git diff --check
 git status --short
