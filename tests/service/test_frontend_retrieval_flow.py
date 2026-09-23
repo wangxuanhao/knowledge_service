@@ -228,8 +228,21 @@ def test_project_and_scope_changes_clear_isolated_state(workbench):
 
     # Scope change clears graph, selection and details but keeps the result rail.
     workbench.paths.clear()
+    page.evaluate("""() => {
+      document.getElementById('apply-scope').addEventListener('click', () => {
+        window.__scopeClearSnapshot = {
+          hits: document.getElementById('hits').innerHTML,
+          summary: document.getElementById('graph-summary').textContent,
+          detail: document.getElementById('graph-detail').innerHTML,
+          node: document.getElementById('graph-node').value,
+        };
+      }, {once: true});
+    }""")
     with page.expect_response(lambda response: response.url.endswith('/metadata/facets')):
         page.click('#apply-scope')
+    scope_cleared = page.evaluate("window.__scopeClearSnapshot")
+    assert scope_cleared == {
+        'hits': hits_after_graph, 'summary': INITIAL_GRAPH_HINT, 'detail': '', 'node': ''}
     page.wait_for_function(
         "document.querySelector('#graph-summary').textContent === "
         f"{json.dumps(INITIAL_GRAPH_HINT)}")
@@ -246,7 +259,20 @@ def test_project_and_scope_changes_clear_isolated_state(workbench):
         "document.querySelectorAll('#graph-timeline .tl-points option').length > 1")
     hits_before_time = page.locator('#hits').inner_html()
     workbench.paths.clear()
+    page.evaluate("""() => {
+      document.querySelector('#graph-timeline .tl-prev').addEventListener('click', () => {
+        window.__timeClearSnapshot = {
+          hits: document.getElementById('hits').innerHTML,
+          summary: document.getElementById('graph-summary').textContent,
+          detail: document.getElementById('graph-detail').innerHTML,
+          node: document.getElementById('graph-node').value,
+        };
+      }, {once: true});
+    }""")
     page.click('#graph-timeline .tl-prev')
+    time_cleared = page.evaluate("window.__timeClearSnapshot")
+    assert time_cleared == {
+        'hits': hits_before_time, 'summary': INITIAL_GRAPH_HINT, 'detail': '', 'node': ''}
     page.wait_for_function(
         "document.querySelector('#graph-summary').textContent === "
         f"{json.dumps(INITIAL_GRAPH_HINT)}")

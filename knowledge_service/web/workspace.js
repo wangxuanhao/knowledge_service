@@ -130,7 +130,7 @@
   function applyTimelinePoint(value){
     if(get('known-at').value===value){renderTimelinePoints();return;}
     get('known-at').value=value;renderTimelinePoints();
-    clearGraphWorkspace({preserveSearchResults:true});
+    window.clearGraphWorkspace({preserveSearchResults:true});
   }
   function moveTimeline(direction){
     const values=[...uiTimeline.events.map(event=>event.known_at),''],currentValue=get('graph-timeline').querySelector('.tl-points').value,index=values.indexOf(currentValue),next=Math.max(0,Math.min(values.length-1,(index<0?values.length-1:index)+direction));applyTimelinePoint(values[next]);
@@ -305,14 +305,14 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
       graphRequests.release(ticket);
     }
   };
-  function clearGraphWorkspace({preserveSearchResults=false}={}){
+  window.clearGraphWorkspace=({preserveSearchResults=false}={})=>{
     graphRequests.invalidate();
-    ui.graph=null;wb.nodes.clear();wb.chart?.clear();
+    wb.epoch++;ui.graph=null;wb.nodes.clear();wb.chart?.clear();
     get('graph-node').value='';get('graph-entity-choice').value='';get('graph-detail').replaceChildren();
     get('graph-summary').textContent='从左侧检索结果选择实体或关系';
     get('graph-type-buttons')?.remove();get('graph-timeline')?.remove();
     if(!preserveSearchResults){get('hits').replaceChildren();get('search-summary').textContent='';}
-  }
+  };
   act('search',runSearch);act('draw-graph',()=>drawGraph(null,Number(get('graph-hops').value)));
   // 「展开邻域」与「绘制图谱」共用同一份渲染器：绑定从 workbench.js 移到这里，
   // 同一个按钮不再被两个文件各绑一次。没选中实体时给出明确提示，而不是等后端返回空图。
@@ -323,10 +323,10 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
     if(!await window.drawGraph(id,hops))return;
     status('已展开 '+hops+' 跳邻域');
   });
-  act('apply-scope',async()=>{details.open=false;clearGraphWorkspace({preserveSearchResults:true});window.clearKnowledgeChat?.({notify:true});await Promise.all([options(),discoverMetadata()]);if(!get('tab-mindmap').classList.contains('hidden')&&get('mindmap-root').value)await get('draw-mindmap').onclick();});
+  act('apply-scope',async()=>{details.open=false;window.clearGraphWorkspace({preserveSearchResults:true});window.clearKnowledgeChat?.({notify:true});await Promise.all([options(),discoverMetadata()]);if(!get('tab-mindmap').classList.contains('hidden')&&get('mindmap-root').value)await get('draw-mindmap').onclick();});
   const previousAddFilter=get('add-filter')?.onclick;
   if(previousAddFilter)get('add-filter').onclick=async()=>{await previousAddFilter();if(!get('status').classList.contains('error'))await get('apply-scope').onclick();};
-  act('reset-scope',async()=>{for(const id of ['known-at','filters','type-scope','predicate-scope'])get(id).value='';cb.conditions=[];renderCB();resetTimeline();clearGraphWorkspace({preserveSearchResults:true});window.clearKnowledgeChat?.({notify:true});await options();});
+  act('reset-scope',async()=>{for(const id of ['known-at','filters','type-scope','predicate-scope'])get(id).value='';cb.conditions=[];renderCB();resetTimeline();window.clearGraphWorkspace({preserveSearchResults:true});window.clearKnowledgeChat?.({notify:true});await options();});
   act('build-index',async()=>{watch(await api(endpoint('/indexes/rebuild'),{}));status('索引任务已提交；可继续浏览图谱或使用关键词检索。');});
   act('graph-reset-view',async()=>{wb.chart?.dispatchAction({type:'restore'});wb.chart?.resize();});
   get('detail-drawer-close').onclick=()=>get('graph-detail').replaceChildren();
@@ -334,7 +334,7 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
   // Ignore out-of-order project responses, and load graph immediately on selection.
   const priorChange=get('project').onchange;
   get('project').onchange=()=>{
-    priorChange();ui.request++;ui.options=[];choices();ui.ontology=null;resetTimeline();clearGraphWorkspace();get('ontology-browser')?.replaceChildren();
+    priorChange();ui.request++;ui.options=[];choices();ui.ontology=null;resetTimeline();window.clearGraphWorkspace();get('ontology-browser')?.replaceChildren();
     clearTimeout(entityTimer);get('graph-entity-filter').value='';cb.facets=[];cb.conditions=[];renderCB();get('metadata-field-choice').innerHTML='<option value="">读取项目字段…</option>';get('metadata-value-choice').innerHTML='<option value="">先选择字段</option>';get('metadata-facet-summary').textContent='';
     get('project').title=get('project').selectedOptions[0]?.textContent||'';
     get('type-scope').value='';get('predicate-scope').value='';

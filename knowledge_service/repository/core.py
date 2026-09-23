@@ -661,7 +661,24 @@ class Repository:
             raise ValueError('嵌入向量必须是非空有限数值列表')
         return record
 
-    def _put(self, project_id, record, expected_version=None, recorded_at=None):
+    @staticmethod
+    def _next_recorded_at(recorded_at):
+        return normalize_time(
+            datetime.fromisoformat(recorded_at.replace('Z', '+00:00'))
+            + timedelta(microseconds=1))
+
+    def _operation_recorded_at(self, project_id, recorded_at=None,
+                               coalesce_recorded_at=False):
+        now = normalize_time(recorded_at) if recorded_at is not None else utc_now()
+        latest = self._db.execute(
+            'SELECT MAX(recorded_at) FROM record_versions WHERE project_id=?',
+            (project_id,)).fetchone()[0]
+        if latest and (now < latest or (now == latest and not coalesce_recorded_at)):
+            now = self._next_recorded_at(latest)
+        return now
+
+    def _put(self, project_id, record, expected_version=None, recorded_at=None,
+             coalesce_recorded_at=False):
         record = self._validate_record(record)
         if expected_version is not None and (type(expected_version) is not int or expected_version < 0):
             raise ValueError('期望版本必须是非负整数')
@@ -669,13 +686,14 @@ class Repository:
         version = old['version'] if old else 0
         if expected_version is not None and expected_version != version:
             raise ValueError('版本冲突：记录已变更')
-        now = recorded_at or utc_now()
-        # 同一逻辑记录的连续版本必须具有严格递增的系统时间。若两个版本共享
-        # recorded_at，旧版会在该精确时间点同时满足 recorded_at<=known_at，
-        # 又因 superseded_at==known_at 被严格上界排除，导致历史查询看不到任何版本。
-        # 批次内不同记录仍共享时间点；这里只规范化同一记录的修订时间。
-        if old and now <= old['recorded_at']:
-            now = normalize_time(datetime.fromisoformat(old['recorded_at']) + timedelta(microseconds=1))
+        now = normalize_time(recorded_at) if recorded_at is not None else utc_now()
+        # 独立修订必须具有严格递增的系统时间。若两个独立版本共享 recorded_at，
+        # 旧版会在该精确时间点同时满足 recorded_at<=known_at，又因
+        # superseded_at==known_at 被严格上界排除，导致历史查询看不到任何版本。
+        # coalesce_recorded_at 只供同一逻辑操作的分阶段写入显式复用时间点。
+        if old and (now < old['recorded_at'] or
+                    (now == old['recorded_at'] and not coalesce_recorded_at)):
+            now = self._next_recorded_at(old['recorded_at'])
         self._db.execute('UPDATE record_versions SET superseded_at=? WHERE project_id=? AND id=? AND superseded_at IS NULL', (now, project_id, record['id']))
         version_id = str(uuid4())
         # 向量以 float32 字节存储，不放在 payload 的 JSON 里（避免反序列化出浮点对象列表）。
@@ -774,15 +792,19 @@ class Repository:
         with self._lock:
             return [dict(row) for row in self._db.execute(sql, (project_id,)).fetchall()]
 
-    def put_record(self, project_id, record, expected_version=None, recorded_at=None):
+    def put_record(self, project_id, record, expected_version=None, recorded_at=None,
+                   coalesce_recorded_at=False):
         """写单条记录；``recorded_at`` 可显式指定系统时间点，默认取当前时刻。
 
         批次语义：同一批写入（含单文档 ingest 的全部记录）应共享同一个
         ``recorded_at``，否则 timeline 会把每条记录当成独立时间点。
+        ``coalesce_recorded_at`` 仅用于已持有同一操作时间戳的内部多阶段写入；
+        普通修订不得开启，否则会破坏精确 ``known_at`` 的历史边界。
         """
         with self._transaction():
             self.get_project(project_id)
-            return self._put(project_id, record, expected_version, recorded_at)
+            return self._put(project_id, record, expected_version, recorded_at,
+                             coalesce_recorded_at)
 
     def put_batch(self, project_id, records, expected_versions=None, formal_operation=None):
         if not isinstance(records, list):
@@ -803,11 +825,9 @@ class Repository:
             raise ValueError('期望版本引用了批次外的记录')
         with self._transaction():
             self.get_project(project_id)
-            latest = self._db.execute('SELECT MAX(recorded_at) FROM record_versions WHERE project_id=?', (project_id,)).fetchone()[0]
-            now = utc_now()
-            if latest and now <= latest:
-                now = normalize_time(datetime.fromisoformat(latest) + timedelta(microseconds=1))
-            return [self._put(project_id, record, expected_versions.get(record['id']), now) for record in records]
+            now = self._operation_recorded_at(project_id)
+            return [self._put(project_id, record, expected_versions.get(record['id']), now,
+                              coalesce_recorded_at=True) for record in records]
 
     @staticmethod
     def _record(row, vectors='none'):

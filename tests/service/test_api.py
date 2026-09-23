@@ -41,6 +41,22 @@ def test_filtered_ingestion_search_and_restart(client):
     assert client.post(f'/api/projects/{p2}/search',json=scope).json()['hits'] == []
 
 
+def test_ingest_coalesces_receipt_and_completion_into_one_timeline_point(client):
+    p = project(client)
+    response = client.post(f'/api/projects/{p}/documents', json={
+        'title': '一次摄取', 'text': '商户必须提供退款凭证。', 'extract': False})
+    assert response.status_code == 201, response.text
+
+    document = response.json()['document']
+    timeline = client.get(f'/api/projects/{p}/timeline').json()
+    assert timeline['total'] == 1
+    assert timeline['events'][0]['known_at'] == document['recorded_at']
+    stored = client.app.state.service.repository.get_record(
+        p, document['id'], known_at=timeline['events'][0]['known_at'])
+    assert stored['version'] == 2
+    assert stored['metadata']['status'] == 'ready'
+
+
 def test_background_ingestion_has_stage_logs(client):
     import time
     p=project(client)

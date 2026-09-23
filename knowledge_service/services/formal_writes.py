@@ -156,7 +156,8 @@ class FormalFactWriter:
             project_id, assertion['canonical_record_id'], record_version_id,
             assertion['id'], event_id)
 
-    def apply(self, operation, project_id, assertions, expected, policy, recorded_at=None):
+    def apply(self, operation, project_id, assertions, expected, policy, recorded_at=None,
+              coalesce_recorded_at=False):
         if operation not in FORMAL_OPERATIONS:
             raise ValueError('不支持的正式操作')
         if not isinstance(expected, dict) or any(
@@ -165,7 +166,6 @@ class FormalFactWriter:
             raise ValueError('正式期望必须将 ID 映射到版本')
         # 批次系统时间点：整批共享一个 recorded_at，落库循环不再逐条 utc_now()，
         # 否则一次批量写入会被 timeline 拆成与记录数等量的时间点。
-        ts = recorded_at or utc_now()
         records = list(policy.get('records', []))
         completion = policy.get('completion')
         explicit_assertions = [(item, None) for item in assertions or []]
@@ -178,6 +178,8 @@ class FormalFactWriter:
         assertion_moves = []
         with self.repository._transaction():
             self.repository.get_project(project_id)
+            ts = self.repository._operation_recorded_at(
+                project_id, recorded_at, coalesce_recorded_at)
             for record_id, wanted in expected.items():
                 row = self.repository._db.execute(
                     '''SELECT version FROM record_versions
@@ -189,7 +191,8 @@ class FormalFactWriter:
             if completion:
                 document, document_version = completion
                 result_records.append(self.repository._put(
-                    project_id, document, expected.get(document['id'], document_version), ts))
+                    project_id, document, expected.get(document['id'], document_version), ts,
+                    coalesce_recorded_at=True))
             for ordinal, original in enumerate(records):
                 record = self._canonical_record(original)
                 expected_version = expected.get(record['id'])
@@ -235,7 +238,9 @@ class FormalFactWriter:
                                     selected_versions[winner] = row['version_id']
                                     record['metadata']={**record.get('metadata',{}),'_deleted':True,
                                         'merged_into_fact':winner,'fact_collision':True}
-                                    saved=self.repository._put(project_id,record,expected_version,ts)
+                                    saved=self.repository._put(
+                                        project_id,record,expected_version,ts,
+                                        coalesce_recorded_at=True)
                                     canonical_by_input[original['id']]=winner
                                     result_records.append(saved)
                                     fact_redirects.append((record['id'],winner))
@@ -248,7 +253,8 @@ class FormalFactWriter:
                                     **({'_operation_id':record['metadata']['_operation_id']}
                                        if record.get('metadata',{}).get('_operation_id') else {})}
                                 result_records.append(self.repository._put(
-                                    project_id,mapped_tombstone,mapped_record['version'],ts))
+                                    project_id,mapped_tombstone,mapped_record['version'],ts,
+                                    coalesce_recorded_at=True))
                                 self.repository._db.execute(
                                     '''UPDATE fact_keys SET canonical_record_id=? WHERE project_id=?
                                        AND fact_key=? AND retired_at IS NULL''',
@@ -288,13 +294,15 @@ class FormalFactWriter:
                                            AND canonical_record_id=? AND retired_at IS NULL''',
                                         (utc_now(), project_id, record['id']))
                                     result_records.append(self.repository._put(
-                                        project_id, source_tombstone, expected_version, ts))
+                                        project_id, source_tombstone, expected_version, ts,
+                                        coalesce_recorded_at=True))
                                     result_records.append(saved)
                                 elif operation=='legacy_import':
                                     record['metadata']={**record.get('metadata',{}),'_deleted':True,
                                         'merged_into_fact':canonical_id,'legacy_parallel_occurrence':True}
                                     result_records.append(self.repository._put(
-                                        project_id,record,expected_version,ts))
+                                        project_id,record,expected_version,ts,
+                                        coalesce_recorded_at=True))
                                 else:
                                     result_records.append(saved)
                                 if not policy.get('suppress_auto_assertions'):
@@ -315,7 +323,9 @@ class FormalFactWriter:
                                    (project_id,fact_key,canonical_record_id,created_at,retired_at)
                                    VALUES (?,?,?,?,NULL)''',
                                 (project_id, fact_key, record['id'], utc_now()))
-                saved = self.repository._put(project_id, record, expected_version, ts)
+                saved = self.repository._put(
+                    project_id, record, expected_version, ts,
+                    coalesce_recorded_at=True)
                 result_records.append(saved)
                 canonical_by_input[original['id']] = canonical_id
                 selected_versions[canonical_id] = saved['version_id']
@@ -449,7 +459,8 @@ class FormalFactWriter:
                     else:
                         continue
                     result_records.append(self.repository._put(
-                        project_id, writable, current['version'], ts))
+                        project_id, writable, current['version'], ts,
+                        coalesce_recorded_at=True))
             if ledger:
                 reversal_of = ledger.get('reversal_of')
                 if reversal_of:

@@ -141,8 +141,25 @@ def test_timeline_change_clears_graph_without_reloading_and_preserves_search_res
     workspace=(ROOT/'workspace.js').read_text(encoding='utf-8')
     timeline=workspace[workspace.index('function applyTimelinePoint'):workspace.index('function moveTimeline')]
 
-    assert "clearGraphWorkspace({preserveSearchResults:true})" in timeline
+    assert "window.clearGraphWorkspace({preserveSearchResults:true})" in timeline
     assert 'drawGraph(' not in timeline
+
+
+def test_graph_reset_has_one_workspace_owner_and_preserves_request_invalidation():
+    workbench=(ROOT/'workbench.js').read_text(encoding='utf-8')
+    workspace=(ROOT/'workspace.js').read_text(encoding='utf-8')
+    reset=workspace[workspace.index('window.clearGraphWorkspace='):
+                    workspace.index("act('search'")]
+    project_change=workspace[workspace.index("const priorChange=get('project').onchange"):
+                             workspace.index('function autoLoadGraph')]
+
+    assert 'clearOwnedGraphState' not in workbench
+    assert "graph-summary').textContent='从左侧检索结果选择实体或关系'" not in workbench
+    assert workspace.count('window.clearGraphWorkspace=') == 1
+    assert 'graphRequests.invalidate()' in reset
+    assert 'ui.graph=null' in reset and 'wb.nodes.clear()' in reset
+    assert "get('graph-summary').textContent='从左侧检索结果选择实体或关系'" in reset
+    assert project_change.index('window.clearGraphWorkspace()') < project_change.index('autoLoadGraph')
 
 
 def test_knowledge_history_excludes_document_receipts_and_sources_show_build_state():

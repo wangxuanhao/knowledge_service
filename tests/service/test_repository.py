@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -92,9 +93,8 @@ def test_ontology_lineage_metadata_survives_restart(tmp_path):
 def test_correction_replaces_interval_but_history_retains_original(tmp_path):
     repo = Repository(tmp_path / 'db')
     p = repo.create_project('a')['id']
-    recorded_at = normalize_time('2025-01-01')
-    initial = repo.put_record(p, {'id': 'policy', 'kind': 'entity', 'text': 'policy', 'valid_from': '2020-01-01', 'valid_until': '2030-01-01', 'embedding': [1., 2.], 'embedding_model': 'model-a'}, recorded_at=recorded_at)
-    corrected = repo.put_record(p, {'id': 'policy', 'kind': 'entity', 'text': 'correction', 'valid_from': '2025-01-01', 'valid_until': '2028-01-01'}, expected_version=1, recorded_at=recorded_at)
+    initial = repo.put_record(p, {'id': 'policy', 'kind': 'entity', 'text': 'policy', 'valid_from': '2020-01-01', 'valid_until': '2030-01-01', 'embedding': [1., 2.], 'embedding_model': 'model-a'}, recorded_at='2025-01-01T00:00:00Z')
+    corrected = repo.put_record(p, {'id': 'policy', 'kind': 'entity', 'text': 'correction', 'valid_from': '2025-01-01', 'valid_until': '2028-01-01'}, expected_version=1, recorded_at='2025-01-01T08:00:00+08:00')
     assert corrected['recorded_at'] > initial['recorded_at']
     assert repo.query(p, valid_at='2022-01-01', known_at=corrected['recorded_at']) == []
     old = repo.get_record(p, 'policy', valid_at='2022-01-01', known_at=initial['recorded_at'])
@@ -106,6 +106,18 @@ def test_correction_replaces_interval_but_history_retains_original(tmp_path):
         repo.put_batch(p, [{'id': 'policy', 'kind': 'entity', 'text': 'uncommitted'}, {'kind': 'entity', 'text': 'bad date', 'valid_from': '2025-01-01T00:00:00'}])
     assert len(repo.history(p, 'policy')) == 2
     assert repo.history(p, 'policy')[-1]['superseded_at'] is None
+
+
+def test_explicit_recorded_at_accepts_aware_datetime_and_stores_utc(tmp_path):
+    repo = Repository(tmp_path / 'db')
+    p = repo.create_project('a')['id']
+    local_time = datetime(2025, 1, 1, 8, 30, tzinfo=timezone(timedelta(hours=8)))
+
+    saved = repo.put_record(
+        p, {'id': 'aware', 'kind': 'entity', 'text': 'aware'}, recorded_at=local_time)
+
+    assert saved['recorded_at'] == '2025-01-01T00:30:00.000000Z'
+    assert repo.history(p, 'aware')[0]['recorded_at'] == saved['recorded_at']
 
 
 @pytest.mark.parametrize('value', [float('nan'), float('inf'), True, '1'])
