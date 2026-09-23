@@ -79,10 +79,10 @@ class OntologyDrafts:
     def create(project_id, base_ontology_id_or_none, source, title, actor) -> Draft
     def command(project_id, draft_id, expected_revision, command) -> DraftPreview
     def submit(project_id, draft_id, expected_revision) -> DraftPreview
-    def decide(project_id, draft_id, expected_revision, expected_ontology_id, decisions, actor) -> DraftPreview
+    def decide(project_id, draft_id, expected_revision, expected_ontology_id, validation_fingerprint, decisions, acknowledged_warning_codes, actor) -> DraftPreview
     def rebase(project_id, draft_id, expected_revision, expected_ontology_id) -> DraftPreview
     def close(project_id, draft_id, expected_revision, actor, reason) -> Draft
-    def publish(project_id, draft_id, expected_revision, expected_ontology_id, idempotency_key, actor) -> OntologyVersion
+    def publish(project_id, draft_id, expected_revision, expected_ontology_id, validation_fingerprint, acknowledged_warning_codes, idempotency_key, actor) -> OntologyVersion
 ```
 
 模块内部负责：
@@ -107,6 +107,10 @@ class OntologyDrafts:
 - 发布幂等记录或等价唯一约束：以 `(project_id, draft_id, idempotency_key)` 保证重试不会产生重复版本。
 
 草案命令使用单条数据库 CAS：`UPDATE ontology_drafts ... WHERE id=? AND project_id=? AND revision=?`，未更新到一行即返回 409。进程内锁只可作为性能优化，不能承担正确性。发布在一个 Repository 事务内完成：校验当前 ontology、插入 ontology version、落地草案终态、操作/决定引用和 ontology provenance；任何一步失败均整体回滚。
+
+三张新表的 `project_id` 都引用 `projects(id) ON DELETE CASCADE`；operations/decisions 分别引用 draft/operation 并随项目级联。`base_ontology_id` 和 `published_ontology_id` 使用可空外键；项目删除由 Repository 在同一事务按“provenance edges/activities → decisions → operations → drafts → ontologies → project”的显式顺序执行，并把三张表删除数量加入响应和测试，避免当前先删 ontology 时被外键阻塞。
+
+项目一致性导出必须包含 drafts、operations、decisions 及其 ontology provenance；导入时先恢复 ontology versions，再恢复 draft/operation/decision 和 provenance 引用。面向运行时的轻量 projection 可以显式排除未发布草案，但必须在格式 metadata 标注 `governance_history_included=false`，不能伪装成完整治理备份。
 
 现有 `save_ontology` 降为 Repository 私有/受控原语，外部路由和业务 service 不得直接调用。仅允许三类内部调用：新项目的可信默认本体 bootstrap、向全新空项目执行精确快照恢复/迁移、统一草案 publish。项目创建时 bootstrap 记录来源与 actor；已有项目的旧格式导入必须进入草案。首个草案允许 `base_ontology_id=null`，仅当项目发布时仍无当前本体才可成功。
 
@@ -191,6 +195,8 @@ domain/range 在首期是“允许类型的 OR 集合”，不是交集：零个
 
 `advanced_rdf_patch` 只由 Turtle diff 生成，用于首期结构化编辑器未覆盖但现有 Turtle 能力已允许的 RDF/OWL/SHACL 语句。它必须展示增删三元组、标记为高风险并逐项审核；无法安全归组或影响 RDF collection 完整性的 patch 阻断提交。
 
+`advanced_rdf_patch` 不是逃生旁路。编译后和发布前都要重新检查正式术语保留不变量：不得删除已发布术语的 class/property 声明，不得改变其 kind，不得通过删除全部描述实现物理删除，也不得直接增删受治理的 `owl:deprecated` 或 `dcterms:isReplacedBy`。Turtle 中删除整个已发布术语规范化为 `retire_term`（界面明确提示语义变化）；无法无歧义识别时阻断并要求结构化处理。弃用、恢复和替代分别规范化为 `retire_term`、`restore_term` 和结构化 annotation 操作。
+
 ## 状态机
 
 草案状态：
@@ -252,6 +258,19 @@ stale_base / stale_source -> editing（成功 rebase/刷新来源）
 
 停用不能静默级联，也不通过删除术语三元组来实现。`retire_term` 为目标增加弃用标记，并把所有依赖完整展示为影响；活动术语若仍依赖已停用术语，根据约束类型产生 warning 或阻断。需要改变依赖时必须在同一或后续草案中显式增加独立边操作。历史知识不删除、不自动改型，并继续按其写入时绑定的 `ontology_id` 校验。
 
+发布判定采用固定依赖矩阵：
+
+| 新版本中的依赖 | 结果 |
+|---|---|
+| 活动子类 `subClassOf` 已停用父类 | `error`，必须改父级、停用子类或放弃停用 |
+| 活动 object/datatype property 的 domain/range 指向已停用类 | `error` |
+| 活动 SHACL shape 的 `targetClass` 指向已停用类，或 `path` 指向已停用 property | `error` |
+| 活动术语 `dcterms:isReplacedBy` 指向已停用术语 | `error` |
+| 已停用术语指向活动替代术语 | `info`，允许且推荐 |
+| 已停用术语自身保留的父级、domain/range、SHACL 或其他结构引用 | `info`，作为可恢复定义保留，不参与新写入校验 |
+| 非约束型自定义 annotation 引用已停用术语 | `warning`，必须明确确认 |
+| 历史知识/旧 ontology version 引用已停用术语 | 历史影响报告，不阻断新版本 |
+
 ### 恢复和替代
 
 - 恢复旧定义：请求必须携带 `source_ontology_id`，从该不可变版本选择注解和结构边作为模板，生成 `restore_term` 与用户明确勾选的边操作；
@@ -278,6 +297,8 @@ stale_base / stale_source -> editing（成功 rebase/刷新来源）
 - `warning`：可提交，但审核和发布必须明确确认；
 - `info`：提示范围和证据。
 
+每次完整校验生成由 base/source versions、有效操作 fingerprints、报告内容和规则版本计算的 `validation_fingerprint`。中高风险 decision 和 publish 都必须回传该 fingerprint 以及用户明确确认的 `acknowledged_warning_codes`。服务端在决定/发布时重算；fingerprint 不同、出现任何新 warning、warning 集合或语义发生变化、或存在未确认 warning 时返回 409/422 并要求重新验证，不能沿用旧确认。
+
 风险分类：
 
 - 低风险：仅人工结构化的标签/说明；人工创建且无引用的新叶子术语；
@@ -285,7 +306,9 @@ stale_base / stale_source -> editing（成功 rebase/刷新来源）
 - 高风险：停用、删除父级/domain/range、datatype 修改、影响正式知识、影响大量后代、`advanced_rdf_patch`；
 - 阻断：循环、缺失引用、非法类型、无法安全拆分的复杂 RDF/SHACL 引用。
 
-风险阈值由服务端常量和测试固定，首期定义为：受影响后代大于 50、约束引用大于 10 或待处理候选大于 20 时至少为高风险；任何正式记录影响至少为高风险。只有最新校验通过、没有 warning、来源不是 discovery/AI/import 的低风险操作可批量批准；一次最多 100 条。中高风险和停用不能批量批准。
+风险阈值由服务端常量和测试固定，首期定义为：任何带 warning 的操作至少为中风险；受影响后代大于 50、约束引用大于 10 或待处理候选大于 20 时至少为高风险；任何正式记录影响至少为高风险。只有最新校验通过、没有 warning、来源不是 discovery/AI/import 的低风险操作可批量批准；一次最多 100 条。中高风险和停用不能批量批准。
+
+`restore_term` 风险固定为高，不得批量批准；审核卡必须展示 `source_ontology_id`、恢复的 annotation/父级/domain/range/datatype 完整集合以及恢复后重新生效的约束影响。
 
 ## 人工审核设计
 
@@ -367,14 +390,14 @@ POST /api/projects/{p}/ontology-drafts/{draft_id}/publish
 
 GET  /api/projects/{p}/ontology-hierarchy/roots
 GET  /api/projects/{p}/ontology-hierarchy/search
-GET  /api/projects/{p}/ontology-hierarchy/{term_id}/children
-GET  /api/projects/{p}/ontology-hierarchy/{term_id}/neighborhood
+GET  /api/projects/{p}/ontology-hierarchy/children?iri={url_encoded_iri}
+GET  /api/projects/{p}/ontology-hierarchy/neighborhood?iri={url_encoded_iri}
 GET  /api/projects/{p}/ontology-matrix
 ```
 
-所有变更请求包含 `expected_revision`；decide、rebase 和 publish 还包含 `expected_ontology_id`，publish 另含 `idempotency_key`。版本或来源冲突返回 409，并返回 `stale_base`/`stale_source` 与当前版本，不自动覆盖。
+所有变更请求包含 `expected_revision`；decide、rebase 和 publish 还包含 `expected_ontology_id`，中高风险 decide 和 publish 包含 `validation_fingerprint`、`acknowledged_warning_codes`，publish 另含 `idempotency_key`。版本、来源或校验快照冲突返回 409，并返回 `stale_base`/`stale_source`/`validation_changed` 与当前信息，不自动覆盖。
 
-层级、搜索和矩阵读取接口均支持 cursor 分页、限制 page size、`ontology_id` 和可选 `draft_id` 覆盖层；children 返回 canonical IRI、是否引用行、子级数量和其他父级数量，前端不从一次性完整 summary 构造大树。
+层级、搜索和矩阵读取接口均支持 cursor 分页、限制 page size、`ontology_id` 和可选 `draft_id` 覆盖层；children/neighborhood 的任意 IRI 只能放在 URL 编码后的 `iri` query 参数中，不能放普通 path segment，以支持包含 `/`、`#` 等字符的 HTTP IRI。children 返回 canonical IRI、是否引用行、子级数量和其他父级数量，前端不从一次性完整 summary 构造大树。
 
 命令示例：
 
@@ -391,7 +414,7 @@ GET  /api/projects/{p}/ontology-matrix
 }
 ```
 
-审核请求支持一条或多条 decision。每条包含 operation id、operation fingerprint、action 和 reason；批量时服务端只接受全部为低风险且最新校验通过且无 warning 的最多 100 条批准，不能依赖前端隐藏高风险项。`request_changes` 回到 editing，调整生成替代操作；`close` 必须保存 actor 和 reason。
+审核请求支持一条或多条 decision。每条包含 operation id、operation fingerprint、action 和 reason；中高风险决定还绑定 validation fingerprint 和已确认 warning codes。批量时服务端只接受全部为低风险且最新校验通过且无 warning 的最多 100 条批准，不能依赖前端隐藏高风险项。`request_changes` 回到 editing，调整生成替代操作；`close` 必须保存 actor 和 reason。
 
 ### 兼容适配器
 
@@ -410,7 +433,7 @@ GET  /api/projects/{p}/ontology-matrix
 
 1. 解析提交 Turtle 和 base Turtle；
 2. 先做 RDF graph isomorphism/canonicalization，再按 subject/predicate/规范子图计算 additions/removals；blank node 的解析器临时 ID 绝不能作为稳定身份；
-3. 可识别的 class/property/label/subClassOf/domain/range/datatype 转成结构化操作；
+3. 可识别的 class/property/label/subClassOf/domain/range/datatype/`owl:deprecated`/`dcterms:isReplacedBy` 转成结构化操作，并执行“已发布术语只能停用”规范化；
 4. 首期只识别规范 `owl:unionOf` 和项目已支持的 SHACL shape blank-node 子图，并用 canonical subgraph hash 作为 provenance 指纹；
 5. 其他没有 blank node 的安全变更可转换成 `advanced_rdf_patch`；不支持的 OWL restriction 或复杂 blank-node 子图直接阻断并给出原因，不能盲目降级为 patch；
 6. blank-node collection 被整体识别和替换，不能产生半个 RDF list；语义等价、仅 blank-node ID 或序列化顺序不同的 Turtle 必须产生零操作；
@@ -428,7 +451,7 @@ GET  /api/projects/{p}/ontology-matrix
 - 多语言标签、多个根类和多个父类均被保留；
 - Semantica 缺失时发现草案接口返回明确的可操作错误，不影响手工本体工作台。
 
-实现时以真实或固定的 Semantica 0.6.7 输出 fixture 锁定 adapter 契约，防止文档字段与运行时结果漂移。参考上游文档：[Ontology Learning Guide](https://github.com/Hawksight-AI/semantica/blob/main/docs/guides/ontology.md) 与 [Semantica repository](https://github.com/Hawksight-AI/semantica)。
+实现时以真实或固定的 Semantica 0.6.7 输出 fixture 锁定 adapter 契约，防止文档字段与运行时结果漂移。参考上游文档：[Ontology Learning Guide](https://github.com/semantica-agi/semantica/blob/main/docs/guides/ontology.md) 与 [Semantica repository](https://github.com/semantica-agi/semantica)。
 
 ### 发现与候选发布副作用
 
@@ -491,15 +514,19 @@ ontology version
 - 多语言 annotation 单值调整不覆盖其他语言；
 - domain/range 的 0/1/N 规范 `owl:unionOf` 往返与安全重建；
 - retire 的真实弃用、依赖展开、阻断、历史保留和 restore 去标记；
+- 每类停用依赖矩阵及 restore 固定高风险；
 - 带 `source_ontology_id` 的 restore、RDF replacement 和 stale base/source rebase；
 - raw Turtle 结构化 diff、等价 blank-node 图零 diff 与复杂 BNode 阻断；
+- Turtle 删除已发布声明被规范化为 retire 或阻断，advanced patch 不能改变 kind/弃用/替代不变量；
 - 来源下限、数量阈值、warning 和最多 100 条的服务端批量批准限制；
+- validation fingerprint 与 warning acknowledgement：新增/变化/未确认 warning 均阻断决定或发布；
 - 全拒绝、部分批准、原子发布和失败回滚；
 - 双数据库连接并发 CAS、publish 幂等和同 key 异 payload 冲突；
 - discovery publish 的候选物化、文档更新、事务回滚与提交后 Milvus 重试；
 - candidate 来源文档变化触发 `stale_source`；
 - provenance schema 迁移保留旧数据、完整链路和失败回滚；
-- pending legacy artifact 惰性转换和失败复核状态。
+- pending legacy artifact 惰性转换和失败复核状态；
+- 新治理表的项目级联删除计数、完整治理导出/导入和轻量导出标记。
 
 ### 接口与页面测试
 
@@ -509,6 +536,7 @@ ontology version
 - 低风险批量审核、中高风险单审和阻断项无批准入口；
 - 大列表虚拟化、搜索、按需展开和 stale 状态；
 - DAG 引用行共享 canonical selection，主路径不改变 RDF；roots/children/search/neighborhood/matrix 均验证 cursor 分页和 draft overlay；
+- HTTP/HTTPS IRI（含 `/`、`#`）经 query 参数可正确查询层级；
 - `ontology-workbench.css`/JS 资源版本和加载顺序；
 - 页面使用文本转义，不把标签、IRI、证据作为 HTML 注入；
 - 键盘操作、焦点、窄屏和 reduced motion；
