@@ -43,16 +43,29 @@ def test_filtered_ingestion_search_and_restart(client):
 
 def test_ingest_coalesces_receipt_and_completion_into_one_timeline_point(client):
     p = project(client)
+    repository = client.app.state.service.repository
+    future = repository.put_record(
+        p, {'id': 'future', 'kind': 'document', 'text': 'future'},
+        recorded_at='2030-01-01T00:00:00Z')
     response = client.post(f'/api/projects/{p}/documents', json={
         'title': '一次摄取', 'text': '商户必须提供退款凭证。', 'extract': False})
     assert response.status_code == 201, response.text
 
     document = response.json()['document']
     timeline = client.get(f'/api/projects/{p}/timeline').json()
-    assert timeline['total'] == 1
-    assert timeline['events'][0]['known_at'] == document['recorded_at']
-    stored = client.app.state.service.repository.get_record(
-        p, document['id'], known_at=timeline['events'][0]['known_at'])
+    assert timeline['total'] == 2
+    ingest_event = timeline['events'][-1]
+    assert ingest_event['known_at'] > future['recorded_at']
+    assert ingest_event['known_at'] == document['recorded_at']
+    operation_records = [
+        row for row in repository.current_records(p)
+        if row['id'] == document['id'] or row.get('source_id') == document['id']]
+    operation_times = {
+        version['recorded_at']
+        for row in operation_records for version in repository.history(p, row['id'])}
+    assert operation_times == {ingest_event['known_at']}
+    stored = repository.get_record(
+        p, document['id'], known_at=ingest_event['known_at'])
     assert stored['version'] == 2
     assert stored['metadata']['status'] == 'ready'
 

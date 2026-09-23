@@ -120,6 +120,23 @@ def _search(page, query='退款', mode='keyword'):
     page.wait_for_function("document.querySelectorAll('#hits .hit-kind').length === 3")
 
 
+def _watch_graph_clear(page, selector, snapshot_name, event='click'):
+    page.evaluate("""([selector, snapshotName, event]) => {
+      document.querySelector(selector).addEventListener(event, () => {
+        window[snapshotName] = {
+          hits: document.getElementById('hits').innerHTML,
+          summary: document.getElementById('graph-summary').textContent,
+          detail: document.getElementById('graph-detail').innerHTML,
+          node: document.getElementById('graph-node').value,
+        };
+      }, {once: true});
+    }""", [selector, snapshot_name, event])
+
+
+def _graph_clear_snapshot(page, snapshot_name):
+    return page.evaluate("snapshotName => window[snapshotName]", snapshot_name)
+
+
 # ── Task 1: the combined workspace keeps search, graph and details decoupled ──
 
 def test_search_updates_only_the_result_rail_and_ignores_graph_keys(workbench):
@@ -228,19 +245,10 @@ def test_project_and_scope_changes_clear_isolated_state(workbench):
 
     # Scope change clears graph, selection and details but keeps the result rail.
     workbench.paths.clear()
-    page.evaluate("""() => {
-      document.getElementById('apply-scope').addEventListener('click', () => {
-        window.__scopeClearSnapshot = {
-          hits: document.getElementById('hits').innerHTML,
-          summary: document.getElementById('graph-summary').textContent,
-          detail: document.getElementById('graph-detail').innerHTML,
-          node: document.getElementById('graph-node').value,
-        };
-      }, {once: true});
-    }""")
+    _watch_graph_clear(page, '#apply-scope', '__scopeClearSnapshot')
     with page.expect_response(lambda response: response.url.endswith('/metadata/facets')):
         page.click('#apply-scope')
-    scope_cleared = page.evaluate("window.__scopeClearSnapshot")
+    scope_cleared = _graph_clear_snapshot(page, '__scopeClearSnapshot')
     assert scope_cleared == {
         'hits': hits_after_graph, 'summary': INITIAL_GRAPH_HINT, 'detail': '', 'node': ''}
     page.wait_for_function(
@@ -259,18 +267,9 @@ def test_project_and_scope_changes_clear_isolated_state(workbench):
         "document.querySelectorAll('#graph-timeline .tl-points option').length > 1")
     hits_before_time = page.locator('#hits').inner_html()
     workbench.paths.clear()
-    page.evaluate("""() => {
-      document.querySelector('#graph-timeline .tl-prev').addEventListener('click', () => {
-        window.__timeClearSnapshot = {
-          hits: document.getElementById('hits').innerHTML,
-          summary: document.getElementById('graph-summary').textContent,
-          detail: document.getElementById('graph-detail').innerHTML,
-          node: document.getElementById('graph-node').value,
-        };
-      }, {once: true});
-    }""")
+    _watch_graph_clear(page, '#graph-timeline .tl-prev', '__timeClearSnapshot')
     page.click('#graph-timeline .tl-prev')
-    time_cleared = page.evaluate("window.__timeClearSnapshot")
+    time_cleared = _graph_clear_snapshot(page, '__timeClearSnapshot')
     assert time_cleared == {
         'hits': hits_before_time, 'summary': INITIAL_GRAPH_HINT, 'detail': '', 'node': ''}
     page.wait_for_function(
@@ -287,19 +286,10 @@ def test_project_and_scope_changes_clear_isolated_state(workbench):
         "headers: {'Content-Type': 'application/json'}, "
         "body: JSON.stringify({name: '第二个项目'})})).json(); "
         "await projects(); return created.id;}")
-    page.evaluate("""() => {
-      document.getElementById('project').addEventListener('change', () => {
-        window.__projectClearSnapshot = {
-          hits: document.getElementById('hits').innerHTML,
-          summary: document.getElementById('graph-summary').textContent,
-          detail: document.getElementById('graph-detail').innerHTML,
-          node: document.getElementById('graph-node').value,
-        };
-      }, {once: true});
-    }""")
+    _watch_graph_clear(page, '#project', '__projectClearSnapshot', event='change')
     with page.expect_response(lambda response: response.url.endswith('/entity-options')):
         page.select_option('#project', other)
-    cleared = page.evaluate("window.__projectClearSnapshot")
+    cleared = _graph_clear_snapshot(page, '__projectClearSnapshot')
     assert cleared == {'hits': '', 'summary': INITIAL_GRAPH_HINT, 'detail': '', 'node': ''}
 
 

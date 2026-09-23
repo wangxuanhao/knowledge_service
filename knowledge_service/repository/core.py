@@ -34,6 +34,20 @@ def _json(value):
         raise ValueError('载荷必须只含有限 JSON 值') from exc
 
 
+class _RecordOperation:
+    """由 Repository 签发的单次逻辑写入上下文。
+
+    上下文的身份而非时间字符串本身授权多阶段写入共享系统时间点，
+    避免不相干的调用方仅凭相同 recorded_at 意外合并历史。
+    """
+    __slots__ = ('_repository_token', 'project_id', 'recorded_at')
+
+    def __init__(self, repository_token, project_id, recorded_at):
+        self._repository_token = repository_token
+        self.project_id = project_id
+        self.recorded_at = recorded_at
+
+
 class OntologyNotPublished(Exception):
     """项目已存在，但还没有任何本体版本（例如 discovery/documents 模式）。"""
     def __init__(self, project_id):
@@ -475,6 +489,8 @@ class Repository:
         self._db = sqlite3.connect(str(path), check_same_thread=False, timeout=30)
         self._db.row_factory = sqlite3.Row
         self._lock = threading.RLock()
+        self._operation_token = object()
+        self._reserved_recorded_at = {}
         self._db.execute('PRAGMA journal_mode=WAL')
         self._db.execute('PRAGMA foreign_keys=ON')
         _run_schema_migrations(self._db)
@@ -667,18 +683,31 @@ class Repository:
             datetime.fromisoformat(recorded_at.replace('Z', '+00:00'))
             + timedelta(microseconds=1))
 
-    def _operation_recorded_at(self, project_id, recorded_at=None,
-                               coalesce_recorded_at=False):
-        now = normalize_time(recorded_at) if recorded_at is not None else utc_now()
-        latest = self._db.execute(
-            'SELECT MAX(recorded_at) FROM record_versions WHERE project_id=?',
-            (project_id,)).fetchone()[0]
-        if latest and (now < latest or (now == latest and not coalesce_recorded_at)):
-            now = self._next_recorded_at(latest)
-        return now
+    def _reserve_record_operation(self, project_id, recorded_at=None):
+        """预留严格晚于项目高水位的逻辑操作时间点。"""
+        with self._transaction():
+            self.get_project(project_id)
+            now = normalize_time(recorded_at) if recorded_at is not None else utc_now()
+            stored = self._db.execute(
+                'SELECT MAX(recorded_at) FROM record_versions WHERE project_id=?',
+                (project_id,)).fetchone()[0]
+            reserved = self._reserved_recorded_at.get(project_id)
+            latest = max((value for value in (stored, reserved) if value is not None),
+                         default=None)
+            if latest and now <= latest:
+                now = self._next_recorded_at(latest)
+            self._reserved_recorded_at[project_id] = now
+            return _RecordOperation(self._operation_token, project_id, now)
+
+    def _record_operation_time(self, project_id, operation):
+        if (not isinstance(operation, _RecordOperation) or
+                operation._repository_token is not self._operation_token or
+                operation.project_id != project_id):
+            raise ValueError('写入操作上下文无效')
+        return operation.recorded_at
 
     def _put(self, project_id, record, expected_version=None, recorded_at=None,
-             coalesce_recorded_at=False):
+             operation=None):
         record = self._validate_record(record)
         if expected_version is not None and (type(expected_version) is not int or expected_version < 0):
             raise ValueError('期望版本必须是非负整数')
@@ -686,13 +715,18 @@ class Repository:
         version = old['version'] if old else 0
         if expected_version is not None and expected_version != version:
             raise ValueError('版本冲突：记录已变更')
-        now = normalize_time(recorded_at) if recorded_at is not None else utc_now()
+        if operation is not None and recorded_at is not None:
+            raise ValueError('写入操作上下文不能与 recorded_at 同时指定')
+        now = (self._record_operation_time(project_id, operation) if operation is not None
+               else normalize_time(recorded_at) if recorded_at is not None else utc_now())
         # 独立修订必须具有严格递增的系统时间。若两个独立版本共享 recorded_at，
         # 旧版会在该精确时间点同时满足 recorded_at<=known_at，又因
         # superseded_at==known_at 被严格上界排除，导致历史查询看不到任何版本。
-        # coalesce_recorded_at 只供同一逻辑操作的分阶段写入显式复用时间点。
-        if old and (now < old['recorded_at'] or
-                    (now == old['recorded_at'] and not coalesce_recorded_at)):
+        # 只有仓储签发的操作上下文可以在同一时间点内修订记录。
+        # 独立写入的相等时间仍必须推进，精确 known_at 才不会出现空洞。
+        if old and operation is not None and now < old['recorded_at']:
+            raise ValueError('写入操作时间点已被更新的修订超过')
+        if old and operation is None and now <= old['recorded_at']:
             now = self._next_recorded_at(old['recorded_at'])
         self._db.execute('UPDATE record_versions SET superseded_at=? WHERE project_id=? AND id=? AND superseded_at IS NULL', (now, project_id, record['id']))
         version_id = str(uuid4())
@@ -792,19 +826,20 @@ class Repository:
         with self._lock:
             return [dict(row) for row in self._db.execute(sql, (project_id,)).fetchall()]
 
-    def put_record(self, project_id, record, expected_version=None, recorded_at=None,
-                   coalesce_recorded_at=False):
+    def put_record(self, project_id, record, expected_version=None, recorded_at=None):
         """写单条记录；``recorded_at`` 可显式指定系统时间点，默认取当前时刻。
 
-        批次语义：同一批写入（含单文档 ingest 的全部记录）应共享同一个
-        ``recorded_at``，否则 timeline 会把每条记录当成独立时间点。
-        ``coalesce_recorded_at`` 仅用于已持有同一操作时间戳的内部多阶段写入；
-        普通修订不得开启，否则会破坏精确 ``known_at`` 的历史边界。
+        多阶段操作由仓储签发的上下文复用时间点；普通调用无法仅凭
+        相同 ``recorded_at`` 合并历史。
         """
         with self._transaction():
             self.get_project(project_id)
-            return self._put(project_id, record, expected_version, recorded_at,
-                             coalesce_recorded_at)
+            return self._put(project_id, record, expected_version, recorded_at)
+
+    def _put_record_for_operation(self, project_id, record, expected_version, operation):
+        with self._transaction():
+            self.get_project(project_id)
+            return self._put(project_id, record, expected_version, operation=operation)
 
     def put_batch(self, project_id, records, expected_versions=None, formal_operation=None):
         if not isinstance(records, list):
@@ -823,11 +858,11 @@ class Repository:
             raise ValueError('批次记录 ID 必须唯一')
         if not set(expected_versions).issubset(ids):
             raise ValueError('期望版本引用了批次外的记录')
+        operation = self._reserve_record_operation(project_id)
         with self._transaction():
             self.get_project(project_id)
-            now = self._operation_recorded_at(project_id)
-            return [self._put(project_id, record, expected_versions.get(record['id']), now,
-                              coalesce_recorded_at=True) for record in records]
+            return [self._put(project_id, record, expected_versions.get(record['id']),
+                              operation=operation) for record in records]
 
     @staticmethod
     def _record(row, vectors='none'):

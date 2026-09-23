@@ -148,12 +148,12 @@ def test_failed_discovery_publish_rolls_back_ontology_records_and_remains_retrya
         original_put=repository._put
         fail_once={'enabled':True}
         def fail_attribute_write(project_id,record,expected_version=None,recorded_at=None,
-                                 coalesce_recorded_at=False):
+                                 operation=None):
             if fail_once['enabled'] and record['kind']=='attribute':
                 fail_once['enabled']=False
                 raise RuntimeError('injected attribute write failure')
-            return original_put(project_id,record,expected_version,recorded_at,
-                                coalesce_recorded_at)
+            return original_put(project_id, record, expected_version, recorded_at,
+                                operation)
         monkeypatch.setattr(repository,'_put',fail_attribute_write)
 
         import time

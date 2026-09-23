@@ -51,11 +51,7 @@ class KnowledgeService:
               operation='manual_write', assertions=None, pending_assertions=None,
               assertion_decisions=None, resolution_reviews=None, ledger=None,
               resolution_decisions=None,suppress_auto_assertions=False, recorded_at=None,
-              defer_milvus_sync=False, coalesce_recorded_at=False):
-        # 批次系统时间点：整批共享一个 recorded_at（未指定则取当前时刻一次）。
-        # ingest 的多个事务会显式传 coalesce_recorded_at=True，其他写入仍由仓储
-        # 推进到严格晚于既有历史的时间点。
-        batch_time = normalize_time(recorded_at) if recorded_at is not None else utc_now()
+              defer_milvus_sync=False, operation_context=None):
         event(f'等待写入锁 · 待写记录 {len(records)}', 85)
         with self.lock:
             event('校验知识结构、来源与关系端点 · 开始')
@@ -184,8 +180,8 @@ class KnowledgeService:
                  'pending_assertions': pending_assertions or [],
                  'assertion_decisions': assertion_decisions or [],
                  'resolution_decisions':resolution_decisions or [],
-                 'suppress_auto_assertions': suppress_auto_assertions}, recorded_at=batch_time,
-                coalesce_recorded_at=coalesce_recorded_at)
+                 'suppress_auto_assertions': suppress_auto_assertions}, recorded_at=recorded_at,
+                operation_context=operation_context)
             accepted = result['accepted_records']
             if not defer_milvus_sync:
                 self._sync_milvus(project_id, accepted)
@@ -310,16 +306,15 @@ class KnowledgeService:
         doc_id = str(uuid4())
         # 整篇文档的批次系统时间点：收据/切片/抽取结果/完成标记共享同一 recorded_at，
         # timeline 里"上传一个文档"= 一个时间点，且 known_at 时间旅行永远看到完整文档。
-        batch_time = utc_now()
+        operation_context = self.repository._reserve_record_operation(project_id)
         initial_readiness=readiness(document_ready=True)
         metadata = {**request.get('metadata', {}), 'title': request['title'], 'uploaded_at': utc_now(),
                     'status': 'processing','active_stage':'document','extraction_mode':extraction_mode,
                     'readiness':initial_readiness}
         document = dict(id=doc_id, kind='document', text=request['text'], metadata=metadata,
                         valid_from=request.get('valid_from'), valid_until=request.get('valid_until'))
-        receipt = self.repository.put_record(
-            project_id, document, expected_version=0, recorded_at=batch_time,
-            coalesce_recorded_at=True)
+        receipt = self.repository._put_record_for_operation(
+            project_id, document, expected_version=0, operation=operation_context)
         run=self.repository.create_ingest_run(project_id,doc_id,receipt['version_id'])
         run=self.repository.update_ingest_run(project_id,run['id'],run['version'],status='running',active_stage='chunking')
         metadata['run_id']=run['id']
@@ -360,8 +355,8 @@ class KnowledgeService:
                 row.update(source_id=doc_id,valid_from=request.get('valid_from'),valid_until=request.get('valid_until'))
                 row['metadata']={**metadata,**row['metadata'],'status':'ready','indexed_at':indexed_at}
             indexed=self.write(
-                project_id,chunk_records,operation='extract',recorded_at=batch_time,
-                coalesce_recorded_at=True)
+                project_id, chunk_records, operation='extract',
+                operation_context=operation_context)
             saved_chunks=indexed
             run=self.repository.update_ingest_run(project_id,run['id'],run['version'],active_stage='extraction',
                 readiness_patch={'keyword_ready':True,'semantic_ready':True})
@@ -466,8 +461,8 @@ class KnowledgeService:
                     relation_constraint_mode=request.get('relation_constraint_mode','review'),
                     shacl_mode='review', shacl_review_out=shacl_reviews,operation='extract',
                     resolution_reviews=request.get('_resolution_reviews',[]),
-                    pending_assertions=pending_assertions, recorded_at=batch_time,
-                    coalesce_recorded_at=True)
+                    pending_assertions=pending_assertions,
+                    operation_context=operation_context)
                 completed, graph_saved = committed[0], committed[1:]
                 saved = [*saved_chunks, *graph_saved]
                 if shacl_reviews:
@@ -503,11 +498,10 @@ class KnowledgeService:
                             'created_at': utc_now()})
                     event(f'SHACL 本体异常 {len(seen)} 条已加入审核；知识未被阻塞')
                     completed['metadata'] = {**completed.get('metadata', {}), 'review_candidates': review_candidates}
-                    completed = self.repository.put_record(project_id,
+                    completed = self.repository._put_record_for_operation(project_id,
                         {k: v for k, v in completed.items() if k not in ('embedding', 'embedding_model',
                          'version', 'version_id', 'recorded_at', 'superseded_at', 'project_id')},
-                        expected_version=completed['version'], recorded_at=batch_time,
-                        coalesce_recorded_at=True)
+                        expected_version=completed['version'], operation=operation_context)
             event(f'落库完成 · {len(saved)} 条派生记录 · 文档 {doc_id}',99)
             run=self.repository.update_ingest_run(project_id,run['id'],run['version'],status='completed',
                 active_stage='completed',readiness_patch={key:value for key,value in final_readiness.items() if key!='search_ready'},
@@ -536,10 +530,11 @@ class KnowledgeService:
                         tombstones.append(tombstone)
                     self.write(project_id,tombstones,completion=(document,current_document['version']),
                         expected_versions={chunk['id']:chunk['version'] for chunk in saved_chunks},operation='extract',
-                        recorded_at=batch_time, coalesce_recorded_at=True)
+                        operation_context=operation_context)
                 else:
-                    self.repository.put_record(project_id, document, expected_version=current_document['version'],
-                        recorded_at=batch_time, coalesce_recorded_at=True)
+                    self.repository._put_record_for_operation(
+                        project_id, document, expected_version=current_document['version'],
+                        operation=operation_context)
             except ValueError as conflict:
                 if '版本冲突' not in str(conflict):
                     raise
