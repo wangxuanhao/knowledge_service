@@ -1,0 +1,57 @@
+<style>
+  .ia-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-top:22px}
+  .ia-card{border:1px solid #d9e3dc;border-radius:14px;background:#fff;overflow:hidden;cursor:pointer;transition:.18s ease;box-shadow:0 8px 24px rgba(32,64,52,.06)}
+  .ia-card:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(32,64,52,.11)}
+  .ia-card.selected{outline:3px solid #2e7d61;border-color:#2e7d61}
+  .ia-preview{height:360px;background:#f5f7f4;padding:12px;display:grid;grid-template-columns:68px 1fr;gap:10px;font-size:10px;color:#496259}
+  .mini-nav{border-radius:8px;background:#173e32;color:#dcebe3;padding:10px 7px;display:grid;align-content:start;gap:7px}
+  .mini-nav b{font-size:12px;color:#fff;margin-bottom:4px}.mini-nav span{padding:6px;border-radius:5px}.mini-nav .on{background:#386454;color:white}
+  .mini-main{display:grid;gap:8px;min-width:0}.mini-head{background:white;border:1px solid #dae4dc;border-radius:8px;padding:10px;display:flex;justify-content:space-between;align-items:center}.mini-head strong{font-size:12px;color:#203c35}.mini-tabs{display:flex;gap:4px}.mini-tabs i{font-style:normal;padding:4px 6px;border-radius:10px;background:#eaf1ec}.mini-tabs .active{background:#2b7259;color:white}
+  .mini-body{display:grid;grid-template-columns:1.1fr .9fr;gap:8px;min-height:0}.pane{background:#fff;border:1px solid #dae4dc;border-radius:8px;padding:9px;overflow:hidden}.pane h5{font-size:10px;margin:0 0 8px;color:#284d40}.tree{display:grid;gap:5px}.node{padding:6px 7px;border:1px solid #dce7df;border-radius:6px;background:#fbfdfb}.node.child{margin-left:13px}.node.grand{margin-left:26px}.node.suggest{border-style:dashed;border-color:#d7953f;background:#fff8ea}.badge-mini{float:right;border-radius:8px;padding:1px 5px;background:#f5d7a5;color:#76511c}.queue{display:grid;gap:6px}.queue div{padding:7px;border-left:3px solid #d7973e;background:#fff8eb}.queue .approved{border-color:#2b815d;background:#eef8f2}.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:3px}.flow span{padding:6px 3px;text-align:center;border-radius:5px;background:#e9f0eb}.flow span:nth-child(3){background:#fff0cf;color:#725016}.canvas{position:relative;background:radial-gradient(circle at 20% 20%,#fff 0,#f1f5f1 70%);border:1px solid #dbe4dd;border-radius:8px;min-height:225px}.bubble{position:absolute;padding:7px 10px;border-radius:14px;background:white;border:1px solid #9ebfaf}.bubble:after{content:'';position:absolute;width:34px;border-top:1px solid #9ebfaf;top:50%;left:100%}.bubble.root{top:18px;left:18px}.bubble.a{top:85px;left:85px}.bubble.b{top:155px;left:22px}.bubble.c{top:155px;left:150px;border-color:#d7953f;background:#fff8ea}.split-rows{display:grid;gap:8px}.large-block{min-height:116px}.ia-copy{padding:15px}.ia-copy h3{margin:0 0 7px}.ia-copy p{min-height:48px}.rec{display:inline-block;margin-top:5px;padding:4px 8px;border-radius:12px;background:#e8f4ed;color:#21644c;font-size:11px;font-weight:700}
+  @media(max-width:980px){.ia-grid{grid-template-columns:1fr}.ia-preview{height:330px}}
+</style>
+
+<h2>本体发现与本体管理，前端应该怎样重组？</h2>
+<p class="subtitle">三种方案都保留开放发现和通用手工建模；差别在于两条链路何时汇合，以及层级树是否成为主界面。点击选择你倾向的方向。</p>
+
+<div class="ia-grid">
+  <div class="ia-card" data-choice="a-separated" onclick="toggleSelect(this)">
+    <div class="ia-preview">
+      <div class="mini-nav"><b>知序</b><span class="on">本体发现</span><span>本体管理</span><span>审核中心</span><span>版本</span></div>
+      <div class="mini-main">
+        <div class="mini-head"><strong>本体发现</strong><div class="mini-tabs"><i class="active">候选</i><i>草案</i></div></div>
+        <div class="split-rows">
+          <div class="pane large-block"><h5>开放候选与层级建议</h5><div class="flow"><span>候选</span><span>归纳</span><span>审核</span><span>发布</span></div></div>
+          <div class="pane large-block"><h5>本体管理（另一个页面）</h5><div class="tree"><div class="node">规则实体</div><div class="node child">合同</div><div class="node child">制度</div></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="ia-copy"><h3>A · 两个入口继续分开</h3><p>发现、管理、审核各自清晰，但用户需要跨页面理解同一条变更。</p></div>
+  </div>
+
+  <div class="ia-card" data-choice="b-unified" onclick="toggleSelect(this)">
+    <div class="ia-preview">
+      <div class="mini-nav"><b>知序</b><span class="on">本体工作台</span><span>知识审核</span><span>版本</span></div>
+      <div class="mini-main">
+        <div class="mini-head"><strong>本体工作台</strong><div class="mini-tabs"><i class="active">层级</i><i>待审核 6</i><i>版本</i></div></div>
+        <div class="mini-body">
+          <div class="pane"><h5>已发布结构 + 草案叠加</h5><div class="tree"><div class="node">业务对象</div><div class="node child">组织</div><div class="node grand">供应商</div><div class="node child suggest">合作伙伴 <span class="badge-mini">建议 87%</span></div><div class="node">规则文档</div></div></div>
+          <div class="pane"><h5>统一变更队列</h5><div class="queue"><div>发现建议：合作伙伴 → 组织</div><div>手工新增：采购合同</div><div class="approved">已批准：供应商父级调整</div></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="ia-copy"><h3>B · 统一本体工作台</h3><p>发现建议和人工草案都叠加到同一层级视图，再进入同一审核队列。</p><span class="rec">推荐：兼顾两条链路与现有项目结构</span></div>
+  </div>
+
+  <div class="ia-card" data-choice="c-graph-first" onclick="toggleSelect(this)">
+    <div class="ia-preview">
+      <div class="mini-nav"><b>知序</b><span class="on">本体图谱</span><span>审核</span><span>版本</span></div>
+      <div class="mini-main">
+        <div class="mini-head"><strong>本体 DAG 设计器</strong><div class="mini-tabs"><i>＋ 类</i><i>连接父类</i></div></div>
+        <div class="canvas"><span class="bubble root">业务对象</span><span class="bubble a">组织</span><span class="bubble b">供应商</span><span class="bubble c">合作伙伴 · 待审</span></div>
+        <div class="pane"><h5>右侧检查器：多父类、关系约束、影响与审批</h5></div>
+      </div>
+    </div>
+    <div class="ia-copy"><h3>C · 图形化 DAG 为中心</h3><p>表达力最强，但会成为一次较大的前端重构，候选审核容易被画布掩盖。</p></div>
+  </div>
+</div>

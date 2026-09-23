@@ -1,0 +1,71 @@
+<style>
+  :root{--ink:#173c32;--green:#176247;--mint:#eaf4ee;--line:#dbe6de;--paper:#fff;--amber:#c47a21;--amber-bg:#fff5e7;--blue:#456f99;--blue-bg:#edf4fa}
+  .explain{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border:1px solid #d7e5dc;background:#f5faf7;border-radius:12px;margin:12px 0 20px}.explain b{color:var(--green)}
+  .app-shell{display:grid;grid-template-columns:182px 1fr;min-height:720px;border:1px solid #cedcd3;border-radius:18px;overflow:hidden;background:#f5f7f4;box-shadow:0 18px 50px rgba(24,61,50,.13)}
+  .sidebar{background:linear-gradient(180deg,#173f34,#12352c);color:#d7e7df;padding:24px 16px}.brandx{font-size:23px;letter-spacing:5px;color:white;margin-bottom:26px}.project{padding:10px;border:1px solid #467062;border-radius:8px;background:#234b3f;font-size:11px;margin-bottom:20px}.navx{display:grid;gap:5px}.navx span{padding:10px 11px;border-radius:7px;font-size:12px}.navx .active{background:#376756;color:white;font-weight:700}.navx small{margin:18px 10px 5px;color:#8fb6a6;letter-spacing:1px}.mainx{padding:24px 28px;min-width:0}.topline{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}.eyebrow{font-size:10px;letter-spacing:1.5px;color:#6e847a}.topline h2{margin:4px 0 5px;color:var(--ink);font-size:26px}.topline p{margin:0;color:#71877c}.version-pill{padding:8px 12px;border-radius:18px;background:#e8f2ec;color:#285f4b;font-size:11px;white-space:nowrap}
+  .lifecycle{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin:22px 0}.stage{position:relative;padding:13px 12px;background:white;border:1px solid var(--line);border-radius:10px;min-width:0}.stage:after{content:'›';position:absolute;right:-8px;top:19px;color:#94a99f;font-size:19px;z-index:2}.stage:last-child:after{display:none}.stage b{display:block;color:#28483d;font-size:12px}.stage span{display:block;margin-top:4px;font-size:10px;color:#829188}.stage strong{float:right;color:var(--green);font-size:18px}.stage.active{border-color:#2b775a;background:#eff8f3;box-shadow:inset 0 0 0 1px #2b775a}.stage.warn strong{color:var(--amber)}
+  .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px}.toolbar button{border:1px solid #cbdcd1;background:white;color:#35644f;border-radius:7px;padding:8px 11px;font-size:11px}.toolbar button.primary{margin-left:auto;background:var(--green);border-color:var(--green);color:white}.toolbar input{flex:1;border:1px solid #ceddd3;border-radius:7px;padding:8px 10px;background:white;font-size:11px}.mode{display:flex;padding:3px;background:#e9efeb;border-radius:8px}.mode span{padding:6px 9px;border-radius:6px;font-size:10px}.mode .on{background:white;color:#1d634a;box-shadow:0 1px 4px #ccd8d0}
+  .workspace{display:grid;grid-template-columns:minmax(300px,1.15fr) minmax(260px,.85fr);gap:13px}.panelx{background:white;border:1px solid var(--line);border-radius:12px;padding:15px;min-width:0}.panelx header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.panelx h3{margin:0;color:#24483b;font-size:13px}.panelx header small{color:#819188;font-size:10px}.tree{display:grid;gap:6px}.branch{border:1px solid #e0e9e3;border-radius:8px;background:#fcfdfc;padding:9px 10px;font-size:11px}.branch .row{display:flex;gap:7px;align-items:center}.branch .arrow{color:#789288}.branch .count{margin-left:auto;color:#91a097}.branch.child{margin-left:22px}.branch.grand{margin-left:44px}.branch.selected{border-color:#398166;background:#edf7f1}.branch.proposed{border-style:dashed;border-color:#d18b36;background:#fff8ed}.chip{display:inline-block;padding:2px 6px;border-radius:9px;font-size:9px;margin-left:5px;background:#dceee4;color:#266249}.chip.ai{background:#ffe2af;color:#764b13}.parents{display:flex;gap:6px;flex-wrap:wrap;margin:9px 0}.parents span{padding:5px 8px;border-radius:12px;background:#eaf2ed;color:#2c614c;font-size:10px}.detail-title{padding-bottom:12px;border-bottom:1px solid #e5ece7}.detail-title small{color:#6f847a}.detail-title h3{font-size:18px;margin:4px 0}.meta{display:grid;grid-template-columns:88px 1fr;gap:8px;font-size:10px;margin:13px 0}.meta dt{color:#7a8d84}.meta dd{margin:0;color:#304c41}.evidence{padding:10px;border-left:3px solid #d58c31;background:var(--amber-bg);font-size:10px;line-height:1.6}.change-box{margin-top:12px;padding:11px;border:1px solid #dfe8e2;border-radius:9px}.change-box b{font-size:11px}.edge{display:flex;align-items:center;gap:7px;margin-top:8px;font-size:10px}.edge span{padding:5px 7px;background:#edf4ef;border-radius:6px}.edge i{font-style:normal;color:#c47a21}.actions{display:flex;gap:7px;margin-top:13px}.actions button{flex:1;border-radius:7px;border:1px solid #2b7358;padding:8px;background:white;color:#2b7358;font-size:10px}.actions .primary{background:#2b7358;color:white}
+  .draftbar{grid-column:1/-1;background:#1d473a;color:#e6f2ec;border-radius:12px;padding:13px 16px;display:flex;align-items:center;gap:14px}.draftbar strong{color:white}.draftbar span{font-size:10px;color:#b8d4c7}.draftbar .stats{display:flex;gap:10px;margin-left:auto}.draftbar .stats i{font-style:normal;padding:5px 8px;border-radius:10px;background:#315c4d}.draftbar button{border:0;border-radius:7px;background:#efb75e;color:#263c33;padding:8px 12px;font-size:10px;font-weight:700}
+  .loop-note{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;margin:20px 0 4px}.source{padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:white}.source b{display:block;color:#244b3c}.source span{font-size:11px;color:#73877e}.merge{font-size:22px;color:#2a7458}.decision{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px}.choice{border:1px solid var(--line);border-radius:12px;padding:14px;background:white;cursor:pointer}.choice.selected{outline:3px solid #2e7d61}.choice h3{margin:0 0 5px;font-size:14px}.choice p{margin:0;font-size:11px;color:#71847b}
+  @media(max-width:900px){.app-shell{grid-template-columns:1fr}.sidebar{display:none}.workspace{grid-template-columns:1fr}.lifecycle{grid-template-columns:1fr 1fr}.stage:after{display:none}.draftbar{display:grid}.draftbar .stats{margin-left:0}.loop-note{grid-template-columns:1fr}.merge{text-align:center}.decision{grid-template-columns:1fr}}
+</style>
+
+<h2>B 方案重新定义：不是新增第三个模块，而是合并为一个“本体工作台”</h2>
+<div class="explain"><b>入口变化</b><span>侧栏原来的“本体发现”和“本体管理”合并成一个入口。原有能力全部保留，只按 5 个生命周期环节重新组织。任何编辑都先进入草案，不再直接发布。</span></div>
+
+<div class="loop-note">
+  <div class="source"><b>链路 A · 开放发现</b><span>候选知识 → 层级建议（可多父类）→ 草案</span></div>
+  <div class="merge">→</div>
+  <div class="source"><b>链路 B · 通用建模</b><span>人工新增 / 调整 / Turtle 导入 → 草案</span></div>
+</div>
+
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brandx">知序</div>
+    <div class="project">当前项目 · 采购知识库⌄</div>
+    <div class="navx"><span>项目总览</span><span>检索与图谱</span><span>知识问答</span><span>原文数据源</span><small>知识治理</small><span class="active">本体工作台 · 6</span><span>知识审核 · 12</span><span>后台任务</span></div>
+  </aside>
+  <main class="mainx">
+    <div class="topline"><div><span class="eyebrow">ONTOLOGY WORKBENCH</span><h2>本体工作台</h2><p>从开放发现到正式发布，在一个地方完成结构建设与治理。</p></div><span class="version-pill">正式版本 v12 · 2026-09-21</span></div>
+
+    <div class="lifecycle">
+      <div class="stage warn"><strong>128</strong><b>1 · 候选发现</b><span>开放候选池</span></div>
+      <div class="stage active"><strong>14</strong><b>2 · 层级编排</b><span>已发布 + 草案叠加</span></div>
+      <div class="stage warn"><strong>6</strong><b>3 · 变更审核</b><span>逐边/逐术语决定</span></div>
+      <div class="stage"><strong>0</strong><b>4 · 发布校验</b><span>循环、SHACL、影响</span></div>
+      <div class="stage"><strong>12</strong><b>5 · 版本治理</b><span>历史、Diff、回溯</span></div>
+    </div>
+
+    <div class="toolbar"><div class="mode"><span>正式结构</span><span class="on">叠加当前草案</span></div><input placeholder="搜索类、关系、属性…"><button>筛选建议</button><button class="primary">＋ 新建变更</button></div>
+
+    <div class="workspace">
+      <section class="panelx">
+        <header><h3>实体类层级</h3><small>树形浏览 · 多父类以标签显示</small></header>
+        <div class="tree">
+          <div class="branch"><div class="row"><span class="arrow">⌄</span><b>业务对象</b><span class="count">8 个子类</span></div></div>
+          <div class="branch child"><div class="row"><span class="arrow">⌄</span><b>组织</b><span class="count">3 个子类</span></div></div>
+          <div class="branch grand"><div class="row"><span class="arrow">•</span><b>供应商</b><span class="chip">正式</span></div></div>
+          <div class="branch grand selected proposed"><div class="row"><span class="arrow">•</span><b>合作伙伴</b><span class="chip ai">发现建议 87%</span><span class="count">待审核</span></div></div>
+          <div class="branch child"><div class="row"><span class="arrow">›</span><b>交易对象</b><span class="count">4 个子类</span></div></div>
+          <div class="branch"><div class="row"><span class="arrow">›</span><b>规则文档</b><span class="count">5 个子类</span></div></div>
+        </div>
+      </section>
+
+      <aside class="panelx">
+        <div class="detail-title"><small>实体类 · 草案新增</small><h3>合作伙伴</h3><code>urn:…:合作伙伴</code></div>
+        <dl class="meta"><dt>直接父类</dt><dd><div class="parents"><span>组织 ×</span><span>业务参与方 ×</span><span>＋ 添加父类</span></div></dd><dt>发现来源</dt><dd>Semantica 开放候选聚类</dd><dt>置信度</dt><dd>87% · 14 条候选支持</dd></dl>
+        <div class="evidence"><b>为什么建议这个层级？</b><br>候选中的“供应商、承包商、合作机构”共享组织属性，并在 9 份来源中承担业务参与角色。该理由只用于审核，不自动成为本体事实。</div>
+        <div class="change-box"><b>本次层级变更</b><div class="edge"><span>合作伙伴</span><i>subClassOf</i><span>组织</span></div><div class="edge"><span>合作伙伴</span><i>subClassOf</i><span>业务参与方</span></div></div>
+        <div class="actions"><button>暂不纳入</button><button>调整父类</button><button class="primary">加入审核草案</button></div>
+      </aside>
+
+      <div class="draftbar"><div><strong>当前草案 · 采购本体 2026-09-22</strong><br><span>来自开放发现 4 项 · 人工建模 2 项 · 未发布</span></div><div class="stats"><i>新增 3</i><i>层级调整 2</i><i>约束调整 1</i></div><button>进入变更审核 →</button></div>
+    </div>
+  </main>
+</div>
+
+<div class="decision">
+  <div class="choice" data-choice="unified-entry" onclick="toggleSelect(this)"><h3>采用统一入口</h3><p>移除侧栏“本体发现”独立入口，能力迁入本体工作台的第 1、2 环节。</p></div>
+  <div class="choice" data-choice="keep-two-entry" onclick="toggleSelect(this)"><h3>仍保留两个入口</h3><p>发现和管理继续独立，只统一底层草案与审核；页面跳转会更多。</p></div>
+</div>

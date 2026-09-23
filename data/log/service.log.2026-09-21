@@ -1,0 +1,181 @@
+2026-09-21 09:46:33 INFO    knowledge_service.timing · 工件列表 · 857.0 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-21 09:46:34 INFO    knowledge_service.service · 开始预热 embedding 模型（首次 encode 较慢，请稍候）…
+2026-09-21 09:47:42 INFO    knowledge_service.timing · 存储查询 · 2.0 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:47:42 INFO    knowledge_service.timing · 存储查询 · 0.9 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:47:42 INFO    knowledge_service.timing · 范围过滤 · 4.3 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 09:47:42 INFO    knowledge_service.timing · 存储查询 · 2.1 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:47:42 INFO    knowledge_service.timing · 范围过滤 · 5.3 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 09:47:42 INFO    knowledge_service.timing · 存储查询 · 3.6 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:47:42 INFO    knowledge_service.timing · 范围过滤 · 6.7 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 09:47:42 INFO    knowledge_service.timing · 范围过滤 · 10.4 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 09:48:11 INFO    knowledge_service.service · embedding 模型预热完成，检索已可用
+2026-09-21 09:50:36 INFO    knowledge_service.timing · 存储查询 · 1.0 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:50:36 INFO    knowledge_service.timing · 范围过滤 · 3.9 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 09:50:36 INFO    knowledge_service.timing · 存储查询 · 4.7 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:50:36 INFO    knowledge_service.timing · 范围过滤 · 8.0 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 09:50:36 INFO    knowledge_service.timing · 存储查询 · 7.2 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:50:36 INFO    knowledge_service.timing · 范围过滤 · 8.9 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 09:50:36 INFO    knowledge_service.timing · 存储查询 · 8.3 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:50:36 INFO    knowledge_service.timing · 范围过滤 · 12.5 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 09:51:25 INFO    knowledge_service.timing · 存储查询 · 2.4 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:51:25 INFO    knowledge_service.timing · 范围过滤 · 3.0 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 09:51:25 INFO    knowledge_service.timing · 存储查询 · 1.0 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:51:25 INFO    knowledge_service.timing · 范围过滤 · 3.1 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 09:51:25 INFO    knowledge_service.timing · 存储查询 · 7.6 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:51:25 INFO    knowledge_service.timing · 范围过滤 · 10.3 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 09:51:25 INFO    knowledge_service.timing · 存储查询 · 9.0 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:51:25 INFO    knowledge_service.timing · 范围过滤 · 13.0 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 09:53:47 INFO    knowledge_service.timing · 存储查询 · 1.2 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:53:47 INFO    knowledge_service.timing · 范围过滤 · 2.2 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 09:53:47 INFO    knowledge_service.timing · 存储查询 · 1.7 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:53:47 INFO    knowledge_service.timing · 范围过滤 · 3.1 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 09:53:47 INFO    knowledge_service.timing · 存储查询 · 0.3 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:53:47 INFO    knowledge_service.timing · 范围过滤 · 1.0 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 09:53:47 INFO    knowledge_service.timing · 存储查询 · 1.3 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:53:47 INFO    knowledge_service.timing · 范围过滤 · 2.1 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 09:54:59 INFO    knowledge_service.timing · 存储查询 · 1.9 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:54:59 INFO    knowledge_service.timing · 范围过滤 · 3.7 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 09:54:59 INFO    knowledge_service.timing · 存储查询 · 3.5 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:54:59 INFO    knowledge_service.timing · 范围过滤 · 5.2 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 09:54:59 INFO    knowledge_service.timing · 存储查询 · 2.9 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:54:59 INFO    knowledge_service.timing · 范围过滤 · 5.9 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 09:54:59 INFO    knowledge_service.timing · 存储查询 · 2.6 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:54:59 INFO    knowledge_service.timing · 范围过滤 · 8.1 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 09:55:40 INFO    knowledge_service.timing · 存储查询 · 2.2 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:55:40 INFO    knowledge_service.timing · 范围过滤 · 4.0 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 09:55:40 INFO    knowledge_service.timing · 存储查询 · 1.3 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:55:40 INFO    knowledge_service.timing · 范围过滤 · 5.3 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 09:55:40 INFO    knowledge_service.timing · 存储查询 · 7.8 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:55:40 INFO    knowledge_service.timing · 范围过滤 · 9.5 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 09:55:40 INFO    knowledge_service.timing · 存储查询 · 1.0 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:55:40 INFO    knowledge_service.timing · 范围过滤 · 14.0 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 09:56:30 INFO    knowledge_service.timing · 存储查询 · 0.8 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:56:30 INFO    knowledge_service.timing · 范围过滤 · 2.1 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 09:56:30 INFO    knowledge_service.timing · 存储查询 · 1.6 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:56:30 INFO    knowledge_service.timing · 范围过滤 · 3.1 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 09:56:56 INFO    knowledge_service.timing · 存储查询 · 0.7 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:56:56 INFO    knowledge_service.timing · 范围过滤 · 1.6 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 09:56:56 INFO    knowledge_service.timing · 存储查询 · 4.7 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:56:56 INFO    knowledge_service.timing · 范围过滤 · 6.9 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 09:56:56 INFO    knowledge_service.timing · 存储查询 · 1.2 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:56:56 INFO    knowledge_service.timing · 范围过滤 · 2.5 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 09:56:56 INFO    knowledge_service.timing · 存储查询 · 1.8 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:56:56 INFO    knowledge_service.timing · 范围过滤 · 4.6 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 09:57:55 INFO    knowledge_service.timing · 存储查询 · 2.2 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:57:55 INFO    knowledge_service.timing · 范围过滤 · 4.9 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 09:57:55 INFO    knowledge_service.timing · 存储查询 · 3.5 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:57:55 INFO    knowledge_service.timing · 范围过滤 · 7.6 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 09:57:55 INFO    knowledge_service.timing · 存储查询 · 2.5 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:57:55 INFO    knowledge_service.timing · 范围过滤 · 5.5 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 09:57:55 INFO    knowledge_service.timing · 存储查询 · 3.2 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 09:57:55 INFO    knowledge_service.timing · 范围过滤 · 6.7 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 10:03:14 INFO    knowledge_service.timing · 存储查询 · 3.0 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 10:03:14 INFO    knowledge_service.timing · 范围过滤 · 6.1 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 10:03:14 INFO    knowledge_service.timing · 存储查询 · 2.6 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 10:03:14 INFO    knowledge_service.timing · 范围过滤 · 4.8 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 10:03:14 INFO    knowledge_service.timing · 存储查询 · 3.2 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 10:03:14 INFO    knowledge_service.timing · 范围过滤 · 8.4 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 10:03:14 INFO    knowledge_service.timing · 存储查询 · 7.1 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 10:03:14 INFO    knowledge_service.timing · 范围过滤 · 10.5 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 10:14:12 INFO    knowledge_service.timing · 工件列表 · 850.0 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-21 10:14:13 INFO    knowledge_service.service · 开始预热 embedding 模型（首次 encode 较慢，请稍候）…
+2026-09-21 10:15:20 INFO    knowledge_service.service · embedding 模型预热完成，检索已可用
+2026-09-21 10:25:09 INFO    knowledge_service.timing · 存储查询 · 3.3 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 10:25:09 INFO    knowledge_service.timing · 存储查询 · 2.3 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 10:25:09 INFO    knowledge_service.timing · 范围过滤 · 777.2 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 10:25:09 INFO    knowledge_service.timing · 范围过滤 · 777.7 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 10:25:09 INFO    knowledge_service.timing · 存储查询 · 0.7 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 10:25:09 INFO    knowledge_service.timing · 范围过滤 · 4.8 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 10:25:09 INFO    knowledge_service.timing · 图谱探索 · 7.8 ms · 种子=False 跳数=1 扫描=4 graph_nodes=3 graph_edges=1
+2026-09-21 10:52:15 INFO    knowledge_service.timing · 当前记录读取 · 0.9 ms · 向量=list 类型=0 扫描=0
+2026-09-21 10:52:17 INFO    knowledge_service.service · 本体校验完成，开始向量化 4 条记录
+2026-09-21 10:52:18 INFO    knowledge_service.service · 写入完成：4 条记录落库并同步向量索引
+2026-09-21 10:52:28 INFO    knowledge_service.timing · 存储查询 · 2.7 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 10:52:28 INFO    knowledge_service.timing · 存储查询 · 2.1 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 10:52:28 INFO    knowledge_service.timing · 范围过滤 · 1013.0 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 10:52:28 INFO    knowledge_service.timing · 范围过滤 · 1013.6 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 10:52:30 INFO    knowledge_service.timing · 存储查询 · 0.3 ms · 向量=True 类型=0 过滤=False 扫描=4 保留=4
+2026-09-21 10:52:30 INFO    knowledge_service.timing · 存储查询 · 0.7 ms · 向量=True 类型=0 过滤=False 扫描=4 保留=4
+2026-09-21 10:52:30 INFO    knowledge_service.timing · 范围过滤 · 1.3 ms · 类型=0 原始=4 存活=4 保留=4
+2026-09-21 10:52:30 INFO    knowledge_service.timing · 范围过滤 · 2.3 ms · 类型=2 原始=4 存活=4 保留=4
+2026-09-21 10:52:39 WARNING knowledge_service · 项目删除后清理 Neo4j 副本失败（可手动重新同步清理）: Unable to retrieve routing information
+2026-09-21 10:53:31 INFO    knowledge_service.timing · 当前记录读取 · 0.2 ms · 向量=list 类型=0 扫描=0
+2026-09-21 10:53:31 INFO    knowledge_service.service · 本体校验完成，开始向量化 3 条记录
+2026-09-21 10:53:31 INFO    knowledge_service.service · 写入完成：3 条记录落库并同步向量索引
+2026-09-21 10:53:39 INFO    knowledge_service.timing · 存储查询 · 3.0 ms · 向量=True 类型=0 过滤=False 扫描=3 保留=3
+2026-09-21 10:53:39 INFO    knowledge_service.timing · 范围过滤 · 844.5 ms · 类型=0 原始=3 存活=3 保留=3
+2026-09-21 10:53:39 INFO    knowledge_service.timing · 存储查询 · 2.9 ms · 向量=True 类型=0 过滤=False 扫描=3 保留=3
+2026-09-21 10:53:39 INFO    knowledge_service.timing · 范围过滤 · 847.4 ms · 类型=2 原始=3 存活=3 保留=3
+2026-09-21 10:53:39 INFO    knowledge_service.timing · 存储查询 · 5.7 ms · 向量=True 类型=0 过滤=False 扫描=3 保留=3
+2026-09-21 10:53:39 INFO    knowledge_service.timing · 范围过滤 · 851.1 ms · 类型=0 原始=3 存活=3 保留=3
+2026-09-21 10:53:39 INFO    knowledge_service.timing · 存储查询 · 8.9 ms · 向量=True 类型=0 过滤=False 扫描=3 保留=3
+2026-09-21 10:53:39 INFO    knowledge_service.timing · 范围过滤 · 854.4 ms · 类型=2 原始=3 存活=3 保留=3
+2026-09-21 10:53:45 WARNING knowledge_service · 项目删除后清理 Neo4j 副本失败（可手动重新同步清理）: Unable to retrieve routing information
+2026-09-21 10:55:54 INFO    knowledge_service.timing · 当前记录读取 · 0.2 ms · 向量=list 类型=0 扫描=0
+2026-09-21 10:55:54 INFO    knowledge_service.service · 本体校验完成，开始向量化 4 条记录
+2026-09-21 10:55:55 INFO    knowledge_service.service · 写入完成：4 条记录落库并同步向量索引
+2026-09-21 10:56:05 INFO    knowledge_service.timing · 存储查询 · 2.9 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 10:56:05 INFO    knowledge_service.timing · 存储查询 · 1.5 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 10:56:05 INFO    knowledge_service.timing · 范围过滤 · 1504.5 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 10:56:05 INFO    knowledge_service.timing · 范围过滤 · 1504.9 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 10:56:09 INFO    knowledge_service.timing · 存储查询 · 0.3 ms · 向量=True 类型=0 过滤=False 扫描=4 保留=4
+2026-09-21 10:56:09 INFO    knowledge_service.timing · 范围过滤 · 3.5 ms · 类型=2 原始=4 存活=4 保留=4
+2026-09-21 10:56:09 INFO    knowledge_service.timing · 存储查询 · 0.2 ms · 向量=True 类型=0 过滤=False 扫描=4 保留=4
+2026-09-21 10:56:09 INFO    knowledge_service.timing · 范围过滤 · 12.0 ms · 类型=0 原始=4 存活=4 保留=4
+2026-09-21 10:56:12 INFO    knowledge_service.timing · 当前记录读取 · 0.2 ms · 向量=list 类型=0 扫描=4
+2026-09-21 10:56:16 WARNING knowledge_service · 项目删除后清理 Neo4j 副本失败（可手动重新同步清理）: Unable to retrieve routing information
+2026-09-21 10:58:12 INFO    knowledge_service.timing · 工件列表 · 864.7 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-21 10:58:12 INFO    knowledge_service.service · 开始预热 embedding 模型（首次 encode 较慢，请稍候）…
+2026-09-21 10:58:24 INFO    knowledge_service.timing · 当前记录读取 · 2.3 ms · 向量=list 类型=0 扫描=0
+2026-09-21 10:58:27 INFO    knowledge_service.service · 本体校验完成，开始向量化 4 条记录
+2026-09-21 10:58:57 WARNING knowledge_service · 项目删除后清理 Neo4j 副本失败（可手动重新同步清理）: Unable to retrieve routing information
+2026-09-21 10:59:32 INFO    knowledge_service.service · embedding 模型预热完成，检索已可用
+2026-09-21 11:00:05 INFO    knowledge_service.timing · 当前记录读取 · 0.2 ms · 向量=list 类型=0 扫描=0
+2026-09-21 11:00:05 INFO    knowledge_service.service · 本体校验完成，开始向量化 4 条记录
+2026-09-21 11:00:05 INFO    knowledge_service.service · 写入完成：4 条记录落库并同步向量索引
+2026-09-21 11:00:14 INFO    knowledge_service.timing · 存储查询 · 3.1 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 11:00:14 INFO    knowledge_service.timing · 范围过滤 · 1160.0 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 11:00:14 INFO    knowledge_service.timing · 存储查询 · 5.5 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 11:00:14 INFO    knowledge_service.timing · 范围过滤 · 1166.9 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 11:00:16 INFO    knowledge_service.timing · 存储查询 · 0.7 ms · 向量=True 类型=0 过滤=False 扫描=4 保留=4
+2026-09-21 11:00:16 INFO    knowledge_service.timing · 存储查询 · 1.1 ms · 向量=True 类型=0 过滤=False 扫描=4 保留=4
+2026-09-21 11:00:16 INFO    knowledge_service.timing · 范围过滤 · 1.9 ms · 类型=2 原始=4 存活=4 保留=4
+2026-09-21 11:00:16 INFO    knowledge_service.timing · 范围过滤 · 2.0 ms · 类型=0 原始=4 存活=4 保留=4
+2026-09-21 11:00:19 INFO    knowledge_service.timing · 当前记录读取 · 0.3 ms · 向量=list 类型=0 扫描=4
+2026-09-21 11:00:24 WARNING knowledge_service · 项目删除后清理 Neo4j 副本失败（可手动重新同步清理）: Unable to retrieve routing information
+2026-09-21 11:01:10 INFO    knowledge_service.timing · 当前记录读取 · 0.3 ms · 向量=list 类型=0 扫描=0
+2026-09-21 11:01:10 INFO    knowledge_service.service · 本体校验完成，开始向量化 4 条记录
+2026-09-21 11:01:10 INFO    knowledge_service.service · 写入完成：4 条记录落库并同步向量索引
+2026-09-21 11:01:16 INFO    knowledge_service.timing · 存储查询 · 1.8 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 11:01:16 INFO    knowledge_service.timing · 范围过滤 · 563.3 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-21 11:01:17 INFO    knowledge_service.timing · 存储查询 · 3.1 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-21 11:01:17 INFO    knowledge_service.timing · 范围过滤 · 565.7 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-21 11:01:19 INFO    knowledge_service.timing · 存储查询 · 0.3 ms · 向量=True 类型=0 过滤=False 扫描=4 保留=4
+2026-09-21 11:01:19 INFO    knowledge_service.timing · 范围过滤 · 1.1 ms · 类型=0 原始=4 存活=4 保留=4
+2026-09-21 11:01:19 INFO    knowledge_service.timing · 存储查询 · 1.0 ms · 向量=True 类型=0 过滤=False 扫描=4 保留=4
+2026-09-21 11:01:19 INFO    knowledge_service.timing · 范围过滤 · 1.6 ms · 类型=2 原始=4 存活=4 保留=4
+2026-09-21 11:01:21 INFO    knowledge_service.timing · 当前记录读取 · 0.1 ms · 向量=list 类型=0 扫描=4
+2026-09-21 11:01:26 WARNING knowledge_service · 项目删除后清理 Neo4j 副本失败（可手动重新同步清理）: Unable to retrieve routing information
+2026-09-21 15:08:19 INFO    knowledge_service.timing · 工件列表 · 0.1 ms · 类型=job 按项目=False 解码=0 保留=0
+2026-09-21 15:08:20 INFO    knowledge_service.service · 开始预热 embedding 模型（首次 encode 较慢，请稍候）…
+2026-09-21 15:08:20 INFO    knowledge_service.service · embedding 模型预热完成，检索已可用
+2026-09-21 15:08:38 DEBUG   knowledge_service.chunking · 切片：策略=fixed 字符数=51 块大小=100 重叠=0
+2026-09-21 15:08:38 INFO    knowledge_service.timing · 当前记录读取 · 0.2 ms · 向量=list 类型=0 扫描=1
+2026-09-21 15:08:38 INFO    knowledge_service.service · 本体校验完成，开始向量化 1 条记录
+2026-09-21 15:08:38 INFO    knowledge_service.service · 写入完成：1 条记录落库并同步向量索引
+2026-09-21 15:08:38 INFO    knowledge_service.timing · 当前记录读取 · 0.1 ms · 向量=list 类型=0 扫描=2
+2026-09-21 15:08:38 INFO    knowledge_service.service · 本体校验完成，开始向量化 0 条记录
+2026-09-21 15:08:38 INFO    knowledge_service.service · 写入完成：1 条记录落库并同步向量索引
+2026-09-21 15:08:55 INFO    knowledge_service.timing · 存储查询 · 0.5 ms · 向量=True 类型=0 过滤=False 扫描=2 保留=2
+2026-09-21 15:08:55 INFO    knowledge_service.timing · 范围过滤 · 2.1 ms · 类型=0 原始=2 存活=2 保留=2
+2026-09-21 15:09:14 INFO    knowledge_service.timing · 存储查询 · 0.3 ms · 向量=True 类型=0 过滤=False 扫描=2 保留=2
+2026-09-21 15:09:14 INFO    knowledge_service.timing · 范围过滤 · 1.5 ms · 类型=0 原始=2 存活=2 保留=2
+2026-09-21 15:09:32 INFO    knowledge_service.timing · 存储查询 · 0.6 ms · 向量=True 类型=0 过滤=False 扫描=2 保留=2
+2026-09-21 15:09:32 INFO    knowledge_service.timing · 存储查询 · 1.1 ms · 向量=True 类型=0 过滤=False 扫描=2 保留=2
+2026-09-21 15:09:32 INFO    knowledge_service.timing · 范围过滤 · 3.2 ms · 类型=0 原始=2 存活=2 保留=2
+2026-09-21 15:09:32 INFO    knowledge_service.timing · 范围过滤 · 3.1 ms · 类型=2 原始=2 存活=2 保留=0
+2026-09-21 15:09:32 INFO    knowledge_service.timing · 存储查询 · 0.4 ms · 向量=True 类型=0 过滤=False 扫描=2 保留=2
+2026-09-21 15:09:32 INFO    knowledge_service.timing · 范围过滤 · 2.0 ms · 类型=2 原始=2 存活=2 保留=0
+2026-09-21 15:09:32 INFO    knowledge_service.timing · 图谱探索 · 2.9 ms · 种子=False 跳数=1 扫描=0 graph_nodes=0 graph_edges=0
+2026-09-21 15:10:22 INFO    knowledge_service.timing · 存储查询 · 0.3 ms · 向量=True 类型=0 过滤=False 扫描=2 保留=2
+2026-09-21 15:10:22 INFO    knowledge_service.timing · 范围过滤 · 1.4 ms · 类型=0 原始=2 存活=2 保留=2
