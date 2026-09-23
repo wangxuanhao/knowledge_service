@@ -160,7 +160,9 @@ Restore in dependency order: project → immutable ontology versions → drafts 
 
 - [ ] **Step 7: Run repository, migration, project deletion and export/import tests.**
 
-Expected: all selected tests pass, including dual-connection CAS.
+Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_draft_repository.py tests/service/test_project_management.py -vv`
+
+Expected: all tests pass, including dual-connection CAS and governance export/import.
 
 - [ ] **Step 8: Commit.**
 
@@ -198,13 +200,24 @@ Use stable SHA-256 fingerprints over canonical JSON. Keep all graph mutation in 
 
 - [ ] **Step 6: Implement graph validation and risk primitives.**
 
-Return structured `{code,severity,message,operation_ids,term_iris}` issues. Constants: descendants >50, constraints >10, pending candidates >20 => high; formal record impact => high; source discovery/AI/import => minimum medium; warning => minimum medium; restore/retire/advanced patch => high.
+Return structured `{code,severity,message,operation_ids,term_iris}` issues and lock the complete action matrix in parameterized tests:
+
+- low only: manual annotation add/remove and an unreferenced manual leaf `create_term`;
+- medium minimum: `add_parent`, `add_domain`, `add_range`, and every discovery/AI/import/candidate semantic suggestion even when otherwise unused;
+- high: `remove_parent`, `remove_domain`, `remove_range`, `set_datatype`, `retire_term`, `restore_term`, `advanced_rdf_patch`, any formal-record impact, descendants >50, constraint references >10, or pending candidates >20;
+- any warning raises an otherwise-low operation to at least medium; no confidence value may lower the source minimum.
+
+Add a negative batch-approval test for every medium/high action so a classification omission cannot silently make it batchable.
 
 - [ ] **Step 7: Enforce deprecation in formal knowledge writes.**
 
 Add tests to `tests/service/test_formal_writes.py` proving new entity, relation and attribute writes reject deprecated target types/properties by default while historical records bound to older ontology IDs remain readable and valid against their own version. Implement the check in `services/formal_writes.py` through `Ontology.is_active_term`, not through UI filtering.
 
 - [ ] **Step 8: Run tests and commit.**
+
+Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_operations.py tests/service/test_formal_writes.py -vv`
+
+Expected: all tests pass.
 
 ```powershell
 git add knowledge_service/services/ontology.py knowledge_service/services/ontology_operations.py knowledge_service/services/formal_writes.py tests/service/test_ontology_operations.py tests/service/test_formal_writes.py
@@ -223,7 +236,7 @@ Test nullable-base first draft, command CAS, immutable supersession, editing/sub
 
 - [ ] **Step 2: Write decision and validation tests.**
 
-Test approve/reject/request_changes; max 100 batch only for no-warning low risk; medium/high requires individual reason; validation fingerprint binds base/source versions, operation fingerprints, report and rule version; changed/unacknowledged warnings reject decisions/publish.
+Test approve/reject/request_changes; max 100 batch only for no-warning low risk; every `reject` and `request_changes` requires a non-empty reason regardless of risk, and every high-risk `approve` requires a non-empty reason. Medium-risk approval may omit a reason only when it has no warning requiring acknowledgement. Validation fingerprint binds base/source versions, operation fingerprints, report and rule version; changed/unacknowledged warnings reject decisions/publish.
 
 - [ ] **Step 3: Write stale/rebase tests.**
 
@@ -238,6 +251,10 @@ Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scrip
 Implement `create`, `command`, `submit`, `decide`, `validate`, `rebase`, `close`, `publish`, plus paginated `roots`, `children`, `search`, `neighborhood`, and `matrix`. The service owns state transitions and never trusts client-provided Turtle or risk.
 
 - [ ] **Step 6: Verify and commit.**
+
+Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_drafts.py -vv`
+
+Expected: all tests pass.
 
 ```powershell
 git add knowledge_service/services/ontology_drafts.py tests/service/test_ontology_drafts.py
@@ -276,6 +293,10 @@ Recheck base/source/revision and validation fingerprint inside the transaction; 
 Public routes/services must no longer call `save_ontology`. Keep only explicit `bootstrap_ontology`, `restore_empty_project_snapshot`, and unified publish wrappers around the private primitive, each with provenance.
 
 - [ ] **Step 6: Run tests and commit.**
+
+Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_provenance_repository.py tests/service/test_ontology_draft_repository.py tests/service/test_ontology_drafts.py -vv`
+
+Expected: all tests pass.
 
 ```powershell
 git add knowledge_service/repository knowledge_service/services/ontology_drafts.py tests/service/test_provenance_repository.py tests/service/test_ontology_draft_repository.py tests/service/test_ontology_drafts.py
@@ -349,6 +370,10 @@ Run database side effects inside the unified publish transaction; enqueue Milvus
 
 - [ ] **Step 6: Run compatibility suites and commit.**
 
+Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_maintenance.py tests/service/test_ontology_discovery.py tests/service/test_ontology_change_proposals.py -vv`
+
+Expected: all tests pass with legacy response compatibility and no direct publish bypass.
+
 ```powershell
 git add knowledge_service/api knowledge_service/services tests/service/test_ontology_maintenance.py tests/service/test_ontology_discovery.py tests/service/test_ontology_change_proposals.py
 git commit -m "feat: route ontology writes through unified governance"
@@ -385,6 +410,10 @@ State contains project, ontology/draft ids, revision, selected canonical IRI, di
 Move/reuse the current discovery statistics, clustering, candidate mind map, candidate filtering, confidence/source evidence and “generate cumulative draft” controls inside the workbench shell. Preserve existing API calls and test hooks during the transition; generating a draft now selects it and advances to design rather than opening a parallel ontology page.
 
 - [ ] **Step 5: Run static tests and commit.**
+
+Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_frontend_static_contract.py tests/test_web_ui_contract.py -vv`
+
+Expected: all tests pass.
 
 ```powershell
 git add knowledge_service/web tests/service/test_frontend_static_contract.py tests/test_web_ui_contract.py
@@ -433,7 +462,7 @@ git commit -m "feat: add ontology DAG editing experience"
 
 - [ ] **Step 1: Write review workflow tests.**
 
-Cover filters/grouping, before/after/context/evidence panes, A approve, E adjust, R reject, J/K navigation, autosaved decisions, explicit high-risk reasons, warning acknowledgements and stale recovery.
+Cover filters/grouping, before/after/context/evidence panes, A approve, E adjust, R reject, J/K navigation, autosaved decisions, mandatory reasons for every rejection and adjustment, mandatory reasons for high-risk approval, warning acknowledgements and stale recovery. Verify the UI cannot submit these decisions with missing reasons and the API still rejects a crafted bypass.
 
 - [ ] **Step 2: Write batch safety tests.**
 
@@ -448,6 +477,10 @@ Render change-driven queues rather than whole-ontology approval. Validation show
 Keep these capabilities reachable under “版本治理”; Turtle editing creates a draft rather than publishing directly.
 
 - [ ] **Step 5: Run UI suites and commit.**
+
+Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_workbench_ui.py tests/service/test_ontology_draft_review_ui.py -vv`
+
+Expected: all tests pass.
 
 ```powershell
 git add knowledge_service/web tests/service/test_ontology_workbench_ui.py tests/service/test_ontology_draft_review_ui.py
@@ -476,6 +509,10 @@ Describe roots/multi-parent semantics, retirement vs deletion, draft states, rev
 
 - [ ] **Step 4: Run focused tests and commit.**
 
+Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_drafts.py tests/service/test_project_management.py -vv`
+
+Expected: all legacy conversion and governance export/import tests pass.
+
 ```powershell
 git add knowledge_service/services/ontology_drafts.py knowledge_service/repository/ontology_draft_store.py tests/service/test_ontology_drafts.py docs/KNOWLEDGE_SERVICE.md
 git commit -m "docs: complete ontology governance migration"
@@ -492,7 +529,7 @@ git commit -m "docs: complete ontology governance migration"
 
 ```powershell
 Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue
-.\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_draft_repository.py tests/service/test_ontology_operations.py tests/service/test_ontology_drafts.py tests/service/test_ontology_draft_api.py tests/service/test_ontology_maintenance.py tests/service/test_ontology_discovery.py tests/service/test_ontology_change_proposals.py tests/service/test_provenance_repository.py -q
+.\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_draft_repository.py tests/service/test_ontology_operations.py tests/service/test_ontology_drafts.py tests/service/test_ontology_draft_api.py tests/service/test_ontology_maintenance.py tests/service/test_ontology_discovery.py tests/service/test_ontology_change_proposals.py tests/service/test_provenance_repository.py tests/service/test_formal_writes.py tests/service/test_project_management.py -q
 ```
 
 Expected: all pass.
