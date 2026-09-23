@@ -92,10 +92,13 @@ def test_ontology_lineage_metadata_survives_restart(tmp_path):
 def test_correction_replaces_interval_but_history_retains_original(tmp_path):
     repo = Repository(tmp_path / 'db')
     p = repo.create_project('a')['id']
-    initial = repo.put_record(p, {'id': 'policy', 'kind': 'entity', 'text': 'policy', 'valid_from': '2020-01-01', 'valid_until': '2030-01-01', 'embedding': [1., 2.], 'embedding_model': 'model-a'})
-    corrected = repo.put_record(p, {'id': 'policy', 'kind': 'entity', 'text': 'correction', 'valid_from': '2025-01-01', 'valid_until': '2028-01-01'}, expected_version=1)
+    recorded_at = normalize_time('2025-01-01')
+    initial = repo.put_record(p, {'id': 'policy', 'kind': 'entity', 'text': 'policy', 'valid_from': '2020-01-01', 'valid_until': '2030-01-01', 'embedding': [1., 2.], 'embedding_model': 'model-a'}, recorded_at=recorded_at)
+    corrected = repo.put_record(p, {'id': 'policy', 'kind': 'entity', 'text': 'correction', 'valid_from': '2025-01-01', 'valid_until': '2028-01-01'}, expected_version=1, recorded_at=recorded_at)
+    assert corrected['recorded_at'] > initial['recorded_at']
     assert repo.query(p, valid_at='2022-01-01', known_at=corrected['recorded_at']) == []
     old = repo.get_record(p, 'policy', valid_at='2022-01-01', known_at=initial['recorded_at'])
+    assert old['version'] == 1
     assert old['valid_until'] == normalize_time('2030-01-01')
     assert old['embedding_model'] == 'model-a'
     assert 'embedding' not in old  # 删列后向量不存 SQLite

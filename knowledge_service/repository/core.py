@@ -670,11 +670,11 @@ class Repository:
         if expected_version is not None and expected_version != version:
             raise ValueError('版本冲突：记录已变更')
         now = recorded_at or utc_now()
-        # 仅当时间真正倒退（时钟回拨 / 显式传入更早时间）才 +1μs 保单调。
-        # 相等是允许的：同批次 revision（如 ingest 文档 v1 收据 → v2 完成态）应共享
-        # 同一个系统时间点，让 timeline 呈现"一次写入 = 一个时间点"；查询端用
-        # `superseded_at > known_at` 严格不等排除旧版，等时 supersede 语义安全。
-        if old and now < old['recorded_at']:
+        # 同一逻辑记录的连续版本必须具有严格递增的系统时间。若两个版本共享
+        # recorded_at，旧版会在该精确时间点同时满足 recorded_at<=known_at，
+        # 又因 superseded_at==known_at 被严格上界排除，导致历史查询看不到任何版本。
+        # 批次内不同记录仍共享时间点；这里只规范化同一记录的修订时间。
+        if old and now <= old['recorded_at']:
             now = normalize_time(datetime.fromisoformat(old['recorded_at']) + timedelta(microseconds=1))
         self._db.execute('UPDATE record_versions SET superseded_at=? WHERE project_id=? AND id=? AND superseded_at IS NULL', (now, project_id, record['id']))
         version_id = str(uuid4())

@@ -100,7 +100,9 @@ def workbench(browser, tmp_path):
     page.wait_for_function("() => document.querySelectorAll('#project option').length > 1")
     with page.expect_response(lambda response: response.url.endswith('/entity-options')):
         page.select_option('#project', project_id)
-    page.wait_for_timeout(80)
+    page.wait_for_function(
+        "document.querySelector('#graph-summary').textContent !== "
+        f"{json.dumps(INITIAL_GRAPH_HINT)}")
     paths.clear()
     try:
         yield SimpleNamespace(page=page, project=project_id, paths=paths, errors=errors)
@@ -123,6 +125,12 @@ def _search(page, query='退款', mode='keyword'):
 def test_search_updates_only_the_result_rail_and_ignores_graph_keys(workbench):
     page = workbench.page
     page.click('[data-tab="search"]')
+
+    # The project boot may intentionally populate the graph. Search owns only the
+    # result rail, so compare against the settled graph state rather than racing it.
+    graph_before = page.locator('#graph-canvas').evaluate('(el) => el.outerHTML')
+    detail_before = page.locator('#graph-detail').evaluate('(el) => el.outerHTML')
+    summary_before = page.locator('#graph-summary').inner_text()
     _search(page)
 
     # Every channel owns a heading, a quota count and its own empty state.
@@ -136,11 +144,6 @@ def test_search_updates_only_the_result_rail_and_ignores_graph_keys(workbench):
         assert sections.nth(index).locator('p.subtle').count() == (1 if hits == 0 else 0)
 
     # The renderer must not turn stray graph keys in the response into a graph.
-    graph_before = page.locator('#graph-canvas').evaluate('(el) => el.outerHTML')
-    detail_before = page.locator('#graph-detail').evaluate('(el) => el.outerHTML')
-    hint_before = page.locator('#graph-summary').inner_text()
-    assert hint_before == INITIAL_GRAPH_HINT
-
     def inject(route):
         response = route.fetch()
         payload = response.json()
@@ -154,12 +157,12 @@ def test_search_updates_only_the_result_rail_and_ignores_graph_keys(workbench):
             page.click('#search')
     finally:
         page.unroute('**/search', inject)
-    page.wait_for_timeout(120)
+    page.wait_for_function("!document.querySelector('#search').disabled")
 
     assert '不应出现的节点' not in page.locator('#hits').inner_text()
     assert page.locator('#graph-canvas').evaluate('(el) => el.outerHTML') == graph_before
     assert page.locator('#graph-detail').evaluate('(el) => el.outerHTML') == detail_before
-    assert page.locator('#graph-summary').inner_text() == INITIAL_GRAPH_HINT
+    assert page.locator('#graph-summary').inner_text() == summary_before
     assert not any(path.endswith('/subgraph') for path in workbench.paths)
 
 
@@ -227,7 +230,9 @@ def test_project_and_scope_changes_clear_isolated_state(workbench):
     workbench.paths.clear()
     with page.expect_response(lambda response: response.url.endswith('/metadata/facets')):
         page.click('#apply-scope')
-    page.wait_for_timeout(120)
+    page.wait_for_function(
+        "document.querySelector('#graph-summary').textContent === "
+        f"{json.dumps(INITIAL_GRAPH_HINT)}")
     assert page.locator('#graph-summary').inner_text() == INITIAL_GRAPH_HINT
     assert page.locator('#graph-detail').inner_html() == ''
     assert page.locator('#graph-node').input_value() == ''
@@ -242,7 +247,9 @@ def test_project_and_scope_changes_clear_isolated_state(workbench):
     hits_before_time = page.locator('#hits').inner_html()
     workbench.paths.clear()
     page.click('#graph-timeline .tl-prev')
-    page.wait_for_timeout(120)
+    page.wait_for_function(
+        "document.querySelector('#graph-summary').textContent === "
+        f"{json.dumps(INITIAL_GRAPH_HINT)}")
     assert page.locator('#graph-summary').inner_text() == INITIAL_GRAPH_HINT
     assert page.locator('#graph-detail').inner_html() == ''
     assert page.locator('#hits').inner_html() == hits_before_time
@@ -254,15 +261,20 @@ def test_project_and_scope_changes_clear_isolated_state(workbench):
         "headers: {'Content-Type': 'application/json'}, "
         "body: JSON.stringify({name: '第二个项目'})})).json(); "
         "await projects(); return created.id;}")
-    workbench.paths.clear()
+    page.evaluate("""() => {
+      document.getElementById('project').addEventListener('change', () => {
+        window.__projectClearSnapshot = {
+          hits: document.getElementById('hits').innerHTML,
+          summary: document.getElementById('graph-summary').textContent,
+          detail: document.getElementById('graph-detail').innerHTML,
+          node: document.getElementById('graph-node').value,
+        };
+      }, {once: true});
+    }""")
     with page.expect_response(lambda response: response.url.endswith('/entity-options')):
         page.select_option('#project', other)
-    page.wait_for_timeout(120)
-    assert page.locator('#hits').inner_html() == ''
-    assert page.locator('#graph-summary').inner_text() == INITIAL_GRAPH_HINT
-    assert page.locator('#graph-detail').inner_html() == ''
-    assert page.locator('#graph-node').input_value() == ''
-    assert not any(path.endswith('/subgraph') for path in workbench.paths)
+    cleared = page.evaluate("window.__projectClearSnapshot")
+    assert cleared == {'hits': '', 'summary': INITIAL_GRAPH_HINT, 'detail': '', 'node': ''}
 
 
 # ── 图谱渲染器只能有一份实现（双 UI 收敛的防回归闸门） ──
@@ -577,7 +589,6 @@ def test_knowledge_chat_keyboard_ime_and_scope_change(workbench):
       input.dispatchEvent(new KeyboardEvent('keydown',
         {key: 'Enter', bubbles: true, cancelable: true, isComposing: true}));
     }""")
-    page.wait_for_timeout(150)
     assert not any(path.endswith('/qa/stream') for path in workbench.paths)
     page.evaluate("""() => document.getElementById('qa-query')
       .dispatchEvent(new CompositionEvent('compositionend', {bubbles: true}))""")
@@ -587,9 +598,19 @@ def test_knowledge_chat_keyboard_ime_and_scope_change(workbench):
         "document.querySelector('#qa-transcript .qa-turn-assistant')?.dataset.state === 'done'")
     assert page.locator('#qa-transcript .qa-turn').count() == 2
 
-    # Changing scope clears the conversation and explains why.
-    page.click('#apply-scope')
-    page.wait_for_timeout(150)
+    # The project selector is the visible owner of QA scope. Changing it clears the
+    # conversation without reaching into the hidden search-only scope controls.
+    other = page.evaluate(
+        "async () => {const created = await (await fetch('/api/projects', {method: 'POST', "
+        "headers: {'Content-Type': 'application/json'}, "
+        "body: JSON.stringify({name: '问答范围'})})).json(); "
+        "await projects(); return created.id;}")
+    assert page.locator('#project').is_visible()
+    with page.expect_response(lambda response: response.url.endswith('/entity-options')):
+        page.select_option('#project', other)
+    page.wait_for_function(
+        "document.querySelectorAll('#qa-transcript .qa-turn').length === 0 && "
+        "document.querySelector('#qa-summary').textContent.includes('范围已变化')")
     assert page.locator('#qa-transcript .qa-turn').count() == 0
     assert '范围已变化' in (page.locator('#qa-summary').text_content() or '')
     assert page.locator('#qa-hero').is_visible()
