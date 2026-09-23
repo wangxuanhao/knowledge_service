@@ -1,4 +1,6 @@
 import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -163,6 +165,87 @@ def test_batch_expected_versions_conflict_rolls_back_and_shared_timestamp(tmp_pa
     assert repo.history(p, 'doc')[0]['superseded_at'] == saved[0]['recorded_at']
     with pytest.raises(ValueError):
         repo.put_batch(p, batch, expected_versions={'not-in-batch': 1})
+
+
+@pytest.mark.parametrize('concurrent', [False, True])
+def test_operation_reservations_are_atomic_across_repository_connections(tmp_path, concurrent):
+    path = tmp_path / 'shared-operations.sqlite'
+    first = Repository(path)
+    project = first.create_project('shared')['id']
+    other_project = first.create_project('other')['id']
+    future = first.put_record(
+        project, {'id': 'future', 'kind': 'document', 'text': 'future'},
+        recorded_at='2030-01-01T00:00:00Z')
+    second = Repository(path)
+
+    if concurrent:
+        barrier = threading.Barrier(2)
+
+        def reserve(repository):
+            barrier.wait()
+            return repository._reserve_record_operation(project)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            operations = list(executor.map(reserve, (first, second)))
+    else:
+        operations = [
+            first._reserve_record_operation(project),
+            second._reserve_record_operation(project),
+        ]
+    (earlier_repository, first_operation), (later_repository, second_operation) = sorted(
+        zip((first, second), operations), key=lambda pair: pair[1].recorded_at)
+
+    assert first_operation.recorded_at > future['recorded_at']
+    assert second_operation.recorded_at > first_operation.recorded_at
+    validating_repository = second if earlier_repository is first else first
+    assert validating_repository._record_operation_time(
+        project, first_operation) == first_operation.recorded_at
+    forged = type(first_operation)(
+        first_operation.token, project, second_operation.recorded_at)
+    with pytest.raises(ValueError, match='上下文无效'):
+        first._record_operation_time(project, forged)
+    with pytest.raises(ValueError, match='上下文无效'):
+        second._put_record_for_operation(
+            other_project, {'id': 'wrong-project', 'kind': 'document', 'text': 'wrong'},
+            expected_version=0, operation=first_operation)
+
+    version_one = earlier_repository._put_record_for_operation(
+        project, {'id': 'versioned', 'kind': 'document', 'text': 'one'},
+        expected_version=0, operation=first_operation)
+    version_two = later_repository._put_record_for_operation(
+        project, {'id': 'versioned', 'kind': 'document', 'text': 'two'},
+        expected_version=1, operation=second_operation)
+
+    assert version_one['recorded_at'] != version_two['recorded_at']
+    exact = second.get_record(project, 'versioned', known_at=version_one['recorded_at'])
+    assert exact['version'] == 1
+    assert exact['text'] == 'one'
+
+
+def test_operation_reservation_migration_upgrades_existing_database(tmp_path, monkeypatch):
+    path = tmp_path / 'operation-reservation-migration.sqlite'
+    migrations = repository_module._SCHEMA_MIGRATIONS
+    assert migrations[-1][0] == 13
+    monkeypatch.setattr(repository_module, '_SCHEMA_MIGRATIONS', migrations[:-1])
+    legacy = Repository(path)
+    project = legacy.create_project('legacy')['id']
+    legacy.close()
+    with sqlite3.connect(path) as db:
+        assert db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='record_operation_reservations'"
+        ).fetchone() is None
+
+    monkeypatch.setattr(repository_module, '_SCHEMA_MIGRATIONS', migrations)
+    upgraded = Repository(path)
+    operation = upgraded._reserve_record_operation(project)
+    assert operation.recorded_at
+    assert upgraded._db.execute(
+        'SELECT COUNT(*) FROM schema_migrations WHERE version=13'
+    ).fetchone()[0] == 1
+    assert upgraded._db.execute(
+        'SELECT project_id,recorded_at FROM record_operation_reservations WHERE token=?',
+        (operation.token,)
+    ).fetchone()['project_id'] == project
 
 
 def test_schema_migration_receives_active_connection_and_runs_once(tmp_path, monkeypatch):

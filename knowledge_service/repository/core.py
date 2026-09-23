@@ -40,12 +40,24 @@ class _RecordOperation:
     上下文的身份而非时间字符串本身授权多阶段写入共享系统时间点，
     避免不相干的调用方仅凭相同 recorded_at 意外合并历史。
     """
-    __slots__ = ('_repository_token', 'project_id', 'recorded_at')
+    __slots__ = ('_token', '_project_id', '_recorded_at')
 
-    def __init__(self, repository_token, project_id, recorded_at):
-        self._repository_token = repository_token
-        self.project_id = project_id
-        self.recorded_at = recorded_at
+    def __init__(self, token, project_id, recorded_at):
+        self._token = token
+        self._project_id = project_id
+        self._recorded_at = recorded_at
+
+    @property
+    def token(self):
+        return self._token
+
+    @property
+    def project_id(self):
+        return self._project_id
+
+    @property
+    def recorded_at(self):
+        return self._recorded_at
 
 
 class OntologyNotPublished(Exception):
@@ -221,6 +233,17 @@ def _create_provenance_schema(db):
                     AND accepted.assertion_id=a.id
                     AND accepted.to_status='accepted'
                     AND accepted.canonical_record_id=rv.id)=1''')
+
+
+def _create_record_operation_reservation_schema(db):
+    """迁移 13：持久化项目逻辑写入时间预留，跨连接串行化高水位。"""
+    db.execute('''CREATE TABLE record_operation_reservations (
+        token TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        recorded_at TEXT NOT NULL,
+        UNIQUE(project_id,recorded_at))''')
+    db.execute('''CREATE INDEX record_operation_reservations_project
+        ON record_operation_reservations(project_id,recorded_at)''')
 
 
 def _create_assertion_schema(db):
@@ -454,6 +477,7 @@ _SCHEMA_MIGRATIONS = (
     (10, _move_vectors_to_column),
     (11, _drop_vector_column),
     (12, _create_provenance_schema),
+    (13, _create_record_operation_reservation_schema),
 )
 
 
@@ -489,8 +513,6 @@ class Repository:
         self._db = sqlite3.connect(str(path), check_same_thread=False, timeout=30)
         self._db.row_factory = sqlite3.Row
         self._lock = threading.RLock()
-        self._operation_token = object()
-        self._reserved_recorded_at = {}
         self._db.execute('PRAGMA journal_mode=WAL')
         self._db.execute('PRAGMA foreign_keys=ON')
         _run_schema_migrations(self._db)
@@ -691,20 +713,30 @@ class Repository:
             stored = self._db.execute(
                 'SELECT MAX(recorded_at) FROM record_versions WHERE project_id=?',
                 (project_id,)).fetchone()[0]
-            reserved = self._reserved_recorded_at.get(project_id)
+            reserved = self._db.execute(
+                '''SELECT MAX(recorded_at) FROM record_operation_reservations
+                   WHERE project_id=?''', (project_id,)).fetchone()[0]
             latest = max((value for value in (stored, reserved) if value is not None),
                          default=None)
             if latest and now <= latest:
                 now = self._next_recorded_at(latest)
-            self._reserved_recorded_at[project_id] = now
-            return _RecordOperation(self._operation_token, project_id, now)
+            token = str(uuid4())
+            self._db.execute(
+                '''INSERT INTO record_operation_reservations(token,project_id,recorded_at)
+                   VALUES (?,?,?)''', (token, project_id, now))
+            return _RecordOperation(token, project_id, now)
 
     def _record_operation_time(self, project_id, operation):
-        if (not isinstance(operation, _RecordOperation) or
-                operation._repository_token is not self._operation_token or
-                operation.project_id != project_id):
+        if not isinstance(operation, _RecordOperation) or operation.project_id != project_id:
             raise ValueError('写入操作上下文无效')
-        return operation.recorded_at
+        with self._lock:
+            row = self._db.execute(
+                '''SELECT recorded_at FROM record_operation_reservations
+                   WHERE token=? AND project_id=?''',
+                (operation.token, project_id)).fetchone()
+        if row is None or row['recorded_at'] != operation.recorded_at:
+            raise ValueError('写入操作上下文无效')
+        return row['recorded_at']
 
     def _put(self, project_id, record, expected_version=None, recorded_at=None,
              operation=None):
