@@ -145,10 +145,34 @@ def test_diff_normalizes_deprecation_restore_and_replacement_operations():
 
     with pytest.raises(ValueError, match='source_ontology_id|structured restore|结构化恢复'):
         canonical_turtle_diff(retired, BASE)
+    with pytest.raises(ValueError, match='resolver|builder|structured restore|结构化恢复'):
+        canonical_turtle_diff(
+            retired, BASE, base_ontology_id='arbitrary-or-nonexistent')
+
+    authoritative = build_operation('restore_term', 'http://ex/rel', after={
+        'source_ontology_id': 'immutable-version-17',
+        'selected_fields': sorted(RESTORE_TEMPLATE_FIELDS),
+        'template': {
+            'kind': 'relation', 'annotations': [], 'parents': [],
+            'domain': ['http://ex/A'], 'range': ['http://ex/B'],
+            'datatype': None,
+        },
+    }, impact={'preview': {'kind': 'relation', 'active': True}})
+    resolved = []
+
+    def resolver(**request):
+        resolved.append(request)
+        return authoritative
+
     restoration = canonical_turtle_diff(
-        retired, BASE, base_ontology_id='ontology-version-17')
+        retired, BASE, source_ontology_id='immutable-version-17',
+        restore_operation_builder=resolver)
     assert [operation['action'] for operation in restoration] == ['restore_term']
-    assert restoration[0]['after']['source_ontology_id'] == 'ontology-version-17'
+    assert restoration[0] is authoritative
+    assert resolved == [{
+        'target_iri': 'http://ex/rel',
+        'source_ontology_id': 'immutable-version-17',
+    }]
     assert isomorphic(
         Graph().parse(data=apply_operations(retired, restoration), format='turtle'),
         Graph().parse(data=BASE, format='turtle'))
@@ -290,6 +314,33 @@ def test_dependency_warning_raises_otherwise_low_operation_and_blocks_batch():
     assert is_batch_eligible(operation) is False
 
 
+def test_added_custom_reference_to_existing_deprecated_term_gets_derived_warning():
+    base = BASE + 'ex:Old a owl:Class; owl:deprecated true .'
+    edited = base + 'ex:A ex:pointsTo ex:Old .'
+    operation = canonical_turtle_diff(base, edited)[0]
+    warnings = operation['validation']['warnings']
+    assert operation['action'] == 'add_annotation'
+    assert warnings[0]['code'] == 'active_custom_annotation_dependency'
+    assert warnings[0]['term_iris'] == ['http://ex/A', 'http://ex/Old']
+    assert operation['risk'] == 'medium'
+    assert is_batch_eligible(operation) is False
+
+
+def test_structured_manual_annotation_uses_same_derived_dependency_warning():
+    ontology = Ontology(BASE + 'ex:Old a owl:Class; owl:deprecated true .')
+    operation = build_operation(
+        'add_annotation', 'http://ex/A', ontology=ontology,
+        after={
+            'predicate': 'http://ex/pointsTo',
+            'value': 'http://ex/Old',
+            'type': 'iri',
+        })
+    assert operation['validation']['warnings'][0]['code'] == (
+        'active_custom_annotation_dependency')
+    assert operation['risk'] == 'medium'
+    assert is_batch_eligible(operation) is False
+
+
 @pytest.mark.parametrize('marker', ['true', '"true"^^xsd:boolean'])
 def test_deactivated_shacl_dependencies_are_info_not_blockers(marker):
     turtle = BASE + f'''
@@ -364,6 +415,17 @@ def test_restore_builder_rejects_empty_duplicate_or_unsupported_fields(
             selected_fields=selected_fields)
     assert RESTORE_TEMPLATE_FIELDS == frozenset({
         'annotations', 'parents', 'domain', 'range', 'datatype'})
+
+
+def test_restore_rejects_selected_field_missing_from_frozen_template():
+    current = BASE + 'ex:rel owl:deprecated true .'
+    operation = build_operation('restore_term', 'http://ex/rel', after={
+        'source_ontology_id': 'immutable-version',
+        'selected_fields': ['domain'],
+        'template': {'kind': 'relation'},
+    })
+    with pytest.raises(ValueError, match='domain|template|模板|字段'):
+        apply_operations(current, [operation])
 
 
 def test_restore_selected_none_datatype_clears_current_datatype():

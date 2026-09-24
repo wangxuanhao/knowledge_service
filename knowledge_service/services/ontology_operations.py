@@ -123,7 +123,7 @@ def is_batch_eligible(operation: dict) -> bool:
 def build_operation(action: str, target_iri: str, *, before=None, after=None,
                     source: str = 'manual', impact=None, warnings=None,
                     confidence=None, evidence=None, validation=None,
-                    reason=None) -> dict:
+                    reason=None, ontology: Ontology | str | None = None) -> dict:
     if not isinstance(action, str) or not action:
         raise ValueError('本体操作 action 不能为空')
     action = _ACTION_ALIASES.get(action, action)
@@ -131,6 +131,13 @@ def build_operation(action: str, target_iri: str, *, before=None, after=None,
         raise ValueError('本体操作 target_iri 必须是绝对 IRI')
     impact = dict(impact or {})
     warnings = list(warnings or [])
+    if ontology is not None:
+        derived = operation_dependency_warnings(
+            ontology, action, target_iri, after=after)
+        existing = {_canonical_json(issue) for issue in warnings}
+        warnings.extend(
+            issue for issue in derived
+            if _canonical_json(issue) not in existing)
     operation = {
         'action': action,
         'target_iri': target_iri,
@@ -496,6 +503,10 @@ def apply_operations(base_turtle: str, operations: Iterable[dict]) -> str:
             if (not selected or len(selected) != len(set(selected))
                     or set(selected) - RESTORE_TEMPLATE_FIELDS):
                 raise ValueError('restore_term 必须显式选择有效且不重复的定义字段')
+            missing = [field for field in selected if field not in after['template']]
+            if missing:
+                raise ValueError(
+                    'restore_term template 缺少显式选择的字段：' + ', '.join(missing))
             current = Ontology(graph.serialize(format='turtle'))
             if current.is_active_term(target):
                 raise ValueError('restore_term 的当前术语必须已停用（deprecated）')
@@ -522,6 +533,31 @@ def _issue(code: str, severity: str, message: str, term_iris,
         'operation_ids': list(operation_ids or []),
         'term_iris': [str(term) for term in term_iris],
     }
+
+
+def operation_dependency_warnings(ontology: Ontology | str, action: str,
+                                  target_iri: str, *, after=None) -> list[dict]:
+    """Derive server-owned warnings for one structured operation."""
+    if isinstance(ontology, str):
+        ontology = Ontology(ontology)
+    action = _ACTION_ALIASES.get(action, action)
+    spec = after or {}
+    if action != 'add_annotation' or spec.get('type') != 'iri':
+        return []
+    predicate = URIRef(spec.get('predicate', ''))
+    if predicate in _STRUCTURAL_PREDICATES or str(predicate).startswith(str(SH)):
+        return []
+    source = ontology.resolve(target_iri)
+    referenced = ontology.resolve(spec.get('value', ''))
+    declared = ontology.classes | ontology.relations | ontology.attributes
+    if (source not in declared or referenced not in declared
+            or not ontology.is_active_term(source)
+            or ontology.is_active_term(referenced)):
+        return []
+    return [_issue(
+        'active_custom_annotation_dependency', 'warning',
+        f'活动术语通过自定义 annotation {predicate} 引用已停用术语',
+        [source, referenced])]
 
 
 def _owning_shape(graph: Graph, node) -> URIRef | BNode:
@@ -688,6 +724,9 @@ def build_restore_operation(repository, project_id: str, target_iri: str,
     template = _term_template(Ontology(source['turtle']), target_iri)
     captured = {'kind': template['kind']}
     for field in selected:
+        if field not in template:
+            raise ValueError(
+                f'restore_term 的冻结 template 缺少所选字段：{field}')
         captured[field] = template[field]
     after = {
         'source_ontology_id': source_ontology_id,
@@ -904,37 +943,27 @@ def canonical_turtle_diff(base_turtle: str, edited_turtle: str, *,
         if now_deprecated:
             operations.append(build_operation('retire_term', str(term)))
         else:
-            template = _term_template(Ontology(edited_turtle), str(term))
-            if not immutable_source_id and restore_operation_builder is None:
+            if restore_operation_builder is None:
                 raise ValueError(
-                    '移除 owl:deprecated 需要 source_ontology_id 和结构化恢复（structured restore）')
-            impact = {
-                'preview': {**template, 'active': True},
-                'reactivated_constraints': sum(
-                    len(template[field]) for field in ('parents', 'domain', 'range')),
-            }
-            if restore_operation_builder is not None:
-                operation = restore_operation_builder(
-                    target_iri=str(term),
-                    source_ontology_id=immutable_source_id,
-                    selected_fields=sorted(RESTORE_TEMPLATE_FIELDS),
-                    template=template,
-                    impact=impact,
-                )
-                if (not isinstance(operation, dict)
-                        or operation.get('action') != 'restore_term'
-                        or operation.get('target_iri') != str(term)
-                        or not (operation.get('after') or {}).get('source_ontology_id')):
-                    raise ValueError('restore_operation_builder 必须返回有效的 restore_term 操作')
-            else:
-                operation = build_operation('restore_term', str(term), after={
-                    'source_ontology_id': immutable_source_id,
-                    'selected_fields': sorted(RESTORE_TEMPLATE_FIELDS),
-                    'template': template,
-                }, impact=impact)
+                    '移除 owl:deprecated 需要不可变版本 resolver/builder 执行结构化恢复'
+                    '（structured restore）')
+            operation = restore_operation_builder(
+                target_iri=str(term), source_ontology_id=immutable_source_id)
+            operation_after = operation.get('after') if isinstance(operation, dict) else None
+            if (not isinstance(operation, dict)
+                    or operation.get('action') != 'restore_term'
+                    or operation.get('target_iri') != str(term)
+                    or not isinstance(operation_after, dict)
+                    or not operation_after.get('source_ontology_id')
+                    or not isinstance(operation_after.get('template'), dict)
+                    or not isinstance(operation.get('impact'), dict)
+                    or 'preview' not in operation['impact']):
+                raise ValueError(
+                    'restore_operation_builder 必须返回从不可变版本解析的完整 restore_term 操作')
             operations.append(operation)
             restored_terms.add(term)
 
+    edited_ontology = Ontology(edited.serialize(format='turtle'))
     annotation_removals = []
     annotation_additions = []
     for term in [*term_order, *sorted(set(base_declarations) & set(edited_declarations), key=str)]:
@@ -949,7 +978,8 @@ def canonical_turtle_diff(base_turtle: str, edited_turtle: str, *,
         for predicate, value in sorted(new_annotations - old_annotations,
                                        key=lambda item: _canonical_json(_annotation_spec(*item))):
             annotation_additions.append(build_operation(
-                'add_annotation', str(term), after=_annotation_spec(predicate, value)))
+                'add_annotation', str(term), after=_annotation_spec(predicate, value),
+                ontology=edited_ontology))
     operations.extend(annotation_removals)
     operations.extend(annotation_additions)
 
