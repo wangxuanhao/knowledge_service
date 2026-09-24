@@ -230,27 +230,27 @@ git commit -m "feat: compile governed ontology operations"
 - Create: `knowledge_service/services/ontology_drafts.py`
 - Create: `tests/service/test_ontology_drafts.py`
 
-- [ ] **Step 1: Write lifecycle tests for create/command/submit.**
+- [x] **Step 1: Write lifecycle tests for create/command/submit.**
 
 Test nullable-base first draft, command CAS, immutable supersession, editing/submitted transitions, source context, preview overlay, and close reason/actor. For `restore_term`, require `source_ontology_id` plus an explicit field/edge selection, reject missing or cross-project source versions, and preserve the resolved template in the immutable operation.
 
-- [ ] **Step 2: Write decision and validation tests.**
+- [x] **Step 2: Write decision and validation tests.**
 
 Test approve/reject/request_changes; max 100 batch only for no-warning low risk; every `reject` and `request_changes` requires a non-empty reason regardless of risk, and every high-risk `approve` requires a non-empty reason. Medium-risk approval may omit a reason only when it has no warning requiring acknowledgement. Validation fingerprint binds base/source versions, operation fingerprints, report and rule version; changed/unacknowledged warnings reject decisions/publish.
 
-- [ ] **Step 3: Write stale/rebase tests.**
+- [x] **Step 3: Write stale/rebase tests.**
 
 Test `stale_base` after another ontology publishes, `stale_source` after a document revision changes, rebase only to latest, clean/conflict/no-op classification, and retention of decisions only when operation fingerprints are unchanged.
 
-- [ ] **Step 4: Run and verify service tests fail.**
+- [x] **Step 4: Run and verify service tests fail.**
 
 Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_drafts.py -vv`
 
-- [ ] **Step 5: Implement the deep service interface.**
+- [x] **Step 5: Implement the deep service interface.**
 
 Implement `create`, `command`, `submit`, `decide`, `validate`, `rebase`, `close`, `publish`, plus paginated `roots`, `children`, `search`, `neighborhood`, and `matrix`. The service owns state transitions and never trusts client-provided Turtle or risk.
 
-- [ ] **Step 6: Verify and commit.**
+- [x] **Step 6: Verify and commit.**
 
 Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_drafts.py -vv`
 
