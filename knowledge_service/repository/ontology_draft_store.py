@@ -40,6 +40,45 @@ def _required_text(item, key):
     return value
 
 
+def _dependency_order(items, dependency_key, kind):
+    """Topologically order a single-parent audit chain in O(V + E)."""
+    by_id = {}
+    for item in items:
+        identifier = item['id']
+        if identifier in by_id:
+            raise ValueError(f'{kind} 恢复顺序无效：重复 ID {identifier}')
+        by_id[identifier] = item
+    missing = sorted({
+        item.get(dependency_key) for item in items
+        if item.get(dependency_key) is not None
+        and item.get(dependency_key) not in by_id
+    })
+    if missing:
+        raise ValueError(f'{kind} 恢复顺序无效：缺少引用 {missing}')
+
+    indegree = {identifier: 0 for identifier in by_id}
+    children = {identifier: [] for identifier in by_id}
+    for item in items:
+        dependency = item.get(dependency_key)
+        if dependency is not None:
+            indegree[item['id']] = 1
+            children[dependency].append(item['id'])
+    ready = [item['id'] for item in items if indegree[item['id']] == 0]
+    ordered = []
+    cursor = 0
+    while cursor < len(ready):
+        identifier = ready[cursor]
+        cursor += 1
+        ordered.append(by_id[identifier])
+        for child in children[identifier]:
+            indegree[child] -= 1
+            if indegree[child] == 0:
+                ready.append(child)
+    if len(ordered) != len(items):
+        raise ValueError(f'{kind} 恢复顺序无效：存在循环引用')
+    return ordered
+
+
 class OntologyDraftStore:
     """Repository-composed store sharing its connection, lock and transactions."""
 
@@ -61,6 +100,17 @@ class OntologyDraftStore:
             (project_id, ontology_id)).fetchone()
         if row is None:
             raise ValueError(f'{field} 不属于此项目')
+
+    def _validate_artifact_reference(self, project_id, artifact_id):
+        if artifact_id is None:
+            return
+        if not isinstance(artifact_id, str) or not artifact_id:
+            raise ValueError('legacy_artifact_id 必须是工件 ID 或 null')
+        row = self._db.execute(
+            'SELECT 1 FROM artifacts WHERE project_id=? AND id=?',
+            (project_id, artifact_id)).fetchone()
+        if row is None:
+            raise ValueError('legacy_artifact_id 不属于此项目')
 
     @staticmethod
     def _draft(row):
@@ -136,6 +186,7 @@ class OntologyDraftStore:
                 project_id, draft['base_ontology_id'], 'base_ontology_id')
             self._validate_ontology_reference(
                 project_id, draft['published_ontology_id'], 'published_ontology_id')
+            self._validate_artifact_reference(project_id, draft['legacy_artifact_id'])
             self._db.execute(
                 '''INSERT INTO ontology_drafts
                    (id,project_id,base_ontology_id,source_kind,status,revision,title,
@@ -257,6 +308,9 @@ class OntologyDraftStore:
                 if field in changes:
                     self._validate_ontology_reference(
                         project_id, changes[field], field)
+            if 'legacy_artifact_id' in changes:
+                self._validate_artifact_reference(
+                    project_id, changes['legacy_artifact_id'])
             cursor = self._db.execute(
                 f'''UPDATE ontology_drafts SET {','.join(assignments)}
                     WHERE project_id=? AND id=? AND revision=?''', values)
@@ -350,32 +404,12 @@ class OntologyDraftStore:
                 'publish_requests': requests}
 
     def _restore(self, project_id, history):
-        def dependency_order(items, dependency_key, kind):
-            pending = list(items)
-            pending_ids = {item['id'] for item in pending}
-            emitted = set()
-            ordered = []
-            while pending:
-                ready = [item for item in pending
-                         if item.get(dependency_key) is None
-                         or item.get(dependency_key) in emitted]
-                if not ready:
-                    missing = sorted({item.get(dependency_key) for item in pending}
-                                     - pending_ids - emitted)
-                    detail = f'缺少引用 {missing}' if missing else '存在循环引用'
-                    raise ValueError(f'{kind} 恢复顺序无效：{detail}')
-                for item in ready:
-                    pending.remove(item)
-                    ordered.append(item)
-                    emitted.add(item['id'])
-            return ordered
-
         for draft in history['drafts']:
             self.create(project_id, draft)
-        for operation in dependency_order(
+        for operation in _dependency_order(
                 history['operations'], 'supersedes_operation_id', '本体操作'):
             self.append_operations(project_id, operation['draft_id'], [operation])
-        for decision in dependency_order(
+        for decision in _dependency_order(
                 history['decisions'], 'supersedes_decision_id', '本体审核决定'):
             self.append_decisions(project_id, decision['draft_id'], [decision])
         for request in history['publish_requests']:

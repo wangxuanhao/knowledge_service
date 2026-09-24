@@ -95,7 +95,9 @@ def test_export_projection_includes_deterministic_project_scoped_provenance(prov
     other_doc, _, _ = _source(repo, other, 'other')
     _capture(service, other, [other_doc])
     exported = repo.export_projection(project)
-    assert set(exported) == {'namespace', 'schema_version', 'project', 'records', 'ontologies', 'governance', 'provenance', 'governance_history_included'}
+    assert set(exported) == {
+        'namespace', 'schema_version', 'project', 'records', 'ontologies',
+        'artifacts', 'governance', 'provenance', 'governance_history_included'}
     assert exported['governance_history_included'] is True
     assert set(exported['governance']) == {'assertions', 'assertion_events', 'fact_keys', 'ingest_runs', 'resolution_reviews', 'merge_operations', 'ontology'}
     assert exported['governance']['ontology'] == {

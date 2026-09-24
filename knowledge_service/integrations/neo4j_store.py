@@ -32,6 +32,11 @@ def record_properties(record, ns, pid):
     return props
 
 
+def projection_digest(snapshot):
+    """Hash projection state without local artifacts such as the sync receipt."""
+    return digest({key: value for key, value in snapshot.items() if key != 'artifacts'})
+
+
 class Neo4jProjection:
     def __init__(self, repository, driver=None, settings=None):
         self.repo = repository
@@ -89,7 +94,7 @@ class Neo4jProjection:
             receipt = self.repo.get_artifact('neo4j_sync', key)
         except KeyError:
             receipt = None
-        pending = not receipt or receipt['fingerprint'] != digest(snapshot)
+        pending = not receipt or receipt['fingerprint'] != projection_digest(snapshot)
         try:
             with self.lock, self._driver().session(database=self.database) as session:
                 verification = session.execute_read(self._verify, snapshot)
@@ -163,7 +168,7 @@ class Neo4jProjection:
         ontology_ok = sorted((x['payload'], x['turtle']) for x in ontologies) == sorted((encoded(x), x['turtle']) for x in snapshot['ontologies'])
         local_counts.update(entities=len(entities), ontologies=len(snapshot['ontologies']))
         remote_counts.update(entities=remote_entities, ontologies=len(ontologies))
-        matched = len(project) == 1 and project[0]['fingerprint'] == digest(snapshot) and ontology_ok and not any(any(d.values()) for d in differences.values())
+        matched = len(project) == 1 and project[0]['fingerprint'] == projection_digest(snapshot) and ontology_ok and not any(any(d.values()) for d in differences.values())
         return {'verified': matched, 'state': 'matched' if matched else 'mismatch', 'checked_at': utc_now(),
                 'local': local_counts, 'remote': remote_counts, 'differences': differences}
 
@@ -171,7 +176,7 @@ class Neo4jProjection:
         # 串行化快照与提交，防止旧同步超越新同步。
         with self.lock:
             snapshot = self.repo.export_projection(project_id)
-            fingerprint = digest(snapshot)
+            fingerprint = projection_digest(snapshot)
             progress('已捕获本地快照；正在连接 Neo4j', 15)
             try:
                 driver = self._driver()

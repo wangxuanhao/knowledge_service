@@ -25,6 +25,7 @@ from ..utils.filters import matches_filter, validate_filter
 from ..utils.ingest_runs import merge_readiness, readiness
 from ..core.time import normalize_time, utc_now
 from ..utils.attributes import primitive_datatype
+from .snapshot_validation import validate_restore_snapshot
 
 
 def _json(value):
@@ -248,6 +249,12 @@ def _create_record_operation_reservation_schema(db):
 
 def _ensure_ontology_history_immutable_guards(db):
     """Install idempotent immutable-ledger guards for v14 databases."""
+    db.execute('''CREATE UNIQUE INDEX IF NOT EXISTS ontology_operations_identity_fingerprint
+        ON ontology_operations(project_id,draft_id,id,fingerprint)''')
+    db.execute('''CREATE INDEX IF NOT EXISTS ontology_operations_supersedes
+        ON ontology_operations(project_id,draft_id,supersedes_operation_id)''')
+    db.execute('''CREATE INDEX IF NOT EXISTS ontology_review_decisions_supersedes
+        ON ontology_review_decisions(project_id,draft_id,supersedes_decision_id)''')
     db.execute('''CREATE TRIGGER IF NOT EXISTS ontology_operations_immutable
         BEFORE UPDATE ON ontology_operations BEGIN
           SELECT RAISE(ABORT, 'ontology operations are immutable');
@@ -312,6 +319,54 @@ def _ensure_ontology_history_immutable_guards(db):
         ) BEGIN
           SELECT RAISE(ABORT, 'ontology review decision supersession cycle');
         END''')
+    db.execute('''CREATE TRIGGER IF NOT EXISTS ontology_decision_operation_binding
+        BEFORE INSERT ON ontology_review_decisions
+        WHEN NOT EXISTS (
+          SELECT 1 FROM ontology_operations AS operation
+          WHERE operation.project_id=NEW.project_id
+            AND operation.draft_id=NEW.draft_id
+            AND operation.id=NEW.operation_id
+            AND operation.fingerprint=NEW.operation_fingerprint
+        ) BEGIN
+          SELECT RAISE(ABORT, 'ontology decision operation fingerprint mismatch');
+        END''')
+    db.execute('''CREATE TRIGGER IF NOT EXISTS ontology_decision_supersession_binding
+        BEFORE INSERT ON ontology_review_decisions
+        WHEN EXISTS (
+          SELECT 1 FROM ontology_review_decisions AS prior
+          WHERE prior.project_id=NEW.project_id
+            AND prior.draft_id=NEW.draft_id
+            AND prior.id=NEW.supersedes_decision_id
+            AND (prior.operation_id<>NEW.operation_id
+                 OR prior.operation_fingerprint<>NEW.operation_fingerprint)
+        ) OR EXISTS (
+          SELECT 1 FROM ontology_review_decisions AS replacement
+          WHERE replacement.project_id=NEW.project_id
+            AND replacement.draft_id=NEW.draft_id
+            AND replacement.supersedes_decision_id=NEW.id
+            AND (replacement.operation_id<>NEW.operation_id
+                 OR replacement.operation_fingerprint<>NEW.operation_fingerprint)
+        ) BEGIN
+          SELECT RAISE(ABORT, 'superseded decisions must bind to the same operation');
+        END''')
+
+
+def _ensure_ontology_history_repair_ledger(db):
+    db.execute('''CREATE TABLE IF NOT EXISTS ontology_history_repairs (
+        repair_key TEXT PRIMARY KEY,
+        schema_version INTEGER NOT NULL,
+        reason TEXT NOT NULL,
+        operations_repaired INTEGER NOT NULL CHECK(operations_repaired >= 0),
+        decisions_repaired INTEGER NOT NULL CHECK(decisions_repaired >= 0),
+        repaired_at TEXT NOT NULL)''')
+    db.execute('''CREATE TRIGGER IF NOT EXISTS ontology_history_repairs_update_immutable
+        BEFORE UPDATE ON ontology_history_repairs BEGIN
+          SELECT RAISE(ABORT, 'ontology history repair records are immutable');
+        END''')
+    db.execute('''CREATE TRIGGER IF NOT EXISTS ontology_history_repairs_delete_immutable
+        BEFORE DELETE ON ontology_history_repairs BEGIN
+          SELECT RAISE(ABORT, 'ontology history repair records are immutable');
+        END''')
 
 
 def _supersession_cycle(rows, parent_key):
@@ -333,16 +388,23 @@ def _supersession_cycle(rows, parent_key):
 
 def _repair_ontology_history_integrity(db):
     """Normalize old v14 self-links and reject ambiguous supersession cycles."""
+    repair_key = 'migration14-self-supersession-and-binding-v1'
+    _ensure_ontology_history_repair_ledger(db)
+    if db.execute(
+            'SELECT 1 FROM ontology_history_repairs WHERE repair_key=?',
+            (repair_key,)).fetchone():
+        return
     ledgers = (
         ('ontology_operations', 'supersedes_operation_id',
          'ontology_operations_immutable', '本体操作'),
         ('ontology_review_decisions', 'supersedes_decision_id',
          'ontology_review_decisions_immutable', '本体审核决定'),
     )
+    repaired = {}
     for table, parent_key, update_trigger, label in ledgers:
-        has_self_links = db.execute(
-            f'SELECT 1 FROM {table} WHERE {parent_key}=id LIMIT 1').fetchone()
-        if has_self_links:
+        repaired[table] = db.execute(
+            f'SELECT COUNT(*) FROM {table} WHERE {parent_key}=id').fetchone()[0]
+        if repaired[table]:
             db.execute(f'DROP TRIGGER IF EXISTS {update_trigger}')
             db.execute(f'UPDATE {table} SET {parent_key}=NULL WHERE {parent_key}=id')
         rows = db.execute(
@@ -351,6 +413,37 @@ def _repair_ontology_history_integrity(db):
         cycle = _supersession_cycle(rows, parent_key)
         if cycle:
             raise ValueError(f'{label}替代链存在循环：{" -> ".join(cycle)}')
+    invalid_binding = db.execute(
+        '''SELECT decision.id FROM ontology_review_decisions AS decision
+           LEFT JOIN ontology_operations AS operation
+             ON operation.project_id=decision.project_id
+            AND operation.draft_id=decision.draft_id
+            AND operation.id=decision.operation_id
+            AND operation.fingerprint=decision.operation_fingerprint
+           WHERE operation.id IS NULL LIMIT 1''').fetchone()
+    if invalid_binding:
+        raise ValueError(f'本体审核决定操作指纹不匹配：{invalid_binding[0]}')
+    invalid_supersession = db.execute(
+        '''SELECT replacement.id
+           FROM ontology_review_decisions AS replacement
+           JOIN ontology_review_decisions AS prior
+             ON prior.project_id=replacement.project_id
+            AND prior.draft_id=replacement.draft_id
+            AND prior.id=replacement.supersedes_decision_id
+           WHERE prior.operation_id<>replacement.operation_id
+              OR prior.operation_fingerprint<>replacement.operation_fingerprint
+           LIMIT 1''').fetchone()
+    if invalid_supersession:
+        raise ValueError(
+            f'本体审核决定替代链跨操作：{invalid_supersession[0]}')
+    db.execute(
+        '''INSERT INTO ontology_history_repairs
+           (repair_key,schema_version,reason,operations_repaired,
+            decisions_repaired,repaired_at) VALUES (?,?,?,?,?,?)''',
+        (repair_key, 14,
+         'normalized self-supersession links and validated immutable history',
+         repaired['ontology_operations'],
+         repaired['ontology_review_decisions'], utc_now()))
 
 
 def _create_ontology_draft_schema(db):
@@ -762,11 +855,19 @@ class Repository:
             fact_keys = [dict(row) for row in self._db.execute(
                 'SELECT * FROM fact_keys WHERE project_id=? ORDER BY fact_key,created_at',(project_id,)).fetchall()]
             merge_operations = self.list_merge_operations(project_id)
+            artifacts = []
+            for row in self._db.execute(
+                    'SELECT * FROM artifacts WHERE project_id=? ORDER BY rowid',
+                    (project_id,)).fetchall():
+                artifact = dict(row)
+                artifact['payload'] = json.loads(artifact['payload'])
+                artifacts.append(artifact)
             schema_version = self._db.execute('SELECT MAX(version) FROM schema_migrations').fetchone()[0]
             return {'namespace': namespace, 'schema_version': schema_version,
                     'governance_history_included': True,
                     'project': project, 'records': records,
                     'ontologies': self.list_ontologies(project_id),
+                    'artifacts': artifacts,
                     'provenance': {
                         'record_version_assertions': self.list_record_version_assertions(project_id),
                         'activities': self.list_provenance_activities(project_id),
@@ -779,49 +880,19 @@ class Repository:
     def restore_projection(self, snapshot):
         """Restore a complete project snapshot while preserving stable audit IDs.
 
-        The dependency order is deliberate: ontology versions must exist before
-        draft base/result references; immutable draft history must exist before
+        The dependency order is deliberate: artifacts and ontology versions must
+        exist before draft references; immutable draft history must exist before
         provenance can refer to it.
         """
-        if not isinstance(snapshot, dict) or not isinstance(snapshot.get('project'), dict):
-            raise ValueError('项目备份格式无效')
-        declared_full = snapshot.get('governance_history_included') is True
-        governance = snapshot.get('governance')
-        ontology_history = governance.get('ontology') if isinstance(governance, dict) else None
-        provenance = snapshot.get('provenance')
-        required_top_level = {
-            'namespace', 'schema_version', 'project', 'records', 'ontologies',
-            'governance', 'provenance', 'governance_history_included'}
-        required_governance = {
-            'assertions', 'assertion_events', 'fact_keys', 'ingest_runs',
-            'resolution_reviews', 'merge_operations', 'ontology'}
-        required_ontology = {'drafts', 'operations', 'decisions', 'publish_requests'}
-        required_provenance = {'activities', 'edges', 'record_version_assertions'}
-        if declared_full and (
-                not required_top_level <= set(snapshot)
-                or not isinstance(snapshot.get('records'), list)
-                or not isinstance(snapshot.get('ontologies'), list)
-                or not isinstance(governance, dict)
-                or not required_governance <= set(governance)
-                or any(not isinstance(governance[key], list)
-                       for key in required_governance - {'ontology'})
-                or not isinstance(ontology_history, dict)
-                or not required_ontology <= set(ontology_history)
-                or any(not isinstance(ontology_history[key], list)
-                       for key in required_ontology)
-                or not isinstance(provenance, dict)
-                or not required_provenance <= set(provenance)
-                or any(not isinstance(provenance[key], list)
-                       for key in required_provenance)):
-            raise ValueError('完整治理备份缺少必需的治理历史段')
-        ontology_history = ontology_history or {
-            'drafts': [], 'operations': [], 'decisions': [], 'publish_requests': []}
-        provenance = provenance or {
-            'activities': [], 'edges': [], 'record_version_assertions': []}
+        current_schema_version = self._db.execute(
+            'SELECT MAX(version) FROM schema_migrations').fetchone()[0]
+        validated = validate_restore_snapshot(snapshot, current_schema_version)
+        governance = validated['governance']
+        ontology_history = validated['ontology']
+        provenance = validated['provenance']
+        artifacts = validated['artifacts']
         project = snapshot['project']
-        project_id = project.get('id')
-        if not isinstance(project_id, str) or not project_id:
-            raise ValueError('项目备份缺少稳定项目 ID')
+        project_id = validated['project_id']
 
         def insert_rows(table, rows, json_fields=()):
             columns = {row['name'] for row in self._db.execute(f'PRAGMA table_info({table})')}
@@ -844,7 +915,8 @@ class Repository:
                 (project_id, project['name'], _json(project.get('metadata', {})),
                  project['created_at']))
 
-            # Immutable ontology versions precede all draft foreign-key references.
+            # Artifacts and immutable ontology versions precede draft references.
+            insert_rows('artifacts', artifacts, ('payload',))
             insert_rows('ontologies', snapshot.get('ontologies', ()), ('summary', 'metadata'))
             self._ontology_drafts._restore(project_id, ontology_history)
 
