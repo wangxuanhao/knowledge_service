@@ -236,7 +236,15 @@ def _create_provenance_schema(db):
 
 
 def _create_record_operation_reservation_schema(db):
-    """迁移 13：持久化项目逻辑写入时间预留，跨连接串行化高水位。"""
+    """迁移 13：规范化旧系统时间，并持久化跨连接的项目写入预留。"""
+    rows = db.execute(
+        'SELECT rowid,recorded_at,superseded_at FROM record_versions').fetchall()
+    for row in rows:
+        db.execute(
+            '''UPDATE record_versions SET recorded_at=?,superseded_at=?
+               WHERE rowid=?''',
+            (normalize_time(row['recorded_at'], allow_none=False),
+             normalize_time(row['superseded_at']), row['rowid']))
     db.execute('''CREATE TABLE record_operation_reservations (
         token TEXT PRIMARY KEY,
         project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
