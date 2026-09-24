@@ -272,27 +272,27 @@ git commit -m "feat: add ontology draft lifecycle"
 - Modify: `tests/service/test_ontology_draft_repository.py`
 - Modify: `tests/service/test_ontology_drafts.py`
 
-- [ ] **Step 1: Write migration 15 preservation tests.**
+- [x] **Step 1: Write migration 15 preservation tests.**
 
 Seed migration-12 retrieval/answer rows, including existing `decided-by` edges, run migration 15, and assert rows survive while activity kinds `ontology_draft`/`ontology_publish` and relations `published-from`, `contains-operation`, `decided-by`, `proposed-by`, `supported-by`, `based-on` are accepted. Force migration failure and assert rollback.
 
-- [ ] **Step 2: Write atomic publish and idempotency tests.**
+- [x] **Step 2: Write atomic publish and idempotency tests.**
 
 Inject failure after ontology insert and assert no ontology/draft/provenance partial state. Retry same idempotency key/payload returns the same ontology; same key/different request hash returns conflict.
 
-- [ ] **Step 3: Implement migration 15 by table rebuild.**
+- [x] **Step 3: Implement migration 15 by table rebuild.**
 
 Copy existing rows unchanged into expanded CHECK-constrained tables inside the migration transaction, recreate indexes/FKs, validate counts, then replace old tables.
 
-- [ ] **Step 4: Implement one repository publish transaction.**
+- [x] **Step 4: Implement one repository publish transaction.**
 
 Recheck base/source/revision and validation fingerprint inside the transaction; insert the ontology through a private `_insert_ontology_version`; persist publish request, draft terminal state, ontology activities and stable refs (`ontology-draft:`, `ontology-operation:`, `ontology-decision:`, `ontology-version:`). For Milvus-backed source changes, persist a fingerprinted pending sync artifact/job in this same transaction; execute it only after commit so a process crash cannot lose the retry record.
 
-- [ ] **Step 5: Restrict direct ontology insertion.**
+- [x] **Step 5: Restrict direct ontology insertion.**
 
 Public routes/services must no longer call `save_ontology`. Keep only explicit `bootstrap_ontology`, `restore_empty_project_snapshot`, and unified publish wrappers around the private primitive, each with provenance.
 
-- [ ] **Step 6: Run tests and commit.**
+- [x] **Step 6: Run tests and commit.**
 
 Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_provenance_repository.py tests/service/test_ontology_draft_repository.py tests/service/test_ontology_drafts.py -vv`
 
