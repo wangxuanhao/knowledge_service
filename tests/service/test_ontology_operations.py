@@ -50,16 +50,40 @@ def test_create_term_compiles_all_supported_kinds(kind, iri, declaration):
     assert (URIRef(iri), RDF.type, declaration) in ontology.graph
 
 
+def test_create_term_only_declares_identity_and_rejects_embedded_edges():
+    operation = build_operation('create_term', 'http://ex/C', after={
+        'kind': 'class', 'parents': ['http://ex/A']})
+    with pytest.raises(ValueError, match='create_term|独立'):
+        _apply(operation)
+
+
+@pytest.mark.parametrize('operation', [
+    build_operation('add_parent', 'http://ex/A', after={'value': 'http://ex/Missing'}),
+    build_operation('add_domain', 'http://ex/rel', after={'value': 'http://ex/Missing'}),
+    build_operation('add_range', 'http://ex/rel', after={'value': 'http://ex/Missing'}),
+    build_operation('set_datatype', 'http://ex/value', after={'datatype': 'http://ex/Anything'}),
+    build_operation('add_annotation', 'http://ex/A', after={
+        'predicate': str(DCTERMS.isReplacedBy), 'value': 'http://ex/Missing',
+        'type': 'iri'}),
+])
+def test_operations_reject_nonexistent_references_and_arbitrary_datatypes(operation):
+    with pytest.raises(ValueError, match='不存在|datatype|数据类型'):
+        _apply(operation)
+
+
 def test_class_supports_zero_or_many_parents_and_rejects_duplicate_self_and_multihop_cycles():
-    created = build_operation('create_term', 'http://ex/C', after={
-        'kind': 'class', 'parents': ['http://ex/A', 'http://ex/B']})
-    ontology = _apply(created)
+    operations = [
+        build_operation('create_term', 'http://ex/C', after={'kind': 'class'}),
+        build_operation('add_parent', 'http://ex/C', after={'value': 'http://ex/A'}),
+        build_operation('add_parent', 'http://ex/C', after={'value': 'http://ex/B'}),
+    ]
+    ontology = _apply(*operations)
     assert set(ontology.graph.objects(URIRef('http://ex/C'), RDFS.subClassOf)) == {
         URIRef('http://ex/A'), URIRef('http://ex/B')}
 
     with pytest.raises(ValueError, match='重复'):
-        _apply(build_operation('create_term', 'http://ex/C', after={
-            'kind': 'class', 'parents': ['http://ex/A', 'http://ex/A']}))
+        _apply(*operations, build_operation(
+            'add_parent', 'http://ex/C', after={'value': 'http://ex/A'}))
     with pytest.raises(ValueError, match='自身|循环'):
         _apply(build_operation('add_parent', 'http://ex/A', after={'value': 'http://ex/A'}))
     with pytest.raises(ValueError, match='循环'):
@@ -88,6 +112,50 @@ def test_annotations_are_removed_by_exact_value_and_language():
     assert labels == {Literal('名称', lang='zh')}
 
 
+def test_diff_emits_exact_per_value_language_and_custom_annotation_operations():
+    base = BASE + '''
+      ex:A rdfs:label "Old"@en, "保留"@zh; rdfs:comment "before"; ex:note "x" .
+    '''
+    edited = BASE + '''
+      ex:A rdfs:label "New"@en, "保留"@zh; rdfs:comment "after"; ex:note "y" .
+    '''
+    operations = canonical_turtle_diff(base, edited)
+    assert [operation['action'] for operation in operations] == [
+        'remove_annotation', 'remove_annotation', 'remove_annotation',
+        'add_annotation', 'add_annotation', 'add_annotation']
+    removed = [operation['before'] for operation in operations[:3]]
+    added = [operation['after'] for operation in operations[3:]]
+    assert {'predicate': str(RDFS.label), 'value': 'Old', 'language': 'en',
+            'datatype': None} in removed
+    assert {'predicate': str(RDFS.label), 'value': 'New', 'language': 'en',
+            'datatype': None} in added
+    assert isomorphic(
+        Graph().parse(data=apply_operations(base, operations), format='turtle'),
+        Graph().parse(data=edited, format='turtle'))
+
+
+def test_diff_normalizes_deprecation_restore_and_replacement_operations():
+    retired = BASE + 'ex:rel owl:deprecated true .'
+    retirement = canonical_turtle_diff(BASE, retired)
+    assert [operation['action'] for operation in retirement] == ['retire_term']
+    assert isomorphic(
+        Graph().parse(data=apply_operations(BASE, retirement), format='turtle'),
+        Graph().parse(data=retired, format='turtle'))
+
+    restoration = canonical_turtle_diff(retired, BASE)
+    assert [operation['action'] for operation in restoration] == ['restore_term']
+    assert restoration[0]['after']['source_ontology_id'].startswith('turtle-diff:')
+    assert isomorphic(
+        Graph().parse(data=apply_operations(retired, restoration), format='turtle'),
+        Graph().parse(data=BASE, format='turtle'))
+
+    replacement = canonical_turtle_diff(
+        BASE, BASE + 'ex:A <http://purl.org/dc/terms/isReplacedBy> ex:B .')
+    assert [operation['action'] for operation in replacement] == ['add_annotation']
+    assert replacement[0]['after'] == {
+        'predicate': str(DCTERMS.isReplacedBy), 'value': 'http://ex/B', 'type': 'iri'}
+
+
 def test_datatype_and_domain_range_or_semantics_are_canonical():
     operations = [
         build_operation('set_datatype', 'http://ex/value', after={'datatype': str(XSD.integer)}),
@@ -114,10 +182,10 @@ def test_logical_remove_rebuilds_and_collapses_union_list_without_orphans():
     assert not list(reduced.graph.subjects(RDF.first, None))
 
 
-def test_retire_keeps_definition_and_uses_structured_replacement():
+def test_retire_term_keeps_definition_and_uses_structured_replacement():
     create = build_operation('create_term', 'http://ex/related', after={
         'kind': 'relation'})
-    operation = build_operation('retire', 'http://ex/rel', after={
+    operation = build_operation('retire_term', 'http://ex/rel', after={
         'replacement': {'iri': 'http://ex/related', 'reason': 'merged'}})
     ontology = _apply(create, operation)
     term = URIRef('http://ex/rel')
@@ -129,7 +197,7 @@ def test_retire_keeps_definition_and_uses_structured_replacement():
 
 def test_retire_rejects_active_dependencies_on_the_newly_deprecated_term():
     with pytest.raises(ValueError, match='依赖|dependency'):
-        _apply(build_operation('retire', 'http://ex/A'))
+        _apply(build_operation('retire_term', 'http://ex/A'))
 
 
 def test_retirement_dependency_matrix_blocks_active_semantic_dependencies_but_only_reports_history():
@@ -142,19 +210,39 @@ def test_retirement_dependency_matrix_blocks_active_semantic_dependencies_but_on
           rdfs:range [ owl:unionOf (ex:A ex:B) ] .
         ex:S a sh:NodeShape; sh:targetClass ex:A .
         ex:Old a owl:Class; dcterms:isReplacedBy ex:A .
-        ex:A ex:note "custom" .
+        ex:Referrer a owl:Class; ex:pointsTo ex:A .
     ''', format='turtle')
     report = retirement_dependencies(
         Ontology(graph.serialize(format='turtle')), 'http://ex/A',
         active_records=[{'id': 'current'}], historical_records=[{'id': 'old'}])
-    assert {item['kind'] for item in report['errors']} == {
-        'active_child', 'active_domain', 'active_range', 'active_shacl',
-        'active_replacement'}
-    assert {item['term'] for item in report['errors'] if item['kind'] == 'active_range'} == {
+    assert {item['code'] for item in report['errors']} == {
+        'active_child_dependency', 'active_domain_dependency',
+        'active_range_dependency', 'active_shacl_target_class_dependency',
+        'active_replacement_dependency'}
+    assert {item['term_iris'][0] for item in report['errors']
+            if item['code'] == 'active_range_dependency'} == {
         'http://ex/usesA', 'http://ex/unionUses'}
-    assert report['warnings'][0]['kind'] == 'custom_annotation'
+    assert report['warnings'][0]['code'] == 'active_custom_annotation_dependency'
+    assert report['info'][0]['code'] == 'deprecated_term_structure_retained'
+    for issue in [*report['errors'], *report['warnings'], *report['info']]:
+        assert set(issue) == {
+            'code', 'severity', 'message', 'operation_ids', 'term_iris'}
     assert report['impact']['historical_records'] == 1
     assert report['impact']['active_records'] == 1
+
+
+def test_retirement_issues_distinguish_supported_shacl_path_and_carry_operation_ids():
+    turtle = BASE + '''
+      @prefix sh: <http://www.w3.org/ns/shacl#> .
+      ex:S a sh:NodeShape; sh:targetClass ex:A;
+        sh:property [ sh:path ex:value; sh:maxCount 1 ] .
+    '''
+    report = retirement_dependencies(
+        Ontology(turtle), 'http://ex/value', operation_ids=['op-1'])
+    issue = next(item for item in report['errors']
+                 if item['code'] == 'active_shacl_path_dependency')
+    assert issue['operation_ids'] == ['op-1']
+    assert issue['term_iris'] == ['http://ex/S', 'http://ex/value']
 
 
 def test_restore_builder_requires_same_project_immutable_source_and_captures_template(tmp_path):
@@ -173,19 +261,46 @@ def test_restore_builder_requires_same_project_immutable_source_and_captures_tem
     with pytest.raises(ValueError, match='项目|source'):
         build_restore_operation(repo, project_id, 'http://ex/C', other_source['id'],
                                 selected_fields=['parents'])
+    impacts = []
     operation = build_restore_operation(
         repo, project_id, 'http://ex/C', source['id'],
-        selected_fields=['parents'])
+        selected_fields=['parents'],
+        impact_provider=lambda p, term: impacts.append((p, term)) or {
+            'formal_records': 2, 'historical_records': 3})
+    assert operation['action'] == 'restore_term'
     assert operation['after']['source_ontology_id'] == source['id']
     assert operation['after']['template']['parents'] == ['http://ex/Root']
     assert set(operation['after']['template']) == {'kind', 'parents'}
     assert set(operation['impact']['preview']) >= {
         'kind', 'annotations', 'parents', 'domain', 'range', 'datatype', 'active'}
     assert operation['impact']['preview']['active'] is True
+    assert operation['impact']['reactivated_constraints'] == 1
+    assert operation['impact']['formal_records'] == 2
+    assert operation['impact']['historical_records'] == 3
+    assert impacts == [(project_id, 'http://ex/C')]
     restored = Ontology(apply_operations(current, [operation]))
     assert restored.is_active_term('http://ex/C') is True
     assert list(restored.graph.objects(URIRef('http://ex/C'), RDFS.subClassOf)) == [
         URIRef('http://ex/Root')]
+
+
+def test_restore_term_requires_deprecated_target_and_blocks_historical_cycle():
+    template = {
+        'kind': 'class', 'parents': ['http://ex/B'], 'annotations': [],
+        'domain': [], 'range': [], 'datatype': None,
+    }
+    active_restore = build_operation('restore_term', 'http://ex/A', after={
+        'source_ontology_id': 'source', 'selected_fields': ['parents'],
+        'template': template})
+    with pytest.raises(ValueError, match='停用|deprecated'):
+        _apply(active_restore)
+
+    cyclic_base = BASE + 'ex:C a owl:Class; owl:deprecated true . ex:B rdfs:subClassOf ex:C .'
+    cyclic_restore = build_operation('restore_term', 'http://ex/C', after={
+        'source_ontology_id': 'source', 'selected_fields': ['parents'],
+        'template': {**template, 'parents': ['http://ex/B']}})
+    with pytest.raises(ValueError, match='循环|cycle'):
+        apply_operations(cyclic_base, [cyclic_restore])
 
 
 def test_fingerprint_is_sha256_of_canonical_json_and_ignores_mapping_order():
@@ -195,6 +310,19 @@ def test_fingerprint_is_sha256_of_canonical_json_and_ignores_mapping_order():
     second['after']['meta'] = {'a': 1, 'b': 2}
     assert operation_fingerprint(first) == operation_fingerprint(second)
     assert len(operation_fingerprint(first)) == 64
+
+
+def test_rdf_patch_fingerprint_ignores_turtle_order_and_bnode_labels():
+    first = build_operation('advanced_rdf_patch', 'http://ex/Shape', after={'turtle': '''
+      @prefix sh:<http://www.w3.org/ns/shacl#>. @prefix ex:<http://ex/>.
+      ex:Shape a sh:NodeShape; sh:property _:a. _:a sh:path ex:value; sh:maxCount 1.
+    '''})
+    second = build_operation('advanced_rdf_patch', 'http://ex/Shape', after={'turtle': '''
+      @prefix sh:<http://www.w3.org/ns/shacl#>. @prefix ex:<http://ex/>.
+      _:different sh:maxCount 1; sh:path ex:value. ex:Shape sh:property _:different;
+        a sh:NodeShape.
+    '''})
+    assert first['fingerprint'] == second['fingerprint']
 
 
 def test_apply_rejects_an_operation_changed_after_it_was_fingerprinted():
@@ -227,7 +355,7 @@ def test_canonical_diff_treats_union_member_order_as_semantically_equivalent():
 def test_canonical_diff_groups_union_and_shacl_changes_atomically_and_blocks_complex_owl():
     edited = BASE.replace('rdfs:domain ex:A', 'rdfs:domain [ owl:unionOf (ex:A ex:B) ]', 1)
     operations = canonical_turtle_diff(BASE, edited)
-    assert [op['action'] for op in operations] == ['replace_domain']
+    assert [op['action'] for op in operations] == ['add_domain']
 
     shaped = BASE + '''
         @prefix sh: <http://www.w3.org/ns/shacl#> .
@@ -235,7 +363,11 @@ def test_canonical_diff_groups_union_and_shacl_changes_atomically_and_blocks_com
           sh:property [ sh:path ex:value; sh:maxCount 1 ] .
     '''
     shacl = canonical_turtle_diff(BASE, shaped)
-    assert len(shacl) == 1 and shacl[0]['action'] == 'replace_shacl_shape'
+    assert len(shacl) == 1 and shacl[0]['action'] == 'advanced_rdf_patch'
+    assert 'turtle' not in shacl[0]['after']
+    patch_graph = Graph().parse(
+        data=shacl[0]['after']['canonical_ntriples'], format='nt')
+    assert not list(patch_graph.triples((URIRef('http://ex/A'), None, None)))
     assert isomorphic(
         Graph().parse(data=apply_operations(BASE, shacl), format='turtle'),
         Graph().parse(data=shaped, format='turtle'))
@@ -244,6 +376,75 @@ def test_canonical_diff_groups_union_and_shacl_changes_atomically_and_blocks_com
         a owl:Restriction; owl:onProperty ex:rel; owl:someValuesFrom ex:B ].'''
     with pytest.raises(ValueError, match='Restriction|复杂'):
         canonical_turtle_diff(BASE, restriction)
+
+
+def test_shacl_patch_is_shape_scoped_and_unrelated_changes_are_separate():
+    base = BASE + '''
+      @prefix sh: <http://www.w3.org/ns/shacl#> .
+      ex:S a sh:NodeShape; sh:targetClass ex:A .
+    '''
+    edited = BASE + '''
+      @prefix sh: <http://www.w3.org/ns/shacl#> .
+      ex:S a sh:NodeShape; sh:targetClass ex:A;
+        sh:property [ sh:path ex:value; sh:maxCount 1 ] .
+      ex:A rdfs:label "changed"@en .
+    '''
+    operations = canonical_turtle_diff(base, edited)
+    assert [operation['action'] for operation in operations] == [
+        'add_annotation', 'advanced_rdf_patch']
+    patch = operations[1]
+    fragment = Graph().parse(data=patch['after']['canonical_ntriples'], format='nt')
+    assert (URIRef('http://ex/A'), RDFS.label, None) not in fragment
+    assert isomorphic(
+        Graph().parse(data=apply_operations(base, operations), format='turtle'),
+        Graph().parse(data=edited, format='turtle'))
+
+
+def test_shacl_patch_excludes_ontology_triples_when_term_is_also_a_shape():
+    base = BASE + '''
+      @prefix sh: <http://www.w3.org/ns/shacl#> .
+      ex:A a sh:NodeShape; sh:targetClass ex:A; rdfs:label "old" .
+    '''
+    edited = BASE + '''
+      @prefix sh: <http://www.w3.org/ns/shacl#> .
+      ex:A a sh:NodeShape; sh:targetClass ex:A; sh:closed true; rdfs:label "new" .
+    '''
+    operations = canonical_turtle_diff(base, edited)
+    patch = next(operation for operation in operations
+                 if operation['action'] == 'advanced_rdf_patch')
+    fragment = Graph().parse(data=patch['after']['canonical_ntriples'], format='nt')
+    assert (URIRef('http://ex/A'), RDF.type, OWL.Class) not in fragment
+    assert not list(fragment.triples((URIRef('http://ex/A'), RDFS.label, None)))
+    assert [operation['action'] for operation in operations].count('add_annotation') == 1
+    assert [operation['action'] for operation in operations].count('remove_annotation') == 1
+
+
+def test_advanced_shape_patch_rejects_unrelated_root_triples():
+    operation = build_operation(
+        'advanced_rdf_patch', 'http://ex/A',
+        before={'canonical_ntriples': ''},
+        after={'canonical_ntriples': (
+            '<http://ex/A> <http://www.w3.org/2000/01/rdf-schema#label> "hidden" .\n')})
+    with pytest.raises(ValueError, match='SHACL|unrelated|无关'):
+        _apply(operation)
+
+
+def test_diff_declares_new_parent_before_child_edges_even_when_child_sorts_first():
+    edited = BASE + '''
+      ex:AChild a owl:Class; rdfs:subClassOf ex:ZParent; rdfs:label "Child" .
+      ex:ZParent a owl:Class; rdfs:label "Parent" .
+    '''
+    operations = canonical_turtle_diff(BASE, edited)
+    assert [(operation['action'], operation['target_iri']) for operation in operations[:3]] == [
+        ('create_term', 'http://ex/ZParent'),
+        ('create_term', 'http://ex/AChild'),
+        ('add_annotation', 'http://ex/ZParent'),
+    ]
+    add_parent = next(index for index, operation in enumerate(operations)
+                      if operation['action'] == 'add_parent')
+    parent_create = next(index for index, operation in enumerate(operations)
+                         if operation['target_iri'] == 'http://ex/ZParent')
+    assert parent_create < add_parent
 
 
 def test_diff_requires_retirement_instead_of_physical_declaration_removal():
@@ -267,7 +468,7 @@ def test_advanced_patch_cannot_change_lifecycle_invariants(forbidden):
 
 
 def test_summary_can_filter_active_terms_without_erasing_history_view():
-    ontology = _apply(build_operation('retire', 'http://ex/rel'))
+    ontology = _apply(build_operation('retire_term', 'http://ex/rel'))
     assert {row['id'] for row in ontology.summary()['relations']} >= {'http://ex/rel'}
     assert 'http://ex/rel' not in {
         row['id'] for row in ontology.summary(active_only=True)['relations']}
@@ -290,8 +491,8 @@ def test_summary_can_filter_active_terms_without_erasing_history_view():
     ('remove_domain', 'manual', {}, [], 'high'),
     ('remove_range', 'manual', {}, [], 'high'),
     ('set_datatype', 'manual', {}, [], 'high'),
-    ('retire', 'manual', {}, [], 'high'),
-    ('restore', 'manual', {}, [], 'high'),
+    ('retire_term', 'manual', {}, [], 'high'),
+    ('restore_term', 'manual', {}, [], 'high'),
     ('advanced_rdf_patch', 'manual', {}, [], 'high'),
     ('add_annotation', 'manual', {'formal_records': 1}, [], 'high'),
     ('add_annotation', 'manual', {'descendants': 51}, [], 'high'),
@@ -314,7 +515,7 @@ def test_confidence_never_reduces_source_minimum():
 
 @pytest.mark.parametrize('action', [
     'add_parent', 'add_domain', 'add_range', 'remove_parent', 'remove_domain',
-    'remove_range', 'set_datatype', 'retire', 'restore', 'advanced_rdf_patch',
+    'remove_range', 'set_datatype', 'retire_term', 'restore_term', 'advanced_rdf_patch',
 ])
 def test_batch_eligibility_recomputes_server_floor_instead_of_trusting_claimed_risk(action):
     assert is_batch_eligible({

@@ -451,8 +451,14 @@ def set_term_constraints(ontology, node, kind, parent='', domain='', range_='',
             raise ValueError('domain 约束不能重复')
         resolved_domains = [str(snapshot.resolve(value, snapshot.classes))
                             for value in domain_values]
-        operations.append(build_operation(
-            'replace_domain', target, after={'values': resolved_domains}))
+        existing_domains = [str(value) for value in snapshot.constraint_types(
+            node, RDFS.domain)]
+        operations.extend(build_operation(
+            'remove_domain', target, before={'value': value})
+            for value in existing_domains if value not in resolved_domains)
+        operations.extend(build_operation(
+            'add_domain', target, after={'value': value})
+            for value in resolved_domains if value not in existing_domains)
         if kind == 'relation':
             range_values = [value for value in
                             (ranges if ranges else ([range_] if range_ else []))
@@ -461,14 +467,16 @@ def set_term_constraints(ontology, node, kind, parent='', domain='', range_='',
                 raise ValueError('range 约束不能重复')
             resolved_ranges = [str(snapshot.resolve(value, snapshot.classes))
                                for value in range_values]
-            operations.append(build_operation(
-                'replace_range', target, after={'values': resolved_ranges}))
+            existing_ranges = [str(value) for value in snapshot.constraint_types(
+                node, RDFS.range)]
+            operations.extend(build_operation(
+                'remove_range', target, before={'value': value})
+                for value in existing_ranges if value not in resolved_ranges)
+            operations.extend(build_operation(
+                'add_range', target, after={'value': value})
+                for value in resolved_ranges if value not in existing_ranges)
         else:
             datatype = URIRef(range_) if range_ else None
-            allowed = {XSD.string, XSD.boolean, XSD.integer, XSD.decimal, XSD.double,
-                       XSD.date, XSD.dateTime, RDFS.Literal}
-            if datatype is not None and datatype not in allowed:
-                raise ValueError('属性的取值范围（range）必须是受支持的字面量数据类型')
             operations.append(build_operation(
                 'set_datatype', target,
                 after={'datatype': str(datatype) if datatype else None}))
