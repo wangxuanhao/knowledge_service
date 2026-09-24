@@ -7,6 +7,8 @@ from uuid import uuid4
 
 from ..utils.assertions import occurrence_id
 from ..core.time import utc_now
+from ..repository import OntologyNotPublished
+from .ontology import Ontology
 
 
 FORMAL_OPERATIONS = frozenset({
@@ -133,6 +135,30 @@ class FormalFactWriter:
             selected_versions[canonical_id] = row['version_id']
         return selected_versions[canonical_id]
 
+    def _reject_deprecated_new_term(self, project_id, record, ontology):
+        """Prevent new formal facts from adopting a term retired in the latest ontology.
+
+        Existing rows are intentionally left alone: their stored ``ontology_id``
+        remains the authority for historical reads and revalidation.
+        """
+        if (ontology is None
+                or record.get('kind') not in {'entity', 'relation', 'attribute'}):
+            return
+        current = self.repository._db.execute(
+            '''SELECT 1 FROM record_versions
+               WHERE project_id=? AND id=? AND superseded_at IS NULL''',
+            (project_id, record.get('id'))).fetchone()
+        if current is not None or record.get('metadata', {}).get('_deleted'):
+            return
+        declared = ontology.classes | ontology.relations | ontology.attributes
+        exact = [term for term in declared if str(term) == record.get('type', '')]
+        try:
+            term = exact[0] if len(exact) == 1 else ontology.resolve(record.get('type', ''))
+        except ValueError:
+            return
+        if not ontology.is_active_term(term):
+            raise ValueError(f'不能使用已停用的本体术语创建新事实：{term}')
+
     def _map_accepted_assertion(self, project_id, assertion, record_version_id, *, replay=False):
         """只连接本次接受/重指派的 event；同 event 的版本身份不可改变。"""
         events = self.repository._db.execute(
@@ -185,6 +211,11 @@ class FormalFactWriter:
             self.repository._record_operation_time(project_id, operation_context)
         with self.repository._transaction():
             self.repository.get_project(project_id)
+            try:
+                current_ontology = Ontology(
+                    self.repository.get_ontology(project_id)['turtle'])
+            except OntologyNotPublished:
+                current_ontology = None
             for record_id, wanted in expected.items():
                 row = self.repository._db.execute(
                     '''SELECT version FROM record_versions
@@ -200,6 +231,8 @@ class FormalFactWriter:
                     operation=operation_context))
             for ordinal, original in enumerate(records):
                 record = self._canonical_record(original)
+                self._reject_deprecated_new_term(
+                    project_id, record, current_ontology)
                 expected_version = expected.get(record['id'])
                 canonical_id = record['id']
                 if record['kind'] in {'relation', 'attribute'}:

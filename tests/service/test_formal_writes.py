@@ -26,6 +26,27 @@ def _system(tmp_path):
     return repo, service, project_id
 
 
+def test_new_facts_reject_deprecated_terms_but_old_version_records_remain_valid(tmp_path):
+    repo, service, project_id = _system(tmp_path)
+    old = repo.get_ontology(project_id)
+    historical = service.write(project_id, [{
+        'id': 'historical-person', 'kind': 'entity', 'type': 'Person',
+        'text': '历史人物', 'ontology_id': old['id'],
+    }])
+    deprecated_ttl = old['turtle'] + ' ex:Person owl:deprecated true .'
+    current = repo.save_ontology(project_id, deprecated_ttl, Ontology(deprecated_ttl).summary())
+
+    with pytest.raises(ValueError, match='停用'):
+        service.write(project_id, [{
+            'id': 'new-person', 'kind': 'entity', 'type': 'Person', 'text': '新人物',
+            'ontology_id': current['id'],
+        }])
+
+    stored = repo.get_record(project_id, historical[0]['id'])
+    assert stored['ontology_id'] == old['id']
+    assert Ontology(old['turtle']).validate([stored], shacl=False)['conforms'] is True
+
+
 @pytest.mark.parametrize(('value', 'datatype'), [
     (b'20', 'http://www.w3.org/2001/XMLSchema#string'),
     (Decimal('20.5'), 'http://www.w3.org/2001/XMLSchema#double'),

@@ -6,7 +6,7 @@ import unicodedata
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, unquote
 
-from rdflib import BNode, Graph, Literal, Namespace, RDF, RDFS, URIRef
+from rdflib import Graph, Literal, Namespace, RDF, RDFS, URIRef
 from rdflib.collection import Collection
 from rdflib.namespace import OWL, SH, XSD
 
@@ -110,7 +110,19 @@ class Ontology:
             raise ValueError(f"未知或存在歧义的本体术语：{name}")
         return matches[0]
 
-    def summary(self):
+    def is_active_term(self, term):
+        """Return false only for an explicitly truthy ``owl:deprecated`` marker."""
+        try:
+            node = term if isinstance(term, URIRef) else self.resolve(str(term))
+        except ValueError:
+            return False
+        for marker in self.graph.objects(node, OWL.deprecated):
+            value = marker.toPython() if isinstance(marker, Literal) else str(marker)
+            if value is True or str(value).strip().lower() in {'true', '1'}:
+                return False
+        return True
+
+    def summary(self, active_only=False):
         def item(uri):
             labels = list(self.graph.objects(uri, RDFS.label))
             zh = en = plain = ''
@@ -126,15 +138,18 @@ class Ontology:
             return {"id": str(uri), "name": local_name(uri),
                     "label": plain or en or local_name(uri),
                     "label_zh": zh, "label_en": en,
-                    "description": str(self.graph.value(uri, RDFS.comment) or "")}
+                    "description": str(self.graph.value(uri, RDFS.comment) or ""),
+                    "active": self.is_active_term(uri)}
+        visible = lambda values: [value for value in values
+                                  if not active_only or self.is_active_term(value)]
         return {"classes": [{**item(c), "parents": [str(p) for p in self.graph.objects(c, RDFS.subClassOf)]}
-                            for c in sorted(self.classes)],
+                            for c in sorted(visible(self.classes))],
                 "relations": [{**item(p), "domain": [str(v) for v in self.constraint_types(p,RDFS.domain)],
                                "range": [str(v) for v in self.constraint_types(p,RDFS.range)]}
-                              for p in sorted(self.relations)],
+                              for p in sorted(visible(self.relations))],
                 "attributes": [{**item(p), "domain": [str(v) for v in self.constraint_types(p,RDFS.domain)],
                                 "range": [str(v) for v in self.graph.objects(p, RDFS.range)]}
-                               for p in sorted(self.attributes)], "triples": len(self.graph)}
+                               for p in sorted(visible(self.attributes))], "triples": len(self.graph)}
 
     def constraint_types(self,predicate,constraint):
         """展开用作允许端点集的命名类或 OWL 并集。"""
@@ -411,43 +426,53 @@ def term_impact(service, p, uri, ontology):
 
 
 def set_term_constraints(ontology, node, kind, parent='', domain='', range_='',
-                         domains=None, ranges=None):
-    """写入/替换术语的继承、domain/range 约束；多值用 OWL union 表达。"""
-    for predicate in (RDFS.subClassOf, RDFS.domain, RDFS.range):
-        for old in list(ontology.graph.objects(node, predicate)):
-            head = ontology.graph.value(old, OWL.unionOf)
-            if head:
-                Collection(ontology.graph, head).clear()
-                ontology.graph.remove((old, None, None))
-        ontology.graph.remove((node, predicate, None))
-    if kind == 'class' and parent:
-        parent_node = ontology.resolve(parent, ontology.classes)
-        if parent_node == node:
-            raise ValueError('类不能继承自身')
-        if node in ontology.parents(parent_node):
-            raise ValueError('类继承会形成循环（cycle）')
-        ontology.graph.add((node, RDFS.subClassOf, parent_node))
-    domain_values = list(dict.fromkeys(value for value in (domains or ([domain] if domain else [])) if value))
-    range_values = list(dict.fromkeys(value for value in (ranges or ([range_] if range_ else [])) if value))
+                         domains=None, ranges=None, parents=None):
+    """Compatibility wrapper over governed multi-value operation semantics."""
+    from .ontology_operations import apply_operations, build_operation
 
-    def add_allowed(predicate, values):
-        resolved = [ontology.resolve(value, ontology.classes) for value in values]
-        if len(resolved) == 1:
-            ontology.graph.add((node, predicate, resolved[0]))
-        elif resolved:
-            union = BNode(); head = BNode()
-            ontology.graph.add((union, OWL.unionOf, head))
-            Collection(ontology.graph, head, resolved)
-            ontology.graph.add((node, predicate, union))
-
-    if kind in ('relation', 'attribute'):
-        add_allowed(RDFS.domain, domain_values)
-    if kind == 'relation':
-        add_allowed(RDFS.range, range_values)
-    if kind == 'attribute' and range_:
-        datatype = URIRef(range_)
-        allowed = {XSD.string, XSD.boolean, XSD.integer, XSD.decimal, XSD.double,
-                   XSD.date, XSD.dateTime, RDFS.Literal}
-        if datatype not in allowed:
-            raise ValueError('属性的取值范围（range）必须是受支持的字面量数据类型')
-        ontology.graph.add((node, RDFS.range, datatype))
+    snapshot = Ontology(ontology.graph.serialize(format='turtle'))
+    target = str(node)
+    operations = []
+    if kind == 'class':
+        requested = list(parents if parents else ([parent] if parent else []))
+        if len(requested) != len(set(requested)):
+            raise ValueError('父类不能重复')
+        resolved = [str(snapshot.resolve(value, snapshot.classes)) for value in requested]
+        existing = [str(value) for value in snapshot.graph.objects(node, RDFS.subClassOf)]
+        operations.extend(build_operation(
+            'remove_parent', target, before={'value': value}) for value in existing)
+        operations.extend(build_operation(
+            'add_parent', target, after={'value': value}) for value in resolved)
+    elif kind in ('relation', 'attribute'):
+        domain_values = [value for value in
+                         (domains if domains else ([domain] if domain else []))
+                         if value]
+        if len(domain_values) != len(set(domain_values)):
+            raise ValueError('domain 约束不能重复')
+        resolved_domains = [str(snapshot.resolve(value, snapshot.classes))
+                            for value in domain_values]
+        operations.append(build_operation(
+            'replace_domain', target, after={'values': resolved_domains}))
+        if kind == 'relation':
+            range_values = [value for value in
+                            (ranges if ranges else ([range_] if range_ else []))
+                            if value]
+            if len(range_values) != len(set(range_values)):
+                raise ValueError('range 约束不能重复')
+            resolved_ranges = [str(snapshot.resolve(value, snapshot.classes))
+                               for value in range_values]
+            operations.append(build_operation(
+                'replace_range', target, after={'values': resolved_ranges}))
+        else:
+            datatype = URIRef(range_) if range_ else None
+            allowed = {XSD.string, XSD.boolean, XSD.integer, XSD.decimal, XSD.double,
+                       XSD.date, XSD.dateTime, RDFS.Literal}
+            if datatype is not None and datatype not in allowed:
+                raise ValueError('属性的取值范围（range）必须是受支持的字面量数据类型')
+            operations.append(build_operation(
+                'set_datatype', target,
+                after={'datatype': str(datatype) if datatype else None}))
+    else:
+        raise ValueError('不支持的本体术语类型')
+    ontology.__init__(apply_operations(
+        ontology.graph.serialize(format='turtle'), operations))
