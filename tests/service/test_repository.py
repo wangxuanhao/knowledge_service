@@ -249,74 +249,85 @@ def test_operation_reservation_migration_upgrades_existing_database(tmp_path, mo
     ).fetchone()['project_id'] == project
 
 
-def test_operation_reservation_migration_normalizes_legacy_system_time(tmp_path, monkeypatch):
-    path = tmp_path / 'operation-reservation-offset-upgrade.sqlite'
+def test_operation_reservation_migration_preserves_legacy_system_time(tmp_path, monkeypatch):
+    path = tmp_path / 'operation-reservation-preserve-upgrade.sqlite'
     migrations = repository_module._SCHEMA_MIGRATIONS
     monkeypatch.setattr(repository_module, '_SCHEMA_MIGRATIONS', migrations[:-1])
     legacy = Repository(path)
-    project = legacy.create_project('legacy offsets')['id']
-    payloads = [
-        json.dumps({'id': 'history', 'kind': 'document', 'text': text,
-                    'metadata': {}, 'valid_from': None, 'valid_until': None})
-        for text in ('one', 'two')
-    ]
+    project = legacy.create_project('legacy timestamps')['id']
     with legacy._transaction():
         legacy._db.execute(
             '''INSERT INTO record_versions
                (project_id,id,version,version_id,payload,recorded_at,superseded_at)
                VALUES (?,?,?,?,?,?,?)''',
-            (project, 'history', 1, 'legacy-offset-v1', payloads[0],
+            (project, 'offset', 1, 'legacy-offset',
+             json.dumps({'id': 'offset', 'kind': 'document', 'text': 'offset'}),
              '2030-01-01T08:00:00+08:00', '2030-01-01T09:00:00+08:00'))
         legacy._db.execute(
             '''INSERT INTO record_versions
                (project_id,id,version,version_id,payload,recorded_at,superseded_at)
-               VALUES (?,?,?,?,?,?,NULL)''',
-            (project, 'history', 2, 'legacy-offset-v2', payloads[1],
-             '2030-01-01T01:00:00Z'))
+               VALUES (?,?,?,?,?,?,?)''',
+            (project, 'unparseable', 1, 'legacy-unparseable',
+             json.dumps({'id': 'unparseable', 'kind': 'document', 'text': 'legacy'}),
+             'legacy-recorded-at', 'legacy-superseded-at'))
+    legacy_rows = [
+        tuple(row) for row in legacy._db.execute(
+            'SELECT * FROM record_versions WHERE project_id=? ORDER BY id',
+            (project,)).fetchall()
+    ]
     legacy.close()
 
     monkeypatch.setattr(repository_module, '_SCHEMA_MIGRATIONS', migrations)
     upgraded = Repository(path)
-    history = upgraded.history(project, 'history')
-    assert history[0]['recorded_at'] == '2030-01-01T00:00:00.000000Z'
-    assert history[0]['superseded_at'] == '2030-01-01T01:00:00.000000Z'
-    assert history[1]['recorded_at'] == '2030-01-01T01:00:00.000000Z'
+    upgraded_rows = [
+        tuple(row) for row in upgraded._db.execute(
+            'SELECT * FROM record_versions WHERE project_id=? ORDER BY id',
+            (project,)).fetchall()
+    ]
+    assert upgraded_rows == legacy_rows
+    rows = upgraded._db.execute(
+        '''SELECT id,recorded_at,superseded_at FROM record_versions
+           WHERE project_id=? ORDER BY id''', (project,)).fetchall()
+    assert [tuple(row) for row in rows] == [
+        ('offset', '2030-01-01T08:00:00+08:00', '2030-01-01T09:00:00+08:00'),
+        ('unparseable', 'legacy-recorded-at', 'legacy-superseded-at'),
+    ]
 
-    operation = upgraded._reserve_record_operation(project)
-    assert operation.recorded_at > history[1]['recorded_at']
-    exact = upgraded.get_record(
-        project, 'history', known_at=history[0]['recorded_at'])
-    assert exact['version'] == 1
-    assert exact['text'] == 'one'
 
-
-def test_operation_reservation_migration_rejects_naive_legacy_system_time(
+def test_operation_reservation_uses_true_parseable_legacy_high_water_without_rewrite(
         tmp_path, monkeypatch):
-    path = tmp_path / 'operation-reservation-naive-upgrade.sqlite'
+    path = tmp_path / 'operation-reservation-offset-high-water.sqlite'
     migrations = repository_module._SCHEMA_MIGRATIONS
     monkeypatch.setattr(repository_module, '_SCHEMA_MIGRATIONS', migrations[:-1])
     legacy = Repository(path)
-    project = legacy.create_project('legacy naive')['id']
+    project = legacy.create_project('legacy high water')['id']
     with legacy._transaction():
-        legacy._db.execute(
-            '''INSERT INTO record_versions
-               (project_id,id,version,version_id,payload,recorded_at,superseded_at)
-               VALUES (?,?,?,?,?,?,NULL)''',
-            (project, 'naive', 1, 'legacy-naive-v1',
-             json.dumps({'id': 'naive', 'kind': 'document', 'text': 'naive'}),
-             '2030-01-01T01:00:00'))
+        for record_id, timestamp in (
+                ('offset', '2030-01-01T08:00:00+08:00'),
+                ('chronological-max', '2030-01-01T01:00:00Z'),
+                ('unparseable', 'legacy-recorded-at')):
+            legacy._db.execute(
+                '''INSERT INTO record_versions
+                   (project_id,id,version,version_id,payload,recorded_at,superseded_at)
+                   VALUES (?,?,?,?,?,?,NULL)''',
+                (project, record_id, 1, f'legacy-{record_id}',
+                 json.dumps({'id': record_id, 'kind': 'document', 'text': record_id}),
+                 timestamp))
     legacy.close()
 
     monkeypatch.setattr(repository_module, '_SCHEMA_MIGRATIONS', migrations)
-    with pytest.raises(ValueError, match='时区'):
-        Repository(path)
-    with sqlite3.connect(path) as db:
-        assert db.execute(
-            'SELECT COUNT(*) FROM schema_migrations WHERE version=13'
-        ).fetchone()[0] == 0
-        assert db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='record_operation_reservations'"
-        ).fetchone() is None
+    upgraded = Repository(path)
+    operation = upgraded._reserve_record_operation(project)
+
+    assert operation.recorded_at > normalize_time('2030-01-01T01:00:00Z')
+    rows = upgraded._db.execute(
+        '''SELECT id,recorded_at FROM record_versions
+           WHERE project_id=? ORDER BY id''', (project,)).fetchall()
+    assert [tuple(row) for row in rows] == [
+        ('chronological-max', '2030-01-01T01:00:00Z'),
+        ('offset', '2030-01-01T08:00:00+08:00'),
+        ('unparseable', 'legacy-recorded-at'),
+    ]
 
 
 def test_schema_migration_receives_active_connection_and_runs_once(tmp_path, monkeypatch):

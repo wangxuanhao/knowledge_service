@@ -236,15 +236,7 @@ def _create_provenance_schema(db):
 
 
 def _create_record_operation_reservation_schema(db):
-    """迁移 13：规范化旧系统时间，并持久化跨连接的项目写入预留。"""
-    rows = db.execute(
-        'SELECT rowid,recorded_at,superseded_at FROM record_versions').fetchall()
-    for row in rows:
-        db.execute(
-            '''UPDATE record_versions SET recorded_at=?,superseded_at=?
-               WHERE rowid=?''',
-            (normalize_time(row['recorded_at'], allow_none=False),
-             normalize_time(row['superseded_at']), row['rowid']))
+    """迁移 13：持久化跨连接的项目写入时间预留。"""
     db.execute('''CREATE TABLE record_operation_reservations (
         token TEXT PRIMARY KEY,
         project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -718,9 +710,16 @@ class Repository:
         with self._transaction():
             self.get_project(project_id)
             now = normalize_time(recorded_at) if recorded_at is not None else utc_now()
-            stored = self._db.execute(
-                'SELECT MAX(recorded_at) FROM record_versions WHERE project_id=?',
-                (project_id,)).fetchone()[0]
+            stored_times = []
+            for row in self._db.execute(
+                    'SELECT recorded_at FROM record_versions WHERE project_id=?',
+                    (project_id,)).fetchall():
+                try:
+                    stored_times.append(normalize_time(row['recorded_at'], allow_none=False))
+                except ValueError:
+                    # 旧库时间不属于新写入合同；保留原值，不让它阻断新高水位。
+                    continue
+            stored = max(stored_times, default=None)
             reserved = self._db.execute(
                 '''SELECT MAX(recorded_at) FROM record_operation_reservations
                    WHERE project_id=?''', (project_id,)).fetchone()[0]
