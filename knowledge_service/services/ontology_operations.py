@@ -25,6 +25,7 @@ _DECLARATIONS = {
     'relation': OWL.ObjectProperty,
     'attribute': OWL.DatatypeProperty,
 }
+_CLASS_DECLARATIONS = frozenset({OWL.Class, RDFS.Class})
 _STRUCTURAL_PREDICATES = {
     RDF.type, RDFS.subClassOf, RDFS.domain, RDFS.range, OWL.deprecated,
     DCTERMS.isReplacedBy,
@@ -53,6 +54,21 @@ _RDF_PAYLOAD_KEYS = {'turtle': 'turtle', 'canonical_ntriples': 'nt', 'subgraph':
 def _is_annotation_predicate(predicate) -> bool:
     return (predicate not in _STRUCTURAL_PREDICATES
             and not str(predicate).startswith(str(SH)))
+
+
+def _is_graph_class(graph: Graph, node) -> bool:
+    return any((node, RDF.type, declaration) in graph
+               for declaration in _CLASS_DECLARATIONS)
+
+
+def _graph_term_kind(graph: Graph, node) -> str | None:
+    if _is_graph_class(graph, node):
+        return 'class'
+    if (node, RDF.type, OWL.ObjectProperty) in graph:
+        return 'relation'
+    if (node, RDF.type, OWL.DatatypeProperty) in graph:
+        return 'attribute'
+    return None
 
 
 def _canonical_json(value) -> str:
@@ -315,8 +331,7 @@ def _apply_template(graph: Graph, node: URIRef, template: dict,
 
 
 def _ensure_kind(graph: Graph, node: URIRef, kind: str | None = None) -> str:
-    actual = next((candidate for candidate, declaration in _DECLARATIONS.items()
-                   if (node, RDF.type, declaration) in graph), None)
+    actual = _graph_term_kind(graph, node)
     if actual is None:
         raise ValueError(f'本体术语不存在：{node}')
     if kind is not None and actual != kind:
@@ -333,7 +348,7 @@ def _is_active_graph_term(graph: Graph, node: URIRef) -> bool:
 def _assert_no_parent_cycle(graph: Graph, child: URIRef, parent: URIRef) -> None:
     if child == parent:
         raise ValueError('术语不能继承自身，否则会形成循环（cycle）')
-    if (parent, RDF.type, OWL.Class) not in graph:
+    if not _is_graph_class(graph, parent):
         raise ValueError(f'父类不存在：{parent}')
     pending = [parent]
     seen = set()
@@ -477,7 +492,7 @@ def apply_operations(base_turtle: str, operations: Iterable[dict]) -> str:
             kind = after.get('kind')
             if kind not in _DECLARATIONS:
                 raise ValueError('不支持的本体术语类型')
-            if any((target, RDF.type, value) in graph for value in _DECLARATIONS.values()):
+            if _graph_term_kind(graph, target) is not None:
                 raise ValueError('本体术语已存在')
             if set(after) - {'kind'}:
                 raise ValueError('create_term 只声明术语身份；annotation 和结构边必须使用独立操作')
@@ -511,7 +526,7 @@ def apply_operations(base_turtle: str, operations: Iterable[dict]) -> str:
                 if value in values:
                     raise ValueError('约束值不能重复')
                 if predicate == RDFS.domain or kind == 'relation':
-                    if (value, RDF.type, OWL.Class) not in graph:
+                    if not _is_graph_class(graph, value):
                         raise ValueError(f'domain/range 类不存在：{value}')
                 elif value not in _SUPPORTED_DATATYPES:
                     raise ValueError(f'不支持的 datatype 数据类型：{value}')
@@ -522,7 +537,7 @@ def apply_operations(base_turtle: str, operations: Iterable[dict]) -> str:
                 values = [item for item in values if item != value]
             if predicate == RDFS.domain or kind == 'relation':
                 for value in values:
-                    if (URIRef(str(value)), RDF.type, OWL.Class) not in graph:
+                    if not _is_graph_class(graph, URIRef(str(value))):
                         raise ValueError(f'domain/range 类不存在：{value}')
             _set_constraint(graph, target, predicate, values)
         elif action == 'set_datatype':
@@ -928,9 +943,14 @@ def _canonicalize_supported_unions(source: Graph) -> Graph:
 
 def _declarations(graph: Graph) -> dict[URIRef, str]:
     found = {}
-    for kind, declaration in _DECLARATIONS.items():
+    for declaration in _CLASS_DECLARATIONS:
         for subject in graph.subjects(RDF.type, declaration):
             if isinstance(subject, URIRef):
+                found[subject] = 'class'
+    for kind in ('relation', 'attribute'):
+        declaration = _DECLARATIONS[kind]
+        for subject in graph.subjects(RDF.type, declaration):
+            if isinstance(subject, URIRef) and subject not in found:
                 found[subject] = kind
     return found
 
@@ -1150,4 +1170,3 @@ def canonical_turtle_diff(base_turtle: str, edited_turtle: str, *,
 compile_operation = build_operation
 diff_turtle = canonical_turtle_diff
 batch_eligible = is_batch_eligible
-

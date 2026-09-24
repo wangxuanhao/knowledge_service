@@ -36,9 +36,72 @@ ex:rel a owl:ObjectProperty; rdfs:domain ex:A; rdfs:range ex:B .
 ex:value a owl:DatatypeProperty; rdfs:domain ex:A; rdfs:range xsd:string .
 '''
 
+RDFS_CLASS_BASE = '''
+@prefix ex: <http://ex/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+ex:Root a rdfs:Class .
+ex:A a rdfs:Class; rdfs:subClassOf ex:Root .
+ex:B a rdfs:Class .
+ex:rel a owl:ObjectProperty; rdfs:domain ex:A; rdfs:range ex:Root .
+'''
+
 
 def _apply(*operations, base=BASE):
     return Ontology(apply_operations(base, list(operations)))
+
+
+def test_rdfs_class_supports_annotation_add_and_reviewed_remove():
+    add = build_operation('add_annotation', 'http://ex/A', after={
+        'predicate': str(RDFS.label), 'value': 'A'})
+    remove = build_operation('remove_annotation', 'http://ex/A', before={
+        'predicate': str(RDFS.label), 'value': 'A'})
+    result = Graph().parse(
+        data=apply_operations(RDFS_CLASS_BASE, [add, remove]), format='turtle')
+    assert (URIRef('http://ex/A'), RDF.type, RDFS.Class) in result
+    assert not list(result.objects(URIRef('http://ex/A'), RDFS.label))
+
+
+def test_rdfs_class_supports_parent_add_and_cycle_detection():
+    added = Graph().parse(data=apply_operations(RDFS_CLASS_BASE, [build_operation(
+        'add_parent', 'http://ex/B', after={'value': 'http://ex/A'})]),
+        format='turtle')
+    assert (URIRef('http://ex/B'), RDFS.subClassOf, URIRef('http://ex/A')) in added
+    with pytest.raises(ValueError, match='cycle|循环'):
+        apply_operations(RDFS_CLASS_BASE, [build_operation(
+            'add_parent', 'http://ex/Root', after={'value': 'http://ex/A'})])
+
+
+def test_rdfs_class_is_valid_domain_and_range_reference():
+    result = Ontology(apply_operations(RDFS_CLASS_BASE, [
+        build_operation('add_domain', 'http://ex/rel', after={'value': 'http://ex/B'}),
+        build_operation('add_range', 'http://ex/rel', after={'value': 'http://ex/B'}),
+    ]))
+    assert URIRef('http://ex/B') in result.constraint_types(
+        URIRef('http://ex/rel'), RDFS.domain)
+    assert URIRef('http://ex/B') in result.constraint_types(
+        URIRef('http://ex/rel'), RDFS.range)
+
+
+def test_create_rejects_duplicate_rdfs_class_declaration():
+    with pytest.raises(ValueError, match='已存在|exists'):
+        apply_operations(RDFS_CLASS_BASE, [build_operation(
+            'create_term', 'http://ex/A', after={'kind': 'class'})])
+
+
+def test_turtle_diff_compiles_rdfs_class_label_and_parent_changes():
+    edited = RDFS_CLASS_BASE + '''
+      ex:A rdfs:label "Class A" .
+      ex:B rdfs:subClassOf ex:A .
+    '''
+    operations = canonical_turtle_diff(RDFS_CLASS_BASE, edited)
+    assert [(item['action'], item['target_iri']) for item in operations] == [
+        ('add_annotation', 'http://ex/A'),
+        ('add_parent', 'http://ex/B'),
+    ]
+    assert isomorphic(
+        Graph().parse(data=apply_operations(RDFS_CLASS_BASE, operations), format='turtle'),
+        Graph().parse(data=edited, format='turtle'))
 
 
 @pytest.mark.parametrize(('kind', 'iri', 'declaration'), [
