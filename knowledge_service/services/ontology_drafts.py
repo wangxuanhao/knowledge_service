@@ -355,6 +355,51 @@ class OntologyDrafts:
             return list(dict.fromkeys(requested))
         return authoritative
 
+    @staticmethod
+    def _document_evidence_ref(reference):
+        document_id = reference.get('document_id') or reference.get('id')
+        version = reference.get(
+            'expected_document_version_id', reference.get(
+                'version_id', reference.get(
+                    'expected_document_version', reference.get('version'))))
+        if document_id and version is not None:
+            return f'document-version:{document_id}:{version}'
+        return None
+
+    def _refresh_operation_evidence(self, draft, refreshed_draft, evidence):
+        """Refresh versioned refs without widening an operation's evidence set."""
+        authoritative = set(self._authoritative_evidence(refreshed_draft, {}))
+        old_documents = {
+            (reference.get('document_id') or reference.get('id')): reference
+            for reference in self._source_references(
+                draft.get('source_context') or {})
+        }
+        new_documents = {
+            (reference.get('document_id') or reference.get('id')): reference
+            for reference in self._source_references(
+                refreshed_draft.get('source_context') or {})
+        }
+        refreshed_refs = {}
+        for document_id, old_reference in old_documents.items():
+            new_reference = new_documents.get(document_id)
+            if new_reference is None:
+                continue
+            old_ref = self._document_evidence_ref(old_reference)
+            new_ref = self._document_evidence_ref(new_reference)
+            if old_ref and new_ref:
+                refreshed_refs[old_ref] = new_ref
+
+        selected = []
+        for reference in evidence or []:
+            refreshed = refreshed_refs.get(reference, reference)
+            if refreshed not in authoritative:
+                raise StaleSource(
+                    f'operation evidence {reference!r} no longer exists in '
+                    'the refreshed source snapshot')
+            if refreshed not in selected:
+                selected.append(refreshed)
+        return selected
+
     def _mark_stale(self, project_id, draft, expected_revision, status, error):
         if draft['status'] != status:
             draft = self._cas(project_id, draft['id'], expected_revision,
@@ -1217,6 +1262,9 @@ class OntologyDrafts:
             }
             if source_snapshot_fingerprint is None:
                 rebuild_command['evidence_refs'] = operation.get('evidence') or []
+            else:
+                rebuild_command['evidence_refs'] = self._refresh_operation_evidence(
+                    draft, rebuild_draft, operation.get('evidence') or [])
             rebuilt = self._rebuild_operations(
                 project_id, rebuild_draft, [{
                     'action': operation['action'],
@@ -1321,6 +1369,7 @@ class OntologyDrafts:
                           expected_ontology_id, validation_fingerprint,
                           acknowledged_warning_codes, idempotency_key, actor):
         draft = self.store.get(project_id, draft_id)
+        self._assert_revision(draft, expected_revision)
         if draft['status'] != 'reviewed':
             raise ValueError('only reviewed drafts may be published')
         self._check_current(

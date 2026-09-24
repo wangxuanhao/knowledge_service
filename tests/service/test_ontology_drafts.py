@@ -440,6 +440,43 @@ def test_rebase_cannot_refresh_a_source_candidate_that_disappeared(tmp_path):
     assert persisted['revision'] == stale['revision']
 
 
+def test_rebase_preserves_each_operation_source_selection(tmp_path):
+    repo, service, project_id, base = setup_service(tmp_path)
+    document = repo.put_record(project_id, {
+        'id': 'source-doc', 'kind': 'document', 'text': 'source-v1',
+        'metadata': {'review_candidates': [
+            {'id': 'c1', 'status': 'pending'},
+            {'id': 'c2', 'status': 'pending'},
+        ]}})
+    draft = service.create(
+        project_id, base['id'], 'candidate', 'candidate source', 'author',
+        source_context={
+            'document_id': document['id'], 'candidate_ids': ['c1', 'c2']})
+    changed = service.command(project_id, draft['id'], draft['revision'], {
+        'action': 'add_annotation',
+        'target_iri': 'https://example.test/Child',
+        'predicate': 'http://www.w3.org/2000/01/rdf-schema#label',
+        'value': 'Selected candidate', 'language': 'en',
+        'evidence_refs': ['candidate:c1'],
+    })
+    old_version = draft['source_context']['expected_document_version']
+    repo.put_record(project_id, {
+        'id': document['id'], 'kind': document['kind'], 'text': 'source-v2',
+        'metadata': document['metadata']}, expected_version=document['version'])
+    with pytest.raises(StaleSource):
+        service.validate(project_id, draft['id'], changed['revision'])
+    stale = repo._ontology_drafts.get(project_id, draft['id'])
+
+    rebased = service.rebase(
+        project_id, draft['id'], stale['revision'], base['id'])
+
+    operation = rebased['operations'][0]
+    assert operation['evidence'] == ['candidate:c1']
+    assert 'candidate:c2' not in operation['evidence']
+    assert operation['validation']['source_snapshot_fingerprint']
+    assert rebased['source_context']['expected_document_version'] != old_version
+
+
 def test_wrong_expected_ontology_does_not_poison_a_current_draft(tmp_path):
     repo, service, project_id, base = setup_service(tmp_path)
     draft = service.create(project_id, base['id'], 'manual', 'current', 'author')
@@ -584,6 +621,12 @@ def test_publish_preflight_delegates_without_partial_service_commit(tmp_path):
         submitted['validation_fingerprint'], [{
             'operation_id': op['id'], 'operation_fingerprint': op['fingerprint'],
             'action': 'approve'}], [], 'reviewer')
+    with pytest.raises(RevisionConflict) as caught:
+        service.publish(
+            project_id, draft['id'], reviewed['revision'] - 1, base['id'],
+            reviewed['validation_fingerprint'], [], 'stale', 'publisher')
+    assert caught.value.code == 'revision_conflict'
+    assert calls == []
     result = service.publish(
         project_id, draft['id'], reviewed['revision'], base['id'],
         reviewed['validation_fingerprint'], [], 'once', 'publisher')
