@@ -110,17 +110,17 @@ git commit -m "fix: stabilize existing state and history baselines"
 - Create: `tests/service/test_ontology_draft_repository.py`
 - Modify: `tests/service/test_project_management.py`
 
-- [ ] **Step 1: Write migration and repository contract tests.**
+- [x] **Step 1: Write migration and repository contract tests.**
 
 Assert migration 14 creates `ontology_drafts`, `ontology_operations`, `ontology_review_decisions`, and `ontology_publish_requests`; assert project FKs/cascades, nullable first-version base, unique idempotency key, and operation/decision immutability. Open two `Repository` instances against one database and prove only one `expected_revision=1` CAS update succeeds.
 
-- [ ] **Step 2: Run the new repository tests and verify schema/method failures.**
+- [x] **Step 2: Run the new repository tests and verify schema/method failures.**
 
 Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_draft_repository.py -vv`
 
 Expected: FAIL because migration 14 and `OntologyDraftStore` do not exist.
 
-- [ ] **Step 3: Implement migration 14.**
+- [x] **Step 3: Implement migration 14.**
 
 Use explicit columns for lifecycle/indexed fields and JSON for validated snapshots. Required constraints:
 
@@ -146,25 +146,25 @@ CREATE TABLE ontology_drafts (
 
 Operations and decisions are append-only; adjustment inserts a new operation with `supersedes_operation_id`. Publish requests store request hash plus result ontology id under `UNIQUE(project_id,draft_id,idempotency_key)`.
 
-- [ ] **Step 4: Implement `OntologyDraftStore`.**
+- [x] **Step 4: Implement `OntologyDraftStore`.**
 
 Expose `create`, `get`, `list`, `append_operations`, `compare_and_set`, `append_decisions`, `effective_operations`, `export`, and `delete_counts`. All writes use the owning Repository transaction; CAS is one SQL update with `WHERE revision=?`.
 
-- [ ] **Step 5: Compose the store and project lifecycle.**
+- [x] **Step 5: Compose the store and project lifecycle.**
 
 Instantiate `self._ontology_drafts`; include drafts/operations/decisions in full export, explicit project deletion counts/order, and migration exports. Mark light projection exports with `governance_history_included=false` if applicable.
 
-- [ ] **Step 6: Implement and test ordered full-governance restore.**
+- [x] **Step 6: Implement and test ordered full-governance restore.**
 
 Restore in dependency order: project → immutable ontology versions → drafts → operations → decisions → publish requests → provenance activities/edges. Verify stable IDs, base/published ontology references and decision/operation fingerprints survive export/import. Reject partial “full” backups that declare `governance_history_included=true` but omit a required section.
 
-- [ ] **Step 7: Run repository, migration, project deletion and export/import tests.**
+- [x] **Step 7: Run repository, migration, project deletion and export/import tests.**
 
 Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_draft_repository.py tests/service/test_project_management.py -vv`
 
 Expected: all tests pass, including dual-connection CAS and governance export/import.
 
-- [ ] **Step 8: Commit.**
+- [x] **Step 8: Commit.**
 
 ```powershell
 git add knowledge_service/repository tests/service/test_ontology_draft_repository.py tests/service/test_project_management.py
