@@ -3,7 +3,7 @@
   const get=id=>document.getElementById(id);
   const page=document.createElement('section');page.id='tab-candidate-mindmap';page.className='tab hidden';
   page.innerHTML=`<div class="candidate-map-shell">
-    <header class="candidate-map-hero"><div><small>DISCOVERY REVIEW · 非正式知识</small><h2>候选脑图</h2><p>开放解析完成后先在这里检查实体、关系、类型分布和来源证据；确认候选整体合理后，再进入本体发现生成草案。发布后未入图的候选也继续保留在这里，无需重新解析原文。</p></div><div class="candidate-map-actions"><button id="refresh-candidate-map" class="secondary">刷新候选</button><button id="goto-ontology-discovery">审核并生成本体草案</button><button id="goto-formal-mindmap" class="secondary">查看正式脑图</button></div></header>
+    <header class="candidate-map-hero"><div><small>DISCOVERY REVIEW · 非正式知识</small><h2>候选脑图</h2><p>开放解析完成后先在这里检查实体、关系、类型分布和来源证据；确认候选整体合理后，进入本体工作台生成并审核草案。发布后未入图的候选也继续保留在这里，无需重新解析原文。</p></div><div class="candidate-map-actions"><button id="refresh-candidate-map" class="secondary">刷新候选</button><button id="goto-ontology-discovery">进入本体工作台</button><button id="goto-formal-mindmap" class="secondary">查看正式脑图</button></div></header>
     <section class="panel candidate-map-controls"><label>候选类型<select id="candidate-map-type"><option value="">全部类型</option></select></label><label>生命周期<select id="candidate-map-status"><option value="">全部状态</option><option value="pending">待纳入</option><option value="included_in_draft">草案中</option><option value="approved">已批准</option><option value="materialized">已物化</option></select></label><label>最多显示节点<input id="candidate-map-limit" type="number" min="1" max="2000" value="500"></label><button id="draw-candidate-map">更新视图</button></section>
     <div id="candidate-map-summary" class="candidate-map-summary"></div>
     <section class="panel"><div class="candidate-map-legend"><span data-state="pending">待纳入</span><span data-state="included_in_draft">草案中</span><span data-state="approved">已批准</span><span data-state="materialized">已物化</span></div><div id="candidate-map-canvas" class="graph-canvas candidate-map-canvas"></div></section>
@@ -67,7 +67,7 @@
   }
   nav.onclick=()=>{document.querySelectorAll('.tab').forEach(tab=>tab.classList.add('hidden'));page.classList.remove('hidden');document.querySelectorAll('[data-tab]').forEach(button=>button.classList.toggle('active',button===nav));get('title').textContent='候选脑图';get('scope').classList.add('hidden');load();};
   get('refresh-candidate-map').onclick=load;get('draw-candidate-map').onclick=load;
-  get('goto-ontology-discovery').onclick=()=>document.querySelector('[data-tab="discovery"]')?.click();
+  get('goto-ontology-discovery').onclick=()=>{window.OntologyWorkbench?.open();window.OntologyWorkbench?.setStage('discover');};
   get('goto-formal-mindmap').onclick=()=>document.querySelector('[data-tab="mindmap"]')?.click();
   get('candidate-map-type').onchange=render;get('candidate-map-status').onchange=render;
   get('project').addEventListener('change',()=>{data=null;chart?.clear();get('candidate-map-detail').innerHTML='<p class="subtle">点击候选节点或关系查看出现次数、属性和来源证据。</p>';if(!page.classList.contains('hidden'))load();});

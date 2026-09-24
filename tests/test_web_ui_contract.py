@@ -199,6 +199,7 @@ class _FrontendHTMLParser(HTMLParser):
     handle_startendtag = handle_starttag
 
 
+@unittest.skipUnless(INDEX_HTML.exists(), "legacy kg_web static bundle is not part of this repository")
 class WebUIContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -373,6 +374,17 @@ class WebUIContractTests(unittest.TestCase):
         }
         self.assertEqual({}, defects, "governance controls must exist and be click-bound")
 
-
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_primary_ui_exposes_one_unified_ontology_workbench():
+    primary = ROOT / "knowledge_service" / "web"
+    html = (primary / "index.html").read_text(encoding="utf-8")
+    workbench = (primary / "ontology-workbench.js").read_text(encoding="utf-8")
+    assert html.count(">本体工作台</button>") == 1
+    assert "/assets/ontology-workbench.js?v=workbench-1" in html
+    assert "ontology-workbench" in workbench
+    assert "data-workbench-stage=" in workbench
+    for stage in ("discover", "design", "review", "validate", "publish"):
+        assert f"'{stage}'" in workbench

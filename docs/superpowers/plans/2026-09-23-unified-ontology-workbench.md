@@ -393,23 +393,23 @@ git commit -m "feat: route ontology writes through unified governance"
 - Modify: `tests/service/test_frontend_static_contract.py`
 - Modify: `tests/test_web_ui_contract.py`
 
-- [ ] **Step 1: Write static contract failures.**
+- [x] **Step 1: Write static contract failures.**
 
 Assert one visible “本体工作台” entry, versioned CSS/JS loaded after shared tokens, selectors namespaced under `.ontology-workbench`, no inline event handlers, no second formal `ontology-manager.html` entry, and the five lifecycle stage controls. Assert the discovery stage still exposes statistics, clustering, candidate mind map, source/confidence filters and evidence inspection hooks.
 
-- [ ] **Step 2: Implement semantic shell markup/rendering.**
+- [x] **Step 2: Implement semantic shell markup/rendering.**
 
 Use the existing dark-green navigation, light canvas, green primary action and amber review accents. Create three responsive panes: object/change library, central object/hierarchy/matrix view, and inspector/evidence/review. Preserve keyboard focus and `prefers-reduced-motion`.
 
-- [ ] **Step 3: Implement shared state/loading/error primitives.**
+- [x] **Step 3: Implement shared state/loading/error primitives.**
 
 State contains project, ontology/draft ids, revision, selected canonical IRI, display path, mode, filters and cursor maps. Render all external strings with DOM text nodes/escaping.
 
-- [ ] **Step 4: Embed the existing discovery experience as stage one.**
+- [x] **Step 4: Embed the existing discovery experience as stage one.**
 
 Move/reuse the current discovery statistics, clustering, candidate mind map, candidate filtering, confidence/source evidence and “generate cumulative draft” controls inside the workbench shell. Preserve existing API calls and test hooks during the transition; generating a draft now selects it and advances to design rather than opening a parallel ontology page.
 
-- [ ] **Step 5: Run static tests and commit.**
+- [x] **Step 5: Run static tests and commit.**
 
 Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_frontend_static_contract.py tests/test_web_ui_contract.py -vv`
 

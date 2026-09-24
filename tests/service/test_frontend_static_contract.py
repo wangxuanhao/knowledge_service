@@ -95,3 +95,48 @@ def test_narrow_provenance_panel_uses_answer_flow_instead_of_fixed_overlay():
     js = read('provenance-drawer.js')
     for marker in ('matchMedia', 'qa-transcript', 'qa-provenance-mount', 'qa-scroll'):
         assert marker in js, marker
+
+
+def test_unified_ontology_workbench_has_one_entry_and_versioned_assets():
+    html = read('index.html')
+    assert html.count('>本体工作台</button>') == 1
+    assert '/assets/ontology-workbench.css?v=workbench-1' in html
+    assert '/assets/ontology-workbench.js?v=workbench-1' in html
+    assert html.index('/assets/style.css') < html.index('/assets/ontology-workbench.css')
+    assert html.index('/assets/workspace.js') < html.index('/assets/ontology-workbench.js')
+    assert 'ontology-manager.html' not in html
+    assert not __import__('re').search(r'\son(?:click|change|input|submit)=', html)
+
+
+def test_ontology_workbench_shell_keeps_five_stages_and_discovery_hooks():
+    js = read('ontology-workbench.js')
+    assert 'data-workbench-stage=' in js
+    for stage in ('discover', 'design', 'review', 'validate', 'publish'):
+        assert f"'{stage}'" in js
+    for hook in (
+        'discovery-metrics', 'discovery-cluster', 'candidate-map-canvas',
+        'candidate-map-source', 'candidate-map-confidence',
+        'candidate-map-detail', 'create-discovery-draft',
+    ):
+        assert hook in js or hook in read('candidate-mindmap.js') or hook in read('workspace.js')
+    css = read('ontology-workbench.css')
+    selectors = [line.split('{', 1)[0].strip() for line in css.splitlines() if '{' in line]
+    assert selectors
+    assert all(
+        selector.startswith(('.ontology-workbench', '@', ':root'))
+        for selector in selectors
+        if selector and not selector.startswith(('from', 'to', '0%', '100%'))
+    )
+    assert ':focus-visible' in css
+    assert 'prefers-reduced-motion' in css
+
+
+def test_ontology_workbench_uses_safe_shared_state_contract():
+    js = read('ontology-workbench.js')
+    for marker in (
+        'projectId', 'ontologyId', 'draftId', 'revision', 'selectedIri',
+        'displayPath', 'mode', 'filters', 'cursors', 'textContent',
+        'replaceChildren', 'AbortController',
+    ):
+        assert marker in js, marker
+    assert 'onclick=' not in js and 'onchange=' not in js

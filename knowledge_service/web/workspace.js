@@ -678,6 +678,6 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
   }
   get('refresh-discovery').onclick=render;
   get('view-candidate-mindmap').onclick=()=>document.querySelector('[data-tab="candidate-mindmap"]')?.click();
-  get('create-discovery-draft').onclick=async()=>{const button=get('create-discovery-draft');button.disabled=true;status('正在通过 Semantica 归纳候选类型与关系…');try{await api(endpoint('/ontology-discovery/drafts'),{name:get('discovery-name').value.trim()||'发现本体'});status('本体草案已生成，请核对类型、关系和 Turtle 后再发布。');await render();}catch(error){status(error.message,true);}finally{button.disabled=false;}};
+  get('create-discovery-draft').onclick=async()=>{const button=get('create-discovery-draft');button.disabled=true;status('正在通过 Semantica 归纳候选类型与关系…');try{const draft=await api(endpoint('/ontology-discovery/drafts'),{name:get('discovery-name').value.trim()||'发现本体'});status('本体草案已生成，正在进入统一工作台继续设计与审核。');window.OntologyWorkbench?.open();window.OntologyWorkbench?.setStage('design');await window.OntologyWorkbench?.selectDraft(draft.unified_draft_id||draft.id);}catch(error){status(error.message,true);}finally{button.disabled=false;}};
   get('project').addEventListener('change',()=>{if(!page.classList.contains('hidden'))render();});
 })();
