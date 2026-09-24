@@ -56,8 +56,8 @@
 - `format`：规范化源格式。
 - `parser` 与 `parser_version`。
 - `page_count`。
-- `pages`：只保留页码和可序列化的文本摘要/位置信息，不保存页面图片。
-- `tables`：表格数量及页码摘要，不在每条文档 metadata 中复制大表格内容。
+- `pages`：只保留页码和可序列化的文本摘要，不保存页面图片。
+- `tables`：表格数量、页码、行数和列数摘要，不在每条文档 metadata 中复制大表格内容。
 - `used_ocr` 或 `ocr_mode`。
 - `warnings`。
 
@@ -72,7 +72,7 @@
 字段：
 
 - `file`：单个文件。
-- `options`：现有 `Ingest` 字段中除 `title`、`text` 外的 JSON 对象；允许可选 `title` 覆盖单文件标题。
+- `options`：独立的 `UploadOptions` JSON 对象。它包含现有 `Ingest` 除 `text` 外的字段，其中 `title` 为可选；不提供或只包含空白时使用安全化后的原始文件名，提供时按现有 1–300 字符规则校验并覆盖默认标题。`options` 禁止未知字段，行为与 `Ingest` 的 `extra='forbid'` 一致。
 
 请求阶段完成项目存在性、扩展名、单文件大小和 options 校验，并把文件写入受控临时目录。返回 202 及普通 job 收据。后台任务执行：
 
@@ -83,9 +83,15 @@
 5. 调用现有 `service.ingest`。
 6. 无论成功失败，都删除该任务的临时文件。
 
-服务重启时，现有任务机制会把 queued/running 标记为 interrupted；启动清理只处理本应用专用暂存目录中超过保留期的孤儿文件，不扫描或删除其他目录。
+服务重启时，现有任务机制会把 queued/running 标记为 interrupted；启动清理只处理本应用专用暂存目录中超过 24 小时的孤儿文件，不扫描或删除其他目录。
 
 保留现有 JSON `/documents/jobs` 给粘贴正文及已有 API 客户端。原同步 `/documents/upload` 改为复用同一个解析适配器，维持兼容，但工作台统一使用新的后台上传接口。
+
+新增 multipart 预览接口：
+
+`POST /api/projects/{project_id}/documents/upload/preview`
+
+它接收同样的 `file` 与 `options`，复用上传接口的扩展名、大小、options、临时文件和解析校验，调用同一个 Semantica 文档适配器，再用现有 `split_document` 返回前 20 个切片。它不创建文档、知识记录或持久任务，并在响应或异常返回前删除临时文件。由于预览会同步加载解析模型，前端必须显示忙碌状态；网关部署需要使用与普通文档解析相符的请求超时。
 
 ## 文件边界与安全
 
@@ -110,8 +116,19 @@
 - `page_count`、`table_count`。
 - `ocr_mode`。
 - `parse_warnings`：有界列表。
+- `page_summaries`：最多 200 页，每项只含 `page_number` 和最多 200 字符的 `text_preview`；超出时增加 `page_summaries_truncated=true`。
+- `table_summaries`：最多 100 张表，每项只含 `page_number`、`row_count`、`col_count`；超出时增加 `table_summaries_truncated=true`。
 
-这些字段由服务端覆盖同名用户字段，避免伪造系统来源信息。完整表格内容已经进入 Markdown 正文时，不额外复制到 metadata。
+这些字段由服务端覆盖同名用户字段，避免伪造系统来源信息。页摘要用于在原始临时文件删除后保留基本页级线索，但不承诺与 Markdown 字符偏移一一对应。完整表格内容已经进入 Markdown 正文时，不额外复制到 metadata。
+
+## OCR 配置
+
+服务端配置 `KG_DOCUMENT_OCR_MODE` 取值为 `auto` 或 `disabled`，默认 `auto`：
+
+- `auto`：以 `DoclingParser(enable_ocr=True)` 初始化 Semantica 解析器；文本层 PDF 正常解析，扫描页在本地模型可用时使用 OCR。
+- `disabled`：以 `DoclingParser(enable_ocr=False)` 初始化解析器；若扫描文档无法得到非空正文，返回 `ocr_required`，不创建空文档。
+
+配置在进程启动时读取，同一进程内复用对应解析器实例，不提供逐请求切换。若目标 Semantica/Docling 版本不能兑现开关语义，真实契约测试必须失败，实施时应固定兼容版本或在 Semantica 适配层拒绝启动；不得静默忽略配置。`auto` 模式模型缺失时返回 `model_unavailable`。部署者负责在启动前安装并准备本地模型。
 
 ## 上传页面布局
 
@@ -137,6 +154,7 @@
 - `parse_failed`
 - `encrypted_document`
 - `model_unavailable`
+- `ocr_required`
 - `empty_document`
 - `text_too_large`
 
