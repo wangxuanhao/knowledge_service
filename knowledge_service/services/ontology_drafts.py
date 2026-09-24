@@ -35,6 +35,7 @@ VALIDATION_RULE_VERSION = 'ontology-drafts/1'
 FINAL_STATES = frozenset({'published', 'closed'})
 EDITABLE_STATES = frozenset({'editing'})
 REVIEW_STATES = frozenset({'submitted'})
+NEIGHBORHOOD_LINK_LIMIT = 100
 
 
 class OntologyDraftError(ValueError):
@@ -310,6 +311,50 @@ class OntologyDrafts:
             })
         return snapshots
 
+    def _authoritative_evidence(self, draft, command):
+        requested = command.get('evidence_refs', command.get('evidence'))
+        if requested is not None and (
+                not isinstance(requested, list)
+                or not all(isinstance(item, str) and item.strip()
+                           for item in requested)):
+            raise ValueError('evidence_refs must be a list of non-empty strings')
+        if draft['source_kind'] not in {
+                'discovery', 'candidate', 'import', 'turtle'}:
+            return list(dict.fromkeys(requested or []))
+
+        context = draft.get('source_context') or {}
+        authoritative = []
+        for reference in self._source_references(context):
+            document_id = reference.get('document_id') or reference.get('id')
+            version = reference.get(
+                'expected_document_version_id', reference.get(
+                    'version_id', reference.get(
+                        'expected_document_version', reference.get('version'))))
+            if document_id and version is not None:
+                authoritative.append(f'document-version:{document_id}:{version}')
+            candidate_ids = [*(reference.get('candidate_ids') or [])]
+            if reference.get('candidate_id'):
+                candidate_ids.append(reference['candidate_id'])
+            authoritative.extend(
+                f'candidate:{candidate_id}' for candidate_id in candidate_ids)
+        for key, prefix in (
+                ('candidate_refs', 'candidate'),
+                ('document_refs', 'document-version')):
+            values = context.get(key) or []
+            authoritative.extend(
+                value if ':' in str(value) else f'{prefix}:{value}'
+                for value in values)
+        authoritative.extend(context.get('evidence_refs') or [])
+        authoritative = list(dict.fromkeys(authoritative))
+        if requested is not None:
+            forged = sorted(set(requested) - set(authoritative))
+            if forged:
+                raise ValueError(
+                    'evidence_refs are not present in the frozen source snapshot: '
+                    + ', '.join(forged))
+            return list(dict.fromkeys(requested))
+        return authoritative
+
     def _mark_stale(self, project_id, draft, expected_revision, status, error):
         if draft['status'] != status:
             draft = self._cas(project_id, draft['id'], expected_revision,
@@ -503,7 +548,7 @@ class OntologyDrafts:
         return raw
 
     def _rebuild_operations(self, project_id, draft, operations, ontology, command):
-        evidence = command.get('evidence_refs', command.get('evidence', []))
+        evidence = self._authoritative_evidence(draft, command)
         confidence = command.get('confidence')
         rebuilt = []
         working = Ontology(ontology.graph.serialize(format='turtle'))
@@ -1110,6 +1155,29 @@ class OntologyDrafts:
             return values == ({requested} if requested else set())
         return False
 
+    @staticmethod
+    def _rebase_before(ontology, operation):
+        """Rebuild graph-derived preconditions while retaining removal intent."""
+        action = operation['action']
+        target = URIRef(operation['target_iri'])
+        old = operation.get('before') or {}
+        if action in {'remove_parent', 'remove_domain', 'remove_range'}:
+            return {'value': old.get('value')}
+        if action == 'remove_annotation':
+            return {key: old[key] for key in (
+                'predicate', 'value', 'type', 'language', 'datatype')
+                    if key in old}
+        if action == 'set_datatype':
+            values = sorted(
+                (str(value) for value in ontology.graph.objects(target, RDFS.range)))
+            return {'datatype': values[0] if len(values) == 1 else None}
+        if action == 'advanced_rdf_patch':
+            # The old fragment is the semantic removal intent for a scoped
+            # patch; apply_operations will classify it as a conflict if the
+            # latest graph no longer matches that precondition.
+            return json.loads(_canonical_json(old))
+        return None
+
     def rebase(self, project_id, draft_id, expected_revision,
                expected_ontology_id):
         draft = self.store.get(project_id, draft_id)
@@ -1133,37 +1201,39 @@ class OntologyDrafts:
             refreshed_context = self._refresh_source_context(
                 project_id, draft.get('source_context') or {})
             source_snapshot_fingerprint = _fingerprint(refreshed_context)
+        rebuild_draft = dict(draft)
+        if source_snapshot_fingerprint is not None:
+            rebuild_draft['source_context'] = refreshed_context
         for operation in old_operations:
             ontology = Ontology(turtle)
+            old_validation = operation.get('validation') or {}
+            fresh_validation = {}
+            if source_snapshot_fingerprint is not None:
+                fresh_validation['source_snapshot_fingerprint'] = (
+                    source_snapshot_fingerprint)
+            rebuild_command = {
+                'confidence': old_validation.get('confidence'),
+                'reason': operation.get('reason'),
+            }
+            if source_snapshot_fingerprint is None:
+                rebuild_command['evidence_refs'] = operation.get('evidence') or []
+            rebuilt = self._rebuild_operations(
+                project_id, rebuild_draft, [{
+                    'action': operation['action'],
+                    'target_iri': operation['target_iri'],
+                    'before': self._rebase_before(ontology, operation),
+                    'after': json.loads(_canonical_json(operation.get('after'))),
+                    'validation': fresh_validation,
+                }], ontology, rebuild_command)[0]
             if self._operation_is_noop(ontology, operation):
                 status, message = 'no-op', 'operation is already true on latest base'
-                rebuilt = None
             else:
                 try:
-                    old_validation = operation.get('validation') or {}
-                    carried_validation = {
-                        key: value for key, value in old_validation.items()
-                        if key not in {'warnings', 'source', 'confidence',
-                                       'rebase_status', 'rebase_message'}}
-                    if source_snapshot_fingerprint is not None:
-                        carried_validation['source_snapshot_fingerprint'] = (
-                            source_snapshot_fingerprint)
-                    impact = {**(operation.get('impact') or {}),
-                              **self._impact(project_id, operation['target_iri'])}
-                    rebuilt = build_operation(
-                        operation['action'], operation['target_iri'],
-                        before=operation.get('before'), after=operation.get('after'),
-                        source=old_validation.get('source', draft['source_kind']),
-                        impact=impact,
-                        confidence=old_validation.get('confidence'),
-                        evidence=operation.get('evidence') or [],
-                        validation=carried_validation,
-                        reason=operation.get('reason'), ontology=ontology)
-                    turtle = apply_operations(turtle, [rebuilt])
+                    if not (rebuilt.get('validation') or {}).get('errors'):
+                        turtle = apply_operations(turtle, [rebuilt])
                     status, message = 'clean', None
                 except ValueError as exc:
                     status, message = 'conflict', str(exc)
-                    rebuilt = None
             classifications.append({'operation_id': operation['id'],
                                     'classification': status,
                                     'message': message})
@@ -1175,14 +1245,11 @@ class OntologyDrafts:
             if status == 'clean':
                 replacement = rebuilt
             else:
-                validation = {**(operation.get('validation') or {}),
+                replacement = rebuilt
+                validation = {**(replacement.get('validation') or {}),
                               'rebase_status': status}
                 if message:
                     validation['rebase_message'] = message
-                replacement = {
-                    key: operation.get(key) for key in (
-                        'action', 'target_iri', 'before', 'after', 'evidence',
-                        'impact', 'risk', 'reason')}
                 replacement['validation'] = validation
                 replacement['fingerprint'] = operation_fingerprint(
                     _semantic_operation(replacement))
@@ -1518,22 +1585,50 @@ class OntologyDrafts:
             parent=node if value in children[node] else None)
             for value in page], **metadata}
         result['term'] = self._class_item(node, parents, children, ontology)
-        result['relations'] = [item for item in ontology.summary(active_only=True)[
-            'relations'] if iri in item.get('domain', []) + item.get('range', [])]
-        result['attributes'] = [item for item in ontology.summary(active_only=True)[
-            'attributes'] if iri in item.get('domain', [])]
+        relation_nodes = sorted((
+            value for value in ontology.relations
+            if ontology.is_active_term(value)
+            and node in (set(ontology.constraint_types(value, RDFS.domain))
+                         | set(ontology.constraint_types(value, RDFS.range)))), key=str)
+        attribute_nodes = sorted((
+            value for value in ontology.attributes
+            if ontology.is_active_term(value)
+            and node in set(ontology.constraint_types(value, RDFS.domain))), key=str)
+        projection_limit = min(limit, NEIGHBORHOOD_LINK_LIMIT)
+        result['relations'] = [{
+            **self._term_item(ontology, value),
+            'iri': str(value), 'kind': 'relation',
+        } for value in relation_nodes[:projection_limit]]
+        result['attributes'] = [{
+            **self._term_item(ontology, value),
+            'iri': str(value), 'kind': 'attribute',
+        } for value in attribute_nodes[:projection_limit]]
+        result.update({
+            'relation_count': len(relation_nodes),
+            'attribute_count': len(attribute_nodes),
+            'relations_truncated': len(relation_nodes) > projection_limit,
+            'attributes_truncated': len(attribute_nodes) > projection_limit,
+            'link_projection_limit': projection_limit,
+        })
         return result
 
     def matrix(self, project_id, *, ontology_id=None, draft_id=None,
                cursor=None, limit=50):
         ontology, _ = self._read_ontology(project_id, ontology_id, draft_id)
-        summary = ontology.summary(active_only=True)
-        items = [{**item, 'iri': item['id'], 'kind': 'relation'}
-                 for item in summary['relations']]
-        items.extend({**item, 'iri': item['id'], 'kind': 'attribute'}
-                     for item in summary['attributes'])
-        items.sort(key=lambda item: item['iri'])
-        return self._page(items, cursor, limit)
+        nodes = sorted([
+            *((value, 'relation') for value in ontology.relations
+              if ontology.is_active_term(value)),
+            *((value, 'attribute') for value in ontology.attributes
+              if ontology.is_active_term(value)),
+        ], key=lambda item: str(item[0]))
+        page, metadata = self._page_slice(nodes, cursor, limit)
+        return {
+            'items': [{
+                **self._term_item(ontology, node),
+                'iri': str(node), 'kind': kind,
+            } for node, kind in page],
+            **metadata,
+        }
 
 
 __all__ = [

@@ -366,6 +366,35 @@ def test_source_context_is_frozen_by_the_service_and_detects_later_changes(tmp_p
     assert caught.value.code == 'stale_source'
 
 
+def test_candidate_command_rejects_evidence_outside_frozen_source_snapshot(tmp_path):
+    repo, service, project_id, base = setup_service(tmp_path)
+    document = repo.put_record(project_id, {
+        'id': 'doc-1', 'kind': 'document', 'text': 'source',
+        'metadata': {'review_candidates': [
+            {'id': 'cand-1', 'status': 'pending'}]}})
+    draft = service.create(
+        project_id, base['id'], 'candidate', 'candidate evidence', 'author',
+        source_context={'document_id': document['id'], 'candidate_id': 'cand-1'})
+
+    command = {
+        'action': 'add_annotation',
+        'target_iri': 'https://example.test/Child',
+        'predicate': 'http://www.w3.org/2000/01/rdf-schema#label',
+        'value': 'Candidate label', 'language': 'en',
+        'evidence_refs': ['forged:anything'],
+    }
+    with pytest.raises(ValueError, match='evidence'):
+        service.command(project_id, draft['id'], draft['revision'], command)
+
+    assert repo._ontology_drafts.export(project_id)['operations'] == []
+    accepted = service.command(
+        project_id, draft['id'], draft['revision'],
+        {key: value for key, value in command.items() if key != 'evidence_refs'})
+    evidence = accepted['operations'][0]['evidence']
+    assert 'candidate:cand-1' in evidence
+    assert any(ref.startswith('document-version:doc-1:') for ref in evidence)
+
+
 def test_create_rejects_an_explicitly_stale_source_snapshot(tmp_path):
     repo, service, project_id, base = setup_service(tmp_path)
     document = repo.put_record(project_id, {
@@ -505,6 +534,37 @@ def test_rebase_classifies_cycle_against_latest_as_conflict(tmp_path):
     submitted = service.submit(project_id, draft['id'], rebased['revision'])
     assert submitted['status'] == 'submitted'
     assert submitted['validation_report']['conforms'] is False
+
+
+def test_rebase_recomputes_retirement_dependencies_on_latest_base(tmp_path):
+    repo, service, project_id, base = setup_service(tmp_path)
+    draft = service.create(project_id, base['id'], 'manual', 'retire root', 'author')
+    blocked = service.command(project_id, draft['id'], draft['revision'], {
+        'action': 'retire_term', 'target_iri': 'https://example.test/Root'})
+    original = blocked['operations'][0]
+    assert {issue['code'] for issue in original['validation']['errors']} >= {
+        'active_child_dependency', 'active_domain_dependency'}
+
+    independent = BASE.replace(
+        'ex:Child a owl:Class ; rdfs:subClassOf ex:Root ; rdfs:label "Child" .',
+        'ex:Child a owl:Class ; rdfs:label "Child" .').replace(
+            'ex:rel a owl:ObjectProperty ; rdfs:domain ex:Root ; rdfs:range ex:Child .',
+            'ex:rel a owl:ObjectProperty ; rdfs:domain ex:Child ; rdfs:range ex:Child .')
+    latest = repo.save_ontology(project_id, independent, {})
+    rebased = service.rebase(
+        project_id, draft['id'], blocked['revision'], latest['id'])
+
+    operation = rebased['operations'][0]
+    assert rebased['rebase'][0]['classification'] == 'clean'
+    assert operation['id'] != original['id']
+    assert operation['validation'].get('errors') == []
+    assert operation['validation'].get('warnings') == []
+    assert operation['impact']['descendants'] == 0
+    assert operation['impact']['constraints'] == 0
+    assert operation['impact']['dependency_report']['errors'] == []
+    submitted = service.submit(
+        project_id, draft['id'], rebased['revision'])
+    assert submitted['validation_report']['conforms'] is True
 
 
 def test_publish_preflight_delegates_without_partial_service_commit(tmp_path):
@@ -690,7 +750,9 @@ def test_hierarchy_reads_are_paginated_and_overlay_uses_canonical_iris(tmp_path)
 
 def test_turtle_diff_operations_are_rebuilt_with_source_evidence_and_impact(tmp_path):
     repo, service, project_id, base = setup_service(tmp_path)
-    draft = service.create(project_id, base['id'], 'turtle', 'Turtle edit', 'author')
+    draft = service.create(
+        project_id, base['id'], 'turtle', 'Turtle edit', 'author',
+        source_context={'evidence_refs': ['document-version:1']})
     edited = BASE + '''
 <https://example.test/Child>
   <http://www.w3.org/2000/01/rdf-schema#comment> "edited"@en .
@@ -960,6 +1022,57 @@ def test_hierarchy_paginates_nodes_before_building_expensive_items(
     page = service.roots(project_id, ontology_id=ontology['id'], limit=2)
     assert len(page['items']) == 2
     assert len(calls) == 2
+
+
+def test_matrix_pages_nodes_before_projection_without_full_summary(
+        tmp_path, monkeypatch):
+    repo, service, project_id, _ = setup_service(tmp_path)
+    many = BASE + '\n'.join(
+        f'<urn:test:rel{index:02}> a '
+        '<http://www.w3.org/2002/07/owl#ObjectProperty> ; '
+        '<http://www.w3.org/2000/01/rdf-schema#domain> '
+        '<https://example.test/Root> ; '
+        '<http://www.w3.org/2000/01/rdf-schema#range> '
+        '<https://example.test/Child> .'
+        for index in range(25))
+    ontology = repo.save_ontology(project_id, many, {})
+    calls = []
+    original = service._term_item
+
+    def counted(*args, **kwargs):
+        calls.append(args[1])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(service, '_term_item', counted)
+    page = service.matrix(project_id, ontology_id=ontology['id'], limit=1)
+    assert len(page['items']) == 1
+    assert page['next_cursor']
+    assert len(calls) == 1
+
+
+def test_neighborhood_caps_relation_projection_without_full_summary(
+        tmp_path, monkeypatch):
+    repo, service, project_id, _ = setup_service(tmp_path)
+    many = BASE + '\n'.join(
+        f'<urn:test:rel{index:02}> a '
+        '<http://www.w3.org/2002/07/owl#ObjectProperty> ; '
+        '<http://www.w3.org/2000/01/rdf-schema#domain> '
+        '<https://example.test/Root> ; '
+        '<http://www.w3.org/2000/01/rdf-schema#range> '
+        '<https://example.test/Child> .'
+        for index in range(25))
+    ontology = repo.save_ontology(project_id, many, {})
+
+    def forbidden_summary(*args, **kwargs):
+        raise AssertionError('neighborhood must not materialize the full summary')
+
+    monkeypatch.setattr(Ontology, 'summary', forbidden_summary)
+    result = service.neighborhood(
+        project_id, 'https://example.test/Root',
+        ontology_id=ontology['id'], limit=1)
+    assert len(result['relations']) == 1
+    assert result['relation_count'] == 26
+    assert result['relations_truncated'] is True
 
 
 def test_search_matches_every_rdfs_label_language(tmp_path):
