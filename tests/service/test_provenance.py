@@ -95,8 +95,11 @@ def test_export_projection_includes_deterministic_project_scoped_provenance(prov
     other_doc, _, _ = _source(repo, other, 'other')
     _capture(service, other, [other_doc])
     exported = repo.export_projection(project)
-    assert set(exported) == {'namespace', 'schema_version', 'project', 'records', 'ontologies', 'governance', 'provenance'}
-    assert set(exported['governance']) == {'assertions', 'assertion_events', 'fact_keys', 'ingest_runs', 'resolution_reviews', 'merge_operations'}
+    assert set(exported) == {'namespace', 'schema_version', 'project', 'records', 'ontologies', 'governance', 'provenance', 'governance_history_included'}
+    assert exported['governance_history_included'] is True
+    assert set(exported['governance']) == {'assertions', 'assertion_events', 'fact_keys', 'ingest_runs', 'resolution_reviews', 'merge_operations', 'ontology'}
+    assert exported['governance']['ontology'] == {
+        'drafts': [], 'operations': [], 'decisions': [], 'publish_requests': []}
     assert [r['version'] for r in exported['records'] if r['id'] == record['id']] == [1, 2]
     assert exported['provenance'] == {
         'record_version_assertions': repo.list_record_version_assertions(project),
@@ -149,6 +152,8 @@ def test_delete_project_reports_provenance_counts_and_preserves_other_project(pr
         'records': 3, 'ontologies': 0, 'artifacts': 0, 'assertions': 1,
         'record_version_assertions': 1, 'provenance_activities': 2,
         'provenance_edges': edge_count,
+        'ontology_drafts': 0, 'ontology_operations': 0,
+        'ontology_review_decisions': 0, 'ontology_publish_requests': 0,
     }
     assert client.get(f'/api/projects/{project}/answers/{answer}/evidence/E1/provenance').status_code == 404
     with pytest.raises(KeyError):

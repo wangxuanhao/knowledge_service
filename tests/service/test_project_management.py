@@ -58,6 +58,47 @@ def test_delete_project_removes_all_children(tmp_path):
         repo.get_project(pid)
 
 
+def test_delete_project_explicitly_counts_ontology_governance_history(tmp_path):
+    repo = Repository(tmp_path / 'db')
+    pid = repo.create_project('governed-delete')['id']
+    draft = repo._ontology_drafts.create(pid, {
+        'id': 'draft-delete', 'project_id': pid, 'base_ontology_id': None,
+        'source_kind': 'manual', 'status': 'editing', 'revision': 1,
+        'title': 'Delete me', 'summary': 'Delete the whole project',
+        'source_context': {},
+    })
+    repo._ontology_drafts.append_operations(pid, draft['id'], [{
+        'id': 'op-delete', 'action': 'create_term', 'target_iri': 'urn:delete',
+        'before': None, 'after': {'kind': 'class'}, 'evidence': [], 'impact': {},
+        'validation': {}, 'risk': 'low', 'fingerprint': 'sha256:delete',
+        'reason': 'test',
+    }])
+    repo._ontology_drafts.append_decisions(pid, draft['id'], [{
+        'id': 'decision-delete', 'operation_id': 'op-delete',
+        'operation_fingerprint': 'sha256:delete', 'action': 'approve',
+        'reason': 'reviewed', 'actor': 'reviewer',
+    }])
+    with repo._transaction():
+        repo._db.execute(
+            '''INSERT INTO ontology_publish_requests
+               (id,project_id,draft_id,idempotency_key,request_hash,result_ontology_id,
+                created_at,completed_at) VALUES (?,?,?,?,?,?,?,?)''',
+            ('publish-delete', pid, draft['id'], 'key', 'sha256:request', None,
+             '2026-01-01T00:00:00.000000Z', None))
+
+    deleted = repo.delete_project(pid)
+
+    assert deleted['ontology_drafts'] == 1
+    assert deleted['ontology_operations'] == 1
+    assert deleted['ontology_review_decisions'] == 1
+    assert deleted['ontology_publish_requests'] == 1
+    for table in ('ontology_drafts', 'ontology_operations',
+                  'ontology_review_decisions', 'ontology_publish_requests'):
+        assert repo._db.execute(
+            f'SELECT COUNT(*) FROM {table} WHERE project_id=?', (pid,)
+        ).fetchone()[0] == 0
+
+
 def test_delete_project_cleans_fts_index(tmp_path):
     """record_fts 是 FTS5 虚拟表，无外键不参与级联，删除项目必须显式清掉全文索引。"""
     repo = Repository(tmp_path / 'db')

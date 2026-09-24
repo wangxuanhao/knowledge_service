@@ -226,8 +226,8 @@ def test_operation_reservations_are_atomic_across_repository_connections(tmp_pat
 def test_operation_reservation_migration_upgrades_existing_database(tmp_path, monkeypatch):
     path = tmp_path / 'operation-reservation-migration.sqlite'
     migrations = repository_module._SCHEMA_MIGRATIONS
-    assert migrations[-1][0] == 13
-    monkeypatch.setattr(repository_module, '_SCHEMA_MIGRATIONS', migrations[:-1])
+    assert migrations[-2][0] == 13
+    monkeypatch.setattr(repository_module, '_SCHEMA_MIGRATIONS', migrations[:-2])
     legacy = Repository(path)
     project = legacy.create_project('legacy')['id']
     legacy.close()

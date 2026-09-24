@@ -55,7 +55,7 @@ def _edge(edge_id, activity_id, source, relation, target, ordinal=0, payload=Non
 def test_fresh_database_has_latest_schema_and_provenance_tables(tmp_path):
     repo = Repository(tmp_path / 'fresh.sqlite')
 
-    assert repo._db.execute('SELECT MAX(version) FROM schema_migrations').fetchone()[0] == 13
+    assert repo._db.execute('SELECT MAX(version) FROM schema_migrations').fetchone()[0] == 14
     tables = {
         row[0] for row in repo._db.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"

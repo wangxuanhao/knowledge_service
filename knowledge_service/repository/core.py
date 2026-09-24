@@ -246,6 +246,108 @@ def _create_record_operation_reservation_schema(db):
         ON record_operation_reservations(project_id,recorded_at)''')
 
 
+def _create_ontology_draft_schema(db):
+    """Migration 14: governed drafts plus append-only operations and decisions."""
+    statements = (
+        '''CREATE UNIQUE INDEX ontologies_project_id_fk
+           ON ontologies(project_id,id)''',
+        '''CREATE TABLE ontology_drafts (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          base_ontology_id TEXT,
+          source_kind TEXT NOT NULL CHECK(source_kind IN
+            ('manual','turtle','import','ai','discovery','candidate')),
+          status TEXT NOT NULL CHECK(status IN
+            ('editing','submitted','reviewed','published','closed','stale_base','stale_source')),
+          revision INTEGER NOT NULL CHECK(revision >= 1),
+          title TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          source_context TEXT NOT NULL CHECK(json_valid(source_context)),
+          validation_report TEXT CHECK(validation_report IS NULL OR json_valid(validation_report)),
+          validation_fingerprint TEXT,
+          published_ontology_id TEXT,
+          legacy_artifact_id TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(project_id,id),
+          FOREIGN KEY(project_id,base_ontology_id)
+            REFERENCES ontologies(project_id,id),
+          FOREIGN KEY(project_id,published_ontology_id)
+            REFERENCES ontologies(project_id,id))''',
+        '''CREATE INDEX ontology_drafts_project_status
+           ON ontology_drafts(project_id,status,updated_at,id)''',
+        '''CREATE TABLE ontology_operations (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          draft_id TEXT NOT NULL,
+          action TEXT NOT NULL,
+          target_iri TEXT NOT NULL,
+          before_json TEXT NOT NULL CHECK(json_valid(before_json)),
+          after_json TEXT NOT NULL CHECK(json_valid(after_json)),
+          evidence_json TEXT NOT NULL CHECK(json_valid(evidence_json)),
+          impact_json TEXT NOT NULL CHECK(json_valid(impact_json)),
+          validation_json TEXT NOT NULL CHECK(json_valid(validation_json)),
+          risk TEXT NOT NULL,
+          fingerprint TEXT NOT NULL,
+          reason TEXT,
+          supersedes_operation_id TEXT,
+          created_at TEXT NOT NULL,
+          UNIQUE(project_id,id),
+          UNIQUE(project_id,draft_id,id),
+          FOREIGN KEY(project_id,draft_id)
+            REFERENCES ontology_drafts(project_id,id) ON DELETE CASCADE,
+          FOREIGN KEY(project_id,draft_id,supersedes_operation_id)
+            REFERENCES ontology_operations(project_id,draft_id,id))''',
+        '''CREATE INDEX ontology_operations_draft
+           ON ontology_operations(project_id,draft_id,created_at,id)''',
+        '''CREATE TABLE ontology_review_decisions (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          draft_id TEXT NOT NULL,
+          operation_id TEXT NOT NULL,
+          operation_fingerprint TEXT NOT NULL,
+          action TEXT NOT NULL CHECK(action IN ('approve','reject','request_changes')),
+          reason TEXT,
+          actor TEXT NOT NULL,
+          supersedes_decision_id TEXT,
+          created_at TEXT NOT NULL,
+          UNIQUE(project_id,id),
+          UNIQUE(project_id,draft_id,id),
+          FOREIGN KEY(project_id,draft_id)
+            REFERENCES ontology_drafts(project_id,id) ON DELETE CASCADE,
+          FOREIGN KEY(project_id,draft_id,operation_id)
+            REFERENCES ontology_operations(project_id,draft_id,id),
+          FOREIGN KEY(project_id,draft_id,supersedes_decision_id)
+            REFERENCES ontology_review_decisions(project_id,draft_id,id))''',
+        '''CREATE INDEX ontology_review_decisions_draft
+           ON ontology_review_decisions(project_id,draft_id,created_at,id)''',
+        '''CREATE TABLE ontology_publish_requests (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          draft_id TEXT NOT NULL,
+          idempotency_key TEXT NOT NULL,
+          request_hash TEXT NOT NULL,
+          result_ontology_id TEXT,
+          created_at TEXT NOT NULL,
+          completed_at TEXT,
+          UNIQUE(project_id,draft_id,idempotency_key),
+          FOREIGN KEY(project_id,draft_id)
+            REFERENCES ontology_drafts(project_id,id) ON DELETE CASCADE,
+          FOREIGN KEY(project_id,result_ontology_id)
+            REFERENCES ontologies(project_id,id))''',
+        '''CREATE TRIGGER ontology_operations_immutable
+           BEFORE UPDATE ON ontology_operations BEGIN
+             SELECT RAISE(ABORT, 'ontology operations are immutable');
+           END''',
+        '''CREATE TRIGGER ontology_review_decisions_immutable
+           BEFORE UPDATE ON ontology_review_decisions BEGIN
+             SELECT RAISE(ABORT, 'ontology review decisions are immutable');
+           END''',
+    )
+    for statement in statements:
+        db.execute(statement)
+
+
 def _create_assertion_schema(db):
     statements = (
         '''CREATE TABLE assertions (
@@ -478,6 +580,7 @@ _SCHEMA_MIGRATIONS = (
     (11, _drop_vector_column),
     (12, _create_provenance_schema),
     (13, _create_record_operation_reservation_schema),
+    (14, _create_ontology_draft_schema),
 )
 
 
@@ -520,10 +623,12 @@ class Repository:
         from .ingest_store import IngestRunStore
         from .review_store import ReviewStore
         from .provenance_store import ProvenanceStore
+        from .ontology_draft_store import OntologyDraftStore
         self._assertions = AssertionStore(self)
         self._ingest = IngestRunStore(self)
         self._reviews = ReviewStore(self)
         self._provenance = ProvenanceStore(self)
+        self._ontology_drafts = OntologyDraftStore(self)
         with self._transaction():
             self._db.execute('INSERT OR IGNORE INTO service_settings VALUES (?,?)', ('storage_namespace', str(uuid4())))
             self._db.execute(
@@ -543,11 +648,13 @@ class Repository:
             assertions, assertion_events = self._assertions.export(project_id)
             ingest_runs = self._ingest.export(project_id)
             resolution_reviews = self._reviews.export(project_id)
+            ontology_governance = self._ontology_drafts.export(project_id)
             fact_keys = [dict(row) for row in self._db.execute(
                 'SELECT * FROM fact_keys WHERE project_id=? ORDER BY fact_key,created_at',(project_id,)).fetchall()]
             merge_operations = self.list_merge_operations(project_id)
             schema_version = self._db.execute('SELECT MAX(version) FROM schema_migrations').fetchone()[0]
             return {'namespace': namespace, 'schema_version': schema_version,
+                    'governance_history_included': True,
                     'project': project, 'records': records,
                     'ontologies': self.list_ontologies(project_id),
                     'provenance': {
@@ -556,7 +663,123 @@ class Repository:
                         'edges': self.list_provenance_edges(project_id)},
                     'governance': {'assertions': assertions, 'assertion_events': assertion_events,
                         'fact_keys': fact_keys, 'ingest_runs': ingest_runs,
-                        'resolution_reviews': resolution_reviews, 'merge_operations': merge_operations}}
+                        'resolution_reviews': resolution_reviews, 'merge_operations': merge_operations,
+                        'ontology': ontology_governance}}
+
+    def restore_projection(self, snapshot):
+        """Restore a complete project snapshot while preserving stable audit IDs.
+
+        The dependency order is deliberate: ontology versions must exist before
+        draft base/result references; immutable draft history must exist before
+        provenance can refer to it.
+        """
+        if not isinstance(snapshot, dict) or not isinstance(snapshot.get('project'), dict):
+            raise ValueError('项目备份格式无效')
+        declared_full = snapshot.get('governance_history_included') is True
+        governance = snapshot.get('governance')
+        ontology_history = governance.get('ontology') if isinstance(governance, dict) else None
+        provenance = snapshot.get('provenance')
+        required_top_level = {
+            'namespace', 'schema_version', 'project', 'records', 'ontologies',
+            'governance', 'provenance', 'governance_history_included'}
+        required_governance = {
+            'assertions', 'assertion_events', 'fact_keys', 'ingest_runs',
+            'resolution_reviews', 'merge_operations', 'ontology'}
+        required_ontology = {'drafts', 'operations', 'decisions', 'publish_requests'}
+        required_provenance = {'activities', 'edges', 'record_version_assertions'}
+        if declared_full and (
+                not required_top_level <= set(snapshot)
+                or not isinstance(snapshot.get('records'), list)
+                or not isinstance(snapshot.get('ontologies'), list)
+                or not isinstance(governance, dict)
+                or not required_governance <= set(governance)
+                or any(not isinstance(governance[key], list)
+                       for key in required_governance - {'ontology'})
+                or not isinstance(ontology_history, dict)
+                or not required_ontology <= set(ontology_history)
+                or any(not isinstance(ontology_history[key], list)
+                       for key in required_ontology)
+                or not isinstance(provenance, dict)
+                or not required_provenance <= set(provenance)
+                or any(not isinstance(provenance[key], list)
+                       for key in required_provenance)):
+            raise ValueError('完整治理备份缺少必需的治理历史段')
+        ontology_history = ontology_history or {
+            'drafts': [], 'operations': [], 'decisions': [], 'publish_requests': []}
+        provenance = provenance or {
+            'activities': [], 'edges': [], 'record_version_assertions': []}
+        project = snapshot['project']
+        project_id = project.get('id')
+        if not isinstance(project_id, str) or not project_id:
+            raise ValueError('项目备份缺少稳定项目 ID')
+
+        def insert_rows(table, rows, json_fields=()):
+            columns = {row['name'] for row in self._db.execute(f'PRAGMA table_info({table})')}
+            for exported in rows:
+                values = {key: value for key, value in exported.items() if key in columns}
+                for key in json_fields:
+                    if key in values and values[key] is not None:
+                        values[key] = _json(values[key])
+                names = list(values)
+                self._db.execute(
+                    f"INSERT INTO {table} ({','.join(names)}) VALUES "
+                    f"({','.join('?' for _ in names)})",
+                    [values[name] for name in names])
+
+        with self._transaction():
+            if self._db.execute('SELECT 1 FROM projects WHERE id=?', (project_id,)).fetchone():
+                raise ValueError('目标存储已存在同 ID 项目')
+            self._db.execute(
+                'INSERT INTO projects (id,name,metadata,created_at) VALUES (?,?,?,?)',
+                (project_id, project['name'], _json(project.get('metadata', {})),
+                 project['created_at']))
+
+            # Immutable ontology versions precede all draft foreign-key references.
+            insert_rows('ontologies', snapshot.get('ontologies', ()), ('summary', 'metadata'))
+            self._ontology_drafts._restore(project_id, ontology_history)
+
+            for record in snapshot.get('records', ()):
+                payload = {key: value for key, value in record.items() if key not in {
+                    'project_id', 'version', 'version_id', 'recorded_at',
+                    'superseded_at', 'embedding'}}
+                self._db.execute(
+                    '''INSERT INTO record_versions
+                       (project_id,id,version,version_id,payload,recorded_at,superseded_at)
+                       VALUES (?,?,?,?,?,?,?)''',
+                    (project_id, record['id'], record['version'], record['version_id'],
+                     _json(payload), record['recorded_at'], record.get('superseded_at')))
+            if snapshot.get('records'):
+                self.rebuild_fts(project_id)
+
+            if isinstance(governance, dict):
+                insert_rows('assertions', governance.get('assertions', ()), ('payload',))
+                insert_rows('assertion_events', governance.get('assertion_events', ()))
+                insert_rows('fact_keys', governance.get('fact_keys', ()))
+                insert_rows(
+                    'ingest_runs', governance.get('ingest_runs', ()),
+                    ('readiness', 'counts', 'failure'))
+                insert_rows(
+                    'resolution_reviews', governance.get('resolution_reviews', ()),
+                    ('payload',))
+                insert_rows(
+                    'merge_operations', governance.get('merge_operations', ()),
+                    ('redirects', 'assertion_moves', 'before_state', 'after_state',
+                     'expected_versions'))
+
+            insert_rows(
+                'record_version_assertions',
+                provenance.get('record_version_assertions', ()))
+            insert_rows('provenance_activities', provenance.get('activities', ()), ('payload',))
+            insert_rows('provenance_edges', provenance.get('edges', ()), ('payload',))
+            if not self._db.execute(
+                    'SELECT 1 FROM projects WHERE id<>? LIMIT 1', (project_id,)).fetchone():
+                namespace = snapshot.get('namespace')
+                if isinstance(namespace, str) and namespace:
+                    self._db.execute(
+                        '''INSERT INTO service_settings(key,value) VALUES ('storage_namespace',?)
+                           ON CONFLICT(key) DO UPDATE SET value=excluded.value''',
+                        (namespace,))
+        return self.get_project(project_id)
 
     @contextmanager
     def _transaction(self):
@@ -630,6 +853,7 @@ class Repository:
                     f'DELETE FROM {table} WHERE project_id=?', (project_id,)).rowcount
                 for table in ('provenance_edges', 'provenance_activities', 'record_version_assertions')
             }
+            ontology_governance_deleted = self._ontology_drafts.delete_counts(project_id)
             r = self._db.execute('DELETE FROM record_versions WHERE project_id=?', (project_id,))
             records_deleted = r.rowcount
             # record_fts 是 FTS5 虚拟表，无外键不参与级联，必须显式删除，
@@ -642,7 +866,7 @@ class Repository:
             self._db.execute('DELETE FROM projects WHERE id=?', (project_id,))
         return {'records': records_deleted, 'ontologies': ontologies_deleted,
                 'artifacts': artifacts_deleted, 'assertions': assertions_deleted,
-                **provenance_deleted}
+                **provenance_deleted, **ontology_governance_deleted}
 
     def list_projects(self):
         with self._lock:

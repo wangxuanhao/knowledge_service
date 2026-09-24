@@ -16,8 +16,10 @@ from .core import (
     vector_array,
     _json,
 )
+from .ontology_draft_store import OntologyDraftConflict, OntologyDraftStore
 
 __all__ = [
     'Repository', 'OntologyNotPublished', '_SCHEMA_MIGRATIONS',
     'vector_blob', 'vector_array', '_json',
+    'OntologyDraftConflict', 'OntologyDraftStore',
 ]
