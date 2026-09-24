@@ -278,6 +278,40 @@ def _ensure_ontology_history_immutable_guards(db):
           OR EXISTS (SELECT 1 FROM ontology_review_decisions WHERE id=NEW.id) BEGIN
           SELECT RAISE(ABORT, 'ontology review decisions are immutable');
         END''')
+    db.execute('''CREATE TRIGGER IF NOT EXISTS ontology_operations_insert_cycle_guard
+        BEFORE INSERT ON ontology_operations
+        WHEN NEW.supersedes_operation_id IS NOT NULL AND EXISTS (
+          WITH RECURSIVE supersession(id) AS (
+            VALUES (NEW.supersedes_operation_id)
+            UNION
+            SELECT operation.supersedes_operation_id
+            FROM ontology_operations AS operation
+            JOIN supersession ON operation.id=supersession.id
+            WHERE operation.project_id=NEW.project_id
+              AND operation.draft_id=NEW.draft_id
+              AND operation.supersedes_operation_id IS NOT NULL
+          )
+          SELECT 1 FROM supersession WHERE id=NEW.id
+        ) BEGIN
+          SELECT RAISE(ABORT, 'ontology operation supersession cycle');
+        END''')
+    db.execute('''CREATE TRIGGER IF NOT EXISTS ontology_review_decisions_insert_cycle_guard
+        BEFORE INSERT ON ontology_review_decisions
+        WHEN NEW.supersedes_decision_id IS NOT NULL AND EXISTS (
+          WITH RECURSIVE supersession(id) AS (
+            VALUES (NEW.supersedes_decision_id)
+            UNION
+            SELECT decision.supersedes_decision_id
+            FROM ontology_review_decisions AS decision
+            JOIN supersession ON decision.id=supersession.id
+            WHERE decision.project_id=NEW.project_id
+              AND decision.draft_id=NEW.draft_id
+              AND decision.supersedes_decision_id IS NOT NULL
+          )
+          SELECT 1 FROM supersession WHERE id=NEW.id
+        ) BEGIN
+          SELECT RAISE(ABORT, 'ontology review decision supersession cycle');
+        END''')
 
 
 def _supersession_cycle(rows, parent_key):

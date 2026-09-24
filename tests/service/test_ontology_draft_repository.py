@@ -71,6 +71,29 @@ def _decision(decision_id, operation_id, fingerprint, *, supersedes=None,
     }
 
 
+def _insert_operation_sql(repo, project_id, identifier, supersedes):
+    repo._db.execute(
+        '''INSERT INTO ontology_operations
+           (id,project_id,draft_id,action,target_iri,before_json,after_json,
+            evidence_json,impact_json,validation_json,risk,fingerprint,reason,
+            supersedes_operation_id,created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+        (identifier, project_id, 'draft-1', 'add_parent', f'urn:{identifier}',
+         'null', '{}', '[]', '{}', '{}', 'low', f'sha256:{identifier}', 'test',
+         supersedes, '2026-01-01T00:00:00.000000Z'))
+
+
+def _insert_decision_sql(repo, project_id, identifier, supersedes):
+    repo._db.execute(
+        '''INSERT INTO ontology_review_decisions
+           (id,project_id,draft_id,operation_id,operation_fingerprint,
+            action,reason,actor,supersedes_decision_id,created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?)''',
+        (identifier, project_id, 'draft-1', 'op-valid', 'sha256:op-valid',
+         'approve', 'test', 'reviewer', supersedes,
+         '2026-01-01T00:00:00.000000Z'))
+
+
 def test_migration_14_upgrades_v13_database_with_constrained_append_only_tables(
         tmp_path, monkeypatch):
     path = tmp_path / 'migration-14.sqlite'
@@ -168,6 +191,9 @@ def test_v14_reopen_repairs_missing_delete_guards_without_consuming_migration_15
     with original._transaction():
         original._db.execute('DROP TRIGGER ontology_operations_delete_immutable')
         original._db.execute('DROP TRIGGER ontology_review_decisions_delete_immutable')
+        original._db.execute('DROP TRIGGER ontology_operations_insert_cycle_guard')
+        original._db.execute(
+            'DROP TRIGGER ontology_review_decisions_insert_cycle_guard')
     original.close()
 
     reopened = Repository(path)
@@ -182,6 +208,8 @@ def test_v14_reopen_repairs_missing_delete_guards_without_consuming_migration_15
     assert {
         'ontology_operations_delete_immutable',
         'ontology_review_decisions_delete_immutable',
+        'ontology_operations_insert_cycle_guard',
+        'ontology_review_decisions_insert_cycle_guard',
     } <= triggers
     with pytest.raises(sqlite3.IntegrityError, match='immutable'):
         reopened._db.execute(
@@ -195,6 +223,7 @@ def test_v14_reopen_repairs_self_supersession_and_round_trips(tmp_path):
     old._ontology_drafts.create(project_id, _draft(project_id))
     with old._transaction():
         old._db.execute('DROP TRIGGER IF EXISTS ontology_operations_insert_immutable')
+        old._db.execute('DROP TRIGGER IF EXISTS ontology_operations_insert_cycle_guard')
         old._db.execute(
             '''INSERT INTO ontology_operations
                (id,project_id,draft_id,action,target_iri,before_json,after_json,
@@ -205,6 +234,8 @@ def test_v14_reopen_repairs_self_supersession_and_round_trips(tmp_path):
              'null', '{}', '[]', '{}', '{}', 'low', 'sha256:self', 'legacy',
              'op-self-v14', '2026-01-01T00:00:00.000000Z'))
         old._db.execute('DROP TRIGGER IF EXISTS ontology_review_decisions_insert_immutable')
+        old._db.execute(
+            'DROP TRIGGER IF EXISTS ontology_review_decisions_insert_cycle_guard')
         old._db.execute(
             '''INSERT INTO ontology_review_decisions
                (id,project_id,draft_id,operation_id,operation_fingerprint,
@@ -238,6 +269,10 @@ def test_v14_reopen_rejects_ambiguous_two_node_supersession_cycles(
     old._ontology_drafts.create(project_id, _draft(project_id))
     old._ontology_drafts.append_operations(
         project_id, 'draft-1', [_operation('op-valid-cycle')])
+    with old._transaction():
+        old._db.execute('DROP TRIGGER IF EXISTS ontology_operations_insert_cycle_guard')
+        old._db.execute(
+            'DROP TRIGGER IF EXISTS ontology_review_decisions_insert_cycle_guard')
     old.close()
 
     with sqlite3.connect(path) as raw:
@@ -305,6 +340,102 @@ def test_store_rejects_self_supersession_and_two_node_cycles(tmp_path):
                       supersedes='decision-cycle-a'),
         ])
     assert repo._ontology_drafts.export(project_id)['decisions'] == []
+
+
+@pytest.mark.parametrize('ledger', ['operations', 'decisions'])
+@pytest.mark.parametrize('cycle_size', [2, 3])
+def test_append_rejects_deferred_supersession_cycles_atomically(
+        tmp_path, ledger, cycle_size):
+    repo = Repository(tmp_path / f'append-{ledger}-{cycle_size}-cycle.sqlite')
+    project_id = repo.create_project('deferred append cycle')['id']
+    repo._ontology_drafts.create(project_id, _draft(project_id))
+    if ledger == 'decisions':
+        repo._ontology_drafts.append_operations(
+            project_id, 'draft-1', [_operation('op-valid')])
+
+    identifiers = [f'{ledger}-{index}' for index in range(cycle_size)]
+    if ledger == 'operations':
+        rows = [
+            _operation(identifier, supersedes=identifiers[(index + 1) % cycle_size])
+            for index, identifier in enumerate(identifiers)
+        ]
+        append = repo._ontology_drafts.append_operations
+    else:
+        rows = [
+            _decision(identifier, 'op-valid', 'sha256:op-valid',
+                      supersedes=identifiers[(index + 1) % cycle_size])
+            for index, identifier in enumerate(identifiers)
+        ]
+        append = repo._ontology_drafts.append_decisions
+
+    repo._db.execute('PRAGMA defer_foreign_keys=ON')
+    with pytest.raises(sqlite3.IntegrityError, match='cycle'):
+        append(project_id, 'draft-1', rows)
+
+    assert repo._db.execute(
+        f'SELECT COUNT(*) FROM ontology_{"operations" if ledger == "operations" else "review_decisions"} '
+        f'WHERE id IN ({",".join("?" for _ in identifiers)})', identifiers
+    ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize('ledger', ['operations', 'decisions'])
+def test_direct_sql_rejects_deferred_supersession_cycle_atomically(tmp_path, ledger):
+    repo = Repository(tmp_path / f'direct-{ledger}-cycle.sqlite')
+    project_id = repo.create_project('direct SQL cycle')['id']
+    repo._ontology_drafts.create(project_id, _draft(project_id))
+    if ledger == 'decisions':
+        repo._ontology_drafts.append_operations(
+            project_id, 'draft-1', [_operation('op-valid')])
+        insert = _insert_decision_sql
+    else:
+        insert = _insert_operation_sql
+
+    identifiers = [f'{ledger}-a', f'{ledger}-b']
+    repo._db.execute('PRAGMA defer_foreign_keys=ON')
+    with pytest.raises(sqlite3.IntegrityError, match='cycle'):
+        with repo._transaction():
+            insert(repo, project_id, identifiers[0], identifiers[1])
+            insert(repo, project_id, identifiers[1], identifiers[0])
+
+    table = 'ontology_operations' if ledger == 'operations' else 'ontology_review_decisions'
+    assert repo._db.execute(
+        f'SELECT COUNT(*) FROM {table} WHERE id IN (?,?)', identifiers
+    ).fetchone()[0] == 0
+
+
+def test_deferred_acyclic_supersession_chains_export_and_restore(tmp_path):
+    source = Repository(tmp_path / 'deferred-acyclic-source.sqlite')
+    project_id = source.create_project('deferred acyclic')['id']
+    source._ontology_drafts.create(project_id, _draft(project_id))
+
+    source._db.execute('PRAGMA defer_foreign_keys=ON')
+    source._ontology_drafts.append_operations(project_id, 'draft-1', [
+        _operation('op-new', supersedes='op-middle'),
+        _operation('op-middle', supersedes='op-root'),
+        _operation('op-root'),
+    ])
+    source._db.execute('PRAGMA defer_foreign_keys=ON')
+    source._ontology_drafts.append_decisions(project_id, 'draft-1', [
+        _decision('decision-new', 'op-new', 'sha256:op-new',
+                  supersedes='decision-middle'),
+        _decision('decision-middle', 'op-new', 'sha256:op-new',
+                  supersedes='decision-root'),
+        _decision('decision-root', 'op-new', 'sha256:op-new'),
+    ])
+
+    snapshot = source.export_projection(project_id)
+    target = Repository(tmp_path / 'deferred-acyclic-target.sqlite')
+    target.restore_projection(snapshot)
+
+    restored = target.export_projection(project_id)['governance']['ontology']
+    expected = snapshot['governance']['ontology']
+    assert restored['drafts'] == expected['drafts']
+    assert restored['publish_requests'] == expected['publish_requests']
+    for section in ('operations', 'decisions'):
+        assert {row['id']: row for row in restored[section]} == {
+            row['id']: row for row in expected[section]}
+    assert [row['id'] for row in source._ontology_drafts.effective_operations(
+        project_id, 'draft-1')] == ['op-new']
 
 
 def test_store_crud_supersession_json_and_export_are_project_scoped(tmp_path):
