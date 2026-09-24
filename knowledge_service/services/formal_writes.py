@@ -135,20 +135,16 @@ class FormalFactWriter:
             selected_versions[canonical_id] = row['version_id']
         return selected_versions[canonical_id]
 
-    def _reject_deprecated_new_term(self, project_id, record, ontology):
-        """Prevent new formal facts from adopting a term retired in the latest ontology.
+    def _reject_deprecated_write_term(self, project_id, record, ontology):
+        """Prevent version-producing writes from using a currently retired term.
 
-        Existing rows are intentionally left alone: their stored ``ontology_id``
-        remains the authority for historical reads and revalidation.
+        Historical rows remain untouched and retain their stored ``ontology_id``;
+        only an explicit deletion write is exempt from the current ontology gate.
         """
         if (ontology is None
                 or record.get('kind') not in {'entity', 'relation', 'attribute'}):
             return
-        current = self.repository._db.execute(
-            '''SELECT 1 FROM record_versions
-               WHERE project_id=? AND id=? AND superseded_at IS NULL''',
-            (project_id, record.get('id'))).fetchone()
-        if current is not None or record.get('metadata', {}).get('_deleted'):
+        if record.get('metadata', {}).get('_deleted'):
             return
         declared = ontology.classes | ontology.relations | ontology.attributes
         exact = [term for term in declared if str(term) == record.get('type', '')]
@@ -231,7 +227,7 @@ class FormalFactWriter:
                     operation=operation_context))
             for ordinal, original in enumerate(records):
                 record = self._canonical_record(original)
-                self._reject_deprecated_new_term(
+                self._reject_deprecated_write_term(
                     project_id, record, current_ontology)
                 expected_version = expected.get(record['id'])
                 canonical_id = record['id']

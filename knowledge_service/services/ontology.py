@@ -477,8 +477,14 @@ def set_term_constraints(ontology, node, kind, parent='', domain='', range_='',
                 for value in resolved_ranges if value not in existing_ranges)
         else:
             datatype = URIRef(range_) if range_ else None
+            existing_datatypes = [str(value) for value in snapshot.constraint_types(
+                node, RDFS.range)]
+            if len(existing_datatypes) > 1:
+                raise ValueError('DatatypeProperty 当前数据类型定义不唯一')
             operations.append(build_operation(
                 'set_datatype', target,
+                before={'datatype': existing_datatypes[0]
+                        if existing_datatypes else None},
                 after={'datatype': str(datatype) if datatype else None}))
     else:
         raise ValueError('不支持的本体术语类型')

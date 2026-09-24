@@ -7,6 +7,7 @@ from rdflib.compare import isomorphic
 from rdflib.namespace import OWL, SH, XSD
 
 from knowledge_service.integrations.embeddings import HashingEncoder
+import knowledge_service.services.ontology_operations as ontology_operations
 from knowledge_service.repository import Repository
 from knowledge_service.services.ontology import Ontology, set_term_constraints
 from knowledge_service.services.ontology_operations import (
@@ -145,7 +146,7 @@ def test_diff_normalizes_deprecation_restore_and_replacement_operations():
 
     with pytest.raises(ValueError, match='source_ontology_id|structured restore|结构化恢复'):
         canonical_turtle_diff(retired, BASE)
-    with pytest.raises(ValueError, match='resolver|builder|structured restore|结构化恢复'):
+    with pytest.raises(ValueError, match='source_ontology_id|structured restore|结构化恢复'):
         canonical_turtle_diff(
             retired, BASE, base_ontology_id='arbitrary-or-nonexistent')
 
@@ -194,8 +195,32 @@ def test_restore_diff_requires_requested_source_before_calling_resolver():
 
     with pytest.raises(ValueError, match='source_ontology_id'):
         canonical_turtle_diff(
-            retired, BASE, restore_operation_builder=resolver)
+            retired, BASE, base_ontology_id='current-only',
+            restore_operation_builder=resolver)
     assert calls == []
+
+
+def test_restore_diff_keeps_current_base_and_historical_source_ids_independent():
+    retired = BASE + 'ex:rel owl:deprecated true .'
+    authoritative = build_operation('restore_term', 'http://ex/rel', after={
+        'source_ontology_id': 'historical-template-v3',
+        'selected_fields': sorted(RESTORE_TEMPLATE_FIELDS),
+        'template': {
+            'kind': 'relation', 'annotations': [], 'parents': [],
+            'domain': ['http://ex/A'], 'range': ['http://ex/B'],
+            'datatype': None,
+        },
+    }, impact={'preview': {'kind': 'relation', 'active': True}})
+    requests = []
+    operations = canonical_turtle_diff(
+        retired, BASE, base_ontology_id='current-base-v9',
+        source_ontology_id='historical-template-v3',
+        restore_operation_builder=lambda **request: requests.append(request) or authoritative)
+    assert operations == [authoritative]
+    assert requests == [{
+        'target_iri': 'http://ex/rel',
+        'source_ontology_id': 'historical-template-v3',
+    }]
 
 
 def test_restore_diff_rejects_resolver_source_mismatch():
@@ -217,7 +242,10 @@ def test_restore_diff_rejects_resolver_source_mismatch():
 
 def test_datatype_and_domain_range_or_semantics_are_canonical():
     operations = [
-        build_operation('set_datatype', 'http://ex/value', after={'datatype': str(XSD.integer)}),
+        build_operation(
+            'set_datatype', 'http://ex/value',
+            before={'datatype': str(XSD.string)},
+            after={'datatype': str(XSD.integer)}),
         build_operation('remove_domain', 'http://ex/rel', before={'value': 'http://ex/A'}),
         build_operation('add_domain', 'http://ex/rel', after={'value': 'http://ex/B'}),
         build_operation('add_domain', 'http://ex/rel', after={'value': 'http://ex/A'}),
@@ -230,6 +258,14 @@ def test_datatype_and_domain_range_or_semantics_are_canonical():
     union = ontology.graph.value(domains[0], OWL.unionOf)
     assert list(Collection(ontology.graph, union)) == [URIRef('http://ex/A'), URIRef('http://ex/B')]
     assert list(ontology.graph.objects(URIRef('http://ex/rel'), RDFS.range)) == []
+
+
+def test_diff_rejects_multiple_datatypes_instead_of_emitting_range_bypass():
+    edited = BASE.replace(
+        'rdfs:range xsd:string',
+        'rdfs:range [ owl:unionOf (xsd:string xsd:integer) ]')
+    with pytest.raises(ValueError, match='datatype|set_datatype|数据类型'):
+        canonical_turtle_diff(BASE, edited)
 
 
 def test_logical_remove_rebuilds_and_collapses_union_list_without_orphans():
@@ -523,6 +559,45 @@ def test_restore_selected_none_datatype_clears_current_datatype():
     assert list(restored.graph.objects(URIRef('http://ex/value'), RDFS.range)) == []
 
 
+def test_annotation_only_restore_preserves_class_node_shape_subgraph():
+    current = BASE + '''
+      @prefix sh: <http://www.w3.org/ns/shacl#> .
+      ex:A a sh:NodeShape; owl:deprecated true; rdfs:label "current";
+        sh:targetClass ex:A; sh:property [ sh:path ex:value; sh:minCount 1 ] .
+    '''
+    operation = build_operation('restore_term', 'http://ex/A', after={
+        'source_ontology_id': 'immutable-source',
+        'selected_fields': ['annotations'],
+        'template': {'kind': 'class', 'annotations': [{
+            'predicate': str(RDFS.label), 'value': 'historical',
+            'language': None, 'datatype': None,
+        }]},
+    })
+    restored = Graph().parse(
+        data=apply_operations(current, [operation]), format='turtle')
+    shape = URIRef('http://ex/A')
+    assert (shape, SH.targetClass, shape) in restored
+    properties = list(restored.objects(shape, SH.property))
+    assert len(properties) == 1
+    assert (properties[0], SH.path, URIRef('http://ex/value')) in restored
+    assert (properties[0], SH.minCount, Literal(1)) in restored
+    assert list(restored.objects(shape, RDFS.label)) == [Literal('historical')]
+
+
+def test_restore_annotation_template_rejects_shacl_predicates():
+    current = BASE + 'ex:A owl:deprecated true .'
+    operation = build_operation('restore_term', 'http://ex/A', after={
+        'source_ontology_id': 'immutable-source',
+        'selected_fields': ['annotations'],
+        'template': {'kind': 'class', 'annotations': [{
+            'predicate': str(SH.targetClass), 'value': 'http://ex/B',
+            'type': 'iri',
+        }]},
+    })
+    with pytest.raises(ValueError, match='SHACL|annotation|predicate'):
+        apply_operations(current, [operation])
+
+
 def test_restore_term_requires_deprecated_target_and_blocks_historical_cycle():
     template = {
         'kind': 'class', 'parents': ['http://ex/B'], 'annotations': [],
@@ -549,6 +624,85 @@ def test_restore_term_requires_deprecated_target_and_blocks_historical_cycle():
 def test_domain_and_range_actions_reject_class_targets(operation):
     with pytest.raises(ValueError, match='relation|attribute|关系|属性'):
         _apply(operation)
+
+
+@pytest.mark.parametrize('action', ['add_range', 'remove_range'])
+def test_datatype_property_rejects_range_bypass_operations(action):
+    edge = 'after' if action == 'add_range' else 'before'
+    operation = build_operation(action, 'http://ex/value', **{
+        edge: {'value': str(XSD.string)}})
+    with pytest.raises(ValueError, match='set_datatype|DatatypeProperty|数据类型'):
+        _apply(operation)
+
+
+@pytest.mark.parametrize('operation', [
+    build_operation('add_annotation', 'http://ex/A', after={
+        'predicate': 'relative', 'value': 'x'}),
+    build_operation('add_annotation', 'http://ex/A', after={
+        'predicate': 'http://ex/link', 'value': 'relative', 'type': 'iri'}),
+    build_operation('add_annotation', 'http://ex/A', after={
+        'predicate': 'http://ex/value', 'value': 'x', 'datatype': 'relative'}),
+    build_operation('set_datatype', 'http://ex/value',
+                    before={'datatype': str(XSD.string)},
+                    after={'datatype': 'relative'}),
+])
+def test_operation_iris_and_literal_datatypes_must_be_absolute(operation):
+    with pytest.raises(ValueError, match='绝对 IRI|absolute|datatype'):
+        _apply(operation)
+
+
+def test_annotation_operation_cannot_bypass_scoped_shacl_patch():
+    operation = build_operation('add_annotation', 'http://ex/A', after={
+        'predicate': str(SH.targetClass),
+        'value': 'http://ex/B',
+        'type': 'iri',
+    }, ontology=Ontology(BASE))
+    with pytest.raises(ValueError, match='SHACL|结构|annotation'):
+        _apply(operation)
+
+
+@pytest.mark.parametrize('operation', [
+    build_operation('remove_parent', 'http://ex/A',
+                    before={'value': 'http://ex/Missing'}),
+    build_operation('remove_domain', 'http://ex/rel',
+                    before={'value': 'http://ex/Missing'}),
+    build_operation('remove_range', 'http://ex/rel',
+                    before={'value': 'http://ex/Missing'}),
+    build_operation('remove_annotation', 'http://ex/A', before={
+        'predicate': str(RDFS.label), 'value': 'missing'}),
+    build_operation('set_datatype', 'http://ex/value',
+                    before={'datatype': str(XSD.integer)},
+                    after={'datatype': str(XSD.boolean)}),
+])
+def test_destructive_operation_rejects_reviewed_before_mismatch(operation):
+    with pytest.raises(ValueError, match='before|冲突|不存在|已变更'):
+        _apply(operation)
+
+
+def test_reviewed_before_state_is_checked_sequentially():
+    removal = build_operation('remove_parent', 'http://ex/A', before={
+        'value': 'http://ex/Root'})
+    with pytest.raises(ValueError, match='before|冲突|不存在|已变更'):
+        apply_operations(BASE, [removal, removal])
+
+
+def test_apply_operations_does_not_reparse_full_graph_per_operation(monkeypatch):
+    calls = 0
+    original = ontology_operations.Ontology.__init__
+
+    def counted(self, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(ontology_operations.Ontology, '__init__', counted)
+    operations = [
+        build_operation('add_annotation', 'http://ex/A', after={
+            'predicate': 'http://ex/tag', 'value': f'tag-{index}'})
+        for index in range(100)
+    ]
+    apply_operations(BASE, operations)
+    assert calls <= 2
 
 
 def test_final_validation_rejects_wrong_kind_constraints_and_unknown_simple_shacl_refs():

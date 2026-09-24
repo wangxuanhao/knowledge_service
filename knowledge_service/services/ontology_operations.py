@@ -50,6 +50,11 @@ _SUPPORTED_DATATYPES = {
 _RDF_PAYLOAD_KEYS = {'turtle': 'turtle', 'canonical_ntriples': 'nt', 'subgraph': 'turtle'}
 
 
+def _is_annotation_predicate(predicate) -> bool:
+    return (predicate not in _STRUCTURAL_PREDICATES
+            and not str(predicate).startswith(str(SH)))
+
+
 def _canonical_json(value) -> str:
     return json.dumps(
         value, ensure_ascii=False, allow_nan=False, sort_keys=True,
@@ -224,9 +229,7 @@ def _term_template(ontology: Ontology, iri: str) -> dict:
     kind = term_kind(ontology, node)
     annotations = []
     for predicate, value in ontology.graph.predicate_objects(node):
-        if predicate in _STRUCTURAL_PREDICATES:
-            continue
-        if str(predicate).startswith(str(SH)):
+        if not _is_annotation_predicate(predicate):
             continue
         if isinstance(value, Literal):
             annotations.append({
@@ -259,22 +262,45 @@ def _literal(spec: dict) -> Literal:
     datatype = spec.get('datatype')
     if language and datatype:
         raise ValueError('RDF 文本不能同时指定语言和 datatype')
+    if datatype and (not isinstance(datatype, str) or not absolute_iri(datatype)):
+        raise ValueError('annotation datatype 必须是绝对 IRI')
     return Literal(
         spec.get('value', ''), lang=language,
         datatype=URIRef(datatype) if datatype else None)
+
+
+def _require_absolute_iri(value, label: str) -> str:
+    if not isinstance(value, str) or not absolute_iri(value):
+        raise ValueError(f'{label} 必须是绝对 IRI')
+    return value
 
 
 def _apply_template(graph: Graph, node: URIRef, template: dict,
                     selected_fields: Iterable[str] | None = None) -> None:
     fields = set(selected_fields or _SELECTABLE_TEMPLATE_FIELDS)
     if 'annotations' in fields:
-        for predicate, value in list(graph.predicate_objects(node)):
-            if predicate not in _STRUCTURAL_PREDICATES:
-                graph.remove((node, predicate, value))
+        prepared_annotations = []
         for annotation in template.get('annotations', []):
-            value = (URIRef(annotation['value']) if annotation.get('type') == 'iri'
-                     else _literal(annotation))
-            graph.add((node, URIRef(annotation['predicate']), value))
+            predicate = annotation.get('predicate')
+            if not isinstance(predicate, str) or not absolute_iri(predicate):
+                raise ValueError('annotation predicate 必须是绝对 IRI')
+            if not _is_annotation_predicate(URIRef(predicate)):
+                raise ValueError(
+                    'restore annotation template 不能包含结构或 SHACL predicate')
+            if annotation.get('type') == 'iri':
+                annotation_value = annotation.get('value')
+                if not isinstance(annotation_value, str) or not absolute_iri(
+                        annotation_value):
+                    raise ValueError('annotation IRI value 必须是绝对 IRI')
+                value = URIRef(annotation_value)
+            else:
+                value = _literal(annotation)
+            prepared_annotations.append((URIRef(predicate), value))
+        for predicate, value in list(graph.predicate_objects(node)):
+            if _is_annotation_predicate(predicate):
+                graph.remove((node, predicate, value))
+        for predicate, value in prepared_annotations:
+            graph.add((node, predicate, value))
     if 'parents' in fields:
         graph.remove((node, RDFS.subClassOf, None))
         for parent in template.get('parents', []):
@@ -289,8 +315,8 @@ def _apply_template(graph: Graph, node: URIRef, template: dict,
 
 
 def _ensure_kind(graph: Graph, node: URIRef, kind: str | None = None) -> str:
-    ontology = Ontology(graph.serialize(format='turtle'))
-    actual = term_kind(ontology, node)
+    actual = next((candidate for candidate, declaration in _DECLARATIONS.items()
+                   if (node, RDF.type, declaration) in graph), None)
     if actual is None:
         raise ValueError(f'本体术语不存在：{node}')
     if kind is not None and actual != kind:
@@ -298,14 +324,27 @@ def _ensure_kind(graph: Graph, node: URIRef, kind: str | None = None) -> str:
     return actual
 
 
+def _is_active_graph_term(graph: Graph, node: URIRef) -> bool:
+    return not any(
+        _truthy_literal(marker)
+        for marker in graph.objects(node, OWL.deprecated))
+
+
 def _assert_no_parent_cycle(graph: Graph, child: URIRef, parent: URIRef) -> None:
     if child == parent:
         raise ValueError('术语不能继承自身，否则会形成循环（cycle）')
-    ontology = Ontology(graph.serialize(format='turtle'))
-    if parent not in ontology.classes:
+    if (parent, RDF.type, OWL.Class) not in graph:
         raise ValueError(f'父类不存在：{parent}')
-    if child in ontology.parents(parent):
-        raise ValueError('父类关系会形成多跳循环（cycle）')
+    pending = [parent]
+    seen = set()
+    while pending:
+        current = pending.pop()
+        if current == child:
+            raise ValueError('父类关系会形成多跳循环（cycle）')
+        if current in seen:
+            continue
+        seen.add(current)
+        pending.extend(graph.objects(current, RDFS.subClassOf))
 
 
 def _shape_subgraph(graph: Graph, root: URIRef) -> Graph:
@@ -391,7 +430,11 @@ def _validate_definition_graph(graph: Graph) -> None:
         for value in ontology.constraint_types(owner, RDFS.domain):
             if value not in ontology.classes:
                 raise ValueError(f'domain 类不存在：{value}')
-        for value in ontology.constraint_types(owner, RDFS.range):
+        range_values = ontology.constraint_types(owner, RDFS.range)
+        if kind == 'attribute' and len(range_values) > 1:
+            raise ValueError(
+                f'DatatypeProperty 只能声明一个 datatype：{owner}')
+        for value in range_values:
             if kind == 'relation' and value not in ontology.classes:
                 raise ValueError(f'range 类不存在：{value}')
             if kind == 'attribute' and value not in _SUPPORTED_DATATYPES:
@@ -441,51 +484,83 @@ def apply_operations(base_turtle: str, operations: Iterable[dict]) -> str:
             graph.add((target, RDF.type, _DECLARATIONS[kind]))
         elif action in {'add_parent', 'remove_parent'}:
             _ensure_kind(graph, target, 'class')
-            value = URIRef((after if action == 'add_parent' else before).get('value', ''))
+            value_iri = (after if action == 'add_parent' else before).get('value')
+            _require_absolute_iri(value_iri, 'parent value')
+            value = URIRef(value_iri)
             if action == 'add_parent':
                 if (target, RDFS.subClassOf, value) in graph:
                     raise ValueError('父类不能重复')
                 _assert_no_parent_cycle(graph, target, value)
                 graph.add((target, RDFS.subClassOf, value))
             else:
+                if (target, RDFS.subClassOf, value) not in graph:
+                    raise ValueError('remove_parent before 冲突：被审阅的父类边不存在或已变更')
                 graph.remove((target, RDFS.subClassOf, value))
         elif action in {'add_domain', 'remove_domain', 'add_range', 'remove_range'}:
             kind = _ensure_kind(graph, target)
             if kind not in {'relation', 'attribute'}:
                 raise ValueError('domain/range 只能用于 relation/attribute（关系/属性）术语')
+            if kind == 'attribute' and action.endswith('range'):
+                raise ValueError('DatatypeProperty 数据类型必须使用 set_datatype 修改')
             predicate = RDFS.domain if action.endswith('domain') else RDFS.range
             values = _constraint_values(graph, target, predicate)
-            value = URIRef((after if action.startswith('add_') else before).get('value', ''))
+            value_iri = (after if action.startswith('add_') else before).get('value')
+            _require_absolute_iri(value_iri, f'{action} value')
+            value = URIRef(value_iri)
             if action.startswith('add_'):
                 if value in values:
                     raise ValueError('约束值不能重复')
                 if predicate == RDFS.domain or kind == 'relation':
-                    if value not in Ontology(graph.serialize(format='turtle')).classes:
+                    if (value, RDF.type, OWL.Class) not in graph:
                         raise ValueError(f'domain/range 类不存在：{value}')
                 elif value not in _SUPPORTED_DATATYPES:
                     raise ValueError(f'不支持的 datatype 数据类型：{value}')
                 values.append(value)
             else:
+                if value not in values:
+                    raise ValueError(f'{action} before 冲突：被审阅的约束不存在或已变更')
                 values = [item for item in values if item != value]
-            ontology = Ontology(graph.serialize(format='turtle'))
             if predicate == RDFS.domain or kind == 'relation':
                 for value in values:
-                    if URIRef(str(value)) not in ontology.classes:
+                    if (URIRef(str(value)), RDF.type, OWL.Class) not in graph:
                         raise ValueError(f'domain/range 类不存在：{value}')
             _set_constraint(graph, target, predicate, values)
         elif action == 'set_datatype':
             _ensure_kind(graph, target, 'attribute')
-            datatype = after.get('datatype')
+            if 'datatype' not in after:
+                raise ValueError('set_datatype 必须携带 after datatype')
+            datatype = after['datatype']
+            if datatype is not None:
+                _require_absolute_iri(datatype, 'datatype')
             if datatype and URIRef(datatype) not in _SUPPORTED_DATATYPES:
                 raise ValueError(f'不支持的 datatype 数据类型：{datatype}')
+            if 'datatype' not in before:
+                raise ValueError('set_datatype 缺少被审阅的 before datatype')
+            reviewed_datatype = before['datatype']
+            if reviewed_datatype is not None:
+                _require_absolute_iri(reviewed_datatype, 'before datatype')
+            current_values = _constraint_values(graph, target, RDFS.range)
+            current = str(current_values[0]) if len(current_values) == 1 else None
+            if len(current_values) > 1 or reviewed_datatype != current:
+                raise ValueError('set_datatype before 冲突：当前数据类型已变更')
             _set_constraint(graph, target, RDFS.range, [datatype] if datatype else [])
         elif action in {'add_annotation', 'remove_annotation'}:
             _ensure_kind(graph, target)
             spec = after if action == 'add_annotation' else before
-            predicate = URIRef(spec.get('predicate', ''))
+            predicate_iri = _require_absolute_iri(
+                spec.get('predicate'), 'annotation predicate')
+            predicate = URIRef(predicate_iri)
             if predicate in _STRUCTURAL_PREDICATES - {DCTERMS.isReplacedBy}:
                 raise ValueError('结构谓词不能作为普通 annotation 修改')
-            value = URIRef(spec['value']) if spec.get('type') == 'iri' else _literal(spec)
+            if (predicate != DCTERMS.isReplacedBy
+                    and not _is_annotation_predicate(predicate)):
+                raise ValueError('SHACL predicate 必须使用 scoped shape patch 修改')
+            if spec.get('type') == 'iri':
+                value_iri = _require_absolute_iri(
+                    spec.get('value'), 'annotation IRI value')
+                value = URIRef(value_iri)
+            else:
+                value = _literal(spec)
             if action == 'add_annotation':
                 if predicate == DCTERMS.isReplacedBy:
                     if not isinstance(value, URIRef):
@@ -494,10 +569,13 @@ def apply_operations(base_turtle: str, operations: Iterable[dict]) -> str:
                     replacement_kind = _ensure_kind(graph, value)
                     if value == target or replacement_kind != source_kind:
                         raise ValueError('isReplacedBy 必须指向同类型的其他术语')
-                    if not Ontology(graph.serialize(format='turtle')).is_active_term(value):
+                    if not _is_active_graph_term(graph, value):
                         raise ValueError('isReplacedBy 不能指向已停用术语')
                 graph.add((target, predicate, value))
             else:
+                if (target, predicate, value) not in graph:
+                    raise ValueError(
+                        'remove_annotation before 冲突：被审阅的 annotation 不存在或已变更')
                 graph.remove((target, predicate, value))
         elif action == 'retire_term':
             kind = _ensure_kind(graph, target)
@@ -511,7 +589,7 @@ def apply_operations(base_turtle: str, operations: Iterable[dict]) -> str:
                 replacement_kind = _ensure_kind(graph, candidate)
                 if candidate == target or replacement_kind != kind:
                     raise ValueError('isReplacedBy 必须指向同类型的其他活动术语')
-                if not Ontology(graph.serialize(format='turtle')).is_active_term(candidate):
+                if not _is_active_graph_term(graph, candidate):
                     raise ValueError('isReplacedBy 不能指向已停用术语')
                 graph.set((target, DCTERMS.isReplacedBy, URIRef(iri)))
         elif action == 'restore_term':
@@ -525,13 +603,11 @@ def apply_operations(base_turtle: str, operations: Iterable[dict]) -> str:
             if missing:
                 raise ValueError(
                     'restore_term template 缺少显式选择的字段：' + ', '.join(missing))
-            current = Ontology(graph.serialize(format='turtle'))
-            if current.is_active_term(target):
+            if _is_active_graph_term(graph, target):
                 raise ValueError('restore_term 的当前术语必须已停用（deprecated）')
             _ensure_kind(graph, target, after['template'].get('kind'))
             _apply_template(graph, target, after['template'], selected)
             graph.remove((target, OWL.deprecated, None))
-            _validate_definition_graph(graph)
         elif action == 'advanced_rdf_patch':
             if 'turtle' in after:
                 raise ValueError('advanced RDF patch 不允许携带或替换整个 Turtle 图')
@@ -872,11 +948,11 @@ def _annotation_spec(predicate, value) -> dict:
 def _term_annotations(graph: Graph, term: URIRef) -> set[tuple]:
     annotations = set()
     for predicate, value in graph.predicate_objects(term):
-        if predicate in _STRUCTURAL_PREDICATES - {DCTERMS.isReplacedBy}:
+        if (predicate == DCTERMS.isReplacedBy
+                or _is_annotation_predicate(predicate)):
+            annotations.add((predicate, value))
+        else:
             continue
-        if str(predicate).startswith(str(SH)):
-            continue
-        annotations.add((predicate, value))
     return annotations
 
 
@@ -932,10 +1008,7 @@ def canonical_turtle_diff(base_turtle: str, edited_turtle: str, *,
                           source_ontology_id: str | None = None,
                           restore_operation_builder=None) -> list[dict]:
     """Compile a graph-semantic Turtle diff into reviewable atomic operations."""
-    if (base_ontology_id and source_ontology_id
-            and base_ontology_id != source_ontology_id):
-        raise ValueError('base_ontology_id 与 source_ontology_id 必须一致')
-    immutable_source_id = source_ontology_id or base_ontology_id
+    immutable_source_id = source_ontology_id
     base = _graph(base_turtle)
     edited = _graph(edited_turtle)
     if isomorphic(base, edited):
@@ -1038,7 +1111,10 @@ def canonical_turtle_diff(base_turtle: str, edited_turtle: str, *,
             new = sorted(str(value) for value in _constraint_values(edited, term, predicate))
             if old == new:
                 continue
-            if kind == 'attribute' and suffix == 'range' and len(new) <= 1:
+            if kind == 'attribute' and suffix == 'range':
+                if len(new) > 1:
+                    raise ValueError(
+                        'DatatypeProperty 只能通过 set_datatype 使用一个受支持 datatype')
                 operations.append(build_operation(
                     'set_datatype', str(term), before={'datatype': old[0] if old else None},
                     after={'datatype': new[0] if new else None}))

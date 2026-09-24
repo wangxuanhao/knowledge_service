@@ -47,6 +47,41 @@ def test_new_facts_reject_deprecated_terms_but_old_version_records_remain_valid(
     assert Ontology(old['turtle']).validate([stored], shacl=False)['conforms'] is True
 
 
+@pytest.mark.parametrize(('kind', 'record', 'deprecated_term'), [
+    ('entity', {
+        'id': 'fact', 'kind': 'entity', 'type': 'Person', 'text': 'v1'}, 'Person'),
+    ('relation', {
+        'id': 'fact', 'kind': 'relation', 'type': 'knows', 'text': 'v1',
+        'subject_id': 'a', 'object_id': 'b'}, 'knows'),
+    ('attribute', {
+        'id': 'fact', 'kind': 'attribute', 'type': 'age', 'text': 'v1',
+        'subject_id': 'a', 'value': 20,
+        'datatype': 'http://www.w3.org/2001/XMLSchema#integer'}, 'age'),
+])
+def test_revision_rejects_term_deprecated_after_v1(
+        tmp_path, kind, record, deprecated_term):
+    repo, service, project_id = _system(tmp_path)
+    prerequisites = []
+    if kind in {'relation', 'attribute'}:
+        prerequisites.append({
+            'id': 'a', 'kind': 'entity', 'type': 'Person', 'text': 'A'})
+    if kind == 'relation':
+        prerequisites.append({
+            'id': 'b', 'kind': 'entity', 'type': 'Person', 'text': 'B'})
+    service.write(project_id, [*prerequisites, record])
+    current = repo.get_ontology(project_id)
+    deprecated = current['turtle'] + (
+        f' ex:{deprecated_term} owl:deprecated true .')
+    repo.save_ontology(
+        project_id, deprecated, Ontology(deprecated).summary())
+
+    revision = {**record, 'text': 'v2'}
+    with pytest.raises(ValueError, match='停用'):
+        service.write(
+            project_id, [revision], expected_versions={'fact': 1})
+    assert repo.get_record(project_id, 'fact')['version'] == 1
+
+
 @pytest.mark.parametrize(('value', 'datatype'), [
     (b'20', 'http://www.w3.org/2001/XMLSchema#string'),
     (Decimal('20.5'), 'http://www.w3.org/2001/XMLSchema#double'),
