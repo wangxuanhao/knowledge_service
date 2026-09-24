@@ -246,8 +246,16 @@ def _create_record_operation_reservation_schema(db):
         ON record_operation_reservations(project_id,recorded_at)''')
 
 
-def _ensure_ontology_history_delete_guards(db):
-    """Install idempotent DELETE guards for databases already marked as v14."""
+def _ensure_ontology_history_immutable_guards(db):
+    """Install idempotent immutable-ledger guards for v14 databases."""
+    db.execute('''CREATE TRIGGER IF NOT EXISTS ontology_operations_immutable
+        BEFORE UPDATE ON ontology_operations BEGIN
+          SELECT RAISE(ABORT, 'ontology operations are immutable');
+        END''')
+    db.execute('''CREATE TRIGGER IF NOT EXISTS ontology_review_decisions_immutable
+        BEFORE UPDATE ON ontology_review_decisions BEGIN
+          SELECT RAISE(ABORT, 'ontology review decisions are immutable');
+        END''')
     db.execute('''CREATE TRIGGER IF NOT EXISTS ontology_operations_delete_immutable
         BEFORE DELETE ON ontology_operations
         WHEN ontology_history_delete_allowed() = 0 BEGIN
@@ -258,6 +266,57 @@ def _ensure_ontology_history_delete_guards(db):
         WHEN ontology_history_delete_allowed() = 0 BEGIN
           SELECT RAISE(ABORT, 'ontology review decisions are immutable');
         END''')
+    db.execute('''CREATE TRIGGER IF NOT EXISTS ontology_operations_insert_immutable
+        BEFORE INSERT ON ontology_operations
+        WHEN NEW.supersedes_operation_id = NEW.id
+          OR EXISTS (SELECT 1 FROM ontology_operations WHERE id=NEW.id) BEGIN
+          SELECT RAISE(ABORT, 'ontology operations are immutable');
+        END''')
+    db.execute('''CREATE TRIGGER IF NOT EXISTS ontology_review_decisions_insert_immutable
+        BEFORE INSERT ON ontology_review_decisions
+        WHEN NEW.supersedes_decision_id = NEW.id
+          OR EXISTS (SELECT 1 FROM ontology_review_decisions WHERE id=NEW.id) BEGIN
+          SELECT RAISE(ABORT, 'ontology review decisions are immutable');
+        END''')
+
+
+def _supersession_cycle(rows, parent_key):
+    parents = {row['id']: row[parent_key] for row in rows}
+    completed = set()
+    for start in parents:
+        if start in completed:
+            continue
+        positions, path, current = {}, [], start
+        while current is not None and current in parents and current not in completed:
+            if current in positions:
+                return path[positions[current]:]
+            positions[current] = len(path)
+            path.append(current)
+            current = parents[current]
+        completed.update(path)
+    return None
+
+
+def _repair_ontology_history_integrity(db):
+    """Normalize old v14 self-links and reject ambiguous supersession cycles."""
+    ledgers = (
+        ('ontology_operations', 'supersedes_operation_id',
+         'ontology_operations_immutable', '本体操作'),
+        ('ontology_review_decisions', 'supersedes_decision_id',
+         'ontology_review_decisions_immutable', '本体审核决定'),
+    )
+    for table, parent_key, update_trigger, label in ledgers:
+        has_self_links = db.execute(
+            f'SELECT 1 FROM {table} WHERE {parent_key}=id LIMIT 1').fetchone()
+        if has_self_links:
+            db.execute(f'DROP TRIGGER IF EXISTS {update_trigger}')
+            db.execute(f'UPDATE {table} SET {parent_key}=NULL WHERE {parent_key}=id')
+        rows = db.execute(
+            f'SELECT id,{parent_key} FROM {table} WHERE {parent_key} IS NOT NULL'
+        ).fetchall()
+        cycle = _supersession_cycle(rows, parent_key)
+        if cycle:
+            raise ValueError(f'{label}替代链存在循环：{" -> ".join(cycle)}')
 
 
 def _create_ontology_draft_schema(db):
@@ -349,18 +408,11 @@ def _create_ontology_draft_schema(db):
             REFERENCES ontology_drafts(project_id,id) ON DELETE CASCADE,
           FOREIGN KEY(project_id,result_ontology_id)
             REFERENCES ontologies(project_id,id))''',
-        '''CREATE TRIGGER ontology_operations_immutable
-           BEFORE UPDATE ON ontology_operations BEGIN
-             SELECT RAISE(ABORT, 'ontology operations are immutable');
-           END''',
-        '''CREATE TRIGGER ontology_review_decisions_immutable
-           BEFORE UPDATE ON ontology_review_decisions BEGIN
-             SELECT RAISE(ABORT, 'ontology review decisions are immutable');
-           END''',
     )
     for statement in statements:
         db.execute(statement)
-    _ensure_ontology_history_delete_guards(db)
+    _repair_ontology_history_integrity(db)
+    _ensure_ontology_history_immutable_guards(db)
 
 
 def _create_assertion_schema(db):
@@ -621,7 +673,8 @@ def _run_schema_migrations(db):
         if db.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' "
                 "AND name='ontology_operations'").fetchone():
-            _ensure_ontology_history_delete_guards(db)
+            _repair_ontology_history_integrity(db)
+            _ensure_ontology_history_immutable_guards(db)
         db.commit()
     except BaseException:
         db.rollback()

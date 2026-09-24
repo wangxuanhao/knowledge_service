@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
@@ -7,6 +8,7 @@ import pytest
 
 import knowledge_service.repository as repository_module
 from knowledge_service.repository import Repository
+from knowledge_service.repository.core import _supersession_cycle
 
 
 def _draft(project_id, *, draft_id='draft-1', base_ontology_id=None):
@@ -39,6 +41,20 @@ def _operation(operation_id, *, supersedes=None, fingerprint=None, created_at=No
         'supersedes_operation_id': supersedes,
         **({'created_at': created_at} if created_at else {}),
     }
+
+
+def test_supersession_cycle_check_is_linear_for_long_valid_history():
+    rows = [
+        {'id': f'op-{index}', 'supersedes_operation_id': (
+            f'op-{index - 1}' if index else None)}
+        for index in range(10_000)
+    ]
+
+    started_at = time.perf_counter()
+    cycle = _supersession_cycle(rows, 'supersedes_operation_id')
+
+    assert cycle is None
+    assert time.perf_counter() - started_at < 3
 
 
 def _decision(decision_id, operation_id, fingerprint, *, supersedes=None,
@@ -106,6 +122,23 @@ def test_migration_14_upgrades_v13_database_with_constrained_append_only_tables(
         repo._db.execute(
             "DELETE FROM ontology_review_decisions WHERE id='decision-1'"
         )
+    assert repo._db.execute('PRAGMA recursive_triggers').fetchone()[0] == 0
+    with pytest.raises(sqlite3.IntegrityError, match='immutable'):
+        repo._db.execute(
+            '''INSERT INTO ontology_operations
+               SELECT * FROM ontology_operations WHERE id='op-unreviewed' ''')
+    with pytest.raises(sqlite3.IntegrityError, match='immutable'):
+        repo._db.execute(
+            '''INSERT OR REPLACE INTO ontology_operations
+               SELECT * FROM ontology_operations WHERE id='op-unreviewed' ''')
+    with pytest.raises(sqlite3.IntegrityError, match='immutable'):
+        repo._db.execute(
+            '''INSERT INTO ontology_review_decisions
+               SELECT * FROM ontology_review_decisions WHERE id='decision-1' ''')
+    with pytest.raises(sqlite3.IntegrityError, match='immutable'):
+        repo._db.execute(
+            '''INSERT OR REPLACE INTO ontology_review_decisions
+               SELECT * FROM ontology_review_decisions WHERE id='decision-1' ''')
     assert operations[0]['before'] is None
     assert decisions[0]['operation_fingerprint'] == 'sha256:op-1'
 
@@ -153,6 +186,90 @@ def test_v14_reopen_repairs_missing_delete_guards_without_consuming_migration_15
     with pytest.raises(sqlite3.IntegrityError, match='immutable'):
         reopened._db.execute(
             "DELETE FROM ontology_operations WHERE id='op-old-v14'")
+
+
+def test_v14_reopen_repairs_self_supersession_and_round_trips(tmp_path):
+    path = tmp_path / 'v14-self-supersession.sqlite'
+    old = Repository(path)
+    project_id = old.create_project('self supersession')['id']
+    old._ontology_drafts.create(project_id, _draft(project_id))
+    with old._transaction():
+        old._db.execute('DROP TRIGGER IF EXISTS ontology_operations_insert_immutable')
+        old._db.execute(
+            '''INSERT INTO ontology_operations
+               (id,project_id,draft_id,action,target_iri,before_json,after_json,
+                evidence_json,impact_json,validation_json,risk,fingerprint,reason,
+                supersedes_operation_id,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            ('op-self-v14', project_id, 'draft-1', 'add_parent', 'urn:self',
+             'null', '{}', '[]', '{}', '{}', 'low', 'sha256:self', 'legacy',
+             'op-self-v14', '2026-01-01T00:00:00.000000Z'))
+        old._db.execute('DROP TRIGGER IF EXISTS ontology_review_decisions_insert_immutable')
+        old._db.execute(
+            '''INSERT INTO ontology_review_decisions
+               (id,project_id,draft_id,operation_id,operation_fingerprint,
+                action,reason,actor,supersedes_decision_id,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)''',
+            ('decision-self-v14', project_id, 'draft-1', 'op-self-v14',
+             'sha256:self', 'approve', 'legacy', 'reviewer', 'decision-self-v14',
+             '2026-01-01T00:00:01.000000Z'))
+    old.close()
+
+    reopened = Repository(path)
+    history = reopened._ontology_drafts.export(project_id)
+    assert history['operations'][0]['supersedes_operation_id'] is None
+    assert history['decisions'][0]['supersedes_decision_id'] is None
+    assert [item['id'] for item in reopened._ontology_drafts.effective_operations(
+        project_id, 'draft-1')] == ['op-self-v14']
+
+    snapshot = reopened.export_projection(project_id)
+    restored = Repository(tmp_path / 'v14-self-restored.sqlite')
+    restored.restore_projection(snapshot)
+    assert restored.export_projection(project_id)['governance']['ontology'] == (
+        snapshot['governance']['ontology'])
+
+
+@pytest.mark.parametrize('ledger', ['operations', 'decisions'])
+def test_v14_reopen_rejects_ambiguous_two_node_supersession_cycles(
+        tmp_path, ledger):
+    path = tmp_path / f'v14-{ledger}-cycle.sqlite'
+    old = Repository(path)
+    project_id = old.create_project(f'{ledger} cycle')['id']
+    old._ontology_drafts.create(project_id, _draft(project_id))
+    old._ontology_drafts.append_operations(
+        project_id, 'draft-1', [_operation('op-valid-cycle')])
+    old.close()
+
+    with sqlite3.connect(path) as raw:
+        assert raw.execute('PRAGMA foreign_keys').fetchone()[0] == 0
+        if ledger == 'operations':
+            for identifier, supersedes in (
+                    ('op-cycle-a', 'op-cycle-b'), ('op-cycle-b', 'op-cycle-a')):
+                raw.execute(
+                    '''INSERT INTO ontology_operations
+                       (id,project_id,draft_id,action,target_iri,before_json,after_json,
+                        evidence_json,impact_json,validation_json,risk,fingerprint,reason,
+                        supersedes_operation_id,created_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                    (identifier, project_id, 'draft-1', 'add_parent',
+                     f'urn:{identifier}', 'null', '{}', '[]', '{}', '{}', 'low',
+                     f'sha256:{identifier}', 'legacy', supersedes,
+                     '2026-01-01T00:00:00.000000Z'))
+        else:
+            for identifier, supersedes in (
+                    ('decision-cycle-a', 'decision-cycle-b'),
+                    ('decision-cycle-b', 'decision-cycle-a')):
+                raw.execute(
+                    '''INSERT INTO ontology_review_decisions
+                       (id,project_id,draft_id,operation_id,operation_fingerprint,
+                        action,reason,actor,supersedes_decision_id,created_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?)''',
+                    (identifier, project_id, 'draft-1', 'op-valid-cycle',
+                     'sha256:op-valid-cycle', 'approve', 'legacy', 'reviewer',
+                     supersedes, '2026-01-01T00:00:00.000000Z'))
+
+    with pytest.raises(ValueError, match='循环'):
+        Repository(path)
 
 
 def test_store_rejects_self_supersession_and_two_node_cycles(tmp_path):
