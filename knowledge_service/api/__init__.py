@@ -23,7 +23,12 @@ from pydantic import ValidationError
 import httpx
 
 from ..integrations.embeddings import configured_encoder
-from ..repository import OntologyNotPublished, Repository
+from ..repository import (
+    OntologyNotPublished,
+    OntologyPublicationConflict,
+    Repository,
+)
+from ..services.ontology_drafts import OntologyDraftError
 from ..services.service import KnowledgeService
 from ..core.time import utc_now
 
@@ -99,6 +104,8 @@ def create_app(db_path=None, encoder=None):
     install_ontology_changes(app, service)
     from .ontology_discovery import install as install_ontology_discovery
     install_ontology_discovery(app, service)
+    from .ontology_drafts import install as install_ontology_drafts
+    install_ontology_drafts(app, service)
 
     # ── 异常处理 ──
     @app.exception_handler(KeyError)
@@ -110,6 +117,24 @@ def create_app(db_path=None, encoder=None):
         return JSONResponse(status_code=404, content={
             'detail': '本项目尚未发布本体。可先持续开放发现并累计候选，再在本体发现中生成、审核和发布本体版本；仅文档检索模式不产生图谱本体。',
             'code': 'ontology_not_published'})
+
+    @app.exception_handler(OntologyDraftError)
+    async def ontology_draft_error(request: Request, exc: OntologyDraftError):
+        status = 409 if exc.code in {
+            'revision_conflict', 'stale_base', 'stale_source',
+            'validation_changed',
+        } else 422
+        return JSONResponse(status_code=status, content={
+            'detail': str(exc), 'code': exc.code, 'details': exc.details})
+
+    @app.exception_handler(OntologyPublicationConflict)
+    async def ontology_publication_error(
+            request: Request, exc: OntologyPublicationConflict):
+        status = 422 if exc.code in {
+            'validation_failed', 'batch_not_allowed',
+        } else 409
+        return JSONResponse(status_code=status, content={
+            'detail': str(exc), 'code': exc.code, 'details': exc.details})
 
     @app.exception_handler(ValueError)
     async def invalid(request: Request, exc: ValueError):

@@ -310,23 +310,23 @@ git commit -m "feat: publish ontology drafts atomically with provenance"
 - Modify: `knowledge_service/api/__init__.py`
 - Create: `tests/service/test_ontology_draft_api.py`
 
-- [ ] **Step 1: Write API contract tests.**
+- [x] **Step 1: Write API contract tests.**
 
 Cover create/list/get, commands, submit, decisions, validate, rebase, close, publish and exact 409/422 conflict bodies. Require `expected_revision`; require ontology/validation/idempotency fields at the designed boundaries.
 
-- [ ] **Step 2: Write hierarchy read tests.**
+- [x] **Step 2: Write hierarchy read tests.**
 
 Cover cursor pagination, draft overlay and HTTP IRI values containing `/` and `#` passed through `?iri=` for children/neighborhood. Assert repeated DAG reference rows share canonical IRI and expose `other_parent_count`.
 
-- [ ] **Step 3: Run and confirm route failures.**
+- [x] **Step 3: Run and confirm route failures.**
 
 Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_draft_api.py -vv`
 
-- [ ] **Step 4: Implement thin Pydantic models/routes.**
+- [x] **Step 4: Implement thin Pydantic models/routes.**
 
 Map domain conflicts to stable machine codes: `revision_conflict`, `stale_base`, `stale_source`, `validation_changed`, `validation_failed`, `batch_not_allowed`. Do not duplicate lifecycle logic in handlers.
 
-- [ ] **Step 5: Install router, run tests and commit.**
+- [x] **Step 5: Install router, run tests and commit.**
 
 ```powershell
 git add knowledge_service/api tests/service/test_ontology_draft_api.py

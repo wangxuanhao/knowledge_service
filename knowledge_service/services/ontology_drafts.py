@@ -436,6 +436,14 @@ class OntologyDrafts:
         return latest
 
     # --------------------------------------------------------------- lifecycle
+    def get(self, project_id, draft_id):
+        """Return a draft with its current operations, decisions and preview."""
+        return self._preview(project_id, self.store.get(project_id, draft_id))
+
+    def list(self, project_id, status=None):
+        """List lightweight draft records; previews remain an explicit read."""
+        return self.store.list(project_id, status=status)
+
     def create(self, project_id, base_ontology_id_or_none=None, source='manual',
                title=None, actor=None, *, source_context=None, summary='',
                base_ontology_id=None):
