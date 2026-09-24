@@ -184,6 +184,37 @@ def test_diff_normalizes_deprecation_restore_and_replacement_operations():
         'predicate': str(DCTERMS.isReplacedBy), 'value': 'http://ex/B', 'type': 'iri'}
 
 
+def test_restore_diff_requires_requested_source_before_calling_resolver():
+    retired = BASE + 'ex:rel owl:deprecated true .'
+    calls = []
+
+    def resolver(**request):
+        calls.append(request)
+        raise AssertionError('resolver must not run without a requested immutable source')
+
+    with pytest.raises(ValueError, match='source_ontology_id'):
+        canonical_turtle_diff(
+            retired, BASE, restore_operation_builder=resolver)
+    assert calls == []
+
+
+def test_restore_diff_rejects_resolver_source_mismatch():
+    retired = BASE + 'ex:rel owl:deprecated true .'
+    mismatched = build_operation('restore_term', 'http://ex/rel', after={
+        'source_ontology_id': 'immutable-other',
+        'selected_fields': sorted(RESTORE_TEMPLATE_FIELDS),
+        'template': {
+            'kind': 'relation', 'annotations': [], 'parents': [],
+            'domain': ['http://ex/A'], 'range': ['http://ex/B'],
+            'datatype': None,
+        },
+    }, impact={'preview': {'kind': 'relation', 'active': True}})
+    with pytest.raises(ValueError, match='source_ontology_id|一致|match'):
+        canonical_turtle_diff(
+            retired, BASE, source_ontology_id='immutable-requested',
+            restore_operation_builder=lambda **_: mismatched)
+
+
 def test_datatype_and_domain_range_or_semantics_are_canonical():
     operations = [
         build_operation('set_datatype', 'http://ex/value', after={'datatype': str(XSD.integer)}),
@@ -339,6 +370,59 @@ def test_structured_manual_annotation_uses_same_derived_dependency_warning():
         'active_custom_annotation_dependency')
     assert operation['risk'] == 'medium'
     assert is_batch_eligible(operation) is False
+
+
+@pytest.mark.parametrize(('action', 'edge'), [
+    ('add_annotation', 'after'),
+    ('remove_annotation', 'before'),
+])
+def test_iri_annotation_without_ontology_context_is_validation_required(
+        action, edge):
+    operation = build_operation(action, 'http://ex/A', **{edge: {
+        'predicate': 'http://ex/pointsTo',
+        'value': 'http://ex/Old',
+        'type': 'iri',
+    }})
+    assert operation['validation']['warnings'][0]['code'] == (
+        'ontology_context_required')
+    assert operation['risk'] == 'medium'
+    assert is_batch_eligible(operation) is False
+
+
+def test_batch_eligibility_fails_safe_for_unclassified_iri_annotation_shape():
+    unclassified = {
+        'action': 'add_annotation',
+        'target_iri': 'http://ex/A',
+        'after': {
+            'predicate': 'http://ex/pointsTo',
+            'value': 'http://ex/Old',
+            'type': 'iri',
+        },
+        'source': 'manual',
+        'impact': {},
+        'validation': {'warnings': []},
+        'risk': 'low',
+    }
+    assert is_batch_eligible(unclassified) is False
+
+
+def test_external_custom_annotation_iri_is_valid_with_context_and_stays_low_risk():
+    operation = build_operation(
+        'add_annotation', 'http://ex/A', ontology=Ontology(BASE),
+        after={
+            'predicate': 'http://ex/documentation',
+            'value': 'https://example.com/docs/a',
+            'type': 'iri',
+        })
+    assert operation['validation']['warnings'] == []
+    assert operation['validation']['ontology_context_validated'] is True
+    assert operation['risk'] == 'low'
+    assert is_batch_eligible(operation) is False
+    assert is_batch_eligible(operation, ontology=Ontology(BASE)) is True
+    result = Graph().parse(data=apply_operations(BASE, [operation]), format='turtle')
+    assert (
+        URIRef('http://ex/A'), URIRef('http://ex/documentation'),
+        URIRef('https://example.com/docs/a')) in result
 
 
 @pytest.mark.parametrize('marker', ['true', '"true"^^xsd:boolean'])

@@ -106,12 +106,28 @@ def operation_risk(action: str, *, source: str = 'manual', impact=None,
     return risk
 
 
-def is_batch_eligible(operation: dict) -> bool:
+def _requires_ontology_context(action: str, before=None, after=None) -> bool:
+    action = _ACTION_ALIASES.get(action, action)
+    if action not in {'add_annotation', 'remove_annotation'}:
+        return False
+    spec = (after if action == 'add_annotation' else before) or {}
+    return spec.get('type') == 'iri'
+
+
+def is_batch_eligible(operation: dict, *,
+                      ontology: Ontology | str | None = None) -> bool:
     """Only low-risk operations may enter an unattended batch."""
     warnings = operation.get('warnings')
     if warnings is None:
         warnings = (operation.get('validation') or {}).get('warnings', [])
     validation = operation.get('validation') or {}
+    if _requires_ontology_context(
+            operation.get('action', ''), operation.get('before'), operation.get('after')):
+        if ontology is None:
+            return False
+        warnings = [*warnings, *operation_dependency_warnings(
+            ontology, operation.get('action', ''), operation.get('target_iri', ''),
+            before=operation.get('before'), after=operation.get('after'))]
     floor = operation_risk(
         operation.get('action', ''),
         source=operation.get('source', validation.get('source', 'manual')),
@@ -131,13 +147,15 @@ def build_operation(action: str, target_iri: str, *, before=None, after=None,
         raise ValueError('本体操作 target_iri 必须是绝对 IRI')
     impact = dict(impact or {})
     warnings = list(warnings or [])
-    if ontology is not None:
-        derived = operation_dependency_warnings(
-            ontology, action, target_iri, after=after)
-        existing = {_canonical_json(issue) for issue in warnings}
-        warnings.extend(
-            issue for issue in derived
-            if _canonical_json(issue) not in existing)
+    derived = operation_dependency_warnings(
+        ontology, action, target_iri, before=before, after=after)
+    existing = {_canonical_json(issue) for issue in warnings}
+    warnings.extend(
+        issue for issue in derived
+        if _canonical_json(issue) not in existing)
+    operation_validation = dict(validation or {})
+    if _requires_ontology_context(action, before, after):
+        operation_validation['ontology_context_validated'] = ontology is not None
     operation = {
         'action': action,
         'target_iri': target_iri,
@@ -148,7 +166,7 @@ def build_operation(action: str, target_iri: str, *, before=None, after=None,
         'evidence': list(evidence or []),
         'impact': impact,
         'validation': {
-            **dict(validation or {}), 'warnings': warnings,
+            **operation_validation, 'warnings': warnings,
             'source': source, 'confidence': confidence,
         },
         'risk': operation_risk(
@@ -535,20 +553,30 @@ def _issue(code: str, severity: str, message: str, term_iris,
     }
 
 
-def operation_dependency_warnings(ontology: Ontology | str, action: str,
-                                  target_iri: str, *, after=None) -> list[dict]:
+def operation_dependency_warnings(ontology: Ontology | str | None, action: str,
+                                  target_iri: str, *, before=None,
+                                  after=None) -> list[dict]:
     """Derive server-owned warnings for one structured operation."""
+    action = _ACTION_ALIASES.get(action, action)
+    if action not in {'add_annotation', 'remove_annotation'}:
+        return []
+    spec = (after if action == 'add_annotation' else before) or {}
+    if spec.get('type') != 'iri':
+        return []
+    if ontology is None:
+        return [_issue(
+            'ontology_context_required', 'warning',
+            'IRI annotation 风险分类需要本体上下文重新验证',
+            [target_iri, spec.get('value', '')])]
     if isinstance(ontology, str):
         ontology = Ontology(ontology)
-    action = _ACTION_ALIASES.get(action, action)
-    spec = after or {}
-    if action != 'add_annotation' or spec.get('type') != 'iri':
+    if action == 'remove_annotation':
         return []
     predicate = URIRef(spec.get('predicate', ''))
     if predicate in _STRUCTURAL_PREDICATES or str(predicate).startswith(str(SH)):
         return []
-    source = ontology.resolve(target_iri)
-    referenced = ontology.resolve(spec.get('value', ''))
+    source = URIRef(target_iri)
+    referenced = URIRef(spec.get('value', ''))
     declared = ontology.classes | ontology.relations | ontology.attributes
     if (source not in declared or referenced not in declared
             or not ontology.is_active_term(source)
@@ -943,6 +971,9 @@ def canonical_turtle_diff(base_turtle: str, edited_turtle: str, *,
         if now_deprecated:
             operations.append(build_operation('retire_term', str(term)))
         else:
+            if not immutable_source_id:
+                raise ValueError(
+                    '移除 owl:deprecated 必须指定非空 source_ontology_id')
             if restore_operation_builder is None:
                 raise ValueError(
                     '移除 owl:deprecated 需要不可变版本 resolver/builder 执行结构化恢复'
@@ -953,9 +984,13 @@ def canonical_turtle_diff(base_turtle: str, edited_turtle: str, *,
             if (not isinstance(operation, dict)
                     or operation.get('action') != 'restore_term'
                     or operation.get('target_iri') != str(term)
-                    or not isinstance(operation_after, dict)
-                    or not operation_after.get('source_ontology_id')
-                    or not isinstance(operation_after.get('template'), dict)
+                    or not isinstance(operation_after, dict)):
+                raise ValueError(
+                    'restore_operation_builder 必须返回从不可变版本解析的完整 restore_term 操作')
+            if operation_after.get('source_ontology_id') != immutable_source_id:
+                raise ValueError(
+                    'restore_operation_builder 返回的 source_ontology_id 必须与请求完全一致')
+            if (not isinstance(operation_after.get('template'), dict)
                     or not isinstance(operation.get('impact'), dict)
                     or 'preview' not in operation['impact']):
                 raise ValueError(
@@ -974,7 +1009,8 @@ def canonical_turtle_diff(base_turtle: str, edited_turtle: str, *,
         for predicate, value in sorted(old_annotations - new_annotations,
                                        key=lambda item: _canonical_json(_annotation_spec(*item))):
             annotation_removals.append(build_operation(
-                'remove_annotation', str(term), before=_annotation_spec(predicate, value)))
+                'remove_annotation', str(term), before=_annotation_spec(predicate, value),
+                ontology=edited_ontology))
         for predicate, value in sorted(new_annotations - old_annotations,
                                        key=lambda item: _canonical_json(_annotation_spec(*item))):
             annotation_additions.append(build_operation(
