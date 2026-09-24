@@ -127,6 +127,7 @@ class Ingest(Request):
 
 class OntologyWrite(Request):
     turtle: str = Field(min_length=1, max_length=1_000_000)
+    expected_ontology_id: str | None = None
 
 
 class Sparql(Scope):

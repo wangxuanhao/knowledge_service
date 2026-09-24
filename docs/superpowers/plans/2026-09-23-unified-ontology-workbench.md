@@ -348,27 +348,27 @@ git commit -m "feat: expose ontology draft and hierarchy APIs"
 - Modify: `tests/service/test_ontology_discovery.py`
 - Modify: `tests/service/test_ontology_change_proposals.py`
 
-- [ ] **Step 1: Rewrite compatibility tests first.**
+- [x] **Step 1: Rewrite compatibility tests first.**
 
 Old structured/Turtle writes must create or update a draft and return deprecation metadata, never increase ontology versions. Project creation remains trusted bootstrap; import into an existing project creates an import draft.
 
-- [ ] **Step 2: Pin the Semantica 0.6.7 hierarchy adapter test.**
+- [x] **Step 2: Pin the Semantica 0.6.7 hierarchy adapter test.**
 
 Use a fixed fixture with `classes[].name` and optional singular `parent`; accept `subClassOf` only as compatibility, missing/unknown parent as root, and never invent a parent. Generated suggestions are minimum medium risk.
 
-- [ ] **Step 3: Preserve discovery/candidate publish side effects in tests.**
+- [x] **Step 3: Preserve discovery/candidate publish side effects in tests.**
 
 Assert document/candidate expected versions, mapped/skipped/materialized updates, candidate revalidation, transaction rollback and post-commit fingerprinted Milvus sync artifact behavior.
 
-- [ ] **Step 4: Implement compatibility adapters.**
+- [x] **Step 4: Implement compatibility adapters.**
 
 Convert structured requests into normalized commands, Turtle into canonical diff commands, discovery output into evidence-linked operations, and candidate proposals into source-linked operations. Keep legacy response fields where existing callers require them, but add `draft_id`, `revision`, and deprecation headers/body.
 
-- [ ] **Step 5: Implement source-specific publish hooks.**
+- [x] **Step 5: Implement source-specific publish hooks.**
 
 Run database side effects inside the unified publish transaction; enqueue Milvus sync after commit. Source changes must set `stale_source`, not partially publish.
 
-- [ ] **Step 6: Run compatibility suites and commit.**
+- [x] **Step 6: Run compatibility suites and commit.**
 
 Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_maintenance.py tests/service/test_ontology_discovery.py tests/service/test_ontology_change_proposals.py -vv`
 

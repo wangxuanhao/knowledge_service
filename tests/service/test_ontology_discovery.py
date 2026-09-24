@@ -1,8 +1,12 @@
 from fastapi.testclient import TestClient
+import pytest
+from rdflib import RDFS, URIRef
 
 from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
+from knowledge_service.repository import Repository
 from knowledge_service.services.ontology import Ontology
+from knowledge_service.services.ontology_drafts import OntologyDrafts
 from knowledge_service.services.ontology_discovery import _candidate_mindmap, _induce, _validated_materialization
 
 
@@ -81,42 +85,61 @@ def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,
         assert all(item['description'] for item in summary['classes']+summary['relations'])
         assert {node['status'] for node in client.get(
             base+'/ontology-discovery/candidate-mindmap').json()['nodes']}=={'included_in_draft'}
-        import time
         resp=client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={})
         assert resp.status_code==202,resp.text
-        job=resp.json()
-        assert job['kind']=='ontology_publish'
-        for _ in range(200):
-            job=client.get('/api/jobs/'+job['id']).json()
-            if job['status'] in ('completed','failed','interrupted'):break
-            time.sleep(0.1)
-        assert job['status']=='completed',job.get('error')
-        published=job['result']
-        assert published['status']=='published'
-        assert published['mapped_entities']==2 and published['mapped_relations']==1
-        assert published['mapped_attributes']==2
-        assert published['requires_controlled_reingest'] is False
+        submitted=resp.json()
+        assert submitted['status']=='submitted'
+        assert submitted['deprecation']['deprecated'] is True
+        assert all(operation['risk'] in {'medium','high'}
+                   for operation in submitted['operations'])
+        assert app.state.service.repository.list_ontologies(project['id'])==[]
         graph=client.post(base+'/records/query',json={}).json()['records']
         formal=[row for row in graph if row['kind'] in ('entity','relation','attribute')]
-        assert len(formal)==5
-        assert all(row['metadata']['discovery_candidate_id'] for row in formal)
-        relation=next(row for row in formal if row['kind']=='relation')
-        assert {relation['subject_id'],relation['object_id']}<=set(row['id'] for row in formal)
-        merchant=next(row for row in formal if row['kind']=='entity' and row['text']=='测试商户')
-        assert merchant['properties']=={}
-        attributes=[row for row in formal if row['kind']=='attribute']
-        assert {row['value'] for row in attributes}=={20,21}
-        assert {row['subject_id'] for row in attributes}=={merchant['id']}
-        assert len({row['id'] for row in attributes})==2
+        assert formal==[]
         overview=client.get(base+'/ontology-discovery').json()
-        assert overview['candidate_status_counts']['materialized']==5
-        assert overview['candidate_status_counts']['approved']==0
-        ontology=client.get(base+'/ontology').json()
-        assert ontology['metadata']['source_draft_id']==draft['id']
+        assert overview['candidate_status_counts']['included_in_draft']==5
+        assert overview['published'] is False
+        warning_codes=[item['code'] for item in submitted['validation_report']['warnings']
+                       if item.get('code')]
+        current=submitted
+        for operation in submitted['operations']:
+            decision=client.post(
+                base+f"/ontology-drafts/{draft['id']}/decisions",json={
+                    'expected_revision':current['revision'],
+                    'expected_ontology_id':None,
+                    'validation_fingerprint':submitted['validation_fingerprint'],
+                    'acknowledged_warning_codes':warning_codes,
+                    'actor':'discovery-reviewer',
+                    'decisions':[{
+                        'operation_id':operation['id'],
+                        'operation_fingerprint':operation['fingerprint'],
+                        'action':'approve','reason':'来源与结构已核验'}],
+                })
+            assert decision.status_code==200,decision.text
+            current=decision.json()
+        assert current['status']=='reviewed'
+        published=client.post(
+            base+f"/ontology-drafts/{draft['id']}/publish",json={
+                'expected_revision':current['revision'],
+                'expected_ontology_id':None,
+                'validation_fingerprint':current['validation_fingerprint'],
+                'acknowledged_warning_codes':warning_codes,
+                'idempotency_key':'discovery-publish-1','actor':'publisher',
+            })
+        assert published.status_code==200,published.text
+        formal=[row for row in app.state.service.repository.current_records(project['id'])
+                if row['kind'] in ('entity','relation','attribute')]
+        assert len(formal)==5
+        stored=app.state.service.repository.get_artifact(
+            'ontology_discovery_draft',draft['id'])
+        assert stored['status']=='published' and stored['mapped_entities']==2
+        sync=app.state.service.repository.get_artifact(
+            'ontology_sync_job','ontology-sync:'+published.json()['id'])
+        assert sync['status']=='completed' and sync['fingerprint']
         assert client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={}).status_code==409
 
 
-def test_failed_discovery_publish_rolls_back_ontology_records_and_remains_retryable(tmp_path,monkeypatch):
+def test_legacy_discovery_publish_only_submits_and_never_writes_records(tmp_path,monkeypatch):
     from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
 
     monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False:[
@@ -144,64 +167,14 @@ def test_failed_discovery_publish_rolls_back_ontology_records_and_remains_retrya
             'extraction_mode':'discovery','extract_attributes':True,'resolve_entities':False})
         draft=client.post(base+'/ontology-discovery/drafts',json={'name':'原子本体'}).json()
         app.state.service.milvus_store=milvus
-        repository=app.state.service.repository
-        original_put=repository._put
-        fail_once={'enabled':True}
-        def fail_attribute_write(project_id,record,expected_version=None,recorded_at=None,
-                                 operation=None):
-            if fail_once['enabled'] and record['kind']=='attribute':
-                fail_once['enabled']=False
-                raise RuntimeError('injected attribute write failure')
-            return original_put(project_id, record, expected_version, recorded_at,
-                                operation)
-        monkeypatch.setattr(repository,'_put',fail_attribute_write)
-
-        import time
-        failed=client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={}).json()
-        for _ in range(200):
-            failed=client.get('/api/jobs/'+failed['id']).json()
-            if failed['status'] in ('completed','failed','interrupted'):break
-            time.sleep(0.1)
-        assert failed['status']=='failed'
+        submitted=client.post(
+            base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={})
+        assert submitted.status_code==202,submitted.text
+        assert submitted.json()['status']=='submitted'
         assert app.state.service.repository.list_ontologies(pid)==[]
-        assert app.state.service.repository.get_artifact(
-            'ontology_discovery_draft',draft['id'])['status']=='draft'
         assert not [row for row in app.state.service.repository.current_records(pid)
-            if row['kind'] in ('entity','attribute','relation')]
+                    if row['kind'] in ('entity','attribute','relation')]
         assert milvus.upserts==[]
-
-        original_save_artifact=repository.save_artifact
-        fail_final_save={'enabled':True}
-        def fail_published_draft_save(kind,item):
-            if fail_final_save['enabled'] and item.get('status')=='published':
-                fail_final_save['enabled']=False
-                raise RuntimeError('injected final draft save failure')
-            return original_save_artifact(kind,item)
-        monkeypatch.setattr(repository,'save_artifact',fail_published_draft_save)
-        failed_after_write=client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={}).json()
-        for _ in range(200):
-            failed_after_write=client.get('/api/jobs/'+failed_after_write['id']).json()
-            if failed_after_write['status'] in ('completed','failed','interrupted'):break
-            time.sleep(0.1)
-        assert failed_after_write['status']=='failed'
-        assert repository.list_ontologies(pid)==[]
-        assert repository.get_artifact('ontology_discovery_draft',draft['id'])['status']=='draft'
-        assert not [row for row in repository.current_records(pid)
-            if row['kind'] in ('entity','attribute','relation')]
-        assert milvus.upserts==[]
-
-        retried=client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={})
-        assert retried.status_code==202,retried.text
-        job=retried.json()
-        for _ in range(200):
-            job=client.get('/api/jobs/'+job['id']).json()
-            if job['status'] in ('completed','failed','interrupted'):break
-            time.sleep(0.1)
-        assert job['status']=='completed',job.get('error')
-        assert {key:job['result'][key] for key in ('mapped_entities','mapped_attributes','mapped_relations')}=={
-            'mapped_entities':2,'mapped_attributes':1,'mapped_relations':1}
-        assert len(milvus.upserts)==1
-        assert milvus.lock_owned==[True]
 
 
 def test_legacy_extract_boolean_remains_backward_compatible():
@@ -267,34 +240,14 @@ def test_missing_ontology_reports_clear_state_without_project_id(tmp_path,monkey
         assert overview['published'] is False and overview['unpublished_candidate_count']==1
         assert overview['candidate_status_counts']['included_in_draft']==1
 
-        import time
         resp=client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={})
         assert resp.status_code==202,resp.text
-        job=resp.json()
-        for _ in range(200):
-            job=client.get('/api/jobs/'+job['id']).json()
-            if job['status'] in ('completed','failed','interrupted'):break
-            time.sleep(0.1)
-        assert job['status']=='completed',job.get('error')
-        published=job['result']
+        submitted=resp.json()
+        assert submitted['status']=='submitted'
         overview=client.get(base+'/ontology-discovery').json()
-        assert overview['published'] is True and overview['ontology_id']==published['ontology_id']
-        assert overview['unpublished_candidate_count']==0
-        assert overview['candidate_status_counts']['materialized']==1
-        assert overview['candidate_status_counts']['approved']==0
-        assert overview['requires_controlled_reingest'] is False
-        assert client.get(base+'/ontology').status_code==200
-
-        document=next(row for row in app.state.service.repository.current_records(pid)
-            if row['kind']=='document')
-        candidate_id=document['metadata']['discovery_candidates'][0]['id']
-        app.state.service.repository.put_record(pid,{'id':'legacy-materialized','kind':'entity',
-            'type':'urn:materialized:Merchant','text':'测试商户','ontology_id':published['ontology_id'],
-            'metadata':{'discovery_candidate_id':candidate_id}})
-        overview=client.get(base+'/ontology-discovery').json()
-        assert overview['candidate_status_counts']['materialized']==1
-        assert overview['candidate_status_counts']['approved']==0
-        assert overview['requires_controlled_reingest'] is False
+        assert overview['published'] is False and overview['ontology_id'] is None
+        assert overview['candidate_status_counts']['included_in_draft']==1
+        assert client.get(base+'/ontology').status_code==404
 
 
 def test_cumulative_draft_reuses_existing_term_iri_and_records_diff(tmp_path,monkeypatch):
@@ -411,23 +364,15 @@ def test_review_can_exclude_candidate_before_publish_and_reports_it(tmp_path,mon
         excluded=next(item['id'] for item in draft['candidate_snapshot'] if item['text']=='排除实体')
         reviewed=client.put(base+f"/ontology-discovery/drafts/{draft['id']}",json={'excluded_candidate_ids':[excluded]})
         assert reviewed.status_code==200 and reviewed.json()['revision']==2
-        import time
         resp=client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={})
         assert resp.status_code==202,resp.text
-        job=resp.json()
-        for _ in range(200):
-            job=client.get('/api/jobs/'+job['id']).json()
-            if job['status'] in ('completed','failed','interrupted'):break
-            time.sleep(0.1)
-        assert job['status']=='completed',job.get('error')
-        published=job['result']
-        assert published['mapped_entities']==1 and published['requires_controlled_reingest'] is False
+        assert resp.json()['status']=='submitted'
         overview=client.get(base+'/ontology-discovery').json()
         assert overview['candidate_status_counts']['pending']==1
-        assert overview['candidate_status_counts']['approved']==0
+        assert overview['candidate_status_counts']['included_in_draft']==1
         assert overview['requires_candidate_review'] is True
         formal=[row for row in app.state.service.repository.current_records(project['id']) if row['kind']=='entity']
-        assert [row['text'] for row in formal]==['保留实体']
+        assert formal==[]
 
 
 def test_draft_review_can_rename_and_remove_ontology_terms(tmp_path,monkeypatch):
@@ -453,16 +398,10 @@ def test_draft_review_can_rename_and_remove_ontology_terms(tmp_path,monkeypatch)
         reviewed=client.put(base+f"/ontology-discovery/drafts/{draft['id']}",json={
             'excluded_candidate_ids':[],'excluded_terms':['删除类型'],'term_labels':{'旧类型':'正式类型'}})
         assert reviewed.status_code==200
-        import time
         resp=client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={})
         assert resp.status_code==202,resp.text
-        job=resp.json()
-        for _ in range(200):
-            job=client.get('/api/jobs/'+job['id']).json()
-            if job['status'] in ('completed','failed','interrupted'):break
-            time.sleep(0.1)
-        assert job['status']=='completed',job.get('error')
-        assert job['result']['mapped_entities']==1
+        assert resp.json()['status']=='submitted'
+        assert app.state.service.repository.list_ontologies(project['id'])==[]
 
 
 def test_induction_does_not_invent_name_attribute_without_attribute_candidates():
@@ -499,3 +438,95 @@ def test_materialization_validation_keeps_invalid_relation_pending():
     assert [row['id'] for row in accepted]==['source','target','valid-count']
     assert {item['candidate_id'] for item in skipped}=={'candidate-bad-count','candidate-edge'}
     assert report=={'conforms':True,'accepted_count':3,'skipped_count':2}
+from rdflib import RDFS, URIRef
+
+def test_semantica_067_single_parent_adapter_keeps_unknown_parents_as_roots(monkeypatch):
+    def generated(_self, data, **_kwargs):
+        machine = {item['text']: item['type'] for item in data['entities']}
+        return {
+            'classes': [
+                {'name': machine['Parent']},
+                {'name': machine['Child'], 'parent': machine['Parent']},
+                {'name': machine['Alias'], 'subClassOf': machine['Parent']},
+                {'name': machine['Orphan'], 'parent': 'UnknownParent'},
+            ],
+            'properties': [], 'metadata': {}, 'validation': {},
+        }
+
+    monkeypatch.setattr(
+        'semantica.ontology.OntologyGenerator.generate_ontology', generated)
+    candidates = [{
+        'id': f'c-{name}', 'kind': 'entity', 'proposed_type': name,
+        'text': name, 'confidence': 0.9,
+    } for name in ('Parent', 'Child', 'Alias', 'Orphan')]
+    turtle, mappings, _ = _induce('project', 'hierarchy', candidates)
+    ontology = Ontology(turtle)
+    parent = URIRef(mappings['entity_types']['Parent'])
+    child = URIRef(mappings['entity_types']['Child'])
+    alias = URIRef(mappings['entity_types']['Alias'])
+    orphan = URIRef(mappings['entity_types']['Orphan'])
+
+    assert (child, RDFS.subClassOf, parent) in ontology.graph
+    assert (alias, RDFS.subClassOf, parent) in ontology.graph
+    assert list(ontology.graph.objects(orphan, RDFS.subClassOf)) == []
+
+
+def test_discovery_publication_effect_failure_rolls_back_everything(tmp_path, monkeypatch):
+    repo = Repository(tmp_path / 'discovery-effects.sqlite')
+    project_id = repo.create_project('atomic discovery')['id']
+    candidate = {
+        'id': 'candidate', 'kind': 'entity', 'text': 'Thing',
+        'proposed_type': 'Thing', 'status': 'pending',
+    }
+    document = repo.put_record(project_id, {
+        'id': 'doc', 'kind': 'document', 'text': 'Thing',
+        'metadata': {'discovery_candidates': [candidate]},
+    })
+    drafts = OntologyDrafts(repo, publisher=repo)
+    draft = drafts.create(
+        project_id, None, 'discovery', 'atomic', 'author',
+        source_context={
+            'documents': [{
+                'document_id': document['id'],
+                'expected_document_version': document['version'],
+                'candidate_id': candidate['id'],
+            }],
+            'publication_effects': {
+                'kind': 'discovery', 'skipped_candidates': [],
+                'records': [{
+                    'id': 'formal-thing', 'kind': 'entity',
+                    'type': 'urn:test:Thing', 'text': 'Thing',
+                    'ontology_id': '__PUBLISHED_ONTOLOGY_ID__',
+                    'source_id': document['id'], 'metadata': {
+                        'discovery_candidate_id': candidate['id']},
+                }],
+            },
+        })
+    draft = drafts.command(project_id, draft['id'], draft['revision'], {
+        'action': 'create_term', 'target_iri': 'urn:test:Thing',
+        'kind': 'class'})
+    draft = drafts.submit(project_id, draft['id'], draft['revision'])
+    operation = draft['operations'][0]
+    warnings = [item['code'] for item in draft['validation_report']['warnings']
+                if item.get('code')]
+    draft = drafts.decide(
+        project_id, draft['id'], draft['revision'], None,
+        draft['validation_fingerprint'], [{
+            'operation_id': operation['id'],
+            'operation_fingerprint': operation['fingerprint'],
+            'action': 'approve', 'reason': 'verified',
+        }], warnings, 'reviewer')
+
+    monkeypatch.setattr(
+        repo, '_put', lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError('injected publication effect failure')))
+    with pytest.raises(RuntimeError, match='injected publication effect failure'):
+        drafts.publish(
+            project_id, draft['id'], draft['revision'], None,
+            draft['validation_fingerprint'], warnings,
+            'atomic-discovery', 'publisher')
+
+    assert repo.list_ontologies(project_id) == []
+    assert repo._ontology_drafts.get(project_id, draft['id'])['status'] == 'reviewed'
+    assert not [row for row in repo.current_records(project_id)
+                if row['kind'] == 'entity']

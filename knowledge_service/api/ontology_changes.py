@@ -10,6 +10,8 @@ from fastapi import APIRouter
 
 from ..core.time import utc_now
 from ..services.ontology import Ontology, generated_term_iri, absolute_iri
+from ..services.ontology_adapters import DEPRECATION
+from ..services.ontology_drafts import OntologyDrafts
 from ..services.ontology_changes import (
     ProposalCreate, ProposalDecision, apply, impact, revalidation,
     document_and_candidate,
@@ -18,6 +20,7 @@ from ..services.ontology_changes import (
 
 def install(app, service):
     router = APIRouter(prefix='/api/projects/{p}/ontology-change-proposals')
+    governed = OntologyDrafts(service.repository, publisher=service.repository)
 
     @router.get('')
     def listing(p: str):
@@ -54,6 +57,40 @@ def install(app, service):
             ontology = Ontology(latest['turtle'])
             turtle, _ = apply(ontology, proposal)
             proposal['impact'] = impact(service, p, proposal, ontology, candidate)
+            candidate_revalidation = revalidation(
+                service, p, document, candidate, Ontology(turtle),
+                '__PUBLISHED_ONTOLOGY_ID__', proposal)
+            created = governed.create(
+                p, latest['id'], 'candidate',
+                f"候选本体变更：{proposal['label_zh'] or proposal['label']}",
+                'api:ontology-change',
+                source_context={
+                    'legacy_route': 'POST /ontology-change-proposals',
+                    'documents': [{
+                        'document_id': document['id'],
+                        'expected_document_version': document['version'],
+                        'expected_document_version_id': document['version_id'],
+                        'candidate_id': candidate['id'],
+                        'expected_candidate_status': candidate.get('status'),
+                    }],
+                    'proposal': proposal,
+                    'publication_effects': {
+                        'kind': 'candidate',
+                        'document_id': document['id'],
+                        'candidate_id': candidate['id'],
+                        'expected_document_version': document['version'],
+                        'proposal_id': proposal['id'],
+                        'revalidation': candidate_revalidation,
+                    },
+                },
+                summary=proposal['rationale'])
+            preview = governed.command(p, created['id'], created['revision'], {
+                'action': 'diff_turtle', 'edited_turtle': turtle,
+                'reason': proposal['rationale'],
+            })
+            proposal.update(
+                draft_id=created['id'], draft_revision=preview['revision'],
+                deprecation=DEPRECATION)
             service.repository.save_artifact('ontology_change', proposal)
             return proposal
 
@@ -78,30 +115,26 @@ def install(app, service):
                             revision=proposal['revision'] + 1)
             if request.action == 'reject':
                 proposal['status'] = 'rejected'
+                current = governed.get(p, proposal['draft_id'])
+                closed = governed.close(
+                    p, proposal['draft_id'], current['revision'],
+                    'api:ontology-change', request.note)
+                proposal['draft_revision'] = closed['revision']
                 service.repository.save_artifact('ontology_change', proposal)
-                return {'proposal': proposal, 'ontology': None}
+                return {'proposal': proposal, 'ontology': None, 'draft': closed,
+                        'deprecation': DEPRECATION}
             latest = service.repository.get_ontology(p)
             if latest['id'] != request.expected_ontology_id or latest['id'] != proposal['expected_ontology_id']:
                 raise ValueError('版本冲突：本体已更新，请重新评估草案影响')
             if proposal.get('impact', {}).get('risk') == 'high' and not request.confirm_impact:
                 raise ValueError('高影响本体变更必须明确确认影响范围')
-            document, candidate = document_and_candidate(
-                service, p, proposal['document_id'], proposal['candidate_id'])
-            turtle, ontology = apply(Ontology(latest['turtle']), proposal)
-            saved = {'id': str(uuid4()), 'project_id': p, 'turtle': turtle,
-                     'summary': ontology.summary(), 'created_at': utc_now()}
-            revised = copy.deepcopy(document)
-            revised = {k: v for k, v in revised.items()
-                       if k not in ('project_id', 'version', 'version_id', 'recorded_at', 'superseded_at')}
-            revised_candidate = next(c for c in revised['metadata']['review_candidates']
-                                     if c['id'] == proposal['candidate_id'])
-            revised_candidate['ontology_change'] = revalidation(
-                service, p, document, candidate, ontology, saved['id'], proposal)
-            proposal.update(status='approved', approved_ontology_id=saved['id'],
-                            revalidation=revised_candidate['ontology_change'])
-            service.repository.commit_ontology_change(
-                p, saved, proposal, revised, document['version'], latest['id'])
-            return {'proposal': proposal, 'ontology': saved,
-                    'revalidation': revised_candidate['ontology_change']}
+            current = governed.get(p, proposal['draft_id'])
+            submitted = governed.submit(
+                p, proposal['draft_id'], current['revision'])
+            proposal.update(status='submitted', draft_revision=submitted['revision'],
+                            submitted_at=utc_now(), deprecation=DEPRECATION)
+            service.repository.save_artifact('ontology_change', proposal)
+            return {'proposal': proposal, 'ontology': None, 'draft': submitted,
+                    'revalidation': None, 'deprecation': DEPRECATION}
 
     app.include_router(router)

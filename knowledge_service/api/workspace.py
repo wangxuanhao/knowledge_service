@@ -3,6 +3,7 @@ from time import perf_counter
 import json
 import re
 from typing import Literal as TypingLiteral
+from fastapi import Response
 from pydantic import Field
 from rdflib import BNode, RDF, RDFS, URIRef, Literal
 from rdflib.collection import Collection
@@ -14,6 +15,13 @@ from ..services.ontology import (
     absolute_iri, set_term_constraints, term_kind, term_impact,
 )
 from ..services.retrieval import has_vector
+from ..services.ontology_adapters import (
+    add_deprecation_headers,
+    compatibility_payload,
+    turtle_draft,
+    update_turtle_draft,
+)
+from ..services.ontology_drafts import OntologyDrafts
 
 
 class Explore(Scope):
@@ -38,6 +46,8 @@ class TermWrite(Request):
     domains: list[str] = Field(default_factory=list,max_length=500)
     ranges: list[str] = Field(default_factory=list,max_length=500)
     expected_ontology_id: str
+    draft_id: str | None = None
+    expected_revision: int | None = Field(default=None, ge=1)
 
 
 class TermUpdate(Request):
@@ -50,11 +60,15 @@ class TermUpdate(Request):
     domains: list[str] = Field(default_factory=list,max_length=500)
     ranges: list[str] = Field(default_factory=list,max_length=500)
     expected_ontology_id: str
+    draft_id: str | None = None
+    expected_revision: int | None = Field(default=None, ge=1)
 
 
 class TermRetire(Request):
     expected_ontology_id: str
     confirm_references: bool = False
+    draft_id: str | None = None
+    expected_revision: int | None = Field(default=None, ge=1)
 
 
 def install(app, service):
@@ -164,12 +178,14 @@ def install(app, service):
         return app.state.jobs.submit('semantic_index', run, p)
 
     @app.post('/api/projects/{p}/ontology/terms', status_code=201)
-    def add_term(p: str, request: TermWrite):
+    def add_term(p: str, request: TermWrite, response: Response):
         with service.lock:
             latest = service.repository.get_ontology(p)
             if latest['id'] != request.expected_ontology_id:
                 raise ValueError('版本冲突：请先刷新当前本体再编辑')
-            ontology = Ontology(latest['turtle'])
+            existing = (OntologyDrafts(service.repository).get(p, request.draft_id)
+                        if request.draft_id else None)
+            ontology = Ontology(existing['turtle'] if existing else latest['turtle'])
             if request.kind not in ('class','relation','attribute'):
                 raise ValueError('kind 必须是 class、relation 或 attribute')
             uri=request.uri or generated_term_iri(p,request.label_zh or request.label)
@@ -185,9 +201,17 @@ def install(app, service):
             set_term_constraints(ontology,node,request.kind,request.parent,request.domain,request.range,
                 request.domains,request.ranges)
             turtle = ontology.graph.serialize(format='turtle')
-            return service.repository.bootstrap_ontology(
-                p, turtle, Ontology(turtle).summary(),
-                {'actor': 'api:workspace'})
+            title=f'新增本体术语：{request.label_zh or request.label}'
+            result = (update_turtle_draft(
+                service.repository, p, request.draft_id,
+                request.expected_revision, turtle, reason=title)
+                if request.draft_id else turtle_draft(
+                    service.repository, p, turtle, source_kind='manual',
+                    title=title, actor='api:workspace',
+                    expected_ontology_id=request.expected_ontology_id,
+                    source_context={'legacy_route': 'POST /ontology/terms'}))
+            add_deprecation_headers(response)
+            return result
 
     @app.get('/api/projects/{p}/ontology/term-impact')
     def term_impact_view(p:str,uri:str):
@@ -197,11 +221,13 @@ def install(app, service):
                 **term_impact(service,p,uri,ontology)}
 
     @app.put('/api/projects/{p}/ontology/term')
-    def update_term(p:str,uri:str,request:TermUpdate):
+    def update_term(p:str,uri:str,request:TermUpdate,response:Response):
         with service.lock:
             latest=service.repository.get_ontology(p)
             if latest['id']!=request.expected_ontology_id:raise ValueError('版本冲突：请先刷新当前本体再编辑')
-            ontology=Ontology(latest['turtle']);node=URIRef(uri);kind=term_kind(ontology,node)
+            existing=(OntologyDrafts(service.repository).get(p,request.draft_id)
+                      if request.draft_id else None)
+            ontology=Ontology(existing['turtle'] if existing else latest['turtle']);node=URIRef(uri);kind=term_kind(ontology,node)
             if not absolute_iri(uri) or not kind:raise KeyError(uri)
             ontology.graph.remove((node,RDFS.label,None))
             if request.label.strip():ontology.graph.add((node,RDFS.label,Literal(request.label.strip())))
@@ -211,26 +237,35 @@ def install(app, service):
             set_term_constraints(ontology,node,kind,request.parent,request.domain,request.range,
                 request.domains,request.ranges)
             turtle=ontology.graph.serialize(format='turtle')
-            parsed=Ontology(turtle)
-            return service.repository.bootstrap_ontology(
-                p, turtle, parsed.summary(), {'actor': 'api:workspace'})
+            title=f'调整本体术语：{request.label_zh or request.label}'
+            result=(update_turtle_draft(service.repository,p,request.draft_id,
+                    request.expected_revision,turtle,reason=title)
+                if request.draft_id else turtle_draft(service.repository,p,turtle,source_kind='manual',
+                    title=title,actor='api:workspace',
+                    expected_ontology_id=request.expected_ontology_id,
+                    source_context={'legacy_route':'PUT /ontology/term','target_iri':uri}))
+            add_deprecation_headers(response)
+            return result
 
     @app.post('/api/projects/{p}/ontology/term-retire')
-    def retire_term(p:str,uri:str,request:TermRetire):
+    def retire_term(p:str,uri:str,request:TermRetire,response:Response):
         with service.lock:
             latest=service.repository.get_ontology(p)
             if latest['id']!=request.expected_ontology_id:raise ValueError('版本冲突：请先刷新当前本体再编辑')
-            ontology=Ontology(latest['turtle']);node=URIRef(uri);kind=term_kind(ontology,node)
+            drafts=OntologyDrafts(service.repository,publisher=service.repository)
+            existing=drafts.get(p,request.draft_id) if request.draft_id else None
+            ontology=Ontology(existing['turtle'] if existing else latest['turtle']);node=URIRef(uri);kind=term_kind(ontology,node)
             if not absolute_iri(uri) or not kind:raise KeyError(uri)
             impact=term_impact(service,p,uri,ontology)
             if (impact['record_count'] or impact['constraint_count'] or impact['pending_review_count']) and not request.confirm_references:
                 raise ValueError('术语存在引用；请检查影响并明确确认退休')
-            safe_incoming={RDFS.subClassOf,RDFS.domain,RDFS.range}
-            complex_refs=[(s,pred) for s,pred in ontology.graph.subject_predicates(node) if pred not in safe_incoming]
-            if complex_refs:raise ValueError('术语被 SHACL 或其他本体语句引用；请使用 Turtle 编辑器迁移这些引用')
-            ontology.graph.remove((node,None,None))
-            for predicate in safe_incoming:ontology.graph.remove((None,predicate,node))
-            turtle=ontology.graph.serialize(format='turtle');parsed=Ontology(turtle)
-            saved=service.repository.bootstrap_ontology(
-                p, turtle, parsed.summary(), {'actor': 'api:workspace'})
-            return {**saved,'retired':uri,'impact':impact}
+            draft=(existing if existing else drafts.create(
+                p,latest['id'],'manual',f'停用本体术语：{local_name(uri)}',
+                'api:workspace',source_context={'legacy_route':'POST /ontology/term-retire',
+                                                'target_iri':uri}))
+            revision=(request.expected_revision if existing else draft['revision'])
+            if revision is None:raise ValueError('更新现有草案必须提供 expected_revision')
+            preview=drafts.command(p,draft['id'],revision,{
+                'action':'retire_term','target_iri':uri,'reason':'旧维护接口发起停用'})
+            add_deprecation_headers(response)
+            return compatibility_payload(preview,retired=uri,impact=impact)

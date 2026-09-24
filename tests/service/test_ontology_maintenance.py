@@ -22,7 +22,7 @@ def setup(tmp_path):
     return client,app,p,'/api/projects/'+p,ontology
 
 
-def test_modify_term_constraints_creates_version_and_keeps_history(tmp_path):
+def test_modify_term_constraints_creates_governed_draft_and_keeps_history(tmp_path):
     c,app,p,base,old=setup(tmp_path)
     try:
         response=c.put(base+'/ontology/term?uri=https%3A%2F%2Ftest%2Fknows',json={'label':'熟悉','description':'人工维护',
@@ -32,10 +32,13 @@ def test_modify_term_constraints_creates_version_and_keeps_history(tmp_path):
         term=next(x for x in new['summary']['relations'] if x['id']=='https://test/knows')
         assert term['label']=='熟悉' and term['description']=='人工维护'
         assert term['domain']==['https://test/Thing']
-        assert len(app.state.service.repository.list_ontologies(p))==2
+        assert response.headers['Deprecation']=='true'
+        assert new['draft_id']==new['id'] and new['status']=='editing'
+        assert len(app.state.service.repository.list_ontologies(p))==1
         assert app.state.service.repository.get_ontology(p,old['id'])['turtle']==old['turtle']
         assert c.put(base+'/ontology/term?uri=https%3A%2F%2Ftest%2Fknows',json={'label':'旧提交',
-            'expected_ontology_id':old['id']}).status_code==409
+            'expected_ontology_id':old['id'],'draft_id':new['draft_id'],
+            'expected_revision':1}).status_code==409
     finally:c.__exit__(None,None,None)
 
 
@@ -73,10 +76,15 @@ def test_impact_and_confirmed_retirement_preserve_old_knowledge(tmp_path):
         body['confirm_references']=True
         retired=c.post(base+'/ontology/term-retire?uri=https%3A%2F%2Ftest%2FPerson',json=body)
         assert retired.status_code==200,retired.text
-        assert all(x['id']!='https://test/Person' for x in retired.json()['summary']['classes'])
+        retired_term=next(x for x in retired.json()['summary']['classes']
+                          if x['id']=='https://test/Person')
+        assert retired_term['active'] is True
+        retire_operation=retired.json()['operations'][0]
+        assert retire_operation['action']=='retire_term'
+        assert retire_operation['validation']['errors']
         latest=app.state.service.repository.current_records(p)
         assert next(x for x in latest if x['id']=='p')['ontology_id']==old['id']
-        assert len(app.state.service.repository.list_ontologies(p))==2
+        assert len(app.state.service.repository.list_ontologies(p))==1
     finally:c.__exit__(None,None,None)
 
 
@@ -115,10 +123,10 @@ def test_attribute_datatype_add_edit_and_cycle_rejected(tmp_path):
         attr=next(x for x in added.json()['summary']['attributes'] if x['id']=='https://test/score')
         assert attr['domain']==['https://test/Person'] and attr['range']==['http://www.w3.org/2001/XMLSchema#decimal']
         cycle=c.put(base+'/ontology/term?uri=https%3A%2F%2Ftest%2FThing',json={'label':'事物','parent':'https://test/Person',
-            'expected_ontology_id':added.json()['id']})
+            'expected_ontology_id':old['id']})
         assert cycle.status_code==422 and 'cycle' in cycle.text
         bad=c.post(base+'/ontology/terms',json={'kind':'attribute','uri':'https://test/bad','label':'错误',
-            'range':'https://test/Person','expected_ontology_id':added.json()['id']})
+            'range':'https://test/Person','expected_ontology_id':old['id']})
         assert bad.status_code==422
     finally:c.__exit__(None,None,None)
 
@@ -132,13 +140,15 @@ def test_add_and_update_term_persist_chinese_label(tmp_path):
         term=next(x for x in added.json()['summary']['classes'] if x['id']=='https://test/Shop')
         assert term['label']=='Shop' and term['label_zh']=='店铺'
         updated=c.put(base+'/ontology/term?uri=https%3A%2F%2Ftest%2FShop',json={'label':'Shop','label_zh':'商家店铺',
-            'expected_ontology_id':added.json()['id']})
+            'expected_ontology_id':old['id'],'draft_id':added.json()['draft_id'],
+            'expected_revision':added.json()['revision']})
         assert updated.status_code==200,updated.text
         term=next(x for x in updated.json()['summary']['classes'] if x['id']=='https://test/Shop')
         assert term['label']=='Shop' and term['label_zh']=='商家店铺'
         # Backward compatible: empty label_zh clears the @zh label, plain label remains.
         cleared=c.put(base+'/ontology/term?uri=https%3A%2F%2Ftest%2FShop',json={'label':'Shop',
-            'expected_ontology_id':updated.json()['id']})
+            'expected_ontology_id':old['id'],'draft_id':updated.json()['draft_id'],
+            'expected_revision':updated.json()['revision']})
         assert cleared.status_code==200,cleared.text
         term=next(x for x in cleared.json()['summary']['classes'] if x['id']=='https://test/Shop')
         assert term['label']=='Shop' and term['label_zh']==''
@@ -153,9 +163,9 @@ def test_unicode_iri_round_trips_without_percent_encoding(tmp_path):
             'label_zh':'保护对象','expected_ontology_id':old['id']})
         assert added.status_code==201,added.text
         assert any(item['id']==iri for item in added.json()['summary']['classes'])
-        saved=app.state.service.repository.get_ontology(p,added.json()['id'])
-        assert iri in saved['turtle']
-        reparsed=Ontology(saved['turtle'])
+        assert len(app.state.service.repository.list_ontologies(p))==1
+        assert iri in added.json()['turtle']
+        reparsed=Ontology(added.json()['turtle'])
         assert any(str(item)==iri for item in reparsed.classes)
     finally:c.__exit__(None,None,None)
 

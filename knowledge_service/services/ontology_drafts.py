@@ -444,6 +444,27 @@ class OntologyDrafts:
         """List lightweight draft records; previews remain an explicit read."""
         return self.store.list(project_id, status=status)
 
+    def update_publication_effects(self, project_id, draft_id,
+                                   expected_revision, effects):
+        """Refresh frozen source side effects while a source draft is editable."""
+        draft = self.store.get(project_id, draft_id)
+        self._assert_revision(draft, expected_revision)
+        if draft['status'] != 'editing':
+            raise ValueError('publication effects may only change while editing')
+        if draft['source_kind'] not in {'discovery', 'candidate', 'import'}:
+            raise ValueError('manual drafts do not have source publication effects')
+        if not isinstance(effects, dict):
+            raise ValueError('publication effects must be an object')
+        self._check_current(project_id, draft, expected_revision)
+        context = dict(draft.get('source_context') or {})
+        context['publication_effects'] = effects
+        updated = self._cas(project_id, draft_id, expected_revision, {
+            'source_context': context,
+            'validation_report': None,
+            'validation_fingerprint': None,
+        })
+        return self._preview(project_id, updated)
+
     def create(self, project_id, base_ontology_id_or_none=None, source='manual',
                title=None, actor=None, *, source_context=None, summary='',
                base_ontology_id=None):
@@ -633,7 +654,7 @@ class OntologyDrafts:
                 validation=validation,
                 reason=command.get('reason', raw.get('reason')),
                 ontology=working)
-            if draft['source_kind'] == 'turtle' and item['risk'] == 'low':
+            if draft['source_kind'] in {'turtle', 'discovery'} and item['risk'] == 'low':
                 item['risk'] = 'medium'
                 item['fingerprint'] = operation_fingerprint(item)
             rebuilt.append(item)

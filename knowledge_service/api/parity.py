@@ -14,6 +14,7 @@ class LocalImport(Request):
     name:str=Field(min_length=1,max_length=300)
     kind:str='project'
     build_vectors:bool=False
+    project_id:str|None=None
 
 class Subgraph(Scope):
     node_id:str|None=None
@@ -74,7 +75,9 @@ def install(app,service):
         from ..services.legacy_import import LegacyImporter
         def run(progress):
             progress('正在读取旧版项目；保留原始文件',10)
-            result=LegacyImporter(service).import_project(request.name,request.kind,progress=progress,build_vectors=request.build_vectors)
+            result=LegacyImporter(service).import_project(
+                request.name,request.kind,progress=progress,
+                build_vectors=request.build_vectors,project_id=request.project_id)
             progress('项目已加载；语义索引与图谱展示相互独立',95)
             return result
         return jobs.submit('legacy_import',run)

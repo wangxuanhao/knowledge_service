@@ -185,7 +185,7 @@ def _candidate_lifecycle(repository,project_id,candidates,drafts,records=None):
         included-= {item.get('candidate_id') for item in draft.get('skipped_candidates') or []}
         if draft.get('status')=='published':
             published_ids.update(included)
-        elif draft.get('status')=='draft':
+        elif draft.get('status') in {'draft','submitted'}:
             included_ids.update(included)
     materialized_ids &= candidate_ids
     published_ids = (published_ids & candidate_ids) - materialized_ids
@@ -382,8 +382,9 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
     if baseline_turtle:graph.parse(data=baseline_turtle,format='turtle')
     ns=Namespace(base);graph.bind('disc',ns);graph.bind('owl',OWL);graph.bind('rdfs',RDFS)
     catalog=_term_catalog(graph)
+    inferred_classes=inferred.get('classes',[])
     class_map={};class_lookup=_term_lookup(catalog,'classes')
-    for item in inferred.get('classes',[]):
+    for item in inferred_classes:
         machine_source=str(item.get('metadata',{}).get('inferred_from') or item.get('name'))
         source=reverse_entity.get(machine_source,machine_source)
         uri=class_lookup.get(str(source).strip().casefold()) or _iri(base,source)
@@ -398,6 +399,24 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
             class_map[source]=str(uri);class_lookup[source.lower()]=uri
             graph.add((uri,RDF.type,OWL.Class));graph.add((uri,RDFS.label,Literal(source,lang=_literal_language(source))))
             graph.add((uri,RDFS.comment,Literal(_definition('class',source),lang='zh')))
+    # Semantica 0.6.7 emits at most one suggested parent in ``parent``.
+    # ``subClassOf`` is accepted only as a compatibility alias.  Unknown or
+    # missing parents deliberately leave the class as an independent root.
+    for item in inferred_classes:
+        machine_source=str(item.get('metadata',{}).get('inferred_from') or item.get('name'))
+        source=reverse_entity.get(machine_source,machine_source)
+        child=class_map.get(str(source))
+        parent_value=item.get('parent')
+        if parent_value is None:
+            parent_value=item.get('subClassOf')
+        if isinstance(parent_value,dict):
+            parent_value=parent_value.get('name') or parent_value.get('uri')
+        if not child or not isinstance(parent_value,str) or not parent_value.strip():
+            continue
+        parent_source=reverse_entity.get(parent_value,parent_value)
+        parent=class_map.get(str(parent_source))
+        if parent and parent!=child:
+            graph.add((URIRef(child),RDFS.subClassOf,URIRef(parent)))
     relation_map={};attribute_map={}
     relation_lookup=_term_lookup(catalog,'relations');attribute_lookup=_term_lookup(catalog,'attributes')
     for item in inferred.get('properties',[]):

@@ -62,6 +62,27 @@ def create_app(db_path=None, encoder=None):
     encoder = encoder or configured_encoder()
     service = KnowledgeService(repository, encoder, milvus_store=_build_milvus_store())
 
+    def ontology_sync_runner(job):
+        if service.milvus_store is None:
+            return
+        record_ids = set(job.get('record_ids') or [])
+        if not record_ids:
+            return
+        records = [
+            row for row in repository.current_records(job['project_id'])
+            if row['id'] in record_ids
+            and row['kind'] in {'entity', 'relation', 'chunk'}]
+        if not records:
+            return
+        vectors = service.encoder.encode([row['text'] for row in records])
+        for row, vector in zip(records, vectors):
+            row['embedding'] = vector
+            row['embedding_model'] = service.encoder.identity
+            row['project_id'] = job['project_id']
+        service.milvus_store.upsert(records, flush=True)
+
+    repository._ontology_sync_runner = ontology_sync_runner
+
     @asynccontextmanager
     async def lifespan(app):
         # 启动后异步预热 embedding 模型（首次 encode ~141s），不阻塞启动，消除首次检索卡顿

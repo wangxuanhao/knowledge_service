@@ -9,7 +9,7 @@ TTL='''@prefix : <https://test/> . @prefix owl: <http://www.w3.org/2002/07/owl#>
 :Person a owl:Class .'''
 
 
-def test_candidate_can_propose_and_approve_versioned_ontology_change(tmp_path):
+def test_candidate_proposal_creates_and_submits_governed_draft(tmp_path):
     app=create_app(tmp_path/'proposal.sqlite',HashingEncoder())
     with TestClient(app) as client:
         project=client.post('/api/projects',json={'name':'proposal','use_default_ontology':False}).json()['id']
@@ -32,17 +32,54 @@ def test_candidate_can_propose_and_approve_versioned_ontology_change(tmp_path):
         assert created.status_code==201,created.text
         draft=created.json()
         assert draft['status']=='pending' and draft['impact']['linked_candidates']==1
+        assert draft['draft_id'] and draft['deprecation']['deprecated'] is True
+        assert len(app.state.service.repository.list_ontologies(project))==1
         approved=client.post(base+'/ontology-change-proposals/'+draft['id']+'/decision',json={
             'action':'approve','note':'业务负责人确认','expected_revision':draft['revision'],
             'expected_ontology_id':ontology['id']})
         assert approved.status_code==200,approved.text
         result=approved.json()
-        assert result['proposal']['status']=='approved'
-        assert result['ontology']['id']!=ontology['id']
-        assert any(x['id']=='https://test/worksFor' for x in result['ontology']['summary']['relations'])
+        assert result['proposal']['status']=='submitted'
+        assert result['ontology'] is None
+        assert result['draft']['status']=='submitted'
+        assert any(x['id']=='https://test/worksFor'
+                   for x in result['draft']['ontology']['relations'])
+        assert len(app.state.service.repository.list_ontologies(project))==1
+        submitted=result['draft']
+        warnings=[item['code'] for item in submitted['validation_report']['warnings']
+                  if item.get('code')]
+        current=submitted
+        for operation in submitted['operations']:
+            decision=client.post(
+                base+f"/ontology-drafts/{draft['draft_id']}/decisions",json={
+                    'expected_revision':current['revision'],
+                    'expected_ontology_id':ontology['id'],
+                    'validation_fingerprint':submitted['validation_fingerprint'],
+                    'acknowledged_warning_codes':warnings,
+                    'actor':'candidate-reviewer',
+                    'decisions':[{
+                        'operation_id':operation['id'],
+                        'operation_fingerprint':operation['fingerprint'],
+                        'action':'approve','reason':'候选证据已核验'}],
+                })
+            assert decision.status_code==200,decision.text
+            current=decision.json()
+        published=client.post(
+            base+f"/ontology-drafts/{draft['draft_id']}/publish",json={
+                'expected_revision':current['revision'],
+                'expected_ontology_id':ontology['id'],
+                'validation_fingerprint':current['validation_fingerprint'],
+                'acknowledged_warning_codes':warnings,
+                'idempotency_key':'candidate-publish-1','actor':'publisher',
+            })
+        assert published.status_code==200,published.text
+        assert len(app.state.service.repository.list_ontologies(project))==2
+        stored=app.state.service.repository.get_artifact('ontology_change',draft['id'])
+        assert stored['status']=='published'
+        assert stored['approved_ontology_id']==published.json()['id']
         reviews=client.get(base+'/reviews').json()['reviews']
         assert reviews[0]['ontology_change']['status']=='ready_for_review'
-        assert reviews[0]['ontology_change']['ontology_id']==result['ontology']['id']
+        assert reviews[0]['ontology_change']['ontology_id']==published.json()['id']
 
 
 def test_new_proposal_generates_unicode_iri_when_client_omits_it(tmp_path):
@@ -103,4 +140,7 @@ def test_high_impact_adjustment_requires_explicit_confirmation(tmp_path):
         denied=client.post(base+'/ontology-change-proposals/'+draft['id']+'/decision',json=decision)
         assert denied.status_code==422 and '明确确认' in denied.text
         decision['confirm_impact']=True
-        assert client.post(base+'/ontology-change-proposals/'+draft['id']+'/decision',json=decision).status_code==200
+        submitted=client.post(base+'/ontology-change-proposals/'+draft['id']+'/decision',json=decision)
+        assert submitted.status_code==200
+        assert submitted.json()['draft']['status']=='submitted'
+        assert len(app.state.service.repository.list_ontologies(project))==1

@@ -15,6 +15,8 @@ from rdflib import Graph, Literal, RDF, RDFS, URIRef
 from rdflib.namespace import OWL
 
 from .ontology import Ontology
+from .ontology_adapters import compatibility_payload
+from .ontology_drafts import OntologyDrafts
 
 
 class LegacyImporter:
@@ -125,11 +127,15 @@ class LegacyImporter:
                     continue
         return result
 
-    def import_project(self, name, kind='project', progress=None, build_vectors=True):
+    def import_project(self, name, kind='project', progress=None,
+                       build_vectors=True, project_id=None):
         with self.service.lock:
             self._folder(name, kind)
             key = self._key(name, kind)
             project, audit = self._existing(key)
+            if project_id is not None:
+                project = self.service.repository.get_project(project_id)
+                audit = None
             if audit:
                 return {'project': project, 'counts': audit['metadata']['counts'],
                         'warnings': audit['metadata']['warnings'], 'already_imported': True}
@@ -151,6 +157,36 @@ class LegacyImporter:
                     row.update(embedding=vector, embedding_model=self.service.encoder.identity)
             repository = self.service.repository
             rows = [repository._validate_record(r) for r in rows]
+            if project_id is not None:
+                versions = repository.list_ontologies(project['id'])
+                latest_id = versions[-1]['id'] if versions else None
+                frozen_rows = []
+                for row in rows:
+                    item = {key: value for key, value in row.items()
+                            if key not in {'embedding', 'embedding_model'}}
+                    if item['kind'] in ('entity', 'relation', 'attribute'):
+                        item['ontology_id'] = '__PUBLISHED_ONTOLOGY_ID__'
+                    frozen_rows.append(item)
+                drafts = OntologyDrafts(repository, publisher=repository)
+                draft = drafts.create(
+                    project['id'], latest_id, 'import',
+                    f'旧数据导入：{name}', 'legacy-import',
+                    source_context={
+                        'legacy_import_key': key,
+                        'publication_effects': {
+                            'kind': 'import', 'records': frozen_rows,
+                        },
+                    }, summary='旧数据导入需经人工审核后发布')
+                preview = drafts.command(
+                    project['id'], draft['id'], draft['revision'], {
+                        'action': 'diff_turtle', 'edited_turtle': turtle,
+                        'reason': '旧数据词汇表导入',
+                    })
+                return {
+                    'project': project, 'counts': counts, 'warnings': warnings,
+                    'already_imported': False,
+                    'draft': compatibility_payload(preview),
+                }
             if project is None:
                 project = repository.create_project(name, {'legacy_import_key': key, 'legacy_name': name,
                                                            'legacy_kind': kind, 'legacy_root': str(self.root)})

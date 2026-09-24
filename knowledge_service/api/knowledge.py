@@ -5,13 +5,17 @@
 """
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, Response, UploadFile
 
 from ..models import (
     Ingest, OntologyWrite, Question, RecordBatch, ResolutionReviewDecision,
     Revision, Scope, Search, Sparql,
 )
 from ..services.ontology import Ontology
+from ..services.ontology_adapters import (
+    add_deprecation_headers,
+    turtle_draft,
+)
 from ..services.service import public
 from ..core.time import utc_now
 
@@ -155,12 +159,27 @@ def install(app, service):
         return {**item, 'summary': Ontology(item['turtle']).summary()}
 
     @router.post('/api/projects/{project_id}/ontologies', status_code=201)
-    def save_ontology(project_id: str, request: OntologyWrite):
+    def save_ontology(project_id: str, request: OntologyWrite, response: Response):
         parsed = Ontology(request.turtle)
         with service.lock:
-            return repository.bootstrap_ontology(
-                project_id, request.turtle, parsed.summary(),
-                {'actor': 'api:knowledge'})
+            versions = repository.list_ontologies(project_id)
+            # Compatibility for a project explicitly created without a base
+            # ontology.  Subsequent edits are always governed drafts.
+            if not versions and request.expected_ontology_id is None:
+                add_deprecation_headers(response)
+                return repository.bootstrap_ontology(
+                    project_id, request.turtle, parsed.summary(), {
+                        'actor': 'api:knowledge',
+                        'write_path': 'compatibility_initial_bootstrap',
+                    })
+            result = turtle_draft(
+                repository, project_id, request.turtle, source_kind='turtle',
+                title='Turtle 编辑草案', actor='api:knowledge',
+                expected_ontology_id=request.expected_ontology_id,
+                source_context={'legacy_route': 'POST /ontologies'},
+                summary='由旧 Turtle 写接口转换')
+            add_deprecation_headers(response)
+            return result
 
     @router.post('/api/projects/{project_id}/ontology/validate')
     def validate(project_id: str, request: Scope, ontology_id: str | None = None):

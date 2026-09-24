@@ -13,6 +13,11 @@ from rdflib import Graph, Literal, RDFS, URIRef
 
 from ..models import Request
 from ..services.ontology import Ontology
+from ..services.ontology_adapters import (
+    DEPRECATION,
+    compatibility_payload,
+)
+from ..services.ontology_drafts import OntologyDrafts
 from ..services.ontology_discovery import (
     _candidates, _candidate_lifecycle, _candidate_mindmap, _induce,
     _materialize_candidates, _validated_materialization, _ontology_diff,
@@ -34,6 +39,24 @@ class DraftReview(Request):
 
 def install(app, service):
     router = APIRouter(prefix='/api/projects/{p}/ontology-discovery')
+    governed = OntologyDrafts(service.repository, publisher=service.repository)
+
+    def source_context(candidates):
+        documents = {}
+        for candidate in candidates:
+            document_id = candidate.get('document_id')
+            if not document_id:
+                continue
+            reference = documents.setdefault(document_id, {
+                'document_id': document_id,
+                'expected_document_version_id': candidate.get('document_version_id'),
+                'candidate_ids': [],
+            })
+            reference['candidate_ids'].append(candidate['id'])
+        return {
+            'legacy_route': 'POST /ontology-discovery/drafts',
+            'documents': list(documents.values()),
+        }
 
     @router.get('')
     def overview(p:str):
@@ -86,8 +109,27 @@ def install(app, service):
         parent=ontologies[-1] if ontologies else None
         baseline=parent['turtle'] if parent else None
         turtle,mappings,inferred=_induce(p,request.name,candidates,baseline_turtle=baseline)
-        draft_id=str(uuid4());summary=Ontology(turtle).summary();diff=_ontology_diff(baseline,turtle)
+        summary=Ontology(turtle).summary();diff=_ontology_diff(baseline,turtle)
         candidate_ids=[x['id'] for x in candidates]
+        effect_draft={
+            'id':'__DRAFT_ID__','candidate_snapshot':candidates,
+            'excluded_candidate_ids':[],'mappings':mappings,
+        }
+        provisional,initial_skipped=_materialize_candidates(
+            p,effect_draft,'__PUBLISHED_ONTOLOGY_ID__')
+        context=source_context(candidates)
+        context['publication_effects']={
+            'kind':'discovery','records':provisional,
+            'skipped_candidates':initial_skipped,
+        }
+        created=governed.create(
+            p,parent['id'] if parent else None,'discovery',request.name,
+            'api:ontology-discovery',source_context=context,
+            summary='开放发现候选归纳')
+        preview=governed.command(p,created['id'],created['revision'],{
+            'action':'diff_turtle','edited_turtle':turtle,
+            'reason':'Semantica 0.6.7 开放发现建议'})
+        draft_id=created['id']
         draft={'id':draft_id,'project_id':p,'name':request.name,'status':'draft','revision':1,
             'generator_backend':'semantica','created_at':utc_now(),'candidate_ids':candidate_ids,
             'candidate_snapshot':candidates,
@@ -97,46 +139,30 @@ def install(app, service):
             'quality_warnings':_quality_warnings(candidates),
             'inference':{'metadata':inferred.get('metadata',{}),'validation':inferred.get('validation',{})},
             'ontology_metadata':{'parent_version_id':parent['id'] if parent else None,
-                'source_draft_id':draft_id,'diff':diff,'candidate_ids':candidate_ids}}
-        return service.repository.save_artifact('ontology_discovery_draft',draft)
+                'source_draft_id':draft_id,'diff':diff,'candidate_ids':candidate_ids},
+            'unified_draft_id':draft_id,'draft_revision':preview['revision'],
+            'deprecation':DEPRECATION}
+        service.repository.save_artifact('ontology_discovery_draft',draft)
+        return {**draft,'operations':preview['operations']}
 
     @router.post('/drafts/{draft_id}/publish', status_code=202)
     def publish(p:str,draft_id:str):
-        """提交发布任务：物化→校验→发布本体→写正式图谱，进度上报到后台任务卡。"""
+        """Compatibility action: submit the unified draft for human review."""
         service.repository.get_project(p)
         draft=service.repository.get_artifact('ontology_discovery_draft',draft_id)
         if draft.get('project_id')!=p:raise KeyError(draft_id)
-        if draft.get('status')!='draft':raise ValueError('版本冲突：该发现草案已经发布，不能重复发布')
+        if draft.get('status')!='draft':raise ValueError('版本冲突：该发现草案已经提交，不能重复提交')
         # 提交前乐观锁：父本体已变化时直接拒绝，避免任务跑一半才失败
         ontologies=service.repository.list_ontologies(p)
         latest_id=ontologies[-1]['id'] if ontologies else None
         if latest_id!=draft.get('parent_ontology_id'):
             raise ValueError('版本冲突：本体已更新，请基于当前版本重新生成发现草案')
-        def run(progress):
-            progress('物化候选 → 正式记录雏形（不调 LLM）',5)
-            provisional_records,skipped=_materialize_candidates(p,draft,f"draft:{draft_id}")
-            progress(f'候选物化完成 · {len(provisional_records)} 条待校验',15)
-            records,skipped,validation=_validated_materialization(draft['turtle'],provisional_records,skipped)
-            progress(f'本体校验完成 · {len(records)} 条通过 · {len(skipped)} 条跳过',40)
-            with service.lock:
-                with service.repository._transaction():
-                    ontology,published=service.repository.publish_ontology_draft(
-                        p,draft,draft.get('parent_ontology_id'))
-                    for record in records:record['ontology_id']=ontology['id']
-                    saved=service.write(p,records,relation_constraint_mode='strict',
-                        defer_milvus_sync=True) if records else []
-                    progress(f'正式知识写入完成 · {len(saved)} 条',90)
-                    counts=Counter(row['kind'] for row in saved)
-                    published.update(mapped_entities=counts['entity'],mapped_relations=counts['relation'],
-                        mapped_attributes=len({row['id'] for row in saved if row['kind']=='attribute'}),
-                        skipped_candidates=skipped,validation=validation,
-                        requires_candidate_review=bool(skipped or published.get('excluded_candidate_ids')),
-                        requires_controlled_reingest=False)
-                    service.repository.save_artifact('ontology_discovery_draft',published)
-                service._sync_milvus(p,saved)
-            progress('发布完成 · 正式知识已写入',100)
-            return published
-        return app.state.jobs.submit('ontology_publish', run, p)
+        current=governed.get(p,draft_id)
+        submitted=governed.submit(p,draft_id,current['revision'])
+        draft.update(status='submitted',draft_revision=submitted['revision'],
+                     submitted_at=utc_now(),deprecation=DEPRECATION)
+        service.repository.save_artifact('ontology_discovery_draft',draft)
+        return compatibility_payload(submitted,legacy_discovery=draft)
 
     @router.put('/drafts/{draft_id}')
     def review_draft(p:str,draft_id:str,request:DraftReview):
@@ -161,11 +187,60 @@ def install(app, service):
             iri=iri_by_source[source];graph.remove((iri,None,None));graph.remove((None,None,iri))
             for group in mappings.values():group.pop(source,None)
         turtle=graph.serialize(format='turtle');summary=Ontology(turtle).summary()
+        # Mirror legacy review edits into the authoritative append-only draft.
+        current=governed.get(p,draft_id)
+        for source in request.excluded_terms:
+            iri=str(iri_by_source[source])
+            targeted=[operation for operation in current['operations']
+                      if operation['target_iri']==iri]
+            if targeted:
+                for operation in reversed(targeted):
+                    current=governed.command(p,draft_id,current['revision'],{
+                        'action':'withdraw_operation',
+                        'operation_id':operation['id'],
+                        'reason':'发现审核排除术语'})
+            else:
+                current=governed.command(p,draft_id,current['revision'],{
+                    'action':'retire_term','target_iri':iri,
+                    'reason':'发现审核停用已发布术语'})
+        desired_turtle=turtle
+        baseline_exclusion=False
+        if draft.get('parent_ontology_id') and request.excluded_terms:
+            baseline_graph=Graph();baseline_graph.parse(
+                data=service.repository.get_ontology(
+                    p,draft['parent_ontology_id'])['turtle'],format='turtle')
+            baseline_exclusion=any(
+                any(baseline_graph.triples((iri_by_source[source],None,None)))
+                for source in request.excluded_terms)
+        if baseline_exclusion:
+            adjusted=Graph();adjusted.parse(data=current['turtle'],format='turtle')
+            for source,label in request.term_labels.items():
+                if source in request.excluded_terms:
+                    continue
+                iri=iri_by_source[source]
+                adjusted.remove((iri,RDFS.label,None))
+                adjusted.add((iri,RDFS.label,Literal(
+                    label.strip(),lang=_literal_language(label))))
+            desired_turtle=adjusted.serialize(format='turtle')
+        current=governed.command(p,draft_id,current['revision'],{
+            'action':'diff_turtle','edited_turtle':desired_turtle,
+            'reason':'发现审核调整术语选择与标签'})
+        effect_draft={**draft,'id':draft_id,
+            'excluded_candidate_ids':request.excluded_candidate_ids,
+            'mappings':mappings}
+        provisional,initial_skipped=_materialize_candidates(
+            p,effect_draft,'__PUBLISHED_ONTOLOGY_ID__')
+        current=governed.update_publication_effects(
+            p,draft_id,current['revision'],{
+                'kind':'discovery','records':provisional,
+                'skipped_candidates':initial_skipped,
+            })
         draft.update(excluded_candidate_ids=request.excluded_candidate_ids,excluded_terms=request.excluded_terms,
             term_labels=request.term_labels,turtle=turtle,summary=summary,mappings=mappings,
             review_base_turtle=base_turtle,review_base_mappings=base_mappings,
             diff=_ontology_diff(None if not draft.get('parent_ontology_id') else service.repository.get_ontology(p,draft['parent_ontology_id'])['turtle'],turtle),
-            revision=draft.get('revision',1)+1,reviewed_at=utc_now())
+            revision=draft.get('revision',1)+1,draft_revision=current['revision'],
+            reviewed_at=utc_now(),deprecation=DEPRECATION)
         return service.repository.save_artifact('ontology_discovery_draft',draft)
 
     app.include_router(router)
