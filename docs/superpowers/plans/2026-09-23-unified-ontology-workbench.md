@@ -427,25 +427,25 @@ git commit -m "feat: add unified ontology workbench shell"
 - Modify: `knowledge_service/web/ontology-workbench.css`
 - Create: `tests/service/test_ontology_workbench_ui.py`
 
-- [ ] **Step 1: Write Playwright tests for scale and multi-parent behavior.**
+- [x] **Step 1: Write Playwright tests for scale and multi-parent behavior.**
 
 Test lazy roots/children loading, virtualized rows, search, repeated IRI reference rows with shared selection, display path plus “N other parents”, draft overlay and no eager full-summary tree build.
 
 Also cover discovery-stage regression: statistics/clusters render, candidate filters narrow the mind map and queue, selecting a candidate reveals source evidence/confidence, and generating a discovery draft carries the same candidate/document refs into design.
 
-- [ ] **Step 2: Write editor behavior tests.**
+- [x] **Step 2: Write editor behavior tests.**
 
 Test add class/relation/attribute, multiple parent chips, independent domain/range OR chips, datatype, multilingual annotations, retirement dependency preview, restore source-version selection and request-changes adjustment.
 
-- [ ] **Step 3: Implement object/hierarchy/matrix modes.**
+- [x] **Step 3: Implement object/hierarchy/matrix modes.**
 
 Object mode is default/authoritative. Hierarchy uses paginated expansion and reference rows; matrix pages relation/property constraints. Forms only send commands with current revision and keep unsent input after network errors.
 
-- [ ] **Step 4: Verify responsive and keyboard behavior.**
+- [x] **Step 4: Verify responsive and keyboard behavior.**
 
 Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_workbench_ui.py -vv`
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```powershell
 git add knowledge_service/web/ontology-workbench.js knowledge_service/web/ontology-workbench.css tests/service/test_ontology_workbench_ui.py
