@@ -178,27 +178,27 @@ git commit -m "feat: persist governed ontology drafts"
 - Modify: `knowledge_service/services/ontology.py`
 - Create: `tests/service/test_ontology_operations.py`
 
-- [ ] **Step 1: Write failing compiler tests.**
+- [x] **Step 1: Write failing compiler tests.**
 
 Cover 0..N parents, cycle/self/duplicate rejection, per-language annotation add/remove, class/object/datatype-property creation, datatype changes, and canonical domain/range OR sets: zero removes the constraint, one writes a direct IRI, more than one writes one sorted `owl:unionOf` list.
 
-- [ ] **Step 2: Add retirement/restore invariant tests.**
+- [x] **Step 2: Add retirement/restore invariant tests.**
 
 Assert retirement adds `owl:deprecated true` without deleting declarations/labels/edges; `dcterms:isReplacedBy` is structured; active subclass/domain/range/SHACL dependencies on deprecated terms produce the exact error/warning matrix. A restore command must require `source_ontology_id`, load that immutable version, and reconstruct exactly the user-selected annotations, parents, domain/range and datatype before removing the deprecation marker. Assert the preview shows the complete restored definition and its newly reactivated constraint impact.
 
-- [ ] **Step 3: Add canonical Turtle diff tests.**
+- [x] **Step 3: Add canonical Turtle diff tests.**
 
 Assert isomorphic blank-node graphs yield zero operations; supported union/SHACL subgraphs group atomically; unsupported restrictions block; removing a published declaration becomes `retire_term` or an error; `advanced_rdf_patch` cannot change kind, deprecation, or replacement invariants.
 
-- [ ] **Step 4: Run and confirm failures.**
+- [x] **Step 4: Run and confirm failures.**
 
 Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_operations.py -vv`
 
-- [ ] **Step 5: Implement normalized operation data and compiler.**
+- [x] **Step 5: Implement normalized operation data and compiler.**
 
 Use stable SHA-256 fingerprints over canonical JSON. Keep all graph mutation in `apply_operations(base_turtle, operations)`. Resolve restore templates only from the requested immutable `source_ontology_id`; store the selected definition in the operation fingerprint so later source/version drift cannot change it. Add `active_only=True` to ontology summaries without hiding deprecated terms from version/history views.
 
-- [ ] **Step 6: Implement graph validation and risk primitives.**
+- [x] **Step 6: Implement graph validation and risk primitives.**
 
 Return structured `{code,severity,message,operation_ids,term_iris}` issues and lock the complete action matrix in parameterized tests:
 
@@ -209,11 +209,11 @@ Return structured `{code,severity,message,operation_ids,term_iris}` issues and l
 
 Add a negative batch-approval test for every medium/high action so a classification omission cannot silently make it batchable.
 
-- [ ] **Step 7: Enforce deprecation in formal knowledge writes.**
+- [x] **Step 7: Enforce deprecation in formal knowledge writes.**
 
 Add tests to `tests/service/test_formal_writes.py` proving new entity, relation and attribute writes reject deprecated target types/properties by default while historical records bound to older ontology IDs remain readable and valid against their own version. Implement the check in `services/formal_writes.py` through `Ontology.is_active_term`, not through UI filtering.
 
-- [ ] **Step 8: Run tests and commit.**
+- [x] **Step 8: Run tests and commit.**
 
 Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_operations.py tests/service/test_formal_writes.py -vv`
 
