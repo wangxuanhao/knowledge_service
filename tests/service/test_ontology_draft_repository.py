@@ -344,6 +344,27 @@ def test_v14_reopen_repairs_self_supersession_and_round_trips(tmp_path):
         'SELECT COUNT(*) FROM ontology_history_repairs').fetchone()[0] == 1
 
 
+@pytest.mark.parametrize('statement', [
+    '''INSERT INTO ontology_history_repairs
+       SELECT * FROM ontology_history_repairs WHERE repair_key=?''',
+    '''INSERT OR REPLACE INTO ontology_history_repairs
+       SELECT * FROM ontology_history_repairs WHERE repair_key=?''',
+])
+def test_ontology_history_repair_rows_reject_duplicate_insert_even_without_recursive_triggers(
+        tmp_path, statement):
+    repo = Repository(tmp_path / 'immutable-repair-ledger.sqlite')
+    repair_key = repo._db.execute(
+        'SELECT repair_key FROM ontology_history_repairs').fetchone()[0]
+
+    assert repo._db.execute('PRAGMA recursive_triggers').fetchone()[0] == 0
+    with pytest.raises(sqlite3.IntegrityError, match='immutable'):
+        repo._db.execute(statement, (repair_key,))
+
+    assert repo._db.execute(
+        'SELECT COUNT(*) FROM ontology_history_repairs WHERE repair_key=?',
+        (repair_key,)).fetchone()[0] == 1
+
+
 @pytest.mark.parametrize('ledger', ['operations', 'decisions'])
 def test_v14_reopen_rejects_ambiguous_two_node_supersession_cycles(
         tmp_path, ledger):
@@ -631,6 +652,142 @@ def test_full_restore_fails_closed_for_schema_and_contract_drift(tmp_path, mutat
         target.get_project(snapshot['project']['id'])
 
 
+_FULL_ROW_SHAPES = {
+    ('project',): {
+        'id', 'name', 'metadata', 'created_at',
+    },
+    ('records',): {
+        'id', 'kind', 'text', 'metadata', 'valid_from', 'valid_until',
+        'project_id', 'version', 'version_id', 'recorded_at', 'superseded_at',
+    },
+    ('ontologies',): {
+        'id', 'project_id', 'turtle', 'summary', 'created_at', 'metadata',
+    },
+    ('artifacts',): {'id', 'kind', 'project_id', 'payload'},
+    ('governance', 'assertions'): {
+        'id', 'project_id', 'kind', 'document_id', 'document_version_id',
+        'chunk_id', 'source_hash', 'start_char', 'end_char', 'quote', 'payload',
+        'status', 'canonical_record_id', 'decision_reason', 'decision_version',
+        'created_at', 'decided_at', 'actor',
+    },
+    ('governance', 'assertion_events'): {
+        'id', 'assertion_id', 'project_id', 'from_status', 'to_status',
+        'decision_version', 'reason', 'actor', 'canonical_record_id', 'created_at',
+    },
+    ('governance', 'fact_keys'): {
+        'project_id', 'fact_key', 'canonical_record_id', 'created_at', 'retired_at',
+    },
+    ('governance', 'ingest_runs'): {
+        'id', 'project_id', 'document_id', 'document_version_id', 'attempt',
+        'retry_of', 'status', 'active_stage', 'readiness', 'counts', 'failure',
+        'version', 'created_at', 'updated_at',
+    },
+    ('governance', 'resolution_reviews'): {
+        'id', 'project_id', 'source_entity_id', 'candidate_entity_id', 'score',
+        'status', 'decision_version', 'payload', 'reason', 'actor', 'created_at',
+        'decided_at',
+    },
+    ('governance', 'merge_operations'): {
+        'id', 'project_id', 'operation', 'status', 'redirects', 'assertion_moves',
+        'before_state', 'after_state', 'expected_versions', 'reversal_of',
+        'created_at',
+    },
+    ('governance', 'ontology', 'drafts'): {
+        'id', 'project_id', 'base_ontology_id', 'source_kind', 'status', 'revision',
+        'title', 'summary', 'source_context', 'validation_report',
+        'validation_fingerprint', 'published_ontology_id', 'legacy_artifact_id',
+        'created_at', 'updated_at',
+    },
+    ('governance', 'ontology', 'operations'): {
+        'id', 'project_id', 'draft_id', 'action', 'target_iri', 'risk',
+        'fingerprint', 'reason', 'supersedes_operation_id', 'created_at', 'before',
+        'after', 'evidence', 'impact', 'validation',
+    },
+    ('governance', 'ontology', 'decisions'): {
+        'id', 'project_id', 'draft_id', 'operation_id', 'operation_fingerprint',
+        'action', 'reason', 'actor', 'supersedes_decision_id', 'created_at',
+    },
+    ('governance', 'ontology', 'publish_requests'): {
+        'id', 'project_id', 'draft_id', 'idempotency_key', 'request_hash',
+        'result_ontology_id', 'created_at', 'completed_at',
+    },
+    ('provenance', 'record_version_assertions'): {
+        'project_id', 'record_id', 'record_version_id', 'assertion_id',
+        'assertion_event_id', 'created_at',
+    },
+    ('provenance', 'activities'): {
+        'id', 'project_id', 'kind', 'status', 'payload', 'started_at', 'completed_at',
+    },
+    ('provenance', 'edges'): {
+        'id', 'project_id', 'activity_id', 'source_ref', 'relation', 'target_ref',
+        'ordinal', 'payload', 'created_at',
+    },
+}
+
+
+@pytest.mark.parametrize('section_path,fields', _FULL_ROW_SHAPES.items(),
+                         ids=lambda value: '.'.join(value) if isinstance(value, tuple)
+                         else None)
+@pytest.mark.parametrize('mutation', ['missing', 'unknown'])
+def test_full_restore_validates_exact_row_contracts_before_mutation(
+        tmp_path, section_path, fields, mutation):
+    snapshot, _ = _governed_snapshot(
+        tmp_path, f'row-contract-{mutation}-{len(section_path)}-{section_path[-1]}')
+    project_id = snapshot['project']['id']
+    if section_path == ('project',):
+        row = snapshot['project']
+    else:
+        container = snapshot
+        for key in section_path[:-1]:
+            container = container[key]
+        row = {field: None for field in fields}
+        row['project_id'] = project_id
+        container[section_path[-1]] = [row]
+    if mutation == 'missing':
+        row.pop(sorted(fields - {'project_id'})[0])
+    else:
+        row['future_field'] = 'must not be ignored'
+
+    target = Repository(
+        tmp_path / f'row-contract-target-{mutation}-{section_path[-1]}.sqlite')
+    with pytest.raises(ValueError, match='字段'):
+        target.restore_projection(snapshot)
+    with pytest.raises(KeyError):
+        target.get_project(project_id)
+
+
+@pytest.mark.parametrize('flag', ['missing', 0, 1, 'true', None],
+                         ids=['missing', 'zero', 'one', 'string', 'null'])
+def test_restore_requires_literal_boolean_governance_history_flag(tmp_path, flag):
+    snapshot, _ = _governed_snapshot(tmp_path, f'flag-{type(flag).__name__}-{flag}')
+    if flag == 'missing':
+        del snapshot['governance_history_included']
+    else:
+        snapshot['governance_history_included'] = flag
+    target = Repository(tmp_path / f'flag-target-{type(flag).__name__}-{flag}.sqlite')
+
+    with pytest.raises(ValueError, match='governance_history_included'):
+        target.restore_projection(snapshot)
+    with pytest.raises(KeyError):
+        target.get_project(snapshot['project']['id'])
+
+
+@pytest.mark.parametrize('version', ['missing', None, True, '14', 13, 999],
+                         ids=['missing', 'null', 'bool', 'string', 'too-old', 'future'])
+def test_full_restore_requires_supported_integer_schema_version(tmp_path, version):
+    snapshot, _ = _governed_snapshot(tmp_path, f'version-{version}')
+    if version == 'missing':
+        del snapshot['schema_version']
+    else:
+        snapshot['schema_version'] = version
+    target = Repository(tmp_path / f'version-target-{version}.sqlite')
+
+    with pytest.raises(ValueError, match='schema_version'):
+        target.restore_projection(snapshot)
+    with pytest.raises(KeyError):
+        target.get_project(snapshot['project']['id'])
+
+
 def test_explicit_light_legacy_restore_keeps_permissive_section_contract(tmp_path):
     project_id = 'legacy-light-project'
     snapshot = {
@@ -647,6 +804,22 @@ def test_explicit_light_legacy_restore_keeps_permissive_section_contract(tmp_pat
 
     target = Repository(tmp_path / 'legacy-light-target.sqlite')
     assert target.restore_projection(snapshot)['id'] == project_id
+
+
+def test_full_record_row_contract_preserves_supported_optional_fields(tmp_path):
+    source = Repository(tmp_path / 'record-contract-source.sqlite')
+    project_id = source.create_project('record contract')['id']
+    source.put_record(project_id, {
+        'id': 'entity-1', 'kind': 'entity', 'text': 'Entity', 'type': 'Thing',
+        'source_id': 'document-1', 'ontology_id': 'ontology-1',
+        'embedding_model': 'model-1', 'properties': {'stable': True},
+    })
+    snapshot = source.export_projection(project_id)
+
+    target = Repository(tmp_path / 'record-contract-target.sqlite')
+    target.restore_projection(snapshot)
+
+    assert target.export_projection(project_id)['records'] == snapshot['records']
 
 
 def test_full_export_restores_artifacts_before_legacy_draft_references(tmp_path):

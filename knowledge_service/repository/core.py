@@ -359,6 +359,14 @@ def _ensure_ontology_history_repair_ledger(db):
         operations_repaired INTEGER NOT NULL CHECK(operations_repaired >= 0),
         decisions_repaired INTEGER NOT NULL CHECK(decisions_repaired >= 0),
         repaired_at TEXT NOT NULL)''')
+    db.execute('''CREATE TRIGGER IF NOT EXISTS ontology_history_repairs_insert_immutable
+        BEFORE INSERT ON ontology_history_repairs
+        WHEN EXISTS (
+          SELECT 1 FROM ontology_history_repairs
+          WHERE repair_key=NEW.repair_key)
+        BEGIN
+          SELECT RAISE(ABORT, 'ontology history repair records are immutable');
+        END''')
     db.execute('''CREATE TRIGGER IF NOT EXISTS ontology_history_repairs_update_immutable
         BEFORE UPDATE ON ontology_history_repairs BEGIN
           SELECT RAISE(ABORT, 'ontology history repair records are immutable');
