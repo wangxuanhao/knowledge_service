@@ -621,7 +621,8 @@ def apply_operations(base_turtle: str, operations: Iterable[dict]) -> str:
             if _is_active_graph_term(graph, target):
                 raise ValueError('restore_term 的当前术语必须已停用（deprecated）')
             _ensure_kind(graph, target, after['template'].get('kind'))
-            _apply_template(graph, target, after['template'], selected)
+            if not after.get('activation_only'):
+                _apply_template(graph, target, after['template'], selected)
             graph.remove((target, OWL.deprecated, None))
         elif action == 'advanced_rdf_patch':
             if 'turtle' in after:

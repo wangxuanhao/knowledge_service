@@ -10,7 +10,6 @@ partial publication transaction itself.
 from __future__ import annotations
 
 import base64
-from collections import deque
 import hashlib
 import json
 from uuid import uuid4
@@ -27,6 +26,7 @@ from .ontology_operations import (
     canonical_turtle_diff,
     is_batch_eligible,
     operation_fingerprint,
+    retirement_dependencies,
     validate_ontology_invariants,
 )
 
@@ -34,7 +34,7 @@ from .ontology_operations import (
 VALIDATION_RULE_VERSION = 'ontology-drafts/1'
 FINAL_STATES = frozenset({'published', 'closed'})
 EDITABLE_STATES = frozenset({'editing'})
-REVIEW_STATES = frozenset({'submitted', 'reviewed'})
+REVIEW_STATES = frozenset({'submitted'})
 
 
 class OntologyDraftError(ValueError):
@@ -136,6 +136,16 @@ class OntologyDrafts:
         except OntologyDraftConflict as exc:
             raise self._translate_conflict(exc) from exc
 
+    @staticmethod
+    def _assert_revision(draft, expected_revision):
+        if draft['revision'] != expected_revision:
+            raise RevisionConflict(
+                'ontology draft revision changed', details={
+                    'draft_id': draft['id'],
+                    'expected_revision': expected_revision,
+                    'current_revision': draft['revision'],
+                })
+
     def _history(self, project_id, draft_id):
         history = self.store.export(project_id)
         operations = [row for row in history['operations']
@@ -143,6 +153,30 @@ class OntologyDrafts:
         decisions = [row for row in history['decisions']
                      if row['draft_id'] == draft_id]
         return operations, decisions
+
+    def _effective_operations(self, project_id, draft_id):
+        """Return current operations in stable logical, not append, order."""
+        history, _ = self._history(project_id, draft_id)
+        current_ids = {
+            row['id'] for row in self.store.effective_operations(project_id, draft_id)}
+        by_id = {row['id']: row for row in history}
+        positions = {row['id']: index for index, row in enumerate(history)}
+
+        def logical_position(operation):
+            current = operation
+            seen = set()
+            while current.get('supersedes_operation_id'):
+                parent_id = current['supersedes_operation_id']
+                if parent_id in seen or parent_id not in by_id:
+                    break
+                seen.add(parent_id)
+                current = by_id[parent_id]
+            return positions[current['id']]
+
+        effective = [row for row in history if row['id'] in current_ids]
+        effective.sort(key=lambda row: (logical_position(row), positions[row['id']]))
+        return [row for row in effective
+                if not (row.get('validation') or {}).get('withdrawn')]
 
     @staticmethod
     def _effective_decisions(all_decisions):
@@ -158,23 +192,23 @@ class OntologyDrafts:
         return list(by_operation.values())
 
     def _active_operations(self, project_id, draft_id):
-        return [row for row in self.store.effective_operations(project_id, draft_id)
+        return [row for row in self._effective_operations(project_id, draft_id)
                 if (row.get('validation') or {}).get('rebase_status') != 'no-op']
 
     def _ontology_for_draft(self, project_id, draft):
         operations = self._active_operations(project_id, draft['id'])
         applicable = [row for row in operations
-                      if (row.get('validation') or {}).get('rebase_status') != 'conflict']
+                      if (row.get('validation') or {}).get('rebase_status') != 'conflict'
+                      and not (row.get('validation') or {}).get('errors')]
         turtle = self._base_turtle(project_id, draft['base_ontology_id'])
         if applicable:
             turtle = apply_operations(turtle, map(_semantic_operation, applicable))
         return turtle, operations
 
     def _preview(self, project_id, draft):
-        operations, all_decisions = self._history(project_id, draft['id'])
-        effective_ids = {
-            row['id'] for row in self.store.effective_operations(project_id, draft['id'])}
-        effective = [row for row in operations if row['id'] in effective_ids]
+        _, all_decisions = self._history(project_id, draft['id'])
+        effective = self._effective_operations(project_id, draft['id'])
+        effective_ids = {row['id'] for row in effective}
         decisions = [row for row in self._effective_decisions(all_decisions)
                      if row['operation_id'] in effective_ids
                      and row['operation_fingerprint'] == next(
@@ -328,36 +362,28 @@ class OntologyDrafts:
             source_kind = source
         title = _text(title, 'title')
         actor = _text(actor, 'actor')
-        latest = self._latest_id(project_id)
-        if base_ontology_id_or_none != latest:
-            raise StaleBase(
-                'new draft must use the current ontology as its base', details={
-                    'base_ontology_id': base_ontology_id_or_none,
-                    'current_ontology_id': latest})
-        context = dict(source_context or {})
-        context.setdefault('actor', actor)
-        if source_kind in {'discovery', 'candidate'}:
-            # Honour an explicit caller snapshot as an optimistic source
-            # precondition before filling any omitted snapshot fields.
-            self._source_snapshot(
-                project_id, {'source_context': context}, require_current=True)
-            context = self._refresh_source_context(project_id, context)
-        draft = self.store.create(project_id, {
-            'id': str(uuid4()), 'base_ontology_id': base_ontology_id_or_none,
-            'source_kind': source_kind, 'status': 'editing', 'revision': 1,
-            'title': title, 'summary': summary, 'source_context': context,
-        })
-        if source_kind in {'discovery', 'candidate'}:
-            try:
+        with self.repository._transaction():
+            latest = self._latest_id(project_id)
+            if base_ontology_id_or_none != latest:
+                raise StaleBase(
+                    'new draft must use the current ontology as its base', details={
+                        'base_ontology_id': base_ontology_id_or_none,
+                        'current_ontology_id': latest})
+            context = dict(source_context or {})
+            context['actor'] = actor
+            if source_kind in {'discovery', 'candidate'}:
+                # Honour an explicit caller snapshot as an optimistic source
+                # precondition before filling omitted immutable snapshot fields.
+                self._source_snapshot(
+                    project_id, {'source_context': context}, require_current=True)
+                context = self._refresh_source_context(project_id, context)
+            draft = self.store.create(project_id, {
+                'id': str(uuid4()), 'base_ontology_id': base_ontology_id_or_none,
+                'source_kind': source_kind, 'status': 'editing', 'revision': 1,
+                'title': title, 'summary': summary, 'source_context': context,
+            })
+            if source_kind in {'discovery', 'candidate'}:
                 self._source_snapshot(project_id, draft)
-            except StaleSource:
-                # Creation is atomic from the caller's perspective.
-                with self.repository._transaction():
-                    with self.repository._allow_ontology_history_delete():
-                        self.repository._db.execute(
-                            'DELETE FROM ontology_drafts WHERE project_id=? AND id=?',
-                            (project_id, draft['id']))
-                raise
         return draft
 
     @staticmethod
@@ -396,6 +422,131 @@ class OntologyDrafts:
                 'datatype': command.get('datatype')}
         return action, before, after
 
+    @staticmethod
+    def _annotation_spec(predicate, value):
+        spec = {'predicate': str(predicate), 'value': str(value)}
+        if isinstance(value, URIRef):
+            spec['type'] = 'iri'
+        else:
+            spec['language'] = value.language
+            spec['datatype'] = str(value.datatype) if value.datatype else None
+        return spec
+
+    def _expand_restore(self, operation, ontology):
+        """Keep activation atomic while making selected definition edges reviewable."""
+        after = operation['after']
+        selected = list(after['selected_fields'])
+        template = after['template']
+        activation = json.loads(_canonical_json(operation))
+        activation['after']['activation_only'] = True
+        activation['fingerprint'] = operation_fingerprint(activation)
+        target = URIRef(operation['target_iri'])
+        raw = [activation]
+
+        if 'annotations' in selected:
+            structural = {
+                RDF.type, RDFS.subClassOf, RDFS.domain, RDFS.range,
+                OWL.deprecated,
+            }
+            current = {
+                _canonical_json(self._annotation_spec(predicate, value)):
+                self._annotation_spec(predicate, value)
+                for predicate, value in ontology.graph.predicate_objects(target)
+                if predicate not in structural
+            }
+            desired = {
+                _canonical_json(spec): spec
+                for spec in template.get('annotations', [])}
+            raw.extend({
+                'action': 'remove_annotation', 'target_iri': str(target),
+                'before': current[key],
+            } for key in sorted(set(current) - set(desired)))
+            raw.extend({
+                'action': 'add_annotation', 'target_iri': str(target),
+                'after': desired[key],
+            } for key in sorted(set(desired) - set(current)))
+
+        predicates = {
+            'parents': ('parent', RDFS.subClassOf),
+            'domain': ('domain', RDFS.domain),
+            'range': ('range', RDFS.range),
+        }
+        for field, (suffix, predicate) in predicates.items():
+            if field not in selected:
+                continue
+            if predicate in {RDFS.domain, RDFS.range}:
+                current_values = {
+                    str(value) for value in ontology.constraint_types(target, predicate)}
+            else:
+                current_values = {
+                    str(value) for value in ontology.graph.objects(target, predicate)}
+            desired_values = set(template.get(field, []))
+            raw.extend({
+                'action': f'remove_{suffix}', 'target_iri': str(target),
+                'before': {'value': value},
+            } for value in sorted(current_values - desired_values))
+            raw.extend({
+                'action': f'add_{suffix}', 'target_iri': str(target),
+                'after': {'value': value},
+            } for value in sorted(desired_values - current_values))
+
+        if 'datatype' in selected:
+            current_values = list(ontology.graph.objects(target, RDFS.range))
+            current = str(current_values[0]) if len(current_values) == 1 else None
+            desired = template.get('datatype')
+            if current != desired:
+                raw.append({
+                    'action': 'set_datatype', 'target_iri': str(target),
+                    'before': {'datatype': current},
+                    'after': {'datatype': desired},
+                })
+        return raw
+
+    def _rebuild_operations(self, project_id, draft, operations, ontology, command):
+        evidence = command.get('evidence_refs', command.get('evidence', []))
+        confidence = command.get('confidence')
+        rebuilt = []
+        working = Ontology(ontology.graph.serialize(format='turtle'))
+        for raw in operations:
+            action = raw['action']
+            target = raw['target_iri']
+            impact = {
+                **self._impact(project_id, target, ontology=working),
+                **(raw.get('impact') or {}),
+            }
+            validation = {
+                key: value for key, value in (raw.get('validation') or {}).items()
+                if key not in {'warnings', 'source', 'confidence'}
+            }
+            warnings = list((raw.get('validation') or {}).get('warnings') or [])
+            if action == 'retire_term':
+                dependency_report = retirement_dependencies(
+                    working, target,
+                    active_records=range(impact['formal_records']))
+                impact['dependency_report'] = dependency_report
+                validation['errors'] = dependency_report['errors']
+                validation['info'] = dependency_report['info']
+                warnings.extend(dependency_report['warnings'])
+            item = build_operation(
+                action, target, before=raw.get('before'), after=raw.get('after'),
+                source=draft['source_kind'], impact=impact, warnings=warnings,
+                confidence=confidence,
+                evidence=evidence or raw.get('evidence') or [],
+                validation=validation,
+                reason=command.get('reason', raw.get('reason')),
+                ontology=working)
+            if draft['source_kind'] == 'turtle' and item['risk'] == 'low':
+                item['risk'] = 'medium'
+                item['fingerprint'] = operation_fingerprint(item)
+            rebuilt.append(item)
+            try:
+                applied = apply_operations(
+                    working.graph.serialize(format='turtle'), [item])
+            except ValueError:
+                continue
+            working = Ontology(applied)
+        return rebuilt
+
     def _compile_command(self, project_id, draft, command, ontology):
         if not isinstance(command, dict):
             raise ValueError('command must be an object')
@@ -404,7 +555,7 @@ class OntologyDrafts:
             edited = command.get('edited_turtle', command.get('turtle'))
             if not isinstance(edited, str):
                 raise ValueError('Turtle command requires edited_turtle')
-            return canonical_turtle_diff(
+            raw = canonical_turtle_diff(
                 ontology.graph.serialize(format='turtle'), edited,
                 published=draft['base_ontology_id'] is not None,
                 base_ontology_id=draft['base_ontology_id'],
@@ -414,6 +565,13 @@ class OntologyDrafts:
                         self.repository, project_id, target_iri,
                         source_ontology_id,
                         selected_fields=command.get('selected_fields') or [])))
+            expanded = []
+            for operation in raw:
+                expanded.extend(
+                    self._expand_restore(operation, ontology)
+                    if operation['action'] == 'restore_term' else [operation])
+            return self._rebuild_operations(
+                project_id, draft, expanded, ontology, command)
         target = command.get('target_iri')
         if action == 'restore_term':
             selected = command.get('selected_fields', command.get('selection'))
@@ -423,17 +581,16 @@ class OntologyDrafts:
                 selected_fields=selected or [])
             operation['reason'] = command.get('reason')
             operation['fingerprint'] = operation_fingerprint(operation)
-            return [operation]
+            return self._rebuild_operations(
+                project_id, draft, self._expand_restore(operation, ontology),
+                ontology, command)
         action, before, after = self._operation_args(command)
         # Risk, warnings and fingerprints are always recomputed here.  Client
         # supplied values with those names are intentionally ignored.
-        return [build_operation(
-            action, target, before=before, after=after,
-            source=draft['source_kind'],
-            impact=self._impact(project_id, target, ontology=ontology),
-            confidence=command.get('confidence'),
-            evidence=command.get('evidence_refs', command.get('evidence', [])),
-            reason=command.get('reason'), ontology=ontology)]
+        return self._rebuild_operations(project_id, draft, [{
+            'action': action, 'target_iri': target,
+            'before': before, 'after': after,
+        }], ontology, command)
 
     def _impact(self, project_id, target_iri, *, ontology=None):
         ontology = ontology or Ontology(
@@ -448,11 +605,26 @@ class OntologyDrafts:
                     descendants.add(child)
                     pending_nodes.append(child)
         references = term_impact(self, project_id, target_iri, ontology)
-        constraints = references['constraint_count']
-        formal_records = references['record_count']
+        records = self.repository.current_records(project_id, vectors='none')
+        direct = [
+            row for row in records
+            if row.get('type') == target_iri
+            or target_iri in (row.get('properties') or {})]
+        direct_ids = {row['id'] for row in direct}
+        linked = [
+            row for row in records
+            if row.get('kind') == 'relation' and row['id'] not in direct_ids
+            and (row.get('subject_id') in direct_ids
+                 or row.get('object_id') in direct_ids)]
+        affected_records = [*direct, *linked]
+        constraint_details = [{
+            'subject': str(subject), 'predicate': str(predicate),
+        } for subject, predicate in ontology.graph.subject_predicates(target)]
+        constraints = len(constraint_details)
+        formal_records = len(affected_records)
         pending_ids = set()
         target_names = {target_iri, local_name(target_iri)}
-        for row in self.repository.current_records(project_id, vectors='none'):
+        for row in records:
             metadata = row.get('metadata') or {}
             candidates = [*(metadata.get('review_candidates') or []),
                           *(metadata.get('discovery_candidates') or [])]
@@ -472,32 +644,94 @@ class OntologyDrafts:
             'constraints': constraints,
             'leaf': not descendants,
             'referenced': referenced,
+            'record_ids': [row['id'] for row in affected_records],
+            'record_ids_truncated': False,
+            'record_preview': references['record_preview'],
+            'kind_counts': references['kind_counts'],
+            'linked_relation_count': references['linked_relation_count'],
+            'constraints_detail': constraint_details,
+            'pending_candidate_ids': sorted(pending_ids),
+            'classification_preview': {
+                'records': references['kind_counts'],
+                'descendants': len(descendants),
+                'constraints': constraints,
+                'pending_candidates': pending,
+            },
         }
 
     def command(self, project_id, draft_id, expected_revision, command):
-        draft = self.store.get(project_id, draft_id)
-        if draft['status'] not in EDITABLE_STATES:
-            raise ValueError('commands are only allowed while a draft is editing')
-        self._check_current(project_id, draft, expected_revision)
-        base_turtle, effective = self._ontology_for_draft(project_id, draft)
-        ontology = Ontology(base_turtle)
-        compiled = self._compile_command(project_id, draft, command, ontology)
-        supersedes = command.get(
-            'supersedes_operation_id', command.get('operation_id'))
-        if supersedes:
-            current = {row['id']: row for row in effective}
-            if supersedes not in current:
-                raise ValueError('superseded operation is not current')
-            if len(compiled) != 1:
-                raise ValueError('one adjustment may supersede exactly one operation')
-            compiled[0]['supersedes_operation_id'] = supersedes
-        # Prove the proposed overlay is valid before persisting any audit row.
-        candidate_operations = [row for row in effective
-                                if row['id'] != supersedes] + compiled
-        apply_operations(
-            self._base_turtle(project_id, draft['base_ontology_id']),
-            map(_semantic_operation, candidate_operations))
         with self.repository._transaction():
+            draft = self.store.get(project_id, draft_id)
+            self._assert_revision(draft, expected_revision)
+            if draft['status'] not in EDITABLE_STATES:
+                raise ValueError('commands are only allowed while a draft is editing')
+            self._check_current(project_id, draft, expected_revision)
+            base_turtle, effective = self._ontology_for_draft(project_id, draft)
+            ontology = Ontology(base_turtle)
+            action = command.get('action') if isinstance(command, dict) else None
+            supersedes = command.get(
+                'supersedes_operation_id', command.get('operation_id'))
+            if action == 'withdraw_operation':
+                current = {row['id']: row for row in self._effective_operations(
+                    project_id, draft_id)}
+                withdrawn = current.get(supersedes)
+                if withdrawn is None:
+                    raise ValueError('withdrawn operation is not current')
+                compiled = [{
+                    'action': 'withdraw_operation',
+                    'target_iri': withdrawn['target_iri'],
+                    'before': {'operation_id': withdrawn['id']},
+                    'after': None,
+                    'evidence': [], 'impact': {},
+                    'validation': {'withdrawn': True},
+                    'risk': 'low', 'reason': command.get('reason'),
+                    'supersedes_operation_id': withdrawn['id'],
+                }]
+                compiled[0]['fingerprint'] = operation_fingerprint(compiled[0])
+            else:
+                compiled = self._compile_command(
+                    project_id, draft, command, ontology)
+            if supersedes:
+                current = {row['id']: row for row in effective}
+                if supersedes not in current:
+                    raise ValueError('superseded operation is not current')
+                if len(compiled) != 1:
+                    raise ValueError(
+                        'one adjustment may supersede exactly one operation')
+                compiled[0]['supersedes_operation_id'] = supersedes
+
+            # Replacements occupy the original logical slot so dependent
+            # annotations/edges never move ahead of their declaration.
+            candidate_operations = list(effective)
+            if supersedes:
+                slot = next(index for index, row in enumerate(candidate_operations)
+                            if row['id'] == supersedes)
+                candidate_operations[slot:slot + 1] = (
+                    [] if action == 'withdraw_operation' else compiled)
+            else:
+                candidate_operations.extend(compiled)
+
+            working = self._base_turtle(project_id, draft['base_ontology_id'])
+            for operation in candidate_operations:
+                validation = operation.get('validation') or {}
+                if validation.get('errors') or validation.get('withdrawn'):
+                    continue
+                try:
+                    working = apply_operations(
+                        working, [_semantic_operation(operation)])
+                except ValueError as exc:
+                    if operation not in compiled:
+                        raise
+                    issue = {
+                        'code': 'operation_blocked', 'severity': 'error',
+                        'message': str(exc), 'operation_ids': [],
+                        'term_iris': [operation['target_iri']],
+                    }
+                    operation['validation'] = {
+                        **validation,
+                        'errors': [*(validation.get('errors') or []), issue],
+                    }
+                    operation['fingerprint'] = operation_fingerprint(operation)
             self.store.append_operations(project_id, draft_id, compiled)
             updated = self._cas(project_id, draft_id, expected_revision, {
                 'validation_report': None, 'validation_fingerprint': None})
@@ -525,6 +759,48 @@ class OntologyDrafts:
                 })
         return errors, warnings, info
 
+    @staticmethod
+    def _overlay_dependency_issues(ontology):
+        declared = ontology.classes | ontology.relations | ontology.attributes
+        structural = {
+            RDF.type, RDFS.subClassOf, RDFS.domain, RDFS.range,
+            OWL.deprecated,
+            URIRef('http://purl.org/dc/terms/isReplacedBy'),
+        }
+        warnings = []
+        for subject, predicate, value in ontology.graph:
+            if (subject not in declared or value not in declared
+                    or not ontology.is_active_term(subject)
+                    or ontology.is_active_term(value)
+                    or predicate in structural
+                    or str(predicate).startswith('http://www.w3.org/ns/shacl#')):
+                continue
+            warnings.append({
+                'code': 'active_custom_annotation_dependency',
+                'severity': 'warning',
+                'message': (
+                    f'active term references deprecated term through {predicate}'),
+                'operation_ids': [],
+                'term_iris': [str(subject), str(value)],
+            })
+        info = [{
+            'code': 'deprecated_term_structure_retained',
+            'severity': 'info',
+            'message': 'deprecated term definition remains available for restoration',
+            'operation_ids': [], 'term_iris': [str(term)],
+        } for term in sorted(declared, key=str)
+            if not ontology.is_active_term(term)]
+        return warnings, info
+
+    @staticmethod
+    def _extend_unique(target, additions):
+        existing = {_canonical_json(item) for item in target}
+        for item in additions:
+            encoded = _canonical_json(item)
+            if encoded not in existing:
+                target.append(item)
+                existing.add(encoded)
+
     def _compute_validation(self, project_id, draft):
         operations = self._active_operations(project_id, draft['id'])
         errors, warnings, info = self._operation_issues(operations)
@@ -533,9 +809,15 @@ class OntologyDrafts:
         try:
             candidate_turtle = apply_operations(candidate_turtle, [
                 _semantic_operation(row) for row in operations
-                if (row.get('validation') or {}).get('rebase_status') != 'conflict'])
-            graph_report = validate_ontology_invariants(Ontology(candidate_turtle))
+                if (row.get('validation') or {}).get('rebase_status') != 'conflict'
+                and not (row.get('validation') or {}).get('errors')])
+            candidate_ontology = Ontology(candidate_turtle)
+            graph_report = validate_ontology_invariants(candidate_ontology)
             errors.extend(graph_report.get('errors') or [])
+            overlay_warnings, overlay_info = self._overlay_dependency_issues(
+                candidate_ontology)
+            self._extend_unique(warnings, overlay_warnings)
+            self._extend_unique(info, overlay_info)
         except ValueError as exc:
             issue = {'code': 'graph_integrity', 'severity': 'error',
                      'message': str(exc), 'operation_ids': [], 'term_iris': []}
@@ -580,48 +862,59 @@ class OntologyDrafts:
 
     def validate(self, project_id, draft_id, expected_revision):
         draft = self.store.get(project_id, draft_id)
+        self._assert_revision(draft, expected_revision)
         if draft['status'] in FINAL_STATES:
             raise ValueError('final drafts cannot be validated')
         self._check_current(project_id, draft, expected_revision)
-        report, fingerprint, _ = self._compute_validation(project_id, draft)
-        updated = self._cas(project_id, draft_id, expected_revision, {
-            'validation_report': report,
-            'validation_fingerprint': fingerprint,
-        })
+        with self.repository._transaction():
+            draft = self.store.get(project_id, draft_id)
+            self._assert_revision(draft, expected_revision)
+            self._check_current(project_id, draft, expected_revision)
+            report, fingerprint, _ = self._compute_validation(project_id, draft)
+            updated = self._cas(project_id, draft_id, expected_revision, {
+                'validation_report': report,
+                'validation_fingerprint': fingerprint,
+            })
         return self._preview(project_id, updated)
 
     def submit(self, project_id, draft_id, expected_revision):
         draft = self.store.get(project_id, draft_id)
+        self._assert_revision(draft, expected_revision)
         if draft['status'] != 'editing':
             raise ValueError('only editing drafts may be submitted')
         self._check_current(project_id, draft, expected_revision)
-        operations = self._active_operations(project_id, draft_id)
-        active = [row for row in operations
-                  if (row.get('validation') or {}).get('rebase_status') != 'no-op']
-        if not active:
-            raise ValidationFailed('a draft must contain at least one effective operation')
-        report, fingerprint, _ = self._compute_validation(project_id, draft)
-        if not report['conforms']:
-            raise ValidationFailed('draft validation failed', details={'report': report})
-        current_ids = {row['id'] for row in active}
-        _, decision_rows = self._history(project_id, draft_id)
-        retained = {
-            row['operation_id']: row
-            for row in self._effective_decisions(decision_rows)
-            if row['operation_id'] in current_ids
-            and row['action'] in {'approve', 'reject'}
-            and row['operation_fingerprint'] == next(
-                (operation['fingerprint'] for operation in active
-                 if operation['id'] == row['operation_id']), None)}
-        status = 'submitted'
-        if all(operation_id in retained for operation_id in current_ids):
-            status = ('closed' if all(
-                retained[operation_id]['action'] == 'reject'
-                for operation_id in current_ids) else 'reviewed')
-        updated = self._cas(project_id, draft_id, expected_revision, {
-            'status': status, 'validation_report': report,
-            'validation_fingerprint': fingerprint,
-        })
+        with self.repository._transaction():
+            draft = self.store.get(project_id, draft_id)
+            self._assert_revision(draft, expected_revision)
+            if draft['status'] != 'editing':
+                raise ValueError('only editing drafts may be submitted')
+            self._check_current(project_id, draft, expected_revision)
+            operations = self._active_operations(project_id, draft_id)
+            active = [row for row in operations
+                      if (row.get('validation') or {}).get('rebase_status') != 'no-op']
+            if not active:
+                raise ValidationFailed(
+                    'a draft must contain at least one effective operation')
+            report, fingerprint, _ = self._compute_validation(project_id, draft)
+            current_ids = {row['id'] for row in active}
+            _, decision_rows = self._history(project_id, draft_id)
+            retained = {
+                row['operation_id']: row
+                for row in self._effective_decisions(decision_rows)
+                if row['operation_id'] in current_ids
+                and row['action'] in {'approve', 'reject'}
+                and row['operation_fingerprint'] == next(
+                    (operation['fingerprint'] for operation in active
+                     if operation['id'] == row['operation_id']), None)}
+            status = 'submitted'
+            if all(operation_id in retained for operation_id in current_ids):
+                status = ('closed' if all(
+                    retained[operation_id]['action'] == 'reject'
+                    for operation_id in current_ids) else 'reviewed')
+            updated = self._cas(project_id, draft_id, expected_revision, {
+                'status': status, 'validation_report': report,
+                'validation_fingerprint': fingerprint,
+            })
         return self._preview(project_id, updated)
 
     # ---------------------------------------------------------------- decisions
@@ -631,16 +924,16 @@ class OntologyDrafts:
                 if row.get('code')}
 
     def _require_validation(self, project_id, draft, supplied_fingerprint,
-                            acknowledged_warning_codes):
+                            acknowledged_warning_codes, *, allow_errors=False):
         report, current, turtle = self._compute_validation(project_id, draft)
-        if not report['conforms']:
-            raise ValidationFailed('draft validation failed', details={'report': report})
         if (not supplied_fingerprint
                 or supplied_fingerprint != current
                 or draft.get('validation_fingerprint') != current):
             raise ValidationChanged(
                 'validation snapshot changed; validate again', details={
                     'validation_fingerprint': current, 'report': report})
+        if not report['conforms'] and not allow_errors:
+            raise ValidationFailed('draft validation failed', details={'report': report})
         acknowledged = set(acknowledged_warning_codes or [])
         missing = self._warning_codes(report) - acknowledged
         if missing:
@@ -653,8 +946,9 @@ class OntologyDrafts:
                expected_ontology_id, validation_fingerprint, decisions,
                acknowledged_warning_codes, actor):
         draft = self.store.get(project_id, draft_id)
+        self._assert_revision(draft, expected_revision)
         if draft['status'] not in REVIEW_STATES:
-            raise ValueError('decisions require a submitted or reviewed draft')
+            raise ValueError('decisions require a submitted draft')
         self._check_current(
             project_id, draft, expected_revision,
             expected_ontology_id=expected_ontology_id)
@@ -664,12 +958,28 @@ class OntologyDrafts:
             raise BatchNotAllowed('a decision request must contain 1..100 decisions')
         report, _, turtle = self._require_validation(
             project_id, draft, validation_fingerprint,
-            acknowledged_warning_codes)
+            acknowledged_warning_codes, allow_errors=True)
         operations = {row['id']: row for row in self._active_operations(
             project_id, draft_id)}
         _, previous_rows = self._history(project_id, draft_id)
-        previous = {row['operation_id']: row
-                    for row in self._effective_decisions(previous_rows)}
+        latest_decisions = {
+            row['operation_id']: row
+            for row in self._effective_decisions(previous_rows)}
+        previous = {
+            row['operation_id']: row
+            for row in latest_decisions.values()
+            if row.get('action') in {'approve', 'reject'}
+            and row.get('operation_id') in operations
+            and row.get('operation_fingerprint') == operations[
+                row['operation_id']]['fingerprint']
+        }
+        blocked_ids = {
+            operation_id
+            for issue in report.get('errors') or []
+            for operation_id in issue.get('operation_ids') or []}
+        has_unscoped_errors = any(
+            not (issue.get('operation_ids') or [])
+            for issue in report.get('errors') or [])
         warning_codes = self._warning_codes(report)
         if len(proposed) > 1:
             eligible = all(
@@ -694,6 +1004,11 @@ class OntologyDrafts:
             action = item.get('action')
             if action not in {'approve', 'reject', 'request_changes'}:
                 raise ValueError('unsupported decision action')
+            if (action == 'approve'
+                    and (operation['id'] in blocked_ids or has_unscoped_errors)):
+                raise ValidationFailed(
+                    'blocking operations cannot be approved',
+                    details={'report': report, 'operation_id': operation['id']})
             reason = item.get('reason')
             if action in {'reject', 'request_changes'}:
                 reason = _text(reason, 'reason')
@@ -707,12 +1022,24 @@ class OntologyDrafts:
                 'operation_fingerprint': operation['fingerprint'],
                 'action': action, 'reason': reason, 'actor': actor,
                 'supersedes_decision_id': (
-                    previous.get(operation['id']) or {}).get('id'),
+                    latest_decisions.get(operation['id']) or {}).get('id'),
             })
         with self.repository._transaction():
+            locked = self.store.get(project_id, draft_id)
+            self._assert_revision(locked, expected_revision)
+            if locked['status'] not in REVIEW_STATES:
+                raise ValueError('decisions require a submitted draft')
+            self._check_current(
+                project_id, locked, expected_revision,
+                expected_ontology_id=expected_ontology_id)
+            self._require_validation(
+                project_id, locked, validation_fingerprint,
+                acknowledged_warning_codes, allow_errors=True)
             self.store.append_decisions(project_id, draft_id, saved)
             combined = {**previous}
-            combined.update({row['operation_id']: row for row in saved})
+            combined.update({
+                row['operation_id']: row for row in saved
+                if row['action'] in {'approve', 'reject'}})
             if any(row['action'] == 'request_changes' for row in saved):
                 status = 'editing'
             elif all(op_id in combined for op_id in operations):
@@ -730,8 +1057,9 @@ class OntologyDrafts:
 
     def close(self, project_id, draft_id, expected_revision, actor, reason):
         draft = self.store.get(project_id, draft_id)
-        if draft['status'] in FINAL_STATES:
-            raise ValueError('draft is already final')
+        self._assert_revision(draft, expected_revision)
+        if draft['status'] != 'editing':
+            raise ValueError('only editing drafts may be closed')
         actor, reason = _text(actor, 'actor'), _text(reason, 'reason')
         context = dict(draft.get('source_context') or {})
         context['closure'] = {'actor': actor, 'reason': reason}
@@ -785,6 +1113,7 @@ class OntologyDrafts:
     def rebase(self, project_id, draft_id, expected_revision,
                expected_ontology_id):
         draft = self.store.get(project_id, draft_id)
+        self._assert_revision(draft, expected_revision)
         if draft['status'] in FINAL_STATES:
             raise ValueError('final drafts cannot be rebased')
         latest = self._latest_id(project_id)
@@ -792,6 +1121,9 @@ class OntologyDrafts:
             raise StaleBase('rebase target must be the latest ontology', details={
                 'expected_ontology_id': expected_ontology_id,
                 'current_ontology_id': latest})
+        if (draft['base_ontology_id'] == latest
+                and draft['status'] not in {'stale_base', 'stale_source'}):
+            raise ValueError('rebase requires a stale_base or stale_source draft')
         old_operations = self._active_operations(project_id, draft_id)
         turtle = self._base_turtle(project_id, latest)
         replacements = []
@@ -862,6 +1194,15 @@ class OntologyDrafts:
         if draft['source_kind'] in {'discovery', 'candidate'}:
             context = refreshed_context
         with self.repository._transaction():
+            locked = self.store.get(project_id, draft_id)
+            self._assert_revision(locked, expected_revision)
+            if self._latest_id(project_id) != expected_ontology_id:
+                raise StaleBase('rebase target is no longer latest')
+            if locked['source_kind'] in {'discovery', 'candidate'}:
+                locked_context = self._refresh_source_context(
+                    project_id, locked.get('source_context') or {})
+                if _canonical_json(locked_context) != _canonical_json(context):
+                    raise StaleSource('source changed while rebasing; retry')
             if replacements:
                 self.store.append_operations(project_id, draft_id, replacements)
             updated = self._cas(project_id, draft_id, expected_revision, {
@@ -922,11 +1263,21 @@ class OntologyDrafts:
         idempotency_key = _text(idempotency_key, 'idempotency_key')
         report, fingerprint, _ = self._require_validation(
             project_id, draft, validation_fingerprint,
-            acknowledged_warning_codes)
+            acknowledged_warning_codes, allow_errors=True)
         operations = self._active_operations(project_id, draft_id)
         _, decision_rows = self._history(project_id, draft_id)
         decisions = {row['operation_id']: row
                      for row in self._effective_decisions(decision_rows)}
+        invalid = [
+            operation['id'] for operation in operations
+            if (operation['id'] not in decisions
+                or decisions[operation['id']]['action'] not in {'approve', 'reject'}
+                or decisions[operation['id']]['operation_fingerprint']
+                != operation['fingerprint'])]
+        if invalid:
+            raise ValidationChanged(
+                'publish requires a final current decision for every operation',
+                details={'operation_ids': invalid})
         approved = []
         for operation in operations:
             decision = decisions.get(operation['id'])
@@ -1001,7 +1352,7 @@ class OntologyDrafts:
             raise ValueError('invalid cursor') from exc
 
     @staticmethod
-    def _page(items, cursor, limit):
+    def _page_slice(items, cursor, limit):
         if type(limit) is not int or not 1 <= limit <= 200:
             raise ValueError('limit must be between 1 and 200')
         offset = OntologyDrafts._decode_cursor(cursor)
@@ -1011,8 +1362,13 @@ class OntologyDrafts:
         if next_offset < len(items):
             next_cursor = base64.urlsafe_b64encode(
                 str(next_offset).encode('ascii')).decode('ascii').rstrip('=')
-        return {'items': page, 'next_cursor': next_cursor,
-                'total': len(items), 'limit': limit}
+        return page, {'next_cursor': next_cursor,
+                      'total': len(items), 'limit': limit}
+
+    @staticmethod
+    def _page(items, cursor, limit):
+        page, metadata = OntologyDrafts._page_slice(items, cursor, limit)
+        return {'items': page, **metadata}
 
     @staticmethod
     def _class_maps(ontology):
@@ -1028,91 +1384,140 @@ class OntologyDrafts:
         return active, parents, children
 
     @staticmethod
-    def _labels(ontology):
-        rows = ontology.summary(active_only=True)
-        return {item['id']: item for item in [
-            *rows['classes'], *rows['relations'], *rows['attributes']]}
+    def _term_item(ontology, node):
+        labels = list(ontology.graph.objects(node, RDFS.label))
+        zh = en = plain = ''
+        for label in labels:
+            language = (label.language or '').lower()
+            if not zh and language.startswith('zh'):
+                zh = str(label)
+            elif not en and language.startswith('en'):
+                en = str(label)
+            elif not plain and not language:
+                plain = str(label)
+        item = {
+            'id': str(node), 'name': local_name(node),
+            'label': plain or en or local_name(node),
+            'label_zh': zh, 'label_en': en,
+            'description': str(ontology.graph.value(node, RDFS.comment) or ''),
+            'active': ontology.is_active_term(node),
+        }
+        if node in ontology.classes:
+            item['parents'] = [
+                str(value) for value in ontology.graph.objects(
+                    node, RDFS.subClassOf)]
+        elif node in ontology.relations:
+            item['domain'] = [
+                str(value) for value in ontology.constraint_types(node, RDFS.domain)]
+            item['range'] = [
+                str(value) for value in ontology.constraint_types(node, RDFS.range)]
+        elif node in ontology.attributes:
+            item['domain'] = [
+                str(value) for value in ontology.constraint_types(node, RDFS.domain)]
+            item['range'] = [
+                str(value) for value in ontology.graph.objects(node, RDFS.range)]
+        return item
 
-    @staticmethod
-    def _display_path(node, parents, labels):
-        paths = []
-        pending = deque([(node, [node])])
-        while pending:
-            current, path = pending.popleft()
-            values = sorted(parents.get(current, set()), key=str)
-            if not values:
-                paths.append(path)
-                continue
-            for parent in values:
-                if parent not in path:
-                    pending.append((parent, [parent, *path]))
-        best = min(paths or [[node]], key=lambda path: (len(path), [str(x) for x in path]))
-        return [{'iri': str(item), 'label': labels.get(str(item), {}).get(
-            'label', str(item))} for item in best]
+    def _display_path(self, node, parents, ontology):
+        memo = {}
+        visiting = set()
 
-    def _class_item(self, node, parents, children, labels, *, parent=None):
-        item = labels.get(str(node), {'id': str(node), 'label': str(node)})
+        def best_path(current):
+            if current in memo:
+                return memo[current]
+            if current in visiting:
+                return (current,)
+            visiting.add(current)
+            direct = sorted(parents.get(current, set()), key=str)
+            candidates = [best_path(parent) + (current,) for parent in direct]
+            visiting.remove(current)
+            best = min(
+                candidates or [(current,)],
+                key=lambda path: (len(path), tuple(map(str, path))))
+            memo[current] = best
+            return best
+
+        best = best_path(node)
+        return [{'iri': str(item), 'label': self._term_item(
+            ontology, item)['label']} for item in best]
+
+    def _class_item(self, node, parents, children, ontology, *, parent=None):
+        item = self._term_item(ontology, node)
         return {
             **item, 'iri': str(node), 'canonical_iri': str(node),
             'is_reference': len(parents.get(node, set())) > 1 and parent is not None,
             'child_count': len(children.get(node, set())),
             'other_parent_count': max(0, len(parents.get(node, set())) -
                                       (1 if parent is not None else 0)),
-            'display_path': self._display_path(node, parents, labels),
+            'display_path': self._display_path(node, parents, ontology),
         }
 
     def roots(self, project_id, *, ontology_id=None, draft_id=None,
               cursor=None, limit=50):
         ontology, _ = self._read_ontology(project_id, ontology_id, draft_id)
         active, parents, children = self._class_maps(ontology)
-        labels = self._labels(ontology)
-        items = [self._class_item(node, parents, children, labels)
-                 for node in sorted(active, key=str) if not parents[node]]
-        return self._page(items, cursor, limit)
+        nodes = [node for node in sorted(active, key=str) if not parents[node]]
+        page, metadata = self._page_slice(nodes, cursor, limit)
+        return {'items': [self._class_item(
+            node, parents, children, ontology) for node in page], **metadata}
 
     def children(self, project_id, iri, *, ontology_id=None, draft_id=None,
                  cursor=None, limit=50):
         ontology, _ = self._read_ontology(project_id, ontology_id, draft_id)
         _, parents, children = self._class_maps(ontology)
         parent = URIRef(iri)
-        labels = self._labels(ontology)
-        items = [self._class_item(node, parents, children, labels, parent=parent)
-                 for node in sorted(children.get(parent, set()), key=str)]
-        return self._page(items, cursor, limit)
+        nodes = sorted(children.get(parent, set()), key=str)
+        page, metadata = self._page_slice(nodes, cursor, limit)
+        return {'items': [self._class_item(
+            node, parents, children, ontology, parent=parent)
+            for node in page], **metadata}
 
     def search(self, project_id, query, *, ontology_id=None, draft_id=None,
                cursor=None, limit=50):
         ontology, _ = self._read_ontology(project_id, ontology_id, draft_id)
         needle = _text(query, 'query').casefold()
         active, parents, children = self._class_maps(ontology)
-        labels = self._labels(ontology)
-        class_items = {
-            str(node): self._class_item(node, parents, children, labels)
-            for node in active}
-        items = []
-        for iri, item in sorted(labels.items()):
-            haystack = ' '.join(str(item.get(key, '')) for key in (
-                'id', 'name', 'label', 'label_zh', 'label_en', 'description'))
+        declared = sorted(
+            (ontology.classes | ontology.relations | ontology.attributes), key=str)
+        matches = []
+        for node in declared:
+            if not ontology.is_active_term(node):
+                continue
+            all_labels = [str(value) for value in ontology.graph.objects(
+                node, RDFS.label)]
+            description = str(ontology.graph.value(node, RDFS.comment) or '')
+            haystack = ' '.join([
+                str(node), local_name(node), description,
+                *all_labels,
+            ])
             if needle in haystack.casefold():
-                found = class_items.get(iri, {**item, 'iri': iri,
-                                              'canonical_iri': iri})
-                items.append(found)
-        return self._page(items, cursor, limit)
+                matches.append(node)
+        page, metadata = self._page_slice(matches, cursor, limit)
+        items = []
+        for node in page:
+            iri = str(node)
+            if node in active:
+                items.append(self._class_item(
+                    node, parents, children, ontology))
+            else:
+                items.append({**self._term_item(ontology, node),
+                              'iri': iri, 'canonical_iri': iri})
+        return {'items': items, **metadata}
 
     def neighborhood(self, project_id, iri, *, ontology_id=None, draft_id=None,
                      cursor=None, limit=50):
         ontology, _ = self._read_ontology(project_id, ontology_id, draft_id)
         active, parents, children = self._class_maps(ontology)
-        labels = self._labels(ontology)
         node = URIRef(iri)
         if node not in active:
             raise KeyError(iri)
         adjacent = sorted(parents[node] | children[node], key=str)
-        items = [self._class_item(value, parents, children, labels,
-                                  parent=node if value in children[node] else None)
-                 for value in adjacent]
-        result = self._page(items, cursor, limit)
-        result['term'] = self._class_item(node, parents, children, labels)
+        page, metadata = self._page_slice(adjacent, cursor, limit)
+        result = {'items': [self._class_item(
+            value, parents, children, ontology,
+            parent=node if value in children[node] else None)
+            for value in page], **metadata}
+        result['term'] = self._class_item(node, parents, children, ontology)
         result['relations'] = [item for item in ontology.summary(active_only=True)[
             'relations'] if iri in item.get('domain', []) + item.get('range', [])]
         result['attributes'] = [item for item in ontology.summary(active_only=True)[

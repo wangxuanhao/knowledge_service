@@ -1,6 +1,8 @@
 import pytest
+from rdflib import RDFS, URIRef
 
 from knowledge_service.repository import Repository
+from knowledge_service.services.ontology import Ontology
 from knowledge_service.services.ontology_drafts import (
     BatchNotAllowed,
     OntologyDrafts,
@@ -61,8 +63,10 @@ def test_create_command_supersede_preview_submit_and_close(tmp_path):
 
     submitted = service.submit(project_id, draft['id'], 3)
     assert submitted['status'] == 'submitted'
+    disposable = service.create(
+        project_id, None, 'manual', 'Disposable', 'author')
     closed = service.close(
-        project_id, draft['id'], submitted['revision'], 'author', 'abandoned')
+        project_id, disposable['id'], disposable['revision'], 'author', 'abandoned')
     assert closed['status'] == 'closed'
     assert closed['source_context']['closure'] == {
         'actor': 'author', 'reason': 'abandoned'}
@@ -498,8 +502,9 @@ def test_rebase_classifies_cycle_against_latest_as_conflict(tmp_path):
 
     assert rebased['rebase'][0]['classification'] == 'conflict'
     assert rebased['operations'][0]['validation']['rebase_status'] == 'conflict'
-    with pytest.raises(ValidationFailed):
-        service.submit(project_id, draft['id'], rebased['revision'])
+    submitted = service.submit(project_id, draft['id'], rebased['revision'])
+    assert submitted['status'] == 'submitted'
+    assert submitted['validation_report']['conforms'] is False
 
 
 def test_publish_preflight_delegates_without_partial_service_commit(tmp_path):
@@ -681,3 +686,322 @@ def test_hierarchy_reads_are_paginated_and_overlay_uses_canonical_iris(tmp_path)
         'iri'] == 'https://example.test/Second'
     assert service.matrix(project_id, ontology_id=base['id'])['items'][0]['iri'] == (
         'https://example.test/rel')
+
+
+def test_turtle_diff_operations_are_rebuilt_with_source_evidence_and_impact(tmp_path):
+    repo, service, project_id, base = setup_service(tmp_path)
+    draft = service.create(project_id, base['id'], 'turtle', 'Turtle edit', 'author')
+    edited = BASE + '''
+<https://example.test/Child>
+  <http://www.w3.org/2000/01/rdf-schema#comment> "edited"@en .
+'''
+
+    preview = service.command(project_id, draft['id'], draft['revision'], {
+        'action': 'replace_turtle', 'edited_turtle': edited,
+        'evidence_refs': ['document-version:1'],
+        'risk': 'low', 'impact': {}})
+
+    operation = preview['operations'][0]
+    assert operation['validation']['source'] == 'turtle'
+    assert operation['risk'] == 'medium'
+    assert operation['evidence'] == ['document-version:1']
+    assert set(operation['impact']) >= {
+        'formal_records', 'descendants', 'constraints', 'pending'}
+
+
+def test_validation_rescans_final_overlay_dependency_warnings(tmp_path):
+    repo, service, project_id, _ = setup_service(tmp_path)
+    active_old = BASE.replace(
+        'ex:Legacy a owl:Class ; owl:deprecated true .',
+        'ex:Legacy a owl:Class .')
+    current = repo.save_ontology(project_id, active_old, {})
+    draft = service.create(project_id, current['id'], 'manual', 'overlay', 'author')
+    annotated = service.command(project_id, draft['id'], draft['revision'], {
+        'action': 'add_annotation', 'target_iri': 'https://example.test/Child',
+        'predicate': 'https://example.test/note',
+        'value': 'https://example.test/Legacy', 'value_type': 'iri'})
+    retired = service.command(project_id, draft['id'], annotated['revision'], {
+        'action': 'retire_term', 'target_iri': 'https://example.test/Legacy'})
+
+    submitted = service.submit(project_id, draft['id'], retired['revision'])
+
+    codes = {issue['code'] for issue in submitted['validation_report']['warnings']}
+    assert 'active_custom_annotation_dependency' in codes
+    assert submitted['validation_fingerprint']
+
+
+def test_request_changes_never_counts_as_a_final_decision(tmp_path):
+    _, service, project_id, base = setup_service(tmp_path)
+    draft = service.create(project_id, base['id'], 'manual', 'final decisions', 'author')
+    first = add_label(service, project_id, draft, 'first')
+    second = service.command(project_id, draft['id'], first['revision'], {
+        'action': 'add_annotation', 'target_iri': 'https://example.test/Root',
+        'predicate': 'http://www.w3.org/2000/01/rdf-schema#label',
+        'value': 'second', 'language': 'en'})
+    submitted = service.submit(project_id, draft['id'], second['revision'])
+    first_op, second_op = submitted['operations']
+    changes = service.decide(
+        project_id, draft['id'], submitted['revision'], base['id'],
+        submitted['validation_fingerprint'], [{
+            'operation_id': first_op['id'],
+            'operation_fingerprint': first_op['fingerprint'],
+            'action': 'request_changes', 'reason': 'adjust it'}], [], 'reviewer')
+    resubmitted = service.submit(project_id, draft['id'], changes['revision'])
+
+    partial = service.decide(
+        project_id, draft['id'], resubmitted['revision'], base['id'],
+        resubmitted['validation_fingerprint'], [{
+            'operation_id': second_op['id'],
+            'operation_fingerprint': second_op['fingerprint'],
+            'action': 'approve'}], [], 'reviewer')
+
+    assert partial['status'] == 'submitted'
+
+
+def test_publish_preflight_requires_final_current_decisions_for_every_operation(tmp_path):
+    repo, service, project_id, base = setup_service(
+        tmp_path, publisher=lambda **prepared: prepared)
+    draft = service.create(project_id, base['id'], 'manual', 'preflight', 'author')
+    submitted = service.submit(
+        project_id, draft['id'], add_label(service, project_id, draft)['revision'])
+    operation = submitted['operations'][0]
+    repo._ontology_drafts.append_decisions(project_id, draft['id'], [{
+        'operation_id': operation['id'],
+        'operation_fingerprint': operation['fingerprint'],
+        'action': 'request_changes', 'reason': 'not final', 'actor': 'reviewer'}])
+    reviewed = repo._ontology_drafts.compare_and_set(
+        project_id, draft['id'], submitted['revision'], {'status': 'reviewed'})
+
+    with pytest.raises(ValidationChanged):
+        service.publish_preflight(
+            project_id, draft['id'], reviewed['revision'], base['id'],
+            reviewed['validation_fingerprint'], [], 'invalid-history', 'publisher')
+
+
+def test_withdraw_is_append_only_and_removes_operation_from_all_effective_views(tmp_path):
+    repo, service, project_id, base = setup_service(tmp_path)
+    draft = service.create(project_id, base['id'], 'manual', 'withdraw', 'author')
+    created = service.command(project_id, draft['id'], draft['revision'], {
+        'action': 'create_term', 'target_iri': 'urn:test:Temporary', 'kind': 'class'})
+    operation = created['operations'][0]
+
+    withdrawn = service.command(project_id, draft['id'], created['revision'], {
+        'action': 'withdraw_operation', 'operation_id': operation['id']})
+
+    assert withdrawn['operations'] == []
+    assert 'urn:test:Temporary' not in withdrawn['turtle']
+    history = repo._ontology_drafts.export(project_id)['operations']
+    assert len(history) == 2
+    assert history[1]['supersedes_operation_id'] == operation['id']
+    assert history[1]['validation']['withdrawn'] is True
+    with pytest.raises(ValidationFailed):
+        service.submit(project_id, draft['id'], withdrawn['revision'])
+
+
+def test_replacement_preserves_logical_order_before_dependent_operations(tmp_path):
+    _, service, project_id, base = setup_service(tmp_path)
+    draft = service.create(project_id, base['id'], 'manual', 'ordered', 'author')
+    created = service.command(project_id, draft['id'], draft['revision'], {
+        'action': 'create_term', 'target_iri': 'urn:test:Ordered', 'kind': 'class'})
+    create_op = created['operations'][0]
+    labelled = service.command(project_id, draft['id'], created['revision'], {
+        'action': 'add_annotation', 'target_iri': 'urn:test:Ordered',
+        'predicate': 'http://www.w3.org/2000/01/rdf-schema#label',
+        'value': 'Ordered', 'language': 'en'})
+
+    adjusted = service.command(project_id, draft['id'], labelled['revision'], {
+        'action': 'create_term', 'target_iri': 'urn:test:Ordered', 'kind': 'class',
+        'supersedes_operation_id': create_op['id'], 'reason': 'same declaration'})
+
+    assert [row['action'] for row in adjusted['operations']] == [
+        'create_term', 'add_annotation']
+    assert 'Ordered' in adjusted['turtle']
+
+
+def test_restore_splits_activation_from_selected_definition_operations(tmp_path):
+    repo, service, project_id, base = setup_service(tmp_path)
+    retired_turtle = BASE.replace(
+        'ex:Child a owl:Class ; rdfs:subClassOf ex:Root ; rdfs:label "Child" .',
+        'ex:Child a owl:Class ; owl:deprecated true .')
+    retired = repo.save_ontology(project_id, retired_turtle, {})
+    draft = service.create(project_id, retired['id'], 'manual', 'restore split', 'author')
+
+    preview = service.command(project_id, draft['id'], draft['revision'], {
+        'action': 'restore_term', 'target_iri': 'https://example.test/Child',
+        'source_ontology_id': base['id'],
+        'selected_fields': ['annotations', 'parents']})
+
+    assert [row['action'] for row in preview['operations']] == [
+        'restore_term', 'add_annotation', 'add_parent']
+    restore = preview['operations'][0]
+    assert restore['after']['activation_only'] is True
+    assert restore['after']['selected_fields'] == ['annotations', 'parents']
+    assert restore['after']['template']['parents'] == ['https://example.test/Root']
+
+
+def test_restore_definition_edges_can_be_rejected_independently(tmp_path):
+    repo, service, project_id, base = setup_service(tmp_path)
+    retired_turtle = BASE.replace(
+        'ex:Child a owl:Class ; rdfs:subClassOf ex:Root ; rdfs:label "Child" .',
+        'ex:Child a owl:Class ; owl:deprecated true .')
+    retired = repo.save_ontology(project_id, retired_turtle, {})
+    draft = service.create(project_id, retired['id'], 'manual', 'selective', 'author')
+    preview = service.command(project_id, draft['id'], draft['revision'], {
+        'action': 'restore_term', 'target_iri': 'https://example.test/Child',
+        'source_ontology_id': base['id'],
+        'selected_fields': ['annotations', 'parents']})
+    current = service.submit(project_id, draft['id'], preview['revision'])
+
+    for operation in current['operations']:
+        approve = operation['action'] == 'restore_term'
+        current = service.decide(
+            project_id, draft['id'], current['revision'], retired['id'],
+            current['validation_fingerprint'], [{
+                'operation_id': operation['id'],
+                'operation_fingerprint': operation['fingerprint'],
+                'action': 'approve' if approve else 'reject',
+                'reason': 'activate only' if approve else 'exclude definition edge',
+            }], [], 'reviewer')
+    assert current['status'] == 'reviewed'
+
+    prepared = service.publish_preflight(
+        project_id, draft['id'], current['revision'], retired['id'],
+        current['validation_fingerprint'], [], 'selective', 'publisher')
+    assert [row['action'] for row in prepared['operations']] == ['restore_term']
+    result = Ontology(prepared['turtle'])
+    child = URIRef('https://example.test/Child')
+    assert result.is_active_term(child) is True
+    assert list(result.graph.objects(child, RDFS.subClassOf)) == []
+    assert list(result.graph.objects(child, RDFS.label)) == []
+
+
+def test_blocking_operation_is_reviewable_but_cannot_be_approved(tmp_path):
+    _, service, project_id, base = setup_service(tmp_path)
+    draft = service.create(project_id, base['id'], 'manual', 'blocked', 'author')
+
+    preview = service.command(project_id, draft['id'], draft['revision'], {
+        'action': 'retire_term', 'target_iri': 'https://example.test/Root'})
+
+    operation = preview['operations'][0]
+    error_codes = {issue['code'] for issue in operation['validation']['errors']}
+    assert {'active_child_dependency', 'active_domain_dependency'} <= error_codes
+    submitted = service.submit(project_id, draft['id'], preview['revision'])
+    assert submitted['status'] == 'submitted'
+    assert submitted['validation_report']['conforms'] is False
+    with pytest.raises(ValidationFailed):
+        service.decide(
+            project_id, draft['id'], submitted['revision'], base['id'],
+            submitted['validation_fingerprint'], [{
+                'operation_id': operation['id'],
+                'operation_fingerprint': operation['fingerprint'],
+                'action': 'approve', 'reason': 'unsafe'}], [], 'reviewer')
+    rejected = service.decide(
+        project_id, draft['id'], submitted['revision'], base['id'],
+        submitted['validation_fingerprint'], [{
+            'operation_id': operation['id'],
+            'operation_fingerprint': operation['fingerprint'],
+            'action': 'reject', 'reason': 'blocked'}], [], 'reviewer')
+    assert rejected['status'] == 'closed'
+
+
+def test_retire_impact_keeps_dependency_details_not_only_counts(tmp_path):
+    repo, service, project_id, base = setup_service(tmp_path)
+    repo.put_record(project_id, {
+        'id': 'root-record', 'kind': 'entity',
+        'type': 'https://example.test/Root', 'text': 'root'})
+    repo.put_record(project_id, {
+        'id': 'source', 'kind': 'document', 'text': 'source',
+        'metadata': {'review_candidates': [{
+            'id': 'candidate-root', 'status': 'pending',
+            'target_type': 'https://example.test/Root'}]}})
+    draft = service.create(project_id, base['id'], 'manual', 'retire impact', 'author')
+
+    preview = service.command(project_id, draft['id'], draft['revision'], {
+        'action': 'retire_term', 'target_iri': 'https://example.test/Root'})
+
+    impact = preview['operations'][0]['impact']
+    assert impact['record_ids'] == ['root-record']
+    assert 'candidate-root' in impact['pending_candidate_ids']
+    assert impact['constraints_detail']
+    assert impact['dependency_report']['retained_definition']['kind'] == 'class'
+
+
+def test_command_holds_repository_write_transaction_through_check_and_compile(
+        tmp_path, monkeypatch):
+    _, service, project_id, base = setup_service(tmp_path)
+    draft = service.create(project_id, base['id'], 'manual', 'transaction', 'author')
+    original = service._compile_command
+    observed = []
+
+    def checked_compile(*args, **kwargs):
+        observed.append(service.repository._db.in_transaction)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(service, '_compile_command', checked_compile)
+    add_label(service, project_id, draft)
+    assert observed == [True]
+
+
+def test_hierarchy_paginates_nodes_before_building_expensive_items(
+        tmp_path, monkeypatch):
+    repo, service, project_id, _ = setup_service(tmp_path)
+    many = BASE + '\n'.join(
+        f'<urn:test:Root{index:03}> a <http://www.w3.org/2002/07/owl#Class> .'
+        for index in range(50))
+    ontology = repo.save_ontology(project_id, many, {})
+    calls = []
+    original = service._class_item
+
+    def counted(*args, **kwargs):
+        calls.append(args[0])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(service, '_class_item', counted)
+    page = service.roots(project_id, ontology_id=ontology['id'], limit=2)
+    assert len(page['items']) == 2
+    assert len(calls) == 2
+
+
+def test_search_matches_every_rdfs_label_language(tmp_path):
+    repo, service, project_id, _ = setup_service(tmp_path)
+    multilingual = BASE + '''
+<https://example.test/Child>
+  <http://www.w3.org/2000/01/rdf-schema#label> "Bonjour"@fr,
+                                                     "Guten Tag"@de .
+'''
+    ontology = repo.save_ontology(project_id, multilingual, {})
+    assert service.search(
+        project_id, 'bonjour', ontology_id=ontology['id'])['items'][0]['iri'] == (
+            'https://example.test/Child')
+    assert service.search(
+        project_id, 'guten', ontology_id=ontology['id'])['items'][0]['iri'] == (
+            'https://example.test/Child')
+
+
+def test_actor_is_authoritative_and_state_boundaries_are_strict(tmp_path):
+    _, service, project_id, base = setup_service(tmp_path)
+    draft = service.create(
+        project_id, base['id'], 'manual', 'states', 'author',
+        source_context={'actor': 'spoofed'})
+    assert draft['source_context']['actor'] == 'author'
+    with pytest.raises(ValueError, match='rebase'):
+        service.rebase(project_id, draft['id'], draft['revision'], base['id'])
+    submitted = service.submit(
+        project_id, draft['id'], add_label(service, project_id, draft)['revision'])
+    with pytest.raises(ValueError, match='close|editing'):
+        service.close(
+            project_id, draft['id'], submitted['revision'], 'author', 'too late')
+    operation = submitted['operations'][0]
+    reviewed = service.decide(
+        project_id, draft['id'], submitted['revision'], base['id'],
+        submitted['validation_fingerprint'], [{
+            'operation_id': operation['id'],
+            'operation_fingerprint': operation['fingerprint'],
+            'action': 'approve'}], [], 'reviewer')
+    with pytest.raises(ValueError, match='submitted'):
+        service.decide(
+            project_id, draft['id'], reviewed['revision'], base['id'],
+            reviewed['validation_fingerprint'], [{
+                'operation_id': operation['id'],
+                'operation_fingerprint': operation['fingerprint'],
+                'action': 'reject', 'reason': 'late'}], [], 'reviewer')
