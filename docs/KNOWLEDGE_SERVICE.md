@@ -85,15 +85,45 @@ SQLite 默认保存到 `data/service/knowledge.sqlite`，不使用旧 `graph.jso
 
 ## 本体与溯源
 
-项目创建时可加载内置美团本体，也可关闭默认本体后上传自己的 Turtle。每次保存生成不可变本体版本；实体/关系写入绑定具体版本。类型白名单、关系 domain/range、类继承和 SHACL 都参与写入校验，按事实共存的业务时间段执行，失败整批不落库。SPARQL 仅支持本地 SELECT/ASK，不支持远程 SERVICE/FROM 或写操作。这里只实现明确的 RDFS/SHACL 能力，不宣称完整 OWL 推理机。
+### 唯一真相源与两条输入链路
 
-未知领域可先反复使用开放本体发现。每批文档的候选保留在来源文档中，项目级发现页聚合全部有效候选；新草案以当前已发布本体为父版本，复用按 IRI、标签或局部名匹配到的稳定术语 IRI，并记录类、关系和属性的 added/retained/removed 差异。发布草案只创建不可变本体版本和候选快照，不直接写入正式实体或关系。随后必须明确选择该本体版本重解析原文，正式抽取结果才经过约束校验和融合进入图谱。
+SQLite 中不可变的 `ontology_versions` 是正式本体的唯一真相源；草案、原子变更、审核决定和来源快照都是发布前的治理记录，不能绕过版本边界直接改变正式本体。项目第一次建立本体时允许可信 bootstrap；从已有版本开始，手工结构化编辑、Turtle、开放发现、候选建议和导入都必须创建或更新统一草案。
+
+工作台保留两条输入链路，但在草案处合流：
+
+1. **开放发现**：Semantica 从文档产生候选、聚类和来源证据，人工筛选后生成 discovery 草案。
+2. **受控建模**：人工新增实体类、关系、属性，或提交 Turtle diff，直接形成 manual/turtle 草案的原子变更。
+
+两条链路随后统一执行“设计 → 提交 → 逐项审核 → 校验 → 发布”。发布事务同时写入本体版本、草案状态、来源副作用和 provenance；Milvus 同步在提交后运行，失败留下可重试任务，不会制造半发布版本。发现草案获批的候选在同一事务中物化为正式记录，不再要求重新调用 LLM。
+
+### 层级、多个父类与停用
+
+类层级使用 `rdfs:subClassOf` DAG。一个类可以有零个、一个或多个直接父类：零父类就是有限层级中的独立根，并不意味着还需无限向上补父类；发布前会拒绝环。工作台只分页读取根和展开节点的直接子类，同一个 canonical IRI 在多个父级下显示为引用行，选择任意引用都会选中同一对象。
+
+关系和属性可以有多个 domain/range，服务将它们编译为显式 OWL union（OR），不是隐式交集。新增类允许保持独立根；不能物理删除已发布术语，只能 `retire_term` 停用。停用会保留历史版本、定义和 provenance，并在操作前展示正式记录、约束、后代和待审核引用。`restore_term` 必须明确选择不可变来源版本及要恢复的字段，恢复同样需要审核。
+
+### 草案状态、审核与并发字段
+
+- `editing`：可追加命令；`submitted`：等待审核；`reviewed`：每个当前变更已有最终批准/拒绝；`published`/`closed`：终态。
+- 基础版本或来源变化时进入 `stale_base` / `stale_source`，必须刷新、rebase 或重新生成，不能带着旧快照发布。
+- 每次命令都带 `expected_revision`；提交决定和发布还必须带 `expected_ontology_id`、`validation_fingerprint` 和 `acknowledged_warning_codes`。
+- 发布必须带客户端生成的 `idempotency_key`；重试同一请求返回同一版本，不会重复发布。
+- 只有当前筛选中无警告的低风险操作可批量批准，单次最多 100 项。中高风险、停用、恢复和高级 RDF patch 必须逐项审核。
+- 拒绝和“要求调整”必须填写理由；高风险批准或带警告批准也必须填写理由。`request_changes` 会把草案退回 `editing`。校验指纹变化后旧决定不会被静默沿用。
+
+校验报告固定分为图结构完整性、前瞻新写入约束和历史数据影响三部分。历史影响只用于评估，不会回写或清洗旧记录。正式 provenance 可沿“版本 → 草案 → 原子变更 → 审核决定 → 文档/候选来源快照”查询。
+
+### 时间与旧 artifact 策略
+
+新草案、操作、决定、版本和 provenance 时间统一由服务端写为 UTC `Z` 结构。按当前迁移策略，旧时间字段不做转换、修复或回填；部署方可以备份后删除旧库重新建立。治理功能不会把仅存在于旧 `ontology_discovery_draft` / `ontology_change_proposal` artifact 的历史待办自动转换成新草案，它们不出现在统一草案列表，也不能由统一发布接口发布。
+
+### Semantica 边界
+
+当前适配 Semantica 0.6.7 的严格 LLM 实体/关系抽取、开放本体发现和 `ContextGraph.state_at`。Semantica 层级输出的单值 `parent` 会映射为父类边；缺失或未知父类保留为独立根。多父类、双时态、草案并发、审核、持久化、发布事务和 provenance 由服务层负责。这里只实现明确的 RDFS/OWL-union/SHACL 能力，不宣称完整 OWL 推理机。SPARQL 仅支持本地 SELECT/ASK，不支持远程 SERVICE/FROM 或写操作。
 
 实体身份不以本体版本号分区：只要稳定类型 IRI、名称/别名和业务有效期兼容，同一实体可以跨本体版本融合；规范实体记录会保留参与融合的 `ontology_versions` 和各次来源。相同主语、稳定关系 IRI、宾语及有效期的关系也会按确定性关系键融合并保留来源。类型 IRI 改变时不会自动融合，需通过受审核的本体变更或人工实体治理处理。
 
 文档处理先保存上传回执，再处理切块与抽取；成功时知识和完成状态原子提交，失败保留回执及失败状态，不留下半批派生知识。证据包含 `source_id`、不可变 `source_version_id`、chunk/字符位置、抽取时间和版本信息。问答返回证据编号及版本，可以回查当时的原文。
-
-Semantica 实际参与两处：严格 LLM 实体/关系提取，以及 `graph/semantica` 的 `ContextGraph.state_at`。双时态历史、持久化和过滤由服务层补齐；没有把上传时间冒充 Semantica 时间能力。**当前未实现持久化“决策事件/决策审计日志”**，证据问答不等于完整业务决策审计系统。
 
 ## 主要接口
 
@@ -105,7 +135,14 @@ Semantica 实际参与两处：严格 LLM 实体/关系提取，以及 `graph/se
 | `GET /records/{id}/history` | 不可变历史 |
 | `POST /records/query`、`/search`、`/qa` | 范围列表、检索、证据问答 |
 | `POST /graph`、`/graph/semantica` | 同一查询范围的图快照 |
-| `GET/POST /ontologies`、`GET /ontology` | 本体历史、发布、读取 |
+| `GET/POST /ontologies`、`GET /ontology` | 本体历史、读取；已有版本后的 POST 只创建治理草案 |
+| `GET/POST /ontology-drafts` | 统一草案列表、创建；返回 `revision`、状态和来源上下文 |
+| `POST /ontology-drafts/{id}/commands` | 追加原子变更，要求 `expected_revision` |
+| `POST /ontology-drafts/{id}/validate`、`/submit` | 生成校验指纹、提交审核 |
+| `POST /ontology-drafts/{id}/decisions` | 保存逐项决定及警告确认 |
+| `POST /ontology-drafts/{id}/rebase`、`/close`、`/publish` | 变基、关闭、幂等发布 |
+| `GET /ontology-hierarchy/roots|children|search|neighborhood` | 分页读取多父类 DAG 和对象邻域 |
+| `GET /ontology-matrix` | 分页读取关系/属性的 domain、range 和数据类型 |
 | `GET /ontology-discovery/candidate-mindmap` | 聚合开放候选实体、关系、属性、生命周期与来源证据；只用于预览，不写正式图谱 |
 | `POST /ontology/validate`、`/sparql` | 当前选定快照校验/只读查询 |
 

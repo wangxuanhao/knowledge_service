@@ -1298,3 +1298,18 @@ def test_actor_is_authoritative_and_state_boundaries_are_strict(tmp_path):
                 'operation_id': operation['id'],
                 'operation_fingerprint': operation['fingerprint'],
                 'action': 'reject', 'reason': 'late'}], [], 'reviewer')
+
+
+def test_pre_governance_artifacts_are_not_lazily_migrated_or_publishable(tmp_path):
+    """The new lifecycle deliberately ignores historical artifact-only drafts."""
+    repo, service, project_id, _ = setup_service(tmp_path)
+    repo.save_artifact('ontology_discovery_draft', {
+        'id': 'legacy-only-draft', 'project_id': project_id,
+        'name': '旧发现草案', 'status': 'draft', 'revision': 1,
+        'created_at': '2025-01-01T00:00:00Z', 'candidate_ids': [],
+        'candidate_snapshot': [], 'mappings': {}, 'turtle': BASE,
+    })
+
+    assert service.list(project_id) == []
+    with pytest.raises(KeyError):
+        service.get(project_id, 'legacy-only-draft')

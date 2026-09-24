@@ -487,7 +487,7 @@ git add knowledge_service/web tests/service/test_ontology_workbench_ui.py tests/
 git commit -m "feat: add safe ontology review and publish UI"
 ```
 
-### Task 11: Complete migration compatibility and operator documentation
+### Task 11: Lock the no-migration policy and complete operator documentation
 
 **Files:**
 - Modify: `knowledge_service/services/ontology_drafts.py`
@@ -495,19 +495,19 @@ git commit -m "feat: add safe ontology review and publish UI"
 - Modify: `tests/service/test_ontology_drafts.py`
 - Modify: `docs/KNOWLEDGE_SERVICE.md`
 
-- [ ] **Step 1: Write legacy artifact conversion tests.**
+- [x] **Step 1: Write legacy artifact isolation tests.**
 
-Published/rejected old artifacts stay read-only. Pending artifacts lazily convert once with `legacy_artifact_id`; original remains untouched; conversion failure returns `needs_migration_review` and cannot publish.
+Superseded by the owner's explicit no-migration decision: pre-governance artifact-only drafts remain outside the unified draft list and cannot publish through the governed API. No historical decision is invented.
 
-- [ ] **Step 2: Implement transactional lazy conversion.**
+- [x] **Step 2: Preserve the no-migration boundary.**
 
-Map discovery and candidate artifact fields to normalized source context/operations without inventing historical decisions.
+No conversion code is installed. New discovery/candidate writes already create unified drafts; old artifacts remain read-only compatibility data and may be removed operationally after backup.
 
-- [ ] **Step 3: Document lifecycle and compatibility.**
+- [x] **Step 3: Document lifecycle and compatibility.**
 
 Describe roots/multi-parent semantics, retirement vs deletion, draft states, review shortcuts, API concurrency fields, warning acknowledgements, bootstrap exception and Semantica installation.
 
-- [ ] **Step 4: Run focused tests and commit.**
+- [x] **Step 4: Run focused tests and commit.**
 
 Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_drafts.py tests/service/test_project_management.py -vv`
 
