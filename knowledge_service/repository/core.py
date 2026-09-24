@@ -758,15 +758,22 @@ class Repository:
             raise ValueError('写入操作上下文不能与 recorded_at 同时指定')
         now = (self._record_operation_time(project_id, operation) if operation is not None
                else normalize_time(recorded_at) if recorded_at is not None else utc_now())
+        old_recorded_at = None
+        if old:
+            try:
+                old_recorded_at = normalize_time(old['recorded_at'], allow_none=False)
+            except ValueError as exc:
+                raise ValueError(
+                    '当前记录的旧系统时间戳无法解析，无法安全修订') from exc
         # 独立修订必须具有严格递增的系统时间。若两个独立版本共享 recorded_at，
         # 旧版会在该精确时间点同时满足 recorded_at<=known_at，又因
         # superseded_at==known_at 被严格上界排除，导致历史查询看不到任何版本。
         # 只有仓储签发的操作上下文可以在同一时间点内修订记录。
         # 独立写入的相等时间仍必须推进，精确 known_at 才不会出现空洞。
-        if old and operation is not None and now < old['recorded_at']:
+        if old and operation is not None and now < old_recorded_at:
             raise ValueError('写入操作时间点已被更新的修订超过')
-        if old and operation is None and now <= old['recorded_at']:
-            now = self._next_recorded_at(old['recorded_at'])
+        if old and operation is None and now <= old_recorded_at:
+            now = self._next_recorded_at(old_recorded_at)
         self._db.execute('UPDATE record_versions SET superseded_at=? WHERE project_id=? AND id=? AND superseded_at IS NULL', (now, project_id, record['id']))
         version_id = str(uuid4())
         # 向量以 float32 字节存储，不放在 payload 的 JSON 里（避免反序列化出浮点对象列表）。

@@ -330,6 +330,81 @@ def test_operation_reservation_uses_true_parseable_legacy_high_water_without_rew
     ]
 
 
+def test_revisions_compare_offset_legacy_current_time_chronologically(
+        tmp_path, monkeypatch):
+    path = tmp_path / 'legacy-current-offset-revision.sqlite'
+    migrations = repository_module._SCHEMA_MIGRATIONS
+    monkeypatch.setattr(repository_module, '_SCHEMA_MIGRATIONS', migrations[:-1])
+    legacy = Repository(path)
+    project = legacy.create_project('legacy revisions')['id']
+    with legacy._transaction():
+        for record_id in ('operation', 'explicit'):
+            legacy._db.execute(
+                '''INSERT INTO record_versions
+                   (project_id,id,version,version_id,payload,recorded_at,superseded_at)
+                   VALUES (?,?,?,?,?,?,NULL)''',
+                (project, record_id, 1, f'legacy-{record_id}',
+                 json.dumps({'id': record_id, 'kind': 'document', 'text': 'legacy'}),
+                 '2030-01-01T08:00:00+08:00'))
+    legacy.close()
+
+    monkeypatch.setattr(repository_module, '_SCHEMA_MIGRATIONS', migrations)
+    issuer = Repository(path)
+    writer = Repository(path)
+    operation = issuer._reserve_record_operation(project)
+    operation_revision = writer._put_record_for_operation(
+        project, {'id': 'operation', 'kind': 'document', 'text': 'operation revision'},
+        expected_version=1, operation=operation)
+    explicit_revision = writer.put_record(
+        project, {'id': 'explicit', 'kind': 'document', 'text': 'explicit revision'},
+        expected_version=1, recorded_at='2030-01-01T00:30:00Z')
+
+    assert operation_revision['recorded_at'] > normalize_time(
+        '2030-01-01T08:00:00+08:00')
+    assert explicit_revision['recorded_at'] == '2030-01-01T00:30:00.000000Z'
+    assert writer.history(project, 'operation')[0]['recorded_at'] == (
+        '2030-01-01T08:00:00+08:00')
+    assert writer.history(project, 'explicit')[0]['recorded_at'] == (
+        '2030-01-01T08:00:00+08:00')
+    with pytest.raises(ValueError, match='操作时间点已被'):
+        issuer._put_record_for_operation(
+            project, {'id': 'explicit', 'kind': 'document', 'text': 'stale'},
+            expected_version=2, operation=operation)
+
+
+def test_revision_rejects_unparseable_legacy_current_time_clearly(
+        tmp_path, monkeypatch):
+    path = tmp_path / 'legacy-current-unparseable-revision.sqlite'
+    migrations = repository_module._SCHEMA_MIGRATIONS
+    monkeypatch.setattr(repository_module, '_SCHEMA_MIGRATIONS', migrations[:-1])
+    legacy = Repository(path)
+    project = legacy.create_project('legacy unparseable revisions')['id']
+    with legacy._transaction():
+        for record_id in ('operation', 'explicit'):
+            legacy._db.execute(
+                '''INSERT INTO record_versions
+                   (project_id,id,version,version_id,payload,recorded_at,superseded_at)
+                   VALUES (?,?,?,?,?,?,NULL)''',
+                (project, record_id, 1, f'legacy-{record_id}',
+                 json.dumps({'id': record_id, 'kind': 'document', 'text': 'legacy'}),
+                 'legacy-recorded-at'))
+    legacy.close()
+
+    monkeypatch.setattr(repository_module, '_SCHEMA_MIGRATIONS', migrations)
+    issuer = Repository(path)
+    writer = Repository(path)
+    with pytest.raises(ValueError, match='旧系统时间戳无法解析'):
+        writer.put_record(
+            project, {'id': 'explicit', 'kind': 'document', 'text': 'revision'},
+            expected_version=1, recorded_at='2030-01-01T00:30:00Z')
+
+    operation = issuer._reserve_record_operation(project)
+    with pytest.raises(ValueError, match='旧系统时间戳无法解析'):
+        writer._put_record_for_operation(
+            project, {'id': 'operation', 'kind': 'document', 'text': 'revision'},
+            expected_version=1, operation=operation)
+
+
 def test_schema_migration_receives_active_connection_and_runs_once(tmp_path, monkeypatch):
     path = tmp_path / 'migrations.sqlite'
     connections = []
