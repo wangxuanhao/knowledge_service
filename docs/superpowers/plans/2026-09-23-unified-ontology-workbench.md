@@ -460,23 +460,23 @@ git commit -m "feat: add ontology DAG editing experience"
 - Modify: `tests/service/test_ontology_workbench_ui.py`
 - Modify: `tests/service/test_ontology_draft_review_ui.py`
 
-- [ ] **Step 1: Write review workflow tests.**
+- [x] **Step 1: Write review workflow tests.**
 
 Cover filters/grouping, before/after/context/evidence panes, A approve, E adjust, R reject, J/K navigation, autosaved decisions, mandatory reasons for every rejection and adjustment, mandatory reasons for high-risk approval, warning acknowledgements and stale recovery. Verify the UI cannot submit these decisions with missing reasons and the API still rejects a crafted bypass.
 
-- [ ] **Step 2: Write batch safety tests.**
+- [x] **Step 2: Write batch safety tests.**
 
 Only visible-filter, no-warning low-risk operations may batch approve; max 100; medium/high/retire/restore/advanced patch never expose or accept batch approve. Show validation fingerprint changes and force re-review.
 
-- [ ] **Step 3: Implement review, validation and publish stages.**
+- [x] **Step 3: Implement review, validation and publish stages.**
 
 Render change-driven queues rather than whole-ontology approval. Validation shows graph/prospective/historical sections. Publish sends idempotency key and confirmed warning codes, then links to the created immutable version/provenance chain.
 
-- [ ] **Step 4: Integrate existing version, diff, Turtle history and SPARQL tools.**
+- [x] **Step 4: Integrate existing version, diff, Turtle history and SPARQL tools.**
 
 Keep these capabilities reachable under “版本治理”; Turtle editing creates a draft rather than publishing directly.
 
-- [ ] **Step 5: Run UI suites and commit.**
+- [x] **Step 5: Run UI suites and commit.**
 
 Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_workbench_ui.py tests/service/test_ontology_draft_review_ui.py -vv`
 

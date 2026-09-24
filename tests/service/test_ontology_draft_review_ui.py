@@ -175,3 +175,15 @@ def test_large_dataset_collapsed_dom_small(page):
     stats = page.locator('[data-odr-stats]').inner_text()
     assert f'{per * 3} 实体' in stats
     assert page._errors == []
+
+
+def test_unified_workbench_review_contract_is_present():
+    js = (WEB / 'ontology-workbench.js').read_text(encoding='utf-8')
+    for marker in (
+        "key==='j'", "key==='k'", "a:'approve'", "e:'request_changes'",
+        "r:'reject'", 'dataset.batchEligible', 'validation_fingerprint',
+        'acknowledged_warning_codes', 'idempotency_key',
+        'graph_integrity', 'prospective_new_write_contract',
+        'historical_impact', '版本治理（历史 / Diff / Turtle / SPARQL）',
+    ):
+        assert marker in js, marker

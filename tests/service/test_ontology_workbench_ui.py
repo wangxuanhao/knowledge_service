@@ -21,6 +21,7 @@ MOCKS = r"""() => {
   window.apiCalls = [];
   const draft = {id:'d1',title:'DAG 草案',status:'editing',revision:2,
     source_kind:'manual',base_ontology_id:'o1',operations:[],decisions:[]};
+  window.mockDraft = draft;
   const root = iri => ({id:iri,iri,canonical_iri:iri,name:iri.split(':').pop(),
     label:iri.split(':').pop(),label_zh:'',child_count:1,other_parent_count:0,
     is_reference:false,display_path:[{iri,label:iri.split(':').pop()}]});
@@ -40,6 +41,31 @@ MOCKS = r"""() => {
       draft.revision += 1; draft.operations.push({id:'op'+draft.revision,
         fingerprint:'fp'+draft.revision,risk:'low',source:'manual',
         ...window.apiCalls.at(-1).body.command}); payload={...draft};
+    }
+    else if(parsed.pathname.endsWith('/ontology-drafts/d1/validate')) {
+      draft.validation_report = window.mockValidation || {conforms:true,
+        graph_integrity:{conforms:true,errors:[]},
+        prospective_new_write_contract:{conforms:true,errors:[]},
+        historical_impact:{checked_records:7,nonconforming_records:0,errors:[]},
+        errors:[],warnings:[],info:[]};
+      draft.validation_fingerprint = window.mockFingerprint || 'vf1'; payload={...draft};
+    }
+    else if(parsed.pathname.endsWith('/ontology-drafts/d1/submit')) {
+      draft.status='submitted';draft.revision+=1;
+      draft.validation_report = window.mockValidation || {conforms:true,
+        graph_integrity:{conforms:true,errors:[]},
+        prospective_new_write_contract:{conforms:true,errors:[]},
+        historical_impact:{checked_records:7,nonconforming_records:0,errors:[]},
+        errors:[],warnings:[],info:[]};
+      draft.validation_fingerprint=window.mockFingerprint||'vf1';payload={...draft};
+    }
+    else if(parsed.pathname.endsWith('/ontology-drafts/d1/decisions')) {
+      draft.revision+=1;draft.decisions.push(...window.apiCalls.at(-1).body.decisions);
+      const decided=new Set(draft.decisions.filter(x=>['approve','reject'].includes(x.action)).map(x=>x.operation_id));
+      draft.status=window.apiCalls.at(-1).body.decisions.some(x=>x.action==='request_changes')?'editing':(decided.size===draft.operations.length?'reviewed':'submitted');payload={...draft};
+    }
+    else if(parsed.pathname.endsWith('/ontology-drafts/d1/publish')) {
+      draft.status='published';payload={id:'o2',project_id:'p1',draft_id:'d1',created_at:'2026-09-24T01:02:03Z'};
     }
     else if(parsed.pathname.endsWith('/ontology-drafts/d1')) payload={...draft};
     else if(parsed.pathname.endsWith('/ontology-hierarchy/roots')) payload={items:[root('urn:RootA'),root('urn:RootB')],next_cursor:null};
@@ -136,3 +162,71 @@ def test_retire_preview_and_restore_require_explicit_source_version(page):
     page.wait_for_selector('#ontology-restore-version')
     assert page.locator('#ontology-restore-version option').count() == 2
     assert page.locator('#ontology-restore-fields input[type="checkbox"]:checked').count() == 0
+
+
+def prepare_review(page, operations, warnings=None):
+    open_design(page)
+    page.evaluate("([operations,warnings]) => { mockDraft.operations=operations; mockDraft.decisions=[]; mockDraft.status='editing'; mockValidation={conforms:true,graph_integrity:{conforms:true,errors:[]},prospective_new_write_contract:{conforms:true,errors:[]},historical_impact:{checked_records:7,nonconforming_records:0,errors:[]},errors:[],warnings:warnings||[],info:[]}; }", [operations, warnings or []])
+    page.evaluate("() => OntologyWorkbench.selectDraft('d1')")
+    page.wait_for_selector('[data-submit-review]:not([disabled])')
+    page.click('[data-submit-review]')
+    page.wait_for_selector('[data-review-operation]')
+
+
+def operation(id_, risk='low', action='add_annotation'):
+    return {'id': id_, 'fingerprint': 'fp-'+id_, 'action': action,
+            'target_iri': 'urn:'+id_, 'risk': risk, 'source': 'manual',
+            'before': {'value': '旧值'}, 'after': {'value': '新值'},
+            'impact': {'formal_records': 0},
+            'validation': {'warnings': []},
+            'evidence': [{'document_title': '依据.pdf', 'evidence': '原文证据'}]}
+
+
+def test_review_shortcuts_autosave_and_reasons_are_enforced(page):
+    prepare_review(page, [operation('low'), operation('high','high','retire_term')])
+    page.locator('[data-review-operation]').first.click()
+    page.keyboard.press('a')
+    page.wait_for_function("() => apiCalls.some(x => x.url.endsWith('/decisions'))")
+    low = page.evaluate("() => apiCalls.filter(x => x.url.endsWith('/decisions')).at(-1).body.decisions[0]")
+    assert low['action'] == 'approve' and not low.get('reason')
+
+    page.keyboard.press('j')
+    assert page.locator('[data-review-operation][aria-current="true"]').get_attribute('data-operation-id') == 'high'
+    page.keyboard.press('a')
+    page.wait_for_selector('#ontology-decision-reason')
+    assert page.locator('[data-save-decision]').is_disabled()
+    page.fill('#ontology-decision-reason', '已核对历史影响')
+    assert page.locator('[data-save-decision]').is_enabled()
+    page.click('[data-save-decision]')
+    page.wait_for_function("() => apiCalls.filter(x => x.url.endsWith('/decisions')).length === 2")
+
+
+def test_batch_approve_only_visible_no_warning_low_risk(page):
+    prepare_review(page, [operation('a'), operation('b'), operation('c','medium')])
+    assert page.locator('[data-batch-approve]').is_visible()
+    assert page.locator('[data-review-operation][data-batch-eligible="true"]').count() == 2
+    page.click('[data-batch-approve]')
+    page.wait_for_function("() => apiCalls.some(x => x.url.endsWith('/decisions'))")
+    decisions = page.evaluate("() => apiCalls.filter(x => x.url.endsWith('/decisions')).at(-1).body.decisions")
+    assert len(decisions) == 2 and all(item['action'] == 'approve' for item in decisions)
+
+
+def test_validation_sections_publish_acknowledgement_and_provenance_link(page):
+    warning = {'code':'range_widened','severity':'warning','message':'Range 扩大','operation_ids':['low']}
+    prepare_review(page, [operation('low')], [warning])
+    page.locator('[data-review-operation]').first.click()
+    page.keyboard.press('a')
+    page.fill('#ontology-decision-reason', '已核对警告')
+    page.check('[data-ack-warning="range_widened"]')
+    page.click('[data-save-decision]')
+    page.wait_for_function("() => mockDraft.status === 'reviewed'")
+    page.click('[data-workbench-stage="validate"]')
+    page.wait_for_selector('[data-validation-section="graph"]')
+    assert page.locator('[data-validation-section]').count() == 3
+    assert 'vf1' in page.locator('#ontology-workbench-canvas-content').inner_text()
+    page.click('[data-workbench-stage="publish"]')
+    page.check('[data-publish-warning="range_widened"]')
+    page.fill('#ontology-publisher', 'owner@example.test')
+    page.click('[data-publish-draft]')
+    page.wait_for_selector('[data-published-version="o2"]')
+    assert '草案 d1' in page.locator('#ontology-workbench-canvas-content').inner_text()
