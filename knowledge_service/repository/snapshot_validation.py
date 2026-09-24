@@ -126,6 +126,9 @@ def _validate_record_envelope(row, label):
     def reject(field):
         raise ValueError(f'完整治理备份 {label}.{field} 类型或值无效')
 
+    if 'embedding' in row:
+        raise ValueError(
+            f'完整治理备份 {label}.embedding 是仅限本地存储的非备份字段')
     if not isinstance(row['id'], str) or not row['id']:
         reject('id')
     if not isinstance(row['kind'], str) or row['kind'] not in _RECORD_KINDS:

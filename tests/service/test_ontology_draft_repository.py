@@ -833,6 +833,24 @@ def test_full_record_row_contract_preserves_arbitrary_domain_fields(tmp_path):
     assert target.export_projection(project_id)['records'] == snapshot['records']
 
 
+def test_full_record_row_contract_rejects_storage_reserved_embedding_atomically(
+        tmp_path):
+    source = Repository(tmp_path / 'reserved-embedding-source.sqlite')
+    project_id = source.create_project('reserved embedding')['id']
+    source.put_record(project_id, {
+        'id': 'entity-1', 'kind': 'entity', 'text': 'Entity',
+        'custom': {'preserved': True},
+    })
+    snapshot = source.export_projection(project_id)
+    snapshot['records'][0]['embedding'] = [1.0, 0.0]
+    target = Repository(tmp_path / 'reserved-embedding-target.sqlite')
+
+    with pytest.raises(ValueError, match=r'records\[0\]\.embedding.*存储'):
+        target.restore_projection(snapshot)
+    with pytest.raises(KeyError):
+        target.get_project(project_id)
+
+
 @pytest.mark.parametrize(('field', 'value'), [
     ('id', 7),
     ('kind', 'unsupported'),
