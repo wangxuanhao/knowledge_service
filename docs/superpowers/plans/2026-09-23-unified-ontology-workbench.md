@@ -71,11 +71,11 @@ This prevents the confirmed `OPENSSL_Uplink ... no OPENSSL_Applink` process exit
 - Modify: `knowledge_service/repository/core.py`
 - Test: `tests/service/test_repository.py`
 
-- [ ] **Step 1: Add focused failing tests for graph-state ownership and bitemporal history.**
+- [x] **Step 1: Add focused failing tests for graph-state ownership and bitemporal history.**
 
 Extend the existing four failing tests so they wait on the intended UI state rather than time alone, and add a repository assertion that `known_at=initial['recorded_at']` returns version 1 after a correction whose system timestamp is later.
 
-- [ ] **Step 2: Reproduce the failures independently.**
+- [x] **Step 2: Reproduce the failures independently.**
 
 Run:
 
@@ -86,15 +86,15 @@ Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue
 
 Expected: four reproducible failures matching the baseline report, not TLS process termination.
 
-- [ ] **Step 3: Fix ownership/race behavior at the source.**
+- [x] **Step 3: Fix ownership/race behavior at the source.**
 
 Ensure search does not call graph summary rendering, project/scope/time changes synchronously clear graph state before any optional reload, and hidden scope controls are changed through their owning panel/state function rather than a forced click. Normalize repository system-time comparisons so an exact stored `recorded_at` includes that version while later corrections remain excluded.
 
-- [ ] **Step 4: Run the focused tests.**
+- [x] **Step 4: Run the focused tests.**
 
 Expected: 4 passed.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```powershell
 git add knowledge_service/web/workbench.js knowledge_service/repository/core.py tests/service/test_frontend_retrieval_flow.py tests/service/test_repository.py
@@ -112,15 +112,15 @@ git commit -m "fix: stabilize existing state and history baselines"
 
 - [ ] **Step 1: Write migration and repository contract tests.**
 
-Assert migration 13 creates `ontology_drafts`, `ontology_operations`, `ontology_review_decisions`, and `ontology_publish_requests`; assert project FKs/cascades, nullable first-version base, unique idempotency key, and operation/decision immutability. Open two `Repository` instances against one database and prove only one `expected_revision=1` CAS update succeeds.
+Assert migration 14 creates `ontology_drafts`, `ontology_operations`, `ontology_review_decisions`, and `ontology_publish_requests`; assert project FKs/cascades, nullable first-version base, unique idempotency key, and operation/decision immutability. Open two `Repository` instances against one database and prove only one `expected_revision=1` CAS update succeeds.
 
 - [ ] **Step 2: Run the new repository tests and verify schema/method failures.**
 
 Run: `Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue; .\.venv\Scripts\python.exe -m pytest tests/service/test_ontology_draft_repository.py -vv`
 
-Expected: FAIL because migration 13 and `OntologyDraftStore` do not exist.
+Expected: FAIL because migration 14 and `OntologyDraftStore` do not exist.
 
-- [ ] **Step 3: Implement migration 13.**
+- [ ] **Step 3: Implement migration 14.**
 
 Use explicit columns for lifecycle/indexed fields and JSON for validated snapshots. Required constraints:
 
@@ -272,15 +272,15 @@ git commit -m "feat: add ontology draft lifecycle"
 - Modify: `tests/service/test_ontology_draft_repository.py`
 - Modify: `tests/service/test_ontology_drafts.py`
 
-- [ ] **Step 1: Write migration 14 preservation tests.**
+- [ ] **Step 1: Write migration 15 preservation tests.**
 
-Seed migration-12 retrieval/answer rows, including existing `decided-by` edges, run migration 14, and assert rows survive while activity kinds `ontology_draft`/`ontology_publish` and relations `published-from`, `contains-operation`, `decided-by`, `proposed-by`, `supported-by`, `based-on` are accepted. Force migration failure and assert rollback.
+Seed migration-12 retrieval/answer rows, including existing `decided-by` edges, run migration 15, and assert rows survive while activity kinds `ontology_draft`/`ontology_publish` and relations `published-from`, `contains-operation`, `decided-by`, `proposed-by`, `supported-by`, `based-on` are accepted. Force migration failure and assert rollback.
 
 - [ ] **Step 2: Write atomic publish and idempotency tests.**
 
 Inject failure after ontology insert and assert no ontology/draft/provenance partial state. Retry same idempotency key/payload returns the same ontology; same key/different request hash returns conflict.
 
-- [ ] **Step 3: Implement migration 14 by table rebuild.**
+- [ ] **Step 3: Implement migration 15 by table rebuild.**
 
 Copy existing rows unchanged into expanded CHECK-constrained tables inside the migration transaction, recreate indexes/FKs, validate counts, then replace old tables.
 
