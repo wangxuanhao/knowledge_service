@@ -11,6 +11,7 @@ from knowledge_service.repository import Repository
 from knowledge_service.services.ontology import Ontology, set_term_constraints
 from knowledge_service.services.ontology_operations import (
     DCTERMS,
+    RESTORE_TEMPLATE_FIELDS,
     apply_operations,
     build_operation,
     build_restore_operation,
@@ -142,9 +143,12 @@ def test_diff_normalizes_deprecation_restore_and_replacement_operations():
         Graph().parse(data=apply_operations(BASE, retirement), format='turtle'),
         Graph().parse(data=retired, format='turtle'))
 
-    restoration = canonical_turtle_diff(retired, BASE)
+    with pytest.raises(ValueError, match='source_ontology_id|structured restore|结构化恢复'):
+        canonical_turtle_diff(retired, BASE)
+    restoration = canonical_turtle_diff(
+        retired, BASE, base_ontology_id='ontology-version-17')
     assert [operation['action'] for operation in restoration] == ['restore_term']
-    assert restoration[0]['after']['source_ontology_id'].startswith('turtle-diff:')
+    assert restoration[0]['after']['source_ontology_id'] == 'ontology-version-17'
     assert isomorphic(
         Graph().parse(data=apply_operations(retired, restoration), format='turtle'),
         Graph().parse(data=BASE, format='turtle'))
@@ -245,6 +249,66 @@ def test_retirement_issues_distinguish_supported_shacl_path_and_carry_operation_
     assert issue['term_iris'] == ['http://ex/S', 'http://ex/value']
 
 
+@pytest.mark.parametrize('dependency', [
+    'ex:Child a owl:Class; rdfs:subClassOf ex:New .',
+    'ex:newRel a owl:ObjectProperty; rdfs:domain ex:New; rdfs:range ex:B .',
+    'ex:S a <http://www.w3.org/ns/shacl#NodeShape>; '
+    '<http://www.w3.org/ns/shacl#targetClass> ex:New .',
+    'ex:A ex:semanticRef ex:New .',
+])
+def test_diff_computes_referenced_new_term_risk_from_complete_graph(dependency):
+    edited = BASE + f'ex:New a owl:Class . {dependency}'
+    operations = canonical_turtle_diff(BASE, edited)
+    created = next(operation for operation in operations
+                   if operation['action'] == 'create_term'
+                   and operation['target_iri'] == 'http://ex/New')
+    assert created['impact']['referenced'] is True
+    assert created['risk'] == 'medium'
+    assert is_batch_eligible(created) is False
+
+
+def test_diff_keeps_unreferenced_leaf_create_low_risk():
+    operations = canonical_turtle_diff(BASE, BASE + 'ex:New a owl:Class .')
+    created = next(operation for operation in operations
+                   if operation['target_iri'] == 'http://ex/New')
+    assert created['impact'] == {'leaf': True, 'referenced': False}
+    assert created['risk'] == 'low'
+    assert is_batch_eligible(created) is True
+
+
+def test_dependency_warning_raises_otherwise_low_operation_and_blocks_batch():
+    graph = Graph().parse(data=BASE + '''
+      ex:Referrer a owl:Class; ex:pointsTo ex:A .
+    ''', format='turtle')
+    report = retirement_dependencies(
+        Ontology(graph.serialize(format='turtle')), 'http://ex/A')
+    assert report['warnings'][0]['severity'] == 'warning'
+    operation = build_operation(
+        'add_annotation', 'http://ex/B', warnings=report['warnings'],
+        after={'predicate': str(RDFS.label), 'value': 'B'})
+    assert operation['risk'] == 'medium'
+    assert is_batch_eligible(operation) is False
+
+
+@pytest.mark.parametrize('marker', ['true', '"true"^^xsd:boolean'])
+def test_deactivated_shacl_dependencies_are_info_not_blockers(marker):
+    turtle = BASE + f'''
+      @prefix sh: <http://www.w3.org/ns/shacl#> .
+      ex:C a owl:Class .
+      ex:flag a owl:DatatypeProperty; rdfs:range xsd:boolean .
+      ex:S a sh:NodeShape; sh:deactivated {marker}; sh:targetClass ex:C;
+        sh:property [ sh:path ex:flag ] .
+    '''
+    class_report = retirement_dependencies(Ontology(turtle), 'http://ex/C')
+    path_report = retirement_dependencies(Ontology(turtle), 'http://ex/flag')
+    assert not class_report['errors']
+    assert not path_report['errors']
+    assert any(issue['code'] == 'deactivated_shacl_dependency'
+               for issue in class_report['info'])
+    assert any(issue['code'] == 'deactivated_shacl_dependency'
+               for issue in path_report['info'])
+
+
 def test_restore_builder_requires_same_project_immutable_source_and_captures_template(tmp_path):
     repo = Repository(tmp_path / 'restore.sqlite')
     service = KnowledgeService(repo, HashingEncoder())
@@ -284,6 +348,35 @@ def test_restore_builder_requires_same_project_immutable_source_and_captures_tem
         URIRef('http://ex/Root')]
 
 
+@pytest.mark.parametrize('selected_fields', [
+    [], ['parents', 'parents'], ['parents', 'unsupported'],
+])
+def test_restore_builder_rejects_empty_duplicate_or_unsupported_fields(
+        tmp_path, selected_fields):
+    repo = Repository(tmp_path / 'restore-fields.sqlite')
+    project_id = repo.create_project('p')['id']
+    source = repo.save_ontology(project_id, BASE, Ontology(BASE).summary())
+    current = BASE + 'ex:rel owl:deprecated true .'
+    repo.save_ontology(project_id, current, Ontology(current).summary())
+    with pytest.raises(ValueError, match='显式|重复|字段|field'):
+        build_restore_operation(
+            repo, project_id, 'http://ex/rel', source['id'],
+            selected_fields=selected_fields)
+    assert RESTORE_TEMPLATE_FIELDS == frozenset({
+        'annotations', 'parents', 'domain', 'range', 'datatype'})
+
+
+def test_restore_selected_none_datatype_clears_current_datatype():
+    current = BASE + 'ex:value owl:deprecated true .'
+    operation = build_operation('restore_term', 'http://ex/value', after={
+        'source_ontology_id': 'ontology-no-datatype',
+        'selected_fields': ['datatype'],
+        'template': {'kind': 'attribute', 'datatype': None},
+    })
+    restored = Ontology(apply_operations(current, [operation]))
+    assert list(restored.graph.objects(URIRef('http://ex/value'), RDFS.range)) == []
+
+
 def test_restore_term_requires_deprecated_target_and_blocks_historical_cycle():
     template = {
         'kind': 'class', 'parents': ['http://ex/B'], 'annotations': [],
@@ -301,6 +394,33 @@ def test_restore_term_requires_deprecated_target_and_blocks_historical_cycle():
         'template': {**template, 'parents': ['http://ex/B']}})
     with pytest.raises(ValueError, match='循环|cycle'):
         apply_operations(cyclic_base, [cyclic_restore])
+
+
+@pytest.mark.parametrize('operation', [
+    build_operation('add_domain', 'http://ex/A', after={'value': 'http://ex/B'}),
+    build_operation('add_range', 'http://ex/A', after={'value': 'http://ex/B'}),
+])
+def test_domain_and_range_actions_reject_class_targets(operation):
+    with pytest.raises(ValueError, match='relation|attribute|关系|属性'):
+        _apply(operation)
+
+
+def test_final_validation_rejects_wrong_kind_constraints_and_unknown_simple_shacl_refs():
+    wrong_kind = BASE + 'ex:A rdfs:domain ex:B .'
+    with pytest.raises(ValueError, match='domain|relation|attribute|关系|属性'):
+        apply_operations(wrong_kind, [build_operation(
+            'add_annotation', 'http://ex/A',
+            after={'predicate': str(RDFS.label), 'value': 'A'})])
+
+    invalid_shacl = BASE + '''
+      @prefix sh: <http://www.w3.org/ns/shacl#> .
+      ex:S a sh:NodeShape; sh:targetClass ex:Missing;
+        sh:property [ sh:path ex:missingProperty ] .
+    '''
+    with pytest.raises(ValueError, match='targetClass|path|SHACL'):
+        apply_operations(invalid_shacl, [build_operation(
+            'add_annotation', 'http://ex/A',
+            after={'predicate': str(RDFS.label), 'value': 'A'})])
 
 
 def test_fingerprint_is_sha256_of_canonical_json_and_ignores_mapping_order():

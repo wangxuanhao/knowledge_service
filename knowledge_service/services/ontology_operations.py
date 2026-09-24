@@ -38,9 +38,10 @@ _NON_MANUAL_SOURCES = {
     'discovery', 'ai', 'import', 'candidate', 'semantic_suggestion',
     'candidate_semantic_suggestion',
 }
-_SELECTABLE_TEMPLATE_FIELDS = {
+RESTORE_TEMPLATE_FIELDS = frozenset({
     'annotations', 'parents', 'domain', 'range', 'datatype',
-}
+})
+_SELECTABLE_TEMPLATE_FIELDS = RESTORE_TEMPLATE_FIELDS
 _ACTION_ALIASES = {'retire': 'retire_term', 'restore': 'restore_term'}
 _SUPPORTED_DATATYPES = {
     XSD.string, XSD.boolean, XSD.integer, XSD.decimal, XSD.float, XSD.double,
@@ -257,8 +258,9 @@ def _apply_template(graph: Graph, node: URIRef, template: dict,
         _set_constraint(graph, node, RDFS.domain, template.get('domain', []))
     if 'range' in fields:
         _set_constraint(graph, node, RDFS.range, template.get('range', []))
-    if 'datatype' in fields and template.get('datatype'):
-        _set_constraint(graph, node, RDFS.range, [template['datatype']])
+    if 'datatype' in fields and template.get('kind') == 'attribute':
+        datatype = template.get('datatype')
+        _set_constraint(graph, node, RDFS.range, [datatype] if datatype else [])
 
 
 def _ensure_kind(graph: Graph, node: URIRef, kind: str | None = None) -> str:
@@ -353,7 +355,13 @@ def _validate_definition_graph(graph: Graph) -> None:
         if child in {parent for direct in graph.objects(child, RDFS.subClassOf)
                      for parent in ontology.parents(direct)}:
             raise ValueError(f'类继承会形成循环（cycle）：{child}')
-    for owner in ontology.relations | ontology.attributes:
+    constraint_owners = ontology.relations | ontology.attributes
+    for predicate in (RDFS.domain, RDFS.range):
+        for owner in graph.subjects(predicate, None):
+            if owner not in constraint_owners:
+                raise ValueError(
+                    f'{predicate.split("#")[-1]} 只能附加到 relation/attribute 术语：{owner}')
+    for owner in constraint_owners:
         kind = term_kind(ontology, owner)
         for value in ontology.constraint_types(owner, RDFS.domain):
             if value not in ontology.classes:
@@ -363,6 +371,17 @@ def _validate_definition_graph(graph: Graph) -> None:
                 raise ValueError(f'range 类不存在：{value}')
             if kind == 'attribute' and value not in _SUPPORTED_DATATYPES:
                 raise ValueError(f'不支持的 datatype 数据类型：{value}')
+    for subject, target_class in graph.subject_objects(SH.targetClass):
+        if (_shape_deactivated(graph, subject)
+                or target_class in ontology.classes):
+            continue
+        raise ValueError(f'SHACL targetClass 必须引用已声明的 class：{target_class}')
+    declared_properties = ontology.relations | ontology.attributes
+    for subject, path in graph.subject_objects(SH.path):
+        if (_shape_deactivated(graph, subject) or isinstance(path, BNode)):
+            continue
+        if path not in declared_properties:
+            raise ValueError(f'SHACL path 必须引用已声明的 relation/attribute：{path}')
     report = validate_ontology_invariants(ontology)
     if not report['conforms']:
         raise ValueError(
@@ -407,6 +426,8 @@ def apply_operations(base_turtle: str, operations: Iterable[dict]) -> str:
                 graph.remove((target, RDFS.subClassOf, value))
         elif action in {'add_domain', 'remove_domain', 'add_range', 'remove_range'}:
             kind = _ensure_kind(graph, target)
+            if kind not in {'relation', 'attribute'}:
+                raise ValueError('domain/range 只能用于 relation/attribute（关系/属性）术语')
             predicate = RDFS.domain if action.endswith('domain') else RDFS.range
             values = _constraint_values(graph, target, predicate)
             value = URIRef((after if action.startswith('add_') else before).get('value', ''))
@@ -471,9 +492,10 @@ def apply_operations(base_turtle: str, operations: Iterable[dict]) -> str:
         elif action == 'restore_term':
             if not after.get('source_ontology_id') or not isinstance(after.get('template'), dict):
                 raise ValueError('restore_term 必须携带 source_ontology_id 和不可变 template')
-            selected = after.get('selected_fields')
-            if not selected:
-                raise ValueError('restore_term 必须显式选择恢复字段')
+            selected = list(after.get('selected_fields') or [])
+            if (not selected or len(selected) != len(set(selected))
+                    or set(selected) - RESTORE_TEMPLATE_FIELDS):
+                raise ValueError('restore_term 必须显式选择有效且不重复的定义字段')
             current = Ontology(graph.serialize(format='turtle'))
             if current.is_active_term(target):
                 raise ValueError('restore_term 的当前术语必须已停用（deprecated）')
@@ -516,12 +538,30 @@ def _owning_shape(graph: Graph, node) -> URIRef | BNode:
     return node
 
 
+def _truthy_literal(value) -> bool:
+    if not isinstance(value, Literal):
+        return False
+    converted = value.toPython()
+    return converted is True or str(converted).strip().lower() in {'true', '1'}
+
+
+def _shape_deactivated(graph: Graph, node) -> bool:
+    owner = _owning_shape(graph, node)
+    candidates = {node, owner}
+    return any(
+        _truthy_literal(value)
+        for candidate in candidates
+        for value in graph.objects(candidate, SH.deactivated)
+    )
+
+
 def retirement_dependencies(ontology: Ontology, target_iri: str, *,
                             active_records=None, historical_records=None,
                             operation_ids=None) -> dict:
     """Return the fixed dependency matrix used by retirement previews."""
     target = ontology.resolve(target_iri)
     errors = []
+    deactivated_info = []
     for child in ontology.graph.subjects(RDFS.subClassOf, target):
         if ontology.is_active_term(child):
             errors.append(_issue(
@@ -536,12 +576,24 @@ def retirement_dependencies(ontology: Ontology, target_iri: str, *,
                     '活动 domain/range 约束依赖将被停用的术语',
                     [owner, target], operation_ids))
     for subject in ontology.graph.subjects(SH.targetClass, target):
+        if _shape_deactivated(ontology.graph, subject):
+            deactivated_info.append(_issue(
+                'deactivated_shacl_dependency', 'info',
+                '已停用的 SHACL shape 引用该术语，不阻止停用',
+                [_owning_shape(ontology.graph, subject), target], operation_ids))
+            continue
         errors.append(_issue(
             'active_shacl_target_class_dependency', 'error',
             'SHACL targetClass 依赖将被停用的类',
             [subject, target], operation_ids))
     for subject in ontology.graph.subjects(SH.path, target):
         owner = _owning_shape(ontology.graph, subject)
+        if _shape_deactivated(ontology.graph, subject):
+            deactivated_info.append(_issue(
+                'deactivated_shacl_dependency', 'info',
+                '已停用的 SHACL shape 引用该术语，不阻止停用',
+                [owner, target], operation_ids))
+            continue
         errors.append(_issue(
             'active_shacl_path_dependency', 'error',
             'SHACL path 依赖将被停用的属性',
@@ -562,7 +614,7 @@ def retirement_dependencies(ontology: Ontology, target_iri: str, *,
                 'active_custom_annotation_dependency', 'warning',
                 f'活动术语通过自定义 annotation {predicate} 引用将被停用的术语',
                 [subject, target], operation_ids))
-    info = [_issue(
+    info = [*deactivated_info, _issue(
         'deprecated_term_structure_retained', 'info',
         '停用仅增加 owl:deprecated；术语自身声明、标签和结构将保留',
         [target], operation_ids)]
@@ -602,7 +654,8 @@ def validate_ontology_invariants(ontology: Ontology) -> dict:
                         '活动约束依赖已停用术语', [owner, value]))
     for subject, predicate, value in ontology.graph:
         if (predicate in {SH.targetClass, SH.path} and value in declared
-                and not ontology.is_active_term(value)):
+                and not ontology.is_active_term(value)
+                and not _shape_deactivated(ontology.graph, subject)):
             code = ('active_shacl_target_class_dependency'
                     if predicate == SH.targetClass else 'active_shacl_path_dependency')
             errors.append(_issue(
@@ -781,6 +834,16 @@ def _ordered_new_terms(graph: Graph, added: set[URIRef]) -> list[URIRef]:
     return ordered
 
 
+def _new_term_impact(graph: Graph, term: URIRef) -> dict:
+    """Compute create risk facts from the complete edited semantic graph."""
+    has_child = any(True for _ in graph.subjects(RDFS.subClassOf, term))
+    referenced = any(
+        subject != term
+        for subject, _, _ in graph.triples((None, None, term))
+    )
+    return {'leaf': not has_child, 'referenced': referenced}
+
+
 def _deprecated(graph: Graph, term: URIRef) -> bool:
     return any(
         value.toPython() is True
@@ -797,8 +860,15 @@ def _shape_roots(graph: Graph) -> set[URIRef]:
 
 
 def canonical_turtle_diff(base_turtle: str, edited_turtle: str, *,
-                          published: bool = True) -> list[dict]:
+                          published: bool = True,
+                          base_ontology_id: str | None = None,
+                          source_ontology_id: str | None = None,
+                          restore_operation_builder=None) -> list[dict]:
     """Compile a graph-semantic Turtle diff into reviewable atomic operations."""
+    if (base_ontology_id and source_ontology_id
+            and base_ontology_id != source_ontology_id):
+        raise ValueError('base_ontology_id 与 source_ontology_id 必须一致')
+    immutable_source_id = source_ontology_id or base_ontology_id
     base = _graph(base_turtle)
     edited = _graph(edited_turtle)
     if isomorphic(base, edited):
@@ -823,7 +893,7 @@ def canonical_turtle_diff(base_turtle: str, edited_turtle: str, *,
     for term in term_order:
         operations.append(build_operation(
             'create_term', str(term), after={'kind': edited_declarations[term]},
-            impact={'leaf': True, 'referenced': False}))
+            impact=_new_term_impact(edited, term)))
 
     restored_terms = set()
     for term in sorted(set(base_declarations) & set(edited_declarations), key=str):
@@ -835,12 +905,34 @@ def canonical_turtle_diff(base_turtle: str, edited_turtle: str, *,
             operations.append(build_operation('retire_term', str(term)))
         else:
             template = _term_template(Ontology(edited_turtle), str(term))
-            operations.append(build_operation('restore_term', str(term), after={
-                'source_ontology_id': 'turtle-diff:' + hashlib.sha256(
-                    _canonical_rdf(edited_turtle).encode('utf-8')).hexdigest(),
-                'selected_fields': sorted(_SELECTABLE_TEMPLATE_FIELDS),
-                'template': template,
-            }))
+            if not immutable_source_id and restore_operation_builder is None:
+                raise ValueError(
+                    '移除 owl:deprecated 需要 source_ontology_id 和结构化恢复（structured restore）')
+            impact = {
+                'preview': {**template, 'active': True},
+                'reactivated_constraints': sum(
+                    len(template[field]) for field in ('parents', 'domain', 'range')),
+            }
+            if restore_operation_builder is not None:
+                operation = restore_operation_builder(
+                    target_iri=str(term),
+                    source_ontology_id=immutable_source_id,
+                    selected_fields=sorted(RESTORE_TEMPLATE_FIELDS),
+                    template=template,
+                    impact=impact,
+                )
+                if (not isinstance(operation, dict)
+                        or operation.get('action') != 'restore_term'
+                        or operation.get('target_iri') != str(term)
+                        or not (operation.get('after') or {}).get('source_ontology_id')):
+                    raise ValueError('restore_operation_builder 必须返回有效的 restore_term 操作')
+            else:
+                operation = build_operation('restore_term', str(term), after={
+                    'source_ontology_id': immutable_source_id,
+                    'selected_fields': sorted(RESTORE_TEMPLATE_FIELDS),
+                    'template': template,
+                }, impact=impact)
+            operations.append(operation)
             restored_terms.add(term)
 
     annotation_removals = []
