@@ -1,7 +1,7 @@
 import pytest
 from rdflib import RDFS, URIRef
 
-from knowledge_service.repository import Repository
+from knowledge_service.repository import OntologyPublicationConflict, Repository
 from knowledge_service.services.ontology import Ontology
 from knowledge_service.services.ontology_drafts import (
     BatchNotAllowed,
@@ -634,6 +634,143 @@ def test_publish_preflight_delegates_without_partial_service_commit(tmp_path):
     assert calls[0]['turtle']
     assert calls[0]['idempotency_key'] == 'once'
     assert repo._ontology_drafts.get(project_id, draft['id'])['status'] == 'reviewed'
+
+
+def test_atomic_publish_rolls_back_is_idempotent_and_records_provenance(
+        tmp_path, monkeypatch):
+    repo, service, project_id, base = setup_service(tmp_path)
+    service.publisher = repo
+    draft = service.create(project_id, base['id'], 'manual', 'atomic publish', 'author')
+    submitted = service.submit(
+        project_id, draft['id'], add_label(service, project_id, draft)['revision'])
+    operation = submitted['operations'][0]
+    reviewed = service.decide(
+        project_id, draft['id'], submitted['revision'], base['id'],
+        submitted['validation_fingerprint'], [{
+            'operation_id': operation['id'],
+            'operation_fingerprint': operation['fingerprint'],
+            'action': 'approve'}], [], 'reviewer')
+    prepared = service.publish_preflight(
+        project_id, draft['id'], reviewed['revision'], base['id'],
+        reviewed['validation_fingerprint'], [], 'publish-once', 'publisher')
+    conflicting = service.publish_preflight(
+        project_id, draft['id'], reviewed['revision'], base['id'],
+        reviewed['validation_fingerprint'], [], 'publish-once', 'other-publisher')
+
+    insert = repo._insert_ontology_version
+
+    def fail_after_insert(*args, **kwargs):
+        insert(*args, **kwargs)
+        raise RuntimeError('after ontology insert')
+
+    monkeypatch.setattr(repo, '_insert_ontology_version', fail_after_insert)
+    with pytest.raises(RuntimeError, match='after ontology insert'):
+        repo.publish_ontology_draft(**prepared)
+    assert [row['id'] for row in repo.list_ontologies(project_id)] == [base['id']]
+    assert repo._ontology_drafts.get(project_id, draft['id'])['status'] == 'reviewed'
+    assert repo._ontology_drafts.export(project_id)['publish_requests'] == []
+    assert repo.list_provenance_activities(project_id, kind='ontology_publish') == []
+
+    monkeypatch.setattr(repo, '_insert_ontology_version', insert)
+    ontology = repo.publish_ontology_draft(**prepared)
+    assert repo.publish_ontology_draft(**prepared)['id'] == ontology['id']
+    with pytest.raises(OntologyPublicationConflict) as caught:
+        repo.publish_ontology_draft(**conflicting)
+    assert caught.value.code == 'idempotency_conflict'
+    assert service.publish(
+        project_id, draft['id'], reviewed['revision'], base['id'],
+        reviewed['validation_fingerprint'], [], 'publish-once', 'publisher'
+    )['id'] == ontology['id']
+
+    published = repo._ontology_drafts.get(project_id, draft['id'])
+    assert published['status'] == 'published'
+    assert published['published_ontology_id'] == ontology['id']
+    assert len(repo.list_ontologies(project_id)) == 2
+    activities = repo.list_provenance_activities(project_id)
+    assert {row['kind'] for row in activities} >= {
+        'ontology_draft', 'ontology_publish'}
+    edges = repo.list_provenance_edges(project_id)
+    assert {row['relation'] for row in edges} >= {
+        'published-from', 'contains-operation', 'decided-by', 'proposed-by',
+        'based-on'}
+    assert any(
+        row['source_ref'] == f"ontology-version:{ontology['id']}"
+        and row['target_ref'] == f"ontology-draft:{draft['id']}"
+        for row in edges)
+
+
+def _review_candidate_draft(repo, service, project_id, base, document_id):
+    document = repo.put_record(project_id, {
+        'id': document_id, 'kind': 'document', 'text': 'source',
+        'metadata': {'review_candidates': [
+            {'id': 'candidate-1', 'status': 'pending'}]}})
+    draft = service.create(
+        project_id, base['id'], 'candidate', 'candidate publish', 'author',
+        source_context={
+            'document_id': document_id, 'candidate_id': 'candidate-1'})
+    changed = service.command(project_id, draft['id'], draft['revision'], {
+        'action': 'add_annotation',
+        'target_iri': 'https://example.test/Child',
+        'predicate': 'http://www.w3.org/2000/01/rdf-schema#label',
+        'value': 'Candidate publish', 'language': 'en',
+        'evidence_refs': ['candidate:candidate-1'],
+    })
+    submitted = service.submit(project_id, draft['id'], changed['revision'])
+    operation = submitted['operations'][0]
+    reviewed = service.decide(
+        project_id, draft['id'], submitted['revision'], base['id'],
+        submitted['validation_fingerprint'], [{
+            'operation_id': operation['id'],
+            'operation_fingerprint': operation['fingerprint'],
+            'action': 'approve'}], [], 'reviewer')
+    return document, draft, reviewed
+
+
+def test_atomic_publish_rechecks_source_inside_repository_transaction(tmp_path):
+    repo, service, project_id, base = setup_service(tmp_path)
+    service.publisher = repo
+    document, draft, reviewed = _review_candidate_draft(
+        repo, service, project_id, base, 'stale-publish-source')
+    prepared = service.publish_preflight(
+        project_id, draft['id'], reviewed['revision'], base['id'],
+        reviewed['validation_fingerprint'], [], 'stale-source', 'publisher')
+    repo.put_record(project_id, {
+        'id': document['id'], 'kind': document['kind'], 'text': 'changed',
+        'metadata': document['metadata']}, expected_version=document['version'])
+
+    with pytest.raises(OntologyPublicationConflict) as caught:
+        repo.publish_ontology_draft(**prepared)
+
+    assert caught.value.code == 'stale_source'
+    assert len(repo.list_ontologies(project_id)) == 1
+    assert repo._ontology_drafts.export(project_id)['publish_requests'] == []
+    assert repo._ontology_drafts.get(project_id, draft['id'])['status'] == 'reviewed'
+
+
+def test_candidate_publish_persists_sync_job_before_after_commit_runner(tmp_path):
+    repo, service, project_id, base = setup_service(tmp_path)
+    service.publisher = repo
+    _, draft, reviewed = _review_candidate_draft(
+        repo, service, project_id, base, 'sync-source')
+    observed = []
+
+    def fail_sync(job):
+        ontology = repo.get_ontology(project_id, job['ontology_id'])
+        artifact = repo.get_artifact('ontology_sync_job', job['id'])
+        observed.append((ontology['id'], artifact['status']))
+        raise RuntimeError('vector service unavailable')
+
+    repo._ontology_sync_runner = fail_sync
+    ontology = service.publish(
+        project_id, draft['id'], reviewed['revision'], base['id'],
+        reviewed['validation_fingerprint'], [], 'sync-once', 'publisher')
+
+    jobs = repo.list_artifacts('ontology_sync_job', project_id)
+    assert observed == [(ontology['id'], 'pending')]
+    assert len(jobs) == 1
+    assert jobs[0]['status'] == 'pending'
+    assert jobs[0]['ontology_id'] == ontology['id']
+    assert repo._ontology_drafts.get(project_id, draft['id'])['status'] == 'published'
 
 
 def test_publish_preflight_revalidates_only_the_current_approved_subset(tmp_path):

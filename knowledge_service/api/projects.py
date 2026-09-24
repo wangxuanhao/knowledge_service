@@ -29,7 +29,9 @@ def install(app, service):
         p = repository.create_project(request.name, metadata)
         if request.use_default_ontology and mode == 'ontology':
             turtle = (Path(__file__).resolve().parents[1] / 'resources/default_ontology.ttl').read_text(encoding='utf-8')
-            repository.save_ontology(p['id'], turtle, Ontology(turtle).summary())
+            repository.bootstrap_ontology(
+                p['id'], turtle, Ontology(turtle).summary(),
+                {'actor': 'api:projects'})
         return p
 
     @router.get('/api/projects/{project_id}')

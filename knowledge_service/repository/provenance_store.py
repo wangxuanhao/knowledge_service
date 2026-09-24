@@ -11,11 +11,14 @@ from ..core.time import utc_now
 from .core import _json
 
 
-_ACTIVITY_KINDS = {'retrieval', 'answer'}
+_ACTIVITY_KINDS = {
+    'retrieval', 'answer', 'ontology_draft', 'ontology_publish',
+}
 _TERMINAL_STATUSES = {'completed', 'failed', 'cancelled'}
 _EDGE_RELATIONS = {
     'considered', 'used', 'offered', 'cites', 'supported-by', 'decided-by',
-    'extracted-from', 'sourced-from', 'processed-by',
+    'extracted-from', 'sourced-from', 'processed-by', 'published-from',
+    'contains-operation', 'proposed-by', 'based-on',
 }
 
 

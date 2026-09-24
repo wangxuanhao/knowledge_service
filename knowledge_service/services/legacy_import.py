@@ -155,7 +155,7 @@ class LegacyImporter:
                 project = repository.create_project(name, {'legacy_import_key': key, 'legacy_name': name,
                                                            'legacy_kind': kind, 'legacy_root': str(self.root)})
             versions = repository.list_ontologies(project['id'])
-            ontology = versions[-1] if versions else repository.save_ontology(
+            ontology = versions[-1] if versions else repository.bootstrap_ontology(
                 project['id'], turtle, Ontology(turtle).summary())
             for row in rows:
                 if row['kind'] in ('entity', 'relation'):

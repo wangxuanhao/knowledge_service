@@ -185,7 +185,9 @@ def install(app, service):
             set_term_constraints(ontology,node,request.kind,request.parent,request.domain,request.range,
                 request.domains,request.ranges)
             turtle = ontology.graph.serialize(format='turtle')
-            return service.repository.save_ontology(p, turtle, Ontology(turtle).summary())
+            return service.repository.bootstrap_ontology(
+                p, turtle, Ontology(turtle).summary(),
+                {'actor': 'api:workspace'})
 
     @app.get('/api/projects/{p}/ontology/term-impact')
     def term_impact_view(p:str,uri:str):
@@ -210,7 +212,8 @@ def install(app, service):
                 request.domains,request.ranges)
             turtle=ontology.graph.serialize(format='turtle')
             parsed=Ontology(turtle)
-            return service.repository.save_ontology(p,turtle,parsed.summary())
+            return service.repository.bootstrap_ontology(
+                p, turtle, parsed.summary(), {'actor': 'api:workspace'})
 
     @app.post('/api/projects/{p}/ontology/term-retire')
     def retire_term(p:str,uri:str,request:TermRetire):
@@ -228,5 +231,6 @@ def install(app, service):
             ontology.graph.remove((node,None,None))
             for predicate in safe_incoming:ontology.graph.remove((None,predicate,node))
             turtle=ontology.graph.serialize(format='turtle');parsed=Ontology(turtle)
-            saved=service.repository.save_ontology(p,turtle,parsed.summary())
+            saved=service.repository.bootstrap_ontology(
+                p, turtle, parsed.summary(), {'actor': 'api:workspace'})
             return {**saved,'retired':uri,'impact':impact}

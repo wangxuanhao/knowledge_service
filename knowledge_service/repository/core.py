@@ -68,6 +68,15 @@ class OntologyNotPublished(Exception):
         self.project_id = project_id
 
 
+class OntologyPublicationConflict(ValueError):
+    """Stable conflict raised by the atomic ontology publication boundary."""
+
+    def __init__(self, code, message, *, details=None):
+        self.code = code
+        self.details = dict(details or {})
+        super().__init__(message)
+
+
 def _create_initial_schema(db):
     statements = (
         '''CREATE TABLE IF NOT EXISTS projects (
@@ -550,6 +559,72 @@ def _create_ontology_draft_schema(db):
     _ensure_ontology_history_immutable_guards(db)
 
 
+def _expand_ontology_provenance_schema(db):
+    """Migration 15: extend provenance without rewriting legacy facts."""
+    activity_count = db.execute(
+        'SELECT COUNT(*) FROM provenance_activities').fetchone()[0]
+    edge_count = db.execute(
+        'SELECT COUNT(*) FROM provenance_edges').fetchone()[0]
+
+    db.execute(
+        'ALTER TABLE provenance_activities RENAME TO provenance_activities_v14')
+    db.execute(
+        'ALTER TABLE provenance_edges RENAME TO provenance_edges_v14')
+    db.execute('''CREATE TABLE provenance_activities (
+      id TEXT NOT NULL,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK(kind IN (
+        'retrieval','answer','ontology_draft','ontology_publish')),
+      status TEXT NOT NULL CHECK(status IN
+        ('running','completed','failed','cancelled')),
+      payload TEXT NOT NULL CHECK(json_valid(payload)),
+      started_at TEXT NOT NULL,
+      completed_at TEXT,
+      UNIQUE(project_id,id))''')
+    db.execute('''CREATE TABLE provenance_edges (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      activity_id TEXT NOT NULL,
+      source_ref TEXT NOT NULL,
+      relation TEXT NOT NULL CHECK(relation IN (
+        'considered','used','offered','cites','supported-by','decided-by',
+        'extracted-from','sourced-from','processed-by','published-from',
+        'contains-operation','proposed-by','based-on')),
+      target_ref TEXT NOT NULL,
+      ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+      payload TEXT NOT NULL CHECK(json_valid(payload)),
+      created_at TEXT NOT NULL,
+      UNIQUE(project_id,activity_id,source_ref,relation,target_ref,ordinal),
+      FOREIGN KEY(project_id,activity_id)
+        REFERENCES provenance_activities(project_id,id) ON DELETE CASCADE)''')
+    db.execute('''INSERT INTO provenance_activities
+      (id,project_id,kind,status,payload,started_at,completed_at)
+      SELECT id,project_id,kind,status,payload,started_at,completed_at
+      FROM provenance_activities_v14''')
+    db.execute('''INSERT INTO provenance_edges
+      (id,project_id,activity_id,source_ref,relation,target_ref,ordinal,payload,
+       created_at)
+      SELECT id,project_id,activity_id,source_ref,relation,target_ref,ordinal,
+             payload,created_at
+      FROM provenance_edges_v14''')
+    if db.execute('SELECT COUNT(*) FROM provenance_activities').fetchone()[0] != activity_count:
+        raise RuntimeError('migration 15 provenance activity count mismatch')
+    if db.execute('SELECT COUNT(*) FROM provenance_edges').fetchone()[0] != edge_count:
+        raise RuntimeError('migration 15 provenance edge count mismatch')
+    violations = db.execute(
+        'PRAGMA foreign_key_check(provenance_edges)').fetchall()
+    if violations:
+        raise RuntimeError('migration 15 provenance foreign-key validation failed')
+    db.execute('DROP TABLE provenance_edges_v14')
+    db.execute('DROP TABLE provenance_activities_v14')
+    db.execute('''CREATE INDEX provenance_edges_source
+      ON provenance_edges(project_id,source_ref)''')
+    db.execute('''CREATE INDEX provenance_edges_target
+      ON provenance_edges(project_id,target_ref)''')
+    db.execute('''CREATE INDEX provenance_edges_activity
+      ON provenance_edges(project_id,activity_id)''')
+
+
 def _create_assertion_schema(db):
     statements = (
         '''CREATE TABLE assertions (
@@ -783,6 +858,7 @@ _SCHEMA_MIGRATIONS = (
     (12, _create_provenance_schema),
     (13, _create_record_operation_reservation_schema),
     (14, _create_ontology_draft_schema),
+    (15, _expand_ontology_provenance_schema),
 )
 
 
@@ -1642,33 +1718,76 @@ class Repository:
         return self._reviews.list_merge_operations(project_id)
 
     # ------------------------------------------------------------------ 本体与制品（主存储内）
-    def save_ontology(self, project_id, turtle, summary, metadata=None):
+    @staticmethod
+    def _publish_fingerprint(value):
+        encoded = json.dumps(
+            value, ensure_ascii=False, allow_nan=False, sort_keys=True,
+            separators=(',', ':'))
+        return hashlib.sha256(encoded.encode('utf-8')).hexdigest()
+
+    def _insert_ontology_version(self, project_id, turtle, summary, metadata=None,
+                                 *, ontology_id=None, created_at=None):
         metadata = {} if metadata is None else metadata
         if not isinstance(turtle, str) or not isinstance(summary, dict) or not isinstance(metadata, dict):
             raise ValueError('本体需要 Turtle 文本和摘要对象')
-        item = {'id': str(uuid4()), 'project_id': project_id, 'turtle': turtle,
-                'summary': json.loads(_json(summary)), 'created_at': utc_now(),
-                'metadata': json.loads(_json(metadata))}
-        with self._transaction():
-            self.get_project(project_id)
-            self._db.execute('''INSERT INTO ontologies
-                (id,project_id,turtle,summary,created_at,metadata) VALUES (?,?,?,?,?,?)''',
-                (item['id'], project_id, turtle, _json(summary), item['created_at'], _json(metadata)))
+        item = {
+            'id': ontology_id or str(uuid4()), 'project_id': project_id,
+            'turtle': turtle, 'summary': json.loads(_json(summary)),
+            'created_at': created_at or utc_now(),
+            'metadata': json.loads(_json(metadata)),
+        }
+        self._db.execute(
+            '''INSERT INTO ontologies
+               (id,project_id,turtle,summary,created_at,metadata)
+               VALUES (?,?,?,?,?,?)''',
+            (item['id'], project_id, turtle, _json(item['summary']),
+             item['created_at'], _json(item['metadata'])))
         return item
 
-    def publish_ontology_draft(self, project_id, draft, expected_parent_id):
-        """原子地发布发现草案及其不可变的本体版本。"""
+    def bootstrap_ontology(self, project_id, turtle, summary, metadata=None):
+        """Explicit administrative/bootstrap insertion outside draft governance."""
+        metadata = {**(metadata or {}), 'write_path': 'bootstrap'}
+        with self._transaction():
+            self.get_project(project_id)
+            item = self._insert_ontology_version(
+                project_id, turtle, summary, metadata)
+            activity_id = f"ontology-publish:bootstrap:{item['id']}"
+            payload = {
+                'ontology_id': item['id'], 'source_kind': 'bootstrap',
+                'actor': metadata.get('actor', 'system'),
+            }
+            self._provenance._begin_activity(
+                project_id, activity_id, 'ontology_publish', payload,
+                item['created_at'])
+            self._provenance._transition_activity(
+                project_id, activity_id, 'completed', payload, [{
+                    'activity_id': activity_id,
+                    'source_ref': f"ontology-version:{item['id']}",
+                    'relation': 'proposed-by',
+                    'target_ref': 'source-kind:bootstrap',
+                    'ordinal': 0, 'payload': {},
+                }], item['created_at'])
+            return item
+
+    def save_ontology(self, project_id, turtle, summary, metadata=None):
+        """Compatibility alias; production routes migrate to bootstrap/publish wrappers."""
+        metadata = {**(metadata or {}), 'write_path': 'compatibility'}
+        with self._transaction():
+            self.get_project(project_id)
+            return self._insert_ontology_version(
+                project_id, turtle, summary, metadata)
+
+    def _publish_legacy_ontology_discovery_draft(
+            self, project_id, draft, expected_parent_id):
+        """Compatibility transaction retained until Task 7 converts legacy artifacts."""
         if not isinstance(draft, dict) or draft.get('project_id') != project_id:
             raise ValueError('本体发现草案不属于此项目')
         summary = draft.get('summary')
         metadata = draft.get('ontology_metadata', {})
         if not isinstance(draft.get('turtle'), str) or not isinstance(summary, dict) or not isinstance(metadata, dict):
             raise ValueError('本体发现草案不完整')
-        ontology = {'id': str(uuid4()), 'project_id': project_id, 'turtle': draft['turtle'],
-                    'summary': json.loads(_json(summary)), 'created_at': utc_now(),
-                    'metadata': json.loads(_json(metadata))}
         published = {**draft, 'status': 'published', 'revision': draft.get('revision', 1) + 1,
-                     'published_at': utc_now(), 'ontology_id': ontology['id'],
+                     'published_at': utc_now(),
                      'mapped_entities': 0, 'mapped_relations': 0, 'mapped_attributes': 0,
                      'requires_controlled_reingest': False}
         with self._transaction():
@@ -1679,14 +1798,344 @@ class Repository:
             latest_id = latest['id'] if latest else None
             if latest_id != expected_parent_id:
                 raise ValueError('版本冲突：本体已更新，请基于当前版本重新生成发现草案')
-            self._db.execute('''INSERT INTO ontologies
-                (id,project_id,turtle,summary,created_at,metadata) VALUES (?,?,?,?,?,?)''',
-                (ontology['id'], project_id, ontology['turtle'], _json(ontology['summary']),
-                 ontology['created_at'], _json(ontology['metadata'])))
+            ontology = self._insert_ontology_version(
+                project_id, draft['turtle'], summary,
+                {**metadata, 'write_path': 'legacy_discovery'})
+            published['ontology_id'] = ontology['id']
             self._db.execute(
                 'INSERT INTO artifacts VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',
                 (published['id'], 'ontology_discovery_draft', project_id, _json(published)))
         return ontology, published
+
+    @staticmethod
+    def _ontology_source_references(context):
+        if not isinstance(context, dict):
+            return []
+        references = context.get('documents')
+        if isinstance(references, list):
+            return [row for row in references if isinstance(row, dict)]
+        return [context] if context.get('document_id') else []
+
+    @staticmethod
+    def _ontology_candidate(document, candidate_id):
+        metadata = document.get('metadata') or {}
+        candidates = [*(metadata.get('review_candidates') or []),
+                      *(metadata.get('discovery_candidates') or [])]
+        return next((row for row in candidates if row.get('id') == candidate_id), None)
+
+    def _recheck_ontology_publish_source(self, project_id, draft):
+        if draft['source_kind'] not in {'discovery', 'candidate'}:
+            return
+        for reference in self._ontology_source_references(
+                draft.get('source_context') or {}):
+            document_id = reference.get('document_id') or reference.get('id')
+            try:
+                document = self.get_record(project_id, document_id)
+            except KeyError as exc:
+                raise OntologyPublicationConflict(
+                    'stale_source', 'ontology source document no longer exists',
+                    details={'document_id': document_id}) from exc
+            expected_version = reference.get(
+                'expected_document_version', reference.get('version'))
+            expected_version_id = reference.get(
+                'expected_document_version_id', reference.get('version_id'))
+            if (expected_version is not None
+                    and document.get('version') != expected_version):
+                raise OntologyPublicationConflict(
+                    'stale_source', 'ontology source document revision changed',
+                    details={'document_id': document_id})
+            if (expected_version_id is not None
+                    and document.get('version_id') != expected_version_id):
+                raise OntologyPublicationConflict(
+                    'stale_source', 'ontology source document version changed',
+                    details={'document_id': document_id})
+            candidate_ids = [*(reference.get('candidate_ids') or [])]
+            if reference.get('candidate_id'):
+                candidate_ids.append(reference['candidate_id'])
+            statuses = reference.get('candidate_statuses') or {}
+            fingerprints = reference.get('candidate_fingerprints') or {}
+            for candidate_id in dict.fromkeys(candidate_ids):
+                candidate = self._ontology_candidate(document, candidate_id)
+                if candidate is None:
+                    raise OntologyPublicationConflict(
+                        'stale_source', 'ontology source candidate no longer exists',
+                        details={'candidate_id': candidate_id})
+                if (candidate_id in statuses
+                        and candidate.get('status') != statuses[candidate_id]):
+                    raise OntologyPublicationConflict(
+                        'stale_source', 'ontology source candidate status changed',
+                        details={'candidate_id': candidate_id})
+                if (candidate_id in fingerprints
+                        and self._publish_fingerprint(candidate)
+                        != fingerprints[candidate_id]):
+                    raise OntologyPublicationConflict(
+                        'stale_source', 'ontology source candidate changed',
+                        details={'candidate_id': candidate_id})
+
+    def _recheck_governed_publish(self, prepared):
+        project_id, draft_id = prepared['project_id'], prepared['draft_id']
+        draft = self._ontology_drafts.get(project_id, draft_id)
+        if draft['revision'] != prepared['expected_revision']:
+            raise OntologyPublicationConflict(
+                'revision_conflict', 'ontology draft revision changed',
+                details={'current_revision': draft['revision']})
+        if draft['status'] != 'reviewed':
+            raise OntologyPublicationConflict(
+                'revision_conflict', 'ontology draft is no longer reviewed')
+        latest = self._db.execute(
+            'SELECT id FROM ontologies WHERE project_id=? ORDER BY rowid DESC LIMIT 1',
+            (project_id,)).fetchone()
+        latest_id = latest['id'] if latest else None
+        if (draft['base_ontology_id'] != latest_id
+                or prepared['expected_ontology_id'] != latest_id):
+            raise OntologyPublicationConflict(
+                'stale_base', 'ontology draft base is no longer current', details={
+                    'base_ontology_id': draft['base_ontology_id'],
+                    'current_ontology_id': latest_id})
+        if (draft.get('validation_fingerprint')
+                != prepared['validation_fingerprint']):
+            raise OntologyPublicationConflict(
+                'validation_changed', 'ontology validation fingerprint changed')
+        if json.loads(_json(draft.get('validation_report'))) != json.loads(
+                _json(prepared.get('validation_report'))):
+            raise OntologyPublicationConflict(
+                'validation_changed', 'ontology validation report changed')
+        self._recheck_ontology_publish_source(project_id, draft)
+
+        operations = [row for row in self._ontology_drafts.effective_operations(
+            project_id, draft_id)
+            if row['action'] != 'withdraw_operation'
+            and not (row.get('validation') or {}).get('withdrawn')]
+        decisions = {
+            row['operation_id']: row
+            for row in self._ontology_drafts.effective_decisions(project_id, draft_id)
+        }
+        approved = [row for row in operations
+                    if decisions.get(row['id'], {}).get('action') == 'approve'
+                    and decisions[row['id']]['operation_fingerprint'] == row['fingerprint']]
+        expected = [(row['id'], row['fingerprint']) for row in approved]
+        supplied = [(row['id'], row['fingerprint'])
+                    for row in prepared.get('operations') or []]
+        if supplied != expected:
+            raise OntologyPublicationConflict(
+                'validation_changed', 'approved ontology operation set changed')
+        supplied_decisions = [(row['id'], row['operation_id'])
+                              for row in prepared.get('decisions') or []]
+        expected_decisions = [(decisions[row['id']]['id'], row['id'])
+                              for row in approved]
+        if supplied_decisions != expected_decisions:
+            raise OntologyPublicationConflict(
+                'validation_changed', 'ontology review decision set changed')
+        return draft
+
+    @staticmethod
+    def _provenance_edge(activity_id, source_ref, relation, target_ref, ordinal,
+                         payload=None):
+        return {
+            'activity_id': activity_id, 'source_ref': source_ref,
+            'relation': relation, 'target_ref': target_ref,
+            'ordinal': ordinal, 'payload': payload or {},
+        }
+
+    def _record_ontology_publish_provenance(
+            self, prepared, draft, ontology, request, completed_at):
+        draft_ref = f"ontology-draft:{draft['id']}"
+        version_ref = f"ontology-version:{ontology['id']}"
+        draft_activity = draft_ref
+        publish_activity = f"ontology-publish:{request['id']}"
+        draft_payload = {
+            'draft_id': draft['id'], 'source_kind': draft['source_kind'],
+            'base_ontology_id': draft['base_ontology_id'],
+            'validation_fingerprint': prepared['validation_fingerprint'],
+            'actor': prepared['actor'], 'status': 'published',
+        }
+        publish_payload = {
+            'draft_id': draft['id'], 'ontology_id': ontology['id'],
+            'request_hash': prepared['request_hash'],
+            'idempotency_key': prepared['idempotency_key'],
+            'actor': prepared['actor'],
+        }
+        self._provenance._begin_activity(
+            prepared['project_id'], draft_activity, 'ontology_draft', draft_payload,
+            draft['created_at'])
+        self._provenance._begin_activity(
+            prepared['project_id'], publish_activity, 'ontology_publish',
+            publish_payload, completed_at)
+        draft_edges, publish_edges = [], []
+        for ordinal, (operation, decision) in enumerate(zip(
+                prepared['operations'], prepared['decisions'])):
+            operation_ref = f"ontology-operation:{operation['id']}"
+            decision_ref = f"ontology-decision:{decision['id']}"
+            draft_edges.append(self._provenance_edge(
+                draft_activity, draft_ref, 'contains-operation', operation_ref,
+                ordinal, {'fingerprint': operation['fingerprint'],
+                          'risk': operation['risk']}))
+            draft_edges.append(self._provenance_edge(
+                draft_activity, operation_ref, 'decided-by', decision_ref,
+                ordinal, {'actor': decision['actor'], 'reason': decision['reason'],
+                          'created_at': decision['created_at']}))
+            draft_edges.append(self._provenance_edge(
+                draft_activity, operation_ref, 'proposed-by',
+                f"source-kind:{draft['source_kind']}", ordinal,
+                {'reason': operation.get('reason'),
+                 'created_at': operation['created_at']}))
+            for evidence_ordinal, evidence in enumerate(operation.get('evidence') or []):
+                draft_edges.append(self._provenance_edge(
+                    draft_activity, operation_ref, 'supported-by', evidence,
+                    evidence_ordinal, {
+                        'operation_fingerprint': operation['fingerprint']}))
+            publish_edges.append(self._provenance_edge(
+                publish_activity, version_ref, 'contains-operation', operation_ref,
+                ordinal, {'fingerprint': operation['fingerprint']}))
+        if draft['base_ontology_id'] is not None:
+            draft_edges.append(self._provenance_edge(
+                draft_activity, draft_ref, 'based-on',
+                f"ontology-version:{draft['base_ontology_id']}", 0))
+            publish_edges.append(self._provenance_edge(
+                publish_activity, version_ref, 'based-on',
+                f"ontology-version:{draft['base_ontology_id']}", 0))
+        publish_edges.append(self._provenance_edge(
+            publish_activity, version_ref, 'published-from', draft_ref, 0))
+        self._provenance._transition_activity(
+            prepared['project_id'], draft_activity, 'completed', draft_payload,
+            draft_edges, completed_at)
+        self._provenance._transition_activity(
+            prepared['project_id'], publish_activity, 'completed', publish_payload,
+            publish_edges, completed_at)
+
+    def _create_ontology_sync_job(self, prepared, ontology, completed_at):
+        draft = prepared['draft']
+        if draft['source_kind'] not in {'discovery', 'candidate'}:
+            return None
+        job = {
+            'id': f"ontology-sync:{ontology['id']}",
+            'project_id': prepared['project_id'], 'status': 'pending',
+            'ontology_id': ontology['id'], 'draft_id': draft['id'],
+            'fingerprint': self._publish_fingerprint({
+                'ontology_id': ontology['id'],
+                'source_context': draft.get('source_context') or {},
+            }),
+            'created_at': completed_at, 'completed_at': None,
+        }
+        self._db.execute(
+            '''INSERT INTO artifacts(id,kind,project_id,payload)
+               VALUES (?,'ontology_sync_job',?,?)''',
+            (job['id'], prepared['project_id'], _json(job)))
+        return job
+
+    def _run_ontology_sync_after_commit(self, job):
+        runner = getattr(self, '_ontology_sync_runner', None)
+        if job is None or not callable(runner):
+            return
+        try:
+            runner(dict(job))
+        except Exception:
+            return
+        completed = {**job, 'status': 'completed', 'completed_at': utc_now()}
+        with self._transaction():
+            self._db.execute(
+                '''UPDATE artifacts SET payload=?
+                   WHERE id=? AND kind='ontology_sync_job' ''',
+                (_json(completed), job['id']))
+
+    def replay_ontology_publish(self, project_id, draft_id, idempotency_key,
+                                client_request_hash):
+        request = self._ontology_drafts.get_publish_request(
+            project_id, draft_id, idempotency_key)
+        if request is None or request['result_ontology_id'] is None:
+            raise OntologyPublicationConflict(
+                'idempotency_conflict', 'ontology publish request does not exist')
+        ontology = self.get_ontology(project_id, request['result_ontology_id'])
+        publication = ontology.get('metadata', {}).get('publication', {})
+        if publication.get('client_request_hash') != client_request_hash:
+            raise OntologyPublicationConflict(
+                'idempotency_conflict',
+                'idempotency key was already used with a different request')
+        return ontology
+
+    def _publish_governed_ontology_draft(self, prepared):
+        required = {
+            'project_id', 'draft', 'draft_id', 'expected_revision',
+            'expected_ontology_id', 'validation_fingerprint',
+            'validation_report', 'operations', 'decisions', 'turtle', 'summary',
+            'acknowledged_warning_codes', 'idempotency_key', 'actor',
+            'request_hash', 'client_request_hash',
+        }
+        if missing := required - set(prepared):
+            raise ValueError(f'ontology publish request is missing {sorted(missing)}')
+        calculated = self._publish_fingerprint({
+            key: value for key, value in prepared.items()
+            if key not in {'draft', 'validation_report', 'summary', 'request_hash'}
+        })
+        if calculated != prepared['request_hash']:
+            raise ValueError('ontology publish request hash is invalid')
+
+        sync_job = None
+        with self._transaction():
+            self.get_project(prepared['project_id'])
+            existing = self._ontology_drafts.get_publish_request(
+                prepared['project_id'], prepared['draft_id'],
+                prepared['idempotency_key'])
+            if existing is not None:
+                if existing['request_hash'] != prepared['request_hash']:
+                    raise OntologyPublicationConflict(
+                        'idempotency_conflict',
+                        'idempotency key was already used with a different request')
+                if existing['result_ontology_id'] is None:
+                    raise OntologyPublicationConflict(
+                        'idempotency_conflict',
+                        'ontology publish request is incomplete; retry after recovery')
+                return self.get_ontology(
+                    prepared['project_id'], existing['result_ontology_id'])
+
+            draft = self._recheck_governed_publish(prepared)
+            request = self._ontology_drafts._insert_publish_request(
+                prepared['project_id'], prepared['draft_id'],
+                prepared['idempotency_key'], prepared['request_hash'])
+            completed_at = utc_now()
+            metadata = {
+                'write_path': 'governed_publish',
+                'publication': {
+                    'draft_id': draft['id'],
+                    'base_ontology_id': draft['base_ontology_id'],
+                    'validation_fingerprint': prepared['validation_fingerprint'],
+                    'request_hash': prepared['request_hash'],
+                    'client_request_hash': prepared['client_request_hash'],
+                    'actor': prepared['actor'],
+                },
+            }
+            ontology = self._insert_ontology_version(
+                prepared['project_id'], prepared['turtle'], prepared['summary'],
+                metadata, created_at=completed_at)
+            self._record_ontology_publish_provenance(
+                prepared, draft, ontology, request, completed_at)
+            cursor = self._db.execute(
+                '''UPDATE ontology_drafts
+                   SET status='published',revision=revision+1,
+                       published_ontology_id=?,updated_at=?
+                   WHERE project_id=? AND id=? AND revision=?
+                     AND status='reviewed' AND validation_fingerprint=?''',
+                (ontology['id'], completed_at, prepared['project_id'],
+                 prepared['draft_id'], prepared['expected_revision'],
+                 prepared['validation_fingerprint']))
+            if cursor.rowcount != 1:
+                raise OntologyPublicationConflict(
+                    'revision_conflict', 'ontology draft changed while publishing')
+            self._ontology_drafts._complete_publish_request(
+                request['id'], ontology['id'], completed_at)
+            sync_job = self._create_ontology_sync_job(
+                prepared, ontology, completed_at)
+        self._run_ontology_sync_after_commit(sync_job)
+        return ontology
+
+    def publish_ontology_draft(self, project_id, draft, expected_parent_id=None,
+                               **request):
+        """Dispatch legacy discovery drafts or governed atomic publications."""
+        if 'expected_revision' not in request:
+            return self._publish_legacy_ontology_discovery_draft(
+                project_id, draft, expected_parent_id)
+        prepared = {'project_id': project_id, 'draft': draft, **request}
+        return self._publish_governed_ontology_draft(prepared)
 
     def commit_ontology_change(self, project_id, ontology, proposal, document, expected_document_version,
                                expected_ontology_id):
@@ -1699,10 +2148,10 @@ class Repository:
                                       (project_id,)).fetchone()
             if not latest or latest['id'] != expected_ontology_id:
                 raise ValueError('版本冲突：本体已更新，请重新评估草案影响')
-            self._db.execute('''INSERT INTO ontologies
-                (id,project_id,turtle,summary,created_at,metadata) VALUES (?,?,?,?,?,?)''',
-                (ontology['id'], project_id, ontology['turtle'], _json(ontology['summary']),
-                 ontology['created_at'], _json(ontology.get('metadata', {}))))
+            self._insert_ontology_version(
+                project_id, ontology['turtle'], ontology['summary'],
+                {**ontology.get('metadata', {}), 'write_path': 'legacy_change'},
+                ontology_id=ontology['id'], created_at=ontology['created_at'])
             saved_document = self._put(project_id, document, expected_document_version)
             self._db.execute('INSERT INTO artifacts VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',
                              (proposal['id'], 'ontology_change', project_id, _json(proposal)))

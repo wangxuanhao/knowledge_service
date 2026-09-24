@@ -1365,6 +1365,20 @@ class OntologyDrafts:
         return refreshed
 
     # --------------------------------------------------------------- publishing
+    @staticmethod
+    def _client_publish_hash(project_id, draft_id, expected_revision,
+                             expected_ontology_id, validation_fingerprint,
+                             acknowledged_warning_codes, idempotency_key, actor):
+        return _fingerprint({
+            'project_id': project_id, 'draft_id': draft_id,
+            'expected_revision': expected_revision,
+            'expected_ontology_id': expected_ontology_id,
+            'validation_fingerprint': validation_fingerprint,
+            'acknowledged_warning_codes': sorted(
+                set(acknowledged_warning_codes or [])),
+            'idempotency_key': idempotency_key, 'actor': actor,
+        })
+
     def publish_preflight(self, project_id, draft_id, expected_revision,
                           expected_ontology_id, validation_fingerprint,
                           acknowledged_warning_codes, idempotency_key, actor):
@@ -1423,6 +1437,10 @@ class OntologyDrafts:
                 set(acknowledged_warning_codes or [])),
             'idempotency_key': idempotency_key, 'actor': actor,
         }
+        request['client_request_hash'] = self._client_publish_hash(
+            project_id, draft_id, expected_revision, expected_ontology_id,
+            validation_fingerprint, acknowledged_warning_codes,
+            idempotency_key, actor)
         request['request_hash'] = _fingerprint({
             key: value for key, value in request.items()
             if key not in {'draft', 'validation_report', 'summary'}})
@@ -1431,6 +1449,17 @@ class OntologyDrafts:
     def publish(self, project_id, draft_id, expected_revision,
                 expected_ontology_id, validation_fingerprint,
                 acknowledged_warning_codes, idempotency_key, actor):
+        actor = _text(actor, 'actor')
+        idempotency_key = _text(idempotency_key, 'idempotency_key')
+        draft = self.store.get(project_id, draft_id)
+        replay = getattr(self.publisher, 'replay_ontology_publish', None)
+        if draft['status'] == 'published' and replay is not None:
+            return replay(
+                project_id, draft_id, idempotency_key,
+                self._client_publish_hash(
+                    project_id, draft_id, expected_revision,
+                    expected_ontology_id, validation_fingerprint,
+                    acknowledged_warning_codes, idempotency_key, actor))
         prepared = self.publish_preflight(
             project_id, draft_id, expected_revision, expected_ontology_id,
             validation_fingerprint, acknowledged_warning_codes,

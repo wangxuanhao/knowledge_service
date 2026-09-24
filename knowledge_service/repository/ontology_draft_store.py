@@ -139,6 +139,43 @@ class OntologyDraftStore:
     def _publish_request(row):
         return dict(row)
 
+    def get_publish_request(self, project_id, draft_id, idempotency_key):
+        self.get(project_id, draft_id)
+        with self._lock:
+            row = self._db.execute(
+                '''SELECT * FROM ontology_publish_requests
+                   WHERE project_id=? AND draft_id=? AND idempotency_key=?''',
+                (project_id, draft_id, idempotency_key)).fetchone()
+        return self._publish_request(row) if row is not None else None
+
+    def _insert_publish_request(self, project_id, draft_id, idempotency_key,
+                                request_hash, *, request_id=None, created_at=None):
+        request_id = request_id or str(uuid4())
+        created_at = created_at or utc_now()
+        self._db.execute(
+            '''INSERT INTO ontology_publish_requests
+               (id,project_id,draft_id,idempotency_key,request_hash,
+                result_ontology_id,created_at,completed_at)
+               VALUES (?,?,?,?,?,NULL,?,NULL)''',
+            (request_id, project_id, draft_id, idempotency_key, request_hash,
+             created_at))
+        return self._publish_request(self._db.execute(
+            'SELECT * FROM ontology_publish_requests WHERE id=?',
+            (request_id,)).fetchone())
+
+    def _complete_publish_request(self, request_id, ontology_id, completed_at=None):
+        completed_at = completed_at or utc_now()
+        cursor = self._db.execute(
+            '''UPDATE ontology_publish_requests
+               SET result_ontology_id=?,completed_at=?
+               WHERE id=? AND result_ontology_id IS NULL''',
+            (ontology_id, completed_at, request_id))
+        if cursor.rowcount != 1:
+            raise ValueError('ontology publish request is already completed')
+        return self._publish_request(self._db.execute(
+            'SELECT * FROM ontology_publish_requests WHERE id=?',
+            (request_id,)).fetchone())
+
     def create(self, project_id, item):
         if not isinstance(item, dict):
             raise ValueError('本体草案必须是对象')
@@ -380,6 +417,21 @@ class OntologyDraftStore:
                    ORDER BY operation.created_at,operation.rowid''',
                 (project_id, draft_id)).fetchall()
         return [self._operation(row) for row in rows]
+
+    def effective_decisions(self, project_id, draft_id):
+        self.get(project_id, draft_id)
+        with self._lock:
+            rows = self._db.execute(
+                '''SELECT decision.* FROM ontology_review_decisions AS decision
+                   WHERE decision.project_id=? AND decision.draft_id=?
+                     AND NOT EXISTS (
+                       SELECT 1 FROM ontology_review_decisions AS replacement
+                       WHERE replacement.project_id=decision.project_id
+                         AND replacement.draft_id=decision.draft_id
+                         AND replacement.supersedes_decision_id=decision.id)
+                   ORDER BY decision.created_at,decision.rowid''',
+                (project_id, draft_id)).fetchall()
+        return [self._decision(row) for row in rows]
 
     def export(self, project_id):
         self.repo.get_project(project_id)

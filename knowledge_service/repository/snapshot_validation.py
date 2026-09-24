@@ -91,7 +91,12 @@ _FULL_ROW_CONTRACTS_V14 = {
         'ordinal', 'payload', 'created_at',
     }),
 }
-FULL_ROW_CONTRACTS = {14: _FULL_ROW_CONTRACTS_V14}
+# Migration 15 expands CHECK constraints but does not change the projection row
+# shape, so v14 and v15 snapshots deliberately share the exact wire contract.
+FULL_ROW_CONTRACTS = {
+    14: _FULL_ROW_CONTRACTS_V14,
+    15: _FULL_ROW_CONTRACTS_V14,
+}
 MIN_FULL_SCHEMA_VERSION = min(FULL_ROW_CONTRACTS)
 _RECORD_KINDS = {'document', 'entity', 'relation', 'attribute', 'chunk'}
 

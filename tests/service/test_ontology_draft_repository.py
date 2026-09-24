@@ -150,8 +150,10 @@ def test_migration_14_upgrades_v13_database_with_constrained_append_only_tables(
         tmp_path, monkeypatch):
     path = tmp_path / 'migration-14.sqlite'
     migrations = repository_module._SCHEMA_MIGRATIONS
-    assert migrations[-1][0] == 14
-    monkeypatch.setattr(repository_module, '_SCHEMA_MIGRATIONS', migrations[:-1])
+    assert 14 in dict(migrations)
+    monkeypatch.setattr(
+        repository_module, '_SCHEMA_MIGRATIONS',
+        tuple(item for item in migrations if item[0] < 14))
     legacy = Repository(path)
     project_id = legacy.create_project('legacy')['id']
     legacy.close()
@@ -260,7 +262,7 @@ def test_v14_reopen_repairs_missing_delete_guards_without_consuming_migration_15
     reopened = Repository(path)
 
     assert reopened._db.execute(
-        'SELECT MAX(version) FROM schema_migrations').fetchone()[0] == 14
+        'SELECT MAX(version) FROM schema_migrations').fetchone()[0] == 15
     triggers = {
         row[0] for row in reopened._db.execute(
             "SELECT name FROM sqlite_master WHERE type='trigger'"

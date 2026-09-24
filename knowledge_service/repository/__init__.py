@@ -11,6 +11,7 @@ Repository 保持方法名不变、内部转发到各 Store，对外导入路径
 from .core import (
     Repository,
     OntologyNotPublished,
+    OntologyPublicationConflict,
     _SCHEMA_MIGRATIONS,
     vector_blob,
     vector_array,
@@ -19,7 +20,8 @@ from .core import (
 from .ontology_draft_store import OntologyDraftConflict, OntologyDraftStore
 
 __all__ = [
-    'Repository', 'OntologyNotPublished', '_SCHEMA_MIGRATIONS',
+    'Repository', 'OntologyNotPublished', 'OntologyPublicationConflict',
+    '_SCHEMA_MIGRATIONS',
     'vector_blob', 'vector_array', '_json',
     'OntologyDraftConflict', 'OntologyDraftStore',
 ]

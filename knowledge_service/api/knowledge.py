@@ -158,7 +158,9 @@ def install(app, service):
     def save_ontology(project_id: str, request: OntologyWrite):
         parsed = Ontology(request.turtle)
         with service.lock:
-            return repository.save_ontology(project_id, request.turtle, parsed.summary())
+            return repository.bootstrap_ontology(
+                project_id, request.turtle, parsed.summary(),
+                {'actor': 'api:knowledge'})
 
     @router.post('/api/projects/{project_id}/ontology/validate')
     def validate(project_id: str, request: Scope, ontology_id: str | None = None):
