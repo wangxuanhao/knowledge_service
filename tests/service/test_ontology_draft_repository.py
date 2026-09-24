@@ -725,10 +725,17 @@ _FULL_ROW_SHAPES = {
 }
 
 
-@pytest.mark.parametrize('section_path,fields', _FULL_ROW_SHAPES.items(),
-                         ids=lambda value: '.'.join(value) if isinstance(value, tuple)
-                         else None)
-@pytest.mark.parametrize('mutation', ['missing', 'unknown'])
+_ROW_CONTRACT_MUTATIONS = [
+    (mutation, section_path, fields)
+    for section_path, fields in _FULL_ROW_SHAPES.items()
+    for mutation in ('missing', 'unknown')
+    if mutation == 'missing' or section_path != ('records',)
+]
+
+
+@pytest.mark.parametrize(
+    'mutation,section_path,fields', _ROW_CONTRACT_MUTATIONS,
+    ids=lambda value: '.'.join(value) if isinstance(value, tuple) else None)
 def test_full_restore_validates_exact_row_contracts_before_mutation(
         tmp_path, section_path, fields, mutation):
     snapshot, _ = _governed_snapshot(
@@ -806,13 +813,17 @@ def test_explicit_light_legacy_restore_keeps_permissive_section_contract(tmp_pat
     assert target.restore_projection(snapshot)['id'] == project_id
 
 
-def test_full_record_row_contract_preserves_supported_optional_fields(tmp_path):
+def test_full_record_row_contract_preserves_arbitrary_domain_fields(tmp_path):
     source = Repository(tmp_path / 'record-contract-source.sqlite')
     project_id = source.create_project('record contract')['id']
     source.put_record(project_id, {
         'id': 'entity-1', 'kind': 'entity', 'text': 'Entity', 'type': 'Thing',
         'source_id': 'document-1', 'ontology_id': 'ontology-1',
         'embedding_model': 'model-1', 'properties': {'stable': True},
+        'confidence': 0.875,
+        'business_context': {
+            'market': 'north', 'policy': {'threshold': 12, 'enabled': True}},
+        'business_tags': ['regulated', 'priority'],
     })
     snapshot = source.export_projection(project_id)
 
@@ -820,6 +831,37 @@ def test_full_record_row_contract_preserves_supported_optional_fields(tmp_path):
     target.restore_projection(snapshot)
 
     assert target.export_projection(project_id)['records'] == snapshot['records']
+
+
+@pytest.mark.parametrize(('field', 'value'), [
+    ('id', 7),
+    ('kind', 'unsupported'),
+    ('kind', {'not': 'a string'}),
+    ('text', {'not': 'text'}),
+    ('metadata', []),
+    ('valid_from', 7),
+    ('valid_until', []),
+    ('version', True),
+    ('version_id', ''),
+    ('recorded_at', None),
+    ('superseded_at', 7),
+])
+def test_full_record_row_contract_rejects_malformed_reserved_fields_before_mutation(
+        tmp_path, field, value):
+    source = Repository(tmp_path / f'malformed-record-{field}-source.sqlite')
+    project_id = source.create_project('malformed record')['id']
+    source.put_record(project_id, {
+        'id': 'entity-1', 'kind': 'entity', 'text': 'Entity',
+        'custom': {'preserved': True},
+    })
+    snapshot = source.export_projection(project_id)
+    snapshot['records'][0][field] = value
+    target = Repository(tmp_path / f'malformed-record-{field}-target.sqlite')
+
+    with pytest.raises(ValueError, match=rf'records\[0\].*{field}'):
+        target.restore_projection(snapshot)
+    with pytest.raises(KeyError):
+        target.get_project(project_id)
 
 
 def test_full_export_restores_artifacts_before_legacy_draft_references(tmp_path):

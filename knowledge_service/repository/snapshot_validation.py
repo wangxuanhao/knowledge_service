@@ -13,9 +13,9 @@ FULL_ONTOLOGY = {'drafts', 'operations', 'decisions', 'publish_requests'}
 FULL_PROVENANCE = {'activities', 'edges', 'record_version_assertions'}
 
 
-def _contract(fields, optional=()):
+def _contract(fields, optional=(), *, extensible=False):
     required = frozenset(fields)
-    return required, required | frozenset(optional)
+    return required, required | frozenset(optional), extensible
 
 
 # A full projection is a versioned wire format, not a loose database dump.
@@ -27,10 +27,7 @@ _FULL_ROW_CONTRACTS_V14 = {
     ('records',): _contract({
         'id', 'kind', 'text', 'metadata', 'valid_from', 'valid_until',
         'project_id', 'version', 'version_id', 'recorded_at', 'superseded_at',
-    }, {
-        'type', 'source_id', 'subject_id', 'object_id', 'embedding_model',
-        'ontology_id', 'datatype', 'properties', 'value',
-    }),
+    }, extensible=True),
     ('ontologies',): _contract({
         'id', 'project_id', 'turtle', 'summary', 'created_at', 'metadata',
     }),
@@ -96,6 +93,7 @@ _FULL_ROW_CONTRACTS_V14 = {
 }
 FULL_ROW_CONTRACTS = {14: _FULL_ROW_CONTRACTS_V14}
 MIN_FULL_SCHEMA_VERSION = min(FULL_ROW_CONTRACTS)
+_RECORD_KINDS = {'document', 'entity', 'relation', 'attribute', 'chunk'}
 
 
 def _require_exact_section(section, expected, label):
@@ -113,31 +111,57 @@ def _section(snapshot, path):
     return value
 
 
-def _require_exact_row(row, required, allowed, label):
+def _require_exact_row(row, required, allowed, label, extensible=False):
     if not isinstance(row, dict):
         raise ValueError(f'完整治理备份 {label} 行必须是对象')
     fields = set(row)
     missing = sorted(required - fields)
-    unknown = sorted(fields - allowed)
+    unknown = [] if extensible else sorted(fields - allowed)
     if missing or unknown:
         raise ValueError(
             f'完整治理备份 {label} 字段不匹配：缺少 {missing}，未知 {unknown}')
+
+
+def _validate_record_envelope(row, label):
+    def reject(field):
+        raise ValueError(f'完整治理备份 {label}.{field} 类型或值无效')
+
+    if not isinstance(row['id'], str) or not row['id']:
+        reject('id')
+    if not isinstance(row['kind'], str) or row['kind'] not in _RECORD_KINDS:
+        reject('kind')
+    if not isinstance(row['text'], str):
+        reject('text')
+    if not isinstance(row['metadata'], dict):
+        reject('metadata')
+    for field in ('valid_from', 'valid_until', 'superseded_at'):
+        if row[field] is not None and not isinstance(row[field], str):
+            reject(field)
+    if type(row['version']) is not int or row['version'] < 1:
+        reject('version')
+    for field in ('version_id', 'recorded_at'):
+        if not isinstance(row[field], str) or not row[field]:
+            reject(field)
 
 
 def _validate_full_rows(snapshot, schema_version):
     contracts = FULL_ROW_CONTRACTS.get(schema_version)
     if contracts is None:
         raise ValueError(f'项目备份 schema_version {schema_version} 不受支持')
-    for path, (required, allowed) in contracts.items():
+    for path, (required, allowed, extensible) in contracts.items():
         label = '.'.join(path)
         section = _section(snapshot, path)
         if path == ('project',):
-            _require_exact_row(section, required, allowed, label)
+            _require_exact_row(section, required, allowed, label, extensible)
             continue
         if not isinstance(section, list):
             raise ValueError(f'完整治理备份 {label} 必须是列表')
         for index, row in enumerate(section):
-            _require_exact_row(row, required, allowed, f'{label}[{index}]')
+            row_label = f'{label}[{index}]'
+            _require_exact_row(
+                row, required, allowed, row_label, extensible)
+            if path == ('records',):
+                _validate_record_envelope(row, row_label)
 
 
 def validate_restore_snapshot(snapshot, current_schema_version):
