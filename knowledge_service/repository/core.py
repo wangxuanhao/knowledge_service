@@ -246,6 +246,20 @@ def _create_record_operation_reservation_schema(db):
         ON record_operation_reservations(project_id,recorded_at)''')
 
 
+def _ensure_ontology_history_delete_guards(db):
+    """Install idempotent DELETE guards for databases already marked as v14."""
+    db.execute('''CREATE TRIGGER IF NOT EXISTS ontology_operations_delete_immutable
+        BEFORE DELETE ON ontology_operations
+        WHEN ontology_history_delete_allowed() = 0 BEGIN
+          SELECT RAISE(ABORT, 'ontology operations are immutable');
+        END''')
+    db.execute('''CREATE TRIGGER IF NOT EXISTS ontology_review_decisions_delete_immutable
+        BEFORE DELETE ON ontology_review_decisions
+        WHEN ontology_history_delete_allowed() = 0 BEGIN
+          SELECT RAISE(ABORT, 'ontology review decisions are immutable');
+        END''')
+
+
 def _create_ontology_draft_schema(db):
     """Migration 14: governed drafts plus append-only operations and decisions."""
     statements = (
@@ -346,6 +360,7 @@ def _create_ontology_draft_schema(db):
     )
     for statement in statements:
         db.execute(statement)
+    _ensure_ontology_history_delete_guards(db)
 
 
 def _create_assertion_schema(db):
@@ -603,6 +618,10 @@ def _run_schema_migrations(db):
                 'INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)',
                 (version, utc_now()),
             )
+        if db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='ontology_operations'").fetchone():
+            _ensure_ontology_history_delete_guards(db)
         db.commit()
     except BaseException:
         db.rollback()
@@ -616,6 +635,10 @@ class Repository:
         self._db = sqlite3.connect(str(path), check_same_thread=False, timeout=30)
         self._db.row_factory = sqlite3.Row
         self._lock = threading.RLock()
+        self._ontology_history_delete_depth = 0
+        self._db.create_function(
+            'ontology_history_delete_allowed', 0,
+            lambda: int(self._ontology_history_delete_depth > 0))
         self._db.execute('PRAGMA journal_mode=WAL')
         self._db.execute('PRAGMA foreign_keys=ON')
         _run_schema_migrations(self._db)
@@ -802,6 +825,18 @@ class Repository:
             except BaseException:
                 self._db.rollback()
                 raise
+
+    @contextmanager
+    def _allow_ontology_history_delete(self):
+        """Temporarily authorize immutable-ledger deletion inside a repo transaction."""
+        with self._lock:
+            if not self._db.in_transaction:
+                raise RuntimeError('本体治理历史只能在 Repository 事务内删除')
+            self._ontology_history_delete_depth += 1
+            try:
+                yield
+            finally:
+                self._ontology_history_delete_depth -= 1
 
     def close(self):
         with self._lock:

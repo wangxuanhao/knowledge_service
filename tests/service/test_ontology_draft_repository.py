@@ -92,11 +92,19 @@ def test_migration_14_upgrades_v13_database_with_constrained_append_only_tables(
         project_id, draft['id'], [_operation('op-1')])
     decisions = repo._ontology_drafts.append_decisions(
         project_id, draft['id'], [_decision('decision-1', 'op-1', 'sha256:op-1')])
+    repo._ontology_drafts.append_operations(
+        project_id, draft['id'], [_operation('op-unreviewed')])
     with pytest.raises(sqlite3.IntegrityError, match='immutable'):
         repo._db.execute("UPDATE ontology_operations SET risk='high' WHERE id='op-1'")
     with pytest.raises(sqlite3.IntegrityError, match='immutable'):
         repo._db.execute(
             "UPDATE ontology_review_decisions SET reason='changed' WHERE id='decision-1'"
+        )
+    with pytest.raises(sqlite3.IntegrityError, match='immutable'):
+        repo._db.execute("DELETE FROM ontology_operations WHERE id='op-unreviewed'")
+    with pytest.raises(sqlite3.IntegrityError, match='immutable'):
+        repo._db.execute(
+            "DELETE FROM ontology_review_decisions WHERE id='decision-1'"
         )
     assert operations[0]['before'] is None
     assert decisions[0]['operation_fingerprint'] == 'sha256:op-1'
@@ -114,6 +122,72 @@ def test_migration_14_upgrades_v13_database_with_constrained_append_only_tables(
                    (id,project_id,draft_id,idempotency_key,request_hash,result_ontology_id,
                     created_at,completed_at) VALUES (?,?,?,?,?,?,?,?)''',
                 ('publish-2', *values[1:]))
+
+
+def test_v14_reopen_repairs_missing_delete_guards_without_consuming_migration_15(
+        tmp_path):
+    path = tmp_path / 'v14-delete-guard-repair.sqlite'
+    original = Repository(path)
+    project_id = original.create_project('old v14')['id']
+    original._ontology_drafts.create(project_id, _draft(project_id))
+    original._ontology_drafts.append_operations(
+        project_id, 'draft-1', [_operation('op-old-v14')])
+    with original._transaction():
+        original._db.execute('DROP TRIGGER ontology_operations_delete_immutable')
+        original._db.execute('DROP TRIGGER ontology_review_decisions_delete_immutable')
+    original.close()
+
+    reopened = Repository(path)
+
+    assert reopened._db.execute(
+        'SELECT MAX(version) FROM schema_migrations').fetchone()[0] == 14
+    triggers = {
+        row[0] for row in reopened._db.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger'"
+        )
+    }
+    assert {
+        'ontology_operations_delete_immutable',
+        'ontology_review_decisions_delete_immutable',
+    } <= triggers
+    with pytest.raises(sqlite3.IntegrityError, match='immutable'):
+        reopened._db.execute(
+            "DELETE FROM ontology_operations WHERE id='op-old-v14'")
+
+
+def test_store_rejects_self_supersession_and_two_node_cycles(tmp_path):
+    repo = Repository(tmp_path / 'supersession-cycles.sqlite')
+    project_id = repo.create_project('cycles')['id']
+    repo._ontology_drafts.create(project_id, _draft(project_id))
+
+    with pytest.raises(ValueError, match='不能替代自身'):
+        repo._ontology_drafts.append_operations(
+            project_id, 'draft-1', [_operation('op-self', supersedes='op-self')])
+    assert repo._ontology_drafts.effective_operations(project_id, 'draft-1') == []
+
+    with pytest.raises((ValueError, sqlite3.IntegrityError)):
+        repo._ontology_drafts.append_operations(project_id, 'draft-1', [
+            _operation('op-cycle-a', supersedes='op-cycle-b'),
+            _operation('op-cycle-b', supersedes='op-cycle-a'),
+        ])
+    assert repo._ontology_drafts.effective_operations(project_id, 'draft-1') == []
+
+    repo._ontology_drafts.append_operations(
+        project_id, 'draft-1', [_operation('op-valid')])
+    with pytest.raises(ValueError, match='不能替代自身'):
+        repo._ontology_drafts.append_decisions(project_id, 'draft-1', [
+            _decision('decision-self', 'op-valid', 'sha256:op-valid',
+                      supersedes='decision-self')])
+    assert repo._ontology_drafts.export(project_id)['decisions'] == []
+
+    with pytest.raises((ValueError, sqlite3.IntegrityError)):
+        repo._ontology_drafts.append_decisions(project_id, 'draft-1', [
+            _decision('decision-cycle-a', 'op-valid', 'sha256:op-valid',
+                      supersedes='decision-cycle-b'),
+            _decision('decision-cycle-b', 'op-valid', 'sha256:op-valid',
+                      supersedes='decision-cycle-a'),
+        ])
+    assert repo._ontology_drafts.export(project_id)['decisions'] == []
 
 
 def test_store_crud_supersession_json_and_export_are_project_scoped(tmp_path):

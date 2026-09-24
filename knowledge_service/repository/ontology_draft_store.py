@@ -200,6 +200,8 @@ class OntologyDraftStore:
                     'created_at': proposed.get('created_at') or utc_now(),
                 }
                 _required_text(operation, 'id')
+                if operation['supersedes_operation_id'] == operation['id']:
+                    raise ValueError('本体操作不能替代自身')
                 self._db.execute(
                     '''INSERT INTO ontology_operations
                        (id,project_id,draft_id,action,target_iri,before_json,after_json,
@@ -294,6 +296,8 @@ class OntologyDraftStore:
                     'created_at': proposed.get('created_at') or utc_now(),
                 }
                 _required_text(decision, 'id')
+                if decision['supersedes_decision_id'] == decision['id']:
+                    raise ValueError('本体审核决定不能替代自身')
                 self._db.execute(
                     '''INSERT INTO ontology_review_decisions
                        (id,project_id,draft_id,operation_id,operation_fingerprint,
@@ -387,11 +391,12 @@ class OntologyDraftStore:
 
     def delete_counts(self, project_id):
         with self.repo._transaction():
-            counts = {}
-            for table in (
-                    'ontology_publish_requests', 'ontology_review_decisions',
-                    'ontology_operations', 'ontology_drafts'):
-                counts[table] = self._db.execute(
-                    f'DELETE FROM {table} WHERE project_id=?',
-                    (project_id,)).rowcount
-            return counts
+            with self.repo._allow_ontology_history_delete():
+                counts = {}
+                for table in (
+                        'ontology_publish_requests', 'ontology_review_decisions',
+                        'ontology_operations', 'ontology_drafts'):
+                    counts[table] = self._db.execute(
+                        f'DELETE FROM {table} WHERE project_id=?',
+                        (project_id,)).rowcount
+                return counts

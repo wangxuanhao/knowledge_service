@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -85,6 +87,11 @@ def test_delete_project_explicitly_counts_ontology_governance_history(tmp_path):
                 created_at,completed_at) VALUES (?,?,?,?,?,?,?,?)''',
             ('publish-delete', pid, draft['id'], 'key', 'sha256:request', None,
              '2026-01-01T00:00:00.000000Z', None))
+
+    with pytest.raises(sqlite3.IntegrityError, match='immutable'):
+        repo._db.execute('DELETE FROM projects WHERE id=?', (pid,))
+    repo._db.rollback()
+    assert repo.get_project(pid)['id'] == pid
 
     deleted = repo.delete_project(pid)
 
