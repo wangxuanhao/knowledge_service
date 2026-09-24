@@ -92,9 +92,7 @@ class ResolutionReviewDecision(Request):
     expected_entity_versions: dict[str,int] = Field(default_factory=dict)
 
 
-class Ingest(Request):
-    title: str = Field(min_length=1, max_length=300)
-    text: str = Field(min_length=1, max_length=1_000_000)
+class IngestSettings(Request):
     metadata: dict[str, Any] = Field(default_factory=dict)
     valid_from: str | None = None
     valid_until: str | None = None
@@ -123,6 +121,15 @@ class Ingest(Request):
 
     def effective_extraction_mode(self):
         return self.extraction_mode or ('ontology' if self.extract else 'documents')
+
+
+class Ingest(IngestSettings):
+    title: str = Field(min_length=1, max_length=300)
+    text: str = Field(min_length=1, max_length=1_000_000)
+
+
+class UploadOptions(IngestSettings):
+    title: str | None = Field(default=None, max_length=300)
 
 
 class OntologyWrite(Request):

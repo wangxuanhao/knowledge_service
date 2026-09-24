@@ -3,8 +3,6 @@
 负责知识 CRUD、摄取、检索、问答、图谱、本体查询与 SPARQL。
 业务逻辑全部委托 services/repository，本文件只做请求解析与响应包装。
 """
-from pathlib import Path
-
 from fastapi import APIRouter, File, Form, UploadFile
 
 from ..models import (
@@ -101,21 +99,15 @@ def install(app, service):
 
     @router.post('/api/projects/{project_id}/documents/upload', status_code=201)
     def upload(project_id: str, file: UploadFile = File(...), options: str = Form('{}')):
-        import json
-        if not file.filename or Path(file.filename).suffix.lower() not in {'.txt', '.md'}:
-            raise ValueError('请上传 UTF-8 编码的 .txt 或 .md 文件')
-        content = file.file.read(4_000_001)
-        if len(content) > 4_000_000:
-            raise ValueError('上传文件最大为 4 MB')
+        service.repository.get_project(project_id)
+        uploads = app.state.document_uploads
+        parsed_options = uploads.parse_options(options)
+        staged = uploads.stage(file)
         try:
-            text = content.decode('utf-8-sig')
-            payload = json.loads(options)
-            if not isinstance(payload, dict):
-                raise ValueError('options 必须是 JSON 对象')
-        except (UnicodeError, ValueError) as exc:
-            raise ValueError('文件必须是 UTF-8 编码；options 必须是 JSON 对象') from exc
-        payload.update(title=Path(file.filename).name, text=text)
-        return service.ingest(project_id, Ingest.model_validate(payload).model_dump())
+            payload, _ = uploads.payload(staged, parsed_options)
+            return service.ingest(project_id, Ingest.model_validate(payload).model_dump())
+        finally:
+            uploads.discard(staged)
 
     # ------------------------------------------------------------------ 检索/问答/图谱
     @router.post('/api/projects/{project_id}/search')

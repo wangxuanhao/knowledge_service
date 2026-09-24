@@ -56,7 +56,7 @@ def test_provenance_assets_precede_history_hydration():
     assert '/assets/provenance-drawer.css?v=2' in html
     assert '/assets/provenance-drawer.js?v=3' in html
     assert '/assets/evidence-inspector.js?v=attribute-facts-1' in html
-    assert '/assets/workbench.js?v=provenance-2' in html
+    assert '/assets/workbench.js?v=document-upload-1' in html
     assert html.index('/assets/workbench.css') < html.index('/assets/provenance-drawer.css')
     assert html.index('/assets/ingest-mode.js') < html.index('/assets/provenance-drawer.js') < html.index('/assets/workbench.js')
 
@@ -95,3 +95,20 @@ def test_narrow_provenance_panel_uses_answer_flow_instead_of_fixed_overlay():
     js = read('provenance-drawer.js')
     for marker in ('matchMedia', 'qa-transcript', 'qa-provenance-mount', 'qa-scroll'):
         assert marker in js, marker
+
+
+def test_document_upload_workspace_contract():
+    html = read('index.html')
+    js = read('ingest-mode.js')
+    css = read('workbench.css')
+    source = html + js
+    for marker in ('选择内容', '文件清单', '处理选项', 'doc-dropzone', 'doc-upload-summary',
+                   'doc-clear-files', 'doc-retry-files', '.pdf', '.docx', '.html', '25 MB',
+                   '最多 20 个', '100 MB'):
+        assert marker in source, marker
+    for marker in ('.document-upload-workspace', '.document-dropzone', '.document-queue-row',
+                   '@media(max-width:850px)', ':focus-visible'):
+        assert marker in css, marker
+    assert '/assets/workbench.css?v=document-upload-1' in html
+    assert '/assets/ingest-mode.js?v=document-upload-1' in html
+    assert '/assets/workbench.js?v=document-upload-1' in html

@@ -156,6 +156,7 @@ python -u -m knowledge_service --port 8100
 | `KG_MILVUS_HOST` / `KG_MILVUS_PORT` / `KG_MILVUS_DIM` | 本地 Milvus 地址 / 端口 / 向量维度 | `localhost` / `19530` / `1024` |
 | `KG_LOG_LEVEL` | 终端日志级别（文件恒为 DEBUG） | `INFO` |
 | `KG_SLOW_MS` | 只打印慢于该毫秒的读路径阶段 | `0` |
+| `KG_DOCUMENT_OCR_MODE` | 文档 OCR：`auto` / `disabled` | `auto` |
 | `KG_NEO4J_URI` / `KG_NEO4J_USERNAME` / `KG_NEO4J_PASSWORD` / `KG_NEO4J_DATABASE` | Neo4j 投影 | — |
 
 ---
@@ -163,12 +164,22 @@ python -u -m knowledge_service --port 8100
 ## 知识写入与批量解析
 
 1. 选择项目，并根据知识成熟度选择“项目本体”“开放本体发现”或“仅文档检索”。
-2. 在“知识写入”选择上传 UTF-8 `.txt` / `.md` 文件，或粘贴正文，二选一。
-3. 支持多选文件。单文件可填写标题；多文件分别以文件名为标题，保留独立来源。发布时间和 Metadata 是本批文件共用的，不同时请分批上传。
+2. 在“知识写入”上传 `.txt`、`.md`、`.pdf`、`.docx`、`.html` / `.htm` 文件，或粘贴正文，二选一。TXT / Markdown 必须为 UTF-8；其余格式由 Semantica 的 `DoclingParser` 转为 Markdown。
+3. 支持拖放与多选文件。单文件最大 25 MB，单次最多 20 个、合计不超过 100 MB。单文件可填写标题；多文件分别以安全文件名为标题，保留独立来源。发布时间和 Metadata 是本批文件共用的，不同时请分批上传。
 4. 展开“解析设置”，选择切片和消歧参数；可先预览切片。
 5. 提交后在“后台任务”查看解析过程；开放发现结果到“本体发现”审阅，不直接污染正式图谱。
 
-**批量边界：**目前前端逐文件调用单文档任务接口，每个文件是独立任务，后端单工作线程依次执行。不是多文件拼接抽取，也不是并行解析；尚无后端统一批次 ID、批次级恢复或硬性总任务超时。已被后端接收的任务不依赖页面继续运行，但页面关闭前尚未提交的文件不会自动续传。
+**批量边界：**前端逐文件调用 multipart 单文档任务接口，每个文件是独立任务，后端单工作线程依次执行。不是多文件拼接抽取，也不是并行解析；尚无后端统一批次 ID、批次级恢复或硬性总任务超时。已提交成功的行不会重复发送，失败行可重试；已被后端接收的任务不依赖页面继续运行，但页面关闭前尚未提交的文件不会自动续传。
+
+安装文档解析依赖：
+
+```powershell
+D:\anaconda\envs\llm_model\python.exe -m pip install -e ".[semantica-runtime]"
+```
+
+当前锁定 Semantica `>=0.7,<0.8` 与 Docling `>=2.130,<3`。Docling 首次解析某些 PDF 时可能需要本机已有的模型缓存；模型权重由部署者本地安装和管理。`KG_DOCUMENT_OCR_MODE=auto`（默认）为扫描 PDF 保留 OCR 路径，设为 `disabled` 可关闭。上传的原始二进制只进入临时目录，任务结束即删除；异常中断遗留文件会在下次启动时清理（24 小时阈值）。
+
+文件预览使用 `POST /api/projects/{project_id}/documents/upload/preview`，后台解析使用 `POST /api/projects/{project_id}/documents/upload/jobs`，均为 `multipart/form-data`，包含 `file` 与 JSON 字符串 `options`。原有 JSON `/documents/preview`、`/documents/jobs` 和同步 `/documents/upload` 保持兼容。
 
 ### 实际处理链路
 

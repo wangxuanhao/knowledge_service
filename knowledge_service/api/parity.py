@@ -1,7 +1,7 @@
 """探索、迁移、治理与持久化任务的 HTTP 契约。"""
 from typing import Literal
 from pydantic import Field
-from fastapi import APIRouter
+from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import StreamingResponse, FileResponse
 from ..models import Request, Scope, Ingest, Question
 from ..services.explorer import Explorer
@@ -97,6 +97,49 @@ def install(app,service):
         chunks=split_document(request.text, request.model_dump())
         return {'total':len(chunks),'chunks':chunks[:20],'preview_limit':20,
                 'strategy':request.chunk_strategy,'chunk_size':request.chunk_size,'chunk_overlap':request.chunk_overlap}
+
+    @router.post('/projects/{p}/documents/upload/preview')
+    def preview_upload(p: str, file: UploadFile = File(...), options: str = Form('{}')):
+        service.repository.get_project(p)
+        uploads = app.state.document_uploads
+        parsed_options = uploads.parse_options(options)
+        staged = uploads.stage(file)
+        try:
+            payload, parsed = uploads.payload(staged, parsed_options)
+            from ..services.chunking import split_document
+            chunks = split_document(payload['text'], payload)
+            return {'total': len(chunks), 'chunks': chunks[:20], 'preview_limit': 20,
+                    'strategy': parsed_options.chunk_strategy,
+                    'chunk_size': parsed_options.chunk_size,
+                    'chunk_overlap': parsed_options.chunk_overlap,
+                    'parsed': parsed.metadata}
+        finally:
+            uploads.discard(staged)
+
+    @router.post('/projects/{p}/documents/upload/jobs', status_code=202)
+    def document_upload_job(p: str, file: UploadFile = File(...), options: str = Form('{}')):
+        service.repository.get_project(p)
+        uploads = app.state.document_uploads
+        parsed_options = uploads.parse_options(options)
+        staged = uploads.stage(file)
+
+        def run(progress):
+            try:
+                progress('正在解析上传文档', 10)
+                payload, _ = uploads.payload(staged, parsed_options)
+                from ..utils.diagnostics import reporting
+                with reporting(progress):
+                    result = service.ingest(p, Ingest.model_validate(payload).model_dump())
+                progress('文档及派生知识已提交', 99)
+                return result
+            finally:
+                uploads.discard(staged)
+
+        try:
+            return jobs.submit('ingest_upload', run, p)
+        except Exception:
+            uploads.discard(staged)
+            raise
 
     @router.post('/projects/{p}/documents/jobs',status_code=202)
     def document_job(p:str,request:Ingest):
