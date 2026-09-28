@@ -525,7 +525,7 @@ git commit -m "docs: complete ontology governance migration"
 **Files:**
 - Modify only files required by verified failures; no opportunistic refactors.
 
-- [ ] **Step 1: Run focused backend suites.**
+- [x] **Step 1: Run focused backend suites.**
 
 ```powershell
 Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue
@@ -534,7 +534,7 @@ Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue
 
 Expected: all pass.
 
-- [ ] **Step 2: Run frontend contracts and browser tests.**
+- [x] **Step 2: Run frontend contracts and browser tests.**
 
 ```powershell
 Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue
@@ -543,7 +543,7 @@ Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue
 
 Expected: all pass.
 
-- [ ] **Step 3: Run JavaScript unit tests.**
+- [x] **Step 3: Run JavaScript unit tests.**
 
 ```powershell
 node --test tests/service/*.test.cjs
@@ -551,7 +551,7 @@ node --test tests/service/*.test.cjs
 
 Expected: all pass.
 
-- [ ] **Step 4: Run the complete clean-environment suite.**
+- [x] **Step 4: Run the complete clean-environment suite.**
 
 ```powershell
 Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue
@@ -560,7 +560,7 @@ Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue
 
 Expected: no failures; skipped tests must be explained by optional integrations only.
 
-- [ ] **Step 5: Run syntax/diff checks and inspect the page.**
+- [x] **Step 5: Run syntax/diff checks and inspect the page.**
 
 ```powershell
 Remove-Item Env:SSLKEYLOGFILE -ErrorAction SilentlyContinue
@@ -571,11 +571,11 @@ git status --short
 
 Launch the service, inspect the workbench at desktop and narrow widths, and exercise create → submit → review → validate → publish → provenance once with a multi-parent class.
 
-- [ ] **Step 6: Request code review and resolve only evidence-backed issues.**
+- [x] **Step 6: Request code review and resolve only evidence-backed issues.**
 
 Review against `docs/superpowers/specs/2026-09-23-unified-ontology-workbench-design.md`, rerun affected suites, then rerun the full suite.
 
-- [ ] **Step 7: Commit final verified adjustments.**
+- [x] **Step 7: Commit final verified adjustments.**
 
 ```powershell
 git add -A
