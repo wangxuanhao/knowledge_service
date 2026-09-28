@@ -370,20 +370,23 @@ def test_attribute_provider_filters_redundant_values_and_caps_each_entity(monkey
             assert '大多数实体可能没有任何属性' in prompt
             assert '动作、禁止事项、职责、所有权' in prompt
             assert '分类、文档结构' in prompt
+            assert '属性是主体稳定的标量特征' in prompt
+            assert '章节标题和与主体同名的值都不属于属性' in prompt
+            assert '只返回少数最重要的属性' in prompt
             return AttributeResponse(attributes=[
-                dict(entity_index=0,attribute='name',value='甲',evidence='甲',confidence=.99),
-                dict(entity_index=0,attribute='a1',value='v1',evidence='事实',confidence=.1),
+                dict(entity_index=0,attribute='name',value='  aCmE \t',evidence='Acme',confidence=.99),
+                dict(entity_index=0,attribute='a1',value='v1',evidence='事实',confidence=.5),
+                dict(entity_index=1,attribute='other',value='v7',evidence='事实',confidence=.4),
                 dict(entity_index=0,attribute='a2',value='v2',evidence='事实',confidence=.9),
-                dict(entity_index=0,attribute='a3',value='v3',evidence='事实',confidence=.8),
-                dict(entity_index=0,attribute='a4',value='v4',evidence='事实',confidence=.7),
-                dict(entity_index=0,attribute='a5',value='v5',evidence='事实',confidence=.6),
-                dict(entity_index=0,attribute='a6',value='v6',evidence='事实',confidence=.5),
-                dict(entity_index=1,attribute='other',value='v7',evidence='事实',confidence=.4)])
+                dict(entity_index=0,attribute='a3',value='v3',evidence='事实',confidence=.6),
+                dict(entity_index=0,attribute='a4',value='v4',evidence='事实',confidence=.8),
+                dict(entity_index=0,attribute='a5',value='v5',evidence='事实',confidence=.5),
+                dict(entity_index=0,attribute='a6',value='v6',evidence='事实',confidence=.7)])
     monkeypatch.setattr(providers,'create_provider',lambda *args,**kw:Provider())
-    result=extract_attributes('甲 乙 事实',[Entity('甲','Person',0,1),Entity('乙','Person',2,3)],
+    result=extract_attributes('Acme 乙 事实',[Entity('Acme','Company',0,4),Entity('乙','Company',5,6)],
         Ontology(TTL),dict(provider='openai',llm_model='test',api_key='test',base_url='test'))
     assert [(item.entity_index,item.attribute) for item in result.attributes]==[
-        (0,'a2'),(0,'a3'),(0,'a4'),(0,'a5'),(0,'a6'),(1,'other')]
+        (0,'a1'),(1,'other'),(0,'a2'),(0,'a3'),(0,'a4'),(0,'a6')]
     assert result.diagnostics['skipped_redundant_value']==1
     assert result.diagnostics['skipped_attribute_limit']==1
 

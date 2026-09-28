@@ -55,6 +55,7 @@ entity_index 使用实体清单索引；attribute 优先使用本体属性完整
 value 仅允许字符串、布尔值或数值，不能把实体间关系当作属性；不要猜测。
 evidence 必须逐字引用正文中支持属性值的连续片段；没有明确证据则不返回。
 大多数实体可能没有任何属性。动作、禁止事项、职责、所有权，以及分类、文档结构都不属于属性。
+属性是主体稳定的标量特征；章节标题和与主体同名的值都不属于属性。每个实体只返回少数最重要的属性。
 不要将上传时间、模型置信度等系统 metadata 当作业务属性。confidence 为 0 到 1。
 '''+json.dumps({'entities':[{'index':i,'text':e.text,'type':e.label} for i,e in enumerate(entities)],
         'ontology_attributes':ontology.summary()['attributes'] if ontology is not None else [],'text':text},ensure_ascii=False)
