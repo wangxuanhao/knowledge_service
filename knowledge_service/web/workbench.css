@@ -51,6 +51,8 @@ body.chunk-preview-open{overflow:hidden}
 .chunk-preview-list button.selected,.chunk-preview-list button[aria-current="true"]{border-color:#23795c;background:#285244;color:#fff;box-shadow:0 5px 14px rgba(35,121,92,.2)}
 .chunk-preview-content{box-sizing:border-box;min-width:0;min-height:0;margin:0;padding:24px 28px;overflow:auto;overscroll-behavior:contain;color:#293e34;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;scrollbar-gutter:stable}
 .chunk-preview-content:focus-visible{outline:3px solid #79ad95;outline-offset:-4px}
+.chunk-preview-current{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid #e2eae4;color:#355848}
+.chunk-preview-current strong{font-size:17px}.chunk-preview-current span{color:#65786d;font-size:12px;text-align:right}
 .chunk-preview-content pre{max-width:100%;margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
 .chunk-preview-empty{display:grid;place-items:center;min-height:220px;padding:28px;border:1px dashed #b8cdbf;border-radius:12px;background:#f7faf7;color:#65786d;text-align:center}
 @keyframes chunk-preview-backdrop{from{background:rgba(18,38,29,0)}}
@@ -79,5 +81,5 @@ body.chunk-preview-open{overflow:hidden}
   .chunk-preview-content{padding:18px 16px}
 }
 @media(prefers-reduced-motion:reduce){
-  .chunk-preview-overlay,.chunk-preview-drawer,.chunk-preview-list button{animation:none;transition:none}
+  #chunk-preview.chunk-preview-overlay,.chunk-preview-drawer,.chunk-preview-list button{animation:none;transition:none}
 }

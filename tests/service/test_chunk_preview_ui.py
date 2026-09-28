@@ -165,7 +165,7 @@ def _request_preview(page, path_suffix='/documents/preview'):
 
 
 def _dialog_accessibility(page):
-    return page.locator('#chunk-preview').evaluate(r"""dialog => {
+    return page.locator('#chunk-preview .chunk-preview-drawer').evaluate(r"""dialog => {
       const referencedText = attribute => (dialog.getAttribute(attribute) || '')
         .split(/\s+/).filter(Boolean)
         .map(id => document.getElementById(id)?.textContent?.trim() || '').join(' ').trim();
@@ -189,6 +189,7 @@ def test_preview_host_is_a_body_level_dialog_and_record_import_is_collapsed(work
     drawer = page.locator('body > #chunk-preview')
 
     assert drawer.count() == 1
+    assert drawer.locator('.chunk-preview-drawer').count() == 1
     accessibility = _dialog_accessibility(page)
     assert accessibility['role'] == 'dialog'
     assert accessibility['modal'] == 'true'
@@ -336,7 +337,7 @@ def test_file_preview_uses_upload_endpoint_and_opens_the_same_drawer(workbench):
     drawer = page.locator('#chunk-preview')
     drawer.wait_for(state='visible')
     assert drawer.evaluate('(element) => element.parentElement === document.body')
-    assert drawer.get_attribute('role') == 'dialog'
+    assert drawer.locator('.chunk-preview-drawer').get_attribute('role') == 'dialog'
     assert len(upload_calls) == 1
     assert len(text_calls) == 0
     assert '文件首段预览' in drawer.inner_text()
