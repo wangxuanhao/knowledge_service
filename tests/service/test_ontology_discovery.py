@@ -17,6 +17,7 @@ def test_discovery_generates_readable_unicode_iris_for_every_term_kind():
         {'id':'relation','kind':'relation','subject_id':'entity','object_id':'other',
          'subject':'平台规范','object':'数据平台','proposed_type':'适用于'},
         {'id':'attribute','kind':'attribute','entity_id':'entity','proposed_type':'发布日期','value':'2026-09-16'},
+        {'id':'attribute-again','kind':'attribute','entity_id':'other','proposed_type':'发布日期','value':'2026-09-17'},
     ]
     _,mappings,_=_induce('project-id','中文本体',candidates)
 
@@ -24,6 +25,32 @@ def test_discovery_generates_readable_unicode_iris_for_every_term_kind():
     assert mappings['relation_types']['适用于'].endswith(':适用于')
     assert mappings['attributes']['发布日期'].endswith(':发布日期')
     assert all('%' not in iri for group in mappings.values() for iri in group.values())
+
+
+def test_draft_keeps_singleton_attribute_candidate_without_mapping(tmp_path,monkeypatch):
+    from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
+
+    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False:[
+        {'id':'rule','kind':'entity','text':'平台规则','proposed_type':'规则','confidence':.9},
+        {'id':'heading','kind':'attribute','entity_id':'rule','subject':'平台规则',
+         'proposed_type':'章节标题','value':'总则','confidence':.8},
+    ])
+    app=create_app(tmp_path/'singleton-attribute.sqlite',HashingEncoder())
+    with TestClient(app) as client:
+        project=client.post('/api/projects',json={
+            'name':'低频属性','use_default_ontology':False,'ontology_mode':'discovery'}).json()
+        base=f"/api/projects/{project['id']}"
+        ingested=client.post(base+'/documents',json={
+            'title':'平台规则','text':'平台规则：总则。','extraction_mode':'discovery',
+            'extract_attributes':True,'resolve_entities':False})
+        assert ingested.status_code==201,ingested.text
+
+        draft_response=client.post(base+'/ontology-discovery/drafts',json={'name':'低频属性草案'})
+        assert draft_response.status_code==201,draft_response.text
+        draft=draft_response.json()
+        assert any(item['kind']=='attribute' and item['proposed_type']=='章节标题'
+                   for item in draft['candidate_snapshot'])
+        assert '章节标题' not in draft['mappings']['attributes']
 
 
 def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,monkeypatch):
@@ -408,6 +435,53 @@ def test_induction_does_not_invent_name_attribute_without_attribute_candidates()
     turtle,mappings,_=_induce('project','无属性',[{'id':'a','kind':'entity','text':'甲','proposed_type':'主体'}])
     assert mappings['attributes']=={}
     assert Ontology(turtle).summary()['attributes']==[]
+
+
+def test_induction_omits_singleton_new_attribute_but_keeps_repeated_name():
+    candidates=[
+        {'id':'entity','kind':'entity','text':'平台规则','proposed_type':'规则'},
+        {'id':'heading','kind':'attribute','entity_id':'entity','proposed_type':'章节标题','value':'总则'},
+        {'id':'date-one','kind':'attribute','entity_id':'entity','proposed_type':'发布日期','value':'2026-09-16'},
+        {'id':'date-two','kind':'attribute','entity_id':'entity','proposed_type':'发布日期','value':'2026-09-17'},
+    ]
+
+    turtle,mappings,_=_induce('project','属性频次',candidates)
+
+    assert set(mappings['attributes'])=={'发布日期'}
+    assert {item['label_zh'] for item in Ontology(turtle).summary()['attributes']}=={'发布日期'}
+
+
+def test_induction_reuses_existing_attribute_with_one_candidate():
+    baseline='''
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        <urn:stable:publishedOn> a owl:DatatypeProperty ; rdfs:label "发布日期"@zh .
+    '''
+    candidates=[
+        {'id':'entity','kind':'entity','text':'平台规则','proposed_type':'规则'},
+        {'id':'date','kind':'attribute','entity_id':'entity','proposed_type':'发布日期','value':'2026-09-16'},
+    ]
+
+    turtle,mappings,_=_induce('project','既有属性',candidates,baseline_turtle=baseline)
+
+    assert mappings['attributes']['发布日期']=='urn:stable:publishedOn'
+    assert {item['id'] for item in Ontology(turtle).summary()['attributes']}=={'urn:stable:publishedOn'}
+
+
+def test_induction_counts_stripped_attribute_names_and_maps_original_spellings():
+    candidates=[
+        {'id':'entity','kind':'entity','text':'平台规则','proposed_type':'规则'},
+        {'id':'date-one','kind':'attribute','entity_id':'entity','proposed_type':' 发布日期 ',
+         'value':'2026-09-16'},
+        {'id':'date-two','kind':'attribute','entity_id':'entity','proposed_type':'发布日期',
+         'value':'2026-09-17'},
+    ]
+
+    turtle,mappings,_=_induce('project','属性名称',candidates)
+
+    assert set(mappings['attributes'])=={' 发布日期 ','发布日期'}
+    assert mappings['attributes'][' 发布日期 ']==mappings['attributes']['发布日期']
+    assert {item['label_zh'] for item in Ontology(turtle).summary()['attributes']}=={'发布日期'}
 
 
 def test_materialization_validation_keeps_invalid_relation_pending():

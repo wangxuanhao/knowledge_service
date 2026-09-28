@@ -346,17 +346,20 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
     relation_machine={source:_machine_name('RelationType',source) for source in
         {x['proposed_type'] for x in candidates if x['kind']=='relation'}}
     sample_fields={'type','entity_type','name','text','confidence','properties'}
+    attribute_counts=Counter(str(x['proposed_type']).strip() for x in candidates if x['kind']=='attribute')
     attribute_machine={}
     for source in {x['proposed_type'] for x in candidates if x['kind']=='attribute'}:
-        machine=_machine_name('AttributeType',source)
-        if machine in sample_fields:machine='AttributeType_'+hashlib.sha256(str(source).encode('utf-8')).hexdigest()[:12]
+        if attribute_counts[str(source).strip()]<2:continue
+        machine=_machine_name('AttributeType',str(source).strip())
+        if machine in sample_fields:machine='AttributeType_'+hashlib.sha256(str(source).strip().encode('utf-8')).hexdigest()[:12]
         attribute_machine[source]=machine
     reverse_entity={value:key for key,value in entity_machine.items()}
     reverse_relation={value:key for key,value in relation_machine.items()}
-    reverse_attribute={value:key for key,value in attribute_machine.items()}
+    reverse_attribute={value:str(key).strip() for key,value in attribute_machine.items()}
     attributes=defaultdict(dict)
     for item in candidates:
-        if item['kind']=='attribute':attributes[item.get('entity_id')][attribute_machine[item['proposed_type']]]=item.get('value')
+        if item['kind']=='attribute' and item['proposed_type'] in attribute_machine:
+            attributes[item.get('entity_id')][attribute_machine[item['proposed_type']]]=item.get('value')
     entities=[]
     for item in candidates:
         if item['kind']!='entity':continue
@@ -449,11 +452,17 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
             uri=relation_lookup.get(str(source).strip().casefold()) or _iri(base,source);relation_map[source]=str(uri)
             graph.add((uri,RDF.type,OWL.ObjectProperty));graph.add((uri,RDFS.label,Literal(source,lang=_literal_language(source))))
             graph.add((uri,RDFS.comment,Literal(_definition('relation',source),lang='zh')))
-    for source in sorted({x['proposed_type'] for x in candidates if x['kind']=='attribute'}):
-        if source not in attribute_map:
-            uri=attribute_lookup.get(str(source).strip().casefold()) or _iri(base,source);attribute_map[source]=str(uri)
-            graph.add((uri,RDF.type,OWL.DatatypeProperty));graph.add((uri,RDFS.label,Literal(source,lang=_literal_language(source))))
-            graph.add((uri,RDFS.comment,Literal(_definition('attribute',source),lang='zh')))
+    attribute_sources={x['proposed_type'] for x in candidates if x['kind']=='attribute'}
+    for source in sorted(attribute_sources):
+        canonical=str(source).strip()
+        if canonical in attribute_map:continue
+        existing=attribute_lookup.get(canonical.casefold())
+        if existing or attribute_counts[canonical]>=2:
+            uri=existing or _iri(base,canonical);attribute_map[canonical]=str(uri)
+            graph.add((uri,RDF.type,OWL.DatatypeProperty));graph.add((uri,RDFS.label,Literal(canonical,lang=_literal_language(canonical))))
+            graph.add((uri,RDFS.comment,Literal(_definition('attribute',canonical),lang='zh')))
+    attribute_map={source:attribute_map[str(source).strip()] for source in attribute_sources
+        if str(source).strip() in attribute_map}
     # 父发现版本可能包含旧代码推断出的端点值域。
     # 对本开放候选集中观测到的每条关系都移除它们。显式约束属于
     # 引导式/非开放本体工作流及其审核队列。
