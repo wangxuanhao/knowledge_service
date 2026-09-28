@@ -374,7 +374,7 @@ def test_attribute_provider_filters_redundant_values_and_caps_each_entity(monkey
             assert '章节标题和与主体同名的值都不属于属性' in prompt
             assert '只返回少数最重要的属性' in prompt
             return AttributeResponse(attributes=[
-                dict(entity_index=0,attribute='name',value='  aCmE \t',evidence='Acme',confidence=.99),
+                dict(entity_index=0,attribute='name',value='  aCmE \t',evidence='invented evidence',confidence=.99),
                 dict(entity_index=0,attribute='a1',value='v1',evidence='事实',confidence=.5),
                 dict(entity_index=1,attribute='other',value='v7',evidence='事实',confidence=.4),
                 dict(entity_index=0,attribute='a2',value='v2',evidence='事实',confidence=.9),
@@ -389,6 +389,7 @@ def test_attribute_provider_filters_redundant_values_and_caps_each_entity(monkey
         (0,'a1'),(1,'other'),(0,'a2'),(0,'a3'),(0,'a4'),(0,'a6')]
     assert result.diagnostics['skipped_redundant_value']==1
     assert result.diagnostics['skipped_attribute_limit']==1
+    assert result.diagnostics['unverified_evidence']==1
 
 
 def test_attribute_provider_keeps_nonmatching_evidence_for_review(monkeypatch):

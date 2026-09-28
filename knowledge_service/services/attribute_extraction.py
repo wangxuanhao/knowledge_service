@@ -77,13 +77,13 @@ evidence 必须逐字引用正文中支持属性值的连续片段；没有明�
         if item.entity_index>=len(entities):
             diagnostics['skipped_invalid_entity']+=1
             continue
-        if isinstance(item.value,str) and item.value.strip().casefold()==entities[item.entity_index].text.strip().casefold():
-            diagnostics['skipped_redundant_value']+=1
-            continue
         evidence,status=_locate_evidence(text,item.evidence)
         item=item.model_copy(update={'evidence':evidence,'evidence_status':status})
         if status=='unverified':
             diagnostics['unverified_evidence']+=1
+        if isinstance(item.value,str) and item.value.strip().casefold()==entities[item.entity_index].text.strip().casefold():
+            diagnostics['skipped_redundant_value']+=1
+            continue
         accepted.append((original_index,item))
     by_entity={}
     for original_index,item in accepted:
