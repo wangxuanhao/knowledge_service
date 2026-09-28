@@ -6,5 +6,6 @@ data/rules/*
 .omo
 .venv
 .pytest_cache
+.test-tmp*/
 data/service/knowledge.sqlite
 __pycache__

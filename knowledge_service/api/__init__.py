@@ -23,11 +23,13 @@ from pydantic import ValidationError
 import httpx
 
 from ..integrations.embeddings import configured_encoder
+from ..integrations.document_parser import DocumentParseError
 from ..repository import (
     OntologyNotPublished,
     OntologyPublicationConflict,
     Repository,
 )
+from ..services.document_uploads import DocumentUploads
 from ..services.ontology_drafts import OntologyDraftError
 from ..services.service import KnowledgeService
 from ..core.time import utc_now
@@ -57,10 +59,11 @@ def _build_milvus_store():
         return None
 
 
-def create_app(db_path=None, encoder=None):
+def create_app(db_path=None, encoder=None, upload_temp=None):
     repository = Repository(db_path or os.environ.get('KG_DATABASE', str(ROOT / 'data/service/knowledge.sqlite')))
     encoder = encoder or configured_encoder()
     service = KnowledgeService(repository, encoder, milvus_store=_build_milvus_store())
+    document_uploads = DocumentUploads(upload_temp)
 
     def ontology_sync_runner(job):
         if service.milvus_store is None:
@@ -85,6 +88,7 @@ def create_app(db_path=None, encoder=None):
 
     @asynccontextmanager
     async def lifespan(app):
+        document_uploads.cleanup_old()
         # 启动后异步预热 embedding 模型（首次 encode ~141s），不阻塞启动，消除首次检索卡顿
         import threading
         threading.Thread(target=service.warm_up, daemon=True).start()
@@ -96,6 +100,7 @@ def create_app(db_path=None, encoder=None):
     app = FastAPI(title='Knowledge Service', version='1.0.0', lifespan=lifespan,
                   description='项目本体、双时态知识与 metadata 前置过滤检索。时间区间为左闭右开。')
     app.state.service = service
+    app.state.document_uploads = document_uploads
 
     @app.middleware('http')
     async def fresh_workbench_assets(request, call_next):
@@ -161,6 +166,14 @@ def create_app(db_path=None, encoder=None):
     async def invalid(request: Request, exc: ValueError):
         return JSONResponse(status_code=409 if '版本冲突' in str(exc) else 422, content={'detail': str(exc)})
 
+    @app.exception_handler(DocumentParseError)
+    async def document_parse_error(request: Request, exc: DocumentParseError):
+        return JSONResponse(status_code=exc.status_code, content={
+            'detail': {'code': exc.code, 'message': exc.message},
+            'code': exc.code,
+            'message': exc.message,
+        })
+
     @app.exception_handler(ValidationError)
     async def invalid_model(request: Request, exc: ValidationError):
         return JSONResponse(status_code=422, content={'detail': str(exc)})
@@ -186,7 +199,8 @@ def create_app(db_path=None, encoder=None):
                 'python_executable': sys.executable,
                 'capabilities': ['legacy_import', 'interactive_graph_api', 'governance', 'semantica_merge',
                                  'jobs', 'snapshots', 'dual_channel_qa', 'typed_reviews',
-                                 'ontology_change_proposals', 'ontology_discovery', 'unified_provenance'],
+                                 'ontology_change_proposals', 'ontology_discovery', 'unified_provenance',
+                                 'semantica_document_uploads', 'docling_ocr_ready'],
                 'semantica_version': semantica, 'embedding_model': service.encoder.identity,
                 'semantic': service.encoder.semantic, 'time': utc_now()}
 

@@ -17,7 +17,11 @@ dependencies = [
 neo4j = ["neo4j>=6,<7"]
 milvus = ["pymilvus>=3.0,<4"]
 local = ["sentence-transformers>=3,<7"]
-semantica-runtime = ["PyYAML>=6", "networkx>=3", "rich>=13", "tqdm>=4", "requests>=2", "python-dateutil>=2.9", "openai>=1,<4"]
+semantica-runtime = [
+  "semantica[parse-docling]>=0.7,<0.8", "docling>=2.130,<3",
+  "PyYAML>=6", "networkx>=3", "rich>=13", "tqdm>=4", "requests>=2",
+  "python-dateutil>=2.9", "openai>=1,<4"
+]
 test = ["pytest>=8,<10", "playwright>=1.50,<2"]
 
 [project.scripts]

@@ -198,7 +198,6 @@ async function jobList(){const r=await api('/api/jobs',undefined,'GET');
 function watch(job){wb.jobs.set(job.id,job);jobList();}
 bind('load-jobs',jobList);
 setInterval(async()=>{if(!wb.jobs.size)return;try{const jobs=await jobList();for(const j of jobs){if(wb.jobs.has(j.id)&&!['queued','running'].includes(j.status)){wb.jobs.delete(j.id);if(j.status==='completed'){await projects();if(j.result?.project){$('project').value=j.result.project.id;$('project').onchange();status('导入完成：'+j.result.project.name+'。进入图谱页查看。');}}}}}catch(e){status(e.message,true);}},3000);
-const acceptedUploads=new WeakMap();
 function readParseSettings(){
   const settings={chunk_strategy:$('parse-strategy').value,chunk_size:Number($('parse-size').value),chunk_overlap:Number($('parse-overlap').value),resolve_entities:$('parse-resolve').checked,auto_merge:$('parse-merge').checked,merge_threshold:Number($('parse-threshold').value)};
   if(!Number.isInteger(settings.chunk_size)||settings.chunk_size<100||settings.chunk_size>10000)throw Error('最大字符数需为 100–10000 的整数');
@@ -209,8 +208,13 @@ function readParseSettings(){
 }
 bind('preview-chunks',async()=>{
   const p=controlsProject(),settings=readParseSettings();
-  const documents=await readDocumentBatch(),doc=documents[0];
-  const result=await api('/api/projects/'+encodeURIComponent(p)+'/documents/preview',{title:doc.title,text:doc.text,...settings});
+  const documents=await readDocumentBatch(true),doc=documents[0];
+  let result;
+  if(doc.file){
+    const form=new FormData();form.append('file',doc.file,doc.file.name);
+    form.append('options',JSON.stringify({title:doc.title,metadata:doc.metadata,...settings}));
+    result=await api('/api/projects/'+encodeURIComponent(p)+'/documents/upload/preview',form);
+  }else result=await api('/api/projects/'+encodeURIComponent(p)+'/documents/preview',{title:doc.title,text:doc.text,...settings});
   if(p!==current)return;
   $('chunk-preview').innerHTML=`<p>${esc(doc.title)} · 共 ${result.total} 片，预览前 ${result.chunks.length} 片</p>`+result.chunks.map((c,i)=>`<details><summary>片段 ${i+1} · 原文位置 ${c.start_char}–${c.end_char} · ${c.end_char-c.start_char} 字符</summary><pre>${esc(c.text)}</pre></details>`).join('');
   status('切片预览完成，未调用模型或写入知识');
@@ -221,14 +225,18 @@ bind('ingest',async()=>{
   results.textContent='';let accepted=0,failed=0;
   for(const document of documents){
     const entry=window.document.createElement('p');results.append(entry);
-    const prior=document.file&&acceptedUploads.get(document.file)?.[project];
-    if(prior){entry.textContent=document.title+' · 已提交，任务 '+prior;accepted++;continue;}
     entry.textContent=document.title+' · 正在提交…';
     try{
-      const job=await api('/api/projects/'+encodeURIComponent(project)+'/documents/jobs',{title:document.title,text:document.text,metadata:document.metadata,extract,extraction_mode:mode,...settings});
-      if(document.file){const previous=acceptedUploads.get(document.file)||{};acceptedUploads.set(document.file,{...previous,[project]:job.id});}
+      let job;
+      if(document.file){
+        window.DocumentUploadQueue.setStatus(document.file,'uploading');
+        const form=new FormData();form.append('file',document.file,document.file.name);
+        form.append('options',JSON.stringify({title:document.title,metadata:document.metadata,extract,extraction_mode:mode,...settings}));
+        job=await api('/api/projects/'+encodeURIComponent(project)+'/documents/upload/jobs',form);
+        window.DocumentUploadQueue.setStatus(document.file,'queued',job.id);
+      }else job=await api('/api/projects/'+encodeURIComponent(project)+'/documents/jobs',{title:document.title,text:document.text,metadata:document.metadata,extract,extraction_mode:mode,...settings});
       wb.jobs.set(job.id,job);accepted++;entry.textContent=document.title+' · 已加入解析队列 · '+job.id;
-    }catch(error){failed++;entry.textContent=document.title+' · 提交失败：'+error.message;}
+    }catch(error){if(document.file)window.DocumentUploadQueue.setStatus(document.file,'failed',error.message);failed++;entry.textContent=document.title+' · 提交失败：'+error.message;}
   }
   if(accepted){showTab('jobs');await jobList();}
   status(`已提交 ${accepted} 个文档，提交失败 ${failed} 个。解析进度请查看“后台任务”。`,failed>0);
