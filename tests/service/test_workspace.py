@@ -37,8 +37,15 @@ def test_linked_scope_and_ontology_and_index(tmp_path):
         term={'kind':'class','uri':'urn:test:Shop','label':'门店','expected_ontology_id':o['id']}
         saved=c.post(f'/api/projects/{p}/ontology/terms',json=term)
         assert saved.status_code==201,saved.text
-        assert any(r['label']=='门店' for r in saved.json()['summary']['classes'])
-        assert c.post(f'/api/projects/{p}/ontology/terms',json=term).status_code==409
+        draft=saved.json()
+        assert any(r['label']=='门店' for r in draft['summary']['classes'])
+        assert draft['draft_id'] and draft['deprecation']['deprecated'] is True
+        assert saved.headers['Deprecation']=='true'
+        assert repo.get_ontology(p)['id']==o['id']
+        assert not any(r['label']=='门店' for r in repo.get_ontology(p)['summary']['classes'])
+        assert c.post(f'/api/projects/{p}/ontology/terms',json={
+            **term,'expected_ontology_id':'stale',
+        }).status_code==409
 
 
 def test_keyword_explore_matches_chinese_ontology_label(tmp_path):

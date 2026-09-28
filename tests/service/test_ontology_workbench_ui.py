@@ -91,6 +91,8 @@ def page():
         errors = []
         pg.on('pageerror', lambda error: errors.append(str(error)))
         pg.set_content(SHELL)
+        pg.add_style_tag(path=str(WEB / 'style.css'))
+        pg.add_style_tag(path=str(WEB / 'ontology-workbench.css'))
         pg.add_script_tag(path=str(WEB / 'ontology-workbench.js'))
         pg._errors = errors
         yield pg

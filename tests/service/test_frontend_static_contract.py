@@ -100,12 +100,13 @@ def test_narrow_provenance_panel_uses_answer_flow_instead_of_fixed_overlay():
 def test_unified_ontology_workbench_has_one_entry_and_versioned_assets():
     html = read('index.html')
     assert html.count('>本体工作台</button>') == 1
-    assert '/assets/ontology-workbench.css?v=workbench-1' in html
-    assert '/assets/ontology-workbench.js?v=workbench-1' in html
+    assert '/assets/ontology-workbench.css?v=governance-4' in html
+    assert '/assets/ontology-workbench.js?v=governance-3' in html
     assert html.index('/assets/style.css') < html.index('/assets/ontology-workbench.css')
     assert html.index('/assets/workspace.js') < html.index('/assets/ontology-workbench.js')
     assert 'ontology-manager.html' not in html
     assert not __import__('re').search(r'\son(?:click|change|input|submit)=', html)
+    assert "'ontology-workbench'" in read('menu-hierarchy.js')
 
 
 def test_ontology_workbench_shell_keeps_five_stages_and_discovery_hooks():
@@ -129,6 +130,7 @@ def test_ontology_workbench_shell_keeps_five_stages_and_discovery_hooks():
     )
     assert ':focus-visible' in css
     assert 'prefers-reduced-motion' in css
+    assert '.ontology-workbench__pane{position:static;inset:auto;display:block;width:auto;max-width:none' in css
 
 
 def test_ontology_workbench_uses_safe_shared_state_contract():

@@ -90,7 +90,10 @@ def test_ontology_lineage_metadata_survives_restart(tmp_path):
     repo.close()
 
     reopened = Repository(path)
-    assert reopened.get_ontology(p, second['id'])['metadata'] == metadata
+    assert reopened.get_ontology(p, second['id'])['metadata'] == {
+        **metadata,
+        'write_path': 'compatibility',
+    }
 
 
 def test_correction_replaces_interval_but_history_retains_original(tmp_path):
@@ -226,8 +229,11 @@ def test_operation_reservations_are_atomic_across_repository_connections(tmp_pat
 def test_operation_reservation_migration_upgrades_existing_database(tmp_path, monkeypatch):
     path = tmp_path / 'operation-reservation-migration.sqlite'
     migrations = repository_module._SCHEMA_MIGRATIONS
-    assert migrations[-2][0] == 13
-    monkeypatch.setattr(repository_module, '_SCHEMA_MIGRATIONS', migrations[:-2])
+    assert any(version == 13 for version, _migration in migrations)
+    before_reservations = tuple(
+        migration for migration in migrations if migration[0] < 13)
+    monkeypatch.setattr(
+        repository_module, '_SCHEMA_MIGRATIONS', before_reservations)
     legacy = Repository(path)
     project = legacy.create_project('legacy')['id']
     legacy.close()

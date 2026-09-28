@@ -53,7 +53,7 @@ def test_workbench_has_all_control_targets_and_no_native_dialogs():
     menu=(ROOT/'menu-hierarchy.js').read_text(encoding='utf-8')
     assert '/ontology-discovery/candidate-mindmap' in candidate_map
     assert '非正式知识' in candidate_map and '该聚合键不是正式实体 ID' in candidate_map
-    assert all(text in candidate_map for text in ('开放解析完成后先在这里检查','审核并生成本体草案','查看正式脑图'))
+    assert all(text in candidate_map for text in ('开放解析完成后先在这里检查','进入本体工作台','查看正式脑图'))
     assert '正式重解析' not in candidate_map
     assert 'view-candidate-mindmap' in workspace
     assert 'knowledge-flow' not in candidate_map and 'knowledge-flow' not in workspace

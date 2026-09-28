@@ -11,8 +11,11 @@ def client(tmp_path):
         yield client
 
 
-def project(client):
-    result = client.post('/api/projects', json={'name':'规则平台'})
+def project(client, *, use_default_ontology=True):
+    result = client.post('/api/projects', json={
+        'name':'规则平台',
+        'use_default_ontology': use_default_ontology,
+    })
     assert result.status_code == 201, result.text
     return result.json()['id']
 
@@ -193,7 +196,10 @@ def test_ingest_failure_does_not_overwrite_concurrent_revision(client, monkeypat
 
 def test_ingest_prefers_relation_extracted_validity_over_request(client, monkeypatch):
     import knowledge_service.integrations.semantica_adapter as adapter
-    p = project(client)
+    # This test exercises temporal extraction, not ontology governance.  Start
+    # without the packaged ontology so the compatibility route performs the
+    # one allowed initial bootstrap instead of creating a governed edit draft.
+    p = project(client, use_default_ontology=False)
     base = f'/api/projects/{p}'
     ttl='@prefix : <https://test/> . @prefix owl: <http://www.w3.org/2002/07/owl#> . :Person a owl:Class . :Company a owl:Class . :worksAt a owl:ObjectProperty .'
     client.post(base+'/ontologies', json={'turtle': ttl})
