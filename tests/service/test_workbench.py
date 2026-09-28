@@ -188,3 +188,36 @@ def test_successful_document_submission_opens_task_logs_immediately():
     workbench=(ROOT/'workbench.js').read_text(encoding='utf-8')
     ingest=workbench[workbench.index("bind('ingest'"):workbench.index('async function snapshots')]
     assert "if(accepted){showTab('jobs');await jobList();}" in ingest
+
+
+def test_knowledge_write_has_one_preview_host_and_an_advanced_record_import():
+    class WorkbenchMarkup(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.ids=[]
+            self.assets=[]
+            self.copy=[]
+
+        def handle_starttag(self, tag, attrs):
+            attributes=dict(attrs)
+            if 'id' in attributes:
+                self.ids.append(attributes['id'])
+            if tag == 'link' and 'href' in attributes:
+                self.assets.append(attributes['href'])
+            if tag == 'script' and 'src' in attributes:
+                self.assets.append(attributes['src'])
+
+        def handle_data(self, data):
+            self.copy.append(data)
+
+    markup=WorkbenchMarkup()
+    markup.feed((ROOT/'index.html').read_text(encoding='utf-8'))
+    page_copy=''.join(markup.copy)
+
+    assert markup.ids.count('chunk-preview') == 1
+    assert markup.ids.count('batch') == 1
+    assert markup.ids.count('write-batch') == 1
+    assert '结构化记录导入（高级）' in page_copy
+    assert '不是批量上传文档' in page_copy
+    assert '/assets/workbench.css?v=document-upload-2' in markup.assets
+    assert '/assets/workbench.js?v=document-upload-2' in markup.assets
