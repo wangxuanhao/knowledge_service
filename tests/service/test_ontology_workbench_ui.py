@@ -12,9 +12,15 @@ if not EDGE.exists():
 WEB = Path(__file__).resolve().parents[2] / 'knowledge_service' / 'web'
 
 SHELL = """<!doctype html><html><body>
-<aside><nav><button data-tab="ontology">本体管理</button><button data-tab="ontology-workbench">本体工作台</button></nav></aside>
-<main><h1 id="title"></h1><section id="scope"></section></main>
+<aside><nav><button data-tab="projects">项目管理</button><button data-tab="ontology-workbench">本体工作台</button></nav></aside>
+<main><h1 id="title"></h1><section id="scope"></section><section id="tab-projects" class="tab hidden"></section><section id="tab-ontology" class="tab hidden"></section></main>
 <select id="project"><option value="p1" selected>测试项目</option></select>
+<script>
+document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(tab=>tab.classList.add('hidden'));
+  document.getElementById('tab-'+button.dataset.tab)?.classList.remove('hidden');
+});
+</script>
 </body></html>"""
 
 MOCKS = r"""() => {
@@ -103,6 +109,15 @@ def open_design(page):
     page.click('[data-tab="ontology-workbench"]')
     page.evaluate("() => OntologyWorkbench.setStage('design')")
     page.wait_for_selector('[data-hierarchy-row="urn:RootA"]')
+
+
+def test_switching_to_projects_hides_ontology_workbench(page):
+    page.click('[data-tab="ontology-workbench"]')
+    page.click('[data-tab="projects"]')
+    workbench = page.locator('#tab-ontology-workbench')
+    assert 'hidden' in workbench.get_attribute('class').split()
+    assert workbench.evaluate("element => getComputedStyle(element).display") == 'none'
+    assert not workbench.is_visible()
 
 
 def test_hierarchy_is_lazy_paginated_and_multi_parent_selection_is_shared(page):

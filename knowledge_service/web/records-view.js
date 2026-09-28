@@ -100,6 +100,6 @@
     $('ontology-summary').textContent='正在读取项目本体…';await $('load-ontology').onclick();
     if(p===current&&$('ontology-summary').textContent==='正在读取项目本体…')$('ontology-summary').textContent='本体未加载成功，请检查是否已创建项目本体，或点击“刷新本体”重试。';
   }
-  document.querySelector('[data-tab="ontology"]').addEventListener('click',autoOntology);
+  document.addEventListener('ontology-version-governance:open',autoOntology);
   $('project').addEventListener('change',()=>{if(ontologyVisible()){ $('turtle').value='';$('ontology-versions').replaceChildren();autoOntology();}});
 })();

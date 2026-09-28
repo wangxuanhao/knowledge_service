@@ -43,12 +43,13 @@ def test_project_card_shows_project_id_with_copy():
 def test_assets_version_bumped_for_changed_files():
     """改动过的静态资源必须带版本号，否则浏览器缓存旧文件（"改了没生效"第一嫌疑）。"""
     html = read('index.html')
-    for asset, marker in (('workspace.js', 'linked-review'),
+    for asset, marker in (('workspace.js', 'ontology-nav'),
                           ('ontology-details.js', 'linked-review'),
                           ('workspace.css', 'linked-review'),
                           ('projects.css', 'project-id'),
                           ('ontology-modal.css', 'term-impact')):
         assert f'{asset}?v={marker}' in html, f'{asset} 版本号未 bump（期望前缀 {marker}）'
+    assert '/assets/style.css?v=ontology-nav-1' in html
 
 
 def test_provenance_assets_precede_history_hydration():
@@ -56,7 +57,7 @@ def test_provenance_assets_precede_history_hydration():
     assert '/assets/provenance-drawer.css?v=2' in html
     assert '/assets/provenance-drawer.js?v=3' in html
     assert '/assets/evidence-inspector.js?v=attribute-facts-1' in html
-    assert '/assets/workbench.js?v=document-upload-2' in html
+    assert '/assets/workbench.js?v=ontology-nav-1' in html
     assert html.index('/assets/workbench.css') < html.index('/assets/provenance-drawer.css')
     assert html.index('/assets/ingest-mode.js') < html.index('/assets/provenance-drawer.js') < html.index('/assets/workbench.js')
 
@@ -99,9 +100,20 @@ def test_narrow_provenance_panel_uses_answer_flow_instead_of_fixed_overlay():
 
 def test_unified_ontology_workbench_has_one_entry_and_versioned_assets():
     html = read('index.html')
+    sidebar = html.split('</nav>', 1)[0]
+    workspace = read('workspace.js')
+    menu = read('menu-hierarchy.js')
     assert html.count('>本体工作台</button>') == 1
+    assert 'data-tab="ontology"' not in sidebar
+    assert '>本体管理</button>' not in sidebar
+    assert "page.id='tab-discovery'" not in workspace
+    assert "nav.dataset.tab='discovery'" not in workspace
+    assert "'discovery'" not in menu
+    assert "'ontology'" not in menu
+    for name in ('records-view.js', 'task-review.js', 'ontology-workbench.js'):
+        assert '[data-tab="ontology"]' not in read(name)
     assert '/assets/ontology-workbench.css?v=governance-4' in html
-    assert '/assets/ontology-workbench.js?v=governance-3' in html
+    assert '/assets/ontology-workbench.js?v=ontology-nav-1' in html
     assert html.index('/assets/style.css') < html.index('/assets/ontology-workbench.css')
     assert html.index('/assets/workspace.js') < html.index('/assets/ontology-workbench.js')
     assert 'ontology-manager.html' not in html
@@ -158,4 +170,4 @@ def test_document_upload_workspace_contract():
         assert marker in css, marker
     assert '/assets/workbench.css?v=document-upload-1' in html
     assert '/assets/ingest-mode.js?v=document-upload-1' in html
-    assert '/assets/workbench.js?v=document-upload-2' in html
+    assert '/assets/workbench.js?v=ontology-nav-1' in html

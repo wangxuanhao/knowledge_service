@@ -85,7 +85,7 @@ test('missing ontology shows guidance instead of Not found',async()=>{
   await new Promise(resolve=>setImmediate(resolve));
   const html=get('relation-reviews').innerHTML;
   assert.match(html,/尚未发布本体/);
-  assert.match(html,/前往本体发现/);
+  assert.match(html,/前往本体工作台/);
   assert.doesNotMatch(html,/Not found:/);
 });
 

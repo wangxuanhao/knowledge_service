@@ -17,24 +17,22 @@ def test_workbench_has_all_control_targets_and_no_native_dialogs():
     for tab in ('dashboard','sources','mindmap','jobs','evaluation','records','ontology','search','qa','ingest'):
         assert f'tab-{tab}' in ids
     workspace=(ROOT/'workspace.js').read_text(encoding='utf-8')
+    ontology_workbench=(ROOT/'ontology-workbench.js').read_text(encoding='utf-8')
     workspace_css=(ROOT/'workspace.css').read_text(encoding='utf-8')
-    assert "page.id='tab-discovery'" in workspace
+    assert "page.id='tab-discovery'" not in workspace
     assert "mode.id='extraction-mode'" in workspace
-    assert '发布本体版本' in workspace
+    assert '确认发布' in ontology_workbench
     details=(ROOT/'ontology-details.js').read_text(encoding='utf-8')
     assert 'ontology-details.js' in html
-    assert 'OntologyDetails.renderTechnicalDetails' in workspace
     assert all(label in details for label in ('审核草案并查看技术详情','版本差异','本体定义','名称与技术标识（可编辑）'))
     assert all(help_text in details for help_text in ('新增、保留或删除','Turtle 标准格式','不是乱码'))
-    assert '不会重新调用 LLM' in workspace
-    assert '不需要重新上传原文' in workspace
+    assert '不需要重新上传原文' in ontology_workbench
     assert '受控重解析原文' not in workspace
     assert 'button:disabled{cursor:not-allowed}' in workspace_css
-    assert '.discovery-drafts [data-publish]{grid-column:1/-1;width:100%' in workspace_css
     assert 'contain:layout paint' in workspace_css and 'requestAnimationFrame(()=>{if(ui.graph===result||ui.graph===base)chart.resize();})' in workspace
     assert all(text in workspace for text in ('知识时间','当前状态','上一个已知变更节点','仅在切换节点时刷新','/timeline?limit=100'))
     assert 'tl-density' not in workspace and 'startPlayback' not in workspace
-    assert 'candidate_status_counts' in workspace
+    assert 'candidate_status_counts' in ontology_workbench
     assert all(text in workspace for text in ('本体结构维护','新增本体术语','高级：本体历史版本与 Turtle 源码','可多选'))
     assert all(text in workspace for text in ('新增实体类','新增关系类型','新增实体属性','预计本体标识 IRI','最终 IRI 由后端根据名称统一生成','已保存的类型会自动勾选'))
     assert 'readableIriSegment' in workspace and 'encodeURIComponent(label)' not in workspace
@@ -47,7 +45,7 @@ def test_workbench_has_all_control_targets_and_no_native_dialogs():
     record_dialog=(ROOT/'record-dialog.js').read_text(encoding='utf-8')
     assert all(text in record_dialog for text in ('维护具体实体','维护实体关系','保存实体修改为新版本','保存关系修改为新版本','高级：编辑完整记录 JSON'))
     assert "get('draw-graph')" not in record_dialog
-    assert all(label in workspace for label in ('待纳入','草案中','已批准','已物化'))
+    assert all(label in ontology_workbench for label in ('待纳入','草案中','已批准','已物化'))
     assert '发布本体并映射候选' not in workspace
     candidate_map=(ROOT/'candidate-mindmap.js').read_text(encoding='utf-8')
     menu=(ROOT/'menu-hierarchy.js').read_text(encoding='utf-8')
@@ -55,10 +53,10 @@ def test_workbench_has_all_control_targets_and_no_native_dialogs():
     assert '非正式知识' in candidate_map and '该聚合键不是正式实体 ID' in candidate_map
     assert all(text in candidate_map for text in ('开放解析完成后先在这里检查','进入本体工作台','查看正式脑图'))
     assert '正式重解析' not in candidate_map
-    assert 'view-candidate-mindmap' in workspace
+    assert 'candidate-mindmap' in ontology_workbench
     assert 'knowledge-flow' not in candidate_map and 'knowledge-flow' not in workspace
     assert all(group in menu for group in ('项目','探索与展示','建模与治理','运行与质量'))
-    assert "['建模与治理',['ingest','candidate-mindmap','discovery'" in menu
+    assert "['建模与治理',['ingest','candidate-mindmap','ontology-workbench','reviews','records']]" in menu
     assert all(asset in html for asset in ('candidate-mindmap.js','menu-hierarchy.js','candidate-mindmap.css','menu-hierarchy.css'))
     assert '/assets/workbench.css' in html and '/assets/workbench.js' in html
 
@@ -165,6 +163,7 @@ def test_graph_reset_has_one_workspace_owner_and_preserves_request_invalidation(
 def test_knowledge_history_excludes_document_receipts_and_sources_show_build_state():
     records=(ROOT/'records-view.js').read_text(encoding='utf-8')
     workspace=(ROOT/'workspace.js').read_text(encoding='utf-8')
+    ontology_workbench=(ROOT/'ontology-workbench.js').read_text(encoding='utf-8')
     styles=(ROOT/'workspace.css').read_text(encoding='utf-8')
     sources=(ROOT/'sources-view.js').read_text(encoding='utf-8')
     assert "filter.kinds=['entity','relation','chunk']" in records
@@ -180,7 +179,7 @@ def test_knowledge_history_excludes_document_receipts_and_sources_show_build_sta
     assert '#tab-records>.record-section' in styles and '.governance-step-risk' in styles
     assert '.governance-technical-id{display:none}' in styles
     assert '.governance-merge-preview' in styles and '.governance-selection' in styles
-    assert '兼容估算' in workspace and '这些状态如何变化？' in workspace
+    assert '兼容估算' in ontology_workbench and '这些状态如何变化？' in ontology_workbench
     assert "知识构建失败" in sources
     assert "构建成功" in sources
 

@@ -484,7 +484,7 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
   // 将来给本文件加 'use strict' / 改成模块就会静默失效（下拉换版本后面板不刷新且不报错）。
   const priorLoad=loadOntology;
   window.loadOntology=async(id='')=>{const p=current,result=await priorLoad(id);if(p!==current)return result;ui.ontology=result;
-    if(!result){get('ontology-browser').innerHTML='<p class="subtle">本项目尚未发布本体。开放本体发现模式请先累计候选，再到「本体发现」生成并发布本体版本；仅文档检索模式不产生图谱本体。</p>';return result;}
+    if(!result){get('ontology-browser').innerHTML='<p class="subtle">本项目尚未发布本体。开放本体发现模式请先累计候选，再到「本体工作台」生成并发布本体版本；仅文档检索模式不产生图谱本体。</p>';return result;}
     const classes=result.summary.classes||[],classLabels=new Map(classes.flatMap(c=>[[c.id,ontoName(c)],[c.name,ontoName(c)]]));
     const className=id=>classLabels.get(id)||term(id)||'未指定';
     const datatypeName=id=>new Map(datatypes).get(id)||term(id)||'未指定';
@@ -636,48 +636,4 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
   if(get('parse-merge'))get('parse-merge').onchange=syncMergeThreshold;
   mode.onchange();
 
-  const page=document.createElement('section');page.id='tab-discovery';page.className='tab hidden';
-  page.innerHTML='<div class="discovery-shell"><header class="discovery-hero"><div><small>SCHEMA INDUCTION</small><h2>从证据中发现本体</h2><p>开放解析产生候选知识；你可以逐项审核候选和本体术语。开放关系不会自动添加 domain/range 限制；发布时直接转换为正式知识，且不会重新调用 LLM。只有切换到受控本体模式并人工配置范围后，关系类型限制才参与审核。</p></div><div class="discovery-actions"><label class="discovery-name"><span>草案名称</span><input id="discovery-name" maxlength="200" placeholder="例如：直播规则本体" aria-label="本体草案名称" title="生成的本体草案使用的名称"></label><button id="create-discovery-draft">生成累计草案</button><button id="refresh-discovery" class="secondary">刷新</button></div></header><div id="discovery-content" aria-live="polite"></div></div>';
-  page.querySelector('.discovery-actions').insertAdjacentHTML('afterbegin','<button id="view-candidate-mindmap" class="secondary">先看候选脑图</button>');
-  document.querySelector('main').append(page);
-  const nav=document.createElement('button');nav.dataset.tab='discovery';nav.textContent='本体发现';
-  document.querySelector('[data-tab="ontology"]').after(nav);
-  const activate=()=>{document.querySelectorAll('.tab').forEach(t=>t.classList.add('hidden'));page.classList.remove('hidden');document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b===nav));get('title').textContent='本体发现';get('scope').classList.add('hidden');render();};
-  nav.onclick=activate;
-  async function render(){
-    const host=get('discovery-content');if(!current){host.innerHTML='<div class="discovery-empty">请先选择项目</div>';return;}
-    host.innerHTML='<div class="discovery-empty">正在聚合开放抽取候选…</div>';
-    try{
-      const data=await api(endpoint('/ontology-discovery'),undefined,'GET');
-      const types=data.entity_types||[],relations=data.relation_types||[],attributes=data.attribute_types||[],drafts=data.drafts||[];
-      const published=drafts.some(d=>d.status==='published');
-      const pending=data.unpublished_candidate_count!==undefined?data.unpublished_candidate_count:((data.candidate_count||0)>0&&!published?data.candidate_count:0);
-      const quality=(data.quality_warnings||[]).map(x=>`<div class="discovery-hint"><span><b>质量提醒：</b>${esc(x.message)}</span></div>`).join('');
-      const hasLifecycle=!!data.candidate_status_counts,publishedCandidates=Math.max(0,...drafts.filter(d=>d.status==='published').map(d=>Number(d.candidate_count)||0)),legacyMapped=Math.max(0,...drafts.filter(d=>d.status==='published').map(d=>(Number(d.mapped_entities)||0)+(Number(d.mapped_relations)||0)+(Number(d.mapped_attributes)||0)));
-      const states=data.candidate_status_counts||{pending, included_in_draft:0,approved:Math.max(0,publishedCandidates-legacyMapped),materialized:Math.min(publishedCandidates,legacyMapped)};
-      const lifecycle=`<section class="discovery-metrics"><div><strong>${states.pending||0}</strong><span>待纳入</span></div><div><strong>${states.included_in_draft||0}</strong><span>草案中</span></div><div><strong>${states.approved||0}</strong><span>已批准</span></div><div><strong>${states.materialized||0}</strong><span>已物化</span></div></section>`;
-      const lifecycleHelp='<details class="discovery-lifecycle-help"><summary>这些状态如何变化？</summary><p><b>待纳入</b>：尚未进入任何草案；<b>草案中</b>：已进入未发布草案；<b>已批准</b>：已随本体版本发布但尚未正式入图；<b>已物化</b>：已有正式实体或关系明确关联该候选。继续开放发现只会增加待纳入候选，不会改动正式图谱。</p></details>';
-      const compatibility=hasLifecycle?'':'<div class="discovery-hint discovery-compat"><span><b>兼容估算：</b>当前服务仍返回旧版发现数据，生命周期根据草案和映射数量推算。重启后端后会按候选 ID 精确统计。</span></div>';
-      const notice=lifecycle+lifecycleHelp+compatibility+quality+(pending>0?`<div class="discovery-hint"><span>还有 <b>${pending}</b> 条候选待审核或未通过校验。它们会保留在候选区，可修改草案后再次处理，不需要重新上传原文。</span></div>`:(data.candidate_count>0&&!drafts.length?`<div class="discovery-hint"><span>已累计 ${data.candidate_count} 条候选，可继续发现或生成第一份本体草案。</span></div>`:''));
-      const schema=d=>`${OntologyDetails.reviewPanelHtml(d)}${OntologyDetails.renderTechnicalDetails(d,esc)}`;
-      host.innerHTML=notice+`<section class="discovery-metrics"><div><strong>${data.candidate_count}</strong><span>候选总数</span></div><div><strong>${data.entity_count}</strong><span>实体候选</span></div><div><strong>${data.relation_count}</strong><span>关系候选</span></div><div><strong>${data.attribute_count||0}</strong><span>属性候选</span></div></section><div class="discovery-columns"><section><h3>实体类型簇</h3>${types.length?types.map(x=>`<div class="discovery-cluster"><b>${esc(x.name)}</b><span>${x.count} 个实例</span><small>${(x.examples||[]).map(esc).join('、')}</small><i style="--share:${Math.min(100,x.count/Math.max(1,data.entity_count)*100)}%"></i></div>`).join(''):'<p class="subtle">尚无实体候选</p>'}</section><section><h3>关系与属性簇</h3>${relations.length?relations.map(x=>`<article class="discovery-relation"><div><b>${esc(x.name)}</b><span>${x.count} 条关系</span></div><small>${x.examples.map(esc).join('；')}</small></article>`).join(''):'<p class="subtle">尚无关系候选</p>'}${attributes.map(x=>`<article class="discovery-relation"><div><b>${esc(x.name)}</b><span>${x.count} 个属性值</span></div></article>`).join('')}</section></div><section class="discovery-drafts"><h3>本体草案与发布记录</h3>${drafts.length?drafts.map(d=>`<article data-draft="${esc(d.id)}"><div><small>${d.generator_backend==='semantica'?'Semantica 归纳':'规则归纳'} · ${esc(d.created_at)}</small><h4>${esc(d.name)}</h4><span class="draft-state ${d.status}">${d.status==='published'?'已发布':'待审阅'}</span></div><p>${d.candidate_count} 个候选 · ${(Object.keys(d.mappings?.entity_types||{})).length} 类 · ${(Object.keys(d.mappings?.relation_types||{})).length} 关系 · ${(Object.keys(d.mappings?.attributes||{})).length} 属性</p>${schema(d)}<details><summary>版本差异 · Turtle 与 IRI 映射</summary><pre>${esc(JSON.stringify(d.diff||{},null,2))}</pre><pre>${esc(d.turtle)}</pre><pre>${esc(JSON.stringify(d.mappings,null,2))}</pre></details>${d.status==='draft'?'<label class="publish-check"><input type="checkbox" data-review-confirm>我已核对版本差异、类型边界、关系方向和示例证据</label><button data-publish disabled>发布本体版本</button>':`<small>本体版本 ${esc(d.ontology_id)} · 已保留候选快照 · 等待使用该本体受控重解析</small>`}</article>`).join(''):'<div class="discovery-empty">候选积累后，在上方生成第一份本体草案。</div>'}</section>`;
-      host.querySelectorAll('[data-review-confirm]').forEach(check=>check.onchange=()=>{check.closest('[data-draft]').querySelector('[data-publish]').disabled=!check.checked});
-      host.querySelectorAll('[data-draft]').forEach((article,index)=>{const draft=drafts[index];OntologyDetails.bindCopyButtons(article,draft);if(draft.status==='published'){const summary=article.querySelector(':scope > small');if(summary)summary.textContent=`本体版本 ${draft.ontology_id} · 已生成 ${draft.mapped_entities||0} 个正式实体、${draft.mapped_relations||0} 条正式关系 · ${(draft.skipped_candidates||[]).length} 条留待审核`;}});
-      host.querySelectorAll('[data-draft]').forEach((article,index)=>{
-        const draft=drafts[index];
-        if(draft.status==='draft'){
-          OntologyDetails.bindReviewPanel(article,draft,async(payload)=>{
-            await api(endpoint('/ontology-discovery/drafts/'+encodeURIComponent(draft.id)),payload,'PUT');
-            status('草案审核修改已保存；发布时只将保留且通过校验的候选写入正式图谱，连带跳过的不占排除名单。');
-            await render();
-          });
-        }
-      });
-      host.querySelectorAll('[data-publish]').forEach(button=>{button.textContent='提交发布任务';button.onclick=async()=>{button.disabled=true;try{const id=button.closest('[data-draft]').dataset.draft,result=await api(endpoint('/ontology-discovery/drafts/'+encodeURIComponent(id)+'/publish'),{});const jobId=result.id||'';status(`发布任务已提交${jobId?'（'+jobId.slice(0,8)+'…）':''}，正在跳转「后台任务」查看进度。`);watch(result);showTab('jobs');for(let i=0;i<120;i++){await new Promise(r=>setTimeout(r,3000));const jobs=await api('/api/jobs',undefined,'GET');const job=(jobs.jobs||[]).find(j=>j.id===jobId);if(!job)break;if(job.status==='completed'){const mapped=job.result||{};status(`本体发布完成：${mapped.mapped_entities||0} 个实体、${mapped.mapped_relations||0} 条关系；${(mapped.skipped_candidates||[]).length} 条候选留待处理。`);await render();return;}if(job.status==='failed'||job.status==='interrupted'){status(`发布任务${job.status==='failed'?'失败':'中断'}：${job.error||job.stage||''}`,true);await render();return;}}status('发布任务仍在排队或执行中，可前往「后台任务」查看。',true);}catch(error){status(error.message,true);button.disabled=false;}}});
-    }catch(error){host.innerHTML='<div class="discovery-empty error">'+esc(error.message)+'</div>';}
-  }
-  get('refresh-discovery').onclick=render;
-  get('view-candidate-mindmap').onclick=()=>document.querySelector('[data-tab="candidate-mindmap"]')?.click();
-  get('create-discovery-draft').onclick=async()=>{const button=get('create-discovery-draft');button.disabled=true;status('正在通过 Semantica 归纳候选类型与关系…');try{const draft=await api(endpoint('/ontology-discovery/drafts'),{name:get('discovery-name').value.trim()||'发现本体'});status('本体草案已生成，正在进入统一工作台继续设计与审核。');window.OntologyWorkbench?.open();window.OntologyWorkbench?.setStage('design');await window.OntologyWorkbench?.selectDraft(draft.unified_draft_id||draft.id);}catch(error){status(error.message,true);}finally{button.disabled=false;}};
-  get('project').addEventListener('change',()=>{if(!page.classList.contains('hidden'))render();});
 })();

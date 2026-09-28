@@ -4,7 +4,7 @@
   const groups=[
     ['项目',['projects','dashboard']],
     ['探索与展示',['search','qa','mindmap','sources']],
-    ['建模与治理',['ingest','candidate-mindmap','discovery','ontology-workbench','ontology','reviews','records']],
+    ['建模与治理',['ingest','candidate-mindmap','ontology-workbench','reviews','records']],
     ['运行与质量',['jobs','evaluation']],
   ];
   const buttons=new Map([...nav.querySelectorAll('button[data-tab]')].map(button=>[button.dataset.tab,button]));

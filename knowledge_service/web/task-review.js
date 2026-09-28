@@ -20,13 +20,13 @@
   const reviewPage=document.createElement('section');reviewPage.id='tab-reviews';reviewPage.className='tab hidden';reviewPage.append(panel);
   document.querySelector('main').append(reviewPage);
   const reviewNav=document.createElement('button');reviewNav.dataset.tab='reviews';reviewNav.textContent='知识审核';
-  document.querySelector('[data-tab="ontology"]').after(reviewNav);
+  document.querySelector('[data-tab="ontology-workbench"]').after(reviewNav);
   reviewNav.onclick=()=>{
     document.querySelectorAll('.tab').forEach(t=>t.classList.add('hidden'));reviewPage.classList.remove('hidden');
     document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b===reviewNav));
     $('title').textContent='知识审核';$('scope').classList.add('hidden');reviews();
   };
-  $('review-ontology').onclick=()=>showTab('ontology');
+  $('review-ontology').onclick=()=>window.OntologyWorkbench?.openVersionGovernance();
   $('review-kind').onchange=()=>reviews();
   const attributeOption=document.createElement('label');attributeOption.className='check';
   attributeOption.innerHTML='<input type="checkbox" id="parse-attributes">抽取实体业务属性（选填，每片额外调用一次 LLM，属性值全部待审核）';
@@ -52,7 +52,7 @@
       const labels={validation:'本体异常',entity:'实体类型',relation:'关系',attribute:'实体属性'};
       const changes=changeData.proposals||[],pendingChanges=changes.filter(x=>x.status==='pending');
       $('ontology-change-proposals').innerHTML=pendingChanges.length?pendingChanges.map((draft,i)=>`<article class="ontology-change-card" data-change="${i}"><div><small>${draft.operation==='add'?'新增':'调整'} · ${{class:'实体类',relation:'关系',attribute:'属性'}[draft.kind]}</small><h4>${esc(draft.label)}</h4><code>${esc(draft.uri)}</code></div><div class="change-impact"><b>${draft.impact.risk==='high'?'高影响变更':'受控变更'}</b><span>现有知识 ${draft.impact.record_count} · 约束引用 ${draft.impact.constraint_count} · 关联候选 ${draft.impact.linked_candidates}</span></div><label>审批意见<input class="change-note" maxlength="2000" placeholder="说明批准或拒绝原因"></label><div>${draft.impact.risk==='high'?'<label class="check"><input class="change-confirm-impact" type="checkbox">确认影响</label>':''}<button data-change-action="approve">批准本体版本</button><button data-change-action="reject" class="secondary">拒绝</button></div></article>`).join(''):`<p class="subtle">暂无待批准草案 · 已处理 ${changes.length} 条</p>`;
-      if(!ontology){host.innerHTML='<p class="subtle">本项目尚未发布本体。可先持续开放发现并累计候选，到「本体发现」生成、审核和发布本体版本；发布后再用该本体受控重解析，正式实体与关系才会进入图谱。</p><button id="reviews-goto-discovery">前往本体发现 ↗</button>';host.querySelector('#reviews-goto-discovery').onclick=()=>showTab('discovery');return;}
+      if(!ontology){host.innerHTML='<p class="subtle">本项目尚未发布本体。可先持续开放发现并累计候选，到「本体工作台」生成、审核和发布本体版本；发布后再用该本体受控重解析，正式实体与关系才会进入图谱。</p><button id="reviews-goto-discovery">前往本体工作台 ↗</button>';host.querySelector('#reviews-goto-discovery').onclick=()=>window.OntologyWorkbench?.open('discover');return;}
       host.innerHTML=`<p>待审核 ${pending.length} 条 · 已处理 ${done.length} 条 · 当前本体 ${esc(ontology.id)}</p>`+pending.map((r,i)=>{
         const kind=r.kind||'relation',terms=ontology.summary[{entity:'classes',relation:'relations',attribute:'attributes'}[kind]]||[];
         const heading=kind==='validation'?`${esc(r.text||r.record_id||'图谱记录')} · ${esc(r.path_label||safeLabel(r.path)||'图级约束')}`:kind==='entity'?`${esc(r.text)} · ${typeHint(r.proposed_type)}`:kind==='attribute'?`${esc(r.subject)} · ${typeHint(r.proposed_type)} = ${esc(JSON.stringify(r.value))}`:`${esc(r.subject)} → ${typeHint(r.predicate)} → ${esc(r.object)}`;
