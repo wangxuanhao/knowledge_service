@@ -54,6 +54,7 @@ def extract_attributes(text,entities,ontology,config):
 entity_index 使用实体清单索引；attribute 优先使用本体属性完整 IRI，未定义时可提出明确的新名称。
 value 仅允许字符串、布尔值或数值，不能把实体间关系当作属性；不要猜测。
 evidence 必须逐字引用正文中支持属性值的连续片段；没有明确证据则不返回。
+大多数实体可能没有任何属性。动作、禁止事项、职责、所有权，以及分类、文档结构都不属于属性。
 不要将上传时间、模型置信度等系统 metadata 当作业务属性。confidence 为 0 到 1。
 '''+json.dumps({'entities':[{'index':i,'text':e.text,'type':e.label} for i,e in enumerate(entities)],
         'ontology_attributes':ontology.summary()['attributes'] if ontology is not None else [],'text':text},ensure_ascii=False)
@@ -63,9 +64,10 @@ evidence 必须逐字引用正文中支持属性值的连续片段；没有明�
     except Exception as exc:
         raise RuntimeError('Semantica 属性抽取失败；请检查模型配置和供应商状态') from exc
     diagnostics=dict(returned=len(result.attributes),accepted=0,unverified_evidence=0,
-                     skipped_invalid_schema=0,skipped_invalid_entity=0)
+                     skipped_invalid_schema=0,skipped_invalid_entity=0,
+                     skipped_redundant_value=0,skipped_attribute_limit=0)
     accepted=[]
-    for raw in result.attributes:
+    for original_index,raw in enumerate(result.attributes):
         try:
             item=AttributeProposal.model_validate(raw)
         except (ValueError,TypeError):
@@ -74,10 +76,22 @@ evidence 必须逐字引用正文中支持属性值的连续片段；没有明�
         if item.entity_index>=len(entities):
             diagnostics['skipped_invalid_entity']+=1
             continue
+        if isinstance(item.value,str) and item.value.strip().casefold()==entities[item.entity_index].text.strip().casefold():
+            diagnostics['skipped_redundant_value']+=1
+            continue
         evidence,status=_locate_evidence(text,item.evidence)
         item=item.model_copy(update={'evidence':evidence,'evidence_status':status})
         if status=='unverified':
             diagnostics['unverified_evidence']+=1
-        accepted.append(item)
+        accepted.append((original_index,item))
+    by_entity={}
+    for original_index,item in accepted:
+        by_entity.setdefault(item.entity_index,[]).append((original_index,item))
+    selected_indices=set()
+    for proposals in by_entity.values():
+        ranked=sorted(proposals,key=lambda proposal:(-proposal[1].confidence,proposal[0]))
+        selected_indices.update(index for index,_ in ranked[:5])
+        diagnostics['skipped_attribute_limit']+=max(0,len(proposals)-5)
+    accepted=[item for original_index,item in accepted if original_index in selected_indices]
     diagnostics['accepted']=len(accepted)
     return AttributeExtractionBatch(attributes=accepted,diagnostics=diagnostics)

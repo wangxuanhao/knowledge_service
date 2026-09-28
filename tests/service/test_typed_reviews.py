@@ -356,7 +356,36 @@ def test_attribute_provider_isolates_bad_items_and_marks_unverified_evidence(mon
     assert result.attributes[0].evidence_status=='normalized'
     assert result.attributes[0].evidence=='甲 数量 2'
     assert result.diagnostics=={'returned':4,'accepted':1,'unverified_evidence':0,
-        'skipped_invalid_schema':2,'skipped_invalid_entity':1}
+        'skipped_invalid_schema':2,'skipped_invalid_entity':1,
+        'skipped_redundant_value':0,'skipped_attribute_limit':0}
+
+
+def test_attribute_provider_filters_redundant_values_and_caps_each_entity(monkeypatch):
+    from semantica.semantic_extract import providers
+    from semantica.semantic_extract.types import Entity
+    from knowledge_service.services.attribute_extraction import extract_attributes,AttributeResponse
+    class Provider:
+        def generate_typed(self,prompt,schema):
+            assert schema==AttributeResponse
+            assert '大多数实体可能没有任何属性' in prompt
+            assert '动作、禁止事项、职责、所有权' in prompt
+            assert '分类、文档结构' in prompt
+            return AttributeResponse(attributes=[
+                dict(entity_index=0,attribute='name',value='甲',evidence='甲',confidence=.99),
+                dict(entity_index=0,attribute='a1',value='v1',evidence='事实',confidence=.1),
+                dict(entity_index=0,attribute='a2',value='v2',evidence='事实',confidence=.9),
+                dict(entity_index=0,attribute='a3',value='v3',evidence='事实',confidence=.8),
+                dict(entity_index=0,attribute='a4',value='v4',evidence='事实',confidence=.7),
+                dict(entity_index=0,attribute='a5',value='v5',evidence='事实',confidence=.6),
+                dict(entity_index=0,attribute='a6',value='v6',evidence='事实',confidence=.5),
+                dict(entity_index=1,attribute='other',value='v7',evidence='事实',confidence=.4)])
+    monkeypatch.setattr(providers,'create_provider',lambda *args,**kw:Provider())
+    result=extract_attributes('甲 乙 事实',[Entity('甲','Person',0,1),Entity('乙','Person',2,3)],
+        Ontology(TTL),dict(provider='openai',llm_model='test',api_key='test',base_url='test'))
+    assert [(item.entity_index,item.attribute) for item in result.attributes]==[
+        (0,'a2'),(0,'a3'),(0,'a4'),(0,'a5'),(0,'a6'),(1,'other')]
+    assert result.diagnostics['skipped_redundant_value']==1
+    assert result.diagnostics['skipped_attribute_limit']==1
 
 
 def test_attribute_provider_keeps_nonmatching_evidence_for_review(monkeypatch):
