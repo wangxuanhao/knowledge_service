@@ -6,7 +6,6 @@ import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import urlparse
 
 import pytest
 import uvicorn
@@ -27,6 +26,15 @@ def _browser_path():
     return next((str(path) for path in candidates if path.exists()), None)
 
 
+def _missing_browser_runtime(error):
+    message = str(error)
+    return any(marker in message for marker in (
+        "Executable doesn't exist",
+        'Host system is missing dependencies',
+        'error while loading shared libraries',
+    ))
+
+
 def _project(repository, name):
     project_id = repository.create_project(name, {'ontology_mode': 'ontology'})['id']
     turtle = (Path(__file__).resolve().parents[2] / 'knowledge_service' /
@@ -38,23 +46,30 @@ def _project(repository, name):
 @pytest.fixture(scope='module')
 def browser():
     playwright = pytest.importorskip('playwright.sync_api')
-    executable = _browser_path()
-    if not executable:
-        pytest.skip('Edge or Chrome is required for the real chunk-preview interaction tests')
-
-    runtime = instance = None
+    runtime = playwright.sync_playwright().start()
+    instance = None
     try:
-        runtime = playwright.sync_playwright().start()
-        instance = runtime.chromium.launch(headless=True, executable_path=executable)
-    except Exception as error:
-        if runtime is not None:
-            runtime.stop()
-        pytest.skip(f'Playwright could not launch the installed Chromium browser: {error}')
-    try:
+        try:
+            instance = runtime.chromium.launch(headless=True)
+        except playwright.Error as managed_error:
+            if not _missing_browser_runtime(managed_error):
+                raise
+            executable = _browser_path()
+            if not executable:
+                pytest.skip(
+                    'Playwright Chromium is not installed and no Edge or Chrome fallback was found')
+            try:
+                instance = runtime.chromium.launch(
+                    headless=True, executable_path=executable)
+            except playwright.Error as fallback_error:
+                if _missing_browser_runtime(fallback_error):
+                    pytest.skip(f'Chromium runtime dependency is unavailable: {fallback_error}')
+                raise
         yield instance
     finally:
         try:
-            instance.close()
+            if instance is not None:
+                instance.close()
         finally:
             runtime.stop()
 
@@ -71,23 +86,19 @@ def workbench(browser, tmp_path):
     server = uvicorn.Server(uvicorn.Config(
         app, host='127.0.0.1', port=port, log_level='critical'))
     thread = threading.Thread(target=server.run, daemon=True)
+    context = page = None
     thread.start()
-    for _ in range(100):
-        if server.started or not thread.is_alive():
-            break
-        time.sleep(.05)
-    if not server.started:
-        server.should_exit = True
-        thread.join(timeout=10)
-        pytest.fail('The ephemeral preview-drawer server did not start')
-
-    context = browser.new_context()
-    page = context.new_page()
-    page.set_default_timeout(5000)
-    paths = []
-    page.on('request', lambda request: paths.append(urlparse(request.url).path)
-            if '/api/' in request.url else None)
     try:
+        for _ in range(100):
+            if server.started or not thread.is_alive():
+                break
+            time.sleep(.05)
+        if not server.started:
+            pytest.fail('The ephemeral preview-drawer server did not start')
+
+        context = browser.new_context()
+        page = context.new_page()
+        page.set_default_timeout(5000)
         page.goto(f'http://127.0.0.1:{port}/', wait_until='load')
         page.wait_for_function("() => document.querySelectorAll('#project option').length > 1")
         with page.expect_response(lambda response: response.url.endswith('/entity-options')):
@@ -95,14 +106,19 @@ def workbench(browser, tmp_path):
         page.locator('.nav-group:has([data-tab="ingest"]) summary').click()
         page.click('[data-tab="ingest"]')
         page.locator('#tab-ingest').wait_for(state='visible')
-        paths.clear()
-        yield SimpleNamespace(page=page, project=project_id, paths=paths)
+        yield SimpleNamespace(page=page, project=project_id)
     finally:
         try:
-            context.close()
+            if page is not None:
+                page.close()
         finally:
-            server.should_exit = True
-            thread.join(timeout=10)
+            try:
+                if context is not None:
+                    context.close()
+            finally:
+                server.should_exit = True
+                thread.join(timeout=10)
+                assert not thread.is_alive(), 'The ephemeral preview-drawer server did not stop'
 
 
 def _preview_result(*texts):
@@ -181,6 +197,8 @@ def test_preview_host_is_a_body_level_dialog_and_record_import_is_collapsed(work
     structured_import = page.locator('details:has(#batch):has(#write-batch)')
     assert structured_import.count() == 1
     assert structured_import.evaluate('(details) => details.open') is False
+    assert '结构化记录导入（高级）' in structured_import.locator('summary').inner_text()
+    assert '不是批量上传文档' in structured_import.text_content()
 
 
 def test_text_preview_opens_safe_switchable_drawer_without_refetching(workbench):
@@ -284,7 +302,15 @@ def test_preview_traps_focus_and_stays_inside_narrow_viewports(workbench, width)
         assert page.evaluate(
             "document.activeElement?.closest('#chunk-preview') !== null")
 
-    for box in (drawer.bounding_box(), close.bounding_box()):
+    responsive_regions = [
+        drawer.locator('.chunk-preview-drawer'),
+        drawer.locator('.chunk-preview-list'),
+        drawer.locator('.chunk-preview-content'),
+    ]
+    for region in responsive_regions:
+        assert region.count() == 1
+        assert region.evaluate('(element) => element.scrollWidth <= element.clientWidth + 1')
+    for box in [*(region.bounding_box() for region in responsive_regions), close.bounding_box()]:
         assert box is not None
         assert box['x'] >= 0
         assert box['x'] + box['width'] <= width + 1
