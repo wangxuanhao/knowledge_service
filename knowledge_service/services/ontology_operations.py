@@ -70,6 +70,25 @@ def _graph_classes(graph: Graph) -> set:
     }
 
 
+def _reachable_class_nodes(
+        graph: Graph, start, *, inbound: bool, class_nodes: set | None = None) -> set:
+    class_nodes = _graph_classes(graph) if class_nodes is None else class_nodes
+    adjacent = graph.subjects if inbound else graph.objects
+    pending = list(adjacent(RDFS.subClassOf, start) if inbound
+                   else adjacent(start, RDFS.subClassOf))
+    reached = set()
+    while pending:
+        node = pending.pop()
+        if node in reached or node not in class_nodes:
+            continue
+        reached.add(node)
+        pending.extend(
+            adjacent(RDFS.subClassOf, node) if inbound
+            else adjacent(node, RDFS.subClassOf))
+    reached.discard(start)
+    return reached
+
+
 _SIMPLE_ANONYMOUS_CLASS_PREDICATES = frozenset({
     RDF.type, RDFS.subClassOf, RDFS.label, RDFS.comment,
 })
@@ -793,7 +812,10 @@ def retirement_dependencies(ontology: Ontology, target_iri: str, *,
     target = ontology.resolve(target_iri)
     errors = []
     deactivated_info = []
-    for child in ontology.graph.subjects(RDFS.subClassOf, target):
+    class_nodes = _graph_classes(ontology.graph)
+    children = _reachable_class_nodes(
+        ontology.graph, target, inbound=True, class_nodes=class_nodes)
+    for child in sorted(children & ontology.classes, key=str):
         if ontology.is_active_term(child):
             errors.append(_issue(
                 'active_child_dependency', 'error',
@@ -865,11 +887,14 @@ def validate_ontology_invariants(ontology: Ontology) -> dict:
     """Check that active semantics never depend on deprecated terms."""
     errors = []
     declared = ontology.classes | ontology.relations | ontology.attributes
+    class_nodes = _graph_classes(ontology.graph)
     for child in sorted(ontology.classes, key=str):
         if not ontology.is_active_term(child):
             continue
-        for parent in ontology.graph.objects(child, RDFS.subClassOf):
-            if parent in declared and not ontology.is_active_term(parent):
+        ancestors = _reachable_class_nodes(
+            ontology.graph, child, inbound=False, class_nodes=class_nodes)
+        for parent in sorted(ancestors & ontology.classes, key=str):
+            if not ontology.is_active_term(parent):
                 errors.append(_issue(
                     'active_child_dependency', 'error',
                     '活动子类依赖已停用父类', [child, parent]))
@@ -1125,13 +1150,17 @@ def canonical_turtle_diff(base_turtle: str, edited_turtle: str, *,
     immutable_source_id = source_ontology_id
     base = _graph(base_turtle)
     edited = _graph(edited_turtle)
-    if isomorphic(base, edited):
-        return []
     _validate_supported_bnodes(base)
     _validate_supported_bnodes(edited)
+    if isomorphic(base, edited):
+        _validate_definition_graph(base)
+        _validate_definition_graph(edited)
+        return []
     if isomorphic(
             _canonicalize_supported_unions(base),
             _canonicalize_supported_unions(edited)):
+        _validate_definition_graph(base)
+        _validate_definition_graph(edited)
         return []
     base_declarations = _declarations(base)
     edited_declarations = _declarations(edited)

@@ -24,6 +24,7 @@ from knowledge_service.services.ontology_operations import (
     is_batch_eligible,
     operation_fingerprint,
     retirement_dependencies,
+    validate_ontology_invariants,
 )
 from knowledge_service.services.service import KnowledgeService
 
@@ -893,6 +894,69 @@ def test_declared_class_subclass_edge_is_valid_incoming_anonymous_reference():
         URIRef('http://ex/SimpleChild'), RDFS.comment)) == 'valid hierarchy'
 
 
+@pytest.mark.parametrize('invalid_graph', [
+    BASE + 'ex:Undeclared rdfs:subClassOf ex:Root .',
+    BASE + '''
+      ex:Equivalent a owl:Class; owl:equivalentClass _:anonymous .
+      _:anonymous a owl:Class; rdfs:subClassOf ex:Root .
+    ''',
+])
+def test_noop_canonical_diff_runs_full_definition_validation(invalid_graph):
+    with pytest.raises(ValueError):
+        apply_operations(invalid_graph, [])
+
+    with pytest.raises(ValueError):
+        canonical_turtle_diff(invalid_graph, invalid_graph)
+
+
+def test_active_class_cannot_reach_retired_ancestor_through_anonymous_classes():
+    turtle = BASE + '''
+      ex:ActiveDescendant a owl:Class; rdfs:subClassOf _:first .
+      _:first a owl:Class; rdfs:subClassOf _:second .
+      _:second a rdfs:Class; rdfs:subClassOf ex:RetiredAncestor .
+      ex:RetiredAncestor a owl:Class; owl:deprecated true .
+    '''
+
+    report = validate_ontology_invariants(Ontology(turtle))
+
+    assert report['conforms'] is False
+    dependency = next(
+        issue for issue in report['errors']
+        if issue['code'] == 'active_child_dependency')
+    assert dependency['term_iris'] == [
+        'http://ex/ActiveDescendant', 'http://ex/RetiredAncestor']
+    with pytest.raises(ValueError, match='依赖|dependency'):
+        apply_operations(turtle, [])
+
+
+def test_retirement_preview_traverses_anonymous_class_intermediaries():
+    preview_ontology = Ontology(BASE + '''
+      ex:ActiveDescendant a owl:Class; rdfs:subClassOf _:first .
+      _:first a owl:Class; rdfs:subClassOf _:second .
+      _:second a rdfs:Class; rdfs:subClassOf ex:TargetAncestor .
+      ex:TargetAncestor a owl:Class .
+    ''')
+    preview = retirement_dependencies(
+        preview_ontology, 'http://ex/TargetAncestor')
+    preview_dependency = next(
+        issue for issue in preview['errors']
+        if issue['code'] == 'active_child_dependency')
+    assert preview_dependency['term_iris'] == [
+        'http://ex/ActiveDescendant', 'http://ex/TargetAncestor']
+
+
+def test_active_class_can_reach_active_ancestor_through_anonymous_classes():
+    turtle = BASE + '''
+      ex:ActiveDescendant a owl:Class; rdfs:subClassOf _:first .
+      _:first a owl:Class; rdfs:subClassOf _:second .
+      _:second a rdfs:Class; rdfs:subClassOf ex:ActiveAncestor .
+      ex:ActiveAncestor a owl:Class .
+    '''
+
+    assert validate_ontology_invariants(Ontology(turtle))['conforms'] is True
+    assert canonical_turtle_diff(turtle, turtle) == []
+
+
 @pytest.mark.parametrize('operation', [
     build_operation('add_domain', 'http://ex/A', after={'value': 'http://ex/B'}),
     build_operation('add_range', 'http://ex/A', after={'value': 'http://ex/B'}),
@@ -1032,9 +1096,11 @@ def test_apply_rejects_an_operation_changed_after_it_was_fingerprinted():
 def test_canonical_diff_ignores_bnode_ids_and_triple_order():
     left = '''@prefix ex:<http://ex/>. @prefix owl:<http://www.w3.org/2002/07/owl#>.
               @prefix rdfs:<http://www.w3.org/2000/01/rdf-schema#>.
+              ex:A a owl:Class. ex:B a owl:Class.
               ex:p a owl:ObjectProperty; rdfs:domain [ owl:unionOf (ex:A ex:B) ].'''
     right = '''@prefix ex:<http://ex/>. @prefix owl:<http://www.w3.org/2002/07/owl#>.
                @prefix rdfs:<http://www.w3.org/2000/01/rdf-schema#>.
+               ex:A a owl:Class. ex:B a owl:Class.
                _:different owl:unionOf (ex:A ex:B). ex:p rdfs:domain _:different;
                a owl:ObjectProperty.'''
     assert canonical_turtle_diff(left, right) == []
@@ -1043,6 +1109,7 @@ def test_canonical_diff_ignores_bnode_ids_and_triple_order():
 def test_canonical_diff_treats_union_member_order_as_semantically_equivalent():
     left = '''@prefix ex:<http://ex/>. @prefix owl:<http://www.w3.org/2002/07/owl#>.
               @prefix rdfs:<http://www.w3.org/2000/01/rdf-schema#>.
+              ex:A a owl:Class. ex:B a owl:Class.
               ex:p a owl:ObjectProperty; rdfs:domain [ owl:unionOf (ex:A ex:B) ].'''
     right = left.replace('(ex:A ex:B)', '(ex:B ex:A)')
     assert canonical_turtle_diff(left, right) == []
