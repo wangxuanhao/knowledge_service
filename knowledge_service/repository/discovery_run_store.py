@@ -26,12 +26,17 @@ ALLOWED_TRANSITIONS = {
 MUTABLE_FIELDS = frozenset({
     'status', 'candidate_outcomes', 'created_at', 'updated_at',
 })
-DOCUMENTED_BINDING_KINDS = frozenset({
-    'existing', 'proposed',
+REUSABLE_BINDING_STATES = frozenset({'existing', 'reusable'})
+PROPOSED_BINDING_STATES = frozenset({'proposed', 'new'})
+DIAGNOSTIC_BINDING_STATES = frozenset({
+    'diagnostic', 'quarantined', 'deferred',
 })
-DOCUMENTED_BINDING_STATUSES = frozenset({
-    'existing', 'quarantined', 'deferred',
-})
+DOCUMENTED_BINDING_STATES = (
+    REUSABLE_BINDING_STATES
+    | PROPOSED_BINDING_STATES
+    | DIAGNOSTIC_BINDING_STATES
+)
+DOCUMENTED_TARGET_KINDS = frozenset({'class', 'relation', 'attribute'})
 OPERATION_ID_FIELDS = ('required_operation_ids', 'optional_operation_ids')
 IRI_FIELDS = ('target_iri', 'reuse_iri', 'iri')
 
@@ -53,25 +58,38 @@ def _is_reusable_binding(binding):
     return bool(
         isinstance(binding, dict)
         and binding.get('candidate_id')
-        and (binding.get('binding_kind') == 'existing'
-             or binding.get('status') == 'existing'))
+        and (binding.get('binding_kind') in REUSABLE_BINDING_STATES
+             or binding.get('status') in REUSABLE_BINDING_STATES))
+
+
+def _is_proposed_binding(binding):
+    return bool(
+        isinstance(binding, dict)
+        and binding.get('candidate_id')
+        and (binding.get('binding_kind') in PROPOSED_BINDING_STATES
+             or binding.get('status') in PROPOSED_BINDING_STATES))
 
 
 def _is_actionable_binding(binding):
-    return bool(
-        _is_reusable_binding(binding)
-        or (isinstance(binding, dict)
-            and binding.get('candidate_id')
-            and binding.get('binding_kind') == 'proposed'
-            and (binding.get('target_iri')
-                 or binding.get('required_operation_ids'))))
+    return _is_reusable_binding(binding) or _is_proposed_binding(binding)
 
 
 def _is_resolved_diagnostic_binding(binding, initial_outcome_ids):
     return bool(
         isinstance(binding, dict)
         and binding.get('candidate_id') in initial_outcome_ids
-        and binding.get('status') in {'quarantined', 'deferred'})
+        and (binding.get('binding_kind') in DIAGNOSTIC_BINDING_STATES
+             or binding.get('status') in DIAGNOSTIC_BINDING_STATES))
+
+
+def _binding_state_family(state):
+    if state in REUSABLE_BINDING_STATES:
+        return 'reusable'
+    if state in PROPOSED_BINDING_STATES:
+        return 'proposed'
+    if state in DIAGNOSTIC_BINDING_STATES:
+        return 'diagnostic'
+    return None
 
 
 def _binding_reuse_iri(binding):
@@ -117,6 +135,12 @@ def _validate_candidate_bindings(run, initial_outcomes):
     if not accepted_ids.issubset(snapshot_id_set):
         raise ValueError(
             'discovery run accepted candidate IDs must exist in the candidate snapshot')
+    outcome_ids = set(initial_outcomes)
+    if (not outcome_ids.issubset(snapshot_id_set)
+            or outcome_ids & accepted_ids):
+        raise ValueError(
+            'discovery run outcome candidate must exist in the candidate '
+            'snapshot and cannot be accepted')
 
     binding_ids = set()
     active_binding_ids = set()
@@ -135,6 +159,9 @@ def _validate_candidate_bindings(run, initial_outcomes):
         if candidate_id not in snapshot_id_set:
             raise ValueError(
                 'discovery run binding candidate_id must exist in the candidate snapshot')
+        if binding.get('target_kind') not in DOCUMENTED_TARGET_KINDS:
+            raise ValueError(
+                'discovery run binding target_kind is not documented')
 
         operation_ids = {}
         for field in OPERATION_ID_FIELDS:
@@ -153,18 +180,25 @@ def _validate_candidate_bindings(run, initial_outcomes):
         binding_kind = binding.get('binding_kind')
         binding_status = binding.get('status')
         if (binding_kind is not None
-                and binding_kind not in DOCUMENTED_BINDING_KINDS):
+                and binding_kind not in DOCUMENTED_BINDING_STATES):
             raise ValueError('discovery run binding kind is not documented')
         if (binding_status is not None
-                and binding_status not in DOCUMENTED_BINDING_STATUSES):
+                and binding_status not in DOCUMENTED_BINDING_STATES):
             raise ValueError('discovery run binding status is not documented')
         if binding_kind is None and binding_status is None:
             raise ValueError('discovery run binding state is required')
+        kind_family = _binding_state_family(binding_kind)
+        status_family = _binding_state_family(binding_status)
+        if (kind_family is not None and status_family is not None
+                and kind_family != status_family):
+            raise ValueError(
+                'discovery run binding state fields are contradictory')
 
         diagnostic = _is_resolved_diagnostic_binding(
             binding, initial_outcomes)
-        if (binding_status in {'quarantined', 'deferred'}
-                and not diagnostic):
+        diagnostic_state = (
+            kind_family == 'diagnostic' or status_family == 'diagnostic')
+        if diagnostic_state and not diagnostic:
             raise ValueError(
                 'discovery run diagnostic binding requires an initial outcome')
         provided_iris = [
@@ -176,9 +210,11 @@ def _validate_candidate_bindings(run, initial_outcomes):
             raise ValueError(
                 'discovery run binding target IRI fields must agree')
         if diagnostic:
+            if _binding_has_operations(binding):
+                raise ValueError(
+                    'discovery run diagnostic binding cannot contain operation IDs')
             continue
-        if (not _is_reusable_binding(binding)
-                and binding_kind != 'proposed'):
+        if not (_is_reusable_binding(binding) or _is_proposed_binding(binding)):
             raise ValueError('discovery run binding state is not actionable')
         if not provided_iris:
             raise ValueError(

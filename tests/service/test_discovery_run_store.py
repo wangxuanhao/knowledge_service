@@ -44,6 +44,16 @@ def _run(project_id, *, run_id='discovery-run:abc', fingerprint='sha256:abc'):
     }
 
 
+def _run_with_outcome(project_id, outcome):
+    payload = _run(project_id)
+    payload['candidate_snapshot'].append({
+        'id': outcome['candidate_id'], 'kind': 'attribute',
+    })
+    payload['initial_candidate_outcomes'] = [outcome]
+    payload['candidate_outcomes'] = [outcome]
+    return payload
+
+
 def test_create_is_insert_only_and_idempotent_for_identical_canonical_snapshot(tmp_path):
     repo = Repository(tmp_path / 'store.sqlite')
     project_id = repo.create_project('project')['id']
@@ -157,6 +167,121 @@ def test_draft_run_rejects_invalid_binding_state_or_target(tmp_path, binding):
         })
 
 
+@pytest.mark.parametrize('binding', [
+    {key: value for key, value in _binding().items()
+     if key != 'target_kind'},
+    {**_binding(), 'target_kind': ''},
+    {**_binding(), 'target_kind': 'ontology_term'},
+])
+def test_create_requires_documented_binding_target_kind(tmp_path, binding):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+
+    with pytest.raises(ValueError, match='target_kind'):
+        repo.create_discovery_run({
+            **_run(project_id), 'candidate_bindings': [binding],
+        })
+
+
+@pytest.mark.parametrize('binding', [
+    {**_binding(), 'binding_kind': 'proposed', 'status': 'existing'},
+    {**_binding(kind='existing'), 'status': 'proposed'},
+])
+def test_create_rejects_contradictory_binding_state_tuple(tmp_path, binding):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+
+    with pytest.raises(ValueError, match='binding state'):
+        repo.create_discovery_run({
+            **_run(project_id), 'candidate_bindings': [binding],
+        })
+
+
+@pytest.mark.parametrize(('kind', 'status', 'run_status'), [
+    ('existing', 'reusable', 'ready_to_finalize'),
+    ('reusable', 'existing', 'ready_to_finalize'),
+    ('proposed', 'new', 'draft_created'),
+    ('new', 'proposed', 'draft_created'),
+])
+def test_create_accepts_consistent_binding_state_aliases(
+        tmp_path, kind, status, run_status):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    binding = {
+        **_binding(), 'binding_kind': kind, 'status': status,
+        'required_operation_ids': (
+            [] if run_status == 'ready_to_finalize' else ['operation-1']),
+    }
+
+    run = repo.create_discovery_run({
+        **_run(project_id), 'status': run_status,
+        'unified_draft_id': (
+            None if run_status == 'ready_to_finalize' else 'draft-1'),
+        'candidate_bindings': [binding],
+    })
+
+    assert run['candidate_bindings'] == [binding]
+
+
+def test_diagnostic_binding_requires_matching_outcome_and_no_operations(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    payload = _run(project_id)
+    payload['candidate_snapshot'].append({
+        'id': 'candidate-2', 'kind': 'attribute'})
+
+    with pytest.raises(ValueError, match='initial outcome'):
+        repo.create_discovery_run({
+            **payload,
+            'candidate_bindings': [
+                _binding(), {
+                    'candidate_id': 'candidate-2', 'target_kind': 'attribute',
+                    'status': 'quarantined',
+                    'required_operation_ids': [],
+                    'optional_operation_ids': [],
+                }],
+        })
+
+    diagnostic = {
+        'candidate_id': 'candidate-2', 'status': 'skipped',
+        'code': 'quarantined_candidate',
+    }
+    with pytest.raises(ValueError, match='operation IDs'):
+        repo.create_discovery_run({
+            **payload,
+            'initial_candidate_outcomes': [diagnostic],
+            'candidate_outcomes': [diagnostic],
+            'candidate_bindings': [
+                _binding(), {
+                    'candidate_id': 'candidate-2', 'target_kind': 'attribute',
+                    'status': 'quarantined',
+                    'required_operation_ids': ['operation-2'],
+                    'optional_operation_ids': [],
+                }],
+        })
+
+
+@pytest.mark.parametrize(('outcome_id', 'snapshot'), [
+    ('candidate-1', [{'id': 'candidate-1', 'kind': 'entity'}]),
+    ('candidate-2', [{'id': 'candidate-1', 'kind': 'entity'}]),
+])
+def test_initial_outcome_must_be_snapshot_backed_and_not_accepted(
+        tmp_path, outcome_id, snapshot):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    outcome = {
+        'candidate_id': outcome_id, 'status': 'skipped',
+        'code': 'manual_review_deferred',
+    }
+
+    with pytest.raises(ValueError, match='outcome candidate'):
+        repo.create_discovery_run({
+            **_run(project_id), 'candidate_snapshot': snapshot,
+            'initial_candidate_outcomes': [outcome],
+            'candidate_outcomes': [outcome],
+        })
+
+
 @pytest.mark.parametrize(('status', 'draft_id', 'bindings', 'expected'), [
     ('draft_created', 'draft-1', [], 'draft'),
     ('published', 'draft-1', [], 'draft'),
@@ -200,24 +325,20 @@ def test_same_id_with_different_initial_diagnostic_outcomes_conflicts(tmp_path):
     repo = Repository(tmp_path / 'store.sqlite')
     project_id = repo.create_project('project')['id']
     conflict = {
-        'candidate_id': 'candidate-1', 'status': 'skipped',
+        'candidate_id': 'candidate-2', 'status': 'skipped',
         'code': 'ontology_term_conflict',
     }
-    repo.create_discovery_run({
-        **_run(project_id),
-        'initial_candidate_outcomes': [conflict],
-        'candidate_outcomes': [conflict],
-    })
+    repo.create_discovery_run(_run_with_outcome(project_id, conflict))
 
     with pytest.raises(DiscoveryRunConflict):
         repo.create_discovery_run({
-            **_run(project_id),
+            **_run_with_outcome(project_id, conflict),
             'initial_candidate_outcomes': [{
-                'candidate_id': 'candidate-1', 'status': 'skipped',
+                'candidate_id': 'candidate-2', 'status': 'skipped',
                 'code': 'low_frequency_attribute',
             }],
             'candidate_outcomes': [{
-                'candidate_id': 'candidate-1', 'status': 'skipped',
+                'candidate_id': 'candidate-2', 'status': 'skipped',
                 'code': 'low_frequency_attribute',
             }],
         })
@@ -279,15 +400,13 @@ def test_create_seeds_current_outcomes_from_explicit_initial_outcomes(tmp_path):
     repo = Repository(tmp_path / 'store.sqlite')
     project_id = repo.create_project('project')['id']
     conflict = {
-        'candidate_id': 'candidate-1', 'status': 'skipped',
+        'candidate_id': 'candidate-2', 'status': 'skipped',
         'code': 'ontology_term_conflict',
     }
-    payload = _run(project_id)
+    payload = _run_with_outcome(project_id, conflict)
     payload.pop('candidate_outcomes')
 
-    created = repo.create_discovery_run({
-        **payload, 'initial_candidate_outcomes': [conflict],
-    })
+    created = repo.create_discovery_run(payload)
 
     assert created['candidate_outcomes'] == [conflict]
 
@@ -347,6 +466,7 @@ def test_create_rejects_current_outcomes_without_an_initial_set(tmp_path):
     _binding(kind='existing'),
     {
         'candidate_id': 'candidate-1', 'status': 'existing',
+        'target_kind': 'class',
         'reuse_iri': 'urn:term:candidate-1',
         'required_operation_ids': [], 'optional_operation_ids': [],
     },
@@ -373,6 +493,7 @@ def test_ready_run_accepts_legacy_existing_status_binding(tmp_path):
         'unified_draft_id': None,
         'candidate_bindings': [{
             'candidate_id': 'candidate-1', 'status': 'existing',
+            'target_kind': 'class',
             'reuse_iri': 'urn:term:candidate-1',
             'required_operation_ids': [], 'optional_operation_ids': [],
         }],
@@ -394,6 +515,7 @@ def test_ready_run_requires_valid_reuse_target_iri(tmp_path, target_iri):
             'unified_draft_id': None,
             'candidate_bindings': [{
                 'candidate_id': 'candidate-1', 'binding_kind': 'existing',
+                'target_kind': 'class',
                 'target_iri': target_iri, 'required_operation_ids': [],
                 'optional_operation_ids': [],
             }],
@@ -410,6 +532,7 @@ def test_ready_run_rejects_optional_ontology_operations(tmp_path):
             'unified_draft_id': None,
             'candidate_bindings': [{
                 'candidate_id': 'candidate-1', 'binding_kind': 'existing',
+                'target_kind': 'class',
                 'target_iri': 'urn:term:candidate-1',
                 'required_operation_ids': [],
                 'optional_operation_ids': ['operation-1'],
@@ -425,19 +548,24 @@ def test_diagnosed_run_rejects_ontology_operation_ids(
     repo = Repository(tmp_path / 'store.sqlite')
     project_id = repo.create_project('project')['id']
     diagnostic = {
-        'candidate_id': 'candidate-1', 'status': 'skipped',
+        'candidate_id': 'candidate-2', 'status': 'skipped',
         'code': 'manual_review_deferred',
     }
+    payload = _run_with_outcome(project_id, diagnostic)
 
     with pytest.raises(ValueError, match='operation IDs'):
         repo.create_discovery_run({
-            **_run(project_id), 'status': 'diagnosed_no_change',
+            **payload, 'status': 'diagnosed_no_change',
             'unified_draft_id': None,
-            'initial_candidate_outcomes': [diagnostic],
-            'candidate_outcomes': [diagnostic],
             'candidate_bindings': [{
-                'candidate_id': 'candidate-1', 'status': 'deferred',
-                operation_field: ['operation-1'],
+                'candidate_id': 'candidate-2', 'target_kind': 'attribute',
+                'status': 'deferred',
+                'required_operation_ids': (
+                    ['operation-1']
+                    if operation_field == 'required_operation_ids' else []),
+                'optional_operation_ids': (
+                    ['operation-1']
+                    if operation_field == 'optional_operation_ids' else []),
             }],
         })
 
@@ -454,13 +582,20 @@ def test_ready_run_rejects_operations_on_quarantined_binding(tmp_path):
         repo.create_discovery_run({
             **_run(project_id), 'status': 'ready_to_finalize',
             'unified_draft_id': None,
+            'candidate_snapshot': [
+                {'id': 'candidate-1', 'kind': 'entity'},
+                {'id': 'candidate-2', 'kind': 'attribute'},
+            ],
             'initial_candidate_outcomes': [diagnostic],
             'candidate_outcomes': [diagnostic],
             'candidate_bindings': [{
                 'candidate_id': 'candidate-1', 'binding_kind': 'existing',
+                'target_kind': 'class',
                 'target_iri': 'urn:term:candidate-1',
+                'required_operation_ids': [], 'optional_operation_ids': [],
             }, {
-                'candidate_id': 'candidate-2', 'status': 'quarantined',
+                'candidate_id': 'candidate-2', 'target_kind': 'attribute',
+                'status': 'quarantined', 'required_operation_ids': [],
                 'optional_operation_ids': ['operation-1'],
             }],
         })
@@ -469,11 +604,13 @@ def test_ready_run_rejects_operations_on_quarantined_binding(tmp_path):
 @pytest.mark.parametrize('invalid_binding', [
     {
         'candidate_id': 'candidate-2', 'binding_kind': 'proposed',
+        'target_kind': 'class',
         'target_iri': 'urn:term:candidate-2',
         'required_operation_ids': [], 'optional_operation_ids': [],
     },
     {
         'candidate_id': 'candidate-2', 'binding_kind': 'existing',
+        'target_kind': 'class',
         'target_iri': 'urn:term:candidate-2',
         'required_operation_ids': ['operation-1'],
         'optional_operation_ids': [],
@@ -498,14 +635,18 @@ def test_ready_run_rejects_mixed_non_reusable_or_required_bindings(
         })
 
 
-@pytest.mark.parametrize('diagnostic_status', ['quarantined', 'deferred'])
+@pytest.mark.parametrize(('state_field', 'diagnostic_state'), [
+    ('status', 'quarantined'),
+    ('status', 'deferred'),
+    ('binding_kind', 'diagnostic'),
+])
 def test_ready_run_allows_diagnostic_binding_with_immutable_initial_outcome(
-        tmp_path, diagnostic_status):
+        tmp_path, state_field, diagnostic_state):
     repo = Repository(tmp_path / 'store.sqlite')
     project_id = repo.create_project('project')['id']
     diagnostic = {
         'candidate_id': 'candidate-2', 'status': 'skipped',
-        'code': f'{diagnostic_status}_candidate',
+        'code': f'{diagnostic_state}_candidate',
     }
 
     run = repo.create_discovery_run({
@@ -518,8 +659,8 @@ def test_ready_run_allows_diagnostic_binding_with_immutable_initial_outcome(
         'initial_candidate_outcomes': [diagnostic],
         'candidate_outcomes': [diagnostic],
         'candidate_bindings': [_binding(kind='existing'), {
-            'candidate_id': 'candidate-2', 'binding_kind': 'proposed',
-            'status': diagnostic_status,
+            'candidate_id': 'candidate-2', 'target_kind': 'attribute',
+            state_field: diagnostic_state,
             'required_operation_ids': [],
             'optional_operation_ids': [],
         }],
@@ -538,6 +679,7 @@ def test_diagnosed_run_rejects_actionable_proposed_binding(tmp_path):
             'unified_draft_id': None,
             'candidate_bindings': [{
                 'candidate_id': 'candidate-1', 'binding_kind': 'proposed',
+                'target_kind': 'class',
                 'target_iri': 'urn:term:candidate-1',
                 'required_operation_ids': [],
                 'optional_operation_ids': [],
@@ -605,10 +747,7 @@ def test_transition_preserves_immutable_diagnostic_outcomes(tmp_path):
         'code': 'ontology_term_conflict',
         'diagnostic_code': 'class_property_name_collision',
     }
-    repo.create_discovery_run({
-        **_run(project_id), 'initial_candidate_outcomes': [conflict],
-        'candidate_outcomes': [conflict],
-    })
+    repo.create_discovery_run(_run_with_outcome(project_id, conflict))
 
     transitioned = repo.transition_discovery_run(
         project_id, 'discovery-run:abc', 'draft_created', 'published',
@@ -628,10 +767,8 @@ def test_transition_cannot_overwrite_immutable_diagnostic_outcome(tmp_path):
         'candidate_id': 'conflict', 'status': 'skipped',
         'code': 'ontology_term_conflict',
     }
-    original = repo.create_discovery_run({
-        **_run(project_id), 'initial_candidate_outcomes': [conflict],
-        'candidate_outcomes': [conflict],
-    })
+    original = repo.create_discovery_run(
+        _run_with_outcome(project_id, conflict))
 
     with pytest.raises(DiscoveryRunConflict):
         repo.transition_discovery_run(
@@ -650,10 +787,8 @@ def test_transition_cannot_overwrite_any_initial_outcome_reason(tmp_path):
         'candidate_id': 'deferred', 'status': 'skipped',
         'code': 'manual_review_deferred',
     }
-    original = repo.create_discovery_run({
-        **_run(project_id), 'initial_candidate_outcomes': [deferred],
-        'candidate_outcomes': [deferred],
-    })
+    original = repo.create_discovery_run(
+        _run_with_outcome(project_id, deferred))
 
     with pytest.raises(DiscoveryRunConflict, match='immutable discovery outcome'):
         repo.transition_discovery_run(
@@ -672,10 +807,8 @@ def test_transition_uses_initial_outcome_when_current_outcome_is_malformed(tmp_p
         'candidate_id': 'conflict', 'status': 'skipped',
         'code': 'ontology_term_conflict',
     }
-    original = repo.create_discovery_run({
-        **_run(project_id), 'initial_candidate_outcomes': [conflict],
-        'candidate_outcomes': [conflict],
-    })
+    original = repo.create_discovery_run(
+        _run_with_outcome(project_id, conflict))
     malformed = {
         **original,
         'candidate_outcomes': [{
@@ -704,10 +837,8 @@ def test_transition_without_outcome_payload_rejects_missing_initial_outcome(tmp_
         'candidate_id': 'deferred', 'status': 'skipped',
         'code': 'manual_review_deferred',
     }
-    original = repo.create_discovery_run({
-        **_run(project_id), 'initial_candidate_outcomes': [deferred],
-        'candidate_outcomes': [deferred],
-    })
+    original = repo.create_discovery_run(
+        _run_with_outcome(project_id, deferred))
     malformed = {**original, 'candidate_outcomes': []}
     repo._db.execute(
         'UPDATE artifacts SET payload=? WHERE id=? AND kind=?',
