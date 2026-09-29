@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import unquote
 
-from rdflib import Graph, Literal, RDF, RDFS
+from rdflib import Graph, Literal, RDF, RDFS, URIRef
 from rdflib.namespace import OWL
 from rdflib.term import Identifier
 
@@ -16,6 +16,36 @@ GOVERNED_RDF_KINDS = {
     OWL.ObjectProperty: "relation",
     OWL.DatatypeProperty: "attribute",
 }
+
+
+class RevisionGraph(Graph):
+    """An RDFLib graph with a monotonic revision for triple mutations."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.revision = 0
+
+    def add(self, triple):
+        changed = triple not in self
+        result = super().add(triple)
+        if changed:
+            self.revision += 1
+        return result
+
+    def addN(self, quads):
+        quads = tuple(quads)
+        before = len(self)
+        result = super().addN(quads)
+        if len(self) != before:
+            self.revision += 1
+        return result
+
+    def remove(self, triple):
+        before = len(self)
+        result = super().remove(triple)
+        if len(self) != before:
+            self.revision += 1
+        return result
 
 
 @dataclass(frozen=True)
@@ -52,6 +82,8 @@ def index_governed_vocabulary(graph: Graph) -> tuple[GovernedVocabularyRecord, .
     """Index governed kinds, labels, and retirement state in one graph traversal."""
     rows = {}
     for subject, predicate, obj in graph:
+        if not isinstance(subject, URIRef):
+            continue
         if predicate == RDF.type and obj in GOVERNED_RDF_KINDS:
             row = rows.setdefault(
                 subject, {"kinds": set(), "labels": set(), "retired": False})

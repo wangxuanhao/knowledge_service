@@ -15,7 +15,8 @@ from rdflib.collection import Collection
 from rdflib.compare import isomorphic, to_canonical_graph
 from rdflib.namespace import Namespace, OWL, SH, XSD
 
-from .ontology import Ontology, absolute_iri, term_kind
+from .ontology import Ontology, term_kind
+from .ontology_iri import valid_application_iri
 
 
 DCTERMS = Namespace('http://purl.org/dc/terms/')
@@ -164,7 +165,7 @@ def build_operation(action: str, target_iri: str, *, before=None, after=None,
     if not isinstance(action, str) or not action:
         raise ValueError('本体操作 action 不能为空')
     action = _ACTION_ALIASES.get(action, action)
-    if not isinstance(target_iri, str) or not absolute_iri(target_iri):
+    if not isinstance(target_iri, str) or not valid_application_iri(target_iri):
         raise ValueError('本体操作 target_iri 必须是绝对 IRI')
     impact = dict(impact or {})
     warnings = list(warnings or [])
@@ -278,7 +279,9 @@ def _literal(spec: dict) -> Literal:
     datatype = spec.get('datatype')
     if language and datatype:
         raise ValueError('RDF 文本不能同时指定语言和 datatype')
-    if datatype and (not isinstance(datatype, str) or not absolute_iri(datatype)):
+    if (datatype
+            and (not isinstance(datatype, str)
+                 or not valid_application_iri(datatype))):
         raise ValueError('annotation datatype 必须是绝对 IRI')
     return Literal(
         spec.get('value', ''), lang=language,
@@ -286,7 +289,7 @@ def _literal(spec: dict) -> Literal:
 
 
 def _require_absolute_iri(value, label: str) -> str:
-    if not isinstance(value, str) or not absolute_iri(value):
+    if not isinstance(value, str) or not valid_application_iri(value):
         raise ValueError(f'{label} 必须是绝对 IRI')
     return value
 
@@ -298,15 +301,16 @@ def _apply_template(graph: Graph, node: URIRef, template: dict,
         prepared_annotations = []
         for annotation in template.get('annotations', []):
             predicate = annotation.get('predicate')
-            if not isinstance(predicate, str) or not absolute_iri(predicate):
+            if (not isinstance(predicate, str)
+                    or not valid_application_iri(predicate)):
                 raise ValueError('annotation predicate 必须是绝对 IRI')
             if not _is_annotation_predicate(URIRef(predicate)):
                 raise ValueError(
                     'restore annotation template 不能包含结构或 SHACL predicate')
             if annotation.get('type') == 'iri':
                 annotation_value = annotation.get('value')
-                if not isinstance(annotation_value, str) or not absolute_iri(
-                        annotation_value):
+                if (not isinstance(annotation_value, str)
+                        or not valid_application_iri(annotation_value)):
                     raise ValueError('annotation IRI value 必须是绝对 IRI')
                 value = URIRef(annotation_value)
             else:
@@ -483,7 +487,8 @@ def apply_operations(base_turtle: str, operations: Iterable[dict]) -> str:
             raise ValueError('本体操作 fingerprint 指纹与内容不一致')
         action = _ACTION_ALIASES.get(operation.get('action'), operation.get('action'))
         target_iri = operation.get('target_iri', '')
-        if not isinstance(target_iri, str) or not absolute_iri(target_iri):
+        if (not isinstance(target_iri, str)
+                or not valid_application_iri(target_iri)):
             raise ValueError('本体操作 target_iri 必须是绝对 IRI')
         target = URIRef(target_iri)
         before = operation.get('before') or {}
@@ -598,7 +603,7 @@ def apply_operations(base_turtle: str, operations: Iterable[dict]) -> str:
             replacement = after.get('replacement')
             if replacement:
                 iri = replacement.get('iri') if isinstance(replacement, dict) else replacement
-                if not iri or not absolute_iri(iri):
+                if not iri or not valid_application_iri(iri):
                     raise ValueError('isReplacedBy replacement 必须包含绝对 IRI')
                 candidate = URIRef(iri)
                 replacement_kind = _ensure_kind(graph, candidate)

@@ -9,7 +9,11 @@ from rdflib.namespace import OWL, SH, XSD
 from knowledge_service.integrations.embeddings import HashingEncoder
 import knowledge_service.services.ontology_operations as ontology_operations
 from knowledge_service.repository import Repository
-from knowledge_service.services.ontology import Ontology, set_term_constraints
+from knowledge_service.services.discovery_vocabulary import (
+    DiscoveryVocabularyNormalizer,
+    InvalidDiscoveryCandidate,
+)
+from knowledge_service.services.ontology import Ontology, absolute_iri, set_term_constraints
 from knowledge_service.services.ontology_operations import (
     DCTERMS,
     RESTORE_TEMPLATE_FIELDS,
@@ -49,6 +53,32 @@ ex:rel a owl:ObjectProperty; rdfs:domain ex:A; rdfs:range ex:Root .
 
 def _apply(*operations, base=BASE):
     return Ontology(apply_operations(base, list(operations)))
+
+
+@pytest.mark.parametrize("iri", [
+    "ftp://example.test/Term",
+    "did:example:term",
+    "http://example.test:/Term",
+    "http://example.test/%ZZ",
+])
+def test_application_iri_policy_is_shared_across_entrypoints(iri):
+    assert absolute_iri(iri) is False
+    with pytest.raises(ValueError, match='target_iri'):
+        build_operation('create_term', iri, after={'kind': 'class'})
+    with pytest.raises(InvalidDiscoveryCandidate, match='valid absolute IRI'):
+        DiscoveryVocabularyNormalizer('').normalize([{
+            'id': 'candidate', 'kind': 'class', 'name': 'Term', 'iri': iri,
+        }])
+
+
+@pytest.mark.parametrize("iri", [
+    "https://example.test/Term",
+    "urn:knowledge:ontology:project:Term",
+])
+def test_application_iri_policy_accepts_operational_schemes(iri):
+    assert absolute_iri(iri) is True
+    assert build_operation(
+        'create_term', iri, after={'kind': 'class'})['target_iri'] == iri
 
 
 def test_rdfs_class_supports_annotation_add_and_reviewed_remove():

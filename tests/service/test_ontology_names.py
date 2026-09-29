@@ -2,6 +2,7 @@ import pytest
 from rdflib import Literal, RDF, RDFS, URIRef
 from rdflib.namespace import OWL
 
+import knowledge_service.services.ontology as ontology_module
 from knowledge_service.services.discovery_vocabulary import DiscoveryVocabularyNormalizer
 from knowledge_service.services.ontology import Ontology,local_name
 
@@ -76,3 +77,58 @@ def test_live_graph_mutations_refresh_kinds_labels_and_retirement():
     assert ontology.is_active_term(existing) is True
     with pytest.raises(ValueError):
         ontology.resolve('Added')
+
+
+def test_vocabulary_index_rebuilds_once_per_graph_revision(monkeypatch):
+    calls = 0
+    original = ontology_module.index_governed_vocabulary
+
+    def counted(graph):
+        nonlocal calls
+        calls += 1
+        return original(graph)
+
+    monkeypatch.setattr(ontology_module, 'index_governed_vocabulary', counted)
+    ontology = Ontology('''
+        @prefix ex: <http://example.test/> .
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        ex:Existing a owl:Class .
+    ''')
+
+    assert calls == 1
+    assert ontology.resolve('Existing')
+    assert ontology.resolve('Existing')
+    assert calls == 1
+
+    ontology.graph.add((
+        URIRef('http://example.test/Added'), RDF.type, RDFS.Class))
+    assert ontology.resolve('Added')
+    assert ontology.resolve('Added')
+    assert calls == 2
+
+    ontology.graph.set((
+        URIRef('http://example.test/Added'), RDFS.label, Literal('Renamed')))
+    assert ontology.summary()['classes'][0]['label'] == 'Renamed'
+    assert ontology.summary()['classes'][0]['label'] == 'Renamed'
+    assert calls == 3
+
+    ontology.graph.remove((
+        URIRef('http://example.test/Added'), RDF.type, RDFS.Class))
+    with pytest.raises(ValueError):
+        ontology.resolve('Added')
+    assert calls == 4
+
+
+def test_blank_node_classes_remain_anonymous_graph_semantics():
+    ontology = Ontology('''
+        @prefix ex: <http://example.test/> .
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        ex:Named a owl:Class ; rdfs:subClassOf [
+            a owl:Class ; rdfs:label "Anonymous"
+        ] .
+    ''')
+
+    assert [item['name'] for item in ontology.summary()['classes']] == ['Named']
+    with pytest.raises(ValueError):
+        ontology.resolve('Anonymous')

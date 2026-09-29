@@ -11,7 +11,9 @@ from rdflib.collection import Collection
 from rdflib.namespace import OWL, SH, XSD
 
 from ..utils.attributes import primitive_datatype
+from .ontology_iri import valid_application_iri
 from .ontology_vocabulary import (
+    RevisionGraph,
     deprecated_marker_is_true,
     index_governed_vocabulary,
     local_name,
@@ -91,7 +93,7 @@ def _shacl_violations(results_graph):
 
 class Ontology:
     def __init__(self, turtle: str):
-        self.graph = Graph()
+        self.graph = RevisionGraph()
         try:
             self.graph.parse(data=turtle, format="turtle")
         except Exception as exc:
@@ -100,9 +102,12 @@ class Ontology:
         self.classes = set()
         self.relations = set()
         self.attributes = set()
+        self._indexed_graph_revision = None
         self._refresh_vocabulary()
 
     def _refresh_vocabulary(self):
+        if self._indexed_graph_revision == self.graph.revision:
+            return
         records = index_governed_vocabulary(self.graph)
         self._governed_records = {record.node: record for record in records}
         for target, kind in (
@@ -111,6 +116,7 @@ class Ontology:
                 (self.attributes, "attribute")):
             target.clear()
             target.update(record.node for record in records if kind in record.kinds)
+        self._indexed_graph_revision = self.graph.revision
 
     def _resolve_current(self, name: str, allowed):
         matches = [uri for uri in allowed if str(uri) == name or local_name(uri) == name]
@@ -382,8 +388,7 @@ class Ontology:
 
 def absolute_iri(value):
     """判断一个值是否为可用作 IRI 的绝对地址（URN/HTTP(S)，且无非法空白/保留字符）。"""
-    return value.startswith(('urn:', 'http://', 'https://')) and not any(
-        c.isspace() or c in '<>"{}|^`\\' for c in value)
+    return valid_application_iri(value)
 
 
 def term_kind(ontology, node):

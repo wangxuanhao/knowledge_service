@@ -561,6 +561,47 @@ def test_candidate_boundary_rejects_malformed_rows(candidate, message):
         DiscoveryVocabularyNormalizer("").normalize([candidate])
 
 
+@pytest.mark.parametrize("candidates", [
+    None,
+    42,
+    "candidate",
+    b"candidate",
+    {"id": "candidate", "kind": "class", "name": "Term"},
+    [42],
+])
+def test_candidate_boundary_translates_invalid_containers(candidates):
+    with pytest.raises(InvalidDiscoveryCandidate):
+        DiscoveryVocabularyNormalizer("").normalize(candidates)
+
+
+@pytest.mark.parametrize("candidate", [
+    {"id": "\ud800", "kind": "class", "name": "Term"},
+    {"id": "candidate", "kind": "class", "name": "\ud800"},
+    {"id": "candidate", "kind": "class", "name": "Term",
+     "evidence_refs": ["\ud800"]},
+    {"id": "candidate", "kind": "class", "name": "Term",
+     "metadata": {"nested": ["\ud800"]}},
+    {"id": "candidate", "kind": "class", "name": "Term",
+     "metadata": {"\ud800": "value"}},
+])
+def test_candidate_boundary_rejects_non_utf8_strings_recursively(candidate):
+    with pytest.raises(InvalidDiscoveryCandidate, match="UTF-8"):
+        DiscoveryVocabularyNormalizer("").normalize([candidate])
+
+
+def test_discovery_fingerprint_rejects_non_utf8_candidate_payloads():
+    with pytest.raises(InvalidDiscoveryCandidate, match="UTF-8"):
+        discovery_source_fingerprint(
+            "project", "ontology", [{
+                "id": "candidate", "kind": "class", "name": "Term",
+                "metadata": {"nested": "\ud800"},
+            }],
+            runtime_version="runtime",
+            attribute_threshold=2,
+            generation_options={},
+        )
+
+
 def test_candidate_boundary_accepts_valid_repository_urns_and_http_iris():
     result = DiscoveryVocabularyNormalizer("").normalize([
         {"id": "http", "kind": "class", "name": "HttpTerm",
@@ -842,6 +883,28 @@ def test_baseline_index_traverses_graph_once_and_retains_term_metadata():
     assert term.kind == "class"
     assert term.names == ("Person", "Human")
     assert term.active is False
+
+
+def test_blank_node_governed_terms_never_become_reusable_targets():
+    baseline = """
+        @prefix ex: <http://example.test/> .
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        ex:Named a owl:Class ; rdfs:subClassOf [
+            a owl:Class ; rdfs:label "Anonymous"
+        ] .
+    """
+    candidates = [{
+        "id": "candidate", "kind": "class", "name": "Anonymous",
+    }]
+
+    first = DiscoveryVocabularyNormalizer(baseline).normalize(candidates)
+    second = DiscoveryVocabularyNormalizer(baseline).normalize(candidates)
+
+    assert first == second
+    assert first.conflicts == ()
+    assert first.candidate_bindings[0]["iri"] is None
+    assert "iri" not in first.accepted_candidates[0]
 
 
 def test_audit_reports_cross_kind_names_and_multi_kind_iris_without_candidates():

@@ -4,15 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
-from ipaddress import IPv6Address
-from urllib.parse import urlsplit
 
 from rdflib import Graph
 
+from .ontology_iri import valid_application_iri
 from .ontology_vocabulary import GovernedVocabularyRecord, index_governed_vocabulary
 _KIND_ALIASES = {
     "class": "class", "classes": "class",
@@ -78,19 +76,27 @@ def discovery_source_fingerprint(
         generator_contract="semantica-0.6.7", runtime_version,
         attribute_threshold, generation_options, request_name=None) -> str:
     """Fingerprint every input that can affect discovery generation."""
-    canonical_candidates = [_canonical_json_value(candidate) for candidate in candidates]
-    canonical_candidates.sort(key=_canonical_json)
-    digest = canonical_payload_fingerprint({
-        "project_id": project_id,
-        "base_ontology_id": base_ontology_id,
-        "candidates": canonical_candidates,
-        "normalizer_version": normalizer_version,
-        "generator_contract": generator_contract,
-        "runtime_version": runtime_version,
-        "attribute_threshold": attribute_threshold,
-        "request_name": request_name,
-        "generation_options": _canonical_json_value(generation_options),
-    })
+    try:
+        _validate_utf8_strings(candidates)
+        canonical_candidates = [
+            _canonical_json_value(candidate) for candidate in candidates]
+        canonical_candidates.sort(key=_canonical_json)
+        digest = canonical_payload_fingerprint({
+            "project_id": project_id,
+            "base_ontology_id": base_ontology_id,
+            "candidates": canonical_candidates,
+            "normalizer_version": normalizer_version,
+            "generator_contract": generator_contract,
+            "runtime_version": runtime_version,
+            "attribute_threshold": attribute_threshold,
+            "request_name": request_name,
+            "generation_options": _canonical_json_value(generation_options),
+        })
+    except InvalidDiscoveryCandidate:
+        raise
+    except Exception as exc:
+        raise InvalidDiscoveryCandidate(
+            "candidate payload must be JSON-safe") from exc
     return f"sha256:{digest}"
 
 
@@ -111,183 +117,98 @@ class InvalidDiscoveryCandidate(ValueError):
     """Raised when a discovery candidate violates the normalization boundary."""
 
 
-_ABSOLUTE_IRI = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:.+$", re.DOTALL)
-_INVALID_RAW_IRI_CHARACTERS = frozenset('<>"{}|^`')
-_UNRESERVED = frozenset(
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
-_USERINFO_RAW = _UNRESERVED | frozenset("!$&'()*+,;=:")
-_RFC3987_UCSCHAR_RANGES = (
-    (0x00A0, 0xD7FF),
-    (0xF900, 0xFDCF),
-    (0xFDF0, 0xFFEF),
-    *((plane << 16, (plane << 16) + 0xFFFD) for plane in range(1, 14)),
-    (0xE1000, 0xEFFFD),
-)
-
-
-def _valid_pct_component(value: str, allowed_raw: frozenset[str]) -> bool:
-    """Validate an ASCII component made from allowed raw or percent-encoded octets."""
-    if not value:
-        return False
-    index = 0
-    while index < len(value):
-        if value[index] in allowed_raw:
-            index += 1
-        elif (value[index] == "%" and index + 2 < len(value)
-              and all(character in "0123456789abcdefABCDEF"
-                      for character in value[index + 1:index + 3])):
-            index += 3
-        else:
-            return False
-    return True
-
-
-def _valid_ascii_iri_characters(value: str) -> bool:
-    """Reject ASCII whitespace and controls independently from Unicode policy."""
-    return all(codepoint >= 0x21 and codepoint != 0x7F
-               for character in value
-               if (codepoint := ord(character)) < 0x80)
-
-
-def _valid_raw_ucschar(value: str) -> bool:
-    """Allow raw non-ASCII only from RFC3987 ``ucschar`` ranges."""
-    try:
-        value.encode("utf-8")
-    except UnicodeEncodeError:
-        return False
-    for character in value:
-        codepoint = ord(character)
-        if codepoint >= 0x80 and not any(
-                start <= codepoint <= end
-                for start, end in _RFC3987_UCSCHAR_RANGES):
-            return False
-    return True
-
-
-def _sanitized_ip_literal(literal: str) -> str | None:
-    """Validate an IPv6/IPvFuture literal and return a parser-safe equivalent."""
-    if re.fullmatch(r"[vV][0-9A-Fa-f]+\.[A-Za-z0-9._~!$&'()*+,;=:-]+", literal):
-        return f"v{literal[1:]}"
-    address = literal
-    if "%" in literal:
-        address, separator, zone = literal.partition("%25")
-        if (not separator or not zone or "%" in address or "%25" in zone
-                or not _valid_pct_component(zone, _UNRESERVED)):
-            return None
-    try:
-        IPv6Address(address)
-    except ValueError:
-        return None
-    return address
-
-
-def _sanitize_http_authority(value: str) -> str | None:
-    """Enforce the application-safe HTTP authority and ZoneID policy."""
-    scheme_end = value.find(":")
-    if scheme_end < 0 or value[scheme_end + 1:scheme_end + 3] != "//":
-        return None
-    authority_start = scheme_end + 3
-    suffix_start = min(
-        (position for marker in "/?#"
-         if (position := value.find(marker, authority_start)) >= 0),
-        default=len(value),
-    )
-    authority = value[authority_start:suffix_start]
-    suffix = value[suffix_start:]
-    if (not authority or authority.count("@") > 1
-            or "[" in suffix or "]" in suffix):
-        return None
-    userinfo, separator, host_port = authority.rpartition("@")
-    if not separator:
-        host_port = authority
-    elif not _valid_pct_component(userinfo, _USERINFO_RAW):
-        return None
-    if host_port.endswith(":"):
-        return None
-
-    if "[" in authority or "]" in authority:
-        match = re.fullmatch(r"\[([^\[\]]+)\](?::([0-9]+))?", host_port)
-        if not match or "[" in userinfo or "]" in userinfo:
-            return None
-        sanitized_literal = _sanitized_ip_literal(match.group(1))
-        if sanitized_literal is None:
-            return None
-        port = f":{match.group(2)}" if match.group(2) else ""
-        safe_host_port = f"[{sanitized_literal}]{port}"
-    else:
-        safe_host_port = host_port
-    safe_authority = f"{userinfo}@{safe_host_port}" if separator else safe_host_port
-    return f"{value[:authority_start]}{safe_authority}{suffix}"
-
-
 def _valid_iri(value) -> bool:
-    if not isinstance(value, str):
-        return False
-    if (not _ABSOLUTE_IRI.fullmatch(value)
-            or "\\" in value
-            or any(character in _INVALID_RAW_IRI_CHARACTERS for character in value)
-            or value.count("#") > 1
-            or not _valid_ascii_iri_characters(value)
-            or not _valid_raw_ucschar(value)
-            or re.search(r"%(?![0-9A-Fa-f]{2})", value)):
-        return False
-    scheme = value.split(":", 1)[0].lower()
-    parsed_value = value
-    if scheme in {"http", "https"}:
-        parsed_value = _sanitize_http_authority(value)
-        if parsed_value is None:
-            return False
-    elif "[" in value or "]" in value:
-        return False
+    """Compatibility wrapper for the shared application IRI policy."""
+    return valid_application_iri(value)
+
+
+def _validate_utf8_strings(value, *, active=None) -> None:
+    """Reject lone surrogates at any supported candidate payload depth."""
+    if isinstance(value, str):
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise InvalidDiscoveryCandidate(
+                "candidate payload strings must be valid UTF-8") from exc
+        return
+    if not isinstance(value, (Mapping, list, tuple, set, frozenset)):
+        return
+    active = set() if active is None else active
+    identity = id(value)
+    if identity in active:
+        raise InvalidDiscoveryCandidate("candidate payload must be JSON-safe")
+    active.add(identity)
     try:
-        parsed = urlsplit(parsed_value)
-        if parsed.scheme in {"http", "https"}:
-            parsed.port
-            return bool(parsed.hostname)
-    except ValueError:
-        return False
-    return bool(parsed.scheme and parsed.path)
+        items = value.items() if isinstance(value, Mapping) else value
+        if isinstance(value, Mapping):
+            for key, item in items:
+                _validate_utf8_strings(key, active=active)
+                _validate_utf8_strings(item, active=active)
+        else:
+            for item in items:
+                _validate_utf8_strings(item, active=active)
+    finally:
+        active.remove(identity)
 
 
 def _validate_and_copy_candidates(candidates):
-    rows = list(candidates)
+    if (candidates is None
+            or isinstance(candidates, (str, bytes, bytearray, Mapping))):
+        raise InvalidDiscoveryCandidate("candidates must be a collection")
+    try:
+        rows = list(candidates)
+    except Exception as exc:
+        raise InvalidDiscoveryCandidate("candidates must be a collection") from exc
     seen_ids = set()
     for position, candidate in enumerate(rows):
-        if not isinstance(candidate, Mapping):
-            raise InvalidDiscoveryCandidate(f"candidate {position} must be an object")
-        candidate_id = candidate.get("id")
-        if not isinstance(candidate_id, str) or not candidate_id.strip():
+        try:
+            if not isinstance(candidate, Mapping):
+                raise InvalidDiscoveryCandidate(
+                    f"candidate {position} must be an object")
+            for key, item in candidate.items():
+                _validate_utf8_strings(key)
+                if key != "iri":
+                    _validate_utf8_strings(item)
+            candidate_id = candidate.get("id")
+            if not isinstance(candidate_id, str) or not candidate_id.strip():
+                raise InvalidDiscoveryCandidate(
+                    f"candidate {position} requires a non-empty string id")
+            if candidate_id in seen_ids:
+                raise InvalidDiscoveryCandidate(f"duplicate candidate id: {candidate_id}")
+            seen_ids.add(candidate_id)
+            kind = candidate.get("kind")
+            if not isinstance(kind, str) or kind not in _CANDIDATE_KIND_ALIASES:
+                raise InvalidDiscoveryCandidate(
+                    f"candidate {candidate_id} requires a governed kind")
+            name = candidate.get("name")
+            if not isinstance(name, str):
+                raise InvalidDiscoveryCandidate(
+                    f"candidate {candidate_id} requires a non-empty string name")
+            if not canonical_name(name):
+                raise InvalidDiscoveryCandidate(
+                    f"candidate {candidate_id} requires a non-empty name")
+            if (candidate.get("iri") is not None
+                    and not _valid_iri(candidate.get("iri"))):
+                raise InvalidDiscoveryCandidate(
+                    f"candidate {candidate_id} requires a valid absolute IRI")
+            evidence = candidate.get("evidence_refs")
+            if (evidence is not None
+                    and not isinstance(evidence, (list, tuple, set, frozenset))):
+                raise InvalidDiscoveryCandidate(
+                    f"candidate {candidate_id} requires a supported evidence_refs container")
+            if evidence is not None and any(
+                    not isinstance(reference, str) or not reference.strip()
+                    for reference in evidence):
+                raise InvalidDiscoveryCandidate(
+                    f"candidate {candidate_id} evidence_refs require non-empty string entries")
+        except InvalidDiscoveryCandidate:
+            raise
+        except Exception as exc:
             raise InvalidDiscoveryCandidate(
-                f"candidate {position} requires a non-empty string id")
-        if candidate_id in seen_ids:
-            raise InvalidDiscoveryCandidate(f"duplicate candidate id: {candidate_id}")
-        seen_ids.add(candidate_id)
-        kind = candidate.get("kind")
-        if not isinstance(kind, str) or kind not in _CANDIDATE_KIND_ALIASES:
-            raise InvalidDiscoveryCandidate(
-                f"candidate {candidate_id} requires a governed kind")
-        name = candidate.get("name")
-        if not isinstance(name, str):
-            raise InvalidDiscoveryCandidate(
-                f"candidate {candidate_id} requires a non-empty string name")
-        if not canonical_name(name):
-            raise InvalidDiscoveryCandidate(
-                f"candidate {candidate_id} requires a non-empty name")
-        if candidate.get("iri") is not None and not _valid_iri(candidate.get("iri")):
-            raise InvalidDiscoveryCandidate(
-                f"candidate {candidate_id} requires a valid absolute IRI")
-        evidence = candidate.get("evidence_refs")
-        if evidence is not None and not isinstance(evidence, (list, tuple, set, frozenset)):
-            raise InvalidDiscoveryCandidate(
-                f"candidate {candidate_id} requires a supported evidence_refs container")
-        if evidence is not None and any(
-                not isinstance(reference, str) or not reference.strip()
-                for reference in evidence):
-            raise InvalidDiscoveryCandidate(
-                f"candidate {candidate_id} evidence_refs require non-empty string entries")
+                f"candidate {position} must be a valid object") from exc
     try:
         copied = json.loads(_canonical_json(rows))
-    except (TypeError, ValueError) as exc:
+    except Exception as exc:
         raise InvalidDiscoveryCandidate("candidate payload must be JSON-safe") from exc
     for candidate in copied:
         candidate["kind"] = _CANDIDATE_KIND_ALIASES[candidate["kind"]]
