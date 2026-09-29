@@ -678,6 +678,30 @@ def test_candidate_boundary_accepts_safe_ipv6_zone_ids(iri):
 
 
 @pytest.mark.parametrize("iri", [
+    "http://[v1.foo]/x",
+    "https://[V1.foo]:8443/x",
+])
+def test_candidate_boundary_accepts_case_insensitive_ipvfuture_prefix(iri):
+    result = DiscoveryVocabularyNormalizer("").normalize([
+        {"id": "candidate", "kind": "class", "name": "Term", "iri": iri},
+    ])
+
+    assert result.accepted_candidates[0]["iri"] == iri
+
+
+@pytest.mark.parametrize("iri", [
+    "http://example.test:/x",
+    "https://user@example.test:/x",
+    "http://[::1]:/x",
+])
+def test_candidate_boundary_rejects_explicit_empty_http_ports(iri):
+    with pytest.raises(InvalidDiscoveryCandidate, match="valid absolute IRI"):
+        DiscoveryVocabularyNormalizer("").normalize([
+            {"id": "candidate", "kind": "class", "name": "Term", "iri": iri},
+        ])
+
+
+@pytest.mark.parametrize("iri", [
     "http://user@other@example.test/x",
     "http://user@other@[::1]/x",
     "http://@example.test/x",

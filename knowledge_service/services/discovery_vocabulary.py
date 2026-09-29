@@ -153,8 +153,8 @@ def _safe_unicode_scalars(value: str) -> bool:
 
 def _sanitized_ip_literal(literal: str) -> str | None:
     """Validate an IPv6/IPvFuture literal and return a parser-safe equivalent."""
-    if re.fullmatch(r"v[0-9A-Fa-f]+\.[A-Za-z0-9._~!$&'()*+,;=:-]+", literal):
-        return literal
+    if re.fullmatch(r"[vV][0-9A-Fa-f]+\.[A-Za-z0-9._~!$&'()*+,;=:-]+", literal):
+        return f"v{literal[1:]}"
     address = literal
     if "%" in literal:
         address, separator, zone = literal.partition("%25")
@@ -188,6 +188,8 @@ def _sanitize_http_authority(value: str) -> str | None:
     if not separator:
         host_port = authority
     elif not _valid_pct_component(userinfo, _USERINFO_RAW):
+        return None
+    if host_port.endswith(":"):
         return None
 
     if "[" in authority or "]" in authority:
