@@ -51,6 +51,7 @@ def _seed(repository, project_id):
     repository.put_batch(project_id, [
         {'id': 'a', 'kind': 'entity', 'type': 'Thing', 'text': '退款商户', 'metadata': {}},
         {'id': 'b', 'kind': 'entity', 'type': 'Thing', 'text': '退款平台', 'metadata': {}},
+        {'id': 'x', 'kind': 'entity', 'type': 'Thing', 'text': '无关实体', 'metadata': {}},
         {'id': 'r', 'kind': 'relation', 'type': 'mentions', 'text': '退款关系',
          'subject_id': 'a', 'object_id': 'b', 'metadata': {}},
         {'id': 'c', 'kind': 'chunk', 'text': '退款需要原始凭证', 'source_id': 'd', 'metadata': {}},
@@ -137,6 +138,27 @@ def _graph_clear_snapshot(page, snapshot_name):
     return page.evaluate("snapshotName => window[snapshotName]", snapshot_name)
 
 
+def _trigger_graph_click(page, data_type, row_id):
+    page.evaluate("""([dataType, rowId]) => {
+      const chart = window.echarts.getInstanceByDom(document.getElementById('graph-canvas'));
+      chart.trigger('click', {dataType, data: {id: rowId}});
+    }""", [data_type, row_id])
+
+
+def _graph_node_ids(page):
+    return page.evaluate("""() => {
+      const chart = window.echarts.getInstanceByDom(document.getElementById('graph-canvas'));
+      const series = chart.getOption().series.find(item => item.type === 'graph');
+      return (series?.data || []).map(item => String(item.id)).sort();
+    }""")
+
+
+def _stable_graph_summary(page):
+    summary = page.locator('#graph-summary').inner_text()
+    assert ' · 服务' in summary
+    return summary.split(' · 服务', 1)[0]
+
+
 # ── Task 1: the combined workspace keeps search, graph and details decoupled ──
 
 def test_search_updates_only_the_result_rail_and_ignores_graph_keys(workbench):
@@ -181,6 +203,89 @@ def test_search_updates_only_the_result_rail_and_ignores_graph_keys(workbench):
     assert page.locator('#graph-detail').evaluate('(el) => el.outerHTML') == detail_before
     assert page.locator('#graph-summary').inner_text() == summary_before
     assert not any(path.endswith('/subgraph') for path in workbench.paths)
+
+
+def test_graph_node_click_updates_only_details(workbench):
+    page = workbench.page
+    summary_before = page.locator('#graph-summary').inner_text()
+    workbench.paths.clear()
+
+    _trigger_graph_click(page, 'node', 'a')
+    page.wait_for_function(
+        "document.querySelector('#graph-detail').textContent.includes('退款商户')")
+    page.wait_for_timeout(120)
+
+    assert not any(path.endswith('/subgraph') for path in workbench.paths)
+    assert page.locator('#graph-summary').inner_text() == summary_before
+    assert page.locator('#graph-node').input_value() == 'a'
+    assert page.locator('#graph-entity-choice').input_value() == 'a'
+
+
+def test_graph_edge_click_updates_only_details(workbench):
+    page = workbench.page
+    summary_before = page.locator('#graph-summary').inner_text()
+    workbench.paths.clear()
+
+    _trigger_graph_click(page, 'edge', 'r')
+    page.wait_for_function(
+        "document.querySelector('#graph-detail').textContent.includes('退款关系')")
+    page.wait_for_timeout(120)
+
+    assert not any(path.endswith('/subgraph') for path in workbench.paths)
+    assert page.locator('#graph-summary').inner_text() == summary_before
+
+
+def test_entity_selection_requires_explicit_expand_and_full_graph_ignores_selection(workbench):
+    page = workbench.page
+    page.wait_for_function("""() => {
+      const chart = window.echarts.getInstanceByDom(document.getElementById('graph-canvas'));
+      const series = chart.getOption().series.find(item => item.type === 'graph');
+      return series?.data.some(item => item.id === 'x');
+    }""")
+    full_node_ids = _graph_node_ids(page)
+    assert 'x' in full_node_ids
+    full_stable_summary = _stable_graph_summary(page)
+    full_summary = page.locator('#graph-summary').inner_text()
+    bodies = []
+    page.on('request', lambda request: bodies.append(request.post_data_json)
+            if request.url.endswith('/subgraph') else None)
+    workbench.paths.clear()
+
+    page.select_option('#graph-entity-choice', 'a')
+    page.wait_for_function(
+        "document.querySelector('#graph-detail').textContent.includes('退款商户')")
+    page.wait_for_timeout(120)
+    assert not any(path.endswith('/subgraph') for path in workbench.paths)
+    assert page.locator('#graph-summary').inner_text() == full_summary
+
+    workbench.paths.clear()
+    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+        page.click('#graph-expand')
+    page.wait_for_function("""() => {
+      const chart = window.echarts.getInstanceByDom(document.getElementById('graph-canvas'));
+      const series = chart.getOption().series.find(item => item.type === 'graph');
+      return series && !series.data.some(item => item.id === 'x');
+    }""")
+    assert bodies[-1]['node_id'] == 'a'
+    assert bodies[-1]['attribute_mode'] == 'expanded'
+    expanded_node_ids = _graph_node_ids(page)
+    assert 'x' not in expanded_node_ids
+    assert len(expanded_node_ids) < len(full_node_ids)
+
+    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+        page.click('#draw-graph')
+    page.wait_for_function("""() => {
+      const chart = window.echarts.getInstanceByDom(document.getElementById('graph-canvas'));
+      const series = chart.getOption().series.find(item => item.type === 'graph');
+      return series?.data.some(item => item.id === 'x');
+    }""")
+    assert bodies[-1]['node_id'] is None
+    assert bodies[-1]['attribute_mode'] == 'summary'
+    assert _graph_node_ids(page) == full_node_ids
+    assert _stable_graph_summary(page) == full_stable_summary
+    assert page.locator('#graph-entity-choice').input_value() == 'a'
+    assert page.locator('#graph-node').input_value() == 'a'
+    assert '退款商户' in page.locator('#graph-detail').inner_text()
 
 
 def test_search_button_and_enter_each_issue_exactly_one_search(workbench):
