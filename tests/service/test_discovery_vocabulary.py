@@ -1,6 +1,8 @@
 import json
 import copy
+from collections import UserDict
 from dataclasses import FrozenInstanceError
+from types import MappingProxyType
 
 import pytest
 from rdflib import Graph
@@ -575,6 +577,24 @@ def test_candidate_boundary_rejects_malformed_rows(candidate, message):
 def test_candidate_boundary_translates_invalid_containers(candidates):
     with pytest.raises(InvalidDiscoveryCandidate):
         DiscoveryVocabularyNormalizer("").normalize(candidates)
+
+
+@pytest.mark.parametrize("candidate", [
+    UserDict({
+        "id": "candidate", "kind": "class", "name": "Term",
+        "metadata": MappingProxyType({"source": "user-dict"}),
+    }),
+    MappingProxyType({
+        "id": "candidate", "kind": "class", "name": "Term",
+        "metadata": UserDict({"source": "mapping-proxy"}),
+    }),
+])
+def test_candidate_boundary_canonicalizes_generic_mapping_payloads(candidate):
+    result = DiscoveryVocabularyNormalizer("").normalize([candidate])
+
+    assert result.accepted_candidates[0]["id"] == "candidate"
+    assert dict(result.accepted_candidates[0]["metadata"]) == dict(
+        candidate["metadata"])
 
 
 @pytest.mark.parametrize("candidate", [
