@@ -1,0 +1,57 @@
+2026-09-22 09:47:39 INFO    knowledge_service.timing · 工件列表 · 750.8 ms · 类型=job 按项目=False 解码=20 保留=20
+2026-09-22 09:47:40 INFO    knowledge_service.service · 开始预热 embedding 模型（首次 encode 较慢，请稍候）…
+2026-09-22 09:49:04 INFO    knowledge_service.service · embedding 模型预热完成，检索已可用
+2026-09-22 09:53:42 INFO    knowledge_service.timing · 存储查询 · 4.7 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-22 09:53:42 INFO    knowledge_service.timing · 存储查询 · 4.0 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-22 09:53:42 INFO    knowledge_service.timing · 范围过滤 · 739.1 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-22 09:53:42 INFO    knowledge_service.timing · 范围过滤 · 739.6 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-22 09:53:42 INFO    knowledge_service.timing · 存储查询 · 0.2 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-22 09:53:42 INFO    knowledge_service.timing · 范围过滤 · 1.0 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-22 09:53:42 INFO    knowledge_service.timing · 图谱探索 · 1.5 ms · 种子=False 跳数=1 扫描=4 graph_nodes=3 graph_edges=1
+2026-09-22 09:54:54 INFO    knowledge_service.timing · 存储查询 · 0.8 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-22 09:54:54 INFO    knowledge_service.timing · 范围过滤 · 21.5 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-22 09:54:57 WARNING knowledge_service · 操作不可用：RuntimeError
+2026-09-22 09:54:59 INFO    knowledge_service.timing · 当前记录读取 · 130.0 ms · 向量=none 类型=0 扫描=479
+2026-09-22 09:54:59 INFO    knowledge_service.timing · 候选发现 · 2.0 ms · 候选=1049
+2026-09-22 09:55:01 INFO    knowledge_service.timing · 工件列表 · 1774.2 ms · 类型=ontology_discovery_draft 按项目=True 解码=2 保留=2
+2026-09-22 09:55:01 INFO    knowledge_service.timing · 存储查询 · 401.3 ms · 向量=True 类型=0 过滤=False 扫描=479 保留=479
+2026-09-22 09:55:01 INFO    knowledge_service.timing · 范围过滤 · 2158.8 ms · 类型=0 原始=479 存活=479 保留=479
+2026-09-22 09:55:01 INFO    knowledge_service.timing · 候选生命周期 · 0.9 ms · 候选=1049 草案=2 reused_records=True materialized=472
+2026-09-22 09:55:02 INFO    knowledge_service.timing · 存储查询 · 270.4 ms · 向量=True 类型=0 过滤=False 扫描=479 保留=479
+2026-09-22 09:55:02 INFO    knowledge_service.timing · 范围过滤 · 274.5 ms · 类型=0 原始=479 存活=479 保留=479
+2026-09-22 09:55:02 INFO    knowledge_service.timing · 存储查询 · 542.3 ms · 向量=True 类型=0 过滤=False 扫描=479 保留=479
+2026-09-22 09:55:02 INFO    knowledge_service.timing · 范围过滤 · 546.8 ms · 类型=2 原始=479 存活=479 保留=472
+2026-09-22 09:55:13 INFO    knowledge_service.timing · 存储查询 · 2.0 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-22 09:55:13 INFO    knowledge_service.timing · 范围过滤 · 12.5 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-22 09:55:13 INFO    knowledge_service.timing · 存储查询 · 0.9 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-22 09:55:13 INFO    knowledge_service.timing · 范围过滤 · 2.8 ms · 类型=2 原始=8 存活=8 保留=4
+2026-09-22 09:55:13 INFO    knowledge_service.timing · 存储查询 · 2.2 ms · 向量=True 类型=0 过滤=False 扫描=8 保留=8
+2026-09-22 09:55:13 INFO    knowledge_service.timing · 范围过滤 · 4.3 ms · 类型=0 原始=8 存活=8 保留=8
+2026-09-22 09:55:14 WARNING knowledge_service · 操作不可用：RuntimeError
+2026-09-22 09:55:16 INFO    knowledge_service.timing · 存储查询 · 170.8 ms · 向量=True 类型=0 过滤=False 扫描=479 保留=479
+2026-09-22 09:55:16 INFO    knowledge_service.timing · 范围过滤 · 180.9 ms · 类型=0 原始=479 存活=479 保留=479
+2026-09-22 09:55:17 INFO    knowledge_service.timing · 当前记录读取 · 255.4 ms · 向量=none 类型=0 扫描=479
+2026-09-22 09:55:17 INFO    knowledge_service.timing · 候选发现 · 2.0 ms · 候选=1049
+2026-09-22 09:55:17 INFO    knowledge_service.timing · 工件列表 · 133.1 ms · 类型=ontology_discovery_draft 按项目=True 解码=2 保留=2
+2026-09-22 09:55:17 INFO    knowledge_service.timing · 候选生命周期 · 0.6 ms · 候选=1049 草案=2 reused_records=True materialized=472
+2026-09-22 09:55:17 INFO    knowledge_service.timing · 存储查询 · 213.4 ms · 向量=True 类型=0 过滤=False 扫描=479 保留=479
+2026-09-22 09:55:17 INFO    knowledge_service.timing · 范围过滤 · 215.6 ms · 类型=2 原始=479 存活=479 保留=472
+2026-09-22 09:55:17 INFO    knowledge_service.timing · 存储查询 · 161.7 ms · 向量=True 类型=0 过滤=False 扫描=479 保留=479
+2026-09-22 09:55:17 INFO    knowledge_service.timing · 范围过滤 · 318.2 ms · 类型=0 原始=479 存活=479 保留=479
+2026-09-22 09:55:31 WARNING knowledge_service · 操作不可用：RuntimeError
+2026-09-22 09:55:34 INFO    knowledge_service.timing · 存储查询 · 189.8 ms · 向量=True 类型=0 过滤=False 扫描=479 保留=479
+2026-09-22 09:55:34 INFO    knowledge_service.timing · 范围过滤 · 193.3 ms · 类型=2 原始=479 存活=479 保留=472
+2026-09-22 09:55:34 INFO    knowledge_service.timing · 图谱探索 · 197.9 ms · 种子=False 跳数=1 扫描=472 graph_nodes=236 graph_edges=236
+2026-09-22 09:55:35 INFO    knowledge_service.timing · 当前记录读取 · 107.5 ms · 向量=none 类型=0 扫描=479
+2026-09-22 09:55:35 INFO    knowledge_service.timing · 候选发现 · 2.3 ms · 候选=1049
+2026-09-22 09:55:35 INFO    knowledge_service.timing · 工件列表 · 114.1 ms · 类型=ontology_discovery_draft 按项目=True 解码=2 保留=2
+2026-09-22 09:55:35 INFO    knowledge_service.timing · 候选生命周期 · 1.5 ms · 候选=1049 草案=2 reused_records=True materialized=472
+2026-09-22 09:55:39 INFO    knowledge_service.timing · 当前记录读取 · 102.9 ms · 向量=none 类型=0 扫描=479
+2026-09-22 09:55:39 INFO    knowledge_service.timing · 候选发现 · 1.9 ms · 候选=1049
+2026-09-22 09:55:39 INFO    knowledge_service.timing · 工件列表 · 99.9 ms · 类型=ontology_discovery_draft 按项目=True 解码=2 保留=2
+2026-09-22 09:55:39 INFO    knowledge_service.timing · 候选生命周期 · 0.9 ms · 候选=1049 草案=2 reused_records=True materialized=472
+2026-09-22 09:55:47 WARNING knowledge_service · 操作不可用：RuntimeError
+2026-09-22 10:20:01 INFO    knowledge_service.timing · 当前记录读取 · 318.0 ms · 向量=none 类型=0 扫描=479
+2026-09-22 10:20:01 INFO    knowledge_service.timing · 候选发现 · 2.8 ms · 候选=1049
+2026-09-22 10:20:01 INFO    knowledge_service.timing · 工件列表 · 137.0 ms · 类型=ontology_discovery_draft 按项目=True 解码=2 保留=2
+2026-09-22 10:20:01 INFO    knowledge_service.timing · 候选生命周期 · 1.4 ms · 候选=1049 草案=2 reused_records=True materialized=472

@@ -179,7 +179,7 @@ def test_knowledge_history_excludes_document_receipts_and_sources_show_build_sta
     assert '#tab-records>.record-section' in styles and '.governance-step-risk' in styles
     assert '.governance-technical-id{display:none}' in styles
     assert '.governance-merge-preview' in styles and '.governance-selection' in styles
-    assert '兼容估算' in ontology_workbench and '这些状态如何变化？' in ontology_workbench
+    assert '兼容估算' in ontology_workbench and '查看候选流转状态' in ontology_workbench
     assert "知识构建失败" in sources
     assert "构建成功" in sources
 

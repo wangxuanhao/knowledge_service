@@ -3,11 +3,11 @@
   'use strict';
   const byId=id=>document.getElementById(id);
   const el=(tag,className,text)=>{const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=String(text);return node;};
-  const state={projectId:'',ontologyId:null,draftId:null,revision:null,selectedIri:null,displayPath:[],mode:'object',stage:'discover',filters:{query:'',source:'',confidence:''},cursors:{roots:null,children:new Map(),search:null,matrix:null},hierarchy:{items:[],expanded:new Map()},matrix:[],draft:null,discovery:null,candidates:null,controller:null};
+  const state={projectId:'',ontologyId:null,draftId:null,revision:null,selectedIri:null,displayPath:[],mode:'object',stage:'discover',hasDrafts:null,filters:{query:'',source:'',confidence:'',cluster:''},cursors:{roots:null,children:new Map(),search:null,matrix:null},hierarchy:{items:[],expanded:new Map()},matrix:[],draft:null,discovery:null,candidates:null,controller:null};
   const stages=[['discover','1','发现','候选与证据'],['design','2','设计','对象与层级'],['review','3','审核','逐项决策'],['validate','4','校验','图约束检查'],['publish','5','发布','版本与溯源']];
   const page=el('section','tab hidden ontology-workbench');
   page.id='tab-ontology-workbench';
-  page.innerHTML=`<header class="ontology-workbench__masthead"><div><small class="ontology-workbench__eyebrow">ONTOLOGY GOVERNANCE WORKBENCH</small><h2>把发现变成可审计的领域语言</h2><p>开放发现保留探索性，正式本体通过草案、逐项审核和不可变版本进入唯一真相源。多父类按 DAG 管理；删除统一为可恢复的停用。</p></div><div class="ontology-workbench__context"><span>当前工作上下文</span><strong id="ontology-workbench-context">请选择项目</strong><small id="ontology-workbench-revision">未选择草案</small></div></header><ol class="ontology-workbench__stages" aria-label="本体治理阶段">${stages.map(([id,step,label,copy])=>`<li><button type="button" class="ontology-workbench__stage" data-workbench-stage="${id}" data-step="${step}"><strong>${label}</strong><small>${copy}</small></button></li>`).join('')}</ol><div id="ontology-workbench-notice" class="ontology-workbench__notice" role="status" aria-live="polite"></div><div class="ontology-workbench__body"><aside class="ontology-workbench__pane ontology-workbench__library" aria-label="对象和变更库"><div class="ontology-workbench__pane-head"><div><h3 id="ontology-workbench-library-title">发现队列</h3><p id="ontology-workbench-library-copy">按来源和置信度检查候选</p></div><button type="button" id="ontology-workbench-refresh" class="secondary">刷新</button></div><div class="ontology-workbench__search"><input id="ontology-workbench-search" type="search" placeholder="搜索对象、IRI 或变更" aria-label="搜索本体对象"><button type="button" id="ontology-workbench-search-button" class="secondary">搜索</button></div><div id="ontology-workbench-filters" class="ontology-workbench__filters"><label>来源<select id="candidate-map-source"><option value="">全部来源</option></select></label><label>最低置信度<select id="candidate-map-confidence"><option value="">不限</option><option value="0.9">≥ 0.90</option><option value="0.75">≥ 0.75</option><option value="0.5">≥ 0.50</option></select></label></div><div id="ontology-workbench-library-list" class="ontology-workbench__list"></div></aside><main class="ontology-workbench__pane ontology-workbench__canvas"><div class="ontology-workbench__canvas-head"><div><small id="ontology-workbench-kicker" class="ontology-workbench__eyebrow">DISCOVERY · 非正式知识</small><h3 id="ontology-workbench-canvas-title">候选知识地图</h3></div><div class="ontology-workbench__view-switch" role="group" aria-label="本体视图"><button type="button" data-workbench-mode="object" aria-pressed="true">对象</button><button type="button" data-workbench-mode="hierarchy" aria-pressed="false">层级</button><button type="button" data-workbench-mode="matrix" aria-pressed="false">矩阵</button></div></div><div id="ontology-workbench-canvas-content"><div class="ontology-workbench__empty">选择项目后加载发现候选、聚类统计和来源证据。</div></div><div id="ontology-workbench-actionbar" class="ontology-workbench__actionbar"></div></main><aside class="ontology-workbench__pane ontology-workbench__inspector" aria-label="证据与审核检查器"><div id="ontology-workbench-inspector"><section class="ontology-workbench__inspector-section"><h4>检查器</h4><p>从左侧选择候选或对象，在这里查看来源、影响面与审核状态。</p></section></div></aside></div>`;
+  page.innerHTML=`<header class="ontology-workbench__masthead"><div><small class="ontology-workbench__eyebrow">ONTOLOGY GOVERNANCE WORKBENCH</small><h2>把发现变成可审计的领域语言</h2><p>开放发现保留探索性，正式本体通过草案、逐项审核和不可变版本进入唯一真相源。多父类按 DAG 管理；删除统一为可恢复的停用。</p></div><div class="ontology-workbench__context"><span>当前工作上下文</span><strong id="ontology-workbench-context">请选择项目</strong><small id="ontology-workbench-revision">未选择草案</small></div></header><ol class="ontology-workbench__stages" aria-label="本体治理阶段">${stages.map(([id,step,label,copy])=>`<li><button type="button" class="ontology-workbench__stage" data-workbench-stage="${id}" data-step="${step}"><strong>${label}</strong><small>${copy}</small></button></li>`).join('')}</ol><div id="ontology-workbench-notice" class="ontology-workbench__notice" role="status" aria-live="polite"></div><div class="ontology-workbench__body"><aside class="ontology-workbench__pane ontology-workbench__library" aria-label="对象和变更库"><div class="ontology-workbench__pane-head"><div><h3 id="ontology-workbench-library-title">发现队列</h3><p id="ontology-workbench-library-copy">按来源和置信度检查候选</p></div><button type="button" id="ontology-workbench-refresh" class="secondary">刷新</button></div><div class="ontology-workbench__search"><input id="ontology-workbench-search" type="search" placeholder="搜索对象、IRI 或变更" aria-label="搜索本体对象"><button type="button" id="ontology-workbench-search-button" class="secondary">搜索</button></div><div id="ontology-workbench-filters" class="ontology-workbench__filters"><label>来源<select id="candidate-map-source"><option value="">全部来源</option></select></label><label>最低置信度<select id="candidate-map-confidence"><option value="">不限</option><option value="0.9">≥ 0.90</option><option value="0.75">≥ 0.75</option><option value="0.5">≥ 0.50</option></select></label></div><div id="ontology-workbench-library-list" class="ontology-workbench__list"></div></aside><main class="ontology-workbench__pane ontology-workbench__canvas"><div class="ontology-workbench__canvas-head"><div><small id="ontology-workbench-kicker" class="ontology-workbench__eyebrow">DISCOVERY · 非正式知识</small><h3 id="ontology-workbench-canvas-title">候选术语整理</h3></div><div class="ontology-workbench__view-switch" role="group" aria-label="本体视图"><button type="button" data-workbench-mode="object" aria-pressed="true">对象</button><button type="button" data-workbench-mode="hierarchy" aria-pressed="false">层级</button><button type="button" data-workbench-mode="matrix" aria-pressed="false">矩阵</button></div></div><div id="ontology-workbench-canvas-content"><div class="ontology-workbench__empty">选择项目后加载发现候选、聚类统计和来源证据。</div></div><div id="ontology-workbench-actionbar" class="ontology-workbench__actionbar"></div></main><aside class="ontology-workbench__pane ontology-workbench__inspector" aria-label="证据与审核检查器"><div id="ontology-workbench-inspector"><section class="ontology-workbench__inspector-section"><h4>检查器</h4><p>选择候选或对象，在这里查看来源、影响面与审核状态。</p></section></div></aside></div>`;
   document.querySelector('main').append(page);
   const nav=document.querySelector('[data-tab="ontology-workbench"]');
 
@@ -28,32 +28,56 @@
     byId('ontology-workbench-context').textContent=projectLabel;
     byId('ontology-workbench-revision').textContent=state.draftId?`草案 ${state.draftId.slice(0,8)} · 修订 ${state.revision}`:'未选择草案';
   }
+  function syncStageAvailability(){
+    const locked=state.hasDrafts===false&&!state.draftId;
+    page.querySelectorAll('[data-workbench-stage]').forEach(button=>{button.disabled=button.dataset.workbenchStage!=='discover'&&locked;});
+  }
   function setStage(stage){
+    if(stage!=='discover'&&state.hasDrafts===false&&!state.draftId){syncStageAvailability();notice('请先从“发现”阶段生成草案，再进入设计。','warning');return;}
     state.stage=stage;
+    page.dataset.stage=stage;
     page.querySelectorAll('[data-workbench-stage]').forEach(button=>{if(button.dataset.workbenchStage===stage)button.setAttribute('aria-current','step');else button.removeAttribute('aria-current');});
     const discover=stage==='discover';
     byId('ontology-workbench-filters').hidden=!discover;
+    page.querySelector('.ontology-workbench__view-switch').classList.toggle('hidden',stage!=='design');
     byId('ontology-workbench-kicker').textContent={discover:'DISCOVERY · 非正式知识',design:'DESIGN · 草案叠加层',review:'REVIEW · 变更驱动',validate:'VALIDATION · 可重复快照',publish:'PUBLISH · 不可变版本'}[stage];
-    byId('ontology-workbench-canvas-title').textContent={discover:'候选知识地图',design:'对象设计画布',review:'逐项审核队列',validate:'校验报告',publish:'版本发布与溯源'}[stage];
+    byId('ontology-workbench-canvas-title').textContent={discover:'候选术语整理',design:'对象设计画布',review:'逐项审核队列',validate:'校验报告',publish:'版本发布与溯源'}[stage];
     byId('ontology-workbench-library-title').textContent=discover?'发现队列':stage==='review'?'变更队列':'对象与草案';
     byId('ontology-workbench-library-copy').textContent=discover?'按来源和置信度检查候选':'在统一草案上继续工作';
     if(stage==='discover')renderDiscovery();else renderDraftStage();
   }
   function metric(value,label){const card=el('div','ontology-workbench__metric');card.append(el('strong','',value??0),el('span','',label));return card;}
-  function cluster(title,rows){
-    const box=el('section','ontology-workbench__cluster discovery-cluster');box.append(el('h4','',title));
+  function cluster(title,copy,rows){
+    const box=el('section','ontology-workbench__cluster discovery-cluster');box.append(el('h4','',title),el('p','ontology-workbench__cluster-copy',copy));
     if(!rows.length){box.append(el('p','ontology-workbench__empty','暂无数据'));return box;}
-    rows.slice(0,10).forEach(item=>{const row=el('div','ontology-workbench__cluster-row');row.append(el('span','',item.name||item.type||'未命名'),el('b','',item.count??item.occurrence_count??0));box.append(row);});return box;
+    [...rows].sort((left,right)=>{
+      const count=(right.count??right.occurrence_count??0)-(left.count??left.occurrence_count??0);
+      if(count)return count;
+      const leftName=left.name||left.type||'未命名';const rightName=right.name||right.type||'未命名';
+      return leftName.localeCompare(rightName,'zh-CN',{numeric:true,sensitivity:'base'});
+    }).slice(0,10).forEach(item=>{const name=item.name||item.type||'未命名';const row=el('button','ontology-workbench__cluster-row');row.type='button';row.dataset.clusterFilter=name;row.setAttribute('aria-pressed',String(state.filters.cluster===name));row.append(el('span','',name),el('b','',item.count??item.occurrence_count??0));row.addEventListener('click',()=>{state.filters.cluster=state.filters.cluster===name?'':name;renderDiscoveryData();});box.append(row);});return box;
   }
   const candidateSources=item=>item.sources||[];
   function visibleCandidates(){
-    const query=state.filters.query.toLocaleLowerCase();const threshold=Number(state.filters.confidence||0);const source=state.filters.source;
+    const query=state.filters.query.toLocaleLowerCase();const threshold=Number(state.filters.confidence||0);const source=state.filters.source;const cluster=state.filters.cluster;
     return (state.candidates?.nodes||[]).filter(item=>{
       const sources=candidateSources(item);const confidence=Math.max(0,...sources.map(row=>Number(row.confidence)||0));
       const matchesQuery=!query||`${item.text||''} ${item.type||''}`.toLocaleLowerCase().includes(query);
       const matchesSource=!source||sources.some(row=>(row.document_id||row.document_title)===source);
-      return matchesQuery&&matchesSource&&confidence>=threshold;
+      const matchesCluster=!cluster||item.type===cluster||item.text===cluster;
+      return matchesQuery&&matchesSource&&matchesCluster&&confidence>=threshold;
     });
+  }
+  function discoveryGuide(){
+    const guide=el('section','ontology-workbench__discovery-guide');const copy=el('div');copy.append(el('small','','这里是什么'),el('h3','','从业务文档中提取、等待确认的术语'),el('p','','这里不是正式本体。系统先把文档里的实体、关系和属性整理成候选；你查看分布与原文证据后，再生成草案进入设计。'));
+    const steps=el('ol','ontology-workbench__discovery-steps');[['1','看分布','先判断系统识别了哪些业务概念'],['2','查候选','筛选术语并点击查看右侧证据'],['3','生成草案','把确认范围带入下一步设计']].forEach(([step,title,detail])=>{const item=el('li');item.append(el('i','',step),el('b','',title),el('span','',detail));steps.append(item);});guide.append(copy,steps);return guide;
+  }
+  function discoveryToolbar(){
+    const toolbar=el('section','ontology-workbench__discovery-toolbar');const search=el('label');search.append(el('span','','搜索候选'));const input=el('input');input.type='search';input.value=state.filters.query;input.placeholder='输入术语或类型';input.setAttribute('aria-label','搜索发现候选');search.append(input);
+    const sourceLabel=el('label');sourceLabel.append(el('span','','来源'));const source=el('select');source.append(el('option','','全部来源'));source.firstChild.value='';discoverySources().forEach((label,value)=>{const option=el('option','',label);option.value=value;source.append(option);});source.value=state.filters.source;sourceLabel.append(source);
+    const confidenceLabel=el('label');confidenceLabel.append(el('span','','最低置信度'));const confidence=el('select');[['','不限'],['0.9','≥ 0.90'],['0.75','≥ 0.75'],['0.5','≥ 0.50']].forEach(([value,label])=>{const option=el('option','',label);option.value=value;confidence.append(option);});confidence.value=state.filters.confidence;confidenceLabel.append(confidence);
+    const apply=el('button','secondary','筛选');apply.type='button';const run=()=>{state.filters.query=input.value.trim();state.filters.source=source.value;state.filters.confidence=confidence.value;renderDiscoveryData();};apply.addEventListener('click',run);input.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();run();}});source.addEventListener('change',run);confidence.addEventListener('change',run);
+    const refresh=el('button','secondary','刷新数据');refresh.type='button';refresh.dataset.refreshDiscovery='';refresh.addEventListener('click',loadDiscovery);toolbar.append(search,sourceLabel,confidenceLabel,apply,refresh);return toolbar;
   }
   function renderCandidateInspector(item){
     state.selectedIri=item.id||null;const host=byId('ontology-workbench-inspector');const summary=el('section','ontology-workbench__inspector-section');
@@ -66,19 +90,17 @@
     const canvas=byId('ontology-workbench-canvas-content');const library=byId('ontology-workbench-library-list');
     const data=state.discovery||{};const candidates=visibleCandidates();
     const states=data.candidate_status_counts||{pending:data.unpublished_candidate_count??data.candidate_count??0,included_in_draft:0,approved:0,materialized:0};
-    const lifecycle=el('section','ontology-workbench__metrics ontology-workbench__lifecycle');lifecycle.append(metric(states.pending,'待纳入'),metric(states.included_in_draft,'草案中'),metric(states.approved,'已批准'),metric(states.materialized,'已物化'));
-    const lifecycleHelp=el('details','ontology-workbench__lifecycle-help');lifecycleHelp.append(el('summary','','这些状态如何变化？'),el('p','', '待纳入：尚未进入草案；草案中：已进入未发布草案；已批准：已随本体版本发布但尚未正式入图；已物化：已有正式知识关联该候选。'));if(!data.candidate_status_counts)lifecycleHelp.append(el('p','', '兼容估算：当前服务未返回精确生命周期计数，暂按候选总量估算。'));
     const metrics=el('section','ontology-workbench__metrics discovery-metrics');metrics.append(metric(data.candidate_count,'候选总数'),metric(data.entity_count,'实体候选'),metric(data.relation_count,'关系候选'),metric(data.attribute_count,'属性候选'));
+    const lifecycleHelp=el('details','ontology-workbench__lifecycle-help');const lifecycleSummary=el('summary','',`查看候选流转状态 · ${states.pending} 条待纳入`);const lifecycle=el('section','ontology-workbench__metrics ontology-workbench__lifecycle');lifecycle.append(metric(states.pending,'待纳入'),metric(states.included_in_draft,'草案中'),metric(states.approved,'已批准'),metric(states.materialized,'已物化'));lifecycleHelp.append(lifecycleSummary,lifecycle,el('p','', '待纳入：尚未进入草案；草案中：已进入未发布草案；已批准：已随本体版本发布但尚未正式入图；已物化：已有正式知识关联该候选。'));if(!data.candidate_status_counts)lifecycleHelp.append(el('p','', '兼容估算：当前服务未返回精确生命周期计数，暂按候选总量估算。'));
     const guidance=el('section','ontology-workbench__notice');guidance.textContent=states.pending>0?`还有 ${states.pending} 条候选待审核或未通过校验。候选会继续保留，不需要重新上传原文。`:'候选、草案和正式本体保持隔离；只有审核发布后的版本才进入正式治理链路。';
     const warnings=el('section','ontology-workbench__warnings');(data.quality_warnings||[]).forEach(item=>warnings.append(el('p','',item.message||String(item))));
-    const clusters=el('section','ontology-workbench__clusters');clusters.append(cluster('实体类型簇',data.type_clusters||data.entity_types||[]),cluster('关系与属性簇',[...(data.relation_clusters||data.relation_types||[]),...(data.attribute_clusters||data.attributes||[])]));
-    const heading=el('div','ontology-workbench__pane-head');const title=el('div');title.append(el('h3','',`候选脑图 · ${candidates.length} 个可见对象`),el('p','', '聚类只是浏览投影，不会自动成为正式本体。'));heading.append(title);
+    const clusters=el('section','ontology-workbench__clusters');clusters.append(cluster('实体类型分布','系统归纳出的业务对象类别；点击某一行，可筛选下方候选。',data.type_clusters||data.entity_types||[]),cluster('关系与属性分布','关系表示对象之间的连接，属性表示对象自身的字段；点击可筛选。',[...(data.relation_clusters||data.relation_types||[]),...(data.attribute_clusters||data.attribute_types||data.attributes||[])]));
+    const heading=el('div','ontology-workbench__pane-head ontology-workbench__candidate-heading');const title=el('div');title.append(el('h3','',`候选术语 · ${candidates.length} 条`),el('p','', '点击候选，在右侧核对它来自哪份文档和哪段原文。'));heading.append(title);if(state.filters.cluster){const clear=el('button','secondary',`清除“${state.filters.cluster}”筛选`);clear.type='button';clear.dataset.clearClusterFilter='';clear.addEventListener('click',()=>{state.filters.cluster='';renderDiscoveryData();});heading.append(clear);}
     const grid=el('section','ontology-workbench__candidate-grid candidate-map-canvas');
-    candidates.slice(0,120).forEach(item=>{const button=el('button','ontology-workbench__candidate');button.type='button';button.dataset.candidateId=item.id||'';button.append(el('span','',item.text||item.id),el('small','',`${item.type||'未分类'} · ${item.occurrence_count||0} 次`));button.addEventListener('click',()=>renderCandidateInspector(item));grid.append(button);});
+    candidates.slice(0,120).forEach(item=>{const button=el('button','ontology-workbench__candidate');button.type='button';button.dataset.candidateId=item.id||'';const identity=el('span','ontology-workbench__candidate-name');identity.append(el('b','',item.text||item.id),el('small','',`${candidateSources(item).length} 份来源`));button.append(identity,el('span','ontology-workbench__candidate-type',item.type||'未分类'),el('strong','',`${item.occurrence_count||0} 次`));button.addEventListener('click',()=>renderCandidateInspector(item));grid.append(button);});
     if(!grid.childElementCount)grid.append(el('div','ontology-workbench__empty','当前筛选下没有候选，请调整来源、置信度或搜索条件。'));
-    replace(canvas,lifecycle,lifecycleHelp,metrics,guidance,warnings.childElementCount?warnings:null,clusters,heading,grid);
+    replace(canvas,discoveryGuide(),discoveryToolbar(),metrics,guidance,warnings.childElementCount?warnings:null,clusters,lifecycleHelp,heading,grid);
     replace(library);
-    candidates.slice(0,80).forEach(item=>{const button=el('button','ontology-workbench__list-item');button.type='button';button.append(el('b','',item.text||item.id),el('small','',`${item.type||'未分类'} · ${candidateSources(item).length} 份来源`));button.addEventListener('click',()=>renderCandidateInspector(item));library.append(button);});
     renderDiscoveryActions();
   }
   function discoverySources(){const values=new Map();(state.candidates?.nodes||[]).flatMap(candidateSources).forEach(row=>{const key=row.document_id||row.document_title;if(key)values.set(key,row.document_title||row.document_id);});return values;}
@@ -95,6 +117,7 @@
     }catch(error){if(error.name!=='AbortError'){notice(error.message,'error');replace(byId('ontology-workbench-canvas-content'),el('div','ontology-workbench__empty',error.message));}}
   }
   function renderDraftList(drafts){
+    state.hasDrafts=Boolean(drafts.length||state.draftId);syncStageAvailability();
     if(state.stage==='discover')return;
     const host=byId('ontology-workbench-library-list');replace(host);
     drafts.forEach(draft=>{const button=el('button','ontology-workbench__draft');button.type='button';button.append(el('b','',draft.title||'未命名草案'),el('span','',draft.status||'editing'),el('small','',`${draft.source_kind||'manual'} · 修订 ${draft.revision}`));button.addEventListener('click',()=>selectDraft(draft.id));host.append(button);});
@@ -103,12 +126,12 @@
   async function createDiscoveryDraft(name){
     state.controller?.abort();state.controller=new AbortController();
     notice('正在通过 Semantica 归纳候选并冻结来源快照…');
-    try{const draft=await request(projectPath('/ontology-discovery/drafts'),{method:'POST',body:JSON.stringify({name:String(name||'').trim()||'发现本体'})});state.draftId=draft.unified_draft_id||draft.id;state.revision=draft.draft_revision||draft.revision;state.ontologyId=draft.parent_ontology_id||null;syncContext();notice('累计草案已生成，已进入对象设计。');setStage('design');}
+    try{const draft=await request(projectPath('/ontology-discovery/drafts'),{method:'POST',body:JSON.stringify({name:String(name||'').trim()||'发现本体'})});state.draftId=draft.unified_draft_id||draft.id;state.revision=draft.draft_revision||draft.revision;state.ontologyId=draft.parent_ontology_id||null;state.hasDrafts=true;syncStageAvailability();syncContext();notice('累计草案已生成，已进入对象设计。');setStage('design');}
     catch(error){if(error.name!=='AbortError')notice(error.message,'error');}
   }
   async function selectDraft(id){
     state.controller?.abort();state.controller=new AbortController();
-    notice('正在加载草案叠加层…');try{const draft=await request(projectPath(`/ontology-drafts/${encodeURIComponent(id)}`));state.draft=draft;state.draftId=draft.id;state.revision=draft.revision;state.ontologyId=draft.base_ontology_id;syncContext();notice();renderDraftStage();}catch(error){if(error.name!=='AbortError')notice(error.message,'error');}
+    notice('正在加载草案叠加层…');try{const draft=await request(projectPath(`/ontology-drafts/${encodeURIComponent(id)}`));state.draft=draft;state.draftId=draft.id;state.revision=draft.revision;state.ontologyId=draft.base_ontology_id;state.hasDrafts=true;syncStageAvailability();syncContext();notice();renderDraftStage();}catch(error){if(error.name!=='AbortError')notice(error.message,'error');}
   }
   function draftSummary(){
     const draft=state.draft;if(!draft)return el('div','ontology-workbench__empty','选择现有草案，或从“发现”阶段生成累计草案。');
@@ -253,7 +276,7 @@
     const key=globalThis.crypto?.randomUUID?.()||`publish-${Date.now()}-${Math.random().toString(16).slice(2)}`;notice('正在原子发布本体版本并写入 provenance…');try{const version=await request(projectPath(`/ontology-drafts/${encodeURIComponent(state.draftId)}/publish`),{method:'POST',body:JSON.stringify({expected_revision:state.revision,expected_ontology_id:state.ontologyId,validation_fingerprint:state.draft.validation_fingerprint,acknowledged_warning_codes:acknowledged,idempotency_key:key,actor})});state.draft.status='published';const canvas=byId('ontology-workbench-canvas-content');const card=el('section','ontology-workbench__published');card.dataset.publishedVersion=version.id;card.append(el('small','ontology-workbench__eyebrow','PUBLISHED'),el('h3','',`版本 ${version.id} 已发布`),el('p','',`项目 ${state.projectId} · 草案 ${state.draftId} · 校验 ${state.draft.validation_fingerprint}`),el('p','',`来源 → 草案 → 变更 → 决策 → 版本的 provenance 链已冻结；同步任务失败也不会回滚已发布版本。`),versionGovernanceButton());replace(canvas,card);replace(byId('ontology-workbench-actionbar'));notice('本体版本发布完成。');}
     catch(error){handleGovernanceError(error);}
   }
-  async function loadDrafts(){if(!state.projectId)return;try{const result=await request(projectPath('/ontology-drafts'));renderDraftList(result.items||[]);if(!state.draftId&&result.items?.length)await selectDraft(result.items[0].id);}catch(error){if(error.name!=='AbortError')notice(error.message,'error');}}
+  async function loadDrafts(){if(!state.projectId)return;try{const result=await request(projectPath('/ontology-drafts'));const drafts=result.items||[];renderDraftList(drafts);if(!state.draftId&&drafts.length)await selectDraft(drafts[0].id);else if(!drafts.length&&state.stage!=='discover')setStage('discover');}catch(error){if(error.name!=='AbortError')notice(error.message,'error');}}
   function renderDraftStage(){
     if(!state.projectId){replace(byId('ontology-workbench-canvas-content'),el('div','ontology-workbench__empty','请先选择项目。'));return;}
     if(!state.draft){replace(byId('ontology-workbench-canvas-content'),loadNode('正在加载草案…'));if(state.draftId)selectDraft(state.draftId);else loadDrafts();return;}
@@ -274,7 +297,7 @@
   byId('candidate-map-source').addEventListener('change',event=>{state.filters.source=event.target.value;renderDiscoveryData();});
   byId('candidate-map-confidence').addEventListener('change',event=>{state.filters.confidence=event.target.value;renderDiscoveryData();});
   document.addEventListener('keydown',event=>{if(page.classList.contains('hidden')||state.stage!=='review'||event.altKey||event.ctrlKey||event.metaKey)return;const tag=document.activeElement?.tagName;if(['INPUT','TEXTAREA','SELECT'].includes(tag))return;const operations=reviewOperations();if(!operations.length)return;const key=event.key.toLowerCase();if(key==='j'){event.preventDefault();selectReviewOperation((state.reviewIndex||0)+1);}else if(key==='k'){event.preventDefault();selectReviewOperation((state.reviewIndex||0)-1);}else if(['a','e','r'].includes(key)){event.preventDefault();openDecision({a:'approve',e:'request_changes',r:'reject'}[key],operations[state.reviewIndex||0]);}});
-  byId('project').addEventListener('change',()=>{state.controller?.abort();Object.assign(state,{projectId:'',ontologyId:null,draftId:null,revision:null,selectedIri:null,displayPath:[],draft:null,discovery:null,candidates:null});syncContext();if(!page.classList.contains('hidden'))setStage('discover');});
+  byId('project').addEventListener('change',()=>{state.controller?.abort();Object.assign(state,{projectId:'',ontologyId:null,draftId:null,revision:null,selectedIri:null,displayPath:[],filters:{query:'',source:'',confidence:'',cluster:''},draft:null,discovery:null,candidates:null,hasDrafts:null});syncStageAvailability();syncContext();if(!page.classList.contains('hidden'))setStage('discover');});
   setStage('discover');
   window.OntologyWorkbench={state,open:activate,openVersionGovernance,selectDraft,setStage};
 })();

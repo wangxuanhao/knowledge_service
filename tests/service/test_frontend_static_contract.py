@@ -112,8 +112,8 @@ def test_unified_ontology_workbench_has_one_entry_and_versioned_assets():
     assert "'ontology'" not in menu
     for name in ('records-view.js', 'task-review.js', 'ontology-workbench.js'):
         assert '[data-tab="ontology"]' not in read(name)
-    assert '/assets/ontology-workbench.css?v=governance-4' in html
-    assert '/assets/ontology-workbench.js?v=ontology-nav-1' in html
+    assert '/assets/ontology-workbench.css?v=discovery-layout-2' in html
+    assert '/assets/ontology-workbench.js?v=discovery-layout-2' in html
     assert html.index('/assets/style.css') < html.index('/assets/ontology-workbench.css')
     assert html.index('/assets/workspace.js') < html.index('/assets/ontology-workbench.js')
     assert 'ontology-manager.html' not in html

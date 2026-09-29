@@ -28,6 +28,7 @@ MOCKS = r"""() => {
   const draft = {id:'d1',title:'DAG 草案',status:'editing',revision:2,
     source_kind:'manual',base_ontology_id:'o1',operations:[],decisions:[]};
   window.mockDraft = draft;
+  window.mockDrafts = [draft];
   const root = iri => ({id:iri,iri,canonical_iri:iri,name:iri.split(':').pop(),
     label:iri.split(':').pop(),label_zh:'',child_count:1,other_parent_count:0,
     is_reference:false,display_path:[{iri,label:iri.split(':').pop()}]});
@@ -40,9 +41,18 @@ MOCKS = r"""() => {
     window.apiCalls.push({url:parsed.pathname + parsed.search, method:options.method||'GET',
       body:options.body ? JSON.parse(options.body) : null});
     let payload = {};
-    if(parsed.pathname.endsWith('/ontology-discovery')) payload={candidate_count:0,entity_count:0,relation_count:0,attribute_count:0};
-    else if(parsed.pathname.endsWith('/candidate-mindmap')) payload={nodes:[],edges:[],summary:{}};
-    else if(parsed.pathname.endsWith('/ontology-drafts')) payload={items:[draft],total:1};
+    if(parsed.pathname.endsWith('/ontology-discovery')) payload={
+      candidate_count:10,entity_count:7,relation_count:2,attribute_count:1,
+      entity_types:[{name:'Beta',count:1},{name:'Gamma',count:3},{name:'Alpha',count:3}],
+      relation_types:[{name:'RelationB',count:1},{name:'RelationA',count:4}],
+      attribute_types:[{name:'AttributeA',count:2}]
+    };
+    else if(parsed.pathname.endsWith('/candidate-mindmap')) payload={nodes:[
+      {id:'c1',text:'Alpha one',type:'Alpha',occurrence_count:3,sources:[]},
+      {id:'c2',text:'Gamma one',type:'Gamma',occurrence_count:2,sources:[]},
+      {id:'c3',text:'Relation A',type:'RelationA',occurrence_count:1,sources:[]}
+    ],edges:[],summary:{}};
+    else if(parsed.pathname.endsWith('/ontology-drafts')) payload={items:window.mockDrafts,total:window.mockDrafts.length};
     else if(parsed.pathname.endsWith('/ontology-drafts/d1/commands')) {
       draft.revision += 1; draft.operations.push({id:'op'+draft.revision,
         fingerprint:'fp'+draft.revision,risk:'low',source:'manual',
@@ -118,6 +128,87 @@ def test_switching_to_projects_hides_ontology_workbench(page):
     assert 'hidden' in workbench.get_attribute('class').split()
     assert workbench.evaluate("element => getComputedStyle(element).display") == 'none'
     assert not workbench.is_visible()
+
+
+def test_empty_draft_list_keeps_draft_stages_locked_without_loading_forever(page):
+    page.wait_for_function("() => OntologyWorkbench.state.discovery !== null")
+    page.evaluate("() => { mockDrafts = []; apiCalls = []; }")
+    page.click('[data-tab="ontology-workbench"]')
+    page.wait_for_function(
+        "() => apiCalls.filter(x => x.url.endsWith('/ontology-drafts')).length === 1")
+    page.wait_for_function("() => OntologyWorkbench.state.hasDrafts === false")
+
+    draft_stages = page.locator(
+        '[data-workbench-stage="design"], '
+        '[data-workbench-stage="review"], '
+        '[data-workbench-stage="validate"], '
+        '[data-workbench-stage="publish"]')
+    assert draft_stages.count() == 4
+    assert all(draft_stages.nth(index).is_disabled() for index in range(4))
+
+    page.evaluate("() => OntologyWorkbench.setStage('design')")
+    page.wait_for_function(
+        "() => apiCalls.filter(x => x.url.endsWith('/ontology-drafts')).length === 1")
+    assert page.evaluate("() => OntologyWorkbench.state.stage") == 'discover'
+    assert '正在加载草案' not in page.locator(
+        '#ontology-workbench-canvas-content').inner_text()
+
+
+def test_discovery_clusters_are_complete_and_stably_sorted(page):
+    page.click('[data-tab="ontology-workbench"]')
+    page.wait_for_selector('.discovery-cluster')
+    clusters = page.locator('.discovery-cluster')
+    assert clusters.count() == 2
+    entity_rows = clusters.nth(0).locator('.ontology-workbench__cluster-row')
+    combined_rows = clusters.nth(1).locator('.ontology-workbench__cluster-row')
+    assert entity_rows.all_inner_texts() == ['Alpha\n3', 'Gamma\n3', 'Beta\n1']
+    assert combined_rows.all_inner_texts() == [
+        'RelationA\n4', 'AttributeA\n2', 'RelationB\n1']
+
+
+def test_discovery_uses_one_explained_workspace_instead_of_duplicate_side_queue(page):
+    page.click('[data-tab="ontology-workbench"]')
+    page.wait_for_selector('.ontology-workbench__discovery-guide')
+    assert page.locator('.ontology-workbench__library').is_hidden()
+    assert page.locator('#ontology-workbench-canvas-title').inner_text() == '候选术语整理'
+    canvas = page.locator('#ontology-workbench-canvas-content').inner_text()
+    assert '这里是什么' in canvas
+    assert '从业务文档中提取' in canvas
+    assert '候选术语' in canvas
+    assert page.locator('[data-candidate-id]').count() == 3
+    assert '从左侧选择' not in page.locator('#ontology-workbench-inspector').inner_text()
+
+
+def test_discovery_cluster_filters_the_candidate_list(page):
+    page.click('[data-tab="ontology-workbench"]')
+    page.wait_for_selector('[data-cluster-filter="Alpha"]')
+    page.click('[data-cluster-filter="Alpha"]')
+    assert page.locator('[data-candidate-id]').count() == 1
+    assert page.locator('[data-candidate-id]').inner_text().startswith('Alpha one')
+    assert page.locator('[data-cluster-filter="Alpha"]').get_attribute('aria-pressed') == 'true'
+    page.click('[data-clear-cluster-filter]')
+    assert page.locator('[data-candidate-id]').count() == 3
+
+
+def test_discovery_refresh_remains_available_without_the_side_queue(page):
+    page.click('[data-tab="ontology-workbench"]')
+    page.wait_for_selector('[data-refresh-discovery]')
+    before = page.evaluate("() => apiCalls.filter(x => x.url.endsWith('/ontology-discovery')).length")
+    page.click('[data-refresh-discovery]')
+    page.wait_for_function(
+        "before => apiCalls.filter(x => x.url.endsWith('/ontology-discovery')).length > before",
+        arg=before,
+    )
+
+
+def test_view_switch_only_appears_when_hierarchy_and_matrix_are_available(page):
+    page.click('[data-tab="ontology-workbench"]')
+    switch = page.locator('.ontology-workbench__view-switch')
+    assert switch.is_hidden()
+    page.evaluate("() => OntologyWorkbench.setStage('design')")
+    page.wait_for_selector('[data-hierarchy-row="urn:RootA"]')
+    assert switch.is_visible()
+    assert page.locator('.ontology-workbench__library').is_visible()
 
 
 def test_hierarchy_is_lazy_paginated_and_multi_parent_selection_is_shared(page):
