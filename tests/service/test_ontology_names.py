@@ -1,3 +1,6 @@
+from rdflib import URIRef
+
+from knowledge_service.services.discovery_vocabulary import DiscoveryVocabularyNormalizer
 from knowledge_service.services.ontology import Ontology,local_name
 
 
@@ -17,3 +20,23 @@ def test_urn_summary_keeps_identifier_internal():
     assert item['id']=='urn:knowledge:ontology:p:Merchant'
     assert item['name']=='Merchant'
     assert item['label_zh']=='商户'
+
+
+def test_percent_encoded_rdfs_class_uses_decoded_name_and_retirement_state():
+    turtle = '''
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        <http://example.test/Order%20Item> a rdfs:Class ; owl:deprecated true .
+    '''
+    ontology = Ontology(turtle)
+
+    item = ontology.summary()['classes'][0]
+
+    assert item['name'] == 'Order Item'
+    assert item['active'] is False
+    assert ontology.resolve('Order Item') == URIRef('http://example.test/Order%20Item')
+    assert ontology.summary(active_only=True)['classes'] == []
+    normalized = DiscoveryVocabularyNormalizer(turtle).normalize([{
+        'id': 'candidate', 'kind': 'class', 'name': 'Order Item',
+    }])
+    assert normalized.conflicts[0]['code'] == 'retired_term_reuse_blocked'

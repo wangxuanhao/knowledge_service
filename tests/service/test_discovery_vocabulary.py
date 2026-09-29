@@ -520,16 +520,23 @@ def test_rdfs_class_is_reused_and_included_in_formal_vocabulary_audit():
     ({"id": "", "kind": "class", "name": "Person"}, "non-empty string id"),
     ({"id": "c", "kind": None, "name": "Person"}, "governed kind"),
     ({"id": "c", "kind": "unknown", "name": "Person"}, "governed kind"),
+    ({"id": "c", "kind": "classes", "name": "Person"}, "governed kind"),
     ({"id": "c", "kind": [], "name": "Person"}, "governed kind"),
     ({"id": "c", "kind": "class", "name": "  \t"}, "non-empty name"),
     ({"id": "c", "kind": "class", "name": 123}, "non-empty string name"),
     ({"id": "c", "kind": "class", "name": ["Person"]}, "non-empty string name"),
     ({"id": "c", "kind": "class", "name": "Person", "iri": "not an iri"},
      "valid absolute IRI"),
+    ({"id": "c", "kind": "class", "name": "Person", "iri": "http://["},
+     "valid absolute IRI"),
     ({"id": "c", "kind": "class", "name": "Person", "evidence_refs": "e1"},
      "evidence_refs container"),
     ({"id": "c", "kind": "class", "name": "Person", "evidence_refs": {"e1": 1}},
      "evidence_refs container"),
+    ({"id": "c", "kind": "class", "name": "Person", "evidence_refs": [""]},
+     "non-empty string entries"),
+    ({"id": "c", "kind": "class", "name": "Person", "evidence_refs": ["e1", 2]},
+     "non-empty string entries"),
 ])
 def test_candidate_boundary_rejects_malformed_rows(candidate, message):
     with pytest.raises(InvalidDiscoveryCandidate, match=message):

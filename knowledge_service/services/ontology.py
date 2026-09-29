@@ -11,6 +11,11 @@ from rdflib.collection import Collection
 from rdflib.namespace import OWL, SH, XSD
 
 from ..utils.attributes import primitive_datatype
+from .ontology_vocabulary import (
+    deprecated_marker_is_true,
+    index_governed_vocabulary,
+    local_name,
+)
 
 DATA = Namespace("urn:knowledge:")
 
@@ -35,14 +40,6 @@ def readable_iri_segment(value: str) -> str:
 def generated_term_iri(project_id: str, label: str) -> str:
     """构建每个新本体术语所使用的规范化项目级 IRI。"""
     return f'urn:knowledge:ontology:{project_id}:{readable_iri_segment(label)}'
-
-
-def local_name(uri):
-    value = str(uri).rsplit("#", 1)[-1].rsplit("/", 1)[-1]
-    # 项目本体使用 URN（urn:knowledge:ontology:<project>:Term）。
-    # URN 没有斜杠/井号片段，因此旧实现会把整个存储标识符泄漏到
-    # 每个面向用户的名称和描述中。
-    return value.rsplit(":", 1)[-1] if value.startswith("urn:") else value
 
 
 def parse_shacl_focus_records(shacl_report_text: str, known_ids: set[str]) -> set[str]:
@@ -99,9 +96,11 @@ class Ontology:
             self.graph.parse(data=turtle, format="turtle")
         except Exception as exc:
             raise ValueError(f"无效的 Turtle：{exc}") from exc
-        self.classes = set(self.graph.subjects(RDF.type, OWL.Class)) | set(self.graph.subjects(RDF.type, RDFS.Class))
-        self.relations = set(self.graph.subjects(RDF.type, OWL.ObjectProperty))
-        self.attributes = set(self.graph.subjects(RDF.type, OWL.DatatypeProperty))
+        records = index_governed_vocabulary(self.graph)
+        self._governed_records = {record.node: record for record in records}
+        self.classes = {record.node for record in records if "class" in record.kinds}
+        self.relations = {record.node for record in records if "relation" in record.kinds}
+        self.attributes = {record.node for record in records if "attribute" in record.kinds}
 
     def resolve(self, name: str, allowed=None):
         allowed = allowed if allowed is not None else self.classes | self.relations | self.attributes
@@ -116,15 +115,17 @@ class Ontology:
             node = term if isinstance(term, URIRef) else self.resolve(str(term))
         except ValueError:
             return False
+        record = self._governed_records.get(node)
+        if record is not None:
+            return record.active
         for marker in self.graph.objects(node, OWL.deprecated):
-            value = marker.toPython() if isinstance(marker, Literal) else str(marker)
-            if value is True or str(value).strip().lower() in {'true', '1'}:
+            if deprecated_marker_is_true(marker):
                 return False
         return True
 
     def summary(self, active_only=False):
         def item(uri):
-            labels = list(self.graph.objects(uri, RDFS.label))
+            labels = self._governed_records[uri].label_values
             zh = en = plain = ''
             for obj in labels:
                 lang = getattr(obj, 'language', '') or ''

@@ -8,22 +8,18 @@ import re
 import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 
-from rdflib import Graph, Literal, RDF, RDFS
-from rdflib.namespace import OWL
+from rdflib import Graph
 
-
-_RDF_KIND = {
-    OWL.Class: "class",
-    RDFS.Class: "class",
-    OWL.ObjectProperty: "relation",
-    OWL.DatatypeProperty: "attribute",
-}
+from .ontology_vocabulary import GovernedVocabularyRecord, index_governed_vocabulary
 _KIND_ALIASES = {
     "class": "class", "classes": "class",
     "relation": "relation", "relations": "relation",
     "attribute": "attribute", "attributes": "attribute",
+}
+_CANDIDATE_KIND_ALIASES = {
+    "class": "class", "relation": "relation", "attribute": "attribute",
 }
 
 
@@ -120,7 +116,10 @@ _ABSOLUTE_IRI = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:[^\s]+$")
 def _valid_iri(value) -> bool:
     if not isinstance(value, str) or not _ABSOLUTE_IRI.fullmatch(value):
         return False
-    parsed = urlsplit(value)
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return False
     return bool(parsed.scheme and (parsed.netloc if parsed.scheme in {"http", "https"}
                                    else parsed.path))
 
@@ -139,7 +138,7 @@ def _validate_and_copy_candidates(candidates):
             raise InvalidDiscoveryCandidate(f"duplicate candidate id: {candidate_id}")
         seen_ids.add(candidate_id)
         kind = candidate.get("kind")
-        if not isinstance(kind, str) or _KIND_ALIASES.get(kind) not in _RDF_KIND.values():
+        if not isinstance(kind, str) or kind not in _CANDIDATE_KIND_ALIASES:
             raise InvalidDiscoveryCandidate(
                 f"candidate {candidate_id} requires a governed kind")
         name = candidate.get("name")
@@ -156,12 +155,17 @@ def _validate_and_copy_candidates(candidates):
         if evidence is not None and not isinstance(evidence, (list, tuple, set, frozenset)):
             raise InvalidDiscoveryCandidate(
                 f"candidate {candidate_id} requires a supported evidence_refs container")
+        if evidence is not None and any(
+                not isinstance(reference, str) or not reference.strip()
+                for reference in evidence):
+            raise InvalidDiscoveryCandidate(
+                f"candidate {candidate_id} evidence_refs require non-empty string entries")
     try:
         copied = json.loads(_canonical_json(rows))
     except (TypeError, ValueError) as exc:
         raise InvalidDiscoveryCandidate("candidate payload must be JSON-safe") from exc
     for candidate in copied:
-        candidate["kind"] = _KIND_ALIASES[candidate["kind"]]
+        candidate["kind"] = _CANDIDATE_KIND_ALIASES[candidate["kind"]]
     copied.sort(key=lambda candidate: (
         candidate["id"], candidate["kind"], canonical_name(candidate["name"]),
         _canonical_json(candidate),
@@ -179,27 +183,12 @@ class _BaselineTerm:
 
 
 @dataclass(frozen=True)
-class _BaselineRecord:
-    iri: str
-    kinds: tuple[str, ...]
-    local_name: str
-    labels: tuple[str, ...]
-    active: bool
-
-
-@dataclass(frozen=True)
 class _BaselineIndex:
-    records: tuple[_BaselineRecord, ...]
+    records: tuple[GovernedVocabularyRecord, ...]
     terms: tuple[_BaselineTerm, ...]
     aliases: dict[str, tuple[_BaselineTerm, ...]]
     terms_by_iri: dict[str, _BaselineTerm]
     invalid_iris: dict[str, tuple[str, ...]]
-
-
-def _local_name(iri: str) -> str:
-    if iri.lower().startswith("urn:"):
-        return unquote(iri.rsplit(":", 1)[-1])
-    return unquote(iri.rsplit("#", 1)[-1].rsplit("/", 1)[-1])
 
 
 def _summary_names(baseline_summary):
@@ -217,61 +206,37 @@ def _summary_names(baseline_summary):
     return summary_names
 
 
-def _deprecated_marker_is_true(marker) -> bool:
-    value = marker.toPython() if isinstance(marker, Literal) else str(marker)
-    return value is True or str(value).strip().lower() in {"true", "1"}
-
-
 def _index_baseline_graph(graph: Graph, baseline_summary=None) -> _BaselineIndex:
     """Build all governed baseline lookup structures in one triple traversal."""
-    rows = {}
-    for subject, predicate, obj in graph:
-        iri = str(subject)
-        if predicate == RDF.type and obj in _RDF_KIND:
-            rows.setdefault(iri, {"kinds": set(), "labels": set(), "retired": False})[
-                "kinds"].add(_RDF_KIND[obj])
-        elif predicate == RDFS.label:
-            rows.setdefault(iri, {"kinds": set(), "labels": set(), "retired": False})[
-                "labels"].add(str(obj))
-        elif predicate == OWL.deprecated and _deprecated_marker_is_true(obj):
-            rows.setdefault(iri, {"kinds": set(), "labels": set(), "retired": False})[
-                "retired"] = True
-
     summary_names = _summary_names(baseline_summary)
-    records = []
+    records = index_governed_vocabulary(graph)
     terms = []
     aliases = {}
     terms_by_iri = {}
     invalid_iris = {}
-    for iri in sorted(rows):
-        row = rows[iri]
-        kinds = tuple(sorted(row["kinds"]))
-        if not kinds:
-            continue
-        labels = tuple(sorted(row["labels"]))
-        local_name = _local_name(iri)
-        active = not row["retired"]
-        record = _BaselineRecord(iri, kinds, local_name, labels, active)
-        records.append(record)
-        if len(kinds) > 1:
-            invalid_iris[iri] = kinds
-        for kind in kinds:
-            values = [local_name, *labels, *summary_names.get((iri, kind), [])]
+    for record in records:
+        if len(record.kinds) > 1:
+            invalid_iris[record.iri] = record.kinds
+        for kind in record.kinds:
+            values = [record.local_name, *record.labels,
+                      *summary_names.get((record.iri, kind), [])]
             names = tuple(dict.fromkeys(str(value) for value in values
                                         if canonical_name(value)))
-            term = _BaselineTerm(iri, kind, names, labels, active)
+            term = _BaselineTerm(
+                record.iri, kind, names, record.labels, record.active)
             terms.append(term)
             for name in names:
-                aliases.setdefault(canonical_name(name), {})[(iri, kind)] = term
-            if len(kinds) == 1:
-                terms_by_iri[iri] = term
+                aliases.setdefault(canonical_name(name), {})[
+                    (record.iri, kind)] = term
+            if len(record.kinds) == 1:
+                terms_by_iri[record.iri] = term
 
     frozen_aliases = {
         name: tuple(sorted(values.values(), key=lambda term: (term.iri, term.kind)))
         for name, values in aliases.items()
     }
     return _BaselineIndex(
-        tuple(records), tuple(terms), frozen_aliases, terms_by_iri, invalid_iris)
+        records, tuple(terms), frozen_aliases, terms_by_iri, invalid_iris)
 
 
 def _baseline_index(baseline_turtle: str, baseline_summary=None) -> _BaselineIndex:
