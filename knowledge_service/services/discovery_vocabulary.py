@@ -115,6 +115,8 @@ class _BaselineTerm:
 
 
 def _local_name(iri: str) -> str:
+    if iri.lower().startswith("urn:"):
+        return unquote(iri.rsplit(":", 1)[-1])
     return unquote(iri.rsplit("#", 1)[-1].rsplit("/", 1)[-1])
 
 
@@ -328,6 +330,22 @@ class DiscoveryVocabularyNormalizer:
                 for index in indexes:
                     quarantine(index, "relation_attribute_name_collision",
                                involved_kinds=["attribute", "relation"])
+
+        same_kind_names = {}
+        for index, item in enumerate(copied):
+            if index not in conflict_by_index:
+                key = (item.get("kind"), canonical_name(item.get("name")))
+                same_kind_names.setdefault(key, []).append(index)
+        for indexes in same_kind_names.values():
+            explicit_iris = sorted({str(copied[index]["iri"]) for index in indexes
+                                    if copied[index].get("iri")})
+            if len(explicit_iris) > 1:
+                for index in indexes:
+                    quarantine(index, "candidate_iri_target_collision",
+                               involved_iris=explicit_iris)
+            elif len(explicit_iris) == 1:
+                for index in indexes:
+                    resolved_iri_by_index[index] = explicit_iris[0]
 
         if self.attribute_threshold > 1:
             for name, indexes in by_name.items():

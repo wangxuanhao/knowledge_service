@@ -393,6 +393,67 @@ def test_name_only_kind_collision_precedes_retirement():
     assert result.conflicts[0]["code"] == "existing_term_kind_collision"
 
 
+def test_urn_local_name_reuses_baseline_term_without_labels():
+    baseline = """
+    @prefix owl: <http://www.w3.org/2002/07/owl#> .
+    <urn:knowledge:ontology:project:Term> a owl:Class .
+    """
+
+    result = DiscoveryVocabularyNormalizer(baseline).normalize([
+        {"id": "candidate", "kind": "class", "name": "Term"},
+    ])
+
+    assert result.accepted_candidates[0]["iri"] == "urn:knowledge:ontology:project:Term"
+
+
+def test_audit_uses_urn_local_name_without_labels():
+    baseline = """
+    @prefix owl: <http://www.w3.org/2002/07/owl#> .
+    <urn:knowledge:ontology:project:Term> a owl:Class .
+    <urn:knowledge:ontology:other:Term> a owl:ObjectProperty .
+    """
+
+    audit = audit_formal_vocabulary(baseline)
+
+    assert audit["name_collisions"][0]["canonical_name"] == "term"
+    assert audit["name_collisions"][0]["iris"] == [
+        "urn:knowledge:ontology:other:Term",
+        "urn:knowledge:ontology:project:Term",
+    ]
+
+
+def test_same_kind_merge_retains_single_explicit_new_iri_when_leader_has_none():
+    result = DiscoveryVocabularyNormalizer("").normalize([
+        {"id": "a", "kind": "class", "name": "NovelTerm",
+         "evidence_refs": ["implicit"]},
+        {"id": "z", "kind": "class", "name": "novelterm",
+         "iri": "urn:knowledge:ontology:project:NovelTerm",
+         "evidence_refs": ["explicit"]},
+    ])
+
+    assert [(item["id"], item["iri"]) for item in result.accepted_candidates] == [
+        ("a", "urn:knowledge:ontology:project:NovelTerm")]
+    assert result.accepted_candidates[0]["evidence_refs"] == ["implicit", "explicit"]
+    assert [item["iri"] for item in result.candidate_bindings] == [
+        "urn:knowledge:ontology:project:NovelTerm",
+        "urn:knowledge:ontology:project:NovelTerm",
+    ]
+
+
+def test_same_kind_merge_quarantines_multiple_distinct_explicit_new_iris():
+    result = DiscoveryVocabularyNormalizer("").normalize([
+        {"id": "a", "kind": "class", "name": "Concept"},
+        {"id": "b", "kind": "class", "name": "concept", "iri": "urn:new:Concept"},
+        {"id": "c", "kind": "class", "name": "ＣＯＮＣＥＰＴ", "iri": "urn:other:Concept"},
+    ])
+
+    assert result.accepted_candidates == ()
+    assert [item["candidate_id"] for item in result.conflicts] == ["a", "b", "c"]
+    assert {item["code"] for item in result.conflicts} == {"candidate_iri_target_collision"}
+    assert all(item["involved_iris"] == ["urn:new:Concept", "urn:other:Concept"]
+               for item in result.conflicts)
+
+
 def test_audit_reports_cross_kind_names_and_multi_kind_iris_without_candidates():
     baseline = """
     @prefix ex: <http://example.test/> .
