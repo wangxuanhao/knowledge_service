@@ -9,7 +9,7 @@ test('changed provenance source assets use fresh cache versions',()=>{
   const html=require('node:fs').readFileSync(path.resolve(
     __dirname,'../../knowledge_service/web/index.html'),'utf8');
   assert.ok(html.includes('/assets/provenance-drawer.js?v=3'));
-  assert.ok(html.includes('/assets/evidence-inspector.js?v=attribute-facts-1'));
+  assert.ok(html.includes('/assets/evidence-inspector.js?v=candidate-evidence-1'));
 });
 
 test('frozen source viewer distinguishes complete historical versions from legacy segments',()=>{
@@ -23,6 +23,20 @@ test('frozen source viewer distinguishes complete historical versions from legac
   const legacy=frozenSourceDocument({
     title:'旧来源',version:1,source_content:'segments_only',highlight:'旧片段'});
   assert.equal(legacy.source_content,'segments_only');
+});
+
+test('candidate source projection accepts immutable full text and absolute highlight',()=>{
+  const projected=frozenSourceDocument({
+    title:'固定历史文档',version:4,version_id:'doc-v4',source_content:'full_version',
+    reason:'候选证据 · 历史切片内恢复定位',full_text:'012345恢复证据abcdef',
+    start_char:6,end_char:10,
+  });
+  assert.equal(projected.title,'固定历史文档');
+  assert.equal(projected.version,4);
+  assert.equal(projected.reason,'候选证据 · 历史切片内恢复定位');
+  assert.equal(projected.before,'012345');
+  assert.equal(projected.highlight,'恢复证据');
+  assert.equal(projected.after,'abcdef');
 });
 
 test('formal attributes render every value with support and an explicit escaped conflict marker',()=>{

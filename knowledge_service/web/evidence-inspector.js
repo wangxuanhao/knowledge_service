@@ -24,9 +24,13 @@
     const text=key=>typeof excerpt[key]==='string'?excerpt[key]:'';
     const version=Number.isSafeInteger(excerpt.version)&&excerpt.version>0?excerpt.version:'未知';
     const source_content=excerpt.source_content==='full_version'?'full_version':'segments_only';
+    const fullText=text('full_text');
+    const hasAbsoluteSpan=fullText&&Number.isSafeInteger(excerpt.start_char)&&Number.isSafeInteger(excerpt.end_char)&&0<=excerpt.start_char&&excerpt.start_char<excerpt.end_char&&excerpt.end_char<=fullText.length;
     return {title:text('title')||'历史来源',version,source_content,
-      reason:source_content==='full_version'?'回答生成时冻结的历史原文定位':'回答生成时保存的历史原文片段',
-      before:text('excerpt_before'),highlight:text('highlight'),after:text('excerpt_after')};
+      reason:text('reason')||(source_content==='full_version'?'回答生成时冻结的历史原文定位':'回答生成时保存的历史原文片段'),
+      before:fullText?(hasAbsoluteSpan?fullText.slice(0,excerpt.start_char):fullText):text('excerpt_before'),
+      highlight:fullText?(hasAbsoluteSpan?fullText.slice(excerpt.start_char,excerpt.end_char):''):text('highlight'),
+      after:fullText&&hasAbsoluteSpan?fullText.slice(excerpt.end_char):text('excerpt_after')};
   }
   if(typeof module!=='undefined'&&module.exports)module.exports={frozenSourceDocument,attributeDetailsHtml};
   if(typeof window==='undefined'||typeof document==='undefined')return;
@@ -123,7 +127,7 @@
     try{
       const result=await api(endpoint('/records/'+encodeURIComponent(row.id)+'/evidence'),scope());
       if(ticket!==serial||current!==p||stamp!==JSON.stringify(scope())||!$('inspector-source-list'))return;
-      $('inspector-source-list').innerHTML=result.documents.length?result.documents.map((doc,i)=>`<article class="source-evidence-card"><strong>${esc(doc.title)}</strong><small>来源 v${doc.version} · ${esc({offset:'记录偏移定位',passage:'证据文本匹配',text:'名称 / 内容匹配',unlocated:'尚无精确位置'}[doc.mode])}</small><blockquote>${esc(doc.preview||'原文内容未保存')}</blockquote><button data-source-evidence="${i}">${doc.highlight?'查看原文并定位 ↗':'查看来源文档 ↗'}</button></article>`).join(''):`<p class="evidence-empty">${esc(result.message)}</p>`;
+      $('inspector-source-list').innerHTML=result.documents.length?result.documents.map((doc,i)=>`<article class="source-evidence-card"><strong>${esc(doc.title)}</strong><small>来源 v${doc.version} · ${esc({exact:'精确证据位置',recovered_in_chunk:'历史切片内恢复定位',chunk:'仅保存切片级位置',offset:'记录偏移定位',passage:'证据文本匹配',text:'名称 / 内容匹配',unlocated:'历史来源无法定位'}[doc.mode])}</small><blockquote>${esc(doc.preview||'原文内容未保存')}</blockquote><button data-source-evidence="${i}">${doc.highlight?'查看原文并定位 ↗':'查看来源文档 ↗'}</button></article>`).join(''):`<p class="evidence-empty">${esc(result.message)}</p>`;
       host.querySelectorAll('[data-source-evidence]').forEach(b=>b.onclick=()=>openSource(result.documents[Number(b.dataset.sourceEvidence)]));
     }catch(e){if(ticket===serial&&current===p&&$('inspector-source-list'))$('inspector-source-list').textContent='来源读取失败：'+e.message;}
   };

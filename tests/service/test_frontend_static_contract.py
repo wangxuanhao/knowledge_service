@@ -43,7 +43,7 @@ def test_project_card_shows_project_id_with_copy():
 def test_assets_version_bumped_for_changed_files():
     """改动过的静态资源必须带版本号，否则浏览器缓存旧文件（"改了没生效"第一嫌疑）。"""
     html = read('index.html')
-    for asset, marker in (('workspace.js', 'ontology-nav'),
+    for asset, marker in (('workspace.js', 'graph-scope'),
                           ('ontology-details.js', 'linked-review'),
                           ('workspace.css', 'fact-review'),
                           ('projects.css', 'project-id'),
@@ -56,8 +56,8 @@ def test_provenance_assets_precede_history_hydration():
     html = read('index.html')
     assert '/assets/provenance-drawer.css?v=2' in html
     assert '/assets/provenance-drawer.js?v=3' in html
-    assert '/assets/evidence-inspector.js?v=attribute-facts-1' in html
-    assert '/assets/workbench.js?v=document-upload-3' in html
+    assert '/assets/evidence-inspector.js?v=candidate-evidence-1' in html
+    assert '/assets/workbench.js?v=graph-detail-state-1' in html
     assert html.index('/assets/workbench.css') < html.index('/assets/provenance-drawer.css')
     assert html.index('/assets/ingest-mode.js') < html.index('/assets/provenance-drawer.js') < html.index('/assets/workbench.js')
 
@@ -112,8 +112,8 @@ def test_unified_ontology_workbench_has_one_entry_and_versioned_assets():
     assert "'ontology'" not in menu
     for name in ('records-view.js', 'task-review.js', 'ontology-workbench.js'):
         assert '[data-tab="ontology"]' not in read(name)
-    assert '/assets/ontology-workbench.css?v=fact-routing-1' in html
-    assert '/assets/ontology-workbench.js?v=candidate-source-preview-1' in html
+    assert '/assets/ontology-workbench.css?v=candidate-evidence-1' in html
+    assert '/assets/ontology-workbench.js?v=candidate-evidence-1' in html
     assert html.index('/assets/style.css') < html.index('/assets/ontology-workbench.css')
     assert html.index('/assets/workspace.js') < html.index('/assets/ontology-workbench.js')
     assert 'ontology-manager.html' not in html
@@ -166,6 +166,29 @@ def test_ontology_workbench_uses_preview_and_full_source_count_contract():
     assert '点击候选，在右侧核对结构与精确原文证据。' not in js
 
 
+def test_candidate_evidence_is_lazy_abortable_and_uses_safe_dom_construction():
+    js = read('ontology-workbench.js')
+    inspector = js.split('function renderCandidateInspector', 1)[1].split(
+        'function renderDiscoveryData', 1)[0]
+    for marker in (
+        'candidateEvidenceController', 'candidateEvidenceToken',
+        '/assertions/', '/evidence', 'resolvable', 'createTextNode',
+        "createElement('mark')", 'replaceChildren', 'source_count',
+        'sources_truncated', '查看完整历史原文', '/history',
+        'window.openFrozenSourceEvidence',
+    ):
+        assert marker in js, marker
+    assert 'innerHTML' not in inspector
+    for label in ('精确证据位置', '历史切片内恢复定位', '仅保存切片级位置', '历史来源无法定位'):
+        assert label in js
+
+
+def test_formal_evidence_location_labels_cover_verified_modes():
+    js = read('evidence-inspector.js')
+    for mode in ('exact', 'recovered_in_chunk', 'chunk', 'offset', 'passage', 'text', 'unlocated'):
+        assert f'{mode}:' in js
+
+
 def test_ontology_workbench_uses_safe_shared_state_contract():
     js = read('ontology-workbench.js')
     for marker in (
@@ -191,4 +214,4 @@ def test_document_upload_workspace_contract():
         assert marker in css, marker
     assert '/assets/workbench.css?v=document-upload-3' in html
     assert '/assets/ingest-mode.js?v=document-upload-1' in html
-    assert '/assets/workbench.js?v=document-upload-3' in html
+    assert '/assets/workbench.js?v=graph-detail-state-1' in html

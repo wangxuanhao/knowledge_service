@@ -113,6 +113,9 @@
 .ontology-workbench__evidence article{padding:10px;border-left:3px solid var(--ow-amber);background:#fff8ec}
 .ontology-workbench__evidence b,.ontology-workbench__evidence small{display:block}
 .ontology-workbench__evidence small{margin-top:3px;color:var(--ow-muted);font-size:9px}
+.ontology-workbench__source-chunk{max-height:360px;margin:8px 0 0;padding:10px;border:1px solid #e2ddd2;border-radius:6px;background:#fff;white-space:pre-wrap;overflow:auto;overflow-wrap:anywhere;font:10px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace}
+.ontology-workbench__source-chunk mark{padding:1px 2px;background:#ffe08a;color:inherit}
+.ontology-workbench__evidence-warning{color:#87551e!important}
 .ontology-workbench__drafts{display:grid;gap:7px}
 .ontology-workbench__draft{display:grid;grid-template-columns:1fr auto;gap:5px;width:100%;padding:10px;border:1px solid var(--ow-line);border-radius:8px;background:#fff;color:var(--ow-ink);text-align:left}
 .ontology-workbench__draft span{padding:2px 6px;border-radius:10px;background:#edf3ef;color:var(--ow-green);font-size:9px}

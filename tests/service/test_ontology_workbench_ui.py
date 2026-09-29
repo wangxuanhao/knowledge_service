@@ -32,6 +32,36 @@ MOCKS = r"""() => {
   window.mockChanges = [{id:'change-1',status:'pending',operation:'add',kind:'attribute',
     label:'封禁期限',uri:'urn:封禁期限',rationale:'正式事实需要该属性',revision:1,
     impact:{risk:'low',record_count:0,constraint_count:0,linked_candidates:1}}];
+  window.evidenceDelays = {};
+  window.abortedEvidence = [];
+  window.openedFrozenSource = null;
+  window.openFrozenSourceEvidence = source => { window.openedFrozenSource = source; };
+  const longChunk = '前'.repeat(620) + '恢复证据' + '后'.repeat(80);
+  window.mockEvidence = {
+    'assertion-1': {assertion_id:'assertion-1',document:{id:'doc-1',version:2,
+      version_id:'doc-v2',title:'来源文档',source_content:'full_version'},
+      chunk:{id:'chunk-1',start_char:100,end_char:108,text:'前文精确证据后文'},
+      location:{mode:'exact',reason:'stored_quote_verified',start_char:102,end_char:106,
+        before:'前文',highlight:'精确证据',after:'后文'},
+      integrity:{complete:true,source_hash_status:'matched',warnings:[]}},
+    'assertion-fail': null,
+    'assertion-recovered': {assertion_id:'assertion-recovered',document:{id:'doc-2',version:4,
+      version_id:'doc-v4',title:'长文档',source_content:'full_version'},
+      chunk:{id:'chunk-long',start_char:2000,end_char:2000+longChunk.length,text:longChunk},
+      location:{mode:'recovered_in_chunk',reason:'legacy_evidence_recovered',
+        start_char:2620,end_char:2624,before:longChunk.slice(0,620),highlight:'恢复证据',after:longChunk.slice(624)},
+      integrity:{complete:true,source_hash_status:'unavailable',warnings:[{code:'source_hash_unavailable',message:'断言没有保存来源文档哈希。'}]}},
+    'assertion-chunk': {assertion_id:'assertion-chunk',document:{id:'doc-3',version:1,
+      version_id:'doc-v1',title:'片段文档',source_content:'full_version'},
+      chunk:{id:'chunk-only',start_char:300,end_char:318,text:'完整历史切片但无法唯一定位'},
+      location:{mode:'chunk',reason:'highlight_not_unique',start_char:null,end_char:null,before:'',highlight:'',after:''},
+      integrity:{complete:true,source_hash_status:'matched',warnings:[]}},
+    'assertion-unlocated': {assertion_id:'assertion-unlocated',document:{id:'doc-4',version:7,
+      version_id:'doc-v7',title:'失联文档',source_content:'full_version'},
+      chunk:{id:'chunk-missing',start_char:null,end_char:null,text:null},
+      location:{mode:'unlocated',reason:'chunk_history_missing',start_char:null,end_char:null,before:'',highlight:'',after:''},
+      integrity:{complete:false,source_hash_status:'matched',warnings:[{code:'chunk_history_missing',message:'断言所引用的片段没有历史记录。'}]}},
+  };
   const root = iri => ({id:iri,iri,canonical_iri:iri,name:iri.split(':').pop(),
     label:iri.split(':').pop(),label_zh:'',child_count:1,other_parent_count:0,
     is_reference:false,display_path:[{iri,label:iri.split(':').pop()}]});
@@ -52,14 +82,38 @@ MOCKS = r"""() => {
     };
     else if(parsed.pathname.endsWith('/candidate-mindmap')) payload={nodes:[
       {id:'c1',text:'Alpha one',type:'Alpha',occurrence_count:3,source_count:11,
-       sources_truncated:true,sources:[{assertion_id:'assertion-1',document_id:'doc-1',
+       sources_truncated:true,sources:[{assertion_id:'assertion-1',resolvable:true,document_id:'doc-1',document_version_id:'doc-v2',
          document_title:'来源文档',chunk_id:'chunk-1',confidence:.91,evidence_status:'exact',
-         evidence_preview:'这是候选来源预览',evidence_preview_truncated:true}]},
-      {id:'c2',text:'Gamma one',type:'Gamma',occurrence_count:2,sources:[]},
-      {id:'c3',text:'Relation A',type:'RelationA',occurrence_count:1,sources:[]}
-    ],edges:[{id:'r1',subject:'Alpha one',object:'Gamma one',type:'RelationA',occurrence_count:1,sources:[]}],
-      attributes:[{id:'a1',subject:'Alpha one',type:'AttributeA',value:7,value_type:'integer',occurrence_count:1,sources:[]}],
-      exceptions:[{id:'x1',text:'Alpha one',source_kind:'attribute',type:'负责人',reason:'证据无法定位',reason_code:'evidence_not_in_source',occurrence_count:1,sources:[]}],summary:{}};
+         evidence_preview:'这是候选来源预览',evidence_preview_truncated:true},
+        {assertion_id:'assertion-fail',resolvable:true,document_id:'doc-fail',document_version_id:'doc-fail-v1',
+         document_title:'失败来源',chunk_id:'chunk-fail',confidence:.82,evidence_status:'exact',evidence_preview:'失败预览'}]},
+      {id:'c2',text:'Gamma one',type:'Gamma',occurrence_count:2,sources:[
+        {assertion_id:'assertion-recovered',resolvable:true,document_id:'doc-2',document_version_id:'doc-v4',
+         document_title:'长文档',chunk_id:'chunk-long',confidence:.88,evidence_status:'exact',evidence_preview:'恢复证据'}]},
+      {id:'c3',text:'Relation A',type:'RelationA',occurrence_count:1,sources:[
+        {assertion_id:null,resolvable:false,document_id:'doc-old',document_title:'旧候选',
+         evidence_preview:'旧候选只保留预览',evidence_status:'unverified'}]}
+    ],edges:[{id:'r1',subject:'Alpha one',object:'Gamma one',type:'RelationA',occurrence_count:1,sources:[
+      {assertion_id:'assertion-chunk',resolvable:true,document_id:'doc-3',document_version_id:'doc-v1',
+       document_title:'片段文档',chunk_id:'chunk-only',confidence:.7,evidence_preview:'切片预览'}]}],
+      attributes:[{id:'a1',subject:'Alpha one',type:'AttributeA',value:7,value_type:'integer',occurrence_count:1,sources:[
+        {assertion_id:'assertion-unlocated',resolvable:true,document_id:'doc-4',document_version_id:'doc-v7',
+         document_title:'失联文档',chunk_id:'chunk-missing',confidence:.6,evidence_preview:'不能作为当前原文展示'}]}],
+      exceptions:[{id:'x1',text:'Alpha one',source_kind:'attribute',type:'负责人',reason:'证据无法定位',reason_code:'evidence_not_in_source',occurrence_count:1,sources:[
+        {assertion_id:null,resolvable:false,document_id:'doc-x',document_title:'异常来源',evidence_preview:'异常预览'}]}],summary:{}};
+    else if(parsed.pathname.includes('/assertions/') && parsed.pathname.endsWith('/evidence')) {
+      const assertionId=decodeURIComponent(parsed.pathname.split('/assertions/')[1].split('/')[0]);
+      const delay=window.evidenceDelays[assertionId]||0;
+      if(delay) await new Promise((resolve,reject)=>{
+        const timer=setTimeout(resolve,delay);
+        options.signal?.addEventListener('abort',()=>{clearTimeout(timer);window.abortedEvidence.push(assertionId);reject(new DOMException('Aborted','AbortError'));},{once:true});
+      });
+      if(assertionId==='assertion-fail') return new Response(JSON.stringify({detail:'证据服务暂不可用'}),{status:503,headers:{'Content-Type':'application/json'}});
+      payload=window.mockEvidence[assertionId]||{};
+    }
+    else if(parsed.pathname.endsWith('/records/doc-1/history')) payload={versions:[
+      {id:'doc-1',version:3,version_id:'doc-v3',kind:'document',text:'错误的最新版本',metadata:{title:'新版'}},
+      {id:'doc-1',version:2,version_id:'doc-v2',kind:'document',text:'A'.repeat(102)+'精确证据'+'Z'.repeat(20),metadata:{title:'来源文档'}}]};
     else if(parsed.pathname.endsWith('/ontology-change-proposals/change-1/decision')) {
       window.mockChanges[0].status=window.apiCalls.at(-1).body.action==='approve'?'approved':'rejected';payload={...window.mockChanges[0]};
     }
@@ -187,7 +241,7 @@ def test_discovery_uses_one_explained_workspace_instead_of_duplicate_side_queue(
     canvas = page.locator('#ontology-workbench-canvas-content').inner_text()
     assert '这里是什么' in canvas
     assert '从业务文档中提取' in canvas
-    assert '候选术语' in canvas
+    assert '等待确认的术语' in canvas
     assert page.locator('[data-candidate-id]').count() == 3
     assert '从左侧选择' not in page.locator('#ontology-workbench-inspector').inner_text()
 
@@ -198,11 +252,109 @@ def test_discovery_candidate_uses_preview_full_count_and_truncation_note(page):
     card = page.locator('[data-candidate-id="c1"]')
     assert '11 份来源' in card.inner_text()
     card.click()
+    page.wait_for_selector('[data-candidate-evidence="assertion-1"][data-state="ready"]')
     inspector = page.locator('#ontology-workbench-inspector').inner_text()
-    assert '来源预览 11' in inspector
-    assert '这是候选来源预览' in inspector
-    assert '仅显示 1/11 条来源预览' in inspector
-    assert '内容预览已截断' in inspector
+    assert '来源证据 11' in inspector
+    assert '精确证据位置' in inspector
+    assert '来源文档' in inspector and '来源版本 2' in inspector
+    assert 'chunk-1' in inspector and '100–108' in inspector
+    assert '仅显示 2/11 条来源' in inspector
+
+
+def test_candidate_evidence_is_lazy_and_each_source_settles_independently(page):
+    page.click('[data-tab="ontology-workbench"]')
+    page.wait_for_selector('[data-candidate-id="c1"]')
+    assert page.evaluate("() => apiCalls.filter(x => x.url.includes('/assertions/')).length") == 0
+
+    page.evaluate("() => { evidenceDelays['assertion-1']=150; evidenceDelays['assertion-fail']=150; }")
+    page.click('[data-candidate-id="c1"]')
+    assert page.locator('[data-candidate-evidence][data-state="loading"]').count() == 2
+    assert '正在核验固定文档版本与历史切片' in page.locator(
+        '[data-candidate-evidence="assertion-1"]').inner_text()
+    page.wait_for_function("() => apiCalls.filter(x => x.url.includes('/assertions/')).length === 2")
+    page.wait_for_selector('[data-candidate-evidence="assertion-1"][data-state="ready"]')
+    page.wait_for_selector('[data-candidate-evidence="assertion-fail"][data-state="error"]')
+    ready = page.locator('[data-candidate-evidence="assertion-1"]')
+    failed = page.locator('[data-candidate-evidence="assertion-fail"]')
+    assert '精确证据位置' in ready.inner_text()
+    assert '证据读取失败：证据服务暂不可用' in failed.inner_text()
+
+
+def test_recovered_evidence_renders_the_complete_chunk_and_late_highlight(page):
+    page.click('[data-tab="ontology-workbench"]')
+    page.wait_for_selector('[data-candidate-id="c2"]')
+    page.click('[data-candidate-id="c2"]')
+    card = page.locator('[data-candidate-evidence="assertion-recovered"]')
+    page.wait_for_selector('[data-candidate-evidence="assertion-recovered"][data-state="ready"]')
+    assert '历史切片内恢复定位' in card.inner_text()
+    assert '绝对字符范围 2620–2624' in card.inner_text()
+    assert len(card.locator('pre').inner_text()) == 704
+    assert card.locator('mark').inner_text() == '恢复证据'
+    assert card.locator('mark').evaluate("node => node.parentNode.textContent.indexOf(node.textContent)") == 620
+    assert '断言没有保存来源文档哈希。' in card.inner_text()
+
+
+def test_chunk_and_unlocated_modes_never_fabricate_a_highlight_or_current_text(page):
+    page.click('[data-tab="ontology-workbench"]')
+    page.wait_for_selector('[data-discovery-kind="relation"]')
+    page.click('[data-discovery-kind="relation"]')
+    page.click('[data-candidate-kind="relation"]')
+    chunk = page.locator('[data-candidate-evidence="assertion-chunk"]')
+    page.wait_for_selector('[data-candidate-evidence="assertion-chunk"][data-state="ready"]')
+    assert '仅保存切片级位置' in chunk.inner_text()
+    assert '只能确认到历史切片级别' in chunk.inner_text()
+    assert chunk.locator('mark').count() == 0
+    assert chunk.locator('pre').inner_text() == '完整历史切片但无法唯一定位'
+
+    page.click('[data-discovery-kind="attribute"]')
+    page.click('[data-candidate-kind="attribute"]')
+    missing = page.locator('[data-candidate-evidence="assertion-unlocated"]')
+    page.wait_for_selector('[data-candidate-evidence="assertion-unlocated"][data-state="ready"]')
+    assert '历史来源无法定位' in missing.inner_text()
+    assert '断言所引用的片段没有历史记录。' in missing.inner_text()
+    assert '不能作为当前原文展示' not in missing.inner_text()
+    assert missing.locator('pre').count() == 0
+
+
+def test_candidate_switch_aborts_old_evidence_and_stale_response_cannot_overwrite(page):
+    page.click('[data-tab="ontology-workbench"]')
+    page.wait_for_selector('[data-candidate-id="c1"]')
+    page.evaluate("() => { evidenceDelays['assertion-1']=300; evidenceDelays['assertion-fail']=300; }")
+    page.click('[data-candidate-id="c1"]')
+    page.click('[data-candidate-id="c2"]')
+    page.wait_for_selector('[data-candidate-evidence="assertion-recovered"][data-state="ready"]')
+    page.wait_for_function("() => abortedEvidence.includes('assertion-1') && abortedEvidence.includes('assertion-fail')")
+    inspector = page.locator('#ontology-workbench-inspector')
+    assert 'Gamma one' in inspector.inner_text()
+    assert inspector.locator('[data-candidate-evidence="assertion-1"]').count() == 0
+
+
+def test_unresolvable_candidate_and_exception_do_not_request_assertion_evidence(page):
+    page.click('[data-tab="ontology-workbench"]')
+    page.wait_for_selector('[data-candidate-id="c3"]')
+    before = page.evaluate("() => apiCalls.filter(x => x.url.includes('/assertions/')).length")
+    page.click('[data-candidate-id="c3"]')
+    assert '旧候选只保留预览' in page.locator('#ontology-workbench-inspector').inner_text()
+    page.click('[data-discovery-kind="exception"]')
+    page.click('[data-candidate-kind="exception"]')
+    assert '证据无法定位' in page.locator('#ontology-workbench-inspector').inner_text()
+    assert page.evaluate("() => apiCalls.filter(x => x.url.includes('/assertions/')).length") == before
+
+
+def test_full_historical_source_selects_exact_pinned_version_and_reuses_viewer(page):
+    page.click('[data-tab="ontology-workbench"]')
+    page.wait_for_selector('[data-candidate-id="c1"]')
+    page.click('[data-candidate-id="c1"]')
+    page.wait_for_selector('[data-candidate-evidence="assertion-1"][data-state="ready"]')
+    page.locator('[data-candidate-evidence="assertion-1"] [data-open-candidate-source]').click()
+    page.wait_for_function("() => openedFrozenSource !== null")
+    calls = page.evaluate("() => apiCalls.filter(x => x.url.endsWith('/records/doc-1/history'))")
+    assert len(calls) == 1 and calls[0]['method'] == 'GET'
+    opened = page.evaluate("() => openedFrozenSource")
+    assert opened['version_id'] == 'doc-v2'
+    assert opened['version'] == 2
+    assert opened['full_text'].startswith('A' * 102 + '精确证据')
+    assert opened['start_char'] == 102 and opened['end_char'] == 106
 
 
 def test_discovery_separates_entities_relations_attributes_and_evidence_exceptions(page):

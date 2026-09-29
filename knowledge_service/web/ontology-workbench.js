@@ -3,7 +3,7 @@
   'use strict';
   const byId=id=>document.getElementById(id);
   const el=(tag,className,text)=>{const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=String(text);return node;};
-  const state={projectId:'',ontologyId:null,draftId:null,revision:null,selectedIri:null,displayPath:[],mode:'object',stage:'discover',hasDrafts:null,discoveryKind:'entity',filters:{query:'',source:'',confidence:'',cluster:''},cursors:{roots:null,children:new Map(),search:null,matrix:null},hierarchy:{items:[],expanded:new Map()},matrix:[],draft:null,discovery:null,candidates:null,changeProposals:[],controller:null};
+  const state={projectId:'',ontologyId:null,draftId:null,revision:null,selectedIri:null,displayPath:[],mode:'object',stage:'discover',hasDrafts:null,discoveryKind:'entity',filters:{query:'',source:'',confidence:'',cluster:''},cursors:{roots:null,children:new Map(),search:null,matrix:null},hierarchy:{items:[],expanded:new Map()},matrix:[],draft:null,discovery:null,candidates:null,changeProposals:[],controller:null,candidateEvidenceController:null,candidateEvidenceToken:0};
   const stages=[['discover','1','发现','候选与证据'],['design','2','设计','对象与层级'],['review','3','审核','逐项决策'],['validate','4','校验','图约束检查'],['publish','5','发布','版本与溯源']];
   const page=el('section','tab hidden ontology-workbench');
   page.id='tab-ontology-workbench';
@@ -21,6 +21,7 @@
     if(!response.ok){const detail=payload?.detail;const error=new Error(typeof detail==='string'?detail:(detail?.message||payload?.code||`请求失败（HTTP ${response.status}）`));error.code=payload?.code;error.details=payload?.details;error.status=response.status;throw error;}
     return payload;
   }
+  function cancelCandidateEvidence(){state.candidateEvidenceToken+=1;state.candidateEvidenceController?.abort();state.candidateEvidenceController=null;}
   const loadNode=message=>{const node=el('div','ontology-workbench__loading',message);return node;};
   function syncContext(){
     state.projectId=byId('project')?.value||'';
@@ -34,7 +35,7 @@
   }
   function setStage(stage){
     if(stage!=='discover'&&state.hasDrafts===false&&!state.draftId){syncStageAvailability();notice('请先从“发现”阶段生成草案，再进入设计。','warning');return;}
-    state.stage=stage;
+    if(stage!=='discover')cancelCandidateEvidence();state.stage=stage;
     page.dataset.stage=stage;
     page.querySelectorAll('[data-workbench-stage]').forEach(button=>{if(button.dataset.workbenchStage===stage)button.setAttribute('aria-current','step');else button.removeAttribute('aria-current');});
     const discover=stage==='discover';
@@ -87,7 +88,7 @@
   function discoveryKindTabs(){
     const tabs=el('div','ontology-workbench__candidate-tabs');
     const counts={entity:state.candidates?.nodes?.length||0,relation:state.candidates?.edges?.length||0,attribute:state.candidates?.attributes?.length||0,exception:state.candidates?.exceptions?.length||0};
-    [['entity','实体候选'],['relation','关系候选'],['attribute','属性候选'],['exception','证据异常']].forEach(([kind,label])=>{const button=el('button','secondary',`${label} ${counts[kind]}`);button.type='button';button.dataset.discoveryKind=kind;button.setAttribute('aria-pressed',String(state.discoveryKind===kind));button.addEventListener('click',()=>{state.discoveryKind=kind;state.filters.cluster='';renderDiscoveryData();});tabs.append(button);});return tabs;
+    [['entity','实体候选'],['relation','关系候选'],['attribute','属性候选'],['exception','证据异常']].forEach(([kind,label])=>{const button=el('button','secondary',`${label} ${counts[kind]}`);button.type='button';button.dataset.discoveryKind=kind;button.setAttribute('aria-pressed',String(state.discoveryKind===kind));button.addEventListener('click',()=>{cancelCandidateEvidence();state.discoveryKind=kind;state.filters.cluster='';renderDiscoveryData();});tabs.append(button);});return tabs;
   }
   function renderChangeProposals(){
     const pending=(state.changeProposals||[]).filter(item=>item.status==='pending');
@@ -95,7 +96,50 @@
     const section=el('section','ontology-workbench__change-proposals');section.append(el('h3','',`待审批本体变更申请 · ${pending.length}`),el('p','', '这些申请来自正式事实审核。批准会生成新本体版本，拒绝不会改变当前本体。'));
     pending.forEach(proposal=>{const card=el('article','ontology-workbench__change-proposal');const title=el('div');title.append(el('small','',`${proposal.operation==='add'?'新增':'调整'} · ${{class:'实体类',relation:'关系',attribute:'属性'}[proposal.kind]||proposal.kind}`),el('h4','',proposal.label||proposal.uri),el('p','',proposal.rationale||'未填写申请说明'));const impact=el('p','ontology-workbench__change-impact',`影响：现有知识 ${proposal.impact?.record_count||0} · 约束 ${proposal.impact?.constraint_count||0} · 关联候选 ${proposal.impact?.linked_candidates||0}`);const note=el('input');note.placeholder='审批意见（必填）';note.maxLength=2000;const actions=el('div','ontology-workbench__inspector-actions');const approve=el('button','','批准并生成本体版本');const reject=el('button','secondary','拒绝申请');approve.type=reject.type='button';const confirm=el('label','ontology-workbench__impact-confirm');const check=el('input');check.type='checkbox';confirm.append(check,document.createTextNode('确认高影响变更'));confirm.hidden=proposal.impact?.risk!=='high';const decide=async action=>{if(!note.value.trim()){notice('请填写本体变更审批意见','warning');note.focus();return;}approve.disabled=reject.disabled=true;try{await request(projectPath(`/ontology-change-proposals/${encodeURIComponent(proposal.id)}/decision`),{method:'POST',body:JSON.stringify({action,note:note.value.trim(),expected_revision:proposal.revision,expected_ontology_id:state.discovery?.ontology_id||null,confirm_impact:check.checked})});notice(action==='approve'?'本体变更已批准并生成新版本。':'本体变更申请已拒绝。');await loadDiscovery();}catch(error){notice(error.message,'error');approve.disabled=reject.disabled=false;}};approve.addEventListener('click',()=>decide('approve'));reject.addEventListener('click',()=>decide('reject'));actions.append(approve,reject);card.append(title,impact,confirm,note,actions);section.append(card);});return section;
   }
+  const candidateLocationLabels={exact:'精确证据位置',recovered_in_chunk:'历史切片内恢复定位',chunk:'仅保存切片级位置',unlocated:'历史来源无法定位'};
+  const rangeText=(start,end)=>Number.isSafeInteger(start)&&Number.isSafeInteger(end)?`${start}–${end}`:'未记录';
+  function candidateSourceCard(source,index,kind){
+    const article=el('article','ontology-workbench__candidate-evidence');article.dataset.candidateEvidence=source.assertion_id||`unresolvable-${index}`;
+    article.append(el('b','',source.document_title||source.document_id||'未知来源'),el('small','',`${source.chunk_id||'未记录片段'} · 置信度 ${source.confidence??'—'}`));
+    if(kind==='exception'||source.resolvable===false||!source.assertion_id){article.dataset.state='unresolvable';article.append(el('p','',source.evidence_preview||'该来源没有可解析的断言证据。'),el('small','','历史候选未绑定可解析断言，仅保留原始预览与异常原因，不会请求或推测当前原文。'));return article;}
+    article.dataset.state='loading';article.append(el('p','ontology-workbench__evidence-state','正在核验固定文档版本与历史切片…'));return article;
+  }
+  function appendCandidateChunk(article,resolution){
+    const mode=resolution.location?.mode||'unlocated';const chunk=resolution.chunk||{};const location=resolution.location||{};
+    if(mode==='unlocated'){article.append(el('p','ontology-workbench__evidence-warning',`定位原因：${location.reason||'source_unavailable'}`));return;}
+    const chunkText=typeof chunk.text==='string'?chunk.text:'';const pre=el('pre','ontology-workbench__source-chunk');
+    if(mode==='exact'||mode==='recovered_in_chunk'){
+      const before=typeof location.before==='string'?location.before:'';const highlight=typeof location.highlight==='string'?location.highlight:'';const after=typeof location.after==='string'?location.after:'';
+      pre.replaceChildren(document.createTextNode(before));if(highlight){const mark=document.createElement('mark');mark.textContent=highlight;pre.append(mark);}pre.append(document.createTextNode(after));
+    }else{pre.replaceChildren(document.createTextNode(chunkText));article.append(el('p','ontology-workbench__evidence-warning','只能确认到历史切片级别；下方展示完整历史切片，不标记或猜测更小范围。'));}
+    article.append(pre);
+  }
+  async function openCandidateHistoricalSource(article,resolution,token,signal){
+    const documentRef=resolution.document||{};const button=article.querySelector('[data-open-candidate-source]');button.disabled=true;
+    try{
+      const history=await request(projectPath(`/records/${encodeURIComponent(documentRef.id)}/history`),{signal});
+      if(token!==state.candidateEvidenceToken||signal.aborted||!article.isConnected)return;
+      const pinned=(history.versions||[]).find(version=>version.version_id===documentRef.version_id);
+      if(!pinned)throw new Error('固定历史版本不存在，未回退到最新版本');
+      if(typeof window.openFrozenSourceEvidence!=='function')throw new Error('历史原文查看器尚未加载');
+      const located=['exact','recovered_in_chunk'].includes(resolution.location?.mode);
+      window.openFrozenSourceEvidence({title:documentRef.title||documentRef.id||'历史来源',version:pinned.version,version_id:pinned.version_id,source_content:'full_version',reason:`候选证据 · ${candidateLocationLabels[resolution.location?.mode]||'历史来源'}`,full_text:typeof pinned.text==='string'?pinned.text:'',start_char:located?resolution.location.start_char:null,end_char:located?resolution.location.end_char:null});
+    }catch(error){if(error.name!=='AbortError'&&token===state.candidateEvidenceToken&&article.isConnected){const failure=el('p','ontology-workbench__evidence-warning',`历史原文读取失败：${error.message}`);article.append(failure);button.disabled=false;}}
+  }
+  function renderCandidateResolution(article,resolution,token,signal){
+    const documentRef=resolution.document||{};const chunk=resolution.chunk||{};const location=resolution.location||{};const mode=location.mode||'unlocated';
+    article.dataset.state='ready';article.replaceChildren(el('b','',documentRef.title||documentRef.id||'未知来源'),el('small','',`来源版本 ${documentRef.version??'未知'} · ${candidateLocationLabels[mode]||mode}`),el('small','',`片段 ${chunk.id||'未记录'} · 绝对切片范围 ${rangeText(chunk.start_char,chunk.end_char)}`));
+    if(mode==='exact'||mode==='recovered_in_chunk')article.append(el('small','',`绝对字符范围 ${rangeText(location.start_char,location.end_char)}`));
+    (resolution.integrity?.warnings||[]).forEach(warning=>article.append(el('p','ontology-workbench__evidence-warning',warning.message||warning.code||String(warning))));
+    appendCandidateChunk(article,resolution);
+    if(documentRef.id&&documentRef.version_id){const open=el('button','secondary','查看完整历史原文');open.type='button';open.dataset.openCandidateSource='';open.addEventListener('click',()=>openCandidateHistoricalSource(article,resolution,token,signal));article.append(open);}
+  }
+  async function loadCandidateEvidence(source,article,token,signal){
+    try{const resolution=await request(projectPath(`/assertions/${encodeURIComponent(source.assertion_id)}/evidence`),{signal});if(token!==state.candidateEvidenceToken||signal.aborted||!article.isConnected)return;renderCandidateResolution(article,resolution,token,signal);}
+    catch(error){if(error.name!=='AbortError'&&token===state.candidateEvidenceToken&&article.isConnected){article.dataset.state='error';const failure=el('p','ontology-workbench__evidence-warning',`证据读取失败：${error.message}`);article.replaceChildren(el('b','',source.document_title||source.document_id||'未知来源'),failure);}}
+  }
   function renderCandidateInspector(item,kind=state.discoveryKind){
+    cancelCandidateEvidence();const controller=new AbortController();state.candidateEvidenceController=controller;const token=state.candidateEvidenceToken;
     state.selectedIri=item.id||null;const host=byId('ontology-workbench-inspector');const summary=el('section','ontology-workbench__inspector-section');
     const heading=kind==='relation'?`${item.subject||'？'} — ${item.type||'未分类关系'} → ${item.object||'？'}`:kind==='attribute'?`${item.subject||'？'} — ${item.type||'未分类属性'} = ${JSON.stringify(item.value)}`:item.text||item.type||'候选详情';
     summary.append(el('small','ontology-workbench__eyebrow',({entity:'实体候选',relation:'关系候选',attribute:'属性候选',exception:'证据异常'}[kind]||'候选')),el('h4','',heading));
@@ -103,9 +147,9 @@
     if(kind==='relation')summary.append(el('p','',`实体到实体的事实 · 累计出现 ${item.occurrence_count||0} 次`));
     if(kind==='attribute')summary.append(el('p','',`实体的标量字段 · ${item.value_type||typeof item.value} · 累计出现 ${item.occurrence_count||0} 次`));
     if(kind==='exception')summary.append(el('p','',item.reason||'该候选无法通过正文证据或结构校验'),el('code','',item.reason_code||'unclassified_exception'));
-    const sources=candidateSources(item);const sourceCount=candidateSourceCount(item);const evidence=el('section','ontology-workbench__inspector-section');evidence.append(el('h4','',`来源预览 ${sourceCount}`));const list=el('div','ontology-workbench__evidence');
-    sources.forEach(source=>{const article=el('article');article.append(el('b','',source.document_title||source.document_id||'未知来源'),el('small','',`${source.chunk_id||'未记录片段'} · 置信度 ${source.confidence??'—'} · ${source.evidence_status||'exact'}`),el('p','',`来源预览：${source.evidence_preview||'未保存证据预览'}`));if(source.evidence_preview_truncated)article.append(el('small','','内容预览已截断。'));list.append(article);});
-    if(!list.childElementCount)list.append(el('p','', '没有可展示的来源预览。'));evidence.append(list);if(item.sources_truncated)evidence.append(el('p','ontology-workbench__source-truncation',`仅显示 ${sources.length}/${sourceCount} 条来源预览。`));replace(host,summary,evidence);
+    const sources=candidateSources(item);const sourceCount=candidateSourceCount(item);const evidence=el('section','ontology-workbench__inspector-section');evidence.append(el('h4','',`来源证据 ${sourceCount}`));const list=el('div','ontology-workbench__evidence');
+    sources.forEach((source,index)=>{const article=candidateSourceCard(source,index,kind);list.append(article);if(kind!=='exception'&&source.resolvable!==false&&source.assertion_id)loadCandidateEvidence(source,article,token,controller.signal);});
+    if(!list.childElementCount)list.append(el('p','', '没有可展示的来源证据。'));evidence.append(list);if(item.sources_truncated)evidence.append(el('p','ontology-workbench__source-truncation',`仅显示 ${sources.length}/${sourceCount} 条来源；其余来源未随候选列表返回。`));replace(host,summary,evidence);
   }
   function renderDiscoveryData(){
     const canvas=byId('ontology-workbench-canvas-content');const library=byId('ontology-workbench-library-list');
@@ -128,10 +172,10 @@
   function discoverySources(){const values=new Map();[...(state.candidates?.nodes||[]),...(state.candidates?.edges||[]),...(state.candidates?.attributes||[]),...(state.candidates?.exceptions||[])].flatMap(candidateSources).forEach(row=>{const key=row.document_id||row.document_title;if(key)values.set(key,row.document_title||row.document_id);});return values;}
   function refreshSourceFilter(){const select=byId('candidate-map-source');const selected=state.filters.source;replace(select,el('option','','全部来源'));select.firstChild.value='';discoverySources().forEach((label,value)=>{const option=el('option','',label);option.value=value;select.append(option);});select.value=selected;}
   function renderDiscoveryActions(){const bar=byId('ontology-workbench-actionbar');const legacy=el('button','secondary','打开完整候选脑图');legacy.type='button';legacy.addEventListener('click',()=>document.querySelector('[data-tab="candidate-mindmap"]')?.click());const create=el('button','','生成累计草案');create.type='button';create.id='ontology-workbench-create-discovery-draft';create.addEventListener('click',openDiscoveryDraftForm);replace(bar,legacy,create);}
-  function openDiscoveryDraftForm(){const host=byId('ontology-workbench-inspector');const section=el('section','ontology-workbench__inspector-section');section.append(el('h4','','生成累计草案'),el('p','','当前候选及来源证据会冻结到统一草案，后续进入对象设计和逐项审核。'));const input=el('input');input.id='ontology-discovery-draft-name';input.maxLength=200;input.placeholder='例如：直播规则本体';input.value='发现本体';const create=el('button','','生成并进入设计');create.type='button';create.addEventListener('click',()=>createDiscoveryDraft(input.value));section.append(input,create);replace(host,section);input.focus();}
+  function openDiscoveryDraftForm(){cancelCandidateEvidence();const host=byId('ontology-workbench-inspector');const section=el('section','ontology-workbench__inspector-section');section.append(el('h4','','生成累计草案'),el('p','','当前候选及来源证据会冻结到统一草案，后续进入对象设计和逐项审核。'));const input=el('input');input.id='ontology-discovery-draft-name';input.maxLength=200;input.placeholder='例如：直播规则本体';input.value='发现本体';const create=el('button','','生成并进入设计');create.type='button';create.addEventListener('click',()=>createDiscoveryDraft(input.value));section.append(input,create);replace(host,section);input.focus();}
   async function loadDiscovery(){
     if(!state.projectId){replace(byId('ontology-workbench-canvas-content'),el('div','ontology-workbench__empty','请先从左侧选择项目。'));replace(byId('ontology-workbench-library-list'));return;}
-    state.controller?.abort();state.controller=new AbortController();
+    cancelCandidateEvidence();state.controller?.abort();state.controller=new AbortController();
     replace(byId('ontology-workbench-canvas-content'),loadNode('正在读取发现统计与候选证据…'));notice();
     try{
       const [discovery,candidates,drafts,changes]=await Promise.all([request(projectPath('/ontology-discovery')),request(projectPath('/ontology-discovery/candidate-mindmap?limit=500')),request(projectPath('/ontology-drafts')),request(projectPath('/ontology-change-proposals')).catch(()=>({proposals:[]}))]);
@@ -319,7 +363,8 @@
   byId('candidate-map-source').addEventListener('change',event=>{state.filters.source=event.target.value;renderDiscoveryData();});
   byId('candidate-map-confidence').addEventListener('change',event=>{state.filters.confidence=event.target.value;renderDiscoveryData();});
   document.addEventListener('keydown',event=>{if(page.classList.contains('hidden')||state.stage!=='review'||event.altKey||event.ctrlKey||event.metaKey)return;const tag=document.activeElement?.tagName;if(['INPUT','TEXTAREA','SELECT'].includes(tag))return;const operations=reviewOperations();if(!operations.length)return;const key=event.key.toLowerCase();if(key==='j'){event.preventDefault();selectReviewOperation((state.reviewIndex||0)+1);}else if(key==='k'){event.preventDefault();selectReviewOperation((state.reviewIndex||0)-1);}else if(['a','e','r'].includes(key)){event.preventDefault();openDecision({a:'approve',e:'request_changes',r:'reject'}[key],operations[state.reviewIndex||0]);}});
-  byId('project').addEventListener('change',()=>{state.controller?.abort();Object.assign(state,{projectId:'',ontologyId:null,draftId:null,revision:null,selectedIri:null,displayPath:[],discoveryKind:'entity',filters:{query:'',source:'',confidence:'',cluster:''},draft:null,discovery:null,candidates:null,changeProposals:[],hasDrafts:null});syncStageAvailability();syncContext();if(!page.classList.contains('hidden'))setStage('discover');});
+  document.querySelectorAll('[data-tab]').forEach(button=>{if(button!==nav)button.addEventListener('click',cancelCandidateEvidence);});
+  byId('project').addEventListener('change',()=>{cancelCandidateEvidence();state.controller?.abort();Object.assign(state,{projectId:'',ontologyId:null,draftId:null,revision:null,selectedIri:null,displayPath:[],discoveryKind:'entity',filters:{query:'',source:'',confidence:'',cluster:''},draft:null,discovery:null,candidates:null,changeProposals:[],hasDrafts:null});syncStageAvailability();syncContext();if(!page.classList.contains('hidden'))setStage('discover');});
   setStage('discover');
   window.OntologyWorkbench={state,open:activate,openVersionGovernance,selectDraft,setStage};
 })();
