@@ -117,6 +117,19 @@ def test_generated_vocabulary_guard_rejects_unsupported_datatype_range():
     }
 
 
+def test_generated_vocabulary_guard_rejects_rdfs_literal_datatype_range():
+    turtle = VALID_GENERATED_TURTLE.replace("xsd:string", "rdfs:Literal")
+
+    with pytest.raises(GeneratedVocabularyConflict) as caught:
+        validate_generated_term_kinds(turtle)
+
+    assert caught.value.reason == "unsupported_datatype_range"
+    assert caught.value.detail == {
+        "property": "http://example.test/name",
+        "range": "http://www.w3.org/2000/01/rdf-schema#Literal",
+    }
+
+
 @pytest.mark.parametrize("invalid_shape", [
     "[] rdfs:subClassOf ex:Parent .",
     "[ a owl:Class ; owl:unionOf () ] rdfs:subClassOf ex:Parent .",

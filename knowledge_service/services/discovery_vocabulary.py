@@ -9,11 +9,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from rdflib import BNode, Graph, RDF, RDFS
-from rdflib.namespace import OWL
+from rdflib.namespace import OWL, XSD
 
 from .ontology_iri import valid_application_iri
 from .ontology_operations import (
-    _SUPPORTED_DATATYPES,
     _is_graph_class,
     _is_simple_anonymous_class,
 )
@@ -26,6 +25,10 @@ _KIND_ALIASES = {
 _CANDIDATE_KIND_ALIASES = {
     "class": "class", "relation": "relation", "attribute": "attribute",
 }
+_SUPPORTED_GENERATED_XSD_DATATYPES = frozenset({
+    XSD.string, XSD.boolean, XSD.integer, XSD.decimal, XSD.float, XSD.double,
+    XSD.date, XSD.dateTime,
+})
 
 
 def _immutable(*_args, **_kwargs):
@@ -186,7 +189,7 @@ def validate_generated_term_kinds(turtle: str) -> Graph:
             _raise_generated_conflict(
                 "datatype_property_range_count", property=str(property_node),
                 count=len(ranges))
-        if ranges[0] not in _SUPPORTED_DATATYPES:
+        if ranges[0] not in _SUPPORTED_GENERATED_XSD_DATATYPES:
             _raise_generated_conflict(
                 "unsupported_datatype_range", property=str(property_node),
                 range=str(ranges[0]))

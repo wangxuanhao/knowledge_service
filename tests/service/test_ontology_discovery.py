@@ -262,6 +262,53 @@ def test_create_draft_passes_only_normalized_candidates_to_induce(tmp_path, monk
     assert len(payload['candidate_snapshot']) == len(candidates)
 
 
+def test_merged_spellings_induce_one_term_and_rematerialize_every_source(
+        monkeypatch):
+    _install_fake_ontology_generator(monkeypatch, {'classes': [], 'properties': []})
+    candidates = [
+        {'id': 'z-spaced', 'kind': 'entity', 'text': 'Alice',
+         'proposed_type': ' Person ', 'document_id': 'doc',
+         'document_version_id': 'v1', 'evidence': 'Alice evidence'},
+        {'id': 'a-fullwidth', 'kind': 'entity', 'text': 'Bob',
+         'proposed_type': 'ＰＥＲＳＯＮ', 'document_id': 'doc',
+         'document_version_id': 'v1', 'evidence': 'Bob evidence'},
+    ]
+
+    accepted, normalization = _normalize_induction_candidates(candidates, '')
+    turtle, mappings, _ = _induce('project', 'merged', accepted)
+    reversed_accepted, _ = _normalize_induction_candidates(
+        list(reversed(candidates)), '')
+    _, reversed_mappings, _ = _induce('project', 'merged', reversed_accepted)
+
+    assert {item['id'] for item in accepted} == {'z-spaced', 'a-fullwidth'}
+    assert normalization.merged_groups == ({
+        'kind': 'class', 'canonical_name': 'person',
+        'candidate_ids': ['a-fullwidth', 'z-spaced'],
+        'accepted_candidate_id': 'a-fullwidth',
+        'evidence_refs': ['a-fullwidth', 'z-spaced'],
+    },)
+    assert set(mappings['entity_types']) == {' Person ', 'ＰＥＲＳＯＮ'}
+    assert len(set(mappings['entity_types'].values())) == 1
+    assert mappings == reversed_mappings
+    graph = Graph().parse(data=turtle, format='turtle')
+    assert len(set(graph.subjects(RDF.type, OWL.Class))) == 1
+
+    draft = {
+        'id': 'draft', 'candidate_snapshot': candidates,
+        'mappings': mappings,
+    }
+    records, skipped = _materialize_candidates('project', draft, 'ontology')
+
+    assert skipped == []
+    assert len(records) == 2
+    assert len({record['type'] for record in records}) == 1
+    assert {record['metadata']['discovery_candidate_id']: record['metadata']['evidence']
+            for record in records} == {
+        'z-spaced': 'Alice evidence',
+        'a-fullwidth': 'Bob evidence',
+    }
+
+
 def test_discovery_exceptions_are_separate_from_normal_counts_and_views():
     candidates=[
         {'id':'entity','kind':'entity','text':'账号甲','proposed_type':'账号','document_id':'doc'},

@@ -39,9 +39,12 @@ def _normalize_induction_candidates(candidates, baseline_turtle=None):
             item.get('assertion_id') or item['id']])
         boundary.append(payload)
     result=DiscoveryVocabularyNormalizer(baseline_turtle or '').normalize(boundary)
+    bindings={item['candidate_id']:item for item in result.candidate_bindings}
     accepted=[]
     for item in result.accepted_candidates:
         payload=deepcopy(originals[item['id']])
+        leader_id=bindings[item['id']]['accepted_candidate_id']
+        payload['vocabulary_name']=originals[leader_id]['proposed_type']
         if item.get('iri'):
             payload['iri']=item['iri']
         accepted.append(payload)
@@ -407,9 +410,13 @@ def _iri(base,name):
     return URIRef(base+readable_iri_segment(name))
 
 
+def _candidate_vocabulary_name(candidate):
+    return candidate.get('vocabulary_name') or candidate.get('proposed_type')
+
+
 def _candidate_iri_bindings(candidates, kind):
     return {
-        str(item['proposed_type']).strip(): URIRef(
+        str(_candidate_vocabulary_name(item)).strip(): URIRef(
             item.get('reuse_iri') or item.get('target_iri') or item['iri'])
         for item in candidates
         if item.get('kind') == kind
@@ -469,13 +476,14 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
     from semantica.ontology import OntologyGenerator
     by_id={x['id']:x for x in candidates if x['kind']=='entity'}
     entity_machine={source:_machine_name('EntityType',source) for source in
-        {x['proposed_type'] for x in candidates if x['kind']=='entity'}}
+        {_candidate_vocabulary_name(x) for x in candidates if x['kind']=='entity'}}
     relation_machine={source:_machine_name('RelationType',source) for source in
-        {x['proposed_type'] for x in candidates if x['kind']=='relation'}}
+        {_candidate_vocabulary_name(x) for x in candidates if x['kind']=='relation'}}
     sample_fields={'type','entity_type','name','text','confidence','properties'}
-    attribute_counts=Counter(str(x['proposed_type']).strip() for x in candidates if x['kind']=='attribute')
+    attribute_counts=Counter(str(_candidate_vocabulary_name(x)).strip()
+        for x in candidates if x['kind']=='attribute')
     attribute_machine={}
-    for source in {x['proposed_type'] for x in candidates if x['kind']=='attribute'}:
+    for source in {_candidate_vocabulary_name(x) for x in candidates if x['kind']=='attribute'}:
         if attribute_counts[str(source).strip()]<2:continue
         machine=_machine_name('AttributeType',str(source).strip())
         if machine in sample_fields:machine='AttributeType_'+hashlib.sha256(str(source).strip().encode('utf-8')).hexdigest()[:12]
@@ -485,15 +493,17 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
     reverse_attribute={value:str(key).strip() for key,value in attribute_machine.items()}
     attributes=defaultdict(dict)
     for item in candidates:
-        if item['kind']=='attribute' and item['proposed_type'] in attribute_machine:
+        source=_candidate_vocabulary_name(item)
+        if item['kind']=='attribute' and source in attribute_machine:
             attributes[item.get('entity_id')].setdefault(
-                attribute_machine[item['proposed_type']],item.get('value'))
+                attribute_machine[source],item.get('value'))
     entities=[]
     for item in candidates:
         if item['kind']!='entity':continue
         properties=attributes.get(item['id'],{})
-        entities.append({'type':entity_machine[item['proposed_type']],
-            'entity_type':entity_machine[item['proposed_type']],
+        source=_candidate_vocabulary_name(item)
+        entities.append({'type':entity_machine[source],
+            'entity_type':entity_machine[source],
             'name':item['text'],'text':item['text'],'confidence':item.get('confidence',1),
             'properties':properties,**properties})
     relationships=[]
@@ -501,11 +511,14 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
         if item['kind']!='relation':continue
         subject=by_id.get(item.get('subject_id'),{})
         obj=by_id.get(item.get('object_id'),{})
-        relationships.append({'type':relation_machine[item['proposed_type']],
-            'relationship_type':relation_machine[item['proposed_type']],
+        source=_candidate_vocabulary_name(item)
+        subject_type=_candidate_vocabulary_name(subject) or item.get('subject_type')
+        object_type=_candidate_vocabulary_name(obj) or item.get('object_type')
+        relationships.append({'type':relation_machine[source],
+            'relationship_type':relation_machine[source],
             'source':item.get('subject') or subject.get('text'),'target':item.get('object') or obj.get('text'),
-            'source_type':entity_machine.get(subject.get('proposed_type'),subject.get('proposed_type') or item.get('subject_type')),
-            'target_type':entity_machine.get(obj.get('proposed_type'),obj.get('proposed_type') or item.get('object_type'))})
+            'source_type':entity_machine.get(subject_type,subject_type),
+            'target_type':entity_machine.get(object_type,object_type)})
     base=f'urn:knowledge:ontology:{project_id}:'
     class_bindings=_candidate_iri_bindings(candidates,'entity')
     relation_bindings=_candidate_iri_bindings(candidates,'relation')
@@ -528,7 +541,8 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
             if key:class_lookup[str(key).lower()]=uri
         graph.add((uri,RDF.type,OWL.Class));graph.add((uri,RDFS.label,Literal(str(source),lang=_literal_language(source))))
         graph.add((uri,RDFS.comment,Literal(_definition('class',source),lang='zh')))
-    for source in sorted({x['proposed_type'] for x in candidates if x['kind']=='entity'}):
+    for source in sorted({_candidate_vocabulary_name(x)
+            for x in candidates if x['kind']=='entity'}):
         if source not in class_map:
             uri=(class_bindings.get(str(source).strip())
                 or class_lookup.get(str(source).strip().casefold()) or _iri(base,source))
@@ -582,13 +596,15 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
                 resolved=class_lookup.get(str(value).lower())
                 if resolved:graph.add((uri,RDFS.range,resolved))
                 elif str(value).startswith('xsd:'):graph.add((uri,RDFS.range,getattr(XSD,str(value).split(':',1)[1])))
-    for source in sorted({x['proposed_type'] for x in candidates if x['kind']=='relation'}):
+    for source in sorted({_candidate_vocabulary_name(x)
+            for x in candidates if x['kind']=='relation'}):
         if source not in relation_map:
             uri=(relation_bindings.get(str(source).strip())
                 or relation_lookup.get(str(source).strip().casefold()) or _iri(base,source));relation_map[source]=str(uri)
             graph.add((uri,RDF.type,OWL.ObjectProperty));graph.add((uri,RDFS.label,Literal(source,lang=_literal_language(source))))
             graph.add((uri,RDFS.comment,Literal(_definition('relation',source),lang='zh')))
-    attribute_sources={x['proposed_type'] for x in candidates if x['kind']=='attribute'}
+    attribute_sources={_candidate_vocabulary_name(x)
+        for x in candidates if x['kind']=='attribute'}
     for source in sorted(attribute_sources):
         canonical=str(source).strip()
         if canonical in attribute_map:continue
@@ -599,6 +615,13 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
             graph.add((uri,RDFS.comment,Literal(_definition('attribute',canonical),lang='zh')))
     attribute_map={source:attribute_map[str(source).strip()] for source in attribute_sources
         if str(source).strip() in attribute_map}
+    mapping_specs=(('entity',class_map),('relation',relation_map),('attribute',attribute_map))
+    for kind,mapping in mapping_specs:
+        for item in candidates:
+            if item.get('kind')!=kind:continue
+            target=_candidate_vocabulary_name(item)
+            iri=mapping.get(target) or mapping.get(str(target).strip())
+            if iri:mapping[item['proposed_type']]=iri
     # 父发现版本可能包含旧代码推断出的端点值域。
     # 对本开放候选集中观测到的每条关系都移除它们。显式约束属于
     # 引导式/非开放本体工作流及其审核队列。
