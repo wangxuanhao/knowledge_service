@@ -1,6 +1,10 @@
+import sys
+from types import ModuleType
+
 from fastapi.testclient import TestClient
 import pytest
-from rdflib import RDFS, URIRef
+from rdflib import Graph, RDF, RDFS, URIRef
+from rdflib.namespace import OWL
 
 from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
@@ -8,8 +12,24 @@ from knowledge_service.repository import Repository
 from knowledge_service.services.ontology import Ontology
 from knowledge_service.services.ontology_drafts import OntologyDrafts
 from knowledge_service.services.ontology_discovery import (
-    _candidate_mindmap, _candidates, _induce, _summary, _validated_materialization,
+    _candidate_mindmap, _candidates, _induce, _machine_name, _materialize_candidates,
+    _normalize_induction_candidates, _summary, _validated_materialization,
 )
+from knowledge_service.services.discovery_vocabulary import GeneratedVocabularyConflict
+
+
+def _install_fake_ontology_generator(monkeypatch, result):
+    module = ModuleType('semantica.ontology')
+
+    class FakeOntologyGenerator:
+        def __init__(self, **_kwargs):
+            pass
+
+        def generate_ontology(self, *_args, **_kwargs):
+            return result(*_args, **_kwargs) if callable(result) else result
+
+    module.OntologyGenerator = FakeOntologyGenerator
+    monkeypatch.setitem(sys.modules, 'semantica.ontology', module)
 
 
 def test_discovery_generates_readable_unicode_iris_for_every_term_kind():
@@ -27,6 +47,219 @@ def test_discovery_generates_readable_unicode_iris_for_every_term_kind():
     assert mappings['relation_types']['适用于'].endswith(':适用于')
     assert mappings['attributes']['发布日期'].endswith(':发布日期')
     assert all('%' not in iri for group in mappings.values() for iri in group.values())
+
+
+def test_induce_guard_reports_cross_kind_generated_iri_before_ontology_builder(
+        monkeypatch):
+    machine = _machine_name('AttributeType', '用户行为')
+    _install_fake_ontology_generator(monkeypatch, {
+        'classes': [],
+        'properties': [{
+            'name': machine, 'type': 'literal',
+            'metadata': {'inferred_from': machine},
+            'range': ['xsd:string'],
+        }],
+    })
+    candidates = [
+        {'id': 'entity', 'kind': 'entity', 'text': '操作',
+         'proposed_type': '用户行为'},
+        {'id': 'attribute-1', 'kind': 'attribute', 'entity_id': 'entity',
+         'proposed_type': '用户行为', 'value': '查看'},
+        {'id': 'attribute-2', 'kind': 'attribute', 'entity_id': 'entity',
+         'proposed_type': '用户行为', 'value': '编辑'},
+    ]
+
+    with pytest.raises(GeneratedVocabularyConflict) as caught:
+        _induce('project', 'guard', candidates)
+
+    assert caught.value.reason == 'multiple_governed_kinds'
+    assert caught.value.detail == {
+        'iri': 'urn:knowledge:ontology:project:用户行为',
+        'kinds': ['attribute', 'class'],
+    }
+
+
+def test_induce_uses_candidate_binding_iri_before_generating_one(monkeypatch):
+    _install_fake_ontology_generator(monkeypatch, {'classes': [], 'properties': []})
+    formal_iri = 'https://formal.example/vocabulary/Account'
+    turtle, mappings, _ = _induce('project', 'reuse', [{
+        'id': 'entity', 'kind': 'entity', 'text': '甲',
+        'proposed_type': '账号', 'iri': formal_iri,
+    }])
+
+    graph = Graph().parse(data=turtle, format='turtle')
+    assert mappings['entity_types']['账号'] == formal_iri
+    assert (URIRef(formal_iri), RDF.type, OWL.Class) in graph
+    assert (URIRef('urn:knowledge:ontology:project:账号'), RDF.type, OWL.Class) not in graph
+
+
+def test_materialization_keeps_normalizer_conflicts_out_of_provisional_records():
+    candidates = [
+        {'id': 'entity', 'kind': 'entity', 'text': '账号甲', 'proposed_type': '账号',
+         'document_id': 'doc', 'document_version_id': 'v1', 'evidence': '账号甲'},
+        {'id': 'conflict', 'kind': 'attribute', 'entity_id': 'entity',
+         'proposed_type': '用户行为', 'value': '查看', 'document_id': 'doc',
+         'document_version_id': 'v1', 'evidence': '备用',
+         'attribute_evidence': '用户行为为查看'},
+        {'id': 'low', 'kind': 'attribute', 'entity_id': 'entity',
+         'proposed_type': '备注', 'value': '试用', 'document_id': 'doc',
+         'document_version_id': 'v1', 'evidence': '备注为试用'},
+        {'id': 'accepted', 'kind': 'attribute', 'entity_id': 'entity',
+         'proposed_type': '状态', 'value': '启用', 'document_id': 'doc',
+         'document_version_id': 'v1', 'evidence': '状态为启用'},
+    ]
+    draft = {
+        'id': 'draft', 'candidate_snapshot': candidates,
+        'mappings': {
+            'entity_types': {'账号': 'http://example.test/Account'},
+            'relation_types': {},
+            'attributes': {
+                '用户行为': 'http://example.test/Behavior',
+                '备注': 'http://example.test/Note',
+                '状态': 'http://example.test/Status',
+            },
+        },
+    }
+    outcomes = [
+        {'candidate_id': 'conflict', 'code': 'class_property_name_collision'},
+        {'candidate_id': 'low', 'code': 'low_frequency_attribute'},
+    ]
+
+    records, skipped = _materialize_candidates(
+        'project', draft, 'ontology', candidate_outcomes=outcomes)
+
+    assert {record['metadata']['discovery_candidate_id'] for record in records} == {
+        'entity', 'accepted'}
+    assert {item['candidate_id']: item['reason_code'] for item in skipped} == {
+        'conflict': 'ontology_term_conflict',
+        'low': 'low_frequency_attribute',
+    }
+    assert next(item for item in skipped if item['candidate_id'] == 'conflict')[
+        'candidate'] == candidates[1]
+    assert next(item for item in skipped if item['candidate_id'] == 'low')[
+        'candidate'] == candidates[2]
+
+
+def test_normalized_induction_quarantines_cross_kind_and_low_frequency_candidates(
+        monkeypatch):
+    def inferred(payload, **_kwargs):
+        property_names = {
+            key for entity in payload['entities']
+            for key in entity.get('properties', {})
+        }
+        return {
+            'classes': [],
+            'properties': [
+                {'name': name, 'type': 'literal', 'range': ['xsd:string'],
+                 'metadata': {'inferred_from': name}}
+                for name in property_names
+            ],
+        }
+
+    _install_fake_ontology_generator(monkeypatch, inferred)
+    candidates = [
+        {'id': 'behavior-entity', 'kind': 'entity', 'text': '查看',
+         'proposed_type': '用户行为'},
+        {'id': 'behavior-attribute', 'kind': 'attribute',
+         'entity_id': 'behavior-entity', 'proposed_type': '用户行为', 'value': '查看'},
+        {'id': 'account-a', 'kind': 'entity', 'text': '账号甲', 'proposed_type': '账号'},
+        {'id': 'account-b', 'kind': 'entity', 'text': '账号乙', 'proposed_type': '账号'},
+        {'id': 'belongs-relation', 'kind': 'relation', 'subject_id': 'account-a',
+         'object_id': 'account-b', 'proposed_type': '属于'},
+        {'id': 'belongs-attribute-1', 'kind': 'attribute', 'entity_id': 'account-a',
+         'proposed_type': '属于', 'value': '组甲'},
+        {'id': 'belongs-attribute-2', 'kind': 'attribute', 'entity_id': 'account-b',
+         'proposed_type': '属于', 'value': '组乙'},
+        {'id': 'related', 'kind': 'relation', 'subject_id': 'account-a',
+         'object_id': 'account-b', 'proposed_type': '关联'},
+        {'id': 'status-a', 'kind': 'attribute', 'entity_id': 'account-a',
+         'proposed_type': '状态', 'value': '启用'},
+        {'id': 'status-b', 'kind': 'attribute', 'entity_id': 'account-b',
+         'proposed_type': '状态', 'value': '停用'},
+        {'id': 'note', 'kind': 'attribute', 'entity_id': 'account-a',
+         'proposed_type': '备注', 'value': '试用'},
+    ]
+
+    accepted, normalization = _normalize_induction_candidates(candidates, '')
+    turtle, mappings, _ = _induce('project', 'safe', accepted)
+
+    assert {item['id'] for item in accepted} == {
+        'behavior-entity', 'account-a', 'account-b', 'related', 'status-a', 'status-b'}
+    assert {item['candidate_id']: item['code'] for item in normalization.conflicts} == {
+        'behavior-attribute': 'class_property_name_collision',
+        'belongs-relation': 'relation_attribute_name_collision',
+        'belongs-attribute-1': 'relation_attribute_name_collision',
+        'belongs-attribute-2': 'relation_attribute_name_collision',
+        'note': 'low_frequency_attribute',
+    }
+    assert set(mappings['entity_types']) == {'用户行为', '账号'}
+    assert set(mappings['relation_types']) == {'关联'}
+    assert set(mappings['attributes']) == {'状态'}
+    graph = Graph().parse(data=turtle, format='turtle')
+    governed = (OWL.Class, RDFS.Class, OWL.ObjectProperty, OWL.DatatypeProperty)
+    for subject in set(graph.subjects(RDF.type, None)):
+        kinds = {kind for kind in governed if (subject, RDF.type, kind) in graph}
+        assert len(kinds) <= 1
+
+
+def test_create_draft_passes_only_normalized_candidates_to_induce(tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    candidates = [
+        {'id': 'behavior-entity', 'kind': 'entity', 'text': '查看',
+         'proposed_type': '用户行为'},
+        {'id': 'behavior-attribute', 'kind': 'attribute',
+         'entity_id': 'behavior-entity', 'proposed_type': '用户行为', 'value': '查看'},
+        {'id': 'account-a', 'kind': 'entity', 'text': '账号甲', 'proposed_type': '账号'},
+        {'id': 'account-b', 'kind': 'entity', 'text': '账号乙', 'proposed_type': '账号'},
+        {'id': 'status-a', 'kind': 'attribute', 'entity_id': 'account-a',
+         'proposed_type': '状态', 'value': '启用'},
+        {'id': 'status-b', 'kind': 'attribute', 'entity_id': 'account-b',
+         'proposed_type': '状态', 'value': '停用'},
+        {'id': 'note', 'kind': 'attribute', 'entity_id': 'account-a',
+         'proposed_type': '备注', 'value': '试用'},
+    ]
+    received = []
+
+    def fake_induce(_project_id, _name, accepted, baseline_turtle=None):
+        received.extend(accepted)
+        return """
+            @prefix ex: <http://example.test/> .
+            @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+            @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+            ex:Behavior a owl:Class .
+            ex:Account a owl:Class .
+            ex:Status a owl:DatatypeProperty ; rdfs:domain ex:Account ;
+                rdfs:range xsd:string .
+        """, {
+            'entity_types': {'用户行为': 'http://example.test/Behavior',
+                             '账号': 'http://example.test/Account'},
+            'relation_types': {},
+            'attributes': {'状态': 'http://example.test/Status'},
+        }, {'metadata': {}, 'validation': {}}
+
+    monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(discovery_api, '_induce', fake_induce)
+    app = create_app(tmp_path / 'normalized-draft.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': '安全归纳', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        response = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/drafts",
+            json={'name': '安全草案'})
+
+    assert response.status_code == 201, response.text
+    assert {item['id'] for item in received} == {
+        'behavior-entity', 'account-a', 'account-b', 'status-a', 'status-b'}
+    payload = response.json()
+    assert {item['candidate_id']: item['code']
+            for item in payload['candidate_outcomes']} == {
+        'behavior-attribute': 'class_property_name_collision',
+        'note': 'low_frequency_attribute',
+    }
+    assert len(payload['candidate_snapshot']) == len(candidates)
 
 
 def test_discovery_exceptions_are_separate_from_normal_counts_and_views():

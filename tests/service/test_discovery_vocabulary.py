@@ -9,12 +9,14 @@ from rdflib import Graph
 
 from knowledge_service.services.discovery_vocabulary import (
     DiscoveryVocabularyNormalizer,
+    GeneratedVocabularyConflict,
     InvalidBaselineVocabulary,
     InvalidDiscoveryCandidate,
     audit_formal_vocabulary,
     canonical_name,
     discovery_source_fingerprint,
     _index_baseline_graph,
+    validate_generated_term_kinds,
 )
 
 
@@ -26,6 +28,113 @@ ex:Person a owl:Class; rdfs:label "Human"@en, " PERSON ", "人"@zh .
 ex:OtherPerson a owl:Class; rdfs:label "人"@zh .
 ex:worksFor a owl:ObjectProperty; rdfs:label "employed by"@en .
 """
+
+
+VALID_GENERATED_TURTLE = """
+@prefix ex: <http://example.test/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+ex:Parent a rdfs:Class .
+ex:Child a owl:Class ; rdfs:subClassOf ex:Parent .
+ex:relatedTo a owl:ObjectProperty ; rdfs:domain ex:Child ; rdfs:range ex:Parent .
+ex:name a owl:DatatypeProperty ; rdfs:domain ex:Child ; rdfs:range xsd:string .
+"""
+
+
+def test_generated_vocabulary_guard_accepts_valid_governed_graph():
+    graph = validate_generated_term_kinds(VALID_GENERATED_TURTLE)
+
+    assert len(graph) == 9
+
+
+@pytest.mark.parametrize(("triple", "reason", "detail"), [
+    (
+        "ex:Child a owl:ObjectProperty .",
+        "multiple_governed_kinds",
+        {"iri": "http://example.test/Child", "kinds": ["class", "relation"]},
+    ),
+    (
+        "ex:undeclared rdfs:subClassOf ex:Parent .",
+        "subclass_subject_not_class",
+        {"node": "http://example.test/undeclared"},
+    ),
+    (
+        "ex:Child rdfs:subClassOf ex:undeclared .",
+        "subclass_object_not_class",
+        {"node": "http://example.test/undeclared"},
+    ),
+    (
+        "ex:relatedTo rdfs:domain ex:undeclared .",
+        "object_property_domain_not_class",
+        {"property": "http://example.test/relatedTo", "target": "http://example.test/undeclared"},
+    ),
+    (
+        "ex:relatedTo rdfs:range ex:undeclared .",
+        "object_property_range_not_class",
+        {"property": "http://example.test/relatedTo", "target": "http://example.test/undeclared"},
+    ),
+    (
+        "ex:name rdfs:domain ex:undeclared .",
+        "datatype_property_domain_not_class",
+        {"property": "http://example.test/name", "target": "http://example.test/undeclared"},
+    ),
+    (
+        "ex:name rdfs:range xsd:boolean .",
+        "datatype_property_range_count",
+        {"property": "http://example.test/name", "count": 2},
+    ),
+])
+def test_generated_vocabulary_guard_rejects_structural_conflicts(triple, reason, detail):
+    with pytest.raises(GeneratedVocabularyConflict) as caught:
+        validate_generated_term_kinds(VALID_GENERATED_TURTLE + triple)
+
+    assert caught.value.reason == reason
+    assert caught.value.detail == detail
+
+
+def test_generated_vocabulary_guard_requires_one_datatype_range():
+    turtle = VALID_GENERATED_TURTLE.replace(" ; rdfs:range xsd:string", "")
+
+    with pytest.raises(GeneratedVocabularyConflict) as caught:
+        validate_generated_term_kinds(turtle)
+
+    assert caught.value.reason == "datatype_property_range_count"
+    assert caught.value.detail == {
+        "property": "http://example.test/name", "count": 0}
+
+
+def test_generated_vocabulary_guard_rejects_unsupported_datatype_range():
+    turtle = VALID_GENERATED_TURTLE.replace("xsd:string", "xsd:duration")
+
+    with pytest.raises(GeneratedVocabularyConflict) as caught:
+        validate_generated_term_kinds(turtle)
+
+    assert caught.value.reason == "unsupported_datatype_range"
+    assert caught.value.detail == {
+        "property": "http://example.test/name",
+        "range": "http://www.w3.org/2001/XMLSchema#duration",
+    }
+
+
+@pytest.mark.parametrize("invalid_shape", [
+    "[] rdfs:subClassOf ex:Parent .",
+    "[ a owl:Class ; owl:unionOf () ] rdfs:subClassOf ex:Parent .",
+])
+def test_generated_vocabulary_guard_rejects_undeclared_or_complex_anonymous_classes(
+        invalid_shape):
+    with pytest.raises(GeneratedVocabularyConflict) as caught:
+        validate_generated_term_kinds(VALID_GENERATED_TURTLE + invalid_shape)
+
+    assert caught.value.reason == "subclass_subject_not_class"
+
+
+def test_generated_vocabulary_guard_accepts_simple_declared_anonymous_class():
+    turtle = VALID_GENERATED_TURTLE + """
+        [ a owl:Class ; rdfs:label "Anonymous" ] rdfs:subClassOf ex:Parent .
+    """
+
+    validate_generated_term_kinds(turtle)
 
 
 def test_canonical_name_applies_nfkc_whitespace_collapse_and_casefold():

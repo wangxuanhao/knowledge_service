@@ -15,12 +15,37 @@ from rdflib import Graph,Literal,Namespace,RDF,RDFS,URIRef
 from rdflib.namespace import OWL,XSD
 
 from ..services.ontology import Ontology, readable_iri_segment
+from ..services.discovery_vocabulary import (
+    DiscoveryVocabularyNormalizer,
+    validate_generated_term_kinds,
+)
 from ..core.time import utc_now
 from ..utils.attributes import primitive_datatype
 from ..utils.diagnostics import timed
 
 
 NORMAL_CANDIDATE_KINDS={'entity','relation','attribute'}
+
+
+def _normalize_induction_candidates(candidates, baseline_turtle=None):
+    """Normalize route candidates and return only safe Semantica inputs."""
+    originals={item['id']:item for item in candidates}
+    boundary=[]
+    for item in candidates:
+        payload=deepcopy(item)
+        payload['kind']='class' if item.get('kind')=='entity' else item.get('kind')
+        payload['name']=item.get('proposed_type')
+        payload['evidence_refs']=list(item.get('evidence_refs') or [
+            item.get('assertion_id') or item['id']])
+        boundary.append(payload)
+    result=DiscoveryVocabularyNormalizer(baseline_turtle or '').normalize(boundary)
+    accepted=[]
+    for item in result.accepted_candidates:
+        payload=deepcopy(originals[item['id']])
+        if item.get('iri'):
+            payload['iri']=item['iri']
+        accepted.append(payload)
+    return accepted,result
 
 
 def _literal_language(value):
@@ -37,14 +62,31 @@ def _formal_id(project_id,candidate):
     return 'discovery-'+hashlib.sha256(identity.encode()).hexdigest()[:28]
 
 
-def _materialize_candidates(project_id,draft,ontology_id):
+def _candidate_outcome_skip(item, outcome):
+    code = outcome.get('code')
+    reason_code = ('low_frequency_attribute' if code == 'low_frequency_attribute'
+        else 'ontology_term_conflict')
+    return {
+        'candidate_id': item.get('id'), 'kind': item.get('kind'),
+        'reason_code': reason_code,
+        'reason': ('低频属性未进入发现本体' if reason_code == 'low_frequency_attribute'
+            else '候选词与本体术语类型冲突'),
+        'candidate': deepcopy(item),
+    }
+
+
+def _materialize_candidates(project_id,draft,ontology_id,candidate_outcomes=()):
     """把已审核候选转换为可追溯的正式记录，无需再次调用模型。"""
     candidates=draft.get('candidate_snapshot') or []
     excluded=set(draft.get('excluded_candidate_ids') or [])
+    outcomes={item.get('candidate_id'):item for item in candidate_outcomes or ()}
     mappings=draft.get('mappings') or {};entity_types=mappings.get('entity_types') or {}
     relation_types=mappings.get('relation_types') or {};attribute_types=mappings.get('attributes') or {}
-    entities=[item for item in candidates if item.get('kind')=='entity' and item.get('id') not in excluded]
-    by_document=defaultdict(dict);records=[];skipped=[]
+    entities=[item for item in candidates if item.get('kind')=='entity' and item.get('id') not in excluded
+        and item.get('id') not in outcomes]
+    by_document=defaultdict(dict);records=[]
+    skipped=[_candidate_outcome_skip(item,outcomes[item.get('id')]) for item in candidates
+        if item.get('id') in outcomes]
     for item in entities:
         type_iri=entity_types.get(item.get('proposed_type'))
         if not type_iri or not str(item.get('text','')).strip():
@@ -59,7 +101,8 @@ def _materialize_candidates(project_id,draft,ontology_id):
                 'evidence':item.get('evidence'),'chunk_id':item.get('chunk_id')}})
     record_by_id={record['id']:record for record in records}
     for item in candidates:
-        if item.get('kind')!='attribute' or item.get('id') in excluded:continue
+        if (item.get('kind')!='attribute' or item.get('id') in excluded
+                or item.get('id') in outcomes):continue
         document_key=item.get('document_version_id') or item.get('document_id')
         entity_id=by_document[document_key].get(item.get('entity_id'));attribute=attribute_types.get(item.get('proposed_type'))
         if not entity_id or not attribute:
@@ -79,7 +122,8 @@ def _materialize_candidates(project_id,draft,ontology_id):
                 'attribute_evidence':item.get('attribute_evidence'),
                 'evidence_status':item.get('evidence_status'),'chunk_id':item.get('chunk_id')}})
     for item in candidates:
-        if item.get('kind')!='relation' or item.get('id') in excluded:continue
+        if (item.get('kind')!='relation' or item.get('id') in excluded
+                or item.get('id') in outcomes):continue
         document_key=item.get('document_version_id') or item.get('document_id');local=by_document[document_key]
         subject=local.get(item.get('subject_id'));obj=local.get(item.get('object_id'));type_iri=relation_types.get(item.get('proposed_type'))
         if not subject or not obj or not type_iri:
@@ -363,6 +407,16 @@ def _iri(base,name):
     return URIRef(base+readable_iri_segment(name))
 
 
+def _candidate_iri_bindings(candidates, kind):
+    return {
+        str(item['proposed_type']).strip(): URIRef(
+            item.get('reuse_iri') or item.get('target_iri') or item['iri'])
+        for item in candidates
+        if item.get('kind') == kind
+        and (item.get('reuse_iri') or item.get('target_iri') or item.get('iri'))
+    }
+
+
 def _machine_name(prefix,value):
     """为 Semantica 生成稳定的 ASCII 名称，而标签保留源语言。"""
     value=str(value).strip()
@@ -453,6 +507,9 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
             'source_type':entity_machine.get(subject.get('proposed_type'),subject.get('proposed_type') or item.get('subject_type')),
             'target_type':entity_machine.get(obj.get('proposed_type'),obj.get('proposed_type') or item.get('object_type'))})
     base=f'urn:knowledge:ontology:{project_id}:'
+    class_bindings=_candidate_iri_bindings(candidates,'entity')
+    relation_bindings=_candidate_iri_bindings(candidates,'relation')
+    attribute_bindings=_candidate_iri_bindings(candidates,'attribute')
     inferred=OntologyGenerator(base_uri=base,min_occurrences=1).generate_ontology(
         {'entities':entities,'relationships':relationships},name=name,build_hierarchy=True)
     graph=Graph()
@@ -464,7 +521,8 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
     for item in inferred_classes:
         machine_source=str(item.get('metadata',{}).get('inferred_from') or item.get('name'))
         source=reverse_entity.get(machine_source,machine_source)
-        uri=class_lookup.get(str(source).strip().casefold()) or _iri(base,source)
+        uri=(class_bindings.get(str(source).strip())
+            or class_lookup.get(str(source).strip().casefold()) or _iri(base,source))
         class_map[str(source)]=str(uri)
         for key in (source,machine_source,item.get('name'),item.get('uri')):
             if key:class_lookup[str(key).lower()]=uri
@@ -472,7 +530,8 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
         graph.add((uri,RDFS.comment,Literal(_definition('class',source),lang='zh')))
     for source in sorted({x['proposed_type'] for x in candidates if x['kind']=='entity'}):
         if source not in class_map:
-            uri=class_lookup.get(str(source).strip().casefold()) or _iri(base,source)
+            uri=(class_bindings.get(str(source).strip())
+                or class_lookup.get(str(source).strip().casefold()) or _iri(base,source))
             class_map[source]=str(uri);class_lookup[source.lower()]=uri
             graph.add((uri,RDF.type,OWL.Class));graph.add((uri,RDFS.label,Literal(source,lang=_literal_language(source))))
             graph.add((uri,RDFS.comment,Literal(_definition('class',source),lang='zh')))
@@ -503,7 +562,9 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
             continue
         source=(reverse_relation if is_object else reverse_attribute).get(machine_source,machine_source)
         lookup=relation_lookup if is_object else attribute_lookup
-        uri=lookup.get(str(source).strip().casefold()) or _iri(base,source)
+        bindings=relation_bindings if is_object else attribute_bindings
+        uri=(bindings.get(str(source).strip())
+            or lookup.get(str(source).strip().casefold()) or _iri(base,source))
         graph.add((uri,RDF.type,OWL.ObjectProperty if is_object else OWL.DatatypeProperty))
         graph.add((uri,RDFS.label,Literal(source,lang=_literal_language(source))))
         graph.add((uri,RDFS.comment,Literal(_definition('relation' if is_object else 'attribute',source),lang='zh')))
@@ -523,7 +584,8 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
                 elif str(value).startswith('xsd:'):graph.add((uri,RDFS.range,getattr(XSD,str(value).split(':',1)[1])))
     for source in sorted({x['proposed_type'] for x in candidates if x['kind']=='relation'}):
         if source not in relation_map:
-            uri=relation_lookup.get(str(source).strip().casefold()) or _iri(base,source);relation_map[source]=str(uri)
+            uri=(relation_bindings.get(str(source).strip())
+                or relation_lookup.get(str(source).strip().casefold()) or _iri(base,source));relation_map[source]=str(uri)
             graph.add((uri,RDF.type,OWL.ObjectProperty));graph.add((uri,RDFS.label,Literal(source,lang=_literal_language(source))))
             graph.add((uri,RDFS.comment,Literal(_definition('relation',source),lang='zh')))
     attribute_sources={x['proposed_type'] for x in candidates if x['kind']=='attribute'}
@@ -532,7 +594,7 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
         if canonical in attribute_map:continue
         existing=attribute_lookup.get(canonical.casefold())
         if existing or attribute_counts[canonical]>=2:
-            uri=existing or _iri(base,canonical);attribute_map[canonical]=str(uri)
+            uri=attribute_bindings.get(canonical) or existing or _iri(base,canonical);attribute_map[canonical]=str(uri)
             graph.add((uri,RDF.type,OWL.DatatypeProperty));graph.add((uri,RDFS.label,Literal(canonical,lang=_literal_language(canonical))))
             graph.add((uri,RDFS.comment,Literal(_definition('attribute',canonical),lang='zh')))
     attribute_map={source:attribute_map[str(source).strip()] for source in attribute_sources
@@ -543,5 +605,6 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
     for iri in relation_map.values():
         predicate=URIRef(iri);graph.remove((predicate,RDFS.domain,None));graph.remove((predicate,RDFS.range,None))
     turtle=graph.serialize(format='turtle')
+    validate_generated_term_kinds(turtle)
     Ontology(turtle)
     return turtle,{'entity_types':class_map,'relation_types':relation_map,'attributes':attribute_map},inferred

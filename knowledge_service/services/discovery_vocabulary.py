@@ -8,9 +8,15 @@ import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from rdflib import Graph
+from rdflib import BNode, Graph, RDF, RDFS
+from rdflib.namespace import OWL
 
 from .ontology_iri import valid_application_iri
+from .ontology_operations import (
+    _SUPPORTED_DATATYPES,
+    _is_graph_class,
+    _is_simple_anonymous_class,
+)
 from .ontology_vocabulary import GovernedVocabularyRecord, index_governed_vocabulary
 _KIND_ALIASES = {
     "class": "class", "classes": "class",
@@ -115,6 +121,76 @@ class InvalidBaselineVocabulary(ValueError):
 
 class InvalidDiscoveryCandidate(ValueError):
     """Raised when a discovery candidate violates the normalization boundary."""
+
+
+class GeneratedVocabularyConflict(ValueError):
+    """Raised when generated Turtle violates the governed OWL shape."""
+
+    def __init__(self, reason: str, detail: dict):
+        self.reason = reason
+        self.reason_code = reason
+        self.detail = detail
+        super().__init__(f"{reason}: {_canonical_json(detail)}")
+
+
+def _generated_class_target(graph: Graph, node) -> bool:
+    if not _is_graph_class(graph, node):
+        return False
+    return not isinstance(node, BNode) or _is_simple_anonymous_class(graph, node)
+
+
+def _raise_generated_conflict(reason: str, **detail) -> None:
+    raise GeneratedVocabularyConflict(reason, detail)
+
+
+def validate_generated_term_kinds(turtle: str) -> Graph:
+    """Parse and validate the final Semantica-adapted governed vocabulary."""
+    graph = Graph()
+    try:
+        graph.parse(data=turtle, format="turtle")
+    except Exception as exc:
+        raise GeneratedVocabularyConflict(
+            "generated_turtle_invalid", {"message": str(exc)}) from exc
+
+    for record in index_governed_vocabulary(graph):
+        if len(record.kinds) > 1:
+            _raise_generated_conflict(
+                "multiple_governed_kinds", iri=record.iri,
+                kinds=list(record.kinds))
+
+    for subject, target in sorted(
+            graph.subject_objects(RDFS.subClassOf), key=lambda pair: tuple(map(str, pair))):
+        if not _generated_class_target(graph, subject):
+            _raise_generated_conflict(
+                "subclass_subject_not_class", node=str(subject))
+        if not _generated_class_target(graph, target):
+            _raise_generated_conflict(
+                "subclass_object_not_class", node=str(target))
+
+    property_specs = (
+        (OWL.ObjectProperty, RDFS.domain, "object_property_domain_not_class"),
+        (OWL.ObjectProperty, RDFS.range, "object_property_range_not_class"),
+        (OWL.DatatypeProperty, RDFS.domain, "datatype_property_domain_not_class"),
+    )
+    for declaration, predicate, reason in property_specs:
+        for property_node in sorted(graph.subjects(RDF.type, declaration), key=str):
+            for target in sorted(graph.objects(property_node, predicate), key=str):
+                if not _generated_class_target(graph, target):
+                    _raise_generated_conflict(
+                        reason, property=str(property_node), target=str(target))
+
+    for property_node in sorted(
+            graph.subjects(RDF.type, OWL.DatatypeProperty), key=str):
+        ranges = sorted(set(graph.objects(property_node, RDFS.range)), key=str)
+        if len(ranges) != 1:
+            _raise_generated_conflict(
+                "datatype_property_range_count", property=str(property_node),
+                count=len(ranges))
+        if ranges[0] not in _SUPPORTED_DATATYPES:
+            _raise_generated_conflict(
+                "unsupported_datatype_range", property=str(property_node),
+                range=str(ranges[0]))
+    return graph
 
 
 def _valid_iri(value) -> bool:

@@ -21,7 +21,7 @@ from ..services.ontology_drafts import OntologyDrafts
 from ..services.ontology_discovery import (
     _candidates, _candidate_lifecycle, _candidate_mindmap, _induce,
     _materialize_candidates, _validated_materialization, _ontology_diff,
-    _quality_warnings, _summary, _literal_language,
+    _normalize_induction_candidates, _quality_warnings, _summary, _literal_language,
 )
 from ..utils.diagnostics import timed
 from ..core.time import utc_now
@@ -110,7 +110,9 @@ def install(app, service):
         ontologies=service.repository.list_ontologies(p)
         parent=ontologies[-1] if ontologies else None
         baseline=parent['turtle'] if parent else None
-        turtle,mappings,inferred=_induce(p,request.name,candidates,baseline_turtle=baseline)
+        induction_candidates,normalization=_normalize_induction_candidates(candidates,baseline)
+        turtle,mappings,inferred=_induce(
+            p,request.name,induction_candidates,baseline_turtle=baseline)
         summary=Ontology(turtle).summary();diff=_ontology_diff(baseline,turtle)
         candidate_ids=[x['id'] for x in candidates]
         effect_draft={
@@ -118,7 +120,7 @@ def install(app, service):
             'excluded_candidate_ids':[],'mappings':mappings,
         }
         provisional,initial_skipped=_materialize_candidates(
-            p,effect_draft,'__PUBLISHED_ONTOLOGY_ID__')
+            p,effect_draft,'__PUBLISHED_ONTOLOGY_ID__',normalization.conflicts)
         context=source_context(candidates)
         context['publication_effects']={
             'kind':'discovery','records':provisional,
@@ -135,6 +137,7 @@ def install(app, service):
         draft={'id':draft_id,'project_id':p,'name':request.name,'status':'draft','revision':1,
             'generator_backend':'semantica','created_at':utc_now(),'candidate_ids':candidate_ids,
             'candidate_snapshot':candidates,
+            'candidate_outcomes':[dict(item) for item in normalization.conflicts],
             'candidate_count':len(candidates),'turtle':turtle,'mappings':mappings,'summary':summary,
             'review_base_turtle':turtle,'review_base_mappings':deepcopy(mappings),
             'parent_ontology_id':parent['id'] if parent else None,'diff':diff,
@@ -231,7 +234,7 @@ def install(app, service):
             'excluded_candidate_ids':request.excluded_candidate_ids,
             'mappings':mappings}
         provisional,initial_skipped=_materialize_candidates(
-            p,effect_draft,'__PUBLISHED_ONTOLOGY_ID__')
+            p,effect_draft,'__PUBLISHED_ONTOLOGY_ID__',draft.get('candidate_outcomes'))
         current=governed.update_publication_effects(
             p,draft_id,current['revision'],{
                 'kind':'discovery','records':provisional,
