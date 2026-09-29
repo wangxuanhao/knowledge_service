@@ -776,14 +776,17 @@ def test_anonymous_class_definition_rejects_missing_parent():
         apply_operations(current, [operation])
 
 
-@pytest.mark.parametrize('subject', ['ex:Undeclared', '_:undeclared'])
-def test_subclass_subject_must_be_a_declared_class(subject):
+@pytest.mark.parametrize(('subject', 'error'), [
+    ('ex:Undeclared', 'subClassOf|声明|declared class'),
+    ('_:undeclared', '空白节点|RDF'),
+])
+def test_subclass_subject_must_be_a_declared_class(subject, error):
     current = BASE + f'{subject} rdfs:subClassOf ex:Root .'
     operation = build_operation(
         'add_annotation', 'http://ex/A',
         after={'predicate': str(RDFS.comment), 'value': 'validate graph'})
 
-    with pytest.raises(ValueError, match='subClassOf|声明|declared class'):
+    with pytest.raises(ValueError, match=error):
         apply_operations(current, [operation])
 
 
@@ -828,6 +831,34 @@ def test_valid_anonymous_class_parent_is_supported_by_canonical_diff():
 
     assert [operation['action'] for operation in operations] == ['add_annotation']
     assert isomorphic(actual, expected)
+
+
+def test_apply_operations_rejects_restriction_with_no_operations():
+    turtle = BASE + '''
+      ex:RestrictedChild a owl:Class; rdfs:subClassOf [
+        a owl:Restriction;
+        owl:onProperty ex:rel;
+        owl:someValuesFrom ex:B
+      ] .
+    '''
+
+    with pytest.raises(ValueError, match='Restriction|复杂'):
+        apply_operations(turtle, [])
+
+
+def test_apply_operations_accepts_simple_anonymous_class_with_no_operations():
+    turtle = BASE + '''
+      ex:SimpleChild a owl:Class; rdfs:subClassOf _:anonymous .
+      _:anonymous a rdfs:Class; rdfs:label "Simple parent";
+        rdfs:subClassOf ex:Root .
+    '''
+
+    graph = Graph().parse(data=apply_operations(turtle, []), format='turtle')
+    parent = graph.value(URIRef('http://ex/SimpleChild'), RDFS.subClassOf)
+
+    assert isinstance(parent, BNode)
+    assert (parent, RDF.type, RDFS.Class) in graph
+    assert (parent, RDFS.subClassOf, URIRef('http://ex/Root')) in graph
 
 
 def test_definition_validation_rejects_complex_anonymous_class_expression():

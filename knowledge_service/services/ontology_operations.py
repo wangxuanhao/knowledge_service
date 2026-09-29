@@ -724,6 +724,7 @@ def apply_operations(base_turtle: str, operations: Iterable[dict]) -> str:
             _apply_scoped_shacl_patch(graph, target, before, after)
         else:
             raise ValueError(f'不支持的本体操作：{action}')
+    _validate_supported_bnodes(graph)
     _validate_definition_graph(graph)
     return graph.serialize(format='turtle')
 
