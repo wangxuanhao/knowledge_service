@@ -393,6 +393,7 @@ def absolute_iri(value):
 
 def term_kind(ontology, node):
     """返回术语在本体中的类别：class / relation / attribute，未定义则 None。"""
+    ontology._refresh_vocabulary()
     if node in ontology.classes:
         return 'class'
     if node in ontology.relations:

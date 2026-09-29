@@ -247,9 +247,12 @@ def test_quarantined_conflicts_retain_all_evidence_references():
 
 def test_multiple_candidate_kinds_claiming_same_explicit_iri_are_all_quarantined():
     candidates = [
-        {"id": "c1", "kind": "class", "name": "Person", "iri": "urn:shared"},
-        {"id": "c2", "kind": "relation", "name": "employs", "iri": "urn:shared"},
-        {"id": "c3", "kind": "class", "name": "Human", "iri": "urn:other"},
+        {"id": "c1", "kind": "class", "name": "Person",
+         "iri": "urn:knowledge:shared"},
+        {"id": "c2", "kind": "relation", "name": "employs",
+         "iri": "urn:knowledge:shared"},
+        {"id": "c3", "kind": "class", "name": "Human",
+         "iri": "urn:knowledge:other"},
     ]
 
     result = DiscoveryVocabularyNormalizer("").normalize(candidates)
@@ -614,6 +617,20 @@ def test_candidate_boundary_accepts_valid_repository_urns_and_http_iris():
         "https://example.test/schema#HttpTerm",
         "urn:knowledge:ontology:project:UrnTerm",
     ]
+
+
+@pytest.mark.parametrize("iri", [
+    "urn:ab:Term",
+    f"urn:{'a' * 32}:Term",
+    "urn:knowledge:ontology:project:知识%20条目",
+    "urn:knowledge:Term?+resolution/path?query?=qualifier/value#fragment",
+])
+def test_candidate_boundary_accepts_structurally_valid_rfc8141_urns(iri):
+    result = DiscoveryVocabularyNormalizer("").normalize([
+        {"id": "candidate", "kind": "class", "name": "Term", "iri": iri},
+    ])
+
+    assert result.accepted_candidates[0]["iri"] == iri
 
 
 @pytest.mark.parametrize("iri", [

@@ -60,6 +60,17 @@ def _apply(*operations, base=BASE):
     "did:example:term",
     "http://example.test:/Term",
     "http://example.test/%ZZ",
+    "urn:x",
+    "urn::Term",
+    "urn:a:Term",
+    "urn:knowledge:",
+    "urn:-bad:Term",
+    "urn:knowledge:/Term",
+    f"urn:{'a' * 33}:Term",
+    "urn:bad-:Term",
+    "urn:knowledge:Term?bad",
+    "urn:knowledge:Term?+",
+    "urn:knowledge:Term?=",
 ])
 def test_application_iri_policy_is_shared_across_entrypoints(iri):
     assert absolute_iri(iri) is False
@@ -652,6 +663,25 @@ def test_restore_selected_none_datatype_clears_current_datatype():
     assert list(restored.graph.objects(URIRef('http://ex/value'), RDFS.range)) == []
 
 
+@pytest.mark.parametrize(('target', 'kind', 'field', 'value'), [
+    ('http://ex/A', 'class', 'parents', ['ftp://example.test/Parent']),
+    ('http://ex/rel', 'relation', 'domain', ['did:example:Domain']),
+    ('http://ex/rel', 'relation', 'range', ['http://example.test:/Range']),
+    ('http://ex/value', 'attribute', 'datatype', 'urn:a:string'),
+])
+def test_restore_template_definition_iris_use_shared_application_policy(
+        target, kind, field, value):
+    current = BASE + f'<{target}> owl:deprecated true .'
+    operation = build_operation('restore_term', target, after={
+        'source_ontology_id': 'immutable-source',
+        'selected_fields': [field],
+        'template': {'kind': kind, field: value},
+    })
+
+    with pytest.raises(ValueError, match='绝对 IRI|absolute IRI'):
+        apply_operations(current, [operation])
+
+
 def test_annotation_only_restore_preserves_class_node_shape_subgraph():
     current = BASE + '''
       @prefix sh: <http://www.w3.org/ns/shacl#> .
@@ -708,6 +738,28 @@ def test_restore_term_requires_deprecated_target_and_blocks_historical_cycle():
         'template': {**template, 'parents': ['http://ex/B']}})
     with pytest.raises(ValueError, match='循环|cycle'):
         apply_operations(cyclic_base, [cyclic_restore])
+
+
+def test_anonymous_owl_class_parent_is_valid_but_not_reusable_vocabulary():
+    current = BASE + '''
+      ex:AnonymousChild a owl:Class; rdfs:subClassOf [
+        a owl:Class; rdfs:label "Anonymous parent"
+      ] .
+    '''
+    operation = build_operation('add_annotation', 'http://ex/AnonymousChild', after={
+        'predicate': str(RDFS.comment), 'value': 'keeps anonymous parent',
+    })
+
+    restored = Ontology(apply_operations(current, [operation]))
+    child = URIRef('http://ex/AnonymousChild')
+    parents = list(restored.graph.objects(child, RDFS.subClassOf))
+
+    assert len(parents) == 1
+    assert isinstance(parents[0], BNode)
+    assert (parents[0], RDF.type, OWL.Class) in restored.graph
+    assert parents[0] not in restored.classes
+    with pytest.raises(ValueError):
+        restored.resolve('Anonymous parent')
 
 
 @pytest.mark.parametrize('operation', [

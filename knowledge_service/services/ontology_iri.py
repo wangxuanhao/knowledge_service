@@ -12,6 +12,10 @@ _INVALID_RAW_IRI_CHARACTERS = frozenset('<>"{}|^`')
 _UNRESERVED = frozenset(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 _USERINFO_RAW = _UNRESERVED | frozenset("!$&'()*+,;=:")
+_URN_PCHAR_RAW = _UNRESERVED | frozenset("!$&'()*+,;=:@")
+_URN_NSS_RAW = _URN_PCHAR_RAW | frozenset("/")
+_URN_COMPONENT_RAW = _URN_NSS_RAW | frozenset("?")
+_URN_NID = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,30}[A-Za-z0-9])")
 _RFC3987_UCSCHAR_RANGES = (
     (0x00A0, 0xD7FF),
     (0xF900, 0xFDCF),
@@ -117,6 +121,74 @@ def _sanitize_http_authority(value: str) -> str | None:
     return f"{value[:authority_start]}{safe_authority}{suffix}"
 
 
+def _valid_urn_component(
+        value: str, allowed_raw: frozenset[str], *, allow_empty: bool = False,
+        first_allowed_raw: frozenset[str] | None = None) -> bool:
+    """Validate one RFC 8141 component after global Unicode screening."""
+    if not value:
+        return allow_empty
+    index = 0
+    while index < len(value):
+        character = value[index]
+        raw_characters = (
+            first_allowed_raw
+            if index == 0 and first_allowed_raw is not None
+            else allowed_raw
+        )
+        if ord(character) >= 0x80 or character in raw_characters:
+            index += 1
+        elif (character == "%" and index + 2 < len(value)
+              and all(item in "0123456789abcdefABCDEF"
+                      for item in value[index + 1:index + 3])):
+            index += 3
+        else:
+            return False
+    return True
+
+
+def _valid_urn(value: str) -> bool:
+    """Validate the RFC 8141 NID, NSS, optional r/q components, and fragment."""
+    assigned_name = value.split(":", 1)[1]
+    nid, separator, tail = assigned_name.partition(":")
+    if not separator or not _URN_NID.fullmatch(nid):
+        return False
+
+    body, fragment_separator, fragment = tail.partition("#")
+    if (fragment_separator
+            and not _valid_urn_component(
+                fragment, _URN_COMPONENT_RAW, allow_empty=True)):
+        return False
+
+    question = body.find("?")
+    nss = body if question < 0 else body[:question]
+    suffix = "" if question < 0 else body[question:]
+    if not _valid_urn_component(
+            nss, _URN_NSS_RAW, first_allowed_raw=_URN_PCHAR_RAW):
+        return False
+    if not suffix:
+        return True
+
+    r_component = q_component = None
+    if suffix.startswith("?+"):
+        remainder = suffix[2:]
+        q_separator = remainder.find("?=")
+        if q_separator >= 0:
+            r_component = remainder[:q_separator]
+            q_component = remainder[q_separator + 2:]
+        else:
+            r_component = remainder
+    elif suffix.startswith("?="):
+        q_component = suffix[2:]
+    else:
+        return False
+    return all(
+        _valid_urn_component(
+            component, _URN_COMPONENT_RAW, first_allowed_raw=_URN_PCHAR_RAW)
+        for component in (r_component, q_component)
+        if component is not None
+    )
+
+
 def valid_application_iri(value) -> bool:
     """Return whether ``value`` is an application-safe HTTP(S) or URN IRI."""
     if not isinstance(value, str):
@@ -137,6 +209,8 @@ def valid_application_iri(value) -> bool:
         parsed_value = _sanitize_http_authority(value)
         if parsed_value is None:
             return False
+    elif scheme == "urn":
+        return _valid_urn(value)
     elif "[" in value or "]" in value:
         return False
     try:

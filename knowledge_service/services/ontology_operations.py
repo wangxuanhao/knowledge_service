@@ -294,9 +294,29 @@ def _require_absolute_iri(value, label: str) -> str:
     return value
 
 
+def _restore_iri_values(template: dict, field: str) -> list[str]:
+    values = template.get(field, [])
+    if not isinstance(values, (list, tuple, set, frozenset)):
+        raise ValueError(
+            f'restore template {field} requires a collection of absolute IRIs')
+    return [
+        _require_absolute_iri(value, f'restore template {field} absolute IRI')
+        for value in values
+    ]
+
+
 def _apply_template(graph: Graph, node: URIRef, template: dict,
                     selected_fields: Iterable[str] | None = None) -> None:
     fields = set(selected_fields or _SELECTABLE_TEMPLATE_FIELDS)
+    prepared_iris = {
+        field: _restore_iri_values(template, field)
+        for field in ('parents', 'domain', 'range')
+        if field in fields
+    }
+    datatype = template.get('datatype') if 'datatype' in fields else None
+    if datatype is not None:
+        datatype = _require_absolute_iri(
+            datatype, 'restore template datatype absolute IRI')
     if 'annotations' in fields:
         prepared_annotations = []
         for annotation in template.get('annotations', []):
@@ -323,14 +343,13 @@ def _apply_template(graph: Graph, node: URIRef, template: dict,
             graph.add((node, predicate, value))
     if 'parents' in fields:
         graph.remove((node, RDFS.subClassOf, None))
-        for parent in template.get('parents', []):
+        for parent in prepared_iris['parents']:
             graph.add((node, RDFS.subClassOf, URIRef(parent)))
     if 'domain' in fields:
-        _set_constraint(graph, node, RDFS.domain, template.get('domain', []))
+        _set_constraint(graph, node, RDFS.domain, prepared_iris['domain'])
     if 'range' in fields:
-        _set_constraint(graph, node, RDFS.range, template.get('range', []))
+        _set_constraint(graph, node, RDFS.range, prepared_iris['range'])
     if 'datatype' in fields and template.get('kind') == 'attribute':
-        datatype = template.get('datatype')
         _set_constraint(graph, node, RDFS.range, [datatype] if datatype else [])
 
 
@@ -433,7 +452,9 @@ def _validate_definition_graph(graph: Graph) -> None:
     ontology = Ontology(graph.serialize(format='turtle'))
     for child in ontology.classes:
         for parent in graph.objects(child, RDFS.subClassOf):
-            if parent not in ontology.classes:
+            anonymous_class = (
+                isinstance(parent, BNode) and _is_graph_class(graph, parent))
+            if parent not in ontology.classes and not anonymous_class:
                 raise ValueError(f'父类不存在：{parent}')
         if child in {parent for direct in graph.objects(child, RDFS.subClassOf)
                      for parent in ontology.parents(direct)}:

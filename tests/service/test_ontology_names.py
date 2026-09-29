@@ -4,7 +4,7 @@ from rdflib.namespace import OWL
 
 import knowledge_service.services.ontology as ontology_module
 from knowledge_service.services.discovery_vocabulary import DiscoveryVocabularyNormalizer
-from knowledge_service.services.ontology import Ontology,local_name
+from knowledge_service.services.ontology import Ontology, local_name, term_kind
 
 
 def test_local_name_supports_project_urns_without_breaking_urls():
@@ -132,3 +132,17 @@ def test_blank_node_classes_remain_anonymous_graph_semantics():
     assert [item['name'] for item in ontology.summary()['classes']] == ['Named']
     with pytest.raises(ValueError):
         ontology.resolve('Anonymous')
+
+
+def test_term_kind_observes_live_graph_mutations():
+    ontology = Ontology('')
+    term = URIRef('http://example.test/Mutable')
+
+    assert term_kind(ontology, term) is None
+
+    ontology.graph.add((term, RDF.type, OWL.Class))
+    assert term_kind(ontology, term) == 'class'
+
+    ontology.graph.remove((term, RDF.type, OWL.Class))
+    ontology.graph.add((term, RDF.type, OWL.ObjectProperty))
+    assert term_kind(ontology, term) == 'relation'
