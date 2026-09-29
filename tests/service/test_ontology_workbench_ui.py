@@ -211,7 +211,7 @@ def test_discovery_uses_one_explained_workspace_instead_of_duplicate_side_queue(
     canvas = page.locator('#ontology-workbench-canvas-content').inner_text()
     assert '这里是什么' in canvas
     assert '从业务文档中提取' in canvas
-    assert '候选术语' in canvas
+    assert '等待确认的术语' in canvas
     assert page.locator('[data-candidate-id]').count() == 3
     assert '从左侧选择' not in page.locator('#ontology-workbench-inspector').inner_text()
 
