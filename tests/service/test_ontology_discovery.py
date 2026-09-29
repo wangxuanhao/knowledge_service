@@ -3,7 +3,7 @@ from types import ModuleType
 
 from fastapi.testclient import TestClient
 import pytest
-from rdflib import Graph, RDF, RDFS, URIRef
+from rdflib import Graph, Literal, RDF, RDFS, URIRef
 from rdflib.namespace import OWL
 
 from knowledge_service.api import create_app
@@ -360,6 +360,70 @@ def test_review_excluding_merged_spelling_removes_shared_term_and_all_dependents
     skipped = {item['candidate_id']: item for item in effects['skipped_candidates']}
     assert set(skipped) == {'spaced', 'fullwidth'}
     assert skipped['spaced']['reason'] == skipped['fullwidth']['reason']
+
+
+def test_review_ignores_sibling_label_edit_for_excluded_shared_iri(
+        tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    _install_fake_ontology_generator(monkeypatch, {'classes': [], 'properties': []})
+    candidates = [
+        {'id': 'spaced', 'kind': 'entity', 'text': 'Alice',
+         'proposed_type': ' Person ', 'evidence': 'Alice evidence'},
+        {'id': 'fullwidth', 'kind': 'entity', 'text': 'Bob',
+         'proposed_type': 'ＰＥＲＳＯＮ', 'evidence': 'Bob evidence'},
+        {'id': 'unrelated', 'kind': 'entity', 'text': 'ACME',
+         'proposed_type': 'Organization', 'evidence': 'ACME evidence'},
+    ]
+    baseline = '''
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        <urn:test:Person> a owl:Class ;
+            rdfs:label " Person ", "ＰＥＲＳＯＮ" .
+        <urn:test:Organization> a owl:Class ; rdfs:label "Organization" .
+    '''
+    monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    app = create_app(tmp_path / 'review-label-alias.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': '标签审核', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        app.state.service.repository.save_ontology(
+            project['id'], baseline, Ontology(baseline).summary())
+        base = f"/api/projects/{project['id']}/ontology-discovery"
+        created = client.post(base + '/drafts', json={'name': '标签草案'})
+        assert created.status_code == 201, created.text
+        draft = created.json()
+        shared_iri = draft['mappings']['entity_types'][' Person ']
+        unrelated_iri = draft['mappings']['entity_types']['Organization']
+
+        reviewed = client.put(base + f"/drafts/{draft['id']}", json={
+            'excluded_terms': [' Person '],
+            'term_labels': {
+                'ＰＥＲＳＯＮ': 'Must Not Return',
+                'Organization': 'Company',
+            },
+        })
+        current = OntologyDrafts(app.state.service.repository).get(
+            project['id'], draft['id'])
+
+    assert reviewed.status_code == 200, reviewed.text
+    payload = reviewed.json()
+    assert payload['mappings']['entity_types'] == {'Organization': unrelated_iri}
+    legacy_graph = Graph().parse(data=payload['turtle'], format='turtle')
+    assert not any(legacy_graph.triples((URIRef(shared_iri), None, None)))
+    assert (URIRef(unrelated_iri), RDFS.label, Literal('Company', lang='en')) in legacy_graph
+    authoritative = Graph().parse(data=current['turtle'], format='turtle')
+    assert (URIRef(shared_iri), RDFS.label, Literal('Must Not Return', lang='en')) \
+        not in authoritative
+    assert (URIRef(unrelated_iri), RDFS.label, Literal('Company', lang='en')) \
+        in authoritative
+    active_ids = {
+        item['id'] for item in Ontology(current['turtle']).summary(active_only=True)['classes']}
+    assert shared_iri not in active_ids
+    effects = current['source_context']['publication_effects']
+    assert {record['metadata']['discovery_candidate_id']
+            for record in effects['records']} == {'unrelated'}
 
 
 def test_discovery_exceptions_are_separate_from_normal_counts_and_views():

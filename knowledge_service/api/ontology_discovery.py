@@ -184,11 +184,16 @@ def install(app, service):
             raise ValueError('审核结果包含未知本体术语')
         graph=Graph();graph.parse(data=base_turtle,format='turtle');mappings=deepcopy(base_mappings)
         iri_by_source={source:URIRef(iri) for group in base_mappings.values() for source,iri in group.items()}
+        excluded_iris={iri_by_source[source] for source in request.excluded_terms}
+        label_edits={}
         for source,label in request.term_labels.items():
+            iri=iri_by_source[source]
+            if iri in excluded_iris:continue
             label=label.strip()
             if not label:raise ValueError('本体术语名称不能为空')
-            iri=iri_by_source[source];graph.remove((iri,RDFS.label,None));graph.add((iri,RDFS.label,Literal(label,lang=_literal_language(label))))
-        excluded_iris={iri_by_source[source] for source in request.excluded_terms}
+            label_edits[iri]=label
+        for iri,label in label_edits.items():
+            graph.remove((iri,RDFS.label,None));graph.add((iri,RDFS.label,Literal(label,lang=_literal_language(label))))
         for iri in excluded_iris:
             graph.remove((iri,None,None));graph.remove((None,None,iri))
         for group in mappings.values():
@@ -197,6 +202,14 @@ def install(app, service):
         turtle=graph.serialize(format='turtle');summary=Ontology(turtle).summary()
         # Mirror legacy review edits into the authoritative append-only draft.
         current=governed.get(p,draft_id)
+        baseline_excluded_iris=set()
+        if draft.get('parent_ontology_id') and excluded_iris:
+            baseline_graph=Graph();baseline_graph.parse(
+                data=service.repository.get_ontology(
+                    p,draft['parent_ontology_id'])['turtle'],format='turtle')
+            baseline_excluded_iris={
+                iri for iri in excluded_iris
+                if any(baseline_graph.triples((iri,None,None)))}
         for target_iri in sorted(excluded_iris,key=str):
             iri=str(target_iri)
             targeted=[operation for operation in current['operations']
@@ -207,28 +220,18 @@ def install(app, service):
                         'action':'withdraw_operation',
                         'operation_id':operation['id'],
                         'reason':'发现审核排除术语'})
-            else:
+            if target_iri in baseline_excluded_iris or not targeted:
                 current=governed.command(p,draft_id,current['revision'],{
                     'action':'retire_term','target_iri':iri,
                     'reason':'发现审核停用已发布术语'})
         desired_turtle=turtle
-        baseline_exclusion=False
-        if draft.get('parent_ontology_id') and request.excluded_terms:
-            baseline_graph=Graph();baseline_graph.parse(
-                data=service.repository.get_ontology(
-                    p,draft['parent_ontology_id'])['turtle'],format='turtle')
-            baseline_exclusion=any(
-                any(baseline_graph.triples((iri_by_source[source],None,None)))
-                for source in request.excluded_terms)
+        baseline_exclusion=bool(baseline_excluded_iris)
         if baseline_exclusion:
             adjusted=Graph();adjusted.parse(data=current['turtle'],format='turtle')
-            for source,label in request.term_labels.items():
-                if source in request.excluded_terms:
-                    continue
-                iri=iri_by_source[source]
+            for iri,label in label_edits.items():
                 adjusted.remove((iri,RDFS.label,None))
                 adjusted.add((iri,RDFS.label,Literal(
-                    label.strip(),lang=_literal_language(label))))
+                    label,lang=_literal_language(label))))
             desired_turtle=adjusted.serialize(format='turtle')
         current=governed.command(p,draft_id,current['revision'],{
             'action':'diff_turtle','edited_turtle':desired_turtle,
