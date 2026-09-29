@@ -16,7 +16,7 @@
   const labels={pending:'待纳入',included_in_draft:'草案中',approved:'已批准',materialized:'已物化'};
   const colors={pending:'#d98a29',included_in_draft:'#477dc1',approved:'#25835b',materialized:'#65756e'};
   const stateText=counts=>Object.entries(counts||{}).filter(([,count])=>count).map(([state,count])=>`${labels[state]||state} ${count}`).join(' · ');
-  const evidence=sources=>(sources||[]).length?`<div class="candidate-evidence-list">${sources.map(source=>`<article><b>${esc(source.document_title||source.document_id||'未知来源')}</b><small>${esc(source.chunk_id||'')} · 字符 ${esc(source.start_char??'—')}–${esc(source.end_char??'—')} · 置信度 ${esc(source.confidence??'—')}</small><p>${esc(source.evidence||'未保存证据片段')}</p></article>`).join('')}</div>`:'<p class="subtle">没有可展示的来源证据。</p>';
+  const evidence=sources=>(sources||[]).length?`<div class="candidate-evidence-list">${sources.map(source=>`<article><b>${esc(source.document_title||source.document_id||'未知来源')}</b><small>${esc(source.chunk_id||'')} · 字符 ${esc(source.start_char??'—')}–${esc(source.end_char??'—')} · 置信度 ${esc(source.confidence??'—')}</small><p><b>来源预览：</b>${esc(source.evidence_preview||'未保存证据预览')}</p>${source.evidence_preview_truncated?'<small>预览已截断，完整切片可在本体工作台中查看。</small>':''}</article>`).join('')}</div>`:'<p class="subtle">没有可展示的来源证据。</p>';
   function detail(item,kind){
     const host=get('candidate-map-detail');
     if(kind==='edge'){

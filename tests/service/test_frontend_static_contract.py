@@ -145,6 +145,15 @@ def test_ontology_workbench_shell_keeps_five_stages_and_discovery_hooks():
     assert '.ontology-workbench__pane{position:static;inset:auto;display:block;width:auto;max-width:none' in css
 
 
+def test_legacy_candidate_map_labels_embedded_evidence_as_preview():
+    js = read('candidate-mindmap.js')
+    assert 'source.evidence_preview' in js
+    assert '来源预览' in js
+    assert '本体工作台' in js
+    assert 'evidence_preview_truncated' in js
+    assert "source.evidence||'未保存证据片段'" not in js
+
+
 def test_ontology_workbench_uses_safe_shared_state_contract():
     js = read('ontology-workbench.js')
     for marker in (

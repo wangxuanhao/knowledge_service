@@ -137,12 +137,24 @@ def _candidates(repository,project_id,records=None):
     """
     result=[]
     with timed('候选发现') as record:
+        assertions={item['id']:item for item in repository.list_assertions(project_id)}
         for document in (repository.current_records(project_id, vectors='none', kinds=['document']) if records is None else records):
             if document['kind']!='document' or document.get('metadata',{}).get('_deleted'):continue
             for item in document.get('metadata',{}).get('discovery_candidates',[]):
-                result.append({**item,'document_id':document['id'],'document_version_id':document['version_id'],
+                candidate={**item,'document_id':document['id'],'document_version_id':document['version_id'],
                     'document_title':document['metadata'].get('title',document['id']),
-                    'valid_from':document.get('valid_from'),'valid_until':document.get('valid_until')})
+                    'valid_from':document.get('valid_from'),'valid_until':document.get('valid_until')}
+                assertion=assertions.get(item.get('id')) if item.get('kind') in NORMAL_CANDIDATE_KINDS else None
+                candidate.update({
+                    'assertion_id':assertion.get('id') if assertion else None,
+                    'assertion_document_id':assertion.get('document_id') if assertion else None,
+                    'assertion_document_version_id':assertion.get('document_version_id') if assertion else None,
+                    'assertion_chunk_id':assertion.get('chunk_id') if assertion else None,
+                    'assertion_start_char':assertion.get('start_char') if assertion else None,
+                    'assertion_end_char':assertion.get('end_char') if assertion else None,
+                    'assertion_status':assertion.get('status') if assertion else None,
+                })
+                result.append(candidate)
         record['candidates']=len(result)
     return result
 
@@ -203,11 +215,40 @@ def _candidate_lifecycle(repository,project_id,candidates,drafts,records=None):
         'approved':len(published_ids),'materialized':len(materialized_ids)}
 
 
+def _candidate_source_reference(item):
+    """Build one lightweight candidate source reference without resolving evidence."""
+    normal=item.get('kind') in NORMAL_CANDIDATE_KINDS
+    assertion_id=item.get('assertion_id') if normal else None
+    preview=str(item.get('attribute_evidence') or item.get('evidence') or '')
+    return {'assertion_id':assertion_id,
+        'document_id':item.get('assertion_document_id') if assertion_id else item.get('document_id'),
+        'document_title':item.get('document_title'),
+        'document_version_id':item.get('assertion_document_version_id') if assertion_id else None,
+        'chunk_id':item.get('assertion_chunk_id') if assertion_id else None,
+        'start_char':item.get('assertion_start_char') if assertion_id else None,
+        'end_char':item.get('assertion_end_char') if assertion_id else None,
+        'confidence':item.get('confidence'),'status':item.get('assertion_status') or item.get('status'),
+        'evidence_status':item.get('evidence_status'),
+        'evidence_preview':preview[:500],
+        'evidence_preview_truncated':len(preview)>500,
+        'resolvable':bool(assertion_id)}
+
+
+def _finalize_candidate_sources(item):
+    sources=sorted(item.get('sources') or [],key=lambda source:(
+        str(source.get('document_title') or ''),str(source.get('document_id') or ''),
+        source.get('start_char') if type(source.get('start_char')) is int else float('inf'),
+        str(source.get('assertion_id') or '')))
+    item['source_count']=len(sources)
+    item['sources_truncated']=len(sources)>10
+    item['sources']=sources[:10]
+
+
 def _candidate_mindmap(candidates,states,limit=500):
     """聚合开放出现以便可视化，而不创建规范知识。
 
     响应大小随候选数量增长，而非随 ``limit``：每个被选中的节点携带最多
-    10 条证据记录（每条最长 500 字符）和最多 30 个属性，所以 ``limit=500``
+    10 条来源引用（含最长 500 字符的预览）和最多 30 个属性，所以 ``limit=500``
     仍可能序列化出数兆字节。浏览器随后把这些节点喂给 ECharts 的 *force*
     布局，并给每个节点和边加标签——这是延迟中属于客户端的那一半。
     """
@@ -222,10 +263,7 @@ def _candidate_mindmap(candidates,states,limit=500):
         node['candidate_ids'].append(item['id']);node['occurrence_count']+=1
         node['status_counts'][states.get(item['id'],'pending')]+=1
         if item.get('document_id') not in node['document_ids']:node['document_ids'].append(item.get('document_id'))
-        if len(node['sources'])<10:
-            node['sources'].append({'document_id':item.get('document_id'),'document_title':item.get('document_title'),
-                'chunk_id':item.get('chunk_id'),'start_char':item.get('start_char'),'end_char':item.get('end_char'),
-                'evidence':str(item.get('evidence',''))[:500],'confidence':item.get('confidence')})
+        node['sources'].append(_candidate_source_reference(item))
         candidate_to_node[item['id']]=node['id'];text_to_nodes[text.casefold()].append(node['id'])
     ordered=sorted(entity_groups.values(),key=lambda item:(-item['occurrence_count'],item['type'],item['text']))
     selected=ordered[:max(1,min(int(limit),2000))];selected_ids={item['id'] for item in selected}
@@ -251,12 +289,7 @@ def _candidate_mindmap(candidates,states,limit=500):
         attribute['status_counts'][states.get(item['id'],'pending')]+=1
         if item.get('document_id') not in attribute['document_ids']:
             attribute['document_ids'].append(item.get('document_id'))
-        if len(attribute['sources'])<10:
-            attribute['sources'].append({'document_id':item.get('document_id'),
-                'document_title':item.get('document_title'),'chunk_id':item.get('chunk_id'),
-                'start_char':item.get('start_char'),'end_char':item.get('end_char'),
-                'evidence':str(item.get('attribute_evidence') or item.get('evidence') or '')[:500],
-                'confidence':item.get('confidence'),'evidence_status':item.get('evidence_status')})
+        attribute['sources'].append(_candidate_source_reference(item))
     relation_groups={};unresolved=0;hidden_relations=0
     for item in candidates:
         if item['kind']!='relation':continue
@@ -278,14 +311,12 @@ def _candidate_mindmap(candidates,states,limit=500):
             'status_counts':Counter(),'occurrence_count':0})
         edge['candidate_ids'].append(item['id']);edge['occurrence_count']+=1
         edge['status_counts'][states.get(item['id'],'pending')]+=1
-        if len(edge['sources'])<10:
-            edge['sources'].append({'document_id':item.get('document_id'),'document_title':item.get('document_title'),
-                'chunk_id':item.get('chunk_id'),'start_char':item.get('start_char'),'end_char':item.get('end_char'),
-                'evidence':str(item.get('evidence',''))[:500],'confidence':item.get('confidence')})
+        edge['sources'].append(_candidate_source_reference(item))
     priority=('materialized','approved','included_in_draft','pending')
     for item in [*selected,*relation_groups.values(),*attribute_groups.values()]:
         item['status']=next((status for status in priority if item['status_counts'].get(status)), 'pending')
         item['status_counts']=dict(item['status_counts'])
+        _finalize_candidate_sources(item)
     exceptions=[]
     for item in candidates:
         if item.get('kind')!='exception':continue
@@ -294,10 +325,8 @@ def _candidate_mindmap(candidates,states,limit=500):
             'text':item.get('text'),'subject':item.get('subject'),
             'type':item.get('proposed_type'),'object':item.get('object'),'value':item.get('value'),
             'evidence_status':item.get('evidence_status'),'occurrence_count':1,
-            'sources':[{'document_id':item.get('document_id'),'document_title':item.get('document_title'),
-                'chunk_id':item.get('chunk_id'),'start_char':item.get('start_char'),'end_char':item.get('end_char'),
-                'evidence':str(item.get('evidence') or '')[:500],'confidence':item.get('confidence'),
-                'evidence_status':item.get('evidence_status')} ]})
+            'sources':[_candidate_source_reference(item)]})
+        _finalize_candidate_sources(exceptions[-1])
         if len(exceptions)>=200:break
     normal_count=sum(x.get('kind') in NORMAL_CANDIDATE_KINDS for x in candidates)
     return {'nodes':selected,'edges':list(relation_groups.values()),
