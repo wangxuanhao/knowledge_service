@@ -219,6 +219,86 @@ def test_create_rejects_current_outcome_that_contradicts_initial_outcome(tmp_pat
         })
 
 
+def test_create_rejects_outcomes_beyond_the_exact_initial_set(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    conflict = {
+        'candidate_id': 'candidate-1', 'status': 'skipped',
+        'code': 'ontology_term_conflict',
+    }
+
+    with pytest.raises(ValueError, match='exactly match'):
+        repo.create_discovery_run({
+            **_run(project_id),
+            'initial_candidate_outcomes': [conflict],
+            'candidate_outcomes': [conflict, {
+                'candidate_id': 'candidate-2', 'status': 'materialized',
+            }],
+        })
+
+
+def test_create_rejects_current_outcomes_without_an_initial_set(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    payload = _run(project_id)
+    payload.pop('initial_candidate_outcomes')
+
+    with pytest.raises(ValueError, match='exactly match'):
+        repo.create_discovery_run({
+            **payload,
+            'candidate_outcomes': [{
+                'candidate_id': 'candidate-1', 'status': 'materialized',
+            }],
+        })
+
+
+@pytest.mark.parametrize('binding', [
+    {'candidate_id': 'candidate-1', 'binding_kind': 'existing'},
+    {'candidate_id': 'candidate-1', 'status': 'existing'},
+])
+def test_diagnosed_run_rejects_mapping_only_bindings(tmp_path, binding):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    payload = {
+        **_run(project_id), 'status': 'diagnosed_no_change',
+        'unified_draft_id': None, 'candidate_bindings': [binding],
+    }
+
+    assert discovery_result_kind(payload) == 'mapping_only'
+    with pytest.raises(ValueError, match='diagnosed_no_change.*binding'):
+        repo.create_discovery_run(payload)
+
+
+def test_ready_run_accepts_legacy_existing_status_binding(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+
+    run = repo.create_discovery_run({
+        **_run(project_id), 'status': 'ready_to_finalize',
+        'unified_draft_id': None,
+        'candidate_bindings': [{
+            'candidate_id': 'candidate-1', 'status': 'existing',
+        }],
+    })
+
+    assert discovery_result_kind(run) == 'mapping_only'
+
+
+def test_diagnosed_run_rejects_actionable_proposed_binding(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+
+    with pytest.raises(ValueError, match='diagnosed_no_change.*binding'):
+        repo.create_discovery_run({
+            **_run(project_id), 'status': 'diagnosed_no_change',
+            'unified_draft_id': None,
+            'candidate_bindings': [{
+                'candidate_id': 'candidate-1', 'binding_kind': 'proposed',
+                'required_operation_ids': ['operation-1'],
+            }],
+        })
+
+
 def test_transition_updates_status_draft_link_and_outcomes_in_one_cas(tmp_path):
     repo = Repository(tmp_path / 'store.sqlite')
     project_id = repo.create_project('project')['id']
@@ -321,6 +401,28 @@ def test_transition_cannot_overwrite_immutable_diagnostic_outcome(tmp_path):
     assert repo.get_discovery_run(project_id, original['id']) == original
 
 
+def test_transition_cannot_overwrite_any_initial_outcome_reason(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    deferred = {
+        'candidate_id': 'deferred', 'status': 'skipped',
+        'code': 'manual_review_deferred',
+    }
+    original = repo.create_discovery_run({
+        **_run(project_id), 'initial_candidate_outcomes': [deferred],
+        'candidate_outcomes': [deferred],
+    })
+
+    with pytest.raises(DiscoveryRunConflict, match='immutable discovery outcome'):
+        repo.transition_discovery_run(
+            project_id, original['id'], 'draft_created', 'published',
+            candidate_outcomes=[{
+                'candidate_id': 'deferred', 'status': 'materialized',
+            }])
+
+    assert repo.get_discovery_run(project_id, original['id']) == original
+
+
 def test_transition_uses_initial_outcome_when_current_outcome_is_malformed(tmp_path):
     repo = Repository(tmp_path / 'store.sqlite')
     project_id = repo.create_project('project')['id']
@@ -349,6 +451,30 @@ def test_transition_uses_initial_outcome_when_current_outcome_is_malformed(tmp_p
             candidate_outcomes=[{
                 'candidate_id': 'conflict', 'status': 'materialized',
             }])
+
+    assert repo.get_discovery_run(project_id, original['id']) == malformed
+
+
+def test_transition_without_outcome_payload_rejects_missing_initial_outcome(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    deferred = {
+        'candidate_id': 'deferred', 'status': 'skipped',
+        'code': 'manual_review_deferred',
+    }
+    original = repo.create_discovery_run({
+        **_run(project_id), 'initial_candidate_outcomes': [deferred],
+        'candidate_outcomes': [deferred],
+    })
+    malformed = {**original, 'candidate_outcomes': []}
+    repo._db.execute(
+        'UPDATE artifacts SET payload=? WHERE id=? AND kind=?',
+        (json.dumps(malformed), original['id'], 'ontology_discovery_run'))
+    repo._db.commit()
+
+    with pytest.raises(DiscoveryRunConflict, match='immutable discovery outcome'):
+        repo.transition_discovery_run(
+            project_id, original['id'], 'draft_created', 'published')
 
     assert repo.get_discovery_run(project_id, original['id']) == malformed
 
