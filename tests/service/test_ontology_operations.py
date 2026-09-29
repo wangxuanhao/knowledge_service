@@ -853,6 +853,46 @@ def test_canonical_diff_rejects_complex_typed_anonymous_class_expression():
         canonical_turtle_diff(base, edited)
 
 
+def test_definition_validation_rejects_unsupported_incoming_anonymous_edge():
+    current = BASE + '''
+      ex:Equivalent a owl:Class; owl:equivalentClass _:anonymous .
+      _:anonymous a owl:Class; rdfs:subClassOf ex:Root .
+    '''
+    operation = build_operation('add_annotation', 'http://ex/A', after={
+        'predicate': str(RDFS.comment), 'value': 'validate graph',
+    })
+
+    with pytest.raises(ValueError, match='OWL|incoming|unsupported'):
+        apply_operations(current, [operation])
+
+
+def test_canonical_diff_rejects_unsupported_incoming_anonymous_edge():
+    base = BASE + '''
+      ex:Equivalent a owl:Class; owl:equivalentClass _:anonymous .
+      _:anonymous a owl:Class; rdfs:subClassOf ex:Root .
+    '''
+    edited = base + 'ex:A rdfs:comment "edited" .'
+
+    with pytest.raises(ValueError, match='OWL|incoming|unsupported'):
+        canonical_turtle_diff(base, edited)
+
+
+def test_declared_class_subclass_edge_is_valid_incoming_anonymous_reference():
+    current = BASE + '''
+      ex:SimpleChild a owl:Class; rdfs:subClassOf _:anonymous .
+      _:anonymous a rdfs:Class; rdfs:label "Simple parent";
+        rdfs:subClassOf ex:Root .
+    '''
+    operation = build_operation('add_annotation', 'http://ex/SimpleChild', after={
+        'predicate': str(RDFS.comment), 'value': 'valid hierarchy',
+    })
+
+    restored = Ontology(apply_operations(current, [operation]))
+
+    assert str(restored.graph.value(
+        URIRef('http://ex/SimpleChild'), RDFS.comment)) == 'valid hierarchy'
+
+
 @pytest.mark.parametrize('operation', [
     build_operation('add_domain', 'http://ex/A', after={'value': 'http://ex/B'}),
     build_operation('add_range', 'http://ex/A', after={'value': 'http://ex/B'}),

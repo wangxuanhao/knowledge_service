@@ -83,6 +83,9 @@ def _is_simple_anonymous_class(graph: Graph, node: BNode) -> bool:
             return False
         if predicate in {RDFS.label, RDFS.comment} and isinstance(value, BNode):
             return False
+    for subject, predicate in graph.subject_predicates(node):
+        if predicate != RDFS.subClassOf or not _is_graph_class(graph, subject):
+            return False
     return True
 
 
