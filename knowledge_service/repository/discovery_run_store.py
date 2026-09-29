@@ -13,6 +13,9 @@ RUN_STATUSES = frozenset({
     'diagnosed_no_change', 'ready_to_finalize', 'draft_created', 'published',
     'finalized_no_change', 'stale_base', 'stale_source', 'closed',
 })
+INITIAL_RUN_STATUSES = frozenset({
+    'diagnosed_no_change', 'ready_to_finalize', 'draft_created',
+})
 ALLOWED_TRANSITIONS = {
     'ready_to_finalize': frozenset({
         'finalized_no_change', 'stale_base', 'stale_source', 'closed'}),
@@ -50,18 +53,36 @@ def discovery_result_kind(run):
     return 'diagnosed_no_change'
 
 
-def _merge_candidate_outcomes(current, terminal, *, run_id):
+def _merge_candidate_outcomes(current, terminal, initial, *, run_id):
     merged = [json.loads(_canonical_json(outcome)) for outcome in current]
     positions = {
         outcome.get('candidate_id'): index for index, outcome in enumerate(merged)
         if isinstance(outcome, dict) and outcome.get('candidate_id') is not None
     }
+    protected = {}
+    for outcome in initial:
+        normalized = json.loads(_canonical_json(outcome))
+        if not isinstance(normalized, dict):
+            continue
+        candidate_id = normalized.get('candidate_id')
+        code = normalized.get('code') or normalized.get('reason_code')
+        if candidate_id and code in IMMUTABLE_OUTCOME_CODES:
+            protected[candidate_id] = normalized
+    for candidate_id, outcome in protected.items():
+        position = positions.get(candidate_id)
+        if position is None or merged[position] != outcome:
+            raise DiscoveryRunConflict(
+                'immutable discovery outcome cannot change', run_id=run_id)
     for outcome in terminal:
         if not isinstance(outcome, dict) or not outcome.get('candidate_id'):
             raise ValueError(
                 'discovery run outcomes require a candidate_id')
         normalized = json.loads(_canonical_json(outcome))
         candidate_id = normalized['candidate_id']
+        protected_outcome = protected.get(candidate_id)
+        if protected_outcome is not None and normalized != protected_outcome:
+            raise DiscoveryRunConflict(
+                'immutable discovery outcome cannot change', run_id=run_id)
         position = positions.get(candidate_id)
         if position is None:
             positions[candidate_id] = len(merged)
@@ -118,6 +139,10 @@ class DiscoveryRunStore:
             raise ValueError('discovery run source_fingerprint is required')
         if run.get('status') not in RUN_STATUSES:
             raise ValueError('unsupported discovery run status')
+        if run['status'] not in INITIAL_RUN_STATUSES:
+            raise ValueError('unsupported initial discovery run status')
+        has_initial_outcomes = 'initial_candidate_outcomes' in run
+        has_current_outcomes = 'candidate_outcomes' in run
         for field, default, expected_type in (
                 ('candidate_snapshot', [], list),
                 ('accepted_candidate_ids', [], list),
@@ -135,6 +160,35 @@ class DiscoveryRunStore:
                 run.setdefault(field, default)
             if not isinstance(run[field], expected_type):
                 raise ValueError(f'discovery run {field} has an invalid shape')
+        if has_initial_outcomes and not has_current_outcomes:
+            run['candidate_outcomes'] = json.loads(_canonical_json(
+                run['initial_candidate_outcomes']))
+        initial_by_candidate = {}
+        for outcome in run['initial_candidate_outcomes']:
+            if not isinstance(outcome, dict) or not outcome.get('candidate_id'):
+                raise ValueError(
+                    'discovery run initial candidate outcome requires a candidate_id')
+            candidate_id = outcome['candidate_id']
+            if (candidate_id in initial_by_candidate
+                    and initial_by_candidate[candidate_id] != outcome):
+                raise ValueError(
+                    'discovery run initial candidate outcomes contradict each other')
+            initial_by_candidate[candidate_id] = outcome
+        current_by_candidate = {}
+        for outcome in run['candidate_outcomes']:
+            if not isinstance(outcome, dict) or not outcome.get('candidate_id'):
+                raise ValueError(
+                    'discovery run candidate outcome requires a candidate_id')
+            candidate_id = outcome['candidate_id']
+            if (candidate_id in current_by_candidate
+                    and current_by_candidate[candidate_id] != outcome):
+                raise ValueError(
+                    'discovery run candidate outcomes contradict each other')
+            current_by_candidate[candidate_id] = outcome
+        if any(current_by_candidate.get(candidate_id) != outcome
+               for candidate_id, outcome in initial_by_candidate.items()):
+            raise ValueError(
+                'discovery run initial candidate outcome must be preserved')
         run['candidate_snapshot'] = sorted(
             run['candidate_snapshot'], key=_canonical_json)
         run.setdefault('unified_draft_id', None)
@@ -142,10 +196,18 @@ class DiscoveryRunStore:
         if run['status'] == 'draft_created' and not draft_id:
             raise ValueError('draft_created discovery run requires a draft link')
         if (run['status'] in {
-                'diagnosed_no_change', 'ready_to_finalize',
-                'finalized_no_change'} and draft_id is not None):
+                'diagnosed_no_change', 'ready_to_finalize'}
+                and draft_id is not None):
             raise ValueError(
                 'non-draft discovery run cannot have a draft link')
+        if (run['status'] == 'ready_to_finalize'
+                and not any(
+                    isinstance(binding, dict)
+                    and binding.get('candidate_id')
+                    and binding.get('binding_kind') == 'existing'
+                    for binding in run['candidate_bindings'])):
+            raise ValueError(
+                'ready_to_finalize discovery run requires a reusable binding')
         run.setdefault('supersedes_run_id', None)
         run.setdefault('created_at', utc_now())
         return run
@@ -230,7 +292,9 @@ class DiscoveryRunStore:
             if candidate_outcomes is not None:
                 updated['candidate_outcomes'] = _merge_candidate_outcomes(
                     current.get('candidate_outcomes', []),
-                    candidate_outcomes, run_id=run_id)
+                    candidate_outcomes,
+                    current.get('initial_candidate_outcomes', []),
+                    run_id=run_id)
             updated['updated_at'] = utc_now()
             cursor = self._db.execute(
                 "UPDATE artifacts SET payload=? WHERE id=? AND kind=? "

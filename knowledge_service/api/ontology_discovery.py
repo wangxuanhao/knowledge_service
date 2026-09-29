@@ -337,7 +337,10 @@ def install(app, service):
             # 两种聚合都不看向量，因此完全跳过 float32 列。
             records=service.repository.current_records(p, vectors='none')
             candidates=_candidates(service.repository,p,records)
-            drafts=service.repository.list_artifacts('ontology_discovery_draft',p)
+            stored_drafts=service.repository.list_artifacts(
+                'ontology_discovery_draft',p)
+            drafts=[_hydrate_legacy_draft(service.repository,p,draft)
+                    for draft in stored_drafts]
             states,_=_candidate_lifecycle(service.repository,p,candidates,drafts,records)
             payload=_candidate_mindmap(candidates,states,limit)
             record['nodes']=len(payload.get('nodes') or [])

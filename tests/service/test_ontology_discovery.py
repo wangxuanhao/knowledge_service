@@ -337,6 +337,11 @@ def test_mixed_discovery_creates_one_atomic_run_and_governed_draft(
         overview_draft = next(
             draft for draft in overview_response.json()['drafts']
             if draft['id'] == response.json()['id'])
+        candidate_map_response = client.get(
+            f"/api/projects/{project['id']}/ontology-discovery/candidate-mindmap")
+        assert candidate_map_response.status_code == 200, candidate_map_response.text
+        assert {node['status'] for node in candidate_map_response.json()['nodes']} == {
+            'included_in_draft'}
 
     assert response.status_code == 201, response.text
     payload = response.json()
