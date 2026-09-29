@@ -285,11 +285,14 @@ def test_open_fact_prompt_contains_normalized_reserved_names(monkeypatch):
     mod._extract_facts_open(
         '账号甲当前封禁', [entity],
         {'provider': 'fake', 'llm_model': 'fake', 'api_key': 'fake', 'base_url': 'fake'},
-        include_attributes=True,
+        include_attributes=False,
         reserved_class_names=frozenset({'Ｒule   Class', '账号'}))
 
     assert 'RESERVED_CLASS_NAMES' in captured['prompt']
     assert '"reserved_class_names": ["rule class", "账号"]' in captured['prompt']
+    assert '"classify_relations_and_attributes": true' in captured['prompt']
+    assert '"include_attributes"' not in captured['prompt']
+    assert 'Always return both relation and attribute candidates' in captured['prompt']
 
 
 def test_ontology_induction_exposes_stable_attribute_fields_at_entity_top_level(monkeypatch):

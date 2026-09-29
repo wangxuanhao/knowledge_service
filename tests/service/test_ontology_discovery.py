@@ -112,6 +112,40 @@ def test_open_discovery_reserves_active_and_retired_baseline_classes(tmp_path, m
         'ActiveClass', '活跃类', 'RetiredClass', '退役类'})
 
 
+def test_open_discovery_invalid_explicit_ontology_has_no_ingestion_side_effects(
+        tmp_path, monkeypatch):
+    from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
+
+    called = False
+
+    def discover(self, text, include_attributes=False, *, reserved_class_names=()):
+        nonlocal called
+        called = True
+        return []
+
+    monkeypatch.setattr(SemanticaExtractor, 'discover', discover)
+    app = create_app(tmp_path / 'invalid-baseline.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': '无效基线', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        base = f"/api/projects/{project['id']}"
+        response = client.post(base + '/documents', json={
+            'title': '不应保存', 'text': '账号甲当前封禁',
+            'extraction_mode': 'discovery', 'ontology_id': 'missing-ontology',
+            'resolve_entities': False,
+        })
+
+        assert response.status_code == 404
+        assert 'missing-ontology' in response.json()['detail']
+        assert client.post(base + '/records/query', json={}).json()['records'] == []
+        assert client.get(base + '/ingest-runs').json()['runs'] == []
+        overview = client.get(base + '/ontology-discovery').json()
+        assert overview['candidate_count'] == 0
+        assert overview['exception_count'] == 0
+        assert called is False
+
+
 def test_draft_keeps_singleton_attribute_candidate_without_mapping(tmp_path,monkeypatch):
     from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
 

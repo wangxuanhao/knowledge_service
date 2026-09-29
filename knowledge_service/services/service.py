@@ -299,6 +299,11 @@ class KnowledgeService:
         extraction_mode=request.get('extraction_mode') or ('ontology' if request.get('extract',True) else 'documents')
         event(f"文档开始 · {request['title']} · {len(request['text'])} 字符 · 项目 {project_id} · 模式 {extraction_mode}",5)
         self.repository.get_project(project_id)
+        requested_ontology_id=request.get('ontology_id')
+        selected_ontology_version=(
+            self.repository.get_ontology(project_id,requested_ontology_id)
+            if requested_ontology_id and extraction_mode in ('ontology','discovery')
+            else None)
         for key in ('valid_from', 'valid_until'):
             request[key] = normalize_time(request.get(key))
         if request['valid_from'] and request['valid_until'] and request['valid_from'] >= request['valid_until']:
@@ -363,7 +368,7 @@ class KnowledgeService:
             event(f'文档检索已就绪 · 切片 {len(saved_chunks)} 条 · 图谱抽取继续',14)
             if extraction_mode == 'ontology':
                 from ..integrations.semantica_adapter import SemanticaExtractor
-                version = self.repository.get_ontology(project_id, request.get('ontology_id'))
+                version = selected_ontology_version or self.repository.get_ontology(project_id)
                 extractor = SemanticaExtractor()
                 extractor.include_attributes=request.get('extract_attributes',False)
                 extractor.relation_constraint_mode=request.get('relation_constraint_mode','review')
@@ -415,10 +420,13 @@ class KnowledgeService:
                 from ..repository import OntologyNotPublished
                 from .ontology_vocabulary import index_governed_vocabulary
                 extractor=SemanticaExtractor()
-                try:
-                    baseline_version=self.repository.get_ontology(
-                        project_id,request.get('ontology_id'))
-                except OntologyNotPublished:
+                baseline_version=selected_ontology_version
+                if baseline_version is None:
+                    try:
+                        baseline_version=self.repository.get_ontology(project_id)
+                    except OntologyNotPublished:
+                        pass
+                if baseline_version is None:
                     baseline_class_names=frozenset()
                 else:
                     baseline_ontology=Ontology(baseline_version['turtle'])
