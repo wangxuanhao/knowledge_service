@@ -111,11 +111,18 @@ class InvalidDiscoveryCandidate(ValueError):
     """Raised when a discovery candidate violates the normalization boundary."""
 
 
-_ABSOLUTE_IRI = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:[^\s]+$")
+_ABSOLUTE_IRI = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:.+$", re.DOTALL)
 _INVALID_RAW_IRI_CHARACTERS = frozenset('<>"{}|^`')
 _UNRESERVED = frozenset(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 _USERINFO_RAW = _UNRESERVED | frozenset("!$&'()*+,;=:")
+_RFC3987_UCSCHAR_RANGES = (
+    (0x00A0, 0xD7FF),
+    (0xF900, 0xFDCF),
+    (0xFDF0, 0xFFEF),
+    *((plane << 16, (plane << 16) + 0xFFFD) for plane in range(1, 14)),
+    (0xE1000, 0xEFFFD),
+)
 
 
 def _valid_pct_component(value: str, allowed_raw: frozenset[str]) -> bool:
@@ -135,18 +142,24 @@ def _valid_pct_component(value: str, allowed_raw: frozenset[str]) -> bool:
     return True
 
 
-def _safe_unicode_scalars(value: str) -> bool:
-    """Apply the repository's RFC3987-safe Unicode scalar policy."""
+def _valid_ascii_iri_characters(value: str) -> bool:
+    """Reject ASCII whitespace and controls independently from Unicode policy."""
+    return all(codepoint >= 0x21 and codepoint != 0x7F
+               for character in value
+               if (codepoint := ord(character)) < 0x80)
+
+
+def _valid_raw_ucschar(value: str) -> bool:
+    """Allow raw non-ASCII only from RFC3987 ``ucschar`` ranges."""
     try:
         value.encode("utf-8")
     except UnicodeEncodeError:
         return False
     for character in value:
         codepoint = ord(character)
-        if (character.isspace()
-                or unicodedata.category(character) in {"Cc", "Cs", "Co"}
-                or 0xFDD0 <= codepoint <= 0xFDEF
-                or (codepoint & 0xFFFF) in {0xFFFE, 0xFFFF}):
+        if codepoint >= 0x80 and not any(
+                start <= codepoint <= end
+                for start, end in _RFC3987_UCSCHAR_RANGES):
             return False
     return True
 
@@ -214,7 +227,8 @@ def _valid_iri(value) -> bool:
             or "\\" in value
             or any(character in _INVALID_RAW_IRI_CHARACTERS for character in value)
             or value.count("#") > 1
-            or not _safe_unicode_scalars(value)
+            or not _valid_ascii_iri_characters(value)
+            or not _valid_raw_ucschar(value)
             or re.search(r"%(?![0-9A-Fa-f]{2})", value)):
         return False
     scheme = value.split(":", 1)[0].lower()

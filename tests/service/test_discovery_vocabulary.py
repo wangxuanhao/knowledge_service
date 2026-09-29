@@ -752,6 +752,61 @@ def test_candidate_boundary_accepts_repository_unicode_iris(iri):
     assert result.accepted_candidates[0]["iri"] == iri
 
 
+_RFC3987_UCSCHAR_ALLOWED_BOUNDARIES = [
+    0x00A0, 0xD7FF,
+    0xF900, 0xFDCF,
+    0xFDF0, 0xFFEF,
+    *(boundary
+      for plane in range(1, 14)
+      for boundary in (plane << 16, (plane << 16) + 0xFFFD)),
+    0xE1000, 0xEFFFD,
+]
+
+
+@pytest.mark.parametrize(
+    "codepoint",
+    _RFC3987_UCSCHAR_ALLOWED_BOUNDARIES,
+    ids=lambda codepoint: f"U+{codepoint:04X}",
+)
+def test_candidate_boundary_accepts_every_rfc3987_ucschar_range_edge(codepoint):
+    iri = f"https://example.test/{chr(codepoint)}"
+
+    result = DiscoveryVocabularyNormalizer("").normalize([
+        {"id": "candidate", "kind": "class", "name": "Term", "iri": iri},
+    ])
+
+    assert result.accepted_candidates[0]["iri"] == iri
+
+
+_RFC3987_UCSCHAR_EXCLUDED_BOUNDARIES = [
+    0x0080, 0x009F,
+    0xD800, 0xDFFF,
+    0xE000, 0xF8FF,
+    0xFDD0, 0xFDEF,
+    0xFFF0, 0xFFFD, 0xFFFE, 0xFFFF,
+    *(boundary
+      for plane in range(1, 14)
+      for boundary in ((plane << 16) + 0xFFFE, (plane << 16) + 0xFFFF)),
+    0xE0000, 0xE0FFF,
+    0xEFFFE, 0xEFFFF,
+    0xF0000, 0xFFFFD, 0xFFFFE, 0xFFFFF,
+    0x100000, 0x10FFFD, 0x10FFFE, 0x10FFFF,
+]
+
+
+@pytest.mark.parametrize(
+    "codepoint",
+    _RFC3987_UCSCHAR_EXCLUDED_BOUNDARIES,
+    ids=lambda codepoint: f"U+{codepoint:04X}",
+)
+def test_candidate_boundary_rejects_every_rfc3987_ucschar_gap_family(codepoint):
+    with pytest.raises(InvalidDiscoveryCandidate, match="valid absolute IRI"):
+        DiscoveryVocabularyNormalizer("").normalize([
+            {"id": "candidate", "kind": "class", "name": "Term",
+             "iri": f"https://example.test/{chr(codepoint)}"},
+        ])
+
+
 def test_candidate_boundary_rejects_duplicate_ids_deterministically():
     candidates = [
         {"id": "same", "kind": "class", "name": "Person"},
