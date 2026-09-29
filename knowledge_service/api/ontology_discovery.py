@@ -197,8 +197,8 @@ def install(app, service):
         turtle=graph.serialize(format='turtle');summary=Ontology(turtle).summary()
         # Mirror legacy review edits into the authoritative append-only draft.
         current=governed.get(p,draft_id)
-        for source in request.excluded_terms:
-            iri=str(iri_by_source[source])
+        for target_iri in sorted(excluded_iris,key=str):
+            iri=str(target_iri)
             targeted=[operation for operation in current['operations']
                       if operation['target_iri']==iri]
             if targeted:

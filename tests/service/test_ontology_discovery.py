@@ -309,9 +309,13 @@ def test_merged_spellings_induce_one_term_and_rematerialize_every_source(
     }
 
 
-@pytest.mark.parametrize('excluded_term', [' Person ', 'ＰＥＲＳＯＮ'])
+@pytest.mark.parametrize('excluded_terms', [
+    [' Person '],
+    ['ＰＥＲＳＯＮ'],
+    [' Person ', 'ＰＥＲＳＯＮ'],
+])
 def test_review_excluding_merged_spelling_removes_shared_term_and_all_dependents(
-        tmp_path, monkeypatch, excluded_term):
+        tmp_path, monkeypatch, excluded_terms):
     import knowledge_service.api.ontology_discovery as discovery_api
 
     _install_fake_ontology_generator(monkeypatch, {'classes': [], 'properties': []})
@@ -324,7 +328,7 @@ def test_review_excluding_merged_spelling_removes_shared_term_and_all_dependents
          'proposed_type': 'Organization', 'evidence': 'ACME evidence'},
     ]
     monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
-    app = create_app(tmp_path / f'review-merged-{len(excluded_term)}.sqlite', HashingEncoder())
+    app = create_app(tmp_path / 'review-merged.sqlite', HashingEncoder())
     with TestClient(app) as client:
         project = client.post('/api/projects', json={
             'name': '合并术语审核', 'use_default_ontology': False,
@@ -338,7 +342,7 @@ def test_review_excluding_merged_spelling_removes_shared_term_and_all_dependents
 
         reviewed = client.put(
             base + f"/drafts/{draft['id']}",
-            json={'excluded_terms': [excluded_term]})
+            json={'excluded_terms': excluded_terms})
 
         current = OntologyDrafts(app.state.service.repository).get(
             project['id'], draft['id'])
