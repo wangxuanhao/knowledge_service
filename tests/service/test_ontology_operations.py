@@ -775,6 +775,17 @@ def test_anonymous_class_definition_rejects_missing_parent():
         apply_operations(current, [operation])
 
 
+@pytest.mark.parametrize('subject', ['ex:Undeclared', '_:undeclared'])
+def test_subclass_subject_must_be_a_declared_class(subject):
+    current = BASE + f'{subject} rdfs:subClassOf ex:Root .'
+    operation = build_operation(
+        'add_annotation', 'http://ex/A',
+        after={'predicate': str(RDFS.comment), 'value': 'validate graph'})
+
+    with pytest.raises(ValueError, match='subClassOf|声明|declared class'):
+        apply_operations(current, [operation])
+
+
 def test_anonymous_only_class_cycle_is_rejected():
     current = BASE + '''
       ex:ChildWithAnonymousCycle a owl:Class; rdfs:subClassOf _:first .
@@ -816,6 +827,30 @@ def test_valid_anonymous_class_parent_is_supported_by_canonical_diff():
 
     assert [operation['action'] for operation in operations] == ['add_annotation']
     assert isomorphic(actual, expected)
+
+
+def test_definition_validation_rejects_complex_anonymous_class_expression():
+    current = BASE + '''
+      ex:ComplexChild a owl:Class; rdfs:subClassOf _:anonymous .
+      _:anonymous a owl:Class; owl:complementOf ex:B .
+    '''
+    operation = build_operation('add_annotation', 'http://ex/ComplexChild', after={
+        'predicate': str(RDFS.comment), 'value': 'validate graph',
+    })
+
+    with pytest.raises(ValueError, match='OWL|复杂|unsupported'):
+        apply_operations(current, [operation])
+
+
+def test_canonical_diff_rejects_complex_typed_anonymous_class_expression():
+    base = BASE + '''
+      ex:ComplexChild a owl:Class; rdfs:subClassOf _:anonymous .
+      _:anonymous a owl:Class; owl:complementOf ex:B .
+    '''
+    edited = base + 'ex:ComplexChild rdfs:comment "edited" .'
+
+    with pytest.raises(ValueError, match='OWL|复杂|unsupported'):
+        canonical_turtle_diff(base, edited)
 
 
 @pytest.mark.parametrize('operation', [

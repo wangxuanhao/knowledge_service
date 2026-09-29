@@ -70,6 +70,22 @@ def _graph_classes(graph: Graph) -> set:
     }
 
 
+_SIMPLE_ANONYMOUS_CLASS_PREDICATES = frozenset({
+    RDF.type, RDFS.subClassOf, RDFS.label, RDFS.comment,
+})
+
+
+def _is_simple_anonymous_class(graph: Graph, node: BNode) -> bool:
+    for predicate, value in graph.predicate_objects(node):
+        if predicate not in _SIMPLE_ANONYMOUS_CLASS_PREDICATES:
+            return False
+        if predicate == RDF.type and value not in _CLASS_DECLARATIONS:
+            return False
+        if predicate in {RDFS.label, RDFS.comment} and isinstance(value, BNode):
+            return False
+    return True
+
+
 def _graph_term_kind(graph: Graph, node) -> str | None:
     if _is_graph_class(graph, node):
         return 'class'
@@ -458,6 +474,18 @@ def _apply_scoped_shacl_patch(graph: Graph, target: URIRef, before: dict,
 
 def _validate_definition_graph(graph: Graph) -> None:
     class_nodes = _graph_classes(graph)
+    undeclared_children = set(graph.subjects(RDFS.subClassOf, None)) - class_nodes
+    if undeclared_children:
+        child = min(undeclared_children, key=str)
+        raise ValueError(
+            f'rdfs:subClassOf subject must be a declared class：{child}')
+    unsupported_anonymous = {
+        node for node in class_nodes
+        if isinstance(node, BNode) and not _is_simple_anonymous_class(graph, node)
+    }
+    if unsupported_anonymous:
+        node = min(unsupported_anonymous, key=str)
+        raise ValueError(f'unsupported complex OWL anonymous class：{node}')
     hierarchy_state = {}
 
     def validate_hierarchy(node) -> None:
@@ -947,7 +975,8 @@ def _shacl_nodes(graph: Graph) -> set:
 def _allowed_bnodes(graph: Graph) -> set:
     allowed = _shacl_nodes(graph)
     anonymous_classes = {
-        node for node in _graph_classes(graph) if isinstance(node, BNode)
+        node for node in _graph_classes(graph)
+        if isinstance(node, BNode) and _is_simple_anonymous_class(graph, node)
     }
     allowed.update(anonymous_classes)
     class_pending = list(anonymous_classes)
@@ -960,8 +989,9 @@ def _allowed_bnodes(graph: Graph) -> set:
                 class_pending.append(parent)
     pending = [head for union in graph.objects(None, OWL.unionOf)
                for head in [union] if isinstance(head, BNode)]
-    allowed.update(subject for subject in graph.subjects(OWL.unionOf, None)
-                   if isinstance(subject, BNode))
+    allowed.update(
+        subject for subject in graph.subjects(OWL.unionOf, None)
+        if isinstance(subject, BNode) and not _is_graph_class(graph, subject))
     while pending:
         node = pending.pop()
         if node in allowed:
@@ -976,6 +1006,10 @@ def _allowed_bnodes(graph: Graph) -> set:
 def _validate_supported_bnodes(graph: Graph) -> None:
     if any(graph.subjects(RDF.type, OWL.Restriction)):
         raise ValueError('不支持 owl:Restriction 或其他复杂 OWL 空白节点')
+    if any(
+            isinstance(node, BNode) and not _is_simple_anonymous_class(graph, node)
+            for node in _graph_classes(graph)):
+        raise ValueError('unsupported complex OWL anonymous class')
     all_nodes = {value for triple in graph for value in triple if isinstance(value, BNode)}
     unsupported = all_nodes - _allowed_bnodes(graph)
     if unsupported:
