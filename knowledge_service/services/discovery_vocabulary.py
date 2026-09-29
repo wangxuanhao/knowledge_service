@@ -138,10 +138,15 @@ def _validate_and_copy_candidates(candidates):
         if candidate_id in seen_ids:
             raise InvalidDiscoveryCandidate(f"duplicate candidate id: {candidate_id}")
         seen_ids.add(candidate_id)
-        if _KIND_ALIASES.get(candidate.get("kind")) not in _RDF_KIND.values():
+        kind = candidate.get("kind")
+        if not isinstance(kind, str) or _KIND_ALIASES.get(kind) not in _RDF_KIND.values():
             raise InvalidDiscoveryCandidate(
                 f"candidate {candidate_id} requires a governed kind")
-        if not canonical_name(candidate.get("name")):
+        name = candidate.get("name")
+        if not isinstance(name, str):
+            raise InvalidDiscoveryCandidate(
+                f"candidate {candidate_id} requires a non-empty string name")
+        if not canonical_name(name):
             raise InvalidDiscoveryCandidate(
                 f"candidate {candidate_id} requires a non-empty name")
         if candidate.get("iri") is not None and not _valid_iri(candidate.get("iri")):
