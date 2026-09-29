@@ -188,9 +188,12 @@ def install(app, service):
             label=label.strip()
             if not label:raise ValueError('本体术语名称不能为空')
             iri=iri_by_source[source];graph.remove((iri,RDFS.label,None));graph.add((iri,RDFS.label,Literal(label,lang=_literal_language(label))))
-        for source in request.excluded_terms:
-            iri=iri_by_source[source];graph.remove((iri,None,None));graph.remove((None,None,iri))
-            for group in mappings.values():group.pop(source,None)
+        excluded_iris={iri_by_source[source] for source in request.excluded_terms}
+        for iri in excluded_iris:
+            graph.remove((iri,None,None));graph.remove((None,None,iri))
+        for group in mappings.values():
+            for source,iri in list(group.items()):
+                if URIRef(iri) in excluded_iris:group.pop(source)
         turtle=graph.serialize(format='turtle');summary=Ontology(turtle).summary()
         # Mirror legacy review edits into the authoritative append-only draft.
         current=governed.get(p,draft_id)

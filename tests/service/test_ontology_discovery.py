@@ -309,6 +309,55 @@ def test_merged_spellings_induce_one_term_and_rematerialize_every_source(
     }
 
 
+@pytest.mark.parametrize('excluded_term', [' Person ', 'ＰＥＲＳＯＮ'])
+def test_review_excluding_merged_spelling_removes_shared_term_and_all_dependents(
+        tmp_path, monkeypatch, excluded_term):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    _install_fake_ontology_generator(monkeypatch, {'classes': [], 'properties': []})
+    candidates = [
+        {'id': 'spaced', 'kind': 'entity', 'text': 'Alice',
+         'proposed_type': ' Person ', 'evidence': 'Alice evidence'},
+        {'id': 'fullwidth', 'kind': 'entity', 'text': 'Bob',
+         'proposed_type': 'ＰＥＲＳＯＮ', 'evidence': 'Bob evidence'},
+        {'id': 'unrelated', 'kind': 'entity', 'text': 'ACME',
+         'proposed_type': 'Organization', 'evidence': 'ACME evidence'},
+    ]
+    monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    app = create_app(tmp_path / f'review-merged-{len(excluded_term)}.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': '合并术语审核', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        base = f"/api/projects/{project['id']}/ontology-discovery"
+        created = client.post(base + '/drafts', json={'name': '合并草案'})
+        assert created.status_code == 201, created.text
+        draft = created.json()
+        shared_iri = draft['mappings']['entity_types'][' Person ']
+        assert draft['mappings']['entity_types']['ＰＥＲＳＯＮ'] == shared_iri
+
+        reviewed = client.put(
+            base + f"/drafts/{draft['id']}",
+            json={'excluded_terms': [excluded_term]})
+
+        current = OntologyDrafts(app.state.service.repository).get(
+            project['id'], draft['id'])
+
+    assert reviewed.status_code == 200, reviewed.text
+    payload = reviewed.json()
+    assert payload['mappings']['entity_types'] == {
+        'Organization': draft['mappings']['entity_types']['Organization']}
+    graph = Graph().parse(data=payload['turtle'], format='turtle')
+    assert not any(graph.triples((URIRef(shared_iri), None, None)))
+    assert not any(graph.triples((None, None, URIRef(shared_iri))))
+    effects = current['source_context']['publication_effects']
+    assert {record['metadata']['discovery_candidate_id']
+            for record in effects['records']} == {'unrelated'}
+    skipped = {item['candidate_id']: item for item in effects['skipped_candidates']}
+    assert set(skipped) == {'spaced', 'fullwidth'}
+    assert skipped['spaced']['reason'] == skipped['fullwidth']['reason']
+
+
 def test_discovery_exceptions_are_separate_from_normal_counts_and_views():
     candidates=[
         {'id':'entity','kind':'entity','text':'账号甲','proposed_type':'账号','document_id':'doc'},
