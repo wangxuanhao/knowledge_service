@@ -302,7 +302,7 @@ class KnowledgeService:
         requested_ontology_id=request.get('ontology_id')
         selected_ontology_version=(
             self.repository.get_ontology(project_id,requested_ontology_id)
-            if requested_ontology_id and extraction_mode in ('ontology','discovery')
+            if requested_ontology_id is not None and extraction_mode in ('ontology','discovery')
             else None)
         for key in ('valid_from', 'valid_until'):
             request[key] = normalize_time(request.get(key))

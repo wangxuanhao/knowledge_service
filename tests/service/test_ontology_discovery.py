@@ -112,8 +112,12 @@ def test_open_discovery_reserves_active_and_retired_baseline_classes(tmp_path, m
         'ActiveClass', '活跃类', 'RetiredClass', '退役类'})
 
 
+@pytest.mark.parametrize(('ontology_id', 'expected_detail'), [
+    ('missing-ontology', '未找到：missing-ontology'),
+    ('', '未找到：'),
+])
 def test_open_discovery_invalid_explicit_ontology_has_no_ingestion_side_effects(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, ontology_id, expected_detail):
     from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
 
     called = False
@@ -132,12 +136,12 @@ def test_open_discovery_invalid_explicit_ontology_has_no_ingestion_side_effects(
         base = f"/api/projects/{project['id']}"
         response = client.post(base + '/documents', json={
             'title': '不应保存', 'text': '账号甲当前封禁',
-            'extraction_mode': 'discovery', 'ontology_id': 'missing-ontology',
+            'extraction_mode': 'discovery', 'ontology_id': ontology_id,
             'resolve_entities': False,
         })
 
         assert response.status_code == 404
-        assert 'missing-ontology' in response.json()['detail']
+        assert response.json()['detail'] == expected_detail
         assert client.post(base + '/records/query', json={}).json()['records'] == []
         assert client.get(base + '/ingest-runs').json()['runs'] == []
         overview = client.get(base + '/ontology-discovery').json()
