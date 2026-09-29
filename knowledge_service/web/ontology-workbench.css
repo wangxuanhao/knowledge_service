@@ -60,11 +60,13 @@
 .ontology-workbench__cluster{padding:12px;border:1px solid var(--ow-line);border-radius:9px;background:#fff}
 .ontology-workbench__cluster h4{margin:0 0 4px;font-size:12px}
 .ontology-workbench__cluster-copy{min-height:34px;margin:0 0 7px;color:var(--ow-muted);font-size:10px;line-height:1.55}
+.ontology-workbench__cluster-list.is-expanded{max-height:320px;overflow-y:auto;scrollbar-gutter:stable}
 .ontology-workbench__cluster-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;width:100%;padding:7px 4px;border:0;border-bottom:1px solid #edf1ee;border-radius:0;background:transparent;color:var(--ow-ink);font-size:11px;text-align:left}
 .ontology-workbench__cluster-row:hover{background:#f0f6f2;filter:none}
 .ontology-workbench__cluster-row[aria-pressed="true"]{padding-left:8px;background:var(--ow-green-soft);box-shadow:inset 3px 0 0 var(--ow-green);color:var(--ow-green-dark)}
 .ontology-workbench__cluster-row:last-child{border-bottom:0}
 .ontology-workbench__cluster-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ontology-workbench__cluster-toggle{width:100%;margin-top:8px;padding:6px 8px;font-size:10px}
 .ontology-workbench__discovery-guide{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:18px;margin-bottom:14px;padding:18px 20px;border:1px solid #c9ddd2;border-radius:11px;background:linear-gradient(125deg,#f5faf7,#edf5f0)}
 .ontology-workbench__discovery-guide small{color:var(--ow-green);font-size:9px;font-weight:700;letter-spacing:.12em}
 .ontology-workbench__discovery-guide h3{margin:5px 0 7px;font-family:Georgia,"Microsoft YaHei",serif;font-size:19px}

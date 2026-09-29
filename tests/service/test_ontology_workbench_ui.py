@@ -46,7 +46,12 @@ MOCKS = r"""() => {
     let payload = {};
     if(parsed.pathname.endsWith('/ontology-discovery')) payload={
       candidate_count:10,entity_count:7,relation_count:2,attribute_count:1,exception_count:1,
-      entity_types:[{name:'Beta',count:1},{name:'Gamma',count:3},{name:'Alpha',count:3}],
+      entity_types:[
+        {name:'Beta',count:1},{name:'Gamma',count:3},{name:'Alpha',count:3},
+        {name:'Delta',count:4},{name:'Epsilon',count:5},{name:'Zeta',count:6},
+        {name:'Eta',count:7},{name:'Theta',count:8},{name:'Iota',count:9},
+        {name:'Kappa',count:10},{name:'Lambda',count:11},{name:'Omega',count:12}
+      ],
       relation_types:[{name:'RelationB',count:1},{name:'RelationA',count:4}],
       attribute_types:[{name:'AttributeA',count:2}]
     };
@@ -171,9 +176,31 @@ def test_discovery_clusters_are_complete_and_stably_sorted(page):
     entity_rows = clusters.nth(0).locator('.ontology-workbench__cluster-row')
     relation_rows = clusters.nth(1).locator('.ontology-workbench__cluster-row')
     attribute_rows = clusters.nth(2).locator('.ontology-workbench__cluster-row')
-    assert entity_rows.all_inner_texts() == ['Alpha\n3', 'Gamma\n3', 'Beta\n1']
+    assert entity_rows.all_inner_texts() == [
+        'Omega\n12', 'Lambda\n11', 'Kappa\n10', 'Iota\n9', 'Theta\n8',
+        'Eta\n7', 'Zeta\n6', 'Epsilon\n5', 'Delta\n4', 'Alpha\n3']
     assert relation_rows.all_inner_texts() == ['RelationA\n4', 'RelationB\n1']
     assert attribute_rows.all_inner_texts() == ['AttributeA\n2']
+
+    toggle = clusters.nth(0).locator('.ontology-workbench__cluster-toggle')
+    assert toggle.inner_text() == '展开全部（共 12 类）'
+    assert toggle.get_attribute('aria-expanded') == 'false'
+    assert clusters.nth(1).locator('.ontology-workbench__cluster-toggle').count() == 0
+    assert clusters.nth(2).locator('.ontology-workbench__cluster-toggle').count() == 0
+
+    toggle.click()
+    assert entity_rows.all_inner_texts() == [
+        'Omega\n12', 'Lambda\n11', 'Kappa\n10', 'Iota\n9', 'Theta\n8',
+        'Eta\n7', 'Zeta\n6', 'Epsilon\n5', 'Delta\n4', 'Alpha\n3',
+        'Gamma\n3', 'Beta\n1']
+    assert toggle.inner_text() == '收起'
+    assert toggle.get_attribute('aria-expanded') == 'true'
+    assert 'is-expanded' in clusters.nth(0).locator(
+        '.ontology-workbench__cluster-list').get_attribute('class').split()
+
+    toggle.click()
+    assert entity_rows.count() == 10
+    assert toggle.get_attribute('aria-expanded') == 'false'
 
 
 def test_discovery_uses_one_explained_workspace_instead_of_duplicate_side_queue(page):

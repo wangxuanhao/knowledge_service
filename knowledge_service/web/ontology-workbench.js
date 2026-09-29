@@ -50,12 +50,22 @@
   function cluster(title,copy,rows){
     const box=el('section','ontology-workbench__cluster discovery-cluster');box.append(el('h4','',title),el('p','ontology-workbench__cluster-copy',copy));
     if(!rows.length){box.append(el('p','ontology-workbench__empty','暂无数据'));return box;}
-    [...rows].sort((left,right)=>{
+    const sorted=[...rows].sort((left,right)=>{
       const count=(right.count??right.occurrence_count??0)-(left.count??left.occurrence_count??0);
       if(count)return count;
       const leftName=left.name||left.type||'未命名';const rightName=right.name||right.type||'未命名';
       return leftName.localeCompare(rightName,'zh-CN',{numeric:true,sensitivity:'base'});
-    }).slice(0,10).forEach(item=>{const name=item.name||item.type||'未命名';const row=el('button','ontology-workbench__cluster-row');row.type='button';row.dataset.clusterFilter=name;row.setAttribute('aria-pressed',String(state.filters.cluster===name));row.append(el('span','',name),el('b','',item.count??item.occurrence_count??0));row.addEventListener('click',()=>{state.filters.cluster=state.filters.cluster===name?'':name;renderDiscoveryData();});box.append(row);});return box;
+    });
+    const list=el('div','ontology-workbench__cluster-list');let expanded=false,toggle=null;
+    const renderRows=()=>{
+      replace(list);list.classList.toggle('is-expanded',expanded);
+      sorted.slice(0,expanded?sorted.length:10).forEach(item=>{const name=item.name||item.type||'未命名';const row=el('button','ontology-workbench__cluster-row');row.type='button';row.dataset.clusterFilter=name;row.setAttribute('aria-pressed',String(state.filters.cluster===name));row.append(el('span','',name),el('b','',item.count??item.occurrence_count??0));row.addEventListener('click',()=>{state.filters.cluster=state.filters.cluster===name?'':name;renderDiscoveryData();});list.append(row);});
+      if(!expanded)list.scrollTop=0;
+      if(toggle){toggle.textContent=expanded?'收起':`展开全部（共 ${sorted.length} 类）`;toggle.setAttribute('aria-expanded',String(expanded));}
+    };
+    box.append(list);
+    if(sorted.length>10){toggle=el('button','ontology-workbench__cluster-toggle secondary');toggle.type='button';toggle.addEventListener('click',()=>{expanded=!expanded;renderRows();});box.append(toggle);}
+    renderRows();return box;
   }
   const candidateSources=item=>item.sources||[];
   function discoveryItems(){return ({entity:state.candidates?.nodes,relation:state.candidates?.edges,attribute:state.candidates?.attributes,exception:state.candidates?.exceptions}[state.discoveryKind]||[]);}
