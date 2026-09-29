@@ -53,11 +53,11 @@ OWL domain/range 在 RDF/OWL 中具有推理语义。产品现有“允许端点
 
 ## 核心不变量
 
-1. 一个 IRI 最多只能声明一种活动术语种类：class、relation 或 attribute。
+1. 一个 IRI 在所有已发布声明中最多只能属于一种术语种类：class、relation 或 attribute；停用不释放 IRI 或 kind。
 2. 同一项目内，正式术语和待归纳候选使用同一套规范名称规则。
 3. 不同术语种类不得共享同一规范名称。
 4. 同种类、同规范名称的候选合并证据和出现次数，不重复建术语。
-5. 已发布或已停用正式术语的规范名称和 IRI 均被保留；新的不同种类候选不得复用。
+5. 已发布或已停用正式术语的规范名称和 IRI 均被保留；停用术语不能被自动复用或隐式恢复，新的不同种类候选也不得复用。
 6. 冲突只隔离术语提案，不删除来源候选事实、文档证据或诊断。
 7. 被隔离候选不生成 `create_term`、domain、range、datatype 或父类操作。
 8. 已知候选冲突不能使整个累计草案失败；意外的无效 RDF 必须产生受控错误并完整回滚。
@@ -73,6 +73,24 @@ OWL domain/range 在 RDF/OWL 中具有推理语义。产品现有“允许端点
 5. 不自动删除标点、不做分词、不做同义词合并。
 
 显示标签和多语言标签可保留原文；规范名称只用于项目内的候选合并和冲突检测。首期不允许不同种类使用相同显示标签后再靠 IRI 消歧，因为当前解析、映射和工作台尚不能安全表达这种歧义。
+
+基线本体建立名称注册表时，为每个正式术语索引以下规范化别名：
+
+- IRI 的可读 local name；
+- 全部 `rdfs:label` 值，不区分语言标签；
+- 当前 summary 中作为 `name` 暴露的稳定本地名称。
+
+注册表值是 `(IRI, kind, retired, source)` 集合，不允许用后写值覆盖先写值。候选匹配优先级固定为：
+
+1. 候选显式携带的 IRI 已在基线存在时，以该 IRI 的已发布 kind 为准；kind 不同立即冲突；
+2. 显式 IRI 不存在或候选没有 IRI 时，使用规范名称查询注册表；
+3. 名称只匹配一个活动、同 kind 正式术语时复用该 IRI；
+4. 名称只匹配一个已停用、同 kind 正式术语时隔离为 `retired_term_reuse_blocked`，只建议走人工 restore 草案；
+5. 名称匹配不同 kind、多个 IRI 或活动/停用混合结果时隔离为 `ambiguous_baseline_name` 或 `existing_term_kind_collision`，不得任选一个；
+6. 显式新 IRI 的规范名称又匹配另一个正式 IRI 时隔离为 `candidate_iri_name_mismatch`；
+7. 完全没有匹配时才允许创建新术语。
+
+如果基线中同一 IRI 已声明多个 kind，基线本身不满足结构不变量。发现请求返回受控 422 `invalid_baseline_dual_kind`，不尝试通过候选优先级修复；其他跨 IRI 的重名只使命中该名称的候选隔离，不影响无关候选。
 
 ## 分层处理
 
@@ -138,12 +156,15 @@ class DiscoveryVocabularyNormalizer:
 | 场景 | 处理 |
 |---|---|
 | 同种类、同规范名称 | 合并候选、证据和频次 |
-| 新候选与基线正式术语同种类同名 | 复用正式 IRI |
+| 新候选与基线活动正式术语同种类同名，且唯一命中 | 复用正式 IRI |
+| 新候选与已停用正式术语同种类同名 | 隔离，提示通过高风险 restore 草案恢复 |
 | class 与 relation/attribute 候选同名 | class 候选继续归纳；property 候选隔离 |
 | relation 与 attribute 候选同名 | 两种 property 候选均隔离 |
 | 新候选与基线正式术语不同种类同名 | 正式术语不变；新候选隔离 |
 | 多个输入候选显式携带同一 IRI 但 kind 不同 | 全部冲突输入隔离，并产生高严重度诊断 |
 | 低频新属性 | 保留快照但不归纳，不记为跨类型冲突 |
+
+分类顺序固定为：确定性无效过滤 → 显式 IRI/基线结构校验 → 跨 kind 名称冲突分组 → 同 kind 合并 → 对剩余新属性应用频次门槛。因此同时“低频且跨 kind 冲突”的属性只计入术语冲突，不重复计入低频暂缓，工作台统计互斥。
 
 class 优先只适用于同一次开放发现中的词汇提案，理由是实体类型先被抽取并已作为事实谓词的保留名称；它不证明 class 语义永久正确。若属性或关系才是正确建模，用户必须在后续人工草案中使用明确名称，或退役/替代错误术语，不能原地改变 kind。
 
@@ -160,6 +181,71 @@ Semantica 只接收 `accepted_candidates`。生成结果返回后执行结构检
 
 本体操作编译器保留最终保护：若任何调用方绕过归一化，尝试对 class 应用 domain/range、改变已发布 kind 或生成双重类型声明，编译必须失败。此类意外失败返回结构化 422 诊断，不保存草案或部分操作。
 
+## 发现运行快照
+
+归一化结果不能只存在于 HTTP 响应或可选草案中。每次累计分析使用通用 artifact 持久化一个 `ontology_discovery_run`，作为候选、冲突和草案之间的审计载体。该 artifact 至少保存：
+
+```json
+{
+  "id": "由 source_fingerprint 确定性派生",
+  "project_id": "...",
+  "base_ontology_id": "...",
+  "source_fingerprint": "sha256:...",
+  "normalizer_version": "v1",
+  "generator_version": "semantica-0.6.7",
+  "candidate_snapshot": [],
+  "accepted_candidate_ids": [],
+  "merged_groups": [],
+  "conflicts": [],
+  "mappings": {},
+  "candidate_bindings": [],
+  "diagnostics": {},
+  "status": "analyzed|draft_created|published|finalized_no_change|stale_base|stale_source|closed",
+  "unified_draft_id": null,
+  "supersedes_run_id": null
+}
+```
+
+`source_fingerprint` 由 project、base ontology id、排序后的候选 ID/文档版本/规范化有效载荷、归一化规则版本、Semantica 版本和影响生成结果的请求选项计算。run id 由 project id 与 fingerprint 确定性派生，并由 artifact 主键提供并发唯一性。
+
+候选、冲突和 bindings 快照创建后不可改写。状态、关联 draft id 和终态结果可以通过带期望状态的 Repository 更新推进，但不能替换原始快照。刷新来源或 rebase 不修改旧 run，而是创建带 `supersedes_run_id` 的新 run；旧 run 保持审计可读。草案关闭只把 run 置为 `closed`，发布或无本体变化物化分别置为 `published` / `finalized_no_change`。
+
+因此纯冲突、纯低频、纯复用和混合结果都有持久化载体。工作台刷新后从 discovery run 读取诊断，不依赖是否成功创建本体草案。
+
+## 候选绑定与部分物化
+
+归一化和操作编译必须为每个可接受候选保存 `candidate_binding`：
+
+```json
+{
+  "candidate_id": "...",
+  "target_iri": "...",
+  "target_kind": "class|relation|attribute",
+  "binding_kind": "existing|proposed",
+  "required_operation_ids": [],
+  "optional_operation_ids": []
+}
+```
+
+- 复用唯一活动同 kind 正式术语时，`required_operation_ids=[]`，该绑定不需要制造 no-op 本体操作；
+- 新 class/relation 的 `create_term` 是候选物化的必要操作；父级、relation domain/range 建议默认是可选操作；
+- 新 attribute 的 `create_term` 和建立受支持 datatype 的操作是必要操作，domain 建议默认是可选操作；
+- 编译器若发现某条结构边是目标术语合法存在的必要条件，必须显式放入 required 集合，不能靠发布时猜测。
+
+发布或无变化终结时逐候选计算：
+
+1. target IRI 在最终本体中存在、活动且 kind 正确；
+2. 所有 required operations 均为最新有效版本并被批准、实际应用；
+3. 候选事实通过最终本体和 SHACL 校验。
+
+满足三项才物化。必要操作被拒绝、被替代或校验失败的候选进入 skipped，原因分别使用稳定代码 `required_operation_rejected`、`required_operation_superseded` 或 `ontology_validation_failed`。可选 parent/domain/range 操作被拒不影响术语本身及事实物化。
+
+冲突候选在 discovery run 创建时即持久化 `ontology_term_conflict` 诊断；在该 run 达到 `published` 或 `finalized_no_change` 时，候选生命周期同步写入相同稳定跳过原因。它们永远不会因为另一个操作获批而被顺带物化。
+
+如果归一化结果没有本体变更操作，但存在指向活动基线术语的有效 bindings，则不创建空本体草案，也不创建新本体版本。兼容的累计草案入口返回 `result_kind=mapping_only` 和 discovery run；显式终结动作在一个事务中按当前 ontology id 重新验证并物化这些候选，将 run 置为 `finalized_no_change`。如果既无操作也无可物化 binding，只返回持久化诊断 run，不提供提交/发布动作。
+
+混合草案发布时，在同一个发布事务里应用批准操作，并只物化满足上述规则的 bindings；部分批准因此具有确定结果。
+
 ## 累计草案生成与原子性
 
 累计草案生成顺序调整为：
@@ -169,21 +255,23 @@ Semantica 只接收 `accepted_candidates`。生成结果返回后执行结构检
   -> 归一化、合并、隔离
   -> 使用 accepted candidates 执行 Semantica 归纳
   -> 校验生成 RDF 和操作
-  -> 在一个 Repository 事务内创建 draft + 初始 operations + conflict snapshot
+  -> 在一个 Repository 事务内创建 discovery run + 可选 draft + 初始 operations + bindings
   -> 返回草案预览
 ```
 
-不得先持久化空草案再编译操作。任何归一化之外的异常均回滚全部写入。仅存在冲突、没有可接受候选时，接口仍返回一个可理解的“无可生成操作”结果和冲突诊断；不创建无操作草案。
+不得先持久化空草案再编译操作。编译在事务外完成，但持久化事务开始后必须重新读取当前 `base_ontology_id`、候选文档版本和候选有效载荷并重算 source fingerprint；任一项变化返回 409 `stale_base` / `stale_source`，不写入 run、draft 或 operation。任何归一化之外的异常均回滚全部写入。仅存在冲突、没有可接受候选时，接口返回持久化 discovery run 和冲突诊断；不创建无操作草案。
+
+创建事务使用确定性 run id 作为幂等键：相同 project + source fingerprint 的并发请求只能插入一次。失败插入的一方读取已存在 run；若其 draft 已创建则返回同一 run/draft，若另一事务尚未完成则等待数据库事务结束后读取，不能另建重复活动草案。相同来源/base 的重复请求返回原结果；刷新/rebase 因 fingerprint 改变而创建新 run。
 
 包含正常候选和冲突候选时：
 
 - 创建包含正常操作的 editing 草案；
-- 将冲突快照和诊断计数附在草案来源上下文；
+- 草案通过 discovery run id 引用不可变冲突、bindings 和诊断快照；来源上下文只保存引用和摘要，不复制第二份可变真值；
 - 冲突候选不进入 operations；
 - 草案可以继续提交、审核、验证和发布；
-- 发布物化时冲突候选保持未映射，并保存 `ontology_term_conflict` 跳过原因。
+- 发布物化时冲突候选保持未映射，并保存 `ontology_term_conflict` 跳过原因；其他候选按 binding required/optional 操作规则决定。
 
-重复请求必须遵守现有 revision/idempotency 语义，不得生成相同来源快照的重复活动草案。
+draft 创建后的修改继续遵守现有 revision/idempotency 语义；首次创建由 discovery run fingerprint 提供幂等和并发约束。
 
 ## 工作台最小改动
 
