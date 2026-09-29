@@ -19,6 +19,7 @@ from ..services.discovery_vocabulary import (
     DiscoveryVocabularyNormalizer,
     validate_generated_term_kinds,
 )
+from ..services.ontology_shape import structurally_changed_iris
 from ..core.time import utc_now
 from ..utils.attributes import primitive_datatype
 from ..utils.diagnostics import timed
@@ -527,6 +528,9 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
         {'entities':entities,'relationships':relationships},name=name,build_hierarchy=True)
     graph=Graph()
     if baseline_turtle:graph.parse(data=baseline_turtle,format='turtle')
+    baseline_graph=Graph()
+    for triple in graph:
+        baseline_graph.add(triple)
     ns=Namespace(base);graph.bind('disc',ns);graph.bind('owl',OWL);graph.bind('rdfs',RDFS)
     catalog=_term_catalog(graph)
     inferred_classes=inferred.get('classes',[])
@@ -628,6 +632,7 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
     for iri in relation_map.values():
         predicate=URIRef(iri);graph.remove((predicate,RDFS.domain,None));graph.remove((predicate,RDFS.range,None))
     turtle=graph.serialize(format='turtle')
-    validate_generated_term_kinds(turtle)
+    validate_generated_term_kinds(
+        turtle, changed_iris=structurally_changed_iris(baseline_graph, graph))
     Ontology(turtle)
     return turtle,{'entity_types':class_map,'relation_types':relation_map,'attributes':attribute_map},inferred

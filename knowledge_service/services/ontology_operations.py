@@ -13,10 +13,16 @@ from collections.abc import Iterable
 from rdflib import BNode, Graph, Literal, RDF, RDFS, URIRef
 from rdflib.collection import Collection
 from rdflib.compare import isomorphic, to_canonical_graph
-from rdflib.namespace import Namespace, OWL, SH, XSD
+from rdflib.namespace import Namespace, OWL, SH
 
 from .ontology import Ontology, term_kind
 from .ontology_iri import valid_application_iri
+from .ontology_shape import (
+    CLASS_DECLARATIONS,
+    SUPPORTED_XSD_DATATYPES,
+    is_graph_class,
+    is_simple_anonymous_class,
+)
 
 
 DCTERMS = Namespace('http://purl.org/dc/terms/')
@@ -26,7 +32,6 @@ _DECLARATIONS = {
     'relation': OWL.ObjectProperty,
     'attribute': OWL.DatatypeProperty,
 }
-_CLASS_DECLARATIONS = frozenset({OWL.Class, RDFS.Class})
 _STRUCTURAL_PREDICATES = {
     RDF.type, RDFS.subClassOf, RDFS.domain, RDFS.range, OWL.deprecated,
     DCTERMS.isReplacedBy,
@@ -45,10 +50,7 @@ RESTORE_TEMPLATE_FIELDS = frozenset({
 })
 _SELECTABLE_TEMPLATE_FIELDS = RESTORE_TEMPLATE_FIELDS
 _ACTION_ALIASES = {'retire': 'retire_term', 'restore': 'restore_term'}
-_SUPPORTED_DATATYPES = {
-    XSD.string, XSD.boolean, XSD.integer, XSD.decimal, XSD.float, XSD.double,
-    XSD.date, XSD.dateTime, RDFS.Literal,
-}
+_SUPPORTED_DATATYPES = SUPPORTED_XSD_DATATYPES | {RDFS.Literal}
 _RDF_PAYLOAD_KEYS = {'turtle': 'turtle', 'canonical_ntriples': 'nt', 'subgraph': 'turtle'}
 
 
@@ -57,15 +59,10 @@ def _is_annotation_predicate(predicate) -> bool:
             and not str(predicate).startswith(str(SH)))
 
 
-def _is_graph_class(graph: Graph, node) -> bool:
-    return any((node, RDF.type, declaration) in graph
-               for declaration in _CLASS_DECLARATIONS)
-
-
 def _graph_classes(graph: Graph) -> set:
     return {
         subject
-        for declaration in _CLASS_DECLARATIONS
+        for declaration in CLASS_DECLARATIONS
         for subject in graph.subjects(RDF.type, declaration)
     }
 
@@ -89,27 +86,8 @@ def _reachable_class_nodes(
     return reached
 
 
-_SIMPLE_ANONYMOUS_CLASS_PREDICATES = frozenset({
-    RDF.type, RDFS.subClassOf, RDFS.label, RDFS.comment,
-})
-
-
-def _is_simple_anonymous_class(graph: Graph, node: BNode) -> bool:
-    for predicate, value in graph.predicate_objects(node):
-        if predicate not in _SIMPLE_ANONYMOUS_CLASS_PREDICATES:
-            return False
-        if predicate == RDF.type and value not in _CLASS_DECLARATIONS:
-            return False
-        if predicate in {RDFS.label, RDFS.comment} and isinstance(value, BNode):
-            return False
-    for subject, predicate in graph.subject_predicates(node):
-        if predicate != RDFS.subClassOf or not _is_graph_class(graph, subject):
-            return False
-    return True
-
-
 def _graph_term_kind(graph: Graph, node) -> str | None:
-    if _is_graph_class(graph, node):
+    if is_graph_class(graph, node):
         return 'class'
     if (node, RDF.type, OWL.ObjectProperty) in graph:
         return 'relation'
@@ -417,7 +395,7 @@ def _is_active_graph_term(graph: Graph, node: URIRef) -> bool:
 def _assert_no_parent_cycle(graph: Graph, child: URIRef, parent: URIRef) -> None:
     if child == parent:
         raise ValueError('术语不能继承自身，否则会形成循环（cycle）')
-    if not _is_graph_class(graph, parent):
+    if not is_graph_class(graph, parent):
         raise ValueError(f'父类不存在：{parent}')
     pending = [parent]
     seen = set()
@@ -503,7 +481,7 @@ def _validate_definition_graph(graph: Graph) -> None:
             f'rdfs:subClassOf subject must be a declared class：{child}')
     unsupported_anonymous = {
         node for node in class_nodes
-        if isinstance(node, BNode) and not _is_simple_anonymous_class(graph, node)
+        if isinstance(node, BNode) and not is_simple_anonymous_class(graph, node)
     }
     if unsupported_anonymous:
         node = min(unsupported_anonymous, key=str)
@@ -620,7 +598,7 @@ def apply_operations(base_turtle: str, operations: Iterable[dict]) -> str:
                 if value in values:
                     raise ValueError('约束值不能重复')
                 if predicate == RDFS.domain or kind == 'relation':
-                    if not _is_graph_class(graph, value):
+                    if not is_graph_class(graph, value):
                         raise ValueError(f'domain/range 类不存在：{value}')
                 elif value not in _SUPPORTED_DATATYPES:
                     raise ValueError(f'不支持的 datatype 数据类型：{value}')
@@ -631,7 +609,7 @@ def apply_operations(base_turtle: str, operations: Iterable[dict]) -> str:
                 values = [item for item in values if item != value]
             if predicate == RDFS.domain or kind == 'relation':
                 for value in values:
-                    if not _is_graph_class(graph, URIRef(str(value))):
+                    if not is_graph_class(graph, URIRef(str(value))):
                         raise ValueError(f'domain/range 类不存在：{value}')
             _set_constraint(graph, target, predicate, values)
         elif action == 'set_datatype':
@@ -1005,14 +983,14 @@ def _allowed_bnodes(graph: Graph) -> set:
     allowed = _shacl_nodes(graph)
     anonymous_classes = {
         node for node in _graph_classes(graph)
-        if isinstance(node, BNode) and _is_simple_anonymous_class(graph, node)
+        if isinstance(node, BNode) and is_simple_anonymous_class(graph, node)
     }
     allowed.update(anonymous_classes)
     class_pending = list(anonymous_classes)
     while class_pending:
         node = class_pending.pop()
         for parent in graph.objects(node, RDFS.subClassOf):
-            if (isinstance(parent, BNode) and _is_graph_class(graph, parent)
+            if (isinstance(parent, BNode) and is_graph_class(graph, parent)
                     and parent not in allowed):
                 allowed.add(parent)
                 class_pending.append(parent)
@@ -1020,7 +998,7 @@ def _allowed_bnodes(graph: Graph) -> set:
                for head in [union] if isinstance(head, BNode)]
     allowed.update(
         subject for subject in graph.subjects(OWL.unionOf, None)
-        if isinstance(subject, BNode) and not _is_graph_class(graph, subject))
+        if isinstance(subject, BNode) and not is_graph_class(graph, subject))
     while pending:
         node = pending.pop()
         if node in allowed:
@@ -1036,7 +1014,7 @@ def _validate_supported_bnodes(graph: Graph) -> None:
     if any(graph.subjects(RDF.type, OWL.Restriction)):
         raise ValueError('不支持 owl:Restriction 或其他复杂 OWL 空白节点')
     if any(
-            isinstance(node, BNode) and not _is_simple_anonymous_class(graph, node)
+            isinstance(node, BNode) and not is_simple_anonymous_class(graph, node)
             for node in _graph_classes(graph)):
         raise ValueError('unsupported complex OWL anonymous class')
     all_nodes = {value for triple in graph for value in triple if isinstance(value, BNode)}
@@ -1063,7 +1041,7 @@ def _canonicalize_supported_unions(source: Graph) -> Graph:
 
 def _declarations(graph: Graph) -> dict[URIRef, str]:
     found = {}
-    for declaration in _CLASS_DECLARATIONS:
+    for declaration in CLASS_DECLARATIONS:
         for subject in graph.subjects(RDF.type, declaration):
             if isinstance(subject, URIRef):
                 found[subject] = 'class'

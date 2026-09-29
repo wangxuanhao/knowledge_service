@@ -48,6 +48,52 @@ def test_generated_vocabulary_guard_accepts_valid_governed_graph():
     assert len(graph) == 9
 
 
+def test_generated_vocabulary_guard_ignores_unchanged_range_less_datatype_property():
+    turtle = VALID_GENERATED_TURTLE + """
+        ex:legacyCode a owl:DatatypeProperty .
+    """
+
+    validate_generated_term_kinds(
+        turtle, changed_iris={"http://example.test/name"})
+
+
+def test_generated_vocabulary_guard_requires_range_for_changed_datatype_property():
+    turtle = VALID_GENERATED_TURTLE + """
+        ex:generatedCode a owl:DatatypeProperty .
+    """
+
+    with pytest.raises(GeneratedVocabularyConflict) as caught:
+        validate_generated_term_kinds(
+            turtle, changed_iris={"http://example.test/generatedCode"})
+
+    assert caught.value.reason == "datatype_property_range_count"
+    assert caught.value.detail == {
+        "property": "http://example.test/generatedCode", "count": 0}
+
+
+def test_generated_vocabulary_guard_keeps_kind_exclusivity_global_when_scoped():
+    turtle = VALID_GENERATED_TURTLE + "ex:Parent a owl:ObjectProperty ."
+
+    with pytest.raises(GeneratedVocabularyConflict) as caught:
+        validate_generated_term_kinds(
+            turtle, changed_iris={"http://example.test/name"})
+
+    assert caught.value.reason == "multiple_governed_kinds"
+    assert caught.value.detail["iri"] == "http://example.test/Parent"
+
+
+def test_generated_vocabulary_guard_validates_references_from_changed_property():
+    turtle = VALID_GENERATED_TURTLE + """
+        ex:generatedRelation a owl:ObjectProperty ; rdfs:domain ex:undeclared .
+    """
+
+    with pytest.raises(GeneratedVocabularyConflict) as caught:
+        validate_generated_term_kinds(
+            turtle, changed_iris={"http://example.test/generatedRelation"})
+
+    assert caught.value.reason == "object_property_domain_not_class"
+
+
 @pytest.mark.parametrize(("triple", "reason", "detail"), [
     (
         "ex:Child a owl:ObjectProperty .",

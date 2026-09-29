@@ -9,12 +9,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from rdflib import BNode, Graph, RDF, RDFS
-from rdflib.namespace import OWL, XSD
+from rdflib.namespace import OWL
 
 from .ontology_iri import valid_application_iri
-from .ontology_operations import (
-    _is_graph_class,
-    _is_simple_anonymous_class,
+from .ontology_shape import (
+    SUPPORTED_XSD_DATATYPES,
+    is_graph_class,
+    is_simple_anonymous_class,
 )
 from .ontology_vocabulary import GovernedVocabularyRecord, index_governed_vocabulary
 _KIND_ALIASES = {
@@ -25,10 +26,6 @@ _KIND_ALIASES = {
 _CANDIDATE_KIND_ALIASES = {
     "class": "class", "relation": "relation", "attribute": "attribute",
 }
-_SUPPORTED_GENERATED_XSD_DATATYPES = frozenset({
-    XSD.string, XSD.boolean, XSD.integer, XSD.decimal, XSD.float, XSD.double,
-    XSD.date, XSD.dateTime,
-})
 
 
 def _immutable(*_args, **_kwargs):
@@ -137,16 +134,16 @@ class GeneratedVocabularyConflict(ValueError):
 
 
 def _generated_class_target(graph: Graph, node) -> bool:
-    if not _is_graph_class(graph, node):
+    if not is_graph_class(graph, node):
         return False
-    return not isinstance(node, BNode) or _is_simple_anonymous_class(graph, node)
+    return not isinstance(node, BNode) or is_simple_anonymous_class(graph, node)
 
 
 def _raise_generated_conflict(reason: str, **detail) -> None:
     raise GeneratedVocabularyConflict(reason, detail)
 
 
-def validate_generated_term_kinds(turtle: str) -> Graph:
+def validate_generated_term_kinds(turtle: str, *, changed_iris=None) -> Graph:
     """Parse and validate the final Semantica-adapted governed vocabulary."""
     graph = Graph()
     try:
@@ -161,8 +158,15 @@ def validate_generated_term_kinds(turtle: str) -> Graph:
                 "multiple_governed_kinds", iri=record.iri,
                 kinds=list(record.kinds))
 
+    changed = None if changed_iris is None else {str(iri) for iri in changed_iris}
+
+    def is_changed(node) -> bool:
+        return changed is None or str(node) in changed
+
     for subject, target in sorted(
             graph.subject_objects(RDFS.subClassOf), key=lambda pair: tuple(map(str, pair))):
+        if not is_changed(subject):
+            continue
         if not _generated_class_target(graph, subject):
             _raise_generated_conflict(
                 "subclass_subject_not_class", node=str(subject))
@@ -177,6 +181,8 @@ def validate_generated_term_kinds(turtle: str) -> Graph:
     )
     for declaration, predicate, reason in property_specs:
         for property_node in sorted(graph.subjects(RDF.type, declaration), key=str):
+            if not is_changed(property_node):
+                continue
             for target in sorted(graph.objects(property_node, predicate), key=str):
                 if not _generated_class_target(graph, target):
                     _raise_generated_conflict(
@@ -184,12 +190,14 @@ def validate_generated_term_kinds(turtle: str) -> Graph:
 
     for property_node in sorted(
             graph.subjects(RDF.type, OWL.DatatypeProperty), key=str):
+        if not is_changed(property_node):
+            continue
         ranges = sorted(set(graph.objects(property_node, RDFS.range)), key=str)
         if len(ranges) != 1:
             _raise_generated_conflict(
                 "datatype_property_range_count", property=str(property_node),
                 count=len(ranges))
-        if ranges[0] not in _SUPPORTED_GENERATED_XSD_DATATYPES:
+        if ranges[0] not in SUPPORTED_XSD_DATATYPES:
             _raise_generated_conflict(
                 "unsupported_datatype_range", property=str(property_node),
                 range=str(ranges[0]))

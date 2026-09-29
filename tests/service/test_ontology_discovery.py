@@ -93,6 +93,28 @@ def test_induce_uses_candidate_binding_iri_before_generating_one(monkeypatch):
     assert (URIRef('urn:knowledge:ontology:project:账号'), RDF.type, OWL.Class) not in graph
 
 
+def test_induce_allows_structurally_unchanged_range_less_reused_attribute(monkeypatch):
+    _install_fake_ontology_generator(monkeypatch, {'classes': [], 'properties': []})
+    baseline = '''
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        <urn:stable:publishedOn> a owl:DatatypeProperty ; rdfs:label "发布日期"@zh .
+    '''
+    candidates = [
+        {'id': 'entity', 'kind': 'entity', 'text': '平台规则', 'proposed_type': '规则'},
+        {'id': 'date', 'kind': 'attribute', 'entity_id': 'entity',
+         'proposed_type': '发布日期', 'value': '2026-09-16'},
+    ]
+
+    turtle, mappings, _ = _induce(
+        'project', 'reuse', candidates, baseline_turtle=baseline)
+
+    assert mappings['attributes']['发布日期'] == 'urn:stable:publishedOn'
+    graph = Graph().parse(data=turtle, format='turtle')
+    assert list(graph.objects(
+        URIRef('urn:stable:publishedOn'), RDFS.range)) == []
+
+
 def test_materialization_keeps_normalizer_conflicts_out_of_provisional_records():
     candidates = [
         {'id': 'entity', 'kind': 'entity', 'text': '账号甲', 'proposed_type': '账号',
