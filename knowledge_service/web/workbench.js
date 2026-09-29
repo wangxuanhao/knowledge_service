@@ -223,6 +223,7 @@ function closeChunkPreview(){
   const host=$('chunk-preview');
   if(host.hidden)return;
   host.hidden=true;
+  document.documentElement.classList.remove('chunk-preview-open');
   document.body.classList.remove('chunk-preview-open');
   chunkPreviewBackground(false);
   const trigger=chunkPreviewState.trigger;
@@ -233,6 +234,7 @@ function openChunkPreview(){
   const host=$('chunk-preview');
   chunkPreviewState.trigger=$('preview-chunks');
   host.hidden=false;
+  document.documentElement.classList.add('chunk-preview-open');
   document.body.classList.add('chunk-preview-open');
   chunkPreviewBackground(true);
   $('chunk-preview-close').focus();

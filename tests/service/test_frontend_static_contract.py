@@ -57,7 +57,7 @@ def test_provenance_assets_precede_history_hydration():
     assert '/assets/provenance-drawer.css?v=2' in html
     assert '/assets/provenance-drawer.js?v=3' in html
     assert '/assets/evidence-inspector.js?v=attribute-facts-1' in html
-    assert '/assets/workbench.js?v=ontology-nav-1' in html
+    assert '/assets/workbench.js?v=document-upload-3' in html
     assert html.index('/assets/workbench.css') < html.index('/assets/provenance-drawer.css')
     assert html.index('/assets/ingest-mode.js') < html.index('/assets/provenance-drawer.js') < html.index('/assets/workbench.js')
 
@@ -168,6 +168,6 @@ def test_document_upload_workspace_contract():
     for marker in ('.document-upload-workspace', '.document-dropzone', '.document-queue-row',
                    '@media(max-width:850px)', ':focus-visible'):
         assert marker in css, marker
-    assert '/assets/workbench.css?v=document-upload-1' in html
+    assert '/assets/workbench.css?v=document-upload-3' in html
     assert '/assets/ingest-mode.js?v=document-upload-1' in html
-    assert '/assets/workbench.js?v=ontology-nav-1' in html
+    assert '/assets/workbench.js?v=document-upload-3' in html

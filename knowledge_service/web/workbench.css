@@ -34,13 +34,13 @@ aside{gap:14px;overflow:auto}nav{gap:2px}nav button{padding:9px 10px}aside a{mar
 .structured-import-content #write-batch{justify-self:start}
 
 /* Chunk preview drawer */
-body.chunk-preview-open{overflow:hidden}
+html.chunk-preview-open,body.chunk-preview-open{overflow:hidden}
 #chunk-preview.chunk-preview-overlay[hidden]{display:none}
 #chunk-preview.chunk-preview-overlay{position:fixed;inset:0;z-index:1200;display:flex;justify-content:flex-end;max-height:none;margin-top:0;overflow:hidden;background:rgba(18,38,29,.42);animation:chunk-preview-backdrop .2s ease-out}
 .chunk-preview-drawer{box-sizing:border-box;width:clamp(620px,58vw,940px);max-width:100vw;height:100dvh;min-height:0;display:grid;grid-template-rows:auto auto minmax(0,1fr);overflow:hidden;background:#fff;border-left:1px solid #d5e1d9;box-shadow:-18px 0 48px rgba(20,50,37,.2);animation:chunk-preview-enter .2s ease-out}
 .chunk-preview-header{display:flex;align-items:flex-start;justify-content:space-between;gap:22px;padding:24px 26px 18px;border-bottom:1px solid #e4ebe6;background:#fbfdfb}
 .chunk-preview-header>div{min-width:0}.chunk-preview-header small{font-weight:800;letter-spacing:.16em;color:#23795c}.chunk-preview-header h2{margin:4px 0 6px;color:#203f32}.chunk-preview-header p{margin:0;color:#65786d;font-size:13px;line-height:1.55}
-#chunk-preview-close{flex:0 0 auto;width:38px;height:38px;padding:0;border-radius:50%;font-size:22px;line-height:1}
+#chunk-preview-close{flex:0 0 auto;width:44px;height:44px;padding:0;border-radius:50%;font-size:22px;line-height:1}
 .chunk-preview-summary{display:flex;flex-wrap:wrap;gap:8px;padding:12px 26px;border-bottom:1px solid #e4ebe6;background:#f5f8f5;color:#527064;font-size:12px}
 .chunk-preview-summary:empty{display:none}
 .chunk-preview-summary>span,.chunk-preview-summary .chunk-preview-chip{display:inline-flex;align-items:center;min-height:26px;padding:4px 9px;border:1px solid #cfe0d5;border-radius:999px;background:#fff;color:#355848;font-weight:700}
@@ -53,7 +53,7 @@ body.chunk-preview-open{overflow:hidden}
 .chunk-preview-content:focus-visible{outline:3px solid #79ad95;outline-offset:-4px}
 .chunk-preview-current{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid #e2eae4;color:#355848}
 .chunk-preview-current strong{font-size:17px}.chunk-preview-current span{color:#65786d;font-size:12px;text-align:right}
-.chunk-preview-content pre{max-width:100%;margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.chunk-preview-content pre{max-width:100%;max-height:none;margin:0;overflow:visible;white-space:pre-wrap;overflow-wrap:anywhere}
 .chunk-preview-empty{display:grid;place-items:center;min-height:220px;padding:28px;border:1px dashed #b8cdbf;border-radius:12px;background:#f7faf7;color:#65786d;text-align:center}
 @keyframes chunk-preview-backdrop{from{background:rgba(18,38,29,0)}}
 @keyframes chunk-preview-enter{from{transform:translateX(28px);opacity:.75}}
@@ -74,7 +74,7 @@ body.chunk-preview-open{overflow:hidden}
   .chunk-preview-header{gap:12px;padding:16px}
   .chunk-preview-header h2{font-size:20px}
   .chunk-preview-header p{font-size:12px}
-  #chunk-preview-close{width:36px;height:36px}
+  #chunk-preview-close{width:44px;height:44px}
   .chunk-preview-summary{padding:9px 16px}
   .chunk-preview-list{padding:10px 14px}
   .chunk-preview-list button{max-width:190px;padding:9px 11px}

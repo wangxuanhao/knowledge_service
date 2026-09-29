@@ -244,9 +244,11 @@ def test_repeated_preview_replaces_content_and_both_dismiss_paths_restore_page(w
     _request_preview(page)
     drawer = page.locator('#chunk-preview')
     drawer.wait_for(state='visible')
+    assert page.evaluate("document.documentElement.classList.contains('chunk-preview-open')")
     page.keyboard.press('Escape')
     drawer.wait_for(state='hidden')
     _assert_background_is_inert(page, False)
+    assert not page.evaluate("document.documentElement.classList.contains('chunk-preview-open')")
     assert page.evaluate("document.activeElement?.id") == 'preview-chunks'
 
     _request_preview(page)
@@ -260,6 +262,7 @@ def test_repeated_preview_replaces_content_and_both_dismiss_paths_restore_page(w
     drawer.click(position={'x': 2, 'y': 2})
     drawer.wait_for(state='hidden')
     _assert_background_is_inert(page, False)
+    assert not page.evaluate("document.documentElement.classList.contains('chunk-preview-open')")
     assert page.evaluate("document.activeElement?.id") == 'preview-chunks'
 
 
@@ -291,7 +294,7 @@ def test_empty_and_failed_previews_have_distinct_recoverable_states(workbench):
 def test_preview_traps_focus_and_stays_inside_narrow_viewports(workbench, width):
     page = workbench.page
     page.set_viewport_size({'width': width, 'height': 700})
-    _route_json(page, '**/documents/preview', _preview_result('第一段', '第二段'))
+    _route_json(page, '**/documents/preview', _preview_result('第一段' * 800, '第二段'))
     _choose_text(page)
     _request_preview(page)
 
@@ -317,6 +320,12 @@ def test_preview_traps_focus_and_stays_inside_narrow_viewports(workbench, width)
         assert box is not None
         assert box['x'] >= 0
         assert box['x'] + box['width'] <= width + 1
+    close_box = close.bounding_box()
+    assert close_box['width'] >= 44
+    assert close_box['height'] >= 44
+    preview_text = drawer.locator('.chunk-preview-content pre')
+    assert preview_text.evaluate('(element) => element.scrollHeight <= element.clientHeight + 1')
+    assert page.evaluate('document.documentElement.clientWidth === window.innerWidth')
     assert page.evaluate(
         'document.documentElement.scrollWidth <= window.innerWidth')
 

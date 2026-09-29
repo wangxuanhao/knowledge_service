@@ -219,5 +219,5 @@ def test_knowledge_write_has_one_preview_host_and_an_advanced_record_import():
     assert markup.ids.count('write-batch') == 1
     assert '结构化记录导入（高级）' in page_copy
     assert '不是批量上传文档' in page_copy
-    assert '/assets/workbench.css?v=document-upload-2' in markup.assets
-    assert '/assets/workbench.js?v=document-upload-2' in markup.assets
+    assert '/assets/workbench.css?v=document-upload-3' in markup.assets
+    assert '/assets/workbench.js?v=document-upload-3' in markup.assets
