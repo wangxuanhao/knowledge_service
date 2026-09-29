@@ -96,23 +96,39 @@ class Ontology:
             self.graph.parse(data=turtle, format="turtle")
         except Exception as exc:
             raise ValueError(f"无效的 Turtle：{exc}") from exc
+        self._governed_records = {}
+        self.classes = set()
+        self.relations = set()
+        self.attributes = set()
+        self._refresh_vocabulary()
+
+    def _refresh_vocabulary(self):
         records = index_governed_vocabulary(self.graph)
         self._governed_records = {record.node: record for record in records}
-        self.classes = {record.node for record in records if "class" in record.kinds}
-        self.relations = {record.node for record in records if "relation" in record.kinds}
-        self.attributes = {record.node for record in records if "attribute" in record.kinds}
+        for target, kind in (
+                (self.classes, "class"),
+                (self.relations, "relation"),
+                (self.attributes, "attribute")):
+            target.clear()
+            target.update(record.node for record in records if kind in record.kinds)
 
-    def resolve(self, name: str, allowed=None):
-        allowed = allowed if allowed is not None else self.classes | self.relations | self.attributes
+    def _resolve_current(self, name: str, allowed):
         matches = [uri for uri in allowed if str(uri) == name or local_name(uri) == name]
         if len(matches) != 1:
             raise ValueError(f"未知或存在歧义的本体术语：{name}")
         return matches[0]
 
+    def resolve(self, name: str, allowed=None):
+        self._refresh_vocabulary()
+        allowed = allowed if allowed is not None else self.classes | self.relations | self.attributes
+        return self._resolve_current(name, allowed)
+
     def is_active_term(self, term):
         """Return false only for an explicitly truthy ``owl:deprecated`` marker."""
+        self._refresh_vocabulary()
         try:
-            node = term if isinstance(term, URIRef) else self.resolve(str(term))
+            node = term if isinstance(term, URIRef) else self._resolve_current(
+                str(term), self.classes | self.relations | self.attributes)
         except ValueError:
             return False
         record = self._governed_records.get(node)
@@ -124,8 +140,11 @@ class Ontology:
         return True
 
     def summary(self, active_only=False):
+        self._refresh_vocabulary()
+
         def item(uri):
-            labels = self._governed_records[uri].label_values
+            record = self._governed_records[uri]
+            labels = record.label_values
             zh = en = plain = ''
             for obj in labels:
                 lang = getattr(obj, 'language', '') or ''
@@ -140,9 +159,9 @@ class Ontology:
                     "label": plain or en or local_name(uri),
                     "label_zh": zh, "label_en": en,
                     "description": str(self.graph.value(uri, RDFS.comment) or ""),
-                    "active": self.is_active_term(uri)}
+                    "active": record.active}
         visible = lambda values: [value for value in values
-                                  if not active_only or self.is_active_term(value)]
+                                  if not active_only or self._governed_records[value].active]
         return {"classes": [{**item(c), "parents": [str(p) for p in self.graph.objects(c, RDFS.subClassOf)]}
                             for c in sorted(visible(self.classes))],
                 "relations": [{**item(p), "domain": [str(v) for v in self.constraint_types(p,RDFS.domain)],

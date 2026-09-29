@@ -114,14 +114,20 @@ _ABSOLUTE_IRI = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:[^\s]+$")
 
 
 def _valid_iri(value) -> bool:
-    if not isinstance(value, str) or not _ABSOLUTE_IRI.fullmatch(value):
+    if (not isinstance(value, str) or not _ABSOLUTE_IRI.fullmatch(value)
+            or "\\" in value
+            or any(character.isspace() or unicodedata.category(character) == "Cc"
+                   for character in value)
+            or re.search(r"%(?![0-9A-Fa-f]{2})", value)):
         return False
     try:
         parsed = urlsplit(value)
+        if parsed.scheme in {"http", "https"}:
+            parsed.port
+            return bool(parsed.hostname)
     except ValueError:
         return False
-    return bool(parsed.scheme and (parsed.netloc if parsed.scheme in {"http", "https"}
-                                   else parsed.path))
+    return bool(parsed.scheme and parsed.path)
 
 
 def _validate_and_copy_candidates(candidates):

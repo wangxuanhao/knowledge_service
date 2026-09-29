@@ -529,6 +529,24 @@ def test_rdfs_class_is_reused_and_included_in_formal_vocabulary_audit():
      "valid absolute IRI"),
     ({"id": "c", "kind": "class", "name": "Person", "iri": "http://["},
      "valid absolute IRI"),
+    ({"id": "c", "kind": "class", "name": "Person",
+      "iri": "http://example.test:bad/Person"}, "valid absolute IRI"),
+    ({"id": "c", "kind": "class", "name": "Person",
+      "iri": "http://example.test:99999/Person"}, "valid absolute IRI"),
+    ({"id": "c", "kind": "class", "name": "Person", "iri": "http:///Person"},
+     "valid absolute IRI"),
+    ({"id": "c", "kind": "class", "name": "Person", "iri": "http://example.test/%"},
+     "valid absolute IRI"),
+    ({"id": "c", "kind": "class", "name": "Person", "iri": "http://example.test/%2"},
+     "valid absolute IRI"),
+    ({"id": "c", "kind": "class", "name": "Person", "iri": "http://example.test/%ZZ"},
+     "valid absolute IRI"),
+    ({"id": "c", "kind": "class", "name": "Person",
+      "iri": "http://example.test\\Person"}, "valid absolute IRI"),
+    ({"id": "c", "kind": "class", "name": "Person",
+      "iri": "http://example.test/\x00Person"}, "valid absolute IRI"),
+    ({"id": "c", "kind": "class", "name": "Person",
+      "iri": "http://example.test/Order Item"}, "valid absolute IRI"),
     ({"id": "c", "kind": "class", "name": "Person", "evidence_refs": "e1"},
      "evidence_refs container"),
     ({"id": "c", "kind": "class", "name": "Person", "evidence_refs": {"e1": 1}},
@@ -541,6 +559,20 @@ def test_rdfs_class_is_reused_and_included_in_formal_vocabulary_audit():
 def test_candidate_boundary_rejects_malformed_rows(candidate, message):
     with pytest.raises(InvalidDiscoveryCandidate, match=message):
         DiscoveryVocabularyNormalizer("").normalize([candidate])
+
+
+def test_candidate_boundary_accepts_valid_repository_urns_and_http_iris():
+    result = DiscoveryVocabularyNormalizer("").normalize([
+        {"id": "http", "kind": "class", "name": "HttpTerm",
+         "iri": "https://example.test/schema#HttpTerm"},
+        {"id": "urn", "kind": "class", "name": "UrnTerm",
+         "iri": "urn:knowledge:ontology:project:UrnTerm"},
+    ])
+
+    assert [item["iri"] for item in result.accepted_candidates] == [
+        "https://example.test/schema#HttpTerm",
+        "urn:knowledge:ontology:project:UrnTerm",
+    ]
 
 
 def test_candidate_boundary_rejects_duplicate_ids_deterministically():

@@ -32,9 +32,14 @@ class GovernedVocabularyRecord:
 def local_name(uri) -> str:
     """Return a decoded local name for HTTP(S) IRIs and project URNs."""
     iri = str(uri)
-    if iri.lower().startswith("urn:"):
-        return unquote(iri.rsplit(":", 1)[-1])
-    return unquote(iri.rsplit("#", 1)[-1].rsplit("/", 1)[-1])
+    _, separator, fragment = iri.rpartition("#")
+    if separator:
+        segment = fragment
+    else:
+        path = iri.split("?", 1)[0]
+        segment = (path.rsplit("/", 1)[-1] if "/" in path
+                   else path.rsplit(":", 1)[-1])
+    return unquote(segment)
 
 
 def deprecated_marker_is_true(marker) -> bool:
