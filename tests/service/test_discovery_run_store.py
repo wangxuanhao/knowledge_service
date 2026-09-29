@@ -9,6 +9,18 @@ from knowledge_service.repository.discovery_run_store import (
 )
 
 
+def _binding(candidate_id='candidate-1', *, kind='proposed'):
+    return {
+        'candidate_id': candidate_id,
+        'target_iri': f'urn:term:{candidate_id}',
+        'target_kind': 'class',
+        'binding_kind': kind,
+        'required_operation_ids': (
+            [f'operation:create:{candidate_id}'] if kind == 'proposed' else []),
+        'optional_operation_ids': [],
+    }
+
+
 def _run(project_id, *, run_id='discovery-run:abc', fingerprint='sha256:abc'):
     return {
         'id': run_id,
@@ -22,7 +34,7 @@ def _run(project_id, *, run_id='discovery-run:abc', fingerprint='sha256:abc'):
         'merged_groups': [],
         'conflicts': [],
         'mappings': {'classes': {'Partner': 'urn:term:partner'}},
-        'candidate_bindings': [],
+        'candidate_bindings': [_binding()],
         'initial_candidate_outcomes': [],
         'candidate_outcomes': [],
         'diagnostics': {},
@@ -55,6 +67,8 @@ def test_candidate_snapshot_order_is_canonical_for_idempotent_create(tmp_path):
         **_run(project_id),
         'candidate_snapshot': candidates,
         'accepted_candidate_ids': ['candidate-1', 'candidate-2'],
+        'candidate_bindings': [
+            _binding('candidate-1'), _binding('candidate-2')],
     }
 
     first = repo.create_discovery_run(run)
@@ -64,6 +78,83 @@ def test_candidate_snapshot_order_is_canonical_for_idempotent_create(tmp_path):
     assert second == first
     assert [item['id'] for item in first['candidate_snapshot']] == [
         'candidate-1', 'candidate-2']
+
+
+@pytest.mark.parametrize(('field', 'value'), [
+    ('candidate_snapshot', [
+        {'id': 'candidate-1', 'kind': 'entity'},
+        {'id': 'candidate-1', 'kind': 'entity'},
+    ]),
+    ('accepted_candidate_ids', ['candidate-1', 'candidate-1']),
+    ('accepted_candidate_ids', ['missing-candidate']),
+])
+def test_create_rejects_invalid_snapshot_and_accepted_candidate_ids(
+        tmp_path, field, value):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+
+    with pytest.raises(ValueError, match='candidate'):
+        repo.create_discovery_run({**_run(project_id), field: value})
+
+
+@pytest.mark.parametrize('bindings', [
+    [],
+    [_binding(), _binding()],
+    [_binding('candidate-2')],
+])
+def test_draft_run_requires_exact_unique_binding_coverage(tmp_path, bindings):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+
+    with pytest.raises(ValueError, match='binding.*accepted_candidate_ids'):
+        repo.create_discovery_run({
+            **_run(project_id),
+            'candidate_snapshot': [
+                {'id': 'candidate-1', 'kind': 'entity'},
+                {'id': 'candidate-2', 'kind': 'entity'},
+            ],
+            'candidate_bindings': bindings,
+        })
+
+
+@pytest.mark.parametrize('binding', [
+    {key: value for key, value in _binding().items()
+     if key != 'required_operation_ids'},
+    {key: value for key, value in _binding().items()
+     if key != 'optional_operation_ids'},
+    {**_binding(), 'required_operation_ids': 'operation-1'},
+    {**_binding(), 'optional_operation_ids': ['operation-1', 'operation-1']},
+    {**_binding(), 'required_operation_ids': ['operation-1'],
+     'optional_operation_ids': ['operation-1']},
+    {**_binding(), 'required_operation_ids': ['']},
+    {**_binding(), 'required_operation_ids': ['   ']},
+])
+def test_create_rejects_invalid_binding_operation_id_sets(tmp_path, binding):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+
+    with pytest.raises(ValueError, match='operation IDs'):
+        repo.create_discovery_run({
+            **_run(project_id), 'candidate_bindings': [binding],
+        })
+
+
+@pytest.mark.parametrize('binding', [
+    {**_binding(), 'binding_kind': 'invented'},
+    {**_binding(), 'binding_kind': 'mapping_only'},
+    {**_binding(), 'status': 'invented'},
+    {**_binding(), 'target_iri': None},
+    {**_binding(), 'target_iri': 'relative/term'},
+    {**_binding(), 'reuse_iri': 'urn:term:different'},
+])
+def test_draft_run_rejects_invalid_binding_state_or_target(tmp_path, binding):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+
+    with pytest.raises(ValueError, match='binding'):
+        repo.create_discovery_run({
+            **_run(project_id), 'candidate_bindings': [binding],
+        })
 
 
 @pytest.mark.parametrize(('status', 'draft_id', 'bindings', 'expected'), [
@@ -97,6 +188,8 @@ def test_same_id_with_different_immutable_snapshot_conflicts(tmp_path):
         repo.create_discovery_run({
             **_run(project_id),
             'candidate_snapshot': [{'id': 'candidate-2', 'kind': 'entity'}],
+            'accepted_candidate_ids': ['candidate-2'],
+            'candidate_bindings': [_binding('candidate-2')],
         })
 
     assert repo.get_discovery_run(project_id, 'discovery-run:abc')[
@@ -156,13 +249,13 @@ def test_create_rejects_terminal_lifecycle_statuses(tmp_path, status):
 
 @pytest.mark.parametrize('bindings', [
     [],
-    [{'candidate_id': 'candidate-1', 'binding_kind': 'proposed'}],
+    [_binding()],
 ])
 def test_ready_run_requires_a_reusable_existing_binding(tmp_path, bindings):
     repo = Repository(tmp_path / 'store.sqlite')
     project_id = repo.create_project('project')['id']
 
-    with pytest.raises(ValueError, match='reusable.*binding'):
+    with pytest.raises(ValueError, match='binding'):
         repo.create_discovery_run({
             **_run(project_id), 'status': 'ready_to_finalize',
             'unified_draft_id': None, 'candidate_bindings': bindings,
@@ -176,10 +269,7 @@ def test_ready_run_accepts_a_reusable_existing_binding(tmp_path):
     run = repo.create_discovery_run({
         **_run(project_id), 'status': 'ready_to_finalize',
         'unified_draft_id': None,
-        'candidate_bindings': [{
-            'candidate_id': 'candidate-1', 'binding_kind': 'existing',
-            'target_iri': 'urn:term:candidate-1',
-        }],
+        'candidate_bindings': [_binding(kind='existing')],
     })
 
     assert run['status'] == 'ready_to_finalize'
@@ -254,8 +344,12 @@ def test_create_rejects_current_outcomes_without_an_initial_set(tmp_path):
 
 
 @pytest.mark.parametrize('binding', [
-    {'candidate_id': 'candidate-1', 'binding_kind': 'existing'},
-    {'candidate_id': 'candidate-1', 'status': 'existing'},
+    _binding(kind='existing'),
+    {
+        'candidate_id': 'candidate-1', 'status': 'existing',
+        'reuse_iri': 'urn:term:candidate-1',
+        'required_operation_ids': [], 'optional_operation_ids': [],
+    },
 ])
 def test_diagnosed_run_rejects_mapping_only_bindings(tmp_path, binding):
     repo = Repository(tmp_path / 'store.sqlite')
@@ -280,6 +374,7 @@ def test_ready_run_accepts_legacy_existing_status_binding(tmp_path):
         'candidate_bindings': [{
             'candidate_id': 'candidate-1', 'status': 'existing',
             'reuse_iri': 'urn:term:candidate-1',
+            'required_operation_ids': [], 'optional_operation_ids': [],
         }],
     })
 
@@ -374,15 +469,14 @@ def test_ready_run_rejects_operations_on_quarantined_binding(tmp_path):
 @pytest.mark.parametrize('invalid_binding', [
     {
         'candidate_id': 'candidate-2', 'binding_kind': 'proposed',
-        'required_operation_ids': [],
-    },
-    {
-        'candidate_id': 'candidate-2', 'binding_kind': 'new',
-        'required_operation_ids': [],
+        'target_iri': 'urn:term:candidate-2',
+        'required_operation_ids': [], 'optional_operation_ids': [],
     },
     {
         'candidate_id': 'candidate-2', 'binding_kind': 'existing',
+        'target_iri': 'urn:term:candidate-2',
         'required_operation_ids': ['operation-1'],
+        'optional_operation_ids': [],
     },
 ])
 def test_ready_run_rejects_mixed_non_reusable_or_required_bindings(
@@ -394,10 +488,13 @@ def test_ready_run_rejects_mixed_non_reusable_or_required_bindings(
         repo.create_discovery_run({
             **_run(project_id), 'status': 'ready_to_finalize',
             'unified_draft_id': None,
-            'candidate_bindings': [{
-                'candidate_id': 'candidate-1', 'binding_kind': 'existing',
-                'required_operation_ids': [],
-            }, invalid_binding],
+            'candidate_snapshot': [
+                {'id': 'candidate-1', 'kind': 'entity'},
+                {'id': 'candidate-2', 'kind': 'entity'},
+            ],
+            'accepted_candidate_ids': ['candidate-1', 'candidate-2'],
+            'candidate_bindings': [
+                _binding(kind='existing'), invalid_binding],
         })
 
 
@@ -414,13 +511,13 @@ def test_ready_run_allows_diagnostic_binding_with_immutable_initial_outcome(
     run = repo.create_discovery_run({
         **_run(project_id), 'status': 'ready_to_finalize',
         'unified_draft_id': None,
+        'candidate_snapshot': [
+            {'id': 'candidate-1', 'kind': 'entity'},
+            {'id': 'candidate-2', 'kind': 'entity'},
+        ],
         'initial_candidate_outcomes': [diagnostic],
         'candidate_outcomes': [diagnostic],
-        'candidate_bindings': [{
-            'candidate_id': 'candidate-1', 'binding_kind': 'existing',
-            'target_iri': 'urn:term:candidate-1',
-            'required_operation_ids': [],
-        }, {
+        'candidate_bindings': [_binding(kind='existing'), {
             'candidate_id': 'candidate-2', 'binding_kind': 'proposed',
             'status': diagnostic_status,
             'required_operation_ids': [],
@@ -443,6 +540,7 @@ def test_diagnosed_run_rejects_actionable_proposed_binding(tmp_path):
                 'candidate_id': 'candidate-1', 'binding_kind': 'proposed',
                 'target_iri': 'urn:term:candidate-1',
                 'required_operation_ids': [],
+                'optional_operation_ids': [],
             }],
         })
 
@@ -453,10 +551,7 @@ def test_transition_updates_status_draft_link_and_outcomes_in_one_cas(tmp_path):
     repo.create_discovery_run({
         **_run(project_id), 'status': 'ready_to_finalize',
         'unified_draft_id': None,
-        'candidate_bindings': [{
-            'candidate_id': 'candidate-1', 'binding_kind': 'existing',
-            'target_iri': 'urn:term:candidate-1',
-        }],
+        'candidate_bindings': [_binding(kind='existing')],
     })
 
     transitioned = repo.transition_discovery_run(
@@ -477,10 +572,7 @@ def test_mapping_only_transition_cannot_attach_a_draft(tmp_path):
     original = repo.create_discovery_run({
         **_run(project_id), 'status': 'ready_to_finalize',
         'unified_draft_id': None,
-        'candidate_bindings': [{
-            'candidate_id': 'candidate-1', 'binding_kind': 'existing',
-            'target_iri': 'urn:term:candidate-1',
-        }],
+        'candidate_bindings': [_binding(kind='existing')],
     })
 
     with pytest.raises(DiscoveryRunConflict):

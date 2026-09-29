@@ -26,6 +26,14 @@ ALLOWED_TRANSITIONS = {
 MUTABLE_FIELDS = frozenset({
     'status', 'candidate_outcomes', 'created_at', 'updated_at',
 })
+DOCUMENTED_BINDING_KINDS = frozenset({
+    'existing', 'proposed',
+})
+DOCUMENTED_BINDING_STATUSES = frozenset({
+    'existing', 'quarantined', 'deferred',
+})
+OPERATION_ID_FIELDS = ('required_operation_ids', 'optional_operation_ids')
+IRI_FIELDS = ('target_iri', 'reuse_iri', 'iri')
 
 
 def _canonical_json(value):
@@ -45,9 +53,8 @@ def _is_reusable_binding(binding):
     return bool(
         isinstance(binding, dict)
         and binding.get('candidate_id')
-        and (binding.get('binding_kind') in {'existing', 'mapping_only'}
-             or binding.get('status') == 'existing'
-             or binding.get('mapping_only') is True))
+        and (binding.get('binding_kind') == 'existing'
+             or binding.get('status') == 'existing'))
 
 
 def _is_actionable_binding(binding):
@@ -64,8 +71,7 @@ def _is_resolved_diagnostic_binding(binding, initial_outcome_ids):
     return bool(
         isinstance(binding, dict)
         and binding.get('candidate_id') in initial_outcome_ids
-        and (binding.get('status') in {'quarantined', 'deferred'}
-             or binding.get('binding_kind') in {'quarantined', 'deferred'}))
+        and binding.get('status') in {'quarantined', 'deferred'})
 
 
 def _binding_reuse_iri(binding):
@@ -81,6 +87,108 @@ def _binding_has_operations(binding):
         isinstance(binding, dict)
         and (binding.get('required_operation_ids')
              or binding.get('optional_operation_ids')))
+
+
+def _unique_nonempty_strings(values, label):
+    if (not isinstance(values, list)
+            or any(not isinstance(value, str) or not value.strip()
+                   for value in values)
+            or len(values) != len(set(values))):
+        raise ValueError(
+            f'discovery run {label} must be unique non-empty strings')
+    return set(values)
+
+
+def _validate_candidate_bindings(run, initial_outcomes):
+    snapshot_ids = []
+    for candidate in run['candidate_snapshot']:
+        if (not isinstance(candidate, dict)
+                or not isinstance(candidate.get('id'), str)
+                or not candidate['id'].strip()):
+            raise ValueError(
+                'discovery run candidate snapshot requires non-empty string IDs')
+        snapshot_ids.append(candidate['id'])
+    if len(snapshot_ids) != len(set(snapshot_ids)):
+        raise ValueError(
+            'discovery run candidate snapshot IDs must be unique')
+    snapshot_id_set = set(snapshot_ids)
+    accepted_ids = _unique_nonempty_strings(
+        run['accepted_candidate_ids'], 'accepted candidate IDs')
+    if not accepted_ids.issubset(snapshot_id_set):
+        raise ValueError(
+            'discovery run accepted candidate IDs must exist in the candidate snapshot')
+
+    binding_ids = set()
+    active_binding_ids = set()
+    for binding in run['candidate_bindings']:
+        if not isinstance(binding, dict):
+            raise ValueError('discovery run candidate binding must be a mapping')
+        candidate_id = binding.get('candidate_id')
+        if not isinstance(candidate_id, str) or not candidate_id.strip():
+            raise ValueError(
+                'discovery run candidate binding requires a non-empty candidate_id')
+        if candidate_id in binding_ids:
+            raise ValueError(
+                'discovery run binding candidate IDs must exactly cover '
+                'accepted_candidate_ids once')
+        binding_ids.add(candidate_id)
+        if candidate_id not in snapshot_id_set:
+            raise ValueError(
+                'discovery run binding candidate_id must exist in the candidate snapshot')
+
+        operation_ids = {}
+        for field in OPERATION_ID_FIELDS:
+            if field not in binding:
+                raise ValueError(
+                    'discovery run binding operation IDs must include required '
+                    'and optional lists')
+            operation_ids[field] = _unique_nonempty_strings(
+                binding[field], f'binding {field} operation IDs')
+        if (operation_ids['required_operation_ids']
+                & operation_ids['optional_operation_ids']):
+            raise ValueError(
+                'discovery run binding required and optional operation IDs '
+                'cannot overlap')
+
+        binding_kind = binding.get('binding_kind')
+        binding_status = binding.get('status')
+        if (binding_kind is not None
+                and binding_kind not in DOCUMENTED_BINDING_KINDS):
+            raise ValueError('discovery run binding kind is not documented')
+        if (binding_status is not None
+                and binding_status not in DOCUMENTED_BINDING_STATUSES):
+            raise ValueError('discovery run binding status is not documented')
+        if binding_kind is None and binding_status is None:
+            raise ValueError('discovery run binding state is required')
+
+        diagnostic = _is_resolved_diagnostic_binding(
+            binding, initial_outcomes)
+        if (binding_status in {'quarantined', 'deferred'}
+                and not diagnostic):
+            raise ValueError(
+                'discovery run diagnostic binding requires an initial outcome')
+        provided_iris = [
+            binding[field] for field in IRI_FIELDS if field in binding]
+        if any(not valid_application_iri(iri) for iri in provided_iris):
+            raise ValueError(
+                'discovery run binding target must be a valid application IRI')
+        if len(set(provided_iris)) > 1:
+            raise ValueError(
+                'discovery run binding target IRI fields must agree')
+        if diagnostic:
+            continue
+        if (not _is_reusable_binding(binding)
+                and binding_kind != 'proposed'):
+            raise ValueError('discovery run binding state is not actionable')
+        if not provided_iris:
+            raise ValueError(
+                'discovery run binding requires a valid application target IRI')
+        active_binding_ids.add(candidate_id)
+
+    if active_binding_ids != accepted_ids:
+        raise ValueError(
+            'discovery run binding candidate IDs must exactly cover '
+            'accepted_candidate_ids once')
 
 
 def discovery_result_kind(run):
@@ -222,6 +330,7 @@ class DiscoveryRunStore:
                 'initial candidate outcomes')
         run['candidate_outcomes'] = json.loads(_canonical_json(
             run['initial_candidate_outcomes']))
+        _validate_candidate_bindings(run, initial_by_candidate)
         run['candidate_snapshot'] = sorted(
             run['candidate_snapshot'], key=_canonical_json)
         run.setdefault('unified_draft_id', None)
