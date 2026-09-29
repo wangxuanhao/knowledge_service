@@ -37,6 +37,12 @@ DOCUMENTED_BINDING_STATES = (
     | DIAGNOSTIC_BINDING_STATES
 )
 DOCUMENTED_TARGET_KINDS = frozenset({'class', 'relation', 'attribute'})
+CANDIDATE_TARGET_KIND_ALIASES = {
+    'entity': 'class',
+    'class': 'class',
+    'relation': 'relation',
+    'attribute': 'attribute',
+}
 OPERATION_ID_FIELDS = ('required_operation_ids', 'optional_operation_ids')
 IRI_FIELDS = ('target_iri', 'reuse_iri', 'iri')
 
@@ -119,6 +125,7 @@ def _unique_nonempty_strings(values, label):
 
 def _validate_candidate_bindings(run, initial_outcomes):
     snapshot_ids = []
+    snapshot_by_id = {}
     for candidate in run['candidate_snapshot']:
         if (not isinstance(candidate, dict)
                 or not isinstance(candidate.get('id'), str)
@@ -126,6 +133,7 @@ def _validate_candidate_bindings(run, initial_outcomes):
             raise ValueError(
                 'discovery run candidate snapshot requires non-empty string IDs')
         snapshot_ids.append(candidate['id'])
+        snapshot_by_id[candidate['id']] = candidate
     if len(snapshot_ids) != len(set(snapshot_ids)):
         raise ValueError(
             'discovery run candidate snapshot IDs must be unique')
@@ -141,6 +149,10 @@ def _validate_candidate_bindings(run, initial_outcomes):
         raise ValueError(
             'discovery run outcome candidate must exist in the candidate '
             'snapshot and cannot be accepted')
+    if accepted_ids | outcome_ids != snapshot_id_set:
+        raise ValueError(
+            'discovery run accepted candidates and initial outcome candidates '
+            'must exactly partition the candidate snapshot')
 
     binding_ids = set()
     active_binding_ids = set()
@@ -162,6 +174,11 @@ def _validate_candidate_bindings(run, initial_outcomes):
         if binding.get('target_kind') not in DOCUMENTED_TARGET_KINDS:
             raise ValueError(
                 'discovery run binding target_kind is not documented')
+        candidate_target_kind = CANDIDATE_TARGET_KIND_ALIASES.get(
+            snapshot_by_id[candidate_id].get('kind'))
+        if binding['target_kind'] != candidate_target_kind:
+            raise ValueError(
+                'discovery run binding target_kind must match the candidate kind')
 
         operation_ids = {}
         for field in OPERATION_ID_FIELDS:
@@ -237,7 +254,9 @@ def discovery_result_kind(run):
     return 'diagnosed_no_change'
 
 
-def _merge_candidate_outcomes(current, terminal, initial, *, run_id):
+def _merge_candidate_outcomes(
+        current, terminal, initial, *, run_id, snapshot_candidate_ids,
+        eligible_candidate_ids):
     merged = [json.loads(_canonical_json(outcome)) for outcome in current]
     positions = {
         outcome.get('candidate_id'): index for index, outcome in enumerate(merged)
@@ -259,22 +278,39 @@ def _merge_candidate_outcomes(current, terminal, initial, *, run_id):
         if current_outcomes != [outcome]:
             raise DiscoveryRunConflict(
                 'immutable discovery outcome cannot change', run_id=run_id)
+    normalized_terminal = []
+    terminal_ids = set()
     for outcome in terminal:
-        if not isinstance(outcome, dict) or not outcome.get('candidate_id'):
+        if (not isinstance(outcome, dict)
+                or not isinstance(outcome.get('candidate_id'), str)
+                or not outcome['candidate_id'].strip()):
             raise ValueError(
                 'discovery run outcomes require a candidate_id')
         normalized = json.loads(_canonical_json(outcome))
         candidate_id = normalized['candidate_id']
+        if candidate_id in terminal_ids:
+            raise ValueError(
+                'discovery run terminal outcome candidate IDs must be unique')
+        terminal_ids.add(candidate_id)
+        normalized_terminal.append(normalized)
+
+    resolved_ids = set(positions) - set(protected)
+    unresolved_ids = set(eligible_candidate_ids) - resolved_ids
+    for normalized in normalized_terminal:
+        candidate_id = normalized['candidate_id']
         protected_outcome = protected.get(candidate_id)
-        if protected_outcome is not None and normalized != protected_outcome:
+        if protected_outcome is not None:
             raise DiscoveryRunConflict(
                 'immutable discovery outcome cannot change', run_id=run_id)
-        position = positions.get(candidate_id)
-        if position is None:
-            positions[candidate_id] = len(merged)
-            merged.append(normalized)
-            continue
-        merged[position] = normalized
+        if candidate_id not in snapshot_candidate_ids:
+            raise ValueError(
+                'discovery run terminal outcome candidate must exist in the '
+                'candidate snapshot')
+        if candidate_id not in unresolved_ids:
+            raise ValueError(
+                'discovery run terminal outcomes require unresolved accepted '
+                'and bound candidates')
+        merged.append(normalized)
     return merged
 
 
@@ -489,11 +525,35 @@ class DiscoveryRunStore:
                         'discovery run draft link cannot change', run_id=run_id,
                         expected_status=expected_status,
                         current_status=current['status'])
+            snapshot_candidate_ids = {
+                candidate.get('id')
+                for candidate in current.get('candidate_snapshot', [])
+                if isinstance(candidate, dict)
+            }
+            accepted_candidate_ids = set(
+                current.get('accepted_candidate_ids', []))
+            bound_candidate_ids = {
+                binding.get('candidate_id')
+                for binding in current.get('candidate_bindings', [])
+                if isinstance(binding, dict)
+            }
+            initial_candidate_ids = {
+                outcome.get('candidate_id')
+                for outcome in current.get('initial_candidate_outcomes', [])
+                if isinstance(outcome, dict)
+            }
+            eligible_candidate_ids = (
+                snapshot_candidate_ids
+                & accepted_candidate_ids
+                & bound_candidate_ids
+            ) - initial_candidate_ids
             updated['candidate_outcomes'] = _merge_candidate_outcomes(
                 current.get('candidate_outcomes', []),
                 candidate_outcomes or [],
                 current.get('initial_candidate_outcomes', []),
-                run_id=run_id)
+                run_id=run_id,
+                snapshot_candidate_ids=snapshot_candidate_ids,
+                eligible_candidate_ids=eligible_candidate_ids)
             updated['updated_at'] = utc_now()
             cursor = self._db.execute(
                 "UPDATE artifacts SET payload=? WHERE id=? AND kind=? "

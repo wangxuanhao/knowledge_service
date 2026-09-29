@@ -107,6 +107,20 @@ def test_create_rejects_invalid_snapshot_and_accepted_candidate_ids(
         repo.create_discovery_run({**_run(project_id), field: value})
 
 
+def test_create_requires_every_snapshot_candidate_to_be_audited(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+
+    with pytest.raises(ValueError, match='partition'):
+        repo.create_discovery_run({
+            **_run(project_id),
+            'candidate_snapshot': [
+                {'id': 'candidate-1', 'kind': 'entity'},
+                {'id': 'candidate-2', 'kind': 'relation'},
+            ],
+        })
+
+
 @pytest.mark.parametrize('bindings', [
     [],
     [_binding(), _binding()],
@@ -123,6 +137,7 @@ def test_draft_run_requires_exact_unique_binding_coverage(tmp_path, bindings):
                 {'id': 'candidate-1', 'kind': 'entity'},
                 {'id': 'candidate-2', 'kind': 'entity'},
             ],
+            'accepted_candidate_ids': ['candidate-1', 'candidate-2'],
             'candidate_bindings': bindings,
         })
 
@@ -180,6 +195,51 @@ def test_create_requires_documented_binding_target_kind(tmp_path, binding):
     with pytest.raises(ValueError, match='target_kind'):
         repo.create_discovery_run({
             **_run(project_id), 'candidate_bindings': [binding],
+        })
+
+
+@pytest.mark.parametrize(('candidate_kind', 'target_kind'), [
+    ('entity', 'class'),
+    ('class', 'class'),
+    ('relation', 'relation'),
+    ('attribute', 'attribute'),
+])
+def test_binding_target_kind_matches_normalized_candidate_kind(
+        tmp_path, candidate_kind, target_kind):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+
+    run = repo.create_discovery_run({
+        **_run(project_id),
+        'candidate_snapshot': [{
+            'id': 'candidate-1', 'kind': candidate_kind}],
+        'candidate_bindings': [{
+            **_binding(), 'target_kind': target_kind,
+        }],
+    })
+
+    assert run['candidate_bindings'][0]['target_kind'] == target_kind
+
+
+@pytest.mark.parametrize(('candidate_kind', 'target_kind'), [
+    ('entity', 'relation'),
+    ('class', 'attribute'),
+    ('relation', 'class'),
+    ('attribute', 'relation'),
+])
+def test_create_rejects_binding_target_kind_mismatch(
+        tmp_path, candidate_kind, target_kind):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+
+    with pytest.raises(ValueError, match='target_kind.*candidate'):
+        repo.create_discovery_run({
+            **_run(project_id),
+            'candidate_snapshot': [{
+                'id': 'candidate-1', 'kind': candidate_kind}],
+            'candidate_bindings': [{
+                **_binding(), 'target_kind': target_kind,
+            }],
         })
 
 
@@ -654,7 +714,7 @@ def test_ready_run_allows_diagnostic_binding_with_immutable_initial_outcome(
         'unified_draft_id': None,
         'candidate_snapshot': [
             {'id': 'candidate-1', 'kind': 'entity'},
-            {'id': 'candidate-2', 'kind': 'entity'},
+            {'id': 'candidate-2', 'kind': 'attribute'},
         ],
         'initial_candidate_outcomes': [diagnostic],
         'candidate_outcomes': [diagnostic],
@@ -706,6 +766,66 @@ def test_transition_updates_status_draft_link_and_outcomes_in_one_cas(tmp_path):
     assert transitioned['candidate_outcomes'] == [{
         'candidate_id': 'candidate-1', 'status': 'materialized',
     }]
+
+
+@pytest.mark.parametrize('candidate_outcomes', [
+    [{'candidate_id': 'missing', 'status': 'materialized'}],
+    [
+        {'candidate_id': 'candidate-1', 'status': 'materialized'},
+        {'candidate_id': 'candidate-1', 'status': 'skipped'},
+    ],
+])
+def test_transition_rejects_unknown_or_duplicate_terminal_candidate_ids(
+        tmp_path, candidate_outcomes):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    original = repo.create_discovery_run(_run(project_id))
+
+    with pytest.raises(ValueError, match='candidate'):
+        repo.transition_discovery_run(
+            project_id, original['id'], 'draft_created', 'published',
+            candidate_outcomes=candidate_outcomes)
+
+    assert repo.get_discovery_run(project_id, original['id']) == original
+
+
+def test_transition_rejects_terminal_outcome_for_diagnostic_candidate(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    diagnostic = {
+        'candidate_id': 'candidate-2', 'status': 'skipped',
+        'code': 'quarantined_candidate',
+    }
+    original = repo.create_discovery_run(
+        _run_with_outcome(project_id, diagnostic))
+
+    with pytest.raises(DiscoveryRunConflict, match='immutable discovery outcome'):
+        repo.transition_discovery_run(
+            project_id, original['id'], 'draft_created', 'published',
+            candidate_outcomes=[diagnostic])
+
+    assert repo.get_discovery_run(project_id, original['id']) == original
+
+
+def test_transition_rejects_already_resolved_accepted_candidate(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    original = repo.create_discovery_run(_run(project_id))
+    resolved = {
+        'candidate_id': 'candidate-1', 'status': 'materialized',
+    }
+    malformed = {**original, 'candidate_outcomes': [resolved]}
+    repo._db.execute(
+        'UPDATE artifacts SET payload=? WHERE id=? AND kind=?',
+        (json.dumps(malformed), original['id'], 'ontology_discovery_run'))
+    repo._db.commit()
+
+    with pytest.raises(ValueError, match='unresolved'):
+        repo.transition_discovery_run(
+            project_id, original['id'], 'draft_created', 'published',
+            candidate_outcomes=[resolved])
+
+    assert repo.get_discovery_run(project_id, original['id']) == malformed
 
 
 def test_mapping_only_transition_cannot_attach_a_draft(tmp_path):
