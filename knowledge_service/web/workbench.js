@@ -206,6 +206,116 @@ function readParseSettings(){
   if(!Number.isFinite(settings.merge_threshold)||settings.merge_threshold<0||settings.merge_threshold>1)throw Error('合并阈值需在 0–1 之间');
   return settings;
 }
+const chunkPreviewState={chunks:[],selected:0,trigger:null};
+function chunkPreviewBackground(active){
+  for(const element of [document.querySelector('body>aside'),document.querySelector('body>main')]){
+    if(!element)continue;
+    if(active)element.setAttribute('inert','');
+    else element.removeAttribute('inert');
+  }
+}
+function chunkPreviewFocusable(){
+  const drawer=$('chunk-preview').querySelector('.chunk-preview-drawer');
+  return [...drawer.querySelectorAll('button:not([disabled]),[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')]
+    .filter(element=>!element.hidden&&element.getAttribute('aria-hidden')!=='true');
+}
+function closeChunkPreview(){
+  const host=$('chunk-preview');
+  if(host.hidden)return;
+  host.hidden=true;
+  document.body.classList.remove('chunk-preview-open');
+  chunkPreviewBackground(false);
+  const trigger=chunkPreviewState.trigger;
+  chunkPreviewState.trigger=null;
+  if(trigger?.isConnected&&!trigger.disabled)trigger.focus();
+}
+function openChunkPreview(){
+  const host=$('chunk-preview');
+  chunkPreviewState.trigger=$('preview-chunks');
+  host.hidden=false;
+  document.body.classList.add('chunk-preview-open');
+  chunkPreviewBackground(true);
+  $('chunk-preview-close').focus();
+}
+function selectChunkPreview(index){
+  const chunk=chunkPreviewState.chunks[index];
+  if(!chunk)return;
+  chunkPreviewState.selected=index;
+  const buttons=[...$('chunk-preview-list').querySelectorAll('button')];
+  buttons.forEach((button,buttonIndex)=>{
+    const selected=buttonIndex===index;
+    button.classList.toggle('selected',selected);
+    if(selected)button.setAttribute('aria-current','true');
+    else button.removeAttribute('aria-current');
+  });
+  const content=$('chunk-preview-content');
+  const heading=document.createElement('div');
+  heading.className='chunk-preview-current';
+  const title=document.createElement('strong');
+  title.textContent=`片段 ${index+1}`;
+  const meta=document.createElement('span');
+  const start=Number(chunk.start_char)||0,end=Number(chunk.end_char)||0;
+  meta.textContent=`原文位置 ${start}–${end} · ${Math.max(0,end-start)} 字符`;
+  heading.append(title,meta);
+  const text=document.createElement('pre');
+  text.textContent=String(chunk.text??'');
+  content.replaceChildren(heading,text);
+}
+function renderChunkPreview(result,title){
+  const chunks=Array.isArray(result?.chunks)?result.chunks:[];
+  chunkPreviewState.chunks=chunks;
+  chunkPreviewState.selected=0;
+  const summary=$('chunk-preview-summary');
+  summary.replaceChildren();
+  for(const value of [title,`共 ${Number(result?.total)||0} 片`,`本次预览 ${chunks.length} 片`]){
+    const chip=document.createElement('span');
+    chip.className='chunk-preview-chip';
+    chip.textContent=String(value||'未命名内容');
+    summary.append(chip);
+  }
+  const list=$('chunk-preview-list'),content=$('chunk-preview-content');
+  list.replaceChildren();
+  content.replaceChildren();
+  if(!chunks.length){
+    const empty=document.createElement('div');
+    empty.className='chunk-preview-empty';
+    empty.textContent='未生成切片，请调整切片设置后重试。';
+    content.append(empty);
+    return;
+  }
+  chunks.forEach((chunk,index)=>{
+    const button=document.createElement('button');
+    button.type='button';
+    button.setAttribute('aria-controls','chunk-preview-content');
+    const start=Number(chunk.start_char)||0,end=Number(chunk.end_char)||0;
+    button.textContent=`片段 ${index+1} · ${Math.max(0,end-start)} 字符 · ${start}–${end}`;
+    button.addEventListener('click',()=>selectChunkPreview(index));
+    list.append(button);
+  });
+  selectChunkPreview(0);
+}
+function trapChunkPreviewFocus(event){
+  const host=$('chunk-preview');
+  if(host.hidden)return;
+  if(event.key==='Escape'){
+    event.preventDefault();
+    closeChunkPreview();
+    return;
+  }
+  if(event.key!=='Tab')return;
+  const focusable=chunkPreviewFocusable();
+  if(!focusable.length)return;
+  const current=focusable.indexOf(document.activeElement);
+  let next=current+(event.shiftKey?-1:1);
+  if(current<0)next=event.shiftKey?focusable.length-1:0;
+  else if(next<0)next=focusable.length-1;
+  else if(next>=focusable.length)next=0;
+  event.preventDefault();
+  focusable[next].focus();
+}
+$('chunk-preview-close').addEventListener('click',closeChunkPreview);
+$('chunk-preview').addEventListener('click',event=>{if(event.target===$('chunk-preview'))closeChunkPreview();});
+document.addEventListener('keydown',trapChunkPreviewFocus);
 bind('preview-chunks',async()=>{
   const p=controlsProject(),settings=readParseSettings();
   const documents=await readDocumentBatch(true),doc=documents[0];
@@ -216,7 +326,8 @@ bind('preview-chunks',async()=>{
     result=await api('/api/projects/'+encodeURIComponent(p)+'/documents/upload/preview',form);
   }else result=await api('/api/projects/'+encodeURIComponent(p)+'/documents/preview',{title:doc.title,text:doc.text,...settings});
   if(p!==current)return;
-  $('chunk-preview').innerHTML=`<p>${esc(doc.title)} · 共 ${result.total} 片，预览前 ${result.chunks.length} 片</p>`+result.chunks.map((c,i)=>`<details><summary>片段 ${i+1} · 原文位置 ${c.start_char}–${c.end_char} · ${c.end_char-c.start_char} 字符</summary><pre>${esc(c.text)}</pre></details>`).join('');
+  renderChunkPreview(result,doc.title);
+  openChunkPreview();
   status('切片预览完成，未调用模型或写入知识');
 });
 bind('ingest',async()=>{
