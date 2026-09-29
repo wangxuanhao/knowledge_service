@@ -62,6 +62,14 @@ def _is_graph_class(graph: Graph, node) -> bool:
                for declaration in _CLASS_DECLARATIONS)
 
 
+def _graph_classes(graph: Graph) -> set:
+    return {
+        subject
+        for declaration in _CLASS_DECLARATIONS
+        for subject in graph.subjects(RDF.type, declaration)
+    }
+
+
 def _graph_term_kind(graph: Graph, node) -> str | None:
     if _is_graph_class(graph, node):
         return 'class'
@@ -449,16 +457,26 @@ def _apply_scoped_shacl_patch(graph: Graph, target: URIRef, before: dict,
 
 
 def _validate_definition_graph(graph: Graph) -> None:
-    ontology = Ontology(graph.serialize(format='turtle'))
-    for child in ontology.classes:
-        for parent in graph.objects(child, RDFS.subClassOf):
-            anonymous_class = (
-                isinstance(parent, BNode) and _is_graph_class(graph, parent))
-            if parent not in ontology.classes and not anonymous_class:
+    class_nodes = _graph_classes(graph)
+    hierarchy_state = {}
+
+    def validate_hierarchy(node) -> None:
+        state = hierarchy_state.get(node)
+        if state == 'visiting':
+            raise ValueError(f'类继承会形成循环（cycle）：{node}')
+        if state == 'validated':
+            return
+        hierarchy_state[node] = 'visiting'
+        for parent in graph.objects(node, RDFS.subClassOf):
+            if parent not in class_nodes:
                 raise ValueError(f'父类不存在：{parent}')
-        if child in {parent for direct in graph.objects(child, RDFS.subClassOf)
-                     for parent in ontology.parents(direct)}:
-            raise ValueError(f'类继承会形成循环（cycle）：{child}')
+            validate_hierarchy(parent)
+        hierarchy_state[node] = 'validated'
+
+    for class_node in class_nodes:
+        validate_hierarchy(class_node)
+
+    ontology = Ontology(graph.serialize(format='turtle'))
     constraint_owners = ontology.relations | ontology.attributes
     for predicate in (RDFS.domain, RDFS.range):
         for owner in graph.subjects(predicate, None):
@@ -928,6 +946,18 @@ def _shacl_nodes(graph: Graph) -> set:
 
 def _allowed_bnodes(graph: Graph) -> set:
     allowed = _shacl_nodes(graph)
+    anonymous_classes = {
+        node for node in _graph_classes(graph) if isinstance(node, BNode)
+    }
+    allowed.update(anonymous_classes)
+    class_pending = list(anonymous_classes)
+    while class_pending:
+        node = class_pending.pop()
+        for parent in graph.objects(node, RDFS.subClassOf):
+            if (isinstance(parent, BNode) and _is_graph_class(graph, parent)
+                    and parent not in allowed):
+                allowed.add(parent)
+                class_pending.append(parent)
     pending = [head for union in graph.objects(None, OWL.unionOf)
                for head in [union] if isinstance(head, BNode)]
     allowed.update(subject for subject in graph.subjects(OWL.unionOf, None)
@@ -1147,8 +1177,12 @@ def canonical_turtle_diff(base_turtle: str, edited_turtle: str, *,
         if term in restored_terms:
             continue
         kind = edited_declarations[term]
-        old_parents = sorted(str(value) for value in base.objects(term, RDFS.subClassOf))
-        new_parents = sorted(str(value) for value in edited.objects(term, RDFS.subClassOf))
+        old_parents = sorted(
+            str(value) for value in base.objects(term, RDFS.subClassOf)
+            if isinstance(value, URIRef))
+        new_parents = sorted(
+            str(value) for value in edited.objects(term, RDFS.subClassOf)
+            if isinstance(value, URIRef))
         for value in sorted(set(new_parents) - set(old_parents)):
             operations.append(build_operation('add_parent', str(term), after={'value': value}))
         for value in sorted(set(old_parents) - set(new_parents)):

@@ -762,6 +762,62 @@ def test_anonymous_owl_class_parent_is_valid_but_not_reusable_vocabulary():
         restored.resolve('Anonymous parent')
 
 
+def test_anonymous_class_definition_rejects_missing_parent():
+    current = BASE + '''
+      ex:ChildWithAnonymousParent a owl:Class; rdfs:subClassOf _:anonymous .
+      _:anonymous a owl:Class; rdfs:subClassOf ex:Missing .
+    '''
+    operation = build_operation(
+        'add_annotation', 'http://ex/ChildWithAnonymousParent',
+        after={'predicate': str(RDFS.comment), 'value': 'validate graph'})
+
+    with pytest.raises(ValueError, match='父类|parent|不存在'):
+        apply_operations(current, [operation])
+
+
+def test_anonymous_only_class_cycle_is_rejected():
+    current = BASE + '''
+      ex:ChildWithAnonymousCycle a owl:Class; rdfs:subClassOf _:first .
+      _:first a owl:Class; rdfs:subClassOf _:second .
+      _:second a rdfs:Class; rdfs:subClassOf _:first .
+    '''
+    operation = build_operation(
+        'add_annotation', 'http://ex/ChildWithAnonymousCycle',
+        after={'predicate': str(RDFS.comment), 'value': 'validate graph'})
+
+    with pytest.raises(ValueError, match='循环|cycle'):
+        apply_operations(current, [operation])
+
+
+def test_named_anonymous_named_class_cycle_is_rejected():
+    current = BASE + '''
+      ex:NamedCycle a owl:Class; rdfs:subClassOf _:anonymous .
+      _:anonymous a rdfs:Class; rdfs:subClassOf ex:NamedCycle .
+    '''
+    operation = build_operation(
+        'add_annotation', 'http://ex/NamedCycle',
+        after={'predicate': str(RDFS.comment), 'value': 'validate graph'})
+
+    with pytest.raises(ValueError, match='循环|cycle'):
+        apply_operations(current, [operation])
+
+
+def test_valid_anonymous_class_parent_is_supported_by_canonical_diff():
+    base = BASE + '''
+      ex:ChildWithAnonymousParent a owl:Class; rdfs:subClassOf _:anonymous .
+      _:anonymous a rdfs:Class; rdfs:subClassOf ex:Root .
+    '''
+    edited = base + 'ex:ChildWithAnonymousParent rdfs:comment "edited" .'
+
+    operations = canonical_turtle_diff(base, edited)
+    actual = Graph().parse(
+        data=apply_operations(base, operations), format='turtle')
+    expected = Graph().parse(data=edited, format='turtle')
+
+    assert [operation['action'] for operation in operations] == ['add_annotation']
+    assert isomorphic(actual, expected)
+
+
 @pytest.mark.parametrize('operation', [
     build_operation('add_domain', 'http://ex/A', after={'value': 'http://ex/B'}),
     build_operation('add_range', 'http://ex/A', after={'value': 'http://ex/B'}),
