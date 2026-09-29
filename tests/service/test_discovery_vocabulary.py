@@ -3,13 +3,16 @@ import copy
 from dataclasses import FrozenInstanceError
 
 import pytest
+from rdflib import Graph
 
 from knowledge_service.services.discovery_vocabulary import (
     DiscoveryVocabularyNormalizer,
     InvalidBaselineVocabulary,
+    InvalidDiscoveryCandidate,
     audit_formal_vocabulary,
     canonical_name,
     discovery_source_fingerprint,
+    _index_baseline_graph,
 )
 
 
@@ -39,11 +42,12 @@ def test_normalize_merges_same_kind_without_mutating_payloads_or_losing_evidence
 
     result = DiscoveryVocabularyNormalizer("").normalize(candidates)
 
-    assert [item["id"] for item in result.accepted_candidates] == ["c1", "c3"]
-    assert result.accepted_candidates[0]["evidence_refs"] == ["e1", "e2"]
+    assert [item["id"] for item in result.accepted_candidates] == ["c1", "c2", "c3"]
+    assert result.accepted_candidates[0]["evidence_refs"] == ["e1"]
     assert result.merged_groups == ({
         "kind": "class", "canonical_name": "person", "candidate_ids": ["c1", "c2"],
         "accepted_candidate_id": "c1",
+        "evidence_refs": ["e1", "e2"],
     },)
     assert result.candidate_bindings == (
         {"candidate_id": "c1", "accepted_candidate_id": "c1", "status": "accepted", "iri": None},
@@ -52,10 +56,10 @@ def test_normalize_merges_same_kind_without_mutating_payloads_or_losing_evidence
     )
     assert result.diagnostics == {
         "total_candidates": 3,
-        "accepted_candidates": 2,
-        "merged_candidates": 1,
-        "conflict_candidates": 0,
-        "low_frequency_attributes": 0,
+        "accepted_count": 2,
+        "merged_count": 1,
+        "quarantined_count": 0,
+        "low_frequency_attribute_count": 0,
     }
     assert candidates == original
     assert isinstance(result.accepted_candidates, tuple)
@@ -67,7 +71,7 @@ def test_normalize_merges_same_kind_without_mutating_payloads_or_losing_evidence
     with pytest.raises(TypeError):
         result.accepted_candidates[0]["evidence_refs"].append("e3")
     with pytest.raises(TypeError):
-        result.diagnostics["accepted_candidates"] = 0
+        result.diagnostics["accepted_count"] = 0
 
 
 def test_normalize_converts_nested_payload_containers_to_json_safe_copies():
@@ -93,9 +97,10 @@ def test_baseline_registry_uses_local_all_labels_and_summary_names_without_overw
 
     result = DiscoveryVocabularyNormalizer(BASELINE, baseline_summary=summary).normalize(candidates)
 
-    assert [item["id"] for item in result.accepted_candidates] == ["label", "summary"]
+    assert [item["id"] for item in result.accepted_candidates] == ["label", "local", "summary"]
     assert [item["iri"] for item in result.accepted_candidates] == [
-        "http://example.test/Person", "http://example.test/worksFor"]
+        "http://example.test/Person", "http://example.test/Person",
+        "http://example.test/worksFor"]
     assert result.merged_groups[0]["candidate_ids"] == ["label", "local"]
     assert result.conflicts == ({
         "candidate_id": "ambiguous", "kind": "class", "name": "人", "iri": None,
@@ -103,9 +108,9 @@ def test_baseline_registry_uses_local_all_labels_and_summary_names_without_overw
         "code": "ambiguous_baseline_name",
         "involved_iris": ["http://example.test/OtherPerson", "http://example.test/Person"],
     },)
-    assert result.diagnostics["accepted_candidates"] == 2
-    assert result.diagnostics["merged_candidates"] == 1
-    assert result.diagnostics["conflict_candidates"] == 1
+    assert result.diagnostics["accepted_count"] == 2
+    assert result.diagnostics["merged_count"] == 1
+    assert result.diagnostics["quarantined_count"] == 1
 
 
 def test_baseline_iri_declared_as_two_governed_kinds_is_invalid():
@@ -140,7 +145,7 @@ def test_explicit_iri_precedence_blocks_retired_wrong_kind_and_name_mismatch():
         ("name", "candidate_iri_name_mismatch"),
         ("retired", "retired_term_reuse_blocked"),
     ]
-    assert result.diagnostics["conflict_candidates"] == 3
+    assert result.diagnostics["quarantined_count"] == 3
     assert result.accepted_candidates == ()
 
 
@@ -276,10 +281,10 @@ def test_cross_kind_precedence_and_low_frequency_diagnostics_are_exclusive():
     }
     assert result.diagnostics == {
         "total_candidates": 5,
-        "accepted_candidates": 1,
-        "merged_candidates": 0,
-        "conflict_candidates": 3,
-        "low_frequency_attributes": 1,
+        "accepted_count": 1,
+        "merged_count": 0,
+        "quarantined_count": 3,
+        "low_frequency_attribute_count": 1,
     }
 
 
@@ -290,8 +295,8 @@ def test_default_attribute_threshold_quarantines_a_single_new_attribute():
 
     assert result.conflicts[0]["code"] == "low_frequency_attribute"
     assert result.conflicts[0]["threshold"] == 2
-    assert result.diagnostics["conflict_candidates"] == 0
-    assert result.diagnostics["low_frequency_attributes"] == 1
+    assert result.diagnostics["quarantined_count"] == 0
+    assert result.diagnostics["low_frequency_attribute_count"] == 1
 
 
 def test_normalization_is_deterministic_when_candidate_order_changes():
@@ -309,7 +314,7 @@ def test_normalization_is_deterministic_when_candidate_order_changes():
     backward = normalizer.normalize(list(reversed(candidates)))
 
     assert forward == backward
-    assert [item["id"] for item in forward.accepted_candidates] == ["a", "r"]
+    assert [item["id"] for item in forward.accepted_candidates] == ["a", "r", "z"]
     assert forward.merged_groups[0]["accepted_candidate_id"] == "a"
     assert [item["candidate_id"] for item in forward.candidate_bindings] == ["a", "r", "z"]
 
@@ -328,7 +333,7 @@ def test_ambiguous_baseline_alias_precedes_low_frequency_attribute():
     ])
 
     assert result.conflicts[0]["code"] == "ambiguous_baseline_name"
-    assert result.diagnostics["low_frequency_attributes"] == 0
+    assert result.diagnostics["low_frequency_attribute_count"] == 0
 
 
 def test_explicit_and_name_only_candidates_merge_when_resolving_same_baseline_iri():
@@ -347,9 +352,11 @@ def test_explicit_and_name_only_candidates_merge_when_resolving_same_baseline_ir
 
     result = DiscoveryVocabularyNormalizer(baseline).normalize(candidates)
 
-    assert [item["id"] for item in result.accepted_candidates] == ["a"]
-    assert result.accepted_candidates[0]["iri"] == "http://example.test/Person"
-    assert result.accepted_candidates[0]["evidence_refs"] == ["name-only", "explicit"]
+    assert [item["id"] for item in result.accepted_candidates] == ["a", "z"]
+    assert [item["iri"] for item in result.accepted_candidates] == [
+        "http://example.test/Person", "http://example.test/Person"]
+    assert [item["evidence_refs"] for item in result.accepted_candidates] == [
+        ["name-only"], ["explicit"]]
     assert result.merged_groups[0]["candidate_ids"] == ["a", "z"]
     assert result.candidate_bindings == (
         {"candidate_id": "a", "accepted_candidate_id": "a", "status": "accepted",
@@ -432,8 +439,10 @@ def test_same_kind_merge_retains_single_explicit_new_iri_when_leader_has_none():
     ])
 
     assert [(item["id"], item["iri"]) for item in result.accepted_candidates] == [
-        ("a", "urn:knowledge:ontology:project:NovelTerm")]
-    assert result.accepted_candidates[0]["evidence_refs"] == ["implicit", "explicit"]
+        ("a", "urn:knowledge:ontology:project:NovelTerm"),
+        ("z", "urn:knowledge:ontology:project:NovelTerm")]
+    assert [item["evidence_refs"] for item in result.accepted_candidates] == [
+        ["implicit"], ["explicit"]]
     assert [item["iri"] for item in result.candidate_bindings] == [
         "urn:knowledge:ontology:project:NovelTerm",
         "urn:knowledge:ontology:project:NovelTerm",
@@ -452,6 +461,113 @@ def test_same_kind_merge_quarantines_multiple_distinct_explicit_new_iris():
     assert {item["code"] for item in result.conflicts} == {"candidate_iri_target_collision"}
     assert all(item["involved_iris"] == ["urn:new:Concept", "urn:other:Concept"]
                for item in result.conflicts)
+
+
+def test_vocabulary_merge_preserves_every_relation_and_attribute_payload():
+    candidates = [
+        {"id": "rel-b", "kind": "relation", "name": "owns",
+         "subject_id": "s2", "object_id": "o2", "evidence_refs": ["r2"]},
+        {"id": "attr-b", "kind": "attribute", "name": "code",
+         "entity_id": "e2", "value": "B", "evidence_refs": ["a2"]},
+        {"id": "rel-a", "kind": "relation", "name": "OWNS",
+         "subject_id": "s1", "object_id": "o1", "evidence_refs": ["r1"]},
+        {"id": "attr-a", "kind": "attribute", "name": "ＣＯＤＥ",
+         "entity_id": "e1", "value": "A", "evidence_refs": ["a1"]},
+    ]
+
+    forward = DiscoveryVocabularyNormalizer("").normalize(candidates)
+    backward = DiscoveryVocabularyNormalizer("").normalize(list(reversed(candidates)))
+
+    assert forward == backward
+    assert [item["id"] for item in forward.accepted_candidates] == [
+        "attr-a", "attr-b", "rel-a", "rel-b"]
+    assert [(item["entity_id"], item["value"], list(item["evidence_refs"]))
+            for item in forward.accepted_candidates[:2]] == [
+        ("e1", "A", ["a1"]), ("e2", "B", ["a2"])]
+    assert [(item["subject_id"], item["object_id"], list(item["evidence_refs"]))
+            for item in forward.accepted_candidates[2:]] == [
+        ("s1", "o1", ["r1"]), ("s2", "o2", ["r2"])]
+    assert [group["candidate_ids"] for group in forward.merged_groups] == [
+        ["attr-a", "attr-b"], ["rel-a", "rel-b"]]
+    assert [group["evidence_refs"] for group in forward.merged_groups] == [
+        ["a1", "a2"], ["r1", "r2"]]
+
+
+def test_rdfs_class_is_reused_and_included_in_formal_vocabulary_audit():
+    baseline = """
+    @prefix ex: <http://example.test/> .
+    @prefix owl: <http://www.w3.org/2002/07/owl#> .
+    @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+    ex:Person a rdfs:Class .
+    ex:personRelation a owl:ObjectProperty; rdfs:label "Person" .
+    """
+
+    result = DiscoveryVocabularyNormalizer(baseline).normalize([
+        {"id": "candidate", "kind": "class", "name": "Person",
+         "iri": "http://example.test/Person"},
+    ])
+    audit = audit_formal_vocabulary(baseline)
+
+    assert result.accepted_candidates[0]["iri"] == "http://example.test/Person"
+    collision = next(item for item in audit["name_collisions"]
+                     if item["canonical_name"] == "person")
+    assert collision["kinds"] == ["class", "relation"]
+    assert collision["iris"] == [
+        "http://example.test/Person", "http://example.test/personRelation"]
+
+
+@pytest.mark.parametrize(("candidate", "message"), [
+    ({"id": "", "kind": "class", "name": "Person"}, "non-empty string id"),
+    ({"id": "c", "kind": None, "name": "Person"}, "governed kind"),
+    ({"id": "c", "kind": "unknown", "name": "Person"}, "governed kind"),
+    ({"id": "c", "kind": "class", "name": "  \t"}, "non-empty name"),
+    ({"id": "c", "kind": "class", "name": "Person", "iri": "not an iri"},
+     "valid absolute IRI"),
+    ({"id": "c", "kind": "class", "name": "Person", "evidence_refs": "e1"},
+     "evidence_refs container"),
+    ({"id": "c", "kind": "class", "name": "Person", "evidence_refs": {"e1": 1}},
+     "evidence_refs container"),
+])
+def test_candidate_boundary_rejects_malformed_rows(candidate, message):
+    with pytest.raises(InvalidDiscoveryCandidate, match=message):
+        DiscoveryVocabularyNormalizer("").normalize([candidate])
+
+
+def test_candidate_boundary_rejects_duplicate_ids_deterministically():
+    candidates = [
+        {"id": "same", "kind": "class", "name": "Person"},
+        {"id": "same", "kind": "class", "name": "Organization"},
+    ]
+
+    with pytest.raises(InvalidDiscoveryCandidate, match="duplicate candidate id: same"):
+        DiscoveryVocabularyNormalizer("").normalize(candidates)
+
+
+def test_baseline_index_traverses_graph_once_and_retains_term_metadata():
+    class CountingGraph(Graph):
+        def __init__(self):
+            super().__init__()
+            self.iterations = 0
+
+        def __iter__(self):
+            self.iterations += 1
+            return super().__iter__()
+
+    graph = CountingGraph()
+    graph.parse(data="""
+        @prefix ex: <http://example.test/> .
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        ex:Person a rdfs:Class; rdfs:label "Human"; owl:deprecated true .
+    """, format="turtle")
+
+    index = _index_baseline_graph(graph)
+
+    assert graph.iterations == 1
+    term = index.terms_by_iri["http://example.test/Person"]
+    assert term.kind == "class"
+    assert term.names == ("Person", "Human")
+    assert term.active is False
 
 
 def test_audit_reports_cross_kind_names_and_multi_kind_iris_without_candidates():
@@ -501,7 +617,8 @@ def test_discovery_fingerprint_is_order_independent_and_binds_every_generation_i
 
     fingerprint = discovery_source_fingerprint("project", "ontology-v1", candidates, **kwargs)
 
-    assert len(fingerprint) == 64
+    assert fingerprint.startswith("sha256:")
+    assert len(fingerprint) == 71
     assert fingerprint == discovery_source_fingerprint(
         "project", "ontology-v1", list(reversed(candidates)), **kwargs)
     assert fingerprint == discovery_source_fingerprint(
