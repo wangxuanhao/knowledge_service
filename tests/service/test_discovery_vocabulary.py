@@ -93,16 +93,18 @@ def test_baseline_registry_uses_local_all_labels_and_summary_names_without_overw
 
     result = DiscoveryVocabularyNormalizer(BASELINE, baseline_summary=summary).normalize(candidates)
 
-    assert [item["id"] for item in result.accepted_candidates] == ["label", "local", "summary"]
+    assert [item["id"] for item in result.accepted_candidates] == ["label", "summary"]
     assert [item["iri"] for item in result.accepted_candidates] == [
-        "http://example.test/Person", "http://example.test/Person", "http://example.test/worksFor"]
+        "http://example.test/Person", "http://example.test/worksFor"]
+    assert result.merged_groups[0]["candidate_ids"] == ["label", "local"]
     assert result.conflicts == ({
         "candidate_id": "ambiguous", "kind": "class", "name": "人", "iri": None,
         "evidence_refs": [],
         "code": "ambiguous_baseline_name",
         "involved_iris": ["http://example.test/OtherPerson", "http://example.test/Person"],
     },)
-    assert result.diagnostics["accepted_candidates"] == 3
+    assert result.diagnostics["accepted_candidates"] == 2
+    assert result.diagnostics["merged_candidates"] == 1
     assert result.diagnostics["conflict_candidates"] == 1
 
 
@@ -310,6 +312,85 @@ def test_normalization_is_deterministic_when_candidate_order_changes():
     assert [item["id"] for item in forward.accepted_candidates] == ["a", "r"]
     assert forward.merged_groups[0]["accepted_candidate_id"] == "a"
     assert [item["candidate_id"] for item in forward.candidate_bindings] == ["a", "r", "z"]
+
+
+def test_ambiguous_baseline_alias_precedes_low_frequency_attribute():
+    baseline = """
+    @prefix ex: <http://example.test/> .
+    @prefix owl: <http://www.w3.org/2002/07/owl#> .
+    @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+    ex:first a owl:Class; rdfs:label "code" .
+    ex:second a owl:ObjectProperty; rdfs:label "code" .
+    """
+
+    result = DiscoveryVocabularyNormalizer(baseline, attribute_threshold=2).normalize([
+        {"id": "candidate", "kind": "attribute", "name": "code"},
+    ])
+
+    assert result.conflicts[0]["code"] == "ambiguous_baseline_name"
+    assert result.diagnostics["low_frequency_attributes"] == 0
+
+
+def test_explicit_and_name_only_candidates_merge_when_resolving_same_baseline_iri():
+    baseline = """
+    @prefix ex: <http://example.test/> .
+    @prefix owl: <http://www.w3.org/2002/07/owl#> .
+    @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+    ex:Person a owl:Class; rdfs:label "Human" .
+    """
+    candidates = [
+        {"id": "z", "kind": "class", "name": "Human",
+         "iri": "http://example.test/Person", "evidence_refs": ["explicit"]},
+        {"id": "a", "kind": "class", "name": "Human",
+         "evidence_refs": ["name-only"]},
+    ]
+
+    result = DiscoveryVocabularyNormalizer(baseline).normalize(candidates)
+
+    assert [item["id"] for item in result.accepted_candidates] == ["a"]
+    assert result.accepted_candidates[0]["iri"] == "http://example.test/Person"
+    assert result.accepted_candidates[0]["evidence_refs"] == ["name-only", "explicit"]
+    assert result.merged_groups[0]["candidate_ids"] == ["a", "z"]
+    assert result.candidate_bindings == (
+        {"candidate_id": "a", "accepted_candidate_id": "a", "status": "accepted",
+         "iri": "http://example.test/Person"},
+        {"candidate_id": "z", "accepted_candidate_id": "a", "status": "merged",
+         "iri": "http://example.test/Person"},
+    )
+
+
+def test_baseline_meaning_precedes_current_batch_cross_kind_rules():
+    baseline = """
+    @prefix ex: <http://example.test/> .
+    @prefix owl: <http://www.w3.org/2002/07/owl#> .
+    @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+    ex:status a owl:ObjectProperty; rdfs:label "status" .
+    """
+
+    result = DiscoveryVocabularyNormalizer(baseline).normalize([
+        {"id": "class", "kind": "class", "name": "status"},
+        {"id": "relation", "kind": "relation", "name": "status"},
+    ])
+
+    assert [(item["id"], item["iri"]) for item in result.accepted_candidates] == [
+        ("relation", "http://example.test/status")]
+    assert [(item["candidate_id"], item["code"]) for item in result.conflicts] == [
+        ("class", "existing_term_kind_collision")]
+
+
+def test_name_only_kind_collision_precedes_retirement():
+    baseline = """
+    @prefix ex: <http://example.test/> .
+    @prefix owl: <http://www.w3.org/2002/07/owl#> .
+    @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+    ex:legacy a owl:ObjectProperty; rdfs:label "legacy"; owl:deprecated true .
+    """
+
+    result = DiscoveryVocabularyNormalizer(baseline).normalize([
+        {"id": "candidate", "kind": "class", "name": "legacy"},
+    ])
+
+    assert result.conflicts[0]["code"] == "existing_term_kind_collision"
 
 
 def test_audit_reports_cross_kind_names_and_multi_kind_iris_without_candidates():
