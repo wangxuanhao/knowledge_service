@@ -297,6 +297,8 @@ def test_preview_traps_focus_and_stays_inside_narrow_viewports(workbench, width)
 
     drawer = page.locator('#chunk-preview')
     drawer.wait_for(state='visible')
+    page.wait_for_function("""() => getComputedStyle(
+        document.querySelector('#chunk-preview .chunk-preview-drawer')).transform === 'none'""")
     close = drawer.get_by_role('button', name=re.compile('关闭'))
     for key in ('Shift+Tab', 'Tab', 'Tab', 'Tab', 'Tab', 'Tab'):
         page.keyboard.press(key)
