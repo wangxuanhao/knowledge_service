@@ -649,6 +649,85 @@ def test_candidate_boundary_rejects_lone_unicode_surrogates(surrogate):
         ])
 
 
+@pytest.mark.parametrize("iri", [
+    "http://[fe80::1%25]/x",
+    "http://[fe80::1%eth0]/x",
+    "http://[fe80::1%ab]/x",
+    "http://[fe80::1%25eth:0]/x",
+    "http://[fe80::1%25eth0%25again]/x",
+    "http://[fe80::1%25eth0%]/x",
+    "http://[fe80::1%25eth0%ZZ]/x",
+])
+def test_candidate_boundary_rejects_unsafe_ipv6_zone_ids(iri):
+    with pytest.raises(InvalidDiscoveryCandidate, match="valid absolute IRI"):
+        DiscoveryVocabularyNormalizer("").normalize([
+            {"id": "candidate", "kind": "class", "name": "Term", "iri": iri},
+        ])
+
+
+@pytest.mark.parametrize("iri", [
+    "http://[fe80::1%25eth0]/x",
+    "https://[fe80::1%25eth%2D0]:8443/x",
+])
+def test_candidate_boundary_accepts_safe_ipv6_zone_ids(iri):
+    result = DiscoveryVocabularyNormalizer("").normalize([
+        {"id": "candidate", "kind": "class", "name": "Term", "iri": iri},
+    ])
+
+    assert result.accepted_candidates[0]["iri"] == iri
+
+
+@pytest.mark.parametrize("iri", [
+    "http://user@other@example.test/x",
+    "http://user@other@[::1]/x",
+    "http://@example.test/x",
+])
+def test_candidate_boundary_rejects_unsafe_http_userinfo(iri):
+    with pytest.raises(InvalidDiscoveryCandidate, match="valid absolute IRI"):
+        DiscoveryVocabularyNormalizer("").normalize([
+            {"id": "candidate", "kind": "class", "name": "Term", "iri": iri},
+        ])
+
+
+@pytest.mark.parametrize("iri", [
+    "http://user:pass@[::1]/x",
+    "https://user%40name@example.test/x",
+])
+def test_candidate_boundary_accepts_safe_http_userinfo(iri):
+    result = DiscoveryVocabularyNormalizer("").normalize([
+        {"id": "candidate", "kind": "class", "name": "Term", "iri": iri},
+    ])
+
+    assert result.accepted_candidates[0]["iri"] == iri
+
+
+@pytest.mark.parametrize(("excluded", "case"), [
+    ("\ue000", "bmp-private-use"),
+    ("\U000f0000", "supplementary-private-use"),
+    ("\ufdd0", "noncharacter-range"),
+    ("\ufffe", "bmp-plane-end"),
+    ("\U0001ffff", "supplementary-plane-end"),
+], ids=lambda item: item if len(item) > 1 else None)
+def test_candidate_boundary_rejects_rfc3987_excluded_unicode(excluded, case):
+    with pytest.raises(InvalidDiscoveryCandidate, match="valid absolute IRI"):
+        DiscoveryVocabularyNormalizer("").normalize([
+            {"id": "candidate", "kind": "class", "name": case,
+             "iri": f"https://example.test/{excluded}"},
+        ])
+
+
+@pytest.mark.parametrize("iri", [
+    "https://example.test/知识条目",
+    "urn:knowledge:ontology:project:商户",
+])
+def test_candidate_boundary_accepts_repository_unicode_iris(iri):
+    result = DiscoveryVocabularyNormalizer("").normalize([
+        {"id": "candidate", "kind": "class", "name": "Term", "iri": iri},
+    ])
+
+    assert result.accepted_candidates[0]["iri"] == iri
+
+
 def test_candidate_boundary_rejects_duplicate_ids_deterministically():
     candidates = [
         {"id": "same", "kind": "class", "name": "Person"},

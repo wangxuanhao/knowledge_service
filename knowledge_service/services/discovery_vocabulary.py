@@ -8,6 +8,7 @@ import re
 import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
+from ipaddress import IPv6Address
 from urllib.parse import urlsplit
 
 from rdflib import Graph
@@ -112,34 +113,118 @@ class InvalidDiscoveryCandidate(ValueError):
 
 _ABSOLUTE_IRI = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:[^\s]+$")
 _INVALID_RAW_IRI_CHARACTERS = frozenset('<>"{}|^`')
+_UNRESERVED = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+_USERINFO_RAW = _UNRESERVED | frozenset("!$&'()*+,;=:")
+
+
+def _valid_pct_component(value: str, allowed_raw: frozenset[str]) -> bool:
+    """Validate an ASCII component made from allowed raw or percent-encoded octets."""
+    if not value:
+        return False
+    index = 0
+    while index < len(value):
+        if value[index] in allowed_raw:
+            index += 1
+        elif (value[index] == "%" and index + 2 < len(value)
+              and all(character in "0123456789abcdefABCDEF"
+                      for character in value[index + 1:index + 3])):
+            index += 3
+        else:
+            return False
+    return True
+
+
+def _safe_unicode_scalars(value: str) -> bool:
+    """Apply the repository's RFC3987-safe Unicode scalar policy."""
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    for character in value:
+        codepoint = ord(character)
+        if (character.isspace()
+                or unicodedata.category(character) in {"Cc", "Cs", "Co"}
+                or 0xFDD0 <= codepoint <= 0xFDEF
+                or (codepoint & 0xFFFF) in {0xFFFE, 0xFFFF}):
+            return False
+    return True
+
+
+def _sanitized_ip_literal(literal: str) -> str | None:
+    """Validate an IPv6/IPvFuture literal and return a parser-safe equivalent."""
+    if re.fullmatch(r"v[0-9A-Fa-f]+\.[A-Za-z0-9._~!$&'()*+,;=:-]+", literal):
+        return literal
+    address = literal
+    if "%" in literal:
+        address, separator, zone = literal.partition("%25")
+        if (not separator or not zone or "%" in address or "%25" in zone
+                or not _valid_pct_component(zone, _UNRESERVED)):
+            return None
+    try:
+        IPv6Address(address)
+    except ValueError:
+        return None
+    return address
+
+
+def _sanitize_http_authority(value: str) -> str | None:
+    """Enforce the application-safe HTTP authority and ZoneID policy."""
+    scheme_end = value.find(":")
+    if scheme_end < 0 or value[scheme_end + 1:scheme_end + 3] != "//":
+        return None
+    authority_start = scheme_end + 3
+    suffix_start = min(
+        (position for marker in "/?#"
+         if (position := value.find(marker, authority_start)) >= 0),
+        default=len(value),
+    )
+    authority = value[authority_start:suffix_start]
+    suffix = value[suffix_start:]
+    if (not authority or authority.count("@") > 1
+            or "[" in suffix or "]" in suffix):
+        return None
+    userinfo, separator, host_port = authority.rpartition("@")
+    if not separator:
+        host_port = authority
+    elif not _valid_pct_component(userinfo, _USERINFO_RAW):
+        return None
+
+    if "[" in authority or "]" in authority:
+        match = re.fullmatch(r"\[([^\[\]]+)\](?::([0-9]+))?", host_port)
+        if not match or "[" in userinfo or "]" in userinfo:
+            return None
+        sanitized_literal = _sanitized_ip_literal(match.group(1))
+        if sanitized_literal is None:
+            return None
+        port = f":{match.group(2)}" if match.group(2) else ""
+        safe_host_port = f"[{sanitized_literal}]{port}"
+    else:
+        safe_host_port = host_port
+    safe_authority = f"{userinfo}@{safe_host_port}" if separator else safe_host_port
+    return f"{value[:authority_start]}{safe_authority}{suffix}"
 
 
 def _valid_iri(value) -> bool:
     if not isinstance(value, str):
         return False
-    try:
-        value.encode("utf-8")
-    except UnicodeEncodeError:
-        return False
     if (not _ABSOLUTE_IRI.fullmatch(value)
             or "\\" in value
             or any(character in _INVALID_RAW_IRI_CHARACTERS for character in value)
             or value.count("#") > 1
-            or any(character.isspace() or unicodedata.category(character) == "Cc"
-                   for character in value)
+            or not _safe_unicode_scalars(value)
             or re.search(r"%(?![0-9A-Fa-f]{2})", value)):
         return False
+    scheme = value.split(":", 1)[0].lower()
+    parsed_value = value
+    if scheme in {"http", "https"}:
+        parsed_value = _sanitize_http_authority(value)
+        if parsed_value is None:
+            return False
+    elif "[" in value or "]" in value:
+        return False
     try:
-        parsed = urlsplit(value)
-        if "[" in value or "]" in value:
-            _, userinfo_separator, host_port = parsed.netloc.rpartition("@")
-            userinfo = parsed.netloc[:-len(host_port)] if userinfo_separator else ""
-            if (parsed.scheme not in {"http", "https"}
-                    or "[" in userinfo or "]" in userinfo
-                    or not re.fullmatch(r"\[[^\[\]]+\](?::[0-9]+)?", host_port)
-                    or any("[" in part or "]" in part
-                           for part in (parsed.path, parsed.query, parsed.fragment))):
-                return False
+        parsed = urlsplit(parsed_value)
         if parsed.scheme in {"http", "https"}:
             parsed.port
             return bool(parsed.hostname)
