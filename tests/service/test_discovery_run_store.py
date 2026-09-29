@@ -178,6 +178,7 @@ def test_ready_run_accepts_a_reusable_existing_binding(tmp_path):
         'unified_draft_id': None,
         'candidate_bindings': [{
             'candidate_id': 'candidate-1', 'binding_kind': 'existing',
+            'target_iri': 'urn:term:candidate-1',
         }],
     })
 
@@ -278,10 +279,96 @@ def test_ready_run_accepts_legacy_existing_status_binding(tmp_path):
         'unified_draft_id': None,
         'candidate_bindings': [{
             'candidate_id': 'candidate-1', 'status': 'existing',
+            'reuse_iri': 'urn:term:candidate-1',
         }],
     })
 
     assert discovery_result_kind(run) == 'mapping_only'
+
+
+@pytest.mark.parametrize('target_iri', [
+    None, '', 'relative/term', 'http://example.test/Order Item',
+])
+def test_ready_run_requires_valid_reuse_target_iri(tmp_path, target_iri):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+
+    with pytest.raises(ValueError, match='valid.*IRI'):
+        repo.create_discovery_run({
+            **_run(project_id), 'status': 'ready_to_finalize',
+            'unified_draft_id': None,
+            'candidate_bindings': [{
+                'candidate_id': 'candidate-1', 'binding_kind': 'existing',
+                'target_iri': target_iri, 'required_operation_ids': [],
+                'optional_operation_ids': [],
+            }],
+        })
+
+
+def test_ready_run_rejects_optional_ontology_operations(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+
+    with pytest.raises(ValueError, match='operation IDs'):
+        repo.create_discovery_run({
+            **_run(project_id), 'status': 'ready_to_finalize',
+            'unified_draft_id': None,
+            'candidate_bindings': [{
+                'candidate_id': 'candidate-1', 'binding_kind': 'existing',
+                'target_iri': 'urn:term:candidate-1',
+                'required_operation_ids': [],
+                'optional_operation_ids': ['operation-1'],
+            }],
+        })
+
+
+@pytest.mark.parametrize('operation_field', [
+    'required_operation_ids', 'optional_operation_ids',
+])
+def test_diagnosed_run_rejects_ontology_operation_ids(
+        tmp_path, operation_field):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    diagnostic = {
+        'candidate_id': 'candidate-1', 'status': 'skipped',
+        'code': 'manual_review_deferred',
+    }
+
+    with pytest.raises(ValueError, match='operation IDs'):
+        repo.create_discovery_run({
+            **_run(project_id), 'status': 'diagnosed_no_change',
+            'unified_draft_id': None,
+            'initial_candidate_outcomes': [diagnostic],
+            'candidate_outcomes': [diagnostic],
+            'candidate_bindings': [{
+                'candidate_id': 'candidate-1', 'status': 'deferred',
+                operation_field: ['operation-1'],
+            }],
+        })
+
+
+def test_ready_run_rejects_operations_on_quarantined_binding(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    diagnostic = {
+        'candidate_id': 'candidate-2', 'status': 'skipped',
+        'code': 'quarantined_candidate',
+    }
+
+    with pytest.raises(ValueError, match='operation IDs'):
+        repo.create_discovery_run({
+            **_run(project_id), 'status': 'ready_to_finalize',
+            'unified_draft_id': None,
+            'initial_candidate_outcomes': [diagnostic],
+            'candidate_outcomes': [diagnostic],
+            'candidate_bindings': [{
+                'candidate_id': 'candidate-1', 'binding_kind': 'existing',
+                'target_iri': 'urn:term:candidate-1',
+            }, {
+                'candidate_id': 'candidate-2', 'status': 'quarantined',
+                'optional_operation_ids': ['operation-1'],
+            }],
+        })
 
 
 @pytest.mark.parametrize('invalid_binding', [
@@ -331,11 +418,13 @@ def test_ready_run_allows_diagnostic_binding_with_immutable_initial_outcome(
         'candidate_outcomes': [diagnostic],
         'candidate_bindings': [{
             'candidate_id': 'candidate-1', 'binding_kind': 'existing',
+            'target_iri': 'urn:term:candidate-1',
             'required_operation_ids': [],
         }, {
             'candidate_id': 'candidate-2', 'binding_kind': 'proposed',
             'status': diagnostic_status,
-            'required_operation_ids': ['ignored-operation'],
+            'required_operation_ids': [],
+            'optional_operation_ids': [],
         }],
     })
 
@@ -352,7 +441,8 @@ def test_diagnosed_run_rejects_actionable_proposed_binding(tmp_path):
             'unified_draft_id': None,
             'candidate_bindings': [{
                 'candidate_id': 'candidate-1', 'binding_kind': 'proposed',
-                'required_operation_ids': ['operation-1'],
+                'target_iri': 'urn:term:candidate-1',
+                'required_operation_ids': [],
             }],
         })
 
@@ -365,6 +455,7 @@ def test_transition_updates_status_draft_link_and_outcomes_in_one_cas(tmp_path):
         'unified_draft_id': None,
         'candidate_bindings': [{
             'candidate_id': 'candidate-1', 'binding_kind': 'existing',
+            'target_iri': 'urn:term:candidate-1',
         }],
     })
 
@@ -388,6 +479,7 @@ def test_mapping_only_transition_cannot_attach_a_draft(tmp_path):
         'unified_draft_id': None,
         'candidate_bindings': [{
             'candidate_id': 'candidate-1', 'binding_kind': 'existing',
+            'target_iri': 'urn:term:candidate-1',
         }],
     })
 

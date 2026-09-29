@@ -6,6 +6,7 @@ import json
 import sqlite3
 
 from ..core.time import utc_now
+from ..services.ontology_iri import valid_application_iri
 
 
 KIND = 'ontology_discovery_run'
@@ -65,6 +66,21 @@ def _is_resolved_diagnostic_binding(binding, initial_outcome_ids):
         and binding.get('candidate_id') in initial_outcome_ids
         and (binding.get('status') in {'quarantined', 'deferred'}
              or binding.get('binding_kind') in {'quarantined', 'deferred'}))
+
+
+def _binding_reuse_iri(binding):
+    if not isinstance(binding, dict):
+        return None
+    if 'target_iri' in binding:
+        return binding['target_iri']
+    return binding.get('reuse_iri') or binding.get('iri')
+
+
+def _binding_has_operations(binding):
+    return bool(
+        isinstance(binding, dict)
+        and (binding.get('required_operation_ids')
+             or binding.get('optional_operation_ids')))
 
 
 def discovery_result_kind(run):
@@ -232,6 +248,16 @@ class DiscoveryRunStore:
                     'ready_to_finalize discovery run requires only reusable '
                     'bindings without required operations and at least one '
                     'reusable binding')
+            if any(not valid_application_iri(_binding_reuse_iri(binding))
+                   for binding in reusable_bindings):
+                raise ValueError(
+                    'ready_to_finalize reusable bindings require a valid '
+                    'application IRI')
+        if (run['status'] in {'ready_to_finalize', 'diagnosed_no_change'}
+                and any(_binding_has_operations(binding)
+                        for binding in run['candidate_bindings'])):
+            raise ValueError(
+                'no-draft discovery run bindings cannot contain operation IDs')
         if (run['status'] == 'diagnosed_no_change'
                 and any(_is_actionable_binding(binding)
                         for binding in run['candidate_bindings'])):
