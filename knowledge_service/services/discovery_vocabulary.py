@@ -234,6 +234,12 @@ class DiscoveryVocabularyNormalizer:
         copied = json.loads(_canonical_json(list(candidates)))
         for candidate in copied:
             candidate["kind"] = _KIND_ALIASES.get(candidate.get("kind"), candidate.get("kind"))
+        copied.sort(key=lambda candidate: (
+            str(candidate.get("id") or ""),
+            str(candidate.get("kind") or ""),
+            canonical_name(candidate.get("name")),
+            _canonical_json(candidate),
+        ))
 
         conflict_by_index = {}
 
@@ -244,14 +250,19 @@ class DiscoveryVocabularyNormalizer:
             conflict_by_index[index] = {
                 "candidate_id": item.get("id"), "kind": item.get("kind"),
                 "name": item.get("name"), "iri": item.get("iri"),
+                "evidence_refs": list(item.get("evidence_refs") or []),
                 "code": code, **details,
             }
 
         explicit_claims = {}
+        validated_explicit = set()
         for index, item in enumerate(copied):
             if item.get("iri"):
                 explicit_claims.setdefault(str(item["iri"]), []).append(index)
         for iri, indexes in explicit_claims.items():
+            baseline_term = self._terms_by_iri.get(iri)
+            if baseline_term and not baseline_term.active:
+                continue
             kinds = sorted({copied[index].get("kind") for index in indexes})
             if len(kinds) > 1:
                 for index in indexes:
@@ -263,16 +274,23 @@ class DiscoveryVocabularyNormalizer:
                 continue
             term = self._terms_by_iri.get(str(item["iri"]))
             if not term:
+                aliases = self._aliases.get(canonical_name(item.get("name")), ())
+                involved_iris = sorted({alias.iri for alias in aliases})
+                if involved_iris:
+                    quarantine(index, "candidate_iri_name_mismatch",
+                               involved_iris=involved_iris)
                 continue
-            if term.kind != item.get("kind"):
+            if not term.active:
+                quarantine(index, "retired_term_reuse_blocked")
+            elif term.kind != item.get("kind"):
                 quarantine(index, "existing_term_kind_collision",
                            existing_kind=term.kind)
-            elif not term.active:
-                quarantine(index, "retired_term_reuse_blocked")
             elif canonical_name(item.get("name")) not in {
                     canonical_name(name) for name in term.names}:
                 quarantine(index, "candidate_iri_name_mismatch",
                            baseline_names=list(term.names))
+            else:
+                validated_explicit.add(index)
 
         by_name = {}
         for index, item in enumerate(copied):
@@ -289,6 +307,21 @@ class DiscoveryVocabularyNormalizer:
                 for index in indexes:
                     quarantine(index, "relation_attribute_name_collision",
                                involved_kinds=["attribute", "relation"])
+
+        for index, item in enumerate(copied):
+            if index in conflict_by_index or item.get("iri"):
+                continue
+            aliases = self._aliases.get(canonical_name(item.get("name")), ())
+            involved_iris = {term.iri for term in aliases}
+            if len(involved_iris) != 1:
+                continue
+            term = aliases[0]
+            if not term.active:
+                quarantine(index, "retired_term_reuse_blocked",
+                           involved_iri=term.iri)
+            elif term.kind != item.get("kind"):
+                quarantine(index, "existing_term_kind_collision",
+                           involved_iri=term.iri, existing_kind=term.kind)
 
         if self.attribute_threshold > 1:
             for name, indexes in by_name.items():
@@ -307,7 +340,8 @@ class DiscoveryVocabularyNormalizer:
         for index, candidate in enumerate(copied):
             if index in conflict_by_index:
                 continue
-            key = (candidate.get("kind"), canonical_name(candidate.get("name")))
+            explicit_iri = candidate.get("iri") if index in validated_explicit else None
+            key = (candidate.get("kind"), canonical_name(candidate.get("name")), explicit_iri)
             if key not in groups:
                 groups[key] = []
                 order.append(key)
@@ -319,6 +353,8 @@ class DiscoveryVocabularyNormalizer:
         for key in order:
             indexes = groups[key]
             aliases = self._aliases.get(key[1], ())
+            if key[2]:
+                aliases = tuple(term for term in aliases if term.iri == key[2])
             involved_iris = sorted({term.iri for term in aliases})
             if len(involved_iris) > 1:
                 for index in indexes:
@@ -327,7 +363,8 @@ class DiscoveryVocabularyNormalizer:
             group = [copied[index] for index in indexes]
             leader = group[0]
             same_kind = [term for term in aliases if term.kind == key[0] and term.active]
-            reused_iri = same_kind[0].iri if len(same_kind) == 1 else leader.get("iri")
+            reused_iri = key[2] or (same_kind[0].iri if len(same_kind) == 1
+                                    else leader.get("iri"))
             if reused_iri:
                 leader["iri"] = reused_iri
             evidence = []
@@ -370,7 +407,8 @@ class DiscoveryVocabularyNormalizer:
             tuple(_freeze_json(item) for item in bindings),
             _freeze_json({
                 "total_candidates": len(copied), "accepted_candidates": len(accepted),
-                "merged_candidates": merged_count, "conflict_candidates": len(conflicts),
+                "merged_candidates": merged_count,
+                "conflict_candidates": len(conflicts) - low_frequency_count,
                 "low_frequency_attributes": low_frequency_count,
             }),
         )

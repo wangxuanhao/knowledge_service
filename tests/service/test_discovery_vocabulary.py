@@ -93,11 +93,12 @@ def test_baseline_registry_uses_local_all_labels_and_summary_names_without_overw
 
     result = DiscoveryVocabularyNormalizer(BASELINE, baseline_summary=summary).normalize(candidates)
 
-    assert [item["id"] for item in result.accepted_candidates] == ["local", "label", "summary"]
+    assert [item["id"] for item in result.accepted_candidates] == ["label", "local", "summary"]
     assert [item["iri"] for item in result.accepted_candidates] == [
         "http://example.test/Person", "http://example.test/Person", "http://example.test/worksFor"]
     assert result.conflicts == ({
         "candidate_id": "ambiguous", "kind": "class", "name": "人", "iri": None,
+        "evidence_refs": [],
         "code": "ambiguous_baseline_name",
         "involved_iris": ["http://example.test/OtherPerson", "http://example.test/Person"],
     },)
@@ -132,13 +133,109 @@ def test_explicit_iri_precedence_blocks_retired_wrong_kind_and_name_mismatch():
 
     result = DiscoveryVocabularyNormalizer(baseline).normalize(candidates)
 
-    assert [item["code"] for item in result.conflicts] == [
-        "retired_term_reuse_blocked",
-        "existing_term_kind_collision",
-        "candidate_iri_name_mismatch",
+    assert [(item["candidate_id"], item["code"]) for item in result.conflicts] == [
+        ("kind", "existing_term_kind_collision"),
+        ("name", "candidate_iri_name_mismatch"),
+        ("retired", "retired_term_reuse_blocked"),
     ]
     assert result.diagnostics["conflict_candidates"] == 3
     assert result.accepted_candidates == ()
+
+
+def test_explicit_retired_iri_precedes_kind_mismatch():
+    baseline = """
+    @prefix ex: <http://example.test/> .
+    @prefix owl: <http://www.w3.org/2002/07/owl#> .
+    ex:Old a owl:Class; owl:deprecated true .
+    """
+
+    result = DiscoveryVocabularyNormalizer(baseline).normalize([
+        {"id": "candidate", "kind": "relation", "name": "Old",
+         "iri": "http://example.test/Old"},
+    ])
+
+    assert result.conflicts[0]["code"] == "retired_term_reuse_blocked"
+
+    multiple = DiscoveryVocabularyNormalizer(baseline).normalize([
+        {"id": "class", "kind": "class", "name": "Old",
+         "iri": "http://example.test/Old"},
+        {"id": "relation", "kind": "relation", "name": "Old",
+         "iri": "http://example.test/Old"},
+    ])
+    assert [item["code"] for item in multiple.conflicts] == [
+        "retired_term_reuse_blocked", "retired_term_reuse_blocked"]
+
+
+def test_name_resolution_blocks_unique_retired_and_different_kind_aliases():
+    baseline = """
+    @prefix ex: <http://example.test/> .
+    @prefix owl: <http://www.w3.org/2002/07/owl#> .
+    @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+    ex:Old a owl:Class; rdfs:label "legacy person"; owl:deprecated true .
+    ex:worksFor a owl:ObjectProperty; rdfs:label "employment" .
+    """
+
+    result = DiscoveryVocabularyNormalizer(baseline).normalize([
+        {"id": "retired", "kind": "class", "name": "legacy person"},
+        {"id": "wrong-kind", "kind": "class", "name": "employment"},
+    ])
+
+    assert [(item["candidate_id"], item["code"]) for item in result.conflicts] == [
+        ("retired", "retired_term_reuse_blocked"),
+        ("wrong-kind", "existing_term_kind_collision"),
+    ]
+
+
+def test_unknown_explicit_iri_cannot_claim_an_existing_formal_name():
+    baseline = """
+    @prefix ex: <http://example.test/> .
+    @prefix owl: <http://www.w3.org/2002/07/owl#> .
+    @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+    ex:Person a owl:Class; rdfs:label "Human" .
+    """
+
+    result = DiscoveryVocabularyNormalizer(baseline).normalize([
+        {"id": "candidate", "kind": "class", "name": "Human",
+         "iri": "http://candidate.test/Person"},
+    ])
+
+    assert result.accepted_candidates == ()
+    assert result.conflicts[0]["code"] == "candidate_iri_name_mismatch"
+    assert result.conflicts[0]["iri"] == "http://candidate.test/Person"
+    assert result.conflicts[0]["involved_iris"] == ["http://example.test/Person"]
+
+
+def test_validated_known_explicit_iri_disambiguates_a_shared_alias():
+    baseline = """
+    @prefix ex: <http://example.test/> .
+    @prefix owl: <http://www.w3.org/2002/07/owl#> .
+    @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+    ex:Person a owl:Class; rdfs:label "Human" .
+    ex:Actor a owl:Class; rdfs:label "Human" .
+    """
+
+    result = DiscoveryVocabularyNormalizer(baseline).normalize([
+        {"id": "candidate", "kind": "class", "name": "Human",
+         "iri": "http://example.test/Person"},
+    ])
+
+    assert result.conflicts == ()
+    assert result.accepted_candidates[0]["iri"] == "http://example.test/Person"
+
+
+def test_quarantined_conflicts_retain_all_evidence_references():
+    baseline = """
+    @prefix ex: <http://example.test/> .
+    @prefix owl: <http://www.w3.org/2002/07/owl#> .
+    ex:Old a owl:Class; owl:deprecated true .
+    """
+
+    result = DiscoveryVocabularyNormalizer(baseline).normalize([
+        {"id": "candidate", "kind": "class", "name": "Old",
+         "iri": "http://example.test/Old", "evidence_refs": ["e2", "e1"]},
+    ])
+
+    assert result.conflicts[0]["evidence_refs"] == ["e2", "e1"]
 
 
 def test_multiple_candidate_kinds_claiming_same_explicit_iri_are_all_quarantined():
@@ -179,7 +276,7 @@ def test_cross_kind_precedence_and_low_frequency_diagnostics_are_exclusive():
         "total_candidates": 5,
         "accepted_candidates": 1,
         "merged_candidates": 0,
-        "conflict_candidates": 4,
+        "conflict_candidates": 3,
         "low_frequency_attributes": 1,
     }
 
@@ -191,6 +288,28 @@ def test_default_attribute_threshold_quarantines_a_single_new_attribute():
 
     assert result.conflicts[0]["code"] == "low_frequency_attribute"
     assert result.conflicts[0]["threshold"] == 2
+    assert result.diagnostics["conflict_candidates"] == 0
+    assert result.diagnostics["low_frequency_attributes"] == 1
+
+
+def test_normalization_is_deterministic_when_candidate_order_changes():
+    candidates = [
+        {"id": "z", "kind": "class", "name": " Person ",
+         "evidence_refs": ["e3", "e1"]},
+        {"id": "r", "kind": "relation", "name": "knows",
+         "evidence_refs": ["e4"]},
+        {"id": "a", "kind": "class", "name": "ＰＥＲＳＯＮ",
+         "evidence_refs": ["e2", "e1"]},
+    ]
+    normalizer = DiscoveryVocabularyNormalizer("")
+
+    forward = normalizer.normalize(candidates)
+    backward = normalizer.normalize(list(reversed(candidates)))
+
+    assert forward == backward
+    assert [item["id"] for item in forward.accepted_candidates] == ["a", "r"]
+    assert forward.merged_groups[0]["accepted_candidate_id"] == "a"
+    assert [item["candidate_id"] for item in forward.candidate_bindings] == ["a", "r", "z"]
 
 
 def test_audit_reports_cross_kind_names_and_multi_kind_iris_without_candidates():
