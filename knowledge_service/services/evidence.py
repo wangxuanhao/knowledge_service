@@ -488,9 +488,10 @@ def evidence(service, project_id, record_id, scope):
                 selected.append(resolution)
             elif _resolution_score(resolution) > _resolution_score(selected[index]):
                 selected[index] = resolution
+        ranked = sorted(selected, key=_resolution_score, reverse=True)
         documents = [
             _serialize_formal_document(resolution)
-            for resolution in selected[:20]
+            for resolution in ranked[:20]
         ]
     else:
         origins = [row] + [

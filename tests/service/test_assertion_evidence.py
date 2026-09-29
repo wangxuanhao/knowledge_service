@@ -621,3 +621,37 @@ def test_formal_evidence_caps_documents_after_ranking_all_assertions(
     assert len(documents) == 1
     assert documents[0]['assertion_id'] == good['id']
     assert documents[0]['mode'] == 'exact'
+
+
+def test_formal_evidence_ranks_resolutions_before_document_cap(evidence_repo):
+    repo, project_id = evidence_repo
+    service = KnowledgeService(repo, HashingEncoder())
+    document, chunk = _document_and_chunk(repo, project_id)
+    unresolved = [
+        _assertion(
+            repo, project_id, document, chunk,
+            assertion_id=f'a-missing-{index:02d}')
+        for index in range(20)
+    ]
+    for assertion in unresolved:
+        repo._db.execute(
+            'UPDATE assertions SET document_version_id=? '
+            'WHERE project_id=? AND id=?',
+            (f'missing-{assertion["id"]}', project_id, assertion['id']))
+    good = _assertion(
+        repo, project_id, document, chunk, assertion_id='z-good',
+        start=7, end=12, quote='Alpha', payload={
+            'text': 'Alpha', 'evidence': 'Alpha', 'evidence_status': 'exact'})
+    repo.put_record(project_id, {
+        'id': 'entity-1', 'kind': 'entity', 'text': 'Alpha', 'metadata': {}})
+    for assertion in [*unresolved, good]:
+        repo.transition_assertion(
+            project_id, assertion['id'], 1, 'accepted', 'accepted rank test',
+            'test', canonical_record_id='entity-1')
+
+    documents = evidence_module.evidence(
+        service, project_id, 'entity-1', {})['documents']
+
+    assert [item['assertion_id'] for item in documents] == [
+        good['id'], *[item['id'] for item in unresolved[:19]]]
+    assert documents[0]['mode'] == 'exact'
