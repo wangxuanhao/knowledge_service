@@ -601,6 +601,7 @@ def test_candidate_boundary_rejects_rfc_invalid_raw_iri_characters(iri):
     "http://example.test/Term%5EAlias",
     "http://example.test/%60Term%60",
     "http://example.test/Term%23Alias",
+    "http://example.test/%5BTerm%5D",
 ])
 def test_candidate_boundary_accepts_percent_encoded_reserved_characters(iri):
     result = DiscoveryVocabularyNormalizer("").normalize([
@@ -608,6 +609,44 @@ def test_candidate_boundary_accepts_percent_encoded_reserved_characters(iri):
     ])
 
     assert result.accepted_candidates[0]["iri"] == iri
+
+
+@pytest.mark.parametrize("iri", [
+    "http://example.test/Term[Alias",
+    "http://example.test/Term]Alias",
+    "urn:knowledge:[Term]",
+    "http://[::1/x",
+    "http://::1]/x",
+    "http://[not-an-ip]/x",
+    "http://user[name]@[::1]/x",
+    "https://[::1]/x[invalid]",
+])
+def test_candidate_boundary_rejects_brackets_outside_valid_ip_literal_hosts(iri):
+    with pytest.raises(InvalidDiscoveryCandidate, match="valid absolute IRI"):
+        DiscoveryVocabularyNormalizer("").normalize([
+            {"id": "candidate", "kind": "class", "name": "Term", "iri": iri},
+        ])
+
+
+@pytest.mark.parametrize("iri", [
+    "http://[::1]/x",
+    "https://[2001:db8::1]:8443/x",
+])
+def test_candidate_boundary_accepts_valid_ip_literal_hosts(iri):
+    result = DiscoveryVocabularyNormalizer("").normalize([
+        {"id": "candidate", "kind": "class", "name": "Term", "iri": iri},
+    ])
+
+    assert result.accepted_candidates[0]["iri"] == iri
+
+
+@pytest.mark.parametrize("surrogate", ["\ud800", "\udfff"], ids=["high", "low"])
+def test_candidate_boundary_rejects_lone_unicode_surrogates(surrogate):
+    with pytest.raises(InvalidDiscoveryCandidate, match="valid absolute IRI"):
+        DiscoveryVocabularyNormalizer("").normalize([
+            {"id": "candidate", "kind": "class", "name": "Term",
+             "iri": f"http://example.test/{surrogate}"},
+        ])
 
 
 def test_candidate_boundary_rejects_duplicate_ids_deterministically():

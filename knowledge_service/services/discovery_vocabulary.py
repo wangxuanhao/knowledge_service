@@ -115,7 +115,13 @@ _INVALID_RAW_IRI_CHARACTERS = frozenset('<>"{}|^`')
 
 
 def _valid_iri(value) -> bool:
-    if (not isinstance(value, str) or not _ABSOLUTE_IRI.fullmatch(value)
+    if not isinstance(value, str):
+        return False
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    if (not _ABSOLUTE_IRI.fullmatch(value)
             or "\\" in value
             or any(character in _INVALID_RAW_IRI_CHARACTERS for character in value)
             or value.count("#") > 1
@@ -125,6 +131,15 @@ def _valid_iri(value) -> bool:
         return False
     try:
         parsed = urlsplit(value)
+        if "[" in value or "]" in value:
+            _, userinfo_separator, host_port = parsed.netloc.rpartition("@")
+            userinfo = parsed.netloc[:-len(host_port)] if userinfo_separator else ""
+            if (parsed.scheme not in {"http", "https"}
+                    or "[" in userinfo or "]" in userinfo
+                    or not re.fullmatch(r"\[[^\[\]]+\](?::[0-9]+)?", host_port)
+                    or any("[" in part or "]" in part
+                           for part in (parsed.path, parsed.query, parsed.fragment))):
+                return False
         if parsed.scheme in {"http", "https"}:
             parsed.port
             return bool(parsed.hostname)
