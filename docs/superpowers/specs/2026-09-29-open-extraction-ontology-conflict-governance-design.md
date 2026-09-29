@@ -82,7 +82,7 @@ OWL domain/range 在 RDF/OWL 中具有推理语义。产品现有“允许端点
 
 注册表值是 `(IRI, kind, retired, source)` 集合，不允许用后写值覆盖先写值。候选匹配优先级固定为：
 
-1. 候选显式携带的 IRI 已在基线存在时，以该 IRI 的已发布 kind 为准；kind 不同立即冲突；
+1. 候选显式携带的 IRI 已在基线存在时，先检查停用状态，再检查已发布 kind；已停用时无论 kind 是否相同都隔离为 `retired_term_reuse_blocked`，活动术语 kind 不同则立即冲突；
 2. 显式 IRI 不存在或候选没有 IRI 时，使用规范名称查询注册表；
 3. 名称只匹配一个活动、同 kind 正式术语时复用该 IRI；
 4. 名称只匹配一个已停用、同 kind 正式术语时隔离为 `retired_term_reuse_blocked`，只建议走人工 restore 草案；
@@ -200,7 +200,7 @@ Semantica 只接收 `accepted_candidates`。生成结果返回后执行结构检
   "mappings": {},
   "candidate_bindings": [],
   "diagnostics": {},
-  "status": "analyzed|draft_created|published|finalized_no_change|stale_base|stale_source|closed",
+  "status": "diagnosed_no_change|ready_to_finalize|draft_created|published|finalized_no_change|stale_base|stale_source|closed",
   "unified_draft_id": null,
   "supersedes_run_id": null
 }
@@ -208,7 +208,19 @@ Semantica 只接收 `accepted_candidates`。生成结果返回后执行结构检
 
 `source_fingerprint` 由 project、base ontology id、排序后的候选 ID/文档版本/规范化有效载荷、归一化规则版本、Semantica 版本和影响生成结果的请求选项计算。run id 由 project id 与 fingerprint 确定性派生，并由 artifact 主键提供并发唯一性。
 
-候选、冲突和 bindings 快照创建后不可改写。状态、关联 draft id 和终态结果可以通过带期望状态的 Repository 更新推进，但不能替换原始快照。刷新来源或 rebase 不修改旧 run，而是创建带 `supersedes_run_id` 的新 run；旧 run 保持审计可读。草案关闭只把 run 置为 `closed`，发布或无本体变化物化分别置为 `published` / `finalized_no_change`。
+候选、冲突和 bindings 快照创建后不可改写。状态、关联 draft id 和终态结果可以通过带期望状态的 Repository CAS 更新推进，但不能替换原始快照。刷新来源或 rebase 不修改旧 run，而是创建带 `supersedes_run_id` 的新 run；旧 run 保持审计可读。草案关闭只把 run 置为 `closed`，发布或无本体变化物化分别置为 `published` / `finalized_no_change`。
+
+状态含义固定为：
+
+- `diagnosed_no_change`：终态；没有本体操作且没有可物化 binding，只保存冲突、低频或其他暂缓诊断；
+- `ready_to_finalize`：没有本体变更，但存在复用活动正式术语的 bindings，等待用户确认物化；
+- `draft_created`：关联本体草案仍在治理流程中；
+- `published`：关联草案已发布，候选物化结果已提交；
+- `finalized_no_change`：未产生本体版本，复用活动正式术语的候选已完成物化；
+- `stale_base` / `stale_source`：终止本 run 的后续动作；重新分析必须创建 superseding run；
+- `closed`：关联草案被关闭，未物化候选可在未来新 run 中重新分析。
+
+进入 `diagnosed_no_change` 时，在同一事务中写入 run-local candidate outcomes：冲突为 `ontology_term_conflict`，低频属性为 `low_frequency_attribute`，其他暂缓项使用各自稳定原因。进入 `closed` 时，对尚无结果的 binding 写入 `draft_closed`，已有冲突/暂缓 outcome 不变。outcome 表示该 run 的处理结果，不永久删除或封禁来源候选；来源、本体或人工命名发生变化后可以进入新的 run。
 
 因此纯冲突、纯低频、纯复用和混合结果都有持久化载体。工作台刷新后从 discovery run 读取诊断，不依赖是否成功创建本体草案。
 
@@ -240,9 +252,9 @@ Semantica 只接收 `accepted_candidates`。生成结果返回后执行结构检
 
 满足三项才物化。必要操作被拒绝、被替代或校验失败的候选进入 skipped，原因分别使用稳定代码 `required_operation_rejected`、`required_operation_superseded` 或 `ontology_validation_failed`。可选 parent/domain/range 操作被拒不影响术语本身及事实物化。
 
-冲突候选在 discovery run 创建时即持久化 `ontology_term_conflict` 诊断；在该 run 达到 `published` 或 `finalized_no_change` 时，候选生命周期同步写入相同稳定跳过原因。它们永远不会因为另一个操作获批而被顺带物化。
+冲突候选在 discovery run 创建时即持久化 `ontology_term_conflict` 诊断和 run-local outcome；在该 run 达到 `published`、`finalized_no_change`、`diagnosed_no_change` 或 `closed` 时均保持相同稳定原因。它们永远不会因为另一个操作获批而被顺带物化。
 
-如果归一化结果没有本体变更操作，但存在指向活动基线术语的有效 bindings，则不创建空本体草案，也不创建新本体版本。兼容的累计草案入口返回 `result_kind=mapping_only` 和 discovery run；显式终结动作在一个事务中按当前 ontology id 重新验证并物化这些候选，将 run 置为 `finalized_no_change`。如果既无操作也无可物化 binding，只返回持久化诊断 run，不提供提交/发布动作。
+如果归一化结果没有本体变更操作，但存在指向活动基线术语的有效 bindings，则不创建空本体草案，也不创建新本体版本，并把 run 置为 `ready_to_finalize`。兼容的累计草案入口返回 `result_kind=mapping_only` 和 discovery run；显式终结动作在一个事务中重新读取当前 ontology id、候选状态、文档版本和来源有效载荷，重算 source fingerprint，并确认候选尚未由其他 run 物化。base 或来源变化时以 CAS 将 run 置为 `stale_base` / `stale_source` 并返回 409，不写入任何知识记录。复核一致时才执行最终本体/SHACL 校验、物化候选并将 run 置为 `finalized_no_change`；任一步失败整体回滚。如果既无操作也无可物化 binding，创建时直接保存为终态 `diagnosed_no_change`，不提供提交/发布动作。
 
 混合草案发布时，在同一个发布事务里应用批准操作，并只物化满足上述规则的 bindings；部分批准因此具有确定结果。
 
@@ -280,6 +292,9 @@ draft 创建后的修改继续遵守现有 revision/idempotency 语义；首次�
 - 候选发现阶段显示“已接受 / 已合并 / 低频暂缓 / 术语冲突”数量；
 - 冲突列表显示规范名称、涉及种类、已有正式术语、来源证据和隔离原因；
 - 明确提示“冲突候选不会进入本草案，不影响其他术语审核”；
+- `mapping_only` run 显示“沿用当前本体并提交知识”按钮、待物化/跳过数量和绑定的 ontology version；用户确认后调用 `POST /api/projects/{p}/ontology-discovery/runs/{run_id}/finalize`，请求携带 expected base ontology id 和 source fingerprint；成功后显示 `finalized_no_change`，409 时显示来源或基线已变化并要求重新分析；
+- `diagnosed_no_change` 显示“本次没有可生成或可映射的术语”，保留诊断浏览和“基于最新来源重新分析”入口，不进入设计/审核/发布阶段；
+- `draft_created` 继续进入现有设计、审核、校验和发布阶段；发现页根据 result kind 导航，不要求无草案 run 伪装成草案；
 - 设计、审核和发布阶段只展示实际生成的 operations；
 - 属性创建不得同时生成 attribute `add_range` 和 `set_datatype`；属性使用 domain + datatype；
 - 关系使用 domain + range；实体类型使用 parent；
@@ -322,7 +337,8 @@ draft 创建后的修改继续遵守现有 revision/idempotency 语义；首次�
 - NFKC、空白折叠和 case-fold；
 - 同种类候选合并并保留全部证据；
 - class/attribute、class/relation、relation/attribute 冲突矩阵；
-- 与活动、已停用基线术语的同种类复用和不同种类隔离；
+- 与唯一活动同 kind 基线术语的复用；已停用术语无论显式 IRI 或名称命中均隔离且不隐式恢复；
+- 多语言/多值标签命中多个 IRI 的歧义隔离、候选 IRI/name 不一致和 invalid baseline dual kind 的受控失败；
 - 同一显式 IRI 多 kind 的高严重度冲突；
 - 低频属性不被误记为跨类型冲突。
 
@@ -339,9 +355,14 @@ draft 创建后的修改继续遵守现有 revision/idempotency 语义；首次�
 - 冲突候选不生成 OWL 声明或 domain/range 操作；
 - 同批正常候选仍生成可审核草案；
 - 全部候选冲突时返回诊断但不创建空草案；
+- 纯冲突/纯低频 run 进入 `diagnosed_no_change`，outcomes 稳定且可从工作台重读；
 - Semantica 输出双重 kind 时受控失败；
 - 草案创建或操作写入失败时事务完整回滚；
-- 重试不创建重复活动草案。
+- discovery run 快照不可变，状态变更使用 expected-status CAS；
+- 相同 fingerprint 的串行/并发重试返回同一 run 和 draft，不创建重复活动草案；
+- required operation 部分拒绝只跳过依赖候选，optional parent/domain/range 被拒不阻塞术语和事实物化；
+- mapping-only 工作台终结成功路径、重复终结幂等、来源/基线变化转 stale、候选已由其他 run 处理、校验失败和事务回滚；
+- 草案关闭产生 `draft_closed` outcome，但不覆盖既有冲突原因；新 run 可以重新分析未物化候选。
 
 ### OWL/SHACL 和工作台回归
 
