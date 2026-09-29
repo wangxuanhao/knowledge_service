@@ -45,7 +45,7 @@ def test_assets_version_bumped_for_changed_files():
     html = read('index.html')
     for asset, marker in (('workspace.js', 'ontology-nav'),
                           ('ontology-details.js', 'linked-review'),
-                          ('workspace.css', 'linked-review'),
+                          ('workspace.css', 'fact-review'),
                           ('projects.css', 'project-id'),
                           ('ontology-modal.css', 'term-impact')):
         assert f'{asset}?v={marker}' in html, f'{asset} 版本号未 bump（期望前缀 {marker}）'
@@ -112,8 +112,8 @@ def test_unified_ontology_workbench_has_one_entry_and_versioned_assets():
     assert "'ontology'" not in menu
     for name in ('records-view.js', 'task-review.js', 'ontology-workbench.js'):
         assert '[data-tab="ontology"]' not in read(name)
-    assert '/assets/ontology-workbench.css?v=discovery-layout-2' in html
-    assert '/assets/ontology-workbench.js?v=discovery-layout-2' in html
+    assert '/assets/ontology-workbench.css?v=fact-routing-1' in html
+    assert '/assets/ontology-workbench.js?v=fact-routing-1' in html
     assert html.index('/assets/style.css') < html.index('/assets/ontology-workbench.css')
     assert html.index('/assets/workspace.js') < html.index('/assets/ontology-workbench.js')
     assert 'ontology-manager.html' not in html

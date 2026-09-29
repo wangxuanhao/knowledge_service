@@ -7,7 +7,9 @@ from knowledge_service.integrations.embeddings import HashingEncoder
 from knowledge_service.repository import Repository
 from knowledge_service.services.ontology import Ontology
 from knowledge_service.services.ontology_drafts import OntologyDrafts
-from knowledge_service.services.ontology_discovery import _candidate_mindmap, _induce, _validated_materialization
+from knowledge_service.services.ontology_discovery import (
+    _candidate_mindmap, _induce, _summary, _validated_materialization,
+)
 
 
 def test_discovery_generates_readable_unicode_iris_for_every_term_kind():
@@ -25,6 +27,51 @@ def test_discovery_generates_readable_unicode_iris_for_every_term_kind():
     assert mappings['relation_types']['适用于'].endswith(':适用于')
     assert mappings['attributes']['发布日期'].endswith(':发布日期')
     assert all('%' not in iri for group in mappings.values() for iri in group.values())
+
+
+def test_discovery_exceptions_are_separate_from_normal_counts_and_views():
+    candidates=[
+        {'id':'entity','kind':'entity','text':'账号甲','proposed_type':'账号','document_id':'doc'},
+        {'id':'attribute','kind':'attribute','entity_id':'entity','subject':'账号甲',
+         'proposed_type':'状态','value':'封禁','evidence':'账号甲状态为封禁','document_id':'doc'},
+        {'id':'exception','kind':'exception','source_kind':'relation','text':'账号甲',
+         'proposed_type':'负责人','object':'张三','reason_code':'relation_object_not_resolved',
+         'reason':'关系宾语未命中实体','evidence':'账号甲由张三负责','document_id':'doc'},
+    ]
+    summary=_summary(candidates)
+    mindmap=_candidate_mindmap(candidates,{'entity':'pending','attribute':'pending'})
+    assert summary['candidate_count']==2
+    assert summary['exception_count']==1
+    assert len(mindmap['attributes'])==1
+    assert mindmap['attributes'][0]['subject']=='账号甲'
+    assert len(mindmap['exceptions'])==1
+    assert mindmap['summary']['candidate_count']==2
+    assert mindmap['summary']['exception_count']==1
+
+
+def test_discovery_draft_excludes_evidence_exceptions(tmp_path,monkeypatch):
+    from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
+    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False:[
+        {'id':'account','kind':'entity','text':'账号甲','proposed_type':'账号','confidence':.9,
+         'evidence':'账号甲','evidence_status':'exact'},
+        {'id':'bad','kind':'exception','source_kind':'attribute','text':'账号甲','subject':'账号甲',
+         'proposed_type':'负责人','value':'张三','reason_code':'evidence_not_in_source',
+         'reason':'证据无法定位','evidence':'不存在的证据','evidence_status':'unverified'},
+    ])
+    app=create_app(tmp_path/'exception-draft.sqlite',HashingEncoder())
+    with TestClient(app) as client:
+        project=client.post('/api/projects',json={
+            'name':'异常隔离','use_default_ontology':False,'ontology_mode':'discovery'}).json()
+        base=f"/api/projects/{project['id']}"
+        ingested=client.post(base+'/documents',json={'title':'正文','text':'账号甲当前封禁',
+            'extraction_mode':'discovery','resolve_entities':False})
+        assert ingested.status_code==201,ingested.text
+        assert ingested.json()['discovery_candidates']==1
+        assert ingested.json()['discovery_exceptions']==1
+        overview=client.get(base+'/ontology-discovery').json()
+        assert overview['candidate_count']==1 and overview['exception_count']==1
+        draft=client.post(base+'/ontology-discovery/drafts',json={'name':'异常隔离草案'}).json()
+        assert [item['kind'] for item in draft['candidate_snapshot']]==['entity']
 
 
 def test_draft_keeps_singleton_attribute_candidate_without_mapping(tmp_path,monkeypatch):

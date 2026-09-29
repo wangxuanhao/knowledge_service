@@ -29,6 +29,9 @@ MOCKS = r"""() => {
     source_kind:'manual',base_ontology_id:'o1',operations:[],decisions:[]};
   window.mockDraft = draft;
   window.mockDrafts = [draft];
+  window.mockChanges = [{id:'change-1',status:'pending',operation:'add',kind:'attribute',
+    label:'封禁期限',uri:'urn:封禁期限',rationale:'正式事实需要该属性',revision:1,
+    impact:{risk:'low',record_count:0,constraint_count:0,linked_candidates:1}}];
   const root = iri => ({id:iri,iri,canonical_iri:iri,name:iri.split(':').pop(),
     label:iri.split(':').pop(),label_zh:'',child_count:1,other_parent_count:0,
     is_reference:false,display_path:[{iri,label:iri.split(':').pop()}]});
@@ -42,7 +45,7 @@ MOCKS = r"""() => {
       body:options.body ? JSON.parse(options.body) : null});
     let payload = {};
     if(parsed.pathname.endsWith('/ontology-discovery')) payload={
-      candidate_count:10,entity_count:7,relation_count:2,attribute_count:1,
+      candidate_count:10,entity_count:7,relation_count:2,attribute_count:1,exception_count:1,
       entity_types:[{name:'Beta',count:1},{name:'Gamma',count:3},{name:'Alpha',count:3}],
       relation_types:[{name:'RelationB',count:1},{name:'RelationA',count:4}],
       attribute_types:[{name:'AttributeA',count:2}]
@@ -51,7 +54,13 @@ MOCKS = r"""() => {
       {id:'c1',text:'Alpha one',type:'Alpha',occurrence_count:3,sources:[]},
       {id:'c2',text:'Gamma one',type:'Gamma',occurrence_count:2,sources:[]},
       {id:'c3',text:'Relation A',type:'RelationA',occurrence_count:1,sources:[]}
-    ],edges:[],summary:{}};
+    ],edges:[{id:'r1',subject:'Alpha one',object:'Gamma one',type:'RelationA',occurrence_count:1,sources:[]}],
+      attributes:[{id:'a1',subject:'Alpha one',type:'AttributeA',value:7,value_type:'integer',occurrence_count:1,sources:[]}],
+      exceptions:[{id:'x1',text:'Alpha one',source_kind:'attribute',type:'负责人',reason:'证据无法定位',reason_code:'evidence_not_in_source',occurrence_count:1,sources:[]}],summary:{}};
+    else if(parsed.pathname.endsWith('/ontology-change-proposals/change-1/decision')) {
+      window.mockChanges[0].status=window.apiCalls.at(-1).body.action==='approve'?'approved':'rejected';payload={...window.mockChanges[0]};
+    }
+    else if(parsed.pathname.endsWith('/ontology-change-proposals')) payload={proposals:window.mockChanges};
     else if(parsed.pathname.endsWith('/ontology-drafts')) payload={items:window.mockDrafts,total:window.mockDrafts.length};
     else if(parsed.pathname.endsWith('/ontology-drafts/d1/commands')) {
       draft.revision += 1; draft.operations.push({id:'op'+draft.revision,
@@ -158,12 +167,13 @@ def test_discovery_clusters_are_complete_and_stably_sorted(page):
     page.click('[data-tab="ontology-workbench"]')
     page.wait_for_selector('.discovery-cluster')
     clusters = page.locator('.discovery-cluster')
-    assert clusters.count() == 2
+    assert clusters.count() == 3
     entity_rows = clusters.nth(0).locator('.ontology-workbench__cluster-row')
-    combined_rows = clusters.nth(1).locator('.ontology-workbench__cluster-row')
+    relation_rows = clusters.nth(1).locator('.ontology-workbench__cluster-row')
+    attribute_rows = clusters.nth(2).locator('.ontology-workbench__cluster-row')
     assert entity_rows.all_inner_texts() == ['Alpha\n3', 'Gamma\n3', 'Beta\n1']
-    assert combined_rows.all_inner_texts() == [
-        'RelationA\n4', 'AttributeA\n2', 'RelationB\n1']
+    assert relation_rows.all_inner_texts() == ['RelationA\n4', 'RelationB\n1']
+    assert attribute_rows.all_inner_texts() == ['AttributeA\n2']
 
 
 def test_discovery_uses_one_explained_workspace_instead_of_duplicate_side_queue(page):
@@ -177,6 +187,32 @@ def test_discovery_uses_one_explained_workspace_instead_of_duplicate_side_queue(
     assert '候选术语' in canvas
     assert page.locator('[data-candidate-id]').count() == 3
     assert '从左侧选择' not in page.locator('#ontology-workbench-inspector').inner_text()
+
+
+def test_discovery_separates_entities_relations_attributes_and_evidence_exceptions(page):
+    page.click('[data-tab="ontology-workbench"]')
+    page.wait_for_selector('[data-discovery-kind="entity"]')
+    assert page.locator('[data-candidate-id]').count() == 3
+    page.click('[data-discovery-kind="relation"]')
+    assert page.locator('[data-candidate-kind="relation"]').count() == 1
+    assert 'Alpha one → Gamma one' in page.locator('[data-candidate-kind="relation"]').inner_text()
+    page.click('[data-discovery-kind="attribute"]')
+    assert page.locator('[data-candidate-kind="attribute"]').count() == 1
+    assert 'Alpha one = 7' in page.locator('[data-candidate-kind="attribute"]').inner_text()
+    page.click('[data-discovery-kind="exception"]')
+    assert page.locator('[data-candidate-kind="exception"]').count() == 1
+    assert '证据无法定位' in page.locator('[data-candidate-kind="exception"]').inner_text()
+
+
+def test_ontology_change_approval_is_owned_by_the_ontology_workbench(page):
+    page.click('[data-tab="ontology-workbench"]')
+    page.wait_for_selector('.ontology-workbench__change-proposal')
+    card=page.locator('.ontology-workbench__change-proposal')
+    assert '封禁期限' in card.inner_text()
+    card.locator('input[placeholder^="审批意见"]').fill('同意新增正式属性')
+    card.get_by_role('button',name='批准并生成本体版本').click()
+    page.wait_for_function("() => apiCalls.some(x => x.url.endsWith('/ontology-change-proposals/change-1/decision'))")
+    page.wait_for_function("() => mockChanges[0].status === 'approved'")
 
 
 def test_discovery_cluster_filters_the_candidate_list(page):

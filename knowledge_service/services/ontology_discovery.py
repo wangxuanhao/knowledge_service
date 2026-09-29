@@ -20,6 +20,9 @@ from ..utils.attributes import primitive_datatype
 from ..utils.diagnostics import timed
 
 
+NORMAL_CANDIDATE_KINDS={'entity','relation','attribute'}
+
+
 def _literal_language(value):
     return 'zh' if any('\u4e00' <= char <= '\u9fff' for char in str(value)) else 'en'
 
@@ -153,9 +156,10 @@ def _summary(candidates):
     relations=defaultdict(list)
     for item in candidates:
         if item['kind']=='relation':relations[item['proposed_type']].append(f"{item.get('subject','?')} → {item.get('object','?')}")
-    return {'candidate_count':len(candidates),
+    exceptions=[x for x in candidates if x.get('kind')=='exception']
+    return {'candidate_count':sum(x.get('kind') in NORMAL_CANDIDATE_KINDS for x in candidates),
         'entity_count':sum(entities.values()),'relation_count':sum(len(v) for v in relations.values()),
-        'attribute_count':sum(attributes.values()),
+        'attribute_count':sum(attributes.values()),'exception_count':len(exceptions),
         'entity_types':[{'name':name,'count':count,'examples':entity_groups[name][:5]}
             for name,count in sorted(entities.items(),key=lambda x:(-x[1],x[0]))],
         'attribute_types':[{'name':name,'count':count} for name,count in sorted(attributes.items(),key=lambda x:(-x[1],x[0]))],
@@ -168,7 +172,7 @@ def _candidate_lifecycle(repository,project_id,candidates,drafts,records=None):
     PERF：复用调用方已经执行过的 `current_records` 扫描（通过 `records` 传入），
     避免为同一请求第二次读取每个载荷。
     """
-    candidate_ids={item['id'] for item in candidates}
+    candidate_ids={item['id'] for item in candidates if item.get('kind') in NORMAL_CANDIDATE_KINDS}
     materialized_ids=set()
     with timed('候选生命周期', candidates=len(candidates), drafts=len(drafts),
                reused_records=records is not None) as record:
@@ -226,12 +230,33 @@ def _candidate_mindmap(candidates,states,limit=500):
     ordered=sorted(entity_groups.values(),key=lambda item:(-item['occurrence_count'],item['type'],item['text']))
     selected=ordered[:max(1,min(int(limit),2000))];selected_ids={item['id'] for item in selected}
     node_by_id={item['id']:item for item in selected}
+    attribute_groups={}
     for item in candidates:
         if item['kind']!='attribute':continue
         node_id=candidate_to_node.get(item.get('entity_id'))
         if node_id in node_by_id and len(node_by_id[node_id]['attributes'])<30:
             node_by_id[node_id]['attributes'].append({'name':item.get('proposed_type'),'value':item.get('value'),
                 'candidate_id':item['id'],'status':states.get(item['id'],'pending')})
+        if node_id not in node_by_id:continue
+        value_key=json.dumps(item.get('value'),ensure_ascii=False,sort_keys=True,separators=(',',':'))
+        kind=str(item.get('proposed_type','')).strip() or '未分类属性'
+        key=(node_id,kind.casefold(),value_key)
+        attribute=attribute_groups.setdefault(key,{
+            'id':'candidate-attribute:'+hashlib.sha256(repr(key).encode()).hexdigest()[:24],
+            'subject_id':node_id,'subject':node_by_id[node_id]['text'],'type':kind,
+            'value':item.get('value'),'value_type':item.get('value_type'),
+            'candidate_ids':[],'document_ids':[],'sources':[],
+            'status_counts':Counter(),'occurrence_count':0})
+        attribute['candidate_ids'].append(item['id']);attribute['occurrence_count']+=1
+        attribute['status_counts'][states.get(item['id'],'pending')]+=1
+        if item.get('document_id') not in attribute['document_ids']:
+            attribute['document_ids'].append(item.get('document_id'))
+        if len(attribute['sources'])<10:
+            attribute['sources'].append({'document_id':item.get('document_id'),
+                'document_title':item.get('document_title'),'chunk_id':item.get('chunk_id'),
+                'start_char':item.get('start_char'),'end_char':item.get('end_char'),
+                'evidence':str(item.get('attribute_evidence') or item.get('evidence') or '')[:500],
+                'confidence':item.get('confidence'),'evidence_status':item.get('evidence_status')})
     relation_groups={};unresolved=0;hidden_relations=0
     for item in candidates:
         if item['kind']!='relation':continue
@@ -247,7 +272,9 @@ def _candidate_mindmap(candidates,states,limit=500):
             hidden_relations+=1;continue
         kind=str(item.get('proposed_type','')).strip() or '未分类关系';key=(subject,kind.casefold(),obj)
         edge=relation_groups.setdefault(key,{'id':'candidate-edge:'+hashlib.sha256(repr(key).encode()).hexdigest()[:24],
-            'type':kind,'subject_id':subject,'object_id':obj,'candidate_ids':[],'sources':[],
+            'type':kind,'subject_id':subject,'object_id':obj,
+            'subject':node_by_id[subject]['text'],'object':node_by_id[obj]['text'],
+            'candidate_ids':[],'sources':[],
             'status_counts':Counter(),'occurrence_count':0})
         edge['candidate_ids'].append(item['id']);edge['occurrence_count']+=1
         edge['status_counts'][states.get(item['id'],'pending')]+=1
@@ -256,13 +283,30 @@ def _candidate_mindmap(candidates,states,limit=500):
                 'chunk_id':item.get('chunk_id'),'start_char':item.get('start_char'),'end_char':item.get('end_char'),
                 'evidence':str(item.get('evidence',''))[:500],'confidence':item.get('confidence')})
     priority=('materialized','approved','included_in_draft','pending')
-    for item in [*selected,*relation_groups.values()]:
+    for item in [*selected,*relation_groups.values(),*attribute_groups.values()]:
         item['status']=next((status for status in priority if item['status_counts'].get(status)), 'pending')
         item['status_counts']=dict(item['status_counts'])
+    exceptions=[]
+    for item in candidates:
+        if item.get('kind')!='exception':continue
+        exceptions.append({'id':item['id'],'source_kind':item.get('source_kind','unknown'),
+            'reason_code':item.get('reason_code'),'reason':item.get('reason'),
+            'text':item.get('text'),'subject':item.get('subject'),
+            'type':item.get('proposed_type'),'object':item.get('object'),'value':item.get('value'),
+            'evidence_status':item.get('evidence_status'),'occurrence_count':1,
+            'sources':[{'document_id':item.get('document_id'),'document_title':item.get('document_title'),
+                'chunk_id':item.get('chunk_id'),'start_char':item.get('start_char'),'end_char':item.get('end_char'),
+                'evidence':str(item.get('evidence') or '')[:500],'confidence':item.get('confidence'),
+                'evidence_status':item.get('evidence_status')} ]})
+        if len(exceptions)>=200:break
+    normal_count=sum(x.get('kind') in NORMAL_CANDIDATE_KINDS for x in candidates)
     return {'nodes':selected,'edges':list(relation_groups.values()),
-        'summary':{'candidate_count':len(candidates),'entity_occurrences':sum(x['occurrence_count'] for x in ordered),
+        'attributes':list(attribute_groups.values()),'exceptions':exceptions,
+        'summary':{'candidate_count':normal_count,'exception_count':sum(x.get('kind')=='exception' for x in candidates),
+            'entity_occurrences':sum(x['occurrence_count'] for x in ordered),
             'entity_clusters':len(ordered),'visible_entity_clusters':len(selected),
-            'relation_clusters':len(relation_groups),'unresolved_relations':unresolved,
+            'relation_clusters':len(relation_groups),'attribute_clusters':len(attribute_groups),
+            'unresolved_relations':unresolved,
             'hidden_relations':hidden_relations},
         'truncated':len(selected)<len(ordered)}
 
@@ -359,7 +403,8 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
     attributes=defaultdict(dict)
     for item in candidates:
         if item['kind']=='attribute' and item['proposed_type'] in attribute_machine:
-            attributes[item.get('entity_id')][attribute_machine[item['proposed_type']]]=item.get('value')
+            attributes[item.get('entity_id')].setdefault(
+                attribute_machine[item['proposed_type']],item.get('value'))
     entities=[]
     for item in candidates:
         if item['kind']!='entity':continue

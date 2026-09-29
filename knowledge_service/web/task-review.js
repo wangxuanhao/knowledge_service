@@ -16,7 +16,7 @@
   const ontoName=t=>t.label_zh||((t.label&&t.label!==t.name)?t.label:'')||t.description||t.name||'';
   const typeHint=type=>{const primary=safeLabel(type),local=safeTerm(type);return primary===local?esc(primary):`${esc(primary)} <span class="subtle">${esc(local)}</span>`;};
   const panel=document.createElement('div');panel.className='panel';
-  panel.innerHTML='<div class="row"><h2>知识审核</h2><button id="refresh-reviews" class="secondary">刷新审核</button><button id="review-ontology" class="secondary">管理本体定义 ↗</button></div><p class="subtle">实体、关系和属性候选在批准前不会入图；本体异常不会阻塞整份文档，知识先保存并在这里说明具体限制，可确认例外或标记整改。</p><section class="ontology-change-queue"><h3>本体变更草案</h3><div id="ontology-change-proposals"></div></section><label>候选类型<select id="review-kind"><option value="">全部类型</option><option value="validation">本体异常</option><option value="entity">实体类型</option><option value="relation">关系</option><option value="attribute">实体属性</option></select></label><div id="relation-reviews"></div>';
+  panel.innerHTML='<div class="row"><h2>知识审核</h2><button id="refresh-reviews" class="secondary">刷新审核</button><button id="review-ontology" class="secondary">本体工作台 ↗</button></div><p class="subtle">这里审核已有正式本体下的具体事实：批准后写入正式图谱。开放候选与证据异常在本体工作台处理；本体异常在单独队列确认例外或标记整改。</p><nav class="review-view-tabs" aria-label="知识审核视图"><button id="review-view-facts" type="button" aria-pressed="true">待审核事实</button><button id="review-view-exceptions" type="button" class="secondary" aria-pressed="false">约束异常</button><button id="review-view-history" type="button" class="secondary" aria-pressed="false">已处理</button></nav><label id="review-kind-wrap">事实类型<select id="review-kind"><option value="">全部事实</option><option value="entity">实体映射</option><option value="relation">关系事实</option><option value="attribute">属性事实</option></select></label><div id="relation-reviews"></div>';
   const reviewPage=document.createElement('section');reviewPage.id='tab-reviews';reviewPage.className='tab hidden';reviewPage.append(panel);
   document.querySelector('main').append(reviewPage);
   const reviewNav=document.createElement('button');reviewNav.dataset.tab='reviews';reviewNav.textContent='知识审核';
@@ -26,7 +26,7 @@
     document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b===reviewNav));
     $('title').textContent='知识审核';$('scope').classList.add('hidden');reviews();
   };
-  $('review-ontology').onclick=()=>window.OntologyWorkbench?.openVersionGovernance();
+  $('review-ontology').onclick=()=>window.OntologyWorkbench?.open('discover');
   $('review-kind').onchange=()=>reviews();
   const attributeOption=document.createElement('label');attributeOption.className='check';
   attributeOption.innerHTML='<input type="checkbox" id="parse-attributes">抽取实体业务属性（选填，每片额外调用一次 LLM，属性值全部待审核）';
@@ -38,22 +38,31 @@
   const parseSettings=readParseSettings;
   readParseSettings=()=>({...parseSettings(),relation_constraint_mode:$('parse-relation-constraints').value,
     ...($('extraction-mode').value!=='documents'&&$('parse-attributes').checked?{extract_attributes:true}:{})});
+  let reviewView='facts';
   let generation=0;
   async function reviews(){
     const p=current,serial=++generation,host=$('relation-reviews');
     if(!p){host.textContent='请先选择项目';return;}
     host.textContent='正在读取审核清单…';
     try{
-      const [data,ontology,health,changeData]=await Promise.all([api('/api/projects/'+encodeURIComponent(p)+'/reviews',undefined,'GET'),api('/api/projects/'+encodeURIComponent(p)+'/ontology',undefined,'GET').catch(()=>null),api('/api/health',undefined,'GET'),api('/api/projects/'+encodeURIComponent(p)+'/ontology-change-proposals',undefined,'GET')]);
+      const [data,ontology,health]=await Promise.all([api('/api/projects/'+encodeURIComponent(p)+'/reviews',undefined,'GET'),api('/api/projects/'+encodeURIComponent(p)+'/ontology',undefined,'GET').catch(()=>null),api('/api/health',undefined,'GET')]);
       if(p!==current||serial!==generation)return;
       if(!health.capabilities?.includes('typed_reviews')){host.textContent='当前仍是旧版后端。请先重启 8100 服务，再刷新本页，启用实体、关系和属性审核。';return;}
-      const filter=$('review-kind').value,items=data.reviews.filter(r=>!filter||(r.kind||'relation')===filter);
-      const pending=items.filter(r=>['pending','contradicting'].includes(r.status)),done=items.filter(r=>!['pending','contradicting'].includes(r.status));
-      const labels={validation:'本体异常',entity:'实体类型',relation:'关系',attribute:'实体属性'};
-      const changes=changeData.proposals||[],pendingChanges=changes.filter(x=>x.status==='pending');
-      $('ontology-change-proposals').innerHTML=pendingChanges.length?pendingChanges.map((draft,i)=>`<article class="ontology-change-card" data-change="${i}"><div><small>${draft.operation==='add'?'新增':'调整'} · ${{class:'实体类',relation:'关系',attribute:'属性'}[draft.kind]}</small><h4>${esc(draft.label)}</h4><code>${esc(draft.uri)}</code></div><div class="change-impact"><b>${draft.impact.risk==='high'?'高影响变更':'受控变更'}</b><span>现有知识 ${draft.impact.record_count} · 约束引用 ${draft.impact.constraint_count} · 关联候选 ${draft.impact.linked_candidates}</span></div><label>审批意见<input class="change-note" maxlength="2000" placeholder="说明批准或拒绝原因"></label><div>${draft.impact.risk==='high'?'<label class="check"><input class="change-confirm-impact" type="checkbox">确认影响</label>':''}<button data-change-action="approve">批准本体版本</button><button data-change-action="reject" class="secondary">拒绝</button></div></article>`).join(''):`<p class="subtle">暂无待批准草案 · 已处理 ${changes.length} 条</p>`;
+      const filter=$('review-kind').value,all=data.reviews||[];
+      const isPending=row=>['pending','contradicting'].includes(row.status);
+      const factQueue=all.filter(row=>isPending(row)&&row.kind!=='validation');
+      const exceptionQueue=all.filter(row=>isPending(row)&&row.kind==='validation');
+      const done=all.filter(row=>!isPending(row));
+      const items=(reviewView==='facts'?factQueue:reviewView==='exceptions'?exceptionQueue:done)
+        .filter(row=>reviewView!=='facts'||!filter||(row.kind||'relation')===filter);
+      const pending=reviewView==='history'?[]:items;
+      const labels={validation:'本体异常',entity:'实体映射',relation:'关系事实',attribute:'属性事实'};
+      $('review-view-facts').textContent=`待审核事实 ${factQueue.length}`;$('review-view-exceptions').textContent=`约束异常 ${exceptionQueue.length}`;$('review-view-history').textContent=`已处理 ${done.length}`;$('review-kind-wrap').hidden=reviewView!=='facts';
       if(!ontology){host.innerHTML='<p class="subtle">本项目尚未发布本体。可先持续开放发现并累计候选，到「本体工作台」生成、审核和发布本体版本；发布后再用该本体受控重解析，正式实体与关系才会进入图谱。</p><button id="reviews-goto-discovery">前往本体工作台 ↗</button>';host.querySelector('#reviews-goto-discovery').onclick=()=>window.OntologyWorkbench?.open('discover');return;}
-      host.innerHTML=`<p>待审核 ${pending.length} 条 · 已处理 ${done.length} 条 · 当前本体 ${esc(ontology.id)}</p>`+pending.map((r,i)=>{
+      if(reviewView==='history'){
+        host.innerHTML=`<p>已处理 ${done.length} 条 · 当前本体 ${esc(ontology.id)}</p>`+(done.length?done.map(r=>`<p>${esc(labels[r.kind||'relation'])} · ${esc(r.document_title)} · ${esc(r.path_label||safeLabel(r.proposed_type)||safeLabel(r.predicate)||'')} · ${r.kind==='validation'?(r.resolution==='accepted_exception'?'已确认例外':'需整改'):(r.status==='approved'?'已批准':'已拒绝')} · ${esc(r.target_type||'')} · ${esc(r.note)} · ${esc(r.reviewed_at)}</p>`).join(''):'<p class="subtle">暂无已处理记录。</p>');return;
+      }
+      host.innerHTML=`<p>${reviewView==='facts'?'待审核事实':'待处理约束异常'} ${pending.length} 条 · 当前本体 ${esc(ontology.id)}</p>`+pending.map((r,i)=>{
         const kind=r.kind||'relation',terms=ontology.summary[{entity:'classes',relation:'relations',attribute:'attributes'}[kind]]||[];
         const heading=kind==='validation'?`${esc(r.text||r.record_id||'图谱记录')} · ${esc(r.path_label||safeLabel(r.path)||'图级约束')}`:kind==='entity'?`${esc(r.text)} · ${typeHint(r.proposed_type)}`:kind==='attribute'?`${esc(r.subject)} · ${typeHint(r.proposed_type)} = ${esc(JSON.stringify(r.value))}`:`${esc(r.subject)} → ${typeHint(r.predicate)} → ${esc(r.object)}`;
         const issues=(r.constraint_issues||[]).map(x=>`${x.endpoint==='subject_id'?'主语':'宾语'}：实际 ${safeLabel(x.actual_type)}，期望 ${x.expected_types.map(safeLabel).join(' / ')}`).join('；');
@@ -68,7 +77,8 @@
         const existingOptions=terms.map(t=>`<option value="${esc(t.id)}" ${t.id===r.proposed_type||t.id===r.ontology_change?.target_type?'selected':''}>${esc(ontoName(t))} · ${esc(t.name)}</option>`).join('');
         const changeEditor=kind==='validation'?'':`<details class="ontology-change-editor"><summary>本体变更草案</summary><div class="change-fields"><label>操作<select class="change-operation"><option value="add">新增定义</option><option value="update">调整现有定义</option></select></label><label class="change-existing-label" hidden>要调整的现有术语<select class="change-existing"><option value="">请选择现有术语</option>${existingOptions}</select></label><label>技术标识 IRI<input class="change-uri-preview" value="保存时由后端根据名称生成" readonly></label><label>显示名称<input class="change-label" value="${esc(proposed)}"></label><label>中文名称<input class="change-label-zh" maxlength="200"></label><label>定义说明<input class="change-description" placeholder="该术语表达什么"></label>${kind==='entity'?`<label>父类<select class="change-parent"><option value="">不指定</option>${classOptions}</select></label>`:`<label>定义域<select class="change-domain"><option value="">不指定</option>${optionsFor(domainType)}</select></label><label>值域<select class="change-range"><option value="">不指定</option>${kind==='attribute'?'<option value="http://www.w3.org/2001/XMLSchema#string">字符串</option><option value="http://www.w3.org/2001/XMLSchema#integer">整数</option><option value="http://www.w3.org/2001/XMLSchema#decimal">小数</option><option value="http://www.w3.org/2001/XMLSchema#boolean">布尔值</option>':optionsFor(rangeType)}</select></label>`}<label class="change-rationale">变更理由<input maxlength="2000" placeholder="为什么现有本体无法表达这条知识"></label><button data-submit-proposal>提交草案</button></div></details>`;
         return `<article class="review-item ${kind==='validation'?'validation-review':''}" data-review="${i}"><small>${labels[kind]}</small><h3>${heading}</h3><p>${esc(r.document_title)} · ${esc(r.reason)}</p>${validationDetails}${issues?`<p class="constraint-conflict">${esc(issues)}</p>`:''}${r.conflict?.code==='attribute_max_count_one'?`<p class="constraint-conflict">该属性为单值字段，候选值与当前正式属性冲突。${r.status==='contradicting'?'请选择保留旧值或接受新值。':'普通批准只会登记冲突，不会覆盖或写入候选值。'}</p>`:''}${changeState}<small>抽取本体 ${esc(r.ontology_id)} · 原文字符 ${r.start_char}–${r.end_char}</small>${r.blocked?'<p class="error">关联实体尚未入图或已删除，请先审核实体；拒绝实体不会自动拒绝这些依赖候选。</p>':''}<details><summary>查看原文证据</summary><pre>${esc(r.attribute_evidence||r.evidence)}</pre></details>${kind==='attribute'?`<details><summary>当前正式属性值</summary><pre>${esc(JSON.stringify(r.current_values||[],null,2))}</pre></details>`:''}${mapping}<label>审核理由（必填）<input class="review-note" maxlength="2000" placeholder="填写确认例外、整改或知识审核理由"></label><div class="review-actions">${actions}</div>${changeEditor}</article>`;
-      }).join('')+(done.length?`<details><summary>查看已审核记录</summary>${done.map(r=>`<p>${esc(labels[r.kind||'relation'])} · ${esc(r.document_title)} · ${esc(r.path_label||safeLabel(r.proposed_type)||safeLabel(r.predicate)||'')} · ${r.kind==='validation'?(r.resolution==='accepted_exception'?'已确认例外':'需整改'):(r.status==='approved'?'已批准':'已拒绝')} · ${esc(r.target_type||'')} · ${esc(r.note)} · ${esc(r.reviewed_at)}</p>`).join('')}</details>`:'');
+      }).join('');
+      if(!pending.length)host.insertAdjacentHTML('beforeend','<p class="subtle">当前视图没有待处理事项。</p>');
       host.querySelectorAll('[data-review]').forEach(article=>{
         const r=pending[Number(article.dataset.review)];
         const operation=article.querySelector('.change-operation'),existingLabel=article.querySelector('.change-existing-label');
@@ -108,22 +118,16 @@
           domain:editor.querySelector('.change-domain')?.value||'',range:editor.querySelector('.change-range')?.value||''};
         if((operation==='update'&&!body.uri)||!body.label||!body.rationale){status(operation==='update'?'请选择要调整的现有术语，并填写显示名称和变更理由':'请填写显示名称和变更理由',true);return;}
         button.disabled=true;
-        try{await api('/api/projects/'+encodeURIComponent(p)+'/ontology-change-proposals',body);status('本体变更草案已提交，需单独批准后才会生成新本体版本。');await reviews();}
+        try{await api('/api/projects/'+encodeURIComponent(p)+'/ontology-change-proposals',body);status('本体变更申请已提交；请到本体工作台审批并生成新版本。');await reviews();}
         catch(error){status(error.message,true);button.disabled=false;}
-      });
-      $('ontology-change-proposals').querySelectorAll('[data-change-action]').forEach(button=>button.onclick=async()=>{
-        const card=button.closest('[data-change]'),draft=pendingChanges[Number(card.dataset.change)],note=card.querySelector('.change-note').value.trim();
-        if(!note){status('请填写本体变更审批意见',true);return;}
-        card.querySelectorAll('button').forEach(x=>x.disabled=true);
-        try{await api('/api/projects/'+encodeURIComponent(p)+'/ontology-change-proposals/'+encodeURIComponent(draft.id)+'/decision',{
-          action:button.dataset.changeAction,note,expected_revision:draft.revision,expected_ontology_id:ontology.id,
-          confirm_impact:card.querySelector('.change-confirm-impact')?.checked||false});
-          status(button.dataset.changeAction==='approve'?'新本体版本已生成；关联候选已重新校验，请继续知识审核。':'本体变更草案已拒绝，现有本体未改变。');await reviews();}
-        catch(error){status(error.message,true);card.querySelectorAll('button').forEach(x=>x.disabled=false);}
       });
     }catch(error){if(p===current&&serial===generation)host.textContent='审核清单读取失败：'+error.message;}
   }
   $('refresh-reviews').onclick=reviews;
+  function setReviewView(view){reviewView=view;[['facts','review-view-facts'],['exceptions','review-view-exceptions'],['history','review-view-history']].forEach(([value,id])=>$(id).setAttribute?.('aria-pressed',String(value===view)));reviews();}
+  $('review-view-facts').onclick=()=>setReviewView('facts');
+  $('review-view-exceptions').onclick=()=>setReviewView('exceptions');
+  $('review-view-history').onclick=()=>setReviewView('history');
   async function refresh(){await jobList();}
   document.querySelector('[data-tab="jobs"]').addEventListener('click',()=>refresh().catch(e=>status(e.message,true)));
   const previousProjectChange=$('project').onchange;

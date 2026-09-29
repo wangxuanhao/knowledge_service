@@ -98,8 +98,10 @@ def test_open_discovery_uses_domain_specific_entity_types(monkeypatch):
     captured={}
     class FakeProvider:
         def generate_typed(self,prompt,schema,**kw):
-            captured['prompt']=prompt
-            return schema(entities=[{'text':'美团直播平台','type':'直播平台','confidence':.95}])
+            if schema.__name__=='_OpenEntities':
+                captured['prompt']=prompt
+                return schema(entities=[{'text':'美团直播平台','type':'直播平台','confidence':.95}])
+            return schema(facts=[])
     monkeypatch.setattr(providers,'create_provider',lambda *a,**k:FakeProvider())
     candidates=mod.SemanticaExtractor().discover('美团直播平台开展直播业务')
     assert len(candidates)==1
@@ -122,14 +124,70 @@ def test_open_discovery_matches_relations_by_text_when_types_differ(monkeypatch)
             if schema.__name__=='_OpenEntities':
                 return schema(entities=[{'text':'美团直播平台','type':'直播平台','confidence':.95},
                                         {'text':'主播','type':'主播','confidence':.9}])
-            return schema(relations=[{'subject':'美团直播平台','predicate':'包含','object':'主播',
-                                      'confidence':.8,'evidence':'美团直播平台包含主播'}])
+            return schema(facts=[{'subject':'美团直播平台','predicate':'包含','object':'主播',
+                'fact_kind':'relation','confidence':.8,'evidence':'美团直播平台包含主播'}])
     # Relation discovery resolves its endpoint back to the open entity candidates.
     monkeypatch.setattr(providers,'create_provider',lambda *a,**k:FakeProvider())
     candidates=mod.SemanticaExtractor().discover('美团直播平台包含主播')
     kinds=[c['kind'] for c in candidates]
     assert kinds.count('relation')==1
     assert next(c for c in candidates if c['kind']=='relation')['proposed_type']=='包含'
+
+
+def test_open_discovery_routes_entity_objects_and_scalar_values_once(monkeypatch):
+    mod=adapter()
+    for key in ['KG_LLM_API_KEY','KG_LLM_BASE_URL','KG_LLM_MODEL']:
+        monkeypatch.setenv(key,'test')
+    providers=pytest.importorskip('semantica.semantic_extract.providers')
+    calls=[]
+    class FakeProvider:
+        def generate_typed(self,prompt,schema,**kw):
+            calls.append(schema.__name__)
+            if schema.__name__=='_OpenEntities':
+                return schema(entities=[{'text':'账号甲','type':'账号','confidence':.95},
+                    {'text':'抖音','type':'直播平台','confidence':.94}])
+            return schema(facts=[
+                {'subject':'账号甲','predicate':'使用平台','object':'抖音','fact_kind':'attribute',
+                 'literal_type':'text','confidence':.9,'evidence':'账号甲使用抖音'},
+                {'subject':'账号甲','predicate':'封禁期限','object':'7天','fact_kind':'attribute',
+                 'literal_type':'duration','confidence':.88,'evidence':'封禁期限为7天'},
+            ])
+    monkeypatch.setattr(providers,'create_provider',lambda *a,**k:FakeProvider())
+    result=mod.SemanticaExtractor().discover('账号甲使用抖音，封禁期限为7天',include_attributes=True)
+    assert calls==['_OpenEntities','_OpenFacts']
+    assert [item['kind'] for item in result].count('relation')==1
+    assert [item['kind'] for item in result].count('attribute')==1
+    relation=next(item for item in result if item['kind']=='relation')
+    attribute=next(item for item in result if item['kind']=='attribute')
+    assert relation['object']=='抖音'
+    assert relation['metadata']['classification_reason']=='object_matches_entity'
+    assert attribute['value']=='7天' and attribute['value_type']=='duration'
+    assert all(item.get('evidence_status')=='exact' for item in (relation,attribute))
+
+
+def test_open_discovery_isolates_missing_source_and_unresolved_facts(monkeypatch):
+    mod=adapter()
+    for key in ['KG_LLM_API_KEY','KG_LLM_BASE_URL','KG_LLM_MODEL']:
+        monkeypatch.setenv(key,'test')
+    providers=pytest.importorskip('semantica.semantic_extract.providers')
+    class FakeProvider:
+        def generate_typed(self,prompt,schema,**kw):
+            if schema.__name__=='_OpenEntities':
+                return schema(entities=[{'text':'账号甲','type':'账号'},
+                    {'text':'正文中不存在的人','type':'负责人'}])
+            return schema(facts=[
+                {'subject':'账号甲','predicate':'状态','object':'封禁','fact_kind':'attribute',
+                 'literal_type':'status','evidence':'伪造的证据'},
+                {'subject':'账号甲','predicate':'负责人','object':'张三','fact_kind':'relation',
+                 'evidence':'账号甲当前封禁'},
+            ])
+    monkeypatch.setattr(providers,'create_provider',lambda *a,**k:FakeProvider())
+    result=mod.SemanticaExtractor().discover('账号甲当前封禁',include_attributes=True)
+    assert [item['kind'] for item in result].count('entity')==1
+    assert not any(item['kind'] in {'relation','attribute'} for item in result)
+    exceptions=[item for item in result if item['kind']=='exception']
+    assert {item['reason_code'] for item in exceptions}=={
+        'entity_not_in_source','evidence_not_in_source','relation_object_not_resolved'}
 
 
 def test_ontology_induction_exposes_stable_attribute_fields_at_entity_top_level(monkeypatch):
@@ -147,6 +205,7 @@ def test_ontology_induction_exposes_stable_attribute_fields_at_entity_top_level(
     _induce('project','属性本体',[
         {'id':'merchant','kind':'entity','text':'测试商户','proposed_type':'商户'},
         {'id':'count','kind':'attribute','entity_id':'merchant','proposed_type':'员工数量','value':20},
+        {'id':'count-again','kind':'attribute','entity_id':'merchant','proposed_type':'员工数量','value':21},
     ])
 
     sample=captured['data']['entities'][0]

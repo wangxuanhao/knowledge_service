@@ -248,13 +248,22 @@ class OntologyDrafts:
         return next((item for item in candidates
                      if item.get('id') == candidate_id), None)
 
+    def _current_source_document(self, project_id, document_id):
+        """Read the unsuperseded source revision without a wall-clock race."""
+        history = self.repository.history(project_id, document_id)
+        document = next((item for item in reversed(history)
+                         if item.get('superseded_at') is None), None)
+        if document is None or (document.get('metadata') or {}).get('_deleted'):
+            raise KeyError(document_id)
+        return document
+
     def _source_snapshot(self, project_id, draft, *, require_current=True):
         context = draft.get('source_context') or {}
         snapshots = []
         for reference in self._source_references(context):
             document_id = reference.get('document_id') or reference.get('id')
             try:
-                document = self.repository.get_record(project_id, document_id)
+                document = self._current_source_document(project_id, document_id)
             except KeyError as exc:
                 if require_current:
                     raise StaleSource(
@@ -1369,7 +1378,7 @@ class OntologyDrafts:
             if not document_id:
                 continue
             try:
-                document = self.repository.get_record(project_id, document_id)
+                document = self._current_source_document(project_id, document_id)
             except KeyError as exc:
                 raise StaleSource(
                     f'source document {document_id!r} no longer exists') from exc

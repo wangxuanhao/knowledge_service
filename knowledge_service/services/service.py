@@ -387,11 +387,18 @@ class KnowledgeService:
                         candidate={**candidate}
                         for key in ('record_id','subject_id','object_id','entity_id'):
                             if key in candidate:candidate[key]=id_map[candidate[key]]
+                        candidate_evidence=(candidate.get('attribute_evidence') or
+                            candidate.get('evidence') or chunk['text'])
+                        local_offset=chunk['text'].find(candidate_evidence)
+                        candidate_start=(chunk['metadata']['start_char']+local_offset
+                            if local_offset>=0 else chunk['metadata']['start_char'])
+                        candidate_end=(candidate_start+len(candidate_evidence)
+                            if local_offset>=0 else chunk['metadata']['end_char'])
                         review_candidates.append({**candidate,'id':str(uuid4()),'status':'pending',
                             'ontology_id':version['id'],'chunk_id':chunk['id'],
-                            'start_char':chunk['metadata']['start_char'],'end_char':chunk['metadata']['end_char'],
+                            'start_char':candidate_start,'end_char':candidate_end,
                             'source_hash':hashlib.sha256(request['text'].encode('utf-8')).hexdigest(),
-                            'evidence':chunk['text'],'source_version_id':receipt['version_id'],
+                            'evidence':candidate_evidence,'source_version_id':receipt['version_id'],
                             'valid_from':request.get('valid_from'),'valid_until':request.get('valid_until'),
                             'created_at':utc_now()})
                     for row in extracted:
@@ -413,9 +420,16 @@ class KnowledgeService:
                     processed_chunks += 1
                     id_map={item['id']:f"{chunk['id']}:discovery:{item['id']}" for item in candidates}
                     for item in candidates:
+                        item_evidence=(item.get('attribute_evidence') or item.get('evidence') or
+                            chunk['text'])
+                        local_offset=chunk['text'].find(item_evidence)
+                        item_start=(chunk['metadata']['start_char']+local_offset
+                            if local_offset>=0 else chunk['metadata']['start_char'])
+                        item_end=(item_start+len(item_evidence)
+                            if local_offset>=0 else chunk['metadata']['end_char'])
                         item={**item,'id':id_map[item['id']], 'chunk_id':chunk['id'],
-                            'start_char':chunk['metadata']['start_char'],'end_char':chunk['metadata']['end_char'],
-                            'evidence':chunk['text'],'status':'pending','created_at':utc_now()}
+                            'start_char':item_start,'end_char':item_end,
+                            'evidence':item_evidence,'status':'pending','created_at':utc_now()}
                         for key in ('subject_id','object_id','entity_id'):
                             if item.get(key) in id_map:item[key]=id_map[item[key]]
                         discovery_candidates.append(item)
@@ -437,6 +451,8 @@ class KnowledgeService:
             if review_candidates:event(f'本次 {len(review_candidates)} 条知识候选等待审核；其余合法知识继续保存')
             pending_assertions=[]
             for candidate in [*review_candidates,*discovery_candidates]:
+                if candidate.get('kind')=='exception':
+                    continue
                 start=candidate.get('start_char');end=candidate.get('end_char')
                 if type(start) is int and end is None:
                     end=start+len(candidate.get('evidence',''))
@@ -507,7 +523,9 @@ class KnowledgeService:
                 active_stage='completed',readiness_patch={key:value for key,value in final_readiness.items() if key!='search_ready'},
                 counts_patch={'assertions_pending':len(review_candidates),'records_accepted':len(saved)})
             return {'document': public(completed), 'records': [public(r) for r in saved],
-                    'pending_reviews':len(review_candidates),'discovery_candidates':len(discovery_candidates),
+                    'pending_reviews':len(review_candidates),
+                    'discovery_candidates':sum(item.get('kind') in {'entity','relation','attribute'} for item in discovery_candidates),
+                    'discovery_exceptions':sum(item.get('kind')=='exception' for item in discovery_candidates),
                     'run_id':run['id'],'status':run['status'],'active_stage':run['active_stage'],
                     'readiness':run['readiness']}
         except Exception as exc:

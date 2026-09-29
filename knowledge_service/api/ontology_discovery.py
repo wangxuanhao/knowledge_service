@@ -103,7 +103,9 @@ def install(app, service):
 
     @router.post('/drafts',status_code=201)
     def create_draft(p:str,request:DraftRequest):
-        service.repository.get_project(p);candidates=_candidates(service.repository,p)
+        service.repository.get_project(p)
+        candidates=[item for item in _candidates(service.repository,p)
+            if item.get('kind') in {'entity','relation','attribute'}]
         if not candidates:raise ValueError('尚无开放发现候选，请先用“开放本体发现”模式解析文档')
         ontologies=service.repository.list_ontologies(p)
         parent=ontologies[-1] if ontologies else None

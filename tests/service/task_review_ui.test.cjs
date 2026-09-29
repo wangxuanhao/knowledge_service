@@ -63,7 +63,7 @@ test('review menu is independent and attribute extraction is explicitly opt-in',
   const {context,get,calls,created}=fixture();
   const page=created.find(e=>e.id==='tab-reviews'),nav=created.find(e=>e.dataset.tab==='reviews');
   assert.ok(get('main').children.includes(page));
-  assert.match(page.children[0].innerHTML,/实体类型.*关系.*实体属性/);
+  assert.match(page.children[0].innerHTML,/实体映射.*关系事实.*属性事实/);
   nav.click();await new Promise(resolve=>setImmediate(resolve));
   assert.ok(calls.includes('/api/projects/a/reviews'));
   assert.ok(!calls.includes('/api/jobs'));
@@ -72,7 +72,7 @@ test('review menu is independent and attribute extraction is explicitly opt-in',
   assert.equal(context.readParseSettings().extract_attributes,true);
   get('parse-relation-constraints').value='review';
   assert.equal(context.readParseSettings().relation_constraint_mode,'review');
-  assert.ok(calls.includes('/api/projects/a/ontology-change-proposals'));
+  assert.ok(!calls.includes('/api/projects/a/ontology-change-proposals'));
   get('extraction-mode').value='documents';
   assert.equal(context.readParseSettings().extract_attributes,undefined);
   get('extraction-mode').value='discovery';get('parse-attributes').checked=true;
@@ -104,6 +104,8 @@ test('SHACL exception review names the failed constraint without requiring ontol
     start_char:0,end_char:10,evidence:'规则正文',document_id:'doc',document_version:2};
   const {get,created}=fixture([candidate]);
   created.find(e=>e.dataset.tab==='reviews').click();
+  await new Promise(resolve=>setImmediate(resolve));
+  get('review-view-exceptions').click();
   await new Promise(resolve=>setImmediate(resolve));
   const html=get('relation-reviews').innerHTML;
   assert.match(html,/本体异常/);

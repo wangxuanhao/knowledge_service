@@ -66,7 +66,7 @@ def test_entity_relation_attribute_dependency_and_version_lifecycle(tmp_path,mon
         assert attribute['value']==2
         assert attribute['datatype']=='http://www.w3.org/2001/XMLSchema#integer'
         assertion=repo.get_assertion(p,next(r for r in candidates() if r['kind']=='attribute')['id'])
-        assert assertion['quote']=='甲认识乙，数量2'
+        assert assertion['quote']=='2'
         assert assertion['canonical_record_id']==attribute['id']
         assert all(r['status']=='approved' for r in candidates())
 
@@ -88,6 +88,29 @@ def test_adapter_queues_unknown_entity_and_dependent_known_relation(monkeypatch)
     assert [r['kind'] for r in extractor.review_candidates]==['entity','relation','attribute']
     assert extractor.review_candidates[0]['record_id']==extractor.review_candidates[1]['subject_id']
     assert extractor.review_candidates[0]['record_id']==extractor.review_candidates[2]['entity_id']
+
+
+def test_guided_attribute_value_matching_an_entity_is_reclassified_as_relation(monkeypatch):
+    import knowledge_service.integrations.semantica_adapter as adapter
+    import knowledge_service.services.attribute_extraction as attributes
+    from knowledge_service.services.attribute_extraction import AttributeProposal
+    from semantica.semantic_extract import methods
+    from semantica.semantic_extract.types import Entity
+    for key in ['KG_LLM_API_KEY','KG_LLM_BASE_URL','KG_LLM_MODEL']:
+        monkeypatch.setenv(key,'test')
+    left,right=Entity('甲','Person',0,1),Entity('乙','Person',4,5)
+    monkeypatch.setattr(methods,'extract_entities_llm',lambda *args,**kw:[left,right])
+    monkeypatch.setattr(adapter,'_extract_relations_guided',lambda *args,**kw:[])
+    monkeypatch.setattr(attributes,'extract_attributes',lambda *args:[
+        AttributeProposal(entity_index=0,attribute='负责人',value='乙',evidence='甲的负责人是乙',confidence=.9)])
+    extractor=SemanticaExtractor();extractor.include_attributes=True
+    records=extractor.extract('甲的负责人是乙',Ontology(TTL))
+    assert len([row for row in records if row['kind']=='entity'])==2
+    assert [item['kind'] for item in extractor.review_candidates]==['relation']
+    candidate=extractor.review_candidates[0]
+    assert candidate['subject']=='甲' and candidate['object']=='乙'
+    assert candidate['reason']=='属性值命中正文实体，已按关系候选处理'
+    assert extractor.extraction_diagnostics['attribute_reclassified_relation']==1
 
 
 def test_max_count_one_conflict_stays_reviewable_and_can_be_rejected(tmp_path,monkeypatch):
