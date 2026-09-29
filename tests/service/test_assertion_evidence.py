@@ -589,3 +589,35 @@ def test_hash_mismatched_assertion_does_not_hide_valid_same_version_evidence(
     assert len(documents) == 1
     assert documents[0]['assertion_id'] == good['id']
     assert documents[0]['mode'] == 'exact'
+
+
+def test_formal_evidence_caps_documents_after_ranking_all_assertions(
+        evidence_repo):
+    repo, project_id = evidence_repo
+    service = KnowledgeService(repo, HashingEncoder())
+    document, chunk = _document_and_chunk(repo, project_id)
+    assertions = [
+        _assertion(
+            repo, project_id, document, chunk,
+            assertion_id=f'a-bad-{index:02d}', start=7, end=12,
+            quote='Alpha', payload={'text': 'Alpha'},
+            source_hash='0' * 64)
+        for index in range(20)
+    ]
+    good = _assertion(
+        repo, project_id, document, chunk, assertion_id='z-good',
+        start=7, end=12, quote='Alpha', payload={
+            'text': 'Alpha', 'evidence': 'Alpha', 'evidence_status': 'exact'})
+    repo.put_record(project_id, {
+        'id': 'entity-1', 'kind': 'entity', 'text': 'Alpha', 'metadata': {}})
+    for assertion in [*assertions, good]:
+        repo.transition_assertion(
+            project_id, assertion['id'], 1, 'accepted', 'accepted cap test',
+            'test', canonical_record_id='entity-1')
+
+    documents = evidence_module.evidence(
+        service, project_id, 'entity-1', {})['documents']
+
+    assert len(documents) == 1
+    assert documents[0]['assertion_id'] == good['id']
+    assert documents[0]['mode'] == 'exact'

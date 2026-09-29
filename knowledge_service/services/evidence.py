@@ -155,7 +155,6 @@ def _new_resolution(assertion):
     return {
         'assertion': assertion,
         'document': None,
-        'chunk_record': None,
         'chunk': {
             'id': assertion.get('chunk_id'),
             'start_char': None, 'end_char': None, 'text': None,
@@ -247,7 +246,6 @@ def _resolve_assertion_evidence(repository, project_id, assertion):
         if not hash_complete:
             resolution['location'] = _unlocated('source_hash_mismatch')
         return resolution
-    resolution['chunk_record'] = chunk
     metadata = chunk.get('metadata')
     metadata = metadata if isinstance(metadata, dict) else {}
     start, end = metadata.get('start_char'), metadata.get('end_char')
@@ -477,7 +475,7 @@ def evidence(service, project_id, record_id, scope):
     if assertions:
         selected = []
         version_indexes = {}
-        for assertion in assertions[:20]:
+        for assertion in assertions:
             resolution = _resolve_assertion_evidence(repo, project_id, assertion)
             document = resolution['document']
             if document is None:
@@ -490,7 +488,10 @@ def evidence(service, project_id, record_id, scope):
                 selected.append(resolution)
             elif _resolution_score(resolution) > _resolution_score(selected[index]):
                 selected[index] = resolution
-        documents = [_serialize_formal_document(resolution) for resolution in selected]
+        documents = [
+            _serialize_formal_document(resolution)
+            for resolution in selected[:20]
+        ]
     else:
         origins = [row] + [
             source for source in row.get('metadata', {}).get('merged_sources', [])
