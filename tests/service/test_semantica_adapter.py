@@ -190,6 +190,108 @@ def test_open_discovery_isolates_missing_source_and_unresolved_facts(monkeypatch
         'entity_not_in_source','evidence_not_in_source','relation_object_not_resolved'}
 
 
+def test_open_fact_predicate_matching_entity_type_becomes_exception():
+    mod = adapter()
+    entities = [
+        {'id': 'account', 'kind': 'entity', 'text': '账号甲',
+         'proposed_type': 'Ａccount   Type'},
+        {'id': 'platform', 'kind': 'entity', 'text': '平台乙',
+         'proposed_type': 'Platform'},
+    ]
+    fact = {
+        'subject': '账号甲', 'predicate': 'account type', 'object': '平台乙',
+        'fact_kind': 'relation', 'confidence': .87, 'evidence': '账号甲属于平台乙',
+        'valid_from': '2025-01-01', 'source_context': {'page': 7},
+    }
+
+    accepted, exceptions = mod._route_open_facts(
+        '账号甲属于平台乙', entities, [fact], reserved_class_names=frozenset())
+
+    assert accepted == []
+    assert len(exceptions) == 1
+    exception = exceptions[0]
+    assert exception['reason_code'] == 'entity_property_name_collision'
+    assert exception['subject'] == '账号甲'
+    assert exception['object'] == '平台乙'
+    assert exception['proposed_type'] == 'account type'
+    assert exception['evidence'] == '账号甲属于平台乙'
+    assert exception['payload'] == fact
+
+
+def test_relation_attribute_collision_quarantines_both_predicates():
+    mod = adapter()
+    entities = [
+        {'id': 'account', 'kind': 'entity', 'text': '账号甲', 'proposed_type': '账号'},
+        {'id': 'platform', 'kind': 'entity', 'text': '平台乙', 'proposed_type': '平台'},
+    ]
+    relation = {
+        'subject': '账号甲', 'predicate': 'Ｓtatus', 'object': '平台乙',
+        'fact_kind': 'relation', 'confidence': .81, 'evidence': '账号甲关联平台乙',
+        'source_context': {'sentence': 1},
+    }
+    attribute = {
+        'subject': '账号甲', 'predicate': 'status', 'object': '封禁',
+        'fact_kind': 'attribute', 'literal_type': 'status', 'confidence': .92,
+        'evidence': '账号甲状态为封禁', 'source_context': {'sentence': 2},
+    }
+    unrelated = {
+        'subject': '账号甲', 'predicate': '关联', 'object': '平台乙',
+        'fact_kind': 'relation', 'confidence': .95, 'evidence': '账号甲关联平台乙',
+    }
+
+    accepted, exceptions = mod._route_open_facts(
+        '账号甲关联平台乙，账号甲状态为封禁', entities,
+        [relation, unrelated, attribute])
+
+    assert [(item['kind'], item['proposed_type']) for item in accepted] == [('relation', '关联')]
+    assert len(exceptions) == 2
+    assert {item['reason_code'] for item in exceptions} == {'relation_attribute_name_collision'}
+    assert [item['payload'] for item in exceptions] == [relation, attribute]
+    assert exceptions[0]['object'] == '平台乙'
+    assert exceptions[1]['value'] == '封禁'
+
+
+def test_open_fact_predicate_matching_reserved_baseline_class_uses_canonical_name():
+    mod = adapter()
+    entities = [
+        {'id': 'account', 'kind': 'entity', 'text': '账号甲', 'proposed_type': '账号'},
+        {'id': 'platform', 'kind': 'entity', 'text': '平台乙', 'proposed_type': '平台'},
+    ]
+    fact = {
+        'subject': '账号甲', 'predicate': 'rule class', 'object': '平台乙',
+        'fact_kind': 'relation', 'evidence': '账号甲关联平台乙',
+    }
+
+    accepted, exceptions = mod._route_open_facts(
+        '账号甲关联平台乙', entities, [fact],
+        reserved_class_names=frozenset({'Ｒule   Class'}))
+
+    assert accepted == []
+    assert [item['reason_code'] for item in exceptions] == ['entity_property_name_collision']
+
+
+def test_open_fact_prompt_contains_normalized_reserved_names(monkeypatch):
+    mod = adapter()
+    captured = {}
+
+    class FakeProvider:
+        def generate_typed(self, prompt, schema, **kwargs):
+            captured['prompt'] = prompt
+            return schema(facts=[])
+
+    monkeypatch.setattr(mod, '_open_fact_provider', lambda config: FakeProvider())
+    entity = type('Entity', (), {'text': '账号甲', 'label': '账号'})()
+
+    mod._extract_facts_open(
+        '账号甲当前封禁', [entity],
+        {'provider': 'fake', 'llm_model': 'fake', 'api_key': 'fake', 'base_url': 'fake'},
+        include_attributes=True,
+        reserved_class_names=frozenset({'Ｒule   Class', '账号'}))
+
+    assert 'RESERVED_CLASS_NAMES' in captured['prompt']
+    assert '"reserved_class_names": ["rule class", "账号"]' in captured['prompt']
+
+
 def test_ontology_induction_exposes_stable_attribute_fields_at_entity_top_level(monkeypatch):
     pytest.importorskip('semantica.ontology')
     from semantica.ontology import OntologyGenerator

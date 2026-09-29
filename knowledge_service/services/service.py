@@ -412,11 +412,28 @@ class KnowledgeService:
                     derived.extend(extracted)
             elif extraction_mode == 'discovery':
                 from ..integrations.semantica_adapter import SemanticaExtractor
+                from ..repository import OntologyNotPublished
+                from .ontology_vocabulary import index_governed_vocabulary
                 extractor=SemanticaExtractor()
+                try:
+                    baseline_version=self.repository.get_ontology(
+                        project_id,request.get('ontology_id'))
+                except OntologyNotPublished:
+                    baseline_class_names=frozenset()
+                else:
+                    baseline_ontology=Ontology(baseline_version['turtle'])
+                    baseline_class_names=frozenset(
+                        name
+                        for record in index_governed_vocabulary(baseline_ontology.graph)
+                        if 'class' in record.kinds
+                        for name in (record.local_name,*record.labels)
+                        if str(name).strip())
                 event('开放本体发现已启用 · 候选不会直接进入正式图谱',15)
                 for index,chunk in enumerate(chunk_records):
                     with stage(f"开放发现片段 {index+1}/{len(chunks)} · 位置 {chunk['metadata']['start_char']}–{chunk['metadata']['end_char']}",15+int(60*index/len(chunks))):
-                        candidates=extractor.discover(chunk['text'],include_attributes=request.get('extract_attributes',False))
+                        candidates=extractor.discover(chunk['text'],
+                            include_attributes=request.get('extract_attributes',False),
+                            reserved_class_names=baseline_class_names)
                     processed_chunks += 1
                     id_map={item['id']:f"{chunk['id']}:discovery:{item['id']}" for item in candidates}
                     for item in candidates:

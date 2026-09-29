@@ -51,7 +51,7 @@ def test_discovery_exceptions_are_separate_from_normal_counts_and_views():
 
 def test_discovery_draft_excludes_evidence_exceptions(tmp_path,monkeypatch):
     from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
-    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False:[
+    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False,*,reserved_class_names=():[
         {'id':'account','kind':'entity','text':'账号甲','proposed_type':'账号','confidence':.9,
          'evidence':'账号甲','evidence_status':'exact'},
         {'id':'bad','kind':'exception','source_kind':'attribute','text':'账号甲','subject':'账号甲',
@@ -74,10 +74,48 @@ def test_discovery_draft_excludes_evidence_exceptions(tmp_path,monkeypatch):
         assert [item['kind'] for item in draft['candidate_snapshot']]==['entity']
 
 
+def test_open_discovery_reserves_active_and_retired_baseline_classes(tmp_path, monkeypatch):
+    from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
+
+    reservations = []
+
+    def discover(self, text, include_attributes=False, *, reserved_class_names=()):
+        reservations.append(reserved_class_names)
+        return []
+
+    monkeypatch.setattr(SemanticaExtractor, 'discover', discover)
+    app = create_app(tmp_path / 'baseline-reservations.sqlite', HashingEncoder())
+    turtle = '''
+        @prefix ex: <https://example.test/> .
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        ex:ActiveClass a owl:Class ; rdfs:label "活跃类" .
+        ex:RetiredClass a owl:Class ; rdfs:label "退役类" ; owl:deprecated true .
+    '''
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': '基线保留字', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        app.state.service.repository.save_ontology(
+            project['id'], turtle, Ontology(turtle).summary())
+        response = client.post(f"/api/projects/{project['id']}/documents", json={
+            'title': '多片原文', 'text': '账号甲当前封禁。' * 40,
+            'extraction_mode': 'discovery', 'chunk_size': 100, 'chunk_overlap': 0,
+            'resolve_entities': False,
+        })
+
+    assert response.status_code == 201, response.text
+    assert len(reservations) > 1
+    assert all(isinstance(item, frozenset) for item in reservations)
+    assert all(item is reservations[0] for item in reservations)
+    assert reservations[0] == frozenset({
+        'ActiveClass', '活跃类', 'RetiredClass', '退役类'})
+
+
 def test_draft_keeps_singleton_attribute_candidate_without_mapping(tmp_path,monkeypatch):
     from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
 
-    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False:[
+    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False,*,reserved_class_names=():[
         {'id':'rule','kind':'entity','text':'平台规则','proposed_type':'规则','confidence':.9},
         {'id':'heading','kind':'attribute','entity_id':'rule','subject':'平台规则',
          'proposed_type':'章节标题','value':'总则','confidence':.8},
@@ -103,7 +141,7 @@ def test_draft_keeps_singleton_attribute_candidate_without_mapping(tmp_path,monk
 def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,monkeypatch):
     from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
 
-    def discover(self,text,include_attributes=False):
+    def discover(self,text,include_attributes=False,*,reserved_class_names=()):
         assert include_attributes is True
         return [
             {'id':'merchant','kind':'entity','text':'测试商户','proposed_type':'Merchant','confidence':.93},
@@ -216,7 +254,7 @@ def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,
 def test_legacy_discovery_publish_only_submits_and_never_writes_records(tmp_path,monkeypatch):
     from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
 
-    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False:[
+    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False,*,reserved_class_names=():[
         {'id':'merchant','kind':'entity','text':'测试商户','proposed_type':'Merchant','confidence':.93},
         {'id':'rule','kind':'entity','text':'平台规则','proposed_type':'RuleDocument','confidence':.91},
         {'id':'edge','kind':'relation','subject_id':'rule','object_id':'merchant','subject':'平台规则',
@@ -441,7 +479,7 @@ def test_candidate_mindmap_sorts_and_truncates_lightweight_sources():
 def test_missing_ontology_reports_clear_state_without_project_id(tmp_path,monkeypatch):
     from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
 
-    def discover(self,text,include_attributes=False):
+    def discover(self,text,include_attributes=False,*,reserved_class_names=()):
         return [{'id':'merchant','kind':'entity','text':'测试商户','proposed_type':'Merchant','confidence':.93}]
 
     monkeypatch.setattr(SemanticaExtractor,'discover',discover)
@@ -485,7 +523,7 @@ def test_missing_ontology_reports_clear_state_without_project_id(tmp_path,monkey
 def test_cumulative_draft_reuses_existing_term_iri_and_records_diff(tmp_path,monkeypatch):
     from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
 
-    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False:[
+    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False,*,reserved_class_names=():[
         {'id':'merchant','kind':'entity','text':'测试商户','proposed_type':'商户','confidence':.93},
         {'id':'platform','kind':'entity','text':'测试平台','proposed_type':'平台','confidence':.91},
     ])
@@ -512,7 +550,7 @@ def test_cumulative_draft_reuses_existing_term_iri_and_records_diff(tmp_path,mon
 def test_publish_rejects_draft_when_parent_ontology_changed(tmp_path,monkeypatch):
     from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
 
-    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False:[
+    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False,*,reserved_class_names=():[
         {'id':'merchant','kind':'entity','text':'测试商户','proposed_type':'商户','confidence':.93}])
     app=create_app(tmp_path/'stale.sqlite',HashingEncoder())
     with TestClient(app) as client:
@@ -532,7 +570,7 @@ def test_publish_rejects_draft_when_parent_ontology_changed(tmp_path,monkeypatch
 
 def test_discovery_warns_before_publishing_generic_or_wrong_language_vocabulary(tmp_path,monkeypatch):
     from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
-    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False:[
+    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False,*,reserved_class_names=():[
         {'id':'a','kind':'entity','text':'平台','proposed_type':'CONCEPT','confidence':.9},
         {'id':'b','kind':'entity','text':'商户','proposed_type':'ORG','confidence':.9},
         {'id':'r','kind':'relation','subject_id':'a','object_id':'b','subject':'平台','object':'商户',
@@ -584,7 +622,7 @@ def test_open_induction_removes_legacy_inferred_relation_ranges_from_parent():
 
 def test_review_can_exclude_candidate_before_publish_and_reports_it(tmp_path,monkeypatch):
     from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
-    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False:[
+    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False,*,reserved_class_names=():[
         {'id':'keep','kind':'entity','text':'保留实体','proposed_type':'主体','confidence':.9},
         {'id':'drop','kind':'entity','text':'排除实体','proposed_type':'主体','confidence':.4}])
     app=create_app(tmp_path/'review.sqlite',HashingEncoder())
@@ -609,7 +647,7 @@ def test_review_can_exclude_candidate_before_publish_and_reports_it(tmp_path,mon
 
 def test_draft_review_can_rename_and_remove_ontology_terms(tmp_path,monkeypatch):
     from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
-    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False:[
+    monkeypatch.setattr(SemanticaExtractor,'discover',lambda self,text,include_attributes=False,*,reserved_class_names=():[
         {'id':'a','kind':'entity','text':'甲','proposed_type':'旧类型','confidence':.9},
         {'id':'b','kind':'entity','text':'乙','proposed_type':'删除类型','confidence':.9}])
     app=create_app(tmp_path/'term-review.sqlite',HashingEncoder())
