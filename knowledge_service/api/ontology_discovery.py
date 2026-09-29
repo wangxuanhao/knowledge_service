@@ -68,15 +68,21 @@ def _canonical_candidates(candidates):
 
 
 def _initial_candidate_outcomes(normalization):
-    return [{
-        'candidate_id': conflict['candidate_id'],
-        'status': 'skipped',
-        'code': (
+    outcomes = []
+    for conflict in normalization.conflicts:
+        reason_code = (
             'low_frequency_attribute'
             if conflict.get('code') == 'low_frequency_attribute'
-            else 'ontology_term_conflict'),
-        'diagnostic_code': conflict.get('code'),
-    } for conflict in normalization.conflicts]
+            else 'ontology_term_conflict')
+        outcomes.append({
+            'candidate_id': conflict['candidate_id'],
+            'status': (
+                'deferred'
+                if reason_code == 'low_frequency_attribute' else 'skipped'),
+            'reason_code': reason_code,
+            'diagnostic_code': conflict.get('code'),
+        })
+    return outcomes
 
 
 def _expected_run_snapshot(source_fingerprint, candidates, normalization,

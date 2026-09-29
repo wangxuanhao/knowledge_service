@@ -67,9 +67,7 @@ def _formal_id(project_id,candidate):
 
 
 def _candidate_outcome_skip(item, outcome):
-    code = outcome.get('code')
-    reason_code = ('low_frequency_attribute' if code == 'low_frequency_attribute'
-        else 'ontology_term_conflict')
+    reason_code = outcome.get('reason_code')
     return {
         'candidate_id': item.get('id'), 'kind': item.get('kind'),
         'reason_code': reason_code,

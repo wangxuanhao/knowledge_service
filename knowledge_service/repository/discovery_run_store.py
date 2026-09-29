@@ -43,6 +43,27 @@ CANDIDATE_TARGET_KIND_ALIASES = {
     'relation': 'relation',
     'attribute': 'attribute',
 }
+INITIAL_OUTCOME_DISPOSITIONS = {
+    'ontology_term_conflict': frozenset({'skipped'}),
+    'low_frequency_attribute': frozenset({'deferred'}),
+    'manual_review_deferred': frozenset({'deferred'}),
+}
+TERMINAL_OUTCOME_DISPOSITIONS = {
+    'materialized': frozenset({'materialized'}),
+    'required_operation_missing': frozenset({'skipped'}),
+    'required_operation_rejected': frozenset({'skipped'}),
+    'required_operation_superseded': frozenset({'skipped'}),
+    'ontology_validation_failed': frozenset({'skipped'}),
+    'draft_closed': frozenset({'skipped'}),
+}
+REQUIRED_OPERATION_FAILURE_REASONS = frozenset({
+    'required_operation_missing',
+    'required_operation_rejected',
+    'required_operation_superseded',
+})
+OUTCOME_REQUIRED_FIELDS = frozenset({
+    'candidate_id', 'status', 'reason_code',
+})
 OPERATION_ID_FIELDS = ('required_operation_ids', 'optional_operation_ids')
 IRI_FIELDS = ('target_iri', 'reuse_iri', 'iri')
 
@@ -121,6 +142,34 @@ def _unique_nonempty_strings(values, label):
         raise ValueError(
             f'discovery run {label} must be unique non-empty strings')
     return set(values)
+
+
+def _validate_outcome_schema(outcome, *, initial):
+    label = 'initial candidate outcome' if initial else 'terminal candidate outcome'
+    allowed_fields = (
+        OUTCOME_REQUIRED_FIELDS | {'diagnostic_code'}
+        if initial else OUTCOME_REQUIRED_FIELDS
+    )
+    if (not isinstance(outcome, dict)
+            or set(outcome) - allowed_fields
+            or not OUTCOME_REQUIRED_FIELDS.issubset(outcome)
+            or not isinstance(outcome.get('candidate_id'), str)
+            or not outcome['candidate_id'].strip()
+            or not isinstance(outcome.get('status'), str)
+            or not isinstance(outcome.get('reason_code'), str)):
+        raise ValueError(f'discovery run {label} has an invalid schema')
+    if ('diagnostic_code' in outcome
+            and (not isinstance(outcome['diagnostic_code'], str)
+                 or not outcome['diagnostic_code'].strip())):
+        raise ValueError(f'discovery run {label} has an invalid schema')
+    dispositions = (
+        INITIAL_OUTCOME_DISPOSITIONS
+        if initial else TERMINAL_OUTCOME_DISPOSITIONS
+    )
+    allowed_statuses = dispositions.get(outcome['reason_code'])
+    if allowed_statuses is None or outcome['status'] not in allowed_statuses:
+        raise ValueError(
+            f'discovery run {label} has an incompatible status or reason_code')
 
 
 def _validate_candidate_bindings(run, initial_outcomes):
@@ -218,6 +267,10 @@ def _validate_candidate_bindings(run, initial_outcomes):
         if diagnostic_state and not diagnostic:
             raise ValueError(
                 'discovery run diagnostic binding requires an initial outcome')
+        if (_is_proposed_binding(binding)
+                and not operation_ids['required_operation_ids']):
+            raise ValueError(
+                'discovery run proposed binding requires a required operation')
         provided_iris = [
             binding[field] for field in IRI_FIELDS if field in binding]
         if any(not valid_application_iri(iri) for iri in provided_iris):
@@ -256,7 +309,7 @@ def discovery_result_kind(run):
 
 def _merge_candidate_outcomes(
         current, terminal, initial, *, run_id, snapshot_candidate_ids,
-        eligible_candidate_ids):
+        eligible_bindings, destination_status):
     merged = [json.loads(_canonical_json(outcome)) for outcome in current]
     positions = {
         outcome.get('candidate_id'): index for index, outcome in enumerate(merged)
@@ -295,13 +348,18 @@ def _merge_candidate_outcomes(
         normalized_terminal.append(normalized)
 
     resolved_ids = set(positions) - set(protected)
-    unresolved_ids = set(eligible_candidate_ids) - resolved_ids
+    unresolved_ids = set(eligible_bindings) - resolved_ids
+    if (destination_status in {'stale_base', 'stale_source'}
+            and normalized_terminal):
+        raise ValueError(
+            'discovery run stale transition cannot contain terminal outcomes')
     for normalized in normalized_terminal:
         candidate_id = normalized['candidate_id']
         protected_outcome = protected.get(candidate_id)
         if protected_outcome is not None:
             raise DiscoveryRunConflict(
                 'immutable discovery outcome cannot change', run_id=run_id)
+        _validate_outcome_schema(normalized, initial=False)
         if candidate_id not in snapshot_candidate_ids:
             raise ValueError(
                 'discovery run terminal outcome candidate must exist in the '
@@ -310,7 +368,30 @@ def _merge_candidate_outcomes(
             raise ValueError(
                 'discovery run terminal outcomes require unresolved accepted '
                 'and bound candidates')
-        merged.append(normalized)
+        if (normalized['reason_code'] in REQUIRED_OPERATION_FAILURE_REASONS
+                and not eligible_bindings[candidate_id].get(
+                    'required_operation_ids')):
+            raise ValueError(
+                'discovery run terminal candidate outcome reason_code is '
+                'incompatible with its binding')
+        if (destination_status == 'closed'
+                and (normalized['status'], normalized['reason_code'])
+                != ('skipped', 'draft_closed')):
+            raise ValueError(
+                'discovery run terminal candidate outcome for closed runs '
+                'must be skipped with reason_code draft_closed')
+        if (destination_status in {'published', 'finalized_no_change'}
+                and normalized['reason_code'] == 'draft_closed'):
+            raise ValueError(
+                'discovery run terminal candidate outcome has an '
+                'incompatible destination lifecycle')
+    if (destination_status in {
+            'published', 'finalized_no_change', 'closed'}
+            and terminal_ids != unresolved_ids):
+        raise ValueError(
+            'discovery run terminal outcomes must cover every unresolved '
+            'accepted and bound candidate')
+    merged.extend(normalized_terminal)
     return merged
 
 
@@ -376,9 +457,7 @@ class DiscoveryRunStore:
                 run['initial_candidate_outcomes']))
         initial_by_candidate = {}
         for outcome in run['initial_candidate_outcomes']:
-            if not isinstance(outcome, dict) or not outcome.get('candidate_id'):
-                raise ValueError(
-                    'discovery run initial candidate outcome requires a candidate_id')
+            _validate_outcome_schema(outcome, initial=True)
             candidate_id = outcome['candidate_id']
             if candidate_id in initial_by_candidate:
                 raise ValueError(
@@ -532,8 +611,8 @@ class DiscoveryRunStore:
             }
             accepted_candidate_ids = set(
                 current.get('accepted_candidate_ids', []))
-            bound_candidate_ids = {
-                binding.get('candidate_id')
+            bindings_by_candidate = {
+                binding.get('candidate_id'): binding
                 for binding in current.get('candidate_bindings', [])
                 if isinstance(binding, dict)
             }
@@ -545,15 +624,20 @@ class DiscoveryRunStore:
             eligible_candidate_ids = (
                 snapshot_candidate_ids
                 & accepted_candidate_ids
-                & bound_candidate_ids
+                & set(bindings_by_candidate)
             ) - initial_candidate_ids
+            eligible_bindings = {
+                candidate_id: bindings_by_candidate[candidate_id]
+                for candidate_id in eligible_candidate_ids
+            }
             updated['candidate_outcomes'] = _merge_candidate_outcomes(
                 current.get('candidate_outcomes', []),
                 candidate_outcomes or [],
                 current.get('initial_candidate_outcomes', []),
                 run_id=run_id,
                 snapshot_candidate_ids=snapshot_candidate_ids,
-                eligible_candidate_ids=eligible_candidate_ids)
+                eligible_bindings=eligible_bindings,
+                destination_status=new_status)
             updated['updated_at'] = utc_now()
             cursor = self._db.execute(
                 "UPDATE artifacts SET payload=? WHERE id=? AND kind=? "

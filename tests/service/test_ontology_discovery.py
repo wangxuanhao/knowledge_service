@@ -33,6 +33,21 @@ def _install_fake_ontology_generator(monkeypatch, result):
     monkeypatch.setitem(sys.modules, 'semantica.ontology', module)
 
 
+def _terminal_outcome(candidate_id, status, reason_code):
+    return {
+        'candidate_id': candidate_id,
+        'status': status,
+        'reason_code': reason_code,
+    }
+
+
+def _closed_outcomes(run):
+    return [
+        _terminal_outcome(candidate_id, 'skipped', 'draft_closed')
+        for candidate_id in run['accepted_candidate_ids']
+    ]
+
+
 def test_discovery_generates_readable_unicode_iris_for_every_term_kind():
     candidates=[
         {'id':'entity','kind':'entity','text':'平台规范','proposed_type':'规则 文件'},
@@ -144,8 +159,10 @@ def test_materialization_keeps_normalizer_conflicts_out_of_provisional_records()
         },
     }
     outcomes = [
-        {'candidate_id': 'conflict', 'code': 'class_property_name_collision'},
-        {'candidate_id': 'low', 'code': 'low_frequency_attribute'},
+        _terminal_outcome(
+            'conflict', 'skipped', 'ontology_term_conflict'),
+        _terminal_outcome(
+            'low', 'deferred', 'low_frequency_attribute'),
     ]
 
     records, skipped = _materialize_candidates(
@@ -277,7 +294,7 @@ def test_create_draft_passes_only_normalized_candidates_to_induce(tmp_path, monk
     assert {item['id'] for item in received} == {
         'behavior-entity', 'account-a', 'account-b', 'status-a', 'status-b'}
     payload = response.json()
-    assert {item['candidate_id']: item['code']
+    assert {item['candidate_id']: item['reason_code']
             for item in payload['candidate_outcomes']} == {
         'behavior-attribute': 'ontology_term_conflict',
         'note': 'low_frequency_attribute',
@@ -352,7 +369,7 @@ def test_mixed_discovery_creates_one_atomic_run_and_governed_draft(
     assert payload['run']['candidate_outcomes'] == [{
         'candidate_id': 'conflict',
         'status': 'skipped',
-        'code': 'ontology_term_conflict',
+        'reason_code': 'ontology_term_conflict',
         'diagnostic_code': 'class_property_name_collision',
     }]
     assert overview_draft['candidate_snapshot'] == payload['run'][
@@ -396,8 +413,8 @@ def test_all_conflict_discovery_persists_diagnosis_without_empty_draft(
     assert payload['run']['status'] == 'diagnosed_no_change'
     assert payload['run']['candidate_outcomes'] == [{
         'candidate_id': 'rare',
-        'status': 'skipped',
-        'code': 'low_frequency_attribute',
+        'status': 'deferred',
+        'reason_code': 'low_frequency_attribute',
         'diagnostic_code': 'low_frequency_attribute',
     }]
 
@@ -590,7 +607,8 @@ def test_changed_generation_input_supersedes_closed_run_without_mutating_it(
         first = client.post(url, json={'name': 'first'}).json()['run']
         repo = app.state.service.repository
         closed = repo.transition_discovery_run(
-            project['id'], first['id'], 'draft_created', 'closed')
+            project['id'], first['id'], 'draft_created', 'closed',
+            candidate_outcomes=_closed_outcomes(first))
         retried = client.post(url, json={'name': 'first'})
         second = client.post(url, json={'name': 'second'}).json()['run']
 
@@ -639,7 +657,8 @@ def test_changed_fingerprint_dimension_creates_successor_run(
         first = client.post(url, json={'name': 'same'}).json()['run']
         repo = app.state.service.repository
         repo.transition_discovery_run(
-            project['id'], first['id'], 'draft_created', 'closed')
+            project['id'], first['id'], 'draft_created', 'closed',
+            candidate_outcomes=_closed_outcomes(first))
 
         if dimension == 'normalizer':
             monkeypatch.setattr(discovery_api, 'NORMALIZER_VERSION', 'v2')
@@ -683,7 +702,8 @@ def test_changed_source_after_closed_run_creates_immutable_successor(
         first = client.post(url, json={'name': 'same'}).json()['run']
         repo = app.state.service.repository
         closed = repo.transition_discovery_run(
-            project['id'], first['id'], 'draft_created', 'closed')
+            project['id'], first['id'], 'draft_created', 'closed',
+            candidate_outcomes=_closed_outcomes(first))
         state['text'] = '乙'
         response = client.post(url, json={'name': 'same'})
 
@@ -727,7 +747,8 @@ def test_changed_base_after_closed_run_creates_immutable_successor(
         url = f"/api/projects/{project['id']}/ontology-discovery/drafts"
         first = client.post(url, json={'name': 'same'}).json()['run']
         closed = repo.transition_discovery_run(
-            project['id'], first['id'], 'draft_created', 'closed')
+            project['id'], first['id'], 'draft_created', 'closed',
+            candidate_outcomes=_closed_outcomes(first))
         second_base = repo.save_ontology(
             project['id'], baseline_v2, Ontology(baseline_v2).summary())
         response = client.post(url, json={'name': 'same'})
@@ -788,7 +809,8 @@ def test_mapping_only_discovery_persists_ready_run_without_empty_draft(
         assert replayed.json()['run'] == payload['run']
         finalized = repo.transition_discovery_run(
             project['id'], payload['run']['id'], 'ready_to_finalize',
-            'finalized_no_change')
+            'finalized_no_change', candidate_outcomes=[
+                _terminal_outcome('one', 'materialized', 'materialized')])
         retried = client.post(
             f"/api/projects/{project['id']}/ontology-discovery/drafts",
             json={'name': 'mapping'})
