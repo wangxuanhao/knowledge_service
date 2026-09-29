@@ -1,0 +1,228 @@
+"""Insert-only discovery-run snapshots stored in the shared artifacts table."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+
+from ..core.time import utc_now
+
+
+KIND = 'ontology_discovery_run'
+RUN_STATUSES = frozenset({
+    'diagnosed_no_change', 'ready_to_finalize', 'draft_created', 'published',
+    'finalized_no_change', 'stale_base', 'stale_source', 'closed',
+})
+ALLOWED_TRANSITIONS = {
+    'ready_to_finalize': frozenset({
+        'finalized_no_change', 'stale_base', 'stale_source', 'closed'}),
+    'draft_created': frozenset({
+        'published', 'stale_base', 'stale_source', 'closed'}),
+}
+MUTABLE_FIELDS = frozenset({
+    'status', 'unified_draft_id', 'candidate_outcomes', 'created_at',
+    'updated_at',
+})
+IMMUTABLE_OUTCOME_CODES = frozenset({
+    'ontology_term_conflict', 'low_frequency_attribute',
+})
+
+
+def _canonical_json(value):
+    try:
+        return json.dumps(
+            value, ensure_ascii=False, allow_nan=False, sort_keys=True,
+            separators=(',', ':'))
+    except (TypeError, ValueError) as exc:
+        raise ValueError('discovery run must contain finite JSON values') from exc
+
+
+def _immutable_snapshot(run):
+    return {key: value for key, value in run.items() if key not in MUTABLE_FIELDS}
+
+
+def discovery_result_kind(run):
+    """Return the immutable creation result independently of lifecycle status."""
+    if run.get('unified_draft_id'):
+        return 'draft'
+    if any(binding.get('binding_kind') == 'existing'
+           for binding in run.get('candidate_bindings', ())):
+        return 'mapping_only'
+    return 'diagnosed_no_change'
+
+
+def _merge_candidate_outcomes(current, terminal, *, run_id):
+    merged = [json.loads(_canonical_json(outcome)) for outcome in current]
+    positions = {
+        outcome.get('candidate_id'): index for index, outcome in enumerate(merged)
+        if isinstance(outcome, dict) and outcome.get('candidate_id') is not None
+    }
+    for outcome in terminal:
+        if not isinstance(outcome, dict) or not outcome.get('candidate_id'):
+            raise ValueError(
+                'discovery run outcomes require a candidate_id')
+        normalized = json.loads(_canonical_json(outcome))
+        candidate_id = normalized['candidate_id']
+        position = positions.get(candidate_id)
+        if position is None:
+            positions[candidate_id] = len(merged)
+            merged.append(normalized)
+            continue
+        existing = merged[position]
+        existing_code = existing.get('code') or existing.get('reason_code')
+        if (existing_code in IMMUTABLE_OUTCOME_CODES
+                and normalized != existing):
+            raise DiscoveryRunConflict(
+                'immutable discovery outcome cannot change', run_id=run_id)
+        merged[position] = normalized
+    return merged
+
+
+class DiscoveryRunConflict(ValueError):
+    """A deterministic run key was reused or its lifecycle CAS lost."""
+
+    code = 'discovery_run_conflict'
+
+    def __init__(self, message, *, run_id=None, expected_status=None,
+                 current_status=None):
+        self.run_id = run_id
+        self.expected_status = expected_status
+        self.current_status = current_status
+        self.details = {
+            key: value for key, value in {
+                'run_id': run_id,
+                'expected_status': expected_status,
+                'current_status': current_status,
+            }.items() if value is not None
+        }
+        super().__init__(message)
+
+
+class DiscoveryRunStore:
+    """Narrow immutable/CAS boundary for ``ontology_discovery_run`` rows."""
+
+    def __init__(self, repository):
+        self.repo = repository
+        self._db = repository._db
+
+    @staticmethod
+    def _validate(project_id, item):
+        if not isinstance(item, dict):
+            raise ValueError('discovery run must be an object')
+        run = json.loads(_canonical_json(item))
+        if not isinstance(run.get('id'), str) or not run['id']:
+            raise ValueError('discovery run id must be a non-empty string')
+        if run.get('project_id') != project_id:
+            raise ValueError('discovery run does not belong to this project')
+        if not isinstance(run.get('source_fingerprint'), str) or not run[
+                'source_fingerprint']:
+            raise ValueError('discovery run source_fingerprint is required')
+        if run.get('status') not in RUN_STATUSES:
+            raise ValueError('unsupported discovery run status')
+        for field, default, expected_type in (
+                ('candidate_snapshot', [], list),
+                ('accepted_candidate_ids', [], list),
+                ('merged_groups', [], list),
+                ('conflicts', [], list),
+                ('mappings', {}, dict),
+                ('candidate_bindings', [], list),
+                ('candidate_outcomes', [], list),
+                ('diagnostics', {}, dict)):
+            run.setdefault(field, default)
+            if not isinstance(run[field], expected_type):
+                raise ValueError(f'discovery run {field} has an invalid shape')
+        run['candidate_snapshot'] = sorted(
+            run['candidate_snapshot'], key=_canonical_json)
+        run.setdefault('unified_draft_id', None)
+        run.setdefault('supersedes_run_id', None)
+        run.setdefault('created_at', utc_now())
+        return run
+
+    def create(self, project_id, item):
+        run = self._validate(project_id, item)
+        payload = _canonical_json(run)
+        with self.repo._transaction():
+            self.repo.get_project(project_id)
+            try:
+                self._db.execute(
+                    'INSERT INTO artifacts(id,kind,project_id,payload) VALUES (?,?,?,?)',
+                    (run['id'], KIND, project_id, payload))
+            except sqlite3.IntegrityError as exc:
+                row = self._db.execute(
+                    'SELECT project_id,payload FROM artifacts WHERE id=? AND kind=?',
+                    (run['id'], KIND)).fetchone()
+                if row is None:
+                    raise DiscoveryRunConflict(
+                        'discovery run id collides with another artifact',
+                        run_id=run['id']) from exc
+                existing = json.loads(row['payload'])
+                if (row['project_id'] != project_id
+                        or existing.get('source_fingerprint') != run[
+                            'source_fingerprint']
+                        or _canonical_json(_immutable_snapshot(existing))
+                        != _canonical_json(_immutable_snapshot(run))):
+                    raise DiscoveryRunConflict(
+                        'discovery run id has a different immutable snapshot',
+                        run_id=run['id']) from exc
+                return existing
+        return self.get(project_id, run['id'])
+
+    def get(self, project_id, run_id):
+        with self.repo._lock:
+            row = self._db.execute(
+                'SELECT payload FROM artifacts WHERE id=? AND kind=? AND project_id=?',
+                (run_id, KIND, project_id)).fetchone()
+        if row is None:
+            raise KeyError(run_id)
+        return json.loads(row['payload'])
+
+    def list(self, project_id):
+        self.repo.get_project(project_id)
+        with self.repo._lock:
+            rows = self._db.execute(
+                'SELECT payload FROM artifacts WHERE kind=? AND project_id=? '
+                'ORDER BY rowid DESC', (KIND, project_id)).fetchall()
+        return [json.loads(row['payload']) for row in rows]
+
+    def latest(self, project_id, *, statuses=None):
+        allowed = None if statuses is None else set(statuses)
+        return next((run for run in self.list(project_id)
+                     if allowed is None or run['status'] in allowed), None)
+
+    def transition(self, project_id, run_id, expected_status, new_status, *,
+                   unified_draft_id=None, candidate_outcomes=None):
+        if expected_status not in RUN_STATUSES or new_status not in RUN_STATUSES:
+            raise ValueError('unsupported discovery run status')
+        if new_status not in ALLOWED_TRANSITIONS.get(expected_status, frozenset()):
+            raise DiscoveryRunConflict(
+                'invalid discovery run lifecycle transition', run_id=run_id,
+                expected_status=expected_status)
+        if candidate_outcomes is not None and not isinstance(
+                candidate_outcomes, list):
+            raise ValueError('discovery run outcomes must be a list')
+        with self.repo._transaction():
+            current = self.get(project_id, run_id)
+            if current['status'] != expected_status:
+                raise DiscoveryRunConflict(
+                    'discovery run status changed', run_id=run_id,
+                    expected_status=expected_status,
+                    current_status=current['status'])
+            updated = dict(current)
+            updated['status'] = new_status
+            if unified_draft_id is not None:
+                updated['unified_draft_id'] = unified_draft_id
+            if candidate_outcomes is not None:
+                updated['candidate_outcomes'] = _merge_candidate_outcomes(
+                    current.get('candidate_outcomes', []),
+                    candidate_outcomes, run_id=run_id)
+            updated['updated_at'] = utc_now()
+            cursor = self._db.execute(
+                "UPDATE artifacts SET payload=? WHERE id=? AND kind=? "
+                "AND project_id=? AND json_extract(payload,'$.status')=?",
+                (_canonical_json(updated), run_id, KIND, project_id,
+                 expected_status))
+            if cursor.rowcount != 1:
+                raise DiscoveryRunConflict(
+                    'discovery run status changed', run_id=run_id,
+                    expected_status=expected_status)
+        return self.get(project_id, run_id)

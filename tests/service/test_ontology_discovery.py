@@ -1,4 +1,5 @@
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from types import ModuleType
 
 from fastapi.testclient import TestClient
@@ -278,10 +279,544 @@ def test_create_draft_passes_only_normalized_candidates_to_induce(tmp_path, monk
     payload = response.json()
     assert {item['candidate_id']: item['code']
             for item in payload['candidate_outcomes']} == {
-        'behavior-attribute': 'class_property_name_collision',
+        'behavior-attribute': 'ontology_term_conflict',
         'note': 'low_frequency_attribute',
     }
     assert len(payload['candidate_snapshot']) == len(candidates)
+
+
+def test_mixed_discovery_creates_one_atomic_run_and_governed_draft(
+        tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    candidates = [
+        {'id': 'class', 'kind': 'entity', 'text': '操作',
+         'proposed_type': '用户行为'},
+        {'id': 'conflict', 'kind': 'attribute', 'entity_id': 'class',
+         'proposed_type': '用户行为', 'value': '查看'},
+        {'id': 'account', 'kind': 'entity', 'text': '账号甲',
+         'proposed_type': '账号'},
+    ]
+
+    def fake_induce(_project_id, _name, _accepted, baseline_turtle=None):
+        return '''
+            @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            <urn:test:Behavior> a owl:Class .
+            <urn:test:Account> a owl:Class .
+        ''', {
+            'entity_types': {'用户行为': 'urn:test:Behavior',
+                             '账号': 'urn:test:Account'},
+            'relation_types': {}, 'attributes': {},
+        }, {'metadata': {}, 'validation': {}}
+
+    monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(discovery_api, '_induce', fake_induce)
+    app = create_app(tmp_path / 'atomic-run.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'atomic', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        response = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/drafts",
+            json={'name': 'atomic discovery'})
+
+        repo = app.state.service.repository
+        assert len(repo.list_discovery_runs(project['id'])) == 1
+        assert len(repo._ontology_drafts.export(project['id'])['drafts']) == 1
+        legacy = repo.list_artifacts('ontology_discovery_draft', project['id'])
+        assert len(legacy) == 1
+        assert not ({'candidate_snapshot', 'candidate_outcomes', 'mappings',
+                     'candidate_bindings'} & set(legacy[0]))
+        governed = OntologyDrafts(repo).get(project['id'], response.json()['id'])
+
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload['result_kind'] == 'draft'
+    assert payload['run']['status'] == 'draft_created'
+    assert payload['run']['unified_draft_id'] == payload['id']
+    assert {row['candidate_id'] for row in payload['run']['conflicts']} == {'conflict'}
+    assert payload['run']['candidate_outcomes'] == [{
+        'candidate_id': 'conflict',
+        'status': 'skipped',
+        'code': 'ontology_term_conflict',
+        'diagnostic_code': 'class_property_name_collision',
+    }]
+    assert set(governed['source_context']['publication_effects']) == {
+        'discovery_run_id', 'summary'}
+
+
+def test_all_conflict_discovery_persists_diagnosis_without_empty_draft(
+        tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    candidates = [{
+        'id': 'rare', 'kind': 'attribute', 'entity_id': 'missing',
+        'proposed_type': '序列号', 'value': '1',
+    }]
+    monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(
+        discovery_api, '_induce',
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError('induced conflicts')))
+    app = create_app(tmp_path / 'diagnosed-run.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'diagnosed', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        response = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/drafts",
+            json={'name': 'diagnosis'})
+
+        repo = app.state.service.repository
+        assert len(repo.list_discovery_runs(project['id'])) == 1
+        assert repo._ontology_drafts.export(project['id'])['drafts'] == []
+        assert repo.list_artifacts('ontology_discovery_draft', project['id']) == []
+
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload['result_kind'] == 'diagnosed_no_change'
+    assert payload['run']['status'] == 'diagnosed_no_change'
+    assert payload['run']['candidate_outcomes'] == [{
+        'candidate_id': 'rare',
+        'status': 'skipped',
+        'code': 'low_frequency_attribute',
+        'diagnostic_code': 'low_frequency_attribute',
+    }]
+
+
+def test_identical_discovery_retry_returns_same_run_and_draft(tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    candidates = [{'id': 'one', 'kind': 'entity', 'text': '甲',
+                   'proposed_type': '主体'}]
+    monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(discovery_api, '_induce', lambda *_args, **_kwargs: (
+        '@prefix owl: <http://www.w3.org/2002/07/owl#> . '
+        '<urn:test:Subject> a owl:Class .',
+        {'entity_types': {'主体': 'urn:test:Subject'},
+         'relation_types': {}, 'attributes': {}},
+        {'metadata': {}, 'validation': {}}))
+    app = create_app(tmp_path / 'retry-run.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'retry', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        url = f"/api/projects/{project['id']}/ontology-discovery/drafts"
+        first = client.post(url, json={'name': 'same'})
+        second = client.post(url, json={'name': 'same'})
+
+        repo = app.state.service.repository
+        assert len(repo.list_discovery_runs(project['id'])) == 1
+        assert len(repo._ontology_drafts.export(project['id'])['drafts']) == 1
+
+    assert first.status_code == second.status_code == 201
+    assert first.json()['run']['id'] == second.json()['run']['id']
+    assert first.json()['id'] == second.json()['id']
+
+
+def test_candidate_order_change_returns_same_run_and_draft(tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    candidates = [
+        {'id': 'two', 'kind': 'entity', 'text': '乙', 'proposed_type': '客体'},
+        {'id': 'one', 'kind': 'entity', 'text': '甲', 'proposed_type': '主体'},
+    ]
+    calls = iter([
+        candidates, candidates, list(reversed(candidates)),
+        list(reversed(candidates)),
+    ])
+    monkeypatch.setattr(
+        discovery_api, '_candidates', lambda *_args, **_kwargs: next(calls))
+    monkeypatch.setattr(discovery_api, '_induce', lambda *_args, **_kwargs: (
+        '@prefix owl: <http://www.w3.org/2002/07/owl#> . '
+        '<urn:test:Subject> a owl:Class . '
+        '<urn:test:Object> a owl:Class .',
+        {'entity_types': {
+            '主体': 'urn:test:Subject', '客体': 'urn:test:Object'},
+         'relation_types': {}, 'attributes': {}},
+        {'metadata': {}, 'validation': {}}))
+    app = create_app(tmp_path / 'ordered-retry-run.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'ordered retry', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        url = f"/api/projects/{project['id']}/ontology-discovery/drafts"
+        first = client.post(url, json={'name': 'same'})
+        second = client.post(url, json={'name': 'same'})
+
+        assert first.status_code == second.status_code == 201
+        assert first.json()['run']['id'] == second.json()['run']['id']
+        assert first.json()['id'] == second.json()['id']
+        assert len(app.state.service.repository.list_discovery_runs(
+            project['id'])) == 1
+
+
+def test_concurrent_identical_discovery_retry_returns_one_run_and_draft(
+        tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    candidates = [{'id': 'one', 'kind': 'entity', 'text': '甲',
+                   'proposed_type': '主体'}]
+    monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(discovery_api, '_induce', lambda *_args, **_kwargs: (
+        '@prefix owl: <http://www.w3.org/2002/07/owl#> . '
+        '<urn:test:Subject> a owl:Class .',
+        {'entity_types': {'主体': 'urn:test:Subject'},
+         'relation_types': {}, 'attributes': {}},
+        {'metadata': {}, 'validation': {}}))
+    app = create_app(tmp_path / 'concurrent-retry.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'concurrent', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        url = f"/api/projects/{project['id']}/ontology-discovery/drafts"
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            responses = list(pool.map(
+                lambda _: client.post(url, json={'name': 'same'}), range(2)))
+
+        assert all(response.status_code == 201 for response in responses)
+        assert len({response.json()['run']['id'] for response in responses}) == 1
+        assert len({response.json()['id'] for response in responses}) == 1
+        repo = app.state.service.repository
+        assert len(repo.list_discovery_runs(project['id'])) == 1
+        assert len(repo._ontology_drafts.export(project['id'])['drafts']) == 1
+
+
+def test_initial_command_failure_rolls_back_draft_operations_run_and_legacy_artifact(
+        tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    candidates = [{'id': 'one', 'kind': 'entity', 'text': '甲',
+                   'proposed_type': '主体'}]
+    monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(discovery_api, '_induce', lambda *_args, **_kwargs: (
+        '@prefix owl: <http://www.w3.org/2002/07/owl#> . '
+        '<urn:test:Subject> a owl:Class .',
+        {'entity_types': {'主体': 'urn:test:Subject'},
+         'relation_types': {}, 'attributes': {}},
+        {'metadata': {}, 'validation': {}}))
+    original = OntologyDrafts.create_with_command
+
+    def fail_after_initial_command(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        raise RuntimeError('forced initial command failure')
+
+    monkeypatch.setattr(OntologyDrafts, 'create_with_command', fail_after_initial_command)
+    app = create_app(tmp_path / 'rollback-run.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'rollback', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        response = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/drafts",
+            json={'name': 'rollback'})
+        assert response.status_code == 503
+        repo = app.state.service.repository
+        assert repo.list_discovery_runs(project['id']) == []
+        history = repo._ontology_drafts.export(project['id'])
+        assert history['drafts'] == [] and history['operations'] == []
+        assert repo.list_artifacts('ontology_discovery_draft', project['id']) == []
+
+
+def test_source_change_between_snapshot_and_transaction_is_409_without_writes(
+        tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    snapshots = [
+        [{'id': 'one', 'kind': 'entity', 'text': '甲', 'proposed_type': '主体'}],
+        [{'id': 'one', 'kind': 'entity', 'text': '乙', 'proposed_type': '主体'}],
+    ]
+    monkeypatch.setattr(
+        discovery_api, '_candidates',
+        lambda *_args, **_kwargs: snapshots.pop(0) if snapshots else snapshots[-1])
+    monkeypatch.setattr(discovery_api, '_induce', lambda *_args, **_kwargs: (
+        '@prefix owl: <http://www.w3.org/2002/07/owl#> . '
+        '<urn:test:Subject> a owl:Class .',
+        {'entity_types': {'主体': 'urn:test:Subject'},
+         'relation_types': {}, 'attributes': {}},
+        {'metadata': {}, 'validation': {}}))
+    app = create_app(tmp_path / 'stale-source-run.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'stale', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        response = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/drafts",
+            json={'name': 'stale'})
+        assert response.status_code == 409
+        assert response.json()['code'] == 'stale_source'
+        repo = app.state.service.repository
+        assert repo.list_discovery_runs(project['id']) == []
+        assert repo._ontology_drafts.export(project['id'])['drafts'] == []
+
+
+def test_changed_generation_input_supersedes_closed_run_without_mutating_it(
+        tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    candidates = [{'id': 'one', 'kind': 'entity', 'text': '甲',
+                   'proposed_type': '主体'}]
+    monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(discovery_api, '_induce', lambda *_args, **_kwargs: (
+        '@prefix owl: <http://www.w3.org/2002/07/owl#> . '
+        '<urn:test:Subject> a owl:Class .',
+        {'entity_types': {'主体': 'urn:test:Subject'},
+         'relation_types': {}, 'attributes': {}},
+        {'metadata': {}, 'validation': {}}))
+    app = create_app(tmp_path / 'successor-run.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'successor', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        url = f"/api/projects/{project['id']}/ontology-discovery/drafts"
+        first = client.post(url, json={'name': 'first'}).json()['run']
+        repo = app.state.service.repository
+        closed = repo.transition_discovery_run(
+            project['id'], first['id'], 'draft_created', 'closed')
+        retried = client.post(url, json={'name': 'first'})
+        second = client.post(url, json={'name': 'second'}).json()['run']
+
+        assert retried.status_code == 201, retried.text
+        assert retried.json()['result_kind'] == 'draft'
+        assert retried.json()['id'] == first['unified_draft_id']
+        assert retried.json()['run']['status'] == 'closed'
+        assert second['id'] != first['id']
+        assert second['supersedes_run_id'] == first['id']
+        assert repo.get_discovery_run(project['id'], first['id']) == closed
+
+
+@pytest.mark.parametrize('dimension', [
+    'normalizer', 'generator', 'runtime', 'threshold', 'generation_options',
+])
+def test_changed_fingerprint_dimension_creates_successor_run(
+        tmp_path, monkeypatch, dimension):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    candidates = [{'id': 'one', 'kind': 'entity', 'text': '甲',
+                   'proposed_type': '主体'}]
+    state = {'runtime': 'runtime-v1', 'option': 'option-v1'}
+    monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(
+        discovery_api, '_semantica_runtime_version', lambda: state['runtime'])
+    original_options = discovery_api._generation_options
+    if dimension == 'generation_options':
+        monkeypatch.setattr(
+            discovery_api, '_generation_options',
+            lambda request, baseline: {
+                **original_options(request, baseline),
+                'test_option': state['option'],
+            })
+    monkeypatch.setattr(discovery_api, '_induce', lambda *_args, **_kwargs: (
+        '@prefix owl: <http://www.w3.org/2002/07/owl#> . '
+        '<urn:test:Subject> a owl:Class .',
+        {'entity_types': {'主体': 'urn:test:Subject'},
+         'relation_types': {}, 'attributes': {}},
+        {'metadata': {}, 'validation': {}}))
+    app = create_app(tmp_path / f'fingerprint-{dimension}.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': dimension, 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        url = f"/api/projects/{project['id']}/ontology-discovery/drafts"
+        first = client.post(url, json={'name': 'same'}).json()['run']
+        repo = app.state.service.repository
+        repo.transition_discovery_run(
+            project['id'], first['id'], 'draft_created', 'closed')
+
+        if dimension == 'normalizer':
+            monkeypatch.setattr(discovery_api, 'NORMALIZER_VERSION', 'v2')
+        elif dimension == 'generator':
+            monkeypatch.setattr(discovery_api, 'GENERATOR_CONTRACT', 'semantica-next')
+        elif dimension == 'runtime':
+            state['runtime'] = 'runtime-v2'
+        elif dimension == 'threshold':
+            monkeypatch.setattr(discovery_api, 'ATTRIBUTE_THRESHOLD', 3)
+        else:
+            state['option'] = 'option-v2'
+
+        response = client.post(url, json={'name': 'same'})
+
+        assert response.status_code == 201, response.text
+        second = response.json()['run']
+        assert second['id'] != first['id']
+        assert second['supersedes_run_id'] == first['id']
+
+
+def test_changed_source_after_closed_run_creates_immutable_successor(
+        tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    state = {'text': '甲'}
+    monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: [{
+        'id': 'one', 'kind': 'entity', 'text': state['text'],
+        'proposed_type': '主体'}])
+    monkeypatch.setattr(discovery_api, '_induce', lambda *_args, **_kwargs: (
+        '@prefix owl: <http://www.w3.org/2002/07/owl#> . '
+        '<urn:test:Subject> a owl:Class .',
+        {'entity_types': {'主体': 'urn:test:Subject'},
+         'relation_types': {}, 'attributes': {}},
+        {'metadata': {}, 'validation': {}}))
+    app = create_app(tmp_path / 'source-successor.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'source successor', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        url = f"/api/projects/{project['id']}/ontology-discovery/drafts"
+        first = client.post(url, json={'name': 'same'}).json()['run']
+        repo = app.state.service.repository
+        closed = repo.transition_discovery_run(
+            project['id'], first['id'], 'draft_created', 'closed')
+        state['text'] = '乙'
+        response = client.post(url, json={'name': 'same'})
+
+        assert response.status_code == 201, response.text
+        second = response.json()['run']
+        assert second['id'] != first['id']
+        assert second['supersedes_run_id'] == first['id']
+        assert repo.get_discovery_run(project['id'], first['id']) == closed
+
+
+def test_changed_base_after_closed_run_creates_immutable_successor(
+        tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    baseline_v1 = '''
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        <urn:test:BaseOne> a owl:Class .
+    '''
+    baseline_v2 = baseline_v1 + '<urn:test:BaseTwo> a owl:Class .\n'
+    candidates = [{'id': 'one', 'kind': 'entity', 'text': '甲',
+                   'proposed_type': '新增'}]
+    monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+
+    def fake_induce(_project_id, _name, _accepted, baseline_turtle=None):
+        return (baseline_turtle or '') + (
+            '\n<urn:test:Added> a '
+            '<http://www.w3.org/2002/07/owl#Class> .'), {
+                'entity_types': {'新增': 'urn:test:Added'},
+                'relation_types': {}, 'attributes': {},
+            }, {'metadata': {}, 'validation': {}}
+
+    monkeypatch.setattr(discovery_api, '_induce', fake_induce)
+    app = create_app(tmp_path / 'base-successor.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'base successor', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        repo = app.state.service.repository
+        first_base = repo.save_ontology(
+            project['id'], baseline_v1, Ontology(baseline_v1).summary())
+        url = f"/api/projects/{project['id']}/ontology-discovery/drafts"
+        first = client.post(url, json={'name': 'same'}).json()['run']
+        closed = repo.transition_discovery_run(
+            project['id'], first['id'], 'draft_created', 'closed')
+        second_base = repo.save_ontology(
+            project['id'], baseline_v2, Ontology(baseline_v2).summary())
+        response = client.post(url, json={'name': 'same'})
+
+        assert response.status_code == 201, response.text
+        second = response.json()['run']
+        assert first['base_ontology_id'] == first_base['id']
+        assert second['base_ontology_id'] == second_base['id']
+        assert second['id'] != first['id']
+        assert second['supersedes_run_id'] == first['id']
+        assert repo.get_discovery_run(project['id'], first['id']) == closed
+
+
+def test_mapping_only_discovery_persists_ready_run_without_empty_draft(
+        tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    baseline = '''
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        <urn:test:Subject> a owl:Class ; rdfs:label "主体"@zh .
+    '''
+    candidates = [{'id': 'one', 'kind': 'entity', 'text': '甲',
+                   'proposed_type': '主体'}]
+    monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(discovery_api, '_induce', lambda *_args, **_kwargs: (
+        baseline,
+        {'entity_types': {'主体': 'urn:test:Subject'},
+         'relation_types': {}, 'attributes': {}},
+        {'metadata': {}, 'validation': {}}))
+    app = create_app(tmp_path / 'mapping-run.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'mapping', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        repo = app.state.service.repository
+        repo.save_ontology(project['id'], baseline, Ontology(baseline).summary())
+        response = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/drafts",
+            json={'name': 'mapping'})
+
+        assert response.status_code == 201, response.text
+        payload = response.json()
+        assert payload['result_kind'] == 'mapping_only'
+        assert payload['run']['status'] == 'ready_to_finalize'
+        assert payload['run']['candidate_bindings'][0]['binding_kind'] == 'existing'
+        assert repo._ontology_drafts.export(project['id'])['drafts'] == []
+        assert repo.list_artifacts('ontology_discovery_draft', project['id']) == []
+        finalized = repo.transition_discovery_run(
+            project['id'], payload['run']['id'], 'ready_to_finalize',
+            'finalized_no_change')
+        retried = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/drafts",
+            json={'name': 'mapping'})
+
+        assert retried.status_code == 201, retried.text
+        assert retried.json()['result_kind'] == 'mapping_only'
+        assert retried.json()['run'] == finalized
+
+
+def test_generated_vocabulary_conflict_has_stable_422_envelope(tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: [{
+        'id': 'one', 'kind': 'entity', 'text': '甲', 'proposed_type': '主体'}])
+    monkeypatch.setattr(
+        discovery_api, '_induce',
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            GeneratedVocabularyConflict('multiple_governed_kinds', {
+                'iri': 'urn:test:bad', 'kinds': ['attribute', 'class']})))
+    app = create_app(tmp_path / 'generated-conflict.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'invalid generated', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        response = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/drafts",
+            json={'name': 'invalid'})
+
+        assert response.status_code == 422
+        assert response.json()['code'] == 'generated_vocabulary_conflict'
+        assert 'domain/range 只能用于' not in response.text
+        assert app.state.service.repository.list_discovery_runs(project['id']) == []
+
+
+def test_invalid_dual_kind_baseline_has_stable_422_envelope(tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: [{
+        'id': 'one', 'kind': 'entity', 'text': '甲', 'proposed_type': '主体'}])
+    baseline = '''
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        <urn:test:bad> a owl:Class, owl:ObjectProperty .
+    '''
+    app = create_app(tmp_path / 'invalid-baseline.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'invalid baseline', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        repo = app.state.service.repository
+        repo.save_ontology(project['id'], baseline, Ontology(baseline).summary())
+        response = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/drafts",
+            json={'name': 'invalid'})
+
+        assert response.status_code == 422
+        assert response.json()['code'] == 'invalid_baseline_dual_kind'
+        assert repo.list_discovery_runs(project['id']) == []
 
 
 def test_merged_spellings_induce_one_term_and_rematerialize_every_source(
@@ -377,11 +912,8 @@ def test_review_excluding_merged_spelling_removes_shared_term_and_all_dependents
     assert not any(graph.triples((URIRef(shared_iri), None, None)))
     assert not any(graph.triples((None, None, URIRef(shared_iri))))
     effects = current['source_context']['publication_effects']
-    assert {record['metadata']['discovery_candidate_id']
-            for record in effects['records']} == {'unrelated'}
-    skipped = {item['candidate_id']: item for item in effects['skipped_candidates']}
-    assert set(skipped) == {'spaced', 'fullwidth'}
-    assert skipped['spaced']['reason'] == skipped['fullwidth']['reason']
+    assert set(effects) == {'discovery_run_id', 'summary'}
+    assert effects['discovery_run_id'] == draft['run']['id']
 
 
 def test_review_ignores_sibling_label_edit_for_excluded_shared_iri(
@@ -444,8 +976,8 @@ def test_review_ignores_sibling_label_edit_for_excluded_shared_iri(
         item['id'] for item in Ontology(current['turtle']).summary(active_only=True)['classes']}
     assert shared_iri not in active_ids
     effects = current['source_context']['publication_effects']
-    assert {record['metadata']['discovery_candidate_id']
-            for record in effects['records']} == {'unrelated'}
+    assert set(effects) == {'discovery_run_id', 'summary'}
+    assert effects['discovery_run_id'] == draft['run']['id']
 
 
 def test_discovery_exceptions_are_separate_from_normal_counts_and_views():

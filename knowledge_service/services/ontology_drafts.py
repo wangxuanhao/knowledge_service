@@ -514,6 +514,19 @@ class OntologyDrafts:
                 self._source_snapshot(project_id, draft)
         return draft
 
+    def create_with_command(
+            self, project_id, base_ontology_id_or_none=None, source='manual',
+            title=None, actor=None, *, source_context=None, summary='', command,
+            base_ontology_id=None):
+        """Create a draft and its initial compiled operations as one write."""
+        with self.repository._transaction():
+            draft = self.create(
+                project_id, base_ontology_id_or_none, source, title, actor,
+                source_context=source_context, summary=summary,
+                base_ontology_id=base_ontology_id)
+            return self.command(
+                project_id, draft['id'], draft['revision'], command)
+
     @staticmethod
     def _operation_args(command):
         action = command.get('action')

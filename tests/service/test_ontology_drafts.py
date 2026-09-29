@@ -42,6 +42,77 @@ def add_label(service, project_id, draft, value='Renamed'):
     })
 
 
+def test_create_with_command_persists_draft_and_initial_operations_atomically(tmp_path):
+    repo, service, project_id, base = setup_service(tmp_path)
+    edited = BASE + '''
+<https://example.test/New> a <http://www.w3.org/2002/07/owl#Class> .
+'''
+
+    preview = service.create_with_command(
+        project_id, base['id'], 'discovery', 'Discovery', 'generator',
+        source_context={}, summary='initial discovery',
+        command={'action': 'diff_turtle', 'edited_turtle': edited})
+
+    assert preview['revision'] == 2
+    assert preview['operations']
+    exported = repo._ontology_drafts.export(project_id)
+    assert [row['id'] for row in exported['drafts']] == [preview['id']]
+    assert [row['draft_id'] for row in exported['operations']] == [preview['id']]
+
+
+def test_create_with_command_invalid_diff_rolls_back_draft_and_operations(tmp_path):
+    repo, service, project_id, base = setup_service(tmp_path)
+
+    with pytest.raises(Exception):
+        service.create_with_command(
+            project_id, base['id'], 'discovery', 'Discovery', 'generator',
+            source_context={}, summary='initial discovery',
+            command={'action': 'diff_turtle', 'edited_turtle': 'not turtle {'})
+
+    exported = repo._ontology_drafts.export(project_id)
+    assert exported['drafts'] == []
+    assert exported['operations'] == []
+
+
+def test_create_with_command_stale_base_leaves_no_partial_state(tmp_path):
+    repo, service, project_id, base = setup_service(tmp_path)
+    latest = repo.save_ontology(project_id, BASE + '\n# latest', {})
+    assert latest['id'] != base['id']
+
+    with pytest.raises(StaleBase):
+        service.create_with_command(
+            project_id, base['id'], 'discovery', 'Discovery', 'generator',
+            source_context={}, summary='initial discovery',
+            command={'action': 'diff_turtle', 'edited_turtle': BASE})
+
+    exported = repo._ontology_drafts.export(project_id)
+    assert exported['drafts'] == []
+    assert exported['operations'] == []
+
+
+def test_create_with_command_stale_source_leaves_no_partial_state(tmp_path):
+    repo, service, project_id, base = setup_service(tmp_path)
+    document = repo.put_record(project_id, {
+        'id': 'source-doc', 'kind': 'document', 'text': 'v1', 'metadata': {}})
+    repo.put_record(project_id, {
+        'id': document['id'], 'kind': document['kind'], 'text': 'v2',
+        'metadata': document['metadata']}, expected_version=document['version'])
+
+    with pytest.raises(StaleSource):
+        service.create_with_command(
+            project_id, base['id'], 'discovery', 'Discovery', 'generator',
+            source_context={
+                'document_id': document['id'],
+                'expected_document_version': document['version'],
+            },
+            summary='initial discovery',
+            command={'action': 'diff_turtle', 'edited_turtle': BASE})
+
+    exported = repo._ontology_drafts.export(project_id)
+    assert exported['drafts'] == []
+    assert exported['operations'] == []
+
+
 def test_create_command_supersede_preview_submit_and_close(tmp_path):
     repo, service, project_id, _ = setup_service(tmp_path, with_base=False)
     draft = service.create(

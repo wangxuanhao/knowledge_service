@@ -912,11 +912,13 @@ class Repository:
         from .review_store import ReviewStore
         from .provenance_store import ProvenanceStore
         from .ontology_draft_store import OntologyDraftStore
+        from .discovery_run_store import DiscoveryRunStore
         self._assertions = AssertionStore(self)
         self._ingest = IngestRunStore(self)
         self._reviews = ReviewStore(self)
         self._provenance = ProvenanceStore(self)
         self._ontology_drafts = OntologyDraftStore(self)
+        self._discovery_runs = DiscoveryRunStore(self)
         with self._transaction():
             self._db.execute('INSERT OR IGNORE INTO service_settings VALUES (?,?)', ('storage_namespace', str(uuid4())))
             self._db.execute(
@@ -2284,11 +2286,39 @@ class Repository:
         raise KeyError(ontology_id)
 
     def save_artifact(self, kind, item):
+        if kind == 'ontology_discovery_run':
+            raise ValueError(
+                'ontology discovery runs must use create_discovery_run or '
+                'transition_discovery_run')
         with self._transaction():
             if item.get('project_id'): self.get_project(item['project_id'])
             self._db.execute('INSERT INTO artifacts VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',
                              (item['id'], kind, item.get('project_id'), _json(item)))
         return item
+
+    # Discovery runs are immutable snapshots with a narrow lifecycle CAS.  Do
+    # not route these methods through save_artifact, whose contract is upsert.
+    def create_discovery_run(self, project_id_or_item, item=None):
+        if item is None:
+            item = project_id_or_item
+            project_id = item.get('project_id') if isinstance(item, dict) else None
+        else:
+            project_id = project_id_or_item
+        return self._discovery_runs.create(project_id, item)
+
+    def get_discovery_run(self, project_id, run_id):
+        return self._discovery_runs.get(project_id, run_id)
+
+    def list_discovery_runs(self, project_id):
+        return self._discovery_runs.list(project_id)
+
+    def latest_discovery_run(self, project_id, *, statuses=None):
+        return self._discovery_runs.latest(project_id, statuses=statuses)
+
+    def transition_discovery_run(self, project_id, run_id, expected_status,
+                                 new_status, **changes):
+        return self._discovery_runs.transition(
+            project_id, run_id, expected_status, new_status, **changes)
 
     def get_artifact(self, kind, artifact_id):
         with self._lock:

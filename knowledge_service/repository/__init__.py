@@ -18,10 +18,12 @@ from .core import (
     _json,
 )
 from .ontology_draft_store import OntologyDraftConflict, OntologyDraftStore
+from .discovery_run_store import DiscoveryRunConflict, DiscoveryRunStore
 
 __all__ = [
     'Repository', 'OntologyNotPublished', 'OntologyPublicationConflict',
     '_SCHEMA_MIGRATIONS',
     'vector_blob', 'vector_array', '_json',
     'OntologyDraftConflict', 'OntologyDraftStore',
+    'DiscoveryRunConflict', 'DiscoveryRunStore',
 ]
