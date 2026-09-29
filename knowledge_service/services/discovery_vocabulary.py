@@ -111,11 +111,14 @@ class InvalidDiscoveryCandidate(ValueError):
 
 
 _ABSOLUTE_IRI = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:[^\s]+$")
+_INVALID_RAW_IRI_CHARACTERS = frozenset('<>"{}|^`')
 
 
 def _valid_iri(value) -> bool:
     if (not isinstance(value, str) or not _ABSOLUTE_IRI.fullmatch(value)
             or "\\" in value
+            or any(character in _INVALID_RAW_IRI_CHARACTERS for character in value)
+            or value.count("#") > 1
             or any(character.isspace() or unicodedata.category(character) == "Cc"
                    for character in value)
             or re.search(r"%(?![0-9A-Fa-f]{2})", value)):

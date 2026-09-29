@@ -575,6 +575,41 @@ def test_candidate_boundary_accepts_valid_repository_urns_and_http_iris():
     ]
 
 
+@pytest.mark.parametrize("iri", [
+    "http://example.test/Term<Alias",
+    "http://example.test/Term>Alias",
+    'http://example.test/Term"Alias',
+    "http://example.test/Term{Alias",
+    "http://example.test/Term}",
+    "http://example.test/Term|Alias",
+    "http://example.test/Term^Alias",
+    "http://example.test/Term`Alias",
+    "http://example.test/Term#first#second",
+])
+def test_candidate_boundary_rejects_rfc_invalid_raw_iri_characters(iri):
+    with pytest.raises(InvalidDiscoveryCandidate, match="valid absolute IRI"):
+        DiscoveryVocabularyNormalizer("").normalize([
+            {"id": "candidate", "kind": "class", "name": "Term", "iri": iri},
+        ])
+
+
+@pytest.mark.parametrize("iri", [
+    "http://example.test/%3CTerm%3E",
+    "http://example.test/%22Term%22",
+    "http://example.test/%7BTerm%7D",
+    "http://example.test/Term%7CAlias",
+    "http://example.test/Term%5EAlias",
+    "http://example.test/%60Term%60",
+    "http://example.test/Term%23Alias",
+])
+def test_candidate_boundary_accepts_percent_encoded_reserved_characters(iri):
+    result = DiscoveryVocabularyNormalizer("").normalize([
+        {"id": "candidate", "kind": "class", "name": "Term", "iri": iri},
+    ])
+
+    assert result.accepted_candidates[0]["iri"] == iri
+
+
 def test_candidate_boundary_rejects_duplicate_ids_deterministically():
     candidates = [
         {"id": "same", "kind": "class", "name": "Person"},
