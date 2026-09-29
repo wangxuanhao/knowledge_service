@@ -50,7 +50,7 @@ MOCKS = r"""() => {
       chunk:{id:'chunk-long',start_char:2000,end_char:2000+longChunk.length,text:longChunk},
       location:{mode:'recovered_in_chunk',reason:'legacy_evidence_recovered',
         start_char:2620,end_char:2624,before:longChunk.slice(0,620),highlight:'恢复证据',after:longChunk.slice(624)},
-      integrity:{complete:true,source_hash_status:'unavailable',warnings:[{code:'source_hash_unavailable',message:'断言没有保存来源文档哈希。'}]}},
+      integrity:{complete:true,source_hash_status:'unavailable',warnings:[{code:'source_hash_unavailable',message:'该历史断言未保存来源文档哈希，无法进行额外的哈希一致性校验；固定文档版本与历史切片仍可正常溯源。'}]}},
     'assertion-chunk': {assertion_id:'assertion-chunk',document:{id:'doc-3',version:1,
       version_id:'doc-v1',title:'片段文档',source_content:'full_version'},
       chunk:{id:'chunk-only',start_char:300,end_char:318,text:'完整历史切片但无法唯一定位'},
@@ -291,7 +291,7 @@ def test_recovered_evidence_renders_the_complete_chunk_and_late_highlight(page):
     assert len(card.locator('pre').inner_text()) == 704
     assert card.locator('mark').inner_text() == '恢复证据'
     assert card.locator('mark').evaluate("node => node.parentNode.textContent.indexOf(node.textContent)") == 620
-    assert '断言没有保存来源文档哈希。' in card.inner_text()
+    assert '固定文档版本与历史切片仍可正常溯源' in card.inner_text()
 
 
 def test_chunk_and_unlocated_modes_never_fabricate_a_highlight_or_current_text(page):
@@ -355,6 +355,11 @@ def test_full_historical_source_selects_exact_pinned_version_and_reuses_viewer(p
     assert opened['version'] == 2
     assert opened['full_text'].startswith('A' * 102 + '精确证据')
     assert opened['start_char'] == 102 and opened['end_char'] == 106
+    button = page.locator('[data-candidate-evidence="assertion-1"] [data-open-candidate-source]')
+    assert button.is_enabled()
+    button.click()
+    page.wait_for_function("() => apiCalls.filter(x => x.url.endsWith('/records/doc-1/history')).length === 2")
+    assert button.is_enabled()
 
 
 def test_discovery_separates_entities_relations_attributes_and_evidence_exceptions(page):

@@ -124,7 +124,8 @@
       if(typeof window.openFrozenSourceEvidence!=='function')throw new Error('历史原文查看器尚未加载');
       const located=['exact','recovered_in_chunk'].includes(resolution.location?.mode);
       window.openFrozenSourceEvidence({title:documentRef.title||documentRef.id||'历史来源',version:pinned.version,version_id:pinned.version_id,source_content:'full_version',reason:`候选证据 · ${candidateLocationLabels[resolution.location?.mode]||'历史来源'}`,full_text:typeof pinned.text==='string'?pinned.text:'',start_char:located?resolution.location.start_char:null,end_char:located?resolution.location.end_char:null});
-    }catch(error){if(error.name!=='AbortError'&&token===state.candidateEvidenceToken&&article.isConnected){const failure=el('p','ontology-workbench__evidence-warning',`历史原文读取失败：${error.message}`);article.append(failure);button.disabled=false;}}
+    }catch(error){if(error.name!=='AbortError'&&token===state.candidateEvidenceToken&&article.isConnected){const failure=el('p','ontology-workbench__evidence-warning',`历史原文读取失败：${error.message}`);article.append(failure);}}
+    finally{if(token===state.candidateEvidenceToken&&!signal.aborted&&article.isConnected)button.disabled=false;}
   }
   function renderCandidateResolution(article,resolution,token,signal){
     const documentRef=resolution.document||{};const chunk=resolution.chunk||{};const location=resolution.location||{};const mode=location.mode||'unlocated';

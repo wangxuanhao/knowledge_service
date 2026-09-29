@@ -383,7 +383,7 @@ def test_primary_ui_exposes_one_unified_ontology_workbench():
     html = (primary / "index.html").read_text(encoding="utf-8")
     workbench = (primary / "ontology-workbench.js").read_text(encoding="utf-8")
     assert html.count(">本体工作台</button>") == 1
-    assert "/assets/ontology-workbench.js?v=candidate-evidence-1" in html
+    assert "/assets/ontology-workbench.js?v=candidate-evidence-2" in html
     assert "ontology-workbench" in workbench
     assert "data-workbench-stage=" in workbench
     for stage in ("discover", "design", "review", "validate", "publish"):

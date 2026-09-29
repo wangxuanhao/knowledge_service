@@ -254,6 +254,9 @@ def test_missing_source_hash_is_unavailable_but_verified_legacy_chunk_is_complet
     assert result['integrity']['source_hash_status'] == 'unavailable'
     assert _warning_codes(result) == [
         'legacy_chunk_version_assumed', 'source_hash_unavailable']
+    assert result['integrity']['warnings'][-1]['message'] == (
+        '该历史断言未保存来源文档哈希，无法进行额外的哈希一致性校验；'
+        '固定文档版本与历史切片仍可正常溯源。')
 
 
 def test_source_version_metadata_does_not_override_recorded_at_mismatch(evidence_repo):

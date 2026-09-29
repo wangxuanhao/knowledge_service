@@ -12,7 +12,9 @@ _WARNING_MESSAGES = {
     'legacy_chunk_version_assumed': '旧片段未记录来源版本，已使用唯一的来源匹配历史。',
     'chunk_bounds_invalid': '片段保存的字符范围无效或超出固定文档版本。',
     'chunk_text_mismatch': '片段文本与固定文档版本中的字符范围不一致。',
-    'source_hash_unavailable': '断言没有保存来源文档哈希，无法校验哈希完整性。',
+    'source_hash_unavailable': (
+        '该历史断言未保存来源文档哈希，无法进行额外的哈希一致性校验；'
+        '固定文档版本与历史切片仍可正常溯源。'),
     'source_hash_mismatch': '断言来源哈希与固定文档版本不一致。',
     'attribute_evidence_missing': '属性断言没有保存可恢复的属性证据。',
     'attribute_evidence_non_unique': '属性证据在片段中不是唯一匹配。',
