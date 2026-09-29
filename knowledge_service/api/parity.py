@@ -20,6 +20,8 @@ class Subgraph(Scope):
     node_id:str|None=None
     hops:int=Field(default=1,ge=0,le=5)
     attribute_mode:Literal['none','summary','expanded']='summary'
+    entity_type:str|None=None
+    predicate:str|None=None
 
 class Mindmap(Scope):
     root_id:str

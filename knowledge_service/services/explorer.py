@@ -140,14 +140,20 @@ class Explorer:
             # chunk/document 载荷仍不参与图谱响应。
             if attribute_mode not in {'none','summary','expanded'}:
                 raise ValueError('不支持的属性展示模式')
+            entity_type=scope.get('entity_type')
+            predicate=scope.get('predicate')
             record_scope={key:value for key,value in scope.items()
-                          if key not in {'node_id','hops','attribute_mode'}}
+                          if key not in {'node_id','hops','attribute_mode',
+                                         'entity_type','predicate'}}
             graph_kinds=['entity','relation']
             if attribute_mode!='none':graph_kinds.append('attribute')
             rows=self.service.scoped(p,{**record_scope,'kinds':graph_kinds})
             record['rows']=len(rows)
-            nodes={r['id']:r for r in rows if r['kind']=='entity'}
-            edges=[r for r in rows if r['kind']=='relation' and r['subject_id'] in nodes and r['object_id'] in nodes]
+            nodes={r['id']:r for r in rows
+                   if r['kind']=='entity' and (not entity_type or r['type']==entity_type)}
+            edges=[r for r in rows
+                   if r['kind']=='relation' and (not predicate or r['type']==predicate)
+                   and r['subject_id'] in nodes and r['object_id'] in nodes]
             attributes=[r for r in rows if r['kind']=='attribute' and r['subject_id'] in nodes]
             record['graph_nodes']=len(nodes)
             record['graph_edges']=len(edges)

@@ -161,6 +161,52 @@ def test_subgraph_summary_does_not_require_a_published_ontology(tmp_path):
                 if row['kind'] == 'attribute_value'] == [20]
 
 
+def test_subgraph_filters_entity_type_and_predicate_without_dangling_edges(tmp_path):
+    app = create_app(tmp_path/'filtered-explorer.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project_id = client.post('/api/projects', json={
+            'name': 'filtered explorer', 'use_default_ontology': False,
+        }).json()['id']
+        repo = app.state.service.repository
+        repo.put_batch(project_id, [
+            {'id': 'a', 'kind': 'entity', 'type': 'Thing', 'text': '甲', 'metadata': {}},
+            {'id': 'b', 'kind': 'entity', 'type': 'Thing', 'text': '乙', 'metadata': {}},
+            {'id': 's', 'kind': 'entity', 'type': 'Service', 'text': '服务', 'metadata': {}},
+            {'id': 'r-main', 'kind': 'relation', 'type': 'mentions', 'text': '甲提到乙',
+             'subject_id': 'a', 'object_id': 'b', 'metadata': {}},
+            {'id': 'r-other', 'kind': 'relation', 'type': 'ignores', 'text': '乙忽略甲',
+             'subject_id': 'b', 'object_id': 'a', 'metadata': {}},
+            {'id': 'r-cross', 'kind': 'relation', 'type': 'mentions', 'text': '甲提到服务',
+             'subject_id': 'a', 'object_id': 's', 'metadata': {}},
+        ])
+        scoped_calls = []
+        original_scoped = app.state.service.scoped
+
+        def counted_scoped(project, scope):
+            scoped_calls.append(dict(scope))
+            return original_scoped(project, scope)
+
+        app.state.service.scoped = counted_scoped
+        endpoint = f'/api/projects/{project_id}/subgraph'
+
+        default = client.post(endpoint, json={}).json()
+        assert {row['id'] for row in default['nodes']} == {'a', 'b', 's'}
+        assert {row['id'] for row in default['edges']} == {'r-main', 'r-other', 'r-cross'}
+
+        graph_filter = {'entity_type': 'Thing', 'predicate': 'mentions'}
+        full = client.post(endpoint, json=graph_filter).json()
+        seeded = client.post(endpoint, json={
+            **graph_filter, 'node_id': 'a', 'hops': 1,
+        }).json()
+        for result in (full, seeded):
+            node_ids = {row['id'] for row in result['nodes']}
+            assert node_ids == {'a', 'b'}
+            assert {row['id'] for row in result['edges']} == {'r-main'}
+            assert all(edge['subject_id'] in node_ids and edge['object_id'] in node_ids
+                       for edge in result['edges'])
+        assert all(not {'entity_type', 'predicate'} & call.keys() for call in scoped_calls)
+
+
 def test_explorer_scope_sources_snapshot_and_evaluation(tmp_path):
     with TestClient(create_app(tmp_path/'x.sqlite',HashingEncoder())) as client:
         p=client.post('/api/projects',json={'name':'explorer'}).json()['id']

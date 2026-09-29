@@ -112,6 +112,25 @@ def test_revision_and_half_open_time(client):
     assert len(client.get(path+'/rule/history').json()['versions']) == 2
 
 
+def test_get_record_respects_known_at_with_mixed_offset(client):
+    p = project(client)
+    repository = client.app.state.service.repository
+    first = repository.put_record(
+        p, {'id':'temporal', 'kind':'entity', 'type':'Merchant', 'text':'旧版本'},
+        recorded_at='2025-01-01T00:00:00.123000Z')
+    repository.put_record(
+        p, {'id':'temporal', 'kind':'entity', 'type':'Merchant', 'text':'新版本'},
+        expected_version=1, recorded_at='2025-01-01T00:00:00.123100Z')
+
+    response = client.get(
+        f'/api/projects/{p}/records/temporal',
+        params={'known_at':'2025-01-01T08:00:00.123050+08:00'})
+
+    assert response.status_code == 200, response.text
+    assert response.json()['text'] == '旧版本'
+    assert response.json()['version'] == first['version'] == 1
+
+
 def test_invalid_ontology_and_filter_rollback(client):
     p = project(client)
     path = f'/api/projects/{p}'

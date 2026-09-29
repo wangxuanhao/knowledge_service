@@ -4,7 +4,13 @@
   const graphRequests=GraphTypeFilter.createGraphRequestGate();
   const get = id => document.getElementById(id);
   const make = (tag, html, className='') => {const e=document.createElement(tag);e.innerHTML=html;e.className=className;return e;};
-  const act = (id, fn) => {get(id).onclick=async()=>{get(id).disabled=true;try{await fn();}catch(e){status(e.message,true);}finally{get(id).disabled=false;}};};
+  const graphExpandState={busy:false,pendingDetail:false};
+  function syncGraphExpandDisabled(){get('graph-expand').disabled=graphExpandState.busy||graphExpandState.pendingDetail;}
+  function setActionBusy(id,busy){
+    if(id==='graph-expand'){graphExpandState.busy=busy;syncGraphExpandDisabled();}
+    else get(id).disabled=busy;
+  }
+  const act = (id, fn) => {get(id).onclick=async()=>{setActionBusy(id,true);try{await fn();}catch(e){status(e.message,true);}finally{setActionBusy(id,false);}};};
   const ontoName=t=>t.label_zh||((t.label&&t.label!==t.name)?t.label:'')||({'name':'名称'}[t.name])||t.description||t.name||'';
 
   // ── Metadata condition builder ──
@@ -146,20 +152,75 @@
   get('draw-mindmap').onclick=async()=>{if(!select.value){status('当前筛选范围内没有可选实体',true);return;}await oldMindmap();wb.tree?.setOption({series:[{initialTreeDepth:1,label:{position:'right',align:'left',width:170,overflow:'truncate',fontSize:11},leaves:{label:{position:'right',align:'left',width:170,overflow:'truncate',fontSize:11}}}]});};
   function choices(){
     for(const [selectId,filterId] of [['mindmap-root','mindmap-filter'],['graph-entity-choice','graph-entity-filter']]){
-      const previous=get(selectId).value, query=get(filterId).value.trim().toLocaleLowerCase();
-      const rows=ui.options.filter(r=>(r.text+' '+labelOf(r.type)+' '+term(r.type)).toLocaleLowerCase().includes(query));
+      const element=get(selectId),previous=element.value, query=get(filterId).value.trim().toLocaleLowerCase();
+      let rows=ui.options.filter(r=>(r.text+' '+labelOf(r.type)+' '+term(r.type)).toLocaleLowerCase().includes(query));
+      if(selectId==='graph-entity-choice'&&selectedEntityId&&!rows.some(r=>r.id===selectedEntityId)){
+        const committed=ui.options.find(r=>r.id===selectedEntityId);
+        if(committed)rows=[...rows,committed];
+      }
       // 同名同类型重复实体显示来源文档，方便区分（比 ID 更友好）
       const counts=new Map();
       rows.forEach(r=>{const key=r.text+'|'+labelOf(r.type);counts.set(key,(counts.get(key)||0)+1);});
-      get(selectId).innerHTML=(selectId==='graph-entity-choice'?'<option value="">选择实体</option>':'')+rows.map(r=>{const key=r.text+'|'+labelOf(r.type);const dup=(counts.get(key)||0)>1;const src=r.source?(' · '+String(r.source).replace(/\.(md|txt|docx?)$/i,'').slice(0,16)):'';return `<option value="${esc(r.id)}" title="${esc(term(r.type))}">${esc(r.text)} · ${esc(labelOf(r.type))}${dup?esc(src):''}</option>`;}).join('');
-      if(rows.some(r=>r.id===previous))get(selectId).value=previous;
+      element.innerHTML=(selectId==='graph-entity-choice'?'<option value="">选择实体</option>':'')+rows.map(r=>{const key=r.text+'|'+labelOf(r.type);const dup=(counts.get(key)||0)>1;const src=r.source?(' · '+String(r.source).replace(/\.(md|txt|docx?)$/i,'').slice(0,16)):'';return `<option value="${esc(r.id)}" title="${esc(term(r.type))}">${esc(r.text)} · ${esc(labelOf(r.type))}${dup?esc(src):''}</option>`;}).join('');
+      if(rows.some(r=>r.id===previous))element.value=previous;
+      if(selectId==='graph-entity-choice'&&pendingEntityId&&element.value!==pendingEntityId)invalidatePendingDetail();
     }
   }
   get('mindmap-filter').oninput=choices;
-  let entityTimer;
+  let selectedEntityId='',pendingEntityId='',detailSelectionEpoch=0;
+  const detailScope=()=>({valid_at:scope().valid_at||null,known_at:get('known-at').value||null});
+  function restoreCommittedSelection(){
+    get('graph-entity-choice').value=selectedEntityId;
+    get('graph-node').value=selectedEntityId;
+  }
+  function settlePendingDetail(token){
+    if(token!==detailSelectionEpoch||!pendingEntityId)return false;
+    restoreCommittedSelection();
+    pendingEntityId='';
+    graphExpandState.pendingDetail=false;
+    syncGraphExpandDisabled();
+    return true;
+  }
+  function invalidatePendingDetail(){
+    settlePendingDetail(detailSelectionEpoch);
+    detailSelectionEpoch++;
+  }
+  function beginPendingDetail(id){
+    const token=++detailSelectionEpoch;
+    pendingEntityId=id;
+    graphExpandState.pendingDetail=true;
+    syncGraphExpandDisabled();
+    return token;
+  }
   get('graph-entity-filter').oninput=choices;
   get('graph-entity-filter').onkeydown=e=>{if(e.key==='Enter'&&get('graph-entity-choice').value)get('graph-entity-choice').onchange();};
-  get('graph-entity-choice').onchange=async()=>{clearTimeout(entityTimer);const id=get('graph-entity-choice').value;if(!id)return;get('graph-node').value=id;ui.request++;const hops=Number(get('graph-hops').value);try{if(!await drawGraph(id,hops))return;const row=wb.nodes.get(id);if(row){inspect(row);status('已定位：'+row.text+' · 展示 '+hops+' 跳邻域');}}catch(e){status(e.message,true);}};
+  get('graph-entity-choice').onchange=async()=>{
+    const choice=get('graph-entity-choice'),id=choice.value;
+    if(!id){invalidatePendingDetail();restoreCommittedSelection();return;}
+    const local=wb.nodes.get(id);
+    if(local){inspect(local);status('已选择：'+local.text+' · 点击“展开邻域”查看邻域');return;}
+    const token=beginPendingDetail(id),project=current;
+    try{
+      const temporal=detailScope(),stamp=JSON.stringify(temporal);
+      const isCurrent=()=>token===detailSelectionEpoch&&pendingEntityId===id&&project===current&&choice.value===id&&JSON.stringify(detailScope())===stamp;
+      const params=new URLSearchParams();
+      for(const key of ['valid_at','known_at'])if(temporal[key])params.set(key,temporal[key]);
+      const query=params.size?'?'+params.toString():'';
+      const row=await api(endpoint('/records/'+encodeURIComponent(id)+query),undefined,'GET');
+      if(!isCurrent()){settlePendingDetail(token);return;}
+      inspect(row);status('已选择：'+row.text+' · 点击“展开邻域”查看邻域');
+    }catch(error){if(settlePendingDetail(token))status(error.message,true);}
+  };
+  async function selectEntityDetail(id){
+    const choice=get('graph-entity-choice');
+    if(![...choice.options].some(option=>option.value===id)){
+      get('graph-entity-filter').value='';choices();
+    }
+    choice.value=id;
+    if(choice.value!==id)throw Error('当前范围内没有该实体');
+    await choice.onchange();
+  }
+  window.selectEntityDetail=selectEntityDetail;
 
   async function options(){
     const p=current, stamp=JSON.stringify(scope());if(!p)return;
@@ -174,13 +235,14 @@
     }
   }
   function inspect(row){
+    invalidatePendingDetail();
     if(GraphTypeFilter.isAttributeNode(row)){
       const entity=wb.nodes.get(row.subject_id);
       if(entity)return inspect(entity);
       return;
     }
-    get('graph-node').value=row.kind==='entity'?row.id:row.subject_id;
-    if(row.kind==='entity'){get('mindmap-root').value=row.id;get('graph-entity-choice').value=row.id;}
+    const isEntity=row.kind==='entity';
+    if(isEntity){selectedEntityId=row.id;get('graph-node').value=row.id;get('mindmap-root').value=row.id;get('graph-entity-choice').value=row.id;}
     window.renderEvidenceInspector(row,ui.options);
   }
   function renderGraph(result, selectedType='', base=result){
@@ -199,16 +261,11 @@
     ui.graph=result;wb.nodes=new Map(result.nodes.map(n=>[n.id,n]));
     const chart=initChart(), types=[...new Set(result.nodes.map(n=>GraphTypeFilter.isAttributeNode(n)?'属性值':(n.type_label||displayType(n.type))))], matched=new Set(result.matched_ids||[]);
     chart.resize();
-    chart.off('click');chart.on('click',async p=>{
+    chart.off('click');chart.on('click',p=>{
       const row=p.dataType==='edge'?result.edges.find(e=>e.id===p.data.id):wb.nodes.get(p.data.id);
       if(!row)return;
       if(GraphTypeFilter.isAttributeEdge(row)||GraphTypeFilter.isAttributeNode(row)){
         const entity=wb.nodes.get(row.subject_id);if(entity)inspect(entity);return;
-      }
-      if(row.kind==='entity'&&(base.attribute_mode!=='expanded'||base.selected_node_id!==row.id)){
-        try{if(!await drawGraph(row.id,Number(get('graph-hops').value)))return;const selected=wb.nodes.get(row.id);if(selected)inspect(selected);}
-        catch(error){status(error.message,true);}
-        return;
       }
       inspect(row);
     });
@@ -257,7 +314,7 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
       const rows=result.hits.filter(r=>r.kind===kind);
       return `<section><h3 class="hit-kind">${{entity:'匹配实体',chunk:'原文片段',relation:'关系链路'}[kind]} <small>${rows.length} / ${result.channel_quotas?.[kind]??5}</small></h3>${rows.map(r=>`<article class="hit-entry"><b>${esc(r.text.slice(0,80))}</b><span>${esc(labelOf(r.type)||'原文')} · ${Number(r.score||r.keyword_score||0).toFixed(2)}</span><p>${esc(r.text.slice(0,180))}</p><div class="row">${kind==='entity'||kind==='relation'?`<button data-graph-node="${esc(kind==='entity'?r.id:r.subject_id)}">在图谱中查看</button>`:''}${kind==='chunk'&&r.source_id?`<button data-source-record="${esc(r.source_id)}" class="secondary">查看原文</button>`:''}</div></article>`).join('')||'<p class="subtle">暂无命中</p>'}</section>`;
     }).join('');
-    get('hits').querySelectorAll('[data-graph-node]').forEach(b=>b.onclick=async()=>{get('graph-node').value=b.dataset.graphNode;await drawGraph(b.dataset.graphNode,Number(get('graph-hops').value));});
+    get('hits').querySelectorAll('[data-graph-node]').forEach(b=>b.onclick=async()=>{try{await selectEntityDetail(b.dataset.graphNode);}catch(error){status(error.message,true);}});
     get('hits').querySelectorAll('[data-source-record]').forEach(b=>b.onclick=()=>historyFor({id:b.dataset.sourceRecord}));
   }
   async function runSearch(){
@@ -280,21 +337,24 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
   // 图谱渲染器的唯一实现，显式挂到 window（不再依赖非严格模式下的隐式全局赋值）。
   // workbench.js 的 #graph-expand / #load-graph / 证据条目三个入口都按名字引用这个槽位，
   // 见下方 act('graph-expand') 与 workbench.js 注释。
+  const graphScope=()=>({...scope(),valid_at:null,
+    entity_type:get('type-scope').value||null,
+    predicate:get('predicate-scope').value||null});
   window.drawGraph=async(node=null,hops=1)=>{
     // node 省略时渲染当前 scope 的全图（后端 node_id=null 返回全 scope，见 explorer.py:16）
-    const id=node||get('graph-node').value||get('graph-entity-choice').value||null;
-    const project=current,scopeSnapshot={...scope(),valid_at:null};
+    const id=node||null;
+    const project=current,scopeSnapshot=graphScope();
     const ticket=graphRequests.begin(project,scopeSnapshot,id);
     const done=kgTime('subgraph');
     try{
       let result;
-      try{result=await scopedRead('/subgraph',{node_id:id,hops,valid_at:null,
+      try{result=await scopedRead('/subgraph',{...scopeSnapshot,node_id:id,hops,
         attribute_mode:id?'expanded':'summary'});}
       catch(error){
-        if(!graphRequests.isCurrent(ticket,current,{...scope(),valid_at:null},id))return null;
+        if(!graphRequests.isCurrent(ticket,current,graphScope(),id))return null;
         throw error;
       }
-      if(!graphRequests.isCurrent(ticket,current,{...scope(),valid_at:null},id))return null;
+      if(!graphRequests.isCurrent(ticket,current,graphScope(),id))return null;
       done({node:id||'all',hops,nodes:result.nodes.length,edges:result.edges.length,server_ms:result.timing_ms?.total??'—'});
       renderGraph(result);
       // 开放本体发现的提示条要跟着图谱一起刷新：这原本只在 workbench.js 的旧 drawGraph 副本里做，
@@ -306,9 +366,9 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
     }
   };
   window.clearGraphWorkspace=({preserveSearchResults=false}={})=>{
-    graphRequests.invalidate();
+    graphRequests.invalidate();invalidatePendingDetail();
     wb.epoch++;ui.graph=null;wb.nodes.clear();wb.chart?.clear();
-    get('graph-node').value='';get('graph-entity-choice').value='';get('graph-detail').replaceChildren();
+    selectedEntityId='';get('graph-node').value='';get('graph-entity-choice').value='';get('graph-detail').replaceChildren();
     get('graph-summary').textContent='从左侧检索结果选择实体或关系';
     get('graph-type-buttons')?.remove();get('graph-timeline')?.remove();
     if(!preserveSearchResults){get('hits').replaceChildren();get('search-summary').textContent='';}
@@ -329,13 +389,13 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
   act('reset-scope',async()=>{for(const id of ['known-at','filters','type-scope','predicate-scope'])get(id).value='';cb.conditions=[];renderCB();resetTimeline();window.clearGraphWorkspace({preserveSearchResults:true});window.clearKnowledgeChat?.({notify:true});await options();});
   act('build-index',async()=>{watch(await api(endpoint('/indexes/rebuild'),{}));status('索引任务已提交；可继续浏览图谱或使用关键词检索。');});
   act('graph-reset-view',async()=>{wb.chart?.dispatchAction({type:'restore'});wb.chart?.resize();});
-  get('detail-drawer-close').onclick=()=>get('graph-detail').replaceChildren();
+  get('detail-drawer-close').onclick=()=>{invalidatePendingDetail();get('graph-detail').replaceChildren();};
   get('query').onkeydown=e=>{if(e.key==='Enter')get('search').click();};
   // Ignore out-of-order project responses, and load graph immediately on selection.
   const priorChange=get('project').onchange;
   get('project').onchange=()=>{
     priorChange();ui.request++;ui.options=[];choices();ui.ontology=null;resetTimeline();window.clearGraphWorkspace();get('ontology-browser')?.replaceChildren();
-    clearTimeout(entityTimer);get('graph-entity-filter').value='';cb.facets=[];cb.conditions=[];renderCB();get('metadata-field-choice').innerHTML='<option value="">读取项目字段…</option>';get('metadata-value-choice').innerHTML='<option value="">先选择字段</option>';get('metadata-facet-summary').textContent='';
+    get('graph-entity-filter').value='';cb.facets=[];cb.conditions=[];renderCB();get('metadata-field-choice').innerHTML='<option value="">读取项目字段…</option>';get('metadata-value-choice').innerHTML='<option value="">先选择字段</option>';get('metadata-facet-summary').textContent='';
     get('project').title=get('project').selectedOptions[0]?.textContent||'';
     get('type-scope').value='';get('predicate-scope').value='';
     get('query').value='';get('graph-node').value='';updateChip();

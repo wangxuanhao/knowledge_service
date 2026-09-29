@@ -473,7 +473,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     toggle.onclick=()=>{const open=toggle.getAttribute('aria-expanded')==='true';toggle.setAttribute('aria-expanded',String(!open));panel.hidden=open;};
     panel.querySelectorAll('[data-evidence-node]').forEach(node=>{node.onclick=async()=>{
       showTab('search');
-      try{await window.drawGraph(node.dataset.evidenceNode,GRAPH_HOPS);}catch(error){status(error.message,true);}
+      try{await window.selectEntityDetail(node.dataset.evidenceNode);}catch(error){status(error.message,true);}
       $c('graph-heading')?.focus();
     };});
     panel.querySelectorAll('[data-evidence-source]').forEach(node=>{node.onclick=async()=>{

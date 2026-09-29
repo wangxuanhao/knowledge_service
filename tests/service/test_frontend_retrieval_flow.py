@@ -23,7 +23,7 @@ SEARCH_BODY_FIELDS = {
 }
 SUBGRAPH_BODY_FIELDS = {
     'node_id', 'hops', 'filters', 'valid_at', 'known_at', 'include_unknown',
-    'attribute_mode',
+    'attribute_mode', 'entity_type', 'predicate',
 }
 
 
@@ -52,8 +52,13 @@ def _seed(repository, project_id):
         {'id': 'a', 'kind': 'entity', 'type': 'Thing', 'text': '退款商户', 'metadata': {}},
         {'id': 'b', 'kind': 'entity', 'type': 'Thing', 'text': '退款平台', 'metadata': {}},
         {'id': 'x', 'kind': 'entity', 'type': 'Thing', 'text': '无关实体', 'metadata': {}},
+        {'id': 's', 'kind': 'entity', 'type': 'Service', 'text': '结算服务', 'metadata': {}},
         {'id': 'r', 'kind': 'relation', 'type': 'mentions', 'text': '退款关系',
          'subject_id': 'a', 'object_id': 'b', 'metadata': {}},
+        {'id': 'r-alt', 'kind': 'relation', 'type': 'ignores', 'text': '忽略关系',
+         'subject_id': 'b', 'object_id': 'x', 'metadata': {}},
+        {'id': 'r-cross', 'kind': 'relation', 'type': 'supports', 'text': '服务支持',
+         'subject_id': 'a', 'object_id': 's', 'metadata': {}},
         {'id': 'c', 'kind': 'chunk', 'text': '退款需要原始凭证', 'source_id': 'd', 'metadata': {}},
         {'id': 'd', 'kind': 'document', 'text': '退款规则原文', 'metadata': {'title': '退款规则'}},
     ])
@@ -151,6 +156,65 @@ def _graph_node_ids(page):
       const series = chart.getOption().series.find(item => item.type === 'graph');
       return (series?.data || []).map(item => String(item.id)).sort();
     }""")
+
+
+def _graph_edge_ids(page):
+    return page.evaluate("""() => {
+      const chart = window.echarts.getInstanceByDom(document.getElementById('graph-canvas'));
+      const series = chart.getOption().series.find(item => item.type === 'graph');
+      return (series?.links || series?.edges || []).map(item => String(item.id)).sort();
+    }""")
+
+
+def _assert_complete_entity_inspector(page, text):
+    detail = page.locator('#graph-detail')
+    detail_text = detail.inner_text()
+    assert text in detail_text
+    assert '版本历史 · v1' in detail_text
+    assert '新增关系' in detail_text
+    assert '展开脑图' in detail_text
+    assert 'undefined' not in detail_text
+
+
+def _render_a_neighborhood(page):
+    page.select_option('#graph-entity-choice', 'a')
+    page.wait_for_function(
+        "document.querySelector('#graph-detail').textContent.includes('退款商户')")
+    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+        page.click('#graph-expand')
+    page.wait_for_function("""() => {
+      const chart = window.echarts.getInstanceByDom(document.getElementById('graph-canvas'));
+      const series = chart.getOption().series.find(item => item.type === 'graph');
+      return series && !series.data.some(item => item.id === 'x');
+    }""")
+
+
+def _hold_record_request(page, record_id='x'):
+    pattern = re.compile(rf'/records/{re.escape(record_id)}(?:\?.*)?$')
+    held = []
+
+    def hold(route):
+        held.append(route)
+
+    page.route(pattern, hold)
+    return pattern, hold, held
+
+
+def _is_record_exchange(exchange, record_id='x'):
+    request = exchange.request if hasattr(exchange, 'request') else exchange
+    return (request.method == 'GET'
+            and urlparse(request.url).path.endswith(f'/records/{record_id}'))
+
+
+def _release_record_request(page, held, record_id='x'):
+    assert len(held) == 1
+    with page.expect_response(lambda response: _is_record_exchange(response, record_id)) as info:
+        held.pop().continue_()
+    response = info.value
+    response.body()
+    page.evaluate("""() => new Promise(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve)))""")
+    return response
 
 
 def _stable_graph_summary(page):
@@ -257,6 +321,16 @@ def test_entity_selection_requires_explicit_expand_and_full_graph_ignores_select
     page.wait_for_timeout(120)
     assert not any(path.endswith('/subgraph') for path in workbench.paths)
     assert page.locator('#graph-summary').inner_text() == full_summary
+    _assert_complete_entity_inspector(page, '退款商户')
+
+    detail_before = page.locator('#graph-detail').inner_html()
+    workbench.paths.clear()
+    page.select_option('#graph-entity-choice', '')
+    page.wait_for_timeout(120)
+    assert page.locator('#graph-entity-choice').input_value() == 'a'
+    assert page.locator('#graph-node').input_value() == 'a'
+    assert page.locator('#graph-detail').inner_html() == detail_before
+    assert workbench.paths == []
 
     workbench.paths.clear()
     with page.expect_response(lambda response: response.url.endswith('/subgraph')):
@@ -286,6 +360,264 @@ def test_entity_selection_requires_explicit_expand_and_full_graph_ignores_select
     assert page.locator('#graph-entity-choice').input_value() == 'a'
     assert page.locator('#graph-node').input_value() == 'a'
     assert '退款商户' in page.locator('#graph-detail').inner_text()
+
+
+def test_entity_selection_fetches_complete_detail_outside_rendered_neighborhood(workbench):
+    page = workbench.page
+    _render_a_neighborhood(page)
+    neighborhood_node_ids = _graph_node_ids(page)
+    summary_before = page.locator('#graph-summary').inner_text()
+    workbench.paths.clear()
+
+    pattern, handler, held = _hold_record_request(page)
+    try:
+        with page.expect_request(_is_record_exchange):
+            page.select_option('#graph-entity-choice', 'x')
+        assert page.locator('#graph-expand').is_disabled()
+        assert page.locator('#graph-node').input_value() == 'a'
+        assert page.locator('#graph-entity-choice').input_value() == 'x'
+        assert '退款商户' in page.locator('#graph-detail').inner_text()
+
+        response = _release_record_request(page, held)
+        assert response.status == 200
+        page.wait_for_function("""() =>
+          document.querySelector('#graph-detail').textContent.includes('无关实体')
+          && !document.querySelector('#graph-expand').disabled""")
+    finally:
+        for route in held:
+            route.abort()
+        page.unroute(pattern, handler)
+
+    assert f'/api/projects/{workbench.project}/records/x' in workbench.paths
+    assert not any(path.endswith('/subgraph') for path in workbench.paths)
+    assert _graph_node_ids(page) == neighborhood_node_ids
+    assert page.locator('#graph-summary').inner_text() == summary_before
+    assert page.locator('#graph-node').input_value() == 'x'
+    assert page.locator('#graph-entity-choice').input_value() == 'x'
+    _assert_complete_entity_inspector(page, '无关实体')
+
+
+def test_expand_stays_disabled_until_pending_entity_detail_resolves(workbench):
+    page = workbench.page
+    _render_a_neighborhood(page)
+    subgraph_pattern = re.compile(r'/subgraph$')
+    held_subgraphs = []
+
+    def hold_subgraph(route):
+        held_subgraphs.append(route)
+
+    page.route(subgraph_pattern, hold_subgraph)
+    record_pattern, record_handler, held_records = _hold_record_request(page)
+    try:
+        with page.expect_request(lambda request: request.url.endswith('/subgraph')):
+            page.click('#graph-expand')
+        assert page.locator('#graph-expand').is_disabled()
+
+        with page.expect_request(_is_record_exchange):
+            page.select_option('#graph-entity-choice', 'x')
+        assert page.locator('#graph-expand').is_disabled()
+
+        assert len(held_subgraphs) == 1
+        with page.expect_response(
+                lambda response: response.url.endswith('/subgraph')) as info:
+            held_subgraphs.pop().continue_()
+        assert info.value.status == 200
+        info.value.body()
+        page.evaluate("""() => new Promise(resolve =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)))""")
+
+        assert page.locator('#graph-expand').is_disabled()
+
+        response = _release_record_request(page, held_records)
+        assert response.status == 200
+        assert page.locator('#graph-expand').is_enabled()
+    finally:
+        for route in held_subgraphs + held_records:
+            route.abort()
+        page.unroute(subgraph_pattern, hold_subgraph)
+        page.unroute(record_pattern, record_handler)
+
+
+def test_entity_filter_removal_rolls_back_pending_detail(workbench):
+    page = workbench.page
+    _render_a_neighborhood(page)
+    pattern, handler, held = _hold_record_request(page)
+    try:
+        with page.expect_request(_is_record_exchange):
+            page.select_option('#graph-entity-choice', 'x')
+        assert page.locator('#graph-expand').is_disabled()
+
+        page.fill('#graph-entity-filter', '退款')
+        assert page.locator('#graph-entity-choice').input_value() == 'a'
+        assert page.locator('#graph-node').input_value() == 'a'
+        assert page.locator('#graph-expand').is_enabled()
+
+        response = _release_record_request(page, held)
+        assert response.status == 200
+    finally:
+        for route in held:
+            route.abort()
+        page.unroute(pattern, handler)
+
+    assert '退款商户' in page.locator('#graph-detail').inner_text()
+    assert '无关实体' not in page.locator('#graph-detail').inner_text()
+
+
+def test_entity_filter_keeps_committed_fallback_when_no_entities_match(workbench):
+    page = workbench.page
+    _render_a_neighborhood(page)
+    pattern, handler, held = _hold_record_request(page)
+    try:
+        with page.expect_request(_is_record_exchange):
+            page.select_option('#graph-entity-choice', 'x')
+        assert page.locator('#graph-expand').is_disabled()
+
+        page.fill('#graph-entity-filter', '完全不匹配')
+        assert page.locator('#graph-entity-filter').input_value() == '完全不匹配'
+        assert page.locator('#graph-entity-choice option').evaluate_all(
+            '(options) => options.map(option => option.value)') == ['', 'a']
+        assert page.locator('#graph-entity-choice').input_value() == 'a'
+        assert page.locator('#graph-node').input_value() == 'a'
+        assert page.locator('#graph-expand').is_enabled()
+
+        response = _release_record_request(page, held)
+        assert response.status == 200
+    finally:
+        for route in held:
+            route.abort()
+        page.unroute(pattern, handler)
+
+    assert page.locator('#graph-entity-filter').input_value() == '完全不匹配'
+    assert page.locator('#graph-entity-choice').input_value() == 'a'
+    assert '退款商户' in page.locator('#graph-detail').inner_text()
+    assert '无关实体' not in page.locator('#graph-detail').inner_text()
+
+
+def test_invalid_detail_scope_rolls_back_pending_detail(workbench):
+    page = workbench.page
+    _render_a_neighborhood(page)
+    page.fill('#filters', '{')
+
+    page.select_option('#graph-entity-choice', 'x')
+    page.evaluate("""() => new Promise(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve)))""")
+
+    assert page.locator('#graph-entity-choice').input_value() == 'a'
+    assert page.locator('#graph-node').input_value() == 'a'
+    assert page.locator('#graph-expand').is_enabled()
+    assert '退款商户' in page.locator('#graph-detail').inner_text()
+    assert not any(path.endswith('/records/x') for path in workbench.paths)
+    assert workbench.errors == []
+
+
+def test_late_entity_detail_does_not_replace_relation_detail(workbench):
+    page = workbench.page
+    _render_a_neighborhood(page)
+
+    pattern, handler, held = _hold_record_request(page)
+    try:
+        with page.expect_request(_is_record_exchange):
+            page.select_option('#graph-entity-choice', 'x')
+        assert page.locator('#graph-expand').is_disabled()
+        _trigger_graph_click(page, 'edge', 'r')
+        page.wait_for_function(
+            "document.querySelector('#graph-detail').textContent.includes('退款关系')")
+        assert page.locator('#graph-entity-choice').input_value() == 'a'
+        assert page.locator('#graph-node').input_value() == 'a'
+        assert page.locator('#graph-expand').is_enabled()
+
+        response = _release_record_request(page, held)
+        assert response.status == 200
+    finally:
+        for route in held:
+            route.abort()
+        page.unroute(pattern, handler)
+
+    detail = page.locator('#graph-detail').inner_text()
+    assert '退款关系' in detail
+    assert '无关实体' not in detail
+    assert page.locator('#graph-entity-choice').input_value() == 'a'
+    assert page.locator('#graph-node').input_value() == 'a'
+    assert page.locator('#graph-expand').is_enabled()
+
+    bodies = []
+    page.on('request', lambda request: bodies.append(request.post_data_json)
+            if request.url.endswith('/subgraph') else None)
+    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+        page.click('#graph-expand')
+    assert bodies[-1]['node_id'] == 'a'
+
+
+def test_late_entity_detail_does_not_reopen_closed_drawer(workbench):
+    page = workbench.page
+    _render_a_neighborhood(page)
+
+    pattern, handler, held = _hold_record_request(page)
+    try:
+        with page.expect_request(_is_record_exchange):
+            page.select_option('#graph-entity-choice', 'x')
+        assert page.locator('#graph-expand').is_disabled()
+        page.evaluate("() => document.getElementById('detail-drawer-close').click()")
+        assert page.locator('#graph-detail').inner_html() == ''
+        assert page.locator('#graph-entity-choice').input_value() == 'a'
+        assert page.locator('#graph-node').input_value() == 'a'
+        assert page.locator('#graph-expand').is_enabled()
+
+        response = _release_record_request(page, held)
+        assert response.status == 200
+    finally:
+        for route in held:
+            route.abort()
+        page.unroute(pattern, handler)
+
+    assert page.locator('#graph-detail').inner_html() == ''
+    assert page.locator('#graph-entity-choice').input_value() == 'a'
+    assert page.locator('#graph-node').input_value() == 'a'
+    assert page.locator('#graph-expand').is_enabled()
+
+
+def test_failed_entity_read_restores_committed_selection(workbench):
+    page = workbench.page
+    _render_a_neighborhood(page)
+    detail_before = page.locator('#graph-detail').inner_html()
+
+    def fail_record(route):
+        route.fulfill(status=500, json={'detail': 'record failed'})
+
+    pattern = re.compile(r'/records/x(?:\?.*)?$')
+    page.route(pattern, fail_record)
+    try:
+        with page.expect_response(_is_record_exchange):
+            page.select_option('#graph-entity-choice', 'x')
+        page.wait_for_function(
+            "document.querySelector('#status').textContent.includes('record failed')")
+    finally:
+        page.unroute(pattern, fail_record)
+
+    assert page.locator('#graph-entity-choice').input_value() == 'a'
+    assert page.locator('#graph-node').input_value() == 'a'
+    assert page.locator('#graph-detail').inner_html() == detail_before
+    assert page.locator('#graph-expand').is_enabled()
+
+
+def test_relation_detail_preserves_entity_selection_for_expand(workbench):
+    page = workbench.page
+    page.select_option('#graph-entity-choice', 'b')
+    page.wait_for_function(
+        "document.querySelector('#graph-detail').textContent.includes('退款平台')")
+
+    _trigger_graph_click(page, 'edge', 'r')
+    page.wait_for_function(
+        "document.querySelector('#graph-detail').textContent.includes('退款关系')")
+    assert page.locator('#graph-entity-choice').input_value() == 'b'
+    assert page.locator('#graph-node').input_value() == 'b'
+
+    bodies = []
+    page.on('request', lambda request: bodies.append(request.post_data_json)
+            if request.url.endswith('/subgraph') else None)
+    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+        page.click('#graph-expand')
+    assert bodies[-1]['node_id'] == 'b'
 
 
 def test_search_button_and_enter_each_issue_exactly_one_search(workbench):
@@ -318,34 +650,38 @@ def test_search_button_and_enter_each_issue_exactly_one_search(workbench):
     assert bodies[1]['include_unknown'] is True
 
 
-def test_entity_and_relation_hits_each_load_one_scoped_subgraph(workbench):
+def test_entity_and_relation_hits_select_consistent_detail_without_redraw(workbench):
     page = workbench.page
     page.click('[data-tab="search"]')
     _search(page)
-    subgraph_path = f'/api/projects/{workbench.project}/subgraph'
+    graph_nodes = _graph_node_ids(page)
+    graph_summary = page.locator('#graph-summary').inner_text()
 
     for index, expected_seed in ((0, 'a'), (2, 'a')):
         workbench.paths.clear()
-        bodies = []
-        page.once('request', lambda request: bodies.append(request.post_data_json)
-                  if request.url.endswith('/subgraph') else None)
-        with page.expect_response(lambda response: response.url.endswith('/subgraph')):
-            page.locator('#hits > section').nth(index).locator('[data-graph-node]').first.click()
-        assert workbench.paths.count(subgraph_path) == 1
+        page.locator('#hits > section').nth(index).locator('[data-graph-node]').first.click()
+        page.evaluate("""() => new Promise(resolve =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)))""")
+        assert not any(path.endswith('/subgraph') for path in workbench.paths)
         assert not any(path.endswith('/explore') or path.endswith('/search')
                        for path in workbench.paths)
-        assert bodies and set(bodies[0]) == SUBGRAPH_BODY_FIELDS
-        assert bodies[0]['node_id'] == expected_seed
+        assert page.locator('#graph-entity-choice').input_value() == expected_seed
+        assert page.locator('#graph-node').input_value() == expected_seed
+        assert '退款商户' in page.locator('#graph-detail').inner_text()
+        assert _graph_node_ids(page) == graph_nodes
+        assert page.locator('#graph-summary').inner_text() == graph_summary
         assert page.locator('[data-tab="search"]').get_attribute('class') == 'active'
-        assert page.locator('#graph-summary').inner_text() != INITIAL_GRAPH_HINT
 
 
 def test_project_and_scope_changes_clear_isolated_state(workbench):
     page = workbench.page
     page.click('[data-tab="search"]')
     _search(page)
+    page.locator('#hits > section').nth(0).locator('[data-graph-node]').first.click()
+    page.wait_for_function(
+        "document.querySelector('#graph-detail').textContent.includes('退款商户')")
     with page.expect_response(lambda response: response.url.endswith('/subgraph')):
-        page.locator('#hits > section').nth(0).locator('[data-graph-node]').first.click()
+        page.click('#graph-expand')
     hits_after_graph = page.locator('#hits').inner_html()
 
     # Scope change clears graph, selection and details but keeps the result rail.
@@ -366,8 +702,11 @@ def test_project_and_scope_changes_clear_isolated_state(workbench):
     assert not any(path.endswith('/subgraph') for path in workbench.paths)
 
     # The knowledge-time switch clears the graph without re-loading it.
+    page.locator('#hits > section').nth(0).locator('[data-graph-node]').first.click()
+    page.wait_for_function(
+        "document.querySelector('#graph-detail').textContent.includes('退款商户')")
     with page.expect_response(lambda response: response.url.endswith('/subgraph')):
-        page.locator('#hits > section').nth(0).locator('[data-graph-node]').first.click()
+        page.click('#graph-expand')
     page.wait_for_function(
         "document.querySelectorAll('#graph-timeline .tl-points option').length > 1")
     hits_before_time = page.locator('#hits').inner_html()
@@ -396,6 +735,46 @@ def test_project_and_scope_changes_clear_isolated_state(workbench):
         page.select_option('#project', other)
     cleared = _graph_clear_snapshot(page, '__projectClearSnapshot')
     assert cleared == {'hits': '', 'summary': INITIAL_GRAPH_HINT, 'detail': '', 'node': ''}
+
+
+def test_graph_scope_filters_survive_expand_and_explicit_full_redraw(workbench):
+    page = workbench.page
+    assert _graph_node_ids(page) == ['a', 'b', 's', 'x']
+    assert _graph_edge_ids(page) == ['r', 'r-alt', 'r-cross']
+
+    bodies = []
+    page.on('request', lambda request: bodies.append(request.post_data_json)
+            if request.url.endswith('/subgraph') else None)
+    page.select_option('#type-scope', 'Thing')
+    page.select_option('#predicate-scope', 'mentions')
+    with page.expect_response(lambda response: response.url.endswith('/metadata/facets')):
+        page.click('#apply-scope')
+    assert page.locator('#type-scope').input_value() == 'Thing'
+    assert page.locator('#predicate-scope').input_value() == 'mentions'
+
+    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+        page.click('#draw-graph')
+    assert _graph_node_ids(page) == ['a', 'b', 'x']
+    assert _graph_edge_ids(page) == ['r']
+
+    page.select_option('#graph-entity-choice', 'a')
+    page.wait_for_function(
+        "document.querySelector('#graph-detail').textContent.includes('退款商户')")
+    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+        page.click('#graph-expand')
+    assert _graph_node_ids(page) == ['a', 'b']
+    assert _graph_edge_ids(page) == ['r']
+
+    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+        page.click('#draw-graph')
+    assert _graph_node_ids(page) == ['a', 'b', 'x']
+    assert _graph_edge_ids(page) == ['r']
+    assert page.locator('#type-scope').input_value() == 'Thing'
+    assert page.locator('#predicate-scope').input_value() == 'mentions'
+    assert len(bodies) == 3
+    assert [body['node_id'] for body in bodies] == [None, 'a', None]
+    assert all(body['entity_type'] == 'Thing' and body['predicate'] == 'mentions'
+               for body in bodies)
 
 
 # ── 图谱渲染器只能有一份实现（双 UI 收敛的防回归闸门） ──
@@ -433,9 +812,10 @@ def test_draw_and_expand_buttons_share_the_single_graph_renderer(workbench):
     page.click('[data-tab="search"]')
     _search(page)
 
-    # 检索命中进图谱：workspace.js 的实体入口
-    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
-        page.locator('#hits > section').nth(0).locator('[data-graph-node]').first.click()
+    # 检索命中先走统一详情选择；只有下方显式「展开邻域」才请求子图。
+    page.locator('#hits > section').nth(0).locator('[data-graph-node]').first.click()
+    page.wait_for_function(
+        "document.querySelector('#graph-detail').textContent.includes('退款商户')")
     assert page.locator('#graph-type-buttons').count() == 1
     assert '服务' in page.locator('#graph-summary').inner_text()
 
@@ -674,16 +1054,19 @@ def test_knowledge_chat_evidence_disclosure_and_cross_menu_navigation(workbench)
 
     graph_buttons = page.locator(f'#{panel_id} [data-evidence-node]')
     assert graph_buttons.count() >= 1
+    graph_nodes = _graph_node_ids(page)
+    graph_summary = page.locator('#graph-summary').inner_text()
     workbench.paths.clear()
-    bodies = []
-    page.once('request', lambda request: bodies.append(request.post_data_json)
-              if request.url.endswith('/subgraph') else None)
-    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
-        graph_buttons.first.click()
-    assert workbench.paths.count(f'/api/projects/{workbench.project}/subgraph') == 1
-    assert not any(path.endswith('/search') or path.endswith('/explore')
+    graph_buttons.first.click()
+    page.wait_for_function(
+        "document.querySelector('#graph-detail').textContent.includes('退款商户')")
+    assert not any(path.endswith('/subgraph') or path.endswith('/search') or path.endswith('/explore')
                    for path in workbench.paths)
-    assert bodies and set(bodies[0]) == SUBGRAPH_BODY_FIELDS
+    assert page.locator('#graph-entity-choice').input_value() == 'a'
+    assert page.locator('#graph-node').input_value() == 'a'
+    assert '退款商户' in page.locator('#graph-detail').inner_text()
+    assert _graph_node_ids(page) == graph_nodes
+    assert page.locator('#graph-summary').inner_text() == graph_summary
     assert page.locator('[data-tab="search"]').get_attribute('class') == 'active'
     assert page.evaluate("() => document.activeElement.id") == 'graph-heading'
 

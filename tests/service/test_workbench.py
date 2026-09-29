@@ -220,4 +220,5 @@ def test_knowledge_write_has_one_preview_host_and_an_advanced_record_import():
     assert '结构化记录导入（高级）' in page_copy
     assert '不是批量上传文档' in page_copy
     assert '/assets/workbench.css?v=document-upload-3' in markup.assets
-    assert '/assets/workbench.js?v=document-upload-3' in markup.assets
+    assert '/assets/workbench.js?v=graph-detail-state-1' in markup.assets
+    assert '/assets/workspace.js?v=graph-scope-1' in markup.assets

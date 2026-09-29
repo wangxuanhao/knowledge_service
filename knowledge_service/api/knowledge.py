@@ -28,6 +28,13 @@ def install(app, service):
         rows = service.write(project_id, [r.model_dump(exclude_none=True) for r in request.records])
         return {'records': [public(r) for r in rows]}
 
+    @router.get('/api/projects/{project_id}/records/{record_id}')
+    def read(project_id: str, record_id: str, valid_at: str | None = None,
+             known_at: str | None = None):
+        row = repository.get_record(
+            project_id, record_id, valid_at=valid_at, known_at=known_at)
+        return public(row)
+
     @router.put('/api/projects/{project_id}/records/{record_id}')
     def revise(project_id: str, record_id: str, request: Revision):
         row = request.record.model_dump(exclude_none=True)
