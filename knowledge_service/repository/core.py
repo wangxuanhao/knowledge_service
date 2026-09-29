@@ -2291,6 +2291,12 @@ class Repository:
                 'ontology discovery runs must use create_discovery_run or '
                 'transition_discovery_run')
         with self._transaction():
+            existing = self._db.execute(
+                'SELECT kind FROM artifacts WHERE id=?', (item['id'],)).fetchone()
+            if existing is not None and existing['kind'] == 'ontology_discovery_run':
+                raise ValueError(
+                    'ontology discovery runs must use create_discovery_run or '
+                    'transition_discovery_run')
             if item.get('project_id'): self.get_project(item['project_id'])
             self._db.execute('INSERT INTO artifacts VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',
                              (item['id'], kind, item.get('project_id'), _json(item)))

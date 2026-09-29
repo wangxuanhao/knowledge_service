@@ -20,8 +20,7 @@ ALLOWED_TRANSITIONS = {
         'published', 'stale_base', 'stale_source', 'closed'}),
 }
 MUTABLE_FIELDS = frozenset({
-    'status', 'unified_draft_id', 'candidate_outcomes', 'created_at',
-    'updated_at',
+    'status', 'candidate_outcomes', 'created_at', 'updated_at',
 })
 IMMUTABLE_OUTCOME_CODES = frozenset({
     'ontology_term_conflict', 'low_frequency_attribute',
@@ -126,14 +125,27 @@ class DiscoveryRunStore:
                 ('conflicts', [], list),
                 ('mappings', {}, dict),
                 ('candidate_bindings', [], list),
+                ('initial_candidate_outcomes', None, list),
                 ('candidate_outcomes', [], list),
                 ('diagnostics', {}, dict)):
-            run.setdefault(field, default)
+            if field == 'initial_candidate_outcomes' and field not in run:
+                run[field] = json.loads(_canonical_json(
+                    run.get('candidate_outcomes', [])))
+            else:
+                run.setdefault(field, default)
             if not isinstance(run[field], expected_type):
                 raise ValueError(f'discovery run {field} has an invalid shape')
         run['candidate_snapshot'] = sorted(
             run['candidate_snapshot'], key=_canonical_json)
         run.setdefault('unified_draft_id', None)
+        draft_id = run['unified_draft_id']
+        if run['status'] == 'draft_created' and not draft_id:
+            raise ValueError('draft_created discovery run requires a draft link')
+        if (run['status'] in {
+                'diagnosed_no_change', 'ready_to_finalize',
+                'finalized_no_change'} and draft_id is not None):
+            raise ValueError(
+                'non-draft discovery run cannot have a draft link')
         run.setdefault('supersedes_run_id', None)
         run.setdefault('created_at', utc_now())
         return run
@@ -210,7 +222,11 @@ class DiscoveryRunStore:
             updated = dict(current)
             updated['status'] = new_status
             if unified_draft_id is not None:
-                updated['unified_draft_id'] = unified_draft_id
+                if current.get('unified_draft_id') != unified_draft_id:
+                    raise DiscoveryRunConflict(
+                        'discovery run draft link cannot change', run_id=run_id,
+                        expected_status=expected_status,
+                        current_status=current['status'])
             if candidate_outcomes is not None:
                 updated['candidate_outcomes'] = _merge_candidate_outcomes(
                     current.get('candidate_outcomes', []),

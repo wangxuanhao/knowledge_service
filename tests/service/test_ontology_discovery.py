@@ -9,7 +9,7 @@ from rdflib.namespace import OWL
 
 from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
-from knowledge_service.repository import Repository
+from knowledge_service.repository import DiscoveryRunConflict, Repository
 from knowledge_service.services.ontology import Ontology
 from knowledge_service.services.ontology_drafts import OntologyDrafts
 from knowledge_service.services.ontology_discovery import (
@@ -325,9 +325,18 @@ def test_mixed_discovery_creates_one_atomic_run_and_governed_draft(
         assert len(repo._ontology_drafts.export(project['id'])['drafts']) == 1
         legacy = repo.list_artifacts('ontology_discovery_draft', project['id'])
         assert len(legacy) == 1
-        assert not ({'candidate_snapshot', 'candidate_outcomes', 'mappings',
-                     'candidate_bindings'} & set(legacy[0]))
+        assert not ({
+            'candidate_snapshot', 'candidate_outcomes', 'mappings',
+            'candidate_bindings', 'candidate_ids', 'candidate_count',
+        } & set(legacy[0]))
+        assert 'candidate_ids' not in legacy[0]['ontology_metadata']
         governed = OntologyDrafts(repo).get(project['id'], response.json()['id'])
+        overview_response = client.get(
+            f"/api/projects/{project['id']}/ontology-discovery")
+        assert overview_response.status_code == 200, overview_response.text
+        overview_draft = next(
+            draft for draft in overview_response.json()['drafts']
+            if draft['id'] == response.json()['id'])
 
     assert response.status_code == 201, response.text
     payload = response.json()
@@ -341,6 +350,11 @@ def test_mixed_discovery_creates_one_atomic_run_and_governed_draft(
         'code': 'ontology_term_conflict',
         'diagnostic_code': 'class_property_name_collision',
     }]
+    assert overview_draft['candidate_snapshot'] == payload['run'][
+        'candidate_snapshot']
+    assert overview_draft['mappings'] == payload['run']['mappings']
+    assert overview_draft['candidate_ids'] == [
+        item['id'] for item in payload['run']['candidate_snapshot']]
     assert set(governed['source_context']['publication_effects']) == {
         'discovery_run_id', 'summary'}
 
@@ -757,6 +771,16 @@ def test_mapping_only_discovery_persists_ready_run_without_empty_draft(
         assert payload['run']['candidate_bindings'][0]['binding_kind'] == 'existing'
         assert repo._ontology_drafts.export(project['id'])['drafts'] == []
         assert repo.list_artifacts('ontology_discovery_draft', project['id']) == []
+        with pytest.raises(DiscoveryRunConflict):
+            repo.transition_discovery_run(
+                project['id'], payload['run']['id'], 'ready_to_finalize',
+                'finalized_no_change', unified_draft_id='forged-draft')
+        replayed = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/drafts",
+            json={'name': 'mapping'})
+        assert replayed.status_code == 201, replayed.text
+        assert replayed.json()['result_kind'] == 'mapping_only'
+        assert replayed.json()['run'] == payload['run']
         finalized = repo.transition_discovery_run(
             project['id'], payload['run']['id'], 'ready_to_finalize',
             'finalized_no_change')

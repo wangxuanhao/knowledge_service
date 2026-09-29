@@ -21,6 +21,7 @@ def _run(project_id, *, run_id='discovery-run:abc', fingerprint='sha256:abc'):
         'conflicts': [],
         'mappings': {'classes': {'Partner': 'urn:term:partner'}},
         'candidate_bindings': [],
+        'initial_candidate_outcomes': [],
         'candidate_outcomes': [],
         'diagnostics': {},
         'status': 'draft_created',
@@ -100,6 +101,44 @@ def test_same_id_with_different_immutable_snapshot_conflicts(tmp_path):
         'candidate_snapshot'] == [{'id': 'candidate-1', 'kind': 'entity'}]
 
 
+def test_same_id_with_different_initial_diagnostic_outcomes_conflicts(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    conflict = {
+        'candidate_id': 'candidate-1', 'status': 'skipped',
+        'code': 'ontology_term_conflict',
+    }
+    repo.create_discovery_run({
+        **_run(project_id),
+        'initial_candidate_outcomes': [conflict],
+        'candidate_outcomes': [conflict],
+    })
+
+    with pytest.raises(DiscoveryRunConflict):
+        repo.create_discovery_run({
+            **_run(project_id),
+            'initial_candidate_outcomes': [{
+                'candidate_id': 'candidate-1', 'status': 'skipped',
+                'code': 'low_frequency_attribute',
+            }],
+            'candidate_outcomes': [{
+                'candidate_id': 'candidate-1', 'status': 'skipped',
+                'code': 'low_frequency_attribute',
+            }],
+        })
+
+
+def test_non_draft_run_cannot_be_created_with_a_draft_link(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+
+    with pytest.raises(ValueError, match='draft'):
+        repo.create_discovery_run({
+            **_run(project_id), 'status': 'diagnosed_no_change',
+            'unified_draft_id': 'forged-draft',
+        })
+
+
 def test_transition_updates_status_draft_link_and_outcomes_in_one_cas(tmp_path):
     repo = Repository(tmp_path / 'store.sqlite')
     project_id = repo.create_project('project')['id']
@@ -120,6 +159,39 @@ def test_transition_updates_status_draft_link_and_outcomes_in_one_cas(tmp_path):
     }]
 
 
+def test_mapping_only_transition_cannot_attach_a_draft(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    original = repo.create_discovery_run({
+        **_run(project_id), 'status': 'ready_to_finalize',
+        'unified_draft_id': None,
+        'candidate_bindings': [{
+            'candidate_id': 'candidate-1', 'binding_kind': 'existing',
+        }],
+    })
+
+    with pytest.raises(DiscoveryRunConflict):
+        repo.transition_discovery_run(
+            project_id, original['id'], 'ready_to_finalize',
+            'finalized_no_change', unified_draft_id='forged-draft')
+
+    assert repo.get_discovery_run(project_id, original['id']) == original
+    assert discovery_result_kind(original) == 'mapping_only'
+
+
+def test_draft_transition_cannot_rebind_to_another_draft(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    original = repo.create_discovery_run(_run(project_id))
+
+    with pytest.raises(DiscoveryRunConflict):
+        repo.transition_discovery_run(
+            project_id, original['id'], 'draft_created', 'published',
+            unified_draft_id='draft-2')
+
+    assert repo.get_discovery_run(project_id, original['id']) == original
+
+
 def test_transition_preserves_immutable_diagnostic_outcomes(tmp_path):
     repo = Repository(tmp_path / 'store.sqlite')
     project_id = repo.create_project('project')['id']
@@ -129,7 +201,8 @@ def test_transition_preserves_immutable_diagnostic_outcomes(tmp_path):
         'diagnostic_code': 'class_property_name_collision',
     }
     repo.create_discovery_run({
-        **_run(project_id), 'candidate_outcomes': [conflict],
+        **_run(project_id), 'initial_candidate_outcomes': [conflict],
+        'candidate_outcomes': [conflict],
     })
 
     transitioned = repo.transition_discovery_run(
@@ -151,7 +224,8 @@ def test_transition_cannot_overwrite_immutable_diagnostic_outcome(tmp_path):
         'code': 'ontology_term_conflict',
     }
     original = repo.create_discovery_run({
-        **_run(project_id), 'candidate_outcomes': [conflict],
+        **_run(project_id), 'initial_candidate_outcomes': [conflict],
+        'candidate_outcomes': [conflict],
     })
 
     with pytest.raises(DiscoveryRunConflict):
@@ -196,5 +270,19 @@ def test_generic_artifact_upsert_cannot_mutate_discovery_runs(tmp_path):
     with pytest.raises(ValueError, match='create_discovery_run'):
         repo.save_artifact('ontology_discovery_run', {
             **original, 'candidate_snapshot': [{'id': 'mutated'}]})
+
+    assert repo.get_discovery_run(project_id, original['id']) == original
+
+
+def test_generic_artifact_upsert_cannot_overwrite_run_using_another_kind(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    original = repo.create_discovery_run(_run(project_id))
+
+    with pytest.raises(ValueError, match='create_discovery_run'):
+        repo.save_artifact('unrelated_artifact', {
+            'id': original['id'], 'project_id': project_id,
+            'payload': 'replacement',
+        })
 
     assert repo.get_discovery_run(project_id, original['id']) == original

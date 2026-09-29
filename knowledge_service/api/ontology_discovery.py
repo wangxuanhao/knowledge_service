@@ -82,6 +82,7 @@ def _initial_candidate_outcomes(normalization):
 def _expected_run_snapshot(source_fingerprint, candidates, normalization,
                            induction_candidates, mappings, parent, request,
                            runtime_version, generation_options):
+    initial_outcomes = _initial_candidate_outcomes(normalization)
     return {
         'source_fingerprint': source_fingerprint,
         'candidate_snapshot': _canonical_copy(candidates),
@@ -89,6 +90,7 @@ def _expected_run_snapshot(source_fingerprint, candidates, normalization,
         'merged_groups': _canonical_copy(normalization.merged_groups),
         'conflicts': _canonical_copy(normalization.conflicts),
         'mappings': _canonical_copy(mappings),
+        'initial_candidate_outcomes': initial_outcomes,
         'diagnostics': _canonical_copy(normalization.diagnostics),
         'base_ontology_id': parent['id'] if parent else None,
         'base_ontology_fingerprint': generation_options[
@@ -127,6 +129,22 @@ def _existing_run_result(repository, governed, run, expected):
         'run': run,
         'discovery_run': run,
         'operations': current['operations'],
+    }
+
+
+def _hydrate_legacy_draft(repository, project_id, draft):
+    run_id = draft.get('discovery_run_id')
+    if not run_id:
+        return draft
+    run = repository.get_discovery_run(project_id, run_id)
+    candidate_snapshot = run['candidate_snapshot']
+    return {
+        **draft,
+        'candidate_ids': [item['id'] for item in candidate_snapshot],
+        'candidate_count': len(candidate_snapshot),
+        'candidate_snapshot': candidate_snapshot,
+        'candidate_outcomes': run['candidate_outcomes'],
+        'mappings': run['mappings'],
     }
 
 
@@ -287,7 +305,10 @@ def install(app, service):
         # 过去两者各自读取整个项目。二者都不看向量，因此完全跳过 float32 列。
         records=service.repository.current_records(p, vectors='none')
         candidates=_candidates(service.repository,p,records)
-        drafts=service.repository.list_artifacts('ontology_discovery_draft',p)
+        stored_drafts=service.repository.list_artifacts(
+            'ontology_discovery_draft',p)
+        drafts=[_hydrate_legacy_draft(service.repository,p,draft)
+                for draft in stored_drafts]
         ontologies=service.repository.list_ontologies(p)
         states,status_counts=_candidate_lifecycle(service.repository,p,candidates,drafts,records)
         enriched_drafts=[]
@@ -366,7 +387,6 @@ def install(app, service):
             p,parent,candidates,request,runtime_version=runtime_version,
             generation_options=generation_options)
         run_id=_run_id(p,source_fingerprint)
-        candidate_ids=[x['id'] for x in candidates]
         candidate_outcomes=_initial_candidate_outcomes(normalization)
         expected_run=_expected_run_snapshot(
             source_fingerprint,candidates,normalization,
@@ -457,6 +477,7 @@ def install(app, service):
                 'conflicts':_canonical_copy(normalization.conflicts),
                 'mappings':_canonical_copy(mappings),
                 'candidate_bindings':bindings,
+                'initial_candidate_outcomes':candidate_outcomes,
                 'candidate_outcomes':candidate_outcomes,
                 'diagnostics':_canonical_copy(normalization.diagnostics),
                 'status':status,'unified_draft_id':draft_id,
@@ -469,7 +490,6 @@ def install(app, service):
 
             draft={'id':draft_id,'project_id':p,'name':request.name,'status':'draft',
                 'revision':1,'generator_backend':'semantica','created_at':utc_now(),
-                'candidate_ids':candidate_ids,'candidate_count':len(candidates),
                 'turtle':turtle,'summary':summary,
                 'review_base_turtle':turtle,
                 'parent_ontology_id':expected_parent_id,'diff':diff,
@@ -477,8 +497,7 @@ def install(app, service):
                 'inference':{'metadata':inferred.get('metadata',{}),
                     'validation':inferred.get('validation',{})},
                 'ontology_metadata':{'parent_version_id':expected_parent_id,
-                    'source_draft_id':draft_id,'diff':diff,
-                    'candidate_ids':candidate_ids},
+                    'source_draft_id':draft_id,'diff':diff},
                 'unified_draft_id':draft_id,'draft_revision':preview['revision'],
                 'discovery_run_id':run_id,'discovery_summary':compact,
                 'deprecation':DEPRECATION}
