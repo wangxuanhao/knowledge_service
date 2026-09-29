@@ -284,6 +284,64 @@ def test_ready_run_accepts_legacy_existing_status_binding(tmp_path):
     assert discovery_result_kind(run) == 'mapping_only'
 
 
+@pytest.mark.parametrize('invalid_binding', [
+    {
+        'candidate_id': 'candidate-2', 'binding_kind': 'proposed',
+        'required_operation_ids': [],
+    },
+    {
+        'candidate_id': 'candidate-2', 'binding_kind': 'new',
+        'required_operation_ids': [],
+    },
+    {
+        'candidate_id': 'candidate-2', 'binding_kind': 'existing',
+        'required_operation_ids': ['operation-1'],
+    },
+])
+def test_ready_run_rejects_mixed_non_reusable_or_required_bindings(
+        tmp_path, invalid_binding):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+
+    with pytest.raises(ValueError, match='only reusable bindings'):
+        repo.create_discovery_run({
+            **_run(project_id), 'status': 'ready_to_finalize',
+            'unified_draft_id': None,
+            'candidate_bindings': [{
+                'candidate_id': 'candidate-1', 'binding_kind': 'existing',
+                'required_operation_ids': [],
+            }, invalid_binding],
+        })
+
+
+@pytest.mark.parametrize('diagnostic_status', ['quarantined', 'deferred'])
+def test_ready_run_allows_diagnostic_binding_with_immutable_initial_outcome(
+        tmp_path, diagnostic_status):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    diagnostic = {
+        'candidate_id': 'candidate-2', 'status': 'skipped',
+        'code': f'{diagnostic_status}_candidate',
+    }
+
+    run = repo.create_discovery_run({
+        **_run(project_id), 'status': 'ready_to_finalize',
+        'unified_draft_id': None,
+        'initial_candidate_outcomes': [diagnostic],
+        'candidate_outcomes': [diagnostic],
+        'candidate_bindings': [{
+            'candidate_id': 'candidate-1', 'binding_kind': 'existing',
+            'required_operation_ids': [],
+        }, {
+            'candidate_id': 'candidate-2', 'binding_kind': 'proposed',
+            'status': diagnostic_status,
+            'required_operation_ids': ['ignored-operation'],
+        }],
+    })
+
+    assert run['status'] == 'ready_to_finalize'
+
+
 def test_diagnosed_run_rejects_actionable_proposed_binding(tmp_path):
     repo = Repository(tmp_path / 'store.sqlite')
     project_id = repo.create_project('project')['id']

@@ -59,6 +59,14 @@ def _is_actionable_binding(binding):
                  or binding.get('required_operation_ids'))))
 
 
+def _is_resolved_diagnostic_binding(binding, initial_outcome_ids):
+    return bool(
+        isinstance(binding, dict)
+        and binding.get('candidate_id') in initial_outcome_ids
+        and (binding.get('status') in {'quarantined', 'deferred'}
+             or binding.get('binding_kind') in {'quarantined', 'deferred'}))
+
+
 def discovery_result_kind(run):
     """Return the immutable creation result independently of lifecycle status."""
     if run.get('unified_draft_id'):
@@ -209,12 +217,21 @@ class DiscoveryRunStore:
                 and draft_id is not None):
             raise ValueError(
                 'non-draft discovery run cannot have a draft link')
-        has_reusable_binding = any(
-            _is_reusable_binding(binding)
-            for binding in run['candidate_bindings'])
-        if run['status'] == 'ready_to_finalize' and not has_reusable_binding:
-            raise ValueError(
-                'ready_to_finalize discovery run requires a reusable binding')
+        if run['status'] == 'ready_to_finalize':
+            unresolved_bindings = [
+                binding for binding in run['candidate_bindings']
+                if not _is_resolved_diagnostic_binding(
+                    binding, initial_by_candidate)]
+            reusable_bindings = [
+                binding for binding in unresolved_bindings
+                if (_is_reusable_binding(binding)
+                    and not binding.get('required_operation_ids'))]
+            if (not reusable_bindings
+                    or len(reusable_bindings) != len(unresolved_bindings)):
+                raise ValueError(
+                    'ready_to_finalize discovery run requires only reusable '
+                    'bindings without required operations and at least one '
+                    'reusable binding')
         if (run['status'] == 'diagnosed_no_change'
                 and any(_is_actionable_binding(binding)
                         for binding in run['candidate_bindings'])):
