@@ -51,7 +51,10 @@ MOCKS = r"""() => {
       attribute_types:[{name:'AttributeA',count:2}]
     };
     else if(parsed.pathname.endsWith('/candidate-mindmap')) payload={nodes:[
-      {id:'c1',text:'Alpha one',type:'Alpha',occurrence_count:3,sources:[]},
+      {id:'c1',text:'Alpha one',type:'Alpha',occurrence_count:3,source_count:11,
+       sources_truncated:true,sources:[{assertion_id:'assertion-1',document_id:'doc-1',
+         document_title:'来源文档',chunk_id:'chunk-1',confidence:.91,evidence_status:'exact',
+         evidence_preview:'这是候选来源预览',evidence_preview_truncated:true}]},
       {id:'c2',text:'Gamma one',type:'Gamma',occurrence_count:2,sources:[]},
       {id:'c3',text:'Relation A',type:'RelationA',occurrence_count:1,sources:[]}
     ],edges:[{id:'r1',subject:'Alpha one',object:'Gamma one',type:'RelationA',occurrence_count:1,sources:[]}],
@@ -187,6 +190,19 @@ def test_discovery_uses_one_explained_workspace_instead_of_duplicate_side_queue(
     assert '候选术语' in canvas
     assert page.locator('[data-candidate-id]').count() == 3
     assert '从左侧选择' not in page.locator('#ontology-workbench-inspector').inner_text()
+
+
+def test_discovery_candidate_uses_preview_full_count_and_truncation_note(page):
+    page.click('[data-tab="ontology-workbench"]')
+    page.wait_for_selector('[data-candidate-id="c1"]')
+    card = page.locator('[data-candidate-id="c1"]')
+    assert '11 份来源' in card.inner_text()
+    card.click()
+    inspector = page.locator('#ontology-workbench-inspector').inner_text()
+    assert '来源预览 11' in inspector
+    assert '这是候选来源预览' in inspector
+    assert '仅显示 1/11 条来源预览' in inspector
+    assert '内容预览已截断' in inspector
 
 
 def test_discovery_separates_entities_relations_attributes_and_evidence_exceptions(page):

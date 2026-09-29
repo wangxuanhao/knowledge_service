@@ -113,7 +113,7 @@ def test_unified_ontology_workbench_has_one_entry_and_versioned_assets():
     for name in ('records-view.js', 'task-review.js', 'ontology-workbench.js'):
         assert '[data-tab="ontology"]' not in read(name)
     assert '/assets/ontology-workbench.css?v=fact-routing-1' in html
-    assert '/assets/ontology-workbench.js?v=fact-routing-1' in html
+    assert '/assets/ontology-workbench.js?v=candidate-source-preview-1' in html
     assert html.index('/assets/style.css') < html.index('/assets/ontology-workbench.css')
     assert html.index('/assets/workspace.js') < html.index('/assets/ontology-workbench.js')
     assert 'ontology-manager.html' not in html
@@ -147,11 +147,23 @@ def test_ontology_workbench_shell_keeps_five_stages_and_discovery_hooks():
 
 def test_legacy_candidate_map_labels_embedded_evidence_as_preview():
     js = read('candidate-mindmap.js')
+    html = read('index.html')
     assert 'source.evidence_preview' in js
     assert '来源预览' in js
     assert '本体工作台' in js
     assert 'evidence_preview_truncated' in js
     assert "source.evidence||'未保存证据片段'" not in js
+    assert '/assets/candidate-mindmap.js?v=source-preview-1' in html
+
+
+def test_ontology_workbench_uses_preview_and_full_source_count_contract():
+    js = read('ontology-workbench.js')
+    assert 'source.evidence_preview' in js
+    assert '来源预览' in js
+    assert 'source_count' in js
+    assert 'sources_truncated' in js
+    assert "source.evidence||'未保存证据片段'" not in js
+    assert '点击候选，在右侧核对结构与精确原文证据。' not in js
 
 
 def test_ontology_workbench_uses_safe_shared_state_contract():
