@@ -1,4 +1,4 @@
-name: knowledge-service-postgres
+name: knowledge-service
 
 services:
   postgres:
