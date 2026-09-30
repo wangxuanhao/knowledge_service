@@ -356,6 +356,124 @@ def test_create_draft_passes_only_normalized_candidates_to_induce(tmp_path, monk
     assert len(payload['candidate_snapshot']) == len(candidates)
 
 
+def test_0928_开放_跨类型同名隔离后无关术语仍生成草案(tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    candidates = [
+        {'id': 'behavior-class', 'kind': 'entity', 'text': '点赞',
+         'proposed_type': '用户行为', 'evidence_refs': ['ev-behavior-class']},
+        {'id': 'violation-class', 'kind': 'entity', 'text': '低俗内容',
+         'proposed_type': '违规内容类别', 'evidence_refs': ['ev-violation-class']},
+        {'id': 'channel-class', 'kind': 'entity', 'text': '站内信',
+         'proposed_type': '通知渠道', 'evidence_refs': ['ev-channel-class']},
+        {'id': 'account-a', 'kind': 'entity', 'text': '账号甲',
+         'proposed_type': '账号', 'evidence_refs': ['ev-account-a']},
+        {'id': 'account-b', 'kind': 'entity', 'text': '账号乙',
+         'proposed_type': '账号', 'evidence_refs': ['ev-account-b']},
+        {'id': 'behavior-attribute', 'kind': 'attribute',
+         'entity_id': 'account-a', 'proposed_type': '用户行为', 'value': '点赞',
+         'evidence_refs': ['ev-behavior-attribute']},
+        {'id': 'violation-attribute', 'kind': 'attribute',
+         'entity_id': 'account-a', 'proposed_type': '违规内容类别', 'value': '低俗',
+         'evidence_refs': ['ev-violation-attribute']},
+        {'id': 'channel-attribute', 'kind': 'attribute',
+         'entity_id': 'account-a', 'proposed_type': '通知渠道', 'value': '短信',
+         'evidence_refs': ['ev-channel-attribute']},
+        {'id': 'belongs-relation', 'kind': 'relation',
+         'subject_id': 'account-a', 'object_id': 'account-b',
+         'proposed_type': '属于', 'evidence_refs': ['ev-belongs-relation']},
+        {'id': 'belongs-attribute-a', 'kind': 'attribute',
+         'entity_id': 'account-a', 'proposed_type': '属于', 'value': '组甲',
+         'evidence_refs': ['ev-belongs-attribute-a']},
+        {'id': 'belongs-attribute-b', 'kind': 'attribute',
+         'entity_id': 'account-b', 'proposed_type': '属于', 'value': '组乙',
+         'evidence_refs': ['ev-belongs-attribute-b']},
+        {'id': 'forbidden-relation', 'kind': 'relation',
+         'subject_id': 'account-a', 'object_id': 'account-b',
+         'proposed_type': '禁止出现', 'evidence_refs': ['ev-forbidden-relation']},
+        {'id': 'forbidden-attribute-a', 'kind': 'attribute',
+         'entity_id': 'account-a', 'proposed_type': '禁止出现', 'value': True,
+         'evidence_refs': ['ev-forbidden-attribute-a']},
+        {'id': 'forbidden-attribute-b', 'kind': 'attribute',
+         'entity_id': 'account-b', 'proposed_type': '禁止出现', 'value': False,
+         'evidence_refs': ['ev-forbidden-attribute-b']},
+        {'id': 'related-relation', 'kind': 'relation',
+         'subject_id': 'account-a', 'object_id': 'account-b',
+         'proposed_type': '关联', 'evidence_refs': ['ev-related-relation']},
+        {'id': 'status-attribute-a', 'kind': 'attribute',
+         'entity_id': 'account-a', 'proposed_type': '状态', 'value': '启用',
+         'evidence_refs': ['ev-status-attribute-a']},
+        {'id': 'status-attribute-b', 'kind': 'attribute',
+         'entity_id': 'account-b', 'proposed_type': '状态', 'value': '停用',
+         'evidence_refs': ['ev-status-attribute-b']},
+    ]
+    induced_ids = []
+
+    def fake_induce(_project_id, _name, accepted, baseline_turtle=None):
+        induced_ids.extend(item['id'] for item in accepted)
+        return '''
+            @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+            @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+            <urn:test:UserBehavior> a owl:Class .
+            <urn:test:ViolationCategory> a owl:Class .
+            <urn:test:NotificationChannel> a owl:Class .
+            <urn:test:Account> a owl:Class .
+            <urn:test:related> a owl:ObjectProperty ;
+                rdfs:domain <urn:test:Account> ; rdfs:range <urn:test:Account> .
+            <urn:test:status> a owl:DatatypeProperty ;
+                rdfs:domain <urn:test:Account> ; rdfs:range xsd:string .
+        ''', {
+            'entity_types': {
+                '用户行为': 'urn:test:UserBehavior',
+                '违规内容类别': 'urn:test:ViolationCategory',
+                '通知渠道': 'urn:test:NotificationChannel',
+                '账号': 'urn:test:Account',
+            },
+            'relation_types': {'关联': 'urn:test:related'},
+            'attributes': {'状态': 'urn:test:status'},
+        }, {'metadata': {}, 'validation': {}}
+
+    monkeypatch.setattr(
+        discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(discovery_api, '_induce', fake_induce)
+    app = create_app(tmp_path / 'test-0928-open.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'test_0928_开放', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        response = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/drafts",
+            json={'name': 'test_0928_开放累计草案'})
+
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload['result_kind'] == 'draft'
+    assert set(induced_ids) == {
+        'behavior-class', 'violation-class', 'channel-class',
+        'account-a', 'account-b', 'related-relation',
+        'status-attribute-a', 'status-attribute-b',
+    }
+    conflicts = {item['candidate_id']: item for item in payload['run']['conflicts']}
+    assert {item['code'] for item in conflicts.values()} == {
+        'class_property_name_collision', 'relation_attribute_name_collision'}
+    assert set(conflicts) == {
+        'behavior-attribute', 'violation-attribute', 'channel-attribute',
+        'belongs-relation', 'belongs-attribute-a', 'belongs-attribute-b',
+        'forbidden-relation', 'forbidden-attribute-a', 'forbidden-attribute-b',
+    }
+    assert {item['reason_code'] for item in payload['candidate_outcomes']} == {
+        'ontology_term_conflict'}
+    graph = Graph().parse(data=payload['turtle'], format='turtle')
+    governed_kinds = (OWL.Class, RDFS.Class, OWL.ObjectProperty, OWL.DatatypeProperty)
+    for subject in set(graph.subjects(RDF.type, None)):
+        assert sum((subject, RDF.type, kind) in graph for kind in governed_kinds) <= 1
+    assert (URIRef('urn:test:related'), RDFS.range,
+            URIRef('urn:test:Account')) in graph
+    assert (URIRef('urn:test:status'), RDFS.range,
+            URIRef('http://www.w3.org/2001/XMLSchema#string')) in graph
+
+
 def test_mixed_discovery_creates_one_atomic_run_and_governed_draft(
         tmp_path, monkeypatch):
     import knowledge_service.api.ontology_discovery as discovery_api
