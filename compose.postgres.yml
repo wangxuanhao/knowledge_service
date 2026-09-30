@@ -64,12 +64,18 @@ services:
       - type: bind
         source: ../milvus/volumes/milvus
         target: /var/lib/milvus
+        bind:
+          create_host_path: false
       - type: bind
         source: ../milvus/embedEtcd.yaml
         target: /milvus/configs/embedEtcd.yaml
+        bind:
+          create_host_path: false
       - type: bind
         source: ../milvus/user.yaml
         target: /milvus/configs/user.yaml
+        bind:
+          create_host_path: false
     healthcheck:
       test:
         - CMD-SHELL
