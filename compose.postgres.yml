@@ -40,6 +40,58 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  milvus:
+    image: milvusdb/milvus:v3.0.2
+    container_name: milvus-standalone
+    restart: unless-stopped
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      DEPLOY_MODE: STANDALONE
+      ETCD_USE_EMBED: "true"
+      ETCD_DATA_DIR: /var/lib/milvus/etcd
+      ETCD_CONFIG_PATH: /milvus/configs/embedEtcd.yaml
+      COMMON_STORAGETYPE: local
+    command:
+      - milvus
+      - run
+      - standalone
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+      - "2379:2379"
+    volumes:
+      - type: bind
+        source: ../milvus/volumes/milvus
+        target: /var/lib/milvus
+      - type: bind
+        source: ../milvus/embedEtcd.yaml
+        target: /milvus/configs/embedEtcd.yaml
+      - type: bind
+        source: ../milvus/user.yaml
+        target: /milvus/configs/user.yaml
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -f http://localhost:9091/healthz
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 90s
+    stop_grace_period: 60s
+
+  attu:
+    image: zilliz/attu:v3.0.0-beta.6
+    container_name: attu
+    restart: unless-stopped
+    environment:
+      MILVUS_ADDRESS: milvus:19530
+    ports:
+      - "3000:3000"
+    depends_on:
+      milvus:
+        condition: service_healthy
+
 volumes:
   knowledge_postgres_data:
     name: knowledge-postgres-data
