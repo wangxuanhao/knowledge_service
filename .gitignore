@@ -5,6 +5,7 @@
 data/model/*
 data/rules/*
 data/service/
+data/log/
 .omo
 .venv
 .pytest_cache
