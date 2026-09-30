@@ -32,6 +32,9 @@ MOCKS = r"""() => {
   window.mockChanges = [{id:'change-1',status:'pending',operation:'add',kind:'attribute',
     label:'封禁期限',uri:'urn:封禁期限',rationale:'正式事实需要该属性',revision:1,
     impact:{risk:'low',record_count:0,constraint_count:0,linked_candidates:1}}];
+  window.mockDiscoveryRun = null;
+  window.mockDraftCreationResult = null;
+  window.mockFinalizeStale = false;
   window.evidenceDelays = {};
   window.abortedEvidence = [];
   window.openedFrozenSource = null;
@@ -78,8 +81,28 @@ MOCKS = r"""() => {
       candidate_count:10,entity_count:7,relation_count:2,attribute_count:1,exception_count:1,
       entity_types:[{name:'Beta',count:1},{name:'Gamma',count:3},{name:'Alpha',count:3}],
       relation_types:[{name:'RelationB',count:1},{name:'RelationA',count:4}],
-      attribute_types:[{name:'AttributeA',count:2}]
+      attribute_types:[{name:'AttributeA',count:2}],
+      latest_run:window.mockDiscoveryRun ? {
+        id:window.mockDiscoveryRun.id,status:window.mockDiscoveryRun.status,
+        result_kind:window.mockDiscoveryRun.result_kind,
+        unified_draft_id:window.mockDiscoveryRun.unified_draft_id,
+        diagnostics:window.mockDiscoveryRun.diagnostics
+      } : null
     };
+    else if(parsed.pathname.endsWith('/ontology-discovery/runs')) payload={
+      items:window.mockDiscoveryRun?[window.mockDiscoveryRun]:[],
+      total:window.mockDiscoveryRun?1:0
+    };
+    else if(parsed.pathname.includes('/ontology-discovery/runs/') && parsed.pathname.endsWith('/finalize')) {
+      if(window.mockFinalizeStale) return new Response(JSON.stringify({
+        detail:'discovery base changed before finalization',code:'discovery_run_conflict',
+        details:{current_status:'stale_base'}
+      }),{status:409,headers:{'Content-Type':'application/json'}});
+      window.mockDiscoveryRun={...window.mockDiscoveryRun,status:'finalized_no_change'};
+      payload={result_kind:'mapping_only',run:window.mockDiscoveryRun,
+        discovery_run:window.mockDiscoveryRun,materialized_count:2};
+    }
+    else if(parsed.pathname.includes('/ontology-discovery/runs/')) payload=window.mockDiscoveryRun||{};
     else if(parsed.pathname.endsWith('/candidate-mindmap')) payload={nodes:[
       {id:'c1',text:'Alpha one',type:'Alpha',occurrence_count:3,source_count:11,
        sources_truncated:true,sources:[{assertion_id:'assertion-1',resolvable:true,document_id:'doc-1',document_version_id:'doc-v2',
@@ -118,6 +141,15 @@ MOCKS = r"""() => {
       window.mockChanges[0].status=window.apiCalls.at(-1).body.action==='approve'?'approved':'rejected';payload={...window.mockChanges[0]};
     }
     else if(parsed.pathname.endsWith('/ontology-change-proposals')) payload={proposals:window.mockChanges};
+    else if(parsed.pathname.endsWith('/ontology-discovery/drafts') && (options.method||'GET')==='POST') {
+      payload=window.mockDraftCreationResult||{
+        result_kind:'draft',id:'d1',unified_draft_id:'d1',draft_revision:draft.revision,
+        parent_ontology_id:'o1',run:{id:'run-draft',status:'draft_created',
+          result_kind:'draft',unified_draft_id:'d1',diagnostics:{accepted_count:2},
+          conflicts:[],merged_groups:[]}
+      };
+      window.mockDiscoveryRun=payload.run||payload.discovery_run||null;
+    }
     else if(parsed.pathname.endsWith('/ontology-drafts')) payload={items:window.mockDrafts,total:window.mockDrafts.length};
     else if(parsed.pathname.endsWith('/ontology-drafts/d1/commands')) {
       draft.revision += 1; draft.operations.push({id:'op'+draft.revision,
@@ -410,6 +442,137 @@ def test_discovery_refresh_remains_available_without_the_side_queue(page):
     )
 
 
+def prepare_discovery_creation(page, result):
+    page.evaluate(
+        "result => { mockDraftCreationResult=result; mockDiscoveryRun=null; "
+        "mockDrafts=[]; mockFinalizeStale=false; }",
+        result,
+    )
+    page.click('[data-tab="ontology-workbench"]')
+    page.wait_for_function("() => OntologyWorkbench.state.hasDrafts === false")
+    page.click('#ontology-workbench-create-discovery-draft')
+    page.wait_for_selector('#ontology-discovery-draft-name')
+    page.get_by_role('button', name='生成并进入设计').click()
+
+
+def mapping_only_result():
+    run = {
+        'id': 'run-map', 'status': 'ready_to_finalize',
+        'result_kind': 'mapping_only', 'unified_draft_id': None,
+        'diagnostics': {
+            'total_candidates': 6, 'accepted_count': 2, 'merged_count': 1,
+            'quarantined_count': 2, 'low_frequency_attribute_count': 1,
+        },
+        'merged_groups': [{
+            'kind': 'class', 'canonical_name': '用户行为',
+            'candidate_ids': ['entity-1', 'entity-2'],
+            'accepted_candidate_id': 'entity-1',
+            'evidence_refs': ['assertion-1', 'assertion-2'],
+        }],
+        'conflicts': [{
+            'candidate_id': 'attribute-1', 'name': '通知渠道',
+            'kind': 'attribute', 'code': 'class_property_name_collision',
+            'involved_kinds': ['attribute', 'class'],
+            'evidence_refs': ['assertion-conflict-1'],
+        }, {
+            'candidate_id': 'relation-1', 'name': '禁止出现',
+            'kind': 'relation', 'code': 'existing_term_kind_collision',
+            'existing_kind': 'attribute',
+            'evidence_refs': ['assertion-conflict-2'],
+        }],
+    }
+    return {'result_kind': 'mapping_only', 'run': run, 'discovery_run': run}
+
+
+def test_discovery_draft_result_selects_governed_draft_and_enters_design(page):
+    result = {
+        'result_kind': 'draft', 'id': 'd1', 'unified_draft_id': 'd1',
+        'draft_revision': 2, 'parent_ontology_id': 'o1',
+        'title': '归纳草案', 'status': 'editing', 'source_kind': 'discovery',
+        'operations': [], 'decisions': [],
+        'run': {
+            'id': 'run-draft', 'status': 'draft_created',
+            'result_kind': 'draft', 'unified_draft_id': 'd1',
+            'diagnostics': {'accepted_count': 2},
+            'conflicts': [], 'merged_groups': [],
+        },
+    }
+
+    prepare_discovery_creation(page, result)
+
+    page.wait_for_function("() => OntologyWorkbench.state.stage === 'design'")
+    assert page.evaluate("() => OntologyWorkbench.state.draftId") == 'd1'
+    assert page.evaluate("() => OntologyWorkbench.state.draft?.id") == 'd1'
+
+
+def test_mapping_only_result_stays_in_discovery_and_can_finalize(page):
+    prepare_discovery_creation(page, mapping_only_result())
+
+    page.wait_for_selector('[data-finalize-discovery-run]')
+    assert page.evaluate("() => OntologyWorkbench.state.stage") == 'discover'
+    assert '沿用当前本体并提交知识' in page.locator(
+        '[data-finalize-discovery-run]').inner_text()
+
+    page.click('[data-finalize-discovery-run]')
+    page.wait_for_function(
+        "() => apiCalls.some(x => x.url.endsWith('/ontology-discovery/runs/run-map/finalize'))")
+    page.wait_for_function(
+        "() => OntologyWorkbench.state.discoveryRun.status === 'finalized_no_change'")
+    assert page.evaluate("() => OntologyWorkbench.state.stage") == 'discover'
+
+
+def test_diagnosed_no_change_keeps_empty_draft_stages_locked(page):
+    run = {
+        'id': 'run-diagnostic', 'status': 'diagnosed_no_change',
+        'result_kind': 'diagnosed_no_change', 'unified_draft_id': None,
+        'diagnostics': {
+            'total_candidates': 2, 'accepted_count': 0, 'merged_count': 0,
+            'quarantined_count': 1, 'low_frequency_attribute_count': 1,
+        },
+        'conflicts': [], 'merged_groups': [],
+    }
+
+    prepare_discovery_creation(page, {
+        'result_kind': 'diagnosed_no_change', 'run': run, 'discovery_run': run,
+    })
+
+    page.wait_for_selector('[data-discovery-run-diagnostic]')
+    assert page.evaluate("() => OntologyWorkbench.state.stage") == 'discover'
+    assert page.evaluate("() => OntologyWorkbench.state.hasDrafts") is False
+    assert page.locator('[data-workbench-stage="design"]').is_disabled()
+    assert '未生成本体草案' in page.locator(
+        '[data-discovery-run-diagnostic]').inner_text()
+
+
+def test_mapping_only_stale_conflict_tells_user_to_refresh_and_reanalyse(page):
+    prepare_discovery_creation(page, mapping_only_result())
+    page.evaluate("() => { mockFinalizeStale=true; }")
+
+    page.click('[data-finalize-discovery-run]')
+
+    page.wait_for_function(
+        "() => document.querySelector('#ontology-workbench-notice').textContent.includes('刷新并重新分析')")
+    assert page.evaluate("() => OntologyWorkbench.state.stage") == 'discover'
+
+
+def test_discovery_run_shows_normalization_metrics_and_conflict_evidence(page):
+    prepare_discovery_creation(page, mapping_only_result())
+
+    conflict = page.locator('[data-discovery-conflict="attribute-1"]')
+    page.wait_for_selector('[data-discovery-conflict="attribute-1"]')
+    text = conflict.inner_text()
+    assert '通知渠道' in text
+    assert '属性' in text and '实体类' in text
+    assert '实体类型同名' in text
+    assert 'assertion-conflict-1' in text
+    existing_conflict = page.locator('[data-discovery-conflict="relation-1"]').inner_text()
+    assert '禁止出现' in existing_conflict
+    assert '当前本体中的属性同名' in existing_conflict
+    assert 'assertion-conflict-2' in existing_conflict
+    metrics = page.locator('[data-discovery-run-metrics]').inner_text()
+    assert all(label in metrics for label in ('接受 2', '合并 1', '隔离 2', '低频属性 1'))
+
+
 def test_view_switch_only_appears_when_hierarchy_and_matrix_are_available(page):
     page.click('[data-tab="ontology-workbench"]')
     switch = page.locator('.ontology-workbench__view-switch')
@@ -465,6 +628,25 @@ def test_object_editor_sends_revisioned_multi_parent_and_constraint_commands(pag
     actions = [item['command']['action'] for item in commands]
     assert actions[:6] == ['create_term','add_domain','add_domain','add_range','add_annotation','add_annotation']
     assert [item['expected_revision'] for item in commands[:6]] == [2,3,4,5,6,7]
+
+
+def test_attribute_editor_uses_datatype_and_never_sends_object_range(page):
+    open_design(page)
+    page.click('[data-new-object]')
+    page.select_option('#ontology-object-kind', 'attribute')
+    page.fill('#ontology-object-iri', 'urn:notificationChannel')
+    page.fill('#ontology-object-domain', 'urn:RootA')
+    page.fill('#ontology-object-range', 'urn:Child')
+    page.fill('#ontology-object-datatype', 'http://www.w3.org/2001/XMLSchema#string')
+    page.click('#ontology-object-save')
+    page.wait_for_function(
+        "() => apiCalls.filter(x => x.url.endsWith('/commands')).length >= 3")
+
+    commands = page.evaluate(
+        "() => apiCalls.filter(x => x.url.endsWith('/commands')).map(x => x.body.command)")
+    actions = [item['action'] for item in commands]
+    assert actions == ['create_term', 'add_domain', 'set_datatype']
+    assert 'add_range' not in actions
 
 
 def test_retire_preview_and_restore_require_explicit_source_version(page):
