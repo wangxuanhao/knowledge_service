@@ -1,6 +1,6 @@
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 from fastapi.testclient import TestClient
 import pytest
@@ -45,6 +45,60 @@ def _closed_outcomes(run):
     return [
         _terminal_outcome(candidate_id, 'skipped', 'draft_closed')
         for candidate_id in run['accepted_candidate_ids']
+    ]
+
+
+def test_candidate_bindings_keep_reusable_terms_operation_free():
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    normalization = SimpleNamespace(candidate_bindings=[
+        {'candidate_id': 'existing', 'iri': 'urn:test:Existing'},
+        {'candidate_id': 'proposed', 'iri': 'urn:test:Proposed'},
+    ])
+    candidates = [
+        {'id': 'existing', 'kind': 'entity', 'proposed_type': 'Existing'},
+        {'id': 'proposed', 'kind': 'entity', 'proposed_type': 'Proposed'},
+    ]
+    operations = [
+        {
+            'id': 'operation:parent', 'action': 'add_parent',
+            'target_iri': 'urn:test:Existing',
+        },
+        {
+            'id': 'operation:create', 'action': 'create_term',
+            'target_iri': 'urn:test:Proposed',
+        },
+    ]
+    baseline = '''
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        <urn:test:Existing> a owl:Class .
+    '''
+
+    bindings = discovery_api._candidate_bindings(
+        normalization, candidates, candidates, {
+            'entity_types': {
+                'Existing': 'urn:test:Existing',
+                'Proposed': 'urn:test:Proposed',
+            },
+        }, operations, baseline)
+
+    assert bindings == [
+        {
+            'candidate_id': 'existing',
+            'target_iri': 'urn:test:Existing',
+            'target_kind': 'class',
+            'binding_kind': 'existing',
+            'required_operation_ids': [],
+            'optional_operation_ids': [],
+        },
+        {
+            'candidate_id': 'proposed',
+            'target_iri': 'urn:test:Proposed',
+            'target_kind': 'class',
+            'binding_kind': 'proposed',
+            'required_operation_ids': ['operation:create'],
+            'optional_operation_ids': [],
+        },
     ]
 
 
@@ -553,6 +607,48 @@ def test_initial_command_failure_rolls_back_draft_operations_run_and_legacy_arti
         assert repo.list_artifacts('ontology_discovery_draft', project['id']) == []
 
 
+def test_invalid_binding_operation_reference_rolls_back_discovery_creation(
+        tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    candidates = [{'id': 'one', 'kind': 'entity', 'text': '甲',
+                   'proposed_type': '主体'}]
+    monkeypatch.setattr(
+        discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(discovery_api, '_induce', lambda *_args, **_kwargs: (
+        '@prefix owl: <http://www.w3.org/2002/07/owl#> . '
+        '<urn:test:Subject> a owl:Class .',
+        {'entity_types': {'主体': 'urn:test:Subject'},
+         'relation_types': {}, 'attributes': {}},
+        {'metadata': {}, 'validation': {}}))
+    original_bindings = discovery_api._candidate_bindings
+
+    def binding_with_missing_operation(*args, **kwargs):
+        bindings = original_bindings(*args, **kwargs)
+        bindings[0]['required_operation_ids'] = ['missing-operation']
+        return bindings
+
+    monkeypatch.setattr(
+        discovery_api, '_candidate_bindings', binding_with_missing_operation)
+    app = create_app(tmp_path / 'invalid-binding-run.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'invalid binding', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        response = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/drafts",
+            json={'name': 'invalid binding'})
+
+        assert response.status_code == 422
+        assert 'operation' in response.json()['detail']
+        repo = app.state.service.repository
+        assert repo.list_discovery_runs(project['id']) == []
+        history = repo._ontology_drafts.export(project['id'])
+        assert history['drafts'] == [] and history['operations'] == []
+        assert repo.list_artifacts(
+            'ontology_discovery_draft', project['id']) == []
+
+
 def test_source_change_between_snapshot_and_transaction_is_409_without_writes(
         tmp_path, monkeypatch):
     import knowledge_service.api.ontology_discovery as discovery_api
@@ -820,6 +916,57 @@ def test_mapping_only_discovery_persists_ready_run_without_empty_draft(
         assert retried.json()['run'] == finalized
 
 
+def test_all_reusable_bindings_ignore_unbound_annotation_diff(
+        tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    baseline = '''
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        <urn:test:Subject> a owl:Class ; rdfs:label "主体"@zh .
+    '''
+    generated = baseline + '''
+        <urn:test:Subject>
+            <http://www.w3.org/2000/01/rdf-schema#comment>
+            "generated description"@en .
+    '''
+    candidates = [{'id': 'one', 'kind': 'entity', 'text': '甲',
+                   'proposed_type': '主体'}]
+    monkeypatch.setattr(
+        discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(discovery_api, '_induce', lambda *_args, **_kwargs: (
+        generated,
+        {'entity_types': {'主体': 'urn:test:Subject'},
+         'relation_types': {}, 'attributes': {}},
+        {'metadata': {}, 'validation': {}}))
+    app = create_app(tmp_path / 'mapping-annotation-run.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'mapping annotations', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        repo = app.state.service.repository
+        repo.save_ontology(
+            project['id'], baseline, Ontology(baseline).summary())
+
+        response = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/drafts",
+            json={'name': 'mapping annotations'})
+
+        assert response.status_code == 201, response.text
+        payload = response.json()
+        assert payload['result_kind'] == 'mapping_only'
+        assert payload['run']['status'] == 'ready_to_finalize'
+        assert payload['run']['candidate_bindings'] == [{
+            'candidate_id': 'one',
+            'target_iri': 'urn:test:Subject',
+            'target_kind': 'class',
+            'binding_kind': 'existing',
+            'required_operation_ids': [],
+            'optional_operation_ids': [],
+        }]
+        assert repo._ontology_drafts.export(project['id'])['drafts'] == []
+
+
 def test_generated_vocabulary_conflict_has_stable_422_envelope(tmp_path, monkeypatch):
     import knowledge_service.api.ontology_discovery as discovery_api
 
@@ -985,7 +1132,6 @@ def test_review_ignores_sibling_label_edit_for_excluded_shared_iri(
         @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
         <urn:test:Person> a owl:Class ;
             rdfs:label " Person ", "ＰＥＲＳＯＮ" .
-        <urn:test:Organization> a owl:Class ; rdfs:label "Organization" .
     '''
     monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
     app = create_app(tmp_path / 'review-label-alias.sqlite', HashingEncoder())

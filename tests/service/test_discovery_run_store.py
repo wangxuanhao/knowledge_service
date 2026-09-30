@@ -7,6 +7,7 @@ from knowledge_service.repository.discovery_run_store import (
     DiscoveryRunConflict,
     discovery_result_kind,
 )
+from knowledge_service.services.ontology_operations import build_operation
 
 
 def _binding(candidate_id='candidate-1', *, kind='proposed'):
@@ -72,6 +73,121 @@ def _terminal_outcome(
         'status': status,
         'reason_code': reason_code,
     }
+
+
+def _operation(operation_id, action, target_iri, *, target_kind='class'):
+    arguments = {}
+    if action == 'create_term':
+        arguments['after'] = {'kind': target_kind}
+    elif action == 'set_datatype':
+        arguments.update(
+            before={'datatype': None},
+            after={'datatype': 'http://www.w3.org/2001/XMLSchema#string'},
+        )
+    elif action in {'add_parent', 'add_domain', 'add_range'}:
+        arguments['after'] = {'value': 'urn:term:suggestion'}
+    return {
+        **build_operation(
+            action, target_iri, source='discovery', **arguments),
+        'id': operation_id,
+    }
+
+
+def _create_draft(repo, project_id, operations=(), *, draft_id='draft-1'):
+    repo._ontology_drafts.create(project_id, {
+        'id': draft_id,
+        'base_ontology_id': None,
+        'source_kind': 'discovery',
+        'status': 'editing',
+        'revision': 1,
+        'title': draft_id,
+        'summary': '',
+        'source_context': {},
+    })
+    return repo._ontology_drafts.append_operations(
+        project_id, draft_id, list(operations))
+
+
+def _seed_linked_draft(repo, project_id, run):
+    if run.get('status') != 'draft_created':
+        return
+    draft_id = run.get('unified_draft_id')
+    try:
+        repo._ontology_drafts.get(project_id, draft_id)
+        return
+    except KeyError:
+        pass
+    operations = []
+    seen_ids = set()
+    for binding in run.get('candidate_bindings', []):
+        if not isinstance(binding, dict) or not ({
+                binding.get('binding_kind'), binding.get('status')}
+                & {'proposed', 'new'}):
+            continue
+        target_iri = binding.get('target_iri')
+        target_kind = binding.get('target_kind')
+        required_ids = binding.get('required_operation_ids')
+        optional_ids = binding.get('optional_operation_ids')
+        if (not isinstance(target_iri, str)
+                or target_kind not in {'class', 'relation', 'attribute'}
+                or not isinstance(required_ids, list)
+                or not isinstance(optional_ids, list)):
+            continue
+        for index, operation_id in enumerate(required_ids):
+            if not isinstance(operation_id, str) or operation_id in seen_ids:
+                continue
+            action = (
+                'set_datatype'
+                if target_kind == 'attribute'
+                and ('datatype' in operation_id or index > 0)
+                else 'create_term'
+            )
+            try:
+                operation = _operation(
+                    operation_id, action, target_iri,
+                    target_kind=target_kind)
+            except ValueError:
+                continue
+            operations.append(operation)
+            seen_ids.add(operation_id)
+        optional_actions = {
+            'class': ['add_parent'],
+            'relation': ['add_domain', 'add_range'],
+            'attribute': ['add_domain'],
+        }[target_kind]
+        for index, operation_id in enumerate(optional_ids):
+            if not isinstance(operation_id, str) or operation_id in seen_ids:
+                continue
+            try:
+                operation = _operation(
+                    operation_id,
+                    optional_actions[min(index, len(optional_actions) - 1)],
+                    target_iri,
+                )
+            except ValueError:
+                continue
+            operations.append(operation)
+            seen_ids.add(operation_id)
+    _create_draft(
+        repo, project_id, operations,
+        draft_id=draft_id,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _governed_draft_for_legacy_run_fixtures(monkeypatch):
+    original = Repository.create_discovery_run
+
+    def create_with_linked_draft(repo, project_id_or_item, item=None):
+        run = project_id_or_item if item is None else item
+        project_id = (
+            run.get('project_id') if item is None else project_id_or_item)
+        if isinstance(run, dict):
+            _seed_linked_draft(repo, project_id, run)
+        return original(repo, project_id_or_item, item)
+
+    monkeypatch.setattr(
+        Repository, 'create_discovery_run', create_with_linked_draft)
 
 
 def test_create_is_insert_only_and_idempotent_for_identical_canonical_snapshot(tmp_path):
@@ -219,6 +335,268 @@ def test_proposed_attribute_binding_accepts_multiple_required_operations(tmp_pat
     assert run['candidate_bindings'] == [binding]
 
 
+def test_draft_binding_loads_operations_inside_create_transaction(
+        tmp_path, monkeypatch):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    _create_draft(repo, project_id, [_operation(
+        'operation:create:candidate-1', 'create_term',
+        'urn:term:candidate-1')])
+    observed_transactions = []
+    original = repo._ontology_drafts.effective_operations
+
+    def observe_transaction(*args, **kwargs):
+        observed_transactions.append(repo._db.in_transaction)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        repo._ontology_drafts, 'effective_operations', observe_transaction)
+
+    repo.create_discovery_run(_run(project_id))
+
+    assert observed_transactions == [True]
+
+
+def test_draft_run_rejects_missing_linked_governed_draft(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+
+    with pytest.raises(ValueError, match='governed draft'):
+        repo._discovery_runs.create(project_id, _run(project_id))
+
+
+@pytest.mark.parametrize(('operation', 'binding_changes'), [
+    (None, {}),
+    (
+        _operation(
+            'operation:create:candidate-1', 'create_term',
+            'urn:term:another-candidate'),
+        {},
+    ),
+    (
+        _operation(
+            'operation:create:candidate-1', 'add_parent',
+            'urn:term:candidate-1'),
+        {},
+    ),
+    (
+        _operation(
+            'operation:create:candidate-1', 'create_term',
+            'urn:term:candidate-1'),
+        {'optional_operation_ids': ['operation:optional:candidate-1']},
+    ),
+])
+def test_draft_binding_rejects_missing_wrong_target_or_wrong_action_operation(
+        tmp_path, operation, binding_changes):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    operations = [] if operation is None else [operation]
+    if binding_changes:
+        operations.append(_operation(
+            'operation:optional:candidate-1', 'set_datatype',
+            'urn:term:candidate-1'))
+    _create_draft(repo, project_id, operations)
+
+    with pytest.raises(ValueError, match='operation'):
+        repo.create_discovery_run({
+            **_run(project_id),
+            'candidate_bindings': [{
+                **_binding(),
+                **binding_changes,
+            }],
+        })
+
+
+def test_draft_binding_rejects_operation_from_another_draft(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    _create_draft(repo, project_id)
+    _create_draft(repo, project_id, [_operation(
+        'operation:create:candidate-1', 'create_term',
+        'urn:term:candidate-1')], draft_id='draft-2')
+
+    with pytest.raises(ValueError, match='operation'):
+        repo.create_discovery_run(_run(project_id))
+
+
+@pytest.mark.parametrize(('candidate_kind', 'target_kind', 'operations'), [
+    (
+        'entity', 'class', [
+            _operation(
+                'operation:create:candidate-1', 'create_term',
+                'urn:term:candidate-1'),
+            _operation(
+                'operation:parent:candidate-1', 'add_parent',
+                'urn:term:candidate-1'),
+        ],
+    ),
+    (
+        'relation', 'relation', [
+            _operation(
+                'operation:create:candidate-1', 'create_term',
+                'urn:term:candidate-1', target_kind='relation'),
+            _operation(
+                'operation:domain:candidate-1', 'add_domain',
+                'urn:term:candidate-1'),
+            _operation(
+                'operation:range:candidate-1', 'add_range',
+                'urn:term:candidate-1'),
+        ],
+    ),
+    (
+        'attribute', 'attribute', [
+            _operation(
+                'operation:create:candidate-1', 'create_term',
+                'urn:term:candidate-1', target_kind='attribute'),
+            _operation(
+                'operation:datatype:candidate-1', 'set_datatype',
+                'urn:term:candidate-1'),
+            _operation(
+                'operation:domain:candidate-1', 'add_domain',
+                'urn:term:candidate-1'),
+        ],
+    ),
+])
+def test_draft_binding_accepts_kind_specific_required_and_optional_actions(
+        tmp_path, candidate_kind, target_kind, operations):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    _create_draft(repo, project_id, operations)
+    binding = {
+        **_binding(),
+        'target_kind': target_kind,
+        'required_operation_ids': [
+            operation['id'] for operation in operations
+            if operation['action'] in {'create_term', 'set_datatype'}
+        ],
+        'optional_operation_ids': [
+            operation['id'] for operation in operations
+            if operation['action'] not in {'create_term', 'set_datatype'}
+        ],
+    }
+
+    run = repo.create_discovery_run({
+        **_run(project_id),
+        'candidate_snapshot': [{
+            'id': 'candidate-1', 'kind': candidate_kind}],
+        'candidate_bindings': [binding],
+    })
+
+    assert run['candidate_bindings'] == [binding]
+
+
+def test_proposed_attribute_binding_requires_create_and_datatype_actions(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    create_operation = _operation(
+        'operation:create:candidate-1', 'create_term',
+        'urn:term:candidate-1', target_kind='attribute')
+    _create_draft(repo, project_id, [create_operation])
+
+    with pytest.raises(ValueError, match='required.*operation'):
+        repo.create_discovery_run({
+            **_run(project_id),
+            'candidate_snapshot': [{
+                'id': 'candidate-1', 'kind': 'attribute'}],
+            'candidate_bindings': [{
+                **_binding(),
+                'target_kind': 'attribute',
+            }],
+        })
+
+
+def test_draft_created_requires_at_least_one_proposed_binding(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    _create_draft(repo, project_id)
+
+    with pytest.raises(ValueError, match='draft_created.*proposed'):
+        repo.create_discovery_run({
+            **_run(project_id),
+            'candidate_bindings': [_binding(kind='existing')],
+        })
+
+
+def test_mixed_draft_requires_reusable_binding_to_remain_operation_free(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    _create_draft(repo, project_id, [
+        _operation(
+            'operation:create:candidate-1', 'create_term',
+            'urn:term:candidate-1'),
+        _operation(
+            'operation:parent:candidate-2', 'add_parent',
+            'urn:term:candidate-2'),
+    ])
+
+    with pytest.raises(ValueError, match='reusable.*operation'):
+        repo.create_discovery_run({
+            **_run(project_id),
+            'candidate_snapshot': [
+                {'id': 'candidate-1', 'kind': 'entity'},
+                {'id': 'candidate-2', 'kind': 'entity'},
+            ],
+            'accepted_candidate_ids': ['candidate-1', 'candidate-2'],
+            'candidate_bindings': [
+                _binding(),
+                {
+                    **_binding('candidate-2', kind='existing'),
+                    'optional_operation_ids': [
+                        'operation:parent:candidate-2'],
+                },
+            ],
+        })
+
+
+def test_draft_created_accepts_mixed_proposed_and_reusable_bindings(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    _create_draft(repo, project_id, [_operation(
+        'operation:create:candidate-1', 'create_term',
+        'urn:term:candidate-1')])
+
+    run = repo.create_discovery_run({
+        **_run(project_id),
+        'candidate_snapshot': [
+            {'id': 'candidate-1', 'kind': 'entity'},
+            {'id': 'candidate-2', 'kind': 'entity'},
+        ],
+        'accepted_candidate_ids': ['candidate-1', 'candidate-2'],
+        'candidate_bindings': [
+            _binding(),
+            _binding('candidate-2', kind='existing'),
+        ],
+    })
+
+    assert [
+        binding['binding_kind'] for binding in run['candidate_bindings']
+    ] == ['proposed', 'existing']
+
+
+def test_draft_created_rejects_all_diagnostic_shape(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project_id = repo.create_project('project')['id']
+    _create_draft(repo, project_id)
+    diagnostic = _initial_outcome(
+        'candidate-1', status='deferred',
+        reason_code='manual_review_deferred')
+
+    with pytest.raises(ValueError, match='draft_created.*proposed'):
+        repo.create_discovery_run({
+            **_run(project_id),
+            'accepted_candidate_ids': [],
+            'candidate_bindings': [{
+                'candidate_id': 'candidate-1',
+                'target_kind': 'class',
+                'binding_kind': 'diagnostic',
+                'required_operation_ids': [],
+                'optional_operation_ids': [],
+            }],
+            'initial_candidate_outcomes': [diagnostic],
+            'candidate_outcomes': [diagnostic],
+        })
+
+
 @pytest.mark.parametrize('outcome', [
     {'candidate_id': 'candidate-2', 'status': 'skipped'},
     {**_initial_outcome(), 'status': 'materialized'},
@@ -285,16 +663,22 @@ def test_binding_target_kind_matches_normalized_candidate_kind(
     repo = Repository(tmp_path / 'store.sqlite')
     project_id = repo.create_project('project')['id']
 
+    binding = {
+        **_binding(), 'target_kind': target_kind,
+        'required_operation_ids': (
+            ['operation:create:candidate-1',
+             'operation:datatype:candidate-1']
+            if target_kind == 'attribute'
+            else ['operation:create:candidate-1']),
+    }
     run = repo.create_discovery_run({
         **_run(project_id),
         'candidate_snapshot': [{
             'id': 'candidate-1', 'kind': candidate_kind}],
-        'candidate_bindings': [{
-            **_binding(), 'target_kind': target_kind,
-        }],
+        'candidate_bindings': [binding],
     })
 
-    assert run['candidate_bindings'][0]['target_kind'] == target_kind
+    assert run['candidate_bindings'] == [binding]
 
 
 @pytest.mark.parametrize(('candidate_kind', 'target_kind'), [
@@ -737,7 +1121,8 @@ def test_ready_run_rejects_mixed_non_reusable_or_required_bindings(
     repo = Repository(tmp_path / 'store.sqlite')
     project_id = repo.create_project('project')['id']
 
-    with pytest.raises(ValueError, match='only reusable bindings'):
+    with pytest.raises(
+            ValueError, match='only reusable bindings|reusable binding'):
         repo.create_discovery_run({
             **_run(project_id), 'status': 'ready_to_finalize',
             'unified_draft_id': None,

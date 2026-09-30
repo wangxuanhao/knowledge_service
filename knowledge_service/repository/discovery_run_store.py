@@ -37,6 +37,16 @@ DOCUMENTED_BINDING_STATES = (
     | DIAGNOSTIC_BINDING_STATES
 )
 DOCUMENTED_TARGET_KINDS = frozenset({'class', 'relation', 'attribute'})
+BINDING_REQUIRED_ACTIONS = {
+    'class': frozenset({'create_term'}),
+    'relation': frozenset({'create_term'}),
+    'attribute': frozenset({'create_term', 'set_datatype'}),
+}
+BINDING_OPTIONAL_ACTIONS = {
+    'class': frozenset({'add_parent'}),
+    'relation': frozenset({'add_domain', 'add_range'}),
+    'attribute': frozenset({'add_domain'}),
+}
 CANDIDATE_TARGET_KIND_ALIASES = {
     'entity': 'class',
     'class': 'class',
@@ -271,6 +281,9 @@ def _validate_candidate_bindings(run, initial_outcomes):
                 and not operation_ids['required_operation_ids']):
             raise ValueError(
                 'discovery run proposed binding requires a required operation')
+        if (_is_reusable_binding(binding) and _binding_has_operations(binding)):
+            raise ValueError(
+                'discovery run reusable binding cannot contain operation IDs')
         provided_iris = [
             binding[field] for field in IRI_FIELDS if field in binding]
         if any(not valid_application_iri(iri) for iri in provided_iris):
@@ -295,6 +308,53 @@ def _validate_candidate_bindings(run, initial_outcomes):
         raise ValueError(
             'discovery run binding candidate IDs must exactly cover '
             'accepted_candidate_ids once')
+
+
+def _validate_binding_operations(run, operations):
+    operations_by_id = {operation['id']: operation for operation in operations}
+    for binding in run['candidate_bindings']:
+        if not _is_proposed_binding(binding):
+            continue
+        target_iri = _binding_reuse_iri(binding)
+        target_kind = binding['target_kind']
+        referenced = {
+            field: [operations_by_id.get(operation_id)
+                    for operation_id in binding[field]]
+            for field in OPERATION_ID_FIELDS
+        }
+        if any(operation is None for rows in referenced.values()
+               for operation in rows):
+            raise ValueError(
+                'discovery run binding operation must exist in its governed draft')
+        if any(operation['target_iri'] != target_iri
+               for rows in referenced.values() for operation in rows):
+            raise ValueError(
+                'discovery run binding operation must target its binding IRI')
+        required_actions = {
+            operation['action']
+            for operation in referenced['required_operation_ids']
+        }
+        if (required_actions != BINDING_REQUIRED_ACTIONS[target_kind]
+                or len(referenced['required_operation_ids'])
+                != len(BINDING_REQUIRED_ACTIONS[target_kind])):
+            raise ValueError(
+                'discovery run binding required operation actions do not '
+                'match its target kind')
+        optional_actions = {
+            operation['action']
+            for operation in referenced['optional_operation_ids']
+        }
+        if not optional_actions.issubset(BINDING_OPTIONAL_ACTIONS[target_kind]):
+            raise ValueError(
+                'discovery run binding optional operation action does not '
+                'match its target kind')
+        create_operation = next(
+            operation for operation in referenced['required_operation_ids']
+            if operation['action'] == 'create_term')
+        if (create_operation.get('after') or {}).get('kind') != target_kind:
+            raise ValueError(
+                'discovery run binding create operation kind does not match '
+                'its target kind')
 
 
 def discovery_result_kind(run):
@@ -493,6 +553,12 @@ class DiscoveryRunStore:
                 and draft_id is not None):
             raise ValueError(
                 'non-draft discovery run cannot have a draft link')
+        if (run['status'] == 'draft_created'
+                and not any(_is_proposed_binding(binding)
+                            for binding in run['candidate_bindings'])):
+            raise ValueError(
+                'draft_created discovery run requires at least one proposed '
+                'accepted binding')
         if run['status'] == 'ready_to_finalize':
             unresolved_bindings = [
                 binding for binding in run['candidate_bindings']
@@ -532,6 +598,33 @@ class DiscoveryRunStore:
         payload = _canonical_json(run)
         with self.repo._transaction():
             self.repo.get_project(project_id)
+            row = self._db.execute(
+                'SELECT project_id,payload FROM artifacts WHERE id=? AND kind=?',
+                (run['id'], KIND),
+            ).fetchone()
+            if row is not None:
+                existing = json.loads(row['payload'])
+                if (row['project_id'] != project_id
+                        or existing.get('source_fingerprint') != run[
+                            'source_fingerprint']
+                        or _canonical_json(_immutable_snapshot(existing))
+                        != _canonical_json(_immutable_snapshot(run))):
+                    raise DiscoveryRunConflict(
+                        'discovery run id has a different immutable snapshot',
+                        run_id=run['id'])
+                return existing
+            if run['status'] == 'draft_created':
+                try:
+                    self.repo._ontology_drafts.get(
+                        project_id, run['unified_draft_id'])
+                except KeyError as exc:
+                    raise ValueError(
+                        'discovery run governed draft does not exist') from exc
+                _validate_binding_operations(
+                    run,
+                    self.repo._ontology_drafts.effective_operations(
+                        project_id, run['unified_draft_id']),
+                )
             try:
                 self._db.execute(
                     'INSERT INTO artifacts(id,kind,project_id,payload) VALUES (?,?,?,?)',

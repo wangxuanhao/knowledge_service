@@ -23,6 +23,7 @@ from ..services.ontology_adapters import (
     compatibility_payload,
 )
 from ..repository.discovery_run_store import (
+    BINDING_OPTIONAL_ACTIONS,
     DiscoveryRunConflict,
     discovery_result_kind,
 )
@@ -224,21 +225,25 @@ def _candidate_bindings(normalization, induction_candidates, original_candidates
         target_iri = binding.get('iri') or _target_for_candidate(leader, mappings)
         if not target_iri:
             continue
+        target_kind = ('class' if original.get('kind') == 'entity'
+                       else original.get('kind'))
+        binding_kind = ('existing' if target_iri in existing_iris
+                        else 'proposed')
         target_operations = operation_by_target.get(target_iri, [])
         required_actions = {'create_term'}
         if original.get('kind') == 'attribute':
             required_actions.add('set_datatype')
-        required = [operation['id'] for operation in target_operations
-                    if operation['action'] in required_actions]
-        optional = [operation['id'] for operation in target_operations
-                    if operation['id'] not in required]
+        required = ([] if binding_kind == 'existing' else [
+            operation['id'] for operation in target_operations
+            if operation['action'] in required_actions])
+        optional = ([] if binding_kind == 'existing' else [
+            operation['id'] for operation in target_operations
+            if operation['action'] in BINDING_OPTIONAL_ACTIONS[target_kind]])
         result.append({
             'candidate_id': candidate_id,
             'target_iri': target_iri,
-            'target_kind': ('class' if original.get('kind') == 'entity'
-                            else original.get('kind')),
-            'binding_kind': ('existing' if target_iri in existing_iris
-                             else 'proposed'),
+            'target_kind': target_kind,
+            'binding_kind': binding_kind,
             'required_operation_ids': required,
             'optional_operation_ids': optional,
         })
@@ -439,7 +444,12 @@ def install(app, service):
             predecessor=service.repository.latest_discovery_run(
                 p,statuses={'stale_base','stale_source','closed'})
             draft_id=None;preview=None
-            if proposed_operations:
+            binding_shapes=_candidate_bindings(
+                normalization,induction_candidates,current_candidates,
+                mappings,[],baseline)
+            has_proposed_binding=any(
+                item['binding_kind']=='proposed' for item in binding_shapes)
+            if proposed_operations and has_proposed_binding:
                 context=source_context(current_candidates)
                 preview=governed.create_with_command(
                     p,expected_parent_id,'discovery',request.name,
@@ -458,9 +468,7 @@ def install(app, service):
                         'discovery_run_id':run_id,'summary':compact})
                 status='draft_created'
             else:
-                bindings=_candidate_bindings(
-                    normalization,induction_candidates,current_candidates,
-                    mappings,[],baseline)
+                bindings=binding_shapes
                 reusable=[item for item in bindings
                           if item['binding_kind']=='existing']
                 status=('ready_to_finalize' if reusable
@@ -492,7 +500,7 @@ def install(app, service):
                 'status':status,'unified_draft_id':draft_id,
                 'supersedes_run_id':predecessor['id'] if predecessor else None,
             })
-            if not proposed_operations:
+            if preview is None:
                 result_kind=discovery_result_kind(run)
                 return {'result_kind':result_kind,'run':run,
                         'discovery_run':run}
