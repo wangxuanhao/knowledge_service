@@ -139,5 +139,6 @@ services:
 
 volumes:
   knowledge_postgres_data:
+    external: true
     name: knowledge-postgres-data
 

@@ -9,6 +9,8 @@ data/service/
 .venv
 .pytest_cache
 .test-tmp*/
+.tmp-compose-cutover/
+.tmp-milvus-recovery-test/
 *.sqlite-shm
 *.sqlite-wal
 __pycache__
