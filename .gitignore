@@ -14,5 +14,6 @@ data/log/
 .tmp-milvus-recovery-test/
 *.sqlite-shm
 *.sqlite-wal
+.superpowers
 __pycache__
 
