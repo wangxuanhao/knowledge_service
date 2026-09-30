@@ -53,8 +53,11 @@ services:
       - --listen-peer-urls=http://127.0.0.1:2380
       - --initial-advertise-peer-urls=http://localhost:2380
       - --initial-cluster=default=http://localhost:2380
+      - --quota-backend-bytes=4294967296
+      - --auto-compaction-mode=revision
+      - --auto-compaction-retention=1000
     ports:
-      - "2379:2379"
+      - "127.0.0.1:2379:2379"
     volumes:
       - type: bind
         source: ../milvus/volumes/milvus/etcd
@@ -98,6 +101,12 @@ services:
         bind:
           create_host_path: false
       - type: bind
+        source: ../milvus/volumes/milvus/etcd
+        target: /var/lib/milvus/etcd
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
         source: ../milvus/user.yaml
         target: /milvus/configs/user.yaml
         bind:
@@ -114,6 +123,7 @@ services:
     depends_on:
       etcd:
         condition: service_healthy
+        restart: true
 
   attu:
     image: zilliz/attu:v3.0.0-beta.6

@@ -2,69 +2,87 @@
 
 ## Goal
 
-Manage PostgreSQL, Milvus, and Attu through the existing Docker Compose project while preserving the running PostgreSQL instance and all existing Milvus data.
+Manage PostgreSQL, external etcd, Milvus, and Attu as the `knowledge-service` Docker Compose project while preserving the existing PostgreSQL volume and Milvus data.
 
-## Current State
+## Current Target Architecture
 
-- PostgreSQL runs as `knowledge-postgres` from `postgres:18.6-bookworm` and is already managed by `compose.postgres.yml` under the `knowledge-service-postgres` Compose project.
-- Milvus runs as `milvus-standalone` from `milvusdb/milvus:v3.0.2`. It uses embedded etcd and local object storage.
-- Milvus persists data in the host directory `D:\workspace\milvus\volumes\milvus` and reads `embedEtcd.yaml` and `user.yaml` from `D:\workspace\milvus`.
-- Attu runs as `attu` from `zilliz/attu:v3.0.0-beta.6` and currently reaches Milvus through `host.docker.internal:19530`.
-- Milvus and Attu were created with `docker run`, so Docker Compose cannot adopt their existing container objects directly.
+The target deployment has four services in `compose.yml`:
 
-## Chosen Approach
+- `postgres` runs `postgres:18.6-bookworm` as `knowledge-postgres` and keeps the physical named volume `knowledge-postgres-data` unchanged.
+- `etcd` runs `quay.io/coreos/etcd:v3.5.33` as `knowledge-etcd`. It is the only writer to the existing etcd data directory.
+- `milvus` runs `milvusdb/milvus:v3.0.2` as `milvus-standalone` in standalone mode with local storage and connects to `etcd:2379`.
+- `attu` runs `zilliz/attu:v3.0.0-beta.6` as `attu` and connects to `milvus:19530`.
 
-Extend `compose.postgres.yml` with `milvus` and `attu` services while keeping the existing Compose project name and PostgreSQL service definition. Preserve the exact Milvus and Attu image tags requested by the user.
+Milvus's former embedded-etcd configuration is retained only as an emergency rollback definition. It is not part of the target deployment.
 
-Milvus will use bind mounts that resolve to the existing configuration and data paths. The service will retain embedded etcd, local storage, the original command, the original health check, and the existing host ports. Its container will run with the original unconfined seccomp setting because the vendor-provided Windows standalone launcher used that setting.
+## Service and Health Dependency Chain
 
-Attu will connect to `milvus:19530` over the Compose network. It will depend on the Milvus health check and retain port 3000. Both services will use `restart: unless-stopped` so they recover after Docker or host restarts.
+All four services join the Compose project's default bridge network. The startup and health chain is:
 
-## Services and Networking
+```text
+etcd healthy -> Milvus healthy -> Attu starts
+```
 
-All three services will join the Compose project's default bridge network. Container-to-container traffic will use Compose DNS names:
+Milvus uses long-form `depends_on` with `condition: service_healthy` and `restart: true` for etcd. Attu uses `condition: service_healthy` for Milvus. PostgreSQL is independent of this chain.
 
-- Application or administrative clients may reach PostgreSQL on `127.0.0.1:5432`.
-- Milvus remains available on host ports `19530`, `9091`, and `2379` to preserve existing integrations.
-- Attu remains available on host port `3000` and reaches Milvus internally at `milvus:19530`.
+Host interfaces are:
 
-The public port shape is intentionally unchanged in this migration. Restricting Milvus ports to localhost is a separate hardening change because changing it now could break unknown clients.
+- PostgreSQL: `127.0.0.1:5432`
+- etcd: `127.0.0.1:2379` only; containers use `etcd:2379`
+- Milvus: `19530` and `9091`
+- Attu: `3000`
 
-## Data Safety and Cutover
+The etcd process uses a 4 GiB backend quota and revision-based auto-compaction with a 1,000-revision retention window. Its health check calls `etcdctl endpoint health` against the container-local client endpoint.
 
-Before cutover, capture the current container configuration and verify that Milvus is healthy and the data directory exists. Render and validate the merged Compose configuration before stopping anything.
+## Data Ownership
 
-For cutover:
+Data ownership is explicit so only one process can write the etcd store:
 
-1. Stop the existing `attu` and `milvus-standalone` containers.
-2. Remove only those two container objects so their names can be reused by Compose.
-3. Do not remove or modify `D:\workspace\milvus\volumes\milvus`, `embedEtcd.yaml`, or `user.yaml`.
-4. Start the Compose-managed Milvus and Attu services.
-5. Leave the existing PostgreSQL container running and under its current Compose project identity.
+- PostgreSQL exclusively owns the physical Docker volume `knowledge-postgres-data` mounted at `/var/lib/postgresql`.
+- External etcd exclusively owns `../milvus/volumes/milvus/etcd`, mounted read-write at `/etcd-data`.
+- Milvus keeps the writable parent bind `../milvus/volumes/milvus` at `/var/lib/milvus` for local Milvus data.
+- A more-specific bind shadows `/var/lib/milvus/etcd` inside the Milvus container and mounts the same host etcd directory read-only. This prevents Milvus from becoming a second writer even though the parent mount is writable.
+- Milvus reads `../milvus/user.yaml` at `/milvus/configs/user.yaml`.
 
-The expected service interruption is limited to Milvus and Attu startup time.
+Every bind uses `bind.create_host_path: false`; missing sources fail validation instead of silently creating empty paths.
+
+## Cutover and Snapshot Safety
+
+Before any container changes, render `compose.yml` with project name `knowledge-service`, record the PostgreSQL identity and volume, record the existing Milvus collection list, and save inspect metadata for the legacy Milvus and Attu containers.
+
+The cutover order is deliberately staged:
+
+1. Stop and remove only the legacy Attu and Milvus container objects.
+2. Start external etcd by itself against the existing etcd data directory.
+3. Wait for external etcd to become healthy.
+4. Create and copy out a real etcd snapshot while Milvus is still stopped.
+5. Start Milvus and wait for it to become healthy.
+6. Verify the existing `knowledge_records` collection, then start Attu.
+7. Confirm PostgreSQL retained its original container identity, start time, and physical named volume.
+
+The snapshot boundary matters: etcd must be healthy enough to produce a consistent snapshot, while Milvus must not yet be running and changing metadata.
 
 ## Failure Handling and Rollback
 
-If the Compose-managed Milvus fails validation, stop and remove only the new Milvus and Attu container objects. Recreate them with the previously captured image tags, environment, mounts, commands, ports, security option, and health check. Because both old and new Milvus instances use the same host data directory, container replacement does not move or delete persistent data.
+If cutover validation fails, capture logs and preserve the etcd snapshot before changing containers. Stop and remove Compose-managed Attu and Milvus, then stop and remove external etcd. Confirm `knowledge-etcd` is absent before starting any embedded-etcd Milvus rollback container. This ordering preserves the single-writer invariant.
 
-No command in the migration may use Docker volume pruning, recursive filesystem deletion, or the `delete` action from the original Milvus launcher.
+The embedded-etcd `docker run` definition in the implementation plan is rollback-only. It must never run concurrently with external etcd because both use `../milvus/volumes/milvus/etcd`. Do not remove or recursively modify the Milvus data directory, do not remove `knowledge-postgres-data`, and do not use Docker volume pruning.
 
 ## Validation
 
 The migration is accepted only when all of the following checks pass:
 
-- `docker compose config` renders successfully and resolves the three services.
-- PostgreSQL remains healthy and retains its existing named volume.
-- Milvus reaches Docker health status `healthy` and `http://127.0.0.1:9091/healthz` returns HTTP 200.
-- Attu responds on port 3000 and its environment points to `milvus:19530`.
-- Milvus uses the original host data directory and configuration files.
-- The three expected image tags and host ports are present.
-- Restarting the Compose services preserves PostgreSQL and Milvus data and returns all services to their expected state.
+- `docker compose --project-name knowledge-service --env-file .env.postgres -f compose.yml config` renders exactly `postgres`, `etcd`, `milvus`, and `attu` with the pinned images.
+- Port 2379 is published only on `127.0.0.1`; Milvus publishes only 19530 and 9091.
+- External etcd has the configured quota, compaction settings, writable data mount, and healthy endpoint.
+- The Milvus etcd shadow mount renders read-only, Milvus points to `etcd:2379`, and the health dependency chain is present.
+- PostgreSQL remains healthy with the same container identity, start time, and physical volume `knowledge-postgres-data`.
+- The pre-Milvus etcd snapshot exists outside the container and reports valid snapshot metadata.
+- The `knowledge_records` collection remains present after cutover and after the staged restart checks for etcd, Milvus, and Attu.
 
 ## Out of Scope
 
 - Migrating application persistence from SQLite to PostgreSQL.
-- Changing the Milvus deployment from standalone mode to a distributed cluster.
-- Upgrading PostgreSQL, Milvus, or Attu beyond the versions already selected.
+- Changing Milvus standalone mode to a distributed cluster.
+- Upgrading PostgreSQL, Milvus, Attu, or etcd beyond the pinned versions.
 - Changing application connection strings or adding authentication in front of Attu.
