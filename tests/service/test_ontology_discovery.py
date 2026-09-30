@@ -1094,6 +1094,51 @@ def test_mapping_only_finalize_materializes_without_new_ontology_and_is_idempote
             project['id'], vectors='none', kinds=['entity'])) == 1
 
 
+def test_reusing_materialized_context_keeps_actual_records_and_remaps_endpoints():
+    from copy import deepcopy
+    from knowledge_service.services.ontology_discovery import _reuse_materialized_records
+
+    existing=[{'id':'canonical-entity','kind':'entity','type':'urn:Reviewed',
+               'text':'已审核名称','metadata':{'discovery_candidate_ids':['one','alias']}}]
+    proposed=[{'id':'generated-one','kind':'entity','type':'urn:Guessed',
+               'text':'模型重猜名称','metadata':{'discovery_candidate_id':'one'}},
+              {'id':'new-edge','kind':'relation','subject_id':'generated-one',
+               'object_id':'generated-one','metadata':{'discovery_candidate_id':'edge'}}]
+    original=deepcopy(proposed)
+    result=_reuse_materialized_records(proposed,existing,{'one','alias'})
+    assert result[0]==existing[0]
+    assert result[1]['subject_id']==result[1]['object_id']=='canonical-entity'
+    assert proposed==original
+    assert _reuse_materialized_records(proposed,existing,set())==proposed
+
+
+def test_mapping_finalize_does_not_treat_unrelated_id_collision_as_reused(tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+    from knowledge_service.services.ontology_discovery import _formal_id
+
+    baseline='''@prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        <urn:test:Subject> a owl:Class ; rdfs:label "主体"@zh .'''
+    candidates=[{'id':'one','kind':'entity','text':'甲','proposed_type':'主体'}]
+    monkeypatch.setattr(discovery_api,'_candidates',lambda *_a,**_kw:candidates)
+    monkeypatch.setattr(discovery_api,'_induce',lambda *_a,**_kw:(baseline,
+        {'entity_types':{'主体':'urn:test:Subject'},'relation_types':{},'attributes':{}},
+        {'metadata':{},'validation':{}}))
+    app=create_app(tmp_path/'unrelated-id.sqlite',HashingEncoder())
+    with TestClient(app) as client:
+        project=client.post('/api/projects',json={'name':'ID 冲突',
+            'use_default_ontology':False,'ontology_mode':'discovery'}).json()
+        p=project['id'];base=f'/api/projects/{p}';repo=app.state.service.repository
+        repo.save_ontology(p,baseline,Ontology(baseline).summary())
+        run=client.post(base+'/ontology-discovery/drafts',json={'name':'ID 冲突'}).json()['run']
+        unrelated=repo._put(p,{'id':_formal_id(p,candidates[0]),'kind':'entity',
+            'text':'非候选记录','type':'urn:test:Subject','metadata':{}},0)
+        response=client.post(base+f"/ontology-discovery/runs/{run['id']}/finalize")
+        assert response.status_code==409,response.text
+        assert repo.get_discovery_run(p,run['id'])['status']=='ready_to_finalize'
+        assert repo.current_records(p,vectors='none',kinds=['entity'])==[unrelated]
+
+
 def test_mapping_only_finalize_marks_stale_base_without_writes(
         tmp_path, monkeypatch):
     import knowledge_service.api.ontology_discovery as discovery_api
@@ -1936,12 +1981,13 @@ def test_draft_keeps_singleton_attribute_candidate_without_mapping(tmp_path,monk
         assert '章节标题' not in draft['mappings']['attributes']
 
 
-def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,monkeypatch):
+@pytest.mark.parametrize('new_type_in_second_round', [False, True])
+def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,monkeypatch,new_type_in_second_round):
     from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
 
     def discover(self,text,include_attributes=False,*,reserved_class_names=()):
         assert include_attributes is True
-        return [
+        items = [
             {'id':'merchant','kind':'entity','text':'测试商户','proposed_type':'Merchant','confidence':.93},
             {'id':'rule','kind':'entity','text':'平台规则','proposed_type':'RuleDocument','confidence':.91},
             {'id':'edge','kind':'relation','subject_id':'rule','object_id':'merchant','subject':'平台规则',
@@ -1953,6 +1999,10 @@ def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,
              'proposed_type':'employeeCount','value':21,'confidence':.84,
              'attribute_evidence':'后续增长到21人','evidence_status':'exact'},
         ]
+        if new_type_in_second_round and '新增店铺' in text:
+            items.append({'id':'shop','kind':'entity','text':'新增店铺',
+                          'proposed_type':'Shop','confidence':.9})
+        return items
 
     monkeypatch.setattr(SemanticaExtractor,'discover',discover)
     app=create_app(tmp_path/'discovery.sqlite',HashingEncoder())
@@ -2047,6 +2097,65 @@ def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,
             'ontology_sync_job','ontology-sync:'+published.json()['id'])
         assert sync['status']=='completed' and sync['fingerprint']
         assert client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={}).status_code==409
+
+        first_versions={row['id']:row['version_id'] for row in formal}
+        # A second document round reuses the published vocabulary, without an
+        # empty draft/version, and still updates the workbench lifecycle counts.
+        next_document=client.post(base+'/documents',json={
+            'title':'第二轮原文','text':'平台规则适用于测试商户，员工20人，后续增长到21人，新增店铺。',
+            'extraction_mode':'discovery','extract_attributes':True,'resolve_entities':False})
+        assert next_document.status_code==201,next_document.text
+        next_result=client.post(base+'/ontology-discovery/drafts',json={'name':'第二轮归纳'})
+        assert next_result.status_code==201,next_result.text
+        next_run=next_result.json()['run']
+        assert next_run['id']!=draft['run']['id']
+        if new_type_in_second_round:
+            assert next_result.json()['result_kind']=='draft'
+            second_draft_id=next_run['unified_draft_id']
+            submitted=client.post(base+f'/ontology-discovery/drafts/{second_draft_id}/publish',json={}).json()
+            warnings=[item['code'] for item in submitted['validation_report']['warnings'] if item.get('code')]
+            current=submitted
+            for op in submitted['operations']:
+                decisions=client.post(base+f'/ontology-drafts/{second_draft_id}/decisions',json={
+                    'expected_revision':current['revision'],
+                    'expected_ontology_id':published.json()['id'],
+                    'validation_fingerprint':submitted['validation_fingerprint'],
+                    'acknowledged_warning_codes':warnings,'actor':'reviewer',
+                    'decisions':[{'operation_id':op['id'],'operation_fingerprint':op['fingerprint'],
+                                  'action':'approve','reason':'第二轮新增类型已核验'}]})
+                assert decisions.status_code==200,decisions.text
+                current=decisions.json()
+            second_publish=client.post(base+f'/ontology-drafts/{second_draft_id}/publish',json={
+                'expected_revision':decisions.json()['revision'],
+                'expected_ontology_id':published.json()['id'],
+                'validation_fingerprint':decisions.json()['validation_fingerprint'],
+                'acknowledged_warning_codes':warnings,'idempotency_key':'second-publish','actor':'publisher'})
+            assert second_publish.status_code==200,second_publish.text
+            after=client.get(base+'/ontology-discovery').json()
+            assert after['latest_run']['status']=='published'
+            assert after['candidate_status_counts']['materialized']==11
+            assert len(app.state.service.repository.list_ontologies(project['id']))==2
+            current_records=app.state.service.repository.current_records(project['id'])
+            assert {row['id']:row['version_id'] for row in current_records if row['id'] in first_versions}==first_versions
+            return
+        assert next_result.json()['result_kind']=='mapping_only'
+        assert next_run['status']=='ready_to_finalize'
+        assert next_run['unified_draft_id'] is None
+        finalized=client.post(base+f"/ontology-discovery/runs/{next_run['id']}/finalize")
+        assert finalized.status_code==200,finalized.text
+        assert finalized.json()['run']['status']=='finalized_no_change'
+        assert finalized.json()['materialized_count']==5
+        assert len(app.state.service.repository.list_ontologies(project['id']))==1
+        after=client.get(base+'/ontology-discovery').json()
+        assert after['latest_run']['id']==next_run['id']
+        assert after['latest_run']['result_kind']=='mapping_only'
+        assert after['candidate_status_counts']['materialized']==10
+        current_records=app.state.service.repository.current_records(project['id'])
+        assert {row['id']:row['version_id'] for row in current_records if row['id'] in first_versions}==first_versions
+        replay=client.post(base+'/ontology-discovery/drafts',json={'name':'第二轮归纳'})
+        assert replay.status_code==201,replay.text
+        assert replay.json()['run']['id']==next_run['id']
+        assert replay.json()['run']['status']=='finalized_no_change'
 
 
 def test_legacy_discovery_publish_only_submits_and_never_writes_records(tmp_path,monkeypatch):

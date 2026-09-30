@@ -140,6 +140,43 @@ def _materialize_candidates(project_id,draft,ontology_id,candidate_outcomes=()):
     return records,skipped
 
 
+def _materialized_candidate_ids(records):
+    """Candidate identities already represented by persisted formal records."""
+    result=set()
+    for record in records:
+        metadata=record.get('metadata') or {}
+        if metadata.get('discovery_candidate_id'):
+            result.add(metadata['discovery_candidate_id'])
+        result.update(metadata.get('discovery_candidate_ids') or [])
+    return result
+
+
+def _reuse_materialized_records(proposed, existing, candidate_ids):
+    """Validate against persisted context, without regenerating or rewriting it.
+
+    The full cumulative candidate snapshot is still needed for attribute evidence
+    thresholds and relation endpoints. Only candidates known to have been
+    materialized when the run was created can reuse an existing record.
+    """
+    by_candidate={candidate_id:record for record in existing
+        for candidate_id in _materialized_candidate_ids([record])
+        if candidate_id in candidate_ids}
+    replacements={record['id']:by_candidate[candidate_id]
+        for record in proposed
+        if (candidate_id:=(record.get('metadata') or {}).get('discovery_candidate_id')) in by_candidate}
+    result={}
+    for record in proposed:
+        if record['id'] in replacements:
+            current=replacements[record['id']]
+        else:
+            current=deepcopy(record)
+            for key in ('subject_id','object_id'):
+                if current.get(key) in replacements:
+                    current[key]=replacements[current[key]]['id']
+        result[current['id']]=current
+    return list(result.values())
+
+
 def _validated_materialization(turtle,records,skipped):
     """发布前只保留符合已审核本体的记录。"""
     ontology=Ontology(turtle);accepted_entities=[];accepted_attributes=[];accepted_relations=[]

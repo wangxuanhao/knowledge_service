@@ -39,13 +39,14 @@ from ..services.ontology_discovery import (
     _candidates, _candidate_lifecycle, _candidate_mindmap, _induce,
     _materialize_candidates, _validated_materialization, _ontology_diff,
     _normalize_induction_candidates, _quality_warnings, _summary, _literal_language,
+    _materialized_candidate_ids, _reuse_materialized_records,
 )
 from ..utils.diagnostics import timed
 from ..core.time import utc_now
 
 
 NORMALIZER_VERSION = 'v1'
-GENERATOR_CONTRACT = 'semantica-0.6.7'
+GENERATOR_CONTRACT = 'semantica-0.6.7+materialization-context-v2'
 ATTRIBUTE_THRESHOLD = 2
 
 
@@ -291,16 +292,8 @@ def _current_finalize_fingerprint(project_id, run, parent, candidates):
 
 
 def _processed_discovery_candidate_ids(repository, project_id):
-    result = set()
-    for record in repository.current_records(
-            project_id, vectors='none',
-            kinds=['entity', 'relation', 'attribute']):
-        metadata = record.get('metadata') or {}
-        candidate_id = metadata.get('discovery_candidate_id')
-        if candidate_id:
-            result.add(candidate_id)
-        result.update(metadata.get('discovery_candidate_ids') or [])
-    return result
+    return _materialized_candidate_ids(repository.current_records(
+        project_id, vectors='none', kinds=['entity', 'relation', 'attribute']))
 
 
 class DraftRequest(Request):
@@ -440,6 +433,8 @@ def install(app, service):
         ontologies=service.repository.list_ontologies(p)
         parent=ontologies[-1] if ontologies else None
         baseline=parent['turtle'] if parent else None
+        processed_ids=_processed_discovery_candidate_ids(service.repository,p)
+        processed_ids.intersection_update(item['id'] for item in candidates)
         induction_candidates,normalization=_normalize_induction_candidates(candidates,baseline)
         if induction_candidates:
             try:
@@ -513,6 +508,11 @@ def install(app, service):
                 return _existing_run_result(
                     service.repository,governed,existing,expected_run)
 
+            current_processed=(_processed_discovery_candidate_ids(service.repository,p)
+                & {item['id'] for item in current_candidates})
+            if current_processed!=processed_ids:
+                raise StaleSource('discovery materialization changed while creating the run')
+
             predecessor=service.repository.latest_discovery_run(
                 p,statuses={'stale_base','stale_source','closed'})
             draft_id=None;preview=None
@@ -559,6 +559,7 @@ def install(app, service):
                 'runtime_version':runtime_version,
                 'attribute_threshold':ATTRIBUTE_THRESHOLD,
                 'generation_options':generation_options,
+                'materialized_candidate_ids':sorted(processed_ids),
                 'request_name':request.name,
                 'candidate_snapshot':_canonical_copy(current_candidates),
                 'accepted_candidate_ids':[item['id'] for item in induction_candidates],
@@ -627,13 +628,17 @@ def install(app, service):
                     item for item in _candidates(service.repository, p)
                     if item.get('kind') in {
                         'entity', 'relation', 'attribute'}])
+                existing_records = service.repository.current_records(
+                    p, vectors='none', kinds=['entity','relation','attribute'])
+                processed_ids = _materialized_candidate_ids(existing_records)
+                previous_ids = set(run.get(
+                    'materialized_candidate_ids') or [])
                 current_fingerprint = _current_finalize_fingerprint(
                     p, run, parent, candidates)
-                processed_ids = _processed_discovery_candidate_ids(
-                    service.repository, p)
                 accepted_ids = set(run.get('accepted_candidate_ids') or [])
                 if (current_fingerprint != run['source_fingerprint']
-                        or accepted_ids & processed_ids):
+                        or previous_ids != processed_ids & {item['id'] for item in candidates}
+                        or accepted_ids & (processed_ids - previous_ids)):
                     service.repository.transition_discovery_run(
                         p, run_id, 'ready_to_finalize', 'stale_source')
                     stale_error = StaleSource(
@@ -651,17 +656,18 @@ def install(app, service):
                     proposed, skipped = _materialize_candidates(
                         p, draft, parent_id,
                         run.get('candidate_outcomes') or [])
+                    proposed = _reuse_materialized_records(
+                        proposed, existing_records, previous_ids)
                     accepted, skipped, validation = _validated_materialization(
                         parent['turtle'], proposed, skipped)
+                    existing_record_ids = {item['id'] for item in existing_records
+                        if _materialized_candidate_ids([item]) & previous_ids}
                     saved = [
                         service.repository._put(p, record, 0)
                         for record in accepted
+                        if record['id'] not in existing_record_ids
                     ]
-                    materialized_ids = {
-                        (record.get('metadata') or {}).get(
-                            'discovery_candidate_id')
-                        for record in saved
-                    }
+                    materialized_ids = _materialized_candidate_ids(accepted)
                     terminal_outcomes = [{
                         'candidate_id': binding['candidate_id'],
                         'status': (

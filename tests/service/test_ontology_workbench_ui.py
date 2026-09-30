@@ -35,6 +35,9 @@ MOCKS = r"""() => {
   window.mockDiscoveryRun = null;
   window.mockDraftCreationResult = null;
   window.mockFinalizeStale = false;
+  window.mockCreateError = null;
+  window.mockLifecycleCounts = null;
+  window.mockFinalizeOutcomes = [];
   window.evidenceDelays = {};
   window.abortedEvidence = [];
   window.openedFrozenSource = null;
@@ -82,9 +85,10 @@ MOCKS = r"""() => {
       entity_types:[{name:'Beta',count:1},{name:'Gamma',count:3},{name:'Alpha',count:3}],
       relation_types:[{name:'RelationB',count:1},{name:'RelationA',count:4}],
       attribute_types:[{name:'AttributeA',count:2}],
+      candidate_status_counts:window.mockLifecycleCounts,
       latest_run:window.mockDiscoveryRun ? {
         id:window.mockDiscoveryRun.id,status:window.mockDiscoveryRun.status,
-        result_kind:window.mockDiscoveryRun.result_kind,
+        result_kind:window.mockDiscoveryRun.result_kind || (window.mockDiscoveryRun.unified_draft_id ? 'draft' : window.mockDiscoveryRun.status==='diagnosed_no_change' ? 'diagnosed_no_change' : 'mapping_only'),
         unified_draft_id:window.mockDiscoveryRun.unified_draft_id,
         diagnostics:window.mockDiscoveryRun.diagnostics
       } : null
@@ -95,10 +99,12 @@ MOCKS = r"""() => {
     };
     else if(parsed.pathname.includes('/ontology-discovery/runs/') && parsed.pathname.endsWith('/finalize')) {
       if(window.mockFinalizeStale) return new Response(JSON.stringify({
-        detail:'discovery base changed before finalization',code:'discovery_run_conflict',
-        details:{current_status:'stale_base'}
+        detail:'discovery base changed before finalization',code:'stale_base',
+        details:{base_ontology_id:'o1',current_ontology_id:'o2'}
       }),{status:409,headers:{'Content-Type':'application/json'}});
-      window.mockDiscoveryRun={...window.mockDiscoveryRun,status:'finalized_no_change'};
+      window.mockDiscoveryRun={...window.mockDiscoveryRun,status:'finalized_no_change',candidate_outcomes:window.mockFinalizeOutcomes};
+      delete window.mockDiscoveryRun.result_kind;
+      window.mockLifecycleCounts={pending:3,included_in_draft:0,approved:0,materialized:2};
       payload={result_kind:'mapping_only',run:window.mockDiscoveryRun,
         discovery_run:window.mockDiscoveryRun,materialized_count:2};
     }
@@ -142,6 +148,7 @@ MOCKS = r"""() => {
     }
     else if(parsed.pathname.endsWith('/ontology-change-proposals')) payload={proposals:window.mockChanges};
     else if(parsed.pathname.endsWith('/ontology-discovery/drafts') && (options.method||'GET')==='POST') {
+      if(window.mockCreateError) return new Response(JSON.stringify(window.mockCreateError),{status:409,headers:{'Content-Type':'application/json'}});
       payload=window.mockDraftCreationResult||{
         result_kind:'draft',id:'d1',unified_draft_id:'d1',draft_revision:draft.revision,
         parent_ontology_id:'o1',run:{id:'run-draft',status:'draft_created',
@@ -194,23 +201,31 @@ MOCKS = r"""() => {
 }"""
 
 
-@pytest.fixture()
-def page():
+@pytest.fixture(scope='module')
+def workbench_browser():
     from playwright.sync_api import sync_playwright
     with sync_playwright() as runtime:
         browser = runtime.chromium.launch(headless=True, executable_path=str(EDGE))
-        context = browser.new_context(viewport={'width': 1500, 'height': 1000})
-        context.add_init_script(f"({MOCKS})()")
-        pg = context.new_page()
-        errors = []
-        pg.on('pageerror', lambda error: errors.append(str(error)))
-        pg.set_content(SHELL)
-        pg.add_style_tag(path=str(WEB / 'style.css'))
-        pg.add_style_tag(path=str(WEB / 'ontology-workbench.css'))
-        pg.add_script_tag(path=str(WEB / 'ontology-workbench.js'))
-        pg._errors = errors
-        yield pg
+        yield browser
         browser.close()
+
+
+@pytest.fixture()
+def page(workbench_browser):
+    context = workbench_browser.new_context(viewport={'width': 1500, 'height': 1000})
+    context.add_init_script(f"({MOCKS})()")
+    pg = context.new_page()
+    errors = []
+    pg.on('pageerror', lambda error: errors.append(str(error)))
+    pg.set_content(SHELL)
+    pg.add_style_tag(path=str(WEB / 'style.css'))
+    pg.add_style_tag(path=str(WEB / 'ontology-workbench.css'))
+    pg.add_script_tag(path=str(WEB / 'ontology-workbench.js'))
+    pg.wait_for_function("() => OntologyWorkbench.state.discovery !== null")
+    pg.set_default_timeout(5000)
+    pg._errors = errors
+    yield pg
+    context.close()
 
 
 def open_design(page):
@@ -553,6 +568,8 @@ def test_mapping_only_stale_conflict_tells_user_to_refresh_and_reanalyse(page):
     page.wait_for_function(
         "() => document.querySelector('#ontology-workbench-notice').textContent.includes('刷新并重新分析')")
     assert page.evaluate("() => OntologyWorkbench.state.stage") == 'discover'
+    assert page.locator('[data-finalize-discovery-run]').count() == 0
+    assert page.locator('#ontology-workbench-create-discovery-draft').count() == 1
 
 
 def test_discovery_run_shows_normalization_metrics_and_conflict_evidence(page):
@@ -573,6 +590,131 @@ def test_discovery_run_shows_normalization_metrics_and_conflict_evidence(page):
     assert all(label in metrics for label in ('接受 2', '合并 1', '隔离 2', '低频属性 1'))
 
 
+@pytest.mark.parametrize('status,label', [
+    ('published', '已发布'), ('closed', '已关闭'),
+    ('stale_base', '本体版本已变化'), ('stale_source', '候选来源已变化'),
+])
+def test_finished_discovery_run_allows_next_round(page, status, label):
+    page.evaluate("run => { mockDiscoveryRun=run; }", {
+        'id': 'run-old', 'status': status, 'unified_draft_id': 'd1',
+        'diagnostics': {}, 'conflicts': [],
+    })
+    page.click('[data-tab="ontology-workbench"]')
+    page.wait_for_selector('[data-discovery-run="run-old"]')
+    assert page.locator('#ontology-workbench-create-discovery-draft').count() == 1
+    assert label in page.locator('[data-discovery-run]').inner_text()
+    page.click('#ontology-workbench-create-discovery-draft')
+    page.get_by_role('button', name='生成并进入设计').click()
+    page.wait_for_function("() => OntologyWorkbench.state.draft?.id === 'd1'")
+    assert page.evaluate("() => OntologyWorkbench.state.stage") == 'design'
+
+
+def test_new_discovery_draft_replaces_previously_selected_draft(page):
+    open_design(page)
+    page.evaluate("""() => {
+      OntologyWorkbench.state.draft={...mockDraft,id:'old-draft',title:'旧草案'};
+      OntologyWorkbench.state.draftId='old-draft';
+      mockDraft.title='本轮新草案';
+    }""")
+    page.click('[data-workbench-stage="discover"]')
+    page.wait_for_selector('#ontology-workbench-create-discovery-draft')
+    page.click('#ontology-workbench-create-discovery-draft')
+    page.get_by_role('button', name='生成并进入设计').click()
+    page.wait_for_function("() => OntologyWorkbench.state.stage === 'design'")
+    page.wait_for_selector('[data-hierarchy-row="urn:RootA"]')
+    assert page.evaluate("() => OntologyWorkbench.state.draft.id") == 'd1'
+    assert page.evaluate("() => OntologyWorkbench.state.draft.title") == '本轮新草案'
+    assert page.evaluate("() => OntologyWorkbench.state.draftId") == 'd1'
+
+
+@pytest.mark.parametrize('status,kind', [
+    ('published', 'draft'), ('closed', 'draft'),
+    ('finalized_no_change', 'mapping_only'),
+])
+def test_reanalysis_of_unchanged_processed_candidates_does_not_reopen_editor(page, status, kind):
+    run = {'id': 'run-replayed', 'status': status, 'conflicts': [],
+           'unified_draft_id': 'd1' if kind == 'draft' else None}
+    prepare_discovery_creation(page, {
+        'result_kind': kind, 'id': 'd1', 'unified_draft_id': run['unified_draft_id'],
+        'draft_revision': 2, 'parent_ontology_id': 'o1', 'run': run,
+    })
+    page.wait_for_function("() => OntologyWorkbench.state.discoveryRun?.id === 'run-replayed'")
+    assert page.evaluate("() => OntologyWorkbench.state.stage") == 'discover'
+    assert '本轮已处理' in page.locator('#ontology-workbench-notice').inner_text()
+    assert page.locator('[data-finalize-discovery-run]').count() == 0
+
+
+def test_finalize_refreshes_counts_and_renders_persisted_outcomes(page):
+    result = mapping_only_result()
+    del result['run']['result_kind']  # Actual run detail has no result_kind.
+    prepare_discovery_creation(page, result)
+    page.wait_for_selector('[data-finalize-discovery-run]')
+    page.evaluate("""() => { mockFinalizeOutcomes=[
+      {candidate_id:'entity-1',status:'materialized',reason_code:'materialized'},
+      {candidate_id:'attribute-1',status:'skipped',reason_code:'ontology_term_conflict'},
+      {candidate_id:'a2',status:'skipped',reason_code:'ontology_validation_failed'}
+    ]; }""")
+    before = page.evaluate("() => apiCalls.filter(x => x.url.endsWith('/ontology-discovery')).length")
+    page.click('[data-finalize-discovery-run]')
+    page.wait_for_function("() => OntologyWorkbench.state.discoveryRun.status === 'finalized_no_change'")
+    assert page.evaluate("() => apiCalls.filter(x => x.url.endsWith('/ontology-discovery')).length") > before
+    assert '只复用现有本体' in page.locator('[data-discovery-run]').inner_text()
+    assert '已提交知识' in page.locator('[data-discovery-run]').inner_text()
+    assert page.locator('[data-finalize-discovery-run]').count() == 0
+    page.locator('.ontology-workbench__lifecycle-help summary').click()
+    assert '2' in page.locator('.ontology-workbench__lifecycle .ontology-workbench__metric').filter(has_text='已物化').inner_text()
+    assert '已入图' in page.locator('[data-discovery-outcome="entity-1"]').inner_text()
+    assert '本体校验未通过' in page.locator('[data-discovery-outcome="a2"]').inner_text()
+    page.click('[data-refresh-discovery]')
+    page.wait_for_selector('[data-discovery-outcome="a2"]')
+    assert '已跳过' in page.locator('[data-discovery-outcome="attribute-1"]').inner_text()
+
+
+@pytest.mark.parametrize('status', ['stale_base', 'stale_source'])
+def test_mapping_stale_run_offers_reanalysis_without_finalize(page, status):
+    run = mapping_only_result()['run']
+    run['status'] = status
+    page.evaluate("run => { mockDiscoveryRun=run; }", run)
+    page.click('[data-tab="ontology-workbench"]')
+    page.wait_for_selector('[data-discovery-run]')
+    assert page.locator('[data-finalize-discovery-run]').count() == 0
+    assert '重新分析' in page.locator('#ontology-workbench-create-discovery-draft').inner_text()
+
+
+def test_create_discovery_conflict_offers_refresh_guidance(page):
+    page.evaluate("""() => { mockCreateError={code:'stale_source',detail:'source changed',details:{}}; }""")
+    prepare_discovery_creation(page, mapping_only_result())
+    page.wait_for_function("() => apiCalls.some(x => x.method==='POST' && x.url.endsWith('/ontology-discovery/drafts'))")
+    assert '刷新并重新分析' in page.locator('#ontology-workbench-notice').inner_text()
+
+
+@pytest.mark.parametrize('assertion_id', ['assertion-1', 'assertion-fail', None])
+def test_conflict_evidence_uses_pinned_assertion_or_reports_unavailable(page, assertion_id):
+    result = mapping_only_result()
+    result['run']['candidate_snapshot'] = [{
+        'id': 'attribute-1', 'kind': 'attribute', 'proposed_type': '通知渠道',
+        'assertion_id': assertion_id, 'document_title': '冲突来源',
+    }]
+    result['run']['conflicts'][0]['evidence_refs'] = [assertion_id or 'attribute-1']
+    prepare_discovery_creation(page, result)
+    page.wait_for_selector('[data-discovery-conflict="attribute-1"]')
+    page.locator('[data-discovery-conflict="attribute-1"]').get_by_role('button', name='查看冲突证据').click()
+    inspector = page.locator('#ontology-workbench-inspector')
+    if assertion_id == 'assertion-1':
+        page.wait_for_selector('[data-candidate-evidence="assertion-1"][data-state="ready"]')
+        assert '精确证据' in inspector.inner_text()
+        inspector.get_by_role('button', name='查看完整历史原文').click()
+        page.wait_for_function("() => openedFrozenSource !== null")
+        assert page.evaluate("() => openedFrozenSource.version_id") == 'doc-v2'
+    elif assertion_id:
+        page.wait_for_selector('[data-candidate-evidence="assertion-fail"][data-state="error"]')
+        assert '证据读取失败' in inspector.inner_text()
+    else:
+        assert '仅保留原始预览' in inspector.inner_text()
+        assert not page.evaluate("() => apiCalls.some(x => x.url.includes('/assertions/'))")
+    assert page._errors == []
+
+
 def test_view_switch_only_appears_when_hierarchy_and_matrix_are_available(page):
     page.click('[data-tab="ontology-workbench"]')
     switch = page.locator('.ontology-workbench__view-switch')
@@ -591,6 +733,7 @@ def test_hierarchy_is_lazy_paginated_and_multi_parent_selection_is_shared(page):
 
     page.click('[data-expand-iri="urn:RootA"]')
     page.click('[data-expand-iri="urn:RootB"]')
+    page.wait_for_function("() => document.querySelectorAll('[data-hierarchy-row=\"urn:Child\"]').length === 2")
     assert page.locator('[data-hierarchy-row="urn:Child"]').count() == 2
     page.locator('[data-hierarchy-row="urn:Child"]').first.click()
     assert page.locator('[data-hierarchy-row="urn:Child"][aria-current="true"]').count() == 2

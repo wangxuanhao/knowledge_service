@@ -2026,6 +2026,8 @@ class Repository:
         if effect_kind == 'discovery':
             from ..services.ontology_discovery import (
                 _materialize_candidates,
+                _materialized_candidate_ids,
+                _reuse_materialized_records,
                 _validated_materialization,
             )
 
@@ -2129,12 +2131,25 @@ class Repository:
             proposed, skipped = _materialize_candidates(
                 project_id, materialization_source, ontology['id'],
                 [*(run.get('candidate_outcomes') or []), *required_outcomes])
+            previous_ids = set(run.get(
+                'materialized_candidate_ids') or [])
+            existing_records = self.current_records(
+                project_id, vectors='none', kinds=['entity','relation','attribute'])
+            processed_ids = _materialized_candidate_ids(existing_records)
+            if (not previous_ids <= processed_ids
+                    or (set(run.get('accepted_candidate_ids') or [])
+                        & (processed_ids - previous_ids))):
+                raise OntologyPublicationConflict(
+                    'stale_source', 'discovery materialization context changed')
+            proposed = _reuse_materialized_records(
+                proposed, existing_records, previous_ids)
             accepted, skipped, validation = _validated_materialization(
                 prepared['turtle'], proposed, skipped)
-            saved = [self._put(project_id, record, 0) for record in accepted]
-            materialized_ids = {
-                (record.get('metadata') or {}).get('discovery_candidate_id')
-                for record in saved}
+            existing_record_ids = {item['id'] for item in existing_records
+                if _materialized_candidate_ids([item]) & previous_ids}
+            saved = [self._put(project_id, record, 0) for record in accepted
+                     if record['id'] not in existing_record_ids]
+            materialized_ids = _materialized_candidate_ids(accepted)
             required_by_candidate = {
                 outcome['candidate_id']: outcome
                 for outcome in required_outcomes}

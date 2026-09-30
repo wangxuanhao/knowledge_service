@@ -55,6 +55,18 @@ def _run_with_outcome(project_id, outcome):
     return payload
 
 
+@pytest.mark.parametrize('ids', ['candidate-1', ['unknown'], ['candidate-1', 'candidate-1'], [None]])
+def test_materialized_context_requires_unique_snapshot_candidate_ids(tmp_path, ids):
+    repo=Repository(tmp_path/'invalid-context.sqlite')
+    project=repo.create_project('invalid context')
+    payload=_run(project['id'])
+    payload.update(status='ready_to_finalize',unified_draft_id=None,
+                   candidate_bindings=[_binding(kind='existing')],
+                   materialized_candidate_ids=ids)
+    with pytest.raises(ValueError,match='materialized_candidate_ids'):
+        repo.create_discovery_run(project['id'],payload)
+
+
 def _initial_outcome(
         candidate_id='candidate-2', *, status='skipped',
         reason_code='ontology_term_conflict'):

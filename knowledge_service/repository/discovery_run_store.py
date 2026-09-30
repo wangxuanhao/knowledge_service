@@ -542,6 +542,13 @@ class DiscoveryRunStore:
         run['candidate_outcomes'] = json.loads(_canonical_json(
             run['initial_candidate_outcomes']))
         _validate_candidate_bindings(run, initial_by_candidate)
+        materialized_ids=run.get('materialized_candidate_ids', [])
+        snapshot_ids={item['id'] for item in run['candidate_snapshot']}
+        if (not isinstance(materialized_ids,list)
+                or any(not isinstance(item,str) or item not in snapshot_ids
+                       for item in materialized_ids)
+                or len(materialized_ids)!=len(set(materialized_ids))):
+            raise ValueError('discovery run materialized_candidate_ids must be unique snapshot IDs')
         run['candidate_snapshot'] = sorted(
             run['candidate_snapshot'], key=_canonical_json)
         run.setdefault('unified_draft_id', None)
