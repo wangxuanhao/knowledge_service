@@ -916,6 +916,500 @@ def test_mapping_only_discovery_persists_ready_run_without_empty_draft(
         assert retried.json()['run'] == finalized
 
 
+def test_mapping_only_finalize_materializes_without_new_ontology_and_is_idempotent(
+        tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    baseline = '''
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        <urn:test:Subject> a owl:Class ; rdfs:label "主体"@zh .
+    '''
+    candidates = [{
+        'id': 'one', 'kind': 'entity', 'text': '甲',
+        'proposed_type': '主体', 'document_id': 'document-1',
+        'document_version_id': 'document-version-1',
+    }]
+    monkeypatch.setattr(
+        discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(discovery_api, '_induce', lambda *_args, **_kwargs: (
+        baseline,
+        {'entity_types': {'主体': 'urn:test:Subject'},
+         'relation_types': {}, 'attributes': {}},
+        {'metadata': {}, 'validation': {}}))
+    app = create_app(tmp_path / 'mapping-finalize.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'mapping finalize', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        repo = app.state.service.repository
+        ontology = repo.save_ontology(
+            project['id'], baseline, Ontology(baseline).summary())
+        created = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/drafts",
+            json={'name': 'mapping finalize'}).json()
+        run_id = created['run']['id']
+
+        finalized = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/runs/"
+            f"{run_id}/finalize")
+
+        assert finalized.status_code == 200, finalized.text
+        payload = finalized.json()
+        assert payload['result_kind'] == 'mapping_only'
+        assert payload['run']['status'] == 'finalized_no_change'
+        assert len(repo.list_ontologies(project['id'])) == 1
+        assert repo.list_ontologies(project['id'])[0]['id'] == ontology['id']
+        entities = repo.current_records(
+            project['id'], vectors='none', kinds=['entity'])
+        assert len(entities) == 1
+        assert entities[0]['type'] == 'urn:test:Subject'
+        assert entities[0]['ontology_id'] == ontology['id']
+
+        retried = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/runs/"
+            f"{run_id}/finalize")
+
+        assert retried.status_code == 200, retried.text
+        assert retried.json()['run'] == payload['run']
+        assert len(repo.current_records(
+            project['id'], vectors='none', kinds=['entity'])) == 1
+
+
+def test_mapping_only_finalize_marks_stale_base_without_writes(
+        tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    baseline = '''
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        <urn:test:Subject> a owl:Class ; rdfs:label "主体"@zh .
+    '''
+    candidates = [{
+        'id': 'one', 'kind': 'entity', 'text': '甲',
+        'proposed_type': '主体',
+    }]
+    monkeypatch.setattr(
+        discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(discovery_api, '_induce', lambda *_args, **_kwargs: (
+        baseline,
+        {'entity_types': {'主体': 'urn:test:Subject'},
+         'relation_types': {}, 'attributes': {}},
+        {'metadata': {}, 'validation': {}}))
+    app = create_app(tmp_path / 'mapping-stale-base.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'mapping stale base', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        repo = app.state.service.repository
+        repo.save_ontology(project['id'], baseline, Ontology(baseline).summary())
+        run = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/drafts",
+            json={'name': 'mapping stale base'}).json()['run']
+        changed = baseline + '<urn:test:Other> a owl:Class .\n'
+        repo.save_ontology(project['id'], changed, Ontology(changed).summary())
+
+        response = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/runs/"
+            f"{run['id']}/finalize")
+
+        assert response.status_code == 409, response.text
+        assert response.json()['code'] == 'stale_base'
+        assert repo.get_discovery_run(
+            project['id'], run['id'])['status'] == 'stale_base'
+        assert repo.current_records(
+            project['id'], vectors='none', kinds=['entity']) == []
+
+
+def test_mapping_only_finalize_marks_stale_source_without_writes(
+        tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    baseline = '''
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        <urn:test:Subject> a owl:Class ; rdfs:label "主体"@zh .
+    '''
+    candidates = [{
+        'id': 'one', 'kind': 'entity', 'text': '甲',
+        'proposed_type': '主体',
+    }]
+    monkeypatch.setattr(
+        discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(discovery_api, '_induce', lambda *_args, **_kwargs: (
+        baseline,
+        {'entity_types': {'主体': 'urn:test:Subject'},
+         'relation_types': {}, 'attributes': {}},
+        {'metadata': {}, 'validation': {}}))
+    app = create_app(tmp_path / 'mapping-stale-source.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'mapping stale source', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        repo = app.state.service.repository
+        repo.save_ontology(project['id'], baseline, Ontology(baseline).summary())
+        run = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/drafts",
+            json={'name': 'mapping stale source'}).json()['run']
+        candidates[0] = {**candidates[0], 'text': '已修改'}
+
+        response = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/runs/"
+            f"{run['id']}/finalize")
+
+        assert response.status_code == 409, response.text
+        assert response.json()['code'] == 'stale_source'
+        assert repo.get_discovery_run(
+            project['id'], run['id'])['status'] == 'stale_source'
+        assert repo.current_records(
+            project['id'], vectors='none', kinds=['entity']) == []
+
+
+def test_mapping_only_finalize_validation_exception_rolls_back(
+        tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    baseline = '''
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        <urn:test:Subject> a owl:Class ; rdfs:label "主体"@zh .
+    '''
+    candidates = [{
+        'id': 'one', 'kind': 'entity', 'text': '甲',
+        'proposed_type': '主体',
+    }]
+    monkeypatch.setattr(
+        discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(discovery_api, '_induce', lambda *_args, **_kwargs: (
+        baseline,
+        {'entity_types': {'主体': 'urn:test:Subject'},
+         'relation_types': {}, 'attributes': {}},
+        {'metadata': {}, 'validation': {}}))
+    app = create_app(tmp_path / 'mapping-validation-rollback.sqlite', HashingEncoder())
+    with TestClient(app, raise_server_exceptions=False) as client:
+        project = client.post('/api/projects', json={
+            'name': 'mapping validation rollback', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        repo = app.state.service.repository
+        repo.save_ontology(project['id'], baseline, Ontology(baseline).summary())
+        run = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/drafts",
+            json={'name': 'mapping validation rollback'}).json()['run']
+        monkeypatch.setattr(
+            discovery_api, '_validated_materialization',
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                RuntimeError('forced SHACL failure')))
+
+        response = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/runs/"
+            f"{run['id']}/finalize")
+
+        assert response.status_code == 503
+        assert repo.get_discovery_run(
+            project['id'], run['id'])['status'] == 'ready_to_finalize'
+        assert repo.current_records(
+            project['id'], vectors='none', kinds=['entity']) == []
+
+
+def test_mapping_only_finalize_preserves_conflict_outcomes(
+        tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    baseline = '''
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        <urn:test:Subject> a owl:Class ; rdfs:label "主体"@zh .
+        <urn:test:Object> a owl:Class ; rdfs:label "客体"@zh .
+    '''
+    candidates = [
+        {'id': 'subject', 'kind': 'entity', 'text': '甲',
+         'proposed_type': '主体'},
+        {'id': 'object', 'kind': 'entity', 'text': '乙',
+         'proposed_type': '客体'},
+        {'id': 'relation', 'kind': 'relation', 'subject_id': 'subject',
+         'object_id': 'object', 'proposed_type': '同名'},
+        {'id': 'attribute-1', 'kind': 'attribute', 'entity_id': 'subject',
+         'proposed_type': '同名', 'value': '一'},
+        {'id': 'attribute-2', 'kind': 'attribute', 'entity_id': 'subject',
+         'proposed_type': '同名', 'value': '二'},
+    ]
+    monkeypatch.setattr(
+        discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(discovery_api, '_induce', lambda *_args, **_kwargs: (
+        baseline,
+        {'entity_types': {
+            '主体': 'urn:test:Subject', '客体': 'urn:test:Object'},
+         'relation_types': {}, 'attributes': {}},
+        {'metadata': {}, 'validation': {}}))
+    app = create_app(tmp_path / 'mapping-conflicts.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'mapping conflicts', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        repo = app.state.service.repository
+        repo.save_ontology(project['id'], baseline, Ontology(baseline).summary())
+        run = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/drafts",
+            json={'name': 'mapping conflicts'}).json()['run']
+
+        response = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/runs/"
+            f"{run['id']}/finalize")
+
+        assert response.status_code == 200, response.text
+        finalized = response.json()['run']
+        assert finalized['status'] == 'finalized_no_change'
+        outcomes = {
+            outcome['candidate_id']: outcome
+            for outcome in finalized['candidate_outcomes']}
+        assert outcomes['subject']['reason_code'] == 'materialized'
+        assert outcomes['object']['reason_code'] == 'materialized'
+        for candidate_id in {'relation', 'attribute-1', 'attribute-2'}:
+            assert outcomes[candidate_id]['reason_code'] == (
+                'ontology_term_conflict')
+            assert outcomes[candidate_id]['status'] == 'skipped'
+
+
+def test_discovery_run_read_audit_and_overview_endpoints(tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    baseline = '''
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        <urn:test:Subject> a owl:Class ; rdfs:label "主体"@zh .
+    '''
+    candidates = [{
+        'id': 'one', 'kind': 'entity', 'text': '甲',
+        'proposed_type': '主体',
+    }]
+    monkeypatch.setattr(
+        discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(discovery_api, '_induce', lambda *_args, **_kwargs: (
+        baseline,
+        {'entity_types': {'主体': 'urn:test:Subject'},
+         'relation_types': {}, 'attributes': {}},
+        {'metadata': {}, 'validation': {}}))
+    app = create_app(tmp_path / 'run-reads.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'run reads', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        repo = app.state.service.repository
+        repo.save_ontology(project['id'], baseline, Ontology(baseline).summary())
+        run = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/drafts",
+            json={'name': 'run reads'}).json()['run']
+
+        listing = client.get(
+            f"/api/projects/{project['id']}/ontology-discovery/runs")
+        detail = client.get(
+            f"/api/projects/{project['id']}/ontology-discovery/runs/"
+            f"{run['id']}")
+        audit = client.get(
+            f"/api/projects/{project['id']}/ontology-discovery/audit")
+        overview = client.get(
+            f"/api/projects/{project['id']}/ontology-discovery")
+
+        assert listing.status_code == 200, listing.text
+        assert listing.json() == {'items': [run], 'total': 1}
+        assert detail.status_code == 200, detail.text
+        assert detail.json() == run
+        assert audit.status_code == 200, audit.text
+        assert audit.json() == {'name_collisions': [], 'iri_collisions': []}
+        assert overview.status_code == 200, overview.text
+        assert overview.json()['latest_run']['id'] == run['id']
+        assert overview.json()['latest_run']['status'] == 'ready_to_finalize'
+
+
+def test_closing_discovery_draft_closes_run_and_unresolved_bindings(
+        tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    generated = '''
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        <urn:test:Subject> a owl:Class ; rdfs:label "主体"@zh .
+    '''
+    candidates = [{
+        'id': 'one', 'kind': 'entity', 'text': '甲',
+        'proposed_type': '主体',
+    }]
+    monkeypatch.setattr(
+        discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(discovery_api, '_induce', lambda *_args, **_kwargs: (
+        generated,
+        {'entity_types': {'主体': 'urn:test:Subject'},
+         'relation_types': {}, 'attributes': {}},
+        {'metadata': {}, 'validation': {}}))
+    app = create_app(tmp_path / 'run-close.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'run close', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        created = client.post(
+            f"/api/projects/{project['id']}/ontology-discovery/drafts",
+            json={'name': 'run close'}).json()
+        draft_id = created['run']['unified_draft_id']
+        current = client.get(
+            f"/api/projects/{project['id']}/ontology-drafts/{draft_id}").json()
+
+        closed = client.post(
+            f"/api/projects/{project['id']}/ontology-drafts/{draft_id}/close",
+            json={
+                'expected_revision': current['revision'],
+                'actor': 'reviewer', 'reason': 'not needed',
+            })
+
+        assert closed.status_code == 200, closed.text
+        run = app.state.service.repository.get_discovery_run(
+            project['id'], created['run']['id'])
+        assert run['status'] == 'closed'
+        assert run['candidate_outcomes'] == [
+            _terminal_outcome('one', 'skipped', 'draft_closed')]
+
+
+def test_publication_materializes_only_approved_required_bindings(
+        tmp_path, monkeypatch):
+    import knowledge_service.api.ontology_discovery as discovery_api
+
+    generated = '''
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+        <urn:test:Accepted> a owl:Class ; rdfs:label "保留类型"@zh .
+        <urn:test:Rejected> a owl:Class ; rdfs:label "拒绝类型"@zh .
+        <urn:test:Name> a owl:DatatypeProperty ;
+            rdfs:label "名称"@zh ;
+            rdfs:domain <urn:test:Accepted> ;
+            rdfs:range xsd:string .
+    '''
+    candidates = [
+        {'id': 'accepted', 'kind': 'entity', 'text': '甲',
+         'proposed_type': '保留类型'},
+        {'id': 'rejected', 'kind': 'entity', 'text': '乙',
+         'proposed_type': '拒绝类型'},
+        {'id': 'name-1', 'kind': 'attribute', 'entity_id': 'accepted',
+         'subject': '甲', 'proposed_type': '名称', 'value': '甲一'},
+        {'id': 'name-2', 'kind': 'attribute', 'entity_id': 'accepted',
+         'subject': '甲', 'proposed_type': '名称', 'value': '甲二'},
+    ]
+    monkeypatch.setattr(
+        discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
+    monkeypatch.setattr(discovery_api, '_induce', lambda *_args, **_kwargs: (
+        generated,
+        {'entity_types': {
+            '保留类型': 'urn:test:Accepted',
+            '拒绝类型': 'urn:test:Rejected',
+        }, 'relation_types': {}, 'attributes': {'名称': 'urn:test:Name'}},
+        {'metadata': {}, 'validation': {}}))
+    app = create_app(tmp_path / 'partial-publish.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'partial publish', 'use_default_ontology': False,
+            'ontology_mode': 'discovery'}).json()
+        base = f"/api/projects/{project['id']}"
+        created = client.post(
+            base + '/ontology-discovery/drafts',
+            json={'name': 'partial publish'}).json()
+        submitted_response = client.post(
+            base + f"/ontology-discovery/drafts/{created['id']}/publish",
+            json={})
+        assert submitted_response.status_code == 202, submitted_response.text
+        submitted = submitted_response.json()
+        warning_codes = [
+            warning['code']
+            for warning in submitted['validation_report']['warnings']
+            if warning.get('code')]
+        current = submitted
+        for operation in submitted['operations']:
+            reject = (
+                operation['target_iri'] == 'urn:test:Rejected'
+                or (operation['action'] == 'add_domain'
+                    and operation['target_iri'] == 'urn:test:Name'))
+            decision = client.post(
+                base + f"/ontology-drafts/{created['id']}/decisions",
+                json={
+                    'expected_revision': current['revision'],
+                    'expected_ontology_id': None,
+                    'validation_fingerprint': submitted[
+                        'validation_fingerprint'],
+                    'acknowledged_warning_codes': warning_codes,
+                    'actor': 'reviewer',
+                    'decisions': [{
+                        'operation_id': operation['id'],
+                        'operation_fingerprint': operation['fingerprint'],
+                        'action': 'reject' if reject else 'approve',
+                        'reason': 'reviewed',
+                    }],
+                })
+            assert decision.status_code == 200, decision.text
+            current = decision.json()
+        assert current['status'] == 'reviewed'
+
+        repo = app.state.service.repository
+        original_transition = repo.transition_discovery_run
+
+        def fail_publish_transition(
+                project_id, run_id, expected_status, new_status, **changes):
+            if new_status == 'published':
+                raise DiscoveryRunConflict(
+                    'forced publication transition failure', run_id=run_id)
+            return original_transition(
+                project_id, run_id, expected_status, new_status, **changes)
+
+        monkeypatch.setattr(
+            repo, 'transition_discovery_run', fail_publish_transition)
+        failed = client.post(
+            base + f"/ontology-drafts/{created['id']}/publish",
+            json={
+                'expected_revision': current['revision'],
+                'expected_ontology_id': None,
+                'validation_fingerprint': current['validation_fingerprint'],
+                'acknowledged_warning_codes': warning_codes,
+                'idempotency_key': 'partial-publish-failed',
+                'actor': 'publisher',
+            })
+        assert failed.status_code == 409, failed.text
+        assert repo.list_ontologies(project['id']) == []
+        assert [record for record in repo.current_records(
+            project['id'], vectors='none')
+            if record['kind'] in {'entity', 'relation', 'attribute'}] == []
+        assert repo.get_discovery_run(
+            project['id'], created['run']['id'])['status'] == 'draft_created'
+        monkeypatch.setattr(
+            repo, 'transition_discovery_run', original_transition)
+
+        published = client.post(
+            base + f"/ontology-drafts/{created['id']}/publish",
+            json={
+                'expected_revision': current['revision'],
+                'expected_ontology_id': None,
+                'validation_fingerprint': current['validation_fingerprint'],
+                'acknowledged_warning_codes': warning_codes,
+                'idempotency_key': 'partial-publish-1',
+                'actor': 'publisher',
+            })
+
+        assert published.status_code == 200, published.text
+        records = app.state.service.repository.current_records(
+            project['id'], vectors='none')
+        formal = [
+            record for record in records
+            if record['kind'] in {'entity', 'relation', 'attribute'}]
+        assert {record['metadata']['discovery_candidate_id']
+                for record in formal} == {'accepted', 'name-1', 'name-2'}
+        run = app.state.service.repository.get_discovery_run(
+            project['id'], created['run']['id'])
+        assert run['status'] == 'published'
+        assert {outcome['candidate_id']: outcome['reason_code']
+                for outcome in run['candidate_outcomes']} == {
+            'accepted': 'materialized',
+            'rejected': 'required_operation_rejected',
+            'name-1': 'materialized',
+            'name-2': 'materialized',
+        }
+
+
 def test_all_reusable_bindings_ignore_unbound_annotation_diff(
         tmp_path, monkeypatch):
     import knowledge_service.api.ontology_discovery as discovery_api

@@ -1197,15 +1197,34 @@ class OntologyDrafts:
         return self._preview(project_id, updated)
 
     def close(self, project_id, draft_id, expected_revision, actor, reason):
-        draft = self.store.get(project_id, draft_id)
-        self._assert_revision(draft, expected_revision)
-        if draft['status'] != 'editing':
-            raise ValueError('only editing drafts may be closed')
         actor, reason = _text(actor, 'actor'), _text(reason, 'reason')
-        context = dict(draft.get('source_context') or {})
-        context['closure'] = {'actor': actor, 'reason': reason}
-        return self._cas(project_id, draft_id, expected_revision, {
-            'status': 'closed', 'source_context': context})
+        with self.repository._transaction():
+            draft = self.store.get(project_id, draft_id)
+            self._assert_revision(draft, expected_revision)
+            if draft['status'] != 'editing':
+                raise ValueError('only editing drafts may be closed')
+            context = dict(draft.get('source_context') or {})
+            context['closure'] = {'actor': actor, 'reason': reason}
+            closed = self._cas(project_id, draft_id, expected_revision, {
+                'status': 'closed', 'source_context': context})
+            effects = context.get('publication_effects') or {}
+            run_id = effects.get('discovery_run_id')
+            if draft.get('source_kind') == 'discovery' and run_id:
+                run = self.repository.get_discovery_run(project_id, run_id)
+                resolved_ids = {
+                    outcome['candidate_id']
+                    for outcome in run.get('candidate_outcomes') or []
+                }
+                terminal = [{
+                    'candidate_id': binding['candidate_id'],
+                    'status': 'skipped',
+                    'reason_code': 'draft_closed',
+                } for binding in run.get('candidate_bindings') or []
+                    if binding['candidate_id'] not in resolved_ids]
+                self.repository.transition_discovery_run(
+                    project_id, run_id, 'draft_created', 'closed',
+                    candidate_outcomes=terminal)
+            return closed
 
     # ------------------------------------------------------------------ rebase
     @staticmethod

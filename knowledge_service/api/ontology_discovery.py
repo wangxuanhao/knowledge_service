@@ -30,6 +30,7 @@ from ..repository.discovery_run_store import (
 from ..services.discovery_vocabulary import (
     GeneratedVocabularyConflict,
     InvalidBaselineVocabulary,
+    audit_formal_vocabulary,
     discovery_source_fingerprint,
 )
 from ..services.ontology_drafts import OntologyDrafts, StaleBase, StaleSource
@@ -259,6 +260,49 @@ def _compact_run_summary(candidate_count, normalization, binding_count):
     }
 
 
+def _finalize_result(run, *, materialized_count=None, skipped_candidates=None,
+                     validation=None):
+    result = {
+        'result_kind': 'mapping_only',
+        'run': run,
+        'discovery_run': run,
+    }
+    if materialized_count is not None:
+        result['materialized_count'] = materialized_count
+    if skipped_candidates is not None:
+        result['skipped_candidates'] = skipped_candidates
+    if validation is not None:
+        result['validation'] = validation
+    return result
+
+
+def _current_finalize_fingerprint(project_id, run, parent, candidates):
+    generation_options = _canonical_copy(run['generation_options'])
+    generation_options['baseline_turtle_sha256'] = hashlib.sha256(
+        ((parent or {}).get('turtle') or '').encode('utf-8')).hexdigest()
+    return discovery_source_fingerprint(
+        project_id, parent['id'] if parent else None, candidates,
+        normalizer_version=NORMALIZER_VERSION,
+        generator_contract=GENERATOR_CONTRACT,
+        runtime_version=_semantica_runtime_version(),
+        attribute_threshold=ATTRIBUTE_THRESHOLD,
+        generation_options=generation_options,
+        request_name=run['request_name'])
+
+
+def _processed_discovery_candidate_ids(repository, project_id):
+    result = set()
+    for record in repository.current_records(
+            project_id, vectors='none',
+            kinds=['entity', 'relation', 'attribute']):
+        metadata = record.get('metadata') or {}
+        candidate_id = metadata.get('discovery_candidate_id')
+        if candidate_id:
+            result.add(candidate_id)
+        result.update(metadata.get('discovery_candidate_ids') or [])
+    return result
+
+
 class DraftRequest(Request):
     name: str = Field(default='发现本体', min_length=1, max_length=200)
 
@@ -321,6 +365,7 @@ def install(app, service):
         drafts=[_hydrate_legacy_draft(service.repository,p,draft)
                 for draft in stored_drafts]
         ontologies=service.repository.list_ontologies(p)
+        latest_run=service.repository.latest_discovery_run(p)
         states,status_counts=_candidate_lifecycle(service.repository,p,candidates,drafts,records)
         enriched_drafts=[]
         for draft in drafts:
@@ -334,9 +379,36 @@ def install(app, service):
             'published':bool(ontologies),
             'ontology_id':ontologies[-1]['id'] if ontologies else None,
             'candidate_status_counts':status_counts,
+            'latest_run':({
+                'id':latest_run['id'],
+                'status':latest_run['status'],
+                'result_kind':discovery_result_kind(latest_run),
+                'unified_draft_id':latest_run.get('unified_draft_id'),
+                'diagnostics':latest_run.get('diagnostics') or {},
+                'created_at':latest_run.get('created_at'),
+                'updated_at':latest_run.get('updated_at'),
+            } if latest_run else None),
             'unpublished_candidate_count':status_counts['pending']+status_counts['included_in_draft'],
             'requires_candidate_review':bool(status_counts['pending']+status_counts['included_in_draft']+status_counts['approved']),
             'requires_controlled_reingest':False}
+
+    @router.get('/runs')
+    def list_runs(p: str):
+        service.repository.get_project(p)
+        items = service.repository.list_discovery_runs(p)
+        return {'items': items, 'total': len(items)}
+
+    @router.get('/runs/{run_id}')
+    def get_run(p: str, run_id: str):
+        service.repository.get_project(p)
+        return service.repository.get_discovery_run(p, run_id)
+
+    @router.get('/audit')
+    def audit(p: str):
+        service.repository.get_project(p)
+        ontologies = service.repository.list_ontologies(p)
+        turtle = ontologies[-1]['turtle'] if ontologies else ''
+        return audit_formal_vocabulary(turtle)
 
     @router.get('/candidate-mindmap')
     def candidate_mindmap(p:str,limit:int=500):
@@ -524,6 +596,97 @@ def install(app, service):
                 'mappings':run['mappings'],'review_base_mappings':deepcopy(mappings),
                 'result_kind':'draft','run':run,'discovery_run':run,
                 'operations':preview['operations']}
+
+    @router.post('/runs/{run_id}/finalize')
+    def finalize_run(p: str, run_id: str):
+        service.repository.get_project(p)
+        stale_error = None
+        result = None
+        with service.repository._transaction():
+            run = service.repository.get_discovery_run(p, run_id)
+            if run['status'] == 'finalized_no_change':
+                return _finalize_result(run)
+            if run['status'] != 'ready_to_finalize':
+                raise DiscoveryRunConflict(
+                    'discovery run is not ready to finalize',
+                    run_id=run_id, expected_status='ready_to_finalize',
+                    current_status=run['status'])
+
+            ontologies = service.repository.list_ontologies(p)
+            parent = ontologies[-1] if ontologies else None
+            parent_id = parent['id'] if parent else None
+            if parent_id != run.get('base_ontology_id'):
+                service.repository.transition_discovery_run(
+                    p, run_id, 'ready_to_finalize', 'stale_base')
+                stale_error = StaleBase(
+                    'discovery base changed before finalization', details={
+                        'base_ontology_id': run.get('base_ontology_id'),
+                        'current_ontology_id': parent_id})
+            else:
+                candidates = _canonical_candidates([
+                    item for item in _candidates(service.repository, p)
+                    if item.get('kind') in {
+                        'entity', 'relation', 'attribute'}])
+                current_fingerprint = _current_finalize_fingerprint(
+                    p, run, parent, candidates)
+                processed_ids = _processed_discovery_candidate_ids(
+                    service.repository, p)
+                accepted_ids = set(run.get('accepted_candidate_ids') or [])
+                if (current_fingerprint != run['source_fingerprint']
+                        or accepted_ids & processed_ids):
+                    service.repository.transition_discovery_run(
+                        p, run_id, 'ready_to_finalize', 'stale_source')
+                    stale_error = StaleSource(
+                        'discovery source changed before finalization', details={
+                            'expected_source_fingerprint': run[
+                                'source_fingerprint'],
+                            'current_source_fingerprint': current_fingerprint,
+                        })
+                else:
+                    draft = {
+                        **run,
+                        'id': run_id,
+                        'excluded_candidate_ids': [],
+                    }
+                    proposed, skipped = _materialize_candidates(
+                        p, draft, parent_id,
+                        run.get('candidate_outcomes') or [])
+                    accepted, skipped, validation = _validated_materialization(
+                        parent['turtle'], proposed, skipped)
+                    saved = [
+                        service.repository._put(p, record, 0)
+                        for record in accepted
+                    ]
+                    materialized_ids = {
+                        (record.get('metadata') or {}).get(
+                            'discovery_candidate_id')
+                        for record in saved
+                    }
+                    terminal_outcomes = [{
+                        'candidate_id': binding['candidate_id'],
+                        'status': (
+                            'materialized'
+                            if binding['candidate_id'] in materialized_ids
+                            else 'skipped'),
+                        'reason_code': (
+                            'materialized'
+                            if binding['candidate_id'] in materialized_ids
+                            else 'ontology_validation_failed'),
+                    } for binding in run.get('candidate_bindings') or []
+                        if binding['candidate_id'] not in {
+                            outcome['candidate_id']
+                            for outcome in run.get('initial_candidate_outcomes')
+                            or []}]
+                    transitioned = service.repository.transition_discovery_run(
+                        p, run_id, 'ready_to_finalize',
+                        'finalized_no_change',
+                        candidate_outcomes=terminal_outcomes)
+                    result = _finalize_result(
+                        transitioned, materialized_count=len(saved),
+                        skipped_candidates=skipped, validation=validation)
+        if stale_error is not None:
+            raise stale_error
+        return result
 
     @router.post('/drafts/{draft_id}/publish', status_code=202)
     def publish(p:str,draft_id:str):

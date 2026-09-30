@@ -2011,24 +2011,155 @@ class Repository:
         effects = (draft.get('source_context') or {}).get('publication_effects')
         if not effects:
             return []
-        if not isinstance(effects, dict) or effects.get('kind') != draft['source_kind']:
+        if not isinstance(effects, dict):
+            raise OntologyPublicationConflict(
+                'stale_source', 'ontology draft publication effects are invalid')
+        effect_kind = effects.get('kind')
+        if (effect_kind is None and draft['source_kind'] == 'discovery'
+                and effects.get('discovery_run_id')):
+            effect_kind = 'discovery'
+        if effect_kind != draft['source_kind']:
             raise OntologyPublicationConflict(
                 'stale_source', 'ontology draft publication effects are invalid')
 
         project_id = prepared['project_id']
-        if effects['kind'] == 'discovery':
-            from ..services.ontology_discovery import _validated_materialization
+        if effect_kind == 'discovery':
+            from ..services.ontology_discovery import (
+                _materialize_candidates,
+                _validated_materialization,
+            )
 
-            proposed = json.loads(_json(effects.get('records') or []))
-            for record in proposed:
-                record['ontology_id'] = ontology['id']
-                metadata = dict(record.get('metadata') or {})
-                metadata['discovery_draft_id'] = draft['id']
-                record['metadata'] = metadata
+            run_id = effects.get('discovery_run_id')
+            if not run_id:
+                if 'records' not in effects:
+                    raise OntologyPublicationConflict(
+                        'stale_source', 'discovery publication run is missing')
+                proposed = json.loads(_json(effects.get('records') or []))
+                for record in proposed:
+                    record['ontology_id'] = ontology['id']
+                    metadata = dict(record.get('metadata') or {})
+                    metadata['discovery_draft_id'] = draft['id']
+                    record['metadata'] = metadata
+                accepted, skipped, validation = _validated_materialization(
+                    prepared['turtle'], proposed,
+                    json.loads(_json(
+                        effects.get('skipped_candidates') or [])))
+                saved = [
+                    self._put(project_id, record, 0)
+                    for record in accepted]
+                counts = {
+                    kind: sum(row['kind'] == kind for row in saved)
+                    for kind in ('entity', 'relation', 'attribute')}
+                row = self._db.execute(
+                    '''SELECT payload FROM artifacts
+                       WHERE id=? AND kind='ontology_discovery_draft' ''',
+                    (draft['id'],)).fetchone()
+                if row is not None:
+                    artifact = json.loads(row['payload'])
+                    artifact.update({
+                        'status': 'published',
+                        'ontology_id': ontology['id'],
+                        'mapped_entities': counts['entity'],
+                        'mapped_relations': counts['relation'],
+                        'mapped_attributes': counts['attribute'],
+                        'skipped_candidates': skipped,
+                        'validation': validation,
+                        'requires_candidate_review': bool(
+                            skipped
+                            or artifact.get('excluded_candidate_ids')),
+                        'requires_controlled_reingest': False,
+                    })
+                    self._db.execute(
+                        '''UPDATE artifacts SET payload=?
+                           WHERE id=? AND kind='ontology_discovery_draft' ''',
+                        (_json(artifact), draft['id']))
+                return [record['id'] for record in saved]
+            try:
+                run = self.get_discovery_run(project_id, run_id)
+            except KeyError as exc:
+                raise OntologyPublicationConflict(
+                    'stale_source', 'discovery publication run does not exist') \
+                    from exc
+            if (run.get('status') != 'draft_created'
+                    or run.get('unified_draft_id') != draft['id']):
+                raise OntologyPublicationConflict(
+                    'stale_source', 'discovery publication run is not current')
+
+            approved_ids = {
+                operation['id'] for operation in prepared['operations']}
+            effective_ids = {
+                operation['id']
+                for operation in self._ontology_drafts.effective_operations(
+                    project_id, draft['id'])}
+            initial_ids = {
+                outcome['candidate_id']
+                for outcome in run.get('initial_candidate_outcomes') or []}
+            required_outcomes = []
+            for binding in run.get('candidate_bindings') or []:
+                if binding['candidate_id'] in initial_ids:
+                    continue
+                missing = [
+                    operation_id
+                    for operation_id in binding.get(
+                        'required_operation_ids') or []
+                    if operation_id not in approved_ids]
+                if not missing:
+                    continue
+                if any(operation_id in effective_ids for operation_id in missing):
+                    reason_code = 'required_operation_rejected'
+                elif any(self._db.execute(
+                        '''SELECT 1 FROM ontology_operations
+                           WHERE project_id=? AND draft_id=? AND id=?''',
+                        (project_id, draft['id'], operation_id)).fetchone()
+                         for operation_id in missing):
+                    reason_code = 'required_operation_superseded'
+                else:
+                    reason_code = 'required_operation_missing'
+                required_outcomes.append({
+                    'candidate_id': binding['candidate_id'],
+                    'status': 'skipped',
+                    'reason_code': reason_code,
+                })
+
+            materialization_source = {
+                **run,
+                'id': draft['id'],
+                'excluded_candidate_ids': [],
+            }
+            proposed, skipped = _materialize_candidates(
+                project_id, materialization_source, ontology['id'],
+                [*(run.get('candidate_outcomes') or []), *required_outcomes])
             accepted, skipped, validation = _validated_materialization(
-                prepared['turtle'], proposed,
-                json.loads(_json(effects.get('skipped_candidates') or [])))
+                prepared['turtle'], proposed, skipped)
             saved = [self._put(project_id, record, 0) for record in accepted]
+            materialized_ids = {
+                (record.get('metadata') or {}).get('discovery_candidate_id')
+                for record in saved}
+            required_by_candidate = {
+                outcome['candidate_id']: outcome
+                for outcome in required_outcomes}
+            terminal_outcomes = []
+            for binding in run.get('candidate_bindings') or []:
+                candidate_id = binding['candidate_id']
+                if candidate_id in initial_ids:
+                    continue
+                if candidate_id in required_by_candidate:
+                    terminal_outcomes.append(required_by_candidate[candidate_id])
+                elif candidate_id in materialized_ids:
+                    terminal_outcomes.append({
+                        'candidate_id': candidate_id,
+                        'status': 'materialized',
+                        'reason_code': 'materialized',
+                    })
+                else:
+                    terminal_outcomes.append({
+                        'candidate_id': candidate_id,
+                        'status': 'skipped',
+                        'reason_code': 'ontology_validation_failed',
+                    })
+            self.transition_discovery_run(
+                project_id, run_id, 'draft_created', 'published',
+                candidate_outcomes=terminal_outcomes)
             counts = {
                 kind: sum(row['kind'] == kind for row in saved)
                 for kind in ('entity', 'relation', 'attribute')}
@@ -2052,7 +2183,7 @@ class Repository:
                     (_json(artifact), draft['id']))
             return [row['id'] for row in saved]
 
-        if effects['kind'] == 'candidate':
+        if effect_kind == 'candidate':
             document = self.get_record(project_id, effects.get('document_id'))
             if document['version'] != effects.get('expected_document_version'):
                 raise OntologyPublicationConflict(
@@ -2094,7 +2225,7 @@ class Repository:
                 (_json(proposal), effects['proposal_id']))
             return [document['id']]
 
-        if effects['kind'] == 'import':
+        if effect_kind == 'import':
             proposed = json.loads(_json(effects.get('records') or []))
             for record in proposed:
                 if record.get('kind') in {'entity', 'relation', 'attribute'}:
