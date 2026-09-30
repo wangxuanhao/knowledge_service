@@ -3,9 +3,11 @@
 *.log
 data/model/*
 data/rules/*
+data/service/*
 .omo
 .venv
 .pytest_cache
 .test-tmp*/
 data/service/knowledge.sqlite
 __pycache__
+
