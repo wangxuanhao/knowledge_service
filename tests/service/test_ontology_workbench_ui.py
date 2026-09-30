@@ -272,25 +272,28 @@ def test_empty_draft_list_keeps_draft_stages_locked_without_loading_forever(page
         '#ontology-workbench-canvas-content').inner_text()
 
 
-def test_discovery_clusters_are_complete_and_stably_sorted(page):
+def test_discovery_distribution_switches_share_one_stably_sorted_detail(page):
     page.click('[data-tab="ontology-workbench"]')
-    page.wait_for_selector('.discovery-cluster')
-    clusters = page.locator('.discovery-cluster')
-    assert clusters.count() == 3
-    entity_rows = clusters.nth(0).locator('.ontology-workbench__cluster-row')
-    relation_rows = clusters.nth(1).locator('.ontology-workbench__cluster-row')
-    attribute_rows = clusters.nth(2).locator('.ontology-workbench__cluster-row')
-    assert entity_rows.all_inner_texts() == [
-        'Omega\n12', 'Lambda\n11', 'Kappa\n10', 'Iota\n9', 'Theta\n8',
-        'Eta\n7', 'Zeta\n6', 'Epsilon\n5', 'Delta\n4', 'Alpha\n3']
-    assert relation_rows.all_inner_texts() == ['RelationA\n4', 'RelationB\n1']
-    assert attribute_rows.all_inner_texts() == ['AttributeA\n2']
+    page.wait_for_selector('[data-discovery-distribution-kind="entity"]')
+    switches = page.locator('[data-discovery-distribution-kind]')
+    assert switches.count() == 3
+    assert switches.all_inner_texts() == [
+        '实体类别\n7 个候选 · 12 类',
+        '关系类型\n2 个候选 · 2 类',
+        '属性定义\n1 个候选 · 1 类',
+    ]
+    assert switches.nth(0).get_attribute('aria-pressed') == 'true'
+    assert page.locator('.discovery-distribution-detail').count() == 1
 
-    toggle = clusters.nth(0).locator('.ontology-workbench__cluster-toggle')
+    entity_rows = page.locator(
+        '.discovery-distribution-detail .ontology-workbench__cluster-row')
+    assert entity_rows.all_inner_texts() == [
+        'Omega\n12', 'Lambda\n11', 'Kappa\n10',
+        'Iota\n9', 'Theta\n8', 'Eta\n7']
+
+    toggle = page.locator('.ontology-workbench__cluster-toggle')
     assert toggle.inner_text() == '展开全部（共 12 类）'
     assert toggle.get_attribute('aria-expanded') == 'false'
-    assert clusters.nth(1).locator('.ontology-workbench__cluster-toggle').count() == 0
-    assert clusters.nth(2).locator('.ontology-workbench__cluster-toggle').count() == 0
 
     toggle.click()
     assert entity_rows.all_inner_texts() == [
@@ -299,12 +302,48 @@ def test_discovery_clusters_are_complete_and_stably_sorted(page):
         'Gamma\n3', 'Beta\n1']
     assert toggle.inner_text() == '收起'
     assert toggle.get_attribute('aria-expanded') == 'true'
-    assert 'is-expanded' in clusters.nth(0).locator(
+    assert 'is-expanded' in page.locator(
         '.ontology-workbench__cluster-list').get_attribute('class').split()
 
     toggle.click()
-    assert entity_rows.count() == 10
+    assert entity_rows.count() == 6
     assert toggle.get_attribute('aria-expanded') == 'false'
+
+
+def test_discovery_distribution_switches_candidate_kind_and_cluster_filter(page):
+    page.click('[data-tab="ontology-workbench"]')
+    page.click('[data-discovery-distribution-kind="relation"]')
+
+    assert page.evaluate("() => OntologyWorkbench.state.discoveryKind") == 'relation'
+    assert page.locator(
+        '[data-discovery-distribution-kind="relation"]').get_attribute(
+            'aria-pressed') == 'true'
+    assert page.locator('.discovery-distribution-detail h4').inner_text() == '关系类型分布'
+    assert page.locator('[data-candidate-kind="relation"]').count() == 1
+
+    page.click('[data-cluster-filter="RelationA"]')
+    assert page.evaluate("() => OntologyWorkbench.state.filters.cluster") == 'RelationA'
+    assert page.locator('[data-cluster-filter="RelationA"]').get_attribute(
+        'aria-pressed') == 'true'
+    assert '类别：RelationA' in page.locator(
+        '[data-active-cluster-filter]').inner_text()
+    assert page.locator('[data-candidate-id="r1"]').count() == 1
+
+    page.click('[data-discovery-distribution-kind="attribute"]')
+    assert page.evaluate("() => OntologyWorkbench.state.discoveryKind") == 'attribute'
+    assert page.evaluate("() => OntologyWorkbench.state.filters.cluster") == ''
+    assert page.locator('[data-candidate-kind="attribute"]').count() == 1
+
+
+def test_discovery_evidence_exceptions_remain_reachable(page):
+    page.click('[data-tab="ontology-workbench"]')
+    page.click('[data-discovery-kind="exception"]')
+    assert page.evaluate("() => OntologyWorkbench.state.discoveryKind") == 'exception'
+    assert page.locator('[data-candidate-kind="exception"]').count() == 1
+
+    page.click('[data-discovery-distribution-kind="entity"]')
+    assert page.evaluate("() => OntologyWorkbench.state.discoveryKind") == 'entity'
+    assert page.locator('[data-candidate-kind="entity"]').count() == 3
 
 
 def test_discovery_uses_one_explained_workspace_instead_of_duplicate_side_queue(page):
@@ -464,6 +503,7 @@ def test_ontology_change_approval_is_owned_by_the_ontology_workbench(page):
 
 def test_discovery_cluster_filters_the_candidate_list(page):
     page.click('[data-tab="ontology-workbench"]')
+    page.click('.ontology-workbench__cluster-toggle')
     page.wait_for_selector('[data-cluster-filter="Alpha"]')
     page.click('[data-cluster-filter="Alpha"]')
     assert page.locator('[data-candidate-id]').count() == 1
@@ -482,6 +522,33 @@ def test_discovery_refresh_remains_available_without_the_side_queue(page):
         "before => apiCalls.filter(x => x.url.endsWith('/ontology-discovery')).length > before",
         arg=before,
     )
+
+
+def test_discovery_draft_form_explains_name_and_uses_unfiltered_scope(page):
+    page.click('[data-tab="ontology-workbench"]')
+    page.click('[data-discovery-distribution-kind="relation"]')
+    page.click('[data-cluster-filter="RelationA"]')
+    page.click('#ontology-workbench-create-discovery-draft')
+
+    form = page.locator('[data-discovery-draft-form]')
+    assert '当前候选及来源证据会冻结' in form.inner_text()
+    assert form.locator('[data-draft-scope="candidates"]').inner_text() == '10\n全部候选'
+    assert form.locator('[data-draft-scope="definitions"]').inner_text() == '15\n分布项'
+    assert form.locator('[data-draft-scope="sources"]').inner_text() == '7\n来源文档'
+
+    name = page.get_by_label('草案名称（必填）')
+    assert name.input_value()
+    assert '知识草案' in name.input_value()
+    assert '用于草案列表、审核记录和版本追溯' in form.inner_text()
+    name.fill('直播规则草案')
+    assert page.locator('[data-draft-name-preview]').inner_text() == '直播规则草案'
+
+    before = page.evaluate("() => apiCalls.length")
+    page.click('[data-cancel-discovery-draft]')
+    assert page.locator('[data-discovery-draft-form]').count() == 0
+    assert page.evaluate("() => apiCalls.length") == before
+    assert page.evaluate("() => OntologyWorkbench.state.discoveryKind") == 'relation'
+    assert page.evaluate("() => OntologyWorkbench.state.filters.cluster") == 'RelationA'
 
 
 def prepare_discovery_creation(page, result):
