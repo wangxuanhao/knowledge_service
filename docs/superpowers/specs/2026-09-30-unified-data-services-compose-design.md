@@ -46,6 +46,12 @@ Data ownership is explicit so only one process can write the etcd store:
 
 Every bind uses `bind.create_host_path: false`; missing sources fail validation instead of silently creating empty paths.
 
+## Environment Configuration
+
+The project uses `.env` as the single local source for application and infrastructure configuration. Docker Compose automatically reads this file from the project directory for `${VARIABLE}` interpolation, so normal commands do not require `--env-file`.
+
+PostgreSQL receives only its required `POSTGRES_*` and `TZ` values through the service's explicit `environment` mapping. The complete `.env` file is not injected into the container, which prevents unrelated application secrets such as LLM API keys from being exposed there. `.env.example` mirrors the supported variable names with non-secret examples and remains safe to commit. The former `.env.postgres` file is retired after its values are merged into `.env`.
+
 ## Cutover and Snapshot Safety
 
 Before any container changes, render `compose.yml` with project name `knowledge-service`, record the PostgreSQL identity and volume, record the existing Milvus collection list, and save inspect metadata for the legacy Milvus and Attu containers.
@@ -72,7 +78,8 @@ The embedded-etcd `docker run` definition in the implementation plan is rollback
 
 The migration is accepted only when all of the following checks pass:
 
-- `docker compose --project-name knowledge-service --env-file .env.postgres -f compose.yml config` renders exactly `postgres`, `etcd`, `milvus`, and `attu` with the pinned images.
+- `docker compose -f compose.yml config` automatically loads `.env` and renders exactly `postgres`, `etcd`, `milvus`, and `attu` with the pinned images.
+- The rendered PostgreSQL environment contains the required PostgreSQL variables but none of the application's `KG_*` variables.
 - Port 2379 is published only on `127.0.0.1`; Milvus publishes only 19530 and 9091.
 - External etcd has the configured quota, compaction settings, writable data mount, and healthy endpoint.
 - The Milvus etcd shadow mount renders read-only, Milvus points to `etcd:2379`, and the health dependency chain is present.
