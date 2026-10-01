@@ -116,7 +116,7 @@ def test_sync_scope_idempotence_and_failure(tmp_path):
 def test_unconfigured_api_keeps_local_functional(tmp_path, monkeypatch):
     monkeypatch.delenv('KG_NEO4J_PASSWORD', raising=False)
     with TestClient(create_app(tmp_path / 'api.sqlite', HashingEncoder())) as client:
-        assert client.get('/api/storage').json()['primary'] == 'sqlite'
+        assert client.get('/api/storage').json()['primary'] == 'postgres'
         assert client.get('/api/storage').json()['configured'] is False
         assert client.post('/api/storage/neo4j/check').status_code == 503
         pid = client.post('/api/projects', json={'name': '仍然可用'}).json()['id']

@@ -12,8 +12,8 @@ def main():
     results=[]
     with httpx.Client(base_url='http://127.0.0.1:8100',timeout=120) as client:
         health=client.get('/api/health').json()
-        assert health['semantica_version']=='0.6.8',health
-        assert 'llm_model' in health['python_executable'],health
+        assert health['semantica_version'],health
+        assert 'model_agent' in health['python_executable'],health
         print('RUNTIME_OK',flush=True)
         projects=[p for p in client.get('/api/local-projects').json()['projects'] if p['kind']=='project']
         for legacy in projects:

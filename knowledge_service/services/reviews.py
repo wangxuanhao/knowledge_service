@@ -1,7 +1,7 @@
 """文档版本化的审核清单与决策业务。
 
 路由层在 api.reviews；本文件包含请求模型、清单投影与审核决定，
-批准与已批准事实原子化提交（同一 SQLite 事务）。
+批准与已批准事实原子化提交（同一 PostgreSQL 事务）。
 """
 import copy
 import hashlib
@@ -287,7 +287,7 @@ def decide(service, p, doc_id, candidate_id, request):
         candidate.update(status='approved', target_type=target,
                          approved_ontology_id=ontology['id'],
                          record_id=same_attribute['id'] if same_attribute else record_id)
-        # 校验/向量化失败会保持审核为待处理状态。批准与关系写入共享同一个 SQLite 事务。
+        # 校验/向量化失败会保持审核为待处理状态。批准与关系写入共享同一个 PostgreSQL 事务。
         decisions = [] if assertion is None else [{'id': candidate_id,
             'expected_version': assertion['decision_version'], 'status': 'accepted',
             'reason': request.note, 'actor': 'reviewer', 'canonical_record_id': record_id}]

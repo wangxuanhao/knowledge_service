@@ -6,6 +6,9 @@ from pathlib import Path
 
 import httpx
 
+from ..core.net import external_client
+from ..utils.diagnostics import redact
+
 
 class HashingEncoder:
     identity = 'demo-character-bigrams-sha256-256-v1'
@@ -57,7 +60,7 @@ class RemoteEncoder:
         if not all([self.url, self.model, self.key]):
             raise RuntimeError('请配置 KG_EMBEDDING_BASE_URL、KG_EMBEDDING_MODEL、KG_EMBEDDING_API_KEY')
         try:
-            with httpx.Client(timeout=120) as client:
+            with external_client(120) as client:
                 response = client.post(self.url + '/embeddings', headers={'Authorization': f'Bearer {self.key}'},
                                        json={'model': self.model, 'input': texts})
                 response.raise_for_status()
@@ -66,7 +69,9 @@ class RemoteEncoder:
                     raise RuntimeError('embedding 提供商返回的向量数量不正确')
                 return [row['embedding'] for row in data]
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
-            raise RuntimeError(f'embedding 提供商不可用或返回无效响应（{type(exc).__name__}）') from exc
+            # 保留底层原因（经 redact 脱敏）：只报异常类型会让「模型名不存在」
+            # 这类可自愈的配置错误看起来和网络故障一样，无法自查。
+            raise RuntimeError(f'embedding 提供商不可用或返回无效响应：{redact(exc)}') from exc
 
 
 def configured_encoder():

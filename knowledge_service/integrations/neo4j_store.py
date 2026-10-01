@@ -1,4 +1,4 @@
-"""可选、显式的 SQLite -> Neo4j 投影。SQLite 仍是权威数据源。
+"""可选、显式的 PostgreSQL -> Neo4j 投影。PostgreSQL 仍是权威数据源。
 
 一次项目同步即一次远程事务。失败的同步不会回滚本地写入。
 固定标签与参数化值隔离了本应用的数据。
@@ -49,7 +49,7 @@ class Neo4jProjection:
         self.lock = threading.RLock()
 
     def status(self):
-        return {'mode': 'sqlite_with_optional_neo4j_projection', 'primary': 'sqlite',
+        return {'mode': 'postgres_with_optional_neo4j_projection', 'primary': 'postgres',
                 'configured': bool(self.password or self.driver),
                 'database': self.database, 'sync_mode': 'manual_per_project',
                 'retrieval_backend': 'local', 'embeddings_synced': False}
@@ -65,7 +65,7 @@ class Neo4jProjection:
         try:
             from neo4j import GraphDatabase
         except ImportError:
-            raise RuntimeError('请在 llm_model 环境中安装可选的 neo4j 驱动') from None
+            raise RuntimeError('请在 model_agent 环境中安装可选的 neo4j 驱动') from None
         self.driver = GraphDatabase.driver(self.uri, auth=(self.username, self.password),
                                           connection_timeout=5, connection_acquisition_timeout=10,
                                           max_transaction_retry_time=10)
@@ -107,7 +107,7 @@ class Neo4jProjection:
     def delete_project(self, project_id):
         """从 Neo4j 投影中删除整个项目：项目节点、记录/版本/本体节点及其关系。
 
-        与 SQLite 删除独立——SQLite 仍是权威源，这里只清理远端副本；
+        与 PostgreSQL 删除独立——PostgreSQL 仍是权威源，这里只清理远端副本；
         未配置/连接失败时抛出异常，由调用方决定是否吞掉。
         """
         with self.lock:

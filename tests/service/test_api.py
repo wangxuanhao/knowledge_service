@@ -89,7 +89,7 @@ def test_background_ingestion_has_stage_logs(client):
         time.sleep(.02)
     assert job['status']=='completed',job
     logs='\n'.join(job['logs'])
-    for message in ('文档开始','原文收据已保存','切片完成','向量化','SQLite 原子落库','落库完成'):
+    for message in ('文档开始','原文收据已保存','切片完成','向量化','原子落库','落库完成'):
         assert message in logs
 
 

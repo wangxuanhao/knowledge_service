@@ -114,34 +114,3 @@ def test_superseded_is_terminal_and_assertions_are_project_isolated(tmp_path):
     repo.delete_project(first_project)
     assert repo._db.execute('SELECT COUNT(*) FROM assertions').fetchone()[0] == 0
     assert repo._db.execute('SELECT COUNT(*) FROM assertion_events').fetchone()[0] == 0
-
-
-def test_legacy_current_graph_is_backfilled_once_on_upgrade(tmp_path, monkeypatch):
-    path = tmp_path / 'legacy.sqlite'
-    all_migrations = repository_module._SCHEMA_MIGRATIONS
-    # Pin the migration under test by version instead of assuming it is the last entry:
-    # the legacy database must miss only the governance backfill, while still being
-    # writable by the current code (which needs the later `vector` column to exist).
-    legacy_migrations = tuple(item for item in all_migrations if item[0] != 8)
-    monkeypatch.setattr(repository_module, '_SCHEMA_MIGRATIONS', legacy_migrations)
-    legacy = Repository(path)
-    project_id = legacy.create_project('旧项目')['id']
-    legacy.put_batch(project_id, [
-        {'id': 'a', 'kind': 'entity', 'type': 'Person', 'text': '张三'},
-        {'id': 'b', 'kind': 'entity', 'type': 'Person', 'text': '李四'},
-        {'id': 'r', 'kind': 'relation', 'type': 'knows', 'text': '认识',
-         'subject_id': 'a', 'object_id': 'b'},
-        {'id': 'r2', 'kind': 'relation', 'type': 'knows', 'text': '另一个来源',
-         'subject_id': 'a', 'object_id': 'b'},
-    ])
-    legacy.close()
-
-    monkeypatch.setattr(repository_module, '_SCHEMA_MIGRATIONS', all_migrations)
-    upgraded = Repository(path)
-    assert len(upgraded.list_assertions(project_id, status='accepted')) == 4
-    assert upgraded.list_fact_keys(project_id)[0]['canonical_record_id'] == 'r'
-    assert len(upgraded.list_assertions(project_id, status='accepted', canonical_record_id='r')) == 2
-    assert upgraded.get_record(project_id, 'r2')['metadata']['_deleted'] is True
-    upgraded.close()
-    reopened = Repository(path)
-    assert len(reopened.list_assertions(project_id, status='accepted')) == 4

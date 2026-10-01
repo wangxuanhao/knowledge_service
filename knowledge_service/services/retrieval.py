@@ -1,10 +1,13 @@
 """对已过滤的候选集排序，绝不做全局 top-k 过滤。"""
 import json
-import sqlite3
 import logging
 import re
 from time import perf_counter
 import numpy as np
+
+# 数据库错误的唯一出处：降级通道必须捕获驱动无关的 DatabaseError；否则一次
+# 查询失败会让整个检索抛错，而不是按设计降级。
+from ..repository.connection import DatabaseError
 
 LOG = logging.getLogger('knowledge_service.retrieval')
 
@@ -115,7 +118,7 @@ class RetrievalEngine:
 
         candidates 是已由 scope 过滤的候选 rows（含 version_id）。Milvus 只做排名，
         返回 version_id+score 后按 version_id 从 candidates 回填完整 row，不二次查
-        SQLite。content_k 在回填后按 channel 分通道截断。
+        PostgreSQL。content_k 在回填后按 channel 分通道截断。
         """
         candidate_ids = [row["version_id"] for row in candidates if "version_id" in row]
         by_version = {row["version_id"]: row for row in candidates if "version_id" in row}
@@ -199,7 +202,7 @@ class RetrievalEngine:
         if requested_kinds is not None:
             channels = [kind for kind in channels if kind in requested_kinds]
         # Milvus 快路径：连接可用且非历史时间视图时，整个排名交给 Milvus（向量留在
-        # Milvus，SQLite 不再读 vector 列）。Milvus 失败会透明降级到下方本地逻辑。
+        # Milvus，PostgreSQL 不再读 vector 列）。Milvus 失败会透明降级到下方本地逻辑。
         use_milvus = (self.milvus is not None and self.milvus.available
                       and scope.get('known_at') is None)
         include_embeddings = (retrieval_mode in {'hybrid', 'semantic'}
@@ -260,7 +263,7 @@ class RetrievalEngine:
             try:
                 keyword, keyword_backend = _rank_keyword()
                 rankings['keyword'] = keyword
-            except (ValueError, RuntimeError, sqlite3.Error) as exc:
+            except (ValueError, RuntimeError, DatabaseError) as exc:
                 errors['keyword'] = str(exc)
         if retrieval_mode in {'hybrid', 'semantic'}:
             try:
@@ -281,7 +284,7 @@ class RetrievalEngine:
             try:
                 keyword, keyword_backend = _rank_keyword()
                 rankings['keyword'] = keyword
-            except (ValueError, RuntimeError, sqlite3.Error) as exc:
+            except (ValueError, RuntimeError, DatabaseError) as exc:
                 errors['keyword'] = str(exc)
         active = [backend for backend, rows in rankings.items() if rows or not candidates]
         if not rankings:

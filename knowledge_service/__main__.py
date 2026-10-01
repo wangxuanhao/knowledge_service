@@ -9,7 +9,7 @@ def main():
     parser = argparse.ArgumentParser(description='Knowledge Service — 双时态、本体与过滤检索')
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8100)
-    parser.add_argument('--database', help='SQLite 路径；默认 data/service/knowledge.sqlite')
+    parser.add_argument('--dsn', help='PostgreSQL 连接串；缺省时从 .env 的 KG_DATABASE_URL 或 POSTGRES_APP_* 解析')
     parser.add_argument('--demo', action='store_true', help='使用确定性的非语义哈希代替模型')
     args = parser.parse_args()
     if args.demo:
@@ -21,7 +21,7 @@ def main():
     configure_logging()
     from .api import create_app
     import uvicorn
-    uvicorn.run(create_app(args.database), host=args.host, port=args.port)
+    uvicorn.run(create_app(args.dsn), host=args.host, port=args.port)
 
 
 if __name__ == '__main__':

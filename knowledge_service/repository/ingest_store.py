@@ -151,9 +151,10 @@ class IngestRunStore:
             if old is not None and json.loads(old['payload']) != json.loads(encoded):
                 raise ValueError('阶段输出键冲突')
             self._db.execute(
-                '''INSERT OR IGNORE INTO ingest_stage_outputs
+                '''INSERT INTO ingest_stage_outputs
                    (project_id,document_version_id,chunk_id,stage,input_hash,payload,created_at)
-                   VALUES (?,?,?,?,?,?,?)''',
+                   VALUES (?,?,?,?,?,?,?)
+                   ON CONFLICT DO NOTHING''',
                 (project_id, document_version_id, chunk_id, stage, input_hash, encoded, utc_now()))
         return payload
 

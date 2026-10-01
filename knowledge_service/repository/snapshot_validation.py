@@ -97,7 +97,24 @@ FULL_ROW_CONTRACTS = {
     14: _FULL_ROW_CONTRACTS_V14,
     15: _FULL_ROW_CONTRACTS_V14,
 }
-MIN_FULL_SCHEMA_VERSION = min(FULL_ROW_CONTRACTS)
+
+# ── 快照**线格式**版本（与数据库迁移编号无关）────────────────────────────────
+#
+# 这两个概念曾经被混为一谈：快照里的 `schema_version` 直接取
+# `SELECT MAX(version) FROM schema_migrations`。而迁移编号是**按迁移文件**的
+# （0001 → 1、0002 → 2），于是导出快照被标成 2，与这里的下限 14 矛盾 ——
+# 备份恢复整体失败。二者回答的是不同问题，必须分开：
+#   * 迁移编号：这个库的 schema 是哪一版（DB 自己的事）；
+#   * 线格式版本：这份快照的形状是哪一版（文件自己的事，决定能否被解读）。
+#
+# 基线表的行形状与最后一代完整快照契约一致，故本项目导出的快照标 15，
+# 并接受 14~15 的输入：14 与 15 的行形状相同（15 只收紧了 CHECK 约束，
+# 见上方 FULL_ROW_CONTRACTS 的说明），因此两者共用同一套契约。
+LATEST_FULL_SNAPSHOT_FORMAT = max(FULL_ROW_CONTRACTS)
+MIN_FULL_SNAPSHOT_FORMAT = min(FULL_ROW_CONTRACTS)
+
+# 兼容旧名：历史快照里 `schema_version` 与行形状版本同值，旧引用可能仍用此名。
+MIN_FULL_SCHEMA_VERSION = MIN_FULL_SNAPSHOT_FORMAT
 _RECORD_KINDS = {'document', 'entity', 'relation', 'attribute', 'chunk'}
 
 
@@ -172,8 +189,12 @@ def _validate_full_rows(snapshot, schema_version):
                 _validate_record_envelope(row, row_label)
 
 
-def validate_restore_snapshot(snapshot, current_schema_version):
-    """Validate snapshot shape, version, ownership and artifact references."""
+def validate_restore_snapshot(snapshot, current_snapshot_format):
+    """Validate snapshot shape, version, ownership and artifact references.
+
+    `current_snapshot_format` 是**快照线格式**版本（`LATEST_FULL_SNAPSHOT_FORMAT`），
+    不是数据库迁移编号 —— 见该常量的说明。
+    """
     if not isinstance(snapshot, dict):
         raise ValueError('项目备份格式无效')
     history_flag = snapshot.get('governance_history_included')
@@ -189,14 +210,14 @@ def validate_restore_snapshot(snapshot, current_schema_version):
     if history_flag:
         if type(schema_version) is not int:
             raise ValueError('完整治理项目备份必须包含整数 schema_version')
-        if not MIN_FULL_SCHEMA_VERSION <= schema_version <= current_schema_version:
+        if not MIN_FULL_SNAPSHOT_FORMAT <= schema_version <= current_snapshot_format:
             raise ValueError(
                 f'项目备份 schema_version {schema_version} 不在支持范围 '
-                f'{MIN_FULL_SCHEMA_VERSION}..{current_schema_version}')
+                f'{MIN_FULL_SNAPSHOT_FORMAT}..{current_snapshot_format}')
     elif schema_version is not None:
         if type(schema_version) is not int:
             raise ValueError('项目备份 schema_version 无效')
-        if schema_version > current_schema_version:
+        if schema_version > current_snapshot_format:
             raise ValueError(
                 f'项目备份 schema_version {schema_version} 新于当前版本 '
                 f'{current_schema_version}')

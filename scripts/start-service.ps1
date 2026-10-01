@@ -1,4 +1,4 @@
-param([int]$Port = 8100, [switch]$Demo, [string]$EnvironmentName = 'llm_model')
+param([int]$Port = 8100, [switch]$Demo, [string]$EnvironmentName = 'model_agent')
 $ErrorActionPreference = 'Stop'
 $serviceRoot = Split-Path -Parent $PSScriptRoot
 $serviceConda = Get-Command conda -ErrorAction Stop

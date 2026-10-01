@@ -1,0 +1,233 @@
+# knowledge-service 统一基础设施编排
+#
+# 组成：
+#   postgres —— 权威关系库（数据 bind 到 ./volumes/postgres，便于整体迁移）
+#   etcd     —— Milvus 元数据存储（独立容器，唯一写者）
+#   minio    —— Milvus 对象存储
+#   milvus   —— Milvus standalone（不使用内嵌 etcd）
+#   attu     —— Milvus 可视化管理台（无状态，可随时重建）
+#
+# 为什么不再用「milvus 内嵌 etcd」：
+#   旧方式是 `docker run -e ETCD_USE_EMBED=true -e ETCD_DATA_DIR=/var/lib/milvus/etcd`，
+#   即 Milvus 进程自带一个 etcd，它独占 2379 端口并写 /var/lib/milvus/etcd。
+#   一旦再起一个独立 etcd（或 Milvus 与 etcd 争抢同一数据目录/端口），两边就会抢锁、
+#   抢端口，表现为「etcd 启动竞争」。现在按官方拆分式部署：etcd 只由本文件的 etcd 服务
+#   充当，Milvus 只通过 ETCD_ENDPOINTS 远程连接（启动日志 use.embed=false），
+#   数据目录与端口都不存在第二个写者，竞争从结构上被消除。
+#
+# 维护约定：
+#   - 不要用 `docker compose down -v`：数据都在 bind 目录里删不到，但会连带清掉 minio 镜像声明的匿名卷，属无意义副作用
+#   - 严禁同时运行「内嵌 etcd 的 Milvus」：两个进程会写同一份 etcd 数据目录
+#   - 所有端口只绑 127.0.0.1，不对局域网暴露
+#   - 数据目录由 .env 的 DOCKER_VOLUME_DIRECTORY 指定，默认 ./volumes
+#   - 详细维护/迁移/故障处置见 docs/2026-10-01-Docker基础设施维护手册.md
+
+name: knowledge-service
+
+x-milvus-image: &milvus-image milvusdb/milvus:v3.0.2
+
+services:
+  # ── PostgreSQL：权威关系库 ────────────────────────────────────────────
+  # 数据直接落在宿主的 ./volumes/postgres（bind 挂载），与 etcd/minio/milvus 同级：
+  #   - 整套 stack 的数据就是一个目录，迁移/备份只需整体拷贝 ./volumes
+  #   - 不使用 Docker 命名卷，数据不会藏在 Docker 虚拟机里找不到
+  #   - `docker compose down -v` 也删不掉它，只有手工 rm 才会
+  postgres:
+    image: postgres:18.6-bookworm
+    container_name: knowledge-postgres
+    restart: unless-stopped
+    shm_size: 256mb
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:?POSTGRES_DB must be set in .env}"
+      POSTGRES_USER: "${POSTGRES_USER:?POSTGRES_USER must be set in .env}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}"
+      POSTGRES_APP_USER: "${POSTGRES_APP_USER:?POSTGRES_APP_USER must be set in .env}"
+      POSTGRES_APP_PASSWORD: "${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD must be set in .env}"
+      POSTGRES_INITDB_ARGS: "${POSTGRES_INITDB_ARGS:?POSTGRES_INITDB_ARGS must be set in .env}"
+      TZ: "${TZ:?TZ must be set in .env}"
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # PG18 官方镜像的 PGDATA 是 /var/lib/postgresql/18/docker，挂父目录即可
+      - ${DOCKER_VOLUME_DIRECTORY:-./volumes}/postgres:/var/lib/postgresql
+      # 初始化脚本：镜像不认 POSTGRES_APP_USER，必须靠脚本建角色。
+      # 只在「空数据目录」首次初始化时自动执行；已有集群需手工跑一次（见维护手册 §4）
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - password_encryption=scram-sha-256
+      - -c
+      - wal_compression=on
+      - -c
+      - track_io_timing=on
+      - -c
+      - log_min_duration_statement=200
+      - -c
+      - idle_in_transaction_session_timeout=60000
+      - -c
+      - timezone=Asia/Shanghai
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    stop_grace_period: 60s
+    security_opt:
+      - no-new-privileges:true
+
+  # ── Milvus 一次性卷属主修复（官方 v3.0 做法）─────────────────────────
+  # Milvus 镜像内以非 root 的 milvus 用户运行，而 bind 挂载的宿主机目录属主
+  # 往往不匹配，导致 /var/lib/milvus 不可写、容器反复重启。这个一次性任务以 root
+  # 跑完 chown 就退出，milvus 通过 service_completed_successfully 等它做完。
+  # 换了宿主机目录属主后，删掉 .milvus-volume-owner-* 标记文件即可让它重跑。
+  milvus-volume-init:
+    image: *milvus-image
+    user: "0:0"
+    network_mode: none
+    read_only: true
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        uid="$$(id -u milvus)"
+        gid="$$(id -g milvus)"
+        marker="/var/lib/milvus/.milvus-volume-owner-$${uid}-$${gid}"
+        if [ ! -e "$${marker}" ]; then
+          echo "Preparing /var/lib/milvus for $${uid}:$${gid}"
+          chown -R "$${uid}:$${gid}" /var/lib/milvus
+          touch "$${marker}"
+          chown "$${uid}:$${gid}" "$${marker}"
+        fi
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-./volumes}/milvus:/var/lib/milvus
+    security_opt:
+      - no-new-privileges:true
+
+  # ── etcd：Milvus 元数据存储（唯一写者）──────────────────────────────
+  # 沿用官方 etcd 命令与配额：4GiB backend 上限 + 按 revision 自动压缩 1000 条，
+  # 避免 etcd 无限增长把磁盘写满。
+  etcd:
+    container_name: milvus-etcd
+    image: quay.io/coreos/etcd:v3.5.25
+    restart: unless-stopped
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-./volumes}/etcd:/etcd
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    ports:
+      # 仅本机可连，便于运维用 etcdctl / 打快照；容器之间走 etcd:2379
+      - "127.0.0.1:2379:2379"
+    healthcheck:
+      # 比官方收紧到 5s：milvus 依赖 service_healthy，官方 30s 会让它白等最多 30s
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 60s
+    security_opt:
+      - no-new-privileges:true
+
+  # ── minio：Milvus 对象存储 ───────────────────────────────────────────
+  # Milvus 会在其中自动建 a-bucket；9000 是 S3 API，9001 是控制台。
+  # 凭证来自 .env（不写死 minioadmin），并同步注入 milvus，两处必须一致。
+  minio:
+    container_name: milvus-minio
+    image: milvusdb/minio:RELEASE.2024-12-18T13-15-44Z
+    restart: unless-stopped
+    environment:
+      MINIO_ACCESS_KEY: "${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY must be set in .env}"
+      MINIO_SECRET_KEY: "${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be set in .env}"
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-./volumes}/minio:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 10s
+    stop_grace_period: 60s
+    security_opt:
+      - no-new-privileges:true
+
+  # ── Milvus standalone ────────────────────────────────────────────────
+  # 不设置 ETCD_USE_EMBED，因此进程内不起内嵌 etcd（启动日志 use.embed=false），
+  # 元数据全部交给上面的 etcd 服务，向量/索引数据落到 minio。
+  # 依赖用 service_healthy + restart:true，而不是官方的 service_started：
+  # etcd 没就绪时 milvus 不会抢跑（消除启动竞争窗口）；
+  # 用 compose 命令重启 etcd 时 milvus 会被连带重启；若直接用原生
+  # `docker restart milvus-etcd`，compose 感知不到，此时 milvus 会自行重连恢复。
+  milvus:
+    container_name: milvus-standalone
+    image: *milvus-image
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      MINIO_REGION: "${MINIO_REGION:-us-east-1}"
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY_ID: "${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY must be set in .env}"
+      MINIO_SECRET_ACCESS_KEY: "${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be set in .env}"
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-./volumes}/milvus:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
+    ports:
+      - "127.0.0.1:19530:19530"
+      - "127.0.0.1:9091:9091"
+    stop_grace_period: 60s
+    depends_on:
+      # 卷属主修复必须先跑完，否则 milvus 可能因目录不可写而反复重启
+      milvus-volume-init:
+        condition: service_completed_successfully
+      etcd:
+        condition: service_healthy
+        restart: true
+      minio:
+        condition: service_healthy
+
+  # ── Attu：Milvus 可视化管理台 ────────────────────────────────────────
+  # 无状态纯前端，不挂任何数据卷：随便重建/删除都不影响 Milvus 数据。
+  # 必须等 milvus healthy 才启动，否则界面会一直报连接失败。
+  attu:
+    image: zilliz/attu:v3.0.0-beta.6
+    container_name: attu
+    restart: unless-stopped
+    environment:
+      MILVUS_ADDRESS: milvus:19530
+    ports:
+      # 宿主 30001 -> 容器 3000（避开常见的 3000 占用）；仅本机可访问
+      - "127.0.0.1:30001:3000"
+    depends_on:
+      milvus:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+
+# 不使用任何 Docker 命名卷：
+# 所有持久化数据都在 ${DOCKER_VOLUME_DIRECTORY:-./volumes} 下，一个目录搬走即可迁移。
+#   volumes/postgres  —— PostgreSQL（权威关系库）
+#   volumes/etcd      —— Milvus 元数据
+#   volumes/minio     —— Milvus 对象存储
+#   volumes/milvus    —— Milvus 本地数据

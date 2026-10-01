@@ -1,43 +1,9 @@
-import json
-import sqlite3
-
 import pytest
 
 import knowledge_service.repository as repository_module
 from knowledge_service.repository import Repository
-
-
-def _create_v11_database(path, monkeypatch):
-    migrations = repository_module._SCHEMA_MIGRATIONS
-    monkeypatch.setattr(repository_module, '_SCHEMA_MIGRATIONS', migrations[:11])
-    repo = Repository(path)
-    monkeypatch.setattr(repository_module, '_SCHEMA_MIGRATIONS', migrations)
-    return repo
-
-
-def _insert_legacy_support(repo, project_id, *, record_id, version_id, assertion_id,
-                           event_ids, timestamp='2025-01-02T03:04:05.000000Z'):
-    repo._db.execute(
-        '''INSERT INTO record_versions
-           (project_id,id,version,version_id,payload,recorded_at,superseded_at)
-           VALUES (?,?,?,?,?,?,NULL)''',
-        (project_id, record_id, 1, version_id,
-         json.dumps({'id': record_id, 'kind': 'entity', 'text': record_id}), timestamp))
-    repo._db.execute(
-        '''INSERT INTO assertions
-           (id,project_id,kind,payload,status,canonical_record_id,decision_reason,
-            decision_version,created_at,decided_at,actor)
-           VALUES (?,?,?,'{}','accepted',?,'accepted',?,?,?,'reviewer')''',
-        (assertion_id, project_id, 'entity', record_id, len(event_ids) + 1,
-         timestamp, timestamp))
-    for index, event_id in enumerate(event_ids, start=2):
-        repo._db.execute(
-            '''INSERT INTO assertion_events
-               (id,assertion_id,project_id,from_status,to_status,decision_version,
-                reason,actor,canonical_record_id,created_at)
-               VALUES (?,?,?,'pending','accepted',?,'accepted','reviewer',?,?)''',
-            (event_id, assertion_id, project_id, index, record_id, timestamp))
-    repo._db.commit()
+from knowledge_service.repository.connection import IntegrityError
+from knowledge_service.repository.migrate import discover_migrations
 
 
 def _edge(edge_id, activity_id, source, relation, target, ordinal=0, payload=None):
@@ -55,182 +21,15 @@ def _edge(edge_id, activity_id, source, relation, target, ordinal=0, payload=Non
 def test_fresh_database_has_latest_schema_and_provenance_tables(tmp_path):
     repo = Repository(tmp_path / 'fresh.sqlite')
 
-    assert repo._db.execute('SELECT MAX(version) FROM schema_migrations').fetchone()[0] == 15
+    expected = max(migration.version for migration in discover_migrations())
+    assert repo._db.execute(
+        'SELECT MAX(version) FROM schema_migrations').fetchone()[0] == expected
     tables = {
         row[0] for row in repo._db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
+            'SELECT tablename FROM pg_tables WHERE schemaname = current_schema()'
         )
     }
     assert {'record_version_assertions', 'provenance_activities', 'provenance_edges'} <= tables
-
-
-def test_migration_15_preserves_existing_provenance_and_expands_contract(
-        tmp_path, monkeypatch):
-    path = tmp_path / 'migration-15.sqlite'
-    migrations = repository_module._SCHEMA_MIGRATIONS
-    monkeypatch.setattr(
-        repository_module, '_SCHEMA_MIGRATIONS',
-        tuple(item for item in migrations if item[0] <= 14))
-    legacy = Repository(path)
-    project_id = legacy.create_project('legacy provenance')['id']
-    legacy.begin_provenance_activity(
-        project_id, 'answer-old', 'answer', {'legacy': True},
-        '2025-01-01T00:00:00.000000Z')
-    legacy.complete_provenance_activity(
-        project_id, 'answer-old', {'legacy': 'complete'}, [{
-            'id': 'edge-old', 'activity_id': 'answer-old',
-            'source_ref': 'assertion:old', 'relation': 'decided-by',
-            'target_ref': 'reviewer:old', 'ordinal': 0,
-            'payload': {'kept': True},
-            'created_at': '2025-01-01T00:00:01.000000Z',
-        }], '2025-01-01T00:00:01.000000Z')
-    before_activities = legacy.list_provenance_activities(project_id)
-    before_edges = legacy.list_provenance_edges(project_id)
-    legacy.close()
-
-    monkeypatch.setattr(repository_module, '_SCHEMA_MIGRATIONS', migrations)
-    upgraded = Repository(path)
-
-    assert upgraded.list_provenance_activities(project_id) == before_activities
-    assert upgraded.list_provenance_edges(project_id) == before_edges
-    upgraded.begin_provenance_activity(
-        project_id, 'draft-new', 'ontology_draft', {'draft_id': 'd1'})
-    upgraded.complete_provenance_activity(
-        project_id, 'draft-new', {'draft_id': 'd1'}, [{
-            'activity_id': 'draft-new',
-            'source_ref': 'ontology-draft:d1',
-            'relation': 'contains-operation',
-            'target_ref': 'ontology-operation:o1', 'ordinal': 0,
-            'payload': {},
-        }])
-    upgraded.begin_provenance_activity(
-        project_id, 'publish-new', 'ontology_publish', {'draft_id': 'd1'})
-    relations = (
-        'published-from', 'contains-operation', 'decided-by', 'proposed-by',
-        'supported-by', 'based-on')
-    upgraded.complete_provenance_activity(
-        project_id, 'publish-new', {'draft_id': 'd1'}, [{
-            'activity_id': 'publish-new', 'source_ref': f'source:{index}',
-            'relation': relation, 'target_ref': f'target:{index}',
-            'ordinal': index, 'payload': {},
-        } for index, relation in enumerate(relations)])
-
-
-def test_migration_15_failure_rolls_back_rebuild_and_marker(tmp_path, monkeypatch):
-    path = tmp_path / 'migration-15-rollback.sqlite'
-    migrations = repository_module._SCHEMA_MIGRATIONS
-    monkeypatch.setattr(
-        repository_module, '_SCHEMA_MIGRATIONS',
-        tuple(item for item in migrations if item[0] <= 14))
-    legacy = Repository(path)
-    project_id = legacy.create_project('rollback provenance')['id']
-    legacy.begin_provenance_activity(
-        project_id, 'retrieval-old', 'retrieval', {'kept': True})
-    legacy.close()
-    real_migration = dict(migrations)[15]
-
-    def fail_after_rebuild(db):
-        real_migration(db)
-        raise RuntimeError('migration 15 failed')
-
-    monkeypatch.setattr(
-        repository_module, '_SCHEMA_MIGRATIONS',
-        (*tuple(item for item in migrations if item[0] < 15),
-         (15, fail_after_rebuild)))
-    with pytest.raises(RuntimeError, match='migration 15 failed'):
-        Repository(path)
-
-    with sqlite3.connect(path) as db:
-        assert db.execute(
-            'SELECT COUNT(*) FROM schema_migrations WHERE version=15').fetchone()[0] == 0
-        assert db.execute(
-            "SELECT COUNT(*) FROM provenance_activities WHERE id='retrieval-old'"
-        ).fetchone()[0] == 1
-        with pytest.raises(sqlite3.IntegrityError):
-            db.execute(
-                "INSERT INTO provenance_activities VALUES "
-                "('new-kind',?,'ontology_publish','running','{}','now',NULL)",
-                (project_id,))
-
-
-def test_real_v11_database_upgrades_once_and_restart_is_idempotent(tmp_path, monkeypatch):
-    path = tmp_path / 'upgrade.sqlite'
-    old = _create_v11_database(path, monkeypatch)
-    assert old._db.execute('SELECT MAX(version) FROM schema_migrations').fetchone()[0] == 11
-    old.close()
-
-    first = Repository(path)
-    first._db.execute(
-        "INSERT INTO provenance_activities VALUES (?,?,?,?,?,?,?)",
-        ('rr_keep', first.create_project('p')['id'], 'retrieval', 'running', '{}',
-         '2025-01-01T00:00:00.000000Z', None),
-    )
-    first._db.commit()
-    first.close()
-
-    second = Repository(path)
-    assert second._db.execute(
-        'SELECT COUNT(*) FROM schema_migrations WHERE version=12'
-    ).fetchone()[0] == 1
-    assert second._db.execute(
-        "SELECT status FROM provenance_activities WHERE id='rr_keep'"
-    ).fetchone()[0] == 'running'
-
-
-def test_migration_12_failure_rolls_back_tables_indexes_and_marker(tmp_path, monkeypatch):
-    path = tmp_path / 'rollback.sqlite'
-    old = _create_v11_database(path, monkeypatch)
-    old.close()
-    migrations = repository_module._SCHEMA_MIGRATIONS
-    real_migration = migrations[11][1]
-
-    def fail_after_migration(db):
-        real_migration(db)
-        raise RuntimeError('migration 12 failed')
-
-    monkeypatch.setattr(
-        repository_module, '_SCHEMA_MIGRATIONS', (*migrations[:11], (12, fail_after_migration)))
-
-    with pytest.raises(RuntimeError, match='migration 12 failed'):
-        Repository(path)
-
-    with sqlite3.connect(path) as db:
-        names = {
-            row[0] for row in db.execute(
-                "SELECT name FROM sqlite_master WHERE name LIKE 'provenance_%' "
-                "OR name LIKE 'record_version_assertions%' "
-                "OR name IN ('record_versions_provenance_fk', "
-                "'assertion_events_provenance_fk')"
-            )
-        }
-        assert names == set()
-        assert db.execute(
-            'SELECT COUNT(*) FROM schema_migrations WHERE version=12'
-        ).fetchone()[0] == 0
-
-
-def test_migration_12_backfills_only_unique_exact_legacy_support(tmp_path, monkeypatch):
-    path = tmp_path / 'backfill.sqlite'
-    old = _create_v11_database(path, monkeypatch)
-    project_id = old.create_project('legacy')['id']
-    _insert_legacy_support(
-        old, project_id, record_id='record-exact', version_id='version-exact',
-        assertion_id='assertion-exact', event_ids=['event-exact'])
-    _insert_legacy_support(
-        old, project_id, record_id='record-ambiguous', version_id='version-ambiguous',
-        assertion_id='assertion-ambiguous', event_ids=['event-a', 'event-b'])
-    old.close()
-
-    upgraded = Repository(path)
-
-    assert upgraded.list_record_version_assertions(project_id) == [{
-        'project_id': project_id,
-        'record_id': 'record-exact',
-        'record_version_id': 'version-exact',
-        'assertion_id': 'assertion-exact',
-        'assertion_event_id': 'event-exact',
-        'created_at': '2025-01-02T03:04:05.000000Z',
-    }]
 
 
 def test_composite_foreign_keys_reject_cross_project_edge_and_mismatched_mapping(tmp_path):
@@ -248,14 +47,14 @@ def test_composite_foreign_keys_reject_cross_project_edge_and_mismatched_mapping
         'id': 'other-assertion', 'kind': 'entity', 'payload': {}, 'actor': 'reviewer'})
     repo.begin_provenance_activity(first, 'rr_1', 'retrieval', {})
 
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(IntegrityError):
         repo._db.execute(
             '''INSERT INTO provenance_edges
                (id,project_id,activity_id,source_ref,relation,target_ref,ordinal,payload,created_at)
                VALUES ('edge-cross',?,'rr_1','retrieval-run:rr_1','considered',
                        'record-version:version',0,'{}','2025-01-01')''',
             (second,))
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(IntegrityError):
         repo._db.execute(
             '''INSERT INTO record_version_assertions
                (project_id,record_id,record_version_id,assertion_id,assertion_event_id,created_at)

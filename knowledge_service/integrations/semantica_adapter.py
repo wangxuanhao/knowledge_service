@@ -1,6 +1,6 @@
 """Semantica 抽取与有效时间快照。
 
-SQLite 在调用本适配器前解析系统时间/项目/过滤范围。
+调用方在调用本适配器前解析系统时间/项目/过滤范围。
 Semantica 的图并不取代权威的双时态仓库。
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pydantic import BaseModel,Field,StrictBool,StrictFloat,StrictInt,StrictStr
 
 from ..core.time import normalize_time
 from ..services.discovery_vocabulary import canonical_name
-from ..utils.diagnostics import event, stage
+from ..utils.diagnostics import event, redact, stage
 
 LOG = logging.getLogger('knowledge_service.semantica_adapter')
 
@@ -487,7 +487,11 @@ class SemanticaExtractor:
             event(f"开放事实发现返回 · 关系 {sum(x['kind']=='relation' for x in candidates)} 条 · "
                   f"属性 {sum(x['kind']=='attribute' for x in candidates)} 条 · 异常 {len(exceptions)} 条")
         except Exception as exc:
-            raise RuntimeError('Semantica 开放发现失败；请检查模型配置和供应商可用性') from exc
+            # 保留底层原因（经 redact 脱敏）。原来只报一句通用文案，把
+            # 「模型名不存在 / TLS 超时 / 鉴权失败」压成同一条消息，用户无法自查；
+            # 实测供应商返回的 `supported API model names are ...` 就是这样被吞掉的。
+            raise RuntimeError(f'Semantica 开放发现失败：{redact(exc)}；'
+                               '请检查模型配置和供应商可用性') from exc
         return [*candidates,*exceptions]
 
     def extract(self, text: str, ontology: Ontology) -> list[dict]:

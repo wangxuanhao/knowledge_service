@@ -414,7 +414,7 @@ class OntologyDraftStore:
                        WHERE replacement.project_id=operation.project_id
                          AND replacement.draft_id=operation.draft_id
                          AND replacement.supersedes_operation_id=operation.id)
-                   ORDER BY operation.created_at,operation.rowid''',
+                   ORDER BY operation.created_at,operation.seq''',
                 (project_id, draft_id)).fetchall()
         return [self._operation(row) for row in rows]
 
@@ -429,7 +429,7 @@ class OntologyDraftStore:
                        WHERE replacement.project_id=decision.project_id
                          AND replacement.draft_id=decision.draft_id
                          AND replacement.supersedes_decision_id=decision.id)
-                   ORDER BY decision.created_at,decision.rowid''',
+                   ORDER BY decision.created_at,decision.seq''',
                 (project_id, draft_id)).fetchall()
         return [self._decision(row) for row in rows]
 
@@ -438,15 +438,15 @@ class OntologyDraftStore:
         with self._lock:
             drafts = [self._draft(row) for row in self._db.execute(
                 '''SELECT * FROM ontology_drafts
-                   WHERE project_id=? ORDER BY rowid''',
+                   WHERE project_id=? ORDER BY seq''',
                 (project_id,)).fetchall()]
             operations = [self._operation(row) for row in self._db.execute(
                 '''SELECT * FROM ontology_operations
-                   WHERE project_id=? ORDER BY rowid''',
+                   WHERE project_id=? ORDER BY seq''',
                 (project_id,)).fetchall()]
             decisions = [self._decision(row) for row in self._db.execute(
                 '''SELECT * FROM ontology_review_decisions
-                   WHERE project_id=? ORDER BY rowid''',
+                   WHERE project_id=? ORDER BY seq''',
                 (project_id,)).fetchall()]
             requests = [self._publish_request(row) for row in self._db.execute(
                 '''SELECT * FROM ontology_publish_requests

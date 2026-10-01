@@ -1,7 +1,7 @@
 """项目管理路由（/api/projects*）。
 
 负责项目生命周期：列表、创建、查看、改名、删除。删除会同时清理
-SQLite 主表 + FTS + Milvus 分区 + Neo4j 副本（外部副本失败不阻断，只告警）。
+PostgreSQL 主表 + FTS + Milvus 分区 + Neo4j 副本（外部副本失败不阻断，只告警）。
 """
 import logging
 from pathlib import Path
@@ -45,8 +45,8 @@ def install(app, service):
     @router.delete('/api/projects/{project_id}')
     def delete_project(project_id: str):
         deleted = repository.delete_project(project_id)
-        # SQLite 删除成功后，再清理可选的派生存储（Milvus 向量分区 / Neo4j 副本）。
-        # 任一外部存储失败都不回滚 SQLite 删除，只记录告警——它们都是可重建的副本。
+        # PostgreSQL 删除成功后，再清理可选的派生存储（Milvus 向量分区 / Neo4j 副本）。
+        # 任一外部存储失败都不回滚 PostgreSQL 删除，只记录告警——它们都是可重建的副本。
         cleaned = {'milvus': False, 'neo4j': False}
         if service.milvus_store is not None:
             try:

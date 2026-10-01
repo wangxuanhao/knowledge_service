@@ -120,7 +120,7 @@ class ReviewStore:
         self.repo.get_project(project_id)
         with self._lock:
             rows = self._db.execute(
-                'SELECT * FROM merge_operations WHERE project_id=? ORDER BY created_at,rowid',
+                'SELECT * FROM merge_operations WHERE project_id=? ORDER BY created_at,seq',
                 (project_id,)).fetchall()
         result = []
         for row in rows:

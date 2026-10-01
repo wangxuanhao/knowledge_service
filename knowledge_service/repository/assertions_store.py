@@ -133,7 +133,7 @@ class AssertionStore:
         if assertion_id is not None:
             sql += ' AND assertion_id=?'
             values.append(assertion_id)
-        sql += ' ORDER BY created_at,rowid'
+        sql += ' ORDER BY created_at,seq'
         with self._lock:
             return [dict(row) for row in self._db.execute(sql, values).fetchall()]
 
@@ -144,7 +144,7 @@ class AssertionStore:
                 'SELECT * FROM assertions WHERE project_id=? ORDER BY created_at,id',
                 (project_id,)).fetchall()]
             events = [dict(row) for row in self._db.execute(
-                'SELECT * FROM assertion_events WHERE project_id=? ORDER BY created_at,rowid',
+                'SELECT * FROM assertion_events WHERE project_id=? ORDER BY created_at,seq',
                 (project_id,)).fetchall()]
         return assertions, events
 

@@ -14,7 +14,6 @@ from ..services.ontology import (
     Ontology, generated_term_iri, local_name,
     absolute_iri, set_term_constraints, term_kind, term_impact,
 )
-from ..services.retrieval import has_vector
 from ..services.ontology_adapters import (
     add_deprecation_headers,
     compatibility_payload,
@@ -165,16 +164,13 @@ def install(app, service):
                 saved = service.milvus_store.rebuild_project(p, encoded)
                 return {'indexed': saved, 'backend': 'milvus', 'total': len(rows),
                         'elapsed_seconds': round(perf_counter()-start, 2)}
-            # SQLite 本地：只补无向量或模型不匹配的当前版本
-            stale = [r for r in rows if not has_vector(r) or r.get('embedding_model') != service.encoder.identity]
-            saved = 0
-            for offset in range(0, len(stale), 16):
-                progress(f'向量编码 {offset}/{len(stale)}；图谱浏览仍可用', int(90*offset/max(1,len(rows))))
-                batch = stale[offset:offset+16]
-                vectors = service.encoder.encode([r['text'] for r in batch])
-                saved += service.repository.store_embeddings(p, batch, vectors, service.encoder.identity)
-            return {'indexed': saved, 'backend': 'sqlite', 'skipped_changed_versions': len(stale)-saved,
-                    'elapsed_seconds': round(perf_counter()-start, 2)}
+            # 无 Milvus 时不再有本地向量后端：`record_versions.vector` 列已随迁移 11
+            # 删除，`store_embeddings` 是空实现。此处**明确报错**，而不是返回
+            # `indexed=0` 的「假成功」—— 后台任务状态必须如实反映索引未建立，
+            # 否则前端会显示「索引已重建」，而检索其实仍然没有语义通道。
+            raise RuntimeError(
+                '未配置向量后端：向量已迁至 Milvus，本地不再存储向量。'
+                '请设置 KG_VECTOR_BACKEND=milvus 并确保 Milvus 可用后重试。')
         return app.state.jobs.submit('semantic_index', run, p)
 
     @app.post('/api/projects/{p}/ontology/terms', status_code=201)

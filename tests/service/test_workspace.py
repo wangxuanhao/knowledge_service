@@ -62,6 +62,9 @@ def test_keyword_explore_matches_chinese_ontology_label(tmp_path):
 
 
 def test_environment_never_loads_example_model_values(tmp_path,monkeypatch):
+    # 本用例专门验证「.env 会被加载，且 .env.example 不会被当配置源」，
+    # 因此必须显式关掉测试套件默认的 KG_SKIP_DOTENV（见 tests/conftest.py）。
+    monkeypatch.setenv('KG_SKIP_DOTENV','0')
     for key in ('KG_NEO4J_PASSWORD','KG_LLM_API_KEY','KG_NEO4J_DATABASE'):
         monkeypatch.delenv(key,raising=False)
     (tmp_path/'.env.example').write_text('KG_NEO4J_PASSWORD=test-secret\nKG_LLM_API_KEY=example-do-not-use\nKG_NEO4J_DATABASE=example\n')

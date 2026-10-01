@@ -22,6 +22,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 import httpx
 
+from ..core.config import load_environment
+from ..utils.diagnostics import redact
 from ..integrations.embeddings import configured_encoder
 from ..integrations.document_parser import DocumentParseError
 from ..repository import (
@@ -39,7 +41,7 @@ LOG = logging.getLogger('knowledge_service')
 
 
 def _build_milvus_store():
-    """按需创建 Milvus 检索索引；未显式开启或连接失败返回 None，降级本地 SQLite 向量。
+    """按需创建 Milvus 检索索引；未显式开启或连接失败时返回 None（不再降级到本地向量）。
 
     通过环境变量 KG_VECTOR_BACKEND=milvus 显式开启（默认关闭，保持向后兼容）。
     """
@@ -59,8 +61,23 @@ def _build_milvus_store():
         return None
 
 
-def create_app(db_path=None, encoder=None, upload_temp=None):
-    repository = Repository(db_path or os.environ.get('KG_DATABASE', str(ROOT / 'data/service/knowledge.sqlite')))
+def create_app(dsn=None, encoder=None, upload_temp=None):
+    """装配应用。
+
+    第一个参数是**连接目标**：显式传入时原样转交 `Repository`（测试靠它注入
+    隔离的 PostgreSQL 槽位），否则从环境解析 PostgreSQL DSN。
+
+    刻意**不再回退**到遗留的 `KG_DATABASE` / 本地 `data/service/knowledge.sqlite`：
+    那种静默回退会让人以为数据写进了 PostgreSQL，实际写到了别处（规划 §5.1）。
+    缺配置时 `resolve_dsn()` 会直接抛错并说明缺哪个键，而不是悄悄建一个 SQLite 文件。
+    """
+    # 统一配置入口：**任何**构造应用的路径都先加载仓库根 `.env`
+    # （`python -m knowledge_service`、直接 uvicorn、脚本、测试……）。
+    # load_environment 只补缺失的键，不覆盖已存在的 shell 环境变量，
+    # 因此重复调用是安全的、且 shell 优先级仍然最高。
+    load_environment(ROOT)
+    from ..repository.connection import resolve_dsn
+    repository = Repository(dsn or resolve_dsn())
     encoder = encoder or configured_encoder()
     service = KnowledgeService(repository, encoder, milvus_store=_build_milvus_store())
     document_uploads = DocumentUploads(upload_temp)
@@ -185,7 +202,10 @@ def create_app(db_path=None, encoder=None, upload_temp=None):
 
     @app.exception_handler(httpx.HTTPError)
     async def provider_error(request: Request, exc: httpx.HTTPError):
-        return JSONResponse(status_code=503, content={'detail': f'模型提供商不可用（{type(exc).__name__}）'})
+        # 带上底层原因（经 redact 脱敏）：只回异常类型无法区分
+        # 「模型名不存在」「鉴权失败」「网络超时」，用户无法自查。
+        return JSONResponse(status_code=503,
+                            content={'detail': f'模型提供商不可用：{redact(exc)}'})
 
     # ── 健康检查 ──
     @app.get('/api/health')
@@ -195,7 +215,8 @@ def create_app(db_path=None, encoder=None, upload_temp=None):
         except PackageNotFoundError:
             semantica = None
         import sys
-        return {'status': 'ok', 'version': '1.1.0', 'database': 'sqlite', 'time_model': 'bitemporal',
+        return {'status': 'ok', 'version': '1.1.0',
+                'database': service.repository.backend_label, 'time_model': 'bitemporal',
                 'python_executable': sys.executable,
                 'capabilities': ['legacy_import', 'interactive_graph_api', 'governance', 'semantica_merge',
                                  'jobs', 'snapshots', 'dual_channel_qa', 'typed_reviews',

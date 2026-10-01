@@ -4,7 +4,7 @@
 
 独立服务层 `knowledge_service/`：双时态版本、本体/SHACL、嵌套 metadata 前置过滤、检索与证据问答，包含管理工作台。
 
-可选 [Neo4j 接入](docs/neo4j接入.md)：本地 SQLite 继续保留，按项目同步图谱与历史版本；不替换现有检索。
+可选 [Neo4j 接入](docs/neo4j接入.md)：PostgreSQL 是唯一业务真值库，按项目同步图谱与历史版本；不替换现有检索。
 
 ---
 
@@ -24,7 +24,7 @@
         ▼                            ▼                            ▼
  ┌──────────────┐          ┌──────────────────┐          ┌────────────────┐
  │ services/    │          │  integrations/   │          │ repository/    │
- │（业务服务层） │          │（外部系统适配）   │          │（SQLite 存储层）│
+ │（业务服务层） │          │（外部系统适配）   │          │（PostgreSQL 存储层）│
  │ service      │          │  embeddings      │          │ core（主存储）  │
  │ retrieval    │          │  milvus_store    │          │ assertions_store│
  │ ontology     │          │  neo4j_store     │          │ ingest_store   │
@@ -50,12 +50,14 @@ from knowledge_service import create_app, Repository, KnowledgeService
 
 | 存储 | 位置 | 角色 |
 |---|---|---|
-| SQLite | `repository/` | **唯一真相源**：双时态版本、本体版本链、制品、任务收据 |
+| PostgreSQL | `repository/` | **唯一真相源**：双时态版本、本体版本链、制品、任务收据 |
 | Milvus | `integrations/milvus_store.py` | 派生检索索引（dense + sparse），可经 `/indexes/rebuild` 重建 |
 | Neo4j | `integrations/neo4j_store.py` | 可选图谱投影副本，按项目手动同步 |
 | 编码器 | `integrations/embeddings.py` | 本地 bge-m3 / OpenAI 兼容 / demo 哈希 |
 
-SQLite 是真值，Milvus / Neo4j 是可重建副本——副本丢失或损坏不影响权威数据。
+PostgreSQL 是真值，Milvus / Neo4j 是可重建副本——副本丢失或损坏不影响权威数据。
+schema 由编号 SQL 迁移管理（`repository/migrations/` + `migrate.py`），应用进程**不建表**：
+启动时只校验迁移版本，漏跑迁移会明确报错。
 
 ---
 
@@ -92,8 +94,12 @@ knowledge_service/
 │   ├── entity_resolution.py    #   实体消歧
 │   ├── reconciliation.py       #   增量实体融合
 │   └── review_validation.py    #   审核属性校验
-├── repository/                 # 💾 SQLite 存储层
-│   ├── core.py                 #   主存储：项目/记录/本体/制品/FTS/查询/迁移
+├── repository/                 # 💾 PostgreSQL 存储层
+│   ├── core.py                 #   主存储：项目/记录/本体/制品/FTS/查询
+│   ├── connection.py           #   连接池 / unit-of-work · resolve_dsn（DSN 唯一出处）
+│   ├── pg_engine.py            #   SQLite→PG 方言适配层（占位符/字面 % 转义 + 残留语法拦截）
+│   ├── migrate.py              #   编号迁移执行器（校验和台账 + advisory lock）
+│   ├── migrations/             #   编号 SQL 迁移（0001_core.sql …）
 │   ├── assertions_store.py     #   断言（审核候选）生命周期
 │   ├── ingest_store.py         #   摄取运行与阶段输出
 │   └── review_store.py         #   消歧审核与合并账本
@@ -120,11 +126,18 @@ knowledge_service/
 
 ## 启动服务
 
-在仓库根目录执行（当前使用 conda 环境 `llm_model`，Semantica 0.6.8）：
+在仓库根目录执行（当前使用 conda 环境 `model_agent`，Python 3.13，Semantica 0.7.x）：
 
 ```powershell
-conda activate llm_model
+conda activate model_agent
 python -u -m knowledge_service --port 8100
+```
+
+先确保基础设施已就绪（PostgreSQL 必须先在跑，否则服务拒绝启动）：
+
+```powershell
+docker compose up -d --wait
+python -m knowledge_service.repository.migrate    # 应用待执行迁移（幂等）
 ```
 
 工作台：[http://127.0.0.1:8100/](http://127.0.0.1:8100/)；[交互 API 文档](http://127.0.0.1:8100/docs)。默认只监听本机，启动终端按 `Ctrl+C` 停止。修改后端代码或 `.env` 后需要重启；前端修改需要刷新页面，刷新前请保留未提交内容。
@@ -137,8 +150,11 @@ python -u -m knowledge_service --port 8100
 - 抽取和生成式证据问答使用 `KG_LLM_BASE_URL`、`KG_LLM_MODEL`、`KG_LLM_API_KEY`，支持 DeepSeek 的 OpenAI 兼容接入，可能产生模型调用费用。
 - 本地向量模型使用 `KG_EMBEDDING_BACKEND=local`、`KG_EMBEDDING_PATH`（默认 `data/model`）。本地模式不需要远程 embedding 的 URL / API Key。
 - `--demo` 使用非语义哈希向量，仅用于流程验证，不代表真实语义检索，也不会自动关闭 LLM 抽取。
-- 本地权威存储是 `data/service/knowledge.sqlite`：项目、原文、知识版本、任务收据等保存在 SQLite；历史项目的原始文件仍保留。
-- 向量检索默认走本地 SQLite；`KG_VECTOR_BACKEND=milvus` 显式开启后走本地 Milvus（Docker `milvus-standalone`，端口 19530）。Milvus 连接失败自动降级本地，不拖垮主流程。
+- 权威存储是 PostgreSQL（容器 `knowledge-postgres`，端口 5432）：项目、原文、知识版本、任务收据等都在库里；schema 由编号迁移管理（`repository/migrations/`），应用启动只校验版本、不建表。
+- 应用以**应用角色** `knowledge_app` 连库（无 DDL 权限）；建表/建索引必须用迁移器 `python -m knowledge_service.repository.migrate`，它使用 owner 凭据。应用进程读不到超级用户口令（最小权限）。
+- 向量检索必须显式 `KG_VECTOR_BACKEND=milvus` 才开启（Docker 容器 `milvus-standalone`，端口 19530）。向量已不再存于关系库的本地列；未开启 Milvus 时**没有**语义通道，检索自动降级为关键词（PostgreSQL `pg_trgm` + 全文）。
+- 基础设施用仓库根目录 `docker-compose.yml` 一条命令拉起：`docker compose up -d --wait`。包含 PostgreSQL、独立 etcd、minio、Milvus standalone 与 Attu（<http://127.0.0.1:30001>）五个容器，全部端口只绑 `127.0.0.1`，持久化数据统一落在 `./volumes`。
+- Milvus **不使用内嵌 etcd**：元数据由独立的 `milvus-etcd` 承担，避免 Milvus 与 etcd 争抢同一数据目录与 2379 端口。维护与迁移见 `docs/2026-10-01-Docker基础设施维护手册.md`，一键验证 `bash scripts/verify-compose-stack.sh`。
 - Neo4j 是按项目手动同步的图谱副本，检索仍走本地。多个项目可共用一个 database，通过项目标识隔离；切换页面项目不会自动同步。
 - 配置只从 `.env` 加载（全部 `KG_` 前缀键）；`.env.example` 仅是参考模板，不作为配置源。shell 环境变量优先级最高，已设置的键不会被 `.env` 覆盖。
 
@@ -146,13 +162,17 @@ python -u -m knowledge_service --port 8100
 
 | 变量 | 用途 | 默认 |
 |---|---|---|
-| `KG_DATABASE` | SQLite 路径 | `data/service/knowledge.sqlite` |
+| `KG_DATABASE_URL` | 应用连接串（PostgreSQL）；留空则由下两行组装 | 空 |
+| `POSTGRES_DB` / `POSTGRES_APP_USER` / `POSTGRES_APP_PASSWORD` | 应用角色连库信息（组装 DSN 用，**不含**超级用户口令） | `knowledge` / `knowledge_app` / — |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` | **仅迁移器**使用的 owner 凭据（应用进程读不到） | — |
+| `KG_DATABASE_HOST` / `KG_DATABASE_PORT` | PostgreSQL 地址 / 端口 | `127.0.0.1` / `5432` |
+| `KG_MIGRATION_DATABASE_URL` | 迁移器连接串（建表需 DDL 权限）；留空回退 `POSTGRES_USER/PASSWORD` | 空 |
 | `KG_LLM_BASE_URL` / `KG_LLM_MODEL` / `KG_LLM_API_KEY` | LLM 抽取与问答 | — |
 | `KG_EMBEDDING_BACKEND` | `local` / `openai` / `demo` | `local` |
 | `KG_EMBEDDING_PATH` | 本地 bge-m3 模型目录（backend=local） | `data/model` |
 | `KG_EMBEDDING_BATCH_SIZE` | 编码批大小 1..64（backend=local） | `4` |
 | `KG_EMBEDDING_BASE_URL` / `KG_EMBEDDING_MODEL` / `KG_EMBEDDING_API_KEY` | OpenAI 兼容 embedding 提供商（backend=openai） | — |
-| `KG_VECTOR_BACKEND` | `milvus` 开启 Milvus 向量索引 | 关闭（本地） |
+| `KG_VECTOR_BACKEND` | `milvus` 开启 Milvus 向量索引 | 关闭（无向量后端） |
 | `KG_MILVUS_HOST` / `KG_MILVUS_PORT` / `KG_MILVUS_DIM` | 本地 Milvus 地址 / 端口 / 向量维度 | `localhost` / `19530` / `1024` |
 | `KG_LOG_LEVEL` | 终端日志级别（文件恒为 DEBUG） | `INFO` |
 | `KG_SLOW_MS` | 只打印慢于该毫秒的读路径阶段 | `0` |
@@ -174,7 +194,7 @@ python -u -m knowledge_service --port 8100
 安装文档解析依赖：
 
 ```powershell
-D:\anaconda\envs\llm_model\python.exe -m pip install -e ".[semantica-runtime]"
+D:\Anaconda3\envs\model_agent\python.exe -m pip install -e ".[semantica-runtime]"
 ```
 
 当前锁定 Semantica `>=0.7,<0.8` 与 Docling `>=2.130,<3`。Docling 首次解析某些 PDF 时可能需要本机已有的模型缓存；模型权重由部署者本地安装和管理。`KG_DOCUMENT_OCR_MODE=auto`（默认）为扫描 PDF 保留 OCR 路径，设为 `disabled` 可关闭。上传的原始二进制只进入临时目录，任务结束即删除；异常中断遗留文件会在下次启动时清理（24 小时阈值）。
@@ -245,7 +265,7 @@ D:\anaconda\envs\llm_model\python.exe -m pip install -e ".[semantica-runtime]"
 
 后台任务按当前项目、每个文档一张卡片展示；切片、实体抽取、关系抽取、审核、校验、向量化等维度各保留最新摘要。重复心跳、完整步骤和异常位置保留在折叠详情中，不会删除底层日志。
 
-“后台任务”和启动终端都能查看：文档信息、切片配置与数量、第几片及原文范围、实体／关系抽取开始与结束、耗时和数量、消歧融合、本体校验、向量化和 SQLite 落库。
+“后台任务”和启动终端都能查看：文档信息、切片配置与数量、第几片及原文范围、实体／关系抽取开始与结束、耗时和数量、消歧融合、本体校验、向量化和 PostgreSQL 落库。
 
 - 每条日志有 UTC 时间戳和累计运行秒数；终端以 `[task:任务ID]` 标识。
 - 每 30 秒记录等待阶段与工作线程的代码位置。心跳不表示任务有实际进展，也不是自动超时取消。
@@ -303,9 +323,9 @@ D:\anaconda\envs\llm_model\python.exe -m pip install -e ".[semantica-runtime]"
 | 申请本体变更 | 从候选创建新增/调整类、关系或属性的草案；批准后生成新本体版本并重新校验关联候选，但不自动写入知识 |
 | 后续文档 | 默认使用最新本体抽取；新本体已定义的同名关系可以直接通过正常校验。一次审核映射不构成永久别名规则，模型仍输出未知名字时会再次进入审核 |
 
-审核决定与批准边在同一个 SQLite 事务提交；文档版本冲突、原文变更、已审核、端点删除或本体版本冲突会拦截，模型向量化/校验失败不会留下半条批准记录。审核保存抽取时的原文片段，不把修改后的正文冒充旧证据；融合端点会跟随保留实体。
+审核决定与批准边在同一个 PostgreSQL 事务提交；文档版本冲突、原文变更、已审核、端点删除或本体版本冲突会拦截，模型向量化/校验失败不会留下半条批准记录。审核保存抽取时的原文片段，不把修改后的正文冒充旧证据；融合端点会跟随保留实体。
 
-本体变更草案绑定来源文档、知识候选、文档版本和本体基准版本。批准前展示现有知识引用、约束引用和关联候选数量；调整被引用的术语属于高影响变更，必须额外确认。批准发布本体版本、草案决定和候选重校验结果采用同一个 SQLite 事务。本体或候选已变化时返回版本冲突，要求重新评估，不会覆盖新版。
+本体变更草案绑定来源文档、知识候选、文档版本和本体基准版本。批准前展示现有知识引用、约束引用和关联候选数量；调整被引用的术语属于高影响变更，必须额外确认。批准发布本体版本、草案决定和候选重校验结果采用同一个 PostgreSQL 事务。本体或候选已变化时返回版本冲突，要求重新评估，不会覆盖新版。
 
 批准后重新检索/加载图谱查看，时间及 metadata 筛选仍然生效；Neo4j 副本需要手动重新同步。当前是本机服务的审核留痕，不包含审核员身份认证、角色权限、多级审批或批量批准。拒绝/批准没有专用撤销按钮；已入图关系可通过现有知识治理功能处理。
 
@@ -334,11 +354,11 @@ D:\anaconda\envs\llm_model\python.exe -m pip install -e ".[semantica-runtime]"
 
 `DELETE /api/projects/{id}` 会**物理删除**该项目的全部数据，无逻辑标记：
 
-- SQLite：`record_versions` / `ontologies` / `artifacts` / `projects` 四张主表 + 7 张关联表（断言/摄取/消歧等，经外键级联）+ FTS 全文索引；
+- PostgreSQL：`record_versions` / `ontologies` / `artifacts` / `projects` 四张主表 + 7 张关联表（断言/摄取/消歧等，经外键级联）+ FTS 全文索引；
 - Milvus：清空该项目分区向量；
 - Neo4j：删除该项目节点与关系（若配置过）。
 
-任一外部存储清理失败不阻断 SQLite 删除，只记录告警（它们都是可重建副本）。返回体带 `cleaned` 字段说明各副本清理结果。
+任一外部存储清理失败不阻断 PostgreSQL 删除，只记录告警（它们都是可重建副本）。返回体带 `cleaned` 字段说明各副本清理结果。
 
 ---
 
@@ -347,11 +367,12 @@ D:\anaconda\envs\llm_model\python.exe -m pip install -e ".[semantica-runtime]"
 回归测试在 `tests/service/`（39 个文件，约 200 用例），全量约 2–4 分钟：
 
 ```bash
-conda activate llm_model
+conda activate model_agent
 python -m pytest tests/service -q
 ```
 
-- 服务层测试用 `llm_model` 解释器（含 Semantica）；前端契约测试（`test_frontend_retrieval_flow.py`）需 `.venv` 的 playwright + 系统 Edge。
+- 需要**真实 PostgreSQL**：测试用 `tests/service/pg_support.py` 在独立的 `knowledge_test` 库上建隔离 schema（每个 `Repository(路径)` 映射到一个槽位），跑完自动清理。数据库不可用时相关用例**自动 skip**，不会假绿。
+- 服务层测试用 `model_agent` 解释器（含 Semantica）；前端契约测试（`test_frontend_retrieval_flow.py`）需 `.venv` 的 playwright + 系统 Edge。
 - 真浏览器契约测试解释器：`.venv/Scripts/python.exe -m pytest tests/service/test_frontend_retrieval_flow.py -q`。
 
 ---
@@ -359,14 +380,17 @@ python -m pytest tests/service -q
 ## 快速开始（仓库根执行）
 
 ```powershell
-conda activate llm_model
+conda activate model_agent
+docker compose up -d --wait
+python -m knowledge_service.repository.migrate
 python -u -m knowledge_service --port 8100
 ```
 
 - 工作台：[http://127.0.0.1:8100/](http://127.0.0.1:8100/)；[交互 API 文档](http://127.0.0.1:8100/docs)。
 - 服务验收：`python scripts/smoke_service.py`（针对运行中的 8100 服务）。
 
-> 环境：conda env `llm_model`（Python 3.12，当前 Semantica 0.6.8，另含 rdflib、sentence-transformers）。
+> 环境：conda env `model_agent`（Python 3.13，另含 rdflib、sentence-transformers）。
+> 权威存储是 PostgreSQL（`docker compose` 的 `knowledge-postgres`），**启动前必须可用**。
 > 向量模型 `data/model`（bge-m3）与本体文件可本地读取；LLM 抽取和生成式问答是否联网取决于供应商配置，并非整个流程默认全离线。
 
 ---
@@ -380,6 +404,7 @@ python -u -m knowledge_service --port 8100
 | `docs/2026-09-09-同屏工作台与加载优化.md` | 工作台性能优化记录 |
 | `docs/2026-09-10-Semantica抽取与本体约束机制.md` | 抽取与本体约束机制 |
 | `docs/milvus-向量化改造设计.md` | Milvus 向量检索设计 |
+| `docs/2026-10-01-Docker基础设施维护手册.md` | PostgreSQL / Milvus / etcd / minio / Attu 容器的启动、迁移与故障处置 |
 | `docs/neo4j接入.md` | Neo4j 投影接入说明 |
 | `docs/解析日志定位.md` | 读路径耗时日志定位 |
 | `docs/图谱设计.md` | 图谱设计稿（§4 本体来源、§7 评测口径） |

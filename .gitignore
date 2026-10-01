@@ -1,6 +1,7 @@
 .env
 .env.postgres
-.env.*.local
+.env.*
+!.env.example
 *.log
 data/model/*
 data/rules/*
@@ -12,6 +13,8 @@ data/log/
 .test-tmp*/
 .tmp-compose-cutover/
 .tmp-milvus-recovery-test/
+# Milvus/etcd/minio 的 bind 挂载数据目录（由 DOCKER_VOLUME_DIRECTORY 指定）
+/volumes/
 *.sqlite-shm
 *.sqlite-wal
 .superpowers

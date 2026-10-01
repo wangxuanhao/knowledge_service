@@ -20,8 +20,10 @@ def main():
     parser.add_argument('--sync-all-legacy',action='store_true',help='Sync all imported legacy projects; otherwise check connection only')
     args=parser.parse_args()
     load_environment(ROOT)
-    import os
-    repo=Repository(os.environ.get('KG_DATABASE',str(ROOT/'data/service/knowledge.sqlite')))
+    from knowledge_service.repository.connection import resolve_dsn
+    # 复用应用同一套 DSN 解析（KG_DATABASE_URL / POSTGRES_APP_*），
+    # 不再读遗留的 KG_DATABASE —— 它指向的 SQLite 后端已整体移除。
+    repo=Repository(resolve_dsn())
     projection=Neo4jProjection(repo)
     try:
         print('CONNECTION',projection.check(),flush=True)

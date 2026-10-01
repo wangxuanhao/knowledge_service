@@ -127,7 +127,7 @@ def test_ontology_workbench_shell_keeps_five_stages_and_discovery_hooks():
     for stage in ('discover', 'design', 'review', 'validate', 'publish'):
         assert f"'{stage}'" in js
     for hook in (
-        'discovery-metrics', 'discovery-cluster', 'candidate-map-canvas',
+        'discovery-metrics', 'discovery-distribution-detail', 'candidate-map-canvas',
         'candidate-map-source', 'candidate-map-confidence',
         'candidate-map-detail', 'create-discovery-draft',
     ):

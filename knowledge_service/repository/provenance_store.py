@@ -4,11 +4,13 @@
 ``Repository._transaction`` 的组合操作调用，绝不自行开启嵌套事务。
 """
 import json
-import sqlite3
 from uuid import uuid4
 
 from ..core.time import utc_now
 from .core import _json
+# IntegrityError 从连接层取唯一出处（`connection.py` 里映射为 psycopg 的完整性错误）。
+# 不直接依赖驱动类型：主键碰撞需由此异常转成领域冲突，否则会以原始驱动异常泄漏。
+from .connection import IntegrityError
 
 
 _ACTIVITY_KINDS = {
@@ -235,7 +237,7 @@ class ProvenanceStore:
                 (edge_id, project_id, edge['activity_id'], edge['source_ref'],
                  edge['relation'], edge['target_ref'], edge['ordinal'],
                  _json(payload), created_at))
-        except sqlite3.IntegrityError:
+        except IntegrityError:
             # 将主键碰撞转换为稳定的领域冲突；复合 FK 等完整性错误仍应原样暴露。
             by_id = self._db.execute(
                 'SELECT * FROM provenance_edges WHERE id=?', (edge_id,)).fetchone()

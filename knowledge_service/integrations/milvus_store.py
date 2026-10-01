@@ -1,8 +1,8 @@
 """Milvus 向量与 BM25 检索索引存储 —— 对齐 Milvus 3.0 / pymilvus >= 3.0.1，走 MilvusClient。
 
-把"检索索引"从 SQLite 的 vector 列迁到本地 Milvus。SQLite 仍是唯一真相源
-（双时态、元数据、本体、版本链），Milvus 只承载"当前活跃记录"的 dense
-向量 + sparse(BM25) 索引——派生数据，丢了可经 /indexes/rebuild 全量重建。
+Milvus 承载"当前活跃记录"的 dense 向量 + sparse(BM25) 索引 —— 派生数据，
+丢了可经 /indexes/rebuild 全量重建；真值（双时态、元数据、本体、版本链）
+由 PostgreSQL 持久化。
 
 Milvus 3.0 对齐决策（与 2.6 的差异已逐条评估，不盲目沿用旧封装）：
   * 全部走 MilvusClient（非 ORM-style 的 Collection/connections/utility——后者在
@@ -11,7 +11,7 @@ Milvus 3.0 对齐决策（与 2.6 的差异已逐条评估，不盲目沿用旧�
     （common.storage.useLoonFFI，默认关），启用后失去 2.6 rollback；本项目
     实体/关系/片段文本均 < 64KB，TEXT 的 LOB/无长度限制用不上，不为此承担
     存储引擎升级的不可逆代价。
-  * 时态字段暂不用 3.0 新增的 TIMESTAMPTZ —— 双时态过滤留在 SQLite
+  * 时态字段暂不用 3.0 新增的 TIMESTAMPTZ —— 双时态过滤由 PostgreSQL 承担
     （repository.query 是核心资产），Milvus 只做当前活跃记录的排名索引。
   * sparse 索引沿用 SPARSE_INVERTED_INDEX + BM25 metric：3.0 内部已默认
     MaxScore 做 BM25 打分、SINDI 做 sparse IP，对本封装透明，无需显式改参。
@@ -29,7 +29,7 @@ Milvus 3.0 对齐决策（与 2.6 的差异已逐条评估，不盲目沿用旧�
   rebuild_project(...)  清空某 project 分区后批量重建
 
 BM25 依赖 Milvus 3.x 的 Function(BM25)（从 text 自动生成 sparse），dense 用
-bge-m3 的 embedding 字段。关联 SQLite 的键是 version_id（=== record_versions.version_id）。
+bge-m3 的 embedding 字段。与 PostgreSQL 关联的键是 version_id（=== record_versions.version_id）。
 """
 from __future__ import annotations
 
@@ -197,7 +197,7 @@ class MilvusStore:
         if kind:
             parts.append(kind)
         if candidate_ids:
-            # 由 SQLite scope 过滤后给出的候选版本号集合，限定在项目可见集内排名
+            # 由 scope 过滤后给出的候选版本号集合，限定在项目可见集内排名
             quoted = ", ".join(f'"{v}"' for v in candidate_ids[:5000])
             parts.append(f"version_id in [{quoted}]")
         return " and ".join(parts)

@@ -1,4 +1,3 @@
-import sqlite3
 from decimal import Decimal
 
 import pytest
@@ -6,6 +5,7 @@ from pydantic import ValidationError
 
 from knowledge_service.integrations.embeddings import HashingEncoder
 from knowledge_service.models import RecordWrite
+from knowledge_service.repository.connection import IntegrityError
 from knowledge_service.services.formal_writes import FormalFactWriter
 from knowledge_service.services.ontology import Ontology
 from knowledge_service.repository import Repository
@@ -505,7 +505,7 @@ def test_wrong_assertion_event_fk_rolls_back_formal_write(tmp_path, monkeypatch)
                               'nonexistent-event', created_at)
 
     monkeypatch.setattr(repo._provenance, '_insert_mapping', use_wrong_event)
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(IntegrityError):
         _write(repo, project_id, [_entity('a')])
     assert repo.current_records(project_id) == []
     assert repo.list_assertions(project_id) == []

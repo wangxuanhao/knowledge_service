@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 
 from ..core.time import utc_now
 from ..services.ontology_iri import valid_application_iri
+# 完整性错误的唯一出处（见 `connection.py`）：主键碰撞需要被转成领域冲突，
+# 换库后必须捕获 psycopg 的异常体系，否则 except 分支形同虚设。
+from .connection import IntegrityError
 
 
 KIND = 'ontology_discovery_run'
@@ -636,7 +638,7 @@ class DiscoveryRunStore:
                 self._db.execute(
                     'INSERT INTO artifacts(id,kind,project_id,payload) VALUES (?,?,?,?)',
                     (run['id'], KIND, project_id, payload))
-            except sqlite3.IntegrityError as exc:
+            except IntegrityError as exc:
                 row = self._db.execute(
                     'SELECT project_id,payload FROM artifacts WHERE id=? AND kind=?',
                     (run['id'], KIND)).fetchone()
@@ -670,7 +672,7 @@ class DiscoveryRunStore:
         with self.repo._lock:
             rows = self._db.execute(
                 'SELECT payload FROM artifacts WHERE kind=? AND project_id=? '
-                'ORDER BY rowid DESC', (KIND, project_id)).fetchall()
+                'ORDER BY seq DESC', (KIND, project_id)).fetchall()
         return [json.loads(row['payload']) for row in rows]
 
     def latest(self, project_id, *, statuses=None):
@@ -741,7 +743,7 @@ class DiscoveryRunStore:
             updated['updated_at'] = utc_now()
             cursor = self._db.execute(
                 "UPDATE artifacts SET payload=? WHERE id=? AND kind=? "
-                "AND project_id=? AND json_extract(payload,'$.status')=?",
+                "AND project_id=? AND (payload::jsonb->>'status')=?",
                 (_canonical_json(updated), run_id, KIND, project_id,
                  expected_status))
             if cursor.rowcount != 1:
