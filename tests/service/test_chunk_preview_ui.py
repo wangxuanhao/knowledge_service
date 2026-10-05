@@ -155,14 +155,15 @@ def _route_json(page, pattern, payloads, status=200):
 
 
 def _choose_text(page, title='预览规则', text='待切片的正文'):
-    page.locator(
-        'label.document-mode-option:has(input[name="document-input-mode"][value="text"])'
-    ).click()
-    page.fill('#doc-title', title)
-    page.fill('#doc-text', text)
+    # 写入页已改为纯文件上传：切片预览读取文件队列，不再有「粘贴正文」模式。
+    page.set_input_files('#doc-file', {
+        'name': title + '.txt',
+        'mimeType': 'text/plain',
+        'buffer': text.encode('utf-8'),
+    })
 
 
-def _request_preview(page, path_suffix='/documents/preview'):
+def _request_preview(page, path_suffix='/documents/upload/preview'):
     with page.expect_response(lambda response: response.url.endswith(path_suffix)):
         page.click('#preview-chunks')
 
@@ -209,7 +210,7 @@ def test_text_preview_opens_safe_switchable_drawer_without_refetching(workbench)
     page = workbench.page
     first = '<img src=x onerror="window.previewPwned=true">第一段原文'
     second = '第二段原文'
-    calls = _route_json(page, '**/documents/preview', _preview_result(first, second))
+    calls = _route_json(page, '**/documents/upload/preview', _preview_result(first, second))
     _choose_text(page)
 
     _request_preview(page)
@@ -238,7 +239,7 @@ def test_text_preview_opens_safe_switchable_drawer_without_refetching(workbench)
 
 def test_repeated_preview_replaces_content_and_both_dismiss_paths_restore_page(workbench):
     page = workbench.page
-    calls = _route_json(page, '**/documents/preview', [
+    calls = _route_json(page, '**/documents/upload/preview', [
         _preview_result('旧片段一', '旧片段二'),
         _preview_result('唯一的新片段'),
     ])
@@ -271,7 +272,7 @@ def test_repeated_preview_replaces_content_and_both_dismiss_paths_restore_page(w
 
 def test_empty_and_failed_previews_have_distinct_recoverable_states(workbench):
     page = workbench.page
-    _route_json(page, '**/documents/preview', _preview_result())
+    _route_json(page, '**/documents/upload/preview', _preview_result())
     _choose_text(page)
 
     _request_preview(page)
@@ -282,8 +283,8 @@ def test_empty_and_failed_previews_have_distinct_recoverable_states(workbench):
     page.keyboard.press('Escape')
     drawer.wait_for(state='hidden')
 
-    page.unroute('**/documents/preview')
-    _route_json(page, '**/documents/preview', {'detail': '预览暂时不可用'}, status=503)
+    page.unroute('**/documents/upload/preview')
+    _route_json(page, '**/documents/upload/preview', {'detail': '预览暂时不可用'}, status=503)
     _request_preview(page)
 
     drawer.wait_for(state='hidden')
@@ -297,7 +298,7 @@ def test_empty_and_failed_previews_have_distinct_recoverable_states(workbench):
 def test_preview_traps_focus_and_stays_inside_narrow_viewports(workbench, width):
     page = workbench.page
     page.set_viewport_size({'width': width, 'height': 700})
-    _route_json(page, '**/documents/preview', _preview_result('第一段' * 800, '第二段'))
+    _route_json(page, '**/documents/upload/preview', _preview_result('第一段' * 800, '第二段'))
     _choose_text(page)
     _request_preview(page)
 
