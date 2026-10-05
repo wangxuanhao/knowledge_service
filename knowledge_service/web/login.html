@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>登录 · 知序 Knowledge Service</title>
+    <link rel="stylesheet" href="/assets/style.css?v=font-floor-11">
+    <link rel="stylesheet" href="/assets/theme.css?v=redesign-teal-3">
+    <link rel="stylesheet" href="/assets/auth.css?v=auth-login-1">
+</head>
+<body class="login-body">
+    <!-- 独立登录页：不加载工作台任何业务脚本，登录成功后才跳转主页。 -->
+    <main class="login-page">
+        <section class="auth-card login-card" role="main">
+            <div class="auth-brand">知序<small>KNOWLEDGE SERVICE</small></div>
+            <h1>登录</h1>
+            <p class="auth-hint">
+                登录后进入知识服务主界面。超级管理员 / 管理员可写入与管理账号，
+                只读账号可检索、问答与查看脑图。
+            </p>
+            <form id="login-form" autocomplete="on">
+                <label for="login-username">用户名</label>
+                <input id="login-username" name="username" autocomplete="username"
+                       placeholder="请输入用户名" required>
+                <label for="login-password">口令</label>
+                <input id="login-password" name="password" type="password"
+                       autocomplete="current-password" placeholder="至少 6 位" required>
+                <p class="auth-error" id="login-error" role="alert"></p>
+                <button type="submit" class="auth-submit" id="login-submit">登 录</button>
+            </form>
+            <!-- 账号由管理员在「用户与权限」里开通：这里不摆自助注册，也不摆点了必被拒的入口。 -->
+            <p class="login-foot">还没有账号？请联系管理员在「用户与权限」里为你开通。</p>
+        </section>
+    </main>
+    <script src="/assets/login.js?v=auth-login-1"></script>
+</body>
+</html>

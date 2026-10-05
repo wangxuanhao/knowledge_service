@@ -1,0 +1,344 @@
+/* ============================================================================
+   auth.css —— 登录/注册浮层 与 侧边栏会话区
+   沿用站点深色科技感：暗底 + 青色高亮 + 细边框。
+   ============================================================================ */
+
+/* ── 全屏遮罩：未登录时盖住整个工作台，不可误操作后面的内容 ── */
+.auth-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(1200px 600px at 50% -10%, rgba(34, 211, 238, 0.12), transparent 60%),
+                rgba(6, 10, 18, 0.86);
+    backdrop-filter: blur(6px);
+}
+.auth-overlay[hidden] { display: none; }
+
+/* ── 登录卡片 ── */
+.auth-card {
+    width: min(380px, calc(100vw - 40px));
+    padding: 28px 26px 24px;
+    border: 1px solid rgba(34, 211, 238, 0.28);
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(13, 20, 33, 0.96), rgba(9, 14, 24, 0.96));
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.02),
+                0 24px 70px rgba(0, 0, 0, 0.55),
+                0 0 42px rgba(34, 211, 238, 0.10);
+}
+.auth-card .auth-brand {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #67e8f9;
+}
+.auth-card .auth-brand small {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    letter-spacing: 3px;
+    color: #64748b;
+}
+.auth-card h2 {
+    margin: 18px 0 4px;
+    font-size: 17px;
+    color: #e2e8f0;
+}
+.auth-card .auth-hint {
+    margin: 0 0 18px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #94a3b8;
+}
+.auth-card label {
+    display: block;
+    margin: 12px 0 6px;
+    font-size: 12px;
+    color: #94a3b8;
+}
+.auth-card input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    font-size: 14px;
+    color: #e2e8f0;
+    background: rgba(2, 6, 14, 0.7);
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 8px;
+    outline: none;
+}
+.auth-card input:focus {
+    border-color: rgba(34, 211, 238, 0.6);
+    box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.12);
+}
+.auth-card .auth-error {
+    min-height: 16px;
+    margin: 12px 0 0;
+    font-size: 12px;
+    color: #f87171;
+}
+.auth-submit {
+    width: 100%;
+    margin-top: 18px;
+    padding: 11px;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    color: #04121a;
+    background: linear-gradient(180deg, #22d3ee, #0891b2);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+.auth-submit:hover { filter: brightness(1.08); }
+.auth-submit:disabled { opacity: .55; cursor: wait; }
+
+.auth-switch {
+    margin-top: 14px;
+    font-size: 12px;
+    text-align: center;
+    color: #94a3b8;
+}
+.auth-switch button {
+    padding: 0;
+    font-size: 12px;
+    color: #67e8f9;
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+/* ── 侧边栏底部会话信息：当前账号 + 退出 ── */
+.session-box {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 9px;
+    background: rgba(2, 6, 14, 0.5);
+    font-size: 12px;
+}
+.session-box[hidden] { display: none; }
+.session-box .session-who {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #cbd5e1;
+    word-break: break-all;
+}
+.session-box .session-role {
+    display: inline-block;
+    padding: 1px 7px;
+    font-size: 10px;
+    border-radius: 999px;
+}
+.session-box .session-role.is-admin {
+    color: #04121a;
+    background: #22d3ee;
+}
+.session-box .session-role.is-viewer {
+    color: #a5f3fc;
+    background: rgba(34, 211, 238, 0.14);
+    border: 1px solid rgba(34, 211, 238, 0.3);
+}
+.session-box .session-logout {
+    margin-top: 8px;
+    width: 100%;
+    padding: 5px;
+    font-size: 11px;
+    color: #94a3b8;
+    background: none;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 6px;
+    cursor: pointer;
+}
+.session-box .session-logout:hover { color: #f87171; border-color: rgba(248, 113, 113, 0.5); }
+
+/* admin-only 元素默认隐藏，登录为管理员后由 JS 加上 body.is-admin 再显示。
+   非管理员 / 未登录时绝不出现写入口。
+   ⚠️ 显示那条也必须带 !important：隐藏那条是 !important，不带的话它永远赢，
+   结果就是"管理员也看不到任何写入口"（界面看起来像功能没做，实测踩过）。 */
+.admin-only { display: none !important; }
+body.is-admin .admin-only { display: revert !important; }
+/* 按钮等元素恢复成它们本来的显示方式（revert 在个别老浏览器不准时，兜底 inline-block） */
+body.is-admin button.admin-only { display: inline-block !important; }
+
+/* ============================================================================
+   会话框：角色说明 + 三个动作（改口令 / 用户与权限 / 退出登录）
+   ============================================================================ */
+/* 「只读账号不能做什么」只在只读用户身上出现 —— 管理员看这句是噪声。 */
+.session-box .session-hint { display: none; }
+body.is-viewer .session-box .session-hint {
+    display: block;
+    margin: 8px 0 2px;
+    font-size: 11px;
+    line-height: 1.5;
+    color: #94a3b8;
+}
+.session-box .session-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+.session-box .session-btn {
+    flex: 0 0 auto;            /* 全局 input/button 规则会撑宽，这里钉住不拉伸 */
+    padding: 3px 8px;
+    font: inherit;
+    font-size: 11px;
+    color: #cbd5e1;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 6px;
+    cursor: pointer;
+}
+.session-box .session-btn:hover { border-color: rgba(34, 211, 238, 0.5); color: #e2e8f0; }
+
+/* ============================================================================
+   「用户与权限」抽屉 / 「修改我的口令」对话框（user-admin.js）
+   —— 深色卡片 + 青色主操作，与登录浮层同一套观感。
+   ============================================================================ */
+.ua-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 60;               /* 低于登录浮层（1000）：掉线弹登录时必须盖在抽屉之上 */
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 48px 20px;
+    overflow: auto;
+    background: rgba(2, 6, 14, 0.7);
+}
+.ua-overlay[hidden] { display: none; }
+.ua-card {
+    width: min(940px, 100%);
+    padding: 22px 24px 26px;
+    color: #e2e8f0;
+    background: rgba(13, 20, 33, 0.96);
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 14px;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+}
+.ua-card-narrow { width: min(520px, 100%); }
+.ua-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.ua-head h2 { margin: 0 0 6px; font-size: 19px; }
+.ua-sub { margin: 0; max-width: 74ch; font-size: 12px; line-height: 1.7; color: #94a3b8; }
+.ua-sub b { color: #a5f3fc; font-weight: 600; }
+.ua-close {
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    font-size: 18px;
+    line-height: 1;
+    color: #94a3b8;
+    background: transparent;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 8px;
+    cursor: pointer;
+}
+.ua-close:hover { color: #e2e8f0; border-color: rgba(34, 211, 238, 0.5); }
+.ua-flash { min-height: 18px; margin: 10px 0 0; font-size: 12px; color: #94a3b8; }
+.ua-flash.is-good { color: #67e8f9; }
+.ua-flash.is-error { color: #f87171; }
+.ua-create { margin-top: 14px; padding: 14px 16px; border: 1px solid rgba(148, 163, 184, 0.18); border-radius: 10px; }
+.ua-create h3, .ua-list h3 { margin: 0 0 10px; font-size: 13px; color: #cbd5e1; }
+.ua-list h3 small { margin-left: 6px; font-weight: 400; color: #64748b; }
+.ua-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 12px; }
+.ua-form label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #94a3b8; }
+.ua-form input, .ua-form select { width: 200px; padding: 6px 8px; color: #e2e8f0; background: #04121a; border: 1px solid rgba(148, 163, 184, 0.22); border-radius: 6px; }
+.ua-form input:focus, .ua-form select:focus { outline: none; border-color: rgba(34, 211, 238, 0.6); }
+.ua-form-column { flex-direction: column; align-items: stretch; }
+.ua-form-column input { width: 100%; }
+.ua-primary { padding: 7px 14px; font: inherit; font-size: 12px; color: #04121a; background: #22d3ee; border: 0; border-radius: 7px; cursor: pointer; }
+.ua-primary:disabled { opacity: 0.55; cursor: wait; }
+.ua-note { margin: 10px 0 0; font-size: 11px; line-height: 1.7; color: #94a3b8; }
+.ua-note b { color: #cbd5e1; }
+/* 环境变量名这类标识用等宽 + 淡青，跟正文区分开（默认 code 的底色在深色面板上会花） */
+.ua-note code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #67e8f9; background: rgba(56, 189, 248, .12); padding: 1px 5px; border-radius: 4px; }
+.ua-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ua-table th { padding: 6px 8px; text-align: left; font-size: 11px; font-weight: 500; color: #94a3b8; border-bottom: 1px solid rgba(148, 163, 184, 0.18); }
+.ua-table td { padding: 8px; vertical-align: top; border-bottom: 1px solid rgba(148, 163, 184, 0.1); }
+.ua-table tr.is-self { background: rgba(34, 211, 238, 0.06); }
+.ua-name { font-family: var(--ui-mono, monospace); }
+.ua-self-tag { margin-left: 4px; font-size: 10px; color: #67e8f9; }
+.ua-time { color: #94a3b8; white-space: nowrap; }
+.ua-role { padding: 2px 7px; font-size: 11px; border-radius: 999px; }
+.ua-role.is-admin { color: #a5f3fc; background: rgba(34, 211, 238, 0.12); border: 1px solid rgba(34, 211, 238, 0.35); }
+.ua-role.is-viewer { color: #cbd5e1; background: rgba(148, 163, 184, 0.12); border: 1px solid rgba(148, 163, 184, 0.3); }
+.ua-state.is-on { color: #86efac; }
+.ua-state.is-off { color: #f87171; }
+.ua-actions-col { min-width: 240px; }
+.ua-table .ua-actions-col { display: table-cell; }
+.ua-action {
+    flex: 0 0 auto;
+    margin: 0 6px 6px 0;
+    padding: 4px 9px;
+    font: inherit;
+    font-size: 11px;
+    color: #cbd5e1;
+    background: transparent;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    border-radius: 6px;
+    cursor: pointer;
+}
+.ua-action:hover { color: #e2e8f0; border-color: rgba(34, 211, 238, 0.5); }
+.ua-self-note { display: inline-block; max-width: 30ch; font-size: 11px; line-height: 1.6; color: #64748b; }
+.ua-empty { padding: 14px 8px; color: #94a3b8; }
+.ua-pw-actions { display: flex; gap: 10px; margin-top: 4px; }
+
+/* ============================================================================
+   独立登录页（login.html）—— 整页深色科技背景 + 居中卡片
+   ============================================================================ */
+.login-body {
+    /* 覆盖工作台侧栏布局：登录页没有侧边栏，让卡片整体居中。 */
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    background:
+        radial-gradient(1100px 520px at 50% -12%, rgba(34, 211, 238, 0.14), transparent 60%),
+        radial-gradient(800px 480px at 85% 110%, rgba(8, 145, 178, 0.10), transparent 60%),
+        #060a12;
+}
+.login-page {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    box-sizing: border-box;
+}
+.login-card {
+    /* 登录卡片比浮层版略宽，标题用 h1。 */
+    width: min(400px, calc(100vw - 40px));
+}
+.login-card h1 {
+    margin: 18px 0 4px;
+    font-size: 20px;
+    color: #e2e8f0;
+}
+.login-foot {
+    margin: 16px 0 0;
+    font-size: 12px;
+    line-height: 1.6;
+    text-align: center;
+    color: #64748b;
+}
+
+/* ============================================================================
+   超级管理员角色徽章（侧栏会话区）
+   ============================================================================ */
+.session-box .session-role.is-superadmin {
+    color: #04121a;
+    /* 超管用更亮的金色→青色渐变，和普通管理员区分开。 */
+    background: linear-gradient(180deg, #a5f3fc, #22d3ee);
+    box-shadow: 0 0 10px rgba(34, 211, 238, 0.45);
+}
+
+/* 用户清单里的超级管理员角色标签 */
+.ua-role.is-superadmin {
+    color: #04121a;
+    background: linear-gradient(180deg, #a5f3fc, #22d3ee);
+    border: 1px solid rgba(34, 211, 238, 0.55);
+}
