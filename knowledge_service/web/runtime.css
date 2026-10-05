@@ -1,0 +1,32 @@
+/* 「项目与运行」页的样式：分区页签 + 页头。整体限定在 .runtime 作用域内，不污染其它页面。 */
+
+.runtime{display:block}
+
+/* 页头：一句话说清这一页管什么、不管什么（首屏内容起点要低，不要把标题堆成一片）。 */
+.runtime .runtime-hero{margin:0 0 12px;padding:14px 18px;border:1px solid var(--line);border-radius:10px;background:linear-gradient(180deg,var(--ks-sunken),var(--ks-surface))}
+.runtime .runtime-hero small{display:block;font-size:11px;letter-spacing:2px;color:var(--ks-muted)}
+.runtime .runtime-hero h2{margin:4px 0 6px;font-size:19px;font-weight:600}
+.runtime .runtime-hero p{margin:0;font-size:12.5px;line-height:1.75;color:var(--ks-muted)}
+.runtime .runtime-hero b{font-weight:600;color:var(--ks-ink)}
+
+/* 分区页签：一屏一问的"问"，每格写清"这里回答什么"。 */
+.runtime .runtime-views{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
+.runtime .runtime-views button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;flex:1 1 200px;min-width:180px;padding:10px 12px;background:var(--ks-surface);color:var(--ks-accent);border:1px solid var(--line);border-radius:9px;text-align:left}
+.runtime .runtime-views button b{font-size:13px;font-weight:600}
+.runtime .runtime-views button small{font-size:11.5px;line-height:1.5;color:var(--ks-faint)}
+.runtime .runtime-views button[aria-pressed="true"]{background:#19654e;border-color:#19654e;color:#fff}
+.runtime .runtime-views button[aria-pressed="true"] b{color:#fff}
+.runtime .runtime-views button[aria-pressed="true"] small{color:#d7e8de}
+.runtime .runtime-views button:focus-visible{outline:2px solid var(--ks-line);outline-offset:2px}
+
+/* 面板：四块各自是完整的一屏，同一时刻只显示一屏；不叠边框（内外不套框）。
+   面板与 #tab-runtime 是兄弟节点（沿用原来的 id，既有代码靠这些 id 判断"现在在哪一屏"），
+   所以这里用 .runtime-panel / .runtime-lead 这类独有类限定，而不是要求祖先选择器。
+   字号下限 11px 是引导式界面规则的硬线。 */
+.runtime-panel{display:block}
+.runtime-panel.hidden{display:none}
+.runtime-lead{margin:0 0 14px;font-size:12.5px;line-height:1.75;color:var(--ks-muted)}
+.runtime-purpose{margin:0 0 16px;font-size:12px;line-height:1.7;color:var(--ks-faint)}
+@media(max-width:850px){
+  .runtime .runtime-views button{flex:1 1 100%}
+}

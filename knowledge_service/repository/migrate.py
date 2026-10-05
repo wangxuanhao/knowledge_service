@@ -120,11 +120,16 @@ def _applied(conn) -> dict[int, tuple[str, str]]:
 
 
 def apply_migrations(dsn: str, *, directory: Optional[Path] = None,
-                     verbose: bool = True) -> dict:
+                     verbose: bool = True,
+                     allow_checksum_mismatch: bool = False) -> dict:
     """应用全部待执行迁移。返回 {'applied': [...], 'current': n}。
 
     整个过程持有 advisory lock；每条迁移在自己的事务里执行，做到
     「要么这条迁移整体生效，要么完全没发生」。
+
+    ``allow_checksum_mismatch`` 只在**已确认当前文件为权威**的历史遗留场景使用：
+    台账里记录的 checksum 与当前文件不一致时，默认报错；显式放行后则按当前文件
+    重写台账 checksum 再继续（CLI 的 ``--rewrite-checksums`` 对应此开关）。
     """
     migrations = discover_migrations(directory)
 
@@ -136,14 +141,32 @@ def apply_migrations(dsn: str, *, directory: Optional[Path] = None,
             _ensure_bookkeeping(conn)
             applied = _applied(conn)
 
-            # 已应用的迁移内容一旦变化，必须报错而不是默默接受
+            # 已应用的迁移内容一旦变化，默认必须报错而不是默默接受。
+            # 但历史遗留可能导致台账 checksum 与当前文件不一致（例如切换后端时迁移文件
+            # 在应用之后又被编辑过）。此时需要人工确认：显式 allow_checksum_mismatch
+            # 才按当前文件重写台账，否则给出「新旧 checksum + 补救命令」后拒绝。
             for migration in migrations:
                 if migration.version in applied:
                     name, checksum = applied[migration.version]
                     if checksum != migration.checksum:
-                        raise MigrationError(
-                            f'迁移 {migration.version:04d}（{name}）已应用，但内容已变化。'
-                            '迁移文件一经应用不可修改；请新增一条迁移来表达变更。')
+                        if allow_checksum_mismatch:
+                            with conn.cursor() as cur:
+                                cur.execute(
+                                    'UPDATE schema_migrations SET checksum=%s '
+                                    'WHERE version=%s',
+                                    (migration.checksum, migration.version))
+                            if verbose:
+                                print(
+                                    f'  ! 迁移 {migration.version:04d}（{name}）内容已变化，'
+                                    f'已按当前文件重写 checksum：'
+                                    f'{checksum[:12]} → {migration.checksum[:12]}')
+                        else:
+                            raise MigrationError(
+                                f'迁移 {migration.version:04d}（{name}）已应用，但内容已变化：\n'
+                                f'  台账 checksum={checksum[:12]}…，'
+                                f'当前文件={migration.checksum[:12]}…。\n'
+                                '迁移文件一经应用不可修改；若确属历史遗留、且已确认当前文件'
+                                '为权威，请用 `--rewrite-checksums` 重写台账后继续。')
 
             pending = [m for m in migrations if m.version not in applied]
             if verbose:
@@ -247,6 +270,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                         help='只校验 schema 版本，不执行任何 DDL')
     parser.add_argument('--status', action='store_true',
                         help='打印版本与校验和状态')
+    parser.add_argument('--rewrite-checksums', action='store_true',
+                        help='已应用迁移内容变化时，按当前文件重写台账 checksum'
+                             '（仅在确认当前文件为权威后使用）')
     parser.add_argument('--quiet', action='store_true')
     args = parser.parse_args(list(argv) if argv is not None else None)
 
@@ -271,7 +297,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     print(f'  {version:04d}  {name}  {checksum[:12]}')
             return 0 if state['ok'] else 1
 
-        result = apply_migrations(dsn, verbose=not args.quiet)
+        result = apply_migrations(dsn, verbose=not args.quiet,
+                                  allow_checksum_mismatch=args.rewrite_checksums)
         if not args.quiet:
             print(f'完成：当前版本 {result["current"]}，'
                   f'本次应用 {len(result["applied"])} 条')

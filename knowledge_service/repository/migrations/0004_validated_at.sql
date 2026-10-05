@@ -1,0 +1,25 @@
+-- ════════════════════════════════════════════════════════════════════════════
+--  0004：草案「校验通过」标记 validated_at
+--
+--  问题
+--    「设计 → 校验 → 审核 → 发布」应当是严格顺序：设计提交后才能校验，校验通过后
+--    才能审核，审核完成后才能发布。但 draft.status 只有
+--    editing/submitted/reviewed/published/closed 这几档，「校验通过」没有独立落点：
+--    submit() 顺手也会算出校验报告，于是 submitted 状态下阶段条同时点亮「校验」和
+--    「审核」，用户看到的就是「为什么能同时看到校验/审核/发布」（原话）。
+--
+--  为什么用可空时间戳，而不是布尔或新增 status 枚举
+--    * 布尔只能回答「通过没通过」，时间戳还能回答「什么时候通过的」，审计可追溯；
+--    * 不新增 status 枚举，是为了不动 ontology_drafts.status 的 CHECK 约束与
+--      既有的写操作守卫（editing→submitted→reviewed→published 的生命周期不变）；
+--    * NULL＝尚未校验通过，与 validation_fingerprint 的 NULL 约定一致。
+--
+--  语义
+--    * submit()         会把 validated_at 清空（重新提交即作废上一次校验）；
+--    * validate()       在 status='submitted' 且校验通过（无阻断错误）时写入当前时间；
+--    * stage_state()    据此逐个解锁：校验 → 审核 → 发布；
+--    * decide()         仍以 validation_fingerprint 匹配为准（提交时已算好报告，且支持
+--                       「提交并自审」一键流程），顺序约束由 stage_state() 在前端门禁兜底。
+-- ════════════════════════════════════════════════════════════════════════════
+
+ALTER TABLE ontology_drafts ADD COLUMN validated_at timestamptz;

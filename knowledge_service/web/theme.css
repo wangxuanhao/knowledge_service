@@ -1,0 +1,885 @@
+/* ==========================================================================
+   知序 · 统一浅青（teal）设计层（theme.css）—— 最后加载，覆盖全部旧样式
+   --------------------------------------------------------------------------
+   配色依据：用户提供的参考图（2730×1536）经取色，结构为
+     ① 深青侧栏 / 主色  #124242（约占 3%，沉稳的墨青，不是黑也不是灰）
+     ② 白色内容区 / 卡片 #ffffff（约 38%）
+     ③ 浅青灰页面底      #f3f7f8 / #f4f8f9
+     ④ 浅青块 / 选中弱底  #e1efef / #e7f1f2
+     ⑤ 浅青描边          #d8e6e6 / #c9dcdc
+   一句话：深青做骨架（侧栏/主按钮/标题），白色做纸面，浅青做分组与选中。
+   不做什么：不用纯黑白（发灰像线框稿）、不用褐色/金色（土）、不用纯紫做大面积。
+   ========================================================================== */
+
+:root {
+  /* —— 表面：浅青灰底 → 白卡片 → 浅青次级 —— */
+  --ui-bg: #f3f7f8;            /* 页面底：浅青灰 */
+  --ui-surface: #ffffff;        /* 面板/卡片：白纸 */
+  --ui-surface-2: #eef5f5;      /* 次级/下沉区：浅青 */
+  --ui-raised: #e3eeee;         /* hover 浮起 */
+  --ui-overlay: #103535;        /* 代码块底：深青（唯一深色点缀）*/
+
+  /* —— 描边：青灰系 —— */
+  --ui-line: #d5e4e4;
+  --ui-line-2: #bccfcf;
+  --ui-line-strong: #8fb0b0;
+
+  /* —— 文字（标题/正文用深青主色，不是黑）—— */
+  --ui-ink: #124242;            /* 标题/正文：墨青 */
+  --ui-ink-2: #3d5e5e;          /* 次级正文 */
+  --ui-muted: #688585;          /* 说明文字 */
+  --ui-faint: #93a9a9;          /* 最弱：时间戳/路径 */
+
+  /* —— 强调 —— */
+  --ui-accent: #0e7c7b;         /* 链接/选中/焦点：中青 */
+  --ui-accent-strong: #124242;  /* 实心主按钮：墨青（白字≈7:1）*/
+  --ui-accent-2: #14b8a6;       /* 亮青：徽标/发光/最亮一档 */
+  --ui-violet: #7c3aed;         /* 关系（只给图谱“关系”语义）*/
+  --ui-ok: #0f766e;             /* 成功/已发布：深青绿 */
+  --ui-warn: #ca8a04;           /* 待决策：橄榄黄（冷调，不是褐色）*/
+  --ui-danger: #be123c;         /* 阻断/危险：玫红 */
+
+  /* —— 强调弱化底（白纸上的淡彩）—— */
+  --ui-accent-dim: #dceceb;
+  --ui-violet-dim: #ece4fb;
+  --ui-ok-dim: #d7ece8;
+  --ui-warn-dim: #fbf0cf;
+  --ui-danger-dim: #fbe0e7;
+
+  /* —— 形状与投影 —— */
+  --ui-radius: 12px;
+  --ui-radius-sm: 8px;
+  --ui-radius-pill: 999px;
+  --ui-shadow: 0 1px 2px rgba(16, 53, 53, .06), 0 8px 24px -16px rgba(16, 53, 53, .18);
+  --ui-shadow-lift: 0 2px 4px rgba(16, 53, 53, .08), 0 18px 40px -20px rgba(16, 53, 53, .25);
+  --ui-glow: 0 0 0 3px rgba(20, 184, 166, .22);
+
+  /* —— 字与等宽（字号下限 11px 是硬线）—— */
+  --ui-font: Inter, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  --ui-mono: "Cascadia Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, "Microsoft YaHei", monospace;
+  --ui-fs-xs: 11px;
+  --ui-fs-sm: 12px;
+  --ui-fs-md: 13px;
+  --ui-fs-lg: 14.5px;
+  --ui-fs-h3: 14px;
+  --ui-fs-h2: 16px;
+  --ui-fs-h1: 21px;
+}
+
+/* —— 基础：浅青底、墨青字 —— */
+body {
+  background: var(--ui-bg);
+  color: var(--ui-ink);
+  font-family: var(--ui-font);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+::selection { background: rgba(20, 184, 166, .28); color: #0c3534; }
+* { scrollbar-color: var(--ui-line-2) transparent; scrollbar-width: thin; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--ui-line-2);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: var(--ui-radius-pill);
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--ui-line-strong); background-clip: content-box; }
+
+/* ==========================================================================
+   死令牌层复活 —— style.css 定义 --ks-*，各页引用；这里按浅青重定义。
+   ========================================================================== */
+:root {
+  --ks-ink: var(--ui-ink);
+  --ks-ink-2: var(--ui-ink-2);
+  --ks-muted: var(--ui-muted);
+  --ks-faint: var(--ui-faint);
+  --ks-line: var(--ui-line);
+  --ks-line-strong: var(--ui-line-2);
+  --ks-surface: var(--ui-surface);
+  --ks-sunken: var(--ui-surface-2);
+  --ks-paper: var(--ui-bg);
+  --ks-accent: var(--ui-accent);
+  --ks-accent-soft: var(--ui-accent-dim);
+  --ks-accent-line: rgba(14, 124, 123, .4);
+  --ks-amber: var(--ui-warn);
+  --ks-amber-soft: var(--ui-warn-dim);
+  --ks-amber-line: rgba(202, 138, 4, .4);
+  --ks-danger: var(--ui-danger);
+  --ks-danger-soft: var(--ui-danger-dim);
+  --ks-danger-line: rgba(190, 18, 60, .4);
+  --ks-ok: var(--ui-ok);
+  --ks-ok-soft: var(--ui-ok-dim);
+  --ks-serif: var(--ui-font);
+  --ks-sans: var(--ui-font);
+  --ks-mono: var(--ui-mono);
+
+  --accent: var(--ui-accent);
+  --line: var(--ui-line);
+}
+
+/* ==========================================================================
+   侧栏 —— 深青骨架（#124242），浅色字，亮青做激活；四组层色寻路。
+   ========================================================================== */
+body aside {
+  width: 224px;
+  padding: 20px 14px 16px;
+  background:
+    radial-gradient(460px 260px at 12% -6%, rgba(45, 212, 191, .14), transparent 60%),
+    radial-gradient(420px 260px at 104% 22%, rgba(56, 189, 248, .08), transparent 60%),
+    linear-gradient(180deg, #144a49 0%, #0f3a39 55%, #0c2e2d 100%);
+  border-right: 1px solid #0a2423;
+  color: #d7e8e7;
+  gap: 18px;
+}
+body aside .brand {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: .16em;
+  color: #f0faf9;
+}
+/* 品牌前一颗亮青发光点 */
+body aside .brand::before {
+  content: '';
+  align-self: center;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #5eead4, #2dd4bf);
+  box-shadow: 0 0 12px 2px rgba(45, 212, 191, .65);
+  flex: 0 0 auto;
+}
+body aside .brand small {
+  display: block;
+  margin-top: 7px;
+  font-size: var(--ui-fs-xs);
+  letter-spacing: .16em;
+  color: #8fb5b3;
+}
+body aside > label {
+  font-size: var(--ui-fs-xs);
+  letter-spacing: .06em;
+  color: #a9c6c5;
+  margin: 0;
+}
+body aside select#project {
+  margin-top: 6px;
+  width: 100%;
+  background: #0c2e2d;
+  border: 1px solid #1d5351;
+  color: #e7f2f1;
+  border-radius: var(--ui-radius-sm);
+  padding: 9px 10px;
+  font-size: var(--ui-fs-md);
+}
+body aside select#project:focus { outline: none; border-color: #2dd4bf; box-shadow: 0 0 0 3px rgba(45, 212, 191, .25); }
+
+body aside nav { display: grid; gap: 10px; }
+body aside .nav-group {
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: var(--ui-radius-sm);
+  background: rgba(255, 255, 255, .03);
+  overflow: hidden;
+}
+body aside .nav-group > summary {
+  padding: 9px 11px;
+  font-size: var(--ui-fs-xs);
+  letter-spacing: .1em;
+  color: #a9c6c5;
+  background: rgba(0, 0, 0, .12);
+  border-bottom: 1px solid transparent;
+  cursor: pointer;
+  list-style: none;
+  transition: color .15s, background .15s;
+}
+body aside .nav-group > summary::-webkit-details-marker { display: none; }
+body aside .nav-group[open] > summary {
+  color: #5eead4;
+  background: rgba(45, 212, 191, .1);
+  border-bottom-color: rgba(255, 255, 255, .07);
+}
+body aside .nav-group > summary::after {
+  content: '›';
+  float: right;
+  transform: rotate(90deg);
+  transition: transform .15s;
+  color: #7fa5a3;
+}
+body aside .nav-group[open] > summary::after { transform: rotate(-90deg); }
+
+/* 四组层色：structure=青teal / instance=翠绿 / consume=天蓝 / run=柠檬黄（非褐）*/
+body aside .nav-group[data-layer=structure] { border-left: 2px solid #2dd4bf; }
+body aside .nav-group[data-layer=structure] > summary { color: #5eead4; }
+body aside .nav-group[data-layer=instance] { border-left: 2px solid #34d399; }
+body aside .nav-group[data-layer=instance] > summary { color: #6ee7b7; }
+body aside .nav-group[data-layer=consume] { border-left: 2px solid #38bdf8; }
+body aside .nav-group[data-layer=consume] > summary { color: #7dd3fc; }
+body aside .nav-group[data-layer=run] { border-left: 2px solid #fde047; }
+body aside .nav-group[data-layer=run] > summary { color: #fde68a; }
+
+body aside .nav-group > button {
+  display: block;
+  width: 100%;
+  padding: 9px 12px 9px 18px;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: #c2d8d7;
+  font-size: var(--ui-fs-md);
+  text-align: left;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+body aside .nav-group > button:hover { background: rgba(45, 212, 191, .1); color: #f0faf9; }
+body aside .nav-group > button.active {
+  border-left-color: #5eead4;
+  background: linear-gradient(90deg, rgba(45, 212, 191, .24), rgba(45, 212, 191, .03));
+  color: #eafdfa;
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(45, 212, 191, .2);
+}
+body aside .sidebar-footer { gap: 8px; font-size: var(--ui-fs-xs); }
+body aside .sidebar-footer a { color: #5eead4; margin-top: auto; }
+body aside .sidebar-footer a:hover { color: #99f6e4; }
+body aside .sidebar-footer .subtle, body aside #health {
+  color: #8fb5b3;
+  font-family: var(--ui-mono);
+  font-size: var(--ui-fs-xs);
+}
+
+/* ==========================================================================
+   主区骨架 —— 浅青底 + 墨青标题 + 亮青眉题
+   ========================================================================== */
+body main {
+  background:
+    radial-gradient(1000px 480px at 12% -14%, rgba(20, 184, 166, .1), transparent 60%),
+    radial-gradient(820px 460px at 96% -6%, rgba(56, 189, 248, .08), transparent 58%),
+    var(--ui-bg);
+  color: var(--ui-ink);
+  margin-left: 224px;
+  width: calc(100% - 224px);
+}
+body main header { border-bottom: 1px solid var(--ui-line); padding-bottom: 14px; }
+body main header small {
+  font-size: var(--ui-fs-xs);
+  letter-spacing: .2em;
+  color: var(--ui-accent-2);       /* 眉题：亮青品牌锚点 */
+}
+body main h1 { font-size: var(--ui-fs-h1); color: var(--ui-ink); letter-spacing: .01em; font-weight: 650; }
+body main h2 { font-size: var(--ui-fs-h2); color: var(--ui-ink); }
+body main h3 { color: var(--ui-ink); }
+body main .badge {
+  padding: 4px 11px;
+  border: 1px solid rgba(14, 124, 123, .3);
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-accent-dim);
+  color: var(--ui-accent);
+  font-size: var(--ui-fs-xs);
+  letter-spacing: .04em;
+}
+
+/* 状态条 */
+body main #status:not(:empty) {
+  padding: 10px 14px;
+  margin-bottom: 18px;
+  border: 1px solid var(--ui-line);
+  border-left: 3px solid var(--ui-accent-2);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface);
+  color: var(--ui-ink-2);
+}
+body main #status.error {
+  border-left-color: var(--ui-danger);
+  background: var(--ui-danger-dim);
+  color: var(--ui-danger);
+}
+
+/* ==========================================================================
+   面板与卡片 —— 白纸 + 淡青顶光 + 投影
+   ========================================================================== */
+body main .panel {
+  padding: 22px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius);
+  background:
+    linear-gradient(180deg, rgba(20, 184, 166, .04), rgba(255, 255, 255, 0) 40%),
+    var(--ui-surface);
+  box-shadow: var(--ui-shadow);
+  color: var(--ui-ink);
+}
+body main .card {
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius);
+  background: var(--ui-surface);
+  color: var(--ui-ink);
+  box-shadow: var(--ui-shadow);
+  transition: border-color .15s, box-shadow .15s;
+}
+body main .card:hover { border-color: var(--ui-line-2); box-shadow: var(--ui-shadow-lift); }
+body main .card h3 { color: var(--ui-ink); }
+body main .card p { color: var(--ui-ink-2); }
+body main hr { border: 0; border-top: 1px solid var(--ui-line); }
+
+/* ==========================================================================
+   表单
+   ========================================================================== */
+body main label { color: var(--ui-muted); font-size: var(--ui-fs-sm); }
+body main input:not([type=checkbox]):not([type=radio]),
+body main select,
+body main textarea {
+  background-color: var(--ui-surface);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-ink);
+  padding: 9px 11px;
+  font: inherit;
+}
+body main textarea { font-family: var(--ui-mono); line-height: 1.6; }
+body main input::placeholder, body main textarea::placeholder { color: var(--ui-faint); }
+body main input:focus, body main select:focus, body main textarea:focus {
+  outline: none;
+  border-color: var(--ui-accent-2);
+  box-shadow: var(--ui-glow);
+}
+body main select:not([multiple]):not([size]),
+body dialog select:not([multiple]):not([size]),
+.ontology-modal select:not([multiple]):not([size]) {
+  background-image: linear-gradient(45deg, transparent 50%, var(--ui-muted) 50%),
+    linear-gradient(135deg, var(--ui-muted) 50%, transparent 50%);
+  background-position: calc(100% - 16px) 55%, calc(100% - 11px) 55%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 30px;
+  appearance: none;
+}
+body main .check input, body main input[type=checkbox], body main input[type=radio] { accent-color: var(--ui-accent); }
+body main .check { color: var(--ui-ink-2); }
+
+/* ==========================================================================
+   按钮 —— 主=墨青实心 / 次=青灰描边 / 危险=玫红描边
+   主色必须落在 background-color 上（只写渐变会让“实心”检查判成描边按钮）。
+   ========================================================================== */
+body main button {
+  border: 1px solid transparent;
+  border-radius: var(--ui-radius-sm);
+  background-color: #124242;
+  background-image: linear-gradient(135deg, #15504e 0%, #124242 60%, #0e3837 100%);
+  color: #ffffff;
+  font-weight: 600;
+  padding: 9px 16px;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(16, 53, 53, .2), 0 8px 20px -10px rgba(18, 66, 66, .5);
+  transition: filter .15s, box-shadow .15s, transform .05s;
+}
+body main button:hover { filter: brightness(1.12); box-shadow: 0 1px 2px rgba(16, 53, 53, .22), 0 12px 26px -10px rgba(18, 66, 66, .55); }
+body main button:active { transform: translateY(1px); }
+body main button:disabled { opacity: .45; cursor: not-allowed; filter: none; box-shadow: none; }
+body main button.secondary {
+  background-color: var(--ui-surface);
+  background-image: none;
+  border-color: var(--ui-line-2);
+  color: var(--ui-ink-2);
+  box-shadow: none;
+}
+body main button.secondary:hover { border-color: var(--ui-accent); color: var(--ui-accent); box-shadow: none; }
+body main button.danger {
+  background-color: transparent;
+  background-image: none;
+  border-color: rgba(190, 18, 60, .5);
+  color: var(--ui-danger);
+  box-shadow: none;
+}
+body main button.danger:hover { background-color: var(--ui-danger-dim); box-shadow: none; }
+
+body main button:focus-visible,
+body main a:focus-visible,
+body main .check:focus-visible,
+body main [tabindex]:focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
+   代码 / 预格式 / 表格
+   ========================================================================== */
+body main pre, body main code, body main .mono { font-family: var(--ui-mono); }
+body main pre {
+  background: var(--ui-overlay);
+  border: 1px solid #0a2423;
+  border-radius: var(--ui-radius-sm);
+  color: #cde8e6;
+  padding: 14px;
+}
+body main code {
+  background: var(--ui-accent-dim);
+  border: 1px solid rgba(14, 124, 123, .2);
+  border-radius: 5px;
+  padding: 1px 6px;
+  color: var(--ui-accent);
+  font-size: .92em;
+}
+body main table { border-collapse: collapse; width: 100%; color: var(--ui-ink-2); }
+body main th, body main td { border-bottom: 1px solid var(--ui-line); padding: 9px 10px; text-align: left; }
+body main th { color: var(--ui-muted); font-size: var(--ui-fs-sm); font-weight: 600; }
+body main tbody tr:hover { background: var(--ui-surface-2); }
+
+/* ==========================================================================
+   提示文字 / chip
+   ========================================================================== */
+body main .subtle, body main small { color: var(--ui-muted); }
+body main .subtle a { color: var(--ui-accent); }
+body main .chip, body main .tag, body main .pill {
+  background: var(--ui-accent-dim);
+  border: 1px solid rgba(14, 124, 123, .25);
+  border-radius: var(--ui-radius-pill);
+  color: var(--ui-accent);
+  padding: 2px 9px;
+  font-size: var(--ui-fs-xs);
+}
+
+/* ==========================================================================
+   全局提示卡（.ks-notice）
+   ========================================================================== */
+body .ks-notice {
+  border: 1px solid var(--ui-line);
+  border-left: 4px solid var(--ui-accent);
+  border-radius: var(--ui-radius-sm);
+  background-color: var(--ui-surface);
+  color: var(--ui-ink-2);
+  box-shadow: var(--ui-shadow);
+}
+body .ks-notice__icon { background: var(--ui-accent-dim); color: var(--ui-accent); }
+body .ks-notice__close { color: var(--ui-faint); }
+body .ks-notice__close:hover { background: var(--ui-surface-2); color: var(--ui-ink); }
+body .ks-notice.is-error {
+  border-color: rgba(190, 18, 60, .3);
+  border-left-color: var(--ui-danger);
+  background-color: var(--ui-surface);
+  color: var(--ui-danger);
+}
+body .ks-notice.is-error .ks-notice__icon { background: var(--ui-danger-dim); color: var(--ui-danger); }
+body .ks-notice.is-warning {
+  border-color: rgba(202, 138, 4, .3);
+  border-left-color: var(--ui-warn);
+  background-color: var(--ui-surface);
+  color: #8a6108;
+}
+body .ks-notice.is-warning .ks-notice__icon { background: var(--ui-warn-dim); color: var(--ui-warn); }
+
+/* ==========================================================================
+   运行层分区页签 —— 墨绿旧选中态 → 浅青选中
+   ========================================================================== */
+body main .runtime .runtime-views button {
+  background: var(--ui-surface);
+  color: var(--ui-ink-2);
+  border-color: var(--ui-line);
+}
+body main .runtime .runtime-views button b { color: var(--ui-ink); }
+body main .runtime .runtime-views button small { color: var(--ui-faint); }
+body main .runtime .runtime-views button:hover { border-color: var(--ui-line-2); }
+body main .runtime .runtime-views button[aria-pressed="true"] {
+  background: var(--ui-accent-dim);
+  border-color: rgba(14, 124, 123, .45);
+  color: var(--ui-accent);
+  box-shadow: inset 0 0 0 1px rgba(14, 124, 123, .18);
+}
+body main .runtime .runtime-views button[aria-pressed="true"] b { color: var(--ui-ink); }
+body main .runtime .runtime-views button[aria-pressed="true"] small { color: var(--ui-accent); }
+body main .runtime .runtime-hero {
+  background: linear-gradient(180deg, var(--ui-surface), var(--ui-surface-2));
+  border-color: var(--ui-line);
+}
+body main .runtime .runtime-hero h2 { color: var(--ui-ink); }
+
+/* 知识问答页头（qa-hero）—— 深青渐变，与侧栏呼应，白字 */
+body main .qa-hero {
+  background: radial-gradient(130% 150% at 16% 0%, #1a5f5d 0%, #124744 52%, #0e3837 100%);
+  box-shadow: 0 24px 50px -20px rgba(14, 56, 55, .6);
+}
+body main .qa-hero h2 { color: #f0faf9; }
+body main .qa-eyebrow { color: #7fe8dd; }
+body main .qa-lead { color: #d3e8e6; }
+body main .qa-example { color: #eafdfa; border-color: rgba(94, 234, 212, .35); background: rgba(255,255,255,.07); }
+body main .qa-example:hover { border-color: rgba(94, 234, 212, .7); background: rgba(94, 234, 212, .18); }
+
+/* ==========================================================================
+   P1 两页翻浅 —— 本体建模层（.ontology-model/.om-*）与知识写入聊天流（.ingest-flow-*）
+   --------------------------------------------------------------------------
+   这两页此前是硬编码深色（#080c14/#111a2b + 青 #38bdf8）。浅主题下要把深底翻白、
+   浅色字翻墨青。用容器宽后代选择器一次性收口，不逐个 hex 改。
+   ========================================================================== */
+
+/* —— 本体建模层：深底 → 白/浅青；浅字 → 墨青 ——
+   ⚠️ 关键：原 CSS 选择器是 `.ontology-model .om-topbar`（特异性 0,2,0），
+   只写 `body main .om-topbar`（0,1,2）会被它压过、翻不过来。这里统一挂
+   `body main .ontology-model`（0,2,3）前缀，同选择器又靠后加载，必胜。 */
+body main .ontology-model,
+body main .om-page {
+  background: var(--ui-bg);
+  color: var(--ui-ink);
+}
+body main .ontology-model .om-topbar {
+  background: linear-gradient(180deg, #ffffff, #f1f7f7);
+  border-bottom: 1px solid var(--ui-line);
+  color: var(--ui-ink);
+}
+body main .ontology-model .om-brand,
+body main .ontology-model .om-topbar :is(h1, h2, h3, strong, b) { color: var(--ui-ink); }
+body main .ontology-model .om-ctx { color: var(--ui-muted); }
+
+/* 分段切换 on 态：浅青选中 */
+body main .ontology-model .om-seg { background: var(--ui-surface-2); border: 1px solid var(--ui-line); }
+body main .ontology-model .om-seg > button { background: transparent; color: var(--ui-ink-2); }
+body main .ontology-model .om-seg > button.on {
+  background: var(--ui-surface);
+  color: var(--ui-accent);
+  box-shadow: 0 1px 3px rgba(16, 53, 53, .15);
+}
+
+/* 三栏：左侧清单 / 画布 / 右侧详情，都走白纸浅青 */
+body main .ontology-model .om-body { background: var(--ui-bg); }
+body main .ontology-model .om-side,
+body main .ontology-model .om-detail {
+  background: var(--ui-surface);
+  border-color: var(--ui-line);
+  color: var(--ui-ink);
+}
+body main .ontology-model .om-side :is(h3, h4, strong),
+body main .ontology-model .om-detail :is(h3, h4, strong, b) { color: var(--ui-ink); }
+body main .ontology-model .om-side .subtle,
+body main .ontology-model .om-detail .subtle { color: var(--ui-muted); }
+body main .ontology-model .om-side-empty { color: var(--ui-faint); }
+
+/* 画布：浅青点阵网格（深色版是亮点阵，浅版用青灰点阵）*/
+body main .ontology-model .om-canvas-host {
+  background: var(--ui-surface);
+  border-color: var(--ui-line);
+}
+body main .ontology-model .om-canvas-stage {
+  background: radial-gradient(var(--ui-line-2) .8px, transparent .8px);
+  background-size: 20px 20px;
+  background-color: var(--ui-surface);
+}
+
+/* 节点类型 chip：青/青绿/紫/黄对应 类/关系/属性/待定 —— 白纸上用淡彩 */
+body main .ontology-model .om-chip,
+body main .ontology-model .om-dtype {
+  background: var(--ui-accent-dim);
+  border-color: rgba(14, 124, 123, .3);
+  color: var(--ui-accent);
+}
+body main .ontology-model .om-kind-cls { color: var(--ui-accent); }
+body main .ontology-model .om-kind-rel { color: var(--ui-violet); }
+body main .ontology-model .om-kind-attr { color: var(--ui-muted); }
+body main .ontology-model .om-kind-pending { color: var(--ui-warn); }
+body main .ontology-model .om-dot.rel { background: var(--ui-violet); }
+body main .ontology-model .om-dot.attr { background: var(--ui-muted); }
+body main .ontology-model .om-dot { background: var(--ui-accent-2); }
+
+/* 详情徽标 / 链接 / 底部动作条 */
+body main .ontology-model .om-detail-badge { background: var(--ui-accent-dim); color: var(--ui-accent); }
+body main .ontology-model .om-detail-link { color: var(--ui-accent); }
+body main .ontology-model .om-actionbar {
+  background: linear-gradient(180deg, #ffffff, #f1f7f7);
+  border-top: 1px solid var(--ui-line);
+}
+body main .ontology-model .om-btn {
+  background-color: #124242;
+  background-image: linear-gradient(135deg, #15504e, #124242);
+  color: #fff;
+}
+body main .ontology-model .om-btn.ghost {
+  background-color: transparent;
+  background-image: none;
+  border: 1px solid var(--ui-line-2);
+  color: var(--ui-ink-2);
+}
+
+/* 预览横幅 / 发布说明 / 退役块（提示语义）*/
+body main .ontology-model .om-preview-banner {
+  background: var(--ui-warn-dim);
+  border-color: rgba(202, 138, 4, .3);
+  color: #8a6108;
+}
+body main .ontology-model .om-pub-note,
+body main .ontology-model .om-history-pub-note { background: var(--ui-ok-dim); color: var(--ui-ok); }
+body main .ontology-model .om-retire,
+body main .ontology-model .om-retire-reason { background: var(--ui-danger-dim); border-color: rgba(190, 18, 60, .3); color: var(--ui-danger); }
+body main .ontology-model .om-retire-actions .danger { background-color: var(--ui-danger); color: #fff; }
+
+/* 画布顶部工具条 / 确认气泡 / legend（原深色半透明，补浅）*/
+body main .ontology-model .om-canvas-bar { background: rgba(255, 255, 255, .92); border-color: var(--ui-line); color: var(--ui-ink); }
+/* 工具条【按钮本身】原是深蓝 rgb(17,26,43)（原选择器 .ontology-model .om-canvas-bar button 0,2,1），
+   改成白底墨青描边的 ghost 工具钮，hover 浅青 —— 0,2,3 必胜。 */
+body main .ontology-model .om-canvas-bar button {
+  background: var(--ui-surface);
+  background-image: none;
+  border: 1px solid var(--ui-line-2);
+  color: var(--ui-ink-2);
+  box-shadow: none;
+}
+body main .ontology-model .om-canvas-bar button:hover {
+  background: var(--ui-accent-dim);
+  border-color: var(--ui-accent);
+  color: var(--ui-accent);
+  filter: none;
+}
+/* 图例容器现是折叠式（透明壳），不再在此铺底色；底色由 .om-canvas-legend-body 在展开时提供。 */
+body main .ontology-model .om-canvas-confirm { background: var(--ui-surface); border-color: var(--ui-line-2); color: var(--ui-ink); }
+body main .ontology-model .om-canvas-cancel,
+body main .ontology-model .om-new-input { background: var(--ui-surface); color: var(--ui-ink); border-color: var(--ui-line-2); }
+
+/* ABox 类型 chip（.om-ab-chip）原深底 → 淡彩 */
+body main .ontology-model .om-ab-chip { background: var(--ui-accent-dim); color: var(--ui-accent); }
+body main .ontology-model .om-ab-chip.rel { background: var(--ui-violet-dim); color: var(--ui-violet); }
+body main .ontology-model .om-ab-chip.attr { background: var(--ui-surface-2); color: var(--ui-muted); }
+body main .ontology-model .om-ab-chip.pending { background: var(--ui-warn-dim); color: #8a6108; }
+body main .ontology-model .om-ab-chip.conflict { background: var(--ui-warn-dim); color: #8a6108; }
+body main .ontology-model .om-ab-chip.block { background: var(--ui-danger-dim); color: var(--ui-danger); }
+
+/* 历史版本抽屉（原选择器同样是 `.ontology-model .om-history-panel` 0,2,0，要带前缀）*/
+body .ontology-model .om-history-backdrop { background: rgba(10, 36, 35, .4); }
+body .ontology-model .om-history-panel {
+  background: var(--ui-surface);
+  border-color: var(--ui-line-2);
+  color: var(--ui-ink);
+}
+body main .ontology-model .om-history-head { background: var(--ui-surface-2); color: var(--ui-ink); }
+body main .ontology-model .om-history-item,
+body main .ontology-model .om-history-row { border-bottom-color: var(--ui-line); color: var(--ui-ink-2); }
+body main .ontology-model .om-history-cur,
+body main .ontology-model .om-history-viewing { background: var(--ui-accent-dim); color: var(--ui-accent); }
+body main .ontology-model .om-history-foot { background: var(--ui-surface); border-top-color: var(--ui-line); }
+
+/* —— 知识写入聊天流（.ingest-flow-*）翻浅 —— */
+body main .ingest-flow {
+  background: var(--ui-bg);
+  color: var(--ui-ink);
+}
+body main .ingest-flow-head {
+  background: radial-gradient(130% 150% at 16% 0%, #1a5f5d 0%, #124744 52%, #0e3837 100%);
+  color: #f0faf9;
+}
+body main .ingest-flow-title { color: #f0faf9; }
+body main .ingest-flow-eyebrow { color: #7fe8dd; }
+body main .ingest-flow-lead { color: #d3e8e6; }
+body main .ingest-flow-toolbar {
+  background: var(--ui-surface);
+  border-color: var(--ui-line);
+}
+body main .ingest-flow-btn {
+  background-color: #124242;
+  color: #fff;
+}
+body main .ingest-flow-btn.secondary {
+  background-color: transparent;
+  color: var(--ui-ink-2);
+  border: 1px solid var(--ui-line-2);
+}
+body main .ingest-flow-watch,
+body main .ingest-flow-tally { background: var(--ui-surface-2); color: var(--ui-ink-2); }
+body main .ingest-flow-status { background: var(--ui-ok-dim); color: var(--ui-ok); }
+body main .ingest-flow-status[data-tone="warn"] { background: var(--ui-warn-dim); color: #8a6108; }
+body main .ingest-flow-status[data-tone="error"] { background: var(--ui-danger-dim); color: var(--ui-danger); }
+
+/* 对话区：白纸 + 气泡语义色 */
+body main .ingest-flow-chat { background: var(--ui-bg); }
+body main .ingest-flow-empty { color: var(--ui-faint); }
+body main .ingest-flow-msg-who { color: var(--ui-muted); }
+body main .ingest-flow-msg-body,
+body main .ingest-flow-msg-text { color: var(--ui-ink-2); }
+body main .ingest-flow-bubble {
+  background: var(--ui-surface);
+  border-color: var(--ui-line);
+  color: var(--ui-ink-2);
+}
+body main .ingest-flow-bubble[data-tone="think"] { background: var(--ui-surface-2); color: var(--ui-ink-2); }
+body main .ingest-flow-bubble[data-tone="evidence"] { background: var(--ui-accent-dim); border-left-color: var(--ui-accent); color: var(--ui-accent); }
+body main .ingest-flow-bubble[data-tone="good"] { background: var(--ui-ok-dim); border-left-color: var(--ui-ok); color: var(--ui-ok); }
+body main .ingest-flow-bubble[data-tone="warn"] { background: var(--ui-warn-dim); border-left-color: var(--ui-warn); color: #8a6108; }
+body main .ingest-flow-bubble[data-tone="note"] { background: var(--ui-violet-dim); border-left-color: var(--ui-violet); color: var(--ui-violet); }
+
+/* 底部输入区（composer/input）——原深色 #0d1526/#0a1220，翻白纸浅青（漏覆盖补回）*/
+body main .ingest-flow-composer {
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-line);
+  color: var(--ui-ink);
+}
+body main .ingest-flow-composer.is-drag { border-color: var(--ui-accent-2); box-shadow: var(--ui-glow); }
+body main .ingest-flow-input,
+body main textarea.ingest-flow-input {
+  background: var(--ui-surface-2);
+  border: 1px solid var(--ui-line);
+  color: var(--ui-ink);
+}
+body main .ingest-flow-input::placeholder { color: var(--ui-faint); }
+body main .ingest-flow-composer-actions { color: var(--ui-muted); }
+
+/* 「添加文档·精细设置」折叠条（.ingest-flow-advanced > summary）原是深底 rgb(10,18,32)，
+   改成白纸浅青描边，展开时墨青字 —— 避免知识写入页底部挂一条深色。 */
+body main details.ingest-flow-advanced { background: transparent; }
+body main details.ingest-flow-advanced > summary {
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-line);
+  color: var(--ui-ink-2);
+  border-radius: var(--ui-radius-sm);
+  cursor: pointer;
+}
+body main details.ingest-flow-advanced[open] > summary {
+  background: var(--ui-accent-dim);
+  border-color: var(--ui-accent);
+  color: var(--ui-accent);
+}
+
+/* ==========================================================================
+   旧浅绿页统一到 teal —— dashboard / evaluation / projects / tasks / candidate-mindmap
+   --------------------------------------------------------------------------
+   这些页本来就是浅色，但旧强调色是「墨绿 #216952/#23795c」（偏黄绿），与参考的
+   「青 teal #124242」不是一路。把它们的墨绿强调收进 teal，浅绿底收进浅青。
+   ========================================================================== */
+
+/* 标题强调墨绿 → teal；浅绿底 → 浅青 */
+body main :is(#tab-dashboard, #tab-projects, #tab-jobs, #tab-evaluation) { color: var(--ui-ink); }
+body main #tab-dashboard :is(.metric-card, .dashboard-section) {
+  background: var(--ui-surface);
+  border-color: var(--ui-line);
+}
+body main #tab-dashboard .metric-card.highlight {
+  background: var(--ui-accent-dim);
+  border-color: rgba(14, 124, 123, .4);
+}
+body main #tab-dashboard .metric-icon { background: var(--ui-accent-dim); color: var(--ui-accent); }
+body main #tab-dashboard .distribution { border-bottom-color: var(--ui-line); color: var(--ui-ink-2); }
+
+/* 项目卡 */
+body main #tab-projects .project-card {
+  background: var(--ui-surface);
+  border-color: var(--ui-line);
+}
+body main #tab-projects .project-card.current {
+  background: var(--ui-accent-dim);
+  border-color: rgba(14, 124, 123, .45);
+}
+body main #tab-projects .project-current-badge { background: var(--ui-accent-dim); color: var(--ui-accent); }
+body main #tab-projects .project-actions.danger { background: var(--ui-danger-dim); color: var(--ui-danger); }
+
+/* 后台任务：状态徽标走 teal 语义 */
+body main #tab-jobs .task-card { background: var(--ui-surface); border-color: var(--ui-line); }
+body main #tab-jobs .task-icon { background: var(--ui-surface-2); color: var(--ui-accent); }
+body main #tab-jobs .task-status-badge.completed { background: var(--ui-ok-dim); color: var(--ui-ok); }
+body main #tab-jobs .task-status-badge.running { background: var(--ui-accent-dim); color: var(--ui-accent); }
+body main #tab-jobs .task-status-badge.failed { background: var(--ui-danger-dim); color: var(--ui-danger); }
+body main #tab-jobs .task-status-badge.queued { background: var(--ui-warn-dim); color: #8a6108; }
+body main #tab-jobs .task-progress-bar { background: var(--ui-surface-2); }
+body main #tab-jobs .task-progress-fill { background: linear-gradient(90deg, #14b8a6, #0e7c7b); }
+body main #tab-jobs .task-logs-content { background: var(--ui-overlay); color: #cde8e6; }
+
+/* 快照评测 */
+body main #tab-evaluation :is(.eval-page-intro, .eval-snapshot-card, .eval-list-item) {
+  background: var(--ui-surface);
+  border-color: var(--ui-line);
+}
+body main #tab-evaluation :is(.eval-gold-header, .eval-raw-json) { background: var(--ui-surface-2); color: var(--ui-ink-2); }
+body main #tab-evaluation .eval-snapshot-badge { background: var(--ui-accent-dim); color: var(--ui-accent); }
+body main #tab-evaluation .eval-progress-fill { background: linear-gradient(90deg, #14b8a6, #0e7c7b); }
+body main #tab-evaluation .eval-progress-fill.low { background: linear-gradient(90deg, #fde047, #facc15); }
+body main #tab-evaluation .eval-danger { background: var(--ui-danger-dim); color: var(--ui-danger); }
+body main #tab-evaluation .eval-raw-json pre { background: var(--ui-overlay); color: #cde8e6; }
+
+/* 候选脑图：旧墨绿 hero → teal，橙褐动作 → teal */
+body main .candidate-map-hero {
+  background: radial-gradient(130% 150% at 16% 0%, #1a5f5d 0%, #124744 55%, #0e3837 100%);
+  color: #f0faf9;
+}
+body main .candidate-map-actions button:not(.secondary) {
+  background-color: #124242;
+  color: #fff;
+}
+body main .knowledge-flow li { background: var(--ui-surface); border-color: var(--ui-line); color: var(--ui-muted); }
+body main .knowledge-flow li.active { background: var(--ui-accent-dim); border-color: var(--ui-accent); color: var(--ui-accent); }
+body main .candidate-map-summary > div { background: var(--ui-surface); border-color: var(--ui-line); }
+
+/* ==========================================================================
+   弹层 / 对话框 —— 白纸收口（挂在 <body> 下，body main 作用域盖不到）
+   ========================================================================== */
+body dialog,
+#record-dialog, #source-evidence-dialog, #create-relation-dialog,
+.ontology-modal, .projects-modal {
+  background: var(--ui-surface);
+  color: var(--ui-ink);
+  border-color: var(--ui-line-2);
+}
+body dialog::backdrop { background: rgba(10, 36, 35, .45); }
+body dialog .panel, #record-dialog .panel, .ontology-modal .panel {
+  background: var(--ui-surface);
+  border-color: var(--ui-line);
+}
+.ontology-modal-header, .record-dialog-heading { background: var(--ui-surface); border-bottom-color: var(--ui-line); }
+.ontology-modal-title, #source-evidence-title, #create-relation-title { color: var(--ui-ink); }
+
+body dialog button:not(.secondary),
+.ontology-modal .btn:not(.btn-secondary),
+.projects-modal-footer button:not(.secondary) {
+  background-color: #124242;
+  color: #fff;
+}
+body dialog button.secondary,
+.ontology-modal .btn-secondary,
+.projects-modal-footer .secondary {
+  background-color: transparent;
+  color: var(--ui-ink-2);
+  border: 1px solid var(--ui-line-2);
+}
+body dialog header button,
+.ontology-modal .ontology-modal-close, .projects-modal .projects-modal-close {
+  background: transparent; color: var(--ui-muted);
+}
+body dialog header button:hover,
+.ontology-modal .ontology-modal-close:hover { background: var(--ui-surface-2); color: var(--ui-ink); }
+
+/* 弹层内小块 */
+.relation-path { background: var(--ui-surface-2); border-left-color: var(--ui-ok); }
+.evidence-kind { background: var(--ui-ok-dim); color: var(--ui-ok); }
+.source-evidence-card { background: var(--ui-surface); border-color: var(--ui-line); }
+#source-evidence-text { background: var(--ui-surface-2); color: var(--ui-ink); }
+#source-evidence-anchor { background: var(--ui-warn-dim); color: #8a6108; }
+.relation-choice, .relation-target { background: var(--ui-surface); border-color: var(--ui-line-2); color: var(--ui-ink-2); }
+.relation-choice[aria-pressed="true"], .relation-target[aria-selected="true"] {
+  background: var(--ui-accent-dim); border-color: var(--ui-accent); color: var(--ui-accent);
+}
+.record-version { background: var(--ui-surface-2); border-color: var(--ui-line); }
+.evidence-empty { background: var(--ui-warn-dim); color: #8a6108; }
+.evidence-danger .danger { background: var(--ui-danger-dim); border-color: rgba(190, 18, 60, .5); color: var(--ui-danger); }
+
+/* ==========================================================================
+   响应式
+   ========================================================================== */
+@media (max-width: 850px) {
+  body aside { width: 188px; padding: 18px 12px; }
+  body main { margin-left: 188px; width: calc(100% - 188px); }
+}
+@media (max-width: 580px) {
+  body aside {
+    position: static;
+    width: auto;
+    background: var(--ui-bg);
+    border-right: 0;
+    border-bottom: 1px solid var(--ui-line);
+  }
+  body main { margin-left: 0; width: 100%; }
+}
+
+/* ==========================================================================
+   质感 —— 激活导航克制呼吸微光（尊重 prefers-reduced-motion）
+   ========================================================================== */
+@keyframes ui-breathe {
+  0%, 100% { box-shadow: inset 0 0 0 0 rgba(45, 212, 191, 0); }
+  50%      { box-shadow: inset 0 0 18px -10px rgba(45, 212, 191, .5); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  body aside .nav-group > button.active { animation: ui-breathe 3.6s ease-in-out infinite; }
+}
