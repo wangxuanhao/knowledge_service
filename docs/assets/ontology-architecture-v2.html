@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>三层分离架构：知识写入 / 本体建模层 / 知识台账</title>
+<style>
+  :root{--bg:#080c14;--panel:#0e1522;--panel2:#111a2b;--line:#1d2a3d;--line2:#25354d;
+    --text:#e7eef6;--muted:#8296ad;--faint:#5b6d82;
+    --cyan:#38bdf8;--cyan-soft:rgba(56,189,248,.12);
+    --green:#34d399;--green-soft:rgba(52,211,153,.12);
+    --amber:#fbbf24;--amber-soft:rgba(251,191,36,.12);
+    --violet:#a78bfa;--violet-soft:rgba(167,139,250,.12);
+    --teal:#2dd4bf;--teal-soft:rgba(45,212,191,.12);
+    --mono:ui-monospace,Consolas,monospace}
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.55 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:var(--text);
+    background:radial-gradient(1200px 600px at 15% -10%,rgba(56,189,248,.08),transparent 60%),#080c14;padding:24px}
+  .ttl{font-size:16px;font-weight:700;background:linear-gradient(90deg,#e7eef6,#38bdf8);-webkit-background-clip:text;background-clip:text;color:transparent;margin-bottom:4px}
+  .sub{font-size:12.5px;color:var(--muted);margin-bottom:20px}
+  .map{font-size:11.5px;color:var(--faint);margin-bottom:18px;display:flex;gap:8px;flex-wrap:wrap}
+  .map span{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-family:var(--mono);font-size:10.5px}
+  .map span b{color:var(--cyan);font-weight:600}
+  .cols{display:flex;gap:12px;align-items:stretch}
+  .col{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;position:relative;display:flex;flex-direction:column}
+  .col.one{border-color:rgba(251,191,36,.35)} .col.two{border-color:rgba(56,189,248,.4)} .col.three{border-color:rgba(52,211,153,.35)}
+  .tag{position:absolute;top:-10px;left:14px;font-size:10px;font-family:var(--mono);padding:2px 9px;border-radius:5px;letter-spacing:.05em}
+  .col.one .tag{background:var(--amber-soft);color:var(--amber);border:1px solid rgba(251,191,36,.3)}
+  .col.two .tag{background:var(--cyan-soft);color:var(--cyan);border:1px solid rgba(56,189,248,.3)}
+  .col.three .tag{background:var(--green-soft);color:var(--green);border:1px solid rgba(52,211,153,.3)}
+  .col h3{margin:4px 0 2px;font-size:15px}
+  .col .en{font-size:10.5px;color:var(--faint);font-family:var(--mono);margin-bottom:11px}
+  .col .role{font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:12px;min-height:48px}
+  .col ul{list-style:none;margin:0 0 12px;padding:0;display:flex;flex-direction:column;gap:6px;flex:1}
+  .col li{font-size:12px;color:#b9c6d4;padding-left:14px;position:relative;line-height:1.5}
+  .col li::before{content:"";position:absolute;left:0;top:6px;width:6px;height:6px;border-radius:2px}
+  .col.one li::before{background:var(--amber)} .col.two li::before{background:var(--cyan)} .col.three li::before{background:var(--green)}
+  .col li b{color:var(--text)}
+  .col .foot{font-size:11px;padding:8px 11px;border-radius:8px;line-height:1.5}
+  .col.one .foot{background:var(--amber-soft);color:#d8b45a;border:1px solid rgba(251,191,36,.2)}
+  .col.two .foot{background:var(--cyan-soft);color:#7cc4e8;border:1px solid rgba(56,189,248,.2)}
+  .col.three .foot{background:var(--green-soft);color:#7cc9a8;border:1px solid rgba(52,211,153,.2)}
+  .arrow{display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--faint);font-size:11px;padding:0 2px;flex:0 0 auto;gap:4px}
+  .arrow .lbl{writing-mode:vertical-rl;font-size:10px;letter-spacing:.08em}
+  .arrow b{color:var(--muted);font-size:18px}
+  .sep{height:1px;background:var(--line);margin:20px 0 16px}
+  .sect{font-size:13px;font-weight:700;color:var(--text);margin-bottom:10px;display:flex;align-items:center;gap:8px}
+  .sect .k{color:var(--violet)}
+  .answer{font-size:12.5px;color:var(--muted);line-height:1.7;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .answer b{color:var(--text)} .answer .c{color:var(--cyan)} .answer .a{color:var(--amber)} .answer .g{color:var(--green)} .answer .v{color:var(--violet)} .answer .t{color:var(--teal)}
+  .answer code{font-family:var(--mono);font-size:11px;background:#0a1220;padding:1px 5px;border-radius:4px;color:#9fd4f0}
+</style>
+</head>
+<body>
+
+<div class="ttl">三层分离：知识写入 → 本体建模层 → 知识台账</div>
+<div class="sub">参考「本体星图」那套系统——本体生成（灌材料）与本体星图（看结构）本来就是分开的，不该塞进同一页。</div>
+<div class="map">
+  <span>知识写入 ≈ <b>本体生成</b>（上传/抽取/质检）</span>
+  <span>本体建模层 ≈ <b>本体星图 · 类图谱</b>（看结构/编辑/发布）</span>
+  <span>知识台账 ≈ <b>实体图谱</b>（看对象/按版本显示）</span>
+</div>
+
+<div class="cols">
+  <div class="col one">
+    <div class="tag">① 本体生成</div>
+    <h3>知识写入</h3>
+    <div class="en">Ingest · 独立入口</div>
+    <div class="role">把业务材料变成结构化知识。这是「建设」动作，跟「看」分开。</div>
+    <ul>
+      <li><b>上传文档</b>（.txt/.md/.pdf/.docx）</li>
+      <li><b>扫描数据库表</b>（映射表/字段）</li>
+      <li><b>自然语言</b>描述需求</li>
+      <li>抽取 → <b>质量检查</b> → 出候选</li>
+    </ul>
+    <div class="foot">产出候选：新<b>类/关系/属性</b>（要进本体）+ 新<b>实体/关系/属性值</b>（要进台账）。抽取过程「思考+证据」透明可见。</div>
+  </div>
+  <div class="arrow"><b>→</b><span class="lbl">收下候选</span></div>
+  <div class="col two">
+    <div class="tag">② 本体星图 · 类图谱</div>
+    <h3>本体建模层</h3>
+    <div class="en">Ontology Modeling · 画布</div>
+    <div class="role">看业务世界的<b>结构骨架</b>：有哪些类、关系、属性。唯一能改结构的地方。</div>
+    <ul>
+      <li>左栏：<b>类 / 关系 / 属性</b>三维清单</li>
+      <li>画布：拖节点、连线（父子/关系）</li>
+      <li>点类看：属性、允许关系、规则</li>
+      <li><b>校验并审核 → 发布为 vN+1</b></li>
+    </ul>
+    <div class="foot">只管「结构长什么样」。知识写入抽出的<b>新概念</b>在这里以虚线「待收下」出现，收下后发布成版本。</div>
+  </div>
+  <div class="arrow"><b>→</b><span class="lbl">发布后</span></div>
+  <div class="col three">
+    <div class="tag">③ 实体图谱</div>
+    <h3>知识台账</h3>
+    <div class="en">Knowledge Ledger · 账本</div>
+    <div class="role">看这套结构在业务里的<b>具体落点</b>：哪些实体、谁和谁有关系、属性值多少。</div>
+    <ul>
+      <li>按<b>本体版本</b>显示实体</li>
+      <li>实体/关系/属性值：<b>直接改删</b>，自动留痕</li>
+      <li>可<b>回滚</b>，改删弹影响面</li>
+      <li>不确认版本</li>
+    </ul>
+    <div class="foot">知识写入抽出的<b>新实体/属性值</b>直接落这里。改删无需确认版本，留痕可回滚。</div>
+  </div>
+</div>
+
+<div class="sep"></div>
+<div class="sect"><span class="k">◆</span>那「聊天式分析师（思考+描述+证据）」去哪了？</div>
+<div class="answer">
+  它不取消，只是<b>不占用本体建模层的画布</b>——它归位到 <span class="a">①知识写入</span> 这个独立入口里：
+  上传文档后，抽取过程以「分析师对话流」透明展开（<span class="v">💭 思考</span> 为什么判成类/关系/属性 + <span class="t">📄 证据</span> 引用原文第几条），
+  结果以候选卡片给出，人点「收下」。
+  <br><br>
+  这样职责就干净了：<span class="a">知识写入</span> 负责「<b>灌材料、出候选</b>」（可以有聊天的透明抽取），
+  <span class="c">本体建模层</span> 负责「<b>定结构、发版本</b>」（纯画布，专注骨架），
+  <span class="g">知识台账</span> 负责「<b>看实例</b>」。三个入口，互不越界——这也呼应你上一条「本体层和实例层是两个维度」。
+</div>
+
+</body>
+</html>

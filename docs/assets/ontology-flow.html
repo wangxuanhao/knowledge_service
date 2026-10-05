@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>本体建模层 · 全流程与校验审核口径（流程图）</title>
+<style>
+  :root{
+    --bg:#080c14; --panel:#0e1522; --panel2:#111a2b; --line:#1d2a3d; --line2:#25354d;
+    --text:#e7eef6; --muted:#8296ad; --faint:#5b6d82;
+    --cyan:#38bdf8; --cyan-soft:rgba(56,189,248,.12); --cyan-glow:rgba(56,189,248,.45);
+    --green:#34d399; --green-soft:rgba(52,211,153,.12); --green-glow:rgba(52,211,153,.4);
+    --amber:#fbbf24; --amber-soft:rgba(251,191,36,.12); --amber-glow:rgba(251,191,36,.4);
+    --red:#fb7185; --red-soft:rgba(251,113,133,.12);
+    --violet:#a78bfa; --violet-soft:rgba(167,139,250,.12);
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:var(--text);
+    background:radial-gradient(1200px 600px at 20% -10%,rgba(56,189,248,.08),transparent 60%),
+               radial-gradient(1000px 500px at 90% 0%,rgba(167,139,250,.07),transparent 55%),#080c14;padding:24px}
+  .h1{font-size:16px;font-weight:700;margin:0 0 14px;background:linear-gradient(90deg,#e7eef6,#38bdf8);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .h2{font-size:13px;font-weight:700;color:var(--text);margin:20px 0 8px;display:flex;align-items:center;gap:8px}
+  .h2 .bar{width:4px;height:14px;background:var(--cyan);border-radius:2px;box-shadow:0 0 8px var(--cyan-glow)}
+
+  /* 两层校验对照表 */
+  .tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+  .tbl th,.tbl td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  .tbl th{background:var(--panel2);color:var(--muted);font-weight:600;font-size:11.5px}
+  .tbl td .k{color:var(--cyan);font-family:var(--mono);font-weight:600}
+  .tbl .who{color:var(--green);font-weight:600}
+  .tbl .when{color:var(--amber)}
+
+  /* 流程图 */
+  .flow{display:flex;flex-direction:column;gap:0;margin:6px 0}
+  .node{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 14px;margin:0 auto;max-width:640px;width:100%;position:relative}
+  .node .t{font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px}
+  .node .d{font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.5}
+  .node .d code{font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+  .node.start{border-color:rgba(56,189,248,.5);background:var(--cyan-soft)}
+  .node.machine{border-color:rgba(167,139,250,.5);background:var(--violet-soft)}
+  .node.ok{border-color:rgba(52,211,153,.45);background:var(--green-soft)}
+  .node.hold{border-color:rgba(251,191,36,.45);background:var(--amber-soft)}
+  .node.review{border-color:rgba(251,113,133,.45);background:var(--red-soft)}
+  .node.pub{border-color:rgba(52,211,153,.6);background:var(--green-soft);box-shadow:0 0 16px rgba(52,211,153,.12)}
+  .arrow{text-align:center;color:var(--faint);font-size:15px;line-height:1;padding:3px 0}
+  .arrow .lbl{font-size:10.5px;color:var(--muted);display:block;margin-top:1px}
+
+  .branch{display:flex;gap:10px;margin:2px 0;align-items:stretch}
+  .branch .node{max-width:430px}
+  .branch .node .t{font-size:12.5px}
+
+  /* 开放/非开放 + 累加 */
+  .two{display:flex;gap:12px;margin:6px 0}
+  .two .card{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:11px 13px}
+  .two .card h4{margin:0 0 5px;font-size:12.5px;color:var(--text)}
+  .two .card p{margin:0;font-size:11.5px;color:var(--muted);line-height:1.55}
+  .two .card p b{color:var(--text)}
+
+  .legend-note{margin-top:16px;font-size:12px;color:var(--muted);line-height:1.6;border-top:1px solid var(--line);padding-top:12px}
+  .legend-note b{color:var(--text)}
+  .legend-note .g{color:var(--green)} .legend-note .a{color:var(--amber)} .legend-note .r{color:var(--red)} .legend-note .v{color:var(--violet)}
+</style>
+</head>
+<body>
+
+<div class="h1">本体建模层 · 全流程（两层校验 ＋ 两个"人"的动作）</div>
+
+<!-- 两层校验对照 -->
+<div class="h2"><i class="bar"></i>「校验」＝机器自动，全程不需要人</div>
+<table class="tbl">
+  <tr><th>层</th><th>校验工具</th><th>什么时候跑</th><th>查什么</th><th>不过怎么办</th></tr>
+  <tr>
+    <td><b>结构层</b><br>本体（类/关系/属性）</td>
+    <td><span class="k">SHACL</span></td>
+    <td><span class="when">发布 vN+1 那一刻</span></td>
+    <td>父子继承成环？属性数据类型合法？SHACL 约束自洽？domain/range 指向存在的类？</td>
+    <td><span class="r">发布不了</span>，机器拦下，提示改哪</td>
+  </tr>
+  <tr>
+    <td><b>实例层</b><br>知识（实体/关系/属性值）</td>
+    <td><span class="k">domain / range / 类型</span></td>
+    <td><span class="when">每条知识写入那一刻</span></td>
+    <td>类型在不在本体？关系两端类型匹配吗？属性值类型对吗？</td>
+    <td>分流：见下面三种去向</td>
+  </tr>
+</table>
+
+<!-- 流程图 -->
+<div class="h2"><i class="bar"></i>知识写入 → 逐条机器分流（这是全过程）</div>
+<div class="flow">
+
+  <div class="node start"><div class="t">① 知识写入</div><div class="d">上传文档 / 右侧自然语言描述 → AI 抽取 <code>实体 · 关系 · 属性</code>（候选累加到右侧列表，多次不覆盖）</div></div>
+  <div class="arrow">▼</div>
+
+  <div class="node machine"><div class="t">② 逐条机器校验（自动，不需人）</div><div class="d">拿「当前本体」比对每条：类型在不在？domain/range 匹配吗？值类型对吗？</div></div>
+  <div class="arrow"><span class="lbl">三条去向</span></div>
+
+  <div class="branch">
+    <div class="node ok"><div class="t">✅ 符合本体</div><div class="d">直接落库、立即生效。<b>不需要任何人审核</b>。</div></div>
+    <div class="node hold"><div class="t">⚠️ 类型不在本体</div><div class="d">这条知识标「<b>结构待定</b>」（可检索、不进正式证据链）＋ 新概念作为「待收下」虚线节点画到画布。</div></div>
+    <div class="node review"><div class="t">🚫 类型在，但约束冲突</div><div class="d">domain/range 不匹配、值类型不对 → 进「<b>知识审核</b>」，人批准或拒绝（一次性）。</div></div>
+  </div>
+
+  <div class="arrow">▼<span class="lbl">「类型不在本体」这条链的闭环（右边虚线的后续）</span></div>
+
+  <div class="node hold"><div class="t">③ 人在画布上「收下」新概念</div><div class="d">点右侧候选「收下」→ 该概念进入本次本体草案；「忽略」则丢弃，对应知识维持「结构待定」。</div></div>
+  <div class="arrow">▼</div>
+
+  <div class="node machine"><div class="t">④ 「校验并审核」＝ 跑一遍 SHACL + 人过一眼</div><div class="d">机器查结构合法（成环/数据类型/约束自洽）→ 人扫一眼本次改动（自己改的＋机器抽的）</div></div>
+  <div class="arrow">▼</div>
+
+  <div class="node pub"><div class="t">⑤ 发布为 vN+1</div><div class="d">生成新本体版本 → 所有标「结构待定」的知识<b>自动解除、正式生效</b>，不再单独审核。</div></div>
+</div>
+
+<!-- 开放/非开放 + 累加 -->
+<div class="h2"><i class="bar"></i>「开放 / 非开放」是同一个流程的两种表现，不是两条流程</div>
+<div class="two">
+  <div class="card">
+    <h4>非开放（约束模式）＝ 本体已经够全</h4>
+    <p>抽取结果几乎都走 <b>✅ 符合本体</b>，很少出现「待收下」。这是成熟本体的常态——机器校验即通过，人只管看结果。</p>
+  </div>
+  <div class="card">
+    <h4>开放（探索模式）＝ 本体还在长</h4>
+    <p>新概念不断走 <b>⚠️ 类型不在本体</b>，<b>累加</b>到画布（多次写入不覆盖）。人逐步「收下 → 发布」，本体越用越全。</p>
+  </div>
+</div>
+
+<div class="legend-note">
+  <b>一句话回答你的疑问：</b><br>
+  · <b>现有知识</b>（已通过校验落库的）→ <span class="g">永远不再审核</span>。<br>
+  · <b>后续知识</b>（新写入的）→ 写入那一刻机器校验：<span class="g">符合本体＝自动过</span>；
+  <span class="a">类型不在本体＝结构待定，等概念收下发布后自动解除</span>；
+  <span class="r">约束冲突＝知识审核，人批一次</span>。<br>
+  · 所以「审核」只发生在两个点，都是<b>人</b>做、都只做一次：<span class="v">画布上收下新概念</span> ＋ <span class="r">批准冲突知识</span>。
+  其余全是机器校验，不打扰人。
+</div>
+
+</body>
+</html>

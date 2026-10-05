@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>端到端综合评估：数据流 × 三层 × 底座 × 改动标注</title>
+<style>
+  :root{--bg:#080c14;--panel:#0e1522;--panel2:#111a2b;--line:#1d2a3d;--line2:#25354d;
+    --text:#e7eef6;--muted:#8296ad;--faint:#5b6d82;
+    --cyan:#38bdf8;--cyan-soft:rgba(56,189,248,.12);
+    --green:#34d399;--green-soft:rgba(52,211,153,.12);
+    --amber:#fbbf24;--amber-soft:rgba(251,191,36,.12);
+    --violet:#a78bfa;--red:#fb7185;--red-soft:rgba(251,113,133,.12);
+    --mono:ui-monospace,Consolas,monospace}
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.55 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:var(--text);
+    background:radial-gradient(1200px 600px at 15% -10%,rgba(56,189,248,.08),transparent 60%),#080c14;padding:22px}
+  .ttl{font-size:16px;font-weight:700;background:linear-gradient(90deg,#e7eef6,#38bdf8);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{font-size:12.5px;color:var(--muted);margin:4px 0 18px}
+  .verdict{border:1px solid rgba(52,211,153,.35);background:var(--green-soft);border-radius:12px;padding:13px 16px;font-size:13.5px;line-height:1.7;margin-bottom:18px}
+  .verdict b{color:#c3f5e2} .verdict .hl{color:var(--green);font-weight:700}
+  .flow{display:flex;flex-direction:column;gap:10px;margin-bottom:18px}
+  .row{display:flex;gap:10px;align-items:stretch}
+  .node{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px 15px;position:relative}
+  .node h4{margin:0 0 3px;font-size:13.5px}
+  .node .en{font-size:10px;color:var(--faint);font-family:var(--mono);margin-bottom:8px}
+  .node .st{font-size:11.5px;line-height:1.55}
+  .node .st b{font-weight:600}
+  .ok{color:var(--green)} .todo{color:var(--amber)} .no{color:var(--red)}
+  .tag{position:absolute;top:-9px;right:12px;font-size:9.5px;font-family:var(--mono);padding:2px 8px;border-radius:5px;letter-spacing:.05em}
+  .tag.ok{background:var(--green-soft);border:1px solid rgba(52,211,153,.3);color:var(--green)}
+  .tag.todo{background:var(--amber-soft);border:1px solid rgba(251,191,36,.3);color:var(--amber)}
+  .src{border-color:rgba(45,212,191,.3)}
+  .one{border-color:rgba(251,191,36,.35)}
+  .two{border-color:rgba(56,189,248,.4)}
+  .three{border-color:rgba(52,211,153,.35)}
+  .base{border-color:rgba(167,139,250,.4)}
+  .varr{text-align:center;color:var(--faint);font-size:18px;line-height:1}
+  .varr .l{font-size:10px;letter-spacing:.08em;color:var(--muted)}
+  .split{display:flex;gap:10px;align-items:stretch}
+  .split .varr{flex:0 0 60px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:4px}
+  .sep{height:1px;background:var(--line);margin:16px 0}
+  .matrix{width:100%;border-collapse:collapse;font-size:12px}
+  .matrix th,.matrix td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  .matrix th{background:var(--panel2);color:var(--muted);font-weight:600;font-size:11px}
+  .matrix td code{font-family:var(--mono);font-size:10.5px;color:#9fd4f0}
+  .risk{font-size:12px;color:var(--muted);line-height:1.7;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px 16px;margin-top:14px}
+  .risk b{color:var(--text)} .risk .a{color:var(--amber)} .risk .r{color:var(--red)}
+</style>
+</head>
+<body>
+
+<div class="ttl">端到端综合评估：本体建模层 × 知识写入 × 前端选型 × 流式 × 存储</div>
+<div class="sub">把之前逐块讨论的五个决策点，串成一条完整数据流，看它们之间对不对得上、有没有冲突。</div>
+
+<div class="verdict">
+  <b>整体结论：</b>这是一个<span class="hl">「前端重构」项目，不是「后端重写」项目</span>。
+  后端底座（存储 / 抽取 / 校验 / 发布 / 状态机 / 流式问答）<span class="hl">已经成熟且正确</span>，
+  缺的<span class="hl">全部在前端</span>：把它组织成「三层分离 + 单画布 + 独立写入」的样子。
+  → <b>在现有代码上改，不做 v2。</b>
+</div>
+
+<div class="flow">
+  <div class="row">
+    <div class="node src"><span class="tag ok">数据来源</span>
+      <h4>业务材料</h4><div class="en">Input</div>
+      <div class="st">上传文档（.txt/.md/.pdf/.docx）· 扫描数据库表 · 自然语言描述</div>
+    </div>
+  </div>
+  <div class="varr">▼ <span class="l">知识写入 · 独立入口</span></div>
+  <div class="row">
+    <div class="node one"><span class="tag todo">前端要建</span>
+      <h4>① 知识写入（本体生成）</h4><div class="en">Ingest · 独立入口</div>
+      <div class="st">
+        切片 → 抽取(Semantica 分阶段) → 质检(SHACL) → 出候选<br>
+        <b class="ok">✅ 抽取分阶段已就位</b>（active_stage: chunking→extraction）<br>
+        <b class="ok">✅ SHACL 质检已并入写入</b><br>
+        <b class="todo">⚠️ 前端「进度条 → 分析师对话流」要改</b>（思考+证据）
+      </div>
+    </div>
+  </div>
+  <div class="split">
+    <div class="varr">▼<span class="l">新概念</span></div>
+    <div class="node two"><span class="tag todo">前端要建</span>
+      <h4>② 本体建模层（本体星图 · 类图谱）</h4><div class="en">单画布 · 唯一控制结构版本</div>
+      <div class="st">
+        左：类/关系/属性清单 · 中：画布(Cytoscape 拖拽连线) · 右：节点详情 · 底：校验审核→发布<br>
+        <b class="ok">✅ 后端 publish / publish_preflight / publish_readiness 已有</b><br>
+        <b class="todo">⚠️ 前端单画布 + 收下候选 + 发布内联 要建</b>
+      </div>
+    </div>
+    <div class="varr">▼<span class="l">新实例</span></div>
+    <div class="node three"><span class="tag todo">前端要改</span>
+      <h4>③ 知识台账（实体图谱）</h4><div class="en">实例层 · 另一页</div>
+      <div class="st">
+        按本体版本显示实体/关系/属性值 · 改删留痕可回滚<br>
+        <b class="ok">✅ 后端双时态 + 留痕 + 停用影响面 已有</b><br>
+        <b class="todo">⚠️ 前端「按版本显示」要补</b>
+      </div>
+    </div>
+  </div>
+  <div class="varr">▲ <span class="l">共同底座</span></div>
+  <div class="row">
+    <div class="node base"><span class="tag ok">已正确 · 不动</span>
+      <h4>底座：PostgreSQL + Milvus + Semantica + 问答流</h4><div class="en">Foundation</div>
+      <div class="st">
+        <b class="ok">✅ PG 唯一权威（双时态）</b> · <b class="ok">✅ Milvus 派生索引（dense+BM25，version_id 关联）</b><br>
+        <b class="ok">✅ 写入 + 质检 + 索引同步 = 同一次操作</b>（对应博文「任一步失败数据恢复」）<br>
+        <b class="ok">✅ 问答已是 SSE 流式</b>（answers.stream_events）· <b class="ok">✅ 抽取阶段状态机已就位</b>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="sep"></div>
+
+<div class="matrix">
+<table>
+  <tr><th style="width:14%">决策点</th><th style="width:20%">结论</th><th style="width:30%">现状依据（代码）</th><th style="width:16%">改动量</th><th style="width:20%">依赖/风险</th></tr>
+  <tr><td>架构：三层分离</td><td>知识写入/建模层/台账 三入口，本体层与实例层两个维度</td><td>现状 10 页混在「建模与治理」一组</td><td>中 · 前端菜单重组</td><td>要先做，是后面所有页面的地基</td></tr>
+  <tr><td>前端选型</td><td>原生 JS + Cytoscape.js，不迁 React/Vue</td><td>44 文件原生 JS，vendor 仅 echarts，无构建</td><td>小 · 加一个 vendor 库</td><td>避免「两种范式并存」</td></tr>
+  <tr><td>流式抽取</td><td>阶段流式（非 token 流式）</td><td><code>active_stage</code> + <code>ingest_stage_outputs</code> + <code>ingest-runs</code> 轮询端点已就位</td><td>小 · 前端渲染层</td><td>token 流式做不到（结构化 JSON）</td></tr>
+  <tr><td>存储 PG+Milvus</td><td>不动</td><td><code>write()</code> 内 <code>_sync_milvus()</code> 同次操作</td><td>零</td><td>无</td></tr>
+  <tr><td>思考+证据展示</td><td>现有 evidence/reason 映射成思考文案</td><td>候选已带 <code>evidence</code> + <code>reason</code> + <code>classification_reason</code></td><td>小 · 字段映射</td><td>「思考」不是新产出，是翻译</td></tr>
+</table>
+</div>
+
+<div class="risk">
+  <b>三个诚实边界（一起评估后必须挑明）：</b><br>
+  1. <span class="r">token 级流式做不到</span> —— 抽取是结构化 JSON（generate_typed），要拼完整才校验；你要的「分析师一步步说」是<b>阶段流式</b>，够用但别期待逐字出。<br>
+  2. <span class="a">「改注释不换版本号」要动存储</span> —— 现在版本存整份 turtle，改注释必换版本，这是 P3 单独排期，不能靠画布假装解决。<br>
+  3. <span class="a">「后端状态机 7→2」放最后</span> —— 先复用现有 draft API 把 UI 合了，最后再删门禁死代码，避免「UI 合了、门禁还在打架」。
+</div>
+
+</body>
+</html>
