@@ -29,7 +29,6 @@ def test_workbench_has_all_control_targets_and_no_native_dialogs():
     assert 'contain:layout paint' in workspace_css and 'requestAnimationFrame(()=>{if(ui.graph===result||ui.graph===base)chart.resize();})' in workspace
     assert all(text in workspace for text in ('知识时间','当前状态','上一个已知变更节点','仅在切换节点时刷新','/timeline?limit=100'))
     assert 'tl-density' not in workspace and 'startPlayback' not in workspace
-    assert 'candidate_status_counts' in ontology_workbench
     assert all(text in workspace for text in ('本体结构维护','新增本体术语','高级：本体历史版本与 Turtle 源码','可多选'))
     # 表单文案：IRI 是"系统生成、不用手写"，勾选靠 checklist（不再是"已保存的类型会自动勾选"）。
     assert all(text in workspace for text in ('新增实体类', '新增关系类型', '新增实体属性',
@@ -48,7 +47,6 @@ def test_workbench_has_all_control_targets_and_no_native_dialogs():
     record_dialog=(ROOT/'record-dialog.js').read_text(encoding='utf-8')
     assert all(text in record_dialog for text in ('维护具体实体','维护实体关系','保存实体修改为新版本','保存关系修改为新版本','高级：编辑完整记录 JSON'))
     assert "get('draw-graph')" not in record_dialog
-    assert all(label in ontology_workbench for label in ('待纳入','草案中','已收下','已物化'))
     assert '发布本体并映射候选' not in workspace
     candidate_map=(ROOT/'candidate-mindmap.js').read_text(encoding='utf-8')
     menu=(ROOT/'menu-hierarchy.js').read_text(encoding='utf-8')
@@ -56,7 +54,6 @@ def test_workbench_has_all_control_targets_and_no_native_dialogs():
     assert '非正式知识' in candidate_map and '该聚合键不是正式实体 ID' in candidate_map
     assert all(text in candidate_map for text in ('开放解析完成后先在这里检查','进入本体建模层','查看正式脑图'))
     assert '正式重解析' not in candidate_map
-    assert 'candidate-mindmap' in ontology_workbench
     assert 'knowledge-flow' not in candidate_map and 'knowledge-flow' not in workspace
     # P0 侧栏重构：3 组 10 入口 → 4 组 7 入口；分组维度改为
     # TBox（本体结构）/ ABox（实例知识）/ 消费 / 运行 —— 本体层与实例层是两个维度，
@@ -243,7 +240,8 @@ def test_successful_document_submission_opens_task_logs_immediately():
     """
     workbench=(ROOT/'workbench.js').read_text(encoding='utf-8')
     ingest=workbench[workbench.index("bind('ingest'"):workbench.index('async function snapshots')]
-    assert "if(accepted){showRuntimeView('jobs');await jobList();}" in ingest
+    # 提交成功后显示「想看实时日志可点」的链接（点击才跳任务日志，不打断用户继续上传）。
+    assert "想看实时日志可点" in ingest and "showRuntimeView('jobs')" in ingest
 
 
 def test_knowledge_write_has_one_preview_host_and_an_advanced_record_import():

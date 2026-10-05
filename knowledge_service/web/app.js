@@ -72,8 +72,8 @@ document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{docu
 // Project creation is implemented by the inline workbench form.
 bind('add-filter',async()=>{const field=$('filter-field').value.trim();if(!field)throw Error('填写 metadata 字段路径');let value=$('filter-value').value;try{value=JSON.parse(value);}catch{}const condition={field,op:$('filter-op').value,value};const previous=json('filters');$('filters').value=JSON.stringify(previous?{and:[previous,condition]}:condition,null,2);});
 // Search lives in the linked workspace module (workspace.js); it owns #search, #query and the result rail.
-$('doc-file').onchange=async()=>{const file=$('doc-file').files[0];if(file){$('doc-title').value=file.name;$('doc-text').value=await file.text();}};
-bind('ingest',async()=>{const mode=document.getElementById('extraction-mode').value,result=await api(endpoint('/documents'),{title:$('doc-title').value,text:$('doc-text').value,metadata:readDocumentMetadata(),extract:mode!=='documents',extraction_mode:mode});status(`文档 ${result.document.id} 已处理，写入 ${result.records.length} 条知识。`);});
+// 知识写入的文件上传/提交已移到 ingest-mode.js（文件队列）+ workbench.js（bind('ingest') 提交队列）；
+// 旧对话流的 doc-file.onchange / bind('ingest') 死代码已删除（doc-text 输入框已随对话流移除）。
 bind('write-batch',async()=>{const result=await api(endpoint('/records'),json('batch'));status(`已写入 ${result.records.length} 条知识。`);});
 bind('load-graph',async()=>{const result=await api(endpoint('/graph'),scope());$('records').innerHTML=`<p>${result.nodes.length} 个实体 · ${result.edges.length} 条关系</p>`+result.edges.map(r=>`<div class="card">${esc(recordName(r.subject_id))} → <strong>${typeHint(r.type)}</strong> → ${esc(recordName(r.object_id))}</div>`).join('');});
 bind('revise',async()=>{const result=await api(endpoint('/records/'+encodeURIComponent($('revision-id').value)),{record:json('revision'),expected_version:Number($('revision-version').value)},'PUT');status(`已保存版本 ${result.version}；旧版本仍可按系统时间查询。`);$('revision-version').value=result.version;});
