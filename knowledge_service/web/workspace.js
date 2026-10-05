@@ -565,9 +565,9 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
   }));
   // 本体建模层发布出一个新版本后，这一页必须自己跟上：术语缓存、实体类型/关系类型
   // 下拉、时间轴与图谱都读的是"已发布本体"。以前没有任何通知通道，用户看到的就是
-  // "发布完了，切回检索与交互图谱还是旧的，必须整页刷新"。事件由 ontology-workbench.js
-  // 在发布成功后派发（ontology-workbench:published）。
-  document.addEventListener('ontology-workbench:published',async event=>{
+  // "发布完了，切回检索与交互图谱还是旧的，必须整页刷新"。事件由 ontology-model-panel.js
+  // 在发布成功后派发（ontology-model:published）。
+  document.addEventListener('ontology-model:published',async event=>{
     if(!current)return;
     const versionId=event?.detail?.versionId||'';
     const short=versionId?versionId.slice(0,8)+'…':'';

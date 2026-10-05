@@ -964,8 +964,8 @@
       // 本地状态跟上：这份草案已成为终态，新版本成为项目当前版本。
       if (M.S.draft) { M.S.draft.status = 'accepted'; M.S.draft.published_ontology_id = version && version.id; }
       await ensureVersions(true);
-      // 通知检索/问答/图谱等页面刷新（与审核台同一事件名）。
-      document.dispatchEvent(new CustomEvent('ontology-workbench:published', {
+      // 通知检索/问答/图谱等页面刷新（本体建模层发布成功后统一广播）。
+      document.dispatchEvent(new CustomEvent('ontology-model:published', {
         detail: { versionId: version && version.id, projectId: activeProject(), draftId: id },
       }));
       // 发布结果要报**真实**版本号（"仅标注"时它会等于上一版），不能只说"已发布"
