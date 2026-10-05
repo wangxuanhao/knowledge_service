@@ -10,8 +10,9 @@ from uuid import uuid4
 from ..core.net import external_client
 
 from ..models import RecordWrite
-from .ontology import Ontology
+from .ontology import Ontology, UnknownOntologyTerm, match_query_expansion
 from .retrieval import RetrievalEngine
+from . import structure_pending
 from ..utils.ingest_runs import readiness
 from ..core.time import normalize_time, utc_now
 from ..utils.diagnostics import event, stage, timed
@@ -42,9 +43,89 @@ class KnowledgeService:
         self.milvus_store = milvus_store
         self.lock = threading.RLock()
         self._ontology_label_cache = {}
+        self._ontology_expansion_cache = {}
+        self._ontology_family_cache = {}
+        self._structure_pending_cache = {}
+
+    def structure_pending_ontology(self, project_id):
+        """当前（最新）版本的 ``Ontology`` 对象，「结构待定」判断用；随本体版本签名缓存。
+
+        为什么要缓存：``scoped`` 是共享的成本中心，每个请求都会路过；
+        本体是整段 Turtle，重复解析会把"顺手标一下"变成性能问题。
+        为什么只认当前本体：概念一进本体就要自动解除待定，判据只能盯当前的那一版。
+        """
+        versions = self.repository.list_ontologies(project_id)
+        signature = tuple(version['id'] for version in versions)
+        with self.lock:
+            cached = self._structure_pending_cache.get(project_id)
+            if cached and cached[0] == signature:
+                return cached[1]
+        ontology = Ontology(versions[-1]['turtle']) if versions else Ontology('')
+        with self.lock:
+            self._structure_pending_cache[project_id] = (signature, ontology)
+        return ontology
+
+    def annotate_structure_pending(self, project_id, rows):
+        """给范围内的知识记录补「结构待定」推导态（口径见 services/structure_pending.py）。
+
+        只在这里做一次：网页、问答、图谱、检索读的都是同一份 ``scoped`` 结果，
+        各自再判一遍必然出现"两个地方说法不一样"。
+        """
+        if not any(row.get('kind') in structure_pending.KNOWLEDGE_KINDS for row in rows):
+            return 0
+        return structure_pending.annotate(self.structure_pending_ontology(project_id), rows)
+
+    def structure_pending_report(self, project_id):
+        """收件箱数据：现在还缺哪些概念、各被多少条知识用到（只读，不改任何东西）。"""
+        rows = self.scoped(project_id, {'kinds': list(structure_pending.KNOWLEDGE_KINDS)})
+        ontology = self.structure_pending_ontology(project_id)
+        versions = self.repository.list_ontologies(project_id)
+        return {**structure_pending.summary(ontology, rows, project_id=project_id),
+                'ontology_id': versions[-1]['id'] if versions else None}
 
     def _latest(self, project_id):
         return self.repository.current_records(project_id)
+
+    def _timeline_check(self, project_id, version, prospective, relation_constraint_mode='strict'):
+        """对某个本体版本重算一次"时间一致性 + 结构待定"检查。
+
+        返回 ``(ontology, relevant, own_unknown, pending_ids, report)``：
+
+        * ``relevant`` —— 这次要看这个版本的记录（该版本的全部记录，加上被本次改动
+          牵到的端点记录：端点类型变了会让关系失效，不能静默放过）；
+        * ``own_unknown`` —— 逐条："它自己的类型在本体里查不到"时缺的是哪些术语；
+        * ``pending_ids`` —— 结构待定（含端点传染），**不参与约束校验**（C1 口径）；
+        * ``report`` —— ``validate_timeline`` 在**剔掉待定记录之后**的结论。
+
+        抽出来是因为 **C2 受控重分类的预演要给出和真正写入一模一样的结论**：
+        两处各写一套校验，迟早出现"预演说没问题、真跑却被拒"（或反过来），
+        那时用户没有任何办法判断谁对。所以两个调用点共用这一个函数。
+        """
+        ontology = Ontology(self.repository.get_ontology(project_id, version)['turtle'])
+        relevant = [r for r in prospective.values() if r.get('ontology_id') == version]
+        endpoint_ids = {r.get(k) for r in relevant if r['kind'] == 'relation'
+                        for k in ('subject_id', 'object_id')}
+        endpoint_ids |= {r.get('subject_id') for r in relevant if r['kind'] == 'attribute'}
+        relevant_ids = {r['id'] for r in relevant}
+        relevant += [r for r in prospective.values() if r['id'] in endpoint_ids - relevant_ids]
+        # C1「结构待定」：类型在本体里查不到的记录，**收下并打标**，不整批拒绝。
+        # 只放行"缺术语"这一种失败；约束/端点/datatype 仍然照旧抛错 —— 标错了会盖住真问题。
+        own_unknown = {row['id']: structure_pending.unknown_terms(ontology, row)
+                       for row in relevant}
+        pending_ids = {row_id for row_id, terms in own_unknown.items() if terms}
+        # 端点传染：端点实体待定的关系/属性同样待定（它的 domain/range 根本没法校验）。
+        # 关系的端点只可能是实体（上面已校验），所以一趟就够。
+        for row in relevant:
+            if row['id'] in pending_ids or row['kind'] not in ('relation', 'attribute'):
+                continue
+            keys = (('subject_id', 'object_id') if row['kind'] == 'relation'
+                    else ('subject_id',))
+            if any(row.get(key) in pending_ids for key in keys):
+                pending_ids.add(row['id'])
+        checkable = [row for row in relevant if row['id'] not in pending_ids]
+        report = ontology.validate_timeline(
+            checkable, enforce_relationship_constraints=relation_constraint_mode == 'strict')
+        return ontology, relevant, own_unknown, pending_ids, report
 
     def write(self, project_id, records, expected_version=None, revision=False, completion=None, expected_versions=None,
               relation_constraint_mode='strict', shacl_mode='strict', shacl_review_out=None,
@@ -138,14 +219,32 @@ class KnowledgeService:
             shacl_reviews=[]
             for version in versions:
                 event(f'本体时间一致性校验 · 版本 {version}')
-                ontology = Ontology(self.repository.get_ontology(project_id, version)['turtle'])
-                relevant = [r for r in prospective.values() if r.get('ontology_id') == version]
-                endpoint_ids = {r.get(k) for r in relevant if r['kind'] == 'relation'
-                                for k in ('subject_id', 'object_id')}
-                endpoint_ids |= {r.get('subject_id') for r in relevant if r['kind'] == 'attribute'}
-                relevant_ids = {r['id'] for r in relevant}
-                relevant += [r for r in prospective.values() if r['id'] in endpoint_ids - relevant_ids]
-                report = ontology.validate_timeline(relevant,enforce_relationship_constraints=relation_constraint_mode=='strict')
+                ontology, relevant, own_unknown, pending_ids, report = self._timeline_check(
+                    project_id, version, prospective, relation_constraint_mode)
+                # 标记只打得进**本批次**的记录（别人的记录不在这次写入里，动不了）。
+                # 打不上标不等于看不见：读取侧的状态是推导的，收件箱/台账一样会显示它们是结构待定。
+                marked = 0
+                for row in relevant:
+                    if row['id'] not in pending_ids or row['id'] not in ids:
+                        continue
+                    terms = own_unknown[row['id']]
+                    if not terms:
+                        # 传染时记的必须是**真正待定的那一端**：先 subject 会把"端点正常"的
+                        # 关系错记成 subject 的类型（真机复验抓到过：关系被归到「文件」名下）。
+                        endpoint_keys = (('subject_id', 'object_id') if row['kind'] == 'relation'
+                                         else ('subject_id',))
+                        # 注意：`row.get(key)` 才是记录 id —— 直接 `prospective.get(key)`
+                        # 拿的是字符串 "object_id"，永远取不到记录（真机复验抓到过）。
+                        endpoint = next((prospective.get(row.get(key)) for key in endpoint_keys
+                                         if row.get(key) in pending_ids), None) or {}
+                        terms = [endpoint.get('type') or '(未命名类型)']
+                    structure_pending.mark(
+                        row, terms,
+                        reason=(structure_pending.REASON_UNKNOWN_TERM if own_unknown[row['id']]
+                                else structure_pending.REASON_ENDPOINT_TERM))
+                    marked += 1
+                if pending_ids:
+                    event(f'结构待定 · {marked} 条本次收下并打标，共 {len(pending_ids)} 条不参与约束校验')
                 if not report['conforms']:
                     if shacl_mode == 'review' and report.get('violations'):
                         for violation in report['violations']:
@@ -183,6 +282,9 @@ class KnowledgeService:
                  'suppress_auto_assertions': suppress_auto_assertions}, recorded_at=recorded_at,
                 operation_context=operation_context)
             accepted = result['accepted_records']
+            # C1：写回执直接带上「结构待定」推导态，调用方（页面/脚本）当场就知道
+            # "这一条是收下了、但不是正式知识"，不必再查一次或自己猜。
+            self.annotate_structure_pending(project_id, accepted)
             if not defer_milvus_sync:
                 self._sync_milvus(project_id, accepted)
             # 文案必须如实反映**是否真的**同步了向量索引：未配置向量后端时
@@ -255,6 +357,8 @@ class KnowledgeService:
             kinds = scope.get('kinds')
             result = [r for r in rows if kinds is None or r['kind'] in kinds]
             record['kept'] = len(result)
+        with timed('结构待定标记') as stage_record:
+            stage_record['pending'] = self.annotate_structure_pending(project_id, result)
         return result
 
     def ontology_labels(self, project_id):
@@ -276,10 +380,87 @@ class KnowledgeService:
             self._ontology_label_cache[project_id] = (signature, dict(labels))
         return labels
 
+    def ontology_family(self, project_id):
+        """类型 IRI → {'label','parents':[{id,label}],'ancestors':[{id,label}]}（当前本体版本的类层级）。
+
+        为什么单独做一个方法：检索页的实体详情与图谱节点都要显示"这个实体属于哪个类、它的父类是谁"，
+        两份数据必须同源。这里的"父类"是**当前（最新）版本**本体的 rdfs:subClassOf 直接父类，
+        祖先链是它的闭包（用户要的是"父类 A → 祖父类 B"这种能读懂的链，不是 IRI 集合）。
+        历史版本的陈旧层级不掺进来：界面上回答的是"现在这个本体怎么理解它"。
+        索引只随本体版本变化，按版本签名缓存（与 ontology_labels 同一套签名）。
+        """
+        versions = self.repository.list_ontologies(project_id)
+        signature = tuple(version['id'] for version in versions)
+        with self.lock:
+            cached = self._ontology_family_cache.get(project_id)
+            if cached and cached[0] == signature:
+                return dict(cached[1])
+        index = (Ontology(versions[-1]['turtle']).expansion_index()
+                 if versions else {'labels': {}, 'parents': {}, 'ancestors': {}})
+        labels, direct = index['labels'], index.get('parents', {})
+        family = {}
+        for class_id in set(labels) | set(direct):
+            if '/' not in class_id and ':' not in class_id:
+                continue          # ontology_labels 里还放了 name 键，这里只要 IRI
+            parents = [{'id': parent, 'label': labels.get(parent, parent)}
+                       for parent in direct.get(class_id, [])]
+            family[class_id] = {'label': labels.get(class_id, class_id),
+                                'parents': parents, 'ancestors': self._class_chain(class_id, direct, labels)}
+        with self.lock:
+            self._ontology_family_cache[project_id] = (signature, dict(family))
+        return family
+
+    @staticmethod
+    def _class_chain(class_id, direct, labels, limit=12):
+        """从直接父类往上走到根的**有序**继承链：[{id,label}, …]（父类 → 祖父类 → …）。
+
+        为什么要专门排序：`expansion_index` 给的是祖先**集合**，集合迭代顺序不稳定，
+        界面上"父类：A → B"会闪；而用户要看的正是这条能读懂的链。
+        环（本体里理论上不该有，但编辑器可能造出来）用 seen 集合兜住，最多走 limit 层。
+        """
+        chain, seen, pending = [], {class_id}, list(direct.get(class_id, []))
+        while pending and len(chain) < limit:
+            current = pending.pop(0)
+            if current in seen:
+                continue
+            seen.add(current)
+            chain.append({'id': current, 'label': labels.get(current, current)})
+            pending.extend(parent for parent in direct.get(current, []) if parent not in seen)
+        return chain
+
+    def ontology_expansion(self, project_id, query, enabled=False):
+        """按需计算"本体感知的查询扩展"（P0-1，默认关）。
+
+        * 关的时候直接返回 ``None``：不读本体、不碰缓存，调用方拼出的 scope 与改动前
+          完全一样（"关时逐字节等价"是硬约束，不是尽力而为）；
+        * 开启时只读**当前（最新）版本**的本体：扩展要表达的是"现在这个本体怎么理解
+          查询词"，把历史版本的陈旧层级掺进来会造出已经不成立的父子关系；
+        * 索引按本体版本签名缓存，与 ``ontology_labels`` 用同一套签名 —— 查询是逐次
+          来的，而解析 Turtle 建索引的成本只与本体版本有关（发布新版本自然失效）。
+        """
+        if not enabled:
+            return None
+        versions = self.repository.list_ontologies(project_id)
+        signature = tuple(version['id'] for version in versions)
+        with self.lock:
+            cached = self._ontology_expansion_cache.get(project_id)
+            index = cached[1] if cached and cached[0] == signature else None
+        if index is None:
+            index = (Ontology(versions[-1]['turtle']).expansion_index()
+                     if versions else {'surfaces': [], 'labels': {}, 'ancestors': {}})
+            with self.lock:
+                self._ontology_expansion_cache[project_id] = (signature, index)
+        return match_query_expansion(index, query)
+
     def search(self, project_id, request):
         scope = dict(request)
         if scope.get('kinds') is None:
             scope['kinds'] = ['entity', 'relation', 'chunk']
+        expansion = self.ontology_expansion(
+            project_id, request.get('query', ''),
+            request.get('ontology_expansion', False))
+        if expansion:
+            scope['_ontology_expansion'] = expansion
         rows = self.scoped(project_id, scope)
         LOG.debug('检索开始：query=%r mode=%s 候选=%d', request.get('query'),
                   request.get('retrieval_mode', 'hybrid'), len(rows))
@@ -599,10 +780,16 @@ class KnowledgeService:
             raise RuntimeError(f'文档 {doc_id} 已保留；摄取失败：{exc}') from exc
 
     def answer(self, project_id, request):
-        from .answers import question_context
+        # 注意：这个"一次性 JSON"入口与 answers.stream_events 是同一件事的两个入口，
+        # Q1「结构待定」的口径必须**共用** answers 里的构建函数 —— 各写一套就会自相矛盾。
+        from .answers import question_context, pending_block, no_evidence_text
         retrieval = question_context(self,project_id,request)
+        pending = pending_block([{'citation': f'P{i+1}', **row}
+                                 for i, row in enumerate(retrieval.pop('structure_pending_rows', []))])
         evidence = [{'citation': f'E{i+1}', **row} for i, row in enumerate(retrieval.pop('evidence_rows'))]
         answer = '\n\n'.join(f"[{r['citation']}] {r['text']}" for r in evidence)
+        if not evidence and pending['count']:
+            answer = no_evidence_text(pending)
         mode = 'evidence_only'
         if request.get('generate') and evidence:
             url = os.environ.get('KG_LLM_BASE_URL', '').rstrip('/')
@@ -623,4 +810,5 @@ class KnowledgeService:
                 except (ValueError, KeyError, IndexError, TypeError) as exc:
                     raise RuntimeError('LLM 提供商返回了无效的回答响应') from exc
                 mode = 'llm'
-        return {**retrieval, 'answer': answer or '在所选时间和 metadata 范围内没有找到证据。', 'evidence': evidence, 'mode': mode}
+        return {**retrieval, 'answer': answer or '在所选时间和 metadata 范围内没有找到证据。',
+                'evidence': evidence, 'structure_pending': pending, 'mode': mode}

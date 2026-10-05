@@ -77,6 +77,14 @@ class Search(Scope):
     k_entities: int = Field(default=5, ge=0, le=50)
     k_chunks: int = Field(default=5, ge=0, le=50)
     k_relations: int = Field(default=5, ge=0, le=50)
+    # 本体扩展（P0-1）：开启后顺着本体的父子关系补召回 —— 查询里出现类名（含业务标签）时，
+    # 命中该类的**全部子类**；这些子类实例即使正文里没有查询词也会被召回，关键词也会按类名/别名
+    # 多词 OR 扩召回（同一条记录取最高分，不累加）。
+    # 只补召回、不放宽可见范围：权限与时态仍由 scope 唯一裁决。
+    # 默认关：关闭时检索路径与响应字段和改动前逐字节一致。
+    ontology_expansion: bool = Field(default=False, description=(
+        '本体扩展：按本体父子关系补召回（查父类名也会命中子类实例）。'
+        '只补召回，不放宽可见范围；关闭时行为与不传该字段一致。'))
 
 
 class Question(Search):

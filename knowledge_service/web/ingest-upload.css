@@ -1,0 +1,54 @@
+/* ============================================================================
+ * 知识写入 · 纯文件上传页样式（ingest-upload.css）
+ * ----------------------------------------------------------------------------
+ * 2026-10-05：对话流移除后，本页是浅色主题下的文件上传工作台。
+ * 硬约束：所有选择器以 .ingest-upload / #tab-ingest / .ingest-mode-slot 开头，
+ *         不污染其它页面（前端静态契约要求）。
+ * 颜色一律引用 theme.css 的变量（浅青白底 + 墨青字），与全站同一套，不再深浅混搭。
+ * ========================================================================== */
+
+/* 页面外壳：留白与节奏 */
+.ingest-upload-shell{display:flex;flex-direction:column;gap:14px}
+#tab-ingest .ingest-upload-purpose{
+  margin:2px 0 0;font-size:12.5px;line-height:1.65;color:var(--ui-ink-2);
+  padding:9px 12px;border-left:3px solid var(--ui-accent);
+  background:var(--ui-surface-2);border-radius:var(--ui-radius-sm);
+}
+
+/* ── 解析模式总开关：置顶、显眼 ─────────────────────────────────────────── */
+.ingest-mode-slot{margin:12px 0 0}
+.ingest-mode-slot .extraction-mode-control{
+  display:block;margin:0;padding:12px 14px;
+  border:1px solid var(--ui-line);border-radius:var(--ui-radius-sm);
+  background:var(--ui-surface);
+}
+.ingest-mode-slot .extraction-mode-control>span{
+  display:block;margin-bottom:8px;font-size:12.5px;font-weight:650;color:var(--ui-ink);
+}
+.ingest-mode-slot .extraction-mode-control b{
+  margin-left:6px;padding:2px 7px;border-radius:var(--ui-radius-pill);
+  background:var(--ui-surface-2);color:var(--ui-accent);font-size:11px;font-weight:600;
+}
+.ingest-mode-slot #extraction-mode{
+  width:100%;max-width:420px;padding:7px 10px;
+  border:1px solid var(--ui-line-2);border-radius:var(--ui-radius-sm);
+  background:var(--ui-surface);color:var(--ui-ink);font-size:13px;
+}
+.ingest-mode-slot #extraction-mode:focus-visible{outline:2px solid var(--ui-accent);outline-offset:1px}
+.ingest-mode-slot .extraction-mode-help{
+  margin:8px 0 0;padding-left:11px;border-left:2px solid var(--ui-line);
+  font-size:12px;line-height:1.6;color:var(--ui-ink-2);
+}
+
+/* ── 提交后留在本页的结果提示 ───────────────────────────────────────────── */
+.ingest-after-submit{
+  margin:8px 0 0;padding:9px 12px;font-size:12.5px;line-height:1.7;color:var(--ui-ink-2);
+  border:1px solid var(--ui-line);border-left:3px solid var(--ui-accent-2);
+  border-radius:var(--ui-radius-sm);background:var(--ui-surface);
+}
+.ingest-after-submit button{margin-left:8px;vertical-align:baseline}
+
+/* 窄屏：模式下拉占满，说明不挤 */
+@media(max-width:900px){
+  .ingest-mode-slot #extraction-mode{max-width:100%}
+}
