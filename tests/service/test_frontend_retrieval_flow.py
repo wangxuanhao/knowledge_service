@@ -223,6 +223,26 @@ def _stable_graph_summary(page):
     return summary.split(' · 服务', 1)[0]
 
 
+def _settle_graph(page, timeout_ms=6000):
+    """等图谱首屏渲染真的落地，再对 #graph-summary 做快照。
+
+    摘要由"最后一次图谱渲染"写入，而渲染是异步的（还要跑力导向布局）。
+    以前这些用例是"点完立刻读"，靠够快侥幸赢；布局一慢就会读到渲染前的值，
+    表现为 `服务 64.7 ms` vs `服务 15.4 ms` 这种只有耗时不同的假失败。
+    这里要求连续两次读到同一个值，才认为落定。
+    """
+    previous = None
+    waited = 0
+    while waited < timeout_ms:
+        current = page.locator('#graph-summary').inner_text()
+        if current and current == previous and ' · 服务' in current:
+            return current
+        previous = current
+        page.wait_for_timeout(100)
+        waited += 100
+    return previous or ''
+
+
 # ── Task 1: the combined workspace keeps search, graph and details decoupled ──
 
 def test_search_updates_only_the_result_rail_and_ignores_graph_keys(workbench):
@@ -231,9 +251,12 @@ def test_search_updates_only_the_result_rail_and_ignores_graph_keys(workbench):
 
     # The project boot may intentionally populate the graph. Search owns only the
     # result rail, so compare against the settled graph state rather than racing it.
+    summary_before = _settle_graph(page)   # 先等首屏渲染落定，再快照（否则会和异步渲染赛跑）
     graph_before = page.locator('#graph-canvas').evaluate('(el) => el.outerHTML')
     detail_before = page.locator('#graph-detail').evaluate('(el) => el.outerHTML')
-    summary_before = page.locator('#graph-summary').inner_text()
+    # 只统计"检索动作"发出的请求：进入检索页本身会按最新本体补画一次图谱
+    # （"切回页签自动跟上新版本"），那是页面进入行为，不属于这条断言的射程。
+    workbench.paths.clear()
     _search(page)
 
     # Every channel owns a heading, a quota count and its own empty state.
@@ -325,13 +348,30 @@ def test_entity_selection_requires_explicit_expand_and_full_graph_ignores_select
 
     detail_before = page.locator('#graph-detail').inner_html()
     workbench.paths.clear()
-    page.select_option('#graph-entity-choice', '')
+    # 选回空白项＝清空选择、详情归零、并重绘当前范围全图。
+    # 这条契约以前断言的是"值被弹回上一个实体、不发任何请求"——那正是用户反馈的
+    # "选择实体下拉框，点其他之后切不回空白了"，所以按用户要求反过来了。
+    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+        page.select_option('#graph-entity-choice', '')
     page.wait_for_timeout(120)
-    assert page.locator('#graph-entity-choice').input_value() == 'a'
-    assert page.locator('#graph-node').input_value() == 'a'
-    assert page.locator('#graph-detail').inner_html() == detail_before
-    assert workbench.paths == []
+    assert page.locator('#graph-entity-choice').input_value() == ''
+    assert page.locator('#graph-node').input_value() == ''
+    assert page.locator('#graph-detail').inner_html() != detail_before
+    assert any(path.endswith('/subgraph') for path in workbench.paths)
+    page.wait_for_function("""() => {
+      const chart = window.echarts.getInstanceByDom(document.getElementById('graph-canvas'));
+      const series = chart.getOption().series.find(item => item.type === 'graph');
+      return series?.data.some(item => item.id === 'x');
+    }""")
+    assert 'x' in _graph_node_ids(page)
+    # 用去掉耗时的那一版比：这里真的重绘了全图，服务端耗时当然会变
+    # （原断言能相等，恰恰是因为以前根本没重绘）。
+    assert _stable_graph_summary(page) == full_stable_summary
 
+    # 回到"选中实体 → 展开邻域"这步：重新选中 a 再展开。
+    page.select_option('#graph-entity-choice', 'a')
+    page.wait_for_function(
+        "document.querySelector('#graph-detail').textContent.includes('退款商户')")
     workbench.paths.clear()
     with page.expect_response(lambda response: response.url.endswith('/subgraph')):
         page.click('#graph-expand')
@@ -650,6 +690,38 @@ def test_search_button_and_enter_each_issue_exactly_one_search(workbench):
     assert bodies[1]['include_unknown'] is True
 
 
+def test_ontology_expansion_toggle_stays_off_by_default_and_explains_itself(workbench):
+    """本体扩展开关（P0-1 的入口）：默认关、自带中文说明、开启后请求与会话栏都要说清楚。
+
+    这个开关最容易"功能在、但没人知道它做什么"，所以锁三件事：
+    ① 默认必须是关（关时检索路径与旧行为逐字节一致）；
+    ② 悬停说明要说清"查父类也会命中子类、只补召回不放宽范围"；
+    ③ 开启后的结果栏要写出命中的类与带出的子类数。
+    """
+    page = workbench.page
+    page.click('[data-tab="search"]')
+    bodies = []
+    page.on('request', lambda request: bodies.append(request.post_data_json)
+            if request.url.endswith('/search') else None)
+
+    _search(page)
+    assert bodies[-1]['ontology_expansion'] is False, '默认必须是关闭'
+
+    toggle = page.locator('#ontology-expansion')
+    assert toggle.is_visible()
+    # 说明挂在 label 上（鼠标悬停在文字上就能看到），不是挂在 input 上
+    hint = page.locator('label.search-ontology-expansion').get_attribute('title') or ''
+    assert '子类' in hint and '只补召回' in hint, '开关必须自带中文说明'
+
+    # 勾上后检索一个本体里存在的父类：结果栏要解释"是靠本体层级补到的"
+    page.check('#ontology-expansion')
+    _search(page, query='Actor')
+    assert bodies[-1]['ontology_expansion'] is True
+    summary = page.locator('#search-summary').inner_text()
+    assert '本体扩展' in summary and 'Actor' in summary
+    assert '子类' in summary
+
+
 def test_entity_and_relation_hits_select_consistent_detail_without_redraw(workbench):
     page = workbench.page
     page.click('[data-tab="search"]')
@@ -836,7 +908,9 @@ def test_draw_and_expand_buttons_share_the_single_graph_renderer(workbench):
     assert page.locator('#graph-type-buttons').count() == 1
     assert page.locator('#graph-timeline').count() == 1
     assert '服务' in page.locator('#graph-summary').inner_text()
-    assert page.locator('#status').inner_text() == '已展开 1 跳邻域'
+    # 提示现在是实体卡片（图标 + 正文 + 关闭按钮）：断言正文那一段，
+    # 不能拿整个容器跟一句话做全等比较。
+    assert page.locator('#status .ks-notice__text').inner_text() == '已展开 1 跳邻域'
 
     # 没选实体时给出明确提示，而不是静默画一张空图
     page.evaluate("() => {document.getElementById('graph-node').value = '';}")
@@ -1056,12 +1130,19 @@ def test_knowledge_chat_evidence_disclosure_and_cross_menu_navigation(workbench)
     assert graph_buttons.count() >= 1
     graph_nodes = _graph_node_ids(page)
     graph_summary = page.locator('#graph-summary').inner_text()
+    subgraph_bodies = []
+    page.on('request', lambda request: subgraph_bodies.append(request.post_data_json)
+            if request.url.endswith('/subgraph') else None)
     workbench.paths.clear()
     graph_buttons.first.click()
     page.wait_for_function(
         "document.querySelector('#graph-detail').textContent.includes('退款商户')")
-    assert not any(path.endswith('/subgraph') or path.endswith('/search') or path.endswith('/explore')
-                   for path in workbench.paths)
+    offenders = [path for path in workbench.paths
+                 if path.endswith(('/subgraph', '/search', '/explore'))]
+    # 断言里带上"到底是哪个请求、带了什么载荷"：只报 True/False 时排查得靠猜。
+    key_fields = {k: v for k, v in (subgraph_bodies[-1] if subgraph_bodies else {}).items()
+                  if k in ('node_id', 'hops', 'attribute_mode', 'include_unknown', 'record_id')}
+    assert not offenders, (offenders, key_fields)
     assert page.locator('#graph-entity-choice').input_value() == 'a'
     assert page.locator('#graph-node').input_value() == 'a'
     assert '退款商户' in page.locator('#graph-detail').inner_text()
@@ -1153,7 +1234,13 @@ def test_mobile_composer_stays_reachable_with_expanded_evidence(workbench):
     assert workbench.errors == []
 
 
-def test_chunk_evidence_navigates_to_the_exact_source(workbench):
+def test_chunk_evidence_declares_its_home_when_source_is_merged(workbench):
+    """P0：原文数据源并入「知识写入」，问答证据的来源按钮不再跳来源页，而是明确提示去向。
+
+    旧的 test_chunk_evidence_navigates_to_the_exact_source 断言"点来源 → 跳到 sources 页"，
+    那测的是被合并掉的**独立原文数据源页**。合并后 sources 无侧栏入口，落点改到「知识写入」
+    （P1 接入），P0 期间点来源必须给出明确提示，不能静默失效。
+    """
     page = workbench.page
     page.click('[data-tab="qa"]')
     page.fill('#qa-query', '退款')
@@ -1165,12 +1252,10 @@ def test_chunk_evidence_navigates_to_the_exact_source(workbench):
 
     source_button = page.locator('#qa-transcript [data-evidence-source]').first
     assert source_button.count() == 1
-    with page.expect_response(lambda response: response.url.endswith('/sources')):
-        source_button.click()
-    page.wait_for_function("() => document.getElementById('source-title').textContent.length > 0")
-    assert page.locator('[data-tab="sources"]').get_attribute('class') == 'active'
-    assert page.locator('#source-title').inner_text() == '退款规则'
-    assert page.locator('#source-list [aria-current="true"]').count() == 1
+    source_button.click()
+    # P0：不再跳 sources（侧栏无此入口），改为明确提示去向，且全程不报错。
+    page.wait_for_function(
+        "() => document.getElementById('status').textContent.includes('原文正文查看将并入')")
     assert workbench.errors == []
 
 
@@ -1338,3 +1423,115 @@ def test_knowledge_chat_provenance_clear_aborts_and_ignores_stale_response(workb
     assert page.locator('#provenance-drawer').is_hidden()
     assert page.locator('.qa-turn').count() == 0
     assert page.evaluate('(key) => JSON.parse(localStorage.getItem(key))', 'kg_qa_v1_' + workbench.project) is None
+
+# --------------------------------------------------------------------------- 父类可见性
+def _family(label, parent=None, ancestor=None):
+    """按后端 ontology_family 的载荷形状造一份"类家族"（父类可为空＝顶层类）。"""
+    parents = [{'id': 'urn:knowledge:ontology:' + parent, 'label': parent}] if parent else []
+    ancestors = [{'id': 'urn:knowledge:ontology:' + (ancestor or parent),
+                  'label': ancestor or parent}] if (parent or ancestor) else []
+    return {'class_label': label, 'class_parents': parents, 'class_ancestors': ancestors}
+
+
+def _inject_family(page, record_id, family):
+    """把 /records/<id> 与 /subgraph 里这个实体的类家族换成测试数据。"""
+    record_pattern = re.compile(rf'/records/{re.escape(record_id)}(?:\?.*)?$')
+
+    def inject_record(route):
+        response = route.fetch()
+        route.fulfill(response=response, json={**response.json(), **family})
+
+    def inject_subgraph(route):
+        response = route.fetch()
+        payload = response.json()
+        for node in payload.get('nodes', []):
+            if node.get('id') == record_id and node.get('kind') == 'entity':
+                node.update(family)
+        route.fulfill(response=response, json=payload)
+
+    page.route(record_pattern, inject_record)
+    page.route(re.compile(r'/subgraph(?:\?.*)?$'), inject_subgraph)
+    return record_pattern
+
+
+def _tooltip_text(page, node_id):
+    """把某个图谱节点的悬浮提示逼出来并读回文本（hover 到像素不稳，用 ECharts 自己的 showTip）。"""
+    return page.evaluate("""async (id) => {
+      const chart = window.echarts.getInstanceByDom(document.getElementById('graph-canvas'));
+      const series = chart.getOption().series.find(item => item.type === 'graph');
+      const index = series.data.findIndex(item => item.id === id);
+      if (index < 0) return null;
+      chart.dispatchAction({type: 'showTip', seriesIndex: 0, dataIndex: index});
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const texts = [...document.querySelectorAll('#graph-canvas div')]
+        .map(node => node.innerText).filter(Boolean);
+      return texts[texts.length - 1] || '';
+    }""", node_id)
+
+
+def _open_entity_with_family(page, record_id, family):
+    """注入类家族并**强制重新取数**（进页面时那份详情/图谱是缓存，不重取就看不到注入）。
+
+    细节：先注册路由，再重画图谱（让 /subgraph 带上注入数据），最后选实体（让 /records/<id>
+    重新走一遍）。断言等的是注入的类名，注入没生效就会超时失败 —— 不会静默读旧数据通过。
+    """
+    _inject_family(page, record_id, family)
+    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+        page.click('#draw-graph')
+    page.wait_for_function("""(id) => {
+      const chart = window.echarts.getInstanceByDom(document.getElementById('graph-canvas'));
+      const series = chart.getOption().series.find(item => item.type === 'graph');
+      return Boolean(series && series.data.some(item => item.id === id));
+    }""", arg=record_id)
+    page.select_option('#graph-entity-choice', record_id)
+    page.wait_for_function(
+        "(label) => document.querySelector('#graph-detail').textContent.includes(label)",
+        arg=family['class_label'])
+
+
+def test_entity_detail_and_graph_tooltip_name_the_parent_class(workbench):
+    """检索详情与图谱悬浮提示都要写出"父类"。
+
+    用户的反馈：检索里看不到父类信息、知识图谱也没有。层级长在类之间，实体节点上没有，
+    所以这条契约同时盯住两条前端通路：右侧实体详情卡（evidence-family）与图谱 tooltip。
+    """
+    page = workbench.page
+    _open_entity_with_family(page, 'a', _family('价格类型', parent='电商平台'))
+    detail = page.locator('#graph-detail').inner_text()
+    assert '当前类' in detail and '价格类型' in detail
+    assert '父类' in detail and '电商平台' in detail
+    # 完整继承链只在比直接父类更深时才出现，别把简单情况也塞一行。
+    assert '完整继承链' not in detail
+
+    tooltip = _tooltip_text(page, 'a')
+    assert tooltip and '类型：价格类型' in tooltip
+    assert '父类：电商平台' in tooltip
+
+
+def test_root_class_says_it_has_no_parent_on_purpose(workbench):
+    """顶层类不能显示成空白或"读不到"，要明确说"本体里没有父类"。
+
+    否则用户看到空字段只会以为是坏了 —— 与阶段门禁同样的原则：不锁定/没有父类，
+    都要把原因写在界面上。
+    """
+    page = workbench.page
+    _open_entity_with_family(page, 'b', _family('顶层类'))
+    detail = page.locator('#graph-detail').inner_text()
+    assert '父类' in detail and '本体里没有父类' in detail
+
+    tooltip = _tooltip_text(page, 'b')
+    assert tooltip and '父类：顶层类（本体里没有父类）' in tooltip
+
+
+def test_grandparent_chain_is_shown_in_order(workbench):
+    """多级继承要按"父类 → 祖父类"的顺序读得通，而不是一串无序的类名。"""
+    page = workbench.page
+    family = _family('价格类型', parent='电商平台', ancestor='顶层类')
+    family['class_ancestors'] = [
+        {'id': 'urn:knowledge:ontology:电商平台', 'label': '电商平台'},
+        {'id': 'urn:knowledge:ontology:顶层类', 'label': '顶层类'},
+    ]
+    _open_entity_with_family(page, 's', family)
+    detail = page.locator('#graph-detail').inner_text()
+    assert '完整继承链' in detail
+    assert '价格类型 → 电商平台 → 顶层类' in detail

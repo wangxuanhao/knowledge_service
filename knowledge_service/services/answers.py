@@ -5,8 +5,37 @@ import logging
 import os
 
 from ..core.net import external_client
+from . import structure_pending
 from .provenance import ProvenanceService
 from .retrieval import RetrievalEngine
+
+
+def pending_block(rows):
+    """结构待定的知识 → 问答页面用的那一份单列数据（**不是证据**）。
+
+    问答有两个入口：`service.answer`（一次性 JSON）与 `stream_events`（SSE 流）。
+    两边各写一套必然出现"流式说没有、一次性说有"这种自相矛盾，所以口径只在这里定义一次。
+    """
+    return {
+        'count': len(rows),
+        'terms': sorted({term for row in rows for term in
+                         (row.get('structure_pending') or {}).get('terms') or []}),
+        'items': [{'citation': row['citation'], 'id': row['id'], 'kind': row['kind'],
+                   'text': row['text'], 'text_preview': row.get('text_preview'),
+                   'terms': (row.get('structure_pending') or {}).get('terms') or []}
+                  for row in rows],
+        'note': '这些知识的类型在本体里还没有（结构待定）：能查、能看原文，但不作为正式证据。',
+    }
+
+
+def no_evidence_text(block):
+    """范围内一条正式证据都没有、但有结构待定知识时，答案必须**显式说出来**。
+
+    这是"真没有"和"有但不算数"的区别 —— 用"没有证据"盖过去，用户会以为系统把知识弄丢了。
+    """
+    return (f"当前查询范围内有 {block['count']} 条知识，但它们的类型在本体里还没有"
+            f"（结构待定），不能作为正式证据。涉及的概念：{'、'.join(block['terms']) or '（未命名）'}。"
+            '去「本体建模层」把概念建出来并发布后，这些知识会自动回到证据链里。')
 
 
 def question_context(service,p,request):
@@ -17,6 +46,11 @@ def question_context(service,p,request):
     scope={k:request.get(k) for k in ('filters','valid_at','known_at','kinds')}
     scope['include_unknown']=request.get('include_unknown',True)
     scope['_include_embeddings']=request.get('retrieval_mode','hybrid')!='keyword'
+    # 本体查询扩展（P0-1，默认关）：开启时把扩展交给检索层，命中的子类实例会
+    # 作为检索命中进入下面的种子集与证据集；扩展本身**不改排序**，只补召回。
+    expansion=service.ontology_expansion(p,request['query'],request.get('ontology_expansion',False))
+    if expansion:
+        scope['_ontology_expansion']=expansion
     rows=service.scoped(p,scope)
     entities=[r for r in rows if r['kind']=='entity']
     chunks=[r for r in rows if r['kind']=='chunk']
@@ -40,7 +74,14 @@ def question_context(service,p,request):
         frontier=next_nodes-seeds;seeds|=next_nodes
     unique={r['id']:r for r in direct}
     unique.update(found)
-    return {'hits':direct,'evidence_rows':list(unique.values()),'candidate_count':len(entities)+len(chunks),
+    # C1「结构待定」：命中集里分清「正式证据」与「概念还没进本体的知识」。
+    # 后者仍然可检索、可看原文、可被引用（所以照旧留在 hits 里并显示），
+    # 但不进证据链 —— 一个本体里还没定义的概念，撑不起一条"正式结论"。
+    # 判断只看服务端给的推导态（service.annotate_structure_pending），前端不再各判一套。
+    service.annotate_structure_pending(p,list(unique.values()))
+    formal_evidence,pending_evidence=structure_pending.split(list(unique.values()))
+    return {'hits':direct,'evidence_rows':formal_evidence,
+            'structure_pending_rows':pending_evidence,'candidate_count':len(entities)+len(chunks),
             'filter_stage':'before_ranking','embedding_model':service.encoder.identity,'semantic':service.encoder.semantic,
             'requested_mode':request.get('retrieval_mode','hybrid'),
             'active_modes':sorted(set(result['active_mode'] for result in retrieval)),
@@ -74,7 +115,10 @@ def stream_events(service,p,request):
     try:
         run_id=provenance.begin_retrieval(p,request)
         context=question_context(service,p,request)
+        peer_rows=[{'citation':f'P{i+1}',**r} for i,r in enumerate(context.pop('structure_pending_rows',[]))]
         evidence=[{'citation':f'E{i+1}',**r} for i,r in enumerate(context.pop('evidence_rows'))]
+        # 结构待定单独记一份（不是证据，也不进证据链）：别人问"这条为什么没进答案"时有据可查。
+        context['structure_pending']=pending_block(peer_rows)
         answer_id=provenance.complete_retrieval(p,run_id,context,evidence)
         for row in evidence:
             row['provenance_ref']=f"answer:{answer_id}#{row['citation']}"
@@ -103,7 +147,13 @@ def stream_events(service,p,request):
             for row in evidence:
                 content=f"[{row['citation']}] {row['text']}\n\n";answer+=content;yield event('delta',{'text':content})
             if not evidence:
-                answer='当前查询范围没有证据。';yield event('delta',{'text':answer})
+                # 有知识、但它们涉概念还没建模：**显式说出来**，不要用"没有证据"盖过去 ——
+                # 用户看到的差别是"真没有"和"有但不算数"。
+                if context['structure_pending']['count']:
+                    answer=no_evidence_text(context['structure_pending'])
+                else:
+                    answer='当前查询范围没有证据。'
+                yield event('delta',{'text':answer})
         provenance.complete_answer(p,answer_id,run_id,answer,mode,evidence)
         yield event('done',{'answer':answer,'mode':mode,'answer_id':answer_id,
                            'retrieval_run_id':run_id,'provenance_complete':True})

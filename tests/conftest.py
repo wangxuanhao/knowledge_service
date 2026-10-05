@@ -30,6 +30,23 @@ import pytest  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent / 'service'))
 
 
+# ── 业务测试默认关闭鉴权（只影响 pytest 进程）────────────────────────────────
+# 背景：接入认证中间件后，700+ 处既有 API 用例直接发请求会全部 401。这些用例
+# 测的是业务功能、本就不验证鉴权。这里在最早期设置 KG_AUTH_DISABLED=1，
+# create_app 读到后跳过认证中间件，行为与接入前一致。
+# 该变量只在 pytest 进程生效：生产启动脚本/容器从不设置它。
+# 鉴权本身由专门的 tests/service/test_auth_rbac.py 显式 auth_disabled=False 覆盖。
+os.environ['KG_AUTH_DISABLED'] = '1'
+
+# ── 测试里放开"自助注册"（**只是测试便利**，生产默认关闭）────────────────────
+# 生产默认关闭自助注册（api/auth.py: self_registration_allowed，默认 False）：
+# 开放注册＝任何能访问服务的人都能开一个能读全部知识的只读账号。
+# 但测试里有十几处「注册一个 viewer 拿令牌」的写法，它是最短的造号路径；
+# 这一层默认关闭的行为由 test_auth_rbac.py::test_self_registration_is_closed_by_default
+# 显式钉住（那个用例 monkeypatch 掉本变量再验 403），所以这里开着不会漏测。
+os.environ.setdefault('KG_ALLOW_SELF_REGISTRATION', '1')
+
+
 @pytest.fixture(scope='session', autouse=True)
 def _postgres_session():
     """会话结束清理：删掉槽位 schema 与测试库。"""

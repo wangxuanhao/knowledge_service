@@ -106,6 +106,9 @@ def workbench(browser, tmp_path):
         page.locator('.nav-group:has([data-tab="ingest"]) summary').click()
         page.click('[data-tab="ingest"]')
         page.locator('#tab-ingest').wait_for(state='visible')
+        # 2026-10-05：写入页改回「纯文件上传」并取消折叠 —— 文件上传面板直接可见，
+        # 不再需要展开 <details>。结构变了，活文档跟着改。
+        page.locator('#tab-ingest .document-upload-panel').wait_for(state='visible')
         yield SimpleNamespace(page=page, project=project_id)
     finally:
         try:

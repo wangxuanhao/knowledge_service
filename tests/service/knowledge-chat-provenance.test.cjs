@@ -71,8 +71,12 @@ test('running evidence opens once; safe done decorations and bounded history res
   const answer=turn.querySelector('.qa-answer');assert.equal(answer.textContent,literal);assert.equal(answer.querySelectorAll('button').length,0);
   env.emit('done',{});env.streams.at(-1).close();await settle();
   assert.equal(answer.textContent,literal);assert.equal(answer.querySelectorAll('button').length,1);
+  // C1：结构待定的单列数据（structure_pending）要跟着历史一起存/取 ——
+  // 不然切一次标签回来，那几条"不算证据的知识"就从证据面板上消失了（用户会以为系统把它们丢了）。
+  // 这条流没有结构待定项，所以是 null；有值时的渲染由 test_structure_pending_ui.py 覆盖。
   assert.deepEqual(env.history(),[{kind:'user',text:'question'},{kind:'assistant',text:literal,answer_id:'a',retrieval_run_id:'run-a',
-    evidence:[{citation:'E1',text_preview:'x'.repeat(240),kind:'chunk',version:2,provenance_ref:'answer:a#E1'}]}]);
+    evidence:[{citation:'E1',text_preview:'x'.repeat(240),kind:'chunk',version:2,provenance_ref:'answer:a#E1'}],
+    structure_pending:null}]);
   env.window.clearKnowledgeChat();
   assert.equal(env.get('qa-transcript').querySelector('.qa-answer').querySelectorAll('button').length,1);
   assert.ok(env.get('qa-transcript').querySelector('.qa-evidence-panel').querySelector('.provenance-citation'));

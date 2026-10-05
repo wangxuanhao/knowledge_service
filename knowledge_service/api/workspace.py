@@ -12,7 +12,7 @@ from rdflib.namespace import OWL, XSD
 from ..models import Scope, Request
 from ..services.ontology import (
     Ontology, generated_term_iri, local_name,
-    absolute_iri, set_term_constraints, term_kind, term_impact,
+    absolute_iri, relation_usage, set_term_constraints, term_kind, term_impact,
 )
 from ..services.ontology_adapters import (
     add_deprecation_headers,
@@ -140,6 +140,12 @@ def install(app, service):
         与新模型的 query 向量维度/空间不同，不重建会导致检索维度报错（维度变了）
         或静默返回错误相似度（维度相同但模型不同）。embedding_model 字段只记录向量
         身份（元数据），检索侧不做强校验，靠本接口的「清空分区 + 全量重编码」保证一致。
+
+        **维度不一致时会自动删表重建**：Milvus 的向量维度在建表时固定、事后改不了，
+        所以"换了模型还保留旧表"这件事物理上做不到。删表是安全动作——Milvus 里全是
+        派生数据，本接口马上会全量重编码补回（真值在 PostgreSQL）。放在这个显式动作里
+        做，而不是在检索路径上偷偷改表；成功后在返回里带 `recreated` 与 `dim`，
+        前端/日志能看出"这一次不只是重灌，而是换了表结构"。
         """
         service.repository.get_project(p)
         def run(progress):
@@ -149,6 +155,18 @@ def install(app, service):
             rows = [r for r in service.repository.current_records(p) if r['kind'] in ('entity','relation','chunk')
                     and not r.get('metadata',{}).get('_deleted')]
             if service.milvus_store is not None:
+                from ..integrations.milvus_store import VectorDimensionMismatch
+                store = service.milvus_store
+                recreated = False
+                # 先对齐表结构：维度不一致（换过编码器/模型）时删表按当前维度重建，
+                # 否则下面每一次 upsert 都会失败，用户只看到"向量维度不对"。
+                try:
+                    store.ensure_collection()
+                except VectorDimensionMismatch as mismatch:
+                    progress(f'索引维度不一致（表 {mismatch.collection_dim} 维 → 当前编码器 '
+                             f'{mismatch.expected_dim} 维）：删除旧的向量表并按新维度重建', 2)
+                    store.recreate_collection()
+                    recreated = True
                 # Milvus 重建：清空该 project 分区后批量 upsert 全部当前活跃记录
                 # （不按 has_vector 筛选——Milvus 分区是重灌语义，全量覆盖）。
                 encoded = []
@@ -163,6 +181,8 @@ def install(app, service):
                         encoded.append(r)
                 saved = service.milvus_store.rebuild_project(p, encoded)
                 return {'indexed': saved, 'backend': 'milvus', 'total': len(rows),
+                        'recreated': recreated, 'dim': service.milvus_store.dim,
+                        'embedding_model': service.encoder.identity,
                         'elapsed_seconds': round(perf_counter()-start, 2)}
             # 无 Milvus 时不再有本地向量后端：`record_versions.vector` 列已随迁移 11
             # 删除，`store_embeddings` 是空实现。此处**明确报错**，而不是返回
@@ -215,6 +235,25 @@ def install(app, service):
         if not absolute_iri(uri) or not term_kind(ontology,URIRef(uri)):raise KeyError(uri)
         return {'ontology_id':latest['id'],'kind':term_kind(ontology,URIRef(uri)),
                 **term_impact(service,p,uri,ontology)}
+
+    # 关系类型的两端（domain/range）推断：用户反馈「关系没办法显示」的根因是抽出来的关系
+    # 没有声明 rdfs:domain/range，画布就画不出线。这里给出「本体现在声明的」与
+    # 「实际入库用法反推的候选」两份读数，写回仍走草案命令通道（add_domain/add_range）。
+    #
+    # draft_id 必须能传：画布画的是草案时，两端要按**草案**报。否则回填刚写进草案、
+    # 这里还按已发布版本回一句"未声明"，界面就成了"改了没反应"——正是本轮要修的病。
+    @app.get('/api/projects/{p}/ontology/relation-usage')
+    def relation_usage_view(p:str,uri:str,draft_id:str|None=None):
+        latest=service.repository.get_ontology(p)
+        source,origin=latest,'published'
+        if draft_id:
+            existing=OntologyDrafts(service.repository).get(p,draft_id)
+            if not existing:raise KeyError(draft_id)      # 草案不存在就报错，不静默回落到已发布
+            source,origin=existing,'draft'
+        ontology=Ontology(source['turtle'])
+        if not absolute_iri(uri) or term_kind(ontology,URIRef(uri))!='relation':raise KeyError(uri)
+        return {'ontology_id':latest['id'],'kind':'relation','source':origin,
+                **relation_usage(service,p,uri,ontology)}
 
     @app.put('/api/projects/{p}/ontology/term')
     def update_term(p:str,uri:str,request:TermUpdate,response:Response):

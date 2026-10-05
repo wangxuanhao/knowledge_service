@@ -93,9 +93,33 @@ _FULL_ROW_CONTRACTS_V14 = {
 }
 # Migration 15 expands CHECK constraints but does not change the projection row
 # shape, so v14 and v15 snapshots deliberately share the exact wire contract.
+#
+# Migration 0004 adds the nullable `validated_at` column to ontology_drafts
+# (the "校验通过" marker). Exporters emit it, so the draft row shape changes:
+# v16 snapshots carry `validated_at`; v14/v15 do not. They need separate
+# contracts because an exact-row validator treats an extra field as "未知".
+_FULL_ROW_CONTRACTS_V16 = dict(_FULL_ROW_CONTRACTS_V14)
+_FULL_ROW_CONTRACTS_V16[('governance', 'ontology', 'drafts')] = _contract({
+    'id', 'project_id', 'base_ontology_id', 'source_kind', 'status', 'revision',
+    'title', 'summary', 'source_context', 'validation_report',
+    'validation_fingerprint', 'validated_at', 'published_ontology_id',
+    'legacy_artifact_id', 'created_at', 'updated_at',
+})
+# 迁移 0005（A3 状态 7→3）又给 ontology_drafts 加了一列 `submitted_at`（提交时刻 ——
+# 「已提交」不再是状态，改由时间戳记事实）。行形状再次变化，于是 v17 单独一套契约：
+# 与 v16 只差这一列。
+_FULL_ROW_CONTRACTS_V17 = dict(_FULL_ROW_CONTRACTS_V16)
+_FULL_ROW_CONTRACTS_V17[('governance', 'ontology', 'drafts')] = _contract({
+    'id', 'project_id', 'base_ontology_id', 'source_kind', 'status', 'revision',
+    'title', 'summary', 'source_context', 'validation_report',
+    'validation_fingerprint', 'validated_at', 'submitted_at',
+    'published_ontology_id', 'legacy_artifact_id', 'created_at', 'updated_at',
+})
 FULL_ROW_CONTRACTS = {
     14: _FULL_ROW_CONTRACTS_V14,
     15: _FULL_ROW_CONTRACTS_V14,
+    16: _FULL_ROW_CONTRACTS_V16,
+    17: _FULL_ROW_CONTRACTS_V17,
 }
 
 # ── 快照**线格式**版本（与数据库迁移编号无关）────────────────────────────────
@@ -107,9 +131,9 @@ FULL_ROW_CONTRACTS = {
 #   * 迁移编号：这个库的 schema 是哪一版（DB 自己的事）；
 #   * 线格式版本：这份快照的形状是哪一版（文件自己的事，决定能否被解读）。
 #
-# 基线表的行形状与最后一代完整快照契约一致，故本项目导出的快照标 15，
-# 并接受 14~15 的输入：14 与 15 的行形状相同（15 只收紧了 CHECK 约束，
-# 见上方 FULL_ROW_CONTRACTS 的说明），因此两者共用同一套契约。
+# 本项目导出的快照标 17，并接受 14~17 的输入：14 与 15 的行形状相同（15 只收紧了 CHECK
+# 约束），16 在 ontology_drafts 里多了 validated_at（迁移 0004），17 又多了 submitted_at
+# （迁移 0005），所以 16 / 17 各有自己的一套契约（多一列＝未知字段，会被严格校验拒掉）。
 LATEST_FULL_SNAPSHOT_FORMAT = max(FULL_ROW_CONTRACTS)
 MIN_FULL_SNAPSHOT_FORMAT = min(FULL_ROW_CONTRACTS)
 

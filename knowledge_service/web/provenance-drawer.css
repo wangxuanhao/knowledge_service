@@ -24,3 +24,19 @@
 button.provenance-citation{font:inherit;font-size:12px;padding:0 4px;margin:0 2px;border-radius:3px;vertical-align:baseline;color:var(--accent,#19654e);background:#edf4ef}
 .provenance-legacy-note{color:#789086;font-size:12px;margin:8px 0}
 @media(max-width:760px){.provenance-drawer{position:static;inset:auto;width:100%;max-width:100%;padding:16px;margin:16px 0;border:1px solid var(--line,#dce4dc);border-radius:4px;box-shadow:none;overflow:visible}.provenance-drawer header{position:static;top:auto;padding:0 0 12px}.provenance-node dl{grid-template-columns:90px minmax(0,1fr)}}
+/* ── 「这些块是什么」名词表（默认折叠）：抽屉里原本只有一排卡片，
+   用户反馈看不懂为什么要展示这些。这里把每类节点一句话讲清，并说明
+   标题里的 [E1]/[E2] 是答案正文的引用编号。 ── */
+.provenance-explain{border:1px solid var(--line,#dce4dc);border-radius:4px;background:#fbfdfb;padding:10px 12px}
+.provenance-explain>summary{cursor:pointer;font-weight:550;color:var(--accent,#19654e);font-size:12px}
+.provenance-explain>p{margin:8px 0 6px;font-size:12px;line-height:1.7;color:#4c6357}
+.provenance-explain dl{display:grid;grid-template-columns:110px minmax(0,1fr);gap:4px 10px;margin:6px 0 0}
+.provenance-explain dt{font-size:11px;font-weight:600;color:#26493b}
+.provenance-explain dd{margin:0;font-size:11px;line-height:1.6;color:#5c7266;overflow-wrap:anywhere}
+/* 阅读指南默认展开，所以它要"密但不挤"：问答用两列 dt/dd，名词表再折一层。 */
+.provenance-explain{border-left:3px solid var(--accent,#19654e)}
+.provenance-explain>summary{font-size:12.5px}
+.provenance-explain__glossary{border:1px solid var(--line,#dce4dc);border-radius:4px;background:#fff;padding:8px 10px;margin-top:8px}
+.provenance-explain__glossary>summary{font-size:11.5px;font-weight:550;color:#34674f;cursor:pointer}
+.provenance-explain__glossary p{margin:6px 0 0;font-size:11px;line-height:1.65;color:#5c7266}
+@media(max-width:760px){.provenance-explain dl{grid-template-columns:1fr}}

@@ -8,8 +8,12 @@ const {frozenSourceDocument,attributeDetailsHtml}=require(path.resolve(
 test('changed provenance source assets use fresh cache versions',()=>{
   const html=require('node:fs').readFileSync(path.resolve(
     __dirname,'../../knowledge_service/web/index.html'),'utf8');
-  assert.ok(html.includes('/assets/provenance-drawer.js?v=3'));
-  assert.ok(html.includes('/assets/evidence-inspector.js?v=candidate-evidence-1'));
+  // 这两个文件改过就必须带**新的** ?v=，否则浏览器一直用缓存的旧 JS。
+  // 断言"带版本号、且不是那次改动之前的旧版本" —— 换新版本时要在这里同步（别让断言跟着自动走）。
+  assert.match(html,/\/assets\/provenance-drawer\.js\?v=[^"']+/);
+  assert.match(html,/\/assets\/evidence-inspector\.js\?v=[^"']+/);
+  assert.ok(!html.includes('/assets/evidence-inspector.js?v=candidate-evidence-1'),
+    'evidence-inspector.js 改过文案后必须换新的 ?v=（B1：撤销入口指向「知识台账 → 可撤销的操作」）');
 });
 
 test('frozen source viewer distinguishes complete historical versions from legacy segments',()=>{

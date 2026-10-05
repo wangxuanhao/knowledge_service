@@ -65,7 +65,7 @@ def test_delete_project_explicitly_counts_ontology_governance_history(tmp_path):
     pid = repo.create_project('governed-delete')['id']
     draft = repo._ontology_drafts.create(pid, {
         'id': 'draft-delete', 'project_id': pid, 'base_ontology_id': None,
-        'source_kind': 'manual', 'status': 'editing', 'revision': 1,
+        'source_kind': 'manual', 'status': 'pending', 'revision': 1,
         'title': 'Delete me', 'summary': 'Delete the whole project',
         'source_context': {},
     })

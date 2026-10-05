@@ -55,15 +55,36 @@ _METRIC_DENSE = "COSINE"
 _METRIC_SPARSE = "BM25"
 
 
+class VectorDimensionMismatch(RuntimeError):
+    """collection 的向量维度与当前编码器不一致 —— 维度是建表时固定的，只能重建表。
+
+    专门做一类异常而不是一句 ValueError：调用方（/indexes/rebuild）需要据此决定
+    "删表重建"，而不是把它当成一个普通写入错误重试。
+    """
+
+    def __init__(self, collection: str, collection_dim: int, expected_dim: int, encoder_identity: str = ''):
+        self.collection = collection
+        self.collection_dim = collection_dim
+        self.expected_dim = expected_dim
+        self.encoder_identity = encoder_identity
+        who = f'（当前编码器 {encoder_identity}）' if encoder_identity else ''
+        super().__init__(
+            f'Milvus collection「{collection}」的 embedding 维度是 {collection_dim}，'
+            f'而当前配置要写 {expected_dim} 维{who}。'
+            f'维度在建表时就固定了、改不了：调 POST /api/projects/{{project}}/indexes/rebuild '
+            f'会检测到不一致并删表重建 + 全量重编码；若想保留旧表，则需让 KG_MILVUS_DIM 与编码器对齐。')
+
+
 class MilvusStore:
     """Milvus 检索索引；未连接（milvus 不可用）时所有方法安全降级/抛错，不拖垮主流程。"""
 
     def __init__(self, host: str = "localhost", port: str = "19530",
-                 dim: int = 1024, collection: str = COLLECTION):
+                 dim: int = 1024, collection: str = COLLECTION, encoder_identity: str = ''):
         self.host = host
         self.port = port
         self.dim = dim
         self.collection_name = collection
+        self.encoder_identity = encoder_identity
         self._client: Optional[MilvusClient] = None
 
     # ------------------------------------------------------------------ 连接与建表
@@ -79,13 +100,51 @@ class MilvusStore:
     def available(self) -> bool:
         return self._client is not None
 
-    def ensure_collection(self) -> "MilvusStore":
-        """幂等：已存在直接复用，不存在则建 schema + BM25 function + 双索引。"""
+    def collection_dim(self) -> Optional[int]:
+        """已存在 collection 的 embedding 维度；不存在或读不到返回 None。"""
+        if self._client is None or not self._client.has_collection(self.collection_name):
+            return None
+        try:
+            info = self._client.describe_collection(self.collection_name)
+        except Exception:
+            return None
+        for field in (info or {}).get('fields', []) or []:
+            if field.get('name') == 'embedding':
+                raw = (field.get('params') or {}).get('dim')
+                try:
+                    return int(raw)
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    def ensure_collection(self, recreate: bool = False) -> "MilvusStore":
+        """幂等：已存在直接复用；维度不一致时报错（recreate=True 则删表重建）。
+
+        为什么要在这里查维度：以前只看"表在不在"，于是换过编码器（或 KG_MILVUS_DIM
+        设错）之后，所有写入都在 upsert 里炸一句「向量维度 256 != 预期 1024」，
+        看不出该修哪儿。提前查出来 + 给出可执行的补救，才是可诊断的行为。
+        """
         if self._client is None:
             self.connect()
         if self._client.has_collection(self.collection_name):
+            existing = self.collection_dim()
+            if existing is not None and int(existing) != int(self.dim):
+                if recreate:
+                    return self.recreate_collection()
+                raise VectorDimensionMismatch(self.collection_name, existing, self.dim, self.encoder_identity)
             return self
+        return self._create_collection()
 
+    def recreate_collection(self) -> "MilvusStore":
+        """删掉旧 collection 并按当前 dim 重建。Milvus 里是派生数据，可全量重编码补回。"""
+        if self._client is None:
+            self.connect()
+        if self._client.has_collection(self.collection_name):
+            self._client.drop_collection(self.collection_name)
+        return self._create_collection()
+
+    def _create_collection(self) -> "MilvusStore":
+        """按 self.dim 建 schema + BM25 function + 双索引。"""
         fields = [
             FieldSchema(name="version_id", dtype=DataType.VARCHAR, is_primary=True, max_length=64),
             FieldSchema(name="project_id", dtype=DataType.VARCHAR, is_partition_key=True, max_length=64),
@@ -157,7 +216,10 @@ class MilvusStore:
                 continue
             vec = np.asarray(emb, dtype="float32").reshape(-1)
             if vec.size != self.dim:
-                raise ValueError(f"向量维度 {vec.size} != 预期 {self.dim}")
+                # 和 ensure_collection 报同一类错（维度不可改，只能重建），
+                # 这样调用方只需要处理一种异常，而不是"有时 ValueError 有时别的东西"。
+                raise VectorDimensionMismatch(self.collection_name, self.dim, vec.size,
+                                              str(r.get("embedding_model") or self.encoder_identity))
             ids["embedding"] = vec
             rows.append(ids)
         if not rows:

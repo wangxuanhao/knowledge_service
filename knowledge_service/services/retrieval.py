@@ -103,6 +103,24 @@ def _lexical_rank(candidates, query, limit):
     return [item[0] for item in ranked[:limit]]
 
 
+def merge_keyword_rankings(rankings, limit):
+    """合并多次关键词查询的结果（OR 语义，P0-1 查询扩展用）。
+
+    同一条记录被多个词命中时取**最高分**，不累加：累加会让"被多个扩展词命中"
+    压过"被原查询精确命中"，但扩展词只该负责补召回，不该改变相关性直觉。
+    排序为分数降序、其次 id 升序（保证确定性），最后截断到 limit。
+    """
+    best = {}
+    for rows in rankings:
+        for row in rows:
+            score = row.get('keyword_score') or 0
+            current = best.get(row['id'])
+            if current is None or score > current[0]:
+                best[row['id']] = (score, row)
+    ordered = sorted(best.values(), key=lambda item: (-item[0], item[1]['id']))
+    return [row for _, row in ordered[:limit]]
+
+
 class RetrievalEngine:
     """先限定范围，再由独立后端各自排名，最后用 RRF 融合。"""
     MODES = frozenset({'hybrid', 'semantic', 'keyword'})
@@ -187,6 +205,12 @@ class RetrievalEngine:
         scope = dict(scope or {})
         candidate_ids = scope.pop('_candidate_ids', None)
         lexical_aliases = scope.pop('_lexical_aliases', {})
+        # P0-1 本体查询扩展：默认不存在 → 下面的所有分支一行都不会执行，
+        # 关闭时的响应与改动前逐字段相同（回归基线的硬约束）。
+        expansion = scope.pop('_ontology_expansion', None)
+        expansion_type_iris = set((expansion or {}).get('type_iris') or ())
+        expansion_terms = [term for term in (expansion or {}).get('labels') or ()
+                           if term and term.casefold() not in query.casefold()]
         channels = list(content_channels or ['entity', 'relation', 'chunk'])
         if any(channel not in {'entity', 'relation', 'chunk'} for channel in channels):
             raise ValueError('不支持的内容通道')
@@ -203,6 +227,8 @@ class RetrievalEngine:
             channels = [kind for kind in channels if kind in requested_kinds]
         # Milvus 快路径：连接可用且非历史时间视图时，整个排名交给 Milvus（向量留在
         # Milvus，PostgreSQL 不再读 vector 列）。Milvus 失败会透明降级到下方本地逻辑。
+        # 开了本体扩展就不走它：类型通道（子类实例召回）是本地按已过滤候选算出来的，
+        # Milvus 只负责排名，交出去会静默丢掉子类命中。扩展是显式开关，默认不受影响。
         use_milvus = (self.milvus is not None and self.milvus.available
                       and scope.get('known_at') is None)
         include_embeddings = (retrieval_mode in {'hybrid', 'semantic'}
@@ -229,11 +255,39 @@ class RetrievalEngine:
         if lexical_aliases:
             candidates = [{**row, '_retrieval_aliases': lexical_aliases.get(row['id'], [])}
                           for row in candidates]
+
+        def _rank_ontology_types():
+            """类型通道：命中类与其子类的实体，即使文本里没有查询词也算召回。"""
+            rows = [row for row in candidates
+                    if row['kind'] == 'entity' and row.get('type') in expansion_type_iris]
+            return sorted(({key: value for key, value in row.items() if key != 'embedding'}
+                           for row in rows), key=lambda row: row['id'])
+
         if use_milvus:
             try:
                 LOG.debug('检索走 Milvus 快路径：mode=%s 候选=%d', retrieval_mode, len(candidates))
-                return self._search_via_milvus(project_id, query, retrieval_mode,
-                                               candidates, channels, k, channel_quotas, scope)
+                response = self._search_via_milvus(project_id, query, retrieval_mode,
+                                                   candidates, channels, k, channel_quotas, scope)
+                # 本体扩展的「类型通道」在 Milvus 之外：本地按 type∈type_iris 扫候选，
+                # 把子类实例补进结果（去重），不因走了 Milvus 就丢掉子类召回。
+                if expansion_type_iris:
+                    ontology_rows = _rank_ontology_types()
+                    if ontology_rows:
+                        existing = {row['id'] for row in response['hits']}
+                        entity_quota = (channel_quotas.get('entity', k)
+                                        if channel_quotas else k)
+                        extra = [row for row in ontology_rows if row['id'] not in existing][:entity_quota]
+                        response['hits'] = [*response['hits'], *extra]
+                        response['backends']['ontology'] = {
+                            'active': True, 'hits': len(ontology_rows)}
+                        response['ontology_expansion'] = {
+                            'terms': list((expansion or {}).get('terms') or []),
+                            'subclasses': list((expansion or {}).get('subclasses') or []),
+                            'type_iris': sorted(expansion_type_iris),
+                            'keyword_terms': list(expansion_terms),
+                            'type_hits': len(ontology_rows),
+                        }
+                return response
             except Exception:
                 LOG.warning('Milvus 排名失败，降级到本地检索', exc_info=True)
         rankings = {}
@@ -241,23 +295,39 @@ class RetrievalEngine:
         keyword_backend = None
         per_backend_limit = (sum(max(limit * 5, 50) for limit in channel_quotas.values())
                              if channel_quotas else max(k * 5, 50))
-        def _rank_keyword():
-            """keyword 通道排名：历史视图走词法扫描，当前视图走 FTS5 + 词法兜底。"""
+        def _rank_keyword_once(term):
+            """单次关键词排名：历史视图走词法扫描，当前视图走 FTS + 词法兜底。"""
             if scope.get('known_at'):
-                return _lexical_rank(candidates, query, per_backend_limit), 'historical_scan'
+                return _lexical_rank(candidates, term, per_backend_limit), 'historical_scan'
             indexed_channels = [kind for kind in channels if kind in {'entity', 'chunk'}]
             indexed = []
             for kind in indexed_channels:
                 limit = max(channel_quotas[kind] * 5, 50) if channel_quotas else per_backend_limit
                 indexed.extend(self.repository.keyword_candidates(
-                    project_id, query, kinds=[kind], limit=limit,
+                    project_id, term, kinds=[kind], limit=limit,
                     candidate_ids=[row['id'] for row in candidates if row['kind'] == kind],
                     records=candidates,
                 ))
             indexed_ids = {row['id'] for row in indexed}
-            fallback = [row for row in _lexical_rank(candidates, query, per_backend_limit)
+            fallback = [row for row in _lexical_rank(candidates, term, per_backend_limit)
                         if row['id'] not in indexed_ids]
             return [*indexed, *fallback][:per_backend_limit], 'fts5_current'
+
+        def _rank_keyword():
+            """keyword 通道排名：原查询，外加（开关打开时的）本体扩展词 OR 合并。"""
+            ranking, backend = _rank_keyword_once(query)
+            if not expansion_terms:
+                # 默认路径：一次查询、原样返回 —— 开关关闭时行为与改动前一致。
+                return ranking, backend
+            per_term = [ranking]
+            for term in expansion_terms:
+                try:
+                    per_term.append(_rank_keyword_once(term)[0])
+                except (ValueError, RuntimeError, DatabaseError):
+                    # 单个扩展词失败不该拖垮整条关键词通道：丢掉这个词，继续。
+                    LOG.warning('本体扩展词 %r 的关键词检索失败，已忽略该词', term,
+                                exc_info=True)
+            return merge_keyword_rankings(per_term, per_backend_limit), backend
 
         if retrieval_mode in {'hybrid', 'keyword'}:
             try:
@@ -286,8 +356,20 @@ class RetrievalEngine:
                 rankings['keyword'] = keyword
             except (ValueError, RuntimeError, DatabaseError) as exc:
                 errors['keyword'] = str(exc)
-        active = [backend for backend, rows in rankings.items() if rows or not candidates]
-        if not rankings:
+        # P0-1 类型通道：只在开关打开且真的命中类型时加入（默认路径一行都不执行）。
+        if expansion_type_iris:
+            ontology_rows = _rank_ontology_types()
+            if ontology_rows:
+                rankings['ontology'] = ontology_rows
+                LOG.debug('本体查询扩展命中类型 %d 个，类型通道候选 %d 条',
+                          len(expansion_type_iris), len(ontology_rows))
+        # 补充通道不参与 active_mode / degraded 判定：那两个字段描述的是"关键词/语义
+        # 后端有没有按请求工作"，而本体类型通道是额外召回来源；掺进去会把纯 keyword
+        # 请求误报成混合模式，也会把"语义降级"的告警淹掉。
+        lexical_rankings = {name: rows for name, rows in rankings.items()
+                            if name != 'ontology'}
+        active = [backend for backend, rows in lexical_rankings.items() if rows or not candidates]
+        if not lexical_rankings:
             raise RuntimeError('没有可用的检索后端：' + '; '.join(errors.values()))
         if channel_quotas is not None:
             hits = []
@@ -303,14 +385,16 @@ class RetrievalEngine:
                     hits.extend(rrf_fuse(channel_rankings, quota))
                 else:
                     hits.extend(next(iter(channel_rankings.values()))[:quota])
-            active_mode = 'hybrid' if len(rankings) > 1 else next(iter(rankings))
+            active_mode = 'hybrid' if len(lexical_rankings) > 1 else next(iter(lexical_rankings))
         elif len(rankings) > 1:
+            # 融合用全部来源（含本体类型通道，否则纯 keyword 模式下类型召回会被丢掉），
+            # 但 active_mode 只反映关键词/语义后端，避免把"额外召回"报成降级。
             hits = rrf_fuse(rankings, k)
-            active_mode = 'hybrid'
+            active_mode = 'hybrid' if len(lexical_rankings) > 1 else next(iter(lexical_rankings))
         else:
-            active_mode, rows = next(iter(rankings.items()))
+            active_mode, rows = next(iter(lexical_rankings.items()))
             hits = rows[:k]
-        return {
+        response = {
             'hits': hits,
             'candidate_count': len(candidates),
             'filter_stage': 'before_ranking',
@@ -326,3 +410,18 @@ class RetrievalEngine:
             'valid_at': scope.get('valid_at'),
             'known_at': scope.get('known_at'),
         }
+        if 'ontology' in rankings or expansion_type_iris:
+            # 扩展的台账：命中了哪些类/子类、关键词通道 OR 了哪些词、类型通道召回多少条。
+            # 没有它，命中数变化就成了"魔法"，排查时无从下手。
+            response['backends']['ontology'] = {
+                'active': 'ontology' in rankings,
+                'hits': len(rankings.get('ontology', [])),
+            }
+            response['ontology_expansion'] = {
+                'terms': list((expansion or {}).get('terms') or []),
+                'subclasses': list((expansion or {}).get('subclasses') or []),
+                'type_iris': sorted(expansion_type_iris),
+                'keyword_terms': list(expansion_terms),
+                'type_hits': len(rankings.get('ontology', [])),
+            }
+        return response

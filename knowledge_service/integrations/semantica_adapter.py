@@ -189,6 +189,33 @@ def _open_exception(text, source_kind, reason_code, reason, payload):
     }
 
 
+# 推理模型（deepseek-flash 这类）会**先花掉 completion 预算写思维链**（reasoning_content），
+# 再输出正文 JSON。预算给小了会发生一件很隐蔽的事：正文是**空字符串**、HTTP 依然是 200 OK、
+# `finish_reason=length`、`usage.completion_tokens_details.reasoning_tokens` 把额度占满 ——
+# 抽取于是"成功"地返回 0 个实体。实测症状是同一份文本时好时坏（思维链长度随机），
+# 排查方向很容易被带偏到样本、本体或路由上。
+#
+# 实测数据（346 字文档 + 实体/关系抽取指令，deepseek-flash）：
+#   max_tokens=8192  → finish_reason=length · 正文 0 字     · reasoning_tokens=8192（吃光）
+#   max_tokens=32768 → finish_reason=stop   · 正文 2481 字  · reasoning_tokens=9301
+# 即"思维链 ≈ 文档长度的 27 倍 token 量"。默认给 65536（对上面这段有 6 倍余量），
+# 文档很长时可用 KG_LLM_MAX_TOKENS 继续调大；预算不够时会**响声很大**地失败
+# （抽取异常里会带 `Empty response from LLM`），不会再静默产出 0 条。
+LLM_MAX_TOKENS_DEFAULT = 65536
+
+
+def _llm_max_tokens() -> int:
+    """抽取调用要用的 completion 预算（含思维链）。"""
+    raw = os.getenv('KG_LLM_MAX_TOKENS', '').strip()
+    if not raw:
+        return LLM_MAX_TOKENS_DEFAULT
+    try:
+        value = int(raw)
+    except ValueError:
+        return LLM_MAX_TOKENS_DEFAULT
+    return value if value > 0 else LLM_MAX_TOKENS_DEFAULT
+
+
 def _extract_entities_open(text,config,exceptions=None):
     """开放词表实体类型标注：由模型命名领域类型，而非使用 Semantica 的固定标签清单。"""
     from semantica.semantic_extract.providers import create_provider
@@ -202,7 +229,7 @@ Reuse the exact same type name for the same kind of entity so the vocabulary sta
 Only extract entities that actually appear in the source text; do not invent entities.
 INPUT_JSON:\n'''+json.dumps({'source_document':text},ensure_ascii=False)
     provider=create_provider(config['provider'],model=config['llm_model'],api_key=config['api_key'],base_url=config['base_url'])
-    result=provider.generate_typed(prompt,schema=_OpenEntities)
+    result=provider.generate_typed(prompt,schema=_OpenEntities,max_tokens=_llm_max_tokens())
     entities=[]
     for item in result.entities:
         start=text.find(item.text)
@@ -245,7 +272,7 @@ Do not invent facts or evidence.
 Extract valid_from / valid_until only when the source explicitly states business-valid time; temporal_source_text must be exact source text.
 INPUT_JSON:\n'''+json.dumps(payload,ensure_ascii=False)
     provider=_open_fact_provider(config)
-    return provider.generate_typed(prompt,schema=_OpenFacts).facts
+    return provider.generate_typed(prompt,schema=_OpenFacts,max_tokens=_llm_max_tokens()).facts
 
 
 def _route_open_facts(text,entity_candidates,facts,include_attributes=False,*,reserved_class_names=()):
@@ -350,7 +377,7 @@ Reuse one predicate name for equivalent meanings. Do not invent facts. Evidence 
 Extract valid_from / valid_until only when the source explicitly states a fact's business-valid time. Keep temporal_source_text as exact source text and temporal_confidence between 0 and 1.
 INPUT_JSON:\n'''+json.dumps(payload,ensure_ascii=False)
     provider=create_provider(config['provider'],model=config['llm_model'],api_key=config['api_key'],base_url=config['base_url'])
-    result=provider.generate_typed(prompt,schema=_OpenRelations)
+    result=provider.generate_typed(prompt,schema=_OpenRelations,max_tokens=_llm_max_tokens())
     relations=[]
     for item in result.relations:
         subject=methods.match_entity(item.subject,entities)
@@ -385,7 +412,7 @@ If an important source entity genuinely fits no allowed class, return type as NE
 Do not create an entity for ontology guidance text. Do not return concepts absent from SOURCE_DOCUMENT.
 INPUT_JSON:\n'''+json.dumps(payload,ensure_ascii=False)
     provider=create_provider(config['provider'],model=config['llm_model'],api_key=config['api_key'],base_url=config['base_url'])
-    result=provider.generate_typed(prompt,schema=_GuidedEntities)
+    result=provider.generate_typed(prompt,schema=_GuidedEntities,max_tokens=_llm_max_tokens())
     entities=[]
     for item in result.entities:
         if item.text not in text:
@@ -427,7 +454,7 @@ Do not infer a relation merely because it appears in ontology guidance. If sourc
 Do not invent or infer dates not supported by the source.
 INPUT_JSON:\n'''+json.dumps(payload,ensure_ascii=False)
     provider=create_provider(config['provider'],model=config['llm_model'],api_key=config['api_key'],base_url=config['base_url'])
-    result=provider.generate_typed(prompt,schema=_GuidedRelations)
+    result=provider.generate_typed(prompt,schema=_GuidedRelations,max_tokens=_llm_max_tokens())
     relations=[]
     for item in result.relations:
         subject=methods.match_entity(item.subject,entities)
@@ -461,7 +488,7 @@ class SemanticaExtractor:
         try:
             config = dict(provider='openai', llm_model=os.environ['KG_LLM_MODEL'],
                           api_key=os.environ['KG_LLM_API_KEY'], base_url=os.environ['KG_LLM_BASE_URL'],
-                          silent_fail=False)
+                          silent_fail=False, max_tokens=_llm_max_tokens())
             event('Semantica 开放实体发现 · 不使用项目本体白名单')
             with stage('LLM 开放实体类型发现'):
                 entities=_extract_entities_open(text,config,exceptions)
@@ -552,7 +579,7 @@ class SemanticaExtractor:
             relation_types = [item['id'] for item in summary['relations']]
         config = dict(provider='openai', llm_model=os.environ['KG_LLM_MODEL'],
                       api_key=os.environ['KG_LLM_API_KEY'], base_url=os.environ['KG_LLM_BASE_URL'],
-                      silent_fail=False)
+                      silent_fail=False, max_tokens=_llm_max_tokens())
         try:
             event('LLM 模型 · '+os.environ['KG_LLM_MODEL'])
             with stage('初始化实体抽取器'):
@@ -570,8 +597,12 @@ class SemanticaExtractor:
                 event('跳过关系抽取 · 没有实体或本体未定义关系类型')
             event(f'关系抽取返回 · {len(relations)} 条')
         except Exception as exc:
-            # 避免返回可能包含密钥的供应商异常消息。
-            raise RuntimeError('Semantica LLM 抽取失败；请检查模型配置和供应商可用性') from exc
+            # 不能只说"抽取失败"：把底层原因（经 redact 脱敏）带出来。
+            # 早先这里把异常整个吞掉，只回一句通用文案，于是
+            # 「模型不支持 / 输出被截断 / 鉴权失败 / TLS 超时」在用户那里长成同一个样子，
+            # 完全无法自查 —— 与开放发现路径（discover）保留 redact(exc) 的做法对齐。
+            raise RuntimeError(f'Semantica LLM 抽取失败：{redact(exc)}；'
+                               '请检查模型配置和供应商可用性') from exc
         records, lookup = {}, {}
         pending_entities=set()
         for entity in entities:

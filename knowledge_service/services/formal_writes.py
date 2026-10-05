@@ -135,7 +135,7 @@ class FormalFactWriter:
             selected_versions[canonical_id] = row['version_id']
         return selected_versions[canonical_id]
 
-    def _reject_deprecated_write_term(self, project_id, record, ontology):
+    def _reject_deprecated_write_term(self, project_id, record, ontology, operation=None):
         """Prevent version-producing writes from using a currently retired term.
 
         Historical rows remain untouched and retain their stored ``ontology_id``;
@@ -153,6 +153,12 @@ class FormalFactWriter:
         except ValueError:
             return
         if not ontology.is_active_term(term):
+            # 「撤销/恢复」类写入放行：门禁拦的是"产出**使用**停用术语的新内容"，
+            # 而撤销是把这条记录自己历史版本里的东西原样写回去 —— 不恢复，
+            # "可回滚"这句承诺就是空话（回滚到一半会被这里拦死）。
+            # 普通修订仍然照旧被拦：那条既有契约（术语停用后不许再修订出新版本）不变。
+            if operation in {'merge_reversal'}:
+                return
             raise ValueError(f'不能使用已停用的本体术语创建新事实：{term}')
 
     def _map_accepted_assertion(self, project_id, assertion, record_version_id, *, replay=False):
@@ -228,7 +234,7 @@ class FormalFactWriter:
             for ordinal, original in enumerate(records):
                 record = self._canonical_record(original)
                 self._reject_deprecated_write_term(
-                    project_id, record, current_ontology)
+                    project_id, record, current_ontology, operation)
                 expected_version = expected.get(record['id'])
                 canonical_id = record['id']
                 if record['kind'] in {'relation', 'attribute'}:

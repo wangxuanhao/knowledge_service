@@ -131,11 +131,26 @@ def test_get_record_respects_known_at_with_mixed_offset(client):
     assert response.json()['version'] == first['version'] == 1
 
 
-def test_invalid_ontology_and_filter_rollback(client):
+def test_invalid_writes_roll_back_but_unknown_concepts_are_kept(client):
+    """C1 改掉了这条契约的一半：类型不在本体里不再等于"丢掉知识"。
+
+    旧断言是 `type='Unknown'` 必须 422 且不落库；现在它照样 422 的话，
+    文档里抽出来的概念就永远进不来（这正是规划 §4.1 要修的）。新契约分两半：
+      * 缺术语 → 201 收下 + 标「结构待定」（能查、能引用，但不作为正式证据）；
+      * 真错误（端点不存在、过滤算子非法、Turtle 语法错）→ 照旧 422，且一条都不落库。
+    """
     p = project(client)
     path = f'/api/projects/{p}'
-    assert client.post(path+'/records',json={'records':[{'kind':'entity','text':'x','type':'Unknown'}]}).status_code == 422
-    assert client.post(path+'/records/query',json={}).json()['records'] == []
+    created = client.post(path+'/records',json={'records':[{'kind':'entity','text':'x','type':'Unknown'}]})
+    assert created.status_code == 201, created.text
+    record = created.json()['records'][0]
+    assert record['structure_pending']['state'] == 'pending'
+    assert record['structure_pending']['terms'] == ['Unknown']
+    assert client.post(path+'/records/query',json={}).json()['total'] == 1
+    broken = client.post(path+'/records',json={'records':[
+        {'kind':'relation','type':'Unknown','text':'坏关系','subject_id':'nope','object_id':'nope'}]})
+    assert broken.status_code == 422, broken.text
+    assert client.post(path+'/records/query',json={}).json()['total'] == 1, '失败的写入不能留下半条记录'
     assert client.post(path+'/search',json={'query':'x','filters':{'field':'x','op':'arbitrary','value':1}}).status_code == 422
     assert client.post(path+'/ontologies',json={'turtle':'invalid'}).status_code == 422
 

@@ -73,3 +73,34 @@ def test_merge_consolidates_colliding_facts_and_reversal_restores_them(tmp_path)
     visible = [row for row in service.scoped(project_id, {}) if row['kind'] == 'relation']
     assert {row['id'] for row in visible} == {'a-rel', 'z-rel'}
     assert len(repo.list_fact_keys(project_id)) == 2
+
+def test_duplicate_groups_only_groups_same_name_and_same_type(tmp_path):
+    """「疑似重复」的口径：名称完全相同（忽略大小写与空白）且本体类型相同 —— 刻意不做模糊匹配。
+
+    为什么这么窄：这个数字是给用户核对的。模糊分能给出"12 组"这种好看的数字，
+    但用户点进去会问"这三条凭什么算重复"——那是查重向导（语义档）该回答的问题，
+    不是顶部那个数字该背的锅。软删除的实体不参与统计。
+    """
+    repo = Repository(tmp_path / 'dupes.sqlite')
+    service = KnowledgeService(repo, HashingEncoder())
+    project_id = repo.create_project('乙')['id']
+    ttl = ('@prefix ex: <http://ex/> . '
+           '@prefix owl: <http://www.w3.org/2002/07/owl#> . '
+           'ex:Person a owl:Class . ex:Company a owl:Class .')
+    repo.save_ontology(project_id, ttl, Ontology(ttl).summary())
+    service.write(project_id, [
+        {'id': 'a1', 'kind': 'entity', 'type': 'Person', 'text': '张三'},
+        {'id': 'a2', 'kind': 'entity', 'type': 'Person', 'text': '  张三 '},
+        {'id': 'a3', 'kind': 'entity', 'type': 'Company', 'text': '张三'},
+        {'id': 'b1', 'kind': 'entity', 'type': 'Person', 'text': '李四'},
+        {'id': 'b2', 'kind': 'entity', 'type': 'Person', 'text': '李四'},
+    ])
+    # 软删除走真正的删除通道（它会给记录盖 _deleted 标记），不绕过治理层直接改记录
+    Governance(service).delete(project_id, 'b2', 1)
+
+    groups = Governance(service).duplicate_groups(project_id)
+
+    assert [group['name'] for group in groups] == ['张三'], groups
+    assert {member['id'] for member in groups[0]['members']} == {'a1', 'a2'}
+    assert groups[0]['type'] == 'Person'
+    assert all(member['ontology_id'] for member in groups[0]['members'])

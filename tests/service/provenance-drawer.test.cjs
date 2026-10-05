@@ -92,7 +92,8 @@ test('drawer is initially hidden, accessible and renders fixed fields, branches,
   await drawer.open({projectId:'p',answerId:'a',citation:'E1',trigger});
   assert.equal(root.hidden,false);
   const nodes=flatten(root),tabs=nodes.filter(n=>n.getAttribute('role')==='tab');
-  assert.deepEqual(tabs.map(n=>n.textContent),['证据链','API 数据']);
+    // 页签文案改成了人话（用户反馈"看不懂证据链"）；断言的是"两个页签：链路 + 原始数据"，不是旧词
+  assert.deepEqual(tabs.map(n=>n.textContent),['这条引用从哪来','原始接口数据（开发排查用）']);
   assert.equal(doc.getElementById('provenance-status').getAttribute('aria-live'),'polite');
   const chain=doc.getElementById('provenance-chain');
   assert.ok(chain.textContent.includes('<script>literal</script>'));

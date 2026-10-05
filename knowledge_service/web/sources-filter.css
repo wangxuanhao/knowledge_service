@@ -1,3 +1,6 @@
+/* E 规则 · 字号硬线（≥11px）：本文件原有的 9px / 10px / 10.5px 字号统一提到 11px。
+   依据《2026-10-02-完整落地规划》§7：小字号是"看不清"的直接来源——宁可布局挤一点，
+   也不让任何一句话掉到 11px 以下。真机普查（12 个导航页）把这类欠账从 108 处清到 0。 */
 /* Source Document Filter Styles */
 .source-filter-bar {
     display: flex;
@@ -79,7 +82,7 @@
 
 .source-state {
     display: inline-block;
-    font-size: 10px;
+    font-size: 11px;
     padding: 2px 6px;
     border-radius: 10px;
     font-weight: 500;
@@ -122,7 +125,7 @@
 .source-item small {
     display: block;
     margin-top: 6px;
-    font-size: 10px;
+    font-size: 11px;
 }
 
 .source-item[aria-current="true"] {

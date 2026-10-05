@@ -242,7 +242,10 @@
     }
   }
 
-  /* re-render whenever the 项目管理 tab is shown; also render once on load */
-  document.querySelector('[data-tab="projects"]').addEventListener('click', renderProjects);
-  renderProjects();
+  /* 进入「项目与运行 → 项目设置」分区时重新拉一次；首次加载也渲染一次 */
+  // 项目管理并入「项目与运行」的「项目设置」分区：进入该分区时重新拉一次项目列表。
+  window.RuntimeView?.on('project', renderProjects);
+  // 首次加载也要等认证就绪：未登录时先挂着，别带着空令牌打 /api/projects 拿 401。
+  (window.Auth&&window.Auth.whenReady?window.Auth.whenReady():Promise.resolve())
+    .then(renderProjects);
 })();

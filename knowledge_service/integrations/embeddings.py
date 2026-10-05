@@ -10,9 +10,38 @@ from ..core.net import external_client
 from ..utils.diagnostics import redact
 
 
+def _local_model_dimension(path):
+    """不加载模型就猜出输出维度：读 config.json 的 hidden_size（sentence-transformers
+    的池化输出维度就是它）。猜不到返回 None —— 让调用方回落到显式配置，而不是瞎猜一个数。
+
+    为什么要提前知道：Milvus 的 collection 维度在**建表时固定**，必须和编码器一致；
+    以前这个数字被硬编码成 1024，换个 demo/小模型就变成"写入时才发现维度不对"。
+    """
+    import json
+    try:
+        config = json.loads((Path(path) / 'config.json').read_text(encoding='utf-8'))
+    except Exception:
+        return None
+    for key in ('hidden_size', 'sentence_embedding_dimension', 'd_model'):
+        value = config.get(key)
+        if isinstance(value, int) and value > 0:
+            return value
+    return None
+
+
+def encoder_dimension(encoder=None):
+    """当前编码器产出的向量维度；无法在编码前确定时返回 None。
+
+    这是"维度"的**唯一出处**：Milvus 建表、索引重建、错误提示都读它，
+    别再在别处抄一个 1024。
+    """
+    return getattr(encoder if encoder is not None else configured_encoder(), 'dimension', None)
+
+
 class HashingEncoder:
     identity = 'demo-character-bigrams-sha256-256-v1'
     semantic = False
+    dimension = 256   # 与 encode() 里的 256 桶一致；Milvus 建表维度据此推导
 
     def encode(self, texts):
         output = []
@@ -33,6 +62,10 @@ class LocalEncoder:
         self.identity = f'sentence-transformers:{self.path}:normalized-v1'
         self._model = None
         self._lock = threading.RLock()
+        self.dimension = _local_model_dimension(self.path)
+
+    def __repr__(self):
+        return f'LocalEncoder({self.path}, dim={self.dimension})'
 
     def encode(self, texts):
         with self._lock:
@@ -55,6 +88,9 @@ class RemoteEncoder:
         self.model = os.environ.get('KG_EMBEDDING_MODEL', '')
         self.key = os.environ.get('KG_EMBEDDING_API_KEY', '')
         self.identity = f'openai:{self.url}:{self.model}'
+        # 远端模型的维度无法在调用前问出来：要么显式声明，要么留给首次响应发现。
+        declared = os.environ.get('KG_EMBEDDING_DIMENSION', '').strip()
+        self.dimension = int(declared) if declared.isdigit() and int(declared) > 0 else None
 
     def encode(self, texts):
         if not all([self.url, self.model, self.key]):

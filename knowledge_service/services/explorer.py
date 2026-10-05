@@ -171,9 +171,18 @@ class Explorer:
             labels=self.service.ontology_labels(p) if attribute_mode!='none' else {}
             grouped=(self._entity_attributes(p,attributes,set(nodes),labels)
                      if attribute_mode!='none' else {})
+            # 每个实体都带上它所属类的**父类/祖先**（用户反馈："检索没看到有父类的信息"、
+            # "知识图谱也没父类相关的信息"）。实体节点本身没有父类 —— 层级在**类**之间，
+            # 所以这里给的是"这个实体的类型在本体里的上位类"，图上与详情里都靠它显示归属。
+            family=self.service.ontology_family(p)
             presented=[]
             for row in nodes.values():
                 item=public(row)
+                if item.get('kind')=='entity':
+                    entry=family.get(item.get('type') or '') or {}
+                    item['class_label']=entry.get('label') or item.get('type_label') or ''
+                    item['class_parents']=entry.get('parents') or []
+                    item['class_ancestors']=entry.get('ancestors') or []
                 if attribute_mode!='none':item['attributes']=grouped.get(row['id'],[])
                 presented.append(item)
             presented_edges=[public(r) for r in edges]
@@ -235,9 +244,32 @@ class Explorer:
     def sources(self,p,scope):
         # PERF：与 /dashboard 相同的共享扫描。响应很大是因为每个文档携带完整文本，
         # 但延迟来自扫描本身，而不是载荷。
+        # 「原文 → 解析后映射」：按 source_id 归组一次（O(n)），给每篇文档补上
+        # 派生切片/实体/关系的计数与有界样例，前端据此展示「原文件类型 + 解析后的映射」。
         rows=self.service.scoped(p,scope)
-        return {'documents':[{**public(r),'derived_count':sum(x.get('source_id')==r['id'] for x in rows)}
-                             for r in rows if r['kind']=='document']}
+        by_source=defaultdict(list)
+        for row in rows:
+            source_id=row.get('source_id')
+            if source_id:
+                by_source[source_id].append(row)
+        documents=[]
+        for r in rows:
+            if r['kind']!='document':
+                continue
+            derived=by_source.get(r['id'],[])
+            entities=[x for x in derived if x['kind']=='entity']
+            relations=[x for x in derived if x['kind']=='relation']
+            chunks=[x for x in derived if x['kind']=='chunk']
+            documents.append({
+                **public(r),
+                'derived_count':len(derived),
+                'derived_breakdown':{
+                    'entity':len(entities),'relation':len(relations),'chunk':len(chunks)},
+                'derived_entities':[{'text':x.get('text'),'type':x.get('type')} for x in entities[:20]],
+                'derived_relations':[{'text':x.get('text'),'type':x.get('type')} for x in relations[:20]],
+                'derived_chunks':[{'id':x['id'],'text':(x.get('text') or '')[:200]} for x in chunks[:10]],
+            })
+        return {'documents':documents}
 
     def mindmap(self,p,scope,root_id,depth=3):
         graph=self.graph(p,scope,root_id,depth,attribute_mode='none')

@@ -92,6 +92,10 @@ def test_ontology_lineage_metadata_survives_restart(tmp_path):
     assert reopened.get_ontology(p, second['id'])['metadata'] == {
         **metadata,
         'write_path': 'compatibility',
+        # E1：本体版本号只跟**图结构**走。结构变更 → 递增；纯标注变更 → 复用当前号并标
+        # version_reused。这里 save_ontology 走的是结构路径，所以从 1 递增到 2。
+        'version': 2,
+        'version_reused': False,
     }
 
 
@@ -223,3 +227,38 @@ def test_operation_reservations_are_atomic_across_repository_connections(tmp_pat
     exact = second.get_record(project, 'versioned', known_at=version_one['recorded_at'])
     assert exact['version'] == 1
     assert exact['text'] == 'one'
+
+
+def test_concurrent_reservations_are_serialized_per_project(tmp_path):
+    """同一项目的预留必须串行：别人正持有项目锁时，另一次预留只能等待。
+
+    锁住的是「换到 PostgreSQL 之后丢掉的那份原子性」：SQLite 的 BEGIN IMMEDIATE
+    会给库级写锁，PG 的裸 BEGIN 不会，于是两个连接可能读到同一高水位、插入同一
+    (project_id, recorded_at)，被唯一约束打成 UniqueViolation（曾让全量套件偶发转红）。
+    这里用**外部持有项目锁**的方式把竞态窗口拉成确定性的等待：修复前不会等待（断言立刻失败），
+    修复后必须阻塞到持锁事务结束。
+    """
+    import time
+
+    import psycopg
+    import pg_support
+
+    path = tmp_path / 'serialized-operations.sqlite'
+    repository = Repository(path)
+    project = repository.create_project('serialized')['id']
+    dsn = pg_support.target(path)
+
+    holder = psycopg.connect(dsn)
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        holder.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))', (project,))
+        future = executor.submit(Repository(path)._reserve_record_operation, project)
+        time.sleep(0.6)
+        blocked = not future.done()
+    finally:
+        holder.close()          # 提交/回滚即释放事务级咨询锁
+    reserved = future.result(timeout=15)
+    executor.shutdown()
+
+    assert blocked, '预留没有等待项目锁：并发预留会算出同一时间点并被唯一约束拒绝'
+    assert reserved.recorded_at

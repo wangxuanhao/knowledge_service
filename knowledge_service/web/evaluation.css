@@ -83,7 +83,8 @@
 /* ── Snapshot badges & meta ── */
 .eval-snapshot-badge {
   display: inline-block;
-  font-size: 10px;
+  /* 字号下限 11px：这两个徽标是判断"手动/自动备份"的唯一线索，不能小到读不出来 */
+  font-size: 11px;
   padding: 2px 7px;
   border-radius: 4px;
   font-weight: 500;

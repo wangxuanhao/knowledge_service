@@ -17,9 +17,9 @@
 
 /* Create form (reuses legacy ids: create-name / default-ontology / create-project / cancel-project) */
 .projects-create-form {
-    background: white;
-    border: 1px solid #dce5df;
-    border-radius: 12px;
+    background:var(--ks-surface);
+    border:1px solid var(--ks-line);
+    border-radius:12px;
     padding: 20px;
     margin-bottom: 20px;
     display: grid;
@@ -50,9 +50,9 @@
 }
 
 .project-card {
-    background: white;
-    border: 1px solid #dce5df;
-    border-radius: 12px;
+    background:var(--ks-surface);
+    border:1px solid var(--ks-line);
+    border-radius:12px;
     padding: 20px;
     display: flex;
     flex-direction: column;
@@ -61,13 +61,13 @@
 }
 
 .project-card:hover {
-    border-color: #b3d4c5;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    border-color:var(--ks-line);
+    box-shadow:0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
 .project-card.current {
-    border-color: #216952;
-    background: linear-gradient(135deg, #f0faf3 0%, #e8f5eb 100%);
+    border-color:#216952;
+    background:linear-gradient(135deg, var(--ks-surface) 0%, var(--ks-ok-soft) 100%);
 }
 
 .project-card-head {
@@ -80,7 +80,7 @@
 .project-card-head h3 {
     font-size: 16px;
     font-weight: 600;
-    color: #244238;
+    color:#244238;
     margin: 0;
     overflow-wrap: anywhere;
 }
@@ -89,15 +89,15 @@
     flex-shrink: 0;
     font-size: 11px;
     font-weight: 600;
-    color: #216952;
-    background: #dcfce7;
+    color:var(--ks-accent);
+    background:var(--ks-sunken);
     padding: 3px 10px;
-    border-radius: 12px;
+    border-radius:12px;
 }
 
 .project-created {
     font-size: 12px;
-    color: #6b7f75;
+    color:var(--ks-muted);
     margin: 0;
 }
 
@@ -106,8 +106,8 @@
     grid-template-columns: repeat(4, 1fr);
     gap: 8px;
     padding: 12px 0;
-    border-top: 1px solid #e5ebe5;
-    border-bottom: 1px solid #e5ebe5;
+    border-top:1px solid var(--ks-line);
+    border-bottom:1px solid var(--ks-line);
 }
 
 .project-count {
@@ -118,12 +118,12 @@
     display: block;
     font-size: 18px;
     font-weight: 700;
-    color: #244238;
+    color:#244238;
 }
 
 .project-count span {
     font-size: 11px;
-    color: #6b7f75;
+    color:var(--ks-muted);
 }
 
 .project-actions {
@@ -132,20 +132,48 @@
     margin-top: auto;
 }
 
+/* 行内动作做成"安静的强调"（白底描边）：
+   一屏一个实心按钮 —— 这一屏的主操作是「＋ 创建项目」，卡片上的切换/重命名/删除都是行内动作，
+   全填成实心就会出现一屏十几个绿红按钮，用户分不清哪个才是这一页要干的事。
+   危险语义靠砖红描边 + 文字表达（写法同 .ontology-workbench button.danger），
+   真正的代价在确认弹窗里展示（那里要求勾选确认才放行）。 */
 .project-actions button {
     flex: 1;
     font-size: 12px;
     padding: 8px 12px;
+    /* 行内动作＝描边按钮 → 底必须是**透明**。原来写的是 `white`（浅色主题下与卡片同色，
+       视觉上就是描边），迁移脚本按字面把 white 换成了 --ks-surface（深色**实底**），
+       结果四个行内动作全变成实心，一屏 4 个主按钮、主次层次消失
+       （test_runtime_page_ui.py：project 区实心按钮应为 1 个，实际 4 个）。 */
+    background: transparent;
+    color: var(--ui-accent);
+    border-color: var(--ui-line-2);
+}
+
+.project-actions button:hover {
+    background: rgba(56, 189, 248, .10);
+    border-color: var(--ui-accent);
+}
+
+.project-actions .danger {
+    background: transparent;
+    color: #ff9a8f;
+    border-color: rgba(248, 113, 113, .45);
+}
+
+.project-actions .danger:hover {
+    background: rgba(248, 113, 113, .14);
+    border-color: var(--ui-danger);
 }
 
 /* Empty state */
 .projects-empty {
     text-align: center;
     padding: 48px 20px;
-    color: #6b7f75;
-    background: #f8faf7;
-    border: 1px dashed #d1d5db;
-    border-radius: 12px;
+    color:var(--ks-muted);
+    background:var(--ks-surface);
+    border:1px dashed var(--ks-line);
+    border-radius:12px;
 }
 
 .projects-empty-icon {
@@ -157,7 +185,7 @@
 .projects-empty-title {
     font-size: 14px;
     font-weight: 550;
-    color: #374151;
+    color:#374151;
     margin-bottom: 6px;
 }
 
@@ -172,7 +200,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background:rgba(0, 0, 0, 0.5);
     display: none;
     align-items: center;
     justify-content: center;
@@ -187,12 +215,12 @@
 }
 
 .projects-modal {
-    background: white;
-    border: 1px solid #dce5df;
-    border-radius: 12px;
+    background:var(--ks-surface);
+    border:1px solid var(--ks-line);
+    border-radius:12px;
     width: 90%;
     max-width: 480px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    box-shadow:0 20px 60px rgba(0, 0, 0, 0.3);
     transform: translateY(20px);
     transition: transform 0.2s;
 }
@@ -206,26 +234,26 @@
     align-items: center;
     justify-content: space-between;
     padding: 18px 20px;
-    border-bottom: 1px solid #e5ebe5;
-    background: #f8faf7;
-    border-radius: 12px 12px 0 0;
+    border-bottom:1px solid var(--ks-line);
+    background:var(--ks-surface);
+    border-radius:12px 12px 0 0;
 }
 
 .projects-modal-title {
     font-size: 16px;
     font-weight: 600;
-    color: #294d3e;
+    color:var(--ks-ink);
     margin: 0;
 }
 
 .projects-modal-close {
     width: 28px;
     height: 28px;
-    border: none;
-    background: transparent;
-    color: #6b7f75;
+    border:none;
+    background:transparent;
+    color:var(--ks-muted);
     cursor: pointer;
-    border-radius: 6px;
+    border-radius:6px;
     font-size: 18px;
     display: flex;
     align-items: center;
@@ -234,8 +262,8 @@
 }
 
 .projects-modal-close:hover {
-    background: #e8f0eb;
-    color: #294d3e;
+    background:var(--ks-sunken);
+    color:var(--ks-ink);
 }
 
 .projects-modal-body {
@@ -250,9 +278,9 @@
     display: flex;
     gap: 10px;
     padding: 16px 20px;
-    border-top: 1px solid #e5ebe5;
-    background: #fafcfa;
-    border-radius: 0 0 12px 12px;
+    border-top:1px solid var(--ks-line);
+    background:var(--ks-surface);
+    border-radius:0 0 12px 12px;
 }
 
 .projects-modal-footer button {
@@ -265,12 +293,12 @@
 
 /* Delete confirmation */
 .projects-delete-warning {
-    background: #fef3f2;
-    border: 1px solid #fecaca;
-    border-radius: 8px;
+    background:var(--ks-sunken);
+    border:1px solid var(--ks-line);
+    border-radius:8px;
     padding: 12px 14px;
     font-size: 12px;
-    color: #991b1b;
+    color:#991b1b;
     line-height: 1.7;
     margin-bottom: 14px;
 }
@@ -280,9 +308,9 @@
     align-items: center;
     gap: 8px;
     padding: 10px 12px;
-    background: #fef3f2;
-    border: 1px solid #fecaca;
-    border-radius: 6px;
+    background:var(--ks-sunken);
+    border:1px solid var(--ks-line);
+    border-radius:6px;
     margin-top: 14px;
 }
 
@@ -296,7 +324,7 @@
 .projects-confirm-row label {
     margin: 0;
     font-size: 12px;
-    color: #991b1b;
+    color:#991b1b;
     cursor: pointer;
 }
 
@@ -328,16 +356,16 @@
     gap: 7px;
     margin: 6px 0 12px;
     padding: 6px 8px;
-    border: 1px solid #e2ebe5;
-    border-radius: 7px;
-    background: #f8fbf8;
+    border:1px solid var(--ks-line);
+    border-radius:7px;
+    background:var(--ks-surface);
     font-size: 11px;
-    color: #60756a;
+    color:#60756a;
 }
 
 .project-id > span {
     flex: none;
-    color: #829087;
+    color:var(--ks-muted);
 }
 
 .project-id > code {
@@ -345,7 +373,7 @@
     min-width: 0;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 11px;
-    color: #244f3d;
+    color:var(--ks-ink);
     overflow-wrap: anywhere;
     user-select: all;
 }
@@ -353,15 +381,17 @@
 .project-id-copy {
     flex: none;
     padding: 3px 10px;
-    border: 1px solid #c9dbd0;
-    border-radius: 6px;
-    background: #fff;
-    color: #28634d;
+    border:1px solid var(--ui-line-2);
+    border-radius:6px;
+    /* 同样是"白底描边"被迁移成深色实底的行内动作 → 回透明，否则它会被算成第二个主按钮 */
+    background:transparent;
+    color:var(--ui-accent);
     font: inherit;
-    font-size: 10px;
+    /* 字号下限 11px（引导式界面规则的硬线）：10px 的按钮文字在真机上会被读成"看不清的附属标记" */
+    font-size: 11px;
     cursor: pointer;
 }
 
 .project-id-copy:hover {
-    background: #f0f7f3;
+    background: rgba(56, 189, 248, .10);
 }

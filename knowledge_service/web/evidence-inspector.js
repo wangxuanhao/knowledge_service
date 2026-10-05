@@ -98,17 +98,39 @@
     const name=id=>options.find(n=>n.id===id)?.text||id;
     const aliases=Array.isArray(row.metadata?.aliases)?row.metadata.aliases:[];
     const formalAttributes=row.kind==='entity'?attributeDetailsHtml(row.attributes,esc):'';
+    // 本体归属：这个实体属于哪个类、它的父类是谁（用户反馈"检索没看到有父类的信息"）。
+    // 层级在**类**之间，实体本身没有父类，所以这里说的是"它所属类在本体里的上位类"，
+    // 数据来自服务端 class_parents / class_ancestors（service.ontology_family，与图谱同一份）。
+    const entityFamily=row.kind==='entity'?(()=>{
+      const pick=entry=>(entry&&(entry.label||entry.id))||'';
+      const parents=(row.class_parents||[]).map(pick).filter(Boolean);
+      const ancestors=(row.class_ancestors||[]).map(pick).filter(Boolean);
+      const current=pick({label:row.class_label})||labelOf(row.type);
+      // 用"字段名 + 值"的清单，而不是一排胶囊：胶囊看起来像可点的输入框，
+      // 读者分不清哪个是父类、哪个是当前类（视觉审查就是这么反馈的）。
+      // 同时明确写出"父类"两个字，用户原话是"检索没看到有父类的信息"。
+      const rows=[['当前类',esc(current)]];
+      rows.push(['父类',parents.length?esc(parents.join('、')):'顶层类（本体里没有父类）']);
+      if(ancestors.length>parents.length){
+        rows.push(['完整继承链',esc([current,...ancestors].join(' → '))]);
+      }
+      return `<section class="evidence-family"><h4>本体归属</h4><dl class="evidence-family__rows">`
+        +rows.map(([key,value])=>`<dt>${key}</dt><dd>${value}</dd>`).join('')
+        +'</dl></section>';
+    })():'';
     const legacyAttributes=row.kind==='entity'&&!formalAttributes&&row.properties&&Object.keys(row.properties).length?
       `<section class="evidence-attributes"><h4>兼容属性</h4><dl>${Object.entries(row.properties).map(([key,value])=>`<dt>${esc(key)}</dt><dd>${esc(typeof value==='string'?value:JSON.stringify(value))}</dd>`).join('')}</dl></section>`:'';
-    host.innerHTML=`<section class="evidence-identity"><span class="evidence-kind">${esc({entity:'实体',relation:'关系',chunk:'原文片段',document:'文档'}[row.kind]||row.kind)} · ${typeHint(row.type)}</span><h3>${esc(row.text)}</h3>${row.kind==='relation'?`<div class="relation-path"><b>${esc(name(row.subject_id))}</b><span>↓ ${typeHint(row.type)}</span><b>${esc(name(row.object_id))}</b></div>`:''}${aliases.length?'<p class="evidence-aliases">别名：'+aliases.map(esc).join('、')+'</p>':''}<div class="evidence-action-groups"><div class="evidence-actions"><button data-action="edit">编辑</button>${row.kind==='entity'?'<button data-action="add-relation">新增关系</button>':''}<button data-action="history" class="secondary">版本历史 · v${row.version}</button>${row.kind==='entity'?'<button data-action="mindmap" class="secondary">展开脑图</button>':''}</div>${row.kind==='entity'||row.kind==='relation'?'<div class="evidence-danger"><span>危险操作</span></div>':''}</div></section>${formalAttributes?`<section class="evidence-attributes"><h4>实体属性</h4>${formalAttributes}</section>`:legacyAttributes}<section class="evidence-sources"><h4>原文证据</h4><div id="inspector-source-list" aria-live="polite">正在查找来源…</div></section><section class="evidence-time"><h4>时间</h4><dl><dt>业务生效</dt><dd>${esc(row.valid_from?localTime(row.valid_from):'未知')}</dd><dt>业务失效</dt><dd>${esc(row.valid_until?localTime(row.valid_until):'未设定')}</dd><dt>系统记录</dt><dd>${esc(localTime(row.recorded_at))}</dd></dl></section><details class="evidence-technical"><summary>Metadata / 属性 / 技术标识</summary><pre>${esc(JSON.stringify({id:row.id,type:row.type,source_id:row.source_id,ontology_id:row.ontology_id,metadata:row.metadata,properties:row.properties},null,2))}</pre></details>`;
+    host.innerHTML=`<section class="evidence-identity"><span class="evidence-kind">${esc({entity:'实体',relation:'关系',chunk:'原文片段',document:'文档'}[row.kind]||row.kind)} · ${typeHint(row.type)}</span><h3>${esc(row.text)}</h3>${row.kind==='relation'?`<div class="relation-path"><b>${esc(name(row.subject_id))}</b><span>↓ ${typeHint(row.type)}</span><b>${esc(name(row.object_id))}</b></div>`:''}${aliases.length?'<p class="evidence-aliases">别名：'+aliases.map(esc).join('、')+'</p>':''}<div class="evidence-action-groups"><div class="evidence-actions"><button data-action="edit">编辑</button>${row.kind==='entity'?'<button data-action="add-relation">新增关系</button>':''}<button data-action="history" class="secondary">版本历史 · v${row.version}</button>${row.kind==='entity'||row.kind==='relation'?'<button data-action="ledger" class="secondary">在台账查看</button>':''}${row.kind==='entity'?'<button data-action="mindmap" class="secondary">展开脑图</button>':''}</div>${row.kind==='entity'||row.kind==='relation'?'<div class="evidence-danger"><span>危险操作</span></div>':''}</div></section>${formalAttributes?`<section class="evidence-attributes"><h4>实体属性</h4>${formalAttributes}</section>`:legacyAttributes}${entityFamily}<section class="evidence-sources"><h4>原文证据</h4><div id="inspector-source-list" aria-live="polite">正在查找来源…</div></section><section class="evidence-time"><h4>时间</h4><dl><dt>业务生效</dt><dd>${esc(row.valid_from?localTime(row.valid_from):'未知')}</dd><dt>业务失效</dt><dd>${esc(row.valid_until?localTime(row.valid_until):'未设定')}</dd><dt>系统记录</dt><dd>${esc(localTime(row.recorded_at))}</dd></dl></section><details class="evidence-technical"><summary>Metadata / 属性 / 技术标识</summary><pre>${esc(JSON.stringify({id:row.id,type:row.type,source_id:row.source_id,ontology_id:row.ontology_id,metadata:row.metadata,properties:row.properties},null,2))}</pre></details>`;
     host.querySelector('[data-action="edit"]').onclick=()=>editRecord(row);
     host.querySelector('[data-action="edit"]').textContent=row.kind==='relation'?'编辑这条关系':row.kind==='entity'?'编辑这个实体':'编辑';
     host.querySelector('[data-action="history"]').onclick=()=>historyFor(row);
     host.querySelector('[data-action="add-relation"]')?.addEventListener('click',()=>openRelationCreator(row));
+    // D1「图谱 → 台账」：跳回台账并定位到这一行（记录可能分批加载，focusLedgerRecord 在取回数据后落地）。
+    host.querySelector('[data-action="ledger"]')?.addEventListener('click',()=>window.focusLedgerRecord?.(row));
     if(row.kind==='entity'||row.kind==='relation'){
       const remove=document.createElement('button');remove.className='danger';
       remove.textContent=row.kind==='relation'?'删除这条关系':'删除实体及其关联关系';
-      remove.title='软删除后可在“知识与版本 → 操作历史”中撤销';
+      remove.title='软删除后可在「知识台账 → 可撤销的操作」里撤销';
       remove.onclick=async()=>{
         if(remove.dataset.confirm!=='true'){
           remove.dataset.confirm='true';remove.textContent='再次点击确认删除';
@@ -117,7 +139,7 @@
         remove.disabled=true;
         try{
           const result=await api(endpoint('/delete'),{record_id:row.id,expected_version:row.version});
-          status(`已软删除 ${result.deleted} 条记录；可在“知识与版本 → 操作历史”撤销。`);
+          status(`已软删除 ${result.deleted} 条记录；可在「知识台账 → 可撤销的操作」撤销。`);
           host.innerHTML='<p class="evidence-empty">该知识已软删除，正在刷新图谱…</p>';get('draw-graph').click();
         }catch(error){status(error.message,true);remove.disabled=false;}
       };

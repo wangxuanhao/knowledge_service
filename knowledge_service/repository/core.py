@@ -463,6 +463,13 @@ class Repository:
         """预留严格晚于项目高水位的逻辑操作时间点。"""
         with self._transaction():
             self.get_project(project_id)
+            # PostgreSQL 的裸 BEGIN 是 READ COMMITTED，不像 SQLite 的 BEGIN IMMEDIATE
+            # 会顺手拿到库级写锁：两个连接能同时读到同一高水位，再各自插入同一时间点，
+            # 于是 (project_id, recorded_at) 唯一约束把其中一个打成 UniqueViolation。
+            # 这里取"项目级事务咨询锁"，把「读高水位 + 预留」串成临界区，锁随事务提交释放。
+            self._db.execute(
+                'SELECT pg_advisory_xact_lock(hashtextextended(?, 0))',
+                (project_id,))
             now = normalize_time(recorded_at) if recorded_at is not None else utc_now()
             stored_times = []
             for row in self._db.execute(
@@ -998,16 +1005,47 @@ class Repository:
             separators=(',', ':'))
         return hashlib.sha256(encoded.encode('utf-8')).hexdigest()
 
+    def _current_ontology_version(self, project_id) -> int:
+        """项目当前的本体版本号。
+
+        新数据把版本号写在 `metadata.version` 里；早期发布的本体没有这个字段，
+        用**行序**（第几行就是 v几）回填 —— 两者语义一致，所以老项目不用迁移。
+        """
+        row = self._db.execute(
+            'SELECT metadata FROM ontologies WHERE project_id=? ORDER BY seq DESC LIMIT 1',
+            (project_id,)).fetchone()
+        if row is None:
+            return 0
+        try:
+            stored = json.loads(row['metadata'] or '{}').get('version')
+            if stored is not None and int(stored) > 0:
+                return int(stored)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+        fallback = self._db.execute(
+            'SELECT COUNT(*) AS n FROM ontologies WHERE project_id=?', (project_id,)).fetchone()
+        return int(fallback['n'] or 0)
+
     def _insert_ontology_version(self, project_id, turtle, summary, metadata=None,
-                                 *, ontology_id=None, created_at=None):
+                                 *, ontology_id=None, created_at=None,
+                                 reuse_version=False):
         metadata = {} if metadata is None else metadata
         if not isinstance(turtle, str) or not isinstance(summary, dict) or not isinstance(metadata, dict):
             raise ValueError('本体需要 Turtle 文本和摘要对象')
+        # E1：版本号只跟**图结构**走。纯标注变更（reuse_version=True）复用当前版本号，
+        # 但**照样插一行**——历史一行都不能少，留痕与双时态读取依赖这张表的完整性。
+        current_version = self._current_ontology_version(project_id)
+        if reuse_version and current_version > 0:
+            version, version_reused = current_version, True
+        else:
+            version, version_reused = current_version + 1, False
+        metadata = {**metadata, 'version': version, 'version_reused': version_reused}
         item = {
             'id': ontology_id or str(uuid4()), 'project_id': project_id,
             'turtle': turtle, 'summary': json.loads(_json(summary)),
             'created_at': created_at or utc_now(),
             'metadata': json.loads(_json(metadata)),
+            'version': version,
         }
         self._db.execute(
             '''INSERT INTO ontologies
@@ -1152,14 +1190,34 @@ class Repository:
             raise OntologyPublicationConflict(
                 'revision_conflict', 'ontology draft revision changed',
                 details={'current_revision': draft['revision']})
-        if draft['status'] != 'reviewed':
+        # A3：状态只有三种，「能发布」＝这份请求还在「待处理」（决定齐不齐由
+        # publish_preflight 逐条校验，不靠状态记）。
+        if draft['status'] != 'pending':
             raise OntologyPublicationConflict(
-                'revision_conflict', 'ontology draft is no longer reviewed')
+                'revision_conflict', 'ontology draft is no longer pending')
         latest = self._db.execute(
             'SELECT id FROM ontologies WHERE project_id=? ORDER BY seq DESC LIMIT 1',
             (project_id,)).fetchone()
         latest_id = latest['id'] if latest else None
-        if (draft['base_ontology_id'] != latest_id
+        # 「回到某一版」的基线故意不是最新版（source_kind='revert'，见迁移 0007 与
+        # services/ontology_drafts.REVERT_SOURCE）。这里只校验"它回到的那一版确实还在
+        # 这个项目里"，不要求等于 latest —— 否则回退会在最后一步（事务内复核）被拦下，
+        # 出现"预检通过、发布失败"这种最难查的半通状态。
+        if draft.get('source_kind') == 'revert':
+            known = {row['id'] for row in self.list_ontologies(project_id)}
+            if draft['base_ontology_id'] not in known:
+                raise OntologyPublicationConflict(
+                    'stale_base', 'revert base is not a version of this project',
+                    details={'base_ontology_id': draft['base_ontology_id'],
+                             'current_ontology_id': latest_id})
+            if prepared['expected_ontology_id'] not in (latest_id,
+                                                        draft['base_ontology_id']):
+                raise OntologyPublicationConflict(
+                    'stale_base', 'revert expected ontology is stale', details={
+                        'expected_ontology_id': prepared['expected_ontology_id'],
+                        'current_ontology_id': latest_id,
+                        'revert_base_ontology_id': draft['base_ontology_id']})
+        elif (draft['base_ontology_id'] != latest_id
                 or prepared['expected_ontology_id'] != latest_id):
             raise OntologyPublicationConflict(
                 'stale_base', 'ontology draft base is no longer current', details={
@@ -1220,7 +1278,7 @@ class Repository:
             'draft_id': draft['id'], 'source_kind': draft['source_kind'],
             'base_ontology_id': draft['base_ontology_id'],
             'validation_fingerprint': prepared['validation_fingerprint'],
-            'actor': prepared['actor'], 'status': 'published',
+            'actor': prepared['actor'], 'status': 'accepted',
         }
         publish_payload = {
             'draft_id': draft['id'], 'ontology_id': ontology['id'],
@@ -1585,7 +1643,7 @@ class Repository:
             'expected_ontology_id', 'validation_fingerprint',
             'validation_report', 'operations', 'decisions', 'turtle', 'summary',
             'acknowledged_warning_codes', 'idempotency_key', 'actor',
-            'request_hash', 'client_request_hash',
+            'request_hash', 'client_request_hash', 'note',
         }
         if missing := required - set(prepared):
             raise ValueError(f'ontology publish request is missing {sorted(missing)}')
@@ -1628,21 +1686,31 @@ class Repository:
                     'request_hash': prepared['request_hash'],
                     'client_request_hash': prepared['client_request_hash'],
                     'actor': prepared['actor'],
+                    # 发布说明：版本管理页要回答"这一版为什么发"。
+                    # 必填由发布门禁保证（services/ontology_drafts.publish_preflight）。
+                    'note': prepared.get('note') or '',
                 },
             }
+            # E1：纯标注变更复用当前版本号（图结构没动），但照样插一行留痕。
+            # 判据内联在这里，**不去问 services 层**：repository 依赖 services 是分层倒挂，
+            # 而规则只有一个条件（这批操作全是标注动作）。services 里那份
+            # （ontology_drafts.is_annotation_only）是服务层自用的，两处刻意保持同一条规则。
+            _ops = [op for op in (prepared.get('operations') or []) if isinstance(op, dict)]
+            annotation_only = bool(_ops) and all(
+                op.get('action') in {'add_annotation', 'remove_annotation'} for op in _ops)
             ontology = self._insert_ontology_version(
                 prepared['project_id'], prepared['turtle'], prepared['summary'],
-                metadata, created_at=completed_at)
+                metadata, created_at=completed_at, reuse_version=annotation_only)
             effect_record_ids = self._apply_ontology_source_effects(
                 prepared, draft, ontology)
             self._record_ontology_publish_provenance(
                 prepared, draft, ontology, request, completed_at)
             cursor = self._db.execute(
                 '''UPDATE ontology_drafts
-                   SET status='published',revision=revision+1,
+                   SET status='accepted',revision=revision+1,
                        published_ontology_id=?,updated_at=?
                    WHERE project_id=? AND id=? AND revision=?
-                     AND status='reviewed' AND validation_fingerprint=?''',
+                     AND status='pending' AND validation_fingerprint=?''',
                 (ontology['id'], completed_at, prepared['project_id'],
                  prepared['draft_id'], prepared['expected_revision'],
                  prepared['validation_fingerprint']))

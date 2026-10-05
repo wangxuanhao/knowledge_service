@@ -79,9 +79,15 @@ def canonical_payload_fingerprint(payload) -> str:
 
 def discovery_source_fingerprint(
         project_id, base_ontology_id, candidates, *, normalizer_version="v1",
-        generator_contract="semantica-0.6.7", runtime_version,
+        generator_contract, runtime_version,
         attribute_threshold, generation_options, request_name=None) -> str:
-    """Fingerprint every input that can affect discovery generation."""
+    """Fingerprint every input that can affect discovery generation.
+
+    ``generator_contract`` 是**必填**的：它以前有一个写死的默认值
+    （``semantica-0.6.7``），结果上游已经升到 0.7.0 而指纹输入还在说 0.6.7，
+    排查时把结构差异归因到了错误的版本。必填 + 由调用方显式给出，
+    才能保证"指纹里的版本标签"永远和实际跑的东西一致。
+    """
     try:
         _validate_utf8_strings(candidates)
         canonical_candidates = [

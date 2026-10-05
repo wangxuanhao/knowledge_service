@@ -73,17 +73,21 @@ class Governance:
         return {'status':'candidates','canonical':None,'candidates':sorted(candidates,key=lambda r:r['score'],reverse=True)[:12],'backend':'semantica+project_embedding'}
 
     def _commit(self,p,before,updates,operation,backend='service',redirects=None,reversal_of=None,
-                resolution_decisions=None,assertion_decisions=None):
+                resolution_decisions=None,assertion_decisions=None,audit_extra=None):
         op_id=str(uuid4())
         expected={r['id']:r['version'] for r in before}
         for row in updates:
             row['metadata']={**row.get('metadata',{}),'_operation_id':op_id}
         audit=dict(id='audit:'+op_id,kind='document',text=f'{operation}: '+', '.join(r['id'] for r in before),
                    metadata={'_audit':True,'operation':operation,'operation_id':op_id,'backend':backend,'created_at':utc_now(),
-                             'before':[public(r) for r in before]})
+                             'before':[public(r) for r in before],**(audit_extra or {})})
         expected[audit['id']]=0
+        # 'reclassify'（C2 受控重分类）映射到 formal_writes 里早就留好的 'ontology_remap'：
+        # 审计记录里 operation 仍是 'reclassify'（UI 才认得出"迁到新本体"），
+        # 正式写入用的是 FORMAL_OPERATIONS 白名单里的名字（不能自造）。
         formal_operation={'merge':'merge_rewrite','undo':'merge_reversal',
-                          'delete':'retract_source'}.get(operation,'manual_write')
+                          'delete':'retract_source',
+                          'reclassify':'ontology_remap'}.get(operation,'manual_write')
         ledger={'id':op_id,'operation':formal_operation,'redirects':redirects or {},
                 'before_state':[public(r) for r in before],
                 'expected_versions':expected,'reversal_of':reversal_of}
@@ -267,6 +271,27 @@ class Governance:
 
     def operations(self,p):
         return [public(r) for r in self.repo.current_records(p) if r.get('metadata',{}).get('_audit')]
+
+    def duplicate_groups(self,p):
+        """同名同类型的实体分组 —— 台账顶部「疑似重复」数字与"点进去直接合并"的入口。
+
+        口径写死为**名称完全相同（忽略大小写与首尾空白）且本体类型相同**，
+        也就是查重向导第一步 exact_name_or_alias 的同一档；这里**不做模糊匹配** ——
+        模糊分会给出用户没法自己核对的数字（"这三组凭什么算重复"）。
+        近名重复仍然走「查重」按钮的语义档（DuplicateDetector）。
+        已软删除的实体不参与统计；没有名字的记录跳过（无意义的分组）。
+        """
+        groups={}
+        for row in self.repo.current_records(p,kinds=['entity']):
+            if row.get('metadata',{}).get('_deleted'):continue
+            name=' '.join(str(row.get('text') or '').split()).casefold()
+            if not name:continue
+            groups.setdefault((name,row.get('type') or ''),[]).append({
+                'id':row['id'],'text':row['text'],'type':row.get('type') or '',
+                'version':row.get('version'),'ontology_id':row.get('ontology_id'),
+                'source_id':row.get('source_id')})
+        return [{'name':members[0]['text'],'type':key[1],'members':members}
+                for key,members in sorted(groups.items()) if len(members)>1]
 
     def undo_merge(self,p,operation_id):
         with self.service.lock:

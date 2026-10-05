@@ -1,5 +1,9 @@
 /* Linked graph workspace: preserve existing editing/governance controls. */
 (() => {
+  // 图谱是**只读画布**：节点不可拖动（力导向布局只负责初始摆放，节点位置不承载编辑语义）。
+  // 空白处拖动＝平移画布（ECharts 的 roam:true）；点节点/连线＝看详情；双击空白＝适应画布。
+  // 以前那套「移动节点」zrender 拖动 + 开关按钮已整体移除：对一张检索浏览用的图，
+  // 拖动节点不是能力而是负担——布局会被拖乱，也偏离"正常画布操作"的直觉。
   const ui = {request:0, options:[], ontology:null, graph:null};
   const graphRequests=GraphTypeFilter.createGraphRequestGate();
   const get = id => document.getElementById(id);
@@ -196,7 +200,20 @@
   get('graph-entity-filter').onkeydown=e=>{if(e.key==='Enter'&&get('graph-entity-choice').value)get('graph-entity-choice').onchange();};
   get('graph-entity-choice').onchange=async()=>{
     const choice=get('graph-entity-choice'),id=choice.value;
-    if(!id){invalidatePendingDetail();restoreCommittedSelection();return;}
+    if(!id){
+      // 用户主动选回空白项 = 清空选择、回到当前范围的全图。
+      // 以前这里无条件 restoreCommittedSelection()，值会被弹回上一个实体，
+      // 看起来就是"点其他之后切不回空白了"（用户原话）。
+      // 仍然保留 restoreCommittedSelection()：它现在只服务于"取消一次没加载完的详情"。
+      selectedEntityId='';
+      get('graph-node').value='';
+      invalidatePendingDetail();
+      // 详情面板也跟着清空：留着上一条实体的详情会让人以为"还选着它"。
+      get('graph-detail').replaceChildren();
+      status('已清空实体选择：重新绘制当前范围的全图。');
+      await window.drawGraph(null,Number(get('graph-hops').value));
+      return;
+    }
     const local=wb.nodes.get(id);
     if(local){inspect(local);status('已选择：'+local.text+' · 点击“展开邻域”查看邻域');return;}
     const token=beginPendingDetail(id),project=current;
@@ -245,22 +262,57 @@
     if(isEntity){selectedEntityId=row.id;get('graph-node').value=row.id;get('mindmap-root').value=row.id;get('graph-entity-choice').value=row.id;}
     window.renderEvidenceInspector(row,ui.options);
   }
+  // 图谱悬停提示：把"这个实体是什么、它的类在本体里挂在谁下面"一次说清。
+  // 用户反馈："检索 没看到有父类的信息" + "知识图谱也没父类相关的信息" ——
+  // 层级在**类**之间，实体节点本身没有父类，所以这里显示的是"它所属的类"的父类链
+  // （数据来自 /subgraph 的 class_parents / class_ancestors，唯一出处是服务端 ontology_family）。
+  function graphTooltip(point){
+    if(point.dataType==='edge'){
+      const raw=point.data.rawType;
+      return esc(raw&&raw!==point.data.name?point.data.name+'（'+raw+'）':point.data.name);
+    }
+    const node=wb.nodes.get(point.data.id)||{};
+    const label=name=>name&&(name.label||name.id)||'';
+    const parents=(node.class_parents||[]).map(label).filter(Boolean);
+    const rows=[`<b>${esc(node.text||point.data.name)}</b>`,
+      `类型：${esc(node.class_label||point.data.categoryName||'—')}`];
+    rows.push(parents.length
+      ? `父类：${esc(parents.join(' → '))}`
+      : '父类：顶层类（本体里没有父类）');
+    const ancestors=(node.class_ancestors||[]).map(label).filter(Boolean);
+    if(ancestors.length>parents.length){
+      rows.push(`完整继承链：${esc([node.class_label,...ancestors].filter(Boolean).join(' → '))}`);
+    }
+    return rows.join('<br>');
+  }
   function renderGraph(result, selectedType='', base=result){
     const displayType=type=>result.type_labels?.[type]||labelOf(type);
     // 按实体类型取色，节点、图例、类型按钮颜色一致，避免同名/近名节点无法区分
-    const palette=['#5470c6','#91cc75','#fac858','#ee6666','#73c0de','#3ba272','#fc8452','#9a60b4','#ea7ccc'];
-    const catColor=index=>palette[index%palette.length];
+    // 颜色只有一个出处：graph-palette.js 的 GraphPalette.colorFor(类型名)。
+    // 以前这里是"按数组下标取色"，于是同一个类型换个顺序就换色，且和"按实体类型查看"
+    // 那排圆点错位一格（圆点用的是按钮下标，第 0 项还是「全部类型」）。
+    // 关键：取色的 key 必须是"页面上显示的那个类型名"（label），
+    // 不能有的地方传原始 type、有的地方传 label —— 那样同一个类型会算出两种颜色。
     result=GraphTypeFilter.selectType(base,selectedType);
     let bar=get('graph-type-buttons');
     if(!bar){bar=make('section','','graph-type-buttons');bar.id='graph-type-buttons';get('graph-canvas').after(bar);}
     const baseEntities=GraphTypeFilter.entityNodes(base);
     const groups=[...new Set(baseEntities.map(n=>n.type))];
-    const dot=(type,i)=>type?`<i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${catColor(i)};margin-right:5px;vertical-align:middle"></i>`:'';
-    bar.innerHTML='<small>按实体类型查看 · 只显示所选类型，不展开邻居</small><div>'+['',...groups].map((type,i)=>`<button class="secondary" data-type-index="${i}" aria-pressed="${type===selectedType}" title="${esc(type?term(type):'恢复当前检索范围全部类型')}">${dot(type,i)}${esc(type?displayType(type):'全部类型')} <b>${type?baseEntities.filter(n=>n.type===type).length:baseEntities.length}</b></button>`).join('')+'</div>';
+    // 颜色只有一个出处：graph-palette.js。本轮视图里出现过的类型先统一排序取色，
+    // 撞色时自动挪位，保证同屏不重色；类型名相同则在任何页面都是同一个颜色。
+    const scopeLabels=[...new Set(baseEntities.map(n=>n.type_label||displayType(n.type)))].filter(Boolean);
+    const colorMap=window.GraphPalette?GraphPalette.colorMap(scopeLabels):null;
+    const colorFor=label=>(colorMap&&colorMap.get(label))||(window.GraphPalette?GraphPalette.colorFor(label):'#5470c6');
+    const attrColor=window.GraphPalette?GraphPalette.attribute:'#8c7b68';
+    // 「全部类型」不是某个类型，不画色点（以前它会占用 palette[0]，把整排颜色挤错一位）。
+    // 圆点跟节点用同一个 label 取色（以前这里传的是原始 type，和节点的 label 不是同一个 key）
+    const dot=label=>label?`<i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${colorFor(label)};margin-right:5px;vertical-align:middle"></i>`:'';
+    bar.innerHTML='<small>按实体类型查看 · 只显示所选类型，不展开邻居</small><div>'+['',...groups].map((type,i)=>`<button class="secondary" data-type-index="${i}" aria-pressed="${type===selectedType}" title="${esc(type?term(type):'恢复当前检索范围全部类型')}">${dot(type?displayType(type):'')}${esc(type?displayType(type):'全部类型')} <b>${type?baseEntities.filter(n=>n.type===type).length:baseEntities.length}</b></button>`).join('')+'</div>';
     bar.querySelectorAll('button').forEach(button=>button.onclick=()=>renderGraph(base,['',...groups][Number(button.dataset.typeIndex)],base));
     ui.graph=result;wb.nodes=new Map(result.nodes.map(n=>[n.id,n]));
     const chart=initChart(), types=[...new Set(result.nodes.map(n=>GraphTypeFilter.isAttributeNode(n)?'属性值':(n.type_label||displayType(n.type))))], matched=new Set(result.matched_ids||[]);
     chart.resize();
+    bindPanAffordances();   // 双击空白＝适应画布（幂等）
     chart.off('click');chart.on('click',p=>{
       const row=p.dataType==='edge'?result.edges.find(e=>e.id===p.data.id):wb.nodes.get(p.data.id);
       if(!row)return;
@@ -274,7 +326,7 @@
     // slow"; the server half is the `subgraph` line logged by drawGraph.
     const layoutDone=kgTime('graph-layout');
     const catIndex=label=>Math.max(0,types.indexOf(label));
-chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(p.data.rawType&&p.data.rawType!==p.data.name?p.data.name+' ('+p.data.rawType+')':p.data.name):p.data.name+' · '+p.data.categoryName)},legend:[{show:types.length>1,type:'scroll',data:types,bottom:0,textStyle:{fontSize:11}}],series:[{type:'graph',layout:'force',roam:true,draggable:true,center:['50%','50%'],zoom:.85,label:{show:showLabels,position:'right',fontSize:11,width:110,overflow:'truncate'},edgeSymbol:['none','arrow'],edgeLabel:{show:result.nodes.length<=20,formatter:'{c}',fontSize:10},emphasis:{focus:'adjacency',label:{show:showLabels},edgeLabel:{show:true}},force:{repulsion:320,edgeLength:100,gravity:.1,initLayout:'circular',layoutAnimation:false},categories:types.map((name,index)=>({name,itemStyle:{color:name==='属性值'?'#8c7b68':catColor(index)}})),data:result.nodes.map(n=>{const attribute=GraphTypeFilter.isAttributeNode(n),label=attribute?'属性值':(n.type_label||displayType(n.type));const index=catIndex(label);return {id:n.id,name:n.text,category:index,categoryName:label,symbol:attribute?'roundRect':'circle',symbolSize:attribute?[72,22]:(matched.has(n.id)?34:22),itemStyle:{color:attribute?'#8c7b68':catColor(index),...(attribute&&n.status==='contradicting'?{borderColor:'#b42318',borderWidth:2,borderType:'dashed'}:{}),...(matched.has(n.id)?{borderColor:'#df7d37',borderWidth:4}:{})}}}),links:result.edges.map(e=>{const attribute=GraphTypeFilter.isAttributeEdge(e);return {id:e.id,source:e.subject_id,target:e.object_id,name:e.type_label||displayType(e.type),value:e.type_label||displayType(e.type),rawType:term(e.type),lineStyle:attribute?{type:'dashed',opacity:.55,width:1}:undefined};}),lineStyle:{opacity:.35,curveness:.12}}]},true);
+chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:types.length>1,type:'scroll',data:types,bottom:0,textStyle:{fontSize:11}}],series:[{type:'graph',layout:'force',roam:true,center:['50%','50%'],zoom:.85,label:{show:showLabels,position:'right',fontSize:11,width:110,overflow:'truncate'},edgeSymbol:['none','arrow'],edgeLabel:{show:result.nodes.length<=20,formatter:'{c}',fontSize:10},emphasis:{focus:'adjacency',label:{show:showLabels},edgeLabel:{show:true}},force:{repulsion:320,edgeLength:100,gravity:.1,initLayout:'circular',layoutAnimation:false},categories:types.map(name=>({name,itemStyle:{color:name==='属性值'?attrColor:colorFor(name)}})),data:result.nodes.map(n=>{const attribute=GraphTypeFilter.isAttributeNode(n),label=attribute?'属性值':(n.type_label||displayType(n.type));const index=catIndex(label);return {id:n.id,name:n.text,category:index,categoryName:label,symbol:attribute?'roundRect':'circle',symbolSize:attribute?[72,22]:(matched.has(n.id)?34:22),itemStyle:{color:attribute?attrColor:colorFor(label),...(attribute&&n.status==='contradicting'?{borderColor:'#b42318',borderWidth:2,borderType:'dashed'}:{}),...(matched.has(n.id)?{borderColor:'#df7d37',borderWidth:4}:{})}}}),links:result.edges.map(e=>{const attribute=GraphTypeFilter.isAttributeEdge(e);return {id:e.id,source:e.subject_id,target:e.object_id,name:e.type_label||displayType(e.type),value:e.type_label||displayType(e.type),rawType:term(e.type),lineStyle:attribute?{type:'dashed',opacity:.55,width:1}:undefined};}),lineStyle:{opacity:.35,curveness:.12}}]},true);
     const visibleEntities=GraphTypeFilter.entityNodes(result),visibleRelations=GraphTypeFilter.relationEdges(result),attributeCount=result.nodes.length-visibleEntities.length;
     chart.resize();fitGraph(chart);layoutDone({nodes:result.nodes.length,edges:result.edges.length});get('graph-summary').textContent=`${selectedType?'只看 '+labelOf(selectedType)+' · ':''}${visibleEntities.length} 实体 / ${visibleRelations.length} 关系${attributeCount?' · '+attributeCount+' 个属性值':''}${selectedType?' · 隐藏其他类型及跨类型连线':''}${matched.size?' · 橙色边框为检索命中':''}${result.timing_ms?' · 服务 '+result.timing_ms.total+' ms':''}`;
     // Compact, discrete history navigation; no drag/playback re-query loop.
@@ -302,7 +354,16 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
     const spanX=Math.max(1,Math.max(...xs)-minX),spanY=Math.max(1,Math.max(...ys)-minY);
     // Persist the solved positions so fitting does not restart the simulation.
     const option=chart.getOption();
-    Object.assign(option.series[0],{left:25,right:120,top:30,bottom:30,center:null,zoom:1,force:{initLayout:null,layoutAnimation:true},data:series.option.data.map((node,i)=>{
+    const nodeCount=series.option.data.length;
+    // 斥力按节点数放大：节点越多要撑得越开，否则标签互相压住。
+    const spread=Math.round(420+nodeCount*22);
+    Object.assign(option.series[0],{left:25,right:120,top:30,bottom:30,center:null,zoom:1,
+      // 这里以前写成 force:{initLayout:null,layoutAnimation:true}，把 repulsion/edgeLength
+      // 一起抹掉了 → ECharts 回落到默认斥力与边长，25 个节点就挤成一团。
+      // 用户原话："初始化的图谱能不能分散点，为什么一开始就都聚集在一起"。
+      // 现在显式给出斥力/边长/重力，配合下面的坐标归一化，初始就铺满画布。
+      force:{repulsion:spread,edgeLength:[70,150],gravity:.07,initLayout:null,layoutAnimation:true},
+      data:series.option.data.map((node,i)=>{
       const p=data.getItemLayout(i);
       return {...node,x:(p[0]-minX)/spanX*Math.max(1,chart.getWidth()-145),y:(p[1]-minY)/spanY*Math.max(1,chart.getHeight()-60),fixed:false};
     })});
@@ -317,10 +378,21 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
     get('hits').querySelectorAll('[data-graph-node]').forEach(b=>b.onclick=async()=>{try{await selectEntityDetail(b.dataset.graphNode);}catch(error){status(error.message,true);}});
     get('hits').querySelectorAll('[data-source-record]').forEach(b=>b.onclick=()=>historyFor({id:b.dataset.sourceRecord}));
   }
+  // 本体扩展的结果说明：告诉用户"这次是靠本体层级补到的"——命中了哪些类、带出了多少子类。
+  // 没有这个说明，勾了开关也只是多几条结果，用户无法判断它到底做了什么。
+  function expansionSummary(result){
+    const expansion=result&&result.ontology_expansion;if(!expansion)return '';
+    const terms=(expansion.terms||[]).join('、')||'—';
+    const subclasses=(expansion.subclasses||[]).length;
+    return ` · 本体扩展：命中 ${terms}${subclasses?`，带出 ${subclasses} 个子类`:''}`;
+  }
   async function runSearch(){
     if(!current)return;
     const serial=++ui.request,p=current,started=performance.now();
     const body={...scope(),valid_at:null,query:get('query').value,retrieval_mode:get('search-mode').value,
+      // 本体扩展（默认关闭）：勾上后检索会顺着本体的父子关系补召回 —— 查父类名也能命中子类实例。
+      // 它只补召回，不放宽可见范围（权限/时态仍由 scope 决定）；关闭时读路径与旧行为一致。
+      ontology_expansion:Boolean(get('ontology-expansion')?.checked),
       k_entities:5,k_chunks:5,k_relations:5};
     get('search-summary').textContent='读取所选范围…';
     get('hits').textContent='';
@@ -331,7 +403,7 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
     delete result.nodes;delete result.edges;
     renderHits(result);
     const modeLabel={hybrid:'混合',semantic:'语义',keyword:'关键词'}[result.active_mode]||result.active_mode;
-    get('search-summary').textContent=`${modeLabel}${result.degraded?' · 已降级':''} · ${result.candidate_count} 候选 · ${result.hits.length} 命中 · ${(performance.now()-started).toFixed(0)} ms`;
+    get('search-summary').textContent=`${modeLabel}${result.degraded?' · 已降级':''} · ${result.candidate_count} 候选 · ${result.hits.length} 命中 · ${(performance.now()-started).toFixed(0)} ms${expansionSummary(result)}`;
     updateChip();
   }
   // 图谱渲染器的唯一实现，显式挂到 window（不再依赖非严格模式下的隐式全局赋值）。
@@ -388,7 +460,41 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
   if(previousAddFilter)get('add-filter').onclick=async()=>{await previousAddFilter();if(!get('status').classList.contains('error'))await get('apply-scope').onclick();};
   act('reset-scope',async()=>{for(const id of ['known-at','filters','type-scope','predicate-scope'])get(id).value='';cb.conditions=[];renderCB();resetTimeline();window.clearGraphWorkspace({preserveSearchResults:true});window.clearKnowledgeChat?.({notify:true});await options();});
   act('build-index',async()=>{watch(await api(endpoint('/indexes/rebuild'),{}));status('索引任务已提交；可继续浏览图谱或使用关键词检索。');});
-  act('graph-reset-view',async()=>{wb.chart?.dispatchAction({type:'restore'});wb.chart?.resize();});
+  // 原来只 dispatch restore：返回 series 里写的 zoom:1，而 fitGraph 之后本来就是 zoom:1，
+  // 于是"点了没什么作用"（用户原话）。现在＝适应画布：重新铺开节点 + 缩放到刚好占满画布。
+  act('graph-reset-view',async()=>{
+    const chart=wb.chart;
+    if(!chart||!ui.graph){status('图谱还没渲染：先点「重新渲染全图」，或从左侧检索结果里选一个实体/关系。');return;}
+    chart.resize();fitGraph(chart);
+    status('已适应画布：缩放比例与节点分布都重置为铺满画布；拖乱或缩没了都可以再点这个按钮。');
+  });
+  // 平移/缩放的可发现性：双击空白处＝适应画布。
+  // ECharts 的 zr 事件点在节点上时 event.target 有值，空白处没有 —— 用这个区分，
+  // 免得双击节点也把整图重置了。
+  function bindPanAffordances(){
+    const chart=wb.chart;
+    if(!chart||chart.__panAffordances)return;
+    chart.__panAffordances=true;
+    chart.getZr().on('dblclick',event=>{
+      if(event.target)return;                 // 点在节点/连线上：交给默认行为（看详情）
+      const reset=get('graph-reset-view');
+      if(reset)reset.onclick?.();
+    });
+  }
+  // 图谱缩放：ECharts 的 roam 只给了滚轮/拖pinch，没有可见按钮 —— 触屏和"只想点一下"
+  // 的场景就没有入口。这里直接改 series.zoom（保留用户的中心点），并把范围夹在 0.2~4，
+  // 免得缩到看不见或放大到只剩一个节点。
+  function zoomGraph(factor){
+    const chart=wb.chart;
+    if(!chart||!ui.graph)throw Error('先渲染图谱（点「重新渲染全图」或选择实体），再缩放。');
+    const series=chart.getOption()?.series?.[0];
+    const current=Number(series?.zoom)||1;
+    const next=Math.min(4,Math.max(.2,current*factor));
+    chart.setOption({series:[{zoom:next}]});
+    status(`图谱缩放 ${(next*100).toFixed(0)}%（滚轮也可缩放，拖动可平移）`);
+  }
+  act('graph-zoom-in',()=>zoomGraph(1.18));
+  act('graph-zoom-out',()=>zoomGraph(.85));
   get('detail-drawer-close').onclick=()=>{invalidatePendingDetail();get('graph-detail').replaceChildren();};
   get('query').onkeydown=e=>{if(e.key==='Enter')get('search').click();};
   // Ignore out-of-order project responses, and load graph immediately on selection.
@@ -404,19 +510,83 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
   };
   // 打开「检索与交互图谱」且尚未渲染时，自动加载当前 scope 全图。
   // 挂在 click / 项目切换 / 页面恢复项目 三个时机，避免默认 active tab 不触发 click 导致空白。
+  // 由**调用方指定要看什么**时的抑制开关：例如问答里点"在图谱中查看"，
+  // 它会 showTab('search') 再显示某个实体的详情——此时补画全图是多余的请求，
+  // 而且会先把画布清空（先清后画），反而把刚选中的实体冲掉。
+  // 用法：调用方在导航前 window.suppressNextAutoGraph()，本次补画被吃掉后自动复位。
+  let suppressNextAutoGraph=false;
+  window.suppressNextAutoGraph=()=>{suppressNextAutoGraph=true;};
+
   function autoLoadGraph(){
+    if(suppressNextAutoGraph){suppressNextAutoGraph=false;return;}
     const graphView=!get('tab-search').classList.contains('hidden');
     if(graphView&&current&&!ui.graph&&!graphRequests.isBusy()){
       drawGraph(null,Number(get('graph-hops').value)||1)
         .catch(e=>status(e.message,true));
     }
   }
+  /* 兜底刷新：不管新版本是谁发布的（本体建模层、本体建模层、别人、另一个浏览器标签），
+     用户切回检索 / 问答 / 脑图页时都要自己跟上。以前只有"审核台发布 + 本页收到事件"这一条路，
+     所以症状是"发布完了，点回检索还是旧的，必须整页刷新"（用户原话）。
+     这里再查一次当前本体 id，变了就按新版本刷新术语/类型/图谱；没变则什么都不做（零成本）。 */
+  async function catchUpOntology(){
+    if(!current)return false;
+    try{
+      const before=ui.ontology?.id||'';
+      const latest=await window.loadOntology('');
+      const id=latest?.id||'';
+      if(!id||id===before)return false;
+      await loadOntologyTerms();
+      await Promise.all([options(),discoverMetadata()]);
+      resetTimeline();
+      window.clearGraphWorkspace({preserveSearchResults:true});
+      status(`检测到本体新版本（${id.slice(0,8)}…）：类型下拉、时间轴与图谱已按新版本刷新。`);
+      return true;
+    }catch(error){
+      // 兜底失败不打断用户正在做的事：说一句能自己解决的提示就够了。
+      status(`切回这一页时没能刷新到最新本体：${error.message}。点「重新渲染全图」可重试。`,true);
+      return false;
+    }
+  }
   document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{
     const graphView=b.dataset.tab==='search';
     get('type-scope').style.display=graphView?'':'none';get('predicate-scope').style.display=graphView?'':'none';
     if(b.dataset.tab==='mindmap'&&current)options().catch(e=>status(e.message,true));
-    autoLoadGraph();
+    if(['search','qa','mindmap'].includes(b.dataset.tab)){
+      // 只有**用户真的点了导航**才做"进入页签时对齐本体"。程序化切换（问答/图谱里
+      // "在图谱中查看"会先 showTab('search') 再显示某个实体）绝不能顺手重画全图：
+      // 那条路径是 await 的（先查本体 id 再补画），落地时会晚于 selectEntityDetail，
+      // 于是先把画布清掉、再发一次 /subgraph，把刚选中的实体冲掉——
+      // 现象就是"点证据里的节点，图谱却重新加载了"（契约用例抓到过）。
+      if(event&&event.isTrusted===false){autoLoadGraph();return;}
+      // 先对齐本体版本，再决定是否重画：旧图谱不能拿新类型名去渲染。
+      catchUpOntology().then(autoLoadGraph).catch(()=>autoLoadGraph());
+    }else autoLoadGraph();
   }));
+  // 本体建模层发布出一个新版本后，这一页必须自己跟上：术语缓存、实体类型/关系类型
+  // 下拉、时间轴与图谱都读的是"已发布本体"。以前没有任何通知通道，用户看到的就是
+  // "发布完了，切回检索与交互图谱还是旧的，必须整页刷新"。事件由 ontology-workbench.js
+  // 在发布成功后派发（ontology-workbench:published）。
+  document.addEventListener('ontology-workbench:published',async event=>{
+    if(!current)return;
+    const versionId=event?.detail?.versionId||'';
+    const short=versionId?versionId.slice(0,8)+'…':'';
+    ui.ontology=null;ui.options=[];ui.request++;
+    try{
+      // 顺序有意义：先刷新本体术语缓存（labelOf/term 都依赖它），再取实体选项，
+      // 最后才重画图——否则图上的类型名还是旧版本。
+      await loadOntologyTerms();
+      await Promise.all([options(),discoverMetadata()]);
+      resetTimeline();
+      // 旧图谱是按旧范围/旧本体渲染的，先清掉；检索页可见时立刻重画，不可见时
+      // 由 autoLoadGraph()（tab 点击时触发）按最新状态补画。
+      window.clearGraphWorkspace({preserveSearchResults:true});
+      if(!get('tab-search').classList.contains('hidden'))await window.drawGraph(null,Number(get('graph-hops').value)||1);
+      status(`本体新版本已发布${short?`（${short}）`:''}：类型下拉、时间轴与图谱已按新版本刷新。`);
+    }catch(error){
+      status(`新版本已发布，但这一页的检索/图谱刷新失败：${error.message}。可点「重新渲染全图」重试。`,true);
+    }
+  });
   // Structured ontology browser and versioned term additions, alongside Turtle/SPARQL.
   const ontologyPanel=get('tab-ontology').querySelector('.panel');
   const sourceHeading=ontologyPanel.querySelector('.ontology-editor-heading');
@@ -429,7 +599,7 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
   ontologyPanel.insertBefore(structureHeading,sourceDetails);
   ontologyPanel.insertBefore(make('div','', 'ontology-browser'),sourceDetails);
   ontologyPanel.querySelector('.ontology-browser').id='ontology-browser';
-  const termForm=make('section','<header class="ontology-form-heading"><div><h2>新增本体术语</h2><p>创建新的实体类、关系类型或实体属性。保存后会形成新的本体版本，不会覆盖历史版本。</p></div></header><div class="columns"><label>术语种类<select id="term-kind"><option value="class">实体类</option><option value="relation">关系类型</option><option value="attribute">实体属性</option></select></label><label>预计本体标识 IRI<input id="term-uri" placeholder="填写名称后显示"><small>这里只是预览；最终 IRI 由后端根据名称统一生成。支持中文、阿拉伯文等 Unicode 字符。</small></label><label>显示名称<input id="term-label" placeholder="例如 Merchant"></label><label>中文名称<input id="term-label-zh" maxlength="200" placeholder="例如 商户"></label></div><div class="columns"><label>父类（仅实体类）<select id="term-parent"></select></label><label><span id="term-domain-label">适用实体类型</span><select id="term-domain"></select><small id="term-domain-help"></small></label><label><span id="term-range-label">目标实体类型</span><select id="term-range"></select><small id="term-range-help"></small></label></div><button id="add-ontology-term">新增并保存为新版本</button><p class="subtle">这里只维护本体结构。具体实体和实体关系请在“交互图谱”中点击对应节点或连线进行维护。最终 IRI 由后端生成并校验，创建后保持稳定。</p>','ontology-term-create');
+  const termForm=make('section','<header class="ontology-form-heading"><div><h2>新增本体术语</h2><p>创建新的实体类、关系类型或实体属性。保存后会形成新的本体版本，不会覆盖历史版本。</p></div></header><div class="columns"><label>术语种类<select id="term-kind"><option value="class">实体类</option><option value="relation">关系类型</option><option value="attribute">实体属性</option></select></label><label>英文名（选填，留空就用中文名）<input id="term-label" placeholder="例如 Merchant"></label><label>中文名称（必填）<input id="term-label-zh" maxlength="200" placeholder="例如 商户"></label></div><div class="columns"><label class="ontology-term-iri">系统生成的标识 IRI（自动生成，不用手写）<input id="term-uri" placeholder="填写名称后显示" readonly></label><p class="ontology-term-iri-note"><strong>不用手写，也不用拼写：</strong>先填名称，这一格只是预览；最终 IRI 由后端按名称统一生成并固定下来，创建后不会再变。支持中文、阿拉伯文等 Unicode 字符。</p></div><div class="columns"><label>父类（仅实体类）<select id="term-parent"></select></label><label><span id="term-domain-label">适用实体类型（domain）</span><select id="term-domain"></select><small id="term-domain-help"></small></label><label><span id="term-range-label">目标实体类型（range）</span><select id="term-range"></select><small id="term-range-help"></small></label></div><button id="add-ontology-term">新增并保存为新版本</button><p class="subtle">这里只维护本体结构。具体实体和实体关系请在“交互图谱”中点击对应节点或连线进行维护。最终 IRI 由后端生成并校验，创建后保持稳定。</p>','ontology-term-create');
   ontologyPanel.insertBefore(termForm,sourceDetails);
   get('term-kind').closest('label').classList.add('ontology-kind-source');
   const kindTabs=make('div','<button type="button" data-term-kind-choice="class">新增实体类</button><button type="button" data-term-kind-choice="relation" class="secondary">新增关系类型</button><button type="button" data-term-kind-choice="attribute" class="secondary">新增实体属性</button>','ontology-kind-tabs');
@@ -544,7 +714,7 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
   // 将来给本文件加 'use strict' / 改成模块就会静默失效（下拉换版本后面板不刷新且不报错）。
   const priorLoad=loadOntology;
   window.loadOntology=async(id='')=>{const p=current,result=await priorLoad(id);if(p!==current)return result;ui.ontology=result;
-    if(!result){get('ontology-browser').innerHTML='<p class="subtle">本项目尚未发布本体。开放本体发现模式请先累计候选，再到「本体工作台」生成并发布本体版本；仅文档检索模式不产生图谱本体。</p>';return result;}
+    if(!result){get('ontology-browser').innerHTML='<p class="subtle">本项目尚未发布本体。开放本体发现模式请先累计候选，再到「本体建模层」生成并发布本体版本（要手工设计本体则用「本体建模层」）；仅文档检索模式不产生图谱本体。</p>';return result;}
     const classes=result.summary.classes||[],classLabels=new Map(classes.flatMap(c=>[[c.id,ontoName(c)],[c.name,ontoName(c)]]));
     const className=id=>classLabels.get(id)||term(id)||'未指定';
     const datatypeName=id=>new Map(datatypes).get(id)||term(id)||'未指定';
@@ -554,7 +724,15 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
     get('ontology-browser').querySelectorAll('[data-maintain-uri]').forEach(button=>button.onclick=()=>selectTerm(button.dataset.maintainKind,button.dataset.maintainUri));
     return result;};
   const datatypes=[['http://www.w3.org/2000/01/rdf-schema#Literal','任意字面量'],['http://www.w3.org/2001/XMLSchema#string','字符串'],['http://www.w3.org/2001/XMLSchema#boolean','布尔值'],['http://www.w3.org/2001/XMLSchema#integer','整数'],['http://www.w3.org/2001/XMLSchema#decimal','小数'],['http://www.w3.org/2001/XMLSchema#double','浮点数'],['http://www.w3.org/2001/XMLSchema#date','日期'],['http://www.w3.org/2001/XMLSchema#dateTime','日期时间']];
-  const classOptions=()=>'<option value="">不指定</option>'+(ui.ontology.summary.classes||[]).map(c=>`<option value="${esc(c.id)}">${esc(ontoName(c))}</option>`).join('');
+  // 空列表时不能只留一个空白下拉框——用户看到"没值的框"，分不清是坏了还是本来就空。
+  // 这里给出明确说明，并把"空值"写成一句人话：同一个空选项在父类/domain/range 里
+  // 含义完全不同，所以按用途传入不同文案，别让人猜"不指定"到底不指定什么。
+  const classOptions=(emptyLabel='不指定（不选父类＝作为顶层类）')=>{
+    const classes=ui.ontology?.summary?.classes||[];
+    if(!classes.length)return '<option value="">（本项目还没有实体类，请先在上方「新增实体类」创建）</option>';
+    return `<option value="">${emptyLabel}</option>`
+      +classes.map(c=>`<option value="${esc(c.id)}">${esc(ontoName(c))}</option>`).join('');
+  };
   const selectedValues=select=>[...select.selectedOptions].map(option=>option.value).filter(Boolean);
   function configureChecklist(select,selected){
     let list=select.parentElement.querySelector(`.ontology-checklist[data-for="${select.id}"]`);
@@ -567,19 +745,52 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
   }
   function configureFields(kind,prefix,values={}){
     const parent=get(prefix+'term-parent'),domain=get(prefix+'term-domain'),range=get(prefix+'term-range'),multiple=kind==='relation';
-    parent.innerHTML=classOptions();domain.innerHTML=classOptions();range.innerHTML=kind==='attribute'?'<option value="">不指定</option>'+datatypes.map(([id,label])=>`<option value="${id}">${label}</option>`).join(''):classOptions();
+    parent.innerHTML=classOptions();
+    domain.innerHTML=classOptions('不指定（不限制能用在哪类实体上）');
+    range.innerHTML=kind==='attribute'
+      ?'<option value="">不指定（不限定数据类型）</option>'+datatypes.map(([id,label])=>`<option value="${id}">${label}</option>`).join('')
+      :classOptions('不指定（不限制另一端类型）');
     parent.disabled=kind!=='class';domain.disabled=kind==='class';range.disabled=kind==='class';
-    for(const select of [domain,range]){select.multiple=multiple;select.classList.remove('ontology-checklist-source');select.size=multiple?Math.min(6,Math.max(3,(ui.ontology.summary.classes||[]).length)):1;const list=select.parentElement.querySelector(`.ontology-checklist[data-for="${select.id}"]`);if(list)list.hidden=true;select.hidden=false;}
+    for(const select of [domain,range]){select.multiple=multiple;select.classList.remove('ontology-checklist-source');select.size=multiple?Math.min(6,Math.max(3,(ui.ontology?.summary?.classes||[]).length)):1;const list=select.parentElement.querySelector(`.ontology-checklist[data-for="${select.id}"]`);if(list)list.hidden=true;select.hidden=false;}
     parent.value=values.parent||'';
     const domains=values.domains||[values.domain].filter(Boolean),ranges=values.ranges||[values.range].filter(Boolean);
     [...domain.options].forEach(option=>option.selected=domains.includes(option.value));
     [...range.options].forEach(option=>option.selected=ranges.includes(option.value));
     if(multiple){configureChecklist(domain,domains);configureChecklist(range,ranges);}
-    const rangeLabel=get(prefix+'term-range-label');if(rangeLabel)rangeLabel.textContent=kind==='attribute'?'数据类型':kind==='relation'?'允许的终点实体类型（可多选）':'不适用';
-    const domainLabel=get(prefix+'term-domain-label');if(domainLabel)domainLabel.textContent=kind==='attribute'?'适用实体类型':kind==='relation'?'允许的起点实体类型（可多选）':'不适用';
-    for(const [select,suffix] of [[domain,'domain'],[range,'range']]){let help=get(prefix+'term-'+suffix+'-help');if(!help){help=document.createElement('small');help.id=prefix+'term-'+suffix+'-help';select.after(help);}help.textContent=multiple?'已保存的类型会自动勾选；只需勾选或取消需要调整的项。不选表示不限。':'';}
+    const rangeLabel=get(prefix+'term-range-label');if(rangeLabel)rangeLabel.textContent=kind==='attribute'?'数据类型':kind==='relation'?'允许的终点实体类型（可多选）':'目标实体类型（range）';
+    const domainLabel=get(prefix+'term-domain-label');if(domainLabel)domainLabel.textContent=kind==='attribute'?'适用实体类型':kind==='relation'?'允许的起点实体类型（可多选）':'适用实体类型（domain）';
+    // 空态/不适用态：整块字段（含标签）收起来，只留一行说明它是什么、什么时候才有用。
+    // 之前只把 <select> 设 hidden，但全局 select 样式会把它重新显示出来，
+    // 结果出现"「不适用」+ 灰掉的下拉框"，和旁边可选的「不指定」长得几乎一样，极易误读。
+    const hasClasses=(ui.ontology?.summary?.classes||[]).length>0;
+    const helpFor=(select,suffix,text)=>{let node=get(prefix+'term-'+suffix+'-help');if(!node){node=document.createElement('small');node.id=prefix+'term-'+suffix+'-help';select.after(node);}node.textContent=text;return node;};
+    const note=(select,text)=>{
+      const field=select.closest('label')||select;
+      let node=field.parentElement?.querySelector(`.ontology-field-note[data-for="${select.id}"]`);
+      if(!node){node=document.createElement('p');node.className='subtle ontology-field-note';node.dataset.for=select.id;field.after(node);}
+      node.textContent=text;node.hidden=!text;return node;
+    };
+    // 整块字段的显示/隐藏：包住标签，避免"标签还在、控件被全局样式弹回来"。
+    const showField=(select,visible)=>{const field=select.closest('label')||select;select.hidden=!visible;field.hidden=!visible;};
+    if(kind==='class'){
+      // 实体类不需要 Domain/Range：整块收起，只留一行解释，避免"这里是不是坏了"。
+      showField(domain,false);showField(range,false);
+      helpFor(domain,'domain','');helpFor(range,'range','');
+      note(domain,'实体类不适用 Domain / Range：它们只描述「关系或属性能用在哪类实体上、指向什么」，对实体类本身没有意义。新增实体类只需要填名称、选父类。');
+    }else if(!hasClasses){
+      showField(domain,false);showField(range,false);
+      helpFor(domain,'domain','');helpFor(range,'range','');
+      note(domain,'还没有实体类可以勾选：请先在上方「新增实体类」创建至少一个实体类，再回来为关系/属性限定适用范围。');
+    }else{
+      showField(domain,true);showField(range,true);
+      note(domain,'');note(range,'');
+      helpFor(domain,'domain','domain＝这条关系/属性可以挂在哪些实体类上。不选表示不限。');
+      helpFor(range,'range',kind==='attribute'?'range＝这个属性存什么类型的数据。':'range＝关系的另一端允许是哪些实体类。不选表示不限。');
+    }
   }
-  function configureTermForm(){if(ui.ontology)configureFields(get('term-kind').value,'');}
+  // 本体还没读进来时也要能把表单配好（显示"还没有实体类"的空态说明），
+  // 否则抽屉一打开就是两个空白下拉框——用户分不清是坏了还是本来就空。
+  function configureTermForm(){configureFields(get('term-kind').value,'');}
   get('term-kind').onchange=configureTermForm;
   chooseTermKind('class');
   act('add-ontology-term',async()=>{if(!ui.ontology)throw Error('请先加载本体');const kind=get('term-kind').value;await api(endpoint('/ontology/terms'),{kind,label:get('term-label').value,label_zh:get('term-label-zh').value,parent:kind==='class'?get('term-parent').value:'',domain:kind==='attribute'?get('term-domain').value:'',range:kind==='attribute'?get('term-range').value:'',domains:kind==='relation'?selectedValues(get('term-domain')):[],ranges:kind==='relation'?selectedValues(get('term-range')):[],expected_ontology_id:ui.ontology.id});await get('load-ontology').onclick();status('后端已生成 IRI 并保存新本体版本；已有知识保留原本体版本。');});
@@ -662,12 +873,17 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
     get('dashboard').innerHTML='<p class="subtle" role="status">正在读取当前项目统计…</p>';
     try{await dashboard();}catch(error){if(p===current)get('dashboard').textContent='统计加载失败：'+error.message+'，请点击“刷新统计”重试。';}
   }
-  document.querySelector('[data-tab="dashboard"]').addEventListener('click',refreshDashboard);
+  // 运行总览并入「项目与运行」后不再有独立页签：由 RuntimeView 在进入「运行总览」分区时调用。
+  // 下面两处 get('tab-dashboard') 判断的还是同一个面板 id（面板沿用旧 id），所以口径没变。
+  window.RuntimeView?.on('overview',refreshDashboard);
   get('project').addEventListener('change',()=>{dashboardRequest++;if(!get('tab-dashboard').classList.contains('hidden'))refreshDashboard();});
   for(const id of ['apply-scope','reset-scope'])get(id).addEventListener('click',()=>{if(!get('tab-dashboard').classList.contains('hidden'))refreshDashboard();});
   // Boot into the linked workbench and restore the last selected existing project.
   showTab('search');
-  projects().then(()=>{const saved=sessionStorage.getItem('knowledge-project');if(saved&&[...get('project').options].some(o=>o.value===saved))get('project').value=saved;else if(get('project').options.length>1)get('project').selectedIndex=1;if(get('project').value)get('project').onchange();}).catch(e=>status(e.message,true));
+  // 等认证就绪再拉项目列表：未登录时先挂着。以前这里直接 projects()，
+  // 会带着空令牌打 /api/projects 拿 401（登录框因此误报"登录状态已失效"）。
+  (window.Auth&&window.Auth.whenReady?window.Auth.whenReady():Promise.resolve())
+   .then(()=>projects()).then(()=>{const saved=sessionStorage.getItem('knowledge-project');if(saved&&[...get('project').options].some(o=>o.value===saved))get('project').value=saved;else if(get('project').options.length>1)get('project').selectedIndex=1;if(get('project').value)get('project').onchange();}).catch(e=>status(e.message,true));
 })();
 
 /* Open ontology discovery: schema-free candidates stay separate until a draft is published. */
@@ -675,9 +891,14 @@ chart.setOption({animation:false,tooltip:{formatter:p=>esc(p.dataType==='edge'?(
   const get=id=>document.getElementById(id);
   const oldToggle=get('extract'),mode=document.createElement('select');mode.id='extraction-mode';
   mode.innerHTML='<option value="ontology">使用项目本体 · 正式入图</option><option value="discovery">开放本体发现 · 候选暂存</option><option value="documents">仅文档检索 · 不抽取图谱</option>';
-  const modeLabel=document.createElement('label');modeLabel.className='extraction-mode-control';modeLabel.innerHTML='<span>解析模式 <b>必填</b></span>';modeLabel.append(mode);
+  const modeLabel=document.createElement('label');modeLabel.className='extraction-mode-control';modeLabel.innerHTML='<span>解析模式 <b>必选</b></span>';modeLabel.append(mode);
   const help=document.createElement('p');help.id='extraction-mode-help';help.className='extraction-mode-help';
-  oldToggle.closest('label').before(modeLabel,help);oldToggle.closest('label').classList.add('hidden');
+  // 2026-10-05：写入页改为纯文件上传，解析模式是\"文件会被怎样处理\"的唯一总开关，
+  // 从高级区挪到面板最顶部的占位槽（#ingest-mode-slot）——发送前一眼可见、不会再误操作。
+  const slot=document.getElementById('ingest-mode-slot');
+  if(slot)slot.append(modeLabel,help);
+  else{oldToggle.closest('label').before(modeLabel,help);}
+  oldToggle.closest('label').classList.add('hidden');
   const descriptions={ontology:'按当前项目本体抽取、校验和实体融合，合法知识进入正式图谱。',discovery:'不要求预设本体；Semantica 自由抽取并持续累计候选，不直接写入正式图谱。',documents:'只保存原文、切片和向量，不抽取实体、关系或属性。'};
   mode.onchange=()=>{
     help.textContent=descriptions[mode.value];oldToggle.checked=mode.value!=='documents';

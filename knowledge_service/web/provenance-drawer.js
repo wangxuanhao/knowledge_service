@@ -82,7 +82,9 @@
   function selectTab(index){
     tabButtons.forEach((tab,i)=>{tab.setAttribute('aria-selected',String(i===index));tab.tabIndex=i===index?0:-1;panels[i].hidden=i!==index;});
   }
-  ['证据链','API 数据'].forEach((label,index)=>{
+  // 标签名故意写成一整句：用户原话"证据溯源看不懂，E1 E2分别是干什么的"。
+  // "证据链 / API 数据"两个词既没说清这里是什么，也没说清该看哪一个。
+  ['这条引用从哪来','原始接口数据（开发排查用）'].forEach((label,index)=>{
     const tab=button(label,()=>selectTab(index));tab.id='provenance-tab-'+index;
     tab.setAttribute('role','tab');tab.setAttribute('aria-controls',panels[index].id);
     panels[index].setAttribute('role','tabpanel');panels[index].setAttribute('aria-labelledby',tab.id);
@@ -94,7 +96,12 @@
     });
     tabButtons.push(tab);tabs.appendChild(tab);
   });
-  selectTab(0);root.append(header,status,tabs,chain,rawPanel);document.body.appendChild(root);
+  /* 说明块挂在标签页上方的常驻容器里。以前它是 chain 的第一个子节点，而 open()/render()
+     会 replaceChildren() 清空 chain —— 于是"读取中/读取失败"时说明一起被清掉，
+     用户正好在看"看不懂"的空抽屉。说明必须独立于数据生命周期。 */
+  const guideHost=element('div');guideHost.id='provenance-guide';
+  selectTab(0);root.append(header,status,guideHost,tabs,chain,rawPanel);document.body.appendChild(root);
+  function ensureGuide(){if(!guideHost.children.length)guideHost.appendChild(explainBlock());}
   const narrowScreen=typeof window.matchMedia==='function'?window.matchMedia('(max-width: 760px)'):null;
   function syncLayout(){
     let target=document.body;
@@ -139,8 +146,49 @@
       active?.answerId===context.answerId&&active?.citation===context.citation&&
       (project===null||project===context.projectId);
   }
+  // 「这些块是干什么的」：抽屉里原本只有一堆卡片，用户反馈看不懂为什么要展示这些。
+  // 这里给一份名词表 + 一句话说明，默认折叠，不挡住真正要看的那条链。
+  const nodePurpose={
+    answer:'你正在看的这条回答本身：它引用了哪几条证据、每条是"被引用"还是"只提供过"。',
+    retrieval:'生成这条答案的那一次检索：范围、时间点与检索模式。',
+    assertion:'写入知识时保存的那次判断（当时的状态与它引用到的原文）。',
+    record_version:'这条知识在那一刻的版本快照：名称、类型、生效区间。',
+    chunk_version:'断言引用到的原文切片（分块）。',
+    source_occurrence:'切片在那份文档里的精确位置与前后文——「往上找原文」就是从这里找。',
+    document_version:'当时那份文档的版本（不是今天的文档）。',
+    ingest_run:'这份文档是哪一次导入任务处理的。',
+    review_event:'谁在什么时候批准或拒绝了这条知识（人工审核痕迹）。'
+  };
+  /* 阅读指南：默认展开。以前这段是折叠的，等于没写——用户反馈就是"证据溯源看不懂，
+     E1 E2分别是干什么的，下面的内容是什么，为什么要展示这些，给llm提示的内容又是什么"。
+     所以先正面回答这四个问题，名词表再折一层（要用的人点开）。 */
+  function explainBlock(){
+    const box=element('details',undefined,'provenance-explain');
+    box.open=true;
+    box.appendChild(element('summary','这一页怎么看？E1 / E2 是什么？'));
+    const qa=element('dl');
+    const rows=[
+      ['E1 / E2 是什么','答案正文里的引用编号。正文写成 [E1]、[E2]，每个编号对应下面的一张卡；点正文里的编号就跳到这里。'],
+      ['下面的内容是','生成这条答案时冻结下来的一条条历史记录：哪份文档、命中哪一段原文、原文在文档里的位置、当时的置信度。'],
+      ['为什么要展示','用来核对答案有没有依据：卡片里的原文能和源文档对上，才叫有据可依；对不上就是没依据，要重新检索或补资料。也是审核与追责的凭据。'],
+      ['「给 LLM 的提示」是什么','服务端实际拼给模型的提示词片段。模型只看到证据正文，看不到这一页的历史、审核与版本痕迹——所以这些历史是给你和审核人看的，不是模型的推理过程。'],
+      ['怎么读某一张卡','按箭头从上往下：这条回答 → 那次检索 → 当时写入的判断 → 原文切片 → 这份文档的版本。'],
+    ];
+    rows.forEach(([term,copy])=>qa.append(element('dt',term),element('dd',copy)));
+    box.appendChild(qa);
+    const glossary=element('details',undefined,'provenance-explain__glossary');
+    glossary.appendChild(element('summary','名词表：每类卡片分别是什么'));
+    const list=element('dl');
+    for(const [type,purpose] of Object.entries(nodePurpose)){
+      list.append(element('dt',nodeLabels[type]),element('dd',purpose));
+    }
+    glossary.appendChild(list);
+    glossary.appendChild(element('p','没出现的那类卡片＝这条链上确实没有那条记录（例如手工录入的对象没有「原文定位」）。缺少该有的记录时会显示上方的完整性警告。'));
+    box.appendChild(glossary);
+    return box;
+  }
   function render(data){
-    chain.replaceChildren();raw.textContent=JSON.stringify(data,null,2);
+    ensureGuide();chain.replaceChildren();raw.textContent=JSON.stringify(data,null,2);
     const nodes=list(data.nodes).filter(node=>node&&Object.hasOwn(detailFields,node.type));
     const edges=list(data.edges),warnings=list(data.integrity?.warnings);
     const names=new Map(nodes.map(node=>[node.ref,scalar(node.label)||nodeLabels[node.type]]));
@@ -199,7 +247,7 @@
     else if(!root.contains(document.activeElement))restoreFocus=document.activeElement;
     syncLayout();
     root.hidden=false;title.textContent='证据溯源 · ['+citation+']';
-    chain.replaceChildren();raw.textContent='';selectTab(0);setState('loading','正在读取历史证据链…');closeButton.focus();
+    ensureGuide();chain.replaceChildren();raw.textContent='';selectTab(0);setState('loading','正在读取历史证据链…');closeButton.focus();
     controller=new AbortController();const signal=controller.signal;
     const url='/api/projects/'+encodeURIComponent(projectId)+'/answers/'+encodeURIComponent(answerId)+
       '/evidence/'+encodeURIComponent(citation)+'/provenance';
@@ -231,5 +279,6 @@
     }
   }
   function renderLegacyNote(container){container.appendChild(element('p',LEGACY_NOTE,'provenance-legacy-note'));}
+  ensureGuide();
   window.ProvenanceDrawer={...pure,open,close,render,decorateAnswer,renderLegacyNote,onProjectChange};
 })();

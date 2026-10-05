@@ -2,12 +2,12 @@
 (() => {
   const panel = document.createElement('section');
   panel.className = 'panel neo4j-panel';
-  panel.innerHTML = '<h2>Neo4j 图谱副本</h2><p class="subtle">本地存储继续保留。按项目手动同步完整图谱与版本；检索仍走本地。连接凭据通过服务环境变量配置。</p><div class="row"><button data-storage="check">检查连接</button><button data-storage="status" class="secondary">当前项目同步状态</button><button data-storage="sync">同步当前项目</button></div><pre aria-live="polite"></pre>';
+  panel.innerHTML = '<h2>Neo4j 图谱副本 · 同步与核验</h2><p class="subtle">这里只做一件事：把本地图谱按项目复制到 Neo4j，并核验两边是否一致。<b>本地始终是权威</b>——检索、问答、版本历史都不走 Neo4j，同步失败也不影响本地数据。连接凭据通过服务环境变量配置。</p><div class="row"><button data-storage="check" class="secondary">检查连接</button><button data-storage="status" class="secondary">当前项目同步状态</button><button data-storage="sync">同步当前项目</button></div><pre aria-live="polite"></pre>';
   document.getElementById('tab-dashboard').appendChild(panel);
   const output = panel.querySelector('pre');
   let generation = 0;
   const visible=()=>!document.getElementById('tab-dashboard').classList.contains('hidden');
-  output.textContent='进入项目总览后自动检查 Neo4j 连接与项目同步状态。';
+  output.textContent='进入「运行总览」后自动检查 Neo4j 连接与项目同步状态。';
   async function inspectStorage(){
     const projectId=current, token=++generation;
     output.textContent='正在检查 Neo4j 连接'+(projectId?'及当前项目同步状态…':'…');
@@ -19,7 +19,8 @@
     const syncText=!projectId?'请在左侧选择项目后查看同步状态。':sync.status==='fulfilled'?describe(sync.value):'同步状态检查失败：'+sync.reason.message;
     output.textContent=connectionText+'\n\n'+syncText;
   }
-  document.querySelector('[data-tab="dashboard"]').addEventListener('click',inspectStorage);
+  // 项目总览并入「项目与运行」的「运行总览」分区：进入该分区时自动核验一次。
+  window.RuntimeView?.on('overview',inspectStorage);
   document.getElementById('project').addEventListener('change', () => { generation++;output.textContent = '项目已切换，进入总览后自动核验。';if(visible())inspectStorage(); });
   function describe(result){
     const v=result.verification;

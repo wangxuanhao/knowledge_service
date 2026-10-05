@@ -244,7 +244,7 @@ def seeded(owner_conn):
                     (_PROJECT,))
         cur.execute("""insert into ontology_drafts(id,project_id,source_kind,status,revision,
                        title,summary,source_context,created_at,updated_at)
-                       values (%s,%s,'manual','editing',1,'t','s','{}',now(),now())""",
+                       values (%s,%s,'manual','pending',1,'t','s','{}',now(),now())""",
                     (_DRAFT, _PROJECT))
     yield
     _purge_project(owner_conn, _PROJECT)
