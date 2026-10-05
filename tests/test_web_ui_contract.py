@@ -381,10 +381,11 @@ if __name__ == "__main__":
 def test_primary_ui_exposes_one_unified_ontology_workbench():
     primary = ROOT / "knowledge_service" / "web"
     html = (primary / "index.html").read_text(encoding="utf-8")
-    workbench = (primary / "ontology-workbench.js").read_text(encoding="utf-8")
-    assert html.count(">本体工作台</button>") == 1
-    assert "/assets/ontology-workbench.js?v=discovery-lifecycle-1" in html
-    assert "ontology-workbench" in workbench
-    assert "data-workbench-stage=" in workbench
-    for stage in ("discover", "design", "review", "validate", "publish"):
-        assert f"'{stage}'" in workbench
+    # 入口在"P0 三页合一"里已改名：结构层只剩「本体建模层」一个入口，旧名「本体工作台」与三页签都不该再出现。
+    assert html.count(">本体建模层</button>") == 1
+    for retired in (">本体审核台</button>", ">本体编辑台</button>",
+                    ">本体档案</button>", ">本体工作台</button>"):
+        assert retired not in html, retired
+    # 旧三页文件已删除，不再被加载（收件箱骨架已并入「本体建模层」画布）。
+    assert not (primary / "ontology-workbench.js").exists()
+    assert re.search(r'/assets/ontology-workbench\.js\?v=', html) is None

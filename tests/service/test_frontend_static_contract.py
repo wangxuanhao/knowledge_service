@@ -5,6 +5,8 @@
 """
 from pathlib import Path
 
+import re
+
 WEB = Path(__file__).resolve().parents[2] / 'knowledge_service' / 'web'
 
 
@@ -41,23 +43,31 @@ def test_project_card_shows_project_id_with_copy():
 
 
 def test_assets_version_bumped_for_changed_files():
-    """改动过的静态资源必须带版本号，否则浏览器缓存旧文件（"改了没生效"第一嫌疑）。"""
+    """改动过的静态资源必须带版本号，否则浏览器缓存旧文件（"改了没生效"第一嫌疑）。
+
+    这里只校验"带版本号 + 版本号不是空/占位"，不锁具体数值：锁死数值会让每次正常 bump
+    都变成假红灯（本轮 9 项修复就 bump 了 8 个资源），假红灯会训练人忽略真红灯。
+    本体三页与布局偏好必须都在列表里——它们是本轮新增/改动最多的资源。
+    """
     html = read('index.html')
-    for asset, marker in (('workspace.js', 'graph-scope'),
-                          ('ontology-details.js', 'linked-review'),
-                          ('workspace.css', 'fact-review'),
-                          ('projects.css', 'project-id'),
-                          ('ontology-modal.css', 'term-impact')):
-        assert f'{asset}?v={marker}' in html, f'{asset} 版本号未 bump（期望前缀 {marker}）'
-    assert '/assets/style.css?v=ontology-nav-1' in html
+    versioned = set(re.findall(r'/assets/([\w.-]+)\?v=([\w.-]+)', html))
+    for asset in ('workspace.js', 'workspace.css', 'ontology-details.js', 'projects.css',
+                  'ontology-modal.css', 'style.css',
+                  'provenance-drawer.js', 'provenance-drawer.css'):
+        marker = dict(versioned).get(asset)
+        assert marker, f'{asset} 缺少缓存版本号（?v=…）'
+        assert marker not in ('', '0'), f'{asset} 版本号是占位值'
 
 
 def test_provenance_assets_precede_history_hydration():
     html = read('index.html')
-    assert '/assets/provenance-drawer.css?v=2' in html
-    assert '/assets/provenance-drawer.js?v=3' in html
-    assert '/assets/evidence-inspector.js?v=candidate-evidence-1' in html
-    assert '/assets/workbench.js?v=graph-detail-state-1' in html
+    # 版本值刻意不锁死（改了就要 bump，锁死会让"漏 bump"变成假红灯）：
+    # 只要求这两个资源带缓存版本号，且顺序仍在 workbench.css 之后。
+    assert re.search(r'/assets/provenance-drawer\.css\?v=[\w.-]+', html)
+    assert re.search(r'/assets/provenance-drawer\.js\?v=[\w.-]+', html)
+    # 别锁死 ?v= 的具体值：改了文件就要 bump，锁死只会制造假红灯（只要求带版本号）。
+    assert re.search(r'/assets/evidence-inspector\.js\?v=[\w.-]+', html)
+    assert re.search(r'/assets/workbench\.js\?v=[\w.-]+', html)
     assert html.index('/assets/workbench.css') < html.index('/assets/provenance-drawer.css')
     assert html.index('/assets/ingest-mode.js') < html.index('/assets/provenance-drawer.js') < html.index('/assets/workbench.js')
 
@@ -98,51 +108,59 @@ def test_narrow_provenance_panel_uses_answer_flow_instead_of_fixed_overlay():
         assert marker in js, marker
 
 
-def test_unified_ontology_workbench_has_one_entry_and_versioned_assets():
+def test_ontology_modeling_layer_is_the_single_structure_entry():
+    """P0-A2：结构层三页（审核台/编辑台/档案）合成一个「本体建模层」入口。
+
+    侧栏不再有三个并列的本体页签；「本体建模层」是唯一控制结构的地方。
+    旧三页的 JS/CSS 暂时保留（P1 把功能搬进画布后再删），但必须带缓存版本号。
+    """
     html = read('index.html')
     sidebar = html.split('</nav>', 1)[0]
     workspace = read('workspace.js')
     menu = read('menu-hierarchy.js')
-    assert html.count('>本体工作台</button>') == 1
+    # 结构层只剩「本体建模层」一个入口。
+    assert html.count('>本体建模层</button>') == 1, '侧栏必须恰好一个「本体建模层」入口'
+    # 旧的三个本体页签必须消失（合并被回滚的哨兵）。
+    for retired in ('>本体审核台</button>', '>本体编辑台</button>', '>本体档案</button>',
+                    '>本体工作台</button>'):
+        assert retired not in html, retired
     assert 'data-tab="ontology"' not in sidebar
     assert '>本体管理</button>' not in sidebar
     assert "page.id='tab-discovery'" not in workspace
     assert "nav.dataset.tab='discovery'" not in workspace
     assert "'discovery'" not in menu
     assert "'ontology'" not in menu
-    for name in ('records-view.js', 'task-review.js', 'ontology-workbench.js'):
+    for name in ('records-view.js', 'task-review.js'):
         assert '[data-tab="ontology"]' not in read(name)
-    assert '/assets/ontology-workbench.css?v=candidate-evidence-1' in html
-    assert '/assets/ontology-workbench.js?v=discovery-lifecycle-1' in html
-    assert html.index('/assets/style.css') < html.index('/assets/ontology-workbench.css')
-    assert html.index('/assets/workspace.js') < html.index('/assets/ontology-workbench.js')
+    # 本体建模层资源必须带缓存版本号 + 顺序正确（style/workspace 在前）。
+    assert re.search(r'/assets/ontology-model\.css\?v=[\w.-]+', html)
+    assert re.search(r'/assets/ontology-model\.js\?v=[\w.-]+', html)
+    # 旧三页资源必须已从 index.html 卸载（文件已删除），这是"死代码清干净"的哨兵。
+    for asset in ('ontology-workbench.css', 'ontology-workbench.js',
+                  'ontology-design.css', 'ontology-design.js',
+                  'ontology-archive.css', 'ontology-archive.js'):
+        assert f'/assets/{asset}' not in html, f'{asset} 还在被加载（旧三页应已删除）'
+    assert not (WEB / 'ontology-workbench.js').exists()
+    assert not (WEB / 'ontology-design.js').exists()
+    assert not (WEB / 'ontology-archive.js').exists()
+    assert html.index('/assets/style.css') < html.index('/assets/ontology-model.css')
+    assert html.index('/assets/workspace.js') < html.index('/assets/ontology-model.js')
     assert 'ontology-manager.html' not in html
     assert not __import__('re').search(r'\son(?:click|change|input|submit)=', html)
-    assert "'ontology-workbench'" in read('menu-hierarchy.js')
+    # 侧栏分组里不再有旧本体页签；本体建模层是「本体层」组唯一入口。
+    assert "'ontology-model'" in menu
+    for retired in ('ontology-workbench', 'ontology-design', 'ontology-archive',
+                    'candidate-mindmap', 'reviews'):
+        assert f"'{retired}'" not in menu, f'{retired} 仍作为菜单入口（合并回滚了）'
 
 
-def test_ontology_workbench_shell_keeps_five_stages_and_discovery_hooks():
-    js = read('ontology-workbench.js')
-    assert 'data-workbench-stage=' in js
-    for stage in ('discover', 'design', 'review', 'validate', 'publish'):
-        assert f"'{stage}'" in js
-    for hook in (
-        'discovery-metrics', 'discovery-distribution-detail', 'candidate-map-canvas',
-        'candidate-map-source', 'candidate-map-confidence',
-        'candidate-map-detail', 'create-discovery-draft',
-    ):
-        assert hook in js or hook in read('candidate-mindmap.js') or hook in read('workspace.js')
-    css = read('ontology-workbench.css')
-    selectors = [line.split('{', 1)[0].strip() for line in css.splitlines() if '{' in line]
-    assert selectors
-    assert all(
-        selector.startswith(('.ontology-workbench', '@', ':root'))
-        for selector in selectors
-        if selector and not selector.startswith(('from', 'to', '0%', '100%'))
-    )
-    assert ':focus-visible' in css
-    assert 'prefers-reduced-motion' in css
-    assert '.ontology-workbench__pane{position:static;inset:auto;display:block;width:auto;max-width:none' in css
+def test_legacy_ontology_manager_entry_is_removed():
+    """P0-4：旧的本体管理器入口必须已删除。
+
+    它没有任何运行时引用（只在 `/assets` 挂载下仍可被直接访问），留着就是
+    "第二套本体编辑入口" —— 数据入口分裂的源头。工作台的版本治理抽屉已接管其内容。
+    """
+    assert not (WEB / 'ontology-manager.html').exists()
 
 
 def test_legacy_candidate_map_labels_embedded_evidence_as_preview():
@@ -150,37 +168,13 @@ def test_legacy_candidate_map_labels_embedded_evidence_as_preview():
     html = read('index.html')
     assert 'source.evidence_preview' in js
     assert '来源预览' in js
-    assert '本体工作台' in js
+    # 审核台已并入「本体建模层」：这里必须指向「本体建模层」，不能再出现旧名「本体工作台」
+    assert '进入本体建模层' in js
+    assert '本体工作台' not in js
     assert 'evidence_preview_truncated' in js
     assert "source.evidence||'未保存证据片段'" not in js
-    assert '/assets/candidate-mindmap.js?v=source-preview-1' in html
-
-
-def test_ontology_workbench_uses_preview_and_full_source_count_contract():
-    js = read('ontology-workbench.js')
-    assert 'source.evidence_preview' in js
-    assert '来源预览' in js
-    assert 'source_count' in js
-    assert 'sources_truncated' in js
-    assert "source.evidence||'未保存证据片段'" not in js
-    assert '点击候选，在右侧核对结构与精确原文证据。' not in js
-
-
-def test_candidate_evidence_is_lazy_abortable_and_uses_safe_dom_construction():
-    js = read('ontology-workbench.js')
-    inspector = js.split('function renderCandidateInspector', 1)[1].split(
-        'function renderDiscoveryData', 1)[0]
-    for marker in (
-        'candidateEvidenceController', 'candidateEvidenceToken',
-        '/assertions/', '/evidence', 'resolvable', 'createTextNode',
-        "createElement('mark')", 'replaceChildren', 'source_count',
-        'sources_truncated', '查看完整历史原文', '/history',
-        'window.openFrozenSourceEvidence',
-    ):
-        assert marker in js, marker
-    assert 'innerHTML' not in inspector
-    for label in ('精确证据位置', '历史切片内恢复定位', '仅保存切片级位置', '历史来源无法定位'):
-        assert label in js
+    # 别锁死 ?v= 的具体值（改了就要 bump，锁死只会制造假红灯），只要求带版本号。
+    assert re.search(r'/assets/candidate-mindmap\.js\?v=', html)
 
 
 def test_formal_evidence_location_labels_cover_verified_modes():
@@ -189,29 +183,672 @@ def test_formal_evidence_location_labels_cover_verified_modes():
         assert f'{mode}:' in js
 
 
-def test_ontology_workbench_uses_safe_shared_state_contract():
-    js = read('ontology-workbench.js')
-    for marker in (
-        'projectId', 'ontologyId', 'draftId', 'revision', 'selectedIri',
-        'displayPath', 'mode', 'filters', 'cursors', 'textContent',
-        'replaceChildren', 'AbortController',
-    ):
-        assert marker in js, marker
-    assert 'onclick=' not in js and 'onchange=' not in js
-
-
 def test_document_upload_workspace_contract():
     html = read('index.html')
     js = read('ingest-mode.js')
     css = read('workbench.css')
     source = html + js
-    for marker in ('选择内容', '文件清单', '处理选项', 'doc-dropzone', 'doc-upload-summary',
+    for marker in ('选择文件', '文件清单', '处理选项', 'doc-dropzone', 'doc-upload-summary',
                    'doc-clear-files', 'doc-retry-files', '.pdf', '.docx', '.html', '25 MB',
                    '最多 20 个', '100 MB'):
         assert marker in source, marker
     for marker in ('.document-upload-workspace', '.document-dropzone', '.document-queue-row',
                    '@media(max-width:850px)', ':focus-visible'):
         assert marker in css, marker
-    assert '/assets/workbench.css?v=document-upload-3' in html
+    assert '/assets/workbench.css?v=font-floor-11' in html
     assert '/assets/ingest-mode.js?v=document-upload-1' in html
-    assert '/assets/workbench.js?v=graph-detail-state-1' in html
+    assert re.search(r'/assets/workbench\.js\?v=[\w.-]+', html)
+
+
+# ============================================================================
+# 2026-10-01 用户九项反馈的源码级契约：把"改好的地方别再退回去"钉住。
+# 这些断言刻意针对"用户能看到的现象"，不是实现细节——具体变量名可以改，
+# 现象不能丢（丢了就说明修复被回滚了）。
+# ============================================================================
+
+
+def test_provenance_guide_is_outside_the_cleared_panel():
+    """证据溯源的"这一页怎么看"必须挂在常驻容器里。
+
+    它以前是 chain 的第一个子节点，而 open()/render() 会 replaceChildren() 清空 chain，
+    于是"读取中/读取失败"时说明一起被清掉，用户看到的是空抽屉（反馈：看不懂 E1/E2）。
+    """
+    js = read('provenance-drawer.js')
+    assert 'guideHost' in js and 'ensureGuide' in js
+    assert 'chain.replaceChildren(explainBlock())' not in js, '说明块又回到会被清空的容器里了'
+    assert 'ensureGuide();chain.replaceChildren();' in js, 'render() 必须先保说明、再清卡片'
+    for marker in ('E1 / E2', '给 LLM 的提示'):
+        assert marker in js, marker
+    # 标签名要能自解释，不能再叫"证据链 / API 数据"
+    assert '原始接口数据' in js
+
+
+def test_iri_preview_row_aligns_with_other_columns():
+    """IRI 预览必须和其它字段同一行同一套 .columns 栅格（用户："这个和其他不在一行"）。"""
+    workspace = read('workspace.js')
+    assert '<div class="columns"><label class="ontology-term-iri">' in workspace
+    assert 'ontology-term-iri-note' in workspace
+    css = read('workspace.css')
+    assert '.ontology-term-iri-note{align-self:center' in css, 'IRI 提示必须与输入同排对齐'
+
+
+def test_type_color_comes_from_one_palette_module():
+    """类型颜色只有一个出处：graph-palette.js（用户反馈"节点底下类型颜色和实体类型颜色都不统一"）。
+
+    真因：颜色以前是"在数组里的下标"决定的（palette[index % n]），而筛选条那排圆点用按钮下标取色，
+    第 0 项还是「全部类型」——每个类型的圆点整体错位一格，和图里节点颜色正好差一位。
+    另一个坑：同一处传原始 type、另一处传显示名 label，哈希出来是两个颜色，必须统一用 label。
+    """
+    palette = read('graph-palette.js')
+    assert 'function colorFor(' in palette and 'function colorMap(' in palette
+    assert 'window.GraphPalette' in palette, '必须挂在 window 上供其它脚本用'
+    workspace = read('workspace.js')
+    assert 'catColor' not in workspace, '不能再按数组下标取色'
+    # 圆点与节点/图例同 key：都用页面上显示的类型名
+    assert "${dot(type?displayType(type):'')}" in workspace, '圆点必须用显示名取色'
+    assert 'color:attribute?attrColor:colorFor(label)' in workspace, '节点必须用显示名取色'
+    assert 'colorMap(scopeLabels)' in workspace, '同屏撞色要自动挪位'
+    assert 'GraphPalette.colorFor' in workspace and 'GraphPalette.colorMap' in workspace
+
+
+def test_same_type_same_color_across_pages_palette_is_deterministic():
+    """颜色由类型名哈希决定，与顺序无关；同屏重色由 colorMap 兜底。"""
+    palette = read('graph-palette.js')
+    assert 'Math.imul' in palette, '用 FNV-1a 之类的稳定哈希，别用随环境变的算法'
+    assert 'PALETTE[hash(key) % PALETTE.length]' in palette
+    assert "if (used.has(color))" in palette, '缺少撞色挪位'
+
+
+def test_graph_is_readonly_canvas_pan_and_click_but_no_node_drag():
+    """图谱是**只读画布**：节点不可拖动（力导向布局只负责初始摆放，节点位置不承载编辑语义）。
+
+    空白处拖动＝平移画布（ECharts 的 roam:true）；点节点/连线＝看详情；双击空白＝适应画布。
+    以前那套「移动节点」zrender 拖动（bindNodeDrag + nearestNode）+ 开关按钮已整体移除：
+    对一张检索浏览用的图，拖动节点是负担不是能力——布局会被拖乱，也偏离"正常画布操作"的直觉。
+    """
+    workspace = read('workspace.js')
+    # 平移画布：ECharts graph 的 roam:true（空白处拖动）
+    assert "type:'graph',layout:'force',roam:true" in workspace, '必须允许拖动空白处平移画布（roam）'
+    # 点节点/连线看详情
+    assert "chart.on('click'" in workspace, '点节点或连线必须能看详情'
+    # 双击空白＝适应画布
+    assert "getZr().on('dblclick'" in workspace, '双击空白处＝适应画布'
+    assert 'bindPanAffordances' in workspace
+    # 节点拖动必须整体移除：既没有 zrender 拖动实现，也没有开关按钮
+    assert 'bindNodeDrag' not in workspace, '节点拖动实现应已移除'
+    assert 'nearestNode' not in workspace, '节点拖动实现应已移除'
+    assert 'dragNodes' not in workspace, '「移动节点」开关状态应已移除'
+    html = read('index.html')
+    assert 'id="graph-drag-nodes"' not in html, '「移动节点」开关按钮应已移除'
+    assert 'id="graph-pan-hint"' in html, '缺少拖动/缩放操作提示'
+    assert 'graph-palette.js' in html, '必须引入调色板模块'
+    # 同上：按"带版本号"匹配，不锁死 fix13 这类具体值。
+    assert html.index('graph-palette.js') < re.search(r'workspace\.js\?v=', html).start(), \
+        '调色板要先于 workspace.js 加载'
+    css = read('workspace.css')
+    assert '.graph-canvas canvas{cursor:grab}' in css, '缺少可拖动的光标反馈'
+    # 同类：候选图也是 roam + draggable，拖动同样会被节点吃掉
+    assert 'draggable:false' in read('candidate-mindmap.js'), '候选图也必须关掉节点拖动'
+
+
+def test_pan_hint_says_what_each_action_does():
+    """提示行要写清各动作做什么，不能只放一个"重置视图"了事。"""
+    hint = read('index.html')
+    assert 'graph-pan-hint' in hint
+    # 只读画布的四件事：平移、缩放、适应画布、点节点看详情（不再有"移动节点"）
+    for phrase in ('平移', '缩放', '适应画布', '看详情'):
+        assert phrase in hint, f'提示行缺少「{phrase}」'
+    assert '移动节点' not in hint, '提示行不该再提「移动节点」（节点不可拖动）'
+
+
+def test_display_blocks_that_can_be_hidden_also_pin_the_hidden_attribute():
+    """JS 里会被 .hidden=true 的块，如果作者样式又给了 display:flex/grid，必须显式补 [hidden]{display:none}。
+
+    坑：UA 样式表的 [hidden]{display:none} 会被作者样式里的 display 盖掉，于是"隐藏"的块
+    变成一条**空边框**还占着版面。真机探针 2026-10-05 抓到过一次（台账那行"还挂在旧本体上"），
+    ontology-archive.css 里也早写过同样的注释。这是源码级守卫：删掉那条 [hidden] 规则即变红。
+    """
+    flat = ''.join(read('workspace.css').split())
+    assert '.ledger-stale-notice{display:flex' in flat, '这行提示应该是横排的'
+    assert '.ledger-stale-notice[hidden]{display:none}' in flat, \
+        '这条提示会被 JS 隐藏，必须显式补 [hidden]{display:none}，否则剩下一个空边框条'
+    assert "stale_notice.hidden=true" in read('records-view.js').replace(' ', ''), \
+        '渲染函数里没有再隐藏它？那这条守卫失去意义，请顺手核对'
+
+
+def test_reclassify_operation_reads_in_chinese_on_the_operations_list():
+    """迁完要在「可撤销的操作」里看得懂：操作种类必须有中文名，不能漏成英文动词。"""
+    js = read('records-view.js')
+    assert "'reclassify'" in js
+    assert '迁到新本体' in js
+
+
+def test_snapshot_page_has_exactly_one_restore_entry_point():
+    """快照恢复只能有一个入口：快照卡片上的「恢复」。
+
+    旧的那套 1px 隐藏表单（select + checkbox + button）既看不见又和卡片重复；
+    E 规则「一屏一个实心按钮」量到它时才发现：同一屏上出现了两个"恢复"实心按钮。
+    """
+    html = read('index.html')
+    workbench = read('workbench.js')
+    for retired in ('id="snapshot-list"', 'id="snapshot-confirm"', 'id="restore-snapshot"'):
+        assert retired not in html, f'旧的隐藏快照控件 {retired} 必须已删除'
+    assert "bind('restore-snapshot'" not in workbench
+    assert 'data-snapshot-restore' in workbench, '卡片上的「恢复」必须还在（唯一入口）'
+
+
+def test_runtime_page_merges_four_flat_pages_into_one_entry():
+    """D2：项目管理 / 项目总览 / 后台任务 / 快照·评测 四个平铺菜单 → 「项目与运行」一个入口。
+
+    为什么合并：那四页回答的其实是同一个问题——"这个项目跑得怎么样"，
+    平铺成四个菜单只会让用户在页签之间来回找（用户原话："界面不要一直是平铺的"），
+    而它们又都不是日常动作（都不改知识、不改本体）。
+
+    契约钉住三件事，缺一件合并就会退回去：
+      · 侧边栏只剩 7 项，旧的四项不再作为独立页签；
+      · 四个旧页面成为四个分区，每个分区都写清"这里回答什么"；
+      · 分区数据由 RuntimeView 在**进入时**加载，且加载函数留在各自模块里（不复制第二份）。
+    """
+    html = read('index.html')
+    sidebar = html.split('</nav>', 1)[0].split('<nav>', 1)[1]
+    entries = re.findall(r'data-tab="([\w-]+)"', sidebar)
+    assert len(entries) == 7, entries
+    assert entries.count('runtime') == 1
+    for retired in ('projects', 'dashboard', 'jobs', 'evaluation'):
+        assert f'data-tab="{retired}"' not in sidebar, f'{retired} 仍是独立页签（合并被回滚了）'
+    for label in ('>项目管理</button>', '>项目总览</button>', '>后台任务</button>', '>快照 / 评测</button>'):
+        assert label not in sidebar, label
+
+    # 「做什么 / 不做什么」必须写在页面上：只给一个入口名，用户还是不知道这一页管什么。
+    hero = html.split('class="runtime-hero"', 1)[1].split('</header>', 1)[0]
+    assert '跑得怎么样' in hero
+    for elsewhere in ('知识台账', '本体建模层'):
+        assert elsewhere in hero, f'页头没写清"这件事不在这做，去{elsewhere}"'
+
+    # 四个分区，每格都要有名称 + 一句说明（只有一个名词的分区等于没写）
+    views = re.findall(r'data-runtime-view="(\w+)"', html)
+    assert views == ['project', 'overview', 'jobs', 'snapshots'], views
+    for view in views:
+        block = html.split(f'data-runtime-view="{view}"', 1)[1].split('</button>', 1)[0]
+        assert '<b>' in block and '<small>' in block, f'分区 {view} 缺少名称或说明'
+
+    # 面板沿用旧 id（既有代码靠这些 id 判断"现在在哪一屏"），但都必须挂上 runtime-panel
+    for panel in ('tab-projects', 'tab-dashboard', 'tab-jobs', 'tab-evaluation'):
+        assert f'id="{panel}" class="tab hidden runtime-panel"' in html, panel
+
+    # 加载口径只有一处：RuntimeView 的注册表；四个模块各自把加载函数交上来
+    runtime = read('runtime-view.js')
+    assert 'window.RuntimeView' in runtime and 'on(view,loader)' in runtime
+    assert "const VIEWS=['project','overview','jobs','snapshots']" in runtime
+    for name, view in (('workspace.js', 'overview'), ('task-review.js', 'jobs'),
+                       ('projects-view.js', 'project'), ('workbench.js', 'snapshots')):
+        assert f"RuntimeView?.on('{view}'" in read(name), f'{name} 没把 {view} 分区的加载函数交给 RuntimeView'
+
+    # 合并之后不该再有人按旧页签名找入口（运行时那会是读一个 null 的属性）
+    for name in ('workspace.js', 'task-review.js', 'workbench.js', 'projects-view.js'):
+        source = read(name)
+        for retired in ('projects', 'dashboard', 'jobs', 'evaluation'):
+            assert f'[data-tab="{retired}"]' not in source, f'{name} 还在引用旧页签 {retired}'
+
+    # 导航分组：旧的「项目」「运行与质量」两组并成一组
+    menu = read('menu-hierarchy.js')
+    assert "['运行层 · 跑起来',['runtime']]" in menu
+    assert "['projects','dashboard']" not in menu and "['jobs','evaluation']" not in menu
+    # 只有一个入口的分组不该默认折叠（折叠了用户就找不到它在哪）
+    assert 'available.length===1' in menu
+
+    # 新增资源要引入；改动过的资源都要带缓存版本号（否则浏览器一直用旧 JS）
+    for asset in ('runtime.css', 'runtime-view.js', 'app.js', 'workspace.js', 'menu-hierarchy.js',
+                  'task-review.js', 'workbench.js', 'projects-view.js', 'storage.js'):
+        assert re.search(rf'/assets/{re.escape(asset)}\?v=[\w.-]+', html), asset
+
+
+# ============================================================================
+# 本体建模层用户反馈的源码级契约（2026-10-05）
+# 用户原话："本体层界面展示的只是父类和子类是吧，关系没办法显示，然后这块发布了版本后
+# 不能继续变更了不对吧……就是我点进来能直接修改内容哈，现在父类也加不了，
+# 层级视图还不居中，层级改成层级树吧"
+# 同上一节：断言刻意针对"用户能看到的现象"，具体变量名可以改，现象不能丢。
+# ============================================================================
+
+
+def test_relation_endpoints_section_explains_why_and_backfills_from_real_usage():
+    """关系详情的「两端」区：说清为什么画不出线，并能按**实际用法**一键回填。
+
+    用户看到的现象是：左栏写「关系类型 9」、统计栏写「关系 0」，同一屏两个数字打架，
+    画布上一条关系线都没有。真因是抽出来的关系类型没有 rdfs:domain/range，
+    而画布只在两端都在图里时才画得出线。
+    """
+    panel = read('ontology-model-panel.js')
+    assert '/ontology/relation-usage' in panel
+    # 回填走草案命令通道，且两端各一条（只有 domain 也画不出线）
+    assert "'add_domain'" in panel and "'add_range'" in panel
+    assert 'action: t.action, target_iri: rel.id, value: t.value' in panel
+    # 画布画的是草案时必须带 draft_id 问，否则回填完还显示"未声明"（又是一个"改了没反应"）
+    assert '&draft_id=' in panel
+    # 统计口径只在服务端：前端不许自己数一遍
+    assert 'current_records' not in panel
+    # 没有依据时不猜
+    assert '读不到实际用法' in panel
+    assert '宁可不补，也不猜' in panel
+
+
+def test_hierarchy_view_is_renamed_and_fitted_to_the_band_frame():
+    """「分层视图」改名「层级树」，且居中按**层带外框**算（不是节点外接框）。
+
+    真机读数：3 条层带 x=117.7 宽 848.5，容器只有 902 → 右边缘 966 已被切掉 64px，
+    左边却空出 118px。根因是 Cytoscape 预设布局的 fit 拟合的是**节点**，
+    而层带是后加的、更宽的一圈 SVG 覆盖层 —— fit 根本不知道它存在。
+    """
+    model = read('ontology-model.js')
+    canvas = read('ontology-model-canvas.js')
+    assert '层级树' in model, '视图页签必须叫「层级树」'
+    assert '分层视图' not in model, '旧名「分层视图」必须彻底消失'
+    # 摆位与缩放分开：preset 不 fit，改成按层带外框自己算 zoom/pan
+    assert 'fit: false' in canvas
+    assert 'function fitBox(box, pad)' in canvas
+    assert 'function drawBands(bands)' in canvas
+    assert 'return { x1: -BAND_PAD' in canvas, 'drawBands 必须把层带外框交回去当居中判据'
+    # 层号标签画在带内侧：以前在带外左侧会把外框撑偏，"居中"永远差一截
+    assert 'lx: BAND_PAD + 4' in canvas
+
+
+def test_canvas_has_a_create_entry_because_without_it_parent_cannot_be_added():
+    """画布必须有「新建类」入口 —— 否则就是"父类加不了"。
+
+    整页原先只有「改父类（连线）」，而它要求先选中一个**已存在**的类；空本体上没有
+    任何地方能新建，于是想加父类无从下手。
+    """
+    canvas = read('ontology-model-canvas.js')
+    panel = read('ontology-model-panel.js')
+    assert '＋ 新建类' in canvas
+    assert "'父类（选填：不选就是顶层类）'" in panel, '新建类必须能直接带父类'
+    assert "'/ontology/terms'" in panel, '新建要走与审核台同一条路（POST /ontology/terms），不自己拼 IRI'
+    assert 'focusCreate' in canvas and 'focusCreate' in panel
+
+
+def test_canvas_draws_the_draft_so_edits_are_visible_and_editable_after_publish():
+    """画布画的是**草案**：改完立刻看得见；发布之后也能接着改（自动开新草案）。
+
+    以前只读已发布本体 → 编辑写进草案、画布却按已发布版本画，改了半天屏幕没变化；
+    而且发布成功后 `S.draft` 仍是那份终态草案，下一笔编辑被服务端回一句"已经收下"
+    —— 用户看到的就是"发布了就不能再改了"，刷新一下才好。
+    """
+    model = read('ontology-model.js')
+    assert 'showingDraft' in model, '必须能分辨画布上画的是草案还是已发布本体'
+    assert '/ontology-drafts/${draft.id}' in model, '展示草案要读草案自己的结构'
+    assert '草案 · 未发布' in model and '已发布本体' in model
+    # 终态草案不能再改：必须看状态，不能只看"有没有"
+    assert 'OPEN_STATES.includes(S.draft.status)' in model
+
+
+def test_canvas_stats_separate_relation_types_from_drawn_edges():
+    """统计栏把「关系类型 N」与「画得出线 M」分开说 —— 两个数字打架是这轮反馈的起因。"""
+    assert '关系类型 ${relTotal}（画得出线 ${rel}）' in read('ontology-model-canvas.js')
+
+
+def test_ontology_model_assets_are_versioned_after_this_round():
+    """改动过的本体建模层资源必须带缓存版本号（漏 bump = 浏览器继续用旧 JS）。"""
+    html = read('index.html')
+    for asset in ('ontology-model.js', 'ontology-model-canvas.js', 'ontology-model-panel.js',
+                  'ontology-model-panel.css'):
+        assert re.search(rf'/assets/{re.escape(asset)}\?v=[\w.-]+', html), asset
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 版本管理（发布说明必填 / 版本管理抽屉 / 查看某一版 / 回到某一版）
+#
+# 这一组钉住"界面上的入口与文案确实存在"：动态渲染的东西漏了静态占位，
+# 浏览器不会报错，用户只会看到少了按钮 —— 靠服务端契约测试查不出来。
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_release_button_is_now_version_management():
+    """顶栏入口从「版本历史」升级为「版本管理」，且带上预览横幅与退出按钮。"""
+    js = read('ontology-model.js')
+    # 按钮上的**可见文案**必须是「版本管理」：叫「版本历史」用户会以为还是只读列表
+    assert '版本管理</button>' in js, '顶栏入口文案不是「版本管理」'
+    assert '版本历史' not in js, '旧文案「版本历史」残留（含注释，会误导下一个改这里的人）'
+    assert 'om-preview-banner' in js and 'om-preview-exit' in js
+
+
+def test_version_management_offers_view_and_go_back():
+    """版本管理必须同时提供「查看这一版（只读）」与「回到这一版」——
+    只有查看没有回退等于没回答用户的问题；只有回退没有查看则没人敢按。"""
+    panel = read('ontology-model-panel.js')
+    assert '查看这一版' in panel
+    assert '回到这一版' in panel
+    # 回退不能悄悄改写历史：文案要自己说清它是"再发一版"
+    assert '不改写历史' in panel
+
+
+def test_revert_is_an_explicit_source_kind_with_acknowledgement():
+    """回到某一版必须用显式的 revert 来源，并且要人勾过回退警告。"""
+    model = read('ontology-model.js')
+    panel = read('ontology-model-panel.js')
+    assert "source_kind: 'revert'" in model, '回退必须用 revert 来源（服务端只对它放行历史基线）'
+    assert 'om-ab-warning' in panel, '缺少发布警告逐条勾选（回退那条警告必须真的被人勾过）'
+    assert 'ackWarnings' in panel
+    # 历史版本只读：预览态要锁住编辑入口，并说明去哪解锁
+    assert 'om-ctx.is-preview' in read('ontology-model.js') or 'is-preview' in model
+
+
+def _rule_body(css: str, selector: str) -> str:
+    """取某条选择器的声明块内容（找不到返回空串）。选择器按文本精确匹配，避免正则转义地狱。"""
+    start = css.find(selector + '{')
+    if start < 0:
+        start = css.find(selector + ' {')
+    if start < 0:
+        return ''
+    open_brace = css.index('{', start)
+    return css[open_brace + 1:css.index('}', open_brace)]
+
+
+# 选择器里出现这些就是"状态/排除/伪元素"变体，宽度继承自基础规则，不该单独要求定宽
+_STATE_SUFFIX = (':checked', ':hover', ':focus', ':disabled', ':focus-visible', ':active')
+
+
+def _positive_checkbox_selectors(css: str) -> list[str]:
+    """挑出"**正向**给勾选框/单选框定样式"的选择器组。
+
+    排除三类误报（都真实存在于本仓库）：
+    - `input:not([type=checkbox])` 这种把勾选框**排除在外**的规则（theme.css 的全局表单皮肤）；
+    - `:checked{...}` / `::before{...}` 这类状态与伪元素变体（宽度继承自基础规则）；
+    - 选择器组里混着别的目标（如 `body main .check input, body main input[type=checkbox]`）。
+    """
+    found = []
+    for m in re.finditer(r'([^{}]+)\{([^{}]*)\}', css):
+        group, body = m.group(1).strip(), m.group(2)
+        parts = [p.strip() for p in group.split(',')]
+        positive = [p for p in parts
+                    if ('checkbox' in p or 'radio' in p)
+                    and ':not([type=' not in p.replace(' ', '')
+                    and not p.endswith(_STATE_SUFFIX)
+                    and '::' not in p]
+        # 组里只要有一个不是"点名的勾选框"，就说明这条规则不只服务勾选框 → 跳过
+        if positive and len(positive) == len(parts):
+            found.append((group, body))
+    return found
+
+
+def test_checkbox_rows_pin_their_width_against_the_global_input_rule():
+    """放进 flex 行的勾选框必须**显式定宽**，否则会长成整行。
+
+    `style.css` 第 1 行有一条全局 `input,select,textarea{width:100%}`。勾选框写
+    `flex:0 0 auto` 时 flex-basis 取 auto → 解析成 `width:100%`，于是它吃掉整行、
+    把相邻文字挤成**一行一个汉字**。真机实测（本体建模台回退警告）：
+    勾选框 981px、说明文字只剩 35px、动作条被撑到 729px 高；
+    修好后同一处是 15px 勾选框 + 1341px 文字（一行放下），动作条 216px。
+    DOM 契约测试全绿也发现不了（它只断言文字/类名，不量像素），所以要单独钉住。
+
+    这条是**源码级**证伪（便宜、跑在全量里）；像素级证伪在真机探针里
+    （scratch/probe_ab_layout.py，1680/1280/1100 三档量 span 宽与行数）。
+    """
+    # ① 正向点名的勾选框/单选框规则，必须自己定宽
+    offenders = []
+    for path in sorted(WEB.glob('*.css')):
+        css = re.sub(r'/\*.*?\*/', '', path.read_text(encoding='utf-8'), flags=re.S)
+        for group, body in _positive_checkbox_selectors(css):
+            if 'width' not in body:
+                offenders.append(f'{path.name} :: {" ".join(group.split())}')
+    assert not offenders, (
+        'These checkbox/radio rules do not set a width — the global input{width:100%} '
+        'will stretch them to a full row: ' + ' | '.join(offenders))
+
+    # ② 用**裸 input** 选择器给"勾选框所在行"定样式的地方，选择器上看不出它是勾选框，只能点名。
+    #    新增同类行（flex 行里的裸 input 勾选框）时把它加进这张表。
+    for name, selector in (('ontology-model-panel.css', '.om-ab-warning input'),):
+        body = _rule_body(read(name), selector)
+        assert body, f'{name} 里找不到 `{selector}` 的声明块 —— 选择器改名了？'
+        assert 'width' in body, (
+            f'{name} 的 `{selector}` 没定宽：全局 input{{width:100%}} 会把勾选框撑满整行，'
+            '相邻文字会被挤成一行一个汉字')
+
+
+# ============================================================================
+# 知识写入 = 纯文件上传（2026-10-05）
+# ============================================================================
+
+def test_ingest_page_is_plain_file_upload_without_chat_or_textbox():
+    """写入页只有「文件上传」：没有对话流、没有正文文本框、没有\"粘贴正文\"入口。
+
+    用户拍板：「这个输入框没必要了……不行就是一个文件上传就行了。」
+    钉住三件事：① 文件拖放区与文件清单在；② 对话流三件套与正文框**彻底不存在**；
+    ③ 旧对话流脚本/样式不再被 index.html 加载（否则它会自动挂回对话层）。
+    """
+    html = read('index.html')
+    ingest = html.split('id="tab-ingest"', 1)[1].split('id="tab-records"', 1)[0]
+    # 文件上传主路径仍在
+    for keep in ('id="doc-file"', 'id="doc-dropzone"', 'id="doc-file-list"', 'id="ingest"'):
+        assert keep in ingest, f'文件上传通道被误删了：{keep}'
+    # 对话流 / 正文框 / 粘贴模式入口都不在了
+    for gone in ('ingest-flow', 'id="doc-text"', 'document-input-mode', '粘贴正文'):
+        assert gone not in ingest, f'已废弃的 {gone} 又回到写入页'
+    # 旧对话流资源不再加载，新的纯文件上传资源要带版本号加载
+    assert 'ingest-flow.js' not in html and 'ingest-flow.css' not in html, '旧对话流脚本/样式还在加载'
+    assert 'ingest-upload.js?v=' in html and 'ingest-upload.css?v=' in html, '纯文件上传资源未带版本号引入'
+
+
+def test_ingest_mode_selector_is_promoted_to_top_and_explained():
+    """「解析模式」是\"文件会被怎样处理\"的唯一总开关：必须置顶可见、三档、带说明。
+
+    用户上一轮的困惑就是\"不知道文件会被正式入图还是只存候选\"。钉住：
+      ① 面板顶部有占位槽 #ingest-mode-slot；② workspace.js 把模式选择器注入该槽；
+      ③ 三档齐全（正式入图 / 候选暂存 / 仅文档）；④ 每档有中文说明。
+    """
+    html = read('index.html')
+    ingest = html.split('id="tab-ingest"', 1)[1].split('id="tab-records"', 1)[0]
+    assert 'id="ingest-mode-slot"' in ingest, '面板顶部缺少解析模式占位槽'
+    js = read('workspace.js')
+    assert "getElementById('ingest-mode-slot')" in js, '没有把解析模式注入顶部占位槽'
+    for option in ('使用项目本体', '开放本体发现', '仅文档检索'):
+        assert option in js, f'解析模式缺少档位：{option}'
+    assert 'extraction-mode-help' in js, '切换模式时没有给一句人话说明'
+
+
+def test_ingest_submit_stays_on_the_page_instead_of_jumping_to_jobs():
+    """点「上传并处理」后留在写入页：逐文件结果就地显示，后台任务只作可选入口。
+
+    旧逻辑提交成功就 showRuntimeView('jobs')，等于把人赶走。钉住：
+      workbench.js 提交成功分支不再强制跳转，改为在本页 #doc-submit-results 里给结果，
+      并提供一个\"查看后台任务进度\"的可选按钮。
+    """
+    js = read('workbench.js')
+    # 提交成功分支不再无条件 showRuntimeView('jobs')：改为本页给结果 + 一个可选入口。
+    assert '查看后台任务进度' in js, '没有给可选的后台任务入口'
+    # 不允许「提交成功 → 直接强制跳转」这种形态（showRuntimeView 只能出现在可选按钮里）
+    assert not re.search(r"if\(accepted\)\s*\{\s*showRuntimeView", js), \
+        '提交成功后仍在强制跳转后台任务页'
+    assert 'results.append(view)' in js, '提交结果没有留在本页'
+
+
+def test_ingest_keeps_advanced_options_and_structured_import():
+    """高级解析设置与结构化 JSON 导入仍然可达：删的是对话流，不是这些能力。"""
+    ingest = read('index.html').split('id="tab-ingest"', 1)[1].split('id="tab-records"', 1)[0]
+    for keep in ('id="doc-title"', 'id="write-batch"', 'parse-settings'):
+        assert keep in ingest, f'被误删的能力：{keep}'
+    assert '结构化记录导入（高级）' in ingest, '结构化记录导入被误删了'
+
+
+def test_ingest_results_workspace_is_a_right_drawer_with_real_data():
+    """抽取结果改为**右侧工作区抽屉**，数据来自真实端点（不是假数字）。
+
+    用户诉求：「放在一个侧边工作区，打印汇总信息」—— 页面不再堆叠大卡片。
+    钉住：① 页面不再有 #ingest-results-slot，改为入口按钮 #open-ingest-results；
+    ② ingest-results.js/css 带版本号引入；③ 脚本挂 .ingest-drawer 到 body、读
+    /ingest-runs（阶段/计数）与 /records/query（明细，按 belongsToDoc 归文档）；
+    ④ 有汇总指标 + 三类胶囊渲染分支；⑤ 有对应样式。
+    """
+    html = read('index.html')
+    ingest = html.split('id="tab-ingest"', 1)[1].split('id="tab-records"', 1)[0]
+    assert 'id="ingest-results-slot"' not in ingest, '旧的页面堆叠槽没有移除'
+    assert 'id="open-ingest-results"' in ingest, '缺少抽取结果工作区入口按钮'
+    assert 'ingest-results.js?v=' in html and 'ingest-results.css?v=' in html, \
+        '抽取结果脚本/样式未带版本号引入'
+    js, css = read('ingest-results.js'), read('ingest-results.css')
+    # 抽屉 + 真实端点（不是写死数据）
+    assert "'ingest-drawer'" in js or "'section', 'ingest-drawer'" in js, '没有构建右侧抽屉'
+    assert "endpoint('/ingest-runs')" in js, '没有读抽取运行'
+    assert "endpoint('/records/query" in js, '没有读知识明细'
+    assert 'belongsToDoc' in js, '没有按文档归属聚合明细'
+    # 汇总 + 三类知识渲染分支
+    for fn in ('renderSummary', 'entityChip', 'relationChip', 'attributeChip', 'appendGroups'):
+        assert fn in js, f'工作区缺少渲染分支：{fn}'
+    for klass in ('.ingest-drawer', '.ingest-drawer__summary', '.ingest-drawer__chip',
+                  '.ingest-drawer__doc'):
+        assert klass in css, f'样式缺少 {klass}'
+
+
+def test_ingest_results_drawer_polls_reports_honestly_and_closes():
+    """抽屉要实时刷新、诚实区分\"没抽图谱\"与\"抽了多少\"，并能关闭。
+
+    钉住：① 任务在跑时轮询、关闭/完成后停；② 只做文档（无实体/关系/属性）时如实说明；
+    ③ 失败保留原文收据；④ 待审候选给出口；⑤ 提交后自动滑出、Esc/× 可关。
+    """
+    js = read('ingest-results.js')
+    assert 'setInterval' in js and 'clearInterval' in js, '缺少阶段轮询与停止'
+    # 打开/关闭与自动滑出
+    assert 'function open' in js and 'function close' in js, '缺少抽屉开关函数'
+    assert 'setTimeout(open' in js, '提交后没有自动滑出'
+    assert "e.key === 'Escape'" in js, '不支持 Esc 关闭'
+    # 无图谱知识时的诚实文案（不把空说成成功抽取）
+    assert '没有抽出实体' in js, '没有如实说明"本次没抽到知识"'
+    assert '原文收据已保留' in js, '失败时没有说明原文不丢'
+    assert 'assertions_pending' in js, '有待审候选时没有给出口'
+
+
+
+# ============================================================================
+# 知识台账：实体 / 关系 / 属性 / 原文片段 四个视角（2026-10-05）
+# ============================================================================
+
+def test_ledger_covers_attributes_as_a_first_class_view():
+    """台账要维护「实体、关系、属性」—— 属性以前在台账里**没有视角**。
+
+    属性是一条独立记录（subject_id + 属性名 + 值 + 数据类型）；后端 current_records 早就收
+    'attribute'，是前端查询时把它滤掉了（''.join(['entity','relation','chunk'])）。这条钉住：
+    查询带上它、视角/列/单元格都有，且属性行能回到它所属实体（在图谱里定位）。
+    """
+    js = read('records-view.js')
+    assert "attribute:'属性'" in js, '缺少「属性」这个知识类别'
+    assert "['entity','relation','attribute','chunk']" in js, '查询没有把属性带上'
+    assert 'attribute:[' in js, '缺少属性视角的列定义'
+    assert "view==='attribute'" in js, '缺少属性行的渲染分支'
+    assert 'subject_id' in js and 'datatype' in js, '属性行没有显示所属实体/数据类型'
+
+
+def test_ingest_page_states_its_purpose_in_plain_chinese():
+    """写入页要「简介明确如何使用」：一句话说清本页做什么、不做什么。
+
+    用户原话：「一定要简介明确如何使用才行」。纯文件上传后，\"现在这一步\"状态条随之移除，
+    改为 .ingest-upload-purpose 一句说明：做\"把文件解析成知识\"；不做\"改/删/合并\"（去台账）。
+    钉住：① ingest-upload.js 里有这句中文说明；② 样式里有对应声明；③ 明确指向「知识台账」。
+    """
+    js, css = read('ingest-upload.js'), read('ingest-upload.css')
+    assert 'ingest-upload-purpose' in js, '缺少一句话使用说明'
+    assert '.ingest-upload-purpose' in css, '样式里缺少 .ingest-upload-purpose'
+    assert '把文件解析成知识' in js and '知识台账' in js, \
+        '没有说清本页做什么、不做什么（修改去台账）'
+
+
+# ── 登录 / 角色 / 用户管理（这一轮补的认证面）────────────────────────────────
+
+def test_auth_assets_are_loaded_and_versioned():
+    """auth.js / user-admin.js / auth.css 必须都在 index.html 里带 ?v= 引入。
+
+    漏了 user-admin.js 的连带表现很隐蔽：登录能用、菜单也在，只有点
+    「用户与权限 / 改口令」时静默没反应（auth.js 里降级成一句提示）。
+    """
+    index = read('index.html')
+    for asset in ('auth.js', 'user-admin.js', 'auth.css'):
+        assert re.search(r'%s\?v=[^"\']+' % re.escape(asset), index), f'{asset} 没有带版本号引入'
+
+
+def test_admin_only_show_rule_must_beat_the_hide_rule():
+    """`.admin-only` 的"显示"那条必须也带 !important。
+
+    隐藏那条是 `display:none !important`；不带 !important 的显示规则**永远赢不了它**，
+    于是管理员登录后也看不到任何写入口 —— 界面上表现为"功能没做"，
+    只有真浏览器量可见性才发现（本轮实测踩到并修掉）。
+    """
+    css = read('auth.css')
+    assert '.admin-only { display: none !important; }' in css, '缺少 .admin-only 的隐藏规则'
+    assert 'body.is-admin .admin-only { display: revert !important; }' in css, \
+        '管理员的显示规则没有 !important —— 会被隐藏规则压住，写入口对管理员也不可见'
+
+
+def test_session_buttons_do_not_reuse_login_form_ids():
+    """会话区的按钮 id 不能和登录浮层输入框重名。
+
+    重名时 `getElementById('auth-password')` 取到的是按钮（DOM 顺序在前），
+    登录时读 `.value` 得到 undefined → 登录直接崩；只读提示也拿不到输入框。
+    本节用契约钉住：登录用 id 只允许出现在浮层模板里，会话区必须用另一套名字。
+    """
+    js = read('auth.js')
+    css = read('auth.css')
+    assert 'id="auth-open-password"' in js and 'id="auth-open-users"' in js, \
+        '会话区按钮没有用 auth-open-* 这套独立 id'
+    assert "'auth-password'" not in js.split('function renderSession')[1].split('function notice')[0], \
+        '会话区又用回了与登录输入框重名的 id'
+    assert '.session-box .session-btn' in css, '会话区按钮缺样式'
+    assert 'body.is-viewer .session-box .session-hint' in css, \
+        '只读账号的说明没有"仅对只读用户显示"的样式（管理员会看到多余提示）'
+    assert '写入入口已隐藏' in read('auth.js'), '只读账号没有一句"我不能做什么"'
+
+
+def test_readonly_sidebar_hides_groups_that_become_empty():
+    """只读用户的侧栏不能留下"有标题、里面空的"分组。
+
+    `.admin-only` 只藏按钮，不藏分组标题 → 只读账号会看到「本体层 / 实例层 / 运行层」
+    三块空壳，像是坏了。规则：确知是只读用户（body.is-viewer）时把整组成员都是
+    写入口的分组收起；登录态未知时不动菜单（那时浮层盖着，改了反而闪）。
+    """
+    js = read('menu-hierarchy.js')
+    assert "classList.contains('is-viewer')" in js, '缺少"确知只读用户"的判断'
+    assert "every(button=>button.classList.contains('admin-only'))" in js, \
+        '没有按"组里全是写入口"来收组'
+    assert "attributeFilter:['class']" in js, '没有监听 body 角色变化 —— 登录后不会重算'
+    assert '.nav-group[hidden]{display:none}' in read('menu-hierarchy.css'), \
+        'CSS 没有显式收起规则（只靠 UA 的 [hidden] 会被将来的 display 声明压住）'
+
+
+def test_user_admin_says_what_it_manages_and_what_it_does_not():
+    """「用户与权限」必须一句话说清管什么、不管什么，以及动作的后果。
+
+    用户口径：「新功能不能只给一个开关或数字，必须一句话说明它做什么、不做什么」。
+    """
+    js = read('user-admin.js')
+    assert '不管项目里的知识与本体' in js, '没说清这一页不做什么'
+    assert '立刻失效' in js, '没说清改口令/停用会让已有登录失效'
+    assert '不能改自己' in js, '没说清为什么自己那一行不给改角色'
+    # 三档角色各能做什么（只读用户连按钮都看不到）：
+    assert '管理所有账号' in js, '没写清超级管理员能管理一切账号'
+    assert '管理普通账号' in js, '没写清管理员能管理普通账号'
+    assert '不能管理超级管理员' in js, '没写清管理员的越权边界'
+    assert '只能检索、问答、看脑图' in js, '没写清只读用户能做什么'
+
+def test_auth_401_only_means_session_lost_when_a_token_was_sent():
+    """未登录首屏的杂散 401 不能被当成"登录状态已失效"。
+
+    真机踩过：workspace.js / projects-view.js 在未登录时也发 /api/projects → 401，
+    登录框于是红字写着"登录状态已失效，请重新登录。"（用户根本没登录过），
+    而且顺手把会话标记成"挂起"，登录后还会多一次整页重载。
+    """
+    js = read('auth.js')
+    assert 'response.status === 401 && isApi && getToken()' in js, \
+        '401 处理没有先判断"本来有没有带令牌"'
+
+
+def test_project_loaders_wait_for_auth_when_the_server_enforces_it():
+    """拉项目列表必须先等认证就绪（只在服务端确知启用鉴权时才等）。
+
+    两条一起钉：① 调用点不能裸调 projects()/renderProjects()；
+    ② whenReady 只在 auth_enforced 为真时等 —— 否则测试桩（没这个字段）里
+    整页会永远拉不到数据（没人登录）。
+    """
+    for name, call in (('workspace.js', 'projects()'), ('projects-view.js', 'renderProjects')):
+        js = read(name)
+        assert 'whenReady' in js, f'{name} 没有等认证就绪'
+    js = read('auth.js')
+    assert 'authEnforced !== true' in js, 'whenReady 没有区分"服务端是否启用鉴权"'
+    assert "loadAuthPolicy();" in js, 'whenReady 没有自己触发策略探针（会早于 bootstrap 被调用）'
+    assert 'function releaseWithoutAuth()' in js, '缺少"服务端没启用鉴权就直接放行"的分支'

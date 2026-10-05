@@ -16,17 +16,19 @@
   const ontoName=t=>t.label_zh||((t.label&&t.label!==t.name)?t.label:'')||t.description||t.name||'';
   const typeHint=type=>{const primary=safeLabel(type),local=safeTerm(type);return primary===local?esc(primary):`${esc(primary)} <span class="subtle">${esc(local)}</span>`;};
   const panel=document.createElement('div');panel.className='panel';
-  panel.innerHTML='<div class="row"><h2>知识审核</h2><button id="refresh-reviews" class="secondary">刷新审核</button><button id="review-ontology" class="secondary">本体工作台 ↗</button></div><p class="subtle">这里审核已有正式本体下的具体事实：批准后写入正式图谱。开放候选与证据异常在本体工作台处理；本体异常在单独队列确认例外或标记整改。</p><nav class="review-view-tabs" aria-label="知识审核视图"><button id="review-view-facts" type="button" aria-pressed="true">待审核事实</button><button id="review-view-exceptions" type="button" class="secondary" aria-pressed="false">约束异常</button><button id="review-view-history" type="button" class="secondary" aria-pressed="false">已处理</button></nav><label id="review-kind-wrap">事实类型<select id="review-kind"><option value="">全部事实</option><option value="entity">实体映射</option><option value="relation">关系事实</option><option value="attribute">属性事实</option></select></label><div id="relation-reviews"></div>';
+  panel.innerHTML='<div class="row"><h2>知识审核</h2><button id="refresh-reviews" class="secondary">刷新审核</button><button id="review-ontology" class="secondary">本体建模层 ↗</button></div><p class="subtle">这里审核已有正式本体下的具体事实：批准后写入正式图谱。开放候选与证据异常在本体建模层处理；本体异常在单独队列确认例外或标记整改。</p><nav class="review-view-tabs" aria-label="知识审核视图"><button id="review-view-facts" type="button" aria-pressed="true">待审核事实</button><button id="review-view-exceptions" type="button" class="secondary" aria-pressed="false">约束异常</button><button id="review-view-history" type="button" class="secondary" aria-pressed="false">已处理</button></nav><label id="review-kind-wrap">事实类型<select id="review-kind"><option value="">全部事实</option><option value="entity">实体映射</option><option value="relation">关系事实</option><option value="attribute">属性事实</option></select></label><div id="relation-reviews"></div>';
   const reviewPage=document.createElement('section');reviewPage.id='tab-reviews';reviewPage.className='tab hidden';reviewPage.append(panel);
   document.querySelector('main').append(reviewPage);
-  const reviewNav=document.createElement('button');reviewNav.dataset.tab='reviews';reviewNav.textContent='知识审核';
-  document.querySelector('[data-tab="ontology-workbench"]').after(reviewNav);
+  // P0（2026-10-04）：知识审核（reviews，实例层的 domain/range 冲突审核）并入「知识台账」，
+    // 不再作为独立侧栏入口插入 nav；原 .after(nav) 会因 ontology-workbench 按钮已移除而抛错，
+    // 这里直接不再挂载。页面本体（审具体事实）暂时保留，P1 接进台账后本入口删除。
+    const reviewNav=document.createElement('button');reviewNav.dataset.tab='reviews';reviewNav.textContent='知识审核';
   reviewNav.onclick=()=>{
     document.querySelectorAll('.tab').forEach(t=>t.classList.add('hidden'));reviewPage.classList.remove('hidden');
     document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b===reviewNav));
     $('title').textContent='知识审核';$('scope').classList.add('hidden');reviews();
   };
-  $('review-ontology').onclick=()=>window.OntologyWorkbench?.open('discover');
+  $('review-ontology').onclick=()=>showTab('ontology-model');
   $('review-kind').onchange=()=>reviews();
   const attributeOption=document.createElement('label');attributeOption.className='check';
   attributeOption.innerHTML='<input type="checkbox" id="parse-attributes">抽取实体业务属性（选填，每片额外调用一次 LLM，属性值全部待审核）';
@@ -58,7 +60,7 @@
       const pending=reviewView==='history'?[]:items;
       const labels={validation:'本体异常',entity:'实体映射',relation:'关系事实',attribute:'属性事实'};
       $('review-view-facts').textContent=`待审核事实 ${factQueue.length}`;$('review-view-exceptions').textContent=`约束异常 ${exceptionQueue.length}`;$('review-view-history').textContent=`已处理 ${done.length}`;$('review-kind-wrap').hidden=reviewView!=='facts';
-      if(!ontology){host.innerHTML='<p class="subtle">本项目尚未发布本体。可先持续开放发现并累计候选，到「本体工作台」生成、审核和发布本体版本；发布后再用该本体受控重解析，正式实体与关系才会进入图谱。</p><button id="reviews-goto-discovery">前往本体工作台 ↗</button>';host.querySelector('#reviews-goto-discovery').onclick=()=>window.OntologyWorkbench?.open('discover');return;}
+      if(!ontology){host.innerHTML='<p class="subtle">本项目尚未发布本体。可先持续开放发现并累计候选，到「本体建模层」生成、审核和发布本体版本；发布后再用该本体受控重解析，正式实体与关系才会进入图谱。</p><button id="reviews-goto-discovery">前往本体建模层 ↗</button>';host.querySelector('#reviews-goto-discovery').onclick=()=>showTab('ontology-model');return;}
       if(reviewView==='history'){
         host.innerHTML=`<p>已处理 ${done.length} 条 · 当前本体 ${esc(ontology.id)}</p>`+(done.length?done.map(r=>`<p>${esc(labels[r.kind||'relation'])} · ${esc(r.document_title)} · ${esc(r.path_label||safeLabel(r.proposed_type)||safeLabel(r.predicate)||'')} · ${r.kind==='validation'?(r.resolution==='accepted_exception'?'已确认例外':'需整改'):(r.status==='approved'?'已批准':'已拒绝')} · ${esc(r.target_type||'')} · ${esc(r.note)} · ${esc(r.reviewed_at)}</p>`).join(''):'<p class="subtle">暂无已处理记录。</p>');return;
       }
@@ -118,7 +120,7 @@
           domain:editor.querySelector('.change-domain')?.value||'',range:editor.querySelector('.change-range')?.value||''};
         if((operation==='update'&&!body.uri)||!body.label||!body.rationale){status(operation==='update'?'请选择要调整的现有术语，并填写显示名称和变更理由':'请填写显示名称和变更理由',true);return;}
         button.disabled=true;
-        try{await api('/api/projects/'+encodeURIComponent(p)+'/ontology-change-proposals',body);status('本体变更申请已提交；请到本体工作台审批并生成新版本。');await reviews();}
+        try{await api('/api/projects/'+encodeURIComponent(p)+'/ontology-change-proposals',body);status('本体变更申请已提交；请到本体建模层审批并生成新版本。');await reviews();}
         catch(error){status(error.message,true);button.disabled=false;}
       });
     }catch(error){if(p===current&&serial===generation)host.textContent='审核清单读取失败：'+error.message;}
@@ -129,7 +131,8 @@
   $('review-view-exceptions').onclick=()=>setReviewView('exceptions');
   $('review-view-history').onclick=()=>setReviewView('history');
   async function refresh(){await jobList();}
-  document.querySelector('[data-tab="jobs"]').addEventListener('click',()=>refresh().catch(e=>status(e.message,true)));
+  // 后台任务并入「项目与运行」的「后台任务」分区：进入该分区才刷新一次任务列表。
+  window.RuntimeView?.on('jobs',()=>refresh().catch(e=>status(e.message,true)));
   const previousProjectChange=$('project').onchange;
   $('project').onchange=function(...args){previousProjectChange?.apply(this,args);generation++;if(!reviewPage.classList.contains('hidden'))reviews();if(!$('tab-jobs').classList.contains('hidden'))refresh().catch(e=>status(e.message,true));};
   let jobsGeneration=0;

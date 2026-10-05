@@ -7,6 +7,7 @@ from ..models import Request, Scope, Ingest, Question
 from ..services.explorer import Explorer
 from ..services.governance import Governance
 from ..services.jobs import Jobs
+from ..services.reclassify import Reclassify
 from ..services.answers import stream_events
 
 
@@ -56,16 +57,31 @@ class Evaluate(Scope):
     entities:list[str]=Field(default_factory=list,max_length=10000)
     relations:list[tuple[str,str,str]]=Field(default_factory=list,max_length=10000)
 
+class ReclassifyGroups(Request):
+    """C2 受控重分类：要迁哪几组（分组 key 由面板给出）。**没有默认值** —— 默认不跑。"""
+    groups:list[str]=Field(default_factory=list,max_length=500)
+
+class ReclassifyApply(ReclassifyGroups):
+    actor:str=Field(default='人工',max_length=200)
+
 
 def install(app,service):
     router=APIRouter(prefix='/api')
     explorer=Explorer(service);governance=Governance(service);jobs=Jobs(service.repository)
+    reclassify=Reclassify(service)
     app.state.jobs=jobs
 
     @app.get('/vendor/echarts.min.js')
     def echarts():
         from pathlib import Path
         return FileResponse(Path(__file__).resolve().parents[1]/'web/vendor/echarts.min.js',media_type='application/javascript')
+
+    # P1（2026-10-04）：本体建模层单画布用 Cytoscape.js 做图编辑，vendor 是逐文件显式路由
+    # （不是目录映射），所以新库要在这里补一条，否则 /vendor/cytoscape.min.js 会 404、画布渲染不出来。
+    @app.get('/vendor/cytoscape.min.js')
+    def cytoscape():
+        from pathlib import Path
+        return FileResponse(Path(__file__).resolve().parents[1]/'web/vendor/cytoscape.min.js',media_type='application/javascript')
 
     @router.get('/local-projects')
     def local_projects():
@@ -190,6 +206,48 @@ def install(app,service):
 
     @router.get('/projects/{p}/operations')
     def operations(p:str):return {'operations':governance.operations(p)}
+
+    @router.get('/projects/{p}/duplicate-groups')
+    def duplicate_groups(p:str):return {'groups':governance.duplicate_groups(p)}
+
+    @router.get('/projects/{p}/structure-pending')
+    def structure_pending(p:str):
+        """C1 待建模收件箱：抽出来但本体里还没有的概念，各被哪些知识用到。
+
+        只读：这里**不提供**"手动清除"接口 —— 概念进了本体（发布新版本）以后状态自动变
+        「已解除」，两个清除入口必然打架。
+        """
+        return service.structure_pending_report(p)
+
+    @router.get('/projects/{p}/reclassify')
+    def reclassify_plan(p:str):
+        """C2 受控重分类 · 面板：还挂在旧版本体上的知识，按旧类型分组，逐组给处置。
+
+        只读。三档处置见 services/reclassify.py：原样搬到新版本 / 按替代映射改类型 /
+        没有去处（没有去处的**不会**被迁移，页面会如实说"先去本体建模层建概念"）。
+        这里是"默认不跑"里的"看"：不点下面的确认就什么都不会发生。
+        """
+        service.repository.get_project(p)
+        return reclassify.plan(p)
+
+    @router.post('/projects/{p}/reclassify/preview')
+    def reclassify_preview(p:str,request:ReclassifyGroups):
+        """C2 预演（干跑）：这几组迁过去会不会被本体校验拦下。**不写任何东西**。
+
+        用的是与真正写入同一个校验函数，所以"预演通过 → 写入不会被拦"是硬承诺。
+        """
+        service.repository.get_project(p)
+        return reclassify.preview(p,request.groups)
+
+    @router.post('/projects/{p}/reclassify')
+    def reclassify_apply(p:str,request:ReclassifyApply):
+        """C2 迁移：把选中的组迁到当前本体。
+
+        每条记录**产生新版本**（不原地改），整批写成**一条**操作 —— 撤销走
+        ``POST /operations/{operation_id}/undo``（与合并/删除同一套回滚通道）。
+        """
+        service.repository.get_project(p)
+        return reclassify.apply(p,request.groups,request.actor)
 
     @router.post('/projects/{p}/operations/{operation_id}/undo')
     def undo(p:str,operation_id:str):return governance.undo_merge(p,operation_id)

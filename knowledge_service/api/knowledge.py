@@ -15,6 +15,7 @@ from ..services.ontology_adapters import (
     turtle_draft,
 )
 from ..services.service import public
+from ..services import structure_pending
 from ..core.time import utc_now
 
 
@@ -33,7 +34,15 @@ def install(app, service):
              known_at: str | None = None):
         row = repository.get_record(
             project_id, record_id, valid_at=valid_at, known_at=known_at)
-        return public(row)
+        detail = public(row)
+        # 实体详情要能看出"它属于哪个类、父类是谁"：层级在类之间，实体节点上没有，
+        # 所以这里补上它类型的父类与祖先链（与 /subgraph 同一份数据：service.ontology_family）。
+        if detail.get('kind') == 'entity':
+            entry = service.ontology_family(project_id).get(detail.get('type') or '') or {}
+            detail['class_label'] = entry.get('label') or detail.get('type') or ''
+            detail['class_parents'] = entry.get('parents') or []
+            detail['class_ancestors'] = entry.get('ancestors') or []
+        return detail
 
     @router.put('/api/projects/{project_id}/records/{record_id}')
     def revise(project_id: str, record_id: str, request: Revision):
@@ -147,8 +156,23 @@ def install(app, service):
     # ------------------------------------------------------------------ 本体
     @router.get('/api/projects/{project_id}/ontologies')
     def ontology_history(project_id: str):
-        return {'versions': [{**item, 'summary': Ontology(item['turtle']).summary()}
-                             for item in repository.list_ontologies(project_id)]}
+        # 版本管理页要回答四件事：**第几版 / 什么时候发的 / 谁发的 / 为什么发**。
+        # 版本号按发布顺序现算（库里不存序号 —— 存了就会与顺序脱节）；
+        # 发布说明与发布人取自版本 metadata.publication（发布时必填，见 PublishRequest.note）。
+        versions = repository.list_ontologies(project_id)
+        history = []
+        for index, item in enumerate(versions, start=1):
+            publication = (item.get('metadata') or {}).get('publication') or {}
+            history.append({
+                **item,
+                'summary': Ontology(item['turtle']).summary(),
+                'version': index,
+                'note': publication.get('note') or '',
+                'actor': publication.get('actor') or '',
+                'draft_id': publication.get('draft_id') or '',
+                'base_ontology_id': publication.get('base_ontology_id') or '',
+            })
+        return {'versions': history}
 
     @router.get('/api/projects/{project_id}/ontology')
     def ontology(project_id: str, ontology_id: str | None = None):
@@ -183,8 +207,21 @@ def install(app, service):
     @router.post('/api/projects/{project_id}/ontology/validate')
     def validate(project_id: str, request: Scope, ontology_id: str | None = None):
         version = repository.get_ontology(project_id, ontology_id)
-        return {**Ontology(version['turtle']).validate(service.scoped(project_id, request.model_dump())),
-                'ontology_id': version['id']}
+        rows = service.scoped(project_id, request.model_dump())
+        # C1「结构待定」的记录不作为约束校验的输入：它们的类型还没进本体，
+        # 校验它们只会得到一堆"未知术语"，既不是用户的问题，也会把真违规淹掉。
+        # 但也不能装作没看见 —— 单独列出来并说明为什么跳过。
+        checkable = [row for row in rows if not structure_pending.is_pending(row)]
+        skipped = [{'id': row['id'], 'kind': row.get('kind'),
+                    'terms': (row.get('structure_pending') or {}).get('terms') or []}
+                   for row in rows if structure_pending.is_pending(row)]
+        return {**Ontology(version['turtle']).validate(checkable),
+                'ontology_id': version['id'],
+                'structure_pending_skipped': skipped,
+                'structure_pending_note': (
+                    '这些记录的类型不在本体里（结构待定），没有参与约束校验。'
+                    '去「本体建模层」补齐概念并发布后，它们会自动重新纳入校验。')
+                if skipped else ''}
 
     @router.post('/api/projects/{project_id}/sparql')
     def sparql(project_id: str, request: Sparql):

@@ -18,7 +18,9 @@ function fixture(reviewRows=[],options={}){
     '关系抽取返回 · 1 条','仍在等待当前步骤（非完成进度）'];
   const job={id:'job-a',project_id:'a',kind:'ingest',status:'running',logs,stage:'关系抽取',progress:40,
     created_at:'2026-09-10T10:00:00Z',heartbeat_at:'2026-09-10T10:00:04Z'};
-  const context=vm.createContext({current:'a',$:get,readParseSettings:()=>({chunk_size:1800}),showTab(){},
+  // window 是浏览器里一定存在的东西：各模块在**加载时**就会向 window.RuntimeView 注册
+  // 「项目与运行」的分区加载函数，沙箱少了它这些模块会直接抛 ReferenceError。
+  const context=vm.createContext({window:{},current:'a',$:get,readParseSettings:()=>({chunk_size:1800}),showTab(){},
     document:{createElement(){const e=element();created.push(e);return e;},querySelector:get,querySelectorAll:()=>[]},
     esc:v=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'),
     status(){},jobList(){throw Error('old list must not be used');},bind:(id,fn)=>get(id).onclick=fn,
@@ -85,7 +87,7 @@ test('missing ontology shows guidance instead of Not found',async()=>{
   await new Promise(resolve=>setImmediate(resolve));
   const html=get('relation-reviews').innerHTML;
   assert.match(html,/尚未发布本体/);
-  assert.match(html,/前往本体工作台/);
+  assert.match(html,/前往本体建模层/);
   assert.doesNotMatch(html,/Not found:/);
 });
 

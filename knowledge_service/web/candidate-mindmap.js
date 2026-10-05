@@ -3,20 +3,21 @@
   const get=id=>document.getElementById(id);
   const page=document.createElement('section');page.id='tab-candidate-mindmap';page.className='tab hidden';
   page.innerHTML=`<div class="candidate-map-shell">
-    <header class="candidate-map-hero"><div><small>DISCOVERY REVIEW · 非正式知识</small><h2>候选脑图</h2><p>开放解析完成后先在这里检查实体、关系、类型分布和来源证据；确认候选整体合理后，进入本体工作台生成并审核草案。发布后未入图的候选也继续保留在这里，无需重新解析原文。</p></div><div class="candidate-map-actions"><button id="refresh-candidate-map" class="secondary">刷新候选</button><button id="goto-ontology-discovery">进入本体工作台</button><button id="goto-formal-mindmap" class="secondary">查看正式脑图</button></div></header>
+    <header class="candidate-map-hero"><div><small>DISCOVERY REVIEW · 非正式知识</small><h2>候选脑图</h2><p>开放解析完成后先在这里检查实体、关系、类型分布和来源证据；确认候选整体合理后，进入本体建模层生成并审核草案。发布后未入图的候选也继续保留在这里，无需重新解析原文。</p></div><div class="candidate-map-actions"><button id="refresh-candidate-map" class="secondary">刷新候选</button><button id="goto-ontology-discovery">进入本体建模层</button><button id="goto-formal-mindmap" class="secondary">查看正式脑图</button></div></header>
     <section class="panel candidate-map-controls"><label>候选类型<select id="candidate-map-type"><option value="">全部类型</option></select></label><label>生命周期<select id="candidate-map-status"><option value="">全部状态</option><option value="pending">待纳入</option><option value="included_in_draft">草案中</option><option value="approved">已批准</option><option value="materialized">已物化</option></select></label><label>最多显示节点<input id="candidate-map-limit" type="number" min="1" max="2000" value="500"></label><button id="draw-candidate-map">更新视图</button></section>
     <div id="candidate-map-summary" class="candidate-map-summary"></div>
     <section class="panel"><div class="candidate-map-legend"><span data-state="pending">待纳入</span><span data-state="included_in_draft">草案中</span><span data-state="approved">已批准</span><span data-state="materialized">已物化</span></div><div id="candidate-map-canvas" class="graph-canvas candidate-map-canvas"></div></section>
     <section id="candidate-map-detail" class="panel candidate-map-detail"><p class="subtle">点击候选节点或关系查看出现次数、属性和来源证据。</p></section>
   </div>`;
   document.querySelector('main').append(page);
-  const nav=document.createElement('button');nav.dataset.tab='candidate-mindmap';nav.textContent='候选脑图';
-  document.querySelector('[data-tab="mindmap"]').after(nav);
+  // P0（2026-10-04）：候选脑图并入「本体建模层」，不再作为独立侧栏入口插入 nav。
+    // 页面本体（渲染候选实体/关系）暂时保留，P1 把「候选 → 待收下虚线节点」接进画布后再删。
+    const nav=document.createElement('button');nav.dataset.tab='candidate-mindmap';nav.textContent='候选脑图';
   let chart=null,data=null,request=0;
   const labels={pending:'待纳入',included_in_draft:'草案中',approved:'已批准',materialized:'已物化'};
   const colors={pending:'#d98a29',included_in_draft:'#477dc1',approved:'#25835b',materialized:'#65756e'};
   const stateText=counts=>Object.entries(counts||{}).filter(([,count])=>count).map(([state,count])=>`${labels[state]||state} ${count}`).join(' · ');
-  const evidence=sources=>(sources||[]).length?`<div class="candidate-evidence-list">${sources.map(source=>`<article><b>${esc(source.document_title||source.document_id||'未知来源')}</b><small>${esc(source.chunk_id||'')} · 字符 ${esc(source.start_char??'—')}–${esc(source.end_char??'—')} · 置信度 ${esc(source.confidence??'—')}</small><p><b>来源预览：</b>${esc(source.evidence_preview||'未保存证据预览')}</p>${source.evidence_preview_truncated?'<small>预览已截断，完整切片可在本体工作台中查看。</small>':''}</article>`).join('')}</div>`:'<p class="subtle">没有可展示的来源证据。</p>';
+  const evidence=sources=>(sources||[]).length?`<div class="candidate-evidence-list">${sources.map(source=>`<article><b>${esc(source.document_title||source.document_id||'未知来源')}</b><small>${esc(source.chunk_id||'')} · 字符 ${esc(source.start_char??'—')}–${esc(source.end_char??'—')} · 置信度 ${esc(source.confidence??'—')}</small><p><b>来源预览：</b>${esc(source.evidence_preview||'未保存证据预览')}</p>${source.evidence_preview_truncated?'<small>预览已截断，完整切片可在本体建模层中查看。</small>':''}</article>`).join('')}</div>`:'<p class="subtle">没有可展示的来源证据。</p>';
   function detail(item,kind){
     const host=get('candidate-map-detail');
     if(kind==='edge'){
@@ -40,7 +41,10 @@
     // Raising 「最多显示节点」 past a few hundred makes this the dominant cost, not the API.
     const layoutDone=kgTime('candidate-mindmap-layout');
     chart.setOption({tooltip:{formatter:param=>{const raw=param.data.raw;if(!raw)return '';return param.dataType==='edge'?`${esc(raw.type)}<br>${raw.occurrence_count} 次候选关系`:`${esc(raw.text)}<br>${esc(raw.type)} · ${raw.occurrence_count} 次`; }},
-      series:[{type:'graph',layout:'force',roam:true,draggable:true,focusNodeAdjacency:true,
+      // draggable:true 会把拖动吃掉：画布被节点铺满时，几乎每次按下都落在节点上，
+// 用户看到的现象就是"画布不能平移"（检索页图谱同一个坑，见 workspace.js 的 bindPanAffordances）。
+// 候选图不需要"把节点钉住"，所以直接关掉节点拖动，让拖动＝平移。
+series:[{type:'graph',layout:'force',roam:true,draggable:false,focusNodeAdjacency:true,
         force:{repulsion:260,edgeLength:[90,210],gravity:.06},categories:categories.map(name=>({name})),
         data:nodes.map(node=>({id:node.id,name:node.text,category:categories.indexOf(node.type),symbolSize:Math.min(58,24+Math.log2(node.occurrence_count+1)*8),itemStyle:{color:colors[node.status]||colors.pending},raw:node})),
         links:edges.map(edge=>({id:edge.id,source:edge.subject_id,target:edge.object_id,value:edge.type,name:edge.type,lineStyle:{width:Math.min(6,1+Math.log2(edge.occurrence_count+1)),color:colors[edge.status]||colors.pending},raw:edge})),
@@ -67,7 +71,7 @@
   }
   nav.onclick=()=>{document.querySelectorAll('.tab').forEach(tab=>tab.classList.add('hidden'));page.classList.remove('hidden');document.querySelectorAll('[data-tab]').forEach(button=>button.classList.toggle('active',button===nav));get('title').textContent='候选脑图';get('scope').classList.add('hidden');load();};
   get('refresh-candidate-map').onclick=load;get('draw-candidate-map').onclick=load;
-  get('goto-ontology-discovery').onclick=()=>{window.OntologyWorkbench?.open();window.OntologyWorkbench?.setStage('discover');};
+  get('goto-ontology-discovery').onclick=()=>showTab('ontology-model');
   get('goto-formal-mindmap').onclick=()=>document.querySelector('[data-tab="mindmap"]')?.click();
   get('candidate-map-type').onchange=render;get('candidate-map-status').onchange=render;
   get('project').addEventListener('change',()=>{data=null;chart?.clear();get('candidate-map-detail').innerHTML='<p class="subtle">点击候选节点或关系查看出现次数、属性和来源证据。</p>';if(!page.classList.contains('hidden'))load();});

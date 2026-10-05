@@ -2,10 +2,14 @@
 const wb={epoch:0,chart:null,tree:null,nodes:new Map(),records:new Map(),jobs:new Map()};
 const term=s=>{try{const value=decodeURIComponent(String(s||'').split(/[\/#]/).pop());return value.startsWith('urn:')?value.split(':').pop():value}catch{return String(s||'')}};
 function showTab(name){document.querySelector(`[data-tab="${name}"]`).click();}
+// 打开「项目与运行」里的某个分区。合并后 后台任务 / 快照·评测 不再是独立页签，
+// 但仍需要一个把用户送到那儿的入口（例如文档提交成功 → 直接看任务日志）。
+// 代价说明：从别的分区跳过来时，可能多发一次只读请求（先按旧分区刷新、再切到目标分区）。
+function showRuntimeView(view){showTab('runtime');if(window.RuntimeView?.current!==view)window.RuntimeView?.show(view);}
 function controlsProject(){if(!current)throw Error('请先选择项目');return current;}
 async function scopedRead(path,extra={}){const p=controlsProject(),epoch=wb.epoch;const result=await api('/api/projects/'+encodeURIComponent(p)+path,{...scope(),...extra});if(p!==current||epoch!==wb.epoch)throw Error('项目已切换，旧响应已忽略');return result;}
 function discoveryHintHost(canvasId){const canvas=$(canvasId);if(!canvas||!canvas.parentNode)return null;let host=$(canvasId+'-discovery-hint');if(!host){host=document.createElement('div');host.id=canvasId+'-discovery-hint';host.className='discovery-hint';host.hidden=true;canvas.parentNode.insertBefore(host,canvas.parentNode.firstChild);}return host;}
-async function renderDiscoveryHint(){const p=current,mode=$('project').selectedOptions?.[0]?.dataset?.ontologyMode,hosts=['graph-canvas','mindmap-canvas'].map(discoveryHintHost);if(!p||mode!=='discovery'){hosts.forEach(h=>{if(h)h.hidden=true;});return;}let data;try{data=await api(endpoint('/ontology-discovery'),undefined,'GET');}catch(e){hosts.forEach(h=>{if(h)h.hidden=true;});return;}if(p!==current)return;const pending=data.unpublished_candidate_count||0;hosts.forEach(host=>{if(!host)return;if(pending>0){host.hidden=false;host.innerHTML=`<span>开放本体发现：还有 <b>${pending}</b> 条候选待审核或未通过校验。它们仍保留在候选区，不需要重新上传原文。</span><button data-goto-discovery>前往本体工作台 ↗</button>`;host.querySelector('[data-goto-discovery]').onclick=()=>window.OntologyWorkbench?.open('discover');}else host.hidden=true;});}
+async function renderDiscoveryHint(){const p=current,mode=$('project').selectedOptions?.[0]?.dataset?.ontologyMode,hosts=['graph-canvas','mindmap-canvas'].map(discoveryHintHost);if(!p||mode!=='discovery'){hosts.forEach(h=>{if(h)h.hidden=true;});return;}let data;try{data=await api(endpoint('/ontology-discovery'),undefined,'GET');}catch(e){hosts.forEach(h=>{if(h)h.hidden=true;});return;}if(p!==current)return;const pending=data.unpublished_candidate_count||0;hosts.forEach(host=>{if(!host)return;if(pending>0){host.hidden=false;host.innerHTML=`<span>开放本体发现：还有 <b>${pending}</b> 条候选待审核或未通过校验。它们仍保留在候选区，不需要重新上传原文。</span><button data-goto-discovery>前往本体建模层 ↗</button>`;host.querySelector('[data-goto-discovery]').onclick=()=>showTab('ontology-model');}else host.hidden=true;});}
 for(const tab of ['graph','mindmap'])document.querySelector(`[data-tab="${tab}"]`)?.addEventListener('click',()=>renderDiscoveryHint().catch(()=>{}));
 const oldChange=$('project').onchange;
 $('project').onchange=()=>{oldChange();wb.records.clear();for(const id of ['dashboard','source-list','source-body','resolve-result','tasks','operations','evaluation-result'])$(id).textContent='';const preferred=$('project').selectedOptions?.[0]?.dataset?.ontologyMode,mode=document.getElementById('extraction-mode');if(preferred&&mode){mode.value=preferred;mode.onchange?.();}wb.tree?.clear();renderDiscoveryHint().catch(()=>{});};
@@ -73,14 +77,13 @@ function initChart(){if(!window.echarts)throw Error('本地图形资源未加载
 // #draw-graph、#graph-expand 的绑定同时移交给 workspace.js，避免同一个按钮被两个文件各绑一次。
 async function historyFor(row){const p=current;const r=await api(endpoint('/records/'+encodeURIComponent(row.id)+'/history'),undefined,'GET');if(p!==current)return;$('history').textContent=JSON.stringify(r,null,2);showTab('records');}
 function editRecord(row){showTab('records');const fields=['id','kind','text','type','metadata','properties','source_id','subject_id','object_id','ontology_id','valid_from','valid_until'];$('revision').value=JSON.stringify(Object.fromEntries(fields.filter(k=>row[k]!==undefined).map(k=>[k,row[k]])),null,2);$('revision-id').value=row.id;$('revision-version').value=row.version;$('keep-id').value=row.id;}
-bind('load-records',async()=>{const r=await scopedRead('/records/query?limit=1000');wb.records=new Map(r.records.map(x=>[x.id,x]));$('records').innerHTML=`<p class="subtle">共 ${r.total} 条，展示 ${r.records.length} 条；超过 1000 条请使用 API 分页。</p><div class="table-scroll"><table><thead><tr><th>名称 / 内容</th><th>类型</th><th>版本 / 有效期</th><th>操作</th></tr></thead><tbody>${r.records.map(row=>`<tr><td>${esc(row.text.slice(0,100))}<small>${esc(row.id)}</small></td><td>${esc(row.kind)}<small>${typeHint(row.type)}</small></td><td>v${row.version}<small>${esc(row.valid_from||'未知')} → ${esc(row.valid_until||'未知')}</small></td><td><button data-edit="${esc(row.id)}">编辑</button> <button data-history="${esc(row.id)}" class="secondary">历史</button></td></tr>`).join('')}</tbody></table></div>`;$('records').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editRecord(wb.records.get(b.dataset.edit)));$('records').querySelectorAll('[data-history]').forEach(b=>b.onclick=()=>historyFor(wb.records.get(b.dataset.history)));});
 // 图谱入口统一走 workspace.js 的 window.drawGraph；这里显式引用，避免再依赖"后加载文件覆盖全局"的隐式约定。
 bind('load-graph',async()=>{showTab('search');await window.drawGraph();});
 bind('resolve-entity',async()=>{const r=await scopedRead('/resolve',{text:$('resolve-text').value,threshold:Number($('resolve-threshold').value)});const rows=r.canonical?[r.canonical]:r.candidates;$('resolve-result').innerHTML=`<p>${esc(r.status)} · ${esc(r.backend)}</p>`+rows.map(x=>`<div class="candidate"><strong>${esc(x.text)}</strong> ${typeHint(x.type)} ${x.score!==undefined?'· '+x.score.toFixed(3):''}<small>${esc(x.id)} · v${x.version}</small><button data-keep="${esc(x.id)}">设为保留实体</button> <button data-drop="${esc(x.id)}" class="secondary">设为合并实体</button></div>`).join('');for(const row of rows)wb.records.set(row.id,row);$('resolve-result').querySelectorAll('[data-keep]').forEach(b=>b.onclick=()=>{$('keep-id').value=b.dataset.keep;});$('resolve-result').querySelectorAll('[data-drop]').forEach(b=>b.onclick=()=>{$('drop-id').value=b.dataset.drop;});});
 async function latest(id){const p=current;const r=await api(endpoint('/records/'+encodeURIComponent(id)+'/history'),undefined,'GET');if(p!==current)throw Error('项目已切换');return r.versions[r.versions.length-1];}
 bind('add-alias',async()=>{const id=$('keep-id').value;const row=await latest(id);await api(endpoint('/aliases'),{entity_id:id,alias:$('alias-name').value,expected_version:row.version});status('别名已保存，消歧可直接命中规范实体。');});
-bind('merge-entities',async()=>{if(!$('merge-confirm').checked)throw Error('请先勾选合并确认');const keep=$('keep-id').value,drop=$('drop-id').value;const a=await latest(keep),b=await latest(drop);const r=await api(endpoint('/merge'),{keep_id:keep,drop_id:drop,expected_versions:{[keep]:a.version,[drop]:b.version}});$('merge-confirm').checked=false;status('Semantica 融合完成，操作 '+r.operation_id+'；可在操作历史撤销。');await operations();});
-bind('soft-delete',async()=>{if(!$('delete-confirm').checked)throw Error('请勾选软删除确认');const id=$('revision-id').value;const r=await api(endpoint('/delete'),{record_id:id,expected_version:Number($('revision-version').value)});$('delete-confirm').checked=false;status(`已软删除 ${r.deleted} 条记录（含关联关系）；可在操作历史撤销。`);await operations();});
+bind('merge-entities',async()=>{if(!$('merge-confirm').checked)throw Error('请先勾选合并确认');const keep=$('keep-id').value,drop=$('drop-id').value;const a=await latest(keep),b=await latest(drop);const r=await api(endpoint('/merge'),{keep_id:keep,drop_id:drop,expected_versions:{[keep]:a.version,[drop]:b.version}});$('merge-confirm').checked=false;status('Semantica 融合完成，操作 '+r.operation_id+'；可在「知识台账 → 可撤销的操作」撤销。');await operations();});
+bind('soft-delete',async()=>{if(!$('delete-confirm').checked)throw Error('请勾选软删除确认');const id=$('revision-id').value;const r=await api(endpoint('/delete'),{record_id:id,expected_version:Number($('revision-version').value)});$('delete-confirm').checked=false;status(`已软删除 ${r.deleted} 条记录（含关联关系）；可在「知识台账 → 可撤销的操作」撤销。`);await operations();});
 bind('restore-version',async()=>{const r=await api(endpoint('/restore'),{record_id:$('revision-id').value,version:Number($('restore-number').value),expected_version:Number($('revision-version').value)});$('revision-version').value=r.version;status('历史内容已恢复为新版本 '+r.version);});
 async function operations(){const p=current,r=await api(endpoint('/operations'),undefined,'GET');if(p!==current)return;$('operations').innerHTML=r.operations.map(x=>`<div class="candidate"><b>${esc(x.metadata.operation)}</b> · ${esc(x.recorded_at)}<small>${esc(x.metadata.operation_id)}</small><button data-undo="${esc(x.metadata.operation_id)}">撤销该操作</button></div>`).join('')||'<p>暂无治理操作。</p>';$('operations').querySelectorAll('[data-undo]').forEach(b=>b.onclick=async()=>{try{const r=await api(endpoint('/operations/'+b.dataset.undo+'/undo'),{});status('已恢复 '+r.restored+' 条记录。');await operations();}catch(e){status(e.message,true);}});}
 bind('load-operations',operations);
@@ -351,12 +354,25 @@ bind('ingest',async()=>{
       wb.jobs.set(job.id,job);accepted++;entry.textContent=document.title+' · 已加入解析队列 · '+job.id;
     }catch(error){if(document.file)window.DocumentUploadQueue.setStatus(document.file,'failed',error.message);failed++;entry.textContent=document.title+' · 提交失败：'+error.message;}
   }
-  if(accepted){showTab('jobs');await jobList();}
-  status(`已提交 ${accepted} 个文档，提交失败 ${failed} 个。解析进度请查看“后台任务”。`,failed>0);
+  // 提交后留在「知识写入」本页：逐文件结果已写进 #doc-submit-results，不再把人跳到后台任务页。
+  if(accepted){
+    const view=window.document.createElement('p');
+    view.className='ingest-after-submit';
+    view.innerHTML='';
+    const link=window.document.createElement('button');
+    link.type='button';link.className='secondary';link.textContent='查看后台任务进度 ↗';
+    link.onclick=()=>{showRuntimeView('jobs');jobList().catch(()=>{});};
+    view.append('已提交 '+accepted+' 个文档进入解析队列。想看实时日志可点：');
+    view.append(link);
+    results.append(view);
+  }
+  status(`已提交 ${accepted} 个文档，提交失败 ${failed} 个。本页会保留每个文件的提交结果。`,failed>0);
 });
-async function snapshots(){const p=current,r=await api(endpoint('/snapshots'),undefined,'GET');if(p!==current)return;$('snapshot-list').innerHTML=r.snapshots.map(s=>`<option value="${esc(s.id)}">${esc(s.name)} · ${esc(s.created_at)}</option>`).join('');const container=$('snapshot-cards');if(!r.snapshots.length){container.innerHTML='<div class="eval-snapshot-empty"><p>📋</p><p>还没有快照，先保存一个快照</p></div>';return;}const items=r.snapshots.map(s=>{const isAuto=s.kind==='auto'||s.name.startsWith('Before restoring ')||s.name.startsWith('恢复前自动备份 · ');let displayName=s.name;if(isAuto)displayName=s.name.replace(/^Before restoring /,'').replace(/^恢复前自动备份 · /,'');return{s,isAuto,displayName};});const nameCounts={};items.forEach(i=>{nameCounts[i.displayName]=(nameCounts[i.displayName]||0)+1;});items.sort((a,b)=>{if(a.isAuto!==b.isAuto)return a.isAuto?1:-1;return new Date(b.s.created_at)-new Date(a.s.created_at);});container.innerHTML='<div class="eval-snapshot-cards">'+items.map(({s,isAuto,displayName})=>{const dt=new Date(s.created_at);const dateStr=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0')+' '+String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0');const diffMs=Date.now()-dt.getTime();let rel='';if(diffMs>=0&&diffMs<60000)rel='刚刚';else if(diffMs<3600000)rel=Math.floor(diffMs/60000)+' 分钟前';else if(diffMs<86400000)rel=Math.floor(diffMs/3600000)+' 小时前';else if(diffMs<2592000000)rel=Math.floor(diffMs/86400000)+' 天前';const badge=isAuto?'<span class="eval-snapshot-badge auto">自动备份</span>':'<span class="eval-snapshot-badge manual">手动快照</span>';const recordCount=s.record_count!=null?'<span class="eval-snapshot-records">· '+s.record_count+' 条记录</span>':'';const idSuffix=nameCounts[displayName]>1?'<span class="eval-snapshot-id">#'+esc(s.id.slice(0,6))+'</span>':'';return '<div class="eval-snapshot-card" data-id="'+esc(s.id)+'"><div class="eval-snapshot-header"><span class="eval-snapshot-name">'+esc(displayName)+'</span>'+badge+'</div><div class="eval-snapshot-meta">'+esc(dateStr)+(rel?' · '+esc(rel):'')+idSuffix+recordCount+'</div><div class="eval-snapshot-actions"><button data-snapshot-restore="'+esc(s.id)+'" class="secondary">恢复</button></div></div>';}).join('')+'</div>';container.querySelectorAll('[data-snapshot-restore]').forEach(b=>{b.onclick=async()=>{const id=b.dataset.snapshotRestore;const card=b.closest('.eval-snapshot-card');const actions=b.closest('.eval-snapshot-actions');if(card.querySelector('.eval-restore-confirm'))return;const snap=items.find(i=>i.s.id===id);const displayName=snap?snap.displayName:'';const warning=document.createElement('div');warning.className='eval-restore-confirm';warning.innerHTML='<p>确定恢复到此快照？<br><span class="subtle">恢复前会自动创建恢复点，可随时撤销。</span></p><div class="eval-confirm-actions"><button class="eval-confirm-yes">确认恢复</button><button class="eval-confirm-no secondary">取消</button></div>';card.appendChild(warning);warning.scrollIntoView({behavior:'smooth',block:'nearest'});actions.style.display='none';warning.querySelector('.eval-confirm-yes').onclick=async()=>{const yesBtn=warning.querySelector('.eval-confirm-yes');const noBtn=warning.querySelector('.eval-confirm-no');yesBtn.disabled=true;noBtn.disabled=true;yesBtn.textContent='正在恢复…';yesBtn.classList.add('eval-restoring');try{const r=await api(endpoint('/snapshots/'+id+'/restore'),{});status('已恢复到「'+displayName+'」；恢复前状态已存为「'+(r.recovery_snapshot_name||'恢复前自动备份')+'」');await snapshots();}catch(e){status(e.message,true);yesBtn.disabled=false;noBtn.disabled=false;yesBtn.textContent='确认恢复';yesBtn.classList.remove('eval-restoring');}};warning.querySelector('.eval-confirm-no').onclick=()=>{warning.remove();actions.style.display='';};};});}
+async function snapshots(){const p=current,r=await api(endpoint('/snapshots'),undefined,'GET');if(p!==current)return;const container=$('snapshot-cards');if(!r.snapshots.length){container.innerHTML='<div class="eval-snapshot-empty"><p>📋</p><p>还没有快照，先保存一个快照</p></div>';return;}const items=r.snapshots.map(s=>{const isAuto=s.kind==='auto'||s.name.startsWith('Before restoring ')||s.name.startsWith('恢复前自动备份 · ');let displayName=s.name;if(isAuto)displayName=s.name.replace(/^Before restoring /,'').replace(/^恢复前自动备份 · /,'');return{s,isAuto,displayName};});const nameCounts={};items.forEach(i=>{nameCounts[i.displayName]=(nameCounts[i.displayName]||0)+1;});items.sort((a,b)=>{if(a.isAuto!==b.isAuto)return a.isAuto?1:-1;return new Date(b.s.created_at)-new Date(a.s.created_at);});container.innerHTML='<div class="eval-snapshot-cards">'+items.map(({s,isAuto,displayName})=>{const dt=new Date(s.created_at);const dateStr=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0')+' '+String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0');const diffMs=Date.now()-dt.getTime();let rel='';if(diffMs>=0&&diffMs<60000)rel='刚刚';else if(diffMs<3600000)rel=Math.floor(diffMs/60000)+' 分钟前';else if(diffMs<86400000)rel=Math.floor(diffMs/3600000)+' 小时前';else if(diffMs<2592000000)rel=Math.floor(diffMs/86400000)+' 天前';const badge=isAuto?'<span class="eval-snapshot-badge auto">自动备份</span>':'<span class="eval-snapshot-badge manual">手动快照</span>';const recordCount=s.record_count!=null?'<span class="eval-snapshot-records">· '+s.record_count+' 条记录</span>':'';const idSuffix=nameCounts[displayName]>1?'<span class="eval-snapshot-id">#'+esc(s.id.slice(0,6))+'</span>':'';return '<div class="eval-snapshot-card" data-id="'+esc(s.id)+'"><div class="eval-snapshot-header"><span class="eval-snapshot-name">'+esc(displayName)+'</span>'+badge+'</div><div class="eval-snapshot-meta">'+esc(dateStr)+(rel?' · '+esc(rel):'')+idSuffix+recordCount+'</div><div class="eval-snapshot-actions"><button data-snapshot-restore="'+esc(s.id)+'" class="secondary">恢复</button></div></div>';}).join('')+'</div>';container.querySelectorAll('[data-snapshot-restore]').forEach(b=>{b.onclick=async()=>{const id=b.dataset.snapshotRestore;const card=b.closest('.eval-snapshot-card');const actions=b.closest('.eval-snapshot-actions');if(card.querySelector('.eval-restore-confirm'))return;const snap=items.find(i=>i.s.id===id);const displayName=snap?snap.displayName:'';const warning=document.createElement('div');warning.className='eval-restore-confirm';warning.innerHTML='<p>确定恢复到此快照？<br><span class="subtle">恢复前会自动创建恢复点，可随时撤销。</span></p><div class="eval-confirm-actions"><button class="eval-confirm-yes">确认恢复</button><button class="eval-confirm-no secondary">取消</button></div>';card.appendChild(warning);warning.scrollIntoView({behavior:'smooth',block:'nearest'});actions.style.display='none';warning.querySelector('.eval-confirm-yes').onclick=async()=>{const yesBtn=warning.querySelector('.eval-confirm-yes');const noBtn=warning.querySelector('.eval-confirm-no');yesBtn.disabled=true;noBtn.disabled=true;yesBtn.textContent='正在恢复…';yesBtn.classList.add('eval-restoring');try{const r=await api(endpoint('/snapshots/'+id+'/restore'),{});status('已恢复到「'+displayName+'」；恢复前状态已存为「'+(r.recovery_snapshot_name||'恢复前自动备份')+'」');await snapshots();}catch(e){status(e.message,true);yesBtn.disabled=false;noBtn.disabled=false;yesBtn.textContent='确认恢复';yesBtn.classList.remove('eval-restoring');}};warning.querySelector('.eval-confirm-no').onclick=()=>{warning.remove();actions.style.display='';};};});}
+// 快照与评测并入「项目与运行」：进入该分区就自动读一次快照列表
+// （原来要先点一下「刷新」才看得到——合并后的规则是「进这一屏，就把这一屏该给的数据给出来」）。
+window.RuntimeView?.on('snapshots',()=>snapshots().catch(e=>status(e.message,true)));
 bind('load-snapshots',snapshots);bind('save-snapshot',async()=>{await api(endpoint('/snapshots'),{name:$('snapshot-name').value||'手动快照'});$('snapshot-name').value='';await snapshots();status('项目快照已保存。');});
-bind('restore-snapshot',async()=>{if(!$('snapshot-confirm').checked)throw Error('请勾选恢复确认');const id=$('snapshot-list').value;if(!id)throw Error('选择快照');const opt=$('snapshot-list').selectedOptions?.[0];const name=opt?opt.textContent.split(' · ').slice(0,-1).join(' · '):id;const r=await api(endpoint('/snapshots/'+id+'/restore'),{});$('snapshot-confirm').checked=false;status('已恢复到「'+name+'」；恢复前状态已存为「'+(r.recovery_snapshot_name||'恢复前自动备份')+'」');await snapshots();});
 bind('run-evaluation',async()=>{const input=$('gold-json').value.trim();if(!input)throw Error('请输入标准答案 JSON');let parsed;try{parsed=JSON.parse(input);}catch(e){throw Error('JSON 格式错误：'+e.message);}if(!parsed.entities||!Array.isArray(parsed.entities))throw Error('JSON 缺少 entities 数组');if(!parsed.relations||!Array.isArray(parsed.relations))throw Error('JSON 缺少 relations 数组');$('gold-json-error').textContent='';const r=await scopedRead('/evaluate',json('gold-json'));$('evaluation-result').innerHTML=renderEvalResult(r);});
 bind('export-project',async()=>{status('正在导出…');const r=await api(endpoint('/export'),undefined,'GET');const blob=new Blob([JSON.stringify(r,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=(current||'knowledge-project')+'.json';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);status('项目 JSON 已导出为文件。');});
 $('eval-load-example').onclick=()=>{$('gold-json').value=JSON.stringify({entities:["商户","平台","监管部门"],relations:[["商户","onboards","平台"],["商户","complies_with","监管部门"],["平台","oversees","商户"]]},null,2);$('gold-json-error').textContent='';status('已载入示例标准答案。');};
@@ -441,13 +457,26 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     if(qaHistory.length)atEnd();
   }
   function addEvidence(turn,payload){
-    const rows=Array.isArray(payload?.evidence)?payload.evidence:[];if(!rows.length)return;
+    const rows=Array.isArray(payload?.evidence)?payload.evidence:[];
+    const pendingCount=payload?.structure_pending?.count||0;
+    // 以前"没有证据"就整块不渲染；现在还要看有没有结构待定的知识 —— 有就得说出来，
+    // 否则用户看到的就是"问答没反应"，而真相是"有知识、但概念还没建模"。
+    if(!rows.length&&!pendingCount)return;
     const panelId='qa-evidence-'+(++evidenceSerial),block=document.createElement('div');block.className='qa-evidence-block';
     const toggle=document.createElement('button');
     toggle.type='button';toggle.className='qa-evidence-toggle secondary';
     toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-controls',panelId);
-    toggle.textContent='查看 '+rows.length+' 条依据';
+    toggle.textContent='查看 '+rows.length+' 条依据'+(pendingCount?"（另有 "+pendingCount+" 条结构待定）":"");
     const panel=document.createElement('div');panel.className='qa-evidence-panel';panel.id=panelId;panel.hidden=true;
+    // 这块面板用户反馈"看不懂 E1/E2 是什么、下面这些为什么要展示"。它其实是
+    // 模型回答的输入清单，所以先给一段说明，再列条目。
+    const note=document.createElement('div');note.className='qa-evidence-note';
+    for(const line of [
+      '[E1] [E2] … 是这条答案里的引用编号：证据从 E1 开始按检索顺序编号，答案正文里的 [E1] 就指下面第 1 条。点编号可以看它的完整溯源链（原文 → 记录版本 → 断言 → 审核决定）。',
+      '下面每一条 = 一条依据：摘录是该依据的内容（实体名、关系描述或原文片段），meta 是它的来源类型与本体版本；「在图谱中查看」「查看来源」可以顺着跳到对应位置。',
+      '给模型的提示就是这份清单：系统把「你的问题 + 这些依据（每条带编号）」「以 {"question":"…","evidence":[{"id":"E1","text":"…"}]} 的形状发过去，并要求模型只依据这些证据回答、每条结论标注 [E编号]。所以答案里出现的 [E1] 一定能在这里找到对应；没有勾选「用已配置的语言模型组织答案」时，返回的就是同一份清单的原文。',
+    ]){const p=document.createElement('p');p.textContent=line;note.append(p);}
+    panel.append(note);
     const projectId=current,answerId=payload.answer_id;
     for(const row of rows){
       const article=document.createElement('article');article.className='qa-evidence-item';
@@ -470,16 +499,54 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       if(actions.childElementCount)article.append(actions);
       panel.append(article);
     }
+    /* C1「结构待定」：这些知识**不是证据**（它们的类型还没进本体），但也不能让它们凭空消失 ——
+       用户问的东西可能正好落在它们身上，那就必须显式说出来，并说清"为什么不算、去哪儿补"。
+       编号用 P（peer）而不是 E：一眼能看出它不在证据链里，避免有人拿 [P1] 当引用。 */
+    const pending=payload?.structure_pending;
+    if(pending&&pending.count){
+      const block=document.createElement('div');block.className='qa-pending-block';
+      const head=document.createElement('p');head.className='qa-pending-head';
+      head.innerHTML='<b>另有 '+pending.count+' 条知识涉及本体里还没有的概念（结构待定）</b>'
+        +'<span>它们能查、能看原文，但<b>不算正式证据</b>，所以没有编号进上面那份清单。'
+        +(pending.terms&&pending.terms.length?'缺的概念：'+esc(pending.terms.join('、'))+'。':'')
+        +'去「本体建模层」把概念建出来并发布后，这些知识会自动回到证据链里。</span>';
+      block.append(head);
+      for(const row of (pending.items||[])){
+        const article=document.createElement('article');article.className='qa-pending-item';
+        const label=document.createElement('b');label.className='qa-pending-citation';label.textContent='['+row.citation+']';
+        const excerpt=document.createElement('p');excerpt.textContent=row.text_preview??row.text??'';
+        const meta=document.createElement('p');meta.className='qa-evidence-meta subtle';
+        meta.textContent=(row.kind||'')+' · 缺概念：'+((row.terms||[]).join('、')||'—');
+        article.append(label,excerpt,meta);
+        const seed=row.kind==='entity'?row.id:(row.kind==='relation'?row.subject_id:'');
+        if(seed){
+          const actions=document.createElement('div');actions.className='row';
+          const button=document.createElement('button');button.type='button';button.dataset.evidenceNode=seed;button.textContent='在图谱中查看';
+          actions.append(button);article.append(actions);
+        }
+        block.append(article);
+      }
+      if(!rows.length)toggle.textContent='查看 '+pending.count+' 条结构待定的知识';
+      panel.append(block);
+    }
     toggle.onclick=()=>{const open=toggle.getAttribute('aria-expanded')==='true';toggle.setAttribute('aria-expanded',String(!open));panel.hidden=open;};
     panel.querySelectorAll('[data-evidence-node]').forEach(node=>{node.onclick=async()=>{
+      // 这次跳转由我们指定"看这个实体"，别让进入检索页的自动补画再抢一次画布：
+      // 那条路径会先清空图谱再发全图请求，把刚选中的实体冲掉（契约用例抓到过）。
+      window.suppressNextAutoGraph?.();
       showTab('search');
       try{await window.selectEntityDetail(node.dataset.evidenceNode);}catch(error){status(error.message,true);}
       $c('graph-heading')?.focus();
     };});
     panel.querySelectorAll('[data-evidence-source]').forEach(node=>{node.onclick=async()=>{
-      showTab('sources');
+      // P0（2026-10-04）：原文数据源并入「知识写入」，侧栏独立入口已移除；溯源落点待 P1 接入
+      // 「知识写入」页的"看解析正文"区。期间点来源按钮不再跳 sources（会 null.click 崩），
+      // 改为明确提示，避免静默失效。
+      const sourceTab=document.querySelector('[data-tab="sources"]');
+      if(!sourceTab){status('原文正文查看将并入「知识写入」（下一期接入）；当前可在检索或知识台账查看该证据的原文片段。');return;}
+      sourceTab.click();
       try{await window.selectSource?.(node.dataset.evidenceSource);}catch(error){status(error.message,true);}
-    };});
+        };});
     block.append(toggle,panel);turn.append(block);atEnd();
   }
   function addFailure(turn,message,replay){
@@ -520,8 +587,11 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       if(item.event==='error')throw Error(item.data?.detail||'回答失败');
       if(item.event==='evidence'){
         capture(item.data);record.evidence=evidenceSummary(item.data?.evidence);
+        // C1：结构待定的知识单列，不进证据清单 —— 但历史重绘时要原样恢复（否则切一次标签就"消失"）。
+        record.structure_pending=item.data?.structure_pending||null;
         const channels=item.data?.channels||{};
-        summary.textContent='实体证据 '+(channels.entity??0)+' · 原文证据 '+(channels.chunk??0)+' · 图关系证据 '+(channels.graph_evidence??0);
+        summary.textContent='实体证据 '+(channels.entity??0)+' · 原文证据 '+(channels.chunk??0)+' · 图关系证据 '+(channels.graph_evidence??0)
+          +(item.data?.structure_pending?.count?' · 结构待定 '+(item.data.structure_pending.count)+' 条（不算证据）':'');
         addEvidence(target,{...item.data,answer_id:record.answer_id});
         showRetrievalNotice(item.data);
       }else if(item.event==='delta'){
