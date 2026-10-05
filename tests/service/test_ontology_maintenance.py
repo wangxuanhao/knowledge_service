@@ -33,7 +33,7 @@ def test_modify_term_constraints_creates_governed_draft_and_keeps_history(tmp_pa
         assert term['label']=='熟悉' and term['description']=='人工维护'
         assert term['domain']==['https://test/Thing']
         assert response.headers['Deprecation']=='true'
-        assert new['draft_id']==new['id'] and new['status']=='editing'
+        assert new['draft_id']==new['id'] and new['status']=='pending'
         assert len(app.state.service.repository.list_ontologies(p))==1
         assert app.state.service.repository.get_ontology(p,old['id'])['turtle']==old['turtle']
         assert c.put(base+'/ontology/term?uri=https%3A%2F%2Ftest%2Fknows',json={'label':'旧提交',

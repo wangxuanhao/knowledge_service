@@ -119,7 +119,8 @@ def test_create_command_supersede_preview_submit_and_close(tmp_path):
         project_id, None, 'manual', 'First ontology', 'author',
         source_context={'ticket': 'ONT-1'})
     assert draft['base_ontology_id'] is None
-    assert draft['status'] == 'editing'
+    # A3：新建的请求就是「待处理」（旧词汇里叫 editing）。
+    assert draft['status'] == 'pending'
     assert draft['source_context']['actor'] == 'author'
 
     preview = service.command(project_id, draft['id'], 1, {
@@ -133,12 +134,17 @@ def test_create_command_supersede_preview_submit_and_close(tmp_path):
     assert 'urn:test:Thing' in adjusted['turtle']
 
     submitted = service.submit(project_id, draft['id'], 3)
-    assert submitted['status'] == 'submitted'
+    # A3：提交**不改状态**（还是「待处理」），它做的是冻结这一轮快照：
+    # 写下提交时刻与报告指纹、并要求重新校验（validated_at 清空）。
+    assert submitted['status'] == 'pending'
+    assert submitted['submitted_at']
+    assert submitted['validated_at'] is None
+    assert submitted['validation_report'] is not None
     disposable = service.create(
         project_id, None, 'manual', 'Disposable', 'author')
     closed = service.close(
         project_id, disposable['id'], disposable['revision'], 'author', 'abandoned')
-    assert closed['status'] == 'closed'
+    assert closed['status'] == 'rejected'
     assert closed['source_context']['closure'] == {
         'actor': 'author', 'reason': 'abandoned'}
     assert len(repo._ontology_drafts.export(project_id)['operations']) == 2
@@ -213,7 +219,10 @@ def test_decisions_require_reasons_bind_fingerprints_and_complete_states(tmp_pat
             'operation_id': operation['id'],
             'operation_fingerprint': operation['fingerprint'],
             'action': 'approve'}], [], 'reviewer')
-    assert reviewed['status'] == 'reviewed'
+    # A3：决定不再把状态推成 reviewed —— 全部变更都有决定之后草案仍是「待处理」，
+    # 「决定齐了」由服务端推导（pending_phase == 'settled'）。
+    assert reviewed['status'] == 'pending'
+    assert service.pending_phase(project_id, reviewed) == 'settled'
     assert reviewed['decisions'][0]['operation_fingerprint'] == operation['fingerprint']
 
 
@@ -228,7 +237,12 @@ def test_request_changes_returns_to_editing_and_all_rejected_closes(tmp_path):
         submitted['validation_fingerprint'], [{
             'operation_id': op['id'], 'operation_fingerprint': op['fingerprint'],
             'action': 'request_changes', 'reason': 'use another label'}], [], 'reviewer')
-    assert changed['status'] == 'editing'
+    # A3：退回继续编辑 = 仍然「待处理」，但推导阶段回到「还没提交」，
+    # 并且这一轮的提交与校验一起作废（不能拿旧报告去发布）。
+    assert changed['status'] == 'pending'
+    assert service.pending_phase(project_id, changed) == 'editing'
+    assert changed['submitted_at'] is None
+    assert changed['validation_report'] is None
 
     second = service.create(project_id, base['id'], 'manual', 'reject', 'a')
     second = service.submit(
@@ -239,7 +253,7 @@ def test_request_changes_returns_to_editing_and_all_rejected_closes(tmp_path):
         second['validation_fingerprint'], [{
             'operation_id': op['id'], 'operation_fingerprint': op['fingerprint'],
             'action': 'reject', 'reason': 'not useful'}], [], 'reviewer')
-    assert rejected['status'] == 'closed'
+    assert rejected['status'] == 'rejected'
 
 
 def test_batch_approval_is_capped_and_low_risk_only(tmp_path):
@@ -279,7 +293,8 @@ def test_low_risk_batch_succeeds_and_requests_are_capped_at_100(tmp_path):
     reviewed = service.decide(
         project_id, draft['id'], submitted['revision'], base['id'],
         submitted['validation_fingerprint'], decisions, [], 'reviewer')
-    assert reviewed['status'] == 'reviewed'
+    assert reviewed['status'] == 'pending'
+    assert service.pending_phase(project_id, reviewed) == 'settled'
 
     capped = service.create(project_id, base['id'], 'manual', 'cap', 'author')
     capped = service.submit(
@@ -325,7 +340,8 @@ def test_request_changes_requires_reason_and_medium_approval_does_not(tmp_path):
             'operation_id': operation['id'],
             'operation_fingerprint': operation['fingerprint'],
             'action': 'approve'}], [], 'reviewer')
-    assert reviewed['status'] == 'reviewed'
+    assert reviewed['status'] == 'pending'
+    assert service.pending_phase(project_id, reviewed) == 'settled'
 
 
 def test_validation_fingerprint_and_warning_acknowledgement(tmp_path):
@@ -386,13 +402,17 @@ def test_validation_fingerprint_binds_the_rule_version(tmp_path):
     assert caught.value.details['report']['rule_version'] == 'ontology-drafts/next'
 
 
-def test_stale_base_and_source_are_persisted(tmp_path):
+def test_stale_base_and_source_are_derived_not_persisted(tmp_path):
     repo, service, project_id, base = setup_service(tmp_path)
     draft = service.create(project_id, base['id'], 'manual', 'stale', 'a')
     repo.save_ontology(project_id, BASE + '\n# next\n', {})
     with pytest.raises(StaleBase):
         service.submit(project_id, draft['id'], 1)
-    assert repo._ontology_drafts.get(project_id, draft['id'])['status'] == 'stale_base'
+    # A3：过期**不落状态**（旧代码会把 status 改成 stale_base）—— 状态还是「待处理」，
+    # 「需要重新基线」由 needs_rebase() 当场推导出来（是对"基线落后"这件事求值，不是记一笔）。
+    stale_draft = repo._ontology_drafts.get(project_id, draft['id'])
+    assert stale_draft['status'] == 'pending'
+    assert service.needs_rebase(project_id, stale_draft) == 'stale_base'
 
     current = repo.get_ontology(project_id)
     document = repo.put_record(project_id, {
@@ -410,8 +430,11 @@ def test_stale_base_and_source_are_persisted(tmp_path):
                     expected_version=document['version'])
     with pytest.raises(StaleSource):
         service.validate(project_id, candidate_draft['id'], 1)
-    assert repo._ontology_drafts.get(
-        project_id, candidate_draft['id'])['status'] == 'stale_source'
+    stale_source_draft = repo._ontology_drafts.get(
+        project_id, candidate_draft['id'])
+    assert stale_source_draft['status'] == 'pending'
+    assert service.needs_rebase(
+        project_id, stale_source_draft) == 'stale_source'
 
 
 def test_source_context_is_frozen_by_the_service_and_detects_later_changes(tmp_path):
@@ -507,7 +530,8 @@ def test_rebase_cannot_refresh_a_source_candidate_that_disappeared(tmp_path):
         service.rebase(project_id, draft['id'], stale['revision'], base['id'])
 
     persisted = repo._ontology_drafts.get(project_id, draft['id'])
-    assert persisted['status'] == 'stale_source'
+    assert persisted['status'] == 'pending'
+    assert service.needs_rebase(project_id, persisted) == 'stale_source'
     assert persisted['revision'] == stale['revision']
 
 
@@ -565,7 +589,12 @@ def test_wrong_expected_ontology_does_not_poison_a_current_draft(tmp_path):
 
     assert caught.value.code == 'stale_base'
     persisted = repo._ontology_drafts.get(project_id, draft['id'])
-    assert persisted['status'] == 'submitted'
+    # A3："过期"不再是状态（旧代码这里会写成 stale_base）—— 状态还是「待处理」，
+    # 过期由 needs_rebase() 当场推导。
+    assert persisted['status'] == 'pending'
+    # 注意这里**不是** stale_base：客户端多带了一个过期的 expected_ontology_id，
+    # 那是"这次请求的前提过期"，不等于"草案自己的基线落后"（_check_current 的既定语义）。
+    assert service.needs_rebase(project_id, persisted) is None
     assert persisted['revision'] == submitted['revision']
 
 
@@ -588,7 +617,7 @@ def test_rebase_latest_classifies_noop_and_invalidates_changed_decision(tmp_path
     stale = repo._ontology_drafts.get(project_id, draft['id'])
     rebased = service.rebase(
         project_id, draft['id'], stale['revision'], latest['id'])
-    assert rebased['status'] == 'editing'
+    assert rebased['status'] == 'pending'
     assert rebased['operations'][0]['validation']['rebase_status'] == 'no-op'
     assert rebased['decisions'] == []
 
@@ -615,7 +644,8 @@ def test_clean_rebase_retains_decision_and_resubmit_completes_review(tmp_path):
     assert rebased['operations'][0]['fingerprint'] == operation['fingerprint']
     assert rebased['decisions'][0]['action'] == 'approve'
     resubmitted = service.submit(project_id, draft['id'], rebased['revision'])
-    assert resubmitted['status'] == 'reviewed'
+    assert resubmitted['status'] == 'pending'
+    assert service.pending_phase(project_id, resubmitted) == 'settled'
 
 
 def test_rebase_classifies_cycle_against_latest_as_conflict(tmp_path):
@@ -640,7 +670,8 @@ def test_rebase_classifies_cycle_against_latest_as_conflict(tmp_path):
     assert rebased['rebase'][0]['classification'] == 'conflict'
     assert rebased['operations'][0]['validation']['rebase_status'] == 'conflict'
     submitted = service.submit(project_id, draft['id'], rebased['revision'])
-    assert submitted['status'] == 'submitted'
+    assert submitted['status'] == 'pending'
+    assert service.pending_phase(project_id, submitted) == 'reviewing'
     assert submitted['validation_report']['conforms'] is False
 
 
@@ -695,16 +726,19 @@ def test_publish_preflight_delegates_without_partial_service_commit(tmp_path):
     with pytest.raises(RevisionConflict) as caught:
         service.publish(
             project_id, draft['id'], reviewed['revision'] - 1, base['id'],
-            reviewed['validation_fingerprint'], [], 'stale', 'publisher')
+            reviewed['validation_fingerprint'], [], 'stale', 'publisher',
+            '用例：版本冲突路径')
     assert caught.value.code == 'revision_conflict'
     assert calls == []
     result = service.publish(
         project_id, draft['id'], reviewed['revision'], base['id'],
-        reviewed['validation_fingerprint'], [], 'once', 'publisher')
+        reviewed['validation_fingerprint'], [], 'once', 'publisher',
+        '用例：委托发布')
     assert result['id'] == 'published-by-task-5'
     assert calls[0]['turtle']
     assert calls[0]['idempotency_key'] == 'once'
-    assert repo._ontology_drafts.get(project_id, draft['id'])['status'] == 'reviewed'
+    # A3：发布失败/被拦之后草案还是「待处理」（旧断言是 reviewed）—— 可以修好后重发。
+    assert repo._ontology_drafts.get(project_id, draft['id'])['status'] == 'pending'
 
 
 def test_atomic_publish_rolls_back_is_idempotent_and_records_provenance(
@@ -723,10 +757,12 @@ def test_atomic_publish_rolls_back_is_idempotent_and_records_provenance(
             'action': 'approve'}], [], 'reviewer')
     prepared = service.publish_preflight(
         project_id, draft['id'], reviewed['revision'], base['id'],
-        reviewed['validation_fingerprint'], [], 'publish-once', 'publisher')
+        reviewed['validation_fingerprint'], [], 'publish-once', 'publisher',
+        '用例：原子发布预检')
     conflicting = service.publish_preflight(
         project_id, draft['id'], reviewed['revision'], base['id'],
-        reviewed['validation_fingerprint'], [], 'publish-once', 'other-publisher')
+        reviewed['validation_fingerprint'], [], 'publish-once', 'other-publisher',
+        '用例：幂等冲突预检')
 
     insert = repo._insert_ontology_version
 
@@ -738,7 +774,7 @@ def test_atomic_publish_rolls_back_is_idempotent_and_records_provenance(
     with pytest.raises(RuntimeError, match='after ontology insert'):
         repo.publish_ontology_draft(**prepared)
     assert [row['id'] for row in repo.list_ontologies(project_id)] == [base['id']]
-    assert repo._ontology_drafts.get(project_id, draft['id'])['status'] == 'reviewed'
+    assert repo._ontology_drafts.get(project_id, draft['id'])['status'] == 'pending'
     assert repo._ontology_drafts.export(project_id)['publish_requests'] == []
     assert repo.list_provenance_activities(project_id, kind='ontology_publish') == []
 
@@ -750,11 +786,14 @@ def test_atomic_publish_rolls_back_is_idempotent_and_records_provenance(
     assert caught.value.code == 'idempotency_conflict'
     assert service.publish(
         project_id, draft['id'], reviewed['revision'], base['id'],
-        reviewed['validation_fingerprint'], [], 'publish-once', 'publisher'
+        reviewed['validation_fingerprint'], [], 'publish-once', 'publisher',
+        # 同一把幂等键重放必须带**同一份请求**：发布说明也在请求哈希里
+        # （它要落进版本记录），换个说明就是另一个请求 → 幂等冲突是对的。
+        '用例：原子发布预检'
     )['id'] == ontology['id']
 
     published = repo._ontology_drafts.get(project_id, draft['id'])
-    assert published['status'] == 'published'
+    assert published['status'] == 'accepted'
     assert published['published_ontology_id'] == ontology['id']
     assert len(repo.list_ontologies(project_id)) == 2
     activities = repo.list_provenance_activities(project_id)
@@ -804,7 +843,8 @@ def test_atomic_publish_rechecks_source_inside_repository_transaction(tmp_path):
         repo, service, project_id, base, 'stale-publish-source')
     prepared = service.publish_preflight(
         project_id, draft['id'], reviewed['revision'], base['id'],
-        reviewed['validation_fingerprint'], [], 'stale-source', 'publisher')
+        reviewed['validation_fingerprint'], [], 'stale-source', 'publisher',
+        '用例：来源快照失效')
     repo.put_record(project_id, {
         'id': document['id'], 'kind': document['kind'], 'text': 'changed',
         'metadata': document['metadata']}, expected_version=document['version'])
@@ -815,7 +855,8 @@ def test_atomic_publish_rechecks_source_inside_repository_transaction(tmp_path):
     assert caught.value.code == 'stale_source'
     assert len(repo.list_ontologies(project_id)) == 1
     assert repo._ontology_drafts.export(project_id)['publish_requests'] == []
-    assert repo._ontology_drafts.get(project_id, draft['id'])['status'] == 'reviewed'
+    # 发布被拦下之后草案还是「待处理」：修好来源可以重新试（旧断言是 reviewed）。
+    assert repo._ontology_drafts.get(project_id, draft['id'])['status'] == 'pending'
 
 
 def test_candidate_publish_persists_sync_job_before_after_commit_runner(tmp_path):
@@ -834,14 +875,15 @@ def test_candidate_publish_persists_sync_job_before_after_commit_runner(tmp_path
     repo._ontology_sync_runner = fail_sync
     ontology = service.publish(
         project_id, draft['id'], reviewed['revision'], base['id'],
-        reviewed['validation_fingerprint'], [], 'sync-once', 'publisher')
+        reviewed['validation_fingerprint'], [], 'sync-once', 'publisher',
+        '用例：同步任务失败')
 
     jobs = repo.list_artifacts('ontology_sync_job', project_id)
     assert observed == [(ontology['id'], 'pending')]
     assert len(jobs) == 1
     assert jobs[0]['status'] == 'pending'
     assert jobs[0]['ontology_id'] == ontology['id']
-    assert repo._ontology_drafts.get(project_id, draft['id'])['status'] == 'published'
+    assert repo._ontology_drafts.get(project_id, draft['id'])['status'] == 'accepted'
 
 
 def test_publish_preflight_revalidates_only_the_current_approved_subset(tmp_path):
@@ -867,12 +909,14 @@ def test_publish_preflight_revalidates_only_the_current_approved_subset(tmp_path
             'operation_id': label_op['id'],
             'operation_fingerprint': label_op['fingerprint'],
             'action': 'approve'}], [], 'reviewer')
-    assert reviewed['status'] == 'reviewed'
+    assert reviewed['status'] == 'pending'
+    assert service.pending_phase(project_id, reviewed) == 'settled'
 
     with pytest.raises(ValidationFailed) as caught:
         service.publish_preflight(
             project_id, draft['id'], reviewed['revision'], base['id'],
-            reviewed['validation_fingerprint'], [], 'subset', 'publisher')
+            reviewed['validation_fingerprint'], [], 'subset', 'publisher',
+            '用例：仅校验已收下子集')
     assert caught.value.code == 'validation_failed'
 
 
@@ -997,6 +1041,14 @@ def test_hierarchy_reads_are_paginated_and_overlay_uses_canonical_iris(tmp_path)
         'iri'] == 'https://example.test/Second'
     assert service.matrix(project_id, ontology_id=base['id'])['items'][0]['iri'] == (
         'https://example.test/rel')
+    # 幽灵引用（不在当前本体的活动对象里）不再抛 KeyError，而是返回 not_found + 人话，
+    # 前端据此显示「该对象不可用」而不是裸「未找到：<IRI>」。
+    ghost = service.neighborhood(
+        project_id, 'https://example.test/DoesNotExist', draft_id=draft['id'])
+    assert ghost['not_found'] is True
+    assert ghost['term'] is None
+    assert ghost['iri'] == 'https://example.test/DoesNotExist'
+    assert '该对象不在' in ghost['reason']
 
 
 def test_turtle_diff_operations_are_rebuilt_with_source_evidence_and_impact(tmp_path):
@@ -1068,7 +1120,8 @@ def test_request_changes_never_counts_as_a_final_decision(tmp_path):
             'operation_fingerprint': second_op['fingerprint'],
             'action': 'approve'}], [], 'reviewer')
 
-    assert partial['status'] == 'submitted'
+    assert partial['status'] == 'pending'
+    assert service.pending_phase(project_id, partial) == 'reviewing'
 
 
 def test_publish_preflight_requires_final_current_decisions_for_every_operation(tmp_path):
@@ -1082,13 +1135,16 @@ def test_publish_preflight_requires_final_current_decisions_for_every_operation(
         'operation_id': operation['id'],
         'operation_fingerprint': operation['fingerprint'],
         'action': 'request_changes', 'reason': 'not final', 'actor': 'reviewer'}])
+    # A3：这里只需要"草案被另一个会话改过"（修订号前进、指纹作废）。
+    # 旧代码写成 {'status': 'reviewed'}，那个状态已经不存在了。
     reviewed = repo._ontology_drafts.compare_and_set(
-        project_id, draft['id'], submitted['revision'], {'status': 'reviewed'})
+        project_id, draft['id'], submitted['revision'], {'status': 'pending'})
 
     with pytest.raises(ValidationChanged):
         service.publish_preflight(
             project_id, draft['id'], reviewed['revision'], base['id'],
-            reviewed['validation_fingerprint'], [], 'invalid-history', 'publisher')
+            reviewed['validation_fingerprint'], [], 'invalid-history', 'publisher',
+            '用例：决定已失效')
 
 
 def test_withdraw_is_append_only_and_removes_operation_from_all_effective_views(tmp_path):
@@ -1175,11 +1231,13 @@ def test_restore_definition_edges_can_be_rejected_independently(tmp_path):
                 'action': 'approve' if approve else 'reject',
                 'reason': 'activate only' if approve else 'exclude definition edge',
             }], [], 'reviewer')
-    assert current['status'] == 'reviewed'
+    assert current['status'] == 'pending'
+    assert service.pending_phase(project_id, current) == 'settled'
 
     prepared = service.publish_preflight(
         project_id, draft['id'], current['revision'], retired['id'],
-        current['validation_fingerprint'], [], 'selective', 'publisher')
+        current['validation_fingerprint'], [], 'selective', 'publisher',
+        '用例：选择性恢复')
     assert [row['action'] for row in prepared['operations']] == ['restore_term']
     result = Ontology(prepared['turtle'])
     child = URIRef('https://example.test/Child')
@@ -1199,7 +1257,8 @@ def test_blocking_operation_is_reviewable_but_cannot_be_approved(tmp_path):
     error_codes = {issue['code'] for issue in operation['validation']['errors']}
     assert {'active_child_dependency', 'active_domain_dependency'} <= error_codes
     submitted = service.submit(project_id, draft['id'], preview['revision'])
-    assert submitted['status'] == 'submitted'
+    assert submitted['status'] == 'pending'
+    assert service.pending_phase(project_id, submitted) == 'reviewing'
     assert submitted['validation_report']['conforms'] is False
     with pytest.raises(ValidationFailed):
         service.decide(
@@ -1214,7 +1273,7 @@ def test_blocking_operation_is_reviewable_but_cannot_be_approved(tmp_path):
             'operation_id': operation['id'],
             'operation_fingerprint': operation['fingerprint'],
             'action': 'reject', 'reason': 'blocked'}], [], 'reviewer')
-    assert rejected['status'] == 'closed'
+    assert rejected['status'] == 'rejected'
 
 
 def test_retire_impact_keeps_dependency_details_not_only_counts(tmp_path):
@@ -1352,9 +1411,6 @@ def test_actor_is_authoritative_and_state_boundaries_are_strict(tmp_path):
         service.rebase(project_id, draft['id'], draft['revision'], base['id'])
     submitted = service.submit(
         project_id, draft['id'], add_label(service, project_id, draft)['revision'])
-    with pytest.raises(ValueError, match='close|editing'):
-        service.close(
-            project_id, draft['id'], submitted['revision'], 'author', 'too late')
     operation = submitted['operations'][0]
     reviewed = service.decide(
         project_id, draft['id'], submitted['revision'], base['id'],
@@ -1362,13 +1418,36 @@ def test_actor_is_authoritative_and_state_boundaries_are_strict(tmp_path):
             'operation_id': operation['id'],
             'operation_fingerprint': operation['fingerprint'],
             'action': 'approve'}], [], 'reviewer')
-    with pytest.raises(ValueError, match='submitted'):
+    # 全部变更都有决定了（推导 settled）之后不能再改决定：要重审必须先「退回继续编辑」。
+    # A3 之前这条保护挂在 reviewed 状态上；现在状态只有三种，判据改成**推导**。
+    with pytest.raises(ValueError, match='做审核决定') as refused_decide:
         service.decide(
             project_id, draft['id'], reviewed['revision'], base['id'],
             reviewed['validation_fingerprint'], [{
                 'operation_id': operation['id'],
                 'operation_fingerprint': operation['fingerprint'],
                 'action': 'reject', 'reason': 'late'}], [], 'reviewer')
+    assert refused_decide.value.code == 'draft_immutable'
+    assert refused_decide.value.details['status'] == 'pending'
+    assert refused_decide.value.details['pending_phase'] == 'settled'
+    # 待处理的请求可以直接驳回（收件箱里的「不收」）—— A3 之前必须先「要求调整」才能关。
+    dismissed = service.close(
+        project_id, draft['id'], reviewed['revision'], 'author', 'not now')
+    assert dismissed['status'] == 'rejected'
+    # 驳回之后就是只读账本：再关一次、再改一次决定，一律中文拒绝。
+    with pytest.raises(ValueError, match='驳回') as refused_close:
+        service.close(
+            project_id, draft['id'], dismissed['revision'], 'author', 'again')
+    assert refused_close.value.code == 'draft_immutable'
+    assert refused_close.value.details['status'] == 'rejected'
+    with pytest.raises(ValueError, match='做审核决定') as refused_late:
+        service.decide(
+            project_id, draft['id'], dismissed['revision'], base['id'],
+            dismissed['validation_fingerprint'], [{
+                'operation_id': operation['id'],
+                'operation_fingerprint': operation['fingerprint'],
+                'action': 'reject', 'reason': 'later'}], [], 'reviewer')
+    assert refused_late.value.code == 'draft_immutable'
 
 
 def test_pre_governance_artifacts_are_not_lazily_migrated_or_publishable(tmp_path):

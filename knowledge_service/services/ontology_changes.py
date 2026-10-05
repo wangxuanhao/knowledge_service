@@ -115,7 +115,7 @@ def revalidation(service, p, document, candidate, ontology, ontology_id, proposa
         if candidate.get('kind') == 'relation':
             subject = rows.get(candidate.get('subject_id')); obj = rows.get(candidate.get('object_id'))
             if not subject or not obj:
-                status = 'waiting_for_entities'; issues = ['请先批准关系两端的实体候选']
+                status = 'waiting_for_entities'; issues = ['请先处理关系两端的实体候选']
             else:
                 issues = ontology.relation_constraint_issues(target, subject.get('type', ''), obj.get('type', ''))
                 if issues:
@@ -123,7 +123,7 @@ def revalidation(service, p, document, candidate, ontology, ontology_id, proposa
         elif candidate.get('kind') == 'attribute':
             entity = rows.get(candidate.get('entity_id'))
             if not entity:
-                status = 'waiting_for_entities'; issues = ['请先批准属性所属实体候选']
+                status = 'waiting_for_entities'; issues = ['请先处理属性所属实体候选']
             else:
                 from ..services.review_validation import validate_attribute
                 validate_attribute(ontology, entity.get('type', ''), target, candidate.get('value'))

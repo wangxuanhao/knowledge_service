@@ -1,0 +1,206 @@
+/* ============================================================================
+ * 本体建模层（ontology-model-panel.css）—— 右栏详情 / 底栏动作条 / 版本管理抽屉
+ * P1（2026-10-04）实现者 B。所有选择器都以 .ontology-model 前缀开头（前端静态契约要求），
+ * 不与其它页的类名冲突；只补 panel 的观感，骨架（.om-page/.om-detail 容器等）在 ontology-model.css。
+ * 深色科技感：暗底 #080c14 + 青（实体类）/紫（关系）/青绿（属性）/琥珀（待收下）/砖红（阻断）。
+ * ========================================================================== */
+
+/* ---------- 右栏详情 ---------- */
+.ontology-model .om-detail-empty{color:#8296ad;font-size:12.5px;line-height:1.6}
+.ontology-model .om-detail-card{display:flex;flex-direction:column;gap:4px}
+.ontology-model .om-detail-head{display:flex;flex-wrap:wrap;align-items:center;gap:7px;padding-bottom:9px;margin-bottom:4px;border-bottom:1px solid #1d2a3d}
+.ontology-model .om-detail-kind{font-size:11px;letter-spacing:.06em;padding:2px 7px;border-radius:5px;border:1px solid transparent}
+.ontology-model .om-kind-cls{color:#38bdf8;background:rgba(56,189,248,.12);border-color:rgba(56,189,248,.3)}
+.ontology-model .om-kind-rel{color:#a78bfa;background:rgba(167,139,250,.12);border-color:rgba(167,139,250,.3)}
+.ontology-model .om-kind-attr{color:#2dd4bf;background:rgba(45,212,191,.12);border-color:rgba(45,212,191,.3)}
+.ontology-model .om-kind-pending{color:#fbbf24;background:rgba(251,191,36,.12);border-color:rgba(251,191,36,.35)}
+.ontology-model .om-detail-badge{font-size:11px;padding:2px 6px;border-radius:5px}
+.ontology-model .om-detail-badge.is-active{color:#2ee6a8;background:rgba(46,230,168,.12)}
+.ontology-model .om-detail-badge.is-deprecated{color:#f59e0b;background:rgba(245,158,11,.14)}
+.ontology-model .om-detail-name{font-size:14px;color:#e7eef6;font-weight:700;flex:1 1 100%}
+.ontology-model .om-detail-iri{font-size:11px;color:#5b6d82;font-family:ui-monospace,Consolas,monospace}
+.ontology-model .om-detail-desc{font-size:12px;color:#b9c6d4;line-height:1.6;margin:2px 0 6px}
+.ontology-model .om-detail-sec{margin-top:10px;padding-top:9px;border-top:1px solid rgba(29,42,61,.7)}
+.ontology-model .om-detail-title{margin:0 0 6px;font-size:11px;letter-spacing:.08em;color:#7d90a6;text-transform:uppercase;font-weight:600}
+.ontology-model .om-detail-rows{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
+.ontology-model .om-detail-row{display:flex;align-items:center;gap:7px;font-size:12.5px;color:#b9c6d4;padding:2px 0}
+.ontology-model .om-detail-link{border:0;background:transparent;padding:0;color:#cfe0f0;font:inherit;cursor:pointer;text-align:left}
+.ontology-model .om-detail-link:hover{color:#38bdf8;text-decoration:underline}
+.ontology-model .om-detail-row-label{color:#b9c6d4}
+.ontology-model .om-detail-row-tail{margin-left:auto;font-size:11px;font-family:ui-monospace,Consolas,monospace;color:#7d90a6;white-space:nowrap}
+.ontology-model .om-detail-line{font-size:12px;color:#b9c6d4;line-height:1.55;margin:0 0 5px}
+.ontology-model .om-detail-inline-empty{font-size:12px;color:#5b6d82;margin:0}
+.ontology-model .om-detail-note{margin:6px 0 0;font-size:11px;color:#5b6d82;line-height:1.55}
+.ontology-model .om-detail-actions{display:flex;gap:8px;margin:10px 0 2px}
+
+/* ---------- 底栏动作条 ---------- */
+.ontology-model .om-actionbar-inner{display:flex;flex-wrap:wrap;align-items:center;gap:12px;width:100%}
+.ontology-model .om-ab-counts{display:flex;flex-wrap:wrap;gap:8px}
+.ontology-model .om-ab-chip{display:inline-flex;flex-direction:column;align-items:center;min-width:46px;padding:3px 9px;border-radius:8px;background:#0a1220;border:1px solid #1d2a3d;line-height:1.25}
+.ontology-model .om-ab-chip b{font-size:13px;color:#e7eef6;font-weight:700}
+.ontology-model .om-ab-chip i{font-style:normal;font-size:11px;color:#7d90a6}
+.ontology-model .om-ab-chip.cls b{color:#38bdf8}
+.ontology-model .om-ab-chip.rel b{color:#a78bfa}
+.ontology-model .om-ab-chip.attr b{color:#2dd4bf}
+.ontology-model .om-ab-chip.pending{border-color:rgba(251,191,36,.4)}
+.ontology-model .om-ab-chip.pending b{color:#fbbf24}
+.ontology-model .om-ab-chip.conflict i{color:#f59e0b}
+.ontology-model .om-ab-chip.conflict b{color:#f59e0b}
+.ontology-model .om-ab-chip.block{border-color:rgba(239,68,68,.4)}
+.ontology-model .om-ab-chip.block b{color:#ef4444}
+/* 警告块 flex-basis 是 100%（整行），父级不换行的话它就只能被压扁 —— 实测被压到 1005px
+   而里面的勾选框又占满整行，说明文字只剩 35px。允许换行后：警告块独占一行，按钮/说明在下一行。
+   align-items 是防"某个子节点变高把同伴拉伸"（发布说明输入框曾被拉到 725px 高）。 */
+.ontology-model .om-ab-actions{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.ontology-model .om-ab-note{flex:1 1 100%;font-size:11px;color:#8296ad;line-height:1.5;margin:0}
+
+/* ---------- 版本管理抽屉 ---------- */
+.ontology-model .om-history{position:fixed;inset:0;z-index:60;display:flex;justify-content:flex-end}
+.ontology-model .om-history[hidden]{display:none}
+.ontology-model .om-history-backdrop{position:absolute;inset:0;background:rgba(4,8,14,.64)}
+.ontology-model .om-history-panel{position:relative;width:480px;max-width:92vw;height:100%;background:#0d1524;border-left:1px solid #1d2a3d;display:flex;flex-direction:column;box-shadow:-18px 0 44px rgba(0,0,0,.5)}
+.ontology-model .om-history-head{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid #1d2a3d;background:#111a2b}
+.ontology-model .om-history-head b{font-size:14px;color:#e7eef6}
+.ontology-model .om-history-sub{font-size:11px;color:#5b6d82}
+.ontology-model .om-history-head .om-btn{margin-left:auto}
+.ontology-model .om-history-body{flex:1 1 auto;overflow:auto;padding:12px 16px}
+.ontology-model .om-history-empty{font-size:12.5px;color:#8296ad;line-height:1.6}
+.ontology-model .om-history-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.ontology-model .om-history-item{border:1px solid #1d2a3d;border-radius:9px;background:#0a1220;overflow:hidden}
+.ontology-model .om-history-item.sel{border-color:rgba(56,189,248,.4);box-shadow:inset 0 0 0 1px rgba(56,189,248,.15)}
+.ontology-model .om-history-row{display:flex;align-items:center;gap:9px;width:100%;padding:9px 11px;border:0;background:transparent;cursor:pointer;text-align:left;font:inherit;color:#b9c6d4}
+.ontology-model .om-history-row:hover{background:rgba(56,189,248,.06)}
+.ontology-model .om-history-row b{font-size:12.5px;color:#38bdf8;min-width:26px}
+.ontology-model .om-history-time{font-size:11px;color:#7d90a6;font-family:ui-monospace,Consolas,monospace}
+.ontology-model .om-history-counts{margin-left:auto;font-size:11px;color:#8296ad;white-space:nowrap}
+.ontology-model .om-history-cur{font-size:11px;color:#2ee6a8;background:rgba(46,230,168,.12);border-radius:4px;padding:1px 6px;white-space:nowrap}
+.ontology-model .om-history-detail{padding:10px 11px 12px;border-top:1px solid #1d2a3d}
+.ontology-model .om-history-facts{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin-bottom:8px}
+.ontology-model .om-history-fact{display:contents}
+.ontology-model .om-history-fact span{font-size:11px;color:#5b6d82}
+.ontology-model .om-history-fact b{font-size:11.5px;color:#b9c6d4;font-weight:600;word-break:break-all}
+.ontology-model .om-history-note{font-size:11px;color:#5b6d82;line-height:1.55;margin:6px 0 0}
+.ontology-model .om-history-foot{padding:11px 16px;border-top:1px solid #1d2a3d;background:#111a2b;display:flex;justify-content:flex-end}
+
+/* ---------- 键盘可达与窄屏 ---------- */
+.ontology-model .om-btn:focus-visible{outline:2px solid #38bdf8;outline-offset:2px}
+.ontology-model .om-detail-link:focus-visible{outline:2px solid #38bdf8;outline-offset:2px;border-radius:3px}
+.ontology-model .om-history-row:focus-visible{outline:2px solid #38bdf8;outline-offset:-2px}
+@media(max-width:760px){
+  .ontology-model .om-history-panel{width:100%;max-width:100%}
+  .ontology-model .om-ab-actions{margin-left:0;width:100%}
+  .ontology-model .om-detail{width:280px;flex-basis:280px}
+}
+
+/* —— 停用 / 恢复动作区（D3）：不可逆动作，视觉上与普通区块拉开 ——
+   用红调是因为「停用」改的是生效本体、且历史知识从此不再增长；
+   这是提示语气，不是错误态，所以用弱底 + 红描边，而不是整块红。 */
+.ontology-model .om-retire{
+  border:1px solid rgba(248,113,113,.32);
+  border-radius:10px;
+  background:rgba(248,113,113,.06);
+  padding:12px 14px;
+  margin-top:14px;
+}
+.ontology-model .om-retire .om-detail-title{color:#f87171}
+.ontology-model .om-retire-impact{
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  color:#ffd9d2;
+  line-height:1.7;
+}
+.ontology-model .om-retire-reason{
+  display:block;width:100%;margin:8px 0;resize:vertical;
+  padding:8px 10px;border-radius:8px;
+  border:1px solid #24344a;background:#111a2b;color:#e7eef6;
+  font:inherit;line-height:1.6;
+}
+.ontology-model .om-retire-reason::placeholder{color:#5b6d82}
+.ontology-model .om-retire-reason:focus{outline:none;border-color:#f87171}
+.ontology-model .om-retire-actions{display:flex;gap:8px;flex-wrap:wrap}
+/* 确认停用：红底；恢复：青底 —— 恢复是"变回可用"，不是危险动作 */
+.ontology-model .om-retire-actions button.danger{
+  background:rgba(248,113,113,.16);border-color:rgba(248,113,113,.5);color:#ffd9d2;
+}
+.ontology-model .om-retire-actions button.danger:hover:not(:disabled){
+  background:rgba(248,113,113,.26);box-shadow:none;
+}
+
+/* ---------- 「新建术语」表单：清空选中后右栏就是它 ---------- */
+.ontology-model .om-new-term .om-detail-title{color:#38bdf8}
+.ontology-model .om-new-field{display:block;margin:8px 0 2px}
+.ontology-model .om-new-field-label{display:block;margin-bottom:4px;color:#8296ad;font-size:11px;letter-spacing:.04em}
+.ontology-model .om-new-input{
+  display:block;width:100%;margin:4px 0;
+  padding:7px 9px;border-radius:8px;
+  border:1px solid #24344a;background:#111a2b;color:#e7eef6;
+  font:inherit;line-height:1.5;
+}
+.ontology-model .om-new-input::placeholder{color:#5b6d82}
+.ontology-model .om-new-input:focus{outline:none;border-color:#38bdf8;box-shadow:0 0 0 2px rgba(56,189,248,.18)}
+.ontology-model .om-new-slot{margin-top:2px}
+.ontology-model .om-new-term .om-detail-actions{margin-top:12px}
+.ontology-model .om-new-term .om-detail-actions button{width:100%}
+
+/* ---------- 关系「两端」区：说明为什么画不出线 + 从实际用法回填 ---------- */
+.ontology-model .om-endpoints .om-detail-title{color:#a78bfa}
+.ontology-model .om-endpoints-body .om-detail-line{color:#c8d6e5}
+.ontology-model .om-endpoints-body .om-detail-actions{margin-top:10px}
+.ontology-model .om-endpoints-body .om-detail-actions button:disabled{cursor:not-allowed;opacity:.5}
+
+/* 顶栏版本标签：草案状态要一眼可辨（未发布 = 琥珀色，已发布 = 常规灰） */
+.ontology-model .om-ctx.is-draft{color:#fbbf24}
+/* 历史版本预览 = 紫色，和"草案·未发布"(琥珀) 明确区分开 */
+.ontology-model .om-ctx.is-preview{color:#a78bfa}
+
+/* ---------- 历史版本预览横幅：说清"在看哪一版、怎么回去、改动有没有丢" ---------- */
+.ontology-model .om-preview-banner{
+  display:flex;align-items:center;gap:12px;
+  padding:7px 16px;border-bottom:1px solid rgba(167,139,250,.35);
+  background:rgba(167,139,250,.10);color:#d8ccff;font-size:12px;
+}
+.ontology-model .om-preview-banner[hidden]{display:none}
+.ontology-model .om-preview-banner span{flex:1 1 auto;min-width:0;line-height:1.5}
+.ontology-model .om-preview-banner .om-btn{flex:0 0 auto;border-color:rgba(167,139,250,.5);color:#d8ccff}
+
+/* ---------- 发布说明输入框：和「校验并审核 / 发布」并排在动作条上 ---------- */
+.ontology-model .om-pub-note{
+  flex:1 1 220px;min-width:180px;max-width:360px;
+  padding:6px 10px;border-radius:8px;
+  border:1px solid #25354d;background:#0d1523;color:#e7eef6;
+  font:inherit;font-size:12px;
+}
+.ontology-model .om-pub-note::placeholder{color:#5b6d82}
+.ontology-model .om-pub-note:focus{outline:none;border-color:#2ee6a8;box-shadow:0 0 0 2px rgba(46,230,168,.18)}
+.ontology-model .om-pub-note:disabled{opacity:.5;cursor:not-allowed}
+
+/* ---------- 发布警告逐条确认（回退这类警告必须真的被人勾过） ---------- */
+.ontology-model .om-ab-warnings{
+  flex:1 1 100%;display:grid;gap:6px;
+  padding:9px 11px;border-radius:9px;
+  background:rgba(251,191,36,.07);border:1px solid rgba(251,191,36,.28);
+}
+.ontology-model .om-ab-warnings-title{margin:0;font-size:11.5px;color:#fcd34d;line-height:1.55}
+.ontology-model .om-ab-warning{display:flex;align-items:flex-start;gap:8px;font-size:11.5px;color:#e2d3a8;line-height:1.55;cursor:pointer}
+/* ⚠ 必须显式给宽高：style.css 第 1 行有全局 `input,select,textarea{width:100%}`，
+   而这里 `flex:0 0 auto` 的 flex-basis 是 auto → 会解析成 width:100%，
+   于是勾选框把整行占满（真机实测 981px）、右边的说明文字只剩 35px ≈ 一行一个汉字，
+   整条动作条被撑到 729px 高。DOM 契约测不出来，是截图才发现的。
+   （同款坑见 C2 受控重分类面板的 .odr-crow input[type=checkbox]。） */
+.ontology-model .om-ab-warning input{margin:2px 0 0;flex:0 0 auto;width:15px;height:15px;accent-color:#fbbf24}
+.ontology-model .om-ab-warning span{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+
+/* ---------- 版本管理：发布人 / 正在查看 / 列表里的发布说明 / 两个动作 ---------- */
+.ontology-model .om-history-actor{font-size:11px;color:#8296ad;white-space:nowrap}
+.ontology-model .om-history-viewing{font-size:11px;color:#a78bfa;background:rgba(167,139,250,.14);border-radius:4px;padding:1px 6px;white-space:nowrap}
+.ontology-model .om-history-line-note{
+  margin:0 0 6px;padding:0 11px 0 46px;
+  font-size:11px;color:#94a7bd;line-height:1.55;
+}
+.ontology-model .om-history-pub-note{
+  margin:8px 0 0;padding:8px 10px;border-radius:8px;
+  background:rgba(46,230,168,.07);border:1px solid rgba(46,230,168,.20);
+  font-size:11.5px;color:#cfe9dd;line-height:1.6;
+}
+.ontology-model .om-history-pub-note b{color:#2ee6a8;margin-right:4px}
+.ontology-model .om-history-actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0}
+.ontology-model .om-history-actions .om-btn.primary{background:linear-gradient(180deg,#2ee6a8,#1fae7d);border-color:transparent;color:#04121c;font-weight:700}

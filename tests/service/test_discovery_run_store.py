@@ -110,7 +110,7 @@ def _create_draft(repo, project_id, operations=(), *, draft_id='draft-1'):
         'id': draft_id,
         'base_ontology_id': None,
         'source_kind': 'discovery',
-        'status': 'editing',
+        'status': 'pending',
         'revision': 1,
         'title': draft_id,
         'summary': '',

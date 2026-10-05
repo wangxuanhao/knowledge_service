@@ -395,6 +395,32 @@ def test_retire_term_keeps_definition_and_uses_structured_replacement():
     assert ontology.graph.value(term, DCTERMS.isReplacedBy) == URIRef('http://ex/related')
 
 
+def test_retire_rejects_a_replacement_pointing_at_itself():
+    """停用时的替代类不能是它自己 —— 这会给出一句"我替代我"的空话。
+    前端的选择器已经把自己排除，这条守住服务端这道关。"""
+    with pytest.raises(ValueError, match='同类型的其他活动术语'):
+        _apply(build_operation('retire_term', 'http://ex/rel', after={
+            'replacement': {'iri': 'http://ex/rel'}}))
+
+
+def test_retire_rejects_a_replacement_of_a_different_kind():
+    """替代类必须同类型：关系不能被一个类替代（ex:A 是 owl:Class）。"""
+    with pytest.raises(ValueError, match='同类型的其他活动术语'):
+        _apply(build_operation('retire_term', 'http://ex/rel', after={
+            'replacement': {'iri': 'http://ex/A'}}))
+
+
+def test_retire_rejects_a_replacement_that_is_itself_retired():
+    """替代类必须是**生效中**的：把一个已停用的术语当替代，等于换了个死胡同。"""
+    operations = [
+        build_operation('create_term', 'http://ex/rel2', after={'kind': 'relation'}),
+        build_operation('retire_term', 'http://ex/rel2'),
+    ]
+    with pytest.raises(ValueError, match='不能指向已停用术语'):
+        _apply(*operations, build_operation('retire_term', 'http://ex/rel', after={
+            'replacement': {'iri': 'http://ex/rel2'}}))
+
+
 def test_retire_rejects_active_dependencies_on_the_newly_deprecated_term():
     with pytest.raises(ValueError, match='依赖|dependency'):
         _apply(build_operation('retire_term', 'http://ex/A'))

@@ -18,7 +18,8 @@ def _draft(project_id, *, draft_id='draft-1', base_ontology_id=None):
         'project_id': project_id,
         'base_ontology_id': base_ontology_id,
         'source_kind': 'manual',
-        'status': 'editing',
+        # A3：请求只有三种状态 —— 新建就是「待处理」。
+        'status': 'pending',
         'revision': 1,
         'title': 'Partner hierarchy',
         'summary': 'Add a governed parent edge',
@@ -661,7 +662,7 @@ def test_store_crud_supersession_json_and_export_are_project_scoped(tmp_path):
     ])
     updated = repo._ontology_drafts.compare_and_set(
         project_id, first['id'], 1,
-        {'title': 'Reviewed hierarchy', 'status': 'submitted',
+        {'title': 'Reviewed hierarchy', 'status': 'accepted',
          'validation_report': {'conforms': True},
          'validation_fingerprint': 'sha256:validation'},
     )
@@ -669,7 +670,7 @@ def test_store_crud_supersession_json_and_export_are_project_scoped(tmp_path):
     assert updated['revision'] == 2
     assert updated['validation_report'] == {'conforms': True}
     assert repo._ontology_drafts.get(project_id, first['id']) == updated
-    assert repo._ontology_drafts.list(project_id, status='submitted') == [updated]
+    assert repo._ontology_drafts.list(project_id, status='accepted') == [updated]
     assert [row['id'] for row in operations] == ['op-old', 'op-current']
     assert [row['id'] for row in repo._ontology_drafts.effective_operations(
         project_id, first['id'])] == ['op-current']

@@ -48,6 +48,15 @@ class RebaseRequest(RevisionRequest):
     expected_ontology_id: str | None
 
 
+class BatchApproveRequest(RevisionRequest):
+    """一键审核：只提交意图与乐观锁，集合由服务端取值。"""
+
+    expected_ontology_id: str | None
+    validation_fingerprint: str
+    acknowledged_warning_codes: list[str] = Field(default_factory=list)
+    actor: str
+
+
 class CloseRequest(RevisionRequest):
     actor: str
     reason: str
@@ -59,6 +68,9 @@ class PublishRequest(RevisionRequest):
     acknowledged_warning_codes: list[str] = Field(default_factory=list)
     idempotency_key: str
     actor: str
+    # 发布说明：必填（min_length=1）。版本记录要能回答"这一版为什么发、谁发的"，
+    # 空白说明等于让版本列表变成一串没人看得懂的编号。服务端强制，不靠界面自觉。
+    note: str = Field(min_length=1, max_length=500)
 
 
 def install(app, service):
@@ -78,6 +90,12 @@ def install(app, service):
     def listing(p: str, status: str | None = None):
         items = drafts.list(p, status=status)
         return {'items': items, 'total': len(items)}
+
+    # 阶段门禁（只读）。必须声明在 '/{draft_id}' 之前，否则会先被那条路由吃掉。
+    # 前端只渲染这里的结果：能不能进、为什么、下一步点哪里，不再自己推。
+    @router.get('/stage-availability')
+    def stage_availability(p: str, draft_id: str | None = None):
+        return drafts.stage_state(p, draft_id)
 
     @router.get('/{draft_id}')
     def get(p: str, draft_id: str):
@@ -116,13 +134,40 @@ def install(app, service):
             p, draft_id, request.expected_revision,
             request.actor, request.reason)
 
+    @router.get('/{draft_id}/review-plan')
+    def review_plan(p: str, draft_id: str):
+        """服务端唯一裁决 safe/manual/blocked；前端只渲染，不复刻风险规则。"""
+        return drafts.review_plan(p, draft_id)
+
+    @router.get('/{draft_id}/publish-readiness')
+    def publish_readiness(p: str, draft_id: str):
+        """只读发布清单：逐条返回未满足条件、严重级别与修复建议。"""
+        return drafts.publish_readiness(p, draft_id)
+
+    @router.get('/{draft_id}/evidence')
+    def evidence(p: str, draft_id: str):
+        """只读证据投影：把操作上的机器引用还原成可读的来源条目。"""
+        return drafts.evidence_index(p, draft_id)
+
+    @router.post('/{draft_id}/decisions/batch-approve')
+    def batch_approve(p: str, draft_id: str, request: BatchApproveRequest):
+        """一键审核：服务端挑出「可批准且无需理由」的变更并整批批准。
+
+        集合由服务端 review_plan 决定；阻断项、高风险项、需要写理由的变更
+        永远不在其中，前端只表达意图、不参与挑选。
+        """
+        return drafts.batch_approve(
+            p, draft_id, request.expected_revision,
+            request.expected_ontology_id, request.validation_fingerprint,
+            request.acknowledged_warning_codes, request.actor)
+
     @router.post('/{draft_id}/publish')
     def publish(p: str, draft_id: str, request: PublishRequest):
         return drafts.publish(
             p, draft_id, request.expected_revision,
             request.expected_ontology_id, request.validation_fingerprint,
             request.acknowledged_warning_codes, request.idempotency_key,
-            request.actor)
+            request.actor, request.note)
 
     app.include_router(router)
 

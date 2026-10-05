@@ -787,6 +787,7 @@ def test_discovery_fingerprint_rejects_non_utf8_candidate_payloads():
                 "id": "candidate", "kind": "class", "name": "Term",
                 "metadata": {"nested": "\ud800"},
             }],
+            generator_contract="ontology-discovery/2",
             runtime_version="runtime",
             attribute_threshold=2,
             generation_options={},
@@ -1151,6 +1152,8 @@ def test_discovery_fingerprint_is_order_independent_and_binds_every_generation_i
     ]
     options = {"language": "zh", "model": {"temperature": 0, "top_p": 1}}
     kwargs = {
+        # 契约标签现在必填（不再有写死的默认值，见 discovery_vocabulary 的说明）
+        "generator_contract": "ontology-discovery/2",
         "runtime_version": "semantica-runtime-0.6.7",
         "attribute_threshold": 2,
         "request_name": "initial discovery",
@@ -1163,9 +1166,11 @@ def test_discovery_fingerprint_is_order_independent_and_binds_every_generation_i
     assert len(fingerprint) == 71
     assert fingerprint == discovery_source_fingerprint(
         "project", "ontology-v1", list(reversed(candidates)), **kwargs)
-    assert fingerprint == discovery_source_fingerprint(
+    # 契约标签不再有"写死的默认值"可比 —— 它现在是必填参数，标签换一个就换指纹。
+    # （历史上这里比对的是默认值 "semantica-0.6.7"，那正是漂移的来源。）
+    assert fingerprint != discovery_source_fingerprint(
         "project", "ontology-v1", candidates,
-        generator_contract="semantica-0.6.7", **kwargs)
+        **{**kwargs, "generator_contract": "semantica-0.6.7"})
     reordered_options = {"model": {"top_p": 1, "temperature": 0}, "language": "zh"}
     assert fingerprint == discovery_source_fingerprint(
         "project", "ontology-v1", candidates,

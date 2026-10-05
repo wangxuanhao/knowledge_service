@@ -8,6 +8,7 @@ from copy import deepcopy
 import hashlib
 from importlib import metadata as importlib_metadata
 import json
+import logging
 from uuid import uuid4
 
 from fastapi import APIRouter
@@ -37,16 +38,30 @@ from ..services.ontology_drafts import OntologyDrafts, StaleBase, StaleSource
 from ..services.ontology_operations import canonical_turtle_diff
 from ..services.ontology_discovery import (
     _candidates, _candidate_lifecycle, _candidate_mindmap, _induce,
+    _candidate_vocabulary_name,
     _materialize_candidates, _validated_materialization, _ontology_diff,
     _normalize_induction_candidates, _quality_warnings, _summary, _literal_language,
     _materialized_candidate_ids, _reuse_materialized_records,
+)
+from ..services.hierarchy_suggestion import (
+    HierarchySuggestionsUnavailable, suggest_hierarchy,
 )
 from ..utils.diagnostics import timed
 from ..core.time import utc_now
 
 
 NORMALIZER_VERSION = 'v1'
-GENERATOR_CONTRACT = 'semantica-0.6.7+materialization-context-v2'
+LOG = logging.getLogger('knowledge_service.ontology_discovery')
+# 生成适配层自己的语义版本：只有**本项目的生成管线语义**变化时才递增。
+# 它故意与 semantica 的版本解耦 —— 上游升级不该让已有 run 的 source fingerprint
+# 换身份（否则每升一次 semantica，所有在飞的 run 都会变成 stale）。
+ADAPTER_CONTRACT = 'ontology-discovery/2'
+# 历史契约标签：升级前创建的 run / draft 的 provenance 里存的就是这些值。
+# 校验时按"等价指纹"逐个比对（兼容读路径），否则升级后旧 run 永远收不了尾。
+LEGACY_ADAPTER_CONTRACTS = (
+    'semantica-0.6.7+materialization-context-v2',
+    'semantica-0.6.7',
+)
 ATTRIBUTE_THRESHOLD = 2
 
 
@@ -55,6 +70,44 @@ def _semantica_runtime_version():
         return importlib_metadata.version('semantica')
     except importlib_metadata.PackageNotFoundError:
         return 'unavailable'
+
+
+def generator_contract(runtime_version=None):
+    """对外曝光的生成器契约标签：``semantica-<运行时版本>+适配层 v2``。
+
+    以前这里写死 ``semantica-0.6.7+...``，而实际跑的是 0.7.0 —— 标签在说谎，
+    排查问题时会把上游结构差异归因错版本。现在标签从运行时版本派生：
+    契约标签始终等于 ``importlib.metadata.version('semantica')``，与安装的版本一致。
+    """
+    return (f'semantica-{runtime_version or _semantica_runtime_version()}'
+            '+materialization-context-v2')
+
+
+def _hierarchy_suggestions(induction_candidates, request_name=''):
+    """求"候选类 → 父子关系"的 LLM 建议；任何失败都降级为空建议（原因进日志）。
+
+    为什么必须显式降级：LLM 是外部依赖，没配置/超时/返回不可信内容都不该让"发现本体"
+    失败—— 没有层级只是本体平一点，有层级是增强。降级要留日志，否则"为什么这次没有
+    层级"根本没法排查。
+    """
+    class_names = sorted({
+        name for name in (
+            str(_candidate_vocabulary_name(item) or '').strip()
+            for item in induction_candidates or ()
+            if item.get('kind') == 'entity')
+        if name
+    })
+    if len(class_names) < 2:
+        # 只有一个类（或没有类）谈不上父子关系：省掉一次外部调用。
+        return {}
+    try:
+        return suggest_hierarchy(class_names, request_name=request_name)
+    except HierarchySuggestionsUnavailable as exc:
+        LOG.info('跳过层级建议：%s', exc)
+        return {}
+    except Exception:
+        LOG.warning('层级建议失败，本次发现按"无层级"处理', exc_info=True)
+        return {}
 
 
 def _canonical_copy(value):
@@ -105,7 +158,8 @@ def _expected_run_snapshot(source_fingerprint, candidates, normalization,
         'base_ontology_fingerprint': generation_options[
             'baseline_turtle_sha256'],
         'normalizer_version': NORMALIZER_VERSION,
-        'generator_version': GENERATOR_CONTRACT,
+        'generator_version': generator_contract(runtime_version),
+        'adapter_contract': ADAPTER_CONTRACT,
         'runtime_version': runtime_version,
         'attribute_threshold': ATTRIBUTE_THRESHOLD,
         'generation_options': generation_options,
@@ -171,7 +225,14 @@ def _generation_options(request, baseline):
 
 
 def _source_fingerprint(project_id, parent, candidates, request, *,
-                        runtime_version=None, generation_options=None):
+                        runtime_version=None, generation_options=None,
+                        adapter_contract=None):
+    """源指纹：哪些输入变了就必须换一个 run 身份。
+
+    注意 ``generator_contract`` 用的是 **ADAPTER_CONTRACT**（本项目适配层语义版本），
+    不是 semantica 的运行版本标签 —— 标签只是给人看的 provenance，
+    让它参与身份会让"上游打了个补丁版本"变成"所有 run 都过期"。
+    """
     baseline = parent['turtle'] if parent else None
     if runtime_version is None:
         runtime_version = _semantica_runtime_version()
@@ -180,7 +241,7 @@ def _source_fingerprint(project_id, parent, candidates, request, *,
     return discovery_source_fingerprint(
         project_id, parent['id'] if parent else None, candidates,
         normalizer_version=NORMALIZER_VERSION,
-        generator_contract=GENERATOR_CONTRACT,
+        generator_contract=adapter_contract or ADAPTER_CONTRACT,
         runtime_version=runtime_version,
         attribute_threshold=ATTRIBUTE_THRESHOLD,
         generation_options=generation_options,
@@ -277,18 +338,41 @@ def _finalize_result(run, *, materialized_count=None, skipped_candidates=None,
     return result
 
 
-def _current_finalize_fingerprint(project_id, run, parent, candidates):
+def _finalize_fingerprint(project_id, run, parent, candidates, *,
+                          adapter_contract, runtime_version):
+    """按指定（适配层契约, 运行时版本）重算收尾指纹。"""
     generation_options = _canonical_copy(run['generation_options'])
     generation_options['baseline_turtle_sha256'] = hashlib.sha256(
         ((parent or {}).get('turtle') or '').encode('utf-8')).hexdigest()
     return discovery_source_fingerprint(
         project_id, parent['id'] if parent else None, candidates,
         normalizer_version=NORMALIZER_VERSION,
-        generator_contract=GENERATOR_CONTRACT,
-        runtime_version=_semantica_runtime_version(),
+        generator_contract=adapter_contract,
+        runtime_version=runtime_version,
         attribute_threshold=ATTRIBUTE_THRESHOLD,
         generation_options=generation_options,
         request_name=run['request_name'])
+
+
+def _finalize_fingerprint_candidates(project_id, run, parent, candidates):
+    """收尾时要接受的等价指纹集合（兼容读路径）。
+
+    契约取 **当前 + 全部历史标签**，运行时版本取 **当前 + 该 run 记录的**，
+    两两组合都算等价。差异只在两个"版本标签"上：指纹真正的载荷（候选、基线哈希、
+    生成选项、请求名）必须逐字节相等才可能匹配，所以这里放宽的只是标签，
+    不是数据。没有这一步，任何一次升级都会让在飞的 run 永远收不了尾。
+    """
+    runtime_versions = []
+    for version in (_semantica_runtime_version(), run.get('runtime_version')):
+        if isinstance(version, str) and version and version not in runtime_versions:
+            runtime_versions.append(version)
+    fingerprints = []
+    for contract in (ADAPTER_CONTRACT, *LEGACY_ADAPTER_CONTRACTS):
+        for runtime_version in runtime_versions:
+            fingerprints.append(_finalize_fingerprint(
+                project_id, run, parent, candidates,
+                adapter_contract=contract, runtime_version=runtime_version))
+    return fingerprints
 
 
 def _processed_discovery_candidate_ids(repository, project_id):
@@ -436,10 +520,15 @@ def install(app, service):
         processed_ids=_processed_discovery_candidate_ids(service.repository,p)
         processed_ids.intersection_update(item['id'] for item in candidates)
         induction_candidates,normalization=_normalize_induction_candidates(candidates,baseline)
+        # P0-3：对候选类清单求一次层级建议。**失败即降级**——LLM 没配/超时/返回垃圾
+        # 都只让本次发现"没有层级"，绝不能把本体发现搞挂（层级是增强，不是前提）。
+        hierarchy_suggestions=_hierarchy_suggestions(
+            induction_candidates,request.name)
         if induction_candidates:
             try:
                 turtle,mappings,inferred=_induce(
-                    p,request.name,induction_candidates,baseline_turtle=baseline)
+                    p,request.name,induction_candidates,baseline_turtle=baseline,
+                    hierarchy_suggestions=hierarchy_suggestions)
             except GeneratedVocabularyConflict:
                 raise
             except ValueError as exc:
@@ -555,8 +644,13 @@ def install(app, service):
                     'baseline_turtle_sha256'],
                 'source_fingerprint':source_fingerprint,
                 'normalizer_version':NORMALIZER_VERSION,
-                'generator_version':GENERATOR_CONTRACT,
+                'generator_version':generator_contract(runtime_version),
+                'adapter_contract':ADAPTER_CONTRACT,
                 'runtime_version':runtime_version,
+                # P0-3 层级建议的台账：哪次发现拿了哪些父子关系（便于回溯"这条边是谁提的"）。
+                # 刻意**不放进 `_expected_run_snapshot`**：LLM 输出不是"已存输入"的确定函数，
+                # 进了比对集会让"重跑同一个 run id"因模型抖动而报 snapshot 冲突。
+                'hierarchy_suggestions':hierarchy_suggestions,
                 'attribute_threshold':ATTRIBUTE_THRESHOLD,
                 'generation_options':generation_options,
                 'materialized_candidate_ids':sorted(processed_ids),
@@ -633,10 +727,10 @@ def install(app, service):
                 processed_ids = _materialized_candidate_ids(existing_records)
                 previous_ids = set(run.get(
                     'materialized_candidate_ids') or [])
-                current_fingerprint = _current_finalize_fingerprint(
+                current_fingerprints = _finalize_fingerprint_candidates(
                     p, run, parent, candidates)
                 accepted_ids = set(run.get('accepted_candidate_ids') or [])
-                if (current_fingerprint != run['source_fingerprint']
+                if (run['source_fingerprint'] not in current_fingerprints
                         or previous_ids != processed_ids & {item['id'] for item in candidates}
                         or accepted_ids & (processed_ids - previous_ids)):
                     service.repository.transition_discovery_run(
@@ -645,7 +739,7 @@ def install(app, service):
                         'discovery source changed before finalization', details={
                             'expected_source_fingerprint': run[
                                 'source_fingerprint'],
-                            'current_source_fingerprint': current_fingerprint,
+                            'current_source_fingerprint': current_fingerprints[0],
                         })
                 else:
                     draft = {

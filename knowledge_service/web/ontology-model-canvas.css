@@ -1,0 +1,66 @@
+/* ============================================================================
+ * 本体建模层 · 画布样式（ontology-model-canvas.css）
+ *
+ * 只负责中间画布这一块：Cytoscape 舞台 / 层带覆盖层 / 工具条 / 确认条 / 图例 / 空态。
+ * 骨架（三栏网格、左清单、右详情容器）在 ontology-model.css，不在这里重复。
+ *
+ * 视觉口径：浅青（teal）—— 浅青网格底 #f3f7f8 + 白纸卡 #ffffff +
+ *   青(#0e7c7b)/靛蓝(#6366f1)/teal(#14b8a6)/橄榄黄(#ca8a04) 语义色。
+ *   节点与边的颜色由 JS 的 Cytoscape 样式负责（画在 canvas 上），
+ *   这里只管 canvas 之外、stage 之上的 DOM（图例/工具条/确认条/层带）。
+ *
+ * 硬约束：每个选择器都以 .ontology-model 前缀开头（前端静态契约要求），避免污染其它页。
+ * ========================================================================== */
+
+/* 舞台：铺满中栏容器；背景透明，让 host 的浅青点阵网格透出来。 */
+.ontology-model .om-canvas-stage{position:absolute;inset:0;overflow:hidden;background:transparent;font-family:Inter,"Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+.ontology-model .om-canvas-stage canvas{display:block}
+
+/* 层带覆盖层：叠在画布之上、不吃事件（交互仍落到 Cytoscape）。
+   浅青底色块 + 青描边；is-shade（关系层带）用淡靛蓝。 */
+.ontology-model .om-canvas-bands{position:absolute;left:0;top:0;width:100%;height:100%;z-index:2;pointer-events:none;overflow:visible}
+.ontology-model .om-canvas-band{fill:rgba(14,124,123,.06);stroke:rgba(14,124,123,.16);stroke-width:1}
+.ontology-model .om-canvas-band.is-shade{fill:rgba(99,102,241,.06);stroke:rgba(99,102,241,.14)}
+.ontology-model .om-canvas-band-label{fill:#5f7d7c;font-size:11px;font-family:Inter,"Microsoft YaHei",sans-serif;letter-spacing:.06em;font-weight:600}
+
+/* 图例：右上角。默认【收起】——只显示一个小「图例」按钮（pointer-events 恢复可点）；
+   .is-open 时展开为白纸浮卡。这样不占整块顶部，图谱能真正居中。 */
+.ontology-model .om-canvas-legend{position:absolute;right:12px;top:12px;z-index:5;font-size:11.5px;color:#3d5e5e;pointer-events:none}
+.ontology-model .om-canvas-legend-toggle{pointer-events:auto;border:1px solid #c2d6d5;background:rgba(255,255,255,.96);color:#0e7c7b;border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer;box-shadow:0 6px 16px -10px rgba(13,60,58,.4);transition:border-color .15s,background .15s}
+.ontology-model .om-canvas-legend-toggle:hover{border-color:#0e7c7b;background:#e7f2f1}
+.ontology-model .om-canvas-legend-toggle:focus-visible{outline:2px solid #14b8a6;outline-offset:1px}
+/* 展开浮卡：默认隐藏，.is-open 显示 */
+.ontology-model .om-canvas-legend-body{display:none;margin-top:8px;flex-direction:column;gap:6px;padding:11px 13px;border:1px solid #d5e4e4;border-radius:10px;background:rgba(255,255,255,.98);box-shadow:0 12px 28px -14px rgba(13,60,58,.45);pointer-events:auto;backdrop-filter:blur(6px)}
+.ontology-model .om-canvas-legend.is-open .om-canvas-legend-body{display:flex}
+.ontology-model .om-canvas-legend-item{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.ontology-model .om-canvas-legend-item i{display:inline-block;width:22px;height:0;border-top:2px solid #0e7c7b;flex:0 0 auto}
+.ontology-model .om-canvas-legend-item i.rel{border-top:2px dashed #6366f1}
+.ontology-model .om-canvas-legend-item i.pending{border-top:2px dashed #ca8a04}
+.ontology-model .om-canvas-legend-item i.dot{width:12px;height:12px;border:0;border-radius:3px;background:#0d9488;box-shadow:0 0 0 3px rgba(13,148,136,.18)}
+
+/* 空态：没有可画的类时居中提示。 */
+.ontology-model .om-canvas-empty{position:absolute;left:0;top:0;width:100%;height:100%;z-index:4;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;color:#8a9e9d;font-size:13px;pointer-events:none}
+.ontology-model .om-canvas-empty[hidden]{display:none}
+
+/* 工具条：画布底部常驻，白纸浮卡 + 青灰描边；左统计、中提示、右动作。 */
+.ontology-model .om-canvas-bar{position:absolute;left:12px;right:12px;bottom:12px;z-index:6;display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid #d5e4e4;border-radius:11px;background:rgba(255,255,255,.96);box-shadow:0 12px 30px -16px rgba(13,60,58,.4);backdrop-filter:blur(6px)}
+.ontology-model .om-canvas-stats{color:#688585;font-size:11.5px;white-space:nowrap;flex:0 0 auto}
+.ontology-model .om-canvas-hint{color:#0e7c7b;font-size:11.5px;flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
+/* 工具条按钮：白底青灰描边的 ghost 工具钮，hover 浅青。 */
+.ontology-model .om-canvas-bar button{border:1px solid #c2d6d5;background:#ffffff;color:#3d5e5e;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;flex:0 0 auto;transition:border-color .15s,background .15s,color .15s}
+.ontology-model .om-canvas-bar button:hover:not(:disabled){border-color:#0e7c7b;background:#e7f2f1;color:#0e7c7b}
+.ontology-model .om-canvas-bar button:focus-visible{outline:2px solid #14b8a6;outline-offset:1px}
+.ontology-model .om-canvas-bar button:disabled{opacity:.4;cursor:not-allowed}
+.ontology-model .om-canvas-bar button.om-canvas-cancel[hidden]{display:none}
+
+/* 确认条：两步连线的第二步，浮在工具条上方。白纸卡 + teal 描边。 */
+.ontology-model .om-canvas-confirm{position:absolute;left:12px;right:12px;bottom:62px;z-index:7;display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:11px 13px;border:1px solid rgba(13,148,136,.4);border-radius:11px;background:rgba(255,255,255,.98);box-shadow:0 16px 36px -18px rgba(13,60,58,.45);backdrop-filter:blur(6px)}
+.ontology-model .om-canvas-confirm[hidden]{display:none}
+.ontology-model .om-canvas-confirm-copy{color:#0f5a57;font-size:12px;flex:1 1 auto;min-width:0}
+.ontology-model .om-canvas-confirm-input{border:1px solid #c2d6d5;background:#f3f7f8;color:#124242;border-radius:8px;padding:6px 10px;font-size:12px;font-family:Inter,"Microsoft YaHei",sans-serif;min-width:170px}
+.ontology-model .om-canvas-confirm-input:focus{outline:none;border-color:#14b8a6;box-shadow:0 0 0 3px rgba(20,184,166,.2)}
+.ontology-model .om-canvas-confirm button{border:1px solid #c2d6d5;background:#ffffff;color:#3d5e5e;border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer}
+/* 确认主按钮：teal→青 渐变实心，深青字（浅底上要深色字才有对比）。 */
+.ontology-model .om-canvas-confirm button.primary{background:linear-gradient(135deg,#5eead4,#2dd4bf);border-color:transparent;color:#0c3534;font-weight:700;box-shadow:0 6px 16px -8px rgba(20,184,166,.7)}
+.ontology-model .om-canvas-confirm button:hover:not(:disabled){border-color:#0d9488}
+.ontology-model .om-canvas-confirm button:focus-visible{outline:2px solid #14b8a6;outline-offset:1px}

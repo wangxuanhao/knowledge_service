@@ -39,9 +39,12 @@ def test_candidate_proposal_creates_and_submits_governed_draft(tmp_path):
             'expected_ontology_id':ontology['id']})
         assert approved.status_code==200,approved.text
         result=approved.json()
+        # proposal 是**另一个对象**（ontology_change 工件），它自己的状态词表与草案无关：
+        # 批准后它进 'submitted'（已批准、已送入审核，等逐条收下）。草案那边则是三档模型，
+        # 所以这份草案仍然是 'pending'（"已经提交过"由 submitted_at 记，不是状态）。
         assert result['proposal']['status']=='submitted'
         assert result['ontology'] is None
-        assert result['draft']['status']=='submitted'
+        assert result['draft']['status']=='pending'
         assert any(x['id']=='https://test/worksFor'
                    for x in result['draft']['ontology']['relations'])
         assert len(app.state.service.repository.list_ontologies(project))==1
@@ -71,6 +74,7 @@ def test_candidate_proposal_creates_and_submits_governed_draft(tmp_path):
                 'validation_fingerprint':current['validation_fingerprint'],
                 'acknowledged_warning_codes':warnings,
                 'idempotency_key':'candidate-publish-1','actor':'publisher',
+                'note':'候选变更已核验，发布为版本',
             })
         assert published.status_code==200,published.text
         assert len(app.state.service.repository.list_ontologies(project))==2
@@ -142,5 +146,5 @@ def test_high_impact_adjustment_requires_explicit_confirmation(tmp_path):
         decision['confirm_impact']=True
         submitted=client.post(base+'/ontology-change-proposals/'+draft['id']+'/decision',json=decision)
         assert submitted.status_code==200
-        assert submitted.json()['draft']['status']=='submitted'
+        assert submitted.json()['draft']['status']=='pending'
         assert len(app.state.service.repository.list_ontologies(project))==1

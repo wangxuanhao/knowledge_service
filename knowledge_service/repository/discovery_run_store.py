@@ -184,6 +184,30 @@ def _validate_outcome_schema(outcome, *, initial):
             f'discovery run {label} has an incompatible status or reason_code')
 
 
+def _validate_hierarchy_suggestions(suggestions):
+    """层级建议的持久化形状：``{子类名: [父类名, ...]}``。
+
+    这些边来自 LLM（不可信），但会被持久化、被重新读出来渲染与解释，所以入库前
+    必须收口：名字非空、父类列表非空且不重复。**环**由生成阶段剔除
+    （见 `services/hierarchy_suggestion.py`），这里只做形状校验。
+    """
+    if not isinstance(suggestions, dict):
+        raise ValueError('discovery run hierarchy_suggestions must be an object')
+    for child, parents in suggestions.items():
+        if not isinstance(child, str) or not child.strip():
+            raise ValueError(
+                'discovery run hierarchy_suggestions has an invalid class name')
+        if not isinstance(parents, list) or not parents:
+            raise ValueError(
+                'discovery run hierarchy_suggestions requires non-empty parent lists')
+        if any(not isinstance(parent, str) or not parent.strip() for parent in parents):
+            raise ValueError(
+                'discovery run hierarchy_suggestions has an invalid parent name')
+        if len(set(parents)) != len(parents):
+            raise ValueError(
+                'discovery run hierarchy_suggestions has duplicate parents')
+
+
 def _validate_candidate_bindings(run, initial_outcomes):
     snapshot_ids = []
     snapshot_by_id = {}
@@ -510,10 +534,12 @@ class DiscoveryRunStore:
                 ('candidate_bindings', [], list),
                 ('initial_candidate_outcomes', [], list),
                 ('candidate_outcomes', [], list),
-                ('diagnostics', {}, dict)):
+                ('diagnostics', {}, dict),
+                ('hierarchy_suggestions', {}, dict)):
             run.setdefault(field, default)
             if not isinstance(run[field], expected_type):
                 raise ValueError(f'discovery run {field} has an invalid shape')
+        _validate_hierarchy_suggestions(run['hierarchy_suggestions'])
         if not has_current_outcomes:
             run['candidate_outcomes'] = json.loads(_canonical_json(
                 run['initial_candidate_outcomes']))

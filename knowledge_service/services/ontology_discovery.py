@@ -508,7 +508,7 @@ def _ontology_diff(before_turtle,after_turtle):
     return result
 
 
-def _induce(project_id,name,candidates,baseline_turtle=None):
+def _induce(project_id,name,candidates,baseline_turtle=None,hierarchy_suggestions=None):
     from semantica.ontology import OntologyGenerator
     by_id={x['id']:x for x in candidates if x['kind']=='entity'}
     entity_machine={source:_machine_name('EntityType',source) for source in
@@ -606,6 +606,18 @@ def _induce(project_id,name,candidates,baseline_turtle=None):
         parent=class_map.get(str(parent_source))
         if parent and parent!=child:
             graph.add((URIRef(child),RDFS.subClassOf,URIRef(parent)))
+    # P0-3 LLM 层级建议：Semantica 只看类名推断，我们的机器名是哈希串，实测一条都推不出来，
+    # 所以这里补上"候选类清单 → 父子关系"的 LLM 判断（已做去环/去自环/限量，见
+    # services/hierarchy_suggestion.py）。它写进的是同一张图、走的也是同一条
+    # add_parent → 审核 → 发布 的路径，没有旁路。
+    for child_name,parent_names in (hierarchy_suggestions or {}).items():
+        child=class_map.get(str(child_name))
+        if not child:
+            continue
+        for parent_name in parent_names or ():
+            parent=class_map.get(str(parent_name))
+            if parent and parent!=child:
+                graph.add((URIRef(child),RDFS.subClassOf,URIRef(parent)))
     relation_map={};attribute_map={}
     relation_lookup=_term_lookup(catalog,'relations');attribute_lookup=_term_lookup(catalog,'attributes')
     for item in inferred.get('properties',[]):

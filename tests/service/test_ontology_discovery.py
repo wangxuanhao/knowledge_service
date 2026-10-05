@@ -315,7 +315,7 @@ def test_create_draft_passes_only_normalized_candidates_to_induce(tmp_path, monk
     ]
     received = []
 
-    def fake_induce(_project_id, _name, accepted, baseline_turtle=None):
+    def fake_induce(_project_id, _name, accepted, baseline_turtle=None, hierarchy_suggestions=None):
         received.extend(accepted)
         return """
             @prefix ex: <http://example.test/> .
@@ -409,7 +409,7 @@ def test_0928_开放_跨类型同名隔离后无关术语仍生成草案(tmp_pat
     ]
     induced_ids = []
 
-    def fake_induce(_project_id, _name, accepted, baseline_turtle=None):
+    def fake_induce(_project_id, _name, accepted, baseline_turtle=None, hierarchy_suggestions=None):
         induced_ids.extend(item['id'] for item in accepted)
         return '''
             @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -487,7 +487,7 @@ def test_mixed_discovery_creates_one_atomic_run_and_governed_draft(
          'proposed_type': '账号'},
     ]
 
-    def fake_induce(_project_id, _name, _accepted, baseline_turtle=None):
+    def fake_induce(_project_id, _name, _accepted, baseline_turtle=None, hierarchy_suggestions=None):
         return '''
             @prefix owl: <http://www.w3.org/2002/07/owl#> .
             <urn:test:Behavior> a owl:Class .
@@ -877,7 +877,8 @@ def test_changed_fingerprint_dimension_creates_successor_run(
         if dimension == 'normalizer':
             monkeypatch.setattr(discovery_api, 'NORMALIZER_VERSION', 'v2')
         elif dimension == 'generator':
-            monkeypatch.setattr(discovery_api, 'GENERATOR_CONTRACT', 'semantica-next')
+            monkeypatch.setattr(discovery_api, 'ADAPTER_CONTRACT',
+                                'ontology-discovery-next')
         elif dimension == 'runtime':
             state['runtime'] = 'runtime-v2'
         elif dimension == 'threshold':
@@ -941,7 +942,7 @@ def test_changed_base_after_closed_run_creates_immutable_successor(
                    'proposed_type': '新增'}]
     monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: candidates)
 
-    def fake_induce(_project_id, _name, _accepted, baseline_turtle=None):
+    def fake_induce(_project_id, _name, _accepted, baseline_turtle=None, hierarchy_suggestions=None):
         return (baseline_turtle or '') + (
             '\n<urn:test:Added> a '
             '<http://www.w3.org/2002/07/owl#Class> .'), {
@@ -1507,7 +1508,11 @@ def test_publication_materializes_only_approved_required_bindings(
                 })
             assert decision.status_code == 200, decision.text
             current = decision.json()
-        assert current['status'] == 'reviewed'
+        # A3：决定不再把状态推成 reviewed —— 全部变更都有当前决定后，草案仍是
+        # 「待处理」；服务端推导出的细分阶段是 settled（全部有决定，待收下）。
+        assert current['status'] == 'pending'
+        assert OntologyDrafts(app.state.service.repository).pending_phase(
+            project['id'], current) == 'settled'
 
         repo = app.state.service.repository
         original_transition = repo.transition_discovery_run
@@ -1531,6 +1536,7 @@ def test_publication_materializes_only_approved_required_bindings(
                 'acknowledged_warning_codes': warning_codes,
                 'idempotency_key': 'partial-publish-failed',
                 'actor': 'publisher',
+                'note': '用例：发布中途失败要整体回滚',
             })
         assert failed.status_code == 409, failed.text
         assert repo.list_ontologies(project['id']) == []
@@ -1551,6 +1557,7 @@ def test_publication_materializes_only_approved_required_bindings(
                 'acknowledged_warning_codes': warning_codes,
                 'idempotency_key': 'partial-publish-1',
                 'actor': 'publisher',
+                'note': '用例：发布只落已收下的必需绑定',
             })
 
         assert published.status_code == 200, published.text
@@ -2048,7 +2055,11 @@ def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,
         resp=client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={})
         assert resp.status_code==202,resp.text
         submitted=resp.json()
-        assert submitted['status']=='submitted'
+        # A3：提交不再把状态推成 submitted —— 草案仍是「待处理」；「提交」只冻结这一轮
+        # 快照（记 submitted_at）并要求重新校验（validated_at 清空），所以推导阶段是 reviewing。
+        assert submitted['status']=='pending'
+        assert OntologyDrafts(app.state.service.repository).pending_phase(
+            project['id'],submitted)=='reviewing'
         assert submitted['deprecation']['deprecated'] is True
         assert all(operation['risk'] in {'medium','high'}
                    for operation in submitted['operations'])
@@ -2077,7 +2088,10 @@ def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,
                 })
             assert decision.status_code==200,decision.text
             current=decision.json()
-        assert current['status']=='reviewed'
+        # A3：全部变更都有决定后草案仍是「待处理」，推导出的细分阶段是 settled。
+        assert current['status']=='pending'
+        assert OntologyDrafts(app.state.service.repository).pending_phase(
+            project['id'],current)=='settled'
         published=client.post(
             base+f"/ontology-drafts/{draft['id']}/publish",json={
                 'expected_revision':current['revision'],
@@ -2085,6 +2099,7 @@ def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,
                 'validation_fingerprint':current['validation_fingerprint'],
                 'acknowledged_warning_codes':warning_codes,
                 'idempotency_key':'discovery-publish-1','actor':'publisher',
+                'note':'发现草案已逐条收下，发布为版本',
             })
         assert published.status_code==200,published.text
         formal=[row for row in app.state.service.repository.current_records(project['id'])
@@ -2129,7 +2144,8 @@ def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,
                 'expected_revision':decisions.json()['revision'],
                 'expected_ontology_id':published.json()['id'],
                 'validation_fingerprint':decisions.json()['validation_fingerprint'],
-                'acknowledged_warning_codes':warnings,'idempotency_key':'second-publish','actor':'publisher'})
+                'acknowledged_warning_codes':warnings,'idempotency_key':'second-publish','actor':'publisher',
+                'note':'用例：第二轮发现草案发布'})
             assert second_publish.status_code==200,second_publish.text
             after=client.get(base+'/ontology-discovery').json()
             assert after['latest_run']['status']=='published'
@@ -2189,7 +2205,11 @@ def test_legacy_discovery_publish_only_submits_and_never_writes_records(tmp_path
         submitted=client.post(
             base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={})
         assert submitted.status_code==202,submitted.text
-        assert submitted.json()['status']=='submitted'
+        # A3：提交不改状态，草案仍是「待处理」；提交的时刻记在 submitted_at 上，
+        # 所以推导阶段是 reviewing（"已提交、待逐条处理"）—— 校验还没跑不影响这一点。
+        assert submitted.json()['status']=='pending'
+        assert OntologyDrafts(app.state.service.repository).pending_phase(
+            pid,submitted.json())=='reviewing'
         assert app.state.service.repository.list_ontologies(pid)==[]
         assert not [row for row in app.state.service.repository.current_records(pid)
                     if row['kind'] in ('entity','attribute','relation')]
@@ -2420,7 +2440,11 @@ def test_missing_ontology_reports_clear_state_without_project_id(tmp_path,monkey
         resp=client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={})
         assert resp.status_code==202,resp.text
         submitted=resp.json()
-        assert submitted['status']=='submitted'
+        # A3：提交不改状态，草案仍是「待处理」；提交的时刻记在 submitted_at 上，
+        # 所以推导阶段是 reviewing（"已提交、待逐条处理"）—— 校验还没跑不影响这一点。
+        assert submitted['status']=='pending'
+        assert OntologyDrafts(app.state.service.repository).pending_phase(
+            pid,submitted)=='reviewing'
         overview=client.get(base+'/ontology-discovery').json()
         assert overview['published'] is False and overview['ontology_id'] is None
         assert overview['candidate_status_counts']['included_in_draft']==1
@@ -2543,7 +2567,11 @@ def test_review_can_exclude_candidate_before_publish_and_reports_it(tmp_path,mon
         assert reviewed.status_code==200 and reviewed.json()['revision']==2
         resp=client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={})
         assert resp.status_code==202,resp.text
-        assert resp.json()['status']=='submitted'
+        # A3：提交不改状态，草案仍是「待处理」；提交的时刻记在 submitted_at 上，
+        # 所以推导阶段是 reviewing（"已提交、待逐条处理"）—— 校验还没跑不影响这一点。
+        assert resp.json()['status']=='pending'
+        assert OntologyDrafts(app.state.service.repository).pending_phase(
+            project['id'],resp.json())=='reviewing'
         overview=client.get(base+'/ontology-discovery').json()
         assert overview['candidate_status_counts']['pending']==1
         assert overview['candidate_status_counts']['included_in_draft']==1
@@ -2577,7 +2605,11 @@ def test_draft_review_can_rename_and_remove_ontology_terms(tmp_path,monkeypatch)
         assert reviewed.status_code==200
         resp=client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={})
         assert resp.status_code==202,resp.text
-        assert resp.json()['status']=='submitted'
+        # A3：提交不改状态，草案仍是「待处理」；提交的时刻记在 submitted_at 上，
+        # 所以推导阶段是 reviewing（"已提交、待逐条处理"）—— 校验还没跑不影响这一点。
+        assert resp.json()['status']=='pending'
+        assert OntologyDrafts(app.state.service.repository).pending_phase(
+            project['id'],resp.json())=='reviewing'
         assert app.state.service.repository.list_ontologies(project['id'])==[]
 
 
@@ -2748,9 +2780,13 @@ def test_discovery_publication_effect_failure_rolls_back_everything(tmp_path, mo
         drafts.publish(
             project_id, draft['id'], draft['revision'], None,
             draft['validation_fingerprint'], warnings,
-            'atomic-discovery', 'publisher')
+            'atomic-discovery', 'publisher',
+            '用例：发现草案原子发布')
 
     assert repo.list_ontologies(project_id) == []
-    assert repo._ontology_drafts.get(project_id, draft['id'])['status'] == 'reviewed'
+    # A3：唯一一条变更已被收下 → 草案仍是「待处理」（不再被推成 reviewed）；
+    # 全部变更都有决定，推导出的细分阶段是 settled；发布失败没有改状态。
+    assert repo._ontology_drafts.get(project_id, draft['id'])['status'] == 'pending'
+    assert OntologyDrafts(repo).pending_phase(project_id, draft) == 'settled'
     assert not [row for row in repo.current_records(project_id)
                 if row['kind'] == 'entity']

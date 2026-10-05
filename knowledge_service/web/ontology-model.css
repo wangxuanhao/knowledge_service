@@ -1,0 +1,60 @@
+/* ============================================================================
+ * 本体建模层（ontology-model）—— 单画布页【主控骨架】样式
+ * P1（2026-10-04）：取代「本体编辑台 / 本体审核台 / 本体档案」三个页面，是唯一控制本体版本的地方。
+ * 布局：顶栏（视图切换 + 版本管理）｜左栏（类/关系/属性清单）｜中栏（画布）｜右栏（节点详情）
+ *       底栏（校验并审核 → 发布）。
+ * 深色科技感：暗底 + 青/紫/绿/琥珀 语义色 + 等宽字体 + 点阵网格画布。
+ * 本文件只写【骨架】（顶栏/左栏/三栏网格/底栏容器）；画布细节在 ontology-model-canvas.css，
+ * 右栏详情与底栏内容在 ontology-model-panel.css。
+ * 所有选择器都以 .ontology-model 前缀开头（前端静态契约要求，避免污染其它页）。
+ * ========================================================================== */
+
+.ontology-model{background:#080c14;color:#e7eef6;height:100%}
+.ontology-model .om-page{display:flex;flex-direction:column;min-height:100%}
+
+/* 顶栏 */
+.ontology-model .om-topbar{display:flex;align-items:center;gap:14px;padding:11px 16px;border-bottom:1px solid #1d2a3d;background:linear-gradient(180deg,rgba(56,189,248,.05),transparent),#111a2b}
+.ontology-model .om-brand{font-weight:700;font-size:15px;color:#e7eef6;white-space:nowrap}
+.ontology-model .om-ctx{color:#8296ad;font-size:12.5px;font-family:ui-monospace,Consolas,monospace;white-space:nowrap}
+.ontology-model .om-ctx b{color:#34d399;font-weight:600}
+.ontology-model .om-seg{display:inline-flex;background:#0a1220;border:1px solid #1d2a3d;border-radius:9px;padding:2px;margin-left:auto}
+.ontology-model .om-seg button{border:0;background:transparent;padding:5px 13px;border-radius:7px;font-size:12.5px;color:#8296ad;cursor:pointer;white-space:nowrap}
+.ontology-model .om-seg button.on{background:rgba(56,189,248,.14);color:#38bdf8;font-weight:600;box-shadow:inset 0 0 0 1px rgba(56,189,248,.3)}
+.ontology-model .om-btn{border:1px solid #25354d;background:#111a2b;border-radius:8px;padding:6px 13px;font-size:12.5px;cursor:pointer;white-space:nowrap;color:#e7eef6}
+.ontology-model .om-btn:hover{border-color:#38bdf8}
+.ontology-model .om-btn.primary{background:linear-gradient(180deg,#2ee6a8,#1fae7d);border-color:transparent;color:#04121c;font-weight:700;box-shadow:0 0 14px rgba(52,211,153,.4)}
+.ontology-model .om-btn:disabled{opacity:.45;cursor:not-allowed}
+.ontology-model .om-btn.ghost{border-color:transparent;color:#8296ad}
+
+/* 三栏 */
+.ontology-model .om-body{display:flex;align-items:stretch;flex:1 1 auto;min-height:0;max-height:calc(100dvh - 210px)}
+.ontology-model .om-side{width:206px;flex:0 0 206px;border-right:1px solid #1d2a3d;background:rgba(14,21,34,.7);padding:14px 11px;overflow:auto}
+.ontology-model .om-side h4{margin:14px 0 6px;font-size:11px;letter-spacing:.1em;color:#5b6d82;font-weight:600;text-transform:uppercase;display:flex;align-items:center;gap:6px}
+.ontology-model .om-side h4:first-child{margin-top:0}
+.ontology-model .om-side h4 .om-dot{width:7px;height:7px;border-radius:2px;background:#38bdf8;box-shadow:0 0 8px rgba(56,189,248,.45)}
+.ontology-model .om-side h4.rel .om-dot{background:#a78bfa;box-shadow:0 0 8px rgba(167,139,250,.5)}
+.ontology-model .om-side h4.attr .om-dot{background:#2dd4bf;box-shadow:0 0 8px rgba(45,212,191,.5)}
+.ontology-model .om-side ul{list-style:none;margin:0;padding:0}
+.ontology-model .om-side li{padding:4.5px 9px;border-radius:7px;font-size:12.5px;cursor:pointer;display:flex;align-items:center;gap:7px;color:#b9c6d4}
+.ontology-model .om-side li:hover{background:rgba(56,189,248,.07)}
+.ontology-model .om-side li.sel{background:rgba(56,189,248,.12);color:#38bdf8;font-weight:600;box-shadow:inset 0 0 0 1px rgba(56,189,248,.25)}
+.ontology-model .om-side li.om-none{color:#5b6d82;font-size:11.5px;cursor:default}
+.ontology-model .om-side li.om-none:hover{background:transparent}
+.ontology-model .om-chip{display:inline-block;width:8px;height:8px;border-radius:2px;flex:0 0 auto}
+.ontology-model .om-chip.cls{background:#38bdf8;box-shadow:0 0 6px rgba(56,189,248,.45)}
+.ontology-model .om-chip.rel{background:#a78bfa;box-shadow:0 0 6px rgba(167,139,250,.5)}
+.ontology-model .om-chip.attr{background:#2dd4bf;box-shadow:0 0 6px rgba(45,212,191,.5)}
+.ontology-model .om-dtype{font-size:11px;font-family:ui-monospace,Consolas,monospace;color:#2dd4bf;background:rgba(45,212,191,.12);border:1px solid rgba(45,212,191,.25);border-radius:4px;padding:0 4px;margin-left:auto}
+.ontology-model .om-side .om-tip{margin-top:11px;font-size:11px;color:#5b6d82;line-height:1.55}
+.ontology-model .om-side-empty{color:#8296ad;font-size:12.5px;padding:10px 4px;line-height:1.5}
+
+/* 中栏画布容器（点阵网格背景；Cytoscape 由画布模块挂进这里） */
+.ontology-model .om-canvas-host{flex:1 1 auto;min-width:0;min-height:440px;position:relative;background-color:#0a1120;background-image:radial-gradient(circle,rgba(56,189,248,.16) 1px,transparent 1px);background-size:22px 22px}
+
+/* 右栏详情容器（内容是「节点详情」，由 panel 模块填充） */
+.ontology-model .om-detail{width:312px;flex:0 0 312px;border-left:1px solid #1d2a3d;background:#111a2b;overflow:auto;padding:12px}
+
+/* 底栏（内容是动作条，由 panel 模块填充） */
+.ontology-model .om-actionbar{display:flex;align-items:center;gap:12px;padding:11px 16px;border-top:1px solid #1d2a3d;background:#111a2b}
+
+.ontology-model .om-empty{color:#8296ad;font-size:13px;padding:20px;text-align:center}

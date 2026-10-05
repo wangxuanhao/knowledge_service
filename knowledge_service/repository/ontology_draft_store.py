@@ -5,11 +5,13 @@ from uuid import uuid4
 from ..core.time import utc_now
 
 
-SOURCE_KINDS = {'manual', 'turtle', 'import', 'ai', 'discovery', 'candidate'}
-DRAFT_STATUSES = {
-    'editing', 'submitted', 'reviewed', 'published', 'closed',
-    'stale_base', 'stale_source',
-}
+# 「revert」= 版本管理里的「回到某一版」：基线故意是历史版本（见 services/ontology_drafts
+# 的 REVERT_SOURCE）。它与其它来源的区别不在数据形状，而在"允许基线不是最新版"，
+# 所以必须在这里登记，否则创建草案会被当成不支持。
+SOURCE_KINDS = {'manual', 'turtle', 'import', 'ai', 'discovery', 'candidate', 'revert'}
+# A3（迁移 0005）：请求只有三种状态 —— 待处理 / 已收下 / 已驳回。
+# 「需重新基线」不在状态里：它是推导出来的事实（services/ontology_drafts.needs_rebase）。
+DRAFT_STATUSES = {'pending', 'accepted', 'rejected'}
 DECISION_ACTIONS = {'approve', 'reject', 'request_changes'}
 
 
@@ -182,7 +184,7 @@ class OntologyDraftStore:
         if item.get('project_id', project_id) != project_id:
             raise ValueError('本体草案不属于此项目')
         source_kind = item.get('source_kind')
-        status = item.get('status', 'editing')
+        status = item.get('status', 'pending')
         revision = item.get('revision', 1)
         if source_kind not in SOURCE_KINDS:
             raise ValueError('不支持的本体草案来源')
@@ -211,6 +213,10 @@ class OntologyDraftStore:
             'source_context': source_context,
             'validation_report': validation_report,
             'validation_fingerprint': item.get('validation_fingerprint'),
+            'validated_at': item.get('validated_at'),
+            # 「已经提交」也是**事实**而不是状态（A3 把 submitted 那一档状态删了）：
+            # 提交时刻留档，之后任何一次改动都会把它清空 —— 见 services/ontology_drafts.pending_phase()。
+            'submitted_at': item.get('submitted_at'),
             'published_ontology_id': item.get('published_ontology_id'),
             'legacy_artifact_id': item.get('legacy_artifact_id'),
             'created_at': item.get('created_at') or now,
@@ -228,14 +234,17 @@ class OntologyDraftStore:
                 '''INSERT INTO ontology_drafts
                    (id,project_id,base_ontology_id,source_kind,status,revision,title,
                     summary,source_context,validation_report,validation_fingerprint,
-                    published_ontology_id,legacy_artifact_id,created_at,updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                    validated_at,submitted_at,published_ontology_id,legacy_artifact_id,
+                    created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                 (draft['id'], project_id, draft['base_ontology_id'], source_kind,
                  status, revision, title, summary, _canonical_json(source_context),
                  (_canonical_json(validation_report)
                   if validation_report is not None else None),
-                 draft['validation_fingerprint'], draft['published_ontology_id'],
-                 draft['legacy_artifact_id'], draft['created_at'], draft['updated_at']))
+                 draft['validation_fingerprint'], draft['validated_at'],
+                 draft['submitted_at'],
+                 draft['published_ontology_id'], draft['legacy_artifact_id'],
+                 draft['created_at'], draft['updated_at']))
         return self.get(project_id, draft['id'])
 
     def get(self, project_id, draft_id):
@@ -317,7 +326,8 @@ class OntologyDraftStore:
         allowed = {
             'base_ontology_id', 'source_kind', 'status', 'title', 'summary',
             'source_context', 'validation_report', 'validation_fingerprint',
-            'published_ontology_id', 'legacy_artifact_id',
+            'published_ontology_id', 'legacy_artifact_id', 'validated_at',
+            'submitted_at',
         }
         unknown = set(changes) - allowed
         if unknown:
