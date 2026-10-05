@@ -103,6 +103,59 @@ def install(app,service):
     @router.get('/jobs/{job_id}')
     def job(job_id:str):return service.repository.get_artifact('job',job_id)
 
+    @router.get('/jobs/{job_id}/stream')
+    def job_stream(job_id:str):
+        """SSE：实时推送某个后台任务的进度／完成／失败。
+
+        替代前端每 2 秒轮询：任务跑多久就推多久，无超时窗口。
+        连接建立时先回放任务当前快照（状态/进度/阶段），再实时推送。
+        """
+        import queue as queue_lib
+        # 先确认任务存在（不存在会抛 KeyError → 404）
+        snapshot=service.repository.get_artifact('job',job_id)
+
+        def sse(event_type,payload):
+            import json as _json
+            return ('event: '+event_type+'\ndata: '
+                    +_json.dumps(payload,ensure_ascii=False)+'\n\n')
+
+        def generate():
+            q=jobs.subscribe(job_id)
+            try:
+                # ① 回放当前快照：客户端中途打开也能立刻看到已有进度
+                yield sse('snapshot',{
+                    'id':snapshot['id'],'kind':snapshot.get('kind'),
+                    'status':snapshot['status'],'progress':snapshot.get('progress',0),
+                    'stage':snapshot.get('stage',''),'error':snapshot.get('error'),
+                })
+                # 任务在连接前就已结束：补一个终态事件后收尾
+                if snapshot['status'] in ('completed','failed','interrupted'):
+                    yield sse(snapshot['status'],{
+                        'status':snapshot['status'],
+                        'progress':100 if snapshot['status']=='completed' else snapshot.get('progress',0),
+                        'error':snapshot.get('error')})
+                    return
+                # ② 实时消费订阅队列（阻塞读，靠心跳保活；客户端断开时 GeneratorExit）
+                while True:
+                    try:
+                        message=q.get(timeout=15)
+                    except queue_lib.Empty:
+                        # 保活注释行：防止代理因空闲掐断连接
+                        yield ': keep-alive\n\n'
+                        continue
+                    event_type=message.pop('event')
+                    yield sse(event_type,message)
+                    if event_type in ('completed','failed'):
+                        return
+            except GeneratorExit:
+                raise
+            finally:
+                jobs.unsubscribe(job_id,q)
+
+        return StreamingResponse(
+            generate(),media_type='text/event-stream',
+            headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no','Connection':'keep-alive'})
+
     @router.get('/jobs')
     def all_jobs():return {'jobs':service.repository.list_artifacts('job')[:100]}
 
