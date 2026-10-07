@@ -615,19 +615,22 @@ def test_revert_is_an_explicit_source_kind_with_acknowledgement():
     assert 'om-ctx.is-preview' in read('ontology-model.js') or 'is-preview' in model
 
 
-def test_ontology_model_offers_rebase_when_draft_base_is_stale():
-    """草案基线过期时（服务端推导 needs_rebase==='stale_base'），底栏必须有「重新基线」出口。
+def test_ontology_model_offers_rebase_when_draft_is_stale():
+    """草案过期时（服务端推导 needs_rebase 为 stale_base 或 stale_source），底栏必须有出口。
 
     操作手册第 9 章「实体类型关闭」如实标注的已知卡点：停用变更进草案后，发布被
     publish-readiness 的 base_outdated 硬阻断，但整个单画布找不到「重新基线」按钮 ——
     用户只能"回到最新重开草案"（等于丢掉已做的停用等变更）。服务端 rebase 接口
-    （POST /ontology-drafts/{id}/rebase）与审核台同款处理器一直都在，缺的只是单画布这一处入口。
+    （POST /ontology-drafts/{id}/rebase）一直都在，缺的只是单画布这一处入口。
+    两类过期（stale_base 基线落后 / stale_source 来源快照变了）都走同一个接口，文案区分。
     """
     panel = read('ontology-model-panel.js')
-    assert 'rebaseDraft' in panel, '单画布必须实现「重新基线」处理器'
-    assert "'/rebase'" in panel, '重新基线要打 POST /rebase 接口，不是前端自己拼结构'
-    assert "needs_rebase === 'stale_base'" in panel, '重新基线按钮只在服务端判定 stale_base 时出现，前端不自算'
-    assert '重新基线' in panel, '按钮可见文案必须是「重新基线」'
+    assert 'rebaseDraft' in panel, '单画布必须实现「重新基线/刷新来源」处理器'
+    assert "'/rebase'" in panel, '两类过期都打 POST /rebase 接口，不是前端自己拼结构'
+    assert "rebaseKind === 'stale_base'" in panel and "rebaseKind === 'stale_source'" in panel, \
+        '按钮在服务端判定 stale_base 或 stale_source 时出现，前端不自算'
+    assert '重新基线' in panel, 'stale_base 的按钮可见文案必须是「重新基线」'
+    assert '刷新来源' in panel, 'stale_source 的按钮可见文案必须是「刷新来源」'
 
 
 def _rule_body(css: str, selector: str) -> str:

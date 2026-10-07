@@ -1026,19 +1026,27 @@
       actions.append(warnBox);
     }
 
-    // 草案基线过期（服务端推导 needs_rebase==='stale_base'）：发布被 base_outdated 硬阻断，
-    // 「校验并审核」「发布」此刻都灰着。补一个「重新基线」主按钮作为唯一出路 —— 没有它，
-    // 用户只能"回到最新重开草案"（等于丢掉已做的停用等变更）。这正是操作手册第 9 章标注的
-    // "发布被阻断、界面无该按钮"卡点的修复。
-    const needsRebase = !!(st.stageAvailability
-      && st.stageAvailability.needs_rebase === 'stale_base');
+    // 草案过期（服务端推导 needs_rebase）：两类 ——
+    //   * stale_base：草案基线落后于项目当前本体，发布被 base_outdated 硬阻断；
+    //   * stale_source：discovery/candidate 草案的来源快照变了，发布被 stale_source 硬阻断。
+    // 「校验并审核」「发布」此刻都灰着。补一个主按钮作为唯一出路 —— 没有它，用户只能
+    // "回到最新重开草案"（等于丢掉已做的停用等变更）。这正是操作手册第 9 章标注的
+    // "发布被阻断、界面无该按钮"卡点的修复。两类都调同一个 /rebase 接口，只是文案不同。
+    const rebaseKind = (st.stageAvailability && st.stageAvailability.needs_rebase) || null;
+    const needsRebase = rebaseKind === 'stale_base' || rebaseKind === 'stale_source';
     if (needsRebase && !previewing) {
+      const isSource = rebaseKind === 'stale_source';
+      const rebaseLabel = isSource ? '刷新来源' : '重新基线';
+      const rebaseWhy = isSource
+        ? '这份草案的来源快照已经变了：要先把来源快照刷新到最新，才能继续「校验并审核 → 发布」。'
+        : '这份草案的基线已经不是项目当前本体：要先把草案对齐到最新已发布版本，才能继续「校验并审核 → 发布」。';
       const rebaseBox = el('div', 'om-ab-rebase');
-      rebaseBox.append(el('p', 'om-ab-rebase-title',
-        '这份草案的基线已经不是项目当前本体：要先把草案对齐到最新已发布版本，才能继续「校验并审核 → 发布」。'));
-      const btnRebase = el('button', 'om-btn primary', '重新基线');
+      rebaseBox.append(el('p', 'om-ab-rebase-title', rebaseWhy));
+      const btnRebase = el('button', 'om-btn primary', rebaseLabel);
       btnRebase.type = 'button';
-      btnRebase.title = '做什么：把草案基线对齐到项目当前本体，保留已做的变更（与基线冲突的变更会被标记出来）。不做什么：不发布、不改生效本体——重新基线后要重新「校验并审核」。';
+      btnRebase.title = isSource
+        ? '做什么：重新读取来源快照（来源文档/候选变了才需要），把草案操作重新对齐到新来源。不做什么：不发布、不改生效本体——刷新后要重新「校验并审核」。'
+        : '做什么：把草案基线对齐到项目当前本体，保留已做的变更（与基线冲突的变更会被标记出来）。不做什么：不发布、不改生效本体——重新基线后要重新「校验并审核」。';
       btnRebase.addEventListener('click', rebaseDraft);
       rebaseBox.append(btnRebase);
       actions.append(rebaseBox);
@@ -1087,12 +1095,12 @@
     ensureVersions().then(changed => { if (changed && actionsHost) renderActions(); });
   }
 
-  /* ---- 「重新基线」：POST /{draft_id}/rebase（草案基线过期时对齐到最新本体） ---- */
-  // 什么时候出现：服务端 stage-availability 返回 needs_rebase === 'stale_base'（草案基线
-  // 落后于项目当前本体，发布会被 publish-readiness 的 base_outdated 硬阻断）。
-  // 这是「重新基线」在单画布的唯一前端入口：服务端 rebase 接口与审核台同款处理器一直都在，
-  // 单画布此前从未接上 —— 于是「停用实体类型 → 发布」卡在"先重新基线"却找不到按钮
-  // （操作手册第 9 章如实标注的已知卡点）。本函数就是补这个缺口。
+  /* ---- 「重新基线 / 刷新来源」：POST /{draft_id}/rebase（草案过期时对齐到最新本体/来源） ---- */
+  // 什么时候出现：服务端 stage-availability 返回 needs_rebase ——
+  //   * 'stale_base'：草案基线落后于项目当前本体（发布被 base_outdated 硬阻断）；
+  //   * 'stale_source'：discovery/candidate 草案的来源快照变了（发布被 stale_source 硬阻断）。
+  // 两类都调同一个 /rebase 接口（服务端 rebase() 对 stale_source 会刷新来源上下文并重新对齐操作），
+  // 只是界面文案不同。这是单画布此前缺失的唯一前端入口（操作手册第 9 章如实标注的已知卡点）。
   async function rebaseDraft() {
     const M = model();
     if (!M || !M.S || !M.S.draft || !M.S.draft.id) { status('还没有可重新基线的草案。', true); return; }
@@ -1104,10 +1112,12 @@
       status('读不到项目当前本体（无法确定重新基线的目标版本），请刷新页面再试。', true);
       return;
     }
+    const isSource = M.S.stageAvailability
+      && M.S.stageAvailability.needs_rebase === 'stale_source';
     const id = M.S.draft.id;
     const base = `/ontology-drafts/${encodeURIComponent(id)}`;
     try {
-      status('正在把草案基线对齐到项目当前本体（保留你已做的变更）…');
+      status(isSource ? '正在刷新来源快照…' : '正在把草案基线对齐到项目当前本体（保留你已做的变更）…');
       const result = await api(endpoint(base + '/rebase'), {
         expected_revision: M.S.draft.revision,
         expected_ontology_id: ontologyId,
@@ -1115,11 +1125,15 @@
       const rebaseInfo = (result && result.rebase) || [];
       const clean = rebaseInfo.filter(r => r.classification === 'clean').length;
       const conflict = rebaseInfo.filter(r => r.classification === 'conflict').length;
-      status(conflict
-        ? `已重新基线：${clean} 条变更在新基线上仍然成立，${conflict} 条与基线冲突需重新处理；请重新「校验并审核」。`
-        : '已重新基线到项目当前本体；请重新「校验并审核」再发布。');
+      if (conflict) {
+        status(`已${isSource ? '刷新来源' : '重新基线'}：${clean} 条变更在新来源/基线上仍然成立，${conflict} 条冲突需重新处理；请重新「校验并审核」。`);
+      } else if (isSource) {
+        status('已刷新来源快照；请重新「校验并审核」再发布。');
+      } else {
+        status('已重新基线到项目当前本体；请重新「校验并审核」再发布。');
+      }
     } catch (error) {
-      status(error && error.message ? error.message : '重新基线失败', true);
+      status(error && error.message ? error.message : (isSource ? '刷新来源失败' : '重新基线失败'), true);
     }
     if (typeof M.refresh === 'function') await M.refresh();
   }
