@@ -202,7 +202,7 @@ function watch(job){wb.jobs.set(job.id,job);jobList();}
 bind('load-jobs',jobList);
 setInterval(async()=>{if(!wb.jobs.size)return;try{const jobs=await jobList();for(const j of jobs){if(wb.jobs.has(j.id)&&!['queued','running'].includes(j.status)){wb.jobs.delete(j.id);if(j.status==='completed'){await projects();if(j.result?.project){$('project').value=j.result.project.id;$('project').onchange();status('导入完成：'+j.result.project.name+'。进入图谱页查看。');}}}}}catch(e){status(e.message,true);}},3000);
 function readParseSettings(){
-  const settings={chunk_strategy:$('parse-strategy').value,chunk_size:Number($('parse-size').value),chunk_overlap:Number($('parse-overlap').value),resolve_entities:$('parse-resolve').checked,auto_merge:$('parse-merge').checked,merge_threshold:Number($('parse-threshold').value)};
+  const settings={chunk_strategy:$('parse-strategy').value,chunk_size:Number($('parse-size').value),chunk_overlap:Number($('parse-overlap').value),extract_attributes:$('parse-attributes').checked,relation_constraint_mode:$('parse-relation-constraints').value,resolve_entities:$('parse-resolve').checked,auto_merge:$('parse-merge').checked,merge_threshold:Number($('parse-threshold').value)};
   if(!Number.isInteger(settings.chunk_size)||settings.chunk_size<100||settings.chunk_size>10000)throw Error('最大字符数需为 100–10000 的整数');
   if(!Number.isInteger(settings.chunk_overlap)||settings.chunk_overlap<0||settings.chunk_overlap>2000||settings.chunk_overlap>=settings.chunk_size)throw Error('重叠字符数需为 0–2000 的整数，且小于最大字符数');
   if(settings.auto_merge&&!settings.resolve_entities)throw Error('请先开启实体消歧，再开启语义合并');
@@ -352,6 +352,8 @@ bind('ingest',async()=>{
         window.DocumentUploadQueue.setStatus(document.file,'queued',job.id);
       }else job=await api('/api/projects/'+encodeURIComponent(project)+'/documents/jobs',{title:document.title,text:document.text,metadata:document.metadata,extract,extraction_mode:mode,...settings});
       wb.jobs.set(job.id,job);accepted++;entry.textContent=document.title+' · 已加入解析队列 · '+job.id;
+      // 提交后在右侧工作区实时看进度（SSE）与抽取结果，不跳后台任务页
+      window.IngestResults?.watch(job.id,document.title);
     }catch(error){if(document.file)window.DocumentUploadQueue.setStatus(document.file,'failed',error.message);failed++;entry.textContent=document.title+' · 提交失败：'+error.message;}
   }
   // 提交后留在「知识写入」本页：逐文件结果已写进 #doc-submit-results，不再把人跳到后台任务页。
@@ -477,6 +479,27 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       '给模型的提示就是这份清单：系统把「你的问题 + 这些依据（每条带编号）」「以 {"question":"…","evidence":[{"id":"E1","text":"…"}]} 的形状发过去，并要求模型只依据这些证据回答、每条结论标注 [E编号]。所以答案里出现的 [E1] 一定能在这里找到对应；没有勾选「用已配置的语言模型组织答案」时，返回的就是同一份清单的原文。',
     ]){const p=document.createElement('p');p.textContent=line;note.append(p);}
     panel.append(note);
+    // 推理路径：不调模型的图谱推导链（命中实体 →关系→ 中间节点 →关系→ 结论）。
+    // 纯证据模式下，用户要的「推论」就是它——让「命中 A 是怎么一步步走到结论 C」看得见，
+    // 而不是只有一堆证据文本平铺在那里。
+    const paths=payload?.reasoning_paths||[];
+    if(paths.length){
+      const reasonBlock=document.createElement('div');reasonBlock.className='qa-reasoning-block';
+      const head=document.createElement('p');head.className='qa-reasoning-head';
+      head.innerHTML='<b>推理路径</b><span>命中实体沿关系边能走到的多跳推导链（不调模型，纯图谱推导）。</span>';
+      reasonBlock.append(head);
+      for(const path of paths){
+        const line=document.createElement('p');line.className='qa-reasoning-path';
+        const nodes=[];
+        path.steps.forEach((step,index)=>{
+          if(index===0)nodes.push(esc(step.from_label||step.from));
+          nodes.push('<span class="qa-reasoning-relation">—['+esc(step.relation||'关系')+']→</span> '+esc(step.to_label||step.to));
+        });
+        line.innerHTML=nodes.join(' ');
+        reasonBlock.append(line);
+      }
+      panel.append(reasonBlock);
+    }
     const projectId=current,answerId=payload.answer_id;
     for(const row of rows){
       const article=document.createElement('article');article.className='qa-evidence-item';

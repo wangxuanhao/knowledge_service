@@ -1,14 +1,14 @@
 /* ============================================================================
  * 知识写入 · 抽取结果工作区抽屉样式（ingest-results.css）
  * ----------------------------------------------------------------------------
- * 右侧滑出的工作区：顶部汇总指标网格，下方按文档折叠查看明细。
- * 配色复用浅色主题变量，与 provenance-drawer 同一视觉范式。
+ * 右侧滑出：实时进度条 + 完成后实体／关系／属性分组胶囊（实体带类型）。
+ * accepted=已入图(青色)，pending=待确认(金棕)，失败=砖红。
  * ========================================================================== */
 
-/* ---- 抽屉容器：右侧 fixed 滑出 ------------------------------------------- */
+/* ---- 抽屉容器 ----------------------------------------------------------- */
 .ingest-drawer{
   position:fixed;inset:0 0 0 auto;z-index:110;
-  width:min(460px,42vw);
+  width:min(480px,44vw);
   padding:20px 20px 28px;
   background:#f9fbf8;color:#203c35;
   border-left:1px solid var(--line,#dce4dc);
@@ -17,11 +17,10 @@
 }
 .ingest-drawer[hidden]{display:none!important}
 
-/* 头部：标题 + 关闭，sticky 不随滚动消失 */
+/* 头部 sticky */
 .ingest-drawer header{
   display:flex;align-items:center;justify-content:space-between;gap:12px;
-  margin-bottom:10px;position:sticky;top:-20px;z-index:2;
-  background:#f9fbf8;padding:10px 0;
+  margin-bottom:8px;position:sticky;top:-20px;z-index:2;background:#f9fbf8;padding:10px 0;
 }
 .ingest-drawer h2{font-size:16px;margin:0;font-weight:650}
 .ingest-drawer__close{
@@ -31,98 +30,70 @@
 .ingest-drawer__close:hover{background:#e2ebe3}
 .ingest-drawer :focus-visible{outline:2px solid var(--accent,#19654e);outline-offset:2px}
 
-.ingest-drawer__intro{margin:0 0 14px;color:#5c7266;font-size:12px}
+.ingest-drawer__intro{margin:0 0 16px;color:#5c7266;font-size:12px}
 
-/* ---- 状态行：进行中 / 完成 / 失败 三态 ------------------------------------ */
-.ingest-drawer__status{
-  margin:0 0 16px;padding:9px 12px;border-radius:var(--ui-radius-sm,4px);
-  background:#edf4ef;border-left:3px solid var(--accent,#19654e);font-size:12.5px;
+/* ---- 任务卡 ------------------------------------------------------------- */
+.ingest-drawer__list{display:flex;flex-direction:column;gap:12px}
+.ingest-job{
+  background:#fff;border:1px solid var(--line,#dce4dc);border-radius:var(--ui-radius,8px);
+  padding:13px 14px;
 }
-.ingest-drawer__status[data-tone="busy"]{background:#eaf1f6;border-left-color:#3a6ea5;color:#2f5578}
-.ingest-drawer__status[data-tone="warn"]{background:#fff7e6;border-left-color:#b88225;color:#7a5a1c}
+.ingest-job.is-running,.ingest-job.is-queued{border-color:#c6d9ce}
+.ingest-job.is-failed{border-color:#e6c0b8;background:#fdf8f6}
+.ingest-job__head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}
+.ingest-job__title{font-size:13.5px;font-weight:630;max-width:260px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ingest-job__badge{font-size:10.5px;padding:2px 9px;border-radius:999px;font-weight:550;white-space:nowrap}
+.is-queued .ingest-job__badge{background:#eef1ee;color:#6a7d71}
+.is-running .ingest-job__badge{background:#e6eff8;color:#2f6092}
+.is-completed .ingest-job__badge{background:#e3efe7;color:#1f6b48}
+.is-failed .ingest-job__badge{background:#faeae7;color:#a8402f}
 
-/* ---- 汇总指标网格：一格一个数，3 列 -------------------------------------- */
-.ingest-drawer__summary{
-  display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:20px;
-}
-.ingest-drawer__metric{
-  background:#fff;border:1px solid var(--line,#dce4dc);border-radius:var(--ui-radius-sm,6px);
-  padding:11px 12px;display:flex;flex-direction:column;gap:2px;
-}
-.ingest-drawer__metric b{font-size:21px;font-weight:680;line-height:1.1;color:#234238}
-.ingest-drawer__metric span{font-size:11.5px;color:#6c8479}
-.ingest-drawer__metric.is-primary{background:#f0f7f3;border-color:#b9d8c9}
-.ingest-drawer__metric.is-primary b{color:var(--accent,#19654e)}
-.ingest-drawer__metric.is-warn{background:#fdf6e7;border-color:#e7d3a6}
-.ingest-drawer__metric.is-warn b{color:#a8791e}
-.ingest-drawer__metric.is-danger{background:#fcefec;border-color:#e6bdb6}
-.ingest-drawer__metric.is-danger b{color:#b24436}
+/* 进度条 */
+.ingest-job__bar{position:relative;height:18px;background:#eef2ef;border-radius:999px;overflow:hidden;
+  display:flex;align-items:center;margin-bottom:8px}
+.ingest-job__bar-fill{position:absolute;inset:0 auto 0 0;height:100%;
+  background:linear-gradient(90deg,#2f7d5f,#3fa67d);border-radius:999px;transition:width .3s ease}
+.is-failed .ingest-job__bar-fill{background:linear-gradient(90deg,#b85548,#cf6a5c)}
+.ingest-job__pct{position:relative;z-index:1;margin-left:auto;padding-right:10px;
+  font-size:10.5px;font-weight:600;color:#315247}
+.is-failed .ingest-job__pct{color:#8f382d}
 
-/* ---- 文档明细：折叠块 ---------------------------------------------------- */
-.ingest-drawer__docs{display:flex;flex-direction:column;gap:9px}
-.ingest-drawer__doc{
-  background:#fff;border:1px solid var(--line,#dce4dc);border-radius:var(--ui-radius-sm,6px);
-  overflow:hidden;
-}
-.ingest-drawer__doc[open]{border-color:#c4d6cb}
-.ingest-drawer__doc-head{
-  display:flex;align-items:center;gap:9px;flex-wrap:wrap;
-  padding:10px 12px;cursor:pointer;list-style:none;user-select:none;
-}
-.ingest-drawer__doc-head::-webkit-details-marker{display:none}
-.ingest-drawer__doc-head:hover{background:#f5f9f6}
-.ingest-drawer__doc-name{flex:1;min-width:0}
-.ingest-drawer__doc-name b{
-  font-size:13px;font-weight:620;display:block;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px;
-}
-.ingest-drawer__doc-badge{
-  font-size:10.5px;padding:2px 8px;border-radius:999px;font-weight:550;white-space:nowrap;
-}
-.ingest-drawer__doc-badge.is-completed{background:#e3efe7;color:#1f6b48}
-.ingest-drawer__doc-badge.is-running{background:#e6eff8;color:#2f6092}
-.ingest-drawer__doc-badge.is-queued{background:#eef1ee;color:#6a7d71}
-.ingest-drawer__doc-badge.is-failed{background:#faeae7;color:#a8402f}
-.ingest-drawer__doc-badge.is-interrupted{background:#f0eee6;color:#7c6f3a}
-.ingest-drawer__doc-stage{flex-basis:100%;color:#7d9287;font-size:11px}
+.ingest-job__stage{margin:0;font-size:12px;color:#556e63}
+.ingest-job__error{margin:9px 0 0;padding:8px 11px;font-size:11.5px;
+  background:#fbeeee;border-left:3px solid #c0554a;border-radius:3px;color:#8f382d}
 
-.ingest-drawer__doc-body{padding:2px 12px 12px;border-top:1px solid #edf1ed}
+/* ---- 抽取明细分组（可折叠 details） ------------------------------------- */
+.ingest-result{margin-top:11px;border-top:1px solid #edf1ed;padding-top:10px}
+.ingest-result__group{margin-bottom:8px;border:1px solid #e6ede8;border-radius:6px;background:#fcfdfc}
+.ingest-result__group[open]{background:#fff}
+.ingest-result__group>summary{list-style:none}
+.ingest-result__group>summary::-webkit-details-marker{display:none}
+.ingest-result__label{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap;margin:0;
+  padding:8px 11px;cursor:pointer;user-select:none;border-radius:6px}
+.ingest-result__label:hover{background:#f4f8f5}
+.ingest-result__label b{font-size:12px;font-weight:630;color:#2c4c40}
+.ingest-result__label span{font-size:11px;color:#8aa094}
+.ingest-result__chips{display:flex;flex-wrap:wrap;gap:6px;padding:0 11px 10px}
+/* “展开其余 N 个”按钮：弱化样式，和胶囊同高 */
+.ingest-result__more{font:inherit;font-size:11px;padding:3px 10px;border-radius:999px;cursor:pointer;
+  background:#eef3f0;border:1px dashed #bccfc4;color:#3f6253}
+.ingest-result__more:hover{background:#e4ede7}
 
-/* 分组标签 + 胶囊容器 */
-.ingest-drawer__group{margin-top:11px}
-.ingest-drawer__group-label{display:flex;align-items:baseline;gap:7px;margin:0 0 6px}
-.ingest-drawer__group-label b{font-size:12px;font-weight:630;color:#2c4c40}
-.ingest-drawer__group-label span{font-size:11px;color:#8aa094}
-.ingest-drawer__chips{display:flex;flex-wrap:wrap;gap:6px}
+/* 胶囊：实体=青、关系=灰、属性=蓝；pending 金棕描边 */
+.ingest-result__chip{font-size:11.5px;padding:3px 9px;border-radius:999px;white-space:nowrap}
+.ingest-result__chip.is-entity{background:#eef7f2;border:1px solid #bcd9c8;color:#1d5c43}
+.ingest-result__chip.is-relation{background:#f3f5f2;border:1px solid #d9e0d8;color:#4d6053}
+.ingest-result__chip.is-attribute{background:#f1f2f8;border:1px solid #cfd4e8;color:#414a72}
+.ingest-result__chip.is-pending{background:#fdf6e7;border-color:#d9b96b;color:#8a6824}
 
-/* 胶囊：聚在一起、自动换行 */
-.ingest-drawer__chip{
-  font-size:11.5px;padding:3px 9px;border-radius:999px;white-space:nowrap;
-  background:#f2f6f3;border:1px solid #d3e0d8;color:#315247;
-}
-.ingest-drawer__chip.is-entity{background:#eef7f2;border-color:#bcd9c8;color:#1d5c43}
-.ingest-drawer__chip.is-relation{background:#f3f5f2;border-color:#d9e0d8;color:#4d6053}
-.ingest-drawer__chip.is-attribute{background:#f1f2f8;border-color:#cfd4e8;color:#414a72}
+.ingest-result__empty{margin:0;font-size:12px;color:#7d9287;line-height:1.7}
 
-/* 提示 / 空 / 失败 行 */
-.ingest-drawer__pending{
-  margin:11px 0 0;padding:8px 11px;font-size:11.5px;
-  background:#fdf6e7;border-left:3px solid #c39a3e;border-radius:3px;color:#7c5f24;
-}
-.ingest-drawer__failed{
-  margin:11px 0 0;padding:8px 11px;font-size:11.5px;
-  background:#fbeeee;border-left:3px solid #c0554a;border-radius:3px;color:#8f382d;
-}
-.ingest-drawer__running{margin:11px 0 0;font-size:12px;color:#5a7a9a}
-.ingest-drawer__empty{margin:11px 0 0;font-size:12px;color:#7d9287;line-height:1.7}
+.ingest-drawer__empty{margin:0;font-size:12px;color:#7d9287}
 
-/* ---- 小屏：抽屉改为铺在内容流里，不遮全屏 -------------------------------- */
+/* ---- 小屏：铺在内容流里 ------------------------------------------------- */
 @media (max-width:760px){
-  .ingest-drawer{
-    position:static;inset:auto;width:100%;max-width:100%;
-    margin:14px 0;padding:16px;border:1px solid var(--line,#dce4dc);
-    border-radius:var(--ui-radius,8px);box-shadow:none;overflow:visible;
-  }
+  .ingest-drawer{position:static;inset:auto;width:100%;max-width:100%;margin:14px 0;padding:16px;
+    border:1px solid var(--line,#dce4dc);border-radius:var(--ui-radius,8px);box-shadow:none;overflow:visible}
   .ingest-drawer header{position:static;top:auto}
-  .ingest-drawer__summary{grid-template-columns:repeat(3,1fr)}
 }

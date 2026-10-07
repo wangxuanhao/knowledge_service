@@ -111,25 +111,79 @@
     text-decoration: underline;
 }
 
-/* ── 侧边栏底部会话信息：当前账号 + 退出 ── */
+/* ── 侧边栏底部用户状态栏：默认一条「头像 + 用户名 + 角色徽章」，点击才展开操作 ── */
+/* 状态栏贴住侧栏底部（原来的「服务接口文档 / 连接状态」footer 已移除）。 */
 .session-box {
-    margin-top: 10px;
-    padding: 10px 12px;
-    border: 1px solid rgba(148, 163, 184, 0.18);
-    border-radius: 9px;
-    background: rgba(2, 6, 14, 0.5);
+    position: relative;          /* 下拉菜单以此为定位锚点，向上弹出 */
+    margin-top: auto;            /* 贴住侧栏底部 */
+    padding: 8px 8px;
+    border: 1px solid rgba(94, 234, 212, 0.18);
+    border-radius: 12px;
+    background:
+        linear-gradient(180deg, rgba(94, 234, 212, 0.10), rgba(45, 212, 191, 0.02)),
+        rgba(2, 6, 14, 0.55);
     font-size: 12px;
 }
 .session-box[hidden] { display: none; }
+/* 状态栏整条是可点击的触发器（覆盖全局 button 的默认底色/内边距）。 */
 .session-box .session-who {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 9px;
+    width: 100%;
+    padding: 5px 6px;
+    margin: -4px -4px;           /* 抵消 .session-box 内边距，让整条可点面积更完整 */
     color: #cbd5e1;
-    word-break: break-all;
+    background: transparent;
+    border: 0;
+    border-radius: 9px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
 }
+.session-box .session-who:hover { background: rgba(45, 212, 191, 0.10); }
+/* 首字母圆形头像：青蓝渐变，作为状态栏的视觉锚点。 */
+.session-box .session-who .session-avatar {
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    font-size: 13px;
+    font-weight: 700;
+    color: #04121a;
+    background: linear-gradient(180deg, #5eead4, #2dd4bf);
+    box-shadow: 0 0 10px rgba(45, 212, 191, 0.35);
+}
+.session-box .session-who .session-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    min-width: 0;
+    line-height: 1.3;
+}
+.session-box .session-who .session-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: #e8f6f5;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.session-box .session-who .session-role { margin-top: 2px; }
+.session-box .session-caret {
+    flex: 0 0 auto;
+    margin-left: auto;
+    color: #7bd9cf;
+    font-size: 10px;
+    transition: transform .15s ease;
+}
+.session-box.open .session-caret { transform: rotate(180deg); }
 .session-box .session-role {
     display: inline-block;
+    flex: 0 0 auto;
     padding: 1px 7px;
     font-size: 10px;
     border-radius: 999px;
@@ -143,18 +197,6 @@
     background: rgba(34, 211, 238, 0.14);
     border: 1px solid rgba(34, 211, 238, 0.3);
 }
-.session-box .session-logout {
-    margin-top: 8px;
-    width: 100%;
-    padding: 5px;
-    font-size: 11px;
-    color: #94a3b8;
-    background: none;
-    border: 1px solid rgba(148, 163, 184, 0.22);
-    border-radius: 6px;
-    cursor: pointer;
-}
-.session-box .session-logout:hover { color: #f87171; border-color: rgba(248, 113, 113, 0.5); }
 
 /* admin-only 元素默认隐藏，登录为管理员后由 JS 加上 body.is-admin 再显示。
    非管理员 / 未登录时绝不出现写入口。
@@ -166,35 +208,51 @@ body.is-admin .admin-only { display: revert !important; }
 body.is-admin button.admin-only { display: inline-block !important; }
 
 /* ============================================================================
-   会话框：角色说明 + 三个动作（改口令 / 用户与权限 / 退出登录）
+   用户状态栏下拉菜单：改口令 / 退出登录
+   （「用户与权限」已并入侧栏「系统层 · 管理」菜单，是页面式 tab，不在下拉里）
    ============================================================================ */
 /* 「只读账号不能做什么」只在只读用户身上出现 —— 管理员看这句是噪声。 */
 .session-box .session-hint { display: none; }
 body.is-viewer .session-box .session-hint {
     display: block;
-    margin: 8px 0 2px;
+    margin: 2px 2px 6px;
     font-size: 11px;
     line-height: 1.5;
     color: #94a3b8;
 }
-.session-box .session-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 8px;
+/* 下拉面板：贴住状态栏向上弹出，盖在导航区之上（导航无 z-index，不会被遮坏）。 */
+.session-box .session-menu {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(100% + 6px);
+    z-index: 20;
+    display: none;
+    padding: 6px;
+    background: linear-gradient(180deg, #0e3a39, #0c2e2d);
+    border: 1px solid rgba(45, 212, 191, 0.28);
+    border-radius: 12px;
+    box-shadow: 0 -14px 36px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.03);
 }
-.session-box .session-btn {
-    flex: 0 0 auto;            /* 全局 input/button 规则会撑宽，这里钉住不拉伸 */
-    padding: 3px 8px;
+.session-box.open .session-menu { display: block; }
+.session-box .session-item {
+    display: block;
+    width: 100%;
+    margin: 0;
+    padding: 8px 10px;
     font: inherit;
-    font-size: 11px;
+    font-size: 12px;
     color: #cbd5e1;
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(148, 163, 184, 0.22);
-    border-radius: 6px;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    border-radius: 7px;
     cursor: pointer;
+    transition: background .12s ease, color .12s ease;
 }
-.session-box .session-btn:hover { border-color: rgba(34, 211, 238, 0.5); color: #e2e8f0; }
+.session-box .session-item:hover { background: rgba(45, 212, 191, 0.12); color: #f0faf9; }
+.session-box .session-logout { color: #fca5a5; }
+.session-box .session-logout:hover { background: rgba(248, 113, 113, 0.14); color: #fecaca; }
 
 /* ============================================================================
    「用户与权限」抽屉 / 「修改我的口令」对话框（user-admin.js）
@@ -289,56 +347,191 @@ body.is-viewer .session-box .session-hint {
 .ua-pw-actions { display: flex; gap: 10px; margin-top: 4px; }
 
 /* ============================================================================
-   独立登录页（login.html）—— 整页深色科技背景 + 居中卡片
+   用户与权限 —— 页面式版本（浅色面板，与其它菜单页面统一）
+   user-admin.js 渲染到主区 #tab-useradmin；「修改我的口令」仍用上方深色浮窗。
+   这里用 body main .ua-page 前缀盖过 theme 对 main 内按钮/输入框的通用样式，
+   且 auth.css 靠后加载，同特异性时以本文件为准。
+   ============================================================================ */
+body main .useradmin-tab { padding: 0; }
+body main .ua-page {
+    width: 100%;            /* 铺满整个主内容区（覆盖不同宽度屏幕下的 max-width 限制） */
+    max-width: none;
+    padding: 22px 24px 26px;
+    color: #124242;
+    background:
+        linear-gradient(180deg, rgba(14, 124, 123, 0.04), rgba(255, 255, 255, 0) 40%),
+        #ffffff;
+    border: 1px solid #d5e4e4;
+    border-radius: 12px;
+    box-shadow: 0 3px 14px rgba(18, 66, 66, 0.06);
+}
+body main .ua-page .ua-head h2 { color: #124242; }
+body main .ua-page .ua-sub { color: #5b7770; }
+body main .ua-page .ua-sub b { color: #0e7c7b; }
+body main .ua-page .ua-flash { color: #5b7770; }
+body main .ua-page .ua-flash.is-good { color: #178a5b; }
+body main .ua-page .ua-flash.is-error { color: #c0392b; }
+body main .ua-page h3 { color: #124242; }
+body main .ua-page .ua-list h3 small { color: #789086; }
+body main .ua-page .ua-create { border-color: #dce4dc; }
+body main .ua-page .ua-form label { color: #5b7770; }
+body main .ua-page .ua-form input,
+body main .ua-page .ua-form select {
+    color: #124242;
+    background: #fbfdfb;
+    border-color: #cdd9cf;
+}
+body main .ua-page .ua-note { color: #789086; }
+body main .ua-page .ua-note b { color: #34674f; }
+body main .ua-page .ua-note code { color: #0e7c7b; background: rgba(14, 124, 123, 0.08); }
+body main .ua-page .ua-table th { color: #789086; border-bottom-color: #dce4dc; }
+body main .ua-page .ua-table td { color: #244238; border-bottom-color: #e5ece7; }
+body main .ua-page .ua-table tr.is-self { background: rgba(14, 124, 123, 0.05); }
+body main .ua-page .ua-self-tag { color: #0e7c7b; }
+body main .ua-page .ua-time { color: #789086; }
+body main .ua-page .ua-role.is-admin { color: #0e7c7b; background: rgba(14, 124, 123, 0.10); border-color: rgba(14, 124, 123, 0.30); }
+body main .ua-page .ua-role.is-viewer { color: #5b7770; background: rgba(18, 66, 66, 0.06); border-color: rgba(18, 66, 66, 0.18); }
+body main .ua-page .ua-state.is-on { color: #178a5b; }
+body main .ua-page .ua-state.is-off { color: #c0392b; }
+body main .ua-page .ua-self-note { color: #789086; }
+body main .ua-page .ua-empty { color: #789086; }
+/* 操作按钮是描边式（浮层里原本透明描边；页面里要盖过 theme 的实底主按钮） */
+body main .ua-page .ua-action {
+    color: #34674f;
+    background: transparent;
+    border-color: rgba(14, 124, 123, 0.35);
+}
+body main .ua-page .ua-action:hover { color: #0e7c7b; border-color: #0e7c7b; background: rgba(14, 124, 123, 0.06); }
+/* 主操作按钮（创建账号）沿用青底白字主按钮观感 */
+body main .ua-page .ua-primary { background: #0e7c7b; color: #fff; }
+body main .ua-page .ua-primary:hover { filter: brightness(1.1); }
+
+/* ============================================================================
+   独立登录页（login.html）—— 整页墨青粒子网络背景 + 居中玻璃卡片
+   背景由 login-bg.js 在 #login-canvas 上实时绘制（分层粒子 + 连线 + 大气光斑 + 随鼠标光影），
+   配色沿用系统主题：深墨青底 + 青色(#22d3ee / 淡青#5eead4)高亮，与侧栏观感统一。
    ============================================================================ */
 .login-body {
     /* 覆盖工作台侧栏布局：登录页没有侧边栏，让卡片整体居中。 */
     margin: 0;
     min-height: 100vh;
+    position: relative;
     display: flex;
+    align-items: center;        /* 垂直居中 .login-page */
+    justify-content: center;
+    overflow: hidden;
+    color: #dbe9e7;
     background:
-        radial-gradient(1100px 520px at 50% -12%, rgba(34, 211, 238, 0.14), transparent 60%),
-        radial-gradient(800px 480px at 85% 110%, rgba(8, 145, 178, 0.10), transparent 60%),
-        #060a12;
+        /* 四周暗角，把视线聚向中央卡片 */
+        radial-gradient(120% 100% at 50% 50%, rgba(1, 8, 8, 0) 52%, rgba(1, 8, 8, 0.6) 100%),
+        /* 顶部与底部淡青氛围光 */
+        radial-gradient(1200px 640px at 50% -12%, rgba(45, 212, 191, 0.16), transparent 60%),
+        radial-gradient(900px 520px at 88% 108%, rgba(8, 145, 178, 0.14), transparent 60%),
+        /* 深墨青渐变（系统侧栏墨青 #0f3a39 的暗化版，视觉统一） */
+        linear-gradient(180deg, #0a2e2e, #072321 45%, #041414);
+}
+#login-canvas {
+    position: fixed;
+    inset: 0;
+    display: block;
+    z-index: 0;
+    pointer-events: none;   /* 画布不挡输入：点击直接落在卡片上 */
 }
 .login-page {
+    position: relative;
+    z-index: 1;
     width: 100%;
+    background: transparent;    /* 盖过 theme.css 对 main 的浅色底，露出底层粒子网络 */
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 24px;
     box-sizing: border-box;
 }
-.login-card {
-    /* 登录卡片比浮层版略宽，标题用 h1。 */
+/* 登录卡片：墨青毛玻璃，顶部青色高光条，柔和入场动画。 */
+.login-body .auth-card.login-card {
+    position: relative;
     width: min(400px, calc(100vw - 40px));
+    padding: 30px 30px 26px;
+    border: 1px solid rgba(94, 234, 212, 0.26);
+    border-radius: 16px;
+    background:
+        linear-gradient(180deg, rgba(11, 48, 45, 0.66), rgba(5, 22, 22, 0.78));
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+    backdrop-filter: blur(18px) saturate(150%);
+    box-shadow:
+        0 0 0 1px rgba(94, 234, 212, 0.06),
+        0 30px 80px rgba(0, 0, 0, 0.5),
+        0 0 70px rgba(45, 212, 191, 0.14);
+    animation: login-enter .6s ease-out both;
+}
+/* 卡片顶部一条青色高光描边，提升精致感 */
+.login-body .auth-card.login-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 20px; right: 20px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(94, 234, 212, 0.9), transparent);
+    opacity: .85;
+}
+@keyframes login-enter {
+    from { opacity: 0; transform: translateY(16px) scale(.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* 品牌区：左侧一个青色小标记 + 右侧品牌字 */
+.login-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+/* 用一个小图谱符号作标记：两个光点 + 青色斜向连线（纯 CSS，无需额外子元素） */
+.login-mark::before,
+.login-mark::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+}
+.login-mark::before { left: 7px; top: 8px; width: 5px; height: 5px; background: rgba(165, 243, 252, 0.9); }
+.login-mark::after { right: 7px; bottom: 7px; width: 5px; height: 5px; background: rgba(103, 232, 249, 0.95); }
+.login-mark {
+    background:
+        radial-gradient(circle at 30% 30%, rgba(94, 234, 212, 0.9), rgba(34, 211, 238, 0.05) 70%),
+        linear-gradient(135deg, rgba(94, 234, 212, 0.0) 46%, rgba(94, 234, 212, 0.85) 46%, rgba(94, 234, 212, 0.85) 47%, rgba(94, 234, 212, 0.0) 47%),
+        linear-gradient(180deg, rgba(34, 211, 238, 0.25), rgba(8, 145, 178, 0.10));
+    border: 1px solid rgba(94, 234, 212, 0.35);
+    box-shadow: 0 0 14px rgba(34, 211, 238, 0.25);
 }
 .login-card h1 {
     margin: 18px 0 4px;
     font-size: 20px;
-    color: #e2e8f0;
+    color: #e6f5f3;
+}
+/* 登录页输入框底色改为墨青，贴合卡片而非默认蓝黑 */
+.login-body .auth-card input {
+    background: rgba(4, 18, 20, 0.6);
 }
 .login-foot {
     margin: 16px 0 0;
     font-size: 12px;
     line-height: 1.6;
     text-align: center;
-    color: #64748b;
+    color: #7fa59c;
 }
 
 /* ============================================================================
    超级管理员角色徽章（侧栏会话区）
    ============================================================================ */
 .session-box .session-role.is-superadmin {
-    color: #04121a;
-    /* 超管用更亮的金色→青色渐变，和普通管理员区分开。 */
-    background: linear-gradient(180deg, #a5f3fc, #22d3ee);
-    box-shadow: 0 0 10px rgba(34, 211, 238, 0.45);
+    /* 超管用金→琥珀渐变（区别于普通管理员的青色实底），白底上深字，更醒目也更克制。 */
+    color: #3a1d00;
+    background: linear-gradient(180deg, #fcd34d, #f59e0b);
+    border: 1px solid rgba(251, 191, 36, 0.7);
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.30);
 }
 
 /* 用户清单里的超级管理员角色标签 */
 .ua-role.is-superadmin {
-    color: #04121a;
-    background: linear-gradient(180deg, #a5f3fc, #22d3ee);
-    border: 1px solid rgba(34, 211, 238, 0.55);
+    color: #3a1d00;
+    background: linear-gradient(180deg, #fcd34d, #f59e0b);
+    border: 1px solid rgba(251, 191, 36, 0.6);
 }

@@ -395,19 +395,25 @@
       label.textContent = `第 ${b.depth + 1} 层${b.depth === 0 ? '（根类）' : ''}${b.cont ? '（续）' : ''}`;
       svg.appendChild(rect);
       svg.appendChild(label);
-      const my = b.y - 16, h = NODE_H + 32;
+      // 层带上下也要对称：节点中心在 b.y、卡片高 NODE_H → 范围 [b.y-21, b.y+21]，
+      // 层带 = 卡片范围上下各外扩 BAND_PAD（[b.y-35, b.y+35]）。原来 my=b.y-16、h=NODE_H+32
+      // 是 [b.y-16, b.y+58]——上只留 5px、下空出 37px，框在节点下方空一大截，看着"不对应"。
+      const my = b.y - NODE_H / 2 - BAND_PAD, h = NODE_H + BAND_PAD * 2;
+      // 层带横向必须从**第一列卡片的左边缘**起（中心在 0 的卡片左缘是 -NODE_W/2），
+      // 再向两侧外扩 BAND_PAD。原来从 -BAND_PAD 起，最左一列节点的左半边整段露在框外，
+      // 且整个框相对卡片右偏 NODE_W/2，fit 后节点整体偏左——层级树"节点不在框里"由此而来。
+      const mx = -NODE_W / 2 - BAND_PAD;
       M.bands.push({
         el: rect, label,
-        mx: -BAND_PAD, my, w: contentW + BAND_PAD * 2, h,
-        // 层号标签画在带**内侧**左上角：以前放在带外左侧（lx:-10），会把外框撑出去，
-        // 让"整体居中"永远差一截（左多右少），现在标签算在带内，外框就是带本身。
-        lx: BAND_PAD + 4, ly: b.y - 2,
+        mx, my, w: contentW + BAND_PAD * 2, h,
+        lx: mx + 4, ly: my + 4,   // 层号标签画在带**内侧**左上角（随带左/顶缘走）
       });
       top = Math.min(top, my);
       bottom = Math.max(bottom, my + h);
     }
     syncBands();
-    return { x1: -BAND_PAD, y1: top, x2: contentW + BAND_PAD, y2: bottom };
+    return { x1: -NODE_W / 2 - BAND_PAD, y1: top,
+             x2: -NODE_W / 2 - BAND_PAD + contentW + BAND_PAD * 2, y2: bottom };
   }
 
   function clearBands() {

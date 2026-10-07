@@ -22,9 +22,10 @@
   }
 
   // 系统层（独立于上面业务四组）：用户与权限的**菜单入口**。
-  // 为什么不用 data-tab：用户管理是「抽屉」不是一个 tab 页面（没有 #tab-xxx 容器），
-  // 套 data-tab 会被上面的逻辑收进业务组、点击还会去找不存在的 tab。这里单独建一组，
-  // 点击直接打开用户管理抽屉。按钮带 admin-only：只读用户看不到，下方空组逻辑也会整组隐藏。
+  // 不用 data-tab：它不属于上面四组业务 tab，套 data-tab 会被收进业务组、找不到对应组。
+  // 它是一个「页面式 tab」——点击后由 user-admin.js 渲染到主区 #tab-useradmin 并切换，
+  // 与其它菜单是同一套"点菜单→切页面"的交互，不再弹抽屉浮窗。按钮带 admin-only：
+  // 只读用户看不到，下方空组逻辑也会整组隐藏。
   const systemGroup=document.createElement('details');
   systemGroup.className='nav-group';systemGroup.dataset.layer='system';systemGroup.open=true;
   const systemSummary=document.createElement('summary');systemSummary.textContent='系统层 · 管理';
@@ -39,6 +40,13 @@
   });
   systemGroup.append(systemSummary,usersButton);
   nav.append(systemGroup);
+
+  // 侧栏导航里点其它菜单时，去掉「用户与权限」的 active 高亮（它不带 data-tab，
+  // 通用 tab 切换不会清它的 active，这里补一个委托监听，保证高亮状态互斥）。
+  nav.addEventListener('click',(e)=>{
+    const btn=(e.target&&e.target.closest)?e.target.closest('button'):null;
+    if(btn&&btn!==usersButton&&usersButton.classList.contains('active'))usersButton.classList.remove('active');
+  });
 
   const resolve=document.getElementById('parse-resolve');
   if(resolve?.parentElement)resolve.parentElement.lastChild.textContent='同名／别名实体消歧（稳定类型 IRI 和有效期需兼容）';

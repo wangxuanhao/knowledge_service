@@ -478,6 +478,40 @@ class KnowledgeService:
         labels=self.ontology_labels(project_id)
         result['hits']=[{**row,'type_label':labels.get(row.get('type',''),row.get('type',''))}
                         for row in result['hits']]
+        # 溯源（检索结果挂来源原文）：命中的实体/关系只带自己的短 text（如「商户」），
+        # 用户搜到实体却看不到它来自哪段原文。这里把 metadata.chunk_id 指向的原文片段
+        # 一起带回——chunk 已在 scoped 的 rows 里（kinds 默认含 chunk），零额外查询。
+        # 前端「原文片段」通道据此同时展示「命中知识的来源原文」和「原文全文匹配」两块。
+        _chunk_text = {row['id']: row['text'] for row in rows if row['kind'] == 'chunk'}
+        _source = {}
+        for row in result['hits']:
+            chunk_id = (row.get('metadata') or {}).get('chunk_id')
+            if row['kind'] in ('entity', 'relation') and chunk_id and chunk_id in _chunk_text:
+                row['source_chunk_id'] = chunk_id
+                _source[chunk_id] = _chunk_text[chunk_id]
+        if _source:
+            result['source_chunks'] = [
+                {'id': chunk_id, 'text': text, 'kind': 'chunk'}
+                for chunk_id, text in _source.items()]
+        # 扩展兜底：勾了「本体扩展」但没命中类（或本体没有父子层级）时，给前端一个
+        # 明确诊断，而不是静默——否则用户勾了开关、命中数没变化，还看不出哪里扩了。
+        if request.get('ontology_expansion'):
+            if 'ontology_expansion' not in result:
+                result['ontology_expansion'] = {}
+            _exp = result['ontology_expansion']
+            # 复用 ontology_expansion 的缓存，判断本体到底有没有父子层级（ancestors 非空）。
+            versions = self.repository.list_ontologies(project_id)
+            signature = tuple(v['id'] for v in versions)
+            with self.lock:
+                cached = self._ontology_expansion_cache.get(project_id)
+                index = cached[1] if cached and cached[0] == signature else None
+            if index is None:
+                index = (Ontology(versions[-1]['turtle']).expansion_index()
+                         if versions else {'surfaces': [], 'labels': {}, 'ancestors': {}})
+                with self.lock:
+                    self._ontology_expansion_cache[project_id] = (signature, index)
+            _exp['has_hierarchy'] = bool(index.get('ancestors'))
+            _exp['matched'] = bool(_exp.get('terms'))
         result.update(embedding_model=self.encoder.identity, semantic=self.encoder.semantic)
         LOG.info('检索完成：mode=%s 命中=%d 后端=%s', result.get('requested_mode', ''),
                  len(result['hits']), result.get('_backend', '本地'))

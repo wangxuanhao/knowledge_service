@@ -46,6 +46,9 @@
     stageAvailability: null,  // GET /stage-availability（阶段门禁，服务端唯一出处）
     readiness: null,          // GET /publish-readiness（发布清单）
     candidates: [],           // 待收下候选（画布上的虚线节点）
+    discovery: null,          // GET /ontology-discovery：开放发现候选（published、待纳入候选数等）
+    generating: false,        // 正在生成本体（默认秒级；inferringHierarchy=true 时要几分钟）
+    inferringHierarchy: false,// 本次生成是否同时让模型推断父子层级（可选的慢操作）
     error: null,
   };
 
@@ -122,6 +125,9 @@
     try { published = await api(endpoint('/ontology'), undefined, 'GET'); }
     catch (e) { published = null; }
     S.ontologyId = published ? (published.id || null) : S.ontologyId;
+    // 读开放发现概览（是否已发布本体、待纳入候选数）。它是\"没发布本体时画布该画什么\"的唯一依据，
+    // 所以先于草案选择读出来；读不到就置空，绝不因发现信息缺失挡住正常本体展示。
+    await loadDiscovery();
 
     // ①' 只读预览历史版本：优先于草案展示（用户刚点了「查看这一版」），
     //     但**不销毁**草稿状态 —— 横幅会说明"改动没丢，点这里回去"。
@@ -166,6 +172,11 @@
       S.draft = draft;
       S.showingDraft = false;
       if (published) { S.summary = published.summary || EMPTY_SUMMARY; S.error = null; }
+      else if (S.discovery && S.discovery.published === false) {
+        // 没发布本体：这不是\"读取失败\"，而是\"这个项目还没生成本体\"（开放发现的正常中间态）。
+        // 画布该画的是引导态（有多少候选、怎么归纳生成本体），由 renderSidebar 依 S.discovery 渲染。
+        S.summary = null; S.error = null;
+      }
       else { S.summary = null; S.error = '读取当前本体失败'; }
     }
     await refreshDraftState();
@@ -173,6 +184,18 @@
     emit('graph:changed', { graph: S.graph });
     render();
     return S;
+  }
+
+  // 读开放发现概览（GET /ontology-discovery）：是否已发布本体、待纳入候选数、各状态计数。
+  // 读不到就置空——发现信息是增强，缺它不该挡住正常本体展示；但\"没发布本体\"时它是
+  // 画布上该画什么的唯一依据（见 renderEmptyState），所以读不到时也必须诚实区分，
+  // 不能把\"接口失败\"和\"空项目\"混成一句。
+  async function loadDiscovery() {
+    try {
+      S.discovery = await api(endpoint('/ontology-discovery'), undefined, 'GET');
+    } catch (e) {
+      S.discovery = null;
+    }
   }
 
   // 读阶段门禁（服务端唯一出处）+ 发布清单。拿不到就置空 —— 子模块据此显示"读不到"，
@@ -321,7 +344,22 @@
   function renderSidebar() {
     const host = document.getElementById('om-side'); if (!host) return;
     if (!S.summary) {
-      host.innerHTML = `<div class="om-side-empty">${escHtml(S.error || '请先在上方选择一个知识项目')}</div>`;
+      // 没有本体结构可画：区分三种空态（读不到 / 没发布本体但有候选 / 没候选），
+      // 每种给一句人话 + 能点的下一步，绝不再把"没发布本体"误报成"读取失败"。
+      host.innerHTML = renderEmptyState();
+      const gen = document.getElementById('om-generate-draft');
+      if (gen) gen.addEventListener('click', () => { void generateDraftFromDiscovery(false); });
+      // 第二个慢入口：显式让模型推断父子层级（传 true）
+      const inferH = document.getElementById('om-infer-hierarchy');
+      if (inferH) inferH.addEventListener('click', () => { void generateDraftFromDiscovery(true); });
+      // 顶栏版本徽标不能停在占位「当前本体 v?」：没本体就说清"尚未发布"，别留个 v?。
+      const ver = document.getElementById('om-version');
+      if (ver) {
+        ver.textContent = S.discovery && S.discovery.published === false
+          ? '尚未发布本体' : (S.error || '读不到本体状态');
+        ver.classList.toggle('is-draft', false);
+        ver.classList.toggle('is-preview', false);
+      }
       return;
     }
     const classes = (S.summary.classes || []).filter(c => c.active !== false);
@@ -329,9 +367,40 @@
     const attrs = (S.summary.attributes || []).filter(a => a.active !== false);
     const row = (it, chip) => `<li class="${it.id === S.selected ? 'sel' : ''}" data-sel="${escHtml(it.id)}">
         <span class="om-chip ${chip}"></span>${escHtml(label(it))}</li>`;
-    host.innerHTML = `
+    // 本体类型 → 纵向继承缩进树：根类无缩进，子类按继承层级逐层缩进（点击 = 选中，
+    // 与画布/详情联动）。用「第一个有效父类」挂到树里，避免多重继承重复显示。
+    const classTree = () => {
+      const byId = new Map(classes.map(c => [c.id, c]));
+      const children = new Map();
+      const roots = [];
+      for (const c of classes) {
+        const parent = (c.parents || []).map(p => byId.get(p)).find(Boolean);
+        if (parent) {
+          if (!children.has(parent.id)) children.set(parent.id, []);
+          children.get(parent.id).push(c);
+        } else roots.push(c);
+      }
+      const byName = a => a.sort((x, y) => String(label(x)).localeCompare(String(label(y)), 'zh-CN'));
+      byName(roots); children.forEach(byName);
+      const walk = list => list.map(c => {
+        const kids = children.get(c.id) || [];
+        return `<li data-sel="${escHtml(c.id)}" class="${c.id === S.selected ? 'sel' : ''}">
+          <span class="om-chip cls"></span>${escHtml(label(c))}${kids.length ? `<small class="om-tree-count">${kids.length}</small>` : ''}
+          ${kids.length ? `<ul class="om-tree-children">${walk(kids)}</ul>` : ''}</li>`;
+      }).join('');
+      return walk(roots);
+    };
+    // 已发布本体之后又抽出新候选：左栏顶部给一条"增量归纳"入口（基于当前版本，不影响已发布）。
+    // 否则新知识只会静默躺在 discovery 里，用户不知道"后续加知识怎么显示"。
+    const pendingN = (S.discovery && S.discovery.unpublished_candidate_count) || 0;
+    const discTip = pendingN > 0 ? `<div class="om-discovery-inline">
+      <b>又抽出 ${pendingN} 个新候选</b>
+      <p>后续添加的知识已抽出。可再次生成本体：新候选会整理成类型（或并入已有类型），基于当前版本、不影响已发布内容。</p>
+      <button type="button" id="om-generate-draft-inline" class="om-btn primary">把这 ${pendingN} 个新候选生成进本体（约 1 秒）</button>
+    </div>` : '';
+    host.innerHTML = `${discTip}
       <h4><i class="om-dot"></i>本体类型 · ${classes.length}</h4>
-      <ul>${classes.map(c => row(c, 'cls')).join('') || '<li class="om-none">（还没有类）</li>'}</ul>
+      <ul class="om-tree">${classTree() || '<li class="om-none">（还没有类）</li>'}</ul>
       <h4 class="rel"><i class="om-dot"></i>关系类型 · ${rels.length}</h4>
       <ul>${rels.map(r => row(r, 'rel')).join('') || '<li class="om-none">（还没有关系）</li>'}</ul>
       <h4 class="attr"><i class="om-dot"></i>属性类型 · ${attrs.length}</h4>
@@ -339,7 +408,12 @@
           <span class="om-chip attr"></span>${escHtml(label(a))}
           <span class="om-dtype">${escHtml(dtypeOf(a) || '?')}</span></li>`).join('') || '<li class="om-none">（还没有属性）</li>'}</ul>
       <div class="om-tip">点谁 = 选中谁（左栏/画布一致）<br>实线 = 父子 · 紫虚线 = 关系 · 黄虚线 = 待收下</div>`;
-    host.querySelectorAll('[data-sel]').forEach(li => li.addEventListener('click', () => select(li.dataset.sel)));
+    host.querySelectorAll('[data-sel]').forEach(li => li.addEventListener('click', (e) => {
+      e.stopPropagation(); // 树是嵌套 li：阻止子类点击冒泡到父类，否则点到子类却选中父类
+      select(li.dataset.sel);
+    }));
+    const genInline = document.getElementById('om-generate-draft-inline');
+    if (genInline) genInline.addEventListener('click', () => { void generateDraftFromDiscovery(); });
     const ver = document.getElementById('om-version');
     if (ver) {
       // 必须一眼看出"现在画的是什么、算不算数"：用户改完看不见变化时，
@@ -358,6 +432,80 @@
           : '画布上是已发布的本体版本：任何改动都会自动开一份新草案，不会改到这一版');
     }
     renderPreviewBanner();
+  }
+
+  // 没有本体结构时的三种空态（左栏）。\"没发布本体\"是开放发现的正常中间态，不是故障——
+  // 这一句不能省，否则用户看到空画布会以为是坏了（本轮\"本体建模没内容\"就是它造成的）。
+  function renderEmptyState() {
+    // 归纳中：顶部给一个明确的"正在归纳"说明，回答"点了之后呢"——
+    // 不只让按钮变灰，而是把"正在做什么 / 接下来会怎样"讲清楚。
+    if (S.generating) {
+      return `<div class="om-side-empty om-discovery-guide is-generating">
+        ${S.inferringHierarchy
+          ? `<h4>正在生成本体，并让模型推断父子层级…</h4>
+             <p>类型马上就好；模型同时在判断"谁是谁的父类"，这一步要跑几分钟，别关页面。</p>
+             <p class="om-guide-note">不想要层级也可以等完，层级之后在画布上也能手动画。</p>`
+          : `<h4>正在生成本体…</h4>
+             <p>正在把候选整理成实体类型和关系类型，约 1 秒，不调用模型。</p>`}
+      </div>`;
+    }
+    const d = S.discovery;
+    // ① 读不到发现概览（接口失败 / 网络问题）：诚实说"读不到"，不假装是空项目。
+    if (!d) {
+      return `<div class="om-side-empty">${escHtml(S.error || '读不到项目本体状态，请稍后重试。')}</div>`;
+    }
+    // ② 已发布本体但结构读不到（罕见，接口异常）：按错误提示。
+    if (d.published !== false) {
+      return `<div class="om-side-empty">${escHtml(S.error || '读取本体结构失败')}</div>`;
+    }
+    // ③ 没发布本体：分"有候选"和"没候选"两种。
+    const hasCandidates = (d.candidate_count || 0) > 0;
+    if (hasCandidates) {
+      // 讲"类型"不讲"实体"：这一步整理出的是【实体类型 / 关系类型】，不是一条条实体。
+      const entityTypeN = (d.entity_types || []).length;
+      const relationTypeN = (d.relation_types || []).length;
+      return `<div class="om-side-empty om-discovery-guide">
+        <h4>这个项目还没生成本体</h4>
+        <p>知识写入已抽出 ${d.candidate_count} 个候选，将整理成
+          <b>${entityTypeN}</b> 个实体类型、<b>${relationTypeN}</b> 个关系类型
+          （同名概念会合并，不是把 ${d.entity_count || 0} 个实体名逐个建类）。</p>
+        <button type="button" id="om-generate-draft" class="om-btn primary">生成本体（约 1 秒）</button>
+        <button type="button" id="om-infer-hierarchy" class="om-btn ghost">让模型顺便推断父子层级（要几分钟）</button>
+        <p class="om-guide-do">这一步做什么：把候选整理成一份待审核的本体（实体类型＋关系类型）。<br>
+        不做什么：不会直接发布，也不把候选当成正式知识写进台账；默认类型彼此平级，不调用模型。</p>
+        <p class="om-guide-note">想要"谁是谁的父类"就点第二个按钮，或生成后在画布上手动连线。</p>
+      </div>`;
+    }
+    return `<div class="om-side-empty">
+      <h4>这个项目还没有本体，也没有待纳入的候选</h4>
+      <p>先去「知识写入」页上传文档，选「开放本体发现」模式抽取候选，再回到这里生成本体。</p>
+    </div>`;
+  }
+
+  // 生成本体。默认 infer_hierarchy=false：建类型是确定性操作、约 1 秒、不调模型；
+  // 仅当用户显式要「让模型推断父子层级」才传 true，多等几分钟。
+  async function generateDraftFromDiscovery(inferHierarchy = false) {
+    // 生成中状态交给 render() 统一重绘：左栏引导态和底栏一起切到"正在生成"。
+    S.generating = true;
+    S.inferringHierarchy = !!inferHierarchy;
+    render();
+    if (typeof status === 'function') {
+      status(inferHierarchy
+        ? '正在生成本体，并让模型推断父子层级：类型很快好，层级要跑几分钟，别关页面。'
+        : '正在生成本体（约 1 秒，不调用模型）…', false);
+    }
+    try {
+      await api(endpoint('/ontology-discovery/drafts'),
+        { name: '开放发现归纳', infer_hierarchy: !!inferHierarchy }, 'POST');
+      S.generating = false; S.inferringHierarchy = false;
+      if (typeof status === 'function') status('本体已生成，正在刷新画布…', false);
+      S.preview = null;
+      await refresh();
+    } catch (e) {
+      S.generating = false; S.inferringHierarchy = false;
+      render();
+      if (typeof status === 'function') status('生成失败：' + (e.message || e), true);
+    }
   }
 
   // ---- 挂载：点「本体建模层」页签 / 切项目时加载 ------------------------------
@@ -440,7 +588,7 @@
 
   window.OntologyModel = {
     S, on, emit, render, refresh, refreshDraftState, ensureDraft, sendCommand, select, compileGraph,
-    actorName, uid, previewVersion, clearPreview, forkFrom,
+    actorName, uid, previewVersion, clearPreview, forkFrom, generateDraftFromDiscovery,
     status: (m, e) => (typeof status === 'function' ? status(m, e) : console.log(m)),
     helpers: { label, shortIri, dtypeOf, esc: escHtml },
   };

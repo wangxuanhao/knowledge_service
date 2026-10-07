@@ -87,4 +87,4 @@ bind('run-sparql',async()=>{$('ontology-result').textContent=JSON.stringify(awai
   // 等认证就绪（auth.js）：未登录时这里会挂起，登录成功后才继续，
   // 避免未授权就请求 /api/health、/api/projects 而报 401。
   if(window.__authReady && typeof window.__authReady.then==='function'){await window.__authReady;}
-  const health=await api('/api/health',undefined,'GET');$('health').textContent=`服务在线 · ${health.semantic?'语义模型已配置':'演示模式'}`;await projects();await loadOntologyTerms().catch(()=>{});}catch(e){status(e.message,true);}})();
+  const health=await api('/api/health',undefined,'GET');const healthEl=$('health');if(healthEl)healthEl.textContent=`服务在线 · ${health.semantic?'语义模型已配置':'演示模式'}`;await projects();await loadOntologyTerms().catch(()=>{});}catch(e){status(e.message,true);}})();

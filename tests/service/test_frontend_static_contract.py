@@ -487,6 +487,85 @@ def test_canvas_stats_separate_relation_types_from_drawn_edges():
     assert '关系类型 ${relTotal}（画得出线 ${rel}）' in read('ontology-model-canvas.js')
 
 
+def test_ontology_model_shows_discovery_guide_when_not_yet_published():
+    """没发布本体、但有开放发现候选时，本体建模层不能空白/「读取失败」。
+
+    用户原话：「开放知识写入后，本体建模没内容」。真因是 refresh() 只读已发布本体
+    （没发布 = 404）和治理草案，从不读 /ontology-discovery，也没有归纳入口 ——
+    discovery 模式抽出一堆候选后，点进本体建模层就是一片空白。
+    """
+    model = read('ontology-model.js')
+    # 读开放发现概览，拿到「是否已发布本体 + 待纳入候选数」
+    assert "'/ontology-discovery'" in model
+    # 没发布本体时走引导态，不再误报「读取失败」
+    assert 'S.discovery.published === false' in model
+    # 有候选时给生成本体入口；这一步默认秒级、不调模型
+    assert "'/ontology-discovery/drafts'" in model
+    assert '生成本体（约 1 秒）' in model
+    # 「模型推断父子层级」是可选的慢入口（默认不阻塞拿到本体）
+    assert 'om-infer-hierarchy' in model
+    # 这一步做什么 / 不做什么都要写清（用户核心要求：新功能一句话说明它做什么、不做什么）
+    assert '这一步做什么' in model and '不做什么' in model
+
+
+def test_ontology_model_pending_candidates_chip_reads_real_discovery_count():
+    """底栏「待收下」计数必须读开放发现概览的真实计数，不能永远显示 0。
+
+    旧实现拿画布虚线节点的 candidates.length 当计数，而那一整路从没接过数据源、
+    恒为 0 —— 用户会看到「待收下 0」和左栏「还有 N 个待纳入」互相打脸。
+    """
+    panel = read('ontology-model-panel.js')
+    assert 'unpublished_candidate_count' in panel
+
+
+def test_ontology_model_empty_actionbar_focuses_on_induction_not_disabled_controls():
+    """没本体时，底栏不摆「校验并审核 / 发布 / 发布说明输入框」这一堆 disabled 控件。
+
+    用户反馈「底下的校验和发布是两行」：根因是没本体时仍渲染那三个控件，
+    发布说明输入框最小 180px，flex-wrap 放不下就把按钮挤成两行。
+    没本体时底栏应聚焦一件事——把候选归纳成本体。
+    """
+    panel = read('ontology-model-panel.js')
+    assert 'renderEmptyActions' in panel
+    assert 'if (!summary) { renderEmptyActions(st); return; }' in panel
+
+
+def test_ontology_model_version_badge_does_not_show_v_placeholder():
+    """没本体时顶栏不能停在占位「当前本体 v?」，要说清「尚未发布本体」。
+
+    用户反馈「上面还有个 v?」。renderSidebar 在没 summary 时提前 return，
+    没更新 #om-version，它就停在 buildSkeleton 的初始占位上。
+    """
+    model = read('ontology-model.js')
+    assert '尚未发布本体' in model
+
+
+def test_ontology_model_offers_incremental_induction_after_publish():
+    """已发布本体之后又抽出新候选，左栏要给「增量归纳」入口。
+
+    用户问「后续再添加新的知识的时候如何显示」——否则新知识只会静默躺在
+    discovery 里，用户不知道还能再次归纳进本体。
+    """
+    model = read('ontology-model.js')
+    assert 'om-generate-draft-inline' in model
+    assert '新候选' in model
+
+
+def test_ontology_model_allows_inline_constraint_editing():
+    """右栏必须能编辑 domain/range/数据类型/父类——不能只给只读清单。
+
+    用户原话：\"编辑 domain range 这些、限制啥的都不能操作，那怎么算是本体建模层\"。
+    后端命令通道一直支持，缺的是前端控件。
+    """
+    panel = read('ontology-model-panel.js')
+    assert 'constraintEditSection' in panel
+    assert "'add_domain'" in panel and "'add_range'" in panel
+    assert "'set_datatype'" in panel and "'add_parent'" in panel
+    # 父类下拉必须排除当前类自身：类不能是自己的父类（真机探针抓到自环 target==value）
+    assert "kind === 'class'" in panel
+    assert "o.id !== term.id" in panel
+
+
 def test_ontology_model_assets_are_versioned_after_this_round():
     """改动过的本体建模层资源必须带缓存版本号（漏 bump = 浏览器继续用旧 JS）。"""
     html = read('index.html')
@@ -669,51 +748,95 @@ def test_ingest_keeps_advanced_options_and_structured_import():
     assert '结构化记录导入（高级）' in ingest, '结构化记录导入被误删了'
 
 
-def test_ingest_results_workspace_is_a_right_drawer_with_real_data():
-    """抽取结果改为**右侧工作区抽屉**，数据来自真实端点（不是假数字）。
+def test_ingest_results_drawer_uses_sse_and_assertions_with_real_data():
+    """结果抽屉：进度走 SSE、来源走正式 assertions 表，数据全部真实。
 
-    用户诉求：「放在一个侧边工作区，打印汇总信息」—— 页面不再堆叠大卡片。
-    钉住：① 页面不再有 #ingest-results-slot，改为入口按钮 #open-ingest-results；
-    ② ingest-results.js/css 带版本号引入；③ 脚本挂 .ingest-drawer 到 body、读
-    /ingest-runs（阶段/计数）与 /records/query（明细，按 belongsToDoc 归文档）；
-    ④ 有汇总指标 + 三类胶囊渲染分支；⑤ 有对应样式。
+    用户诉求（2026-10-05）：① 别再靠 ID 前缀猜来源；② 轮询改成 SSE；
+    ③ 实体要显示本体类型。
+    钉住：① 入口按钮存在；② ingest-results.js/css 带版本号；③ 脚本挂 .ingest-drawer、
+    订阅 /api/jobs/{id}/stream（SSE）并读 endpoint('/assertions?document_id=...')；
+    ④ 有实体／关系／属性三类胶囊渲染分支；⑤ 有对应样式。
     """
     html = read('index.html')
     ingest = html.split('id="tab-ingest"', 1)[1].split('id="tab-records"', 1)[0]
-    assert 'id="ingest-results-slot"' not in ingest, '旧的页面堆叠槽没有移除'
-    assert 'id="open-ingest-results"' in ingest, '缺少抽取结果工作区入口按钮'
+    assert 'id="ingest-results-slot"' not in ingest, '旧页面堆叠槽未移除'
+    assert 'id="open-ingest-results"' in ingest, '缺少结果工作区入口按钮'
     assert 'ingest-results.js?v=' in html and 'ingest-results.css?v=' in html, \
-        '抽取结果脚本/样式未带版本号引入'
+        '脚本/样式未带版本号引入'
+
     js, css = read('ingest-results.js'), read('ingest-results.css')
-    # 抽屉 + 真实端点（不是写死数据）
-    assert "'ingest-drawer'" in js or "'section', 'ingest-drawer'" in js, '没有构建右侧抽屉'
-    assert "endpoint('/ingest-runs')" in js, '没有读抽取运行'
-    assert "endpoint('/records/query" in js, '没有读知识明细'
-    assert 'belongsToDoc' in js, '没有按文档归属聚合明细'
-    # 汇总 + 三类知识渲染分支
-    for fn in ('renderSummary', 'entityChip', 'relationChip', 'attributeChip', 'appendGroups'):
+    wb = read('workbench.js')
+    # 属性抽取开关：页面有 checkbox，且 readParseSettings 把它传后端
+    # （根因：extract_attributes 默认 False、UI 无开关，导致属性永远抽不到）
+    # id 与关系约束选择器按活文档 task_review_ui.test.cjs 对齐
+    assert 'id="parse-attributes"' in ingest, '高级设置缺少「抽取实体属性」开关'
+    assert "extract_attributes:$('parse-attributes').checked" in wb, \
+        'readParseSettings 没有把属性开关传给后端'
+    assert 'id="parse-relation-constraints"' in ingest, '缺少关系约束模式选择器'
+    assert "relation_constraint_mode:$('parse-relation-constraints').value" in wb, \
+        'readParseSettings 没有传关系约束模式'
+    # 抽屉 + SSE + assertions（真实口径，非写死）
+    assert "'section', 'ingest-drawer'" in js, '没有构建右侧抽屉'
+    assert "'/stream'" in js and 'splitSseBuffer' in js, '没有消费 SSE 进度流'
+    assert "endpoint('/assertions?document_id=" in js, '没有按文档读正式断言'
+    # 三类知识渲染分支 + 进度条 + 超量折叠
+    for fn in ('assertChip', 'renderAsserts', 'loadAssertions', 'streamJob',
+               'CHIP_PREVIEW_LIMIT'):
         assert fn in js, f'工作区缺少渲染分支：{fn}'
-    for klass in ('.ingest-drawer', '.ingest-drawer__summary', '.ingest-drawer__chip',
-                  '.ingest-drawer__doc'):
+    for klass in ('.ingest-drawer', '.ingest-job__bar', '.ingest-result__chip',
+                  '.ingest-result__group', '.ingest-result__more'):
         assert klass in css, f'样式缺少 {klass}'
 
 
-def test_ingest_results_drawer_polls_reports_honestly_and_closes():
-    """抽屉要实时刷新、诚实区分\"没抽图谱\"与\"抽了多少\"，并能关闭。
+def test_ingest_results_drawer_shows_entity_type_and_status_honestly():
+    """实体要带类型、区分入图/待确认；无知识与失败都如实说，并能关闭。
 
-    钉住：① 任务在跑时轮询、关闭/完成后停；② 只做文档（无实体/关系/属性）时如实说明；
-    ③ 失败保留原文收据；④ 待审候选给出口；⑤ 提交后自动滑出、Esc/× 可关。
+    钉住：① 实体胶囊拼「名字 · 类型短名」；② accepted/pending 用 is-pending 区分；
+    ③ 空知识说"没抽出"；④ 失败保留原文收据；⑤ 提交后自动滑出、Esc 可关。
     """
     js = read('ingest-results.js')
-    assert 'setInterval' in js and 'clearInterval' in js, '缺少阶段轮询与停止'
-    # 打开/关闭与自动滑出
-    assert 'function open' in js and 'function close' in js, '缺少抽屉开关函数'
-    assert 'setTimeout(open' in js, '提交后没有自动滑出'
+    # 实体类型：已入图用短 IRI；待确认候选字段不同（proposed_type），不许渲染成 —
+    assert "shortIri(p.type)" in js, '已入图实体没有显示本体类型'
+    assert 'proposed_type' in js, '待确认实体没用提议类型（会渲染成 —）'
+    assert 'p.subject' in js and 'p.predicate' in js and 'p.object' in js, \
+        '待确认关系没用 主语/谓词/宾语 名字（会渲染成 —）'
+    # 待确认属性字段是 proposed_type（不是关系用的 predicate），否则属性也会显示空
+    assert "safe(p.proposed_type) + ' = '" in js, '待确认属性没用提议属性名（会渲染成 —）'
+    assert "is-pending" in js, '没有区分待确认状态'
+    # 进度不许回退：snapshot 只填空、progress 单调递增
+    assert "d.status === 'queued'" in js, 'snapshot 会覆盖实时状态'
+    assert 'next >= (d.progress || 0)' in js, '进度条没有防回退（会从 97% 跳回 15%）'
+    # 开关（watch 由 workbench 提交后调用，不是 setTimeout 轮询那套）
+    assert 'function watch' in js, '缺少订阅入口'
     assert "e.key === 'Escape'" in js, '不支持 Esc 关闭'
-    # 无图谱知识时的诚实文案（不把空说成成功抽取）
+    # 诚实文案
     assert '没有抽出实体' in js, '没有如实说明"本次没抽到知识"'
     assert '原文收据已保留' in js, '失败时没有说明原文不丢'
-    assert 'assertions_pending' in js, '有待审候选时没有给出口'
+
+
+def test_attribute_is_kept_when_value_is_a_literal_not_an_object_property():
+    """标量属性不许被「属性值命中实体」启发式错误改判成关系（2026-10-05 根因）。
+
+    真机复验抓到：NER 误把字面量值（50000元/已完成）建成 DataEntity 实体；旧逻辑只凭
+    属性值文本命中该实体就把属性改判关系，导致标量属性全跑去关系组、属性组为空。
+    钉住改判关系的三条必要条件：① 值唯一命中实体；② 谓词在本体里是**对象属性**；
+    ③ 命中实体不是 DataEntity 字面量兜底类。
+    """
+    adapter_path = (Path(__file__).resolve().parents[2]
+                    / 'knowledge_service' / 'integrations' / 'semantica_adapter.py')
+    adapter = adapter_path.read_text(encoding='utf-8')
+    # 谓词必须是本体里声明的对象属性
+    assert 'declared_object_property' in adapter, '改判关系前没有校验谓词是对象属性'
+    assert 'ontology.resolve(predicate, ontology.relations)' in adapter, \
+        '没有确认谓词属于本体关系集'
+    # 命中实体不许是字面量兜底类
+    assert 'LITERAL_FALLBACK_CLASSES' in adapter and 'DataEntity' in adapter, \
+        '没有排除被误建成实体的字面量值'
+    assert 'can_be_relation' in adapter, '缺少三条全满足才改判关系的总判据'
+    # 保留为属性的分支仍要落进 review_candidates（不丢失、可在审核台看到）
+    assert "kind='attribute'" in adapter or "kind': 'attribute'" in adapter, \
+        '保留为属性的候选没有进入审核（会丢失）'
+
 
 
 
@@ -852,3 +975,4 @@ def test_project_loaders_wait_for_auth_when_the_server_enforces_it():
     assert 'authEnforced !== true' in js, 'whenReady 没有区分"服务端是否启用鉴权"'
     assert "loadAuthPolicy();" in js, 'whenReady 没有自己触发策略探针（会早于 bootstrap 被调用）'
     assert 'function releaseWithoutAuth()' in js, '缺少"服务端没启用鉴权就直接放行"的分支'
+

@@ -373,3 +373,14 @@ body>main{height:100dvh;overflow-y:auto;overflow-x:hidden;overscroll-behavior:co
 /* D1「图谱 → 台账」：定位到某一行时的高亮闪烁（定位类名由 JS 在 ~1.8s 后移除）。 */
 tr.ledger-row-located td{animation:ledger-locate-flash 1.6s ease}
 @keyframes ledger-locate-flash{from{background:#28634d33}40%{background:#28634d22}to{background:transparent}}
+/* 检索溯源：「命中知识的来源原文」与「原文全文匹配」两块分开展示。
+   来源原文是命中实体/关系的原文依据（可能不含查询词本身），用青色左边框标注，与全文匹配区分。 */
+.hit-source-label{font-size:10px;letter-spacing:.8px;color:var(--ks-accent);margin:8px 2px 4px;font-weight:650}
+.hit-entry.hit-source{border-left:3px solid var(--ks-accent);padding-left:10px;background:var(--ks-accent-soft)}
+/* 问答推理路径：命中实体沿关系边的多跳推导链。关系名用青色等宽标出，一眼看出「谁经哪条关系走到谁」。 */
+.qa-reasoning-block{margin-top:8px;padding:8px 10px;border:1px solid var(--ks-accent-line);border-radius:6px;background:var(--ks-accent-soft)}
+.qa-reasoning-head{margin:0 0 6px;display:flex;gap:8px;align-items:baseline}
+.qa-reasoning-head b{color:var(--ks-accent);font-size:12px}
+.qa-reasoning-head span{color:var(--ks-muted);font-size:11px}
+.qa-reasoning-path{margin:4px 0;font-family:Consolas,"Cascadia Mono",monospace;font-size:12px;line-height:1.7;overflow-wrap:anywhere}
+.qa-reasoning-relation{color:var(--ks-accent);font-size:11px}

@@ -1,6 +1,8 @@
 /* ============================================================================
-   user-admin.js —— 「用户与权限」抽屉（管理员 / 超级管理员）+ 「修改我的口令」
+   user-admin.js —— 「用户与权限」页面（管理员 / 超级管理员）+「修改我的口令」浮窗
    ----------------------------------------------------------------------------
+   用户与权限是侧栏「系统层 · 管理」里的一个页面式菜单：点击后渲染到主区
+   #tab-useradmin 并切换 tab，与其它菜单同一套交互；「修改我的口令」仍是浮窗。
    这一页管什么、不管什么（页面上也这么写，不用猜）：
      * 管：谁能登录（账号）、谁能写（角色）、谁被停用；以及你改自己的口令。
      * 不管：项目里的知识、本体、版本 —— 那些在「知识台账」「本体建模层」做。
@@ -70,11 +72,13 @@
         return detail || (fallback + '（HTTP ' + (result ? result.status : '?') + '）');
     }
 
-    // ── 抽屉骨架 ───────────────────────────────────────────────────────────────
+    // ── 页面骨架：渲染到主区 #tab-useradmin，作为页面式 tab（与其它菜单一致）──
     function build() {
-        drawer = el('div', 'ua-overlay');
+        var host = document.getElementById('tab-useradmin');
+        if (!host) return;
+        drawer = host;
         drawer.innerHTML =
-            '<section class="ua-card" role="dialog" aria-modal="true" aria-labelledby="ua-title">' +
+            '<section class="ua-page" aria-labelledby="ua-title">' +
             '  <header class="ua-head">' +
             '    <div>' +
             '      <h2 id="ua-title">用户与权限</h2>' +
@@ -84,7 +88,6 @@
             '        <b>只读用户</b>：只能检索、问答、看脑图。' +
             '        给账号改口令或停用后，他<b>已登录的会话立刻失效</b>。</p>' +
             '    </div>' +
-            '    <button type="button" class="ua-close" data-ua-close aria-label="关闭">×</button>' +
             '  </header>' +
             '  <p class="ua-flash" data-ua-flash></p>' +
             '  <section class="ua-create">' +
@@ -108,13 +111,8 @@
             '    </table>' +
             '  </section>' +
             '</section>';
-        document.body.appendChild(drawer);
         flashHost = drawer.querySelector('[data-ua-flash]');
         rowsHost = drawer.querySelector('[data-ua-rows]');
-        drawer.querySelector('[data-ua-close]').addEventListener('click', close);
-        drawer.addEventListener('click', function (event) {
-            if (event.target === drawer) close();    // 点遮罩空白处关闭
-        });
         drawer.querySelector('[data-ua-create]').addEventListener('click', createUser);
     }
 
@@ -132,15 +130,33 @@
         }).join('');
     }
 
+    // 打开用户管理页：渲染到 #tab-useradmin 并切换到该 tab。
     function open() {
-        if (!drawer) build();
+        var host = document.getElementById('tab-useradmin');
+        if (!host) return;
+        if (!drawer || drawer !== host || !drawer.querySelector('[data-ua-new-name]')) build();
+        enterPage();
         fillRoleOptions();
-        drawer.hidden = false;
         flash('');
         load();
     }
 
-    function close() { if (drawer) drawer.hidden = true; }
+    // 切换到用户管理页面：隐藏其它 tab、显示本页、更新标题与侧栏高亮。
+    function enterPage() {
+        if (!drawer) return;
+        document.querySelectorAll('.tab').forEach(function (t) { t.classList.add('hidden'); });
+        drawer.classList.remove('hidden');
+        var title = document.getElementById('title');
+        if (title) title.textContent = '用户与权限';
+        document.querySelectorAll('aside nav button').forEach(function (b) { b.classList.remove('active'); });
+        var ub = document.querySelector('aside nav .nav-group[data-layer="system"] button');
+        if (ub) ub.classList.add('active');
+        var scope = document.getElementById('scope');
+        if (scope) scope.classList.add('hidden');
+    }
+
+    // 页面式 tab 不再需要关闭；保留空实现以免外部误调。
+    function close() {}
 
     // ── 读清单 ────────────────────────────────────────────────────────────────
     function load() {

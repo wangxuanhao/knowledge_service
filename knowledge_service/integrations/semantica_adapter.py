@@ -673,21 +673,43 @@ class SemanticaExtractor:
             attribute_diagnostics=getattr(batch,'diagnostics',{})
             for key,value in attribute_diagnostics.items():
                 self.extraction_diagnostics['attribute_'+key]=value
+            # 判据：谓词是否在本体里明确声明为「对象属性」（关系）。
+            def declared_object_property(predicate):
+                try:
+                    return ontology.resolve(predicate, ontology.relations) in ontology.relations
+                except ValueError:
+                    return False
+            # 字面量兜底类型：命中实体若属于这类，本质是被 NER 误建成实体的标量值（金额/状态/时长）。
+            LITERAL_FALLBACK_CLASSES = {'DataEntity'}
             for item in attributes:
                 entity=entities[item.entity_index]
                 entity_id=lookup[(entity.text,entity.label)]
                 object_ids={rid for (text_value,_),rid in lookup.items()
                     if isinstance(item.value,str) and text_value.strip().casefold()==item.value.strip().casefold()}
+                # 先找出属性值唯一命中的那个实体（可能为 None）
+                object_entity=None
                 if len(object_ids)==1:
+                    hit_id=next(iter(object_ids))
+                    object_entity=next((candidate for candidate in entities
+                        if lookup[(candidate.text,candidate.label)]==hit_id),None)
+                # 类型短名（不引正则，兼容 IRI/短名）
+                object_type_short=''
+                if object_entity is not None:
+                    object_type_short=str(object_entity.label).rsplit('#',1)[-1].rsplit('/',1)[-1]
+                # 只有三条全满足才把属性改判为关系：
+                #   ① 值唯一命中实体；② 谓词在本体里是**对象属性**；③ 命中实体不是字面量兜底类。
+                # 否则保留为属性 —— 属性通道已确认 value 是标量，NER 误把标量建成实体不应连锁污染。
+                can_be_relation=(object_entity is not None
+                    and declared_object_property(item.attribute)
+                    and object_type_short not in LITERAL_FALLBACK_CLASSES)
+                if can_be_relation:
                     object_id=next(iter(object_ids));key=(entity_id,item.attribute.strip().casefold(),object_id)
                     if key not in relation_fact_keys:
-                        object_entity=next(candidate for candidate in entities
-                            if lookup[(candidate.text,candidate.label)]==object_id)
                         self.review_candidates.append(dict(kind='relation',predicate=item.attribute,
                             subject_id=entity_id,object_id=object_id,subject=entity.text,object=object_entity.text,
                             subject_type=entity.label,object_type=object_entity.label,confidence=item.confidence,
                             evidence=item.evidence,evidence_status=getattr(item,'evidence_status','exact'),
-                            reason='属性值命中正文实体，已按关系候选处理'))
+                            reason='属性值命中正文实体且谓词为对象属性，已按关系候选处理'))
                         relation_fact_keys.add(key)
                     self.extraction_diagnostics['attribute_reclassified_relation']+=1
                     continue

@@ -140,7 +140,7 @@
         try{
           const result=await api(endpoint('/delete'),{record_id:row.id,expected_version:row.version});
           status(`已软删除 ${result.deleted} 条记录；可在「知识台账 → 可撤销的操作」撤销。`);
-          host.innerHTML='<p class="evidence-empty">该知识已软删除，正在刷新图谱…</p>';get('draw-graph').click();
+          host.innerHTML='<p class="evidence-empty">该知识已软删除，正在刷新图谱…</p>';$('draw-graph').click();
         }catch(error){status(error.message,true);remove.disabled=false;}
       };
       host.querySelector('.evidence-danger').appendChild(remove);

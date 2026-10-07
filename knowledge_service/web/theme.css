@@ -134,30 +134,41 @@ body aside {
 }
 body aside .brand {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
+  color: #f0faf9;
+}
+/* 品牌图形标：一颗知识图谱节点标记 */
+body aside .brand .brand-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(94, 234, 212, .6);
+  box-shadow: 0 0 16px rgba(45, 212, 191, .7), inset 0 0 10px rgba(94, 234, 212, .3);
+}
+body aside .brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+body aside .brand-name {
   font-size: 20px;
   font-weight: 700;
   letter-spacing: .16em;
+  line-height: 1;
   color: #f0faf9;
-}
-/* 品牌前一颗亮青发光点 */
-body aside .brand::before {
-  content: '';
-  align-self: center;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #5eead4, #2dd4bf);
-  box-shadow: 0 0 12px 2px rgba(45, 212, 191, .65);
-  flex: 0 0 auto;
+  white-space: nowrap;
 }
 body aside .brand small {
   display: block;
-  margin-top: 7px;
-  font-size: var(--ui-fs-xs);
-  letter-spacing: .16em;
-  color: #8fb5b3;
+  margin: 0;
+  font-size: 10px;
+  font-family: var(--ui-mono, ui-monospace, "SF Mono", Consolas, monospace);
+  font-weight: 500;
+  letter-spacing: .2em;
+  color: #9ccbc8;
 }
 body aside > label {
   font-size: var(--ui-fs-xs);
@@ -219,6 +230,10 @@ body aside .nav-group[data-layer=consume] { border-left: 2px solid #38bdf8; }
 body aside .nav-group[data-layer=consume] > summary { color: #7dd3fc; }
 body aside .nav-group[data-layer=run] { border-left: 2px solid #fde047; }
 body aside .nav-group[data-layer=run] > summary { color: #fde68a; }
+/* 系统层（管理）—— 紫色系（主题 --ui-violet 的浅亮档，小面积点缀），
+   与上面四组同一套"彩色左边线 + 彩色标题"：未点击时也不再是黑边。 */
+body aside .nav-group[data-layer=system] { border-left: 2px solid #a78bfa; }
+body aside .nav-group[data-layer=system] > summary { color: #c4b5fd; }
 
 body aside .nav-group > button {
   display: block;
@@ -541,7 +556,7 @@ body main .ontology-model .om-seg > button.on {
 }
 
 /* 三栏：左侧清单 / 画布 / 右侧详情，都走白纸浅青 */
-body main .ontology-model .om-body { background: var(--ui-bg); }
+body main .ontology-model .om-body { background: var(--ui-bg); overflow-x: auto; }
 body main .ontology-model .om-side,
 body main .ontology-model .om-detail {
   background: var(--ui-surface);
@@ -554,10 +569,24 @@ body main .ontology-model .om-side .subtle,
 body main .ontology-model .om-detail .subtle { color: var(--ui-muted); }
 body main .ontology-model .om-side-empty { color: var(--ui-faint); }
 
+/* 本体类型 → 纵向继承缩进树：根类无缩进，子类逐层缩进 + 左侧引导线（点击=选中） */
+body main .ontology-model .om-tree { list-style: none; margin: 4px 0 0; padding: 0; }
+body main .ontology-model .om-tree li { flex-wrap: wrap; }
+body main .ontology-model .om-tree .om-tree-children {
+  list-style: none; flex: 1 1 100%; margin: 0;
+  padding: 2px 0 0 12px; border-left: 1px solid var(--ui-line-2);
+}
+body main .ontology-model .om-tree .om-tree-count {
+  margin-left: 5px; padding: 0 5px; font-size: 10px; line-height: 1.5;
+  color: var(--ui-muted); background: var(--ui-surface-2);
+  border: 1px solid var(--ui-line); border-radius: 8px;
+}
+
 /* 画布：浅青点阵网格（深色版是亮点阵，浅版用青灰点阵）*/
 body main .ontology-model .om-canvas-host {
   background: var(--ui-surface);
   border-color: var(--ui-line);
+  min-width: 520px;   /* 画布不能被左右两栏压成一条缝：层级树/图谱在窄视口也有可用宽度 */
 }
 body main .ontology-model .om-canvas-stage {
   background: radial-gradient(var(--ui-line-2) .8px, transparent .8px);
@@ -640,6 +669,14 @@ body main .ontology-model .om-ab-chip.attr { background: var(--ui-surface-2); co
 body main .ontology-model .om-ab-chip.pending { background: var(--ui-warn-dim); color: #8a6108; }
 body main .ontology-model .om-ab-chip.conflict { background: var(--ui-warn-dim); color: #8a6108; }
 body main .ontology-model .om-ab-chip.block { background: var(--ui-danger-dim); color: var(--ui-danger); }
+
+/* 底栏动作条：发布说明 + 校验并审核 + 发布 包成一行，不被挤成两行 */
+body main .ontology-model .om-ab-ops {
+  margin-left: auto; display: flex; flex-wrap: nowrap; align-items: center; gap: 10px;
+}
+@media (max-width: 1180px) {
+  body main .ontology-model .om-ab-ops { flex-wrap: wrap; }
+}
 
 /* 历史版本抽屉（原选择器同样是 `.ontology-model .om-history-panel` 0,2,0，要带前缀）*/
 body .ontology-model .om-history-backdrop { background: rgba(10, 36, 35, .4); }

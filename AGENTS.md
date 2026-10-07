@@ -73,6 +73,7 @@ node --test tests/service/*.test.cjs
 6. **调用本机 HTTP 需要绕过系统代理**：`NO_PROXY='127.0.0.1,localhost'`，否则本地请求返回 502。
 7. **应用连库用角色 `knowledge_app`（无 DDL 权限）**；建表/索引只能用迁移器（它持 owner 凭据）。应用进程读不到超级用户口令。
 8. **前端 404 找不到资源时**：`web/` 映射到 `/assets/`，`web/vendor/` 映射到 `/vendor/`。
+9. **派生知识的来源在 `assertions` 表，不在记录顶层 `source_id`**：一条实体/关系/属性可能被多个文档提到（多对多），`FormalFactWriter._canonical_record()` 落库前会主动 `pop('source_id')`，所以读到 `source_id=None` 是设计、不是丢数据。查「某文档抽出哪些知识」要用 `GET /projects/{p}/assertions?document_id=...`（带 kind/status/payload/quote），**不要靠记录 ID 前缀猜**。待确认（pending）断言的 `payload` 字段与 accepted 规范记录不同：pending 实体用 `proposed_type`、pending 关系用 `subject/predicate/object` 名字、pending 属性用 `subject/proposed_type/value`，前端渲染要分支处理，否则会显示"—"。相关坑：NER 可能误把标量值（金额/状态/时长）建成 `DataEntity` 实体；`semantica_adapter` 把属性改判关系必须三条全满足（值唯一命中实体 + 谓词是本体**对象属性** + 命中实体非 `DataEntity`），否则标量属性会被错误卷进关系组。
 
 ## 巨型文件：读之前先规划
 

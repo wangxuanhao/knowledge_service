@@ -93,26 +93,56 @@
         return { cls: 'is-viewer', text: '只读用户' };
     }
 
+    // 侧栏底部的用户状态栏：默认只露「头像 + 用户名 + 角色徽章」一条，
+    // 点击才展开下面的操作（改口令 / 退出登录），不把操作按钮平铺在导航里。
+    // 「用户与权限」不在下拉里 —— 它作为侧栏「系统层 · 管理」里的菜单项，点进去是页面式。
     function renderSession(user) {
         var box = document.getElementById('session');
         if (!box) { return; }
         if (!user) { box.hidden = true; return; }
         var badge = roleBadge(user.role);
         var name = user.display_name || user.username;
+        var initial = (name || '').trim().charAt(0) || '?';
         box.hidden = false;
+        box.classList.remove('open');
         box.innerHTML =
-            '<div class="session-who"><span class="session-role ' + badge.cls + '">' + badge.text + '</span>' +
-            '<span title="' + escapeHtml(user.username) + '">' + escapeHtml(name) + '</span></div>' +
+            // 状态栏触发器：整条可点，展开/收起操作菜单。
+            '<button type="button" class="session-who" id="session-toggle" ' +
+            'aria-haspopup="true" aria-expanded="false" title="账号操作">' +
+            '  <span class="session-avatar" aria-hidden="true">' + escapeHtml(initial) + '</span>' +
+            '  <span class="session-meta">' +
+            '    <span class="session-name" title="' + escapeHtml(user.username) + '">' + escapeHtml(name) + '</span>' +
+            '    <span class="session-role ' + badge.cls + '">' + badge.text + '</span>' +
+            '  </span>' +
+            '  <span class="session-caret" aria-hidden="true">▾</span>' +
+            '</button>' +
+            // 下拉菜单：只读提示 + 两个动作。默认收起，点击状态栏才展开。
+            '<div class="session-menu" id="session-menu">' +
             // 只读账号要有一句"我不能做什么"：只藏按钮，用户会以为功能坏了。
             '<p class="session-hint">只读账号：能检索、问答、看脑图；写入入口已隐藏，'
             + '要写入请联系管理员调整你的角色。</p>' +
-            '<div class="session-actions">' +
             // id 不能用 auth-password/auth-username（避免与其它表单重名，历史上踩过）。
-            '  <button type="button" class="session-btn" id="auth-open-password">改口令</button>' +
-            // 管理员可见（超管 + 管理员）：后端同样只放行这两类。
-            '  <button type="button" class="session-btn admin-only" id="auth-open-users">用户与权限</button>' +
-            '  <button type="button" class="session-btn session-logout" id="auth-logout">退出登录</button>' +
+            '<button type="button" class="session-item" id="auth-open-password">改口令</button>' +
+            '<button type="button" class="session-item session-logout" id="auth-logout">退出登录</button>' +
             '</div>';
+
+        var toggle = document.getElementById('session-toggle');
+        var menu = document.getElementById('session-menu');
+        function setOpen(open) {
+            box.classList.toggle('open', open);
+            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        }
+        function toggleMenu() { setOpen(!box.classList.contains('open')); }
+        // 点击状态栏整条切换；支持键盘（Enter / 空格）操作。
+        toggle.addEventListener('click', function (e) { e.stopPropagation(); toggleMenu(); });
+        toggle.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleMenu(); }
+        });
+        // 点任一菜单项后收起（改口令会再打开它自己的浮窗）。
+        menu.addEventListener('click', function (e) {
+            if (e.target && e.target.classList && e.target.classList.contains('session-item')) setOpen(false);
+        });
+
         document.getElementById('auth-logout').addEventListener('click', logout);
         document.getElementById('auth-open-password').addEventListener('click', function () {
             if (window.UserAdmin && window.UserAdmin.openPasswordChange) {
@@ -121,16 +151,20 @@
                 notice('改口令界面没加载成功（user-admin.js 未加载），请刷新重试。', 'error');
             }
         });
-        var usersBtn = document.getElementById('auth-open-users');
-        if (usersBtn) {
-            usersBtn.addEventListener('click', function () {
-                if (window.UserAdmin && window.UserAdmin.open) {
-                    window.UserAdmin.open();
-                } else {
-                    notice('用户与权限界面没加载成功（user-admin.js 未加载），请刷新重试。', 'error');
-                }
-            });
-        }
+    }
+
+    // 侧栏外的点击 / 按 Esc 都收起已展开的状态栏菜单（只注册一次）。
+    function setupSessionDismiss() {
+        document.addEventListener('click', function (e) {
+            if (e.target && e.target.closest && e.target.closest('.session-box')) return;
+            var open = document.querySelectorAll('.session-box.open');
+            for (var i = 0; i < open.length; i++) open[i].classList.remove('open');
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key !== 'Escape') return;
+            var open = document.querySelectorAll('.session-box.open');
+            for (var i = 0; i < open.length; i++) open[i].classList.remove('open');
+        });
     }
 
     // 页面内轻提示：复用 app.js 的 noticeCard，独立加载时降级为控制台一句。
@@ -239,8 +273,12 @@
     }
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', bootstrap);
+        document.addEventListener('DOMContentLoaded', function () {
+            setupSessionDismiss();
+            bootstrap();
+        });
     } else {
+        setupSessionDismiss();
         bootstrap();
     }
 })();

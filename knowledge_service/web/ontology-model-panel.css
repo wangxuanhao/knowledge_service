@@ -53,6 +53,7 @@
    align-items 是防"某个子节点变高把同伴拉伸"（发布说明输入框曾被拉到 725px 高）。 */
 .ontology-model .om-ab-actions{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .ontology-model .om-ab-note{flex:1 1 100%;font-size:11px;color:#8296ad;line-height:1.5;margin:0}
+.ontology-model .om-ab-busy{color:#fbbf24;font-size:12px;font-weight:600}
 
 /* ---------- 版本管理抽屉 ---------- */
 .ontology-model .om-history{position:fixed;inset:0;z-index:60;display:flex;justify-content:flex-end}
@@ -204,3 +205,20 @@
 .ontology-model .om-history-pub-note b{color:#2ee6a8;margin-right:4px}
 .ontology-model .om-history-actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0}
 .ontology-model .om-history-actions .om-btn.primary{background:linear-gradient(180deg,#2ee6a8,#1fae7d);border-color:transparent;color:#04121c;font-weight:700}
+
+/* ---------- 内联约束编辑（折叠区：当前值可移除、下拉新增） ---------- */
+.ontology-model .om-constraint-edit{margin-top:10px;border:1px solid #25354d;border-radius:8px;background:#0d1523;padding:0}
+.ontology-model .om-constraint-edit summary{cursor:pointer;list-style:none;padding:8px 11px;font-size:12px;color:#38bdf8;font-weight:600}
+.ontology-model .om-constraint-edit summary::-webkit-details-marker{display:none}
+.ontology-model .om-constraint-edit[open] summary{border-bottom:1px solid #25354d}
+.ontology-model .om-constraint-body{padding:10px 11px;display:grid;gap:10px}
+.ontology-model .om-ce-row{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start}
+.ontology-model .om-ce-label{flex:0 0 88px;font-size:11.5px;color:#8296ad;padding-top:5px}
+.ontology-model .om-ce-current{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:6px}
+.ontology-model .om-ce-empty{font-size:11.5px;color:#5b6d82;padding:4px 0}
+.ontology-model .om-ce-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 6px 3px 9px;border-radius:6px;background:#111d2e;border:1px solid #2b3d57;font-size:11.5px;color:#dbe7f3}
+.ontology-model .om-ce-x{border:none;background:transparent;color:#8296ad;cursor:pointer;font-size:13px;line-height:1;padding:0 2px}
+.ontology-model .om-ce-x:hover{color:#ef4444}
+.ontology-model .om-ce-add{flex:1 1 100%;display:flex;gap:8px;align-items:center}
+.ontology-model .om-ce-select{flex:1 1 auto;min-width:120px;width:auto;padding:5px 8px;border-radius:7px;border:1px solid #25354d;background:#0d1523;color:#e7eef6;font-size:12px}
+.ontology-model .om-ce-add .om-btn{flex:0 0 auto;padding:5px 12px}

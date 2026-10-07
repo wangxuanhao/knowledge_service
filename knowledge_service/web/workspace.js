@@ -371,10 +371,33 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
     done({nodes:series.option.data.length});
   }
   function renderHits(result){
-    get('hits').innerHTML=['entity','chunk','relation'].map(kind=>{
-      const rows=result.hits.filter(r=>r.kind===kind);
-      return `<section><h3 class="hit-kind">${{entity:'匹配实体',chunk:'原文片段',relation:'关系链路'}[kind]} <small>${rows.length} / ${result.channel_quotas?.[kind]??5}</small></h3>${rows.map(r=>`<article class="hit-entry"><b>${esc(r.text.slice(0,80))}</b><span>${esc(labelOf(r.type)||'原文')} · ${Number(r.score||r.keyword_score||0).toFixed(2)}</span><p>${esc(r.text.slice(0,180))}</p><div class="row">${kind==='entity'||kind==='relation'?`<button data-graph-node="${esc(kind==='entity'?r.id:r.subject_id)}">在图谱中查看</button>`:''}${kind==='chunk'&&r.source_id?`<button data-source-record="${esc(r.source_id)}" class="secondary">查看原文</button>`:''}</div></article>`).join('')||'<p class="subtle">暂无命中</p>'}</section>`;
-    }).join('');
+    const sourceChunks=result.source_chunks||[];
+    const chunkHits=result.hits.filter(r=>r.kind==='chunk');
+    // 单条命中条目：isSource 区分「命中知识的来源原文」与「原文全文匹配」。
+    // 实体/关系给「在图谱中查看」，原文片段给「查看原文」。
+    const entry=(r,kind,isSource=false)=>{
+      const score=Number(r.score||r.keyword_score||0).toFixed(2);
+      const tag=isSource?'命中知识的来源原文':(labelOf(r.type)||'原文');
+      const btn=kind==='entity'||kind==='relation'
+        ?`<button data-graph-node="${esc(kind==='entity'?r.id:r.subject_id)}">在图谱中查看</button>`
+        :(kind==='chunk'&&r.source_id?`<button data-source-record="${esc(r.source_id)}" class="secondary">查看原文</button>`:'');
+      return `<article class="hit-entry${isSource?' hit-source':''}"><b>${esc((r.text||'').slice(0,80))}</b><span>${esc(tag)} · ${score}</span><p>${esc((r.text||'').slice(0,180))}</p>${btn?`<div class="row">${btn}</div>`:''}</article>`;
+    };
+    const entities=result.hits.filter(r=>r.kind==='entity');
+    const relations=result.hits.filter(r=>r.kind==='relation');
+    // 「原文片段」组 = 命中实体/关系的来源原文 + chunk 全文命中，两部分分块展示。
+    // 这是检索溯源的落点：搜「商家」命中「商户」时，来源原文里其实没有「商家」这个词，
+    // 但它支撑了命中的实体，必须一并展示，否则用户只看到实体、看不到它来自哪段原文。
+    const chunkTotal=sourceChunks.length+chunkHits.length;
+    const chunkSection=`<section><h3 class="hit-kind">原文片段 <small>${chunkTotal} / ${result.channel_quotas?.chunk??5}</small></h3>`+
+      (sourceChunks.length?`<div class="hit-source-label">命中知识的来源原文</div>`+sourceChunks.map(r=>entry(r,'chunk',true)).join(''):'')+
+      (chunkHits.length?`<div class="hit-source-label">原文全文匹配</div>`+chunkHits.map(r=>entry(r,'chunk')).join(''):'')+
+      (chunkTotal?'':'<p class="subtle">暂无命中</p>')+`</section>`;
+    get('hits').innerHTML=[
+      `<section><h3 class="hit-kind">匹配实体 <small>${entities.length} / ${result.channel_quotas?.entity??5}</small></h3>${entities.map(r=>entry(r,'entity')).join('')||'<p class="subtle">暂无命中</p>'}</section>`,
+      chunkSection,
+      `<section><h3 class="hit-kind">关系链路 <small>${relations.length} / ${result.channel_quotas?.relation??5}</small></h3>${relations.map(r=>entry(r,'relation')).join('')||'<p class="subtle">暂无命中</p>'}</section>`,
+    ].join('');
     get('hits').querySelectorAll('[data-graph-node]').forEach(b=>b.onclick=async()=>{try{await selectEntityDetail(b.dataset.graphNode);}catch(error){status(error.message,true);}});
     get('hits').querySelectorAll('[data-source-record]').forEach(b=>b.onclick=()=>historyFor({id:b.dataset.sourceRecord}));
   }
@@ -382,9 +405,16 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
   // 没有这个说明，勾了开关也只是多几条结果，用户无法判断它到底做了什么。
   function expansionSummary(result){
     const expansion=result&&result.ontology_expansion;if(!expansion)return '';
-    const terms=(expansion.terms||[]).join('、')||'—';
+    const terms=(expansion.terms||[]).join('、')||'';
     const subclasses=(expansion.subclasses||[]).length;
-    return ` · 本体扩展：命中 ${terms}${subclasses?`，带出 ${subclasses} 个子类`:''}`;
+    if(!terms){
+      // 勾了扩展却没命中任何类：明确说清原因，而不是静默（区分「本体没有父子层级」
+      // 和「查询词没命中本体的类」——前者是数据问题，后者是词没对上）。
+      return expansion.has_hierarchy===false
+        ?' · 本体扩展：本体里没有父子层级，无子类可扩展'
+        :' · 本体扩展：查询词未命中本体的类';
+    }
+    return ` · 本体扩展：命中 ${terms}${subclasses?`，带出 ${subclasses} 个子类`:'，该类无子类'}`;
   }
   async function runSearch(){
     if(!current)return;

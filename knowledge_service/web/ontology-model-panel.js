@@ -537,6 +537,125 @@
     return sec;
   }
 
+  /* ==========================================================================
+   * 内联约束编辑 —— 让本体建模层名副其实
+   * --------------------------------------------------------------------------
+   * 后端命令通道（ontology_drafts_commands）一直支持 domain/range/datatype/parent 的增删，
+   * 但右栏只把它们渲染成只读清单，于是用户"看得到、改不了"。这里接成统一的内联编辑：
+   *   · 关系类型 → 增删 domain（主体类）/ range（客体类）
+   *   · 实体属性 → 增删所属类 + set_datatype 改数据类型
+   *   · 实体类   → 增删父类（继承）
+   * 所有改动走 sendCommand：已发布本体下会自动基于当前版本开一份草案，不直接改生效版本。
+   * ======================================================================== */
+  // 常用数据类型（value 是完整 xsd IRI——set_datatype 按完整 IRI 落库）
+  const XSD_BASE = 'http://www.w3.org/2001/XMLSchema#';
+  const DATATYPE_OPTIONS = [
+    ['string', '文本 string'], ['integer', '整数 integer'], ['decimal', '小数 decimal'],
+    ['boolean', '是／否 boolean'], ['date', '日期 date'], ['dateTime', '日期时间 dateTime'],
+    ['anyURI', '链接 anyURI'],
+  ];
+
+  function constraintEditSection(term, kind, summary) {
+    const classes = (summary.classes || []).filter(c => c.active !== false);
+    let options = classes.map(c => ({ id: c.id, text: labelOfIri(c.id, summary) }));
+    // 父类下拉必须排除当前类自身：一个类不能是自己的父类（否则形成自环，真机探针抓到
+    // target 与 value 是同一个 IRI）。domain/range 不做此排除（关系本就可指向自身所在类）。
+    if (kind === 'class') options = options.filter(o => o.id !== term.id);
+
+    const sec = el('details', 'om-constraint-edit');
+    // 折叠区标题按对象类型动态显示——类没有 domain/range，别把四类约束都列上去造成误解。
+    const CE_TITLE = {
+      class: '编辑继承（父类）',
+      relation: '编辑 domain / range（两端类）',
+      attribute: '编辑所属类 / 数据类型',
+    };
+    const summary2 = el('summary', null, CE_TITLE[kind] || '编辑约束');
+    const body = el('div', 'om-constraint-body');
+    sec.append(summary2, body);
+
+    // 发一条约束命令；sendCommand 会在已发布本体下自动开草案
+    async function runCmd(cmd) {
+      const M = model();
+      if (!M || typeof M.sendCommand !== 'function') { status('主控未就绪，暂时无法编辑。', true); return; }
+      try {
+        status('正在把改动写进草案…');
+        await M.sendCommand(cmd);
+        status('已写进草案：底栏「校验并审核」、发布后才生效。');
+      } catch (error) { status((error && error.message) || '编辑失败', true); }
+    }
+
+    // 「当前值（可移除）＋ 下拉新增」的一行约束编辑
+    function linkRow(labelText, currentIris, addAction, removeAction) {
+      const row = el('div', 'om-ce-row');
+      row.append(el('span', 'om-ce-label', labelText));
+      const curHost = el('div', 'om-ce-current');
+      const cur = currentIris || [];
+      if (!cur.length) curHost.append(el('span', 'om-ce-empty', '未限定'));
+      cur.forEach(iri => {
+        const chip = el('span', 'om-ce-chip');
+        chip.append(el('span', null, labelOfIri(iri, summary)));
+        const x = el('button', 'om-ce-x');
+        x.type = 'button'; x.textContent = '×'; x.title = '移除这个约束（写进草案）';
+        x.addEventListener('click', () => { void runCmd({ action: removeAction, target_iri: term.id, value: iri }); });
+        chip.append(x); curHost.append(chip);
+      });
+      // 下拉新增：已声明的类不再列出（避免重复添加）
+      const addHost = el('div', 'om-ce-add');
+      const sel = el('select', 'om-ce-select');
+      const blank = el('option', null, '选一个类…'); blank.value = ''; sel.append(blank);
+      options.filter(o => !cur.includes(o.id)).forEach(o => {
+        const opt = el('option', null, o.text); opt.value = o.id; sel.append(opt);
+      });
+      const addBtn = el('button', 'om-btn secondary', '添加');
+      addBtn.type = 'button'; addBtn.disabled = true;
+      sel.addEventListener('change', () => { addBtn.disabled = !sel.value; });
+      addBtn.addEventListener('click', () => {
+        if (sel.value) void runCmd({ action: addAction, target_iri: term.id, value: sel.value });
+      });
+      addHost.append(sel, addBtn);
+      row.append(curHost, addHost);
+      return row;
+    }
+
+    // 数据类型下拉（set_datatype）
+    function datatypeRow() {
+      const row = el('div', 'om-ce-row');
+      row.append(el('span', 'om-ce-label', '数据类型'));
+      const addHost = el('div', 'om-ce-add');
+      const sel = el('select', 'om-ce-select');
+      const blank = el('option', null, '不限定 / 选择…'); blank.value = ''; sel.append(blank);
+      const currentLocal = help().dtypeOf(term);
+      DATATYPE_OPTIONS.forEach(([local, text]) => {
+        const opt = el('option', null, text); opt.value = XSD_BASE + local;
+        if (local === currentLocal) opt.selected = true;
+        sel.append(opt);
+      });
+      const applyBtn = el('button', 'om-btn secondary', '应用类型');
+      applyBtn.type = 'button';
+      applyBtn.disabled = !sel.value;
+      sel.addEventListener('change', () => { applyBtn.disabled = !sel.value; });
+      applyBtn.addEventListener('click', () => {
+        if (sel.value) void runCmd({ action: 'set_datatype', target_iri: term.id, datatype: sel.value });
+      });
+      addHost.append(sel, applyBtn);
+      row.append(addHost);
+      return row;
+    }
+
+    if (kind === 'relation') {
+      body.append(
+        linkRow('domain 主体类', term.domain, 'add_domain', 'remove_domain'),
+        linkRow('range 客体类', term.range, 'add_range', 'remove_range'));
+    } else if (kind === 'attribute') {
+      body.append(
+        linkRow('所属类 domain', term.domain, 'add_domain', 'remove_domain'),
+        datatypeRow());
+    } else {
+      body.append(linkRow('父类（继承）', term.parents, 'add_parent', 'remove_parent'));
+    }
+    return sec;
+  }
+
   function renderClass(cls, summary) {
     const classes = summary.classes || [], relations = summary.relations || [], attributes = summary.attributes || [];
     const box = el('div', 'om-detail-card');
@@ -554,6 +673,8 @@
       '做什么：列出这个类可以作为 domain 的关系类型及其 range。不做什么：不判断实例是否合法，校验由服务端做。'));
 
     box.append(rulesSection(cls));
+    // 内联编辑父类（继承）；已发布本体下自动开草案
+    box.append(constraintEditSection(cls, 'class', summary));
 
     const parents = cls.parents || [];
     const children = classes.filter(c => (c.parents || []).includes(cls.id)).map(c => c.id);
@@ -593,6 +714,8 @@
     // 两端为空 = 画布上画不出这条关系线。这里给出"为什么没有"和"怎么补"，
     // 而不是让用户对着一条空关系猜（这正是"关系没办法显示"的直接解法）。
     box.append(endpointsSection(rel, summary));
+    // 内联增删 domain / range（约束编辑）
+    box.append(constraintEditSection(rel, 'relation', summary));
 
     box.append(rulesSection(rel));
     box.append(retireSection(rel));
@@ -611,7 +734,10 @@
 
     box.append(section('数据类型（datatype）', 1,
       [termRow('attr', dtypeLabel(attr), help().dtypeOf(attr) || '未限定')],
-      '做什么：这个属性填的数据类型。不做什么：不做取值校验，也不改类型（改类型走草案命令 set_datatype）。'));
+      '做什么：这个属性填的数据类型。不做什么：不做取值校验，也不改类型（改类型走下面的约束编辑 set_datatype）。'));
+
+    // 内联改所属类 + 数据类型（约束编辑）
+    box.append(constraintEditSection(attr, 'attribute', summary));
 
     box.append(rulesSection(attr));
     box.append(retireSection(attr));
@@ -707,14 +833,72 @@
     return { enabled: true, reason: '' };
   }
 
+  // 没本体时的底栏：候选/类型统计 + 「生成本体（秒级）」主按钮 + 一句说明。
+  // 不渲染「校验并审核 / 发布 / 发布说明输入框」——那三个在没本体时全是灰的、没意义，
+  // 还因为发布说明输入框最小 180px 把按钮挤成两行（用户反馈「校验和发布是两行」）。
+  function renderEmptyActions(st) {
+    const disc = st.discovery || null;
+    const pending = disc ? (disc.unpublished_candidate_count || 0) : 0;
+    const generating = !!st.generating;
+    const inferring = !!st.inferringHierarchy;
+    // 这一步整理出的是【实体类型 / 关系类型】，不是一条条实体，所以 chip 直接讲类型。
+    const entityTypeN = disc ? (disc.entity_types || []).length : null;
+    const relationTypeN = disc ? (disc.relation_types || []).length : null;
+    const bar = el('div', 'om-actionbar-inner');
+    const counts = el('div', 'om-ab-counts');
+    const chip = (label, value, cls, tip) => {
+      const c = el('span', 'om-ab-chip' + (cls ? ' ' + cls : ''));
+      c.append(el('b', null, value === null ? '—' : String(value)));
+      c.append(el('i', null, label));
+      if (tip) c.title = tip;
+      return c;
+    };
+    counts.append(
+      chip('实体类型', entityTypeN, 'cls', '将生成的实体类型数（同名概念合并）'),
+      chip('关系类型', relationTypeN, 'rel', '将生成的关系类型数'),
+      chip('候选概念', disc ? (disc.candidate_count || 0) : null, 'pending', '知识写入抽出的候选总数'),
+    );
+    bar.append(counts);
+    const actions = el('div', 'om-ab-actions');
+    if (generating) {
+      actions.append(el('span', 'om-ab-busy', inferring
+        ? '正在生成，并让模型推断父子层级（类型很快好，层级要几分钟，别关页面）…'
+        : '正在生成本体（约 1 秒，不调用模型）…'));
+    } else if (pending > 0) {
+      const btn = el('button', 'om-btn primary', '生成本体（约 1 秒）');
+      btn.type = 'button';
+      btn.title = '把候选整理成一份待审核的本体（实体类型＋关系类型），默认平级、不调模型';
+      btn.addEventListener('click', () => {
+        const M = model();
+        if (M && M.generateDraftFromDiscovery) M.generateDraftFromDiscovery(false);
+      });
+      actions.append(btn);
+    }
+    bar.append(actions);
+    bar.append(el('div', 'om-ab-note', generating
+      ? (inferring
+        ? '生成后是一份待审核草案，接着走「校验 → 审核 → 发布」。'
+        : '马上好。')
+      : (pending > 0
+        ? '本体生成、审核、发布后，这里才会出现「校验并审核 / 发布」；想要自动父子层级，用左栏的慢按钮。'
+        : '这个项目还没有候选：先去「知识写入」页上传文档做开放发现。')));
+    put(actionsHost, bar);
+  }
+
   function renderActions(state) {
     if (!actionsHost) return;
     const st = state || S();
     const summary = st.summary || null;
+    // 没本体（开放发现引导态）走简化底栏，避免一堆 disabled 控件 + 按钮换行。
+    if (!summary) { renderEmptyActions(st); return; }
     const classes = (summary && summary.classes) || [];
     const rels = (summary && summary.relations) || [];
     const attrs = (summary && summary.attributes) || [];
     const candidates = st.candidates || [];
+    // 「待收下」读开放发现概览的真实计数（unpublished_candidate_count），
+    // 而不是画布虚线节点的 candidates.length（那一路从没接过数据源，恒为 0）。
+    const disc = st.discovery || null;
+    const pendingCandidates = disc ? (disc.unpublished_candidate_count || 0) : (candidates.length || 0);
     const draft = st.draft || null;
     const ops = (draft && draft.operations) || [];
     // 「冲突」= 草案里与基线冲突、需重新基线的变更（真实字段：operation.validation.rebase_status）
@@ -737,7 +921,7 @@
       chip('类型', summary ? classes.length : null, 'cls', '当前本体的实体类数量'),
       chip('关系', summary ? rels.length : null, 'rel', '当前本体的关系类型数量'),
       chip('属性', summary ? attrs.length : null, 'attr', '当前本体的实体属性数量'),
-      chip('待收下', candidates.length, 'pending', '知识写入抽出、还没收进本体的候选概念'),
+      chip('待收下', pendingCandidates, 'pending', '知识写入抽出、还没收进本体的候选概念'),
       chip('冲突', draft ? conflicts : 0, 'conflict', '草案里与基线冲突、需要重新基线的变更数'),
       chip('阻断', blockers, 'block', '服务端发布清单里 error 级阻断项数量（读不到显示 —）'),
     );
@@ -842,7 +1026,10 @@
       actions.append(warnBox);
     }
 
-    actions.append(btnReview, noteInput, btnPub);
+    // 操作区：发布说明 + 校验并审核 + 发布，包成一行（.om-ab-ops 不换行，避免按钮被挤到两行）。
+    const opRow = el('div', 'om-ab-ops');
+    opRow.append(btnReview, noteInput, btnPub);
+    actions.append(opRow);
     bar.append(actions);
 
     // 为什么按钮灰着，必须写在页面上（不能只塞进 title）
@@ -855,11 +1042,23 @@
         + '中间几版的结构改动不再留在当前版本里（那些版本仍在「版本管理」里，随时可以再回到它们）。'
         + '要在这个基础上再改，直接在画布上编辑即可。');
     }
-    if (!summary) msgs.push('读不到本体结构（先在左上角选择知识项目）。');
-    if (!draft) msgs.push('还没有草案：在画布上新增/调整术语会自动建立草案。');
-    else if (!st.stageAvailability) msgs.push('读不到服务端阶段门禁（stage-availability）——按未判定处理，按钮不猜可用性。');
-    else if (!reviewGate.enabled && reviewGate.reason) msgs.push(reviewGate.reason);
-    if (!pubGate.enabled && pubGate.reason) msgs.push(pubGate.reason);
+    if (!summary) {
+      // 区分「没选项目」和「选了项目但还没本体」：后者是开放发现的正常中间态，
+      // 说「先选项目」是误导（用户明明选了）。和左栏引导态说同一句话。
+      if (st.discovery && st.discovery.published === false) {
+        msgs.push('这个项目还没生成本体：先点左栏「归纳并生成本体草案」，或从零新建类；本体就绪后这里才能校验、发布。');
+      } else {
+        msgs.push('读不到本体结构（先在左上角选择知识项目）。');
+      }
+    }
+    if (!draft) {
+      // 没草案时只提示一条：不再把「校验」「发布」各自的"还没有草案"变体重复 push（原文案几乎一样）。
+      msgs.push('还没有草案：先在画布上新增或调整术语，草案会自动建立；之后这里才能「校验并审核」和发布。');
+    } else {
+      if (!st.stageAvailability) msgs.push('读不到服务端阶段门禁（stage-availability）——按未判定处理，按钮不猜可用性。');
+      else if (!reviewGate.enabled && reviewGate.reason) msgs.push(reviewGate.reason);
+      if (!pubGate.enabled && pubGate.reason) msgs.push(pubGate.reason);
+    }
     const note = el('div', 'om-ab-note', msgs.join(' '));
     note.hidden = !msgs.length;
     bar.append(note);

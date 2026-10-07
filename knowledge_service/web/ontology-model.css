@@ -47,6 +47,20 @@
 .ontology-model .om-dtype{font-size:11px;font-family:ui-monospace,Consolas,monospace;color:#2dd4bf;background:rgba(45,212,191,.12);border:1px solid rgba(45,212,191,.25);border-radius:4px;padding:0 4px;margin-left:auto}
 .ontology-model .om-side .om-tip{margin-top:11px;font-size:11px;color:#5b6d82;line-height:1.55}
 .ontology-model .om-side-empty{color:#8296ad;font-size:12.5px;padding:10px 4px;line-height:1.5}
+/* 开放发现引导空态：项目没发布本体但有候选时，左栏给出"归纳生成本体"的入口 */
+.ontology-model .om-discovery-guide{padding:12px 8px}
+.ontology-model .om-discovery-guide h4{color:#e7eef6;font-size:13.5px;font-weight:600;margin:0 0 8px}
+.ontology-model .om-discovery-guide p{margin:0 0 10px;font-size:12px;line-height:1.6}
+.ontology-model .om-discovery-guide b{color:#38bdf8;font-weight:600}
+.ontology-model .om-discovery-guide .om-btn{margin:4px 0 12px}
+.ontology-model .om-discovery-guide .om-guide-do{font-size:11px;color:#8296ad;padding:8px 10px;background:rgba(56,189,248,.06);border-left:2px solid #38bdf8;border-radius:0 6px 6px 0;margin:0 0 8px}
+.ontology-model .om-discovery-guide .om-guide-note{font-size:11px;color:#5b6d82;margin:0}
+.ontology-model .om-discovery-guide.is-generating h4{color:#fbbf24}
+/* 已发布本体后又抽出新候选：左栏顶部的增量归纳提示条 */
+.ontology-model .om-discovery-inline{margin:0 0 12px;padding:10px 12px;border:1px solid rgba(251,191,36,.35);background:rgba(251,191,36,.07);border-radius:9px}
+.ontology-model .om-discovery-inline b{display:block;color:#fbbf24;font-size:12.5px;margin-bottom:4px}
+.ontology-model .om-discovery-inline p{color:#8296ad;font-size:11px;margin:0 0 8px;line-height:1.5}
+.ontology-model .om-discovery-inline .om-btn{margin:0}
 
 /* 中栏画布容器（点阵网格背景；Cytoscape 由画布模块挂进这里） */
 .ontology-model .om-canvas-host{flex:1 1 auto;min-width:0;min-height:440px;position:relative;background-color:#0a1120;background-image:radial-gradient(circle,rgba(56,189,248,.16) 1px,transparent 1px);background-size:22px 22px}

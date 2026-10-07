@@ -382,6 +382,10 @@ def _processed_discovery_candidate_ids(repository, project_id):
 
 class DraftRequest(Request):
     name: str = Field(default='发现本体', min_length=1, max_length=200)
+    # 是否让模型额外推断「谁是谁的父类」。默认 false：
+    # 建类型本身不需要模型（候选类型 → owl:Class/ObjectProperty 是确定性操作，秒级完成）；
+    # 只有想要自动层级时才开，它要调 LLM、多等几分钟。层级也能生成后在画布上手动画。
+    infer_hierarchy: bool = False
 
 
 class DraftReview(Request):
@@ -522,8 +526,10 @@ def install(app, service):
         induction_candidates,normalization=_normalize_induction_candidates(candidates,baseline)
         # P0-3：对候选类清单求一次层级建议。**失败即降级**——LLM 没配/超时/返回垃圾
         # 都只让本次发现"没有层级"，绝不能把本体发现搞挂（层级是增强，不是前提）。
-        hierarchy_suggestions=_hierarchy_suggestions(
-            induction_candidates,request.name)
+        # 默认不调模型（秒级生成本体）：只有用户显式要「智能推断层级」才发这次 LLM 请求。
+        hierarchy_suggestions = (
+            _hierarchy_suggestions(induction_candidates, request.name)
+            if request.infer_hierarchy else {})
         if induction_candidates:
             try:
                 turtle,mappings,inferred=_induce(

@@ -9,6 +9,7 @@ data/service/
 data/log/
 .omo
 .venv
+.preview
 .pytest_cache
 .test-tmp*/
 .tmp-compose-cutover/
