@@ -448,9 +448,13 @@ def test_hierarchy_view_is_renamed_and_fitted_to_the_band_frame():
     assert 'fit: false' in canvas
     assert 'function fitBox(box, pad)' in canvas
     assert 'function drawBands(bands)' in canvas
-    assert 'return { x1: -BAND_PAD' in canvas, 'drawBands 必须把层带外框交回去当居中判据'
+    # drawBands 必须把层带外框交回去当居中判据：左边界含 NODE_W/2 + BAND_PAD、
+    # 宽度含两侧 BAND_PAD（曾经只从 -BAND_PAD 起，最左列的左半边露在带外，
+    # 右边缘又被容器切掉，"居中"永远差一截）。
+    assert 'return { x1: -NODE_W / 2 - BAND_PAD' in canvas, \
+        'drawBands 必须把层带外框交回去当居中判据'
     # 层号标签画在带内侧：以前在带外左侧会把外框撑偏，"居中"永远差一截
-    assert 'lx: BAND_PAD + 4' in canvas
+    assert 'lx: mx + 4' in canvas, '层号标签必须画在层带内侧左上角（随带左/顶缘走）'
 
 
 def test_canvas_has_a_create_entry_because_without_it_parent_cannot_be_added():
@@ -908,11 +912,17 @@ def test_session_buttons_do_not_reuse_login_form_ids():
     """
     js = read('auth.js')
     css = read('auth.css')
-    assert 'id="auth-open-password"' in js and 'id="auth-open-users"' in js, \
-        '会话区按钮没有用 auth-open-* 这套独立 id'
+    assert 'id="auth-open-password"' in js, '会话区按钮没有用 auth-open-* 这套独立 id'
+    # 「用户与权限」已从会话区搬到侧栏「系统层 · 管理」（页面式 tab），
+    # 入口由 menu-hierarchy.js 生成并带 admin-only —— 这里钉住它的新位置，
+    # 免得有人又把它塞回会话区（那里只该有改口令 / 退出登录）。
+    hierarchy = read('menu-hierarchy.js')
+    assert "'用户与权限'" in hierarchy and 'admin-only' in hierarchy, \
+        '「用户与权限」入口必须在侧栏系统层里且对只读用户隐藏'
+    assert 'id="auth-open-users"' not in js, '会话区不该再出现用户管理入口'
     assert "'auth-password'" not in js.split('function renderSession')[1].split('function notice')[0], \
         '会话区又用回了与登录输入框重名的 id'
-    assert '.session-box .session-btn' in css, '会话区按钮缺样式'
+    assert '.session-box .session-who' in css, '会话区按钮缺样式'
     assert 'body.is-viewer .session-box .session-hint' in css, \
         '只读账号的说明没有"仅对只读用户显示"的样式（管理员会看到多余提示）'
     assert '写入入口已隐藏' in read('auth.js'), '只读账号没有一句"我不能做什么"'

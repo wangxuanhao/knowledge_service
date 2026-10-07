@@ -38,13 +38,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / 'service'))
 # 鉴权本身由专门的 tests/service/test_auth_rbac.py 显式 auth_disabled=False 覆盖。
 os.environ['KG_AUTH_DISABLED'] = '1'
 
-# ── 测试里放开"自助注册"（**只是测试便利**，生产默认关闭）────────────────────
-# 生产默认关闭自助注册（api/auth.py: self_registration_allowed，默认 False）：
-# 开放注册＝任何能访问服务的人都能开一个能读全部知识的只读账号。
-# 但测试里有十几处「注册一个 viewer 拿令牌」的写法，它是最短的造号路径；
-# 这一层默认关闭的行为由 test_auth_rbac.py::test_self_registration_is_closed_by_default
-# 显式钉住（那个用例 monkeypatch 掉本变量再验 403），所以这里开着不会漏测。
-os.environ.setdefault('KG_ALLOW_SELF_REGISTRATION', '1')
+# 自助注册已从产品里彻底移除（2026-10-07：register 路由与 KG_ALLOW_SELF_REGISTRATION
+# 一并删掉，开号只走「用户与权限」）。测试不再需要放开任何注册开关，造号直接用
+# UserStore 或 /api/users（管理员令牌），所以这里不再设相关环境变量。
 
 
 @pytest.fixture(scope='session', autouse=True)

@@ -13,11 +13,14 @@
   4. 「查一条记录的证据」是只读动作：只读用户应走到业务层（404），**不是** 403
      —— 这是本轮修掉的越权白名单缺口；
   5. 改口令立刻作废该用户全部旧令牌（口令指纹），管理员重置口令同理；
-  6. 管理员不能降级/停用自己（否则当场失去管理权限）。
+  6. 三档角色的越权边界（本轮重点）：
+       * 管理员不能创建超级管理员，也不能查看 / 修改 / 停用 / 删除超级管理员；
+       * 超级管理员账号不能被降级 / 停用 / 删除（谁都不行，包括他自己）；
+       * 管理员 / 超级管理员都不能降级或删除**当前登录的自己**（会当场失去权限）。
 
-跑完自删：脚本用**迁移角色**删掉自己建的临时账号。应用角色按 0008 的授权没有
-DELETE 权限（"禁用优于删除"是刻意取舍），但这个账号从未产生任何业务留痕，
-留着只会污染账号清单，所以由脚本自己清干净。
+跑完自删：脚本用**超管令牌调 DELETE 接口**删掉自己建的临时账号 —— 顺带验证
+「删除账号」这条产品路径真的通（应用角色对 users 有 DELETE：0001 的
+ALTER DEFAULT PRIVILEGES 已授予 SELECT / INSERT / UPDATE / DELETE）。
 用法：python scripts/verify_auth_rbac.py [--url http://127.0.0.1:8100] [--keep]
 """
 from __future__ import annotations
@@ -85,39 +88,89 @@ def main() -> int:
 
     status, _ = call(base, '/api/projects')
     check('未登录读业务接口被拒（401）', status == 401, f'HTTP {status}')
+    status, _ = call(base, '/api/auth/register', 'POST', {'username': 'x', 'password': 'x123456'})
+    check('自助注册入口已移除（未登录被拦，401）', status == 401, f'HTTP {status}')
 
     status, session = login(base, args.admin_user, args.admin_password)
     if status != 200 or not session.get('access_token'):
-        check('管理员登录', False, f'HTTP {status}：{session.get("detail")}')
-        return 1
-    admin = session['access_token']
-    check('管理员登录', session['user']['role'] == 'admin', f'角色={session["user"]["role"]}')
+        check('种子账号登录', False, f'HTTP {status}：{session.get("detail")}')
+        return _summary()
+    superadmin = session['access_token']
+    superadmin_id = session['user']['id']
+    check('种子账号是超级管理员（老库会被就地提升）',
+          session['user']['role'] == 'superadmin', f'角色={session["user"]["role"]}')
 
-    status, users = call(base, '/api/users', token=admin)
+    status, users = call(base, '/api/users', token=superadmin)
     names = [item['username'] for item in users.get('items', [])] if status == 200 else []
-    check('管理员能读账号清单', status == 200 and args.admin_user in names,
+    check('超级管理员能读账号清单', status == 200 and args.admin_user in names,
           f'HTTP {status}，账号数={len(names)}')
     check('账号清单不含口令哈希', 'password_hash' not in json.dumps(users), 
           '响应里没有 password_hash 字段' if 'password_hash' not in json.dumps(users) else '泄漏了口令哈希！')
 
     # 一个项目用来验"能否写入"（管理员建、跑完删）
     status, project = call(base, '/api/projects', 'POST', {'name': f'verify-auth-{uuid4().hex[:6]}'},
-                           token=admin)
+                           token=superadmin)
     project_id = project.get('id')
-    check('管理员能建项目（写权限）', status == 201 and bool(project_id), f'HTTP {status}')
+    check('超级管理员能建项目（写权限）', status == 201 and bool(project_id), f'HTTP {status}')
 
-    # ── 临时只读账号 ──────────────────────────────────────────────────────────
+    # ── 临时账号：一个只读、一个管理员（分别验两条路径）──────────────────────
     temp_user = 'verify_auth_' + uuid4().hex[:6]
     temp_password = 'verify-' + uuid4().hex[:8]
     status, created = call(base, '/api/users', 'POST',
                            {'username': temp_user, 'password': temp_password, 'role': 'viewer',
-                            'display_name': '复验临时账号'}, token=admin)
+                            'display_name': '复验临时账号'}, token=superadmin)
     if status != 201:
-        check('管理员建只读账号', False, f'HTTP {status}：{created.get("detail")}')
-        return 1
+        check('超级管理员建只读账号', False, f'HTTP {status}：{created.get("detail")}')
+        return _summary()
     temp_id = created['id']
-    check('管理员建只读账号（可直接指定角色）', created['role'] == 'viewer',
+    check('超级管理员建只读账号（可直接指定角色）', created['role'] == 'viewer',
           f'角色={created["role"]}')
+
+    temp_admin_user = 'verify_mgr_' + uuid4().hex[:6]
+    temp_admin_password = 'verify-' + uuid4().hex[:8]
+    status, created_admin = call(base, '/api/users', 'POST',
+                                 {'username': temp_admin_user, 'password': temp_admin_password,
+                                  'role': 'admin', 'display_name': '复验临时管理员'},
+                                 token=superadmin)
+    temp_admin_id = created_admin.get('id')
+    check('超级管理员建管理员账号', status == 201 and created_admin.get('role') == 'admin',
+          f'HTTP {status} 角色={created_admin.get("role")}')
+
+    status, session = login(base, temp_admin_user, temp_admin_password)
+    admin = session.get('access_token', '')
+    check('新建的管理员能登录', status == 200, f'HTTP {status}')
+
+    # ── 三档越权边界（管理员 vs 超级管理员）────────────────────────────────
+    status, refused = call(base, '/api/users', 'POST',
+                           {'username': 'verify_should_fail_' + uuid4().hex[:4],
+                            'password': 'whatever123', 'role': 'superadmin'}, token=admin)
+    check('管理员不能创建超级管理员（403）',
+          status == 403 and refused.get('code') == 'cannot_create_superadmin',
+          f'HTTP {status} code={refused.get("code")}')
+
+    status, refused = call(base, f'/api/users/{superadmin_id}', 'PATCH', {'role': 'viewer'},
+                           token=admin)
+    check('管理员不能降级超级管理员（403）',
+          status == 403 and refused.get('code') == 'cannot_manage_superadmin',
+          f'HTTP {status} code={refused.get("code")}')
+
+    status, refused = call(base, f'/api/users/{superadmin_id}', 'PATCH', {'is_active': False},
+                           token=admin)
+    check('管理员不能停用超级管理员（403）',
+          status == 403 and refused.get('code') == 'cannot_manage_superadmin',
+          f'HTTP {status} code={refused.get("code")}')
+
+    status, refused = call(base, f'/api/users/{superadmin_id}', 'DELETE', token=admin)
+    check('管理员不能删除超级管理员（403）',
+          status == 403 and refused.get('code') == 'cannot_manage_superadmin',
+          f'HTTP {status} code={refused.get("code")}')
+
+    spare_user = 'verify_spare_' + uuid4().hex[:4]
+    status, spare = call(base, '/api/users', 'POST',
+                         {'username': spare_user, 'password': 'spare12345', 'role': 'viewer'},
+                         token=admin)
+    spare_viewer_id = spare.get('id') if status == 201 else None
+    check('管理员能建只读账号（越权边界只挡超管）', status == 201, f'HTTP {status}')
 
     status, session = login(base, temp_user, temp_password)
     viewer = session.get('access_token', '')
@@ -148,7 +201,7 @@ def main() -> int:
 
     # ── 提升 / 降级 / 停用即刻生效 ───────────────────────────────────────────
     status, promoted = call(base, f'/api/users/{temp_id}', 'PATCH', {'role': 'admin'},
-                            token=admin)
+                            token=superadmin)
     check('提升为管理员', status == 200 and promoted['user']['role'] == 'admin',
           f'HTTP {status}')
     status, _ = call(base, '/api/projects', 'POST', {'name': f'提升后建的项目-{uuid4().hex[:4]}'},
@@ -157,7 +210,7 @@ def main() -> int:
 
     status, _ = call(base, f'/api/users/{temp_id}', 'PATCH', {'role': 'viewer'}, token=admin)
     status2, _ = call(base, '/api/projects', 'POST', {'name': '降级后建的项目'}, token=viewer)
-    check('降回只读后写权限立刻收回', status == 200 and status2 == 403,
+    check('管理员能降级另一个管理员，写权限立刻收回', status == 200 and status2 == 403,
           f'改角色 HTTP {status}，写入 HTTP {status2}')
 
     # ── 改口令 / 重置口令立刻作废旧令牌 ──────────────────────────────────────
@@ -178,48 +231,72 @@ def main() -> int:
 
     reset_password = 'reset-' + uuid4().hex[:8]
     status, _ = call(base, f'/api/users/{temp_id}', 'PATCH', {'password': reset_password},
-                     token=admin)
+                     token=superadmin)
     status2, _ = call(base, '/api/projects', token=fresh)
-    check('管理员重置口令后该用户令牌立刻失效', status == 200 and status2 == 401,
+    check('超级管理员重置口令后该用户令牌立刻失效', status == 200 and status2 == 401,
           f'重置 HTTP {status}，旧令牌 HTTP {status2}')
     status, session = login(base, temp_user, reset_password)
     fresh = session.get('access_token', '')
 
     # ── 停用 ────────────────────────────────────────────────────────────────
-    status, _ = call(base, f'/api/users/{temp_id}', 'PATCH', {'is_active': False}, token=admin)
+    status, _ = call(base, f'/api/users/{temp_id}', 'PATCH', {'is_active': False},
+                     token=superadmin)
     status2, denied = call(base, '/api/projects', token=fresh)
     check('停用后令牌立刻失效', status == 200 and status2 == 401
           and denied.get('code') == 'account_disabled', f'HTTP {status2} code={denied.get("code")}')
     status, _ = login(base, temp_user, reset_password)
     check('停用后不能再登录', status == 401, f'HTTP {status}')
 
-    # ── 管理员不能把自己锁在门外 ─────────────────────────────────────────────
+    # ── 谁都不能把自己锁在门外（含超级管理员）────────────────────────────────
+    status, refused = call(base, f'/api/users/{superadmin_id}', 'PATCH', {'role': 'viewer'},
+                           token=superadmin)
+    check('超级管理员不能被降级（409，含自己）',
+          status == 409 and refused.get('code') == 'superadmin_protected',
+          f'HTTP {status} code={refused.get("code")}')
+
+    status, refused = call(base, f'/api/users/{superadmin_id}', 'PATCH', {'is_active': False},
+                           token=superadmin)
+    check('超级管理员不能被停用（409，含自己）',
+          status == 409 and refused.get('code') == 'superadmin_protected',
+          f'HTTP {status} code={refused.get("code")}')
+
+    status, refused = call(base, f'/api/users/{superadmin_id}', 'DELETE', token=superadmin)
+    check('超级管理员不能被删除（409，含自己）',
+          status == 409 and refused.get('code') == 'superadmin_protected',
+          f'HTTP {status} code={refused.get("code")}')
+
     status, me = call(base, '/api/auth/me', token=admin)
     admin_id = me.get('user', {}).get('id')
     status, refused = call(base, f'/api/users/{admin_id}', 'PATCH', {'role': 'viewer'},
                            token=admin)
-    check('管理员不能降级自己（409）',
+    check('管理员不能降级/停用自己（409）',
           status == 409 and refused.get('code') == 'cannot_modify_self',
           f'HTTP {status} code={refused.get("code")}')
 
-    # ── 收尾：删掉临时账号与项目 ─────────────────────────────────────────────
+    status, refused = call(base, f'/api/users/{admin_id}', 'DELETE', token=admin)
+    check('管理员不能删除自己（409）',
+          status == 409 and refused.get('code') == 'cannot_modify_self',
+          f'HTTP {status} code={refused.get("code")}')
+
+    # ── 收尾：删掉临时账号与项目（走产品路径 DELETE，顺带验证它真能用）──────
     if args.keep:
-        print(f'\n（--keep）临时账号 {temp_user} 与项目 {project_id} 保留，请自行清理')
+        print(f'\n（--keep）临时账号 {temp_user} / {temp_admin_user} 与项目 {project_id} '
+              f'保留，请自行清理')
         return _summary()
 
     if project_id:
-        call(base, f'/api/projects/{project_id}', 'DELETE', token=admin)
-    try:
-        sys.path.insert(0, str(ROOT))
-        import psycopg
-        from knowledge_service.core.config import load_environment
-        from knowledge_service.repository.migrate import resolve_migration_dsn
-        load_environment(include_admin=True)
-        with psycopg.connect(resolve_migration_dsn()) as conn:
-            removed = conn.execute('DELETE FROM users WHERE id=%s', (temp_id,)).rowcount
-        check('临时账号已清理', removed == 1, '用迁移角色删除（应用角色无 DELETE 权限是设计）')
-    except Exception as exc:                     # 清理失败不影响上面的结论，但要如实说
-        check('临时账号已清理', False, f'删除失败：{type(exc).__name__}：{exc}')
+        call(base, f'/api/projects/{project_id}', 'DELETE', token=superadmin)
+    for uid, name in ((temp_id, temp_user), (temp_admin_id, temp_admin_user),
+                      (spare_viewer_id, spare_user)):
+        if not uid:
+            continue
+        status, _ = call(base, f'/api/users/{uid}', 'DELETE', token=superadmin)
+        check(f'删除临时账号走产品路径（{name}）', status == 200, f'HTTP {status}')
+    status, users = call(base, '/api/users', token=superadmin)
+    left = [item['username'] for item in users.get('items', [])]
+    check('清理后清单里不再有临时账号',
+          not any(n in left for n in (temp_user, temp_admin_user, spare_user)),
+          f'剩余账号数={len(left)}')
 
     return _summary()
 
