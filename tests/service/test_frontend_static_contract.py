@@ -615,6 +615,21 @@ def test_revert_is_an_explicit_source_kind_with_acknowledgement():
     assert 'om-ctx.is-preview' in read('ontology-model.js') or 'is-preview' in model
 
 
+def test_ontology_model_offers_rebase_when_draft_base_is_stale():
+    """草案基线过期时（服务端推导 needs_rebase==='stale_base'），底栏必须有「重新基线」出口。
+
+    操作手册第 9 章「实体类型关闭」如实标注的已知卡点：停用变更进草案后，发布被
+    publish-readiness 的 base_outdated 硬阻断，但整个单画布找不到「重新基线」按钮 ——
+    用户只能"回到最新重开草案"（等于丢掉已做的停用等变更）。服务端 rebase 接口
+    （POST /ontology-drafts/{id}/rebase）与审核台同款处理器一直都在，缺的只是单画布这一处入口。
+    """
+    panel = read('ontology-model-panel.js')
+    assert 'rebaseDraft' in panel, '单画布必须实现「重新基线」处理器'
+    assert "'/rebase'" in panel, '重新基线要打 POST /rebase 接口，不是前端自己拼结构'
+    assert "needs_rebase === 'stale_base'" in panel, '重新基线按钮只在服务端判定 stale_base 时出现，前端不自算'
+    assert '重新基线' in panel, '按钮可见文案必须是「重新基线」'
+
+
 def _rule_body(css: str, selector: str) -> str:
     """取某条选择器的声明块内容（找不到返回空串）。选择器按文本精确匹配，避免正则转义地狱。"""
     start = css.find(selector + '{')

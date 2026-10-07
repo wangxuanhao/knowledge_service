@@ -190,6 +190,17 @@
 .ontology-model .om-ab-warning input{margin:2px 0 0;flex:0 0 auto;width:15px;height:15px;accent-color:#fbbf24}
 .ontology-model .om-ab-warning span{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
 
+/* ---------- 重新基线：草案基线过期时的唯一出路（阻断发布的硬卡点） ----------
+   琥珀警示块：这是"要先处理才能继续"的提示、不是错误态，所以弱底 + 琥珀描边；
+   按钮用主色，因为它是此刻唯一能推进的动作。 */
+.ontology-model .om-ab-rebase{
+  flex:1 1 100%;display:flex;align-items:center;gap:12px;
+  padding:10px 12px;border-radius:9px;
+  background:rgba(251,191,36,.07);border:1px solid rgba(251,191,36,.28);
+}
+.ontology-model .om-ab-rebase-title{margin:0;font-size:11.5px;color:#fcd34d;line-height:1.55;flex:1 1 auto;min-width:0}
+.ontology-model .om-ab-rebase .om-btn{flex:0 0 auto}
+
 /* ---------- 版本管理：发布人 / 正在查看 / 列表里的发布说明 / 两个动作 ---------- */
 .ontology-model .om-history-actor{font-size:11px;color:#8296ad;white-space:nowrap}
 .ontology-model .om-history-viewing{font-size:11px;color:#a78bfa;background:rgba(167,139,250,.14);border-radius:4px;padding:1px 6px;white-space:nowrap}
