@@ -173,6 +173,103 @@ def test_ontology_preview_sets_ephemeral_version_context_and_project_change_rese
     assert page.evaluate('window.wb.versionContext') == empty
 
 
+def test_ontology_context_strip_knowledge_context_and_ledger_navigation(workbench):
+    page = workbench.page
+    summary = {
+        'classes': [{'id': 'urn:test:Thing', 'label_zh': '事项'}],
+        'relations': [], 'attributes': [], 'triples': 1,
+    }
+    old_id = 'ontology-old-12345678'
+    current_id = 'ontology-current-87654321'
+    annotation_id = 'ontology-annotation-abcdef12'
+    releases = [
+        {'id': old_id, 'version': 1, 'version_reused': False,
+         'created_at': '2026-10-01T08:00:00Z', 'summary': summary},
+        {'id': current_id, 'version': 2, 'version_reused': False,
+         'created_at': '2026-10-02T08:00:00Z', 'summary': summary},
+        {'id': annotation_id, 'version': 2, 'version_reused': True,
+         'created_at': '2026-10-03T08:00:00Z', 'summary': summary},
+    ]
+    context_state = {'error': False}
+
+    def ontologies(route):
+        route.fulfill(status=200, json={'versions': releases})
+
+    def ontology(route):
+        ontology_id = urlparse(route.request.url).query.replace('ontology_id=', '')
+        selected = next((item for item in releases if item['id'] == ontology_id), releases[-1])
+        route.fulfill(status=200, json={**selected, 'summary': summary})
+
+    def knowledge_context(route):
+        if context_state['error']:
+            route.fulfill(status=500, json={'detail': 'temporary failure'})
+            return
+        route.fulfill(status=200, json={
+            'ontology': {'id': old_id, 'version': 1, 'is_current': False,
+                         'created_at': '2026-10-01T08:00:00Z'},
+            'current_bound': {'total': 6, 'by_kind': {
+                'entity': 3, 'relation': 2, 'attribute': 1}},
+            'migration': {'pending': 4, 'blocked': 2},
+            'history': {'revision_count': 9, 'record_count': 7, 'migrated_away': 1},
+        })
+
+    page.route(re.compile(r'/api/projects/[^/]+/ontologies(?:\?.*)?$'), ontologies)
+    page.route(re.compile(r'/api/projects/[^/]+/ontology(?:\?.*)?$'), ontology)
+    page.route(re.compile(r'/api/projects/[^/]+/ontologies/[^/]+/knowledge-context$'),
+               knowledge_context)
+
+    page.click('[data-tab="ontology-model"]')
+    page.wait_for_function(
+        "document.querySelector('#om-version-context')?.textContent.includes('当前生效本体：v2')")
+    assert '正在查看：v2（当前）' in page.locator('#om-version-context').inner_text()
+
+    page.click('#om-history')
+    page.wait_for_selector('#om-history-overlay:not([hidden])')
+    page.wait_for_function("document.querySelectorAll('.om-history-row').length === 3")
+    history_text = page.locator('#om-history-body').inner_text()
+    assert history_text.count('v2') >= 2
+    assert '标注修订' in history_text
+    assert 'ontology-' in history_text
+
+    page.locator('.om-history-row').filter(has_text='v1').click()
+    page.wait_for_function(
+        "document.querySelector('.om-history-item.sel .om-knowledge-context')?.dataset.state === 'ready'")
+    detail = page.locator(
+        '.om-history-item.sel .om-knowledge-context').inner_text()
+    for expected in ('当前关联', '6 条', '实体 3', '关系 2', '属性 1',
+                     '待迁移', '4', '迁移阻塞', '2', '历史修订', '9', '已迁出 1'):
+        assert expected in detail
+
+    page.locator('.om-history-item.sel').get_by_role(
+        'button', name='查看这一版（只读）').click()
+    page.wait_for_function(
+        "document.querySelector('#om-version-context')?.textContent.includes('正在查看：v1（历史·只读）')")
+    assert '当前生效本体：v2' in page.locator('#om-version-context').inner_text()
+
+    page.click('#om-history')
+    page.wait_for_selector('#om-history-overlay:not([hidden])')
+    page.wait_for_function(
+        "document.querySelector('.om-history-item.sel .om-knowledge-context')?.dataset.state === 'ready'")
+    page.locator('.om-history-item.sel').get_by_role(
+        'button', name='在知识台账查看').click()
+    assert page.locator('#tab-records').is_visible()
+    assert page.evaluate('window.wb.versionContext') == {
+        'ontologyScope': 'ids', 'ontologyIds': [old_id],
+        'ontologyVersion': 1, 'source': 'ontology-history',
+    }
+
+    page.evaluate("showTab('ontology-model')")
+    page.click('#om-history')
+    context_state['error'] = True
+    page.locator('.om-history-row').filter(has_text='v2').first.evaluate(
+        'button => button.click()')
+    page.wait_for_function(
+        "document.querySelector('.om-history-item.sel .om-knowledge-context')?.dataset.state === 'error'")
+    error_text = page.locator(
+        '.om-history-item.sel .om-knowledge-context').inner_text()
+    assert '读不到关联知识' in error_text
+    assert '—' in error_text
+
 def _watch_graph_clear(page, selector, snapshot_name, event='click'):
     page.evaluate("""([selector, snapshotName, event]) => {
       document.querySelector(selector).addEventListener(event, () => {

@@ -25,6 +25,10 @@
 .ontology-model .om-btn.primary{background:linear-gradient(180deg,#2ee6a8,#1fae7d);border-color:transparent;color:#04121c;font-weight:700;box-shadow:0 0 14px rgba(52,211,153,.4)}
 .ontology-model .om-btn:disabled{opacity:.45;cursor:not-allowed}
 .ontology-model .om-btn.ghost{border-color:transparent;color:#8296ad}
+.ontology-model .om-version-context{display:flex;align-items:center;gap:9px;padding:7px 16px;border-bottom:1px solid #1d2a3d;background:#0d1523;font-size:12px;color:#94a7bd}
+.ontology-model .om-version-context-current{color:#2ee6a8;font-weight:650}
+.ontology-model .om-version-context-divider{color:#5b6d82}
+.ontology-model .om-version-context-viewed{color:#d8ccff;font-weight:650}
 
 /* 三栏 */
 .ontology-model .om-body{display:flex;align-items:stretch;flex:1 1 auto;min-height:0;max-height:calc(100dvh - 210px)}
@@ -72,3 +76,8 @@
 .ontology-model .om-actionbar{display:flex;align-items:center;gap:12px;padding:11px 16px;border-top:1px solid #1d2a3d;background:#111a2b}
 
 .ontology-model .om-empty{color:#8296ad;font-size:13px;padding:20px;text-align:center}
+
+@media(max-width:760px){
+  .ontology-model .om-version-context{align-items:flex-start;flex-direction:column;gap:3px}
+  .ontology-model .om-version-context-divider{display:none}
+}

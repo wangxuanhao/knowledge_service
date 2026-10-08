@@ -75,6 +75,7 @@
 .ontology-model .om-history-time{font-size:11px;color:#7d90a6;font-family:ui-monospace,Consolas,monospace}
 .ontology-model .om-history-counts{margin-left:auto;font-size:11px;color:#8296ad;white-space:nowrap}
 .ontology-model .om-history-cur{font-size:11px;color:#2ee6a8;background:rgba(46,230,168,.12);border-radius:4px;padding:1px 6px;white-space:nowrap}
+.ontology-model .om-history-reused{font-size:11px;color:#fbbf24;background:rgba(251,191,36,.12);border-radius:4px;padding:1px 6px;white-space:nowrap}
 .ontology-model .om-history-detail{padding:10px 11px 12px;border-top:1px solid #1d2a3d}
 .ontology-model .om-history-facts{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin-bottom:8px}
 .ontology-model .om-history-fact{display:contents}
@@ -216,6 +217,20 @@
 .ontology-model .om-history-pub-note b{color:#2ee6a8;margin-right:4px}
 .ontology-model .om-history-actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0}
 .ontology-model .om-history-actions .om-btn.primary{background:linear-gradient(180deg,#2ee6a8,#1fae7d);border-color:transparent;color:#04121c;font-weight:700}
+.ontology-model .om-knowledge-context{display:grid;gap:9px;margin-top:10px;padding:10px;border:1px solid #25354d;border-radius:9px;background:#0d1523}
+.ontology-model .om-knowledge-context-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.ontology-model .om-knowledge-context-head b{font-size:12.5px;color:#e7eef6}
+.ontology-model .om-knowledge-context-head span{font-size:11px;color:#8296ad}
+.ontology-model .om-knowledge-context-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.ontology-model .om-knowledge-context-metric{display:grid;gap:2px;padding:8px;border:1px solid #1d2a3d;border-radius:7px;background:#0a1220}
+.ontology-model .om-knowledge-context-metric span,.ontology-model .om-knowledge-context-metric small{font-size:10.5px;color:#8296ad;line-height:1.4}
+.ontology-model .om-knowledge-context-metric b{font-size:13px;color:#38bdf8}
+.ontology-model .om-knowledge-ledger-link{justify-self:start}
+.ontology-model .om-knowledge-context[data-state="error"]{border-color:rgba(248,113,113,.35);color:#fca5a5}
+
+@media(max-width:520px){
+  .ontology-model .om-knowledge-context-grid{grid-template-columns:1fr}
+}
 
 /* ---------- 内联约束编辑（折叠区：当前值可移除、下拉新增） ---------- */
 .ontology-model .om-constraint-edit{margin-top:10px;border:1px solid #25354d;border-radius:8px;background:#0d1523;padding:0}
