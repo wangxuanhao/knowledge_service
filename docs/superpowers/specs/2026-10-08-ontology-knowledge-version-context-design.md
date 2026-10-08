@@ -4,7 +4,7 @@
 
 当前系统已经分别保存本体历史和知识记录历史：
 
-- `ontologies` 保存项目内不可变的本体发布记录；`metadata.version` 是本体结构版本号。
+- `ontologies` 保存项目内不可变的本体发布记录；新数据在 `metadata.version` 保存本体结构版本号，早期数据缺失时按发布时间顺序回填。当前 `/ontologies` 接口仍用发布行序生成展示号，本能力必须把它收口到同一权威口径，见 4.3。
 - `record_versions` 保存每条知识的双时态修订；`version` 是该记录自己的递增修订号，`version_id` 是不可变修订标识。
 - 实体、关系、属性记录的 payload 已包含 `ontology_id`，受控重分类会生成新记录修订并把新修订关联到目标本体，旧修订继续保留。
 - 本体建模页已经可以只读预览历史本体，也可以从历史本体派生新草案；知识台账已经显示本体归属，但没有统一版本筛选和知识修订时间线。
@@ -75,10 +75,20 @@ Milvus只参与语义向量检索，不参与版本归属与历史计算。本�
 1. 已发布本体不可变；预览历史本体不写数据。
 2. 已保存的知识修订不可变；修改或迁移必须新增修订。
 3. 一个知识修订最多关联一个 `ontology_id`。
-4. 结构化知识（entity、relation、attribute）新写入时必须关联当前本体；兼容历史数据可以暂时没有 `ontology_id`，界面显示“未知本体”，不能猜测版本。
+4. 结构化知识（entity、relation、attribute）没有显式 `ontology_id` 时由现有写入逻辑关联当前本体；显式指定项目内历史本体仍用于历史导入、普通修订和受控治理，并继续按该本体校验。本能力不收紧现有写入权限。兼容历史数据可以暂时没有 `ontology_id`，界面显示“未知本体”，不能猜测版本。
 5. 发布本体不会批量改写知识。
 6. 受控重分类产生 `rN+1`，新修订关联当前本体；旧修订保留原 `ontology_id`。
 7. 当前知识是每个 record id 在所选双时态范围内可见的修订，不等于“属于当前本体的知识”。
+
+### 4.3 本体版本号的权威口径
+
+本体发布记录由不可变 `ontology_id` 唯一标识；面向用户的结构版本号按以下顺序解析：
+
+1. 优先使用 `metadata.version` 的正整数值。
+2. 旧发布记录没有该字段时，按项目内 `created_at, id` 的稳定顺序回填为第 N 个结构版本。
+3. 纯标注发布可以复用同一个结构版本号；此时版本列表显示“本体 v2 · 标注修订”，并用 `ontology_id` 短标识区分两条不可变发布记录。
+
+`GET /ontologies` 必须直接返回解析后的 `version` 和 `version_reused`，本体版本管理、知识台账、重分类标签和新增上下文接口全部使用这两个字段，不能在各前端页面再次按数组下标编号。历史项目的回填规则与 repository `_current_ontology_version` 保持一致。
 
 ## 5. 交互设计
 
@@ -132,6 +142,7 @@ Milvus只参与语义向量检索，不参与版本归属与历史计算。本�
 - 当前：关联当前生效本体。
 - 待迁移：关联旧本体且受控重分类计划中有可用目标。
 - 迁移阻塞：关联旧本体但没有可用目标。
+- 迁移状态未知：关联旧本体，但受控重分类计划读取失败，前端不得猜测处置。
 - 未知本体：没有可识别的 `ontology_id`。
 
 不引入“兼容”状态。现有后端没有独立、稳定的兼容性判定；把“类型仍存在”直接显示成兼容可能误导用户忽略属性或约束变化。可迁移的 `carry` 仍显示“待迁移”，并在重分类抽屉中解释它只变更本体归属。
@@ -164,10 +175,17 @@ r2 · 本体 v1 · 2026-10-06 09:05 · 已取代
 给 `knowledge_service/models.py::Scope` 增加：
 
 ```python
+ontology_scope: Literal['all', 'ids', 'unknown'] = 'all'
 ontology_ids: list[str] | None = None
 ```
 
-`KnowledgeService.scoped` 把该条件应用在软删除过滤之后、entity id 完整性计算之前。空列表视为无匹配，而 `None` 表示不限制。本体 id 必须是字符串，Pydantic 负责请求校验。
+请求校验规则：
+
+- `all`：`ontology_ids` 必须为 `None`，不限制本体归属。
+- `ids`：`ontology_ids` 必须是非空、去重后的字符串列表，只保留这些本体发布记录关联的知识。
+- `unknown`：`ontology_ids` 必须为 `None`，只保留缺少 `ontology_id` 或 `ontology_id` 不属于当前项目任何发布记录的知识。
+
+不合法组合返回 422，不能静默忽略字段。`KnowledgeService.scoped` 把该条件应用在软删除过滤之后、entity id 完整性计算之前；`unknown` 模式从 repository 的项目本体列表得到合法 id 集合。
 
 这样 `/records/query`、`/graph`、`/mindmap` 等复用 Scope 的接口可以保持同一过滤语义，不在前端各自实现不同版本规则。
 
@@ -208,7 +226,7 @@ GET /api/projects/{project_id}/ontologies/{ontology_id}/knowledge-context
 计算规则：
 
 - `current_bound` 只统计当前可见、未软删除且 kind 为 entity/relation/attribute 的修订。
-- `migration` 复用 `Reclassify.plan()` 的分组判定，只汇总 `from_ontology_id` 等于目标版本的组；目标本体是当前版本时两项都为 0。
+- `migration` 复用 `Reclassify.plan()` 的分组判定，只汇总 `from_ontology_id` 等于目标版本的组；`pending` 是这些组中 `migratable=true` 的 `record_count` 之和，`blocked` 是 `migratable=false` 的 `record_count` 之和，不是分组数量。目标本体是当前版本时两项都为 0。重分类计划不可读时两项返回 `null`，前端显示“—”和“迁移状态未知”。
 - `history` 从 `record_versions.payload->>'ontology_id'` 聚合；`migrated_away` 是曾关联该版本但当前可见修订已关联其他本体的 record id 数。
 - 不返回整批知识正文，避免版本管理抽屉加载大量数据；查看明细走台账过滤。
 - 项目或本体不存在时使用现有 404/KeyError 处理；本体不属于项目时不得泄露其他项目统计。
@@ -251,17 +269,20 @@ wb.versionContext = {
 - 本体 id 未知或跨项目：显示版本不存在并退出历史预览。
 - 旧记录没有 `ontology_id`：显示“未知本体”，允许在台账筛选，但不能归入任一版本。
 - 记录历史加载失败：当前记录详情仍可用，历史页签显示可重试错误。
-- 受控重分类计划不可读：待迁移和阻塞显示“—”，不得根据前端猜测。
+- 受控重分类计划不可读：待迁移和阻塞显示“—”；旧本体记录逐行显示“迁移状态未知”，不得根据前端猜测。
 
 ## 9. 测试策略
 
 ### 9.1 服务与仓储测试
 
 - Scope 按单个和多个 `ontology_id` 过滤。
+- Scope 的 `all`、`ids`、`unknown` 三种模式及非法字段组合；`unknown` 同时覆盖缺失 id 和跨项目/失效 id。
 - 过滤后不会留下悬空关系或属性。
 - 上下文统计区分当前关联、历史修订和已迁出记录。
 - 迁移前后：旧本体的 `current_bound` 减少、`migrated_away` 增加，新本体的 `current_bound` 增加。
 - 未映射组计入 blocked，可迁移组计入 pending。
+- pending 与 blocked 断言按各分组 `record_count` 求和，不按分组数计数；计划不可读时返回 null。
+- `/ontologies`、版本管理、台账和重分类对结构版本号使用相同的 metadata 优先与旧数据回填规则，标注修订不会被错误编号为新的结构版本。
 - 跨项目 ontology id 返回 404，不泄露统计。
 - 未知 `ontology_id` 历史记录不归入任何正式版本。
 
