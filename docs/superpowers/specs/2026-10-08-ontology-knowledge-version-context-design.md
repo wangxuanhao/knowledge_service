@@ -164,7 +164,7 @@ r2 · 本体 v1 · 2026-10-06 09:05 · 已取代
 本阶段只增加本体归属范围，不改变图的节点模型：
 
 - 默认仍展示当前双时态范围内的最新知识。
-- 从本体历史详情进入图谱或脑图时，携带所选 `ontology_id`。
+- 从本体历史详情进入图谱或脑图时，携带 `ontology_scope='ids'` 和所选 `ontology_id`。
 - `KnowledgeService.scoped` 先按本体归属过滤，再计算 entity id 集合；关系或属性的主体不在范围内时继续按现有规则剔除，避免悬空边。
 - 页面明确显示“知识范围：本体 vN”，并提供“一键恢复全部本体”。
 
@@ -246,7 +246,8 @@ GET /api/projects/{project_id}/ontologies/{ontology_id}/knowledge-context
 
 ```javascript
 wb.versionContext = {
-  ontologyId: null,
+  ontologyScope: 'all', // 'all' | 'ids' | 'unknown'
+  ontologyIds: null,
   ontologyVersion: null,
   source: null // 'ontology-history' | 'ledger' | 'graph'
 }
@@ -255,10 +256,10 @@ wb.versionContext = {
 规则：
 
 - 切换项目必须清空版本上下文。
-- 本体历史预览更新该上下文。
+- 本体历史预览把上下文更新为 `ontologyScope='ids'`、`ontologyIds=[当前预览 id]`。
 - “在知识台账查看”写入上下文并调用现有页签切换函数。
-- 台账筛选器变化同步上下文；选择“全部本体”清空它。
-- 图谱和脑图读取该上下文，并在 Scope 中发送 `ontology_ids`。
+- 台账筛选器变化同步 `ontologyScope` 与 `ontologyIds`；选择“全部本体”设为 `all/null`，选择“未知本体”设为 `unknown/null`。
+- 图谱和脑图读取该上下文，并在 Scope 中同时发送 `ontology_scope` 与 `ontology_ids`；任何页面都不得只发送 `ontology_ids`。
 - 页面刷新后不持久化版本上下文，避免用户下次进入时误以为仍在当前本体。
 
 ## 8. 错误与空状态
@@ -294,7 +295,7 @@ wb.versionContext = {
 - 台账使用“修订 rN”和“依据本体 vN”，不再把记录版本显示为裸 `vN`。
 - 记录详情时间线显示每个修订对应的本体版本。
 - 切换项目清空本体筛选。
-- 图谱/脑图请求携带 `ontology_ids`，恢复全部本体后不携带。
+- 图谱/脑图请求在精确版本时携带 `ontology_scope='ids'` 和 `ontology_ids`，未知本体时携带 `ontology_scope='unknown'`，恢复全部本体后使用 `ontology_scope='all'` 且 `ontology_ids=null`。
 
 ### 9.3 回归测试
 
