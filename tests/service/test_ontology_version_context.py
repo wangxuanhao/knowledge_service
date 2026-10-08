@@ -132,6 +132,41 @@ def test_history_counts_revisions_records_and_records_migrated_away(tmp_path):
     assert body['current_bound']['total'] == 1
 
 
+def test_migrated_away_uses_only_current_visible_knowledge_rows(tmp_path):
+    client, service, project_id, first = _system(tmp_path, 'visible-history.sqlite')
+    repository = service.repository
+    second = repository.save_ontology(project_id, TTL, {})
+    repository.put_record(project_id, {
+        'id': 'deleted', 'kind': 'entity', 'type': 'Thing', 'text': '旧知识',
+        'ontology_id': first['id'],
+    })
+    repository.put_record(project_id, {
+        'id': 'deleted', 'kind': 'entity', 'type': 'Thing', 'text': '已软删除',
+        'ontology_id': second['id'], 'metadata': {'_deleted': True},
+    }, expected_version=1)
+    repository.put_record(project_id, {
+        'id': 'audit', 'kind': 'entity', 'type': 'Thing', 'text': '旧知识',
+        'ontology_id': first['id'],
+    })
+    repository.put_record(project_id, {
+        'id': 'audit', 'kind': 'entity', 'type': 'Thing', 'text': '审计记录',
+        'ontology_id': second['id'], 'metadata': {'_audit': True},
+    }, expected_version=1)
+    repository.put_record(project_id, {
+        'id': 'document', 'kind': 'document', 'type': 'text', 'text': '旧文档',
+        'ontology_id': first['id'],
+    })
+    repository.put_record(project_id, {
+        'id': 'document', 'kind': 'document', 'type': 'text', 'text': '新文档',
+        'ontology_id': second['id'],
+    }, expected_version=1)
+
+    body = client.get(_context_path(project_id, first['id'])).json()
+
+    assert body['history']['record_count'] == 3
+    assert body['history']['migrated_away'] == 0
+
+
 def test_migration_counts_group_record_counts_for_only_the_target(tmp_path, monkeypatch):
     client, service, project_id, first = _system(tmp_path, 'migration-counts.sqlite')
     second = service.repository.save_ontology(project_id, TTL, {})
@@ -249,9 +284,11 @@ def test_every_context_read_runs_inside_one_repository_snapshot(tmp_path, monkey
         assert state['inside'] and repository._db.in_transaction
         return original_list(requested_project_id)
 
-    def watched_history(requested_project_id, ontology_id):
+    def watched_history(requested_project_id, ontology_id, current_rows):
         assert state['inside'] and repository._db.in_transaction
-        return original_history(requested_project_id, ontology_id)
+        assert all(row['kind'] in {'entity', 'relation', 'attribute'}
+                   for row in current_rows)
+        return original_history(requested_project_id, ontology_id, current_rows)
 
     def watched_scoped(requested_project_id, scope):
         assert state['inside'] and repository._db.in_transaction

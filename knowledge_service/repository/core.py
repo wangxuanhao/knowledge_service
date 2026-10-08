@@ -730,7 +730,7 @@ class Repository:
             rows = self._db.execute('SELECT * FROM record_versions WHERE project_id=? AND id=? ORDER BY version', (project_id, record_id)).fetchall()
         return [self._record(row, vectors='list') for row in rows]
 
-    def ontology_record_history(self, project_id, ontology_id):
+    def ontology_record_history(self, project_id, ontology_id, current_rows):
         """Aggregate record history bound to one known ontology identifier.
 
         Payload inspection stays in Python so this read has identical semantics
@@ -744,19 +744,20 @@ class Repository:
                 (project_id,)).fetchall()
         revision_count = 0
         record_ids = set()
-        current_ontology_ids = {}
         for row in rows:
             payload = json.loads(row['payload'])
             if payload.get('ontology_id') == ontology_id:
                 revision_count += 1
                 record_ids.add(row['id'])
-            if row['superseded_at'] is None:
-                current_ontology_ids[row['id']] = payload.get('ontology_id')
+        current_ontology_ids = {
+            row['id']: row.get('ontology_id') for row in current_rows
+        }
         return {
             'revision_count': revision_count,
             'record_count': len(record_ids),
             'migrated_away': sum(
-                current_ontology_ids.get(record_id) != ontology_id
+                record_id in current_ontology_ids
+                and current_ontology_ids[record_id] != ontology_id
                 for record_id in record_ids
             ),
         }

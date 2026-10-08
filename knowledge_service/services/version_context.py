@@ -23,6 +23,11 @@ class OntologyVersionContext:
             current = versions[-1]
             is_current = current['id'] == target['id']
 
+            all_current = self.service.scoped(project_id, {
+                'kinds': list(KNOWLEDGE_KINDS),
+                'ontology_scope': 'all',
+                'ontology_ids': None,
+            })
             bound = self.service.scoped(project_id, {
                 'kinds': list(KNOWLEDGE_KINDS),
                 'ontology_scope': 'ids',
@@ -54,7 +59,7 @@ class OntologyVersionContext:
                     )
 
             history = self.repository.ontology_record_history(
-                project_id, target['id'])
+                project_id, target['id'], all_current)
             return {
                 'ontology': {
                     'id': target['id'],
