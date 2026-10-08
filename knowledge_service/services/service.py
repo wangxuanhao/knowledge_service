@@ -348,6 +348,16 @@ class KnowledgeService:
             rows = self.repository.query(project_id, **params)
             record['raw'] = len(rows)
             rows = [r for r in rows if not r.get('metadata',{}).get('_deleted') and not r.get('metadata',{}).get('_audit')]
+            ontology_scope = scope.get('ontology_scope', 'all')
+            if ontology_scope == 'ids':
+                ontology_ids = set(scope.get('ontology_ids') or [])
+                rows = [r for r in rows if r.get('ontology_id') in ontology_ids]
+            elif ontology_scope == 'unknown':
+                ontology_ids = {
+                    ontology['id']
+                    for ontology in self.repository.list_ontologies(project_id)
+                }
+                rows = [r for r in rows if r.get('ontology_id') not in ontology_ids]
             entity_ids = {r['id'] for r in rows if r['kind'] == 'entity'}
             rows = [r for r in rows if (
                 r['kind'] != 'relation' or
