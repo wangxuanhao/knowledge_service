@@ -15,6 +15,7 @@ from ..services.ontology_adapters import (
     turtle_draft,
 )
 from ..services.service import public
+from ..services.version_context import OntologyVersionContext
 from ..services import structure_pending
 from ..core.time import utc_now
 
@@ -181,6 +182,10 @@ def install(app, service):
         # 已保存的摘要是缓存。重新构建，使新摘要字段引入之前创建的版本
         # 仍保持 API 兼容。
         return {**item, 'summary': Ontology(item['turtle']).summary()}
+
+    @router.get('/api/projects/{project_id}/ontologies/{ontology_id}/knowledge-context')
+    def ontology_knowledge_context(project_id: str, ontology_id: str):
+        return OntologyVersionContext(service).get(project_id, ontology_id)
 
     @router.post('/api/projects/{project_id}/ontologies', status_code=201)
     def save_ontology(project_id: str, request: OntologyWrite, response: Response):

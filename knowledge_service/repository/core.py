@@ -303,7 +303,7 @@ class Repository:
         return self.get_project(project_id)
 
     @contextmanager
-    def _transaction(self):
+    def _transaction(self, *, repeatable_read_only=False):
         with self._lock:
             if self._db.in_transaction:
                 savepoint='nested_'+uuid4().hex
@@ -316,13 +316,21 @@ class Repository:
                     self._db.execute(f'RELEASE SAVEPOINT {savepoint}')
                     raise
                 return
-            self._db.execute('BEGIN')
+            self._db.execute(
+                'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY'
+                if repeatable_read_only else 'BEGIN')
             try:
                 yield
                 self._db.commit()
             except BaseException:
                 self._db.rollback()
                 raise
+
+    @contextmanager
+    def read_snapshot(self):
+        """Keep a compound read on one connection and transaction snapshot."""
+        with self._transaction(repeatable_read_only=True):
+            yield
 
     @contextmanager
     def _allow_ontology_history_delete(self):
@@ -721,6 +729,37 @@ class Repository:
         with self._lock:
             rows = self._db.execute('SELECT * FROM record_versions WHERE project_id=? AND id=? ORDER BY version', (project_id, record_id)).fetchall()
         return [self._record(row, vectors='list') for row in rows]
+
+    def ontology_record_history(self, project_id, ontology_id):
+        """Aggregate record history bound to one known ontology identifier.
+
+        Payload inspection stays in Python so this read has identical semantics
+        through the PostgreSQL connection and the test adapter.
+        """
+        self.get_project(project_id)
+        with self._lock:
+            rows = self._db.execute(
+                '''SELECT id,superseded_at,payload FROM record_versions
+                   WHERE project_id=? ORDER BY id,version''',
+                (project_id,)).fetchall()
+        revision_count = 0
+        record_ids = set()
+        current_ontology_ids = {}
+        for row in rows:
+            payload = json.loads(row['payload'])
+            if payload.get('ontology_id') == ontology_id:
+                revision_count += 1
+                record_ids.add(row['id'])
+            if row['superseded_at'] is None:
+                current_ontology_ids[row['id']] = payload.get('ontology_id')
+        return {
+            'revision_count': revision_count,
+            'record_count': len(record_ids),
+            'migrated_away': sum(
+                current_ontology_ids.get(record_id) != ontology_id
+                for record_id in record_ids
+            ),
+        }
 
     def get_record_version(self, project_id, version_id):
         """按项目和不可变 version_id 精确读取历史版本，不回退到当前版本。"""
