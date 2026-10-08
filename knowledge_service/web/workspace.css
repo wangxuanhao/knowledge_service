@@ -339,6 +339,15 @@ body>main{height:100dvh;overflow-y:auto;overflow-x:hidden;overscroll-behavior:co
 
 .ledger-pending-badge.is-cleared{background:var(--ks-sunken);border-color:var(--ks-line);color:#77897e}
 
+/* 本体—知识双版本：筛选的是不可变本体发布，行内 rN 则始终表示这条知识自己的修订。 */
+.record-ontology-search{min-width:230px!important}
+.record-ontology-search select{min-width:220px}
+.ledger-migration-badge{display:inline-block;margin-top:7px;padding:2px 8px;border:1px solid var(--ks-line);border-radius:999px;background:var(--ks-sunken);color:var(--ks-muted);font-size:11px;white-space:nowrap}
+.ledger-migration-badge.is-pending{border-color:var(--ks-amber-line);background:var(--ks-amber-soft);color:var(--ks-amber)}
+.ledger-migration-badge.is-blocked{border-color:#d76969;background:#d7696914;color:#b44747}
+.ledger-migration-badge.is-loading,.ledger-migration-badge.is-unknown{border-style:dashed}
+@media(max-width:800px){.record-ontology-search,.record-ontology-search select{min-width:100%!important}}
+
 
 
 /* C1 问答里的「结构待定」单列块：不是证据，但必须看得见、说得清为什么不算。 */

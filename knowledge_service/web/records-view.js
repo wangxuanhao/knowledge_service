@@ -32,10 +32,10 @@
     chunk:'知识背后的原文片段：只读 —— 要改原文请重新上传并解析文档。',
   };
   const COLUMNS={
-    entity:['名称','本体类型','挂在哪一版本体上','版本','原文断言','操作'],
-    relation:['关系','关系类型','挂在哪一版本体上','版本','原文断言','操作'],
-    attribute:['属性','所属实体','挂在哪一版本体上','版本','原文断言','操作'],
-    chunk:['原文片段','来源文档','版本','原文断言','操作'],
+    entity:['名称','本体类型','本体归属','知识修订','原文断言','操作'],
+    relation:['关系','关系类型','本体归属','知识修订','原文断言','操作'],
+    attribute:['属性','所属实体','本体归属','知识修订','原文断言','操作'],
+    chunk:['原文片段','来源文档','知识修订','原文断言','操作'],
   };
   /* 台账头部三件套：一句话边界 + 顶部可点数字 + 三视角页签。
      插在旧面板之前，`#records` 仍然是表格宿主（编辑/版本历史那套沿用旧通道，不动）。 */
@@ -57,6 +57,7 @@
   bar.innerHTML='<label>搜索这里的记录<input id="record-search" placeholder="名称、正文或记录编号"></label>'
     +'<label class="record-kind-search">知识类别<select id="record-kind"><option value="">全部类别</option>'
     +Object.entries(kinds).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')+'</select></label>'
+    +'<label class="record-ontology-search">本体版本<select id="record-ontology" aria-label="按本体版本筛选知识"></select></label>'
     +'<span id="record-count" aria-live="polite"></span>';
   host.before(bar);$('load-records').textContent='刷新记录';
   // 旧面板里的类别下拉与页签是同一件事的两种说法：选择页签时同步它，保证老逻辑（含测试）仍然成立。
@@ -142,27 +143,65 @@
     };
   }
   const nameOf=id=>{const row=wb.records.get(id)||rows.find(x=>x.id===id);return row?row.text:(id||'(未加载)');};
-  /* 本体归属：本体版本表按**发布时间**排序给出展示序号（服务端不给序号，序号只是展示层的事）。
-     三条口径写死在这里，避免各页各说一套：当前版本 / 旧版 / 未知版本。 */
+  const shortId=id=>{const text=String(id==null?'':id);return !text?'未知 ID':(text.length>16?`${text.slice(0,9)}…${text.slice(-4)}`:text);};
+  const versionFields=()=>{
+    const context=wb.versionContext||{};
+    if(context.ontologyScope==='ids'&&Array.isArray(context.ontologyIds)&&context.ontologyIds.length){
+      return {ontology_scope:'ids',ontology_ids:[...context.ontologyIds]};
+    }
+    if(context.ontologyScope==='unknown')return {ontology_scope:'unknown',ontology_ids:null};
+    return {ontology_scope:'all',ontology_ids:null};
+  };
+  /* 本体归属只信 /ontologies 返回的权威 version；同一个 vN 可以有多次不可变发布，
+     因此碰撞时必须带短 ID，后发布的同版本条目标作「标注修订」，不能按数组位置推成 vN+1。 */
   function buildOntology(versions){
-    const ordered=[...versions].sort((a,b)=>String(a.created_at||'').localeCompare(String(b.created_at||'')));
-    const map=new Map();ordered.forEach((item,index)=>map.set(item.id,{no:index+1,created_at:item.created_at,latest:index===ordered.length-1}));
-    return map;
+    const list=[...versions],currentId=list.length?list[list.length-1].id:null,counts=new Map();
+    list.forEach(item=>counts.set(item.version,(counts.get(item.version)||0)+1));
+    const releases=list.map(item=>({...item,isCurrent:item.id===currentId,
+      versionCollision:(counts.get(item.version)||0)>1}));
+    return {list:releases,currentId,byId:new Map(releases.map(item=>[item.id,item]))};
+  }
+  function releaseLabel(release){
+    if(!release)return '未知本体';
+    const state=release.isCurrent?'当前':'历史';
+    const revision=release.version_reused?' · 标注修订':'';
+    const identity=release.versionCollision?` · ${shortId(release.id)}`:'';
+    return `本体 v${release.version}（${state}）${revision}${identity}`;
+  }
+  function renderOntologyFilter(){
+    const select=$('record-ontology');if(!select)return;
+    const fields=versionFields(),selected=fields.ontology_scope==='ids'
+      ?`id:${fields.ontology_ids[0]}`:fields.ontology_scope;
+    const option=(value,label)=>{const item=document.createElement('option');item.value=value;item.textContent=label;return item;};
+    const items=[option('all','全部本体')];
+    for(const release of ontology?.list||[])items.push(option(`id:${release.id}`,releaseLabel(release)));
+    if(selected.startsWith('id:')&&!items.some(item=>item.value===selected)){
+      items.push(option(selected,`已选本体 ${shortId(fields.ontology_ids[0])}（项目版本列表中不存在）`));
+    }
+    items.push(option('unknown','未知本体'));
+    select.replaceChildren(...items);select.value=items.some(item=>item.value===selected)?selected:'all';
+  }
+  function ownershipSummary(row){
+    if(!row||!row.ontology_id)return '未知本体';
+    if(!ontology)return '本体归属读取中…';
+    const found=ontology.byId.get(row.ontology_id);
+    return found?`依据本体 v${found.version}${found.isCurrent?'（当前）':'（历史）'}`:'未知本体';
   }
   function ownership(row){
     if(!row)return '—';
-    if(!row.ontology_id)return '未标注';
-    if(!ontology)return '读取中…';
-    const found=ontology.get(row.ontology_id);
-    if(!found)return '未知版本';
+    if(!row.ontology_id)return '未知本体';
+    if(!ontology)return '本体归属读取中…';
+    const found=ontology.byId.get(row.ontology_id);
+    if(!found)return '未知本体';
     const date=found.created_at?new Date(found.created_at).toLocaleDateString('zh-CN'):'';
-    return `本体 v${found.no}${date?' · '+date:''}${found.latest?'（当前）':'（旧版）'}`;
+    return `${ownershipSummary(row)}${date?' · '+date:''}`;
   }
   function ownershipDetail(row){
     if(!row||!row.ontology_id)return '这条记录没有本体归属信息';
-    const found=ontology&&ontology.get(row.ontology_id);
-    return found?`本体 v${found.no}：${found.created_at||''}`:'该本体版本已经不在项目里了';
+    const found=ontology&&ontology.byId.get(row.ontology_id);
+    return found?`${releaseLabel(found)}：${found.created_at||''}`:'该本体版本不在这个项目的版本列表里';
   }
+  renderOntologyFilter();
   /* 原文断言数：这条知识有几条原文在支撑它（发现时冻结的原句）。
      两条血缘都要数，且要**去重**，否则同一句会被算两次：
        ① 发现候选：记录里的 discovery_candidate_id(s) === 断言的 id；
@@ -293,13 +332,31 @@
       :`本体里已经有这些概念了（${(state.marked||[]).join('、')}），标记自动解除，不需要人工清理。`;
     return badge;
   }
+  function migrationBadge(row,release){
+    if(!release||release.isCurrent)return null;
+    let text='迁移状态未知',state=' is-unknown';
+    if(reclassifyPlan===undefined){text='迁移状态读取中…';state=' is-loading';}
+    else if(reclassifyPlan){
+      const key=`${row.ontology_id||'none'}:${row.kind}:${row.type||''}`;
+      const group=(reclassifyPlan.groups||[]).find(item=>item.key===key);
+      if(group){text=group.migratable?'待迁移':'迁移阻塞';state=group.migratable?' is-pending':' is-blocked';}
+    }
+    const badge=node('span','ledger-migration-badge'+state,text);
+    badge.title=text==='待迁移'?'本体建模层已给出迁移去向；迁移会生成新的知识修订，不覆盖当前修订。'
+      :text==='迁移阻塞'?'新本体里没有可确认的去向，需要先在本体建模层补齐映射。'
+        :text==='迁移状态读取中…'?'正在读取本体迁移计划。':'迁移计划不可用或没有覆盖这条知识，不能推断迁移状态。';
+    return badge;
+  }
   function cells(row){
     const ownershipCell=()=>{const cell=node('td');const label=node('b',null,ownership(row));label.title=ownershipDetail(row);cell.append(label);return cell;};
     const supportCell=()=>{const cell=node('td');const count=supportCount(row);
       if(count===null){cell.textContent='读取中…';return cell;}
       const strong=node('b',null,count?String(count):'0');strong.title=count?'有原文原句在支撑这条知识':'没有找到支撑它的原文断言（可能是人工写入或断言未归位）';
       cell.append(strong,node('small',null,count?'条原文':'条原文'));return cell;};
-    const versionCell=()=>{const cell=node('td');cell.append(node('b',null,'v'+row.version),node('small',null,row.recorded_at?new Date(row.recorded_at).toLocaleString():'—'));return cell;};
+    const versionCell=()=>{const cell=node('td'),release=ontology?.byId.get(row.ontology_id);
+      cell.append(node('b',null,'修订 r'+row.version),node('small',null,ownershipSummary(row)),
+        node('small',null,row.recorded_at?new Date(row.recorded_at).toLocaleString():'—'));
+      const migration=migrationBadge(row,release);if(migration)cell.append(migration);return cell;};
     if(view==='chunk'){
       const text=node('td');const excerpt=node('div','record-excerpt',String(row.text||'').slice(0,200));
       const detail=document.createElement('details');detail.innerText='';detail.append(node('summary',null,'编号与有效期'),node('small',null,`${row.id}\n${row.valid_from||'未知'} → ${row.valid_until||'未知'}`));
@@ -428,8 +485,11 @@
     if(!p){$('record-section-meta').textContent='请先选择项目';renderOperations();renderStaleNotice();host.innerHTML='<div class="record-empty">请先在左侧选择项目</div>';return;}
     $('record-section-meta').textContent='正在读取当前范围…';
     host.innerHTML='<div class="record-empty" role="status">正在读取当前范围的知识…</div>';
-    try{const filter=scope(),stamp=JSON.stringify(filter);filter.kinds=['entity','relation','attribute','chunk'];const r=await api(endpoint('/records/query?limit=1000'),filter);
-      if(serial!==request||p!==current||stamp!==JSON.stringify(scope()))return;
+    try{const baseScope=scope(),ontologyScope=versionFields();
+      const stamp=JSON.stringify({baseScope,ontologyScope});
+      const filter={...baseScope,...ontologyScope,kinds:['entity','relation','attribute','chunk']};
+      const r=await api(endpoint('/records/query?limit=1000'),filter);
+      if(serial!==request||p!==current||stamp!==JSON.stringify({baseScope:scope(),ontologyScope:versionFields()}))return;
       rows=r.records;total=r.total;wb.records=new Map(rows.map(r=>[r.id,r]));renderTabs();render();syncKindSelect();
     }catch(error){if(serial===request&&p===current)host.textContent='读取失败：'+error.message+'；可点击“刷新记录”重试。';}
     // 台账的旁数据：任何一份失败都不能让表格消失 —— 缺哪个就把哪一列如实写成"读不到"。
@@ -443,7 +503,7 @@
       api(project+'/reclassify',undefined,'GET').catch(()=>null),
     ]);
     if(serial!==request||p!==current)return;
-    ontology=versions?buildOntology(versions.versions||[]):null;
+    ontology=versions?buildOntology(versions.versions||[]):null;renderOntologyFilter();
     assertions=assertionList?{byId:new Map((assertionList.assertions||[]).map(item=>[item.id,item])),
       byCanonical:(assertionList.assertions||[]).reduce((acc,item)=>{if(item.canonical_record_id){if(!acc.has(item.canonical_record_id))acc.set(item.canonical_record_id,[]);acc.get(item.canonical_record_id).push(item);}return acc;},new Map())}:null;
     // 只保留有元数据的审计记录（真正的治理动作）；`undo` 那种也留着 ——
@@ -494,6 +554,18 @@
       }
   $('record-search').oninput=()=>{page=0;render();};
   $('record-kind').onchange=()=>{if(VIEW_ORDER.includes($('record-kind').value)){view=$('record-kind').value;page=0;renderTabs();syncKindSelect();}render();};
+  $('record-ontology').onchange=()=>{
+    const value=$('record-ontology').value;
+    if(value==='unknown')wb.setVersionContext({ontologyScope:'unknown',ontologyIds:null,ontologyVersion:null,source:'knowledge-ledger'});
+    else if(value.startsWith('id:')){
+      const id=value.slice(3),release=ontology?.byId.get(id);
+      wb.setVersionContext({ontologyScope:'ids',ontologyIds:[id],ontologyVersion:release?.version??null,source:'knowledge-ledger'});
+    }else wb.setVersionContext({ontologyScope:'all',ontologyIds:null,ontologyVersion:null,source:'knowledge-ledger'});
+  };
+  document.addEventListener('version-context:changed',()=>{
+    renderOntologyFilter();
+    if(!tab.classList.contains('hidden'))load();
+  });
   $('load-records').onclick=load;
   /* 「操作历史」按钮（在合并步骤里）不再摆第二份列表：合并/删除之后要撤销，去台账那一节。
      旧实现把同样的东西渲染进 #operations（一个隐藏节点），于是同一个动作有了两个入口 —— 正是用户说的"环节冲突"。 */

@@ -60,7 +60,14 @@ SHELL = """<!doctype html><html><head><meta charset="utf-8"></head><body>
   <div id="health"></div>
   <script>
   // 台账脚本依赖的几个 app 级全局：只做最小实现，够它跑起来即可（不复制 app.js）。
-  window.wb={records:new Map(),nodes:new Map()};
+  window.wb={records:new Map(),nodes:new Map(),versionContext:{
+    ontologyScope:'all',ontologyIds:null,ontologyVersion:null,source:null}};
+  window.wb.setVersionContext=next=>{
+    window.wb.versionContext={ontologyScope:'all',ontologyIds:null,ontologyVersion:null,source:null,...(next||{})};
+    document.dispatchEvent(new CustomEvent('version-context:changed',{detail:window.wb.versionContext}));
+    return window.wb.versionContext;
+  };
+  window.wb.clearVersionContext=()=>window.wb.setVersionContext();
   window.current='p1';
   window.$=id=>document.getElementById(id);
   window.esc=value=>String(value===undefined||value===null?'':value);
@@ -106,24 +113,25 @@ SHELL = """<!doctype html><html><head><meta charset="utf-8"></head><body>
 
 MOCKS = r"""() => {
   window.apiLog = [];
+  window.recordQueryBodies = [];
   window.undoCalls = [];
   const entity = (id,text,type,ontologyId,extra={}) => ({id,kind:'entity',text,type,ontology_id:ontologyId,
     version:1,recorded_at:'2026-10-01T10:00:00Z',valid_from:null,valid_until:null,properties:{},
     metadata:{...(extra.metadata||{})},...extra});
   const records = [
-    entity('e1','价格说明','urn:ontology:文档标题','o1',{metadata:{discovery_candidate_id:'assert-1'}}),
-    entity('e2','团购价','urn:ontology:价格类型','o2'),
+    entity('e1','价格说明','urn:ontology:文档标题','o1',{version:4,metadata:{discovery_candidate_id:'assert-1'}}),
+    entity('e2','团购价','urn:ontology:价格类型','o2-note'),
     // e3 与 e1 同名同类型：服务端的「疑似重复」分组靠它
     // e3 的 metadata 里又指了一条断言，那条断言的 canonical_record_id 也是 e3 —— 同一句话两条血缘，
     // 台账只能算一条（这是最容易写错、也最容易让"有几条原文在支撑"变成夸大的地方）。
-    entity('e3','价格说明','urn:ontology:文档标题','o2',{metadata:{discovery_candidate_id:'assert-3'}}),
+    entity('e3','价格说明','urn:ontology:文档标题','o2-note',{metadata:{discovery_candidate_id:'assert-3'}}),
     {id:'r1',kind:'relation',text:'参考价 可能是 销售价',type:'urn:ontology:可能是',
       subject_id:'e1',object_id:'e2',ontology_id:'o1',version:2,recorded_at:'2026-10-01T11:00:00Z',
       valid_from:null,valid_until:null,properties:{},metadata:{}},
     // 属性是一条独立记录（主体 + 属性名 + 值 + 数据类型）：台账以前查询时把它滤掉了，
     // 于是"实体身上的属性"在界面上根本看不到。
     {id:'a1',kind:'attribute',text:'12',type:'urn:ontology:重量',value:12,datatype:'integer',
-      subject_id:'e1',ontology_id:'o2',version:1,recorded_at:'2026-10-01T10:30:00Z',
+      subject_id:'e1',ontology_id:'o2-note',version:1,recorded_at:'2026-10-01T10:30:00Z',
       valid_from:null,valid_until:null,properties:{},metadata:{}},
     {id:'c1',kind:'chunk',text:'# 价格说明 团购价为商品/服务的销售价',type:'',source_id:'doc1',
       ontology_id:null,version:1,recorded_at:'2026-10-01T09:00:00Z',valid_from:null,valid_until:null,
@@ -136,10 +144,20 @@ MOCKS = r"""() => {
     const method = (options.method||'GET').toUpperCase();
     window.apiLog.push(method+' '+parsed.pathname);
     const payload = (body) => new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}});
-    if(parsed.pathname.endsWith('/records/query')) return payload({total:records.length,records});
+    if(parsed.pathname.endsWith('/records/query')) {
+      const body = JSON.parse(options.body||'{}');
+      window.recordQueryBodies.push(body);
+      const filtered = body.ontology_scope==='ids'
+        ? records.filter(row=>(body.ontology_ids||[]).includes(row.ontology_id))
+        : body.ontology_scope==='unknown'
+          ? records.filter(row=>!row.ontology_id||!['o1','o2','o2-note'].includes(row.ontology_id))
+          : records;
+      return payload({total:filtered.length,records:filtered});
+    }
     if(parsed.pathname.endsWith('/ontologies')) return payload({versions:[
-      {id:'o1',created_at:'2026-01-01T00:00:00Z'},
-      {id:'o2',created_at:'2026-02-01T00:00:00Z'}]});
+      {id:'o1',version:1,version_reused:false,created_at:'2026-01-01T00:00:00Z'},
+      {id:'o2',version:2,version_reused:false,created_at:'2026-02-01T00:00:00Z'},
+      {id:'o2-note',version:2,version_reused:true,created_at:'2026-03-01T00:00:00Z'}]});
     if(parsed.pathname.endsWith('/assertions')) return payload({total:3,assertions:[
       {id:'assert-1',canonical_record_id:null,status:'pending'},
       {id:'assert-2',canonical_record_id:'e1',status:'accepted'},
@@ -149,7 +167,7 @@ MOCKS = r"""() => {
       return payload({groups:[
       {name:'价格说明',type:'urn:ontology:文档标题',members:[
         {id:'e1',text:'价格说明',type:'urn:ontology:文档标题',version:1,ontology_id:'o1',source_id:null},
-        {id:'e3',text:'价格说明',type:'urn:ontology:文档标题',version:1,ontology_id:'o2',source_id:null}]}]});
+        {id:'e3',text:'价格说明',type:'urn:ontology:文档标题',version:1,ontology_id:'o2-note',source_id:null}]}]});
     }
     if(parsed.pathname.endsWith('/operations')) return payload({operations:[
       // 故意把**旧的排在前面**：服务端回来的顺序按 id/写入顺序，不等于时间顺序（真机上就是这样）
@@ -157,6 +175,14 @@ MOCKS = r"""() => {
         _audit:true,created_at:'2026-10-01T12:00:00Z',before:[{id:'e4'},{id:'e5'}]}},
       {id:'audit:op2',recorded_at:'2026-10-02T09:00:00Z',metadata:{operation:'delete',operation_id:'op2',
         _audit:true,created_at:'2026-10-02T09:00:00Z',before:[{id:'e6'}]}}]});
+    if(parsed.pathname.endsWith('/reclassify')) {
+      if(window.mockFailSide==='reclassify') return new Response('{"error":"boom"}',{status:500,headers:{'Content-Type':'application/json'}});
+      return payload({current_ontology_id:'o2-note',current_version:'本体 v2',stale_records:2,
+        migratable_records:1,unmapped_records:1,groups:[
+          {key:'o1:entity:urn:ontology:文档标题',migratable:true,record_count:1,records:[{id:'e1'}]},
+          {key:'o1:relation:urn:ontology:可能是',migratable:false,record_count:1,records:[{id:'r1'}]},
+        ]});
+    }
     if(parsed.pathname.endsWith('/operations/op1/undo')) { window.undoCalls.push('op1'); return payload({restored:2}); }
     if(parsed.pathname.endsWith('/resolve')) return payload({status:'exact_duplicates',backend:'semantica+aliases',
       canonical:null,candidates:[{id:'e1',text:'价格说明',type:'urn:ontology:文档标题',version:1},
@@ -240,13 +266,13 @@ def test_four_views_are_tabs_and_switch_the_columns(page):
     """
     tabs = [node.inner_text().strip() for node in page.query_selector_all('.ledger-tab')]
     assert tabs == ['实体', '关系', '属性', '原文片段']
-    assert headers(page) == ['名称', '本体类型', '挂在哪一版本体上', '版本', '原文断言', '操作']
+    assert headers(page) == ['名称', '本体类型', '本体归属', '知识修订', '原文断言', '操作']
     page.click('.ledger-tab:nth-child(2)')
-    assert headers(page) == ['关系', '关系类型', '挂在哪一版本体上', '版本', '原文断言', '操作']
+    assert headers(page) == ['关系', '关系类型', '本体归属', '知识修订', '原文断言', '操作']
     page.click('.ledger-tab:nth-child(3)')
-    assert headers(page) == ['属性', '所属实体', '挂在哪一版本体上', '版本', '原文断言', '操作']
+    assert headers(page) == ['属性', '所属实体', '本体归属', '知识修订', '原文断言', '操作']
     page.click('.ledger-tab:nth-child(4)')
-    assert headers(page) == ['原文片段', '来源文档', '版本', '原文断言', '操作']
+    assert headers(page) == ['原文片段', '来源文档', '知识修订', '原文断言', '操作']
 
 
 def test_attribute_view_reads_predicate_subject_and_value(page):
@@ -266,10 +292,88 @@ def test_attribute_view_reads_predicate_subject_and_value(page):
 def test_every_row_says_which_ontology_version_it_hangs_on(page):
     """「挂在哪一版本体上」＝本体归属：当前版本与旧版本必须能分辨（C2 的前提）。"""
     rows = {(item['name'], item['cells'][2].inner_text().strip()): item for item in ledger_rows(page)}
-    assert any(name == '价格说明' and '本体 v1' in ownership and '（旧版）' in ownership
+    assert any(name == '价格说明' and '本体 v1' in ownership and '（历史）' in ownership
                for name, ownership in rows), rows.keys()
     assert any(name == '团购价' and '本体 v2' in ownership and '（当前）' in ownership
                for name, ownership in rows), rows.keys()
+
+
+def test_ontology_filter_lists_every_immutable_release_and_unknown(page):
+    options = page.locator('#record-ontology option').all_inner_texts()
+    assert options[0] == '全部本体'
+    assert options[-1] == '未知本体'
+    assert any('本体 v1' in label and '历史' in label for label in options)
+    v2 = [label for label in options if '本体 v2' in label]
+    assert len(v2) == 2, options
+    assert all('o2' in label for label in v2), '重复的 v2 必须用不可变本体 ID 区分'
+    assert any('标注修订' in label and '当前' in label for label in v2)
+
+
+def test_ontology_filter_always_sends_the_paired_scope_fields(page):
+    def last_body():
+        return page.evaluate("() => window.recordQueryBodies.at(-1)")
+
+    assert last_body()['ontology_scope'] == 'all'
+    assert last_body()['ontology_ids'] is None
+
+    before = page.evaluate("() => window.recordQueryBodies.length")
+    page.select_option('#record-ontology', 'id:o1')
+    page.wait_for_function("before => window.recordQueryBodies.length > before", arg=before)
+    assert last_body()['ontology_scope'] == 'ids'
+    assert last_body()['ontology_ids'] == ['o1']
+
+    before = page.evaluate("() => window.recordQueryBodies.length")
+    page.select_option('#record-ontology', 'unknown')
+    page.wait_for_function("before => window.recordQueryBodies.length > before", arg=before)
+    assert last_body()['ontology_scope'] == 'unknown'
+    assert last_body()['ontology_ids'] is None
+
+    before = page.evaluate("() => window.recordQueryBodies.length")
+    page.select_option('#record-ontology', 'all')
+    page.wait_for_function("before => window.recordQueryBodies.length > before", arg=before)
+    assert last_body()['ontology_scope'] == 'all'
+    assert last_body()['ontology_ids'] is None
+
+
+def test_ontology_history_navigation_preselects_the_ledger_filter(page):
+    before = page.evaluate("() => window.recordQueryBodies.length")
+    page.evaluate("() => window.wb.setVersionContext({ontologyScope:'ids',ontologyIds:['o1'],ontologyVersion:1,source:'ontology-history'})")
+    page.wait_for_function("before => window.recordQueryBodies.length > before", arg=before)
+    page.wait_for_function("() => document.querySelector('#record-ontology')?.value === 'id:o1'")
+    assert page.input_value('#record-ontology') == 'id:o1'
+    assert page.evaluate("() => window.recordQueryBodies.at(-1)")['ontology_ids'] == ['o1']
+
+
+def test_record_revision_and_migration_status_are_truthful(page):
+    rows = ledger_rows(page)
+    old = next(item for item in rows if item['name'] == '价格说明' and '本体 v1' in item['cells'][2].inner_text())
+    assert '修订 r4' in old['row'].inner_text()
+    assert '依据本体 v1（历史）' in old['row'].inner_text()
+    assert '待迁移' in old['row'].inner_text()
+
+    current = next(item for item in rows if item['name'] == '团购价')
+    assert '修订 r1' in current['row'].inner_text()
+    assert '依据本体 v2（当前）' in current['row'].inner_text()
+    assert '待迁移' not in current['row'].inner_text()
+    assert '迁移阻塞' not in current['row'].inner_text()
+
+    page.click('.ledger-tab:nth-child(2)')
+    relation = ledger_rows(page)[0]
+    assert '修订 r2' in relation['row'].inner_text()
+    assert '迁移阻塞' in relation['row'].inner_text()
+
+
+def test_missing_ontology_and_unavailable_plan_are_explicit(page):
+    page.click('.ledger-tab:nth-child(4)')
+    assert '未知本体' in ledger_rows(page)[0]['row'].inner_text()
+
+    page.evaluate("() => { window.mockFailSide = 'reclassify'; }")
+    page.click('#load-records')
+    page.wait_for_function("() => document.querySelector('.ledger-kpi[data-ledger-kpi=duplicates] b').textContent.trim() !== '—'",
+                           timeout=10000)
+    page.click('.ledger-tab:nth-child(1)')
+    old = next(item for item in ledger_rows(page) if item['name'] == '价格说明' and '本体 v1' in item['cells'][2].inner_text())
+    assert '迁移状态未知' in old['row'].inner_text()
 
 
 def test_supporting_assertion_count_merges_both_lineages_without_double_counting(page):
