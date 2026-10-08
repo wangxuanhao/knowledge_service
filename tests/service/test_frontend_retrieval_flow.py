@@ -126,6 +126,53 @@ def _search(page, query='退款', mode='keyword'):
     page.wait_for_function("document.querySelectorAll('#hits .hit-kind').length === 3")
 
 
+def test_ontology_preview_sets_ephemeral_version_context_and_project_change_resets_it(
+        workbench):
+    page = workbench.page
+    empty = {
+        'ontologyScope': 'all', 'ontologyIds': None,
+        'ontologyVersion': None, 'source': None,
+    }
+    assert page.evaluate('window.wb.versionContext') == empty
+
+    release = page.evaluate(
+        "async (projectId) => {const response = await fetch("
+        "'/api/projects/' + encodeURIComponent(projectId) + '/ontologies'); "
+        "const body = await response.json(); return body.versions[0];}",
+        workbench.project,
+    )
+    page.evaluate(
+        "async (release) => {await window.OntologyModel.previewVersion("
+        "release.id, release.version);}",
+        release,
+    )
+    assert page.evaluate('window.wb.versionContext') == {
+        'ontologyScope': 'ids', 'ontologyIds': [release['id']],
+        'ontologyVersion': release['version'], 'source': 'ontology-history',
+    }
+    page.evaluate("async () => {await window.OntologyModel.clearPreview();}")
+    assert page.evaluate('window.wb.versionContext') == empty
+    page.evaluate(
+        "async (release) => {await window.OntologyModel.previewVersion("
+        "release.id, release.version);}",
+        release,
+    )
+
+    other = page.evaluate(
+        "async () => {const created = await (await fetch('/api/projects', {method: 'POST', "
+        "headers: {'Content-Type': 'application/json'}, "
+        "body: JSON.stringify({name: '版本上下文切换'})})).json(); "
+        "await projects(); return created.id;}")
+    with page.expect_response(lambda response: response.url.endswith('/entity-options')):
+        page.select_option('#project', other)
+    assert page.evaluate('window.wb.versionContext') == empty
+
+    page.evaluate("window.wb.setVersionContext({ontologyScope: 'unknown', source: 'test'})")
+    page.reload(wait_until='load')
+    page.wait_for_function("() => document.querySelectorAll('#project option').length > 1")
+    assert page.evaluate('window.wb.versionContext') == empty
+
+
 def _watch_graph_clear(page, selector, snapshot_name, event='click'):
     page.evaluate("""([selector, snapshotName, event]) => {
       document.querySelector(selector).addEventListener(event, () => {

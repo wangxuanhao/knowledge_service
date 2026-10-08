@@ -550,12 +550,17 @@
   function previewVersion(ontologyId, version) {
     S.preview = { id: ontologyId, version: version || null };
     S.selected = null;
+    wb.setVersionContext({
+      ontologyScope: 'ids', ontologyIds: [ontologyId],
+      ontologyVersion: version || null, source: 'ontology-history',
+    });
     emit('preview:changed', { preview: S.preview });
     return refresh();
   }
 
   // 退出预览，回到"草案优先、否则最新已发布版本"的正常视图
   function clearPreview() {
+    wb.clearVersionContext();
     if (!S.preview) return Promise.resolve(S);
     S.preview = null;
     emit('preview:changed', { preview: null });
@@ -579,6 +584,7 @@
       source_context: { revert_from: ontologyId },
     }, 'POST');
     S.preview = null;
+    wb.clearVersionContext();
     S.draft = draft;
     emit('preview:changed', { preview: null });
     emit('draft:changed', { draft });

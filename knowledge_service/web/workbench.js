@@ -1,5 +1,18 @@
 /* Rich exploration on the new service. No native browser prompt/confirm APIs. */
 const wb={epoch:0,chart:null,tree:null,nodes:new Map(),records:new Map(),jobs:new Map()};
+const emptyVersionContext=()=>({
+  ontologyScope:'all',ontologyIds:null,ontologyVersion:null,source:null,
+});
+wb.versionContext=emptyVersionContext();
+wb.setVersionContext=next=>{
+  wb.versionContext={...emptyVersionContext(),...(next||{})};
+  document.dispatchEvent(new CustomEvent('version-context:changed',{
+    detail:wb.versionContext,
+  }));
+  return wb.versionContext;
+};
+wb.clearVersionContext=()=>wb.setVersionContext(emptyVersionContext());
+window.wb=wb;
 const term=s=>{try{const value=decodeURIComponent(String(s||'').split(/[\/#]/).pop());return value.startsWith('urn:')?value.split(':').pop():value}catch{return String(s||'')}};
 function showTab(name){document.querySelector(`[data-tab="${name}"]`).click();}
 // 打开「项目与运行」里的某个分区。合并后 后台任务 / 快照·评测 不再是独立页签，
@@ -12,7 +25,7 @@ function discoveryHintHost(canvasId){const canvas=$(canvasId);if(!canvas||!canva
 async function renderDiscoveryHint(){const p=current,mode=$('project').selectedOptions?.[0]?.dataset?.ontologyMode,hosts=['graph-canvas','mindmap-canvas'].map(discoveryHintHost);if(!p||mode!=='discovery'){hosts.forEach(h=>{if(h)h.hidden=true;});return;}let data;try{data=await api(endpoint('/ontology-discovery'),undefined,'GET');}catch(e){hosts.forEach(h=>{if(h)h.hidden=true;});return;}if(p!==current)return;const pending=data.unpublished_candidate_count||0;hosts.forEach(host=>{if(!host)return;if(pending>0){host.hidden=false;host.innerHTML=`<span>开放本体发现：还有 <b>${pending}</b> 条候选待审核或未通过校验。它们仍保留在候选区，不需要重新上传原文。</span><button data-goto-discovery>前往本体建模层 ↗</button>`;host.querySelector('[data-goto-discovery]').onclick=()=>showTab('ontology-model');}else host.hidden=true;});}
 for(const tab of ['graph','mindmap'])document.querySelector(`[data-tab="${tab}"]`)?.addEventListener('click',()=>renderDiscoveryHint().catch(()=>{}));
 const oldChange=$('project').onchange;
-$('project').onchange=()=>{oldChange();wb.records.clear();for(const id of ['dashboard','source-list','source-body','resolve-result','tasks','operations','evaluation-result'])$(id).textContent='';const preferred=$('project').selectedOptions?.[0]?.dataset?.ontologyMode,mode=document.getElementById('extraction-mode');if(preferred&&mode){mode.value=preferred;mode.onchange?.();}wb.tree?.clear();renderDiscoveryHint().catch(()=>{});};
+$('project').onchange=()=>{wb.clearVersionContext();oldChange();wb.records.clear();for(const id of ['dashboard','source-list','source-body','resolve-result','tasks','operations','evaluation-result'])$(id).textContent='';const preferred=$('project').selectedOptions?.[0]?.dataset?.ontologyMode,mode=document.getElementById('extraction-mode');if(preferred&&mode){mode.value=preferred;mode.onchange?.();}wb.tree?.clear();renderDiscoveryHint().catch(()=>{});};
 let dashboardRequest=0;
 async function dashboard(){const request=++dashboardRequest,p=current,stamp=JSON.stringify(scope());const r=await scopedRead('/dashboard');if(request!==dashboardRequest||p!==current||stamp!==JSON.stringify(scope()))return;
 
