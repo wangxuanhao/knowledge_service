@@ -252,13 +252,33 @@ class Reclassify:
 
     @staticmethod
     def _version_labels(versions):
-        """本体版本 → 展示名（按发布时间排序；序号只是展示层的事，与台账那一列同一口径）。"""
-        ordered = sorted(versions, key=lambda item: str(item.get('created_at') or ''))
+        """本体版本 → 展示名，版本号与复用语义以仓储字段为准。"""
+        ordered = list(versions)
+        by_version = {}
+        for item in ordered:
+            by_version.setdefault(item['version'], []).append(item)
+
+        def short_id(item, peers):
+            ontology_id = str(item['id'])
+            width = min(8, len(ontology_id))
+            while any(str(peer['id'])[:width] == ontology_id[:width]
+                      for peer in peers if peer['id'] != item['id']):
+                width += 1
+            return ontology_id[:width]
+
         labels = {}
         for index, item in enumerate(ordered):
             date = str(item.get('created_at') or '')[:10]
             tail = '（当前）' if index == len(ordered) - 1 else '（旧版）'
-            labels[item['id']] = f'本体 v{index + 1}{" · " + date if date else ""}{tail}'
+            parts = [f'本体 v{item["version"]}']
+            peers = by_version[item['version']]
+            if len(peers) > 1:
+                parts.append(short_id(item, peers))
+            if date:
+                parts.append(date)
+            if item['version_reused']:
+                parts.append('标注修订')
+            labels[item['id']] = ' · '.join(parts) + tail
         return labels
 
     def _context(self, project_id, versions, current_ontology, labels_current):

@@ -99,6 +99,36 @@ def test_ontology_lineage_metadata_survives_restart(tmp_path):
     }
 
 
+def test_commit_ontology_change_rejects_empty_history_without_partial_writes(tmp_path):
+    repo = Repository(tmp_path / 'empty-ontology-change.sqlite')
+    project_id = repo.create_project('empty ontology history')['id']
+    ontology = {
+        'id': 'ontology-from-empty-history',
+        'turtle': '@prefix ex: <urn:ex:> .',
+        'summary': {'classes': []},
+        'metadata': {},
+        'created_at': '2026-01-01T00:00:00Z',
+    }
+    proposal = {'id': 'proposal-from-empty-history', 'status': 'approved'}
+    document = {
+        'id': 'document-from-empty-history',
+        'kind': 'document',
+        'text': 'must remain uncommitted',
+        'metadata': {},
+    }
+
+    with pytest.raises(ValueError, match='版本冲突'):
+        repo.commit_ontology_change(
+            project_id, ontology, proposal, document,
+            expected_document_version=None, expected_ontology_id=None)
+
+    assert repo.list_ontologies(project_id) == []
+    with pytest.raises(KeyError):
+        repo.get_record(project_id, document['id'])
+    with pytest.raises(KeyError):
+        repo.get_artifact('ontology_change', proposal['id'])
+
+
 def test_correction_replaces_interval_but_history_retains_original(tmp_path):
     repo = Repository(tmp_path / 'db')
     p = repo.create_project('a')['id']

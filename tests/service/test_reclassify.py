@@ -166,6 +166,44 @@ def test_plan_groups_stale_knowledge_by_old_type_with_three_outcomes(system):
     assert len(plan['constraints']) == 3
 
 
+def test_version_labels_use_authoritative_numbers_and_disambiguate_reuse(tmp_path):
+    repo, service, project_id = _service(tmp_path, 'version-labels.sqlite')
+    first_id = '11111111-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+    second_id = '22222222-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+    current_id = '33333333-cccc-cccc-cccc-cccccccccccc'
+    rows = [
+        (current_id, '2025-01-02T00:00:00Z', {'version': 2}),
+        (second_id, '2025-01-01T00:00:00Z', {'version': 2}),
+        (first_id, '2025-01-01T00:00:00Z', {}),
+    ]
+    with repo._transaction():
+        for ontology_id, created_at, metadata in rows:
+            repo._db.execute(
+                '''INSERT INTO ontologies
+                   (id,project_id,turtle,summary,created_at,metadata)
+                   VALUES (?,?,?,?,?,?)''',
+                (ontology_id, project_id, V1, json.dumps(Ontology(V1).summary()),
+                 created_at, json.dumps(metadata)))
+    repo.put_record(project_id, {
+        'id': 'old-v2-record', 'kind': 'entity',
+        'type': 'https://example.test/ns#包裹', 'text': '旧版知识',
+        'ontology_id': second_id, 'metadata': {},
+    })
+
+    plan = Reclassify(service).plan(project_id)
+    old_v2 = next(group for group in plan['groups']
+                  if group['key'].startswith(second_id + ':'))['from_version']
+
+    assert plan['current_ontology_id'] == current_id
+    assert plan['current_version'].startswith('本体 v2')
+    assert not plan['current_version'].startswith('本体 v3')
+    assert current_id[:8] in plan['current_version']
+    assert second_id[:8] in old_v2
+    assert old_v2 != plan['current_version']
+    assert '标注修订' not in old_v2
+    assert '标注修订' in plan['current_version']
+
+
 def test_plan_is_read_only_and_only_lists_stale_knowledge(system):
     """「看」不改任何东西；已经迁过的知识不再出现在面板里。"""
     _, service, p, v1, v2 = system

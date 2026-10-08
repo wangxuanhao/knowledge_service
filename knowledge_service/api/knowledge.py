@@ -157,16 +157,17 @@ def install(app, service):
     @router.get('/api/projects/{project_id}/ontologies')
     def ontology_history(project_id: str):
         # 版本管理页要回答四件事：**第几版 / 什么时候发的 / 谁发的 / 为什么发**。
-        # 版本号按发布顺序现算（库里不存序号 —— 存了就会与顺序脱节）；
+        # 版本号与同号复用标记由仓储按不可变发布记录统一解析；
         # 发布说明与发布人取自版本 metadata.publication（发布时必填，见 PublishRequest.note）。
         versions = repository.list_ontologies(project_id)
         history = []
-        for index, item in enumerate(versions, start=1):
+        for item in versions:
             publication = (item.get('metadata') or {}).get('publication') or {}
             history.append({
                 **item,
                 'summary': Ontology(item['turtle']).summary(),
-                'version': index,
+                'version': item['version'],
+                'version_reused': item['version_reused'],
                 'note': publication.get('note') or '',
                 'actor': publication.get('actor') or '',
                 'draft_id': publication.get('draft_id') or '',
