@@ -679,6 +679,9 @@ class SemanticaExtractor:
                     return ontology.resolve(predicate, ontology.relations) in ontology.relations
                 except ValueError:
                     return False
+            def declared_datatype_property(predicate):
+                return any(str(predicate) in {item['id'],item['name']}
+                    for item in summary['attributes'])
             # 字面量兜底类型：命中实体若属于这类，本质是被 NER 误建成实体的标量值（金额/状态/时长）。
             LITERAL_FALLBACK_CLASSES = {'DataEntity'}
             for item in attributes:
@@ -696,11 +699,11 @@ class SemanticaExtractor:
                 object_type_short=''
                 if object_entity is not None:
                     object_type_short=str(object_entity.label).rsplit('#',1)[-1].rsplit('/',1)[-1]
-                # 只有三条全满足才把属性改判为关系：
-                #   ① 值唯一命中实体；② 谓词在本体里是**对象属性**；③ 命中实体不是字面量兜底类。
-                # 否则保留为属性 —— 属性通道已确认 value 是标量，NER 误把标量建成实体不应连锁污染。
+                # 已声明的数据属性必须保持为属性；对象属性和未知谓词在值唯一命中实体时
+                # 进入关系审核，避免未知关系在获准进入审核前就被压回属性。
                 can_be_relation=(object_entity is not None
-                    and declared_object_property(item.attribute)
+                    and (declared_object_property(item.attribute)
+                         or not declared_datatype_property(item.attribute))
                     and object_type_short not in LITERAL_FALLBACK_CLASSES)
                 if can_be_relation:
                     object_id=next(iter(object_ids));key=(entity_id,item.attribute.strip().casefold(),object_id)
@@ -709,7 +712,7 @@ class SemanticaExtractor:
                             subject_id=entity_id,object_id=object_id,subject=entity.text,object=object_entity.text,
                             subject_type=entity.label,object_type=object_entity.label,confidence=item.confidence,
                             evidence=item.evidence,evidence_status=getattr(item,'evidence_status','exact'),
-                            reason='属性值命中正文实体且谓词为对象属性，已按关系候选处理'))
+                            reason='属性值命中正文实体，已按关系候选处理'))
                         relation_fact_keys.add(key)
                     self.extraction_diagnostics['attribute_reclassified_relation']+=1
                     continue

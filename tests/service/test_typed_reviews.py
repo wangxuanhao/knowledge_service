@@ -113,6 +113,28 @@ def test_guided_attribute_value_matching_an_entity_is_reclassified_as_relation(m
     assert extractor.extraction_diagnostics['attribute_reclassified_relation']==1
 
 
+def test_guided_ambiguous_datatype_property_stays_an_attribute(monkeypatch):
+    import knowledge_service.integrations.semantica_adapter as adapter
+    import knowledge_service.services.attribute_extraction as attributes
+    from knowledge_service.services.attribute_extraction import AttributeProposal
+    from semantica.semantic_extract import methods
+    from semantica.semantic_extract.types import Entity
+    for key in ['KG_LLM_API_KEY','KG_LLM_BASE_URL','KG_LLM_MODEL']:
+        monkeypatch.setenv(key,'test')
+    left,right=Entity('甲','Person',0,1),Entity('乙','Person',4,5)
+    monkeypatch.setattr(methods,'extract_entities_llm',lambda *args,**kw:[left,right])
+    monkeypatch.setattr(adapter,'_extract_relations_guided',lambda *args,**kw:[])
+    monkeypatch.setattr(attributes,'extract_attributes',lambda *args:[
+        AttributeProposal(entity_index=0,attribute='owner',value='乙',evidence='甲的 owner 是乙',confidence=.9)])
+    duplicate_attributes=TTL+'''\n@prefix one: <https://one/> . @prefix two: <https://two/> .
+    one:owner a owl:DatatypeProperty . two:owner a owl:DatatypeProperty .'''
+    extractor=SemanticaExtractor();extractor.include_attributes=True
+    extractor.extract('甲的 owner 是乙',Ontology(duplicate_attributes))
+    assert [item['kind'] for item in extractor.review_candidates]==['attribute']
+    assert extractor.review_candidates[0]['proposed_type']=='owner'
+    assert extractor.extraction_diagnostics['attribute_reclassified_relation']==0
+
+
 def test_max_count_one_conflict_stays_reviewable_and_can_be_rejected(tmp_path,monkeypatch):
     def extract(self,text,ontology):
         self.review_candidates=[dict(kind='entity',record_id='person-1',text='甲',proposed_type='Person'),
