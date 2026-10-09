@@ -23,7 +23,7 @@ SEARCH_BODY_FIELDS = {
 }
 SUBGRAPH_BODY_FIELDS = {
     'node_id', 'hops', 'filters', 'valid_at', 'known_at', 'include_unknown',
-    'attribute_mode', 'entity_type', 'predicate',
+    'attribute_mode', 'entity_type', 'predicate', 'ontology_scope', 'ontology_ids',
 }
 
 
@@ -991,6 +991,82 @@ def test_graph_scope_filters_survive_expand_and_explicit_full_redraw(workbench):
     assert [body['node_id'] for body in bodies] == [None, 'a', None]
     assert all(body['entity_type'] == 'Thing' and body['predicate'] == 'mentions'
                for body in bodies)
+
+
+def test_ontology_scope_reaches_graph_redraw_expand_and_mindmap(workbench):
+    page = workbench.page
+    graph_bodies, mindmap_bodies = [], []
+    page.on('request', lambda request: graph_bodies.append(request.post_data_json)
+            if request.url.endswith('/subgraph') else None)
+    page.on('request', lambda request: mindmap_bodies.append(request.post_data_json)
+            if request.url.endswith('/mindmap') else None)
+
+    page.evaluate("""() => window.wb.setVersionContext({
+      ontologyScope: 'ids', ontologyIds: ['ontology-v1'],
+      ontologyVersion: 1, source: 'test'
+    })""")
+    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+        page.click('#draw-graph')
+    page.select_option('#graph-entity-choice', 'a')
+    page.wait_for_function(
+        "document.querySelector('#graph-detail').textContent.includes('退款商户')")
+    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+        page.click('#graph-expand')
+    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+        page.click('#draw-graph')
+
+    page.click('[data-tab="mindmap"]')
+    page.wait_for_function(
+        "() => [...document.querySelectorAll('#mindmap-root option')]"
+        ".some(option => option.value === 'a')")
+    page.select_option('#mindmap-root', 'a')
+    with page.expect_response(lambda response: response.url.endswith('/mindmap')):
+        page.click('#draw-mindmap')
+
+    assert len(graph_bodies) == 3
+    assert all(body['ontology_scope'] == 'ids' and
+               body['ontology_ids'] == ['ontology-v1'] for body in graph_bodies)
+    assert mindmap_bodies[-1]['ontology_scope'] == 'ids'
+    assert mindmap_bodies[-1]['ontology_ids'] == ['ontology-v1']
+
+    page.evaluate("""() => window.wb.setVersionContext({
+      ontologyScope: 'unknown', ontologyIds: null,
+      ontologyVersion: null, source: 'test'
+    })""")
+    with page.expect_response(lambda response: response.url.endswith('/mindmap')):
+        page.click('#draw-mindmap')
+    assert mindmap_bodies[-1]['ontology_scope'] == 'unknown'
+    assert mindmap_bodies[-1]['ontology_ids'] is None
+
+    page.evaluate('() => window.wb.clearVersionContext()')
+    with page.expect_response(lambda response: response.url.endswith('/mindmap')):
+        page.click('#draw-mindmap')
+    assert mindmap_bodies[-1]['ontology_scope'] == 'all'
+    assert mindmap_bodies[-1]['ontology_ids'] is None
+
+
+def test_ontology_scope_banner_reset_redraws_graph_with_all_scope(workbench):
+    page = workbench.page
+    bodies = []
+    page.on('request', lambda request: bodies.append(request.post_data_json)
+            if request.url.endswith('/subgraph') else None)
+    page.evaluate("""() => window.wb.setVersionContext({
+      ontologyScope: 'ids', ontologyIds: ['ontology-v1'],
+      ontologyVersion: 1, source: 'test'
+    })""")
+
+    assert '知识范围：本体 v1' in page.locator('#graph-version-scope').inner_text()
+    assert '知识范围：本体 v1' in page.locator('#mindmap-version-scope').inner_text()
+    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+        page.click('#graph-version-scope [data-reset-ontology-scope]')
+
+    assert bodies[-1]['ontology_scope'] == 'all'
+    assert bodies[-1]['ontology_ids'] is None
+    assert page.evaluate('window.wb.versionContext') == {
+        'ontologyScope': 'all', 'ontologyIds': None,
+        'ontologyVersion': None, 'source': None,
+    }
+    assert '知识范围：全部本体' in page.locator('#graph-version-scope').inner_text()
 
 
 # ── 图谱渲染器只能有一份实现（双 UI 收敛的防回归闸门） ──
