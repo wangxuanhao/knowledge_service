@@ -45,7 +45,7 @@ def test_workbench_has_all_control_targets_and_no_native_dialogs():
     assert all(text in evidence for text in ('编辑这条关系','删除这条关系','删除实体及其关联关系','再次点击确认删除','新增关系','保存并添加到图谱','interactive_graph'))
     assert 'evidence-danger' in evidence and "endpoint('/records')" in evidence
     record_dialog=(ROOT/'record-dialog.js').read_text(encoding='utf-8')
-    assert all(text in record_dialog for text in ('维护具体实体','维护实体关系','保存实体修改为新版本','保存关系修改为新版本','高级：编辑完整记录 JSON'))
+    assert all(text in record_dialog for text in ('维护具体实体','维护实体关系','保存实体修改为新修订','保存关系修改为新修订','高级：编辑完整记录 JSON'))
     assert "get('draw-graph')" not in record_dialog
     assert '发布本体并映射候选' not in workspace
     candidate_map=(ROOT/'candidate-mindmap.js').read_text(encoding='utf-8')
@@ -174,7 +174,8 @@ def test_knowledge_history_excludes_document_receipts_and_sources_show_build_sta
     styles=(ROOT/'workspace.css').read_text(encoding='utf-8')
     sources=(ROOT/'sources-view.js').read_text(encoding='utf-8')
     # 台账的查询范围＝台账的四个视角；属性（attribute）以前被这里滤掉了，界面上根本看不到它
-    assert "filter.kinds=['entity','relation','attribute','chunk']" in records
+    assert "kinds:['entity','relation','attribute','chunk']" in records
+    assert "ontology_scope:'all',ontology_ids:null" in records
     assert "document:'文档'" not in records
     assert "record-library-section" in records and "record-governance" in records
     assert all(step in records for step in ('按名称查找','选择保留的实体','选择另一个重复实体'))
@@ -207,8 +208,8 @@ def test_knowledge_ledger_is_the_instance_layer_home():
     # 四个视角（页签）与旧的下拉不能并存成两套入口；属性这一维是用户点名要的，别再漏
     assert all(view in records for view in ('实体','关系','属性','原文片段'))
     assert 'dataset.ledgerView' in records and 'ledger-tabs' in records
-    # 本体归属：必须能分辨当前版本与旧版本（C2 受控重分类的前提）
-    assert '挂在哪一版本体上' in records and '（旧版）' in records and '（当前）' in records
+    # 本体归属：必须能分辨当前发布与历史发布（C2 受控重分类的前提）
+    assert '本体归属' in records and '（历史）' in records and '（当前）' in records
     # 原文断言：两条血缘都要认（候选血缘 discovery_candidate_id + 已归位血缘 canonical_record_id）
     assert 'discovery_candidate_id' in records and 'byCanonical' in records
     # 撤销：以前接口有、UI 点不到；现在行内与"可撤销的操作"里都要能点到

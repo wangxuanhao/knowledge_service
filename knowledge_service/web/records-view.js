@@ -292,7 +292,7 @@
   function actionsCell(row,index){
       const box=node('div','record-actions');
       const edit=node('button',null,'编辑');edit.dataset.editRow=String(index);edit.type='button';
-      const history=node('button','secondary','版本历史');history.dataset.historyRow=String(index);history.type='button';
+      const history=node('button','secondary','修订历史');history.dataset.historyRow=String(index);history.type='button';
       box.append(edit,history);
       // D1「台账 → 图谱」：把这一个实体/关系画到图谱中心（复用检索命中那套跳转，不重新造定位逻辑）。
       // 属性也能定位：它挂在实体上，所以把「所属实体」画到图谱中心（属性本身不是图上的点）。

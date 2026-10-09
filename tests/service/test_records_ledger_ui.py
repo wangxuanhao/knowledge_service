@@ -29,9 +29,11 @@ SHELL = """<!doctype html><html><head><meta charset="utf-8"></head><body>
     </div>
     <div class="panel">
       <h2>修订记录</h2>
-      <div class="columns"><label>记录 ID<input id="revision-id"></label><label>预期版本<input type="number" id="revision-version" value="1"></label></div>
-      <textarea id="revision"></textarea><button id="revise">保存新版本</button>
-      <label>恢复历史版本号<input type="number" id="restore-number" value="1"></label><button id="restore-version" class="secondary">恢复为新版本</button>
+      <div class="columns"><label>记录 ID<input id="revision-id"></label><label>预期修订号<input type="number" id="revision-version" value="1"></label></div>
+      <textarea id="revision"></textarea><button id="revise">保存新修订</button>
+      <label>恢复历史修订号<input type="number" id="restore-number" value="1"></label><button id="restore-version" class="secondary">恢复为新修订</button>
+      <label><input id="delete-confirm" type="checkbox">确认软删除</label><button id="soft-delete">软删除</button>
+      <pre id="history"></pre>
     </div>
     <section class="panel entity-governance-panel">
       <h2>实体消歧与融合</h2>
@@ -58,6 +60,7 @@ SHELL = """<!doctype html><html><head><meta charset="utf-8"></head><body>
   </section>
   <select id="project"><option value="p1" selected>测试项目</option></select>
   <div id="health"></div>
+  <div id="status"></div>
   <script>
   // 台账脚本依赖的几个 app 级全局：只做最小实现，够它跑起来即可（不复制 app.js）。
   window.wb={records:new Map(),nodes:new Map(),versionContext:{
@@ -115,6 +118,19 @@ MOCKS = r"""() => {
   window.apiLog = [];
   window.recordQueryBodies = [];
   window.undoCalls = [];
+  window.historyRequests = 0;
+  window.timelineRecord = {id:'timeline',kind:'entity',text:'当前仍可查看',type:'urn:ontology:文档标题',
+    ontology_id:'o2-note',version:3,version_id:'revision-r3-aaaaaaaaaaaaaaaa-0003',recorded_at:'2026-03-01T09:00:00Z',
+    superseded_at:null,valid_from:null,valid_until:null,metadata:{},properties:{}};
+  window.historyRevisions = [
+    {id:'timeline',kind:'entity',text:'第一次修订',type:'urn:ontology:文档标题',ontology_id:'o1',
+      version:1,version_id:'revision-r1-aaaaaaaaaaaaaaaa-0001',recorded_at:'2026-01-01T09:00:00Z',superseded_at:'2026-02-01T09:00:00Z',
+      valid_from:null,valid_until:null,metadata:{},properties:{}},
+    {id:'timeline',kind:'entity',text:'第二次修订',type:'urn:ontology:文档标题',ontology_id:'o1',
+      version:2,version_id:'revision-r2-aaaaaaaaaaaaaaaa-0002',recorded_at:'2026-02-01T09:00:00Z',superseded_at:'2026-03-01T09:00:00Z',
+      valid_from:null,valid_until:null,metadata:{_deleted:true},properties:{note:'历史删除态'}},
+    window.timelineRecord,
+  ];
   const entity = (id,text,type,ontologyId,extra={}) => ({id,kind:'entity',text,type,ontology_id:ontologyId,
     version:1,recorded_at:'2026-10-01T10:00:00Z',valid_from:null,valid_until:null,properties:{},
     metadata:{...(extra.metadata||{})},...extra});
@@ -144,6 +160,11 @@ MOCKS = r"""() => {
     const method = (options.method||'GET').toUpperCase();
     window.apiLog.push(method+' '+parsed.pathname);
     const payload = (body) => new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}});
+    if(parsed.pathname.endsWith('/records/timeline/history')) {
+      window.historyRequests++;
+      if(window.mockFailSide==='history') return new Response('{"error":"history boom"}',{status:500,headers:{'Content-Type':'application/json'}});
+      return payload({versions:window.historyRevisions});
+    }
     if(parsed.pathname.endsWith('/records/query')) {
       const body = JSON.parse(options.body||'{}');
       window.recordQueryBodies.push(body);
@@ -221,6 +242,15 @@ def page(ledger_browser):
     pg._errors = errors
     yield pg
     context.close()
+
+
+@pytest.fixture()
+def revision_page(page):
+    page.add_style_tag(path=str(WEB / 'record-dialog.css'))
+    page.add_script_tag(path=str(WEB / 'record-dialog.js'))
+    page.evaluate("() => window.historyFor(window.timelineRecord)")
+    page.wait_for_selector('#record-dialog[open]', timeout=10000)
+    return page
 
 
 def ledger_rows(page):
@@ -374,6 +404,41 @@ def test_missing_ontology_and_unavailable_plan_are_explicit(page):
     page.click('.ledger-tab:nth-child(1)')
     old = next(item for item in ledger_rows(page) if item['name'] == '价格说明' and '本体 v1' in item['cells'][2].inner_text())
     assert '迁移状态未知' in old['row'].inner_text()
+
+
+def test_revision_timeline_orders_immutable_revisions_and_resolves_ontology(revision_page):
+    revision_page.wait_for_selector('.record-revision-item[data-revision="3"]', timeout=10000)
+    items = revision_page.locator('.record-revision-item').all_inner_texts()
+    assert [text.splitlines()[0] for text in items] == ['修订 r3 · 当前', '修订 r2 · 已取代', '修订 r1 · 已取代']
+    assert 'revision-…0003' in items[0]
+    assert '实体' in items[0]
+    assert '本体 v2（当前）' in items[0]
+    assert '已删除' in items[1], '删除状态与“已取代”是两个独立维度，都要显示'
+    assert '本体 v1（历史）' in items[1]
+
+
+def test_revision_timeline_old_selection_is_read_only(revision_page):
+    revision_page.wait_for_selector('.record-revision-item[data-revision="2"]', timeout=10000)
+    revision_page.click('.record-revision-item[data-revision="2"]')
+    detail = revision_page.inner_text('#record-revision-detail')
+    assert '修订 r2 · 已取代' in detail
+    assert '第二次修订' in detail
+    assert '只读历史快照' in detail
+    assert revision_page.is_hidden('#record-structured-edit')
+    assert revision_page.is_hidden('#record-advanced-edit')
+    assert revision_page.query_selector('#record-revision-detail button[type="submit"]') is None
+
+
+def test_revision_timeline_failure_keeps_current_detail_and_can_retry(revision_page):
+    revision_page.evaluate("() => { window.mockFailSide = 'history'; window.historyFor(window.timelineRecord); }")
+    revision_page.wait_for_selector('[data-retry-revision-timeline]', timeout=10000)
+    assert '当前仍可查看' in revision_page.inner_text('#record-revision-detail')
+    assert '历史修订读取失败' in revision_page.inner_text('#record-history-view')
+    before = revision_page.evaluate("() => window.historyRequests")
+    revision_page.evaluate("() => { window.mockFailSide = null; }")
+    revision_page.click('[data-retry-revision-timeline]')
+    revision_page.wait_for_function("before => window.historyRequests > before", arg=before)
+    revision_page.wait_for_selector('.record-revision-item[data-revision="3"]', timeout=10000)
 
 
 def test_supporting_assertion_count_merges_both_lineages_without_double_counting(page):
