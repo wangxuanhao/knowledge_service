@@ -68,6 +68,19 @@ class Scope(Request):
     known_at: str | None = None
     include_unknown: bool = True
     kinds: list[Literal['document', 'entity', 'relation', 'attribute', 'chunk']] | None = None
+    ontology_scope: Literal['all', 'ids', 'unknown'] = 'all'
+    ontology_ids: list[str] | None = None
+
+    @model_validator(mode='after')
+    def check_ontology_scope(self):
+        if self.ontology_scope == 'ids':
+            normalized = [ontology_id.strip() for ontology_id in self.ontology_ids or []]
+            if not normalized or any(not ontology_id for ontology_id in normalized):
+                raise ValueError('ids 本体范围需要非空 ontology_ids')
+            self.ontology_ids = list(dict.fromkeys(normalized))
+        elif self.ontology_ids is not None:
+            raise ValueError('只有 ids 本体范围可以提供 ontology_ids')
+        return self
 
 
 class Search(Scope):

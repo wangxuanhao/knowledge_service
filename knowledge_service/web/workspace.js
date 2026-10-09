@@ -149,6 +149,35 @@
     uiTimeline.events=[];uiTimeline.project=null;uiTimeline.truncated=false;get('known-at').value='';const el=get('graph-timeline');if(el)el.querySelector('.tl-points').innerHTML='<option value="">当前状态</option>';
   }
 
+  const ontologyScope=()=>({
+    ontology_scope:wb.versionContext?.ontologyScope||'all',
+    ontology_ids:wb.versionContext?.ontologyIds||null,
+  });
+  wb.ontologyScope=ontologyScope;
+  const ontologyScopeLabel=()=>{
+    const context=wb.versionContext||{};
+    if(context.ontologyScope==='ids')return context.ontologyVersion==null
+      ?'指定本体':'本体 v'+context.ontologyVersion;
+    if(context.ontologyScope==='unknown')return '未知本体';
+    return '全部本体';
+  };
+  function renderOntologyScopeBanners(){
+    for(const id of ['graph-version-scope','mindmap-version-scope']){
+      const host=get(id);if(!host)continue;
+      const label=make('span','知识范围：'+ontologyScopeLabel());
+      const reset=make('button','恢复全部本体','secondary');reset.type='button';
+      reset.dataset.resetOntologyScope='';
+      reset.hidden=(wb.versionContext?.ontologyScope||'all')==='all';
+      reset.onclick=async()=>{
+        wb.clearVersionContext();
+        if(!current)return;
+        if(id==='graph-version-scope')await window.drawGraph(null,Number(get('graph-hops').value)||1);
+        else if(get('mindmap-root').value)await get('draw-mindmap').onclick();
+      };
+      host.replaceChildren(label,reset);
+    }
+  }
+
   // A searchable native select, not an internal record ID input.
   const select=get('mindmap-root');
   select.parentElement.before(make('label','<span>筛选名称 / 类型</span><input id="mindmap-filter" placeholder="输入名称缩小候选范围">'));
@@ -172,7 +201,7 @@
   }
   get('mindmap-filter').oninput=choices;
   let selectedEntityId='',pendingEntityId='',detailSelectionEpoch=0;
-  const detailScope=()=>({valid_at:scope().valid_at||null,known_at:get('known-at').value||null});
+  const detailScope=()=>({...ontologyScope(),valid_at:scope().valid_at||null,known_at:get('known-at').value||null});
   function restoreCommittedSelection(){
     get('graph-entity-choice').value=selectedEntityId;
     get('graph-node').value=selectedEntityId;
@@ -439,7 +468,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
   // 图谱渲染器的唯一实现，显式挂到 window（不再依赖非严格模式下的隐式全局赋值）。
   // workbench.js 的 #graph-expand / #load-graph / 证据条目三个入口都按名字引用这个槽位，
   // 见下方 act('graph-expand') 与 workbench.js 注释。
-  const graphScope=()=>({...scope(),valid_at:null,
+  const graphScope=()=>({...scope(),...ontologyScope(),valid_at:null,
     entity_type:get('type-scope').value||null,
     predicate:get('predicate-scope').value||null});
   window.drawGraph=async(node=null,hops=1)=>{
@@ -475,6 +504,12 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
     get('graph-type-buttons')?.remove();get('graph-timeline')?.remove();
     if(!preserveSearchResults){get('hits').replaceChildren();get('search-summary').textContent='';}
   };
+  document.addEventListener('version-context:changed',()=>{
+    renderOntologyScopeBanners();
+    window.clearGraphWorkspace({preserveSearchResults:true});
+    wb.tree?.clear();
+  });
+  renderOntologyScopeBanners();
   act('search',runSearch);act('draw-graph',()=>drawGraph(null,Number(get('graph-hops').value)));
   // 「展开邻域」与「绘制图谱」共用同一份渲染器：绑定从 workbench.js 移到这里，
   // 同一个按钮不再被两个文件各绑一次。没选中实体时给出明确提示，而不是等后端返回空图。

@@ -236,7 +236,7 @@ def test_ledger_has_an_attribute_view_with_subject_and_value(browser, tmp_path):
     page.click('[data-ledger-view="attribute"]')
     page.wait_for_selector('#records table.ledger-attribute', timeout=5000)
     headers = [h.strip() for h in page.locator('#records thead th').all_inner_texts()]
-    assert headers == ['属性', '所属实体', '挂在哪一版本体上', '版本', '原文断言', '操作']
+    assert headers == ['属性', '所属实体', '本体归属', '知识修订', '原文断言', '操作']
     row = page.locator('#records tbody tr').first
     excerpt = re.sub(r'\s+', '', row.locator('.record-excerpt').inner_text())
     assert excerpt == '重量=12', f'属性行读不出「属性名 = 值」：{excerpt}'

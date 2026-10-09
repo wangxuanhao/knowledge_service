@@ -85,7 +85,9 @@ def question_context(service,p,request):
     # 读取由 `service.scoped` 计时；下方的图谱 BFS 每跳遍历一次全部关系，
     # 因此 `hops` 会放大读取后的计算成本。`_include_embeddings`
     # 仅在模式确实需要按向量排序时才保留向量。
-    scope={k:request.get(k) for k in ('filters','valid_at','known_at','kinds')}
+    scope={k:request.get(k) for k in (
+        'filters','valid_at','known_at','kinds','ontology_ids')}
+    scope['ontology_scope']=request.get('ontology_scope') or 'all'
     scope['include_unknown']=request.get('include_unknown',True)
     scope['_include_embeddings']=request.get('retrieval_mode','hybrid')!='keyword'
     # 本体查询扩展（P0-1，默认关）：开启时把扩展交给检索层，命中的子类实例会

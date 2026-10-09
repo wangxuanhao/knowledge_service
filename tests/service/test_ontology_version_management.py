@@ -11,13 +11,15 @@
      note 只有空白 → 400（strip 后为空，一样不算说明）。
      只用界面校验挡不住的调用方，会在版本列表里留下一排没人看得懂的版本。
   ② **版本列表回答四件事**：第几版 / 什么时候发的 / 谁发的 / 为什么发。
-     版本号按发布顺序**现算**（库里不存序号，存了就会与顺序脱节）。
+     优先使用发布 metadata 的版本号；旧数据按 created_at/id 稳定发布顺序回填。
   ③ **历史版本可读**：GET /ontology?ontology_id=<v1> 拿得到那一版的结构 ——
      这是界面上「查看这一版（只读）」的数据来源，读不到就只能给一张空画布。
   ④ **回到某一版 = 再发一版**：历史版本不可变。以 v1 为基础开一份新草案并发布，
      得到的是**新版本**，v1/v2 原样保留；新版本的 base_ontology_id 指向 v1。
      不允许"把生产切回旧结构"这种没有发布记录的写法。
 """
+import json
+
 from fastapi.testclient import TestClient
 
 from knowledge_service.api import create_app
@@ -99,6 +101,34 @@ def publish(client, base, draft, note, key='vm-publish', extra_codes=()):
 
 def versions(client, base):
     return client.get(base + '/ontologies').json()['versions']
+
+
+def insert_out_of_order_version_history(repository, project_id):
+    first_id = '11111111-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+    second_id = '22222222-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+    current_id = '33333333-cccc-cccc-cccc-cccccccccccc'
+    rows = [
+        # 故意按 current → second → first 插入，使 seq 与发布时间顺序相反。
+        (current_id, '2025-01-02T00:00:00Z', {
+            'version': 2,
+            'publication': {'note': '标注修订', 'actor': 'editor'},
+        }),
+        (second_id, '2025-01-01T00:00:00Z', {
+            'version': 2,
+            'publication': {'note': '结构发布', 'actor': 'architect'},
+        }),
+        # 与 second 同一 created_at，靠 id 稳定排在前面；旧数据没有 version。
+        (first_id, '2025-01-01T00:00:00Z', {}),
+    ]
+    with repository._transaction():
+        for ontology_id, created_at, metadata in rows:
+            repository._db.execute(
+                '''INSERT INTO ontologies
+                   (id,project_id,turtle,summary,created_at,metadata)
+                   VALUES (?,?,?,?,?,?)''',
+                (ontology_id, project_id, TTL, '{}', created_at,
+                 json.dumps(metadata, ensure_ascii=False)))
+    return first_id, second_id, current_id
 
 
 # ---------------------------------------------------------------- ① 发布说明必填
@@ -201,6 +231,69 @@ def test_version_list_carries_number_note_actor_and_time(tmp_path):
     assert newest['draft_id'] == draft['id']
     # 初始版本没有发布说明（发布说明上线前就存在）——如实给空串，不编一句话
     assert listed[0]['note'] == ''
+
+
+def test_version_list_uses_stable_release_order_and_authoritative_versions(tmp_path):
+    """seq 不是版本语义；历史按 created_at/id 排序并解析 metadata.version。"""
+    app = create_app(tmp_path / 'stable-version-order.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project_id = client.post('/api/projects', json={
+            'name': '稳定版本顺序', 'use_default_ontology': False,
+        }).json()['id']
+        base = f'/api/projects/{project_id}'
+        repository = app.state.service.repository
+        first_id, second_id, current_id = insert_out_of_order_version_history(
+            repository, project_id)
+
+        inserted = repository._db.execute(
+            'SELECT id FROM ontologies WHERE project_id=? ORDER BY seq',
+            (project_id,)).fetchall()
+        assert [row['id'] for row in inserted] == [current_id, second_id, first_id]
+
+        listed = repository.list_ontologies(project_id)
+        assert [item['id'] for item in listed] == [first_id, second_id, current_id]
+        assert [(item['version'], item['version_reused']) for item in listed] == [
+            (1, False), (2, False), (2, True),
+        ]
+
+        response = client.get(base + '/ontologies')
+        assert response.status_code == 200, response.text
+        history = response.json()['versions']
+        assert [item['id'] for item in history] == [first_id, second_id, current_id]
+        assert [(item['version'], item['version_reused']) for item in history] == [
+            (1, False), (2, False), (2, True),
+        ]
+        assert history[1]['note'] == '结构发布'
+        assert history[1]['actor'] == 'architect'
+
+        next_version = repository.save_ontology(project_id, TTL, {})
+        assert next_version['version'] == 3, '下一次结构发布必须从权威当前版本 v2 递增'
+
+
+def test_governed_publish_recheck_uses_stable_latest_ontology(tmp_path):
+    """预检与事务最终复核必须认同 created_at/id 排出的当前本体。"""
+    app = create_app(tmp_path / 'stable-publish-recheck.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project_id = client.post('/api/projects', json={
+            'name': '稳定发布复核', 'use_default_ontology': False,
+        }).json()['id']
+        base = f'/api/projects/{project_id}'
+        repository = app.state.service.repository
+        _, _, current_id = insert_out_of_order_version_history(
+            repository, project_id)
+
+        draft = new_draft(client, base, current_id, '基于权威当前版发布')
+        draft = add_class(
+            client, base, draft, 'https://test/PublishedAfterImport', '导入后新增')
+        reviewed = review(client, base, draft)
+        assert reviewed['base_ontology_id'] == current_id
+
+        response = publish(client, base, reviewed, '逆序历史后的正常结构发布')
+
+        assert response.status_code == 200, response.text
+        history = versions(client, base)
+        assert history[-1]['id'] == response.json()['id']
+        assert history[-1]['version'] == 3
 
 
 def test_history_is_immutable_across_versions(tmp_path):

@@ -37,6 +37,7 @@
   const S = {
     summary: null,            // GET /ontology → { summary:{classes,relations,attributes} }
     ontologyId: null,         // 当前最新本体 id（发布/决策的 expected_ontology_id）
+    ontologyVersion: null,    // 当前生效本体的权威展示版本（由 API 返回，不按数组位置推算）
     graph: null,              // 编译好的画布图 { nodes, edges }
     selected: null,           // 选中的术语 IRI
     draft: null,              // 当前草案（id / revision / status / ontology）
@@ -117,7 +118,8 @@
   // 改了半天屏幕上一个字没变，用户以为没改成功。顶栏会标明现在画的是草案还是已发布版本。
   async function refresh() {
     if (typeof current === 'undefined' || !current) {
-      S.summary = null; S.error = null; S.showingDraft = false; compileGraph(); render();
+      S.summary = null; S.ontologyId = null; S.ontologyVersion = null;
+      S.error = null; S.showingDraft = false; compileGraph(); render();
       return S;
     }
     // ① 已发布本体（失败也不致命：有草案时照样能画）
@@ -125,6 +127,7 @@
     try { published = await api(endpoint('/ontology'), undefined, 'GET'); }
     catch (e) { published = null; }
     S.ontologyId = published ? (published.id || null) : S.ontologyId;
+    S.ontologyVersion = published ? (published.version ?? null) : null;
     // 读开放发现概览（是否已发布本体、待纳入候选数）。它是\"没发布本体时画布该画什么\"的唯一依据，
     // 所以先于草案选择读出来；读不到就置空，绝不因发现信息缺失挡住正常本体展示。
     await loadDiscovery();
@@ -286,9 +289,33 @@
     const el = root(); if (!el) return;
     if (!built) { buildSkeleton(el); built = true; }
     renderSidebar();
+    renderVersionContext();
     // 子模块可能尚未加载（脚本顺序 / 测试 mock shell）——用可选链，缺谁都不崩
     if (window.OntologyCanvas) window.OntologyCanvas.render(S);
     if (window.OntologyPanel) window.OntologyPanel.render(S);
+  }
+
+  function renderVersionContext() {
+    const host = document.getElementById('om-version-context');
+    if (!host) return;
+    const currentLabel = S.ontologyVersion == null
+      ? '尚未发布本体' : `当前生效本体：v${S.ontologyVersion}`;
+    let viewedLabel;
+    if (S.preview) viewedLabel = `正在查看：v${S.preview.version ?? '?'}（历史·只读）`;
+    else if (S.showingDraft) viewedLabel = `正在查看：草案（未发布）${S.ontologyVersion == null ? '' : ` · 基于 v${S.ontologyVersion}`}`;
+    else viewedLabel = S.ontologyVersion == null
+      ? '正在查看：尚未发布' : `正在查看：v${S.ontologyVersion}（当前）`;
+    host.replaceChildren();
+    const currentPart = document.createElement('span');
+    currentPart.className = 'om-version-context-current';
+    currentPart.textContent = currentLabel;
+    const divider = document.createElement('span');
+    divider.className = 'om-version-context-divider';
+    divider.textContent = '→';
+    const viewedPart = document.createElement('span');
+    viewedPart.className = 'om-version-context-viewed';
+    viewedPart.textContent = viewedLabel;
+    host.append(currentPart, divider, viewedPart);
   }
 
   function buildSkeleton(el) {
@@ -307,6 +334,7 @@
           <span id="om-preview-text"></span>
           <button type="button" class="om-btn ghost" id="om-preview-exit">回到最新</button>
         </div>
+        <div class="om-version-context" id="om-version-context" aria-live="polite"></div>
         <div class="om-body">
           <!-- 用 div 不用 aside：全站 style.css 有一条给应用侧栏的全局规则
                aside{position:fixed;inset:0 auto 0 0;width:206px}，任何 aside 都会被固定到
@@ -514,7 +542,8 @@
     if (tab) tab.addEventListener('click', () => { void refresh(); });
     const proj = document.getElementById('project');
     if (proj) proj.addEventListener('change', () => {
-      S.summary = null; S.ontologyId = null; S.graph = null; S.selected = null; S.draft = null;
+      S.summary = null; S.ontologyId = null; S.ontologyVersion = null;
+      S.graph = null; S.selected = null; S.draft = null;
       S.showingDraft = false; S.preview = null;
       S.stageAvailability = null; S.readiness = null; S.candidates = [];
       built = false; render();
@@ -550,12 +579,17 @@
   function previewVersion(ontologyId, version) {
     S.preview = { id: ontologyId, version: version || null };
     S.selected = null;
+    wb.setVersionContext({
+      ontologyScope: 'ids', ontologyIds: [ontologyId],
+      ontologyVersion: version || null, source: 'ontology-history',
+    });
     emit('preview:changed', { preview: S.preview });
     return refresh();
   }
 
   // 退出预览，回到"草案优先、否则最新已发布版本"的正常视图
   function clearPreview() {
+    wb.clearVersionContext();
     if (!S.preview) return Promise.resolve(S);
     S.preview = null;
     emit('preview:changed', { preview: null });
@@ -579,6 +613,7 @@
       source_context: { revert_from: ontologyId },
     }, 'POST');
     S.preview = null;
+    wb.clearVersionContext();
     S.draft = draft;
     emit('preview:changed', { preview: null });
     emit('draft:changed', { draft });

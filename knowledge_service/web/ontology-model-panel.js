@@ -53,6 +53,10 @@
   const versions = { key: '', list: [], loading: false, loaded: false }; // /ontologies 缓存
   let drawer = null;                          // 版本管理抽屉（惰性创建）
   const ui = { historyOpen: false, selectedVersion: '' };
+  const versionLabel = version => version === undefined || version === null
+    ? '版本未标注' : `v${version}`;
+  const hasVersionCollision = version => versions.list.filter(
+    item => item.version === version).length > 1;
   // 发布幂等键：同一轮发布（同一草案 + 同一校验指纹）在重试之间复用同一个键；
   // 换一轮/发布成功后再生成新的。键用 ctx.uid()（主控提供），读不到才退回随机。
   let publishKey = { sig: '', key: '' };
@@ -1330,7 +1334,10 @@
       const li = el('li', 'om-history-item' + (v.id === ui.selectedVersion ? ' sel' : ''));
       const row = el('button', 'om-history-row');
       row.type = 'button';
-      row.append(el('b', null, `v${v.version || index + 1}`));
+      const label = versionLabel(v.version)
+        + (hasVersionCollision(v.version) ? ` · ${shortId(v.id)}` : '');
+      row.append(el('b', null, label));
+      if (v.version_reused) row.append(el('span', 'om-history-reused', '标注修订'));
       row.append(el('span', 'om-history-time', fmtTime(v.created_at)));
       if (v.actor) row.append(el('span', 'om-history-actor', v.actor));
       const sum = v.summary || {};
@@ -1349,6 +1356,60 @@
     put(body, list);
   }
 
+  function loadKnowledgeContext(host, v) {
+    host.dataset.state = 'loading';
+    put(host, el('p', 'om-history-note', '正在读取关联知识…'));
+    api(endpoint(`/ontologies/${encodeURIComponent(v.id)}/knowledge-context`), undefined, 'GET')
+      .then(data => {
+        if (!host.isConnected) return;
+        host.dataset.state = 'ready';
+        const heading = el('div', 'om-knowledge-context-head');
+        heading.append(el('b', null, '关联知识'));
+        heading.append(el('span', null, data.ontology && data.ontology.is_current
+          ? '当前本体' : '历史本体'));
+        const grid = el('div', 'om-knowledge-context-grid');
+        const metric = (label, value, hint) => {
+          const item = el('div', 'om-knowledge-context-metric');
+          item.append(el('span', null, label), el('b', null, value));
+          if (hint) item.append(el('small', null, hint));
+          return item;
+        };
+        const current = data.current_bound || {};
+        const kinds = current.by_kind || {};
+        const migration = data.migration || {};
+        const history = data.history || {};
+        grid.append(
+          metric('当前关联', `${current.total ?? '—'} 条`,
+            `实体 ${kinds.entity ?? '—'} · 关系 ${kinds.relation ?? '—'} · 属性 ${kinds.attribute ?? '—'}`),
+          metric('待迁移', migration.pending ?? '—',
+            migration.pending == null ? '迁移状态未知' : '可迁移知识'),
+          metric('迁移阻塞', migration.blocked ?? '—',
+            migration.blocked == null ? '迁移状态未知' : '需先处理冲突'),
+          metric('历史修订', history.revision_count ?? '—',
+            `涉及知识 ${history.record_count ?? '—'} · 已迁出 ${history.migrated_away ?? '—'}`),
+        );
+        const ledger = el('button', 'om-btn om-knowledge-ledger-link', '在知识台账查看');
+        ledger.type = 'button';
+        ledger.addEventListener('click', () => {
+          wb.setVersionContext({
+            ontologyScope: 'ids', ontologyIds: [v.id],
+            ontologyVersion: v.version ?? null, source: 'ontology-history',
+          });
+          closeHistory();
+          showTab('records');
+        });
+        put(host, heading, grid, ledger);
+      })
+      .catch(() => {
+        if (!host.isConnected) return;
+        host.dataset.state = 'error';
+        const title = el('b', null, '读不到关联知识');
+        const empty = el('p', 'om-history-note',
+          '当前关联 — · 待迁移 — · 迁移阻塞 — · 历史修订 —');
+        put(host, title, empty);
+      });
+  }
+
   function renderVersionDetail(v, index) {
     const box = el('div', 'om-history-detail');
     const sum = v.summary || {};
@@ -1360,7 +1421,8 @@
       f.append(el('b', null, value === undefined || value === null ? '—' : String(value)));
       return f;
     };
-    facts.append(fact('版本', `v${v.version || index + 1}`));
+    facts.append(fact('版本', versionLabel(v.version)
+      + (v.version_reused ? ' · 标注修订' : '')));
     facts.append(fact('版本 ID', shortId(v.id)));
     facts.append(fact('发布时间', fmtTime(v.created_at)));
     const writePath = pub.write_path || (v.metadata && v.metadata.write_path);
@@ -1382,6 +1444,12 @@
       .map(c => c.label_zh || c.label || c.name || c.id);
     if (top.length) box.append(el('p', 'om-history-note', `实体类（前 ${top.length} 个）：${top.join('、')}`));
 
+    const knowledge = el('div', 'om-knowledge-context');
+    knowledge.setAttribute('role', 'region');
+    knowledge.setAttribute('aria-label', '关联知识');
+    box.append(knowledge);
+    loadKnowledgeContext(knowledge, v);
+
     // 两个动作，语义必须分清（这是版本管理唯一容易出事的地方）：
     //   查看这一版 = 只读预览，不写任何数据；
     //   回到这一版 = 以它为基线开一份**新草案** → 审核 → 发布成新版本。历史不改写。
@@ -1397,8 +1465,8 @@
       const M = model();
       if (!M || typeof M.previewVersion !== 'function') { status('主控未就绪，暂时无法查看历史版本。', true); return; }
       closeHistory();
-      await M.previewVersion(v.id, v.version || index + 1);
-      status(`正在查看 v${v.version || index + 1}（只读）。要在这版基础上改，用「版本管理」里的「回到这一版」。`);
+      await M.previewVersion(v.id, v.version);
+      status(`正在查看 ${versionLabel(v.version)}（只读）。要在这版基础上改，用「版本管理」里的「回到这一版」。`);
     });
 
     const backBtn = el('button', 'om-btn primary', '回到这一版');
@@ -1411,7 +1479,7 @@
       try {
         await M.forkFrom(v.id);
         closeHistory();
-        status(`已以 v${v.version || index + 1} 为基础开了一份新草案：改完在底栏「校验并审核」，再发布就成为一个新版本（历史版本原样保留）。`);
+        status(`已以 ${versionLabel(v.version)} 为基础开了一份新草案：改完在底栏「校验并审核」，再发布就成为一个新版本（历史版本原样保留）。`);
       } catch (error) {
         status((error && error.message) || '回到历史版本失败', true);
       } finally {

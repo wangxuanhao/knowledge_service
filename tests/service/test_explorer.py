@@ -277,3 +277,33 @@ def test_qa_stream_reads_scoped_records_once_and_returns_evidence_with_answer(tm
         assert 'event: evidence' in response.text
         assert '退款需要原始凭证' in response.text
         assert 'event: done' in response.text
+
+
+def test_qa_and_stream_preserve_ontology_scope_for_shared_context(tmp_path, monkeypatch):
+    with TestClient(create_app(tmp_path/'qa-ontology-scope.sqlite', HashingEncoder())) as client:
+        p = client.post('/api/projects', json={
+            'name': 'qa ontology scope', 'use_default_ontology': False,
+        }).json()['id']
+        service = client.app.state.service
+        scopes = []
+
+        def capture_scoped(project_id, scope):
+            assert project_id == p
+            scopes.append(dict(scope))
+            return []
+
+        monkeypatch.setattr(service, 'scoped', capture_scoped)
+        request = {
+            'query': '退款', 'generate': False, 'retrieval_mode': 'keyword',
+            'ontology_scope': 'ids',
+            'ontology_ids': [' ontology-v1 ', 'ontology-v1'],
+        }
+
+        answer = client.post(f'/api/projects/{p}/qa', json=request)
+        stream = client.post(f'/api/projects/{p}/qa/stream', json=request)
+
+        assert answer.status_code == stream.status_code == 200
+        assert len(scopes) == 2
+        for scope in scopes:
+            assert scope['ontology_scope'] == 'ids'
+            assert scope['ontology_ids'] == ['ontology-v1']

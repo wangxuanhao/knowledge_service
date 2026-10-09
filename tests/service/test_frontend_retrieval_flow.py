@@ -23,7 +23,7 @@ SEARCH_BODY_FIELDS = {
 }
 SUBGRAPH_BODY_FIELDS = {
     'node_id', 'hops', 'filters', 'valid_at', 'known_at', 'include_unknown',
-    'attribute_mode', 'entity_type', 'predicate',
+    'attribute_mode', 'entity_type', 'predicate', 'ontology_scope', 'ontology_ids',
 }
 
 
@@ -125,6 +125,150 @@ def _search(page, query='退款', mode='keyword'):
         page.click('#search')
     page.wait_for_function("document.querySelectorAll('#hits .hit-kind').length === 3")
 
+
+def test_ontology_preview_sets_ephemeral_version_context_and_project_change_resets_it(
+        workbench):
+    page = workbench.page
+    empty = {
+        'ontologyScope': 'all', 'ontologyIds': None,
+        'ontologyVersion': None, 'source': None,
+    }
+    assert page.evaluate('window.wb.versionContext') == empty
+
+    release = page.evaluate(
+        "async (projectId) => {const response = await fetch("
+        "'/api/projects/' + encodeURIComponent(projectId) + '/ontologies'); "
+        "const body = await response.json(); return body.versions[0];}",
+        workbench.project,
+    )
+    page.evaluate(
+        "async (release) => {await window.OntologyModel.previewVersion("
+        "release.id, release.version);}",
+        release,
+    )
+    assert page.evaluate('window.wb.versionContext') == {
+        'ontologyScope': 'ids', 'ontologyIds': [release['id']],
+        'ontologyVersion': release['version'], 'source': 'ontology-history',
+    }
+    page.evaluate("async () => {await window.OntologyModel.clearPreview();}")
+    assert page.evaluate('window.wb.versionContext') == empty
+    page.evaluate(
+        "async (release) => {await window.OntologyModel.previewVersion("
+        "release.id, release.version);}",
+        release,
+    )
+
+    other = page.evaluate(
+        "async () => {const created = await (await fetch('/api/projects', {method: 'POST', "
+        "headers: {'Content-Type': 'application/json'}, "
+        "body: JSON.stringify({name: '版本上下文切换'})})).json(); "
+        "await projects(); return created.id;}")
+    with page.expect_response(lambda response: response.url.endswith('/entity-options')):
+        page.select_option('#project', other)
+    assert page.evaluate('window.wb.versionContext') == empty
+
+    page.evaluate("window.wb.setVersionContext({ontologyScope: 'unknown', source: 'test'})")
+    page.reload(wait_until='load')
+    page.wait_for_function("() => document.querySelectorAll('#project option').length > 1")
+    assert page.evaluate('window.wb.versionContext') == empty
+
+
+def test_ontology_context_strip_knowledge_context_and_ledger_navigation(workbench):
+    page = workbench.page
+    summary = {
+        'classes': [{'id': 'urn:test:Thing', 'label_zh': '事项'}],
+        'relations': [], 'attributes': [], 'triples': 1,
+    }
+    old_id = 'ontology-old-12345678'
+    current_id = 'ontology-current-87654321'
+    annotation_id = 'ontology-annotation-abcdef12'
+    releases = [
+        {'id': old_id, 'version': 1, 'version_reused': False,
+         'created_at': '2026-10-01T08:00:00Z', 'summary': summary},
+        {'id': current_id, 'version': 2, 'version_reused': False,
+         'created_at': '2026-10-02T08:00:00Z', 'summary': summary},
+        {'id': annotation_id, 'version': 2, 'version_reused': True,
+         'created_at': '2026-10-03T08:00:00Z', 'summary': summary},
+    ]
+    context_state = {'error': False}
+
+    def ontologies(route):
+        route.fulfill(status=200, json={'versions': releases})
+
+    def ontology(route):
+        ontology_id = urlparse(route.request.url).query.replace('ontology_id=', '')
+        selected = next((item for item in releases if item['id'] == ontology_id), releases[-1])
+        route.fulfill(status=200, json={**selected, 'summary': summary})
+
+    def knowledge_context(route):
+        if context_state['error']:
+            route.fulfill(status=500, json={'detail': 'temporary failure'})
+            return
+        route.fulfill(status=200, json={
+            'ontology': {'id': old_id, 'version': 1, 'is_current': False,
+                         'created_at': '2026-10-01T08:00:00Z'},
+            'current_bound': {'total': 6, 'by_kind': {
+                'entity': 3, 'relation': 2, 'attribute': 1}},
+            'migration': {'pending': 4, 'blocked': 2},
+            'history': {'revision_count': 9, 'record_count': 7, 'migrated_away': 1},
+        })
+
+    page.route(re.compile(r'/api/projects/[^/]+/ontologies(?:\?.*)?$'), ontologies)
+    page.route(re.compile(r'/api/projects/[^/]+/ontology(?:\?.*)?$'), ontology)
+    page.route(re.compile(r'/api/projects/[^/]+/ontologies/[^/]+/knowledge-context$'),
+               knowledge_context)
+
+    page.click('[data-tab="ontology-model"]')
+    page.wait_for_function(
+        "document.querySelector('#om-version-context')?.textContent.includes('当前生效本体：v2')")
+    assert '正在查看：v2（当前）' in page.locator('#om-version-context').inner_text()
+
+    page.click('#om-history')
+    page.wait_for_selector('#om-history-overlay:not([hidden])')
+    page.wait_for_function("document.querySelectorAll('.om-history-row').length === 3")
+    history_text = page.locator('#om-history-body').inner_text()
+    assert history_text.count('v2') >= 2
+    assert '标注修订' in history_text
+    assert 'ontology-' in history_text
+
+    page.locator('.om-history-row').filter(has_text='v1').click()
+    page.wait_for_function(
+        "document.querySelector('.om-history-item.sel .om-knowledge-context')?.dataset.state === 'ready'")
+    detail = page.locator(
+        '.om-history-item.sel .om-knowledge-context').inner_text()
+    for expected in ('当前关联', '6 条', '实体 3', '关系 2', '属性 1',
+                     '待迁移', '4', '迁移阻塞', '2', '历史修订', '9', '已迁出 1'):
+        assert expected in detail
+
+    page.locator('.om-history-item.sel').get_by_role(
+        'button', name='查看这一版（只读）').click()
+    page.wait_for_function(
+        "document.querySelector('#om-version-context')?.textContent.includes('正在查看：v1（历史·只读）')")
+    assert '当前生效本体：v2' in page.locator('#om-version-context').inner_text()
+
+    page.click('#om-history')
+    page.wait_for_selector('#om-history-overlay:not([hidden])')
+    page.wait_for_function(
+        "document.querySelector('.om-history-item.sel .om-knowledge-context')?.dataset.state === 'ready'")
+    page.locator('.om-history-item.sel').get_by_role(
+        'button', name='在知识台账查看').click()
+    assert page.locator('#tab-records').is_visible()
+    assert page.evaluate('window.wb.versionContext') == {
+        'ontologyScope': 'ids', 'ontologyIds': [old_id],
+        'ontologyVersion': 1, 'source': 'ontology-history',
+    }
+
+    page.evaluate("showTab('ontology-model')")
+    page.click('#om-history')
+    context_state['error'] = True
+    page.locator('.om-history-row').filter(has_text='v2').first.evaluate(
+        'button => button.click()')
+    page.wait_for_function(
+        "document.querySelector('.om-history-item.sel .om-knowledge-context')?.dataset.state === 'error'")
+    error_text = page.locator(
+        '.om-history-item.sel .om-knowledge-context').inner_text()
+    assert '读不到关联知识' in error_text
+    assert '—' in error_text
 
 def _watch_graph_clear(page, selector, snapshot_name, event='click'):
     page.evaluate("""([selector, snapshotName, event]) => {
@@ -847,6 +991,82 @@ def test_graph_scope_filters_survive_expand_and_explicit_full_redraw(workbench):
     assert [body['node_id'] for body in bodies] == [None, 'a', None]
     assert all(body['entity_type'] == 'Thing' and body['predicate'] == 'mentions'
                for body in bodies)
+
+
+def test_ontology_scope_reaches_graph_redraw_expand_and_mindmap(workbench):
+    page = workbench.page
+    graph_bodies, mindmap_bodies = [], []
+    page.on('request', lambda request: graph_bodies.append(request.post_data_json)
+            if request.url.endswith('/subgraph') else None)
+    page.on('request', lambda request: mindmap_bodies.append(request.post_data_json)
+            if request.url.endswith('/mindmap') else None)
+
+    page.evaluate("""() => window.wb.setVersionContext({
+      ontologyScope: 'ids', ontologyIds: ['ontology-v1'],
+      ontologyVersion: 1, source: 'test'
+    })""")
+    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+        page.click('#draw-graph')
+    page.select_option('#graph-entity-choice', 'a')
+    page.wait_for_function(
+        "document.querySelector('#graph-detail').textContent.includes('退款商户')")
+    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+        page.click('#graph-expand')
+    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+        page.click('#draw-graph')
+
+    page.click('[data-tab="mindmap"]')
+    page.wait_for_function(
+        "() => [...document.querySelectorAll('#mindmap-root option')]"
+        ".some(option => option.value === 'a')")
+    page.select_option('#mindmap-root', 'a')
+    with page.expect_response(lambda response: response.url.endswith('/mindmap')):
+        page.click('#draw-mindmap')
+
+    assert len(graph_bodies) == 3
+    assert all(body['ontology_scope'] == 'ids' and
+               body['ontology_ids'] == ['ontology-v1'] for body in graph_bodies)
+    assert mindmap_bodies[-1]['ontology_scope'] == 'ids'
+    assert mindmap_bodies[-1]['ontology_ids'] == ['ontology-v1']
+
+    page.evaluate("""() => window.wb.setVersionContext({
+      ontologyScope: 'unknown', ontologyIds: null,
+      ontologyVersion: null, source: 'test'
+    })""")
+    with page.expect_response(lambda response: response.url.endswith('/mindmap')):
+        page.click('#draw-mindmap')
+    assert mindmap_bodies[-1]['ontology_scope'] == 'unknown'
+    assert mindmap_bodies[-1]['ontology_ids'] is None
+
+    page.evaluate('() => window.wb.clearVersionContext()')
+    with page.expect_response(lambda response: response.url.endswith('/mindmap')):
+        page.click('#draw-mindmap')
+    assert mindmap_bodies[-1]['ontology_scope'] == 'all'
+    assert mindmap_bodies[-1]['ontology_ids'] is None
+
+
+def test_ontology_scope_banner_reset_redraws_graph_with_all_scope(workbench):
+    page = workbench.page
+    bodies = []
+    page.on('request', lambda request: bodies.append(request.post_data_json)
+            if request.url.endswith('/subgraph') else None)
+    page.evaluate("""() => window.wb.setVersionContext({
+      ontologyScope: 'ids', ontologyIds: ['ontology-v1'],
+      ontologyVersion: 1, source: 'test'
+    })""")
+
+    assert '知识范围：本体 v1' in page.locator('#graph-version-scope').inner_text()
+    assert '知识范围：本体 v1' in page.locator('#mindmap-version-scope').inner_text()
+    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+        page.click('#graph-version-scope [data-reset-ontology-scope]')
+
+    assert bodies[-1]['ontology_scope'] == 'all'
+    assert bodies[-1]['ontology_ids'] is None
+    assert page.evaluate('window.wb.versionContext') == {
+        'ontologyScope': 'all', 'ontologyIds': None,
+        'ontologyVersion': None, 'source': None,
+    }
+    assert '知识范围：全部本体' in page.locator('#graph-version-scope').inner_text()
 
 
 # ── 图谱渲染器只能有一份实现（双 UI 收敛的防回归闸门） ──

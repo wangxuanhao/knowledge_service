@@ -195,10 +195,13 @@ class Repository:
             # 写**快照线格式版本**，不是数据库迁移编号 —— 见 snapshot_validation 的说明。
             # 两者编号体系不同，混用会让备份恢复整体失败。
             from .snapshot_validation import LATEST_FULL_SNAPSHOT_FORMAT
+            ontologies = [{key: item[key] for key in (
+                'id', 'project_id', 'turtle', 'summary', 'created_at', 'metadata')}
+                for item in self.list_ontologies(project_id)]
             return {'namespace': namespace, 'schema_version': LATEST_FULL_SNAPSHOT_FORMAT,
                     'governance_history_included': True,
                     'project': project, 'records': records,
-                    'ontologies': self.list_ontologies(project_id),
+                    'ontologies': ontologies,
                     'artifacts': artifacts,
                     'provenance': {
                         'record_version_assertions': self.list_record_version_assertions(project_id),
@@ -300,7 +303,7 @@ class Repository:
         return self.get_project(project_id)
 
     @contextmanager
-    def _transaction(self):
+    def _transaction(self, *, repeatable_read_only=False):
         with self._lock:
             if self._db.in_transaction:
                 savepoint='nested_'+uuid4().hex
@@ -313,13 +316,21 @@ class Repository:
                     self._db.execute(f'RELEASE SAVEPOINT {savepoint}')
                     raise
                 return
-            self._db.execute('BEGIN')
+            self._db.execute(
+                'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY'
+                if repeatable_read_only else 'BEGIN')
             try:
                 yield
                 self._db.commit()
             except BaseException:
                 self._db.rollback()
                 raise
+
+    @contextmanager
+    def read_snapshot(self):
+        """Keep a compound read on one connection and transaction snapshot."""
+        with self._transaction(repeatable_read_only=True):
+            yield
 
     @contextmanager
     def _allow_ontology_history_delete(self):
@@ -719,6 +730,38 @@ class Repository:
             rows = self._db.execute('SELECT * FROM record_versions WHERE project_id=? AND id=? ORDER BY version', (project_id, record_id)).fetchall()
         return [self._record(row, vectors='list') for row in rows]
 
+    def ontology_record_history(self, project_id, ontology_id, current_rows):
+        """Aggregate record history bound to one known ontology identifier.
+
+        Payload inspection stays in Python so this read has identical semantics
+        through the PostgreSQL connection and the test adapter.
+        """
+        self.get_project(project_id)
+        with self._lock:
+            rows = self._db.execute(
+                '''SELECT id,superseded_at,payload FROM record_versions
+                   WHERE project_id=? ORDER BY id,version''',
+                (project_id,)).fetchall()
+        revision_count = 0
+        record_ids = set()
+        for row in rows:
+            payload = json.loads(row['payload'])
+            if payload.get('ontology_id') == ontology_id:
+                revision_count += 1
+                record_ids.add(row['id'])
+        current_ontology_ids = {
+            row['id']: row.get('ontology_id') for row in current_rows
+        }
+        return {
+            'revision_count': revision_count,
+            'record_count': len(record_ids),
+            'migrated_away': sum(
+                record_id in current_ontology_ids
+                and current_ontology_ids[record_id] != ontology_id
+                for record_id in record_ids
+            ),
+        }
+
     def get_record_version(self, project_id, version_id):
         """按项目和不可变 version_id 精确读取历史版本，不回退到当前版本。"""
         self.get_project(project_id)
@@ -1005,26 +1048,52 @@ class Repository:
             separators=(',', ':'))
         return hashlib.sha256(encoded.encode('utf-8')).hexdigest()
 
-    def _current_ontology_version(self, project_id) -> int:
-        """项目当前的本体版本号。
+    @staticmethod
+    def _parse_ontology_versions(rows):
+        """按稳定发布顺序解析版本号，并逐行标记同号复用。"""
+        items = []
+        seen_versions = set()
+        for index, row in enumerate(rows, start=1):
+            try:
+                metadata = json.loads(row['metadata'] or '{}')
+            except (TypeError, json.JSONDecodeError):
+                metadata = {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+            stored = metadata.get('version')
+            version = stored if (
+                isinstance(stored, int) and not isinstance(stored, bool) and stored > 0
+            ) else index
+            version_reused = version in seen_versions
+            seen_versions.add(version)
+            items.append({
+                **dict(row),
+                'summary': json.loads(row['summary']),
+                'metadata': metadata,
+                'version': version,
+                'version_reused': version_reused,
+            })
+        return items
 
-        新数据把版本号写在 `metadata.version` 里；早期发布的本体没有这个字段，
-        用**行序**（第几行就是 v几）回填 —— 两者语义一致，所以老项目不用迁移。
-        """
+    def _ordered_ontology_versions(self, project_id):
+        rows = self._db.execute(
+            '''SELECT id,project_id,turtle,summary,created_at,metadata
+               FROM ontologies WHERE project_id=? ORDER BY created_at,id''',
+            (project_id,)).fetchall()
+        return self._parse_ontology_versions(rows)
+
+    def _latest_ontology_id(self, project_id):
+        """按与历史列表相同的稳定发布顺序读取当前本体 ID。"""
         row = self._db.execute(
-            'SELECT metadata FROM ontologies WHERE project_id=? ORDER BY seq DESC LIMIT 1',
+            '''SELECT id FROM ontologies WHERE project_id=?
+               ORDER BY created_at DESC,id DESC LIMIT 1''',
             (project_id,)).fetchone()
-        if row is None:
-            return 0
-        try:
-            stored = json.loads(row['metadata'] or '{}').get('version')
-            if stored is not None and int(stored) > 0:
-                return int(stored)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            pass
-        fallback = self._db.execute(
-            'SELECT COUNT(*) AS n FROM ontologies WHERE project_id=?', (project_id,)).fetchone()
-        return int(fallback['n'] or 0)
+        return row['id'] if row else None
+
+    def _current_ontology_version(self, project_id) -> int:
+        """项目当前的本体版本号，与历史列表共用同一解析规则。"""
+        versions = self._ordered_ontology_versions(project_id)
+        return versions[-1]['version'] if versions else 0
 
     def _insert_ontology_version(self, project_id, turtle, summary, metadata=None,
                                  *, ontology_id=None, created_at=None,
@@ -1103,10 +1172,7 @@ class Repository:
                      'requires_controlled_reingest': False}
         with self._transaction():
             self.get_project(project_id)
-            latest = self._db.execute(
-                'SELECT id FROM ontologies WHERE project_id=? ORDER BY seq DESC LIMIT 1',
-                (project_id,)).fetchone()
-            latest_id = latest['id'] if latest else None
+            latest_id = self._latest_ontology_id(project_id)
             if latest_id != expected_parent_id:
                 raise ValueError('版本冲突：本体已更新，请基于当前版本重新生成发现草案')
             ontology = self._insert_ontology_version(
@@ -1195,10 +1261,7 @@ class Repository:
         if draft['status'] != 'pending':
             raise OntologyPublicationConflict(
                 'revision_conflict', 'ontology draft is no longer pending')
-        latest = self._db.execute(
-            'SELECT id FROM ontologies WHERE project_id=? ORDER BY seq DESC LIMIT 1',
-            (project_id,)).fetchone()
-        latest_id = latest['id'] if latest else None
+        latest_id = self._latest_ontology_id(project_id)
         # 「回到某一版」的基线故意不是最新版（source_kind='revert'，见迁移 0007 与
         # services/ontology_drafts.REVERT_SOURCE）。这里只校验"它回到的那一版确实还在
         # 这个项目里"，不要求等于 latest —— 否则回退会在最后一步（事务内复核）被拦下，
@@ -1740,9 +1803,8 @@ class Repository:
             raise ValueError('本体变更提交需要对象形式的载荷')
         with self._transaction():
             self.get_project(project_id)
-            latest = self._db.execute('SELECT id FROM ontologies WHERE project_id=? ORDER BY seq DESC LIMIT 1',
-                                      (project_id,)).fetchone()
-            if not latest or latest['id'] != expected_ontology_id:
+            latest_id = self._latest_ontology_id(project_id)
+            if latest_id is None or latest_id != expected_ontology_id:
                 raise ValueError('版本冲突：本体已更新，请重新评估草案影响')
             self._insert_ontology_version(
                 project_id, ontology['turtle'], ontology['summary'],
@@ -1756,9 +1818,7 @@ class Repository:
     def list_ontologies(self, project_id):
         self.get_project(project_id)
         with self._lock:
-            rows = self._db.execute('SELECT id,project_id,turtle,summary,created_at,metadata FROM ontologies WHERE project_id=? ORDER BY seq', (project_id,)).fetchall()
-        return [{**dict(row), 'summary': json.loads(row['summary']),
-                 'metadata': json.loads(row['metadata'] or '{}')} for row in rows]
+            return self._ordered_ontology_versions(project_id)
 
     def get_ontology(self, project_id, ontology_id=None):
         items = self.list_ontologies(project_id)

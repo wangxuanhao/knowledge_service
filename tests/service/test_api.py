@@ -3,6 +3,7 @@ import pytest
 
 from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
+from knowledge_service.models import Scope
 
 
 @pytest.fixture
@@ -18,6 +19,44 @@ def project(client, *, use_default_ontology=True):
     })
     assert result.status_code == 201, result.text
     return result.json()['id']
+
+
+def test_ontology_scope_accepts_each_legal_combination(client):
+    p = project(client, use_default_ontology=False)
+
+    for scope in [
+        {'ontology_scope': 'all', 'ontology_ids': None},
+        {'ontology_scope': 'ids', 'ontology_ids': ['ontology-v1']},
+        {'ontology_scope': 'unknown', 'ontology_ids': None},
+    ]:
+        response = client.post(f'/api/projects/{p}/records/query', json=scope)
+        assert response.status_code == 200, (scope, response.text)
+
+
+def test_ontology_scope_rejects_each_illegal_combination(client):
+    p = project(client, use_default_ontology=False)
+
+    for scope in [
+        {'ontology_scope': 'all', 'ontology_ids': ['ontology-v1']},
+        {'ontology_scope': 'unknown', 'ontology_ids': ['ontology-v1']},
+        {'ontology_scope': 'ids'},
+        {'ontology_scope': 'ids', 'ontology_ids': None},
+        {'ontology_scope': 'ids', 'ontology_ids': []},
+        {'ontology_scope': 'ids', 'ontology_ids': ['']},
+        {'ontology_scope': 'ids', 'ontology_ids': ['   ']},
+        {'ontology_scope': 'ids', 'ontology_ids': ['\t']},
+    ]:
+        response = client.post(f'/api/projects/{p}/records/query', json=scope)
+        assert response.status_code == 422, (scope, response.text)
+
+
+def test_ontology_scope_deduplicates_ids_in_first_seen_order():
+    scope = Scope.model_validate({
+        'ontology_scope': 'ids',
+        'ontology_ids': [' ontology-v2 ', '\tontology-v1', 'ontology-v2'],
+    })
+
+    assert scope.ontology_ids == ['ontology-v2', 'ontology-v1']
 
 
 def test_packaged_echarts_asset_is_served(client):
@@ -169,6 +208,73 @@ def test_relationships_cannot_leak_filtered_or_inactive_endpoints(client):
     assert graph['edges'] == []
     result = client.post(path+'/search',json={**scope,'query':'商户'}).json()
     assert {r['id'] for r in result['hits']} == {'b'}
+
+
+def test_ontology_scope_filters_versions_unknown_rows_and_dangling_facts(client):
+    p = project(client, use_default_ontology=False)
+    foreign_project = project(client, use_default_ontology=False)
+    repository = client.app.state.service.repository
+    turtle = (
+        '@prefix ex: <https://example.test/> . '
+        '@prefix owl: <http://www.w3.org/2002/07/owl#> . '
+        'ex:Thing a owl:Class .'
+    )
+    first = repository.save_ontology(p, turtle, {})
+    second = repository.save_ontology(p, turtle, {})
+    foreign = repository.save_ontology(foreign_project, turtle, {})
+
+    records = [
+        {'id': 'first-a', 'kind': 'entity', 'type': 'Thing', 'text': 'first a',
+         'ontology_id': first['id']},
+        {'id': 'first-b', 'kind': 'entity', 'type': 'Thing', 'text': 'first b',
+         'ontology_id': first['id']},
+        {'id': 'second-a', 'kind': 'entity', 'type': 'Thing', 'text': 'second a',
+         'ontology_id': second['id']},
+        {'id': 'missing', 'kind': 'entity', 'type': 'Thing', 'text': 'missing'},
+        {'id': 'foreign', 'kind': 'entity', 'type': 'Thing', 'text': 'foreign',
+         'ontology_id': foreign['id']},
+        {'id': 'first-local-relation', 'kind': 'relation', 'type': 'knows',
+         'text': 'local relation', 'subject_id': 'first-a', 'object_id': 'first-b',
+         'ontology_id': first['id']},
+        {'id': 'first-cross-relation', 'kind': 'relation', 'type': 'knows',
+         'text': 'cross relation', 'subject_id': 'first-a', 'object_id': 'second-a',
+         'ontology_id': first['id']},
+        {'id': 'first-local-attribute', 'kind': 'attribute', 'type': 'name',
+         'text': 'local attribute', 'subject_id': 'first-a', 'value': 'A',
+         'datatype': 'http://www.w3.org/2001/XMLSchema#string',
+         'ontology_id': first['id']},
+        {'id': 'first-cross-attribute', 'kind': 'attribute', 'type': 'name',
+         'text': 'cross attribute', 'subject_id': 'second-a', 'value': 'B',
+         'datatype': 'http://www.w3.org/2001/XMLSchema#string',
+         'ontology_id': first['id']},
+    ]
+    for record in records:
+        repository.put_record(p, record)
+
+    def scoped_ids(body):
+        response = client.post(f'/api/projects/{p}/records/query', json=body)
+        assert response.status_code == 200, response.text
+        return {row['id'] for row in response.json()['records']}
+
+    default_response = client.post(f'/api/projects/{p}/records/query', json={})
+    explicit_all = client.post(
+        f'/api/projects/{p}/records/query', json={'ontology_scope': 'all'})
+    assert default_response.status_code == explicit_all.status_code == 200
+    assert default_response.json() == explicit_all.json()
+
+    assert scoped_ids({
+        'ontology_scope': 'ids', 'ontology_ids': [first['id']],
+    }) == {
+        'first-a', 'first-b', 'first-local-relation', 'first-local-attribute',
+    }
+    assert scoped_ids({
+        'ontology_scope': 'ids', 'ontology_ids': [first['id'], second['id']],
+    }) == {
+        'first-a', 'first-b', 'second-a',
+        'first-local-relation', 'first-cross-relation',
+        'first-local-attribute', 'first-cross-attribute',
+    }
+    assert scoped_ids({'ontology_scope': 'unknown'}) == {'missing', 'foreign'}
 
 
 def test_failed_extraction_keeps_receipt_without_partial_records(client, monkeypatch):
