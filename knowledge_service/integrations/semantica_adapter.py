@@ -9,19 +9,22 @@ import hashlib
 import json
 import logging
 import os
-from typing import TYPE_CHECKING, Literal
+from typing import Any, Callable, Literal
 
 from pydantic import BaseModel,Field,StrictBool,StrictFloat,StrictInt,StrictStr
 
 from ..core.time import normalize_time
-from ..services.discovery_vocabulary import canonical_name
+from ..domain.ontology_names import canonical_name
 from ..utils.diagnostics import event, redact, stage
 
 LOG = logging.getLogger('knowledge_service.semantica_adapter')
+_DEFAULT_ATTRIBUTE_EXTRACTOR: Callable[..., Any] | None = None
 
-if TYPE_CHECKING:
-    from ..services.ontology import Ontology
 
+def configure_attribute_extractor(extractor: Callable[..., Any]) -> None:
+    """Register the service-owned optional attribute extraction capability."""
+    global _DEFAULT_ATTRIBUTE_EXTRACTOR
+    _DEFAULT_ATTRIBUTE_EXTRACTOR = extractor
 
 def snapshot(records: list[dict], valid_at: str) -> dict:
     try:
@@ -475,6 +478,9 @@ INPUT_JSON:\n'''+json.dumps(payload,ensure_ascii=False)
 
 
 class SemanticaExtractor:
+    def __init__(self, *, attribute_extractor: Callable[..., Any] | None = None):
+        self.attribute_extractor = attribute_extractor
+
     def discover(self, text: str, include_attributes: bool = False, *,
                  reserved_class_names=()) -> list[dict]:
         """为无模式的项目执行开放词表 Semantica 抽取。"""
@@ -521,7 +527,7 @@ class SemanticaExtractor:
                                '请检查模型配置和供应商可用性') from exc
         return [*candidates,*exceptions]
 
-    def extract(self, text: str, ontology: Ontology) -> list[dict]:
+    def extract(self, text: str, ontology: Any) -> list[dict]:
         self.review_candidates = []
         self.extraction_diagnostics = {
             'skipped_missing_relation_endpoint': 0,
@@ -665,9 +671,13 @@ class SemanticaExtractor:
                                 text=f'{relation.subject.text} {relation.predicate} {relation.object.text}',
                                 valid_from=vf, valid_until=vu, metadata=relation_metadata)
         if getattr(self,'include_attributes',False) and entities:
-            from ..services.attribute_extraction import extract_attributes
+            attribute_extractor = (
+                self.attribute_extractor or _DEFAULT_ATTRIBUTE_EXTRACTOR)
+            if attribute_extractor is None:
+                raise RuntimeError(
+                    'attribute extraction is enabled but no extractor was configured')
             with stage('LLM 实体属性抽取（结果全部待审核）'):
-                batch=extract_attributes(text,entities,ontology,config)
+                batch=attribute_extractor(text,entities,ontology,config)
             # 兼容集成/测试使用的自定义抽取器。
             attributes=getattr(batch,'attributes',batch)
             attribute_diagnostics=getattr(batch,'diagnostics',{})

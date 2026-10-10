@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from ..core.time import utc_now
-from ..services.ontology_iri import valid_application_iri
+from ..domain.ontology_names import valid_application_iri
 # 完整性错误的唯一出处（见 `connection.py`）：主键碰撞需要被转成领域冲突，
 # 换库后必须捕获 psycopg 的异常体系，否则 except 分支形同虚设。
 from .connection import IntegrityError

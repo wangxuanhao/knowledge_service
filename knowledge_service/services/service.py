@@ -601,8 +601,10 @@ class KnowledgeService:
             event(f'文档检索已就绪 · 切片 {len(saved_chunks)} 条 · 图谱抽取继续',14)
             if extraction_mode == 'ontology':
                 from ..integrations.semantica_adapter import SemanticaExtractor
+                from .attribute_extraction import extract_attributes
                 version = selected_ontology_version or self.repository.get_ontology(project_id)
-                extractor = SemanticaExtractor()
+                extractor = SemanticaExtractor(
+                    attribute_extractor=extract_attributes)
                 extractor.include_attributes=request.get('extract_attributes',False)
                 extractor.relation_constraint_mode=request.get('relation_constraint_mode','review')
                 ontology = Ontology(version['turtle'])

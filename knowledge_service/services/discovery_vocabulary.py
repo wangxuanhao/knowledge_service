@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 
 from rdflib import BNode, Graph, RDF, RDFS
 from rdflib.namespace import OWL
 
-from .ontology_iri import valid_application_iri
+from ..domain.ontology_names import canonical_name, valid_application_iri
 from .ontology_shape import (
     SUPPORTED_XSD_DATATYPES,
     is_graph_class,
@@ -48,12 +47,6 @@ def _freeze_json(value):
     if isinstance(value, list):
         return _FrozenList(_freeze_json(item) for item in value)
     return value
-
-
-def canonical_name(value) -> str:
-    """Return the comparison form used for discovered vocabulary names."""
-    normalized = unicodedata.normalize("NFKC", str(value or ""))
-    return " ".join(normalized.split()).casefold()
 
 
 def _canonical_json_value(value):

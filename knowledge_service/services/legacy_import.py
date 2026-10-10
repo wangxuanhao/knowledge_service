@@ -17,6 +17,7 @@ from rdflib.namespace import OWL
 from .ontology import Ontology
 from .ontology_adapters import compatibility_payload
 from .ontology_drafts import OntologyDrafts
+from .formal_writes import FormalFactWriter
 
 
 class LegacyImporter:
@@ -196,8 +197,9 @@ class LegacyImporter:
             for row in rows:
                 if row['kind'] in ('entity', 'relation'):
                     row['ontology_id'] = ontology['id']
-            repository.put_batch(project['id'], rows,
-                expected_versions={r['id']: 0 for r in rows},formal_operation='legacy_import')
+            FormalFactWriter(repository).apply(
+                'legacy_import', project['id'], [],
+                {r['id']: 0 for r in rows}, {'records': rows})
             return {'project': project, 'counts': counts, 'warnings': warnings, 'already_imported': False}
 
     def _prepare(self, files, nodes, edges, segments):

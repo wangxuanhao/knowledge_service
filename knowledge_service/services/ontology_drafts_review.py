@@ -71,6 +71,187 @@ class DraftReviewPublishMixin:
             'note': note or '',
         })
 
+    def _publication_effect_plan(self, project_id, draft, turtle, approved):
+        """Freeze service-owned source effects for the repository transaction.
+
+        The repository rechecks the supplied source snapshots before applying this
+        JSON-safe plan; it does not call service objects while holding the write
+        transaction.
+        """
+        effects = (draft.get('source_context') or {}).get('publication_effects')
+        if not effects:
+            return None
+        effect_kind = effects.get('kind')
+        if (effect_kind is None and draft.get('source_kind') == 'discovery'
+                and effects.get('discovery_run_id')):
+            effect_kind = 'discovery'
+        if effect_kind != draft.get('source_kind'):
+            raise StaleSource('ontology draft publication effects are invalid')
+
+        if effect_kind == 'discovery':
+            from .ontology_discovery import (
+                _materialize_candidates,
+                _materialized_candidate_ids,
+                _reuse_materialized_records,
+                _validated_materialization,
+            )
+
+            run_id = effects.get('discovery_run_id')
+            if not run_id:
+                proposed = json.loads(_canonical_json(effects.get('records') or []))
+                for record in proposed:
+                    record['ontology_id'] = '__PUBLISHED_ONTOLOGY_ID__'
+                    metadata = dict(record.get('metadata') or {})
+                    metadata['discovery_draft_id'] = draft['id']
+                    record['metadata'] = metadata
+                accepted, skipped, validation = _validated_materialization(
+                    turtle, proposed,
+                    json.loads(_canonical_json(
+                        effects.get('skipped_candidates') or [])))
+                return {
+                    'kind': 'discovery', 'mode': 'legacy',
+                    'records': accepted, 'skipped': skipped,
+                    'validation': validation,
+                }
+
+            try:
+                run = self.repository.get_discovery_run(project_id, run_id)
+            except KeyError as exc:
+                raise StaleSource('discovery publication run does not exist') from exc
+            if (run.get('status') != 'draft_created'
+                    or run.get('unified_draft_id') != draft['id']):
+                raise StaleSource('discovery publication run is not current')
+
+            approved_ids = {operation['id'] for operation in approved}
+            effective_ids = {
+                operation['id']
+                for operation in self._active_operations(project_id, draft['id'])}
+            history_ids = {
+                operation['id']
+                for operation in self._history(project_id, draft['id'])[0]}
+            initial_ids = {
+                outcome['candidate_id']
+                for outcome in run.get('initial_candidate_outcomes') or []}
+            required_outcomes = []
+            for binding in run.get('candidate_bindings') or []:
+                if binding['candidate_id'] in initial_ids:
+                    continue
+                missing = [
+                    operation_id
+                    for operation_id in binding.get('required_operation_ids') or []
+                    if operation_id not in approved_ids]
+                if not missing:
+                    continue
+                if any(operation_id in effective_ids for operation_id in missing):
+                    reason_code = 'required_operation_rejected'
+                elif any(operation_id in history_ids for operation_id in missing):
+                    reason_code = 'required_operation_superseded'
+                else:
+                    reason_code = 'required_operation_missing'
+                required_outcomes.append({
+                    'candidate_id': binding['candidate_id'],
+                    'status': 'skipped', 'reason_code': reason_code,
+                })
+
+            materialization_source = {
+                **run, 'id': draft['id'], 'excluded_candidate_ids': []}
+            proposed, skipped = _materialize_candidates(
+                project_id, materialization_source,
+                '__PUBLISHED_ONTOLOGY_ID__',
+                [*(run.get('candidate_outcomes') or []), *required_outcomes])
+            previous_ids = set(run.get('materialized_candidate_ids') or [])
+            existing_records = self.repository.current_records(
+                project_id, vectors='none',
+                kinds=['entity', 'relation', 'attribute'])
+            processed_ids = _materialized_candidate_ids(existing_records)
+            if (not previous_ids <= processed_ids
+                    or (set(run.get('accepted_candidate_ids') or [])
+                        & (processed_ids - previous_ids))):
+                raise StaleSource('discovery materialization context changed')
+            proposed = _reuse_materialized_records(
+                proposed, existing_records, previous_ids)
+            accepted, skipped, validation = _validated_materialization(
+                turtle, proposed, skipped)
+            existing_record_ids = {
+                item['id'] for item in existing_records
+                if _materialized_candidate_ids([item]) & previous_ids}
+            records = [
+                record for record in accepted
+                if record['id'] not in existing_record_ids]
+            materialized_ids = _materialized_candidate_ids(accepted)
+            required_by_candidate = {
+                outcome['candidate_id']: outcome
+                for outcome in required_outcomes}
+            terminal_outcomes = []
+            for binding in run.get('candidate_bindings') or []:
+                candidate_id = binding['candidate_id']
+                if candidate_id in initial_ids:
+                    continue
+                if candidate_id in required_by_candidate:
+                    terminal_outcomes.append(required_by_candidate[candidate_id])
+                elif candidate_id in materialized_ids:
+                    terminal_outcomes.append({
+                        'candidate_id': candidate_id, 'status': 'materialized',
+                        'reason_code': 'materialized'})
+                else:
+                    terminal_outcomes.append({
+                        'candidate_id': candidate_id, 'status': 'skipped',
+                        'reason_code': 'ontology_validation_failed'})
+            return {
+                'kind': 'discovery', 'mode': 'run', 'run_id': run_id,
+                'expected_run_fingerprint': _fingerprint(run),
+                'expected_record_versions': sorted(
+                    (item['id'], item['version_id']) for item in existing_records),
+                'records': records, 'accepted_records': accepted,
+                'skipped': skipped, 'validation': validation,
+                'candidate_outcomes': terminal_outcomes,
+            }
+
+        if effect_kind == 'candidate':
+            document = self.repository.get_record(
+                project_id, effects.get('document_id'))
+            candidates = (document.get('metadata') or {}).get(
+                'review_candidates') or []
+            candidate = next((item for item in candidates
+                              if item.get('id') == effects.get('candidate_id')), None)
+            if candidate is None:
+                raise StaleSource('candidate source no longer exists')
+            expected_candidate_fingerprint = _fingerprint(candidate)
+            proposal = self.repository.get_artifact(
+                'ontology_change', effects.get('proposal_id'))
+            revised = json.loads(_canonical_json({
+                key: value for key, value in document.items()
+                if key not in {
+                    'project_id', 'version', 'version_id', 'recorded_at',
+                    'superseded_at',
+                }}))
+            result = json.loads(_canonical_json(effects.get('revalidation') or {}))
+            revised_candidate = next(
+                item for item in (revised.get('metadata') or {}).get(
+                    'review_candidates') or []
+                if item.get('id') == effects.get('candidate_id'))
+            revised_candidate['ontology_change'] = result
+            return {
+                'kind': 'candidate',
+                'document_id': document['id'],
+                'expected_document_version': document['version'],
+                'expected_candidate_fingerprint': expected_candidate_fingerprint,
+                'proposal_id': proposal['id'],
+                'expected_proposal_fingerprint': _fingerprint(proposal),
+                'document': revised, 'proposal': proposal,
+                'revalidation': result,
+            }
+
+        if effect_kind == 'import':
+            proposed = json.loads(_canonical_json(effects.get('records') or []))
+            report = Ontology(turtle).validate_timeline(proposed)
+            if not report['conforms']:
+                raise ValidationFailed(
+                    'imported records do not conform', details={'report': report})
+            return {'kind': 'import', 'records': proposed}
+
+        raise StaleSource('unsupported ontology publication effect kind')
+
     def publish_preflight(self, project_id, draft_id, expected_revision,
                           expected_ontology_id, validation_fingerprint,
                           acknowledged_warning_codes, idempotency_key, actor,
@@ -154,6 +335,8 @@ class DraftReviewPublishMixin:
             'idempotency_key': idempotency_key, 'actor': actor,
             'note': note,
         }
+        request['source_effect_plan'] = self._publication_effect_plan(
+            project_id, draft, approved_turtle, approved)
         request['client_request_hash'] = self._client_publish_hash(
             project_id, draft_id, expected_revision, expected_ontology_id,
             validation_fingerprint, acknowledged_warning_codes,

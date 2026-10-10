@@ -96,3 +96,13 @@ evidence 必须逐字引用正文中支持属性值的连续片段；没有明�
     accepted=[item for original_index,item in accepted if original_index in selected_indices]
     diagnostics['accepted']=len(accepted)
     return AttributeExtractionBatch(attributes=accepted,diagnostics=diagnostics)
+
+
+def _registered_extract_attributes(*args, **kwargs):
+    """Late-bound compatibility proxy so tests/callers may replace the service."""
+    return extract_attributes(*args, **kwargs)
+
+
+from ..integrations.semantica_adapter import configure_attribute_extractor  # noqa: E402
+
+configure_attribute_extractor(_registered_extract_attributes)

@@ -14,7 +14,6 @@ import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
 from uuid import uuid4
 
 import numpy as np
@@ -684,10 +683,8 @@ class Repository:
         if not isinstance(records, list):
             raise ValueError('记录必须是列表')
         if formal_operation is not None:
-            from ..services.formal_writes import FormalFactWriter
-            result = FormalFactWriter(self).apply(formal_operation, project_id, [],
-                expected_versions or {}, {'records': records})
-            return result['accepted_records']
+            raise ValueError(
+                'formal operations must be prepared and executed by the service layer')
         expected_versions = {} if expected_versions is None else expected_versions
         if not isinstance(expected_versions, dict) or any(not isinstance(k, str) or type(v) is not int or v < 0 for k, v in expected_versions.items()):
             raise ValueError('期望版本必须把记录 ID 映射到非负整数')
@@ -1397,253 +1394,166 @@ class Repository:
             prepared['project_id'], publish_activity, 'completed', publish_payload,
             publish_edges, completed_at)
 
+    @staticmethod
+    def _bind_published_ontology_id(value, ontology_id):
+        """Return a detached plan value with the publication placeholder resolved."""
+        if isinstance(value, dict):
+            return {
+                key: Repository._bind_published_ontology_id(item, ontology_id)
+                for key, item in value.items()}
+        if isinstance(value, list):
+            return [
+                Repository._bind_published_ontology_id(item, ontology_id)
+                for item in value]
+        return ontology_id if value == '__PUBLISHED_ONTOLOGY_ID__' else value
+
+    def _update_discovery_artifact(
+            self, draft_id, ontology_id, saved, skipped, validation):
+        row = self._db.execute(
+            """SELECT payload FROM artifacts
+               WHERE id=? AND kind='ontology_discovery_draft'""",
+            (draft_id,)).fetchone()
+        if row is None:
+            return
+        artifact = json.loads(row['payload'])
+        counts = {
+            kind: sum(record['kind'] == kind for record in saved)
+            for kind in ('entity', 'relation', 'attribute')}
+        artifact.update({
+            'status': 'published', 'ontology_id': ontology_id,
+            'mapped_entities': counts['entity'],
+            'mapped_relations': counts['relation'],
+            'mapped_attributes': counts['attribute'],
+            'skipped_candidates': skipped,
+            'validation': validation,
+            'requires_candidate_review': bool(
+                skipped or artifact.get('excluded_candidate_ids')),
+            'requires_controlled_reingest': False,
+        })
+        self._db.execute(
+            """UPDATE artifacts SET payload=?
+               WHERE id=? AND kind='ontology_discovery_draft'""",
+            (_json(artifact), draft_id))
+
     def _apply_ontology_source_effects(self, prepared, draft, ontology):
-        """Apply frozen discovery/candidate effects in the publish transaction."""
+        """Apply a frozen service plan after transaction-local source rechecks."""
         effects = (draft.get('source_context') or {}).get('publication_effects')
+        plan = prepared.get('source_effect_plan')
         if not effects:
+            if plan is not None:
+                raise OntologyPublicationConflict(
+                    'stale_source', 'unexpected ontology publication effect plan')
             return []
-        if not isinstance(effects, dict):
+        if not isinstance(plan, dict):
             raise OntologyPublicationConflict(
-                'stale_source', 'ontology draft publication effects are invalid')
+                'stale_source', 'ontology publication effect plan is missing')
         effect_kind = effects.get('kind')
         if (effect_kind is None and draft['source_kind'] == 'discovery'
                 and effects.get('discovery_run_id')):
             effect_kind = 'discovery'
-        if effect_kind != draft['source_kind']:
+        if effect_kind != draft['source_kind'] or plan.get('kind') != effect_kind:
             raise OntologyPublicationConflict(
-                'stale_source', 'ontology draft publication effects are invalid')
+                'stale_source', 'ontology publication effect plan is invalid')
 
         project_id = prepared['project_id']
         if effect_kind == 'discovery':
-            from ..services.ontology_discovery import (
-                _materialize_candidates,
-                _materialized_candidate_ids,
-                _reuse_materialized_records,
-                _validated_materialization,
-            )
-
-            run_id = effects.get('discovery_run_id')
-            if not run_id:
-                if 'records' not in effects:
+            mode = plan.get('mode')
+            if mode == 'run':
+                run_id = effects.get('discovery_run_id')
+                if run_id != plan.get('run_id'):
                     raise OntologyPublicationConflict(
-                        'stale_source', 'discovery publication run is missing')
-                proposed = json.loads(_json(effects.get('records') or []))
-                for record in proposed:
-                    record['ontology_id'] = ontology['id']
-                    metadata = dict(record.get('metadata') or {})
-                    metadata['discovery_draft_id'] = draft['id']
-                    record['metadata'] = metadata
-                accepted, skipped, validation = _validated_materialization(
-                    prepared['turtle'], proposed,
-                    json.loads(_json(
-                        effects.get('skipped_candidates') or [])))
-                saved = [
-                    self._put(project_id, record, 0)
-                    for record in accepted]
-                counts = {
-                    kind: sum(row['kind'] == kind for row in saved)
-                    for kind in ('entity', 'relation', 'attribute')}
-                row = self._db.execute(
-                    '''SELECT payload FROM artifacts
-                       WHERE id=? AND kind='ontology_discovery_draft' ''',
-                    (draft['id'],)).fetchone()
-                if row is not None:
-                    artifact = json.loads(row['payload'])
-                    artifact.update({
-                        'status': 'published',
-                        'ontology_id': ontology['id'],
-                        'mapped_entities': counts['entity'],
-                        'mapped_relations': counts['relation'],
-                        'mapped_attributes': counts['attribute'],
-                        'skipped_candidates': skipped,
-                        'validation': validation,
-                        'requires_candidate_review': bool(
-                            skipped
-                            or artifact.get('excluded_candidate_ids')),
-                        'requires_controlled_reingest': False,
-                    })
-                    self._db.execute(
-                        '''UPDATE artifacts SET payload=?
-                           WHERE id=? AND kind='ontology_discovery_draft' ''',
-                        (_json(artifact), draft['id']))
-                return [record['id'] for record in saved]
-            try:
-                run = self.get_discovery_run(project_id, run_id)
-            except KeyError as exc:
+                        'stale_source', 'discovery publication run changed')
+                try:
+                    run = self.get_discovery_run(project_id, run_id)
+                except KeyError as exc:
+                    raise OntologyPublicationConflict(
+                        'stale_source',
+                        'discovery publication run does not exist') from exc
+                if self._publish_fingerprint(run) != plan.get(
+                        'expected_run_fingerprint'):
+                    raise OntologyPublicationConflict(
+                        'stale_source',
+                        'discovery publication run changed')
+                current = self.current_records(
+                    project_id, vectors='none',
+                    kinds=['entity', 'relation', 'attribute'])
+                current_versions = sorted(
+                    (item['id'], item['version_id']) for item in current)
+                expected_versions = [
+                    tuple(item)
+                    for item in plan.get('expected_record_versions') or []]
+                if current_versions != expected_versions:
+                    raise OntologyPublicationConflict(
+                        'stale_source',
+                        'discovery materialization context changed')
+            elif mode != 'legacy':
                 raise OntologyPublicationConflict(
-                    'stale_source', 'discovery publication run does not exist') \
-                    from exc
-            if (run.get('status') != 'draft_created'
-                    or run.get('unified_draft_id') != draft['id']):
-                raise OntologyPublicationConflict(
-                    'stale_source', 'discovery publication run is not current')
+                    'stale_source',
+                    'unsupported discovery publication effect plan')
 
-            approved_ids = {
-                operation['id'] for operation in prepared['operations']}
-            effective_ids = {
-                operation['id']
-                for operation in self._ontology_drafts.effective_operations(
-                    project_id, draft['id'])}
-            initial_ids = {
-                outcome['candidate_id']
-                for outcome in run.get('initial_candidate_outcomes') or []}
-            required_outcomes = []
-            for binding in run.get('candidate_bindings') or []:
-                if binding['candidate_id'] in initial_ids:
-                    continue
-                missing = [
-                    operation_id
-                    for operation_id in binding.get(
-                        'required_operation_ids') or []
-                    if operation_id not in approved_ids]
-                if not missing:
-                    continue
-                if any(operation_id in effective_ids for operation_id in missing):
-                    reason_code = 'required_operation_rejected'
-                elif any(self._db.execute(
-                        '''SELECT 1 FROM ontology_operations
-                           WHERE project_id=? AND draft_id=? AND id=?''',
-                        (project_id, draft['id'], operation_id)).fetchone()
-                         for operation_id in missing):
-                    reason_code = 'required_operation_superseded'
-                else:
-                    reason_code = 'required_operation_missing'
-                required_outcomes.append({
-                    'candidate_id': binding['candidate_id'],
-                    'status': 'skipped',
-                    'reason_code': reason_code,
-                })
-
-            materialization_source = {
-                **run,
-                'id': draft['id'],
-                'excluded_candidate_ids': [],
-            }
-            proposed, skipped = _materialize_candidates(
-                project_id, materialization_source, ontology['id'],
-                [*(run.get('candidate_outcomes') or []), *required_outcomes])
-            previous_ids = set(run.get(
-                'materialized_candidate_ids') or [])
-            existing_records = self.current_records(
-                project_id, vectors='none', kinds=['entity','relation','attribute'])
-            processed_ids = _materialized_candidate_ids(existing_records)
-            if (not previous_ids <= processed_ids
-                    or (set(run.get('accepted_candidate_ids') or [])
-                        & (processed_ids - previous_ids))):
-                raise OntologyPublicationConflict(
-                    'stale_source', 'discovery materialization context changed')
-            proposed = _reuse_materialized_records(
-                proposed, existing_records, previous_ids)
-            accepted, skipped, validation = _validated_materialization(
-                prepared['turtle'], proposed, skipped)
-            existing_record_ids = {item['id'] for item in existing_records
-                if _materialized_candidate_ids([item]) & previous_ids}
-            saved = [self._put(project_id, record, 0) for record in accepted
-                     if record['id'] not in existing_record_ids]
-            materialized_ids = _materialized_candidate_ids(accepted)
-            required_by_candidate = {
-                outcome['candidate_id']: outcome
-                for outcome in required_outcomes}
-            terminal_outcomes = []
-            for binding in run.get('candidate_bindings') or []:
-                candidate_id = binding['candidate_id']
-                if candidate_id in initial_ids:
-                    continue
-                if candidate_id in required_by_candidate:
-                    terminal_outcomes.append(required_by_candidate[candidate_id])
-                elif candidate_id in materialized_ids:
-                    terminal_outcomes.append({
-                        'candidate_id': candidate_id,
-                        'status': 'materialized',
-                        'reason_code': 'materialized',
-                    })
-                else:
-                    terminal_outcomes.append({
-                        'candidate_id': candidate_id,
-                        'status': 'skipped',
-                        'reason_code': 'ontology_validation_failed',
-                    })
-            self.transition_discovery_run(
-                project_id, run_id, 'draft_created', 'published',
-                candidate_outcomes=terminal_outcomes)
-            counts = {
-                kind: sum(row['kind'] == kind for row in saved)
-                for kind in ('entity', 'relation', 'attribute')}
-            row = self._db.execute(
-                "SELECT payload FROM artifacts WHERE id=? AND kind='ontology_discovery_draft'",
-                (draft['id'],)).fetchone()
-            if row is not None:
-                artifact = json.loads(row['payload'])
-                artifact.update({
-                    'status': 'published', 'ontology_id': ontology['id'],
-                    'mapped_entities': counts['entity'],
-                    'mapped_relations': counts['relation'],
-                    'mapped_attributes': counts['attribute'],
-                    'skipped_candidates': skipped, 'validation': validation,
-                    'requires_candidate_review': bool(
-                        skipped or artifact.get('excluded_candidate_ids')),
-                    'requires_controlled_reingest': False,
-                })
-                self._db.execute(
-                    "UPDATE artifacts SET payload=? WHERE id=? AND kind='ontology_discovery_draft'",
-                    (_json(artifact), draft['id']))
-            return [row['id'] for row in saved]
+            records = self._bind_published_ontology_id(
+                json.loads(_json(plan.get('records') or [])), ontology['id'])
+            saved = [self._put(project_id, record, 0) for record in records]
+            if mode == 'run':
+                self.transition_discovery_run(
+                    project_id, plan['run_id'], 'draft_created', 'published',
+                    candidate_outcomes=json.loads(_json(
+                        plan.get('candidate_outcomes') or [])))
+            self._update_discovery_artifact(
+                draft['id'], ontology['id'], saved,
+                json.loads(_json(plan.get('skipped') or [])),
+                json.loads(_json(plan.get('validation') or {})))
+            return [record['id'] for record in saved]
 
         if effect_kind == 'candidate':
-            document = self.get_record(project_id, effects.get('document_id'))
-            if document['version'] != effects.get('expected_document_version'):
+            document = self.get_record(project_id, plan.get('document_id'))
+            if document['version'] != plan.get('expected_document_version'):
                 raise OntologyPublicationConflict(
                     'stale_source', 'candidate source document changed')
-            revised = json.loads(_json({
-                key: value for key, value in document.items()
-                if key not in {
-                    'project_id', 'version', 'version_id', 'recorded_at',
-                    'superseded_at',
-                }}))
-            candidates = (revised.get('metadata') or {}).get(
-                'review_candidates') or []
-            candidate = next((item for item in candidates
-                              if item.get('id') == effects.get('candidate_id')), None)
-            if candidate is None:
+            candidate = self._ontology_candidate(
+                document, effects.get('candidate_id'))
+            if (candidate is None
+                    or self._publish_fingerprint(candidate)
+                    != plan.get('expected_candidate_fingerprint')):
                 raise OntologyPublicationConflict(
-                    'stale_source', 'candidate source no longer exists')
+                    'stale_source', 'candidate source changed')
             proposal_row = self._db.execute(
-                "SELECT payload FROM artifacts WHERE id=? AND kind='ontology_change'",
-                (effects.get('proposal_id'),)).fetchone()
+                """SELECT payload FROM artifacts
+                   WHERE id=? AND kind='ontology_change'""",
+                (plan.get('proposal_id'),)).fetchone()
             if proposal_row is None:
                 raise OntologyPublicationConflict(
                     'stale_source', 'candidate proposal no longer exists')
             proposal = json.loads(proposal_row['payload'])
-            from ..services.ontology import Ontology
-            from ..services.ontology_changes import revalidation
+            if self._publish_fingerprint(proposal) != plan.get(
+                    'expected_proposal_fingerprint'):
+                raise OntologyPublicationConflict(
+                    'stale_source', 'candidate proposal changed')
 
-            result = revalidation(
-                SimpleNamespace(repository=self), project_id, document,
-                candidate, Ontology(prepared['turtle']), ontology['id'], proposal)
-            candidate['ontology_change'] = result
-            self._put(project_id, revised, document['version'])
-            proposal.update({
-                'status': 'published', 'approved_ontology_id': ontology['id'],
+            revised = self._bind_published_ontology_id(
+                json.loads(_json(plan.get('document') or {})), ontology['id'])
+            result = self._bind_published_ontology_id(
+                json.loads(_json(plan.get('revalidation') or {})), ontology['id'])
+            saved_document = self._put(
+                project_id, revised, document['version'])
+            published_proposal = self._bind_published_ontology_id(
+                json.loads(_json(plan.get('proposal') or {})), ontology['id'])
+            published_proposal.update({
+                'status': 'published',
+                'approved_ontology_id': ontology['id'],
                 'revalidation': result,
             })
             self._db.execute(
-                "UPDATE artifacts SET payload=? WHERE id=? AND kind='ontology_change'",
-                (_json(proposal), effects['proposal_id']))
-            return [document['id']]
+                """UPDATE artifacts SET payload=?
+                   WHERE id=? AND kind='ontology_change'""",
+                (_json(published_proposal), plan['proposal_id']))
+            return [saved_document['id']]
 
         if effect_kind == 'import':
-            proposed = json.loads(_json(effects.get('records') or []))
-            for record in proposed:
-                if record.get('kind') in {'entity', 'relation', 'attribute'}:
-                    record['ontology_id'] = ontology['id']
-            from ..services.ontology import Ontology
-            report = Ontology(prepared['turtle']).validate_timeline(proposed)
-            if not report['conforms']:
-                raise OntologyPublicationConflict(
-                    'validation_failed', 'imported records do not conform',
-                    details={'report': report})
-            saved = [self._put(project_id, record, 0) for record in proposed]
-            return [row['id'] for row in saved]
+            records = self._bind_published_ontology_id(
+                json.loads(_json(plan.get('records') or [])), ontology['id'])
+            saved = [self._put(project_id, record, 0) for record in records]
+            return [record['id'] for record in saved]
 
         raise OntologyPublicationConflict(
             'stale_source', 'unsupported ontology publication effect kind')
@@ -1706,7 +1616,7 @@ class Repository:
             'expected_ontology_id', 'validation_fingerprint',
             'validation_report', 'operations', 'decisions', 'turtle', 'summary',
             'acknowledged_warning_codes', 'idempotency_key', 'actor',
-            'request_hash', 'client_request_hash', 'note',
+            'request_hash', 'client_request_hash', 'note', 'source_effect_plan',
         }
         if missing := required - set(prepared):
             raise ValueError(f'ontology publish request is missing {sorted(missing)}')
