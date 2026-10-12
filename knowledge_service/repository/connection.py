@@ -118,6 +118,7 @@ def _reject_sqlite(dsn: str) -> None:
 # 因此在这里给出唯一出处，运行时代码只引用这两个名字，不直接依赖驱动。
 DatabaseError = psycopg.Error
 IntegrityError = psycopg.errors.IntegrityError
+SerializationFailure = psycopg.errors.SerializationFailure
 
 
 class Row:
@@ -504,7 +505,8 @@ def reset_process_database() -> None:
 
 
 __all__ = [
-    'Database', 'DatabaseError', 'Row', 'Session', 'UnitOfWorkClosed',
+    'Database', 'DatabaseError', 'IntegrityError', 'SerializationFailure',
+    'Row', 'Session', 'UnitOfWorkClosed',
     'process_database', 'reset_process_database', 'resolve_dsn',
     'DEFAULT_POOL_MIN', 'DEFAULT_POOL_MAX', 'DEFAULT_ACQUIRE_TIMEOUT',
 ]

@@ -1,4 +1,5 @@
 from decimal import Decimal
+from threading import Event, Thread
 
 import pytest
 from pydantic import ValidationError
@@ -489,6 +490,79 @@ def test_merge_rebind_freezes_new_event_without_redirecting_old_mapping(tmp_path
     assert event['canonical_record_id'] == 'target'
     assert _mapping_ids(repo, project_id) == before | {(
         'target', target['version_id'], source_assertion['id'], event['id'])}
+
+
+def test_formal_plan_dependency_lock_serializes_post_cas_assertion_insert(
+        tmp_path, monkeypatch):
+    repo, _, project_id = _system(tmp_path)
+    _write(repo, project_id, [_entity('source'), _entity('target')])
+    source_assertion = repo.list_assertions(
+        project_id, canonical_record_id='source')[0]
+    plan = FormalFactWriter(repo).prepare(
+        'merge_rewrite', project_id, [], {}, {
+            'records': [],
+            'ledger': {'id': 'locked-merge', 'redirects': {
+                'source': 'target'}},
+        })
+    concurrent = Repository(tmp_path / 'formal.sqlite')
+    cas_reached = Event()
+    release_executor = Event()
+    writer_started = Event()
+    writer_finished = Event()
+    original_snapshot = repo._formal_write_snapshot_data
+
+    def pause_after_locked_snapshot(current_project_id):
+        snapshot = original_snapshot(current_project_id)
+        cas_reached.set()
+        assert release_executor.wait(10)
+        return snapshot
+
+    monkeypatch.setattr(
+        repo, '_formal_write_snapshot_data', pause_after_locked_snapshot)
+    execution = []
+    concurrent_result = []
+
+    def execute_plan():
+        try:
+            execution.append(repo.execute_formal_write(plan))
+        except Exception as exc:  # asserted after joining the worker
+            execution.append(exc)
+
+    def insert_assertion():
+        writer_started.set()
+        try:
+            pending = concurrent.create_assertion(project_id, {
+                'id': 'late-support', 'kind': 'entity', 'payload': {}})
+            concurrent_result.append(concurrent.transition_assertion(
+                project_id, pending['id'], pending['decision_version'],
+                'accepted', 'arrived after plan CAS', 'concurrent-writer',
+                'source'))
+        except Exception as exc:  # asserted after joining the worker
+            concurrent_result.append(exc)
+        finally:
+            writer_finished.set()
+
+    executor = Thread(target=execute_plan)
+    executor.start()
+    assert cas_reached.wait(10)
+    writer = Thread(target=insert_assertion)
+    writer.start()
+    assert writer_started.wait(10)
+    assert not writer_finished.wait(0.2)
+    release_executor.set()
+    executor.join(timeout=15)
+    writer.join(timeout=15)
+
+    assert not executor.is_alive()
+    assert not writer.is_alive()
+    assert len(execution) == 1 and isinstance(execution[0], dict)
+    assert len(concurrent_result) == 1 and isinstance(concurrent_result[0], dict)
+    assert repo.get_assertion(
+        project_id, source_assertion['id'])['canonical_record_id'] == 'target'
+    # The blocked writer is serialized after the merge, rather than mutating
+    # the dependency set between plan validation and action execution.
+    assert repo.get_assertion(
+        project_id, 'late-support')['canonical_record_id'] == 'source'
 
 
 def test_mapping_failure_rolls_back_records_assertions_events_and_prior_mappings(tmp_path, monkeypatch):

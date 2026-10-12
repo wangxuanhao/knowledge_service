@@ -1,3 +1,5 @@
+from threading import Barrier, Thread
+
 import pytest
 from rdflib import RDFS, URIRef
 
@@ -857,6 +859,62 @@ def test_atomic_publish_rechecks_source_inside_repository_transaction(tmp_path):
     assert repo._ontology_drafts.export(project_id)['publish_requests'] == []
     # 发布被拦下之后草案还是「待处理」：修好来源可以重新试（旧断言是 reviewed）。
     assert repo._ontology_drafts.get(project_id, draft['id'])['status'] == 'pending'
+
+
+def test_serializable_publish_aborts_absent_dependency_insert_race(
+        tmp_path, monkeypatch):
+    repo, service, project_id, base = setup_service(tmp_path)
+    service.publisher = repo
+    _, draft, reviewed = _review_candidate_draft(
+        repo, service, project_id, base, 'predicate-race-source')
+    prepared = service.publish_preflight(
+        project_id, draft['id'], reviewed['revision'], base['id'],
+        reviewed['validation_fingerprint'], [], 'predicate-race', 'publisher',
+        '用例：缺失依赖并发插入')
+    concurrent = Repository(tmp_path / 'drafts.sqlite')
+    barrier = Barrier(2)
+    original_recheck = repo._recheck_governed_publish
+
+    def recheck_then_pause(request):
+        current = original_recheck(request)
+        missing = repo._db.execute(
+            '''SELECT id FROM record_versions
+               WHERE project_id=? AND id=? AND superseded_at IS NULL''',
+            (project_id, 'late-dependency')).fetchone()
+        assert missing is None
+        barrier.wait(timeout=10)
+        barrier.wait(timeout=10)
+        return current
+
+    monkeypatch.setattr(repo, '_recheck_governed_publish', recheck_then_pause)
+    outcome = []
+
+    def publish():
+        try:
+            outcome.append(repo.publish_ontology_draft(**prepared))
+        except Exception as exc:  # asserted after joining the worker
+            outcome.append(exc)
+
+    worker = Thread(target=publish)
+    worker.start()
+    barrier.wait(timeout=10)
+    # This transaction reads the ontology row that publication will replace and
+    # inserts the row publication observed as absent, forming the SSI predicate
+    # cycle that a plain repeatable-read transaction cannot reject.
+    with concurrent._transaction(serializable=True):
+        concurrent.get_ontology(project_id)
+        concurrent._put(project_id, {
+            'id': 'late-dependency', 'kind': 'document', 'text': 'arrived late'}, 0)
+    barrier.wait(timeout=10)
+    worker.join(timeout=15)
+
+    assert not worker.is_alive()
+    assert len(outcome) == 1
+    assert isinstance(outcome[0], OntologyPublicationConflict)
+    assert outcome[0].code == 'stale_source'
+    assert len(repo.list_ontologies(project_id)) == 1
+    assert repo.get_record(project_id, 'late-dependency')['text'] == 'arrived late'
+    assert repo._ontology_drafts.export(project_id)['publish_requests'] == []
 
 
 def test_candidate_publish_persists_sync_job_before_after_commit_runner(tmp_path):

@@ -25,6 +25,7 @@ from ..utils.ingest_runs import merge_readiness, readiness
 from ..core.time import normalize_time, utc_now
 from ..utils.attributes import primitive_datatype
 from .snapshot_validation import validate_restore_snapshot
+from .connection import SerializationFailure
 
 
 def _json(value):
@@ -302,9 +303,12 @@ class Repository:
         return self.get_project(project_id)
 
     @contextmanager
-    def _transaction(self, *, repeatable_read_only=False):
+    def _transaction(self, *, repeatable_read_only=False, serializable=False):
         with self._lock:
             if self._db.in_transaction:
+                if serializable:
+                    raise RuntimeError(
+                        'serializable transaction must be the outer transaction')
                 savepoint='nested_'+uuid4().hex
                 self._db.execute(f'SAVEPOINT {savepoint}')
                 try:
@@ -315,9 +319,12 @@ class Repository:
                     self._db.execute(f'RELEASE SAVEPOINT {savepoint}')
                     raise
                 return
-            self._db.execute(
+            begin = (
                 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY'
-                if repeatable_read_only else 'BEGIN')
+                if repeatable_read_only else
+                'BEGIN ISOLATION LEVEL SERIALIZABLE'
+                if serializable else 'BEGIN')
+            self._db.execute(begin)
             try:
                 yield
                 self._db.commit()
@@ -330,6 +337,17 @@ class Repository:
         """Keep a compound read on one connection and transaction snapshot."""
         with self._transaction(repeatable_read_only=True):
             yield
+
+    @contextmanager
+    def _publication_transaction(self):
+        """Run publication at SERIALIZABLE and map predicate races to stale source."""
+        try:
+            with self._transaction(serializable=True):
+                yield
+        except SerializationFailure as exc:
+            raise OntologyPublicationConflict(
+                'stale_source',
+                'ontology publication dependencies changed concurrently') from exc
 
     @contextmanager
     def _allow_ontology_history_delete(self):
@@ -726,11 +744,11 @@ class Repository:
                               operation=operation) for record in records]
 
     def execute_formal_write(self, plan):
-        """Validate and atomically execute a frozen service-owned write plan."""
+        """CAS-check and mechanically execute a service-owned action plan."""
         required = {
-            'operation', 'project_id', 'assertions', 'expected', 'policy',
-            'recorded_at', 'operation_context', 'expected_ontology_id',
-            'fingerprint',
+            'operation', 'project_id', 'actions', 'result_refs',
+            'assertion_result_ids', 'review_items', 'dependencies',
+            'recorded_at', 'operation_context', 'fingerprint',
         }
         if not isinstance(plan, dict):
             raise ValueError('正式写入计划必须是对象')
@@ -741,12 +759,90 @@ class Repository:
         if calculated != plan['fingerprint']:
             raise ValueError('正式写入计划指纹无效')
         from .formal_write_executor import FormalWriteExecutor
-        return FormalWriteExecutor(self).execute(
-            plan['operation'], plan['project_id'], plan['assertions'],
-            plan['expected'], plan['policy'], plan['expected_ontology_id'],
-            recorded_at=plan['recorded_at'],
-            operation_context=self._restore_formal_write_context(
-                plan['operation_context']))
+        with self._transaction(serializable=True):
+            self._lock_formal_write_dependencies()
+            snapshot = self._formal_write_snapshot_data(plan['project_id'])
+            if self._formal_write_dependencies(snapshot) != plan['dependencies']:
+                raise ValueError('版本冲突：正式写入依赖已变更')
+            operation_context = self._restore_formal_write_context(
+                plan['operation_context'])
+            if operation_context is None:
+                operation_context = self._reserve_record_operation(
+                    plan['project_id'], plan['recorded_at'])
+            elif plan['recorded_at'] is not None:
+                raise ValueError('写入操作上下文不能与 recorded_at 同时指定')
+            else:
+                self._record_operation_time(
+                    plan['project_id'], operation_context)
+            return FormalWriteExecutor(self).execute(
+                plan, operation_context=operation_context)
+
+    def _lock_formal_write_dependencies(self):
+        """Close the plan-CAS interval against row and predicate changes.
+
+        PostgreSQL SSI only aborts dangerous dependency cycles; a concurrent
+        insert matching a previously empty predicate is not, by itself, such a
+        cycle.  SHARE ROW EXCLUSIVE keeps all tables represented in the public
+        planning snapshot stable until the prepared actions commit.  The lock
+        remains writable by this transaction, so the executor can mechanically
+        apply the plan while other writers wait for the next serial order.
+        """
+        self._db.execute(
+            '''LOCK TABLE projects,record_versions,ontologies,assertions,
+                          assertion_events,record_version_assertions,fact_keys,
+                          resolution_reviews,merge_operations
+               IN SHARE ROW EXCLUSIVE MODE''')
+
+    def _formal_write_dependencies(self, snapshot):
+        return {
+            'snapshot_fingerprint': snapshot['fingerprint'],
+            'ontology_id': snapshot.get('ontology_id'),
+            'records': {row['id']: row['version_id'] for row in snapshot['records']},
+            'assertions': {
+                row['id']: row['decision_version'] for row in snapshot['assertions']},
+            'fact_keys': self._publish_fingerprint(snapshot['fact_keys']),
+            'merge_operations': {
+                row['id']: self._publish_fingerprint(row)
+                for row in snapshot['merge_operations']},
+            'resolution_reviews': {
+                row['id']: row['decision_version']
+                for row in snapshot['resolution_reviews']},
+        }
+
+    def _formal_write_snapshot_data(self, project_id):
+        """Read the complete detached state consulted by formal-write planning."""
+        self.get_project(project_id)
+        assertions, events = self._assertions.export(project_id)
+        ontology_id = self._latest_ontology_id(project_id)
+        snapshot = {
+            'project_id': project_id,
+            'storage_namespace': self.storage_namespace,
+            'ontology_id': ontology_id,
+            'ontology': (self.get_ontology(project_id, ontology_id)
+                         if ontology_id is not None else None),
+            'records': self.current_records(project_id, vectors='none'),
+            'assertions': assertions,
+            'assertion_events': events,
+            'record_version_assertions': [dict(row) for row in self._db.execute(
+                '''SELECT * FROM record_version_assertions
+                   WHERE project_id=? ORDER BY record_id,record_version_id,
+                                                assertion_id,assertion_event_id''',
+                (project_id,)).fetchall()],
+            'fact_keys': [dict(row) for row in self._db.execute(
+                '''SELECT * FROM fact_keys WHERE project_id=?
+                   ORDER BY fact_key,canonical_record_id''',
+                (project_id,)).fetchall()],
+            'resolution_reviews': self._reviews.export(project_id),
+            'merge_operations': self.list_merge_operations(project_id),
+        }
+        snapshot['fingerprint'] = self._publish_fingerprint(snapshot)
+        return snapshot
+
+    def formal_write_snapshot(self, project_id):
+        """Return an immutable JSON snapshot for service-owned write planning."""
+        with self._transaction(repeatable_read_only=True):
+            snapshot = self._formal_write_snapshot_data(project_id)
+        return json.loads(_json(snapshot))
 
     @staticmethod
     def _record(row, vectors='none'):
@@ -1692,7 +1788,7 @@ class Repository:
             raise ValueError('ontology publish request hash is invalid')
 
         sync_job = None
-        with self._transaction():
+        with self._publication_transaction():
             self.get_project(prepared['project_id'])
             existing = self._ontology_drafts.get_publish_request(
                 prepared['project_id'], prepared['draft_id'],
