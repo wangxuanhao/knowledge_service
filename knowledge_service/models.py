@@ -109,8 +109,13 @@ class ResolutionReviewDecision(Request):
     decision: Literal['merged','separate','rejected']
     expected_version: int = Field(ge=1)
     reason: str = Field(min_length=1,max_length=2000)
-    actor: str = Field(default='reviewer',min_length=1,max_length=200)
     expected_entity_versions: dict[str,int] = Field(default_factory=dict)
+
+    @model_validator(mode='before')
+    @classmethod
+    def discard_legacy_actor(cls, value):
+        return ({key: item for key, item in value.items() if key != 'actor'}
+                if isinstance(value, dict) else value)
 
 
 class IngestSettings(Request):

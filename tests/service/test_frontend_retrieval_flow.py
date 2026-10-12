@@ -1338,12 +1338,8 @@ def test_knowledge_chat_evidence_disclosure_and_cross_menu_navigation(workbench)
         "document.querySelector('#qa-transcript .qa-turn-assistant')?.dataset.state === 'done'")
 
     toggle = page.locator('#qa-transcript .qa-evidence-toggle').first
-    assert toggle.get_attribute('aria-expanded') == 'false'
-    panel_id = toggle.get_attribute('aria-controls')
-    assert page.locator(f'#{panel_id}').is_hidden()
-    assert toggle.inner_text().startswith('查看 ')
-    toggle.press('Enter')
     assert toggle.get_attribute('aria-expanded') == 'true'
+    panel_id = toggle.get_attribute('aria-controls')
     assert page.locator(f'#{panel_id}').is_visible()
 
     graph_buttons = page.locator(f'#{panel_id} [data-evidence-node]')
@@ -1433,7 +1429,7 @@ def test_mobile_composer_stays_reachable_with_expanded_evidence(workbench):
         page.wait_for_function(
             "() => {const turns = document.querySelectorAll('#qa-transcript .qa-turn-assistant'); "
             "return turns.length && turns[turns.length - 1].dataset.state === 'done';}")
-    page.locator('#qa-transcript .qa-evidence-toggle').first.press('Enter')
+    assert page.locator('#qa-transcript .qa-evidence-panel').first.is_visible()
     page.wait_for_timeout(250)
 
     box = page.evaluate("""() => {
@@ -1468,7 +1464,7 @@ def test_chunk_evidence_declares_its_home_when_source_is_merged(workbench):
         page.click('#qa')
     page.wait_for_function(
         "document.querySelector('#qa-transcript .qa-turn-assistant')?.dataset.state === 'done'")
-    page.locator('#qa-transcript .qa-evidence-toggle').first.press('Enter')
+    assert page.locator('#qa-transcript .qa-evidence-panel').first.is_visible()
 
     source_button = page.locator('#qa-transcript [data-evidence-source]').first
     assert source_button.count() == 1
@@ -1530,7 +1526,7 @@ def test_knowledge_chat_provenance_running_safe_done_and_history(workbench):
     page.click('#qa')
     _emit(page, 'evidence', _provenance_evidence())
     toggle = page.locator('.qa-evidence-toggle')
-    toggle.click()
+    assert toggle.get_attribute('aria-expanded') == 'true'
     citation = page.locator('.qa-evidence-panel button.provenance-citation')
     assert citation.count() == 1
     assert page.locator('.qa-turn-assistant').get_attribute('data-state') == 'streaming'
@@ -1570,7 +1566,7 @@ def test_knowledge_chat_provenance_running_safe_done_and_history(workbench):
     page.click('[data-tab="qa"]')
     page.wait_for_function("document.querySelectorAll('.qa-answer button').length === 1")
     assert page.locator('.qa-answer').inner_text() == literal
-    page.locator('.qa-evidence-toggle').click()
+    assert page.locator('.qa-evidence-panel').is_visible()
     assert page.locator('.qa-evidence-panel button.provenance-citation').count() == 1
     page.locator('.qa-answer button').click()
     page.wait_for_function("document.querySelector('#provenance-drawer').dataset.state === 'ready'")
@@ -1629,7 +1625,7 @@ def test_knowledge_chat_provenance_clear_aborts_and_ignores_stale_response(workb
     page.fill('#qa-query', 'clear pending')
     page.click('#qa')
     _emit(page, 'evidence', _provenance_evidence())
-    page.locator('.qa-evidence-toggle').click()
+    assert page.locator('.qa-evidence-panel').is_visible()
     page.locator('.qa-evidence-panel button.provenance-citation').click()
     page.evaluate('clearKnowledgeChat({clearPersist:true})')
     assert page.evaluate('window.__provenanceSignal.aborted')

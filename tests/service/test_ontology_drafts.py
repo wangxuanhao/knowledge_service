@@ -979,7 +979,7 @@ def test_serializable_publish_aborts_absent_dependency_insert_race(
     assert repo._ontology_drafts.export(project_id)['publish_requests'] == []
 
 
-def test_candidate_publish_persists_sync_job_before_after_commit_runner(tmp_path):
+def test_candidate_publish_only_persists_outbox_and_never_runs_sync_inline(tmp_path):
     repo, service, project_id, base = setup_service(tmp_path)
     service.publisher = repo
     _, draft, reviewed = _review_candidate_draft(
@@ -999,7 +999,7 @@ def test_candidate_publish_persists_sync_job_before_after_commit_runner(tmp_path
         '用例：同步任务失败')
 
     jobs = repo.list_artifacts('ontology_sync_job', project_id)
-    assert observed == [(ontology['id'], 'pending')]
+    assert observed == []
     assert len(jobs) == 1
     assert jobs[0]['status'] == 'pending'
     assert jobs[0]['ontology_id'] == ontology['id']

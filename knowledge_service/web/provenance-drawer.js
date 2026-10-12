@@ -23,10 +23,19 @@
     if(!item||typeof item!=='object'||Array.isArray(item))return result;
     const own=key=>Object.prototype.hasOwnProperty.call(item,key);
     if(own('citation')&&validCitation(item.citation))result.citation=item.citation;
-    for(const key of ['text_preview','kind','provenance_ref']){
+    for(const key of ['text_preview','kind','provenance_ref','source_status','source_reason','retrieval_channel','ranker_version']){
       if(own(key)&&typeof item[key]==='string')result[key]=key==='text_preview'?item[key].slice(0,240):item[key];
     }
     if(own('version')&&Number.isSafeInteger(item.version)&&item.version>0)result.version=item.version;
+    if(own('sources')&&Array.isArray(item.sources))result.sources=item.sources.slice(0,20).flatMap(source=>{
+      if(!source||typeof source!=='object'||Array.isArray(source))return [];
+      const clean={};
+      for(const key of ['document_id','record_version_id','title','quote','channel']){
+        if(typeof source[key]==='string')clean[key]=key==='quote'?source[key].slice(0,240):source[key];
+      }
+      if(Number.isSafeInteger(source.version)&&source.version>0)clean.version=source.version;
+      return Object.keys(clean).length?[clean]:[];
+    });
     return result;
   }
 

@@ -1,7 +1,8 @@
-"""单进程后台任务，带持久化收据，而非分布式队列。
+"""Persisted tasks with PostgreSQL leases and bounded local consumers.
 
-2026-10-05：新增**发布-订阅**能力 —— 进度除了写入持久化 logs，还会实时推给
-订阅者（供 SSE 端点 /jobs/{id}/stream 使用）。替代此前前端每 2 秒轮询的笨办法。
+Application jobs use registered handlers and durable inputs. The callable
+submit/_run seam remains for old in-process diagnostic consumers only.
+SSE is local to an instance; persisted receipts remain the shared truth.
 """
 from concurrent.futures import ThreadPoolExecutor
 import queue as queue_lib
@@ -11,6 +12,7 @@ import sys
 import traceback
 from pathlib import Path
 from uuid import uuid4
+from datetime import datetime, timedelta, timezone
 from ..core.time import utc_now
 from ..utils.diagnostics import redact
 
@@ -21,17 +23,147 @@ def concise(value,limit=1200):
 
 
 class Jobs:
-    def __init__(self,repository,heartbeat_seconds=30):
+    def __init__(self,repository,heartbeat_seconds=30, *, handlers=None, workers=2):
         self.repo=repository
         self.lock=threading.RLock()
         self.heartbeat_seconds=heartbeat_seconds
-        self.executor=ThreadPoolExecutor(max_workers=1,thread_name_prefix='knowledge-job')
+        self.executor=ThreadPoolExecutor(max_workers=workers,thread_name_prefix='knowledge-job')
+        self.handlers = dict(handlers or {})
+        self.owner = str(uuid4())
+        self.stopped = threading.Event()
+        self.workers = []
+        self.worker_count = workers
         # 发布-订阅：job_id -> [Queue,...]；跨线程传递进度事件
         self._subscribers={}
         for job in self.repo.list_artifacts('job'):
-            if job['status'] in ('queued','running'):
+            if job['status'] in ('queued','running') and 'payload' not in job:
                 job.update(status='interrupted',updated_at=utc_now(),error='服务在完成前重启；重试前请检查收据')
                 self.repo.save_artifact('job',job)
+    def start(self):
+        with self.lock:
+            if self.workers or not self.handlers or self.stopped.is_set():
+                return
+            for index in range(self.worker_count):
+                worker = threading.Thread(target=self._consume,
+                    name=f'knowledge-durable-{index}', daemon=True)
+                worker.start()
+                self.workers.append(worker)
+
+    def enqueue(self, kind, payload, project_id=None):
+        if kind not in self.handlers:
+            raise ValueError('任务类型没有注册持久处理器')
+        job = dict(id=str(uuid4()), kind=kind, project_id=project_id,
+                   payload=payload, status='queued', progress=0, logs=['已排队'],
+                   created_at=utc_now(), attempts=0)
+        self.repo.save_artifact('job', job)
+        self.start()
+        return job
+
+    def control(self, job_id, action):
+        job = self.repo.get_artifact('job', job_id)
+        if action != 'cancel' and job.get('kind') not in self.handlers:
+            raise ValueError('旧任务缺少持久参数，需重新提交')
+        return self.repo.control_task('job', job_id, action)
+
+    def _consume(self):
+        while not self.stopped.is_set():
+            if getattr(self.repo, 'closed', False):
+                return
+            try:
+                task = self.repo.claim_task('job', self.owner, lease_seconds=180)
+                if task is not None:
+                    self._run_durable(task)
+                    continue
+            except Exception:
+                if getattr(self.repo, 'closed', False):
+                    return
+                # A transient DB failure must not terminate a queue consumer.
+                traceback.print_exc()
+            self.stopped.wait(1)
+
+    def _run_durable(self, task):
+        started = time.monotonic()
+        heartbeat_stop = threading.Event()
+        lost = threading.Event()
+
+        def persist(updates):
+            saved = self.repo.update_task('job', task, updates)
+            if saved is None:
+                lost.set()
+                raise RuntimeError('任务已取消或租约已失效')
+            task.update(saved)
+
+        def progress(stage, percent=None):
+            if lost.is_set() or self.stopped.is_set():
+                raise RuntimeError('任务已取消或执行器已关闭')
+            task['logs'].append(f'[{utc_now()}] {redact(stage)}')
+            persist({'stage': redact(stage), 'stage_started_at': utc_now(),
+                     'logs': task['logs'][-2000:],
+                     'progress': percent if percent is not None else task['progress'],
+                     'elapsed_seconds': round(time.monotonic() - started, 1)})
+            self._publish(task['id'], 'progress', {
+                'stage': redact(stage), 'percent': task['progress']})
+
+        def heartbeat():
+            while not heartbeat_stop.wait(min(self.heartbeat_seconds, 30)):
+                if time.monotonic() - started > 3600:
+                    self.repo.update_task('job', task,
+                        {'status': 'failed', 'error': '任务执行超过 3600 秒，需重试',
+                         'error_type': 'TaskTimeout'})
+                    lost.set()
+                    return
+                lease = (datetime.now(timezone.utc) + timedelta(seconds=180)).isoformat(
+                    timespec='microseconds').replace('+00:00', 'Z')
+                if self.repo.update_task('job', task,
+                        {'lease_until': lease, 'heartbeat_at': utc_now()}) is None:
+                    lost.set()
+                    return
+
+        monitor = threading.Thread(target=heartbeat, daemon=True)
+        monitor.start()
+        try:
+            progress('开始执行', 5)
+            fn = self.handlers[task['kind']]
+            completion = queue_lib.Queue(maxsize=1)
+
+            def execute():
+                try:
+                    value = fn(task['payload'], task.get('project_id'), progress, task['id'])
+                    completion.put((True, value))
+                except BaseException as exc:
+                    completion.put((False, exc))
+
+            # Blocking integrations cannot monopolize a consumer slot forever.
+            # Cancellation is cooperative at their next progress checkpoint.
+            threading.Thread(target=execute, daemon=True,
+                             name='knowledge-task-' + task['id']).start()
+            while True:
+                if lost.is_set() or self.stopped.is_set():
+                    return
+                try:
+                    success, result = completion.get(timeout=1)
+                    break
+                except queue_lib.Empty:
+                    current = self.repo.get_artifact('job', task['id'])
+                    if (current['status'] != 'running'
+                            or current.get('lease_token') != task['lease_token']):
+                        lost.set()
+                        return
+            if not success:
+                raise result
+            if lost.is_set():
+                return
+            persist({'status': 'completed', 'result': result, 'progress': 100,
+                     'completed_at': utc_now()})
+            self._publish(task['id'], 'completed', {'status': 'completed', 'progress': 100})
+        except Exception as exc:
+            if not lost.is_set():
+                self.repo.update_task('job', task, {
+                    'status': 'failed', 'error': concise(exc),
+                    'error_type': type(exc).__name__, 'failed_stage': task.get('stage')})
+                self._publish(task['id'], 'failed', {'status': 'failed', 'error': concise(exc)})
+        finally:
+            heartbeat_stop.set()
 
     # ------------------------------------------------------------- 发布-订阅
     def subscribe(self,job_id):
@@ -120,4 +252,7 @@ class Jobs:
             stopped.set()
 
     def close(self):
-        self.executor.shutdown(wait=True)
+        self.stopped.set()
+        self.executor.shutdown(wait=False, cancel_futures=True)
+        for worker in self.workers:
+            worker.join(timeout=1)

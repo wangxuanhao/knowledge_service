@@ -146,7 +146,7 @@ def run(base: str, p: str, stamp: str, args) -> None:
     check('按概念分组（包裹 2 条：实体 + 关系）',
           grouped.get(unknown_type, {}).get('record_count') == 2,
           str(grouped.get(unknown_type, {}).get('record_count')))
-    check('每组都给出"该去哪儿做什么"', '本体编辑台' in str(grouped.get(unknown_type, {}).get('suggested_action')))
+    check('每组都给出"该去哪儿做什么"', '本体建模层' in str(grouped.get(unknown_type, {}).get('suggested_action')))
 
     scoped = call(base, f'/api/projects/{p}/records/query?limit=100', {'kinds': ['entity', 'relation', 'chunk']})
     ids = [row['id'] for row in scoped['records']]
@@ -162,7 +162,7 @@ def run(base: str, p: str, stamp: str, args) -> None:
           skipped_ids == {'pkg-1', 'who-1', 'rel-1'}, str(sorted(skipped_ids)))
     check('校验本身仍然通过（不是靠报错把问题藏起来）', validation.get('conforms') is True,
           str(validation.get('errors')))
-    check('校验回执写清为什么跳过', '本体编辑台' in str(validation.get('structure_pending_note')))
+    check('校验回执写清为什么跳过', '本体建模层' in str(validation.get('structure_pending_note')))
 
     # ---- 问答：不进证据链，但**显式标注**（两个入口必须同口径） ----------------
     question = {'query': '跨城包裹 寄件人王某', 'k': 10, 'k_entities': 5, 'k_chunks': 5,
@@ -242,6 +242,7 @@ def run(base: str, p: str, stamp: str, args) -> None:
             'validation_fingerprint': submitted['validation_fingerprint'],
             'acknowledged_warning_codes': warnings,
             'idempotency_key': f'c1-verify-{uuid.uuid4()}',
+            'note': '真机验证：补齐缺失概念后核查结构待定解除',
             'actor': 'script:verify_structure_pending'})
     except RuntimeError as error:
         skip('发布新版本体 → 标记自动解除', f'发布链路没走通：{error}')

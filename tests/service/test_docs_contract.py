@@ -81,7 +81,10 @@ def test_v110_html_manual_explains_the_real_end_to_end_lifecycle():
             '本体建模层', '属性不会单独画成节点', '实体脑图当前不展示属性分支',
             '知识台账可以切换到“属性”视角', '发布本体不会自动修改已有知识',
             '服务 v1.1.0', '本体 v1', '本体 v2', '本体 v3', '记录修订 rN',
-            '受控重分类不会自动把“员工”改成“产品经理”'):
+            '受控重分类不会自动把“员工”改成“产品经理”',
+            '前三条依据默认展开', '第一份冻结原文默认可见',
+            'Milvus collection_ready', 'Semantica 质量检查',
+            '本体切片收据'):
         assert phrase in manual, f'HTML 手册缺少关键说明：{phrase}'
     assert '本体建设台' not in manual
 

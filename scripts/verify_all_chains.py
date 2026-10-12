@@ -36,13 +36,14 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 SKIP_EXIT = 3   # 子脚本用 exit 3 表达"本轮条件不满足、没东西可验"（见 run_one 说明）
 
 CHAINS = [
+    ("高优先级 · 身份/维度/outbox/冻结原文", "verify_hardening.py", []),
     ("本体生命周期 · 阶段门禁",        "verify_ontology_gate.py",     []),
     ("本体生命周期 · 单画布写路径",    "verify_ontology_model.py",    []),
     ("本体生命周期 · 停用与影响面",    "verify_ontology_retire.py",   []),
     ("本体生命周期 · 标注/结构计量",   "verify_ontology_version.py",  []),
     # 写入链路会**真调 LLM**（各 ~2–4 分钟），所以排在最后，失败也不影响前面纯逻辑链路。
     ("写入 · 上传→抽取→入库",          "verify_ingest_end_to_end.py", []),
-    ("写入 · 待审候选受理决策",        "verify_review_decision.py",   []),
+    ("写入 · 待审候选受理决策",        "verify_review_decision.py",   ["--timeout", "900"]),
     ("属性治理 · 结构待定",            "verify_structure_pending.py", ["--no-browser"]),
     ("消费 · 知识台账（台账⇄图谱）",   "verify_knowledge_ledger.py",  []),
     ("本体生命周期 · 受控重分类",      "verify_reclassify.py",        []),
@@ -61,19 +62,6 @@ def health_ok(url: str) -> bool:
         return False
 
 
-def kill_edge() -> None:
-    """每条链路前清一次残留的无头 Edge。
-
-    为什么必须做：无头 Edge 偶尔不会随 `context.close()` 立刻退出，下一条链路启动时
-    会撞上残留实例（表现为 launch 卡死或直接报错、exit != 0），而**单独跑这条却是绿的** ——
-    这正是最难查的那种"假失败"。串联运行才是常态，所以在汇总入口统一收口。
-    """
-    if os.name == 'nt':
-        subprocess.run(['powershell', '-Command',
-                        'Stop-Process -Name msedge -Force -ErrorAction SilentlyContinue'],
-                       capture_output=True)
-
-
 def run_one(name: str, script: str, extra: list[str], url: str) -> bool | None:
     """返回 True=通过 / False=失败 / None=跳过（exit 3）。
 
@@ -86,11 +74,14 @@ def run_one(name: str, script: str, extra: list[str], url: str) -> bool | None:
         print(f"[漏] {name}: 找不到 {script}")
         return False
     print(f"\n{'=' * 64}\n▶ {name}  ({script})\n{'=' * 64}", flush=True)
-    kill_edge()
     started = time.monotonic()
+    command = [sys.executable, str(path), "--url", url, *extra]
+    if script != 'verify_auth_rbac.py':
+        command.insert(1, str(SCRIPTS_DIR / 'verify_authenticated.py'))
     result = subprocess.run(
-        [sys.executable, str(path), "--url", url, *extra],
+        command,
         cwd=str(SCRIPTS_DIR.parent),
+        env={**os.environ, 'PYTHONUTF8': '1'},
     )
     elapsed = time.monotonic() - started
     verdict = True if result.returncode == 0 else (None if result.returncode == SKIP_EXIT else False)

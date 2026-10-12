@@ -1046,8 +1046,11 @@ def test_sse_evidence_is_committed_and_trace_running_until_done(provenance, monk
     assert not repo._db.in_transaction
     answer, run = payload['answer_id'], payload['retrieval_run_id']
     row = payload['evidence'][0]
-    assert row == {**context['evidence_rows'][0], 'citation': 'E1',
-                   'provenance_ref': f'answer:{answer}#E1'}
+    assert {key: row[key] for key in context['evidence_rows'][0]} == context['evidence_rows'][0]
+    assert row['citation'] == 'E1'
+    assert row['provenance_ref'] == f'answer:{answer}#E1'
+    assert row['record_version_id'] == context['evidence_rows'][0]['version_id']
+    assert row['source_status'] in {'complete', 'missing'}
     assert repo.get_provenance_activity(project, run)['status'] == 'completed'
     assert service.trace_answer_evidence(project, answer, 'E1')['answer'] == {
         'status': 'running', 'citation_status': 'offered'}

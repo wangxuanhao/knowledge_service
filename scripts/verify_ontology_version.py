@@ -137,6 +137,7 @@ def publish_current_draft(base: str, project_id: str, draft_id: str, *,
         'validation_fingerprint': fingerprint,
         'acknowledged_warning_codes': [],
         'idempotency_key': key,
+        'note': '真机验证：核对结构与标注的版本计量',
         'actor': actor,
     })
     if status not in (200, 201):

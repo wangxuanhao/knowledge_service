@@ -403,7 +403,7 @@
     state.applying = true;
     renderActionsInto(drawer.actionsBox);
     try {
-      const res = await api(endpoint('/reclassify'), { groups: keys, actor: actorName() }, 'POST');
+      const res = await api(endpoint('/reclassify'), { groups: keys }, 'POST');
       if (project !== activeProject()) return;
       state.result = res;
       state.preview = null; state.previewSig = '';

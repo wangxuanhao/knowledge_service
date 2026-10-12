@@ -37,7 +37,7 @@ def test_formal_write_plan_rechecks_ontology_snapshot_before_execution(tmp_path)
     current = repo.get_ontology(project_id)
     repo.save_ontology(project_id, current['turtle'], current['summary'])
 
-    with pytest.raises(ValueError, match='本体.*变更'):
+    with pytest.raises(ValueError, match='版本冲突'):
         repo.execute_formal_write(plan)
 
     with pytest.raises(KeyError):

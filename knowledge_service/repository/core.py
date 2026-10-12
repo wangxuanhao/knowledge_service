@@ -130,6 +130,7 @@ class Repository:
                 'SQLite 后端已在 T03 移除；测试请用 tests/service/pg_support.target()。')
         self._db = SqliteishConnection(text)
         self._lock = threading.RLock()
+        self.closed = False
         self._verify_schema()
         from .assertions_store import AssertionStore
         from .ingest_store import IngestRunStore
@@ -149,7 +150,13 @@ class Repository:
                 ('storage_namespace', str(uuid4())))
             self._db.execute(
                 '''UPDATE ingest_runs SET status='interrupted',failure=?,version=version+1,updated_at=?
-                   WHERE status IN ('queued','running')''',
+                   WHERE status IN ('queued','running') AND NOT EXISTS (
+                     SELECT 1 FROM record_versions r JOIN artifacts a
+                       ON a.id=r.payload::jsonb#>>'{metadata,durable_task_id}'
+                     WHERE r.project_id=ingest_runs.project_id
+                       AND r.id=ingest_runs.document_id AND r.superseded_at IS NULL
+                       AND a.kind='job' AND a.payload::jsonb->'payload' IS NOT NULL
+                       AND a.payload::jsonb->>'status' IN ('queued','running','retry_wait'))''',
                 (_json({'type': 'ProcessRestart', 'message': 'Ingest process restarted'}), utc_now()))
 
     def _verify_schema(self):
@@ -353,6 +360,29 @@ class Repository:
         from .unit_of_work import UnitOfWork
         return UnitOfWork(self, serializable=serializable)
 
+    def claim_task(self, kind, owner, *, lease_seconds=120, task_id=None):
+        from .task_store import TaskStore
+        return TaskStore(self).claim(kind, owner, lease_seconds=lease_seconds,
+                                     task_id=task_id)
+
+    def storage_readiness(self):
+        with self._lock:
+            self._verify_schema()
+            self._db.execute('SELECT 1').fetchone()
+        return {'database': 'ready', 'migrations': 'ready'}
+
+    def update_task(self, kind, task, updates):
+        from .task_store import TaskStore
+        return TaskStore(self).update(kind, task, updates)
+
+    def control_task(self, kind, task_id, action):
+        from .task_store import TaskStore
+        return TaskStore(self).control(kind, task_id, action)
+
+    def insert_if_absent(self, project_id, record):
+        """Insert a stable record only when it has no existing version."""
+        return self._put(project_id, record, 0)
+
     @contextmanager
     def read_snapshot(self):
         """Keep a compound read on one connection and transaction snapshot."""
@@ -372,14 +402,24 @@ class Repository:
 
     @contextmanager
     def _publication_transaction(self):
-        """Run publication at SERIALIZABLE and map retryable DB conflicts."""
-        def conflict():
-            return OntologyPublicationConflict(
+        """Run publication under SSI and map retryable dependency races.
+
+        Publication must remain concurrent long enough for PostgreSQL to see
+        predicate conflicts and choose a serial order.  Taking the formal-write
+        table locks here would block the competing writer before SSI can detect
+        the cycle (and can deadlock test/worker coordination around rechecks).
+        Formal writes still take the stronger table locks because their broad
+        prepared snapshot cannot be protected by one predicate dependency.
+        """
+        try:
+            with self._transaction(serializable=True):
+                yield
+        except (DeadlockDetected, LockNotAvailable,
+                SerializationFailure) as exc:
+            raise OntologyPublicationConflict(
                 'stale_source',
                 'ontology publication dependencies changed concurrently',
-                retryable=True)
-        with self._serialized_project_write(conflict):
-            yield
+                retryable=True) from exc
 
     @contextmanager
     def _formal_write_transaction(self):
@@ -413,6 +453,7 @@ class Repository:
 
     def close(self):
         with self._lock:
+            self.closed = True
             self._db.close()
 
     def store_embeddings(self, project_id, rows, vectors, model):
@@ -1753,8 +1794,6 @@ class Repository:
 
     def _create_ontology_sync_job(self, project_id, draft, ontology,
                                   completed_at, record_ids=None):
-        if draft['source_kind'] not in {'discovery', 'candidate', 'import'}:
-            return None
         job = {
             'id': f"ontology-sync:{ontology['id']}",
             'project_id': project_id, 'status': 'pending',
@@ -1771,21 +1810,6 @@ class Repository:
                VALUES (?,'ontology_sync_job',?,?)''',
             (job['id'], project_id, _json(job)))
         return job
-
-    def _run_ontology_sync_after_commit(self, job):
-        runner = getattr(self, '_ontology_sync_runner', None)
-        if job is None or not callable(runner):
-            return
-        try:
-            runner(dict(job))
-        except Exception:
-            return
-        completed = {**job, 'status': 'completed', 'completed_at': utc_now()}
-        with self._transaction():
-            self._db.execute(
-                '''UPDATE artifacts SET payload=?
-                   WHERE id=? AND kind='ontology_sync_job' ''',
-                (_json(completed), job['id']))
 
     def replay_ontology_publish(self, project_id, draft_id, idempotency_key,
                                 client_request_hash):
@@ -1884,7 +1908,6 @@ class Repository:
             sync_job = self._create_ontology_sync_job(
                 prepared['project_id'], draft, ontology, completed_at,
                 effect_record_ids)
-        self._run_ontology_sync_after_commit(sync_job)
         return ontology
 
     def publish_ontology_draft(self, project_id, draft, expected_parent_id=None,

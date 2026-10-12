@@ -276,7 +276,10 @@ def main() -> int:
                       if (!btn) throw new Error('确认条上没有"确认建立父级"按钮');
                       btn.click();
                     }""")
-                    page.wait_for_timeout(2500)
+                    page.wait_for_function("""() => {
+                      const S=window.OntologyModel.S;
+                      return S.error || (S.draft?.operations || []).some(op => op.action==='add_parent');
+                    }""", timeout=30000)
 
                     # 命令失败时 confirmParent 会把原因写进页面状态区（catch 里），必须抓出来 —— 否则
                     # 只能看到"没建草案"这个结果，看不到为什么。
@@ -312,7 +315,11 @@ def main() -> int:
                 review_btn = page.locator('.om-ab-actions button:has-text("校验并审核")')
                 if review_btn.count() and not review_btn.first.is_disabled():
                     review_btn.first.click()
-                    page.wait_for_timeout(4000)
+                    page.wait_for_function("""() => {
+                      const S=window.OntologyModel.S;
+                      return S.error || !!S.draft?.submitted_at;
+                    }""", timeout=30000)
+                    page.locator('.om-pub-note').fill('真机验证：确认画布写入与发布门禁一致')
                     status_line = page.locator('.om-actionbar-note, .om-status').first
                     report.note('「校验并审核」反馈',
                                 status_line.inner_text()[:140] if status_line.count() else '(无反馈节点)')
@@ -321,9 +328,17 @@ def main() -> int:
                     # 所以断言该看"发布按钮是否解锁"（用户真实看到的东西）。
                     pub_now = page.locator('.om-ab-actions button:has-text("发布为"), '
                                            '.om-ab-actions button:has-text("发布新版本")')
+                    draft_id = page.evaluate('() => window.OntologyModel.S.draft.id')
+                    _, readiness = call(base, f'/api/projects/{project_id}/ontology-drafts/{draft_id}/publish-readiness')
+                    page.wait_for_function("""ready => {
+                      const button=[...document.querySelectorAll('.om-ab-actions button')]
+                        .find(b => b.textContent.includes('发布为') || b.textContent.includes('发布新版本'));
+                      return button && button.disabled === !ready;
+                    }""", arg=bool(readiness.get('ready')), timeout=30000)
                     unlocked = bool(pub_now.count()) and not pub_now.first.is_disabled()
-                    report.check('校验并审核后「发布」按钮解锁（门禁放行）', unlocked,
-                                 '按钮可点' if unlocked else '仍灰着')
+                    report.check('发布按钮与服务端门禁一致（安全变更收下，人工项继续阻断）',
+                                 unlocked == bool(readiness.get('ready')),
+                                 '按钮可点' if unlocked else str(readiness.get('items'))[:180])
                 else:
                     reason = page.locator('.om-ab-note').inner_text() if page.locator('.om-ab-note').count() else ''
                     report.note('「校验并审核」按钮当前灰着', reason[:160] or '(无说明)')

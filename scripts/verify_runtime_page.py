@@ -149,8 +149,8 @@ JS_SOLID = """() => {
         const [r, g, b] = parts.map(Number);
         const alpha = parts.length > 3 ? Number(parts[3]) : 1;
         if (alpha < 0.35) return false;                      // 很淡的底＝描边感
-        const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-        return lum > 0.22;                                   // 只有明显亮过深面板底的才算「实心」
+        // Neutral light/dark secondary backgrounds are not accent actions.
+        return Math.max(r,g,b)-Math.min(r,g,b)>35;
     };
     const buttons=[...panel.querySelectorAll('button')].filter(button => {
         if (getComputedStyle(button).display === 'none' || !button.offsetParent) return false;
@@ -233,8 +233,8 @@ def run(base: str, p: str, suffix: str) -> None:
         check('入口所在分组叫「运行层 · 跑起来」且默认展开', entry['group'] == '运行层 · 跑起来' and entry['groupOpen'] is True,
               str(entry))
         groups = page.evaluate(JS_GROUPS)
-        check('导航分组是 4 组（本体层/实例层/消费层/运行层）',
-              [g['label'] for g in groups] == ['本体层 · 结构', '实例层 · 知识', '消费层 · 用起来', '运行层 · 跑起来'],
+        check('管理员导航包含四个业务层和系统管理层',
+              [g['label'] for g in groups] == ['本体层 · 结构', '实例层 · 知识', '消费层 · 用起来', '运行层 · 跑起来', '系统层 · 管理'],
               str([g['label'] for g in groups]))
 
         # ② 进入这一页：一屏一问
@@ -322,7 +322,7 @@ def run(base: str, p: str, suffix: str) -> None:
         if optional:
             print(f'说明 · Neo4j 可选依赖不可用（{len(optional)} 次 503，未配置即如此），下面核对页面是否如实说明')
         page.evaluate("(view) => document.querySelector(`[data-runtime-view=\"${view}\"]`).click()", 'overview')
-        page.wait_for_timeout(250)
+        page.wait_for_function("() => { const note=document.querySelector('#tab-dashboard .neo4j-panel pre'); return note && !note.textContent.includes('正在检查'); }", timeout=20000)
         note = page.evaluate(
             "() => document.querySelector('#tab-dashboard .neo4j-panel pre').textContent")
         check('可选依赖不可用时页面上有话（不是静默失败）',

@@ -225,7 +225,7 @@ def test_apply_posts_only_the_selected_groups_and_offers_batch_undo(browser, tmp
 
     applied = page.evaluate('window.__applied')
     assert applied['groups'] == ['o1:entity:包裹'], '提交的组不是勾选的那一组'
-    assert applied.get('actor'), '迁移没有带上执行人'
+    assert 'actor' not in applied, '执行人必须由服务器绑定，前端不能指定'
 
     body = page.inner_text('#om-rc-body')
     assert '已把 3 条知识迁到' in body, '迁移回执没有说清迁了几条'

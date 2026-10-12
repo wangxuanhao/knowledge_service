@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import os
 import threading
@@ -17,6 +18,7 @@ from ..utils.ingest_runs import readiness
 from ..core.time import normalize_time, utc_now
 from ..utils.diagnostics import event, stage, timed
 from ..utils.attributes import primitive_datatype
+from .api_workflows import ApplicationData
 
 SYSTEM = {'project_id', 'version', 'version_id', 'recorded_at', 'superseded_at', 'embedding', 'embedding_model'}
 
@@ -39,13 +41,40 @@ def public(record):
 class KnowledgeService:
     def __init__(self, repository, encoder, milvus_store=None):
         self.repository = repository
+        self.data = ApplicationData(repository)
         self.encoder = encoder
         self.milvus_store = milvus_store
+        self.vector_connector = None
         self.lock = threading.RLock()
         self._ontology_label_cache = {}
         self._ontology_expansion_cache = {}
         self._ontology_family_cache = {}
         self._structure_pending_cache = {}
+
+    def semantica_snapshot(self, rows, valid_at):
+        """Return the Semantica projection without exposing the adapter to HTTP."""
+        from ..integrations.semantica_adapter import snapshot
+        return snapshot(rows, valid_at)
+
+    def ontology_drafts(self, *, publish=False):
+        """Construct the governed ontology workflow inside the service layer."""
+        from .ontology_drafts import OntologyDrafts
+        return OntologyDrafts(
+            self.repository,
+            publisher=self.repository if publish else None,
+        )
+
+    def reconnect_vector_store(self):
+        """Retry a failed startup connection through the composition boundary."""
+        with self.lock:
+            if self.milvus_store is None and callable(self.vector_connector):
+                self.milvus_store = self.vector_connector()
+                capabilities = getattr(self, 'runtime_capabilities', None)
+                if capabilities is not None:
+                    capabilities.milvus_store = self.milvus_store
+                    if self.milvus_store is not None:
+                        capabilities.milvus_error = None
+            return self.milvus_store
 
     def structure_pending_ontology(self, project_id):
         """当前（最新）版本的 ``Ontology`` 对象，「结构待定」判断用；随本体版本签名缓存。
@@ -327,8 +356,12 @@ class KnowledgeService:
         try:
             LOG.info('开始预热 embedding 模型（首次 encode 较慢，请稍候）…')
             self.encoder.encode(['预热'])
+            self.encoder.runtime_ready = True
+            self.encoder.runtime_error = None
             LOG.info('embedding 模型预热完成，检索已可用')
         except Exception as exc:
+            self.encoder.runtime_ready = False
+            self.encoder.runtime_error = str(exc)
             LOG.warning('embedding 模型预热失败（首次检索会较慢）: %s', exc)
 
     def scoped(self, project_id, scope):
@@ -608,9 +641,36 @@ class KnowledgeService:
                 extractor.include_attributes=request.get('extract_attributes',False)
                 extractor.relation_constraint_mode=request.get('relation_constraint_mode','review')
                 ontology = Ontology(version['turtle'])
+                from .ontology_slice import OntologySliceSelector
+                slice_selector = OntologySliceSelector(
+                    roots=request.get('ontology_slice_roots') or ())
+                full_summary = ontology.summary()
                 event(f"本体已加载 · 版本 {version['id']} · 实体类 {len(ontology.classes)} · 关系类 {len(ontology.relations)}",15)
                 # 每文档稳定 ID 保留证据，而不是合并不同来源的事实。
                 for index, chunk in enumerate(chunk_records):
+                    slice_receipt = slice_selector.select_terms(
+                        chunk['text'], ontology, ontology_id=version['id'])
+                    selected_iris = {
+                        item['term_iri'] for item in slice_receipt['terms']}
+                    if selected_iris:
+                        extractor.ontology_slice_summary = {
+                            key: [item for item in full_summary.get(key, ())
+                                  if item.get('id') in selected_iris]
+                            for key in ('classes', 'relations', 'attributes')
+                        }
+                        slice_receipt['fallback'] = None
+                    else:
+                        extractor.ontology_slice_summary = full_summary
+                        slice_receipt['degraded'] = True
+                        slice_receipt['fallback'] = 'full_ontology'
+                    slice_hash = hashlib.sha256(json.dumps({
+                        'ontology_id': version['id'],
+                        'selector_version': slice_receipt['selector_version'],
+                        'text': chunk['text'],
+                    }, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+                    self.repository.store_ingest_stage_output(
+                        project_id, receipt['version_id'], chunk['id'],
+                        'ontology_slice', slice_hash, slice_receipt)
                     with stage(f"片段 {index+1}/{len(chunks)} · 位置 {chunk['metadata']['start_char']}–{chunk['metadata']['end_char']} · {len(chunk['text'])} 字符",15+int(60*index/len(chunks))):
                         extracted = extractor.extract(chunk['text'], ontology)
                     processed_chunks += 1
@@ -623,7 +683,6 @@ class KnowledgeService:
                         if candidate.get('kind')=='entity':
                             rid=candidate['record_id'];id_map[rid]=f"{chunk['id']}:{rid}"
                     for candidate in getattr(extractor,'review_candidates',[]):
-                        import hashlib
                         candidate={**candidate}
                         for key in ('record_id','subject_id','object_id','entity_id'):
                             if key in candidate:candidate[key]=id_map[candidate[key]]
@@ -648,7 +707,14 @@ class KnowledgeService:
                                 row[key] = id_map[row[key]]
                         row['ontology_id'] = version['id']
                         row['metadata'] = {**row.get('metadata', {}), 'chunk_id': chunk['id'],
-                                           'start_char': chunk['metadata']['start_char'], 'extraction_backend': 'semantica'}
+                                           'start_char': chunk['metadata']['start_char'], 'extraction_backend': 'semantica',
+                                           'ontology_slice': {
+                                               'ontology_id': version['id'],
+                                               'selector_version': slice_receipt['selector_version'],
+                                               'term_count': len(slice_receipt['terms']),
+                                               'degraded': slice_receipt['degraded'],
+                                               'fallback': slice_receipt.get('fallback'),
+                                           }}
                     derived.extend(extracted)
             elif extraction_mode == 'discovery':
                 from ..integrations.semantica_adapter import SemanticaExtractor

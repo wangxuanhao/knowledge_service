@@ -89,7 +89,7 @@ def install(app, service):
 
     @app.get('/api/projects/{p}/timeline')
     def timeline(p: str, limit: int = 100):
-        return service.repository.timeline_events(p, limit)
+        return service.data.timeline_events(p, limit)
 
     @app.post('/api/projects/{p}/metadata/facets')
     def metadata_facets(p: str, request: Scope):
@@ -147,59 +147,16 @@ def install(app, service):
         做，而不是在检索路径上偷偷改表；成功后在返回里带 `recreated` 与 `dim`，
         前端/日志能看出"这一次不只是重灌，而是换了表结构"。
         """
-        service.repository.get_project(p)
-        def run(progress):
-            start = perf_counter()
-            # 有意保留默认的 `vectors='list'`：该任务必须看到哪些行已带向量、
-            # 由哪个模型产生，因此不能跳过该字段。
-            rows = [r for r in service.repository.current_records(p) if r['kind'] in ('entity','relation','chunk')
-                    and not r.get('metadata',{}).get('_deleted')]
-            if service.milvus_store is not None:
-                from ..integrations.milvus_store import VectorDimensionMismatch
-                store = service.milvus_store
-                recreated = False
-                # 先对齐表结构：维度不一致（换过编码器/模型）时删表按当前维度重建，
-                # 否则下面每一次 upsert 都会失败，用户只看到"向量维度不对"。
-                try:
-                    store.ensure_collection()
-                except VectorDimensionMismatch as mismatch:
-                    progress(f'索引维度不一致（表 {mismatch.collection_dim} 维 → 当前编码器 '
-                             f'{mismatch.expected_dim} 维）：删除旧的向量表并按新维度重建', 2)
-                    store.recreate_collection()
-                    recreated = True
-                # Milvus 重建：清空该 project 分区后批量 upsert 全部当前活跃记录
-                # （不按 has_vector 筛选——Milvus 分区是重灌语义，全量覆盖）。
-                encoded = []
-                for offset in range(0, len(rows), 16):
-                    progress(f'向量编码 {offset}/{len(rows)}；图谱浏览仍可用', int(90*offset/max(1,len(rows))))
-                    batch = rows[offset:offset+16]
-                    vectors = service.encoder.encode([r['text'] for r in batch])
-                    for r, v in zip(batch, vectors):
-                        r['embedding'] = v
-                        r['embedding_model'] = service.encoder.identity
-                        r['project_id'] = p
-                        encoded.append(r)
-                saved = service.milvus_store.rebuild_project(p, encoded)
-                return {'indexed': saved, 'backend': 'milvus', 'total': len(rows),
-                        'recreated': recreated, 'dim': service.milvus_store.dim,
-                        'embedding_model': service.encoder.identity,
-                        'elapsed_seconds': round(perf_counter()-start, 2)}
-            # 无 Milvus 时不再有本地向量后端：`record_versions.vector` 列已随迁移 11
-            # 删除，`store_embeddings` 是空实现。此处**明确报错**，而不是返回
-            # `indexed=0` 的「假成功」—— 后台任务状态必须如实反映索引未建立，
-            # 否则前端会显示「索引已重建」，而检索其实仍然没有语义通道。
-            raise RuntimeError(
-                '未配置向量后端：向量已迁至 Milvus，本地不再存储向量。'
-                '请设置 KG_VECTOR_BACKEND=milvus 并确保 Milvus 可用后重试。')
-        return app.state.jobs.submit('semantic_index', run, p)
+        service.data.get_project(p)
+        return app.state.jobs.enqueue('semantic_index', {'rebuild': True}, p)
 
     @app.post('/api/projects/{p}/ontology/terms', status_code=201)
     def add_term(p: str, request: TermWrite, response: Response):
         with service.lock:
-            latest = service.repository.get_ontology(p)
+            latest = service.data.get_ontology(p)
             if latest['id'] != request.expected_ontology_id:
                 raise ValueError('版本冲突：请先刷新当前本体再编辑')
-            existing = (OntologyDrafts(service.repository).get(p, request.draft_id)
+            existing = (service.ontology_drafts().get(p, request.draft_id)
                         if request.draft_id else None)
             ontology = Ontology(existing['turtle'] if existing else latest['turtle'])
             if request.kind not in ('class','relation','attribute'):
@@ -219,10 +176,10 @@ def install(app, service):
             turtle = ontology.graph.serialize(format='turtle')
             title=f'新增本体术语：{request.label_zh or request.label}'
             result = (update_turtle_draft(
-                service.repository, p, request.draft_id,
+                service.data, p, request.draft_id,
                 request.expected_revision, turtle, reason=title)
                 if request.draft_id else turtle_draft(
-                    service.repository, p, turtle, source_kind='manual',
+                    service.data, p, turtle, source_kind='manual',
                     title=title, actor='api:workspace',
                     expected_ontology_id=request.expected_ontology_id,
                     source_context={'legacy_route': 'POST /ontology/terms'}))
@@ -231,7 +188,7 @@ def install(app, service):
 
     @app.get('/api/projects/{p}/ontology/term-impact')
     def term_impact_view(p:str,uri:str):
-        latest=service.repository.get_ontology(p);ontology=Ontology(latest['turtle'])
+        latest=service.data.get_ontology(p);ontology=Ontology(latest['turtle'])
         if not absolute_iri(uri) or not term_kind(ontology,URIRef(uri)):raise KeyError(uri)
         return {'ontology_id':latest['id'],'kind':term_kind(ontology,URIRef(uri)),
                 **term_impact(service,p,uri,ontology)}
@@ -244,10 +201,10 @@ def install(app, service):
     # 这里还按已发布版本回一句"未声明"，界面就成了"改了没反应"——正是本轮要修的病。
     @app.get('/api/projects/{p}/ontology/relation-usage')
     def relation_usage_view(p:str,uri:str,draft_id:str|None=None):
-        latest=service.repository.get_ontology(p)
+        latest=service.data.get_ontology(p)
         source,origin=latest,'published'
         if draft_id:
-            existing=OntologyDrafts(service.repository).get(p,draft_id)
+            existing=service.ontology_drafts().get(p,draft_id)
             if not existing:raise KeyError(draft_id)      # 草案不存在就报错，不静默回落到已发布
             source,origin=existing,'draft'
         ontology=Ontology(source['turtle'])
@@ -258,9 +215,9 @@ def install(app, service):
     @app.put('/api/projects/{p}/ontology/term')
     def update_term(p:str,uri:str,request:TermUpdate,response:Response):
         with service.lock:
-            latest=service.repository.get_ontology(p)
+            latest=service.data.get_ontology(p)
             if latest['id']!=request.expected_ontology_id:raise ValueError('版本冲突：请先刷新当前本体再编辑')
-            existing=(OntologyDrafts(service.repository).get(p,request.draft_id)
+            existing=(service.ontology_drafts().get(p,request.draft_id)
                       if request.draft_id else None)
             ontology=Ontology(existing['turtle'] if existing else latest['turtle']);node=URIRef(uri);kind=term_kind(ontology,node)
             if not absolute_iri(uri) or not kind:raise KeyError(uri)
@@ -273,9 +230,9 @@ def install(app, service):
                 request.domains,request.ranges)
             turtle=ontology.graph.serialize(format='turtle')
             title=f'调整本体术语：{request.label_zh or request.label}'
-            result=(update_turtle_draft(service.repository,p,request.draft_id,
+            result=(update_turtle_draft(service.data,p,request.draft_id,
                     request.expected_revision,turtle,reason=title)
-                if request.draft_id else turtle_draft(service.repository,p,turtle,source_kind='manual',
+                if request.draft_id else turtle_draft(service.data,p,turtle,source_kind='manual',
                     title=title,actor='api:workspace',
                     expected_ontology_id=request.expected_ontology_id,
                     source_context={'legacy_route':'PUT /ontology/term','target_iri':uri}))
@@ -285,9 +242,9 @@ def install(app, service):
     @app.post('/api/projects/{p}/ontology/term-retire')
     def retire_term(p:str,uri:str,request:TermRetire,response:Response):
         with service.lock:
-            latest=service.repository.get_ontology(p)
+            latest=service.data.get_ontology(p)
             if latest['id']!=request.expected_ontology_id:raise ValueError('版本冲突：请先刷新当前本体再编辑')
-            drafts=OntologyDrafts(service.repository,publisher=service.repository)
+            drafts=service.ontology_drafts(publish=True)
             existing=drafts.get(p,request.draft_id) if request.draft_id else None
             ontology=Ontology(existing['turtle'] if existing else latest['turtle']);node=URIRef(uri);kind=term_kind(ontology,node)
             if not absolute_iri(uri) or not kind:raise KeyError(uri)

@@ -3,7 +3,8 @@
 负责知识 CRUD、摄取、检索、问答、图谱、本体查询与 SPARQL。
 业务逻辑全部委托 services/repository，本文件只做请求解析与响应包装。
 """
-from fastapi import APIRouter, File, Form, Response, UploadFile
+from fastapi import APIRouter, File, Form, Response, UploadFile, Request
+from .audit_identity import audit_actor
 
 from ..models import (
     Ingest, OntologyWrite, Question, RecordBatch, ResolutionReviewDecision,
@@ -22,7 +23,7 @@ from ..core.time import utc_now
 
 def install(app, service):
     router = APIRouter()
-    repository = service.repository
+    repository = service.data
 
     # ------------------------------------------------------------------ 知识 CRUD
     @router.post('/api/projects/{project_id}/records', status_code=201)
@@ -91,7 +92,8 @@ def install(app, service):
         return {'reviews': items, 'total': len(items)}
 
     @router.post('/api/projects/{project_id}/resolution-reviews/{review_id}')
-    def decide_resolution(project_id: str, review_id: str, request: ResolutionReviewDecision):
+    def decide_resolution(project_id: str, review_id: str, request: ResolutionReviewDecision,
+                          http_request: Request):
         review = next((item for item in repository.list_resolution_reviews(project_id)
                        if item['id'] == review_id), None)
         if review is None:
@@ -99,14 +101,14 @@ def install(app, service):
         if request.decision == 'merged':
             from ..services.governance import Governance
             decision = {'id': review_id, 'expected_version': request.expected_version,
-                'decision': 'merged', 'reason': request.reason, 'actor': request.actor}
+                'decision': 'merged', 'reason': request.reason, 'actor': audit_actor(http_request)}
             operation = Governance(service).merge(project_id, review['candidate_entity_id'],
                 review['source_entity_id'], request.expected_entity_versions,
-                resolution_decision=decision)
+                resolution_decision=decision, actor=audit_actor(http_request))
             return {'review': repository.list_resolution_reviews(project_id, status='merged')[-1],
                     'merge': operation}
         return {'review': repository.decide_resolution_review(project_id, review_id,
-            request.expected_version, request.decision, request.reason, request.actor)}
+            request.expected_version, request.decision, request.reason, audit_actor(http_request))}
 
     @router.get('/api/projects/{project_id}/merge-operations')
     def merge_operations(project_id: str):
@@ -120,7 +122,7 @@ def install(app, service):
 
     @router.post('/api/projects/{project_id}/documents/upload', status_code=201)
     def upload(project_id: str, file: UploadFile = File(...), options: str = Form('{}')):
-        service.repository.get_project(project_id)
+        service.data.get_project(project_id)
         uploads = app.state.document_uploads
         parsed_options = uploads.parse_options(options)
         staged = uploads.stage(file)
@@ -150,9 +152,8 @@ def install(app, service):
 
     @router.post('/api/projects/{project_id}/graph/semantica')
     def semantica_snapshot(project_id: str, request: Scope):
-        from ..integrations.semantica_adapter import snapshot
         rows = service.scoped(project_id, request.model_dump())
-        return snapshot(rows, request.valid_at or utc_now())
+        return service.semantica_snapshot(rows, request.valid_at or utc_now())
 
     # ------------------------------------------------------------------ 本体
     @router.get('/api/projects/{project_id}/ontologies')

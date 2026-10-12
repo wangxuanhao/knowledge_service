@@ -1,12 +1,14 @@
 """探索、迁移、治理与持久化任务的 HTTP 契约。"""
 from typing import Literal
-from pydantic import Field
-from fastapi import APIRouter, File, Form, UploadFile
+from pydantic import Field, model_validator
+from fastapi import APIRouter, File, Form, UploadFile, Request as HttpRequest
+from .audit_identity import audit_actor
 from fastapi.responses import StreamingResponse, FileResponse
 from ..models import Request, Scope, Ingest, Question
 from ..services.explorer import Explorer
 from ..services.governance import Governance
 from ..services.jobs import Jobs
+from ..services.job_handlers import job_handlers
 from ..services.reclassify import Reclassify
 from ..services.answers import stream_events
 
@@ -62,12 +64,17 @@ class ReclassifyGroups(Request):
     groups:list[str]=Field(default_factory=list,max_length=500)
 
 class ReclassifyApply(ReclassifyGroups):
-    actor:str=Field(default='人工',max_length=200)
+    @model_validator(mode='before')
+    @classmethod
+    def discard_legacy_actor(cls, value):
+        return ({key: item for key, item in value.items() if key != 'actor'}
+                if isinstance(value, dict) else value)
 
 
 def install(app,service):
     router=APIRouter(prefix='/api')
-    explorer=Explorer(service);governance=Governance(service);jobs=Jobs(service.repository)
+    explorer=Explorer(service);governance=Governance(service)
+    jobs=Jobs(service.data, handlers=job_handlers(service, app.state.document_uploads))
     reclassify=Reclassify(service)
     app.state.jobs=jobs
 
@@ -91,17 +98,14 @@ def install(app,service):
     @router.post('/local-projects/import',status_code=202)
     def local_import(request:LocalImport):
         from ..services.legacy_import import LegacyImporter
-        def run(progress):
-            progress('正在读取旧版项目；保留原始文件',10)
-            result=LegacyImporter(service).import_project(
-                request.name,request.kind,progress=progress,
-                build_vectors=request.build_vectors,project_id=request.project_id)
-            progress('项目已加载；语义索引与图谱展示相互独立',95)
-            return result
-        return jobs.submit('legacy_import',run)
+        return jobs.enqueue('legacy_import',request.model_dump(), request.project_id)
 
     @router.get('/jobs/{job_id}')
-    def job(job_id:str):return service.repository.get_artifact('job',job_id)
+    def job(job_id:str):return service.data.get_artifact('job',job_id)
+
+    @router.post('/jobs/{job_id}/{action}', status_code=202)
+    def control_job(job_id: str, action: Literal['retry','cancel','resume']):
+        return jobs.control(job_id, action)
 
     @router.get('/jobs/{job_id}/stream')
     def job_stream(job_id:str):
@@ -112,7 +116,7 @@ def install(app,service):
         """
         import queue as queue_lib
         # 先确认任务存在（不存在会抛 KeyError → 404）
-        snapshot=service.repository.get_artifact('job',job_id)
+        snapshot=service.data.get_artifact('job',job_id)
 
         def sse(event_type,payload):
             import json as _json
@@ -129,8 +133,8 @@ def install(app,service):
                     'stage':snapshot.get('stage',''),'error':snapshot.get('error'),
                 })
                 # 任务在连接前就已结束：补一个终态事件后收尾
-                if snapshot['status'] in ('completed','failed','interrupted'):
-                    yield sse(snapshot['status'],{
+                if snapshot['status'] in ('completed','failed','interrupted','cancelled'):
+                    yield sse('completed' if snapshot['status']=='completed' else 'failed',{
                         'status':snapshot['status'],
                         'progress':100 if snapshot['status']=='completed' else snapshot.get('progress',0),
                         'error':snapshot.get('error')})
@@ -138,13 +142,26 @@ def install(app,service):
                 # ② 实时消费订阅队列（阻塞读，靠心跳保活；客户端断开时 GeneratorExit）
                 while True:
                     try:
-                        message=q.get(timeout=15)
+                        message=q.get(timeout=1)
                     except queue_lib.Empty:
-                        # 保活注释行：防止代理因空闲掐断连接
+                        # Another instance may own this task. Persisted state
+                        # also handles cancellation, which invalidates a lease
+                        # without publishing on this process-local queue.
+                        fresh=service.data.get_artifact('job',job_id)
+                        if fresh['status'] in ('completed','failed','interrupted','cancelled'):
+                            yield sse('completed' if fresh['status']=='completed' else 'failed',{
+                                'status':fresh['status'],'progress':fresh.get('progress',0),
+                                'error':fresh.get('error')})
+                            return
+                        if fresh.get('updated_at')!=snapshot.get('updated_at'):
+                            yield sse('progress',{
+                                'status':fresh['status'],'progress':fresh.get('progress',0),
+                                'stage':fresh.get('stage',''),'error':fresh.get('error')})
+                            snapshot.update(fresh)
                         yield ': keep-alive\n\n'
                         continue
-                    event_type=message.pop('event')
-                    yield sse(event_type,message)
+                    event_type=message['event']
+                    yield sse(event_type,{key:value for key,value in message.items() if key!='event'})
                     if event_type in ('completed','failed'):
                         return
             except GeneratorExit:
@@ -157,16 +174,16 @@ def install(app,service):
             headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no','Connection':'keep-alive'})
 
     @router.get('/jobs')
-    def all_jobs():return {'jobs':service.repository.list_artifacts('job')[:100]}
+    def all_jobs():return {'jobs':service.data.list_artifacts('job')[:100]}
 
     @router.get('/projects/{p}/jobs')
     def project_jobs(p:str):
-        service.repository.get_project(p)
-        return {'jobs':service.repository.list_artifacts('job',p)}
+        service.data.get_project(p)
+        return {'jobs':service.data.list_artifacts('job',p)}
 
     @router.post('/projects/{p}/documents/preview')
     def preview_document(p:str,request:Ingest):
-        service.repository.get_project(p)
+        service.data.get_project(p)
         from ..services.chunking import split_document
         chunks=split_document(request.text, request.model_dump())
         return {'total':len(chunks),'chunks':chunks[:20],'preview_limit':20,
@@ -174,7 +191,7 @@ def install(app,service):
 
     @router.post('/projects/{p}/documents/upload/preview')
     def preview_upload(p: str, file: UploadFile = File(...), options: str = Form('{}')):
-        service.repository.get_project(p)
+        service.data.get_project(p)
         uploads = app.state.document_uploads
         parsed_options = uploads.parse_options(options)
         staged = uploads.stage(file)
@@ -192,39 +209,25 @@ def install(app,service):
 
     @router.post('/projects/{p}/documents/upload/jobs', status_code=202)
     def document_upload_job(p: str, file: UploadFile = File(...), options: str = Form('{}')):
-        service.repository.get_project(p)
+        service.data.get_project(p)
         uploads = app.state.document_uploads
         parsed_options = uploads.parse_options(options)
         staged = uploads.stage(file)
 
-        def run(progress):
-            try:
-                progress('正在解析上传文档', 10)
-                payload, _ = uploads.payload(staged, parsed_options)
-                from ..utils.diagnostics import reporting
-                with reporting(progress):
-                    result = service.ingest(p, Ingest.model_validate(payload).model_dump())
-                progress('文档及派生知识已提交', 99)
-                return result
-            finally:
-                uploads.discard(staged)
 
         try:
-            return jobs.submit('ingest_upload', run, p)
+            return jobs.enqueue('ingest_upload', {
+                'staged': {'path': str(staged.path), 'original_name': staged.original_name,
+                           'size': staged.size, 'digest': staged.digest},
+                'options': parsed_options.model_dump()}, p)
         except Exception:
             uploads.discard(staged)
             raise
 
     @router.post('/projects/{p}/documents/jobs',status_code=202)
     def document_job(p:str,request:Ingest):
-        service.repository.get_project(p)
-        def run(progress):
-            from ..utils.diagnostics import reporting
-            with reporting(progress):
-                result=service.ingest(p,request.model_dump())
-            progress('文档及派生知识已提交',99)
-            return result
-        return jobs.submit('ingest',run,p)
+        service.data.get_project(p)
+        return jobs.enqueue('ingest',request.model_dump(),p)
 
     @router.post('/projects/{p}/dashboard')
     def dashboard(p:str,request:Scope):return explorer.dashboard(p,request.model_dump())
@@ -247,9 +250,9 @@ def install(app,service):
     def alias(p:str,request:Alias):return governance.alias(p,request.entity_id,request.alias,request.expected_version)
 
     @router.post('/projects/{p}/merge')
-    def merge(p:str,request:Merge):return governance.merge(
+    def merge(p:str,request:Merge,http_request:HttpRequest):return governance.merge(
         p,request.keep_id,request.drop_id,request.expected_versions,
-        attribute_winners=request.attribute_winners)
+        attribute_winners=request.attribute_winners, actor=audit_actor(http_request))
 
     @router.post('/projects/{p}/delete')
     def delete(p:str,request:Delete):return governance.delete(p,request.record_id,request.expected_version)
@@ -280,7 +283,7 @@ def install(app,service):
         没有去处（没有去处的**不会**被迁移，页面会如实说"先去本体建模层建概念"）。
         这里是"默认不跑"里的"看"：不点下面的确认就什么都不会发生。
         """
-        service.repository.get_project(p)
+        service.data.get_project(p)
         return reclassify.plan(p)
 
     @router.post('/projects/{p}/reclassify/preview')
@@ -289,18 +292,18 @@ def install(app,service):
 
         用的是与真正写入同一个校验函数，所以"预演通过 → 写入不会被拦"是硬承诺。
         """
-        service.repository.get_project(p)
+        service.data.get_project(p)
         return reclassify.preview(p,request.groups)
 
     @router.post('/projects/{p}/reclassify')
-    def reclassify_apply(p:str,request:ReclassifyApply):
+    def reclassify_apply(p:str,request:ReclassifyApply,http_request:HttpRequest):
         """C2 迁移：把选中的组迁到当前本体。
 
         每条记录**产生新版本**（不原地改），整批写成**一条**操作 —— 撤销走
         ``POST /operations/{operation_id}/undo``（与合并/删除同一套回滚通道）。
         """
-        service.repository.get_project(p)
-        return reclassify.apply(p,request.groups,request.actor)
+        service.data.get_project(p)
+        return reclassify.apply(p,request.groups,audit_actor(http_request))
 
     @router.post('/projects/{p}/operations/{operation_id}/undo')
     def undo(p:str,operation_id:str):return governance.undo_merge(p,operation_id)
@@ -310,8 +313,8 @@ def install(app,service):
 
     @router.get('/projects/{p}/snapshots')
     def snapshots(p:str):
-        service.repository.get_project(p)
-        return {'snapshots':[{k:v for k,v in s.items() if k not in ('records','ontologies')} for s in service.repository.list_artifacts('snapshot',p)]}
+        service.data.get_project(p)
+        return {'snapshots':[{k:v for k,v in s.items() if k not in ('records','ontologies')} for s in service.data.list_artifacts('snapshot',p)]}
 
     @router.post('/projects/{p}/snapshots/{snapshot_id}/restore')
     def restore_snapshot(p:str,snapshot_id:str):return explorer.restore_snapshot(p,snapshot_id)
@@ -321,11 +324,11 @@ def install(app,service):
 
     @router.get('/projects/{p}/export')
     def export(p:str):
-        return service.repository.export_projection(p)
+        return service.data.export_projection(p)
 
     @router.post('/projects/{p}/qa/stream')
     def qa_stream(p:str,request:Question):
-        service.repository.get_project(p)
+        service.data.get_project(p)
         return StreamingResponse(stream_events(service,p,request.model_dump()),media_type='text/event-stream',headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no'})
 
     app.include_router(router)

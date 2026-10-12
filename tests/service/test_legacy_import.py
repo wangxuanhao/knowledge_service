@@ -126,14 +126,14 @@ def test_missing_endpoints_preserve_edges_as_explicit_unresolved_entities(legacy
 def test_failed_storage_is_not_reported_complete_and_reuses_pending_project(legacy, monkeypatch):
     root, _, _, service = legacy
     importer = importer_type()(service, root)
-    original = service.repository.put_batch
+    original = service.repository.execute_formal_write
     def unavailable(*args, **kwargs):
         raise RuntimeError('storage unavailable')
-    monkeypatch.setattr(service.repository, 'put_batch', unavailable)
+    monkeypatch.setattr(service.repository, 'execute_formal_write', unavailable)
     with pytest.raises(RuntimeError, match='storage unavailable'):
         importer.import_project('原名')
     assert importer.list_projects()[0]['imported_project_id'] is None
-    monkeypatch.setattr(service.repository, 'put_batch', original)
+    monkeypatch.setattr(service.repository, 'execute_formal_write', original)
     assert importer.import_project('原名')['already_imported'] is False
     assert len(service.repository.list_projects()) == 1
 

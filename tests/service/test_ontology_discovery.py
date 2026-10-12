@@ -49,7 +49,7 @@ def _closed_outcomes(run):
 
 
 def test_candidate_bindings_keep_reusable_terms_operation_free():
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     normalization = SimpleNamespace(candidate_bindings=[
         {'candidate_id': 'existing', 'iri': 'urn:test:Existing'},
@@ -297,7 +297,7 @@ def test_normalized_induction_quarantines_cross_kind_and_low_frequency_candidate
 
 
 def test_create_draft_passes_only_normalized_candidates_to_induce(tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     candidates = [
         {'id': 'behavior-entity', 'kind': 'entity', 'text': '查看',
@@ -357,7 +357,7 @@ def test_create_draft_passes_only_normalized_candidates_to_induce(tmp_path, monk
 
 
 def test_0928_开放_跨类型同名隔离后无关术语仍生成草案(tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     candidates = [
         {'id': 'behavior-class', 'kind': 'entity', 'text': '点赞',
@@ -476,7 +476,7 @@ def test_0928_开放_跨类型同名隔离后无关术语仍生成草案(tmp_pat
 
 def test_mixed_discovery_creates_one_atomic_run_and_governed_draft(
         tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     candidates = [
         {'id': 'class', 'kind': 'entity', 'text': '操作',
@@ -555,7 +555,7 @@ def test_mixed_discovery_creates_one_atomic_run_and_governed_draft(
 
 def test_all_conflict_discovery_persists_diagnosis_without_empty_draft(
         tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     candidates = [{
         'id': 'rare', 'kind': 'attribute', 'entity_id': 'missing',
@@ -592,7 +592,7 @@ def test_all_conflict_discovery_persists_diagnosis_without_empty_draft(
 
 
 def test_identical_discovery_retry_returns_same_run_and_draft(tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     candidates = [{'id': 'one', 'kind': 'entity', 'text': '甲',
                    'proposed_type': '主体'}]
@@ -622,7 +622,7 @@ def test_identical_discovery_retry_returns_same_run_and_draft(tmp_path, monkeypa
 
 
 def test_candidate_order_change_returns_same_run_and_draft(tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     candidates = [
         {'id': 'two', 'kind': 'entity', 'text': '乙', 'proposed_type': '客体'},
@@ -660,7 +660,7 @@ def test_candidate_order_change_returns_same_run_and_draft(tmp_path, monkeypatch
 
 def test_concurrent_identical_discovery_retry_returns_one_run_and_draft(
         tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     candidates = [{'id': 'one', 'kind': 'entity', 'text': '甲',
                    'proposed_type': '主体'}]
@@ -691,7 +691,7 @@ def test_concurrent_identical_discovery_retry_returns_one_run_and_draft(
 
 def test_initial_command_failure_rolls_back_draft_operations_run_and_legacy_artifact(
         tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     candidates = [{'id': 'one', 'kind': 'entity', 'text': '甲',
                    'proposed_type': '主体'}]
@@ -727,7 +727,7 @@ def test_initial_command_failure_rolls_back_draft_operations_run_and_legacy_arti
 
 def test_invalid_binding_operation_reference_rolls_back_discovery_creation(
         tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     candidates = [{'id': 'one', 'kind': 'entity', 'text': '甲',
                    'proposed_type': '主体'}]
@@ -769,7 +769,7 @@ def test_invalid_binding_operation_reference_rolls_back_discovery_creation(
 
 def test_source_change_between_snapshot_and_transaction_is_409_without_writes(
         tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     snapshots = [
         [{'id': 'one', 'kind': 'entity', 'text': '甲', 'proposed_type': '主体'}],
@@ -801,7 +801,7 @@ def test_source_change_between_snapshot_and_transaction_is_409_without_writes(
 
 def test_changed_generation_input_supersedes_closed_run_without_mutating_it(
         tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     candidates = [{'id': 'one', 'kind': 'entity', 'text': '甲',
                    'proposed_type': '主体'}]
@@ -840,7 +840,7 @@ def test_changed_generation_input_supersedes_closed_run_without_mutating_it(
 ])
 def test_changed_fingerprint_dimension_creates_successor_run(
         tmp_path, monkeypatch, dimension):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     candidates = [{'id': 'one', 'kind': 'entity', 'text': '甲',
                    'proposed_type': '主体'}]
@@ -896,7 +896,7 @@ def test_changed_fingerprint_dimension_creates_successor_run(
 
 def test_changed_source_after_closed_run_creates_immutable_successor(
         tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     state = {'text': '甲'}
     monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: [{
@@ -931,7 +931,7 @@ def test_changed_source_after_closed_run_creates_immutable_successor(
 
 def test_changed_base_after_closed_run_creates_immutable_successor(
         tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     baseline_v1 = '''
         @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -979,7 +979,7 @@ def test_changed_base_after_closed_run_creates_immutable_successor(
 
 def test_mapping_only_discovery_persists_ready_run_without_empty_draft(
         tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     baseline = '''
         @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -1037,7 +1037,7 @@ def test_mapping_only_discovery_persists_ready_run_without_empty_draft(
 
 def test_mapping_only_finalize_materializes_without_new_ontology_and_is_idempotent(
         tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     baseline = '''
         @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -1114,7 +1114,7 @@ def test_reusing_materialized_context_keeps_actual_records_and_remaps_endpoints(
 
 
 def test_mapping_finalize_does_not_treat_unrelated_id_collision_as_reused(tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
     from knowledge_service.services.ontology_discovery import _formal_id
 
     baseline='''@prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -1142,7 +1142,7 @@ def test_mapping_finalize_does_not_treat_unrelated_id_collision_as_reused(tmp_pa
 
 def test_mapping_only_finalize_marks_stale_base_without_writes(
         tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     baseline = '''
         @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -1187,7 +1187,7 @@ def test_mapping_only_finalize_marks_stale_base_without_writes(
 
 def test_mapping_only_finalize_marks_stale_source_without_writes(
         tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     baseline = '''
         @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -1231,7 +1231,7 @@ def test_mapping_only_finalize_marks_stale_source_without_writes(
 
 def test_mapping_only_finalize_validation_exception_rolls_back(
         tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     baseline = '''
         @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -1277,7 +1277,7 @@ def test_mapping_only_finalize_validation_exception_rolls_back(
 
 def test_mapping_only_finalize_preserves_conflict_outcomes(
         tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     baseline = '''
         @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -1335,7 +1335,7 @@ def test_mapping_only_finalize_preserves_conflict_outcomes(
 
 
 def test_discovery_run_read_audit_and_overview_endpoints(tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     baseline = '''
         @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -1387,7 +1387,7 @@ def test_discovery_run_read_audit_and_overview_endpoints(tmp_path, monkeypatch):
 
 def test_closing_discovery_draft_closes_run_and_unresolved_bindings(
         tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     generated = '''
         @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -1434,7 +1434,7 @@ def test_closing_discovery_draft_closes_run_and_unresolved_bindings(
 
 def test_publication_materializes_only_approved_required_bindings(
         tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     generated = '''
         @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -1582,7 +1582,7 @@ def test_publication_materializes_only_approved_required_bindings(
 
 def test_all_reusable_bindings_ignore_unbound_annotation_diff(
         tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     baseline = '''
         @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -1632,7 +1632,7 @@ def test_all_reusable_bindings_ignore_unbound_annotation_diff(
 
 
 def test_generated_vocabulary_conflict_has_stable_422_envelope(tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: [{
         'id': 'one', 'kind': 'entity', 'text': '甲', 'proposed_type': '主体'}])
@@ -1657,7 +1657,7 @@ def test_generated_vocabulary_conflict_has_stable_422_envelope(tmp_path, monkeyp
 
 
 def test_invalid_dual_kind_baseline_has_stable_422_envelope(tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     monkeypatch.setattr(discovery_api, '_candidates', lambda *_args, **_kwargs: [{
         'id': 'one', 'kind': 'entity', 'text': '甲', 'proposed_type': '主体'}])
@@ -1735,7 +1735,7 @@ def test_merged_spellings_induce_one_term_and_rematerialize_every_source(
 ])
 def test_review_excluding_merged_spelling_removes_shared_term_and_all_dependents(
         tmp_path, monkeypatch, excluded_terms):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     _install_fake_ontology_generator(monkeypatch, {'classes': [], 'properties': []})
     candidates = [
@@ -1780,7 +1780,7 @@ def test_review_excluding_merged_spelling_removes_shared_term_and_all_dependents
 
 def test_review_ignores_sibling_label_edit_for_excluded_shared_iri(
         tmp_path, monkeypatch):
-    import knowledge_service.api.ontology_discovery as discovery_api
+    import knowledge_service.services.ontology_discovery_workflow as discovery_api
 
     _install_fake_ontology_generator(monkeypatch, {'classes': [], 'properties': []})
     candidates = [
@@ -2110,7 +2110,7 @@ def test_open_discovery_builds_draft_then_publishes_versioned_ontology(tmp_path,
         assert stored['status']=='published' and stored['mapped_entities']==2
         sync=app.state.service.repository.get_artifact(
             'ontology_sync_job','ontology-sync:'+published.json()['id'])
-        assert sync['status']=='completed' and sync['fingerprint']
+        assert sync['status'] in {'pending','running','disabled'} and sync['fingerprint']
         assert client.post(base+f"/ontology-discovery/drafts/{draft['id']}/publish",json={}).status_code==409
 
         first_versions={row['id']:row['version_id'] for row in formal}

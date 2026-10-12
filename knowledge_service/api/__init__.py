@@ -24,16 +24,25 @@ import httpx
 
 from ..core.config import load_environment
 from ..utils.diagnostics import redact
-from ..integrations.embeddings import configured_encoder
-from ..integrations.document_parser import DocumentParseError
-from ..repository import (
+from ..bootstrap import (
+    DocumentParseError,
+    EmbeddingDimensionConfigurationError,
+    MilvusStore,
+    VectorDimensionMismatch,
     OntologyNotPublished,
     OntologyPublicationConflict,
     Repository,
+    UserStore,
+    configured_encoder,
+    encoder_dimension,
+    install_neo4j,
+    resolve_dsn,
 )
 from ..services.document_uploads import DocumentUploads
 from ..services.ontology_drafts import OntologyDraftError
 from ..services.service import KnowledgeService
+from ..services.runtime_capabilities import RuntimeCapabilities
+from ..services.ontology_sync import OntologySync
 from ..core.time import utc_now
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -48,10 +57,6 @@ def _resolve_milvus_dim(encoder=None):
     猜测 1024。
     """
     declared = (os.environ.get('KG_MILVUS_DIM') or '').strip()
-    from ..integrations.embeddings import (
-        EmbeddingDimensionConfigurationError,
-        encoder_dimension,
-    )
     declared_dim = None
     if declared:
         try:
@@ -86,7 +91,7 @@ def _resolve_milvus_dim(encoder=None):
         '（或为旧部署显式设置 KG_MILVUS_DIM），拒绝猜测 1024。')
 
 
-def _build_milvus_store(encoder=None):
+def _build_milvus_store(encoder=None, diagnostics=None):
     """按需创建 Milvus 检索索引；未显式开启或连接失败时返回 None（不再降级到本地向量）。
 
     通过环境变量 KG_VECTOR_BACKEND=milvus 显式开启（默认关闭，保持向后兼容）。
@@ -94,8 +99,6 @@ def _build_milvus_store(encoder=None):
     if os.environ.get('KG_VECTOR_BACKEND', '') != 'milvus':
         return None
     try:
-        from ..integrations.embeddings import EmbeddingDimensionConfigurationError
-        from ..integrations.milvus_store import MilvusStore
         host = os.environ.get('KG_MILVUS_HOST', 'localhost')
         port = os.environ.get('KG_MILVUS_PORT', '19530')
         dim = _resolve_milvus_dim(encoder)
@@ -105,6 +108,11 @@ def _build_milvus_store(encoder=None):
         store.connect()
         store.ensure_collection()
         return store
+    except VectorDimensionMismatch as exc:
+        LOG.warning('Milvus collection 需要重建: %s', redact(exc))
+        if diagnostics is not None:
+            diagnostics.append(redact(exc))
+        return store
     except EmbeddingDimensionConfigurationError:
         # 配置矛盾不是暂时性外部故障；静默降级会让部署看似成功、实际永不写 Milvus。
         raise
@@ -112,6 +120,8 @@ def _build_milvus_store(encoder=None):
         # 维度不一致时这里会打印带"怎么修"的说明（VectorDimensionMismatch），
         # 而不是一句无法下手的内部错误。
         LOG.warning('Milvus 不可用，降级本地检索: %s', redact(exc))
+        if diagnostics is not None:
+            diagnostics.append(redact(exc))
         return None
 
 
@@ -204,14 +214,21 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
     # load_environment 只补缺失的键，不覆盖已存在的 shell 环境变量，
     # 因此重复调用是安全的、且 shell 优先级仍然最高。
     load_environment(ROOT)
-    from ..repository.connection import resolve_dsn
     repository = Repository(dsn or resolve_dsn())
     encoder = encoder or configured_encoder()
-    service = KnowledgeService(repository, encoder, milvus_store=_build_milvus_store(encoder))
+    milvus_errors = []
+    milvus_store = _build_milvus_store(encoder, diagnostics=milvus_errors)
+    service = KnowledgeService(repository, encoder, milvus_store=milvus_store)
+    service.vector_connector = lambda: _build_milvus_store(encoder)
+    service.runtime_capabilities = RuntimeCapabilities(
+        encoder=encoder,
+        milvus_store=milvus_store,
+        milvus_configured=os.environ.get('KG_VECTOR_BACKEND', '') == 'milvus',
+        milvus_error=milvus_errors[-1] if milvus_errors else None,
+    )
     document_uploads = DocumentUploads(upload_temp)
 
     # ── 认证基础设施：用户仓储 / JWT 密钥 / 访问令牌有效期 ──
-    from ..repository.users_store import UserStore
     from ..core.security import resolve_jwt_secret
     users = UserStore(repository)
     jwt_secret, jwt_ephemeral = resolve_jwt_secret()
@@ -222,34 +239,23 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
     jwt_ttl = int(os.environ.get('KG_JWT_TTL_SECONDS', '43200'))  # 默认 12 小时
     _ensure_seed_superadmin(users)
 
-    def ontology_sync_runner(job):
-        if service.milvus_store is None:
-            return
-        record_ids = set(job.get('record_ids') or [])
-        if not record_ids:
-            return
-        records = [
-            row for row in repository.current_records(job['project_id'])
-            if row['id'] in record_ids
-            and row['kind'] in {'entity', 'relation', 'chunk'}]
-        if not records:
-            return
-        vectors = service.encoder.encode([row['text'] for row in records])
-        for row, vector in zip(records, vectors):
-            row['embedding'] = vector
-            row['embedding_model'] = service.encoder.identity
-            row['project_id'] = job['project_id']
-        service.milvus_store.upsert(records, flush=True)
-
-    repository._ontology_sync_runner = ontology_sync_runner
+    ontology_sync = OntologySync(service,
+        configured=os.environ.get('KG_VECTOR_BACKEND', '') == 'milvus')
 
     @asynccontextmanager
     async def lifespan(app):
-        document_uploads.cleanup_old()
+        retained_uploads = [job['payload']['staged']['path']
+            for job in service.data.list_artifacts('job')
+            if job.get('kind') == 'ingest_upload' and job.get('status') != 'completed'
+            and job.get('payload', {}).get('staged', {}).get('path')]
+        document_uploads.cleanup_old(protected_paths=retained_uploads)
         # 启动后异步预热 embedding 模型（首次 encode ~141s），不阻塞启动，消除首次检索卡顿
         import threading
         threading.Thread(target=service.warm_up, daemon=True).start()
+        ontology_sync.start()
+        app.state.jobs.start()
         yield
+        ontology_sync.close()
         app.state.jobs.close()
         app.state.neo4j.close()
         repository.close()
@@ -257,8 +263,29 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
     app = FastAPI(title='Knowledge Service', version='1.0.0', lifespan=lifespan,
                   description='项目本体、双时态知识与 metadata 前置过滤检索。时间区间为左闭右开。')
     app.state.service = service
+    app.state.ontology_sync = ontology_sync
     app.state.document_uploads = document_uploads
 
+    app.state.auth_disabled = bool(auth_disabled)
+    @app.get('/livez')
+    def livez():
+        return {'status': 'alive'}
+
+    @app.get('/readyz')
+    def readyz():
+        checks = {}
+        try:
+            checks.update(service.data.storage_readiness())
+        except Exception as exc:
+            checks.update(database='degraded', migrations='degraded', error=redact(exc))
+        runtime = service.runtime_capabilities.snapshot()
+        checks['embedding'] = 'ready' if runtime['embedding']['ready'] else 'degraded'
+        required_semantic = os.environ.get('KG_VECTOR_BACKEND', '') == 'milvus'
+        if required_semantic:
+            checks['semantic'] = runtime['capability_matrix']['semantic']['status']
+        ready = all(value == 'ready' for value in checks.values())
+        return JSONResponse({'status': 'ready' if ready else 'degraded',
+                             'checks': checks}, status_code=200 if ready else 503)
     # ── 认证 / 授权：默认挂载真实中间件；测试进程显式 auth_disabled 时跳过 ──
     if not auth_disabled:
         from .security_middleware import install_auth_middleware
@@ -285,7 +312,6 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
     install_knowledge(app, service)
     from .parity import install
     install(app, service)
-    from ..integrations.neo4j_store import install as install_neo4j
     install_neo4j(app, service)
     from .workspace import install as install_workspace
     install_workspace(app, service)
@@ -367,8 +393,9 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
         except PackageNotFoundError:
             semantica = None
         import sys
-        return {'status': 'ok', 'version': '1.1.0',
-                'database': service.repository.backend_label, 'time_model': 'bitemporal',
+        runtime = service.runtime_capabilities.snapshot()
+        return {'status': runtime['status'], 'version': '1.1.0',
+                'database': service.data.backend_label, 'time_model': 'bitemporal',
                 'python_executable': sys.executable,
                 'capabilities': ['legacy_import', 'interactive_graph_api', 'governance', 'semantica_merge',
                                  'jobs', 'snapshots', 'dual_channel_qa', 'typed_reviews',
@@ -376,6 +403,8 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
                                  'semantica_document_uploads', 'docling_ocr_ready'],
                 'semantica_version': semantica, 'embedding_model': service.encoder.identity,
                 'semantic': service.encoder.semantic, 'time': utc_now(),
+                'embedding': runtime['embedding'], 'vector': runtime['vector'],
+                'capability_matrix': runtime['capability_matrix'],
                 # 公开字段 auth_enabled：告诉前端本进程是否真的启用了鉴权，
                 # 前端只在**确知启用**时才要求先登录；测试桩 / KG_AUTH_DISABLED=1 的
                 # 起法没这个字段或为 false，按"不等"处理，免得页面永远拉不到数据。

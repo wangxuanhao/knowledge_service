@@ -187,7 +187,14 @@ class SqliteishConnection:
 
     @property
     def in_transaction(self) -> bool:
-        return self._conn.info.transaction_status != psycopg.pq.TransactionStatus.IDLE
+        # ACTIVE means another thread is executing a query, including an
+        # autocommit SELECT. Wait for that query before deciding whether a
+        # nested SAVEPOINT is legal; ACTIVE/UNKNOWN are not open transactions.
+        with self._conn.lock:
+            return self._conn.info.transaction_status in (
+                psycopg.pq.TransactionStatus.INTRANS,
+                psycopg.pq.TransactionStatus.INERROR,
+            )
 
     def create_function(self, *args, **kwargs):
         """PG 侧用 plpgsql 函数 + GUC 表达同一语义，本方法无需注册。"""

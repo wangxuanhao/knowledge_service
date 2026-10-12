@@ -178,8 +178,8 @@ def stream_events(service,p,request):
         # 结构待定单独记一份（不是证据，也不进证据链）：别人问"这条为什么没进答案"时有据可查。
         context['structure_pending']=pending_block(peer_rows)
         answer_id=provenance.complete_retrieval(p,run_id,context,evidence)
-        for row in evidence:
-            row['provenance_ref']=f"answer:{answer_id}#{row['citation']}"
+        from .answer_evidence import AnswerEvidence
+        evidence=AnswerEvidence(provenance).summaries(p,answer_id,evidence)
         yield event('evidence',{**context,'evidence':evidence,
                                'answer_id':answer_id,'retrieval_run_id':run_id})
         answer='';mode='evidence_only'

@@ -141,6 +141,7 @@ def publish_v2(base: str, project: str, base_ontology_id: str) -> str:
             'validation_fingerprint': reviewed['validation_fingerprint'],
             'acknowledged_warning_codes': warnings,
             'idempotency_key': f'verify-reclassify-{reviewed["id"]}',
+            'note': '真机验证：发布替代类映射用于受控重分类',
             'actor': 'verify:publisher'})
     if status != 200:
         raise Failure(f'发布失败：HTTP {status} {version}')

@@ -118,7 +118,7 @@ async function jobList(){const r=await api('/api/jobs',undefined,'GET');
 
   // 状态中文映射
   const getStatusLabel=(status)=>{
-    const map={queued:'排队中',running:'处理中',completed:'已完成',failed:'失败',interrupted:'已中断'};
+    const map={queued:'排队中',running:'处理中',completed:'已完成',failed:'失败',interrupted:'已中断',cancelled:'已取消'};
     return map[status]||status;
   };
 
@@ -190,6 +190,13 @@ async function jobList(){const r=await api('/api/jobs',undefined,'GET');
           </div>
         `:''}
 
+        ${Object.hasOwn(j,'payload')?`
+          <div class="task-controls admin-only">
+            ${['queued','running'].includes(j.status)?`<button type="button" class="secondary" data-job-action="cancel" data-job-id="${esc(j.id)}">取消任务</button>`:''}
+            ${['failed','interrupted'].includes(j.status)?`<button type="button" class="secondary" data-job-action="retry" data-job-id="${esc(j.id)}">重试任务</button>`:''}
+            ${j.status==='cancelled'?`<button type="button" class="secondary" data-job-action="resume" data-job-id="${esc(j.id)}">重新排队</button>`:''}
+          </div>`:''}
+
         ${j.result?`
           <div class="task-result">
             <button class="task-result-toggle" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
@@ -209,6 +216,17 @@ async function jobList(){const r=await api('/api/jobs',undefined,'GET');
   `;
 
   $('tasks').innerHTML=`<div class="tasks-container">${statsHtml}${tasksHtml}</div>`;
+  $('tasks').querySelectorAll('[data-job-action]').forEach(button=>{
+    button.onclick=async()=>{
+      button.disabled=true;
+      try{
+        const job=await api('/api/jobs/'+encodeURIComponent(button.dataset.jobId)+'/'+button.dataset.jobAction,{},'POST');
+        if(['queued','running'].includes(job.status))wb.jobs.set(job.id,job);
+        status(job.status==='cancelled'?'取消已受理，将在下一处理检查点停止；已提交知识保留。':'任务已重新排队。');
+        await jobList();
+      }catch(error){button.disabled=false;status(error.message,true);}
+    };
+  });
   return r.jobs;
 }
 function watch(job){wb.jobs.set(job.id,job);jobList();}
@@ -480,9 +498,9 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     const panelId='qa-evidence-'+(++evidenceSerial),block=document.createElement('div');block.className='qa-evidence-block';
     const toggle=document.createElement('button');
     toggle.type='button';toggle.className='qa-evidence-toggle secondary';
-    toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-controls',panelId);
-    toggle.textContent='查看 '+rows.length+' 条依据'+(pendingCount?"（另有 "+pendingCount+" 条结构待定）":"");
-    const panel=document.createElement('div');panel.className='qa-evidence-panel';panel.id=panelId;panel.hidden=true;
+    toggle.setAttribute('aria-expanded','true');toggle.setAttribute('aria-controls',panelId);
+    toggle.textContent='收起 '+rows.length+' 条依据'+(pendingCount?"（另有 "+pendingCount+" 条结构待定）":"");
+    const panel=document.createElement('div');panel.className='qa-evidence-panel';panel.id=panelId;panel.hidden=false;
     // 这块面板用户反馈"看不懂 E1/E2 是什么、下面这些为什么要展示"。它其实是
     // 模型回答的输入清单，所以先给一段说明，再列条目。
     const note=document.createElement('div');note.className='qa-evidence-note';
@@ -514,8 +532,9 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       panel.append(reasonBlock);
     }
     const projectId=current,answerId=payload.answer_id;
-    for(const row of rows){
+    for(const [rowIndex,row] of rows.entries()){
       const article=document.createElement('article');article.className='qa-evidence-item';
+      article.hidden=rowIndex>=3;
       const citation=provenance.sanitizeEvidenceSummary(row).citation;
       const link=document.createElement(answerId&&citation?'button':'b');
       link.className='qa-citation';link.textContent='['+(row.citation||'')+']';
@@ -528,12 +547,40 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       const meta=document.createElement('p');meta.className='qa-evidence-meta subtle';
       meta.textContent=(row.kind||'')+' · '+(labelOf(row.type)||'—')+' · 版本 '+(row.version??'—');
       article.append(link,excerpt,meta);
+      const sources=Array.isArray(row.sources)?row.sources:[];
+      if(sources.length){
+        const sourceBox=document.createElement('div');sourceBox.className='qa-source-list';
+        sources.forEach((source,sourceIndex)=>{
+          const sourceItem=document.createElement('section');sourceItem.className='qa-source-item';sourceItem.hidden=sourceIndex>0;
+          const title=document.createElement('b');title.textContent=source.title||source.document_id||'历史原文';
+          const quote=document.createElement('p');quote.textContent=(source.quote||'').slice(0,240);
+          const sourceMeta=document.createElement('p');sourceMeta.className='qa-evidence-meta subtle';
+          sourceMeta.textContent='文档版本 '+(source.version??'—')+' · '+(source.channel||row.retrieval_channel||'冻结来源');
+          sourceItem.append(title,quote,sourceMeta);sourceBox.append(sourceItem);
+        });
+        if(sources.length>1){
+          const more=document.createElement('button');more.type='button';more.className='qa-source-more secondary';
+          more.textContent='另有 '+(sources.length-1)+' 个来源';more.setAttribute('aria-expanded','false');
+          more.onclick=()=>{const open=more.getAttribute('aria-expanded')==='true';[...sourceBox.querySelectorAll('.qa-source-item')].slice(1).forEach(node=>node.hidden=open);more.setAttribute('aria-expanded',String(!open));more.textContent=open?'另有 '+(sources.length-1)+' 个来源':'收起其他来源';};
+          sourceBox.append(more);
+        }
+        article.append(sourceBox);
+      }else{
+        const missing=document.createElement('p');missing.className='qa-source-missing subtle';
+        missing.textContent='原文状态：'+(row.source_reason||'手工录入或历史来源缺失')+'（未使用当前版本补写）';article.append(missing);
+      }
       const seed=row.kind==='entity'?row.id:(row.kind==='relation'?row.subject_id:'');
       const actions=document.createElement('div');actions.className='row';
       if(seed){const button=document.createElement('button');button.type='button';button.dataset.evidenceNode=seed;button.textContent='在图谱中查看';actions.append(button);}
       if(row.source_id){const button=document.createElement('button');button.type='button';button.className='secondary';button.dataset.evidenceSource=row.source_id;button.textContent='查看来源';actions.append(button);}
       if(actions.childElementCount)article.append(actions);
       panel.append(article);
+    }
+    if(rows.length>3){
+      const more=document.createElement('button');more.type='button';more.className='qa-evidence-more secondary';
+      more.textContent='再看 '+(rows.length-3)+' 条依据';more.setAttribute('aria-expanded','false');
+      more.onclick=()=>{const open=more.getAttribute('aria-expanded')==='true';[...panel.querySelectorAll('.qa-evidence-item')].slice(3).forEach(node=>node.hidden=open);more.setAttribute('aria-expanded',String(!open));more.textContent=open?'再看 '+(rows.length-3)+' 条依据':'收起其余依据';};
+      panel.append(more);
     }
     /* C1「结构待定」：这些知识**不是证据**（它们的类型还没进本体），但也不能让它们凭空消失 ——
        用户问的东西可能正好落在它们身上，那就必须显式说出来，并说清"为什么不算、去哪儿补"。
@@ -565,7 +612,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       if(!rows.length)toggle.textContent='查看 '+pending.count+' 条结构待定的知识';
       panel.append(block);
     }
-    toggle.onclick=()=>{const open=toggle.getAttribute('aria-expanded')==='true';toggle.setAttribute('aria-expanded',String(!open));panel.hidden=open;};
+    toggle.onclick=()=>{const open=toggle.getAttribute('aria-expanded')==='true';toggle.setAttribute('aria-expanded',String(!open));panel.hidden=open;toggle.textContent=(open?'查看 ':'收起 ')+rows.length+' 条依据'+(pendingCount?"（另有 "+pendingCount+" 条结构待定）":"");};
     panel.querySelectorAll('[data-evidence-node]').forEach(node=>{node.onclick=async()=>{
       // 这次跳转由我们指定"看这个实体"，别让进入检索页的自动补画再抢一次画布：
       // 那条路径会先清空图谱再发全图请求，把刚选中的实体冲掉（契约用例抓到过）。
@@ -595,7 +642,9 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
   }
   async function stream(body,turn,historyIndex=qaHistory.length){
     if(busy)return;
-    const project=current,epoch=wb.epoch,mine=++serial;
+    // Chat owns its cancellation generation. A graph repaint is not a change
+    // to the chat scope; project/scope controls explicitly reset chat serial.
+    const project=current,mine=++serial;
     if(turn)provenance.close(false);
     const record={kind:'assistant',text:''};
     // Reserve the retry slot in memory; only terminal answers belong in saved history.
@@ -645,7 +694,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       const reader=response.body.getReader(),decoder=new TextDecoder();
       while(true){
         const {done,value}=await reader.read();
-        if(mine!==serial||project!==current||epoch!==wb.epoch){await reader.cancel();throw Error('范围已变化，已停止显示旧回答');}
+        if(mine!==serial||project!==current){await reader.cancel();throw Error('范围已变化，已停止显示旧回答');}
         if(done)break;
         buffer+=decoder.decode(value,{stream:true});
         const step=chat.splitSseBuffer(buffer);buffer=step.rest;
@@ -661,7 +710,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       provenance.decorateAnswer(answer,text,{projectId:project,answerId:record.answer_id,evidence:record.evidence});
       persist();
     }catch(error){
-      if(mine!==serial||project!==current||epoch!==wb.epoch)return;
+      if(mine!==serial||project!==current)return;
       failed=true;target.dataset.state='error';progress.textContent='';
       const emsg=error?.message||String(error);
       record.text=text;record.error=emsg;persist();

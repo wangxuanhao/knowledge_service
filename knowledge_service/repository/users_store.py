@@ -16,10 +16,9 @@ from __future__ import annotations
 from uuid import uuid4
 
 from ..core.time import utc_now
+from ..domain.users import ROLES, UserAlreadyExists
 
 #: 三档角色（顺序即权限从高到低），新增角色只改这里。
-ROLES = ('superadmin', 'admin', 'viewer')
-
 #: 可以进入「用户与权限」管理面的角色：超级管理员与管理员。
 MANAGER_ROLES = ('superadmin', 'admin')
 
@@ -34,10 +33,6 @@ def normalize_username(username: str) -> str:
     if len(normalized) > 64:
         raise ValueError('用户名过长（最多 64 个字符）')
     return normalized
-
-
-class UserAlreadyExists(ValueError):
-    """用户名已被注册。"""
 
 
 class UserStore:

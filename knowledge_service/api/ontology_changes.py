@@ -20,17 +20,17 @@ from ..services.ontology_changes import (
 
 def install(app, service):
     router = APIRouter(prefix='/api/projects/{p}/ontology-change-proposals')
-    governed = OntologyDrafts(service.repository, publisher=service.repository)
+    governed = service.ontology_drafts(publish=True)
 
     @router.get('')
     def listing(p: str):
-        service.repository.get_project(p)
-        return {'proposals': service.repository.list_artifacts('ontology_change', p)}
+        service.data.get_project(p)
+        return {'proposals': service.data.list_artifacts('ontology_change', p)}
 
     @router.post('', status_code=201)
     def create(p: str, request: ProposalCreate):
         with service.lock:
-            latest = service.repository.get_ontology(p)
+            latest = service.data.get_ontology(p)
             if latest['id'] != request.expected_ontology_id:
                 raise ValueError('版本冲突：本体已更新，请刷新后再创建草案')
             document, candidate = document_and_candidate(
@@ -52,7 +52,7 @@ def install(app, service):
                         'created_at': utc_now(), 'updated_at': utc_now()}
             if any(item.get('status') == 'pending' and item.get('document_id') == request.document_id and
                    item.get('candidate_id') == request.candidate_id
-                   for item in service.repository.list_artifacts('ontology_change', p)):
+                   for item in service.data.list_artifacts('ontology_change', p)):
                 raise ValueError('该知识候选已有待处理的本体变更草案')
             ontology = Ontology(latest['turtle'])
             turtle, _ = apply(ontology, proposal)
@@ -91,12 +91,12 @@ def install(app, service):
             proposal.update(
                 draft_id=created['id'], draft_revision=preview['revision'],
                 deprecation=DEPRECATION)
-            service.repository.save_artifact('ontology_change', proposal)
+            service.data.save_artifact('ontology_change', proposal)
             return proposal
 
     @router.get('/{proposal_id}')
     def get(p: str, proposal_id: str):
-        proposal = service.repository.get_artifact('ontology_change', proposal_id)
+        proposal = service.data.get_artifact('ontology_change', proposal_id)
         if proposal.get('project_id') != p:
             raise KeyError(proposal_id)
         return proposal
@@ -104,7 +104,7 @@ def install(app, service):
     @router.post('/{proposal_id}/decision')
     def decision(p: str, proposal_id: str, request: ProposalDecision):
         with service.lock:
-            proposal = service.repository.get_artifact('ontology_change', proposal_id)
+            proposal = service.data.get_artifact('ontology_change', proposal_id)
             if proposal.get('project_id') != p:
                 raise KeyError(proposal_id)
             if proposal['status'] != 'pending':
@@ -120,10 +120,10 @@ def install(app, service):
                     p, proposal['draft_id'], current['revision'],
                     'api:ontology-change', request.note)
                 proposal['draft_revision'] = closed['revision']
-                service.repository.save_artifact('ontology_change', proposal)
+                service.data.save_artifact('ontology_change', proposal)
                 return {'proposal': proposal, 'ontology': None, 'draft': closed,
                         'deprecation': DEPRECATION}
-            latest = service.repository.get_ontology(p)
+            latest = service.data.get_ontology(p)
             if latest['id'] != request.expected_ontology_id or latest['id'] != proposal['expected_ontology_id']:
                 raise ValueError('版本冲突：本体已更新，请重新评估草案影响')
             if proposal.get('impact', {}).get('risk') == 'high' and not request.confirm_impact:
@@ -133,7 +133,7 @@ def install(app, service):
                 p, proposal['draft_id'], current['revision'])
             proposal.update(status='submitted', draft_revision=submitted['revision'],
                             submitted_at=utc_now(), deprecation=DEPRECATION)
-            service.repository.save_artifact('ontology_change', proposal)
+            service.data.save_artifact('ontology_change', proposal)
             return {'proposal': proposal, 'ontology': None, 'draft': submitted,
                     'revalidation': None, 'deprecation': DEPRECATION}
 

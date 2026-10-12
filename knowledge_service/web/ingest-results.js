@@ -139,9 +139,9 @@
         loadAssertions(jobId);
         break;
       case 'failed':
-        d.status = 'failed';
+        d.status = p.status || 'failed';
         d.error = p.error || d.error;
-        d.stage = '处理失败';
+        d.stage = d.status === 'cancelled' ? '任务已取消' : '处理失败';
         break;
     }
     render();
@@ -171,7 +171,7 @@
   // ===========================================================================
   const STATUS_ZH = {
     queued: '排队中', running: '处理中', completed: '已完成',
-    failed: '失败', interrupted: '已中断',
+    failed: '失败', interrupted: '已中断', cancelled: '已取消',
   };
 
   function jobCard(jobId, d) {

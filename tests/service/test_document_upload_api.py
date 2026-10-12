@@ -65,8 +65,9 @@ def test_multipart_job_ingests_and_removes_staged_file(client):
     assert list(client.app.state.document_uploads.root.iterdir()) == []
 
 
-def test_failed_background_parse_removes_staged_file(client, monkeypatch):
+def test_failed_background_parse_retains_file_and_can_resume(client, monkeypatch):
     project = make_project(client)
+    original = client.app.state.document_uploads.parser.parse
 
     def fail(*args, **kwargs):
         raise RuntimeError('simulated parser failure')
@@ -74,7 +75,7 @@ def test_failed_background_parse_removes_staged_file(client, monkeypatch):
     monkeypatch.setattr(client.app.state.document_uploads.parser, 'parse', fail)
     response = client.post(
         f'/api/projects/{project}/documents/upload/jobs',
-        files={'file': ('broken.pdf', b'%PDF')},
+        files={'file': ('broken.txt', b'original source')},
         data={'options': json.dumps({'extract': False})},
     )
     job_id = response.json()['id']
@@ -85,7 +86,21 @@ def test_failed_background_parse_removes_staged_file(client, monkeypatch):
             break
         time.sleep(.02)
     assert job['status'] == 'failed'
-    assert list(client.app.state.document_uploads.root.iterdir()) == []
+    assert job['error']
+    staged = list(client.app.state.document_uploads.root.iterdir())
+    assert len(staged) == 1 and staged[0].read_bytes() == b'original source'
+    monkeypatch.setattr(client.app.state.document_uploads.parser, 'parse', original)
+    resumed = client.post(f'/api/jobs/{job_id}/resume')
+    assert resumed.status_code == 202, resumed.text
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        job = client.get(f'/api/jobs/{job_id}').json()
+        if job['status'] not in ('queued', 'running'):
+            break
+        time.sleep(.02)
+    assert job['status'] == 'completed', job
+    assert job['attempts'] == 2
+    assert not staged[0].exists()
 
 
 def test_stale_upload_cleanup_only_removes_old_files(tmp_path):

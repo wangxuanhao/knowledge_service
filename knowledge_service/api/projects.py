@@ -16,7 +16,7 @@ LOG = logging.getLogger('knowledge_service')
 
 def install(app, service):
     router = APIRouter()
-    repository = service.repository
+    repository = service.data
 
     @router.get('/api/projects')
     def projects():

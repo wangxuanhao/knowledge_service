@@ -68,7 +68,7 @@ ONLY_ALLOWED_WHEN_FINAL = 'discover'
 # 终态的理由必须指向能真正干活的地方。要求「至少出现一个」而不是「两个都要」：
 # 「已发布/已关闭」这一支会同时指向本体档案与本体设计台；
 # 「选中了终态草案但项目里还有别的编辑中草案」这一支只该指向本体设计台（用户这时不是在找历史版本）。
-FINAL_REASON_HINTS = ('本体档案', '本体编辑台')
+FINAL_REASON_HINTS = ('本体建模层',)
 
 
 class Failure(Exception):
@@ -243,6 +243,7 @@ def prove_the_gate_does_not_lie(base: str, project: str, draft: dict) -> list[st
             # 每次都换新键：否则会被"同一把键重放"那条路径吸收，测不到状态守卫。
             'idempotency_key': f'gate-verify-{uuid.uuid4()}',
             'actor': 'verify-ontology-gate@script',
+            'note': '真机验证：终态草案必须拒绝发布',
         })
     if code == 200:
         problems.append(

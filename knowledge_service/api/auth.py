@@ -25,7 +25,6 @@ from ..core.security import (
     hash_password,
     verify_password,
 )
-from ..repository.users_store import UserStore
 
 LOG = logging.getLogger('knowledge_service')
 
@@ -43,7 +42,7 @@ class PasswordChange(BaseModel):
     new_password: str = Field(min_length=6, max_length=128)
 
 
-def install(app, *, users: UserStore, jwt_secret: str, ttl_seconds: int):
+def install(app, *, users, jwt_secret: str, ttl_seconds: int):
     """挂载认证路由。
 
     :param users: 用户仓储（与主 Repository 共享连接）

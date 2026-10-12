@@ -247,7 +247,7 @@
     const ont = await api(endpoint('/ontology'), undefined, 'GET');
     const draft = await api(endpoint('/ontology-drafts'), {
       base_ontology_id: ont.id, source_kind: 'manual',
-      title: '画布编辑', actor: actorName(), summary: '在本体建模层画布上编辑',
+      title: '画布编辑', summary: '在本体建模层画布上编辑',
     }, 'POST');
     S.draft = draft;
     await refreshDraftState();
@@ -608,7 +608,7 @@
       // 并且发布时会要求勾选那条回退警告。普通草案仍必须基于当前版本 ——
       // 那条保护防的是"在旧基线上做普通编辑会静默丢掉别人的改动"，是另一件事。
       base_ontology_id: ontologyId, source_kind: 'revert',
-      title: '回到历史版本', actor: actorName(),
+      title: '回到历史版本',
       summary: '以某一已发布版本为基础开的新草案（回退不改写历史，发布后成为新版本）',
       source_context: { revert_from: ontologyId },
     }, 'POST');

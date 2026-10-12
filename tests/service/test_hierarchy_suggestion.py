@@ -14,7 +14,7 @@ from types import ModuleType
 
 import pytest
 
-from knowledge_service.api import ontology_discovery as discovery_api
+from knowledge_service.services import ontology_discovery_workflow as discovery_api
 from knowledge_service.services.hierarchy_suggestion import (
     HierarchySuggestionsUnavailable,
     build_prompt,

@@ -600,7 +600,9 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
       const before=ui.ontology?.id||'';
       const latest=await window.loadOntology('');
       const id=latest?.id||'';
-      if(!id||id===before)return false;
+      // First observation establishes the baseline. Boot already loaded the
+      // current terms; absence of a cached editor DTO is not a new publication.
+      if(!id||!before||id===before)return false;
       await loadOntologyTerms();
       await Promise.all([options(),discoverMetadata()]);
       resetTimeline();

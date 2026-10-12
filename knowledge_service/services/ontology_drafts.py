@@ -32,6 +32,9 @@ from .ontology_drafts_commands import DraftCommandMixin
 from .ontology_drafts_evidence import DraftEvidenceMixin
 from .ontology_drafts_readmodels import DraftReadModelsMixin
 from .ontology_drafts_review import DraftReviewPublishMixin
+from ..integrations.semantica_ontology import (
+    QualityEngineUnavailable, SemanticaOntologyQuality, ontology_payload,
+)
 
 
 class OntologyDrafts(
@@ -40,13 +43,21 @@ class OntologyDrafts(
     """Deep interface for draft editing, review, validation and graph reads."""
 
     def __init__(self, repository, *, publisher=None,
-                 validation_rule_version=VALIDATION_RULE_VERSION):
+                 validation_rule_version=VALIDATION_RULE_VERSION,
+                 quality_engine=None):
         self.repository = repository
-        self.store = repository._ontology_drafts
+        self.store = getattr(repository, 'ontology_drafts_store', None)
+        if self.store is None:
+            self.store = repository._ontology_drafts
         self.publisher = publisher
         self.validation_rule_version = _text(
             validation_rule_version, 'validation_rule_version')
         self.plan_policy_version = PLAN_POLICY_VERSION
+        # Keep application construction independent from the optional Semantica
+        # runtime.  The quality gate is required when validation runs, not when
+        # an API/router instance is assembled (discovery adapters may provide a
+        # deliberately minimal ``semantica`` module in tests or deployments).
+        self.quality_engine = quality_engine
 
     # ------------------------------------------------------------------ basics
     def _latest_id(self, project_id):
@@ -811,6 +822,10 @@ class OntologyDrafts(
         errors, warnings, info = self._operation_issues(operations)
         candidate_turtle = self._base_turtle(project_id, draft['base_ontology_id'])
         graph_report = {'conforms': True, 'errors': []}
+        semantica_quality = {
+            'engine': 'semantica', 'passed': False,
+            'issues': [], 'error': 'not_run',
+        }
         try:
             candidate_turtle = apply_operations(candidate_turtle, [
                 _semantic_operation(row) for row in operations
@@ -823,6 +838,31 @@ class OntologyDrafts(
                 candidate_ontology)
             self._extend_unique(warnings, overlay_warnings)
             self._extend_unique(info, overlay_info)
+            try:
+                quality_engine = self.quality_engine or SemanticaOntologyQuality()
+                semantica_quality = quality_engine.check(
+                    ontology_payload(candidate_ontology))
+            except QualityEngineUnavailable as exc:
+                issue = {
+                    'code': exc.code, 'severity': 'error',
+                    'message': str(exc), 'operation_ids': [], 'term_iris': [],
+                }
+                errors.append(issue)
+                semantica_quality = {
+                    'engine': 'semantica', 'passed': False,
+                    'issues': [issue], 'error': exc.code,
+                }
+            if not semantica_quality.get('passed'):
+                for finding in semantica_quality.get('issues') or []:
+                    if finding.get('severity') not in {'error', 'critical'}:
+                        continue
+                    errors.append({
+                        'code': 'semantica_' + str(finding.get('code') or 'quality'),
+                        'severity': 'error', 'message': finding.get('message') or '',
+                        'operation_ids': [],
+                        'term_iris': [finding['element_id']]
+                        if finding.get('element_id') else [],
+                    })
         except ValueError as exc:
             issue = {'code': 'graph_integrity', 'severity': 'error',
                      'message': str(exc), 'operation_ids': [], 'term_iris': []}
@@ -854,6 +894,7 @@ class OntologyDrafts(
             'historical_impact': historical,
             'errors': errors, 'warnings': warnings, 'info': info,
             'conforms': not errors,
+            'semantica_quality': semantica_quality,
         }
         source_snapshot = self._source_snapshot(project_id, draft)
         fingerprint = _fingerprint({

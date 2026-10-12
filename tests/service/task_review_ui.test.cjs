@@ -17,7 +17,7 @@ function fixture(reviewRows=[],options={}){
   const logs=['[2026-09-10T10:00:01Z] 文档开始 · 文件.md · 4 字符','[2026-09-10T10:00:02Z] 实体抽取返回 · 2 个','[2026-09-10T10:00:03Z] 实体抽取返回 · 3 个',
     '关系抽取返回 · 1 条','仍在等待当前步骤（非完成进度）'];
   const job={id:'job-a',project_id:'a',kind:'ingest',status:'running',logs,stage:'关系抽取',progress:40,
-    created_at:'2026-09-10T10:00:00Z',heartbeat_at:'2026-09-10T10:00:04Z'};
+    created_at:'2026-09-10T10:00:00Z',heartbeat_at:'2026-09-10T10:00:04Z',...options.job};
   // window 是浏览器里一定存在的东西：各模块在**加载时**就会向 window.RuntimeView 注册
   // 「项目与运行」的分区加载函数，沙箱少了它这些模块会直接抛 ReferenceError。
   const context=vm.createContext({window:{},current:'a',$:get,readParseSettings:()=>({chunk_size:1800}),showTab(){},
@@ -59,6 +59,19 @@ test('programmatic project switch does not leave previous jobs or load hidden re
   await new Promise(resolve=>setImmediate(resolve));
   assert.ok(!calls.includes('/api/projects/b/reviews'));
   assert.match(get('tasks').innerHTML,/当前项目暂无任务/);
+});
+
+test('durable task cards offer state-appropriate controls without reviving legacy closures',async()=>{
+  for(const [state,action,label] of [['running','cancel','取消任务'],['failed','retry','重试任务'],['cancelled','resume','重新排队']]){
+    const {get}=fixture([],{job:{status:state,payload:{text:'private source'}}});
+    await get('load-jobs').onclick();
+    assert.match(get('tasks').innerHTML,new RegExp('data-job-action="'+action+'"'));
+    assert.match(get('tasks').innerHTML,new RegExp(label));
+    assert.doesNotMatch(get('tasks').innerHTML,/private source/);
+  }
+  const {get}=fixture();
+  await get('load-jobs').onclick();
+  assert.doesNotMatch(get('tasks').innerHTML,/data-job-action/);
 });
 
 test('review menu is independent and attribute extraction is explicitly opt-in',async()=>{

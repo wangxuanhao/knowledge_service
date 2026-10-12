@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Query
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, Query, Request
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from .audit_identity import audit_actor, audit_identity
 
 from ..services.ontology_drafts import OntologyDrafts
 
@@ -18,12 +20,20 @@ from ..services.ontology_drafts import OntologyDrafts
 class _Request(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
+    @model_validator(mode='before')
+    @classmethod
+    def discard_legacy_actor(cls, value):
+        # Old clients may still send actor; it is never authoritative and is
+        # absent from the published request schema.
+        if isinstance(value, dict):
+            return {key: item for key, item in value.items() if key != 'actor'}
+        return value
+
 
 class DraftCreate(_Request):
     base_ontology_id: str | None = None
     source_kind: str = 'manual'
     title: str
-    actor: str
     source_context: dict[str, Any] = Field(default_factory=dict)
     summary: str = ''
 
@@ -41,7 +51,6 @@ class DecisionsRequest(RevisionRequest):
     validation_fingerprint: str
     acknowledged_warning_codes: list[str] = Field(default_factory=list)
     decisions: list[dict[str, Any]]
-    actor: str
 
 
 class RebaseRequest(RevisionRequest):
@@ -54,11 +63,9 @@ class BatchApproveRequest(RevisionRequest):
     expected_ontology_id: str | None
     validation_fingerprint: str
     acknowledged_warning_codes: list[str] = Field(default_factory=list)
-    actor: str
 
 
 class CloseRequest(RevisionRequest):
-    actor: str
     reason: str
 
 
@@ -67,29 +74,45 @@ class PublishRequest(RevisionRequest):
     validation_fingerprint: str
     acknowledged_warning_codes: list[str] = Field(default_factory=list)
     idempotency_key: str
-    actor: str
     # 发布说明：必填（min_length=1）。版本记录要能回答"这一版为什么发、谁发的"，
     # 空白说明等于让版本列表变成一串没人看得懂的编号。服务端强制，不靠界面自觉。
     note: str = Field(min_length=1, max_length=500)
 
 
 def install(app, service):
-    drafts = OntologyDrafts(service.repository, publisher=service.repository)
+    drafts = service.ontology_drafts(publish=True)
     app.state.ontology_drafts = drafts
 
     router = APIRouter(prefix='/api/projects/{p}/ontology-drafts')
 
     @router.post('', status_code=201)
-    def create(p: str, request: DraftCreate):
+    def create(p: str, request: DraftCreate, http_request: Request):
         return drafts.create(
             p, request.base_ontology_id, request.source_kind,
-            request.title, request.actor,
-            source_context=request.source_context, summary=request.summary)
+            request.title, audit_actor(http_request),
+            source_context={**request.source_context,
+                            'audit_identity': audit_identity(http_request)},
+            summary=request.summary)
 
     @router.get('')
     def listing(p: str, status: str | None = None):
         items = drafts.list(p, status=status)
         return {'items': items, 'total': len(items)}
+
+    @app.get('/api/projects/{p}/ontology-index')
+    def index_state(p: str):
+        return app.state.ontology_sync.reconcile(p)
+
+    @app.post('/api/projects/{p}/ontology-index/repair', status_code=202)
+    def repair_index(p: str):
+        return app.state.ontology_sync.repair(p)
+
+    @app.post('/api/projects/{p}/ontology-index/tasks/{task_id}/retry', status_code=202)
+    def retry_index(p: str, task_id: str):
+        task = service.data.get_artifact('ontology_sync_job', task_id)
+        if task.get('project_id') != p:
+            raise KeyError(task_id)
+        return service.data.control_task('ontology_sync_job', task_id, 'retry')
 
     # 阶段门禁（只读）。必须声明在 '/{draft_id}' 之前，否则会先被那条路由吃掉。
     # 前端只渲染这里的结果：能不能进、为什么、下一步点哪里，不再自己推。
@@ -115,12 +138,12 @@ def install(app, service):
         return drafts.submit(p, draft_id, request.expected_revision)
 
     @router.post('/{draft_id}/decisions')
-    def decisions(p: str, draft_id: str, request: DecisionsRequest):
+    def decisions(p: str, draft_id: str, request: DecisionsRequest, http_request: Request):
         return drafts.decide(
             p, draft_id, request.expected_revision,
             request.expected_ontology_id, request.validation_fingerprint,
             request.decisions, request.acknowledged_warning_codes,
-            request.actor)
+            audit_actor(http_request))
 
     @router.post('/{draft_id}/rebase')
     def rebase(p: str, draft_id: str, request: RebaseRequest):
@@ -129,10 +152,10 @@ def install(app, service):
             request.expected_ontology_id)
 
     @router.post('/{draft_id}/close')
-    def close(p: str, draft_id: str, request: CloseRequest):
+    def close(p: str, draft_id: str, request: CloseRequest, http_request: Request):
         return drafts.close(
             p, draft_id, request.expected_revision,
-            request.actor, request.reason)
+            audit_actor(http_request), request.reason)
 
     @router.get('/{draft_id}/review-plan')
     def review_plan(p: str, draft_id: str):
@@ -150,7 +173,7 @@ def install(app, service):
         return drafts.evidence_index(p, draft_id)
 
     @router.post('/{draft_id}/decisions/batch-approve')
-    def batch_approve(p: str, draft_id: str, request: BatchApproveRequest):
+    def batch_approve(p: str, draft_id: str, request: BatchApproveRequest, http_request: Request):
         """一键审核：服务端挑出「可批准且无需理由」的变更并整批批准。
 
         集合由服务端 review_plan 决定；阻断项、高风险项、需要写理由的变更
@@ -159,15 +182,15 @@ def install(app, service):
         return drafts.batch_approve(
             p, draft_id, request.expected_revision,
             request.expected_ontology_id, request.validation_fingerprint,
-            request.acknowledged_warning_codes, request.actor)
+            request.acknowledged_warning_codes, audit_actor(http_request))
 
     @router.post('/{draft_id}/publish')
-    def publish(p: str, draft_id: str, request: PublishRequest):
+    def publish(p: str, draft_id: str, request: PublishRequest, http_request: Request):
         return drafts.publish(
             p, draft_id, request.expected_revision,
             request.expected_ontology_id, request.validation_fingerprint,
             request.acknowledged_warning_codes, request.idempotency_key,
-            request.actor, request.note)
+            audit_actor(http_request), request.note)
 
     app.include_router(router)
 

@@ -102,6 +102,9 @@ def main() -> int:
         counts = (final or {}).get('counts') or {}
         ok((final or {}).get('status') == 'completed', '② 抽取跑到 completed',
            f'入账 {counts.get("records_accepted")} · 待审 {counts.get("assertions_pending")}')
+        if (final or {}).get('status') != 'completed':
+            print('   抽取失败或超时，不能作为“没有待审候选”跳过。', flush=True)
+            return 1
 
         code, body = req(base, f'/api/projects/{project_id}/reviews')
         reviews = as_list(body, 'reviews', 'items')

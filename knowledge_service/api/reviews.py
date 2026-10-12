@@ -2,7 +2,8 @@
 
 业务逻辑与请求模型在 services.reviews；本文件只负责挂载审核列表与决策端点。
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+from .audit_identity import audit_actor
 
 from ..services.reviews import Decision, decide, list_reviews
 
@@ -15,7 +16,9 @@ def install(app, service):
         return list_reviews(service, p)
 
     @router.post('/reviews/{doc_id}/{candidate_id}')
-    def decision(p: str, doc_id: str, candidate_id: str, request: Decision):
-        return decide(service, p, doc_id, candidate_id, request)
+    def decision(p: str, doc_id: str, candidate_id: str, request: Decision,
+                 http_request: Request):
+        return decide(service, p, doc_id, candidate_id, request,
+                      actor=audit_actor(http_request))
 
     app.include_router(router)

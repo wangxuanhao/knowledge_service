@@ -39,9 +39,10 @@ os.environ.setdefault('NO_PROXY', '127.0.0.1,localhost')
 
 EDGE = Path(r'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe')
 
-VIEWS = {'entity': ('实体', ['名称', '本体类型', '挂在哪一版本体上', '版本', '原文断言', '操作']),
-         'relation': ('关系', ['关系', '关系类型', '挂在哪一版本体上', '版本', '原文断言', '操作']),
-         'chunk': ('原文片段', ['原文片段', '来源文档', '版本', '原文断言', '操作'])}
+VIEWS = {'entity': ('实体', ['名称', '本体类型', '本体归属', '知识修订', '原文断言', '操作']),
+         'relation': ('关系', ['关系', '关系类型', '本体归属', '知识修订', '原文断言', '操作']),
+         'attribute': ('属性', ['属性', '所属实体', '本体归属', '知识修订', '原文断言', '操作']),
+         'chunk': ('原文片段', ['原文片段', '来源文档', '知识修订', '原文断言', '操作'])}
 
 
 class Failure(Exception):
@@ -113,9 +114,9 @@ def record_query(base: str, project_id: str) -> list[dict]:
     不是 GET /records —— 用 GET 会收到 405。
     """
     payload = post_json(base, f'/api/projects/{project_id}/records/query?limit=1000',
-                        {'kinds': ['entity', 'relation', 'chunk']}) or {}
+                        {'kinds': ['entity', 'relation', 'attribute', 'chunk']}) or {}
     rows = payload.get('records') or payload.get('items') or []
-    return [row for row in rows if row.get('kind') in ('entity', 'relation', 'chunk')]
+    return [row for row in rows if row.get('kind') in VIEWS]
 
 
 def ontology_ownership(base: str, project_id: str, rows: list[dict]) -> dict[str, str]:
@@ -146,12 +147,12 @@ def parse_ownership(text: str) -> tuple | None:
     刻意不比对字符串：页面按中文习惯显示不补零的月日（2026/10/1），
     脚本从接口拿到的是 ISO（2026-10-01）。比的是"同一版本、同一天、同样的当前/旧版判定"。
     """
-    match = re.match(r'^本体 v(\d+) · (\d{4})/(\d{1,2})/(\d{1,2})(（当前）|（旧版）)?$', (text or '').strip())
+    match = re.match(r'^依据本体 v(\d+)(（当前）|（旧版）) · (\d{4})/(\d{1,2})/(\d{1,2})$', (text or '').strip())
     if not match:
         return None
     number = int(match.group(1))
-    year, month, day = (int(value) for value in match.groups()[1:4])
-    return (number, f'{year:04d}-{month:02d}-{day:02d}', match.group(5) == '（当前）')
+    year, month, day = (int(value) for value in match.groups()[2:5])
+    return (number, f'{year:04d}-{month:02d}-{day:02d}', match.group(2) == '（当前）')
 
 
 def assertion_support(base: str, project_id: str, rows: list[dict]) -> dict[str, int]:
@@ -247,7 +248,7 @@ def main() -> int:
         intro = page.inner_text('.ledger-intro')
         report.check('页签名与标题是「知识台账」', '知识台账' in title, title)
         report.check('一句话边界：这里管具体的东西，分类不在这',
-                     '具体的东西' in intro and '本体编辑台' in intro and '本体审核台' in intro,
+                     '具体的东西' in intro and '分类不在这' in intro and '本体建模层' in intro,
                      intro.replace('\n', ' ')[:90])
 
         # ② 顶部四个数字 = 服务端独立算出的数字
@@ -261,15 +262,21 @@ def main() -> int:
 
         # ③ 三个视角：表头逐列核对（列名就是"这一页承诺给你看什么"）
         tabs = page.evaluate("() => [...document.querySelectorAll('.ledger-tab')].map(n => n.textContent.trim())")
-        report.check('三个视角齐全（实体 / 关系 / 原文片段）',
-                     tabs[:3] == [VIEWS['entity'][0], VIEWS['relation'][0], VIEWS['chunk'][0]], f'{tabs}')
+        report.check('四个视角齐全（实体 / 关系 / 属性 / 原文片段）',
+                     tabs == [VIEWS[key][0] for key in VIEWS], f'{tabs}')
         headers = page.evaluate("() => [...document.querySelectorAll('.record-library thead th')].map(n => n.textContent.trim())")
-        report.check('默认视角（实体）的列头与约定一致', headers == VIEWS['entity'][1], f'{headers}')
-        for index, key in ((1, 'relation'), (2, 'chunk')):
-            page.click(f'.ledger-tab:nth-child({index + 1})')
+        report.check('默认实体视角展示列头或真实空态',
+                     headers == VIEWS['entity'][1] if counts['entity'] else
+                     page.locator('.record-empty').count() == 1, f'{headers}')
+        for key in ('relation','attribute','chunk'):
+            page.click(f'.ledger-tab[data-ledger-view="{key}"]')
             page.wait_for_timeout(400)
             headers = page.evaluate("() => [...document.querySelectorAll('.record-library thead th')].map(n => n.textContent.trim())")
             expected_rows = sum(1 for row in rows if row.get('kind') == key)
+            if not expected_rows:
+                report.check(f'「{VIEWS[key][0]}」真实空态与服务端一致',
+                             page.locator('.record-empty').count() == 1)
+                continue
             shown_rows = page.locator('.record-library tbody tr').count()
             pager = page.locator('.record-pages').inner_text().replace('\n', ' ')
             expected_pages = max(1, -(-expected_rows // 25))
@@ -279,7 +286,8 @@ def main() -> int:
                          shown_rows == min(25, expected_rows) and f'1 / {expected_pages} 页' in pager,
                          f'页面 {shown_rows} 行（{pager}）/ 服务端 {expected_rows} 条 ≈ {expected_pages} 页')
         page.click('.ledger-tab:nth-child(1)')
-        page.wait_for_selector('.record-library tbody tr', timeout=15000)
+        if counts['entity']:
+            page.wait_for_selector('.record-library tbody tr', timeout=15000)
 
         # ④ 逐行核对「挂在哪一版本体上」与「原文断言」——这两列是台账最有信息量的地方
         table = page.evaluate("""() => [...document.querySelectorAll('.record-library tbody tr')].map(row => {
@@ -333,7 +341,7 @@ def main() -> int:
             page.wait_for_selector('#record-dialog[open]', timeout=15000)
             history_title = page.locator('#record-dialog-title').inner_text()
             report.check('点「版本历史」打开的是同一个弹窗（历史模式）',
-                         history_title.startswith('版本历史'), history_title)
+                         history_title.startswith('修订历史'), history_title)
             page.wait_for_selector('#record-history-view article', timeout=15000)
             report.note('  版本历史', page.locator('#record-history-view').inner_text().replace('\n', ' ')[:80])
             page.click('#close-record-dialog')

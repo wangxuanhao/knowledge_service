@@ -29,7 +29,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ..core.security import hash_password
-from ..repository.users_store import ROLES
+from ..domain.users import ROLES, UserAlreadyExists
 
 # 请求模型必须定义在顶层：本文件有 `from __future__ import annotations`，
 # FastAPI 靠模块全局作用域解析注解类型，类定义在函数内部会导致 POST body 永远 missing。
@@ -81,7 +81,6 @@ def install(app, *, users):
                 '只有超级管理员能创建超级管理员账号：当前管理员无权授予系统最高权限。'
                 '如确需新增，请让现有超级管理员操作。',
                 code='cannot_create_superadmin')
-        from ..repository.users_store import UserAlreadyExists
         try:
             row = users.create(body.username, hash_password(body.password),
                                role=body.role, display_name=body.display_name)

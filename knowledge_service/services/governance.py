@@ -145,7 +145,7 @@ class Governance:
         return conflicts
 
     def merge(self,p,keep_id,drop_id,expected_versions,resolution_decision=None,
-              attribute_winners=None):
+              attribute_winners=None, actor='merge-governance'):
         if keep_id==drop_id:
             raise ValueError('请选择两个不同的实体')
         with self.service.lock:
@@ -232,10 +232,10 @@ class Governance:
                                 f'已选择属性记录 {losing[row["id"]]}')
                         assertion_decisions.extend([
                             {'id':assertion['id'],'expected_version':assertion['decision_version'],
-                             'status':'contradicting','reason':reason,'actor':'merge-governance',
+                             'status':'contradicting','reason':reason,'actor':actor,
                              'canonical_record_id':row['id']},
                             {'id':assertion['id'],'expected_version':assertion['decision_version']+1,
-                             'status':'superseded','reason':reason,'actor':'merge-governance',
+                             'status':'superseded','reason':reason,'actor':actor,
                              'canonical_record_id':row['id']},
                         ])
                 elif row.get('subject_id')==drop_id:
@@ -245,7 +245,8 @@ class Governance:
                     updates.append(attribute)
             decisions=[resolution_decision] if resolution_decision else None
             return self._commit(p,before,updates,'merge','semantica',redirects={drop_id:keep_id},
-                resolution_decisions=decisions,assertion_decisions=assertion_decisions)
+                resolution_decisions=decisions,assertion_decisions=assertion_decisions,
+                audit_extra={'actor': actor})
 
     def delete(self,p,record_id,expected_version):
         with self.service.lock:

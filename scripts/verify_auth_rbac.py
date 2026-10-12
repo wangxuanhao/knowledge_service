@@ -204,7 +204,7 @@ def main() -> int:
                             token=superadmin)
     check('提升为管理员', status == 200 and promoted['user']['role'] == 'admin',
           f'HTTP {status}')
-    status, _ = call(base, '/api/projects', 'POST', {'name': f'提升后建的项目-{uuid4().hex[:4]}'},
+    status, promoted_project = call(base, '/api/projects', 'POST', {'name': f'提升后建的项目-{uuid4().hex[:4]}'},
                      token=viewer)
     check('提升后原令牌立刻有写权限（角色每次回查库）', status == 201, f'HTTP {status}')
 
@@ -286,6 +286,8 @@ def main() -> int:
 
     if project_id:
         call(base, f'/api/projects/{project_id}', 'DELETE', token=superadmin)
+    if promoted_project.get('id'):
+        call(base, f'/api/projects/{promoted_project["id"]}', 'DELETE', token=superadmin)
     for uid, name in ((temp_id, temp_user), (temp_admin_id, temp_admin_user),
                       (spare_viewer_id, spare_user)):
         if not uid:

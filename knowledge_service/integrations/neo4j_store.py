@@ -268,6 +268,8 @@ class Neo4jProjection:
 def install(app, service):
     projection = Neo4jProjection(service.repository)
     app.state.neo4j = projection
+    app.state.jobs.handlers['neo4j_sync'] = (
+        lambda payload, project_id, progress, task_id: projection.sync(project_id, progress))
 
     @app.get('/api/storage')
     def storage():
@@ -284,4 +286,4 @@ def install(app, service):
     @app.post('/api/projects/{project_id}/storage/neo4j/sync', status_code=202)
     def sync(project_id: str):
         service.repository.get_project(project_id)
-        return app.state.jobs.submit('neo4j_sync', lambda progress: projection.sync(project_id, progress), project_id)
+        return app.state.jobs.enqueue('neo4j_sync', {'sync': True}, project_id)

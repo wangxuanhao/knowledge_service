@@ -547,7 +547,7 @@ class SemanticaExtractor:
         if ontology is None:
             raise ValueError('抽取需要项目本体')
         LOG.info('Semantica 抽取开始：文本 %d 字符', len(text))
-        summary = ontology.summary()
+        summary = getattr(self, 'ontology_slice_summary', None) or ontology.summary()
         try:
             event('加载 Semantica 抽取模块 · 开始')
             from semantica.semantic_extract.ner_extractor import NERExtractor

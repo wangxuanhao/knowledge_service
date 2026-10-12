@@ -266,6 +266,47 @@ def render_manual(shots: dict | None = None) -> str:
         "能对任意一个版本号回答：它属于软件、项目结构，还是某一条知识记录。",
         "不要说“现在是 v2”而不带对象；应说“本体 v2”或“张三记录 r2”。"))
 
+    qa_runtime_body = '''<div class="callout"><b>问答先看原文，再看结论。</b>
+      每条回答下方的前三条依据默认展开；每条依据的第一份冻结原文默认可见。
+      “另有 N 个来源”只展开这一条依据的其他来源，“再看 N 条依据”才展开其余依据。</div>
+    <div class="version-grid">
+      <article><span>冻结来源</span><h3>不追当前版本</h3><p>标题、摘录、文档版本与检索通道来自生成答案时保存的 offered 溯源分支；手工录入或历史缺口会明确标注，不拿今天的文档补写。</p></article>
+      <article><span>运行能力</span><h3>Milvus collection_ready</h3><p>项目与运行的健康信息要同时核对 configured、connected、collection_ready、实际维度与期望维度。已配置但不可用时状态是 degraded。</p></article>
+      <article><span>发布门禁</span><h3>Semantica 质量检查</h3><p>草案校验保留 Semantica 版本、指标、阈值与问题列表；质量引擎不可用属于阻断错误，不能假装校验通过。</p></article>
+    </div>
+    <div class="rule"><b>本体切片收据：</b>受控抽取应记录用了哪个本体版本、命中了哪些术语以及选择原因；看到降级为全本体时要单独审核，绝不能静默切换成开放发现。</div>
+    <ol><li>问答完成后，先直接阅读默认展开的原文，再核对答案中的 [E1] / [E2]。</li>
+      <li>需要审计时点击引用编号，打开完整的历史溯源抽屉。</li>
+      <li>到“项目与运行”核对本地模型 identity 与 1024 维是否和 Milvus collection 一致。</li>
+      <li>草案接口的 validation_report.semantica_quality 保存 Semantica 质量报告；阻断项修复后重新校验。
+      当前页面主要展示现有业务校验警告，Semantica 警告尚未统一接入逐条确认入口，需另行核对质量报告。</li></ol>'''
+    chapters.append(chapter("chapter-11", "11", "问答原文、Milvus 与本体质量怎么验收",
+        "把消费层看到的依据、运行时向量能力和本体发布门禁放在同一套验收口径里。",
+        qa_runtime_body,
+        "问答能直接看到冻结原文；运行状态显示 1024 维且 collection_ready；草案保存 Semantica 质量报告。",
+        "只看到回答正文不代表可追溯；只看到 Milvus 进程 healthy 也不代表 collection 与模型维度一致。"))
+
+    operations_body = '''<div class="callout"><b>审计人由登录身份决定。</b>
+      创建、审核、发布和重分类由服务器记录用户 ID、用户名和显示名；页面不能指定另一位操作人。
+      关闭认证的环境会明确显示“未启用认证”。</div>
+    <ol><li>探活访问 /livez；就绪检查访问 /readyz。模型仍在加载或必需向量后端不可用时，就绪返回 503。</li>
+      <li>/api/health 的 capability_matrix 分别报告 keyword、semantic、llm、ocr、neo4j。
+      semantic 为 ready 才代表真实模型已完成编码验证且向量 collection 就绪；远程 LLM 未探测时显示 degraded。</li>
+      <li>本体发布成功意味着权威版本已提交。索引由后台 outbox 同步，pending/running/retry_wait 都不表示索引已完成。
+      disabled 表示未启用 Milvus，failed 保留失败原因。只有 completed 才表示消费成功。</li>
+      <li>GET /api/projects/{项目ID}/ontology-index 查看权威版本与索引版本；POST 同一路径的 /repair 触发补偿。</li>
+      <li>维度自动读取本地 model 的 config 并核对真实编码输出；不要把 1024 当成所有模型的固定值。
+      换模型导致维度不匹配时，“构建语义索引”会迁移共享集合并恢复全部项目；普通重建只处理当前项目。
+      rebuilding 期间项目对账不报告 ready；失败后重试会继续恢复全项目，不能把空集合当完成。</li>
+      <li>进入“项目与运行 → 后台任务”，任务卡片可取消、重试或重新排队。
+      接口对应 POST /api/jobs/{任务ID}/retry、/cancel、/resume。
+      重启后持久任务会在原租约过期后重新领取；取消在下一个处理检查点生效，已提交的事实不自动回滚。
+      上传文件在停止任务期间保留以支持重试。</li></ol>'''
+    chapters.append(chapter('chapter-12', '12', '身份、任务和索引同步怎么核查',
+        '发布版本与索引同步分别核查；任务失败可查看原因并重新处理。', operations_body,
+        '能辨认当前用户、模型就绪、任务状态和权威版本与索引版本是否一致。',
+        'Milvus 进程 healthy 或本体发布成功都不能替代项目索引对账。'))
+
     troubleshooting = "".join([
         trouble("创建项目后看不到本体", "本体建模层提示读不到状态或空画布。", "项目尚未选中，或页面还在加载。", "先在左上角选择项目；仍为空就刷新页面，再确认项目模式是加载默认本体。"),
         trouble("发布按钮是灰的", "按钮不可点。", "草案未校验、仍有待审核操作、没有发布说明，或警告未确认。", "从底栏提示依次处理：校验并审核 → 逐条处理 → 填发布说明 → 确认警告。"),
@@ -277,7 +318,7 @@ def render_manual(shots: dict | None = None) -> str:
         trouble("软删除后想找回", "当前关系视角不再显示该关系。", "软删除生成了删除修订，不是物理抹除。", "打开历史或可撤销操作，核对目标 ID 后恢复；恢复会生成新修订。"),
     ])
 
-    body = "".join(chapters) + f'''<section id="troubleshooting" class="appendix"><header class="chapter-head"><span>11</span><div><h2>卡住时按现象排查</h2><p>每一项都给出“看到什么 / 原因 / 下一步”，不要只停在错误描述。</p></div></header><div class="trouble-grid">{troubleshooting}</div></section>'''
+    body = "".join(chapters) + f'''<section id="troubleshooting" class="appendix"><header class="chapter-head"><span>12</span><div><h2>卡住时按现象排查</h2><p>每一项都给出“看到什么 / 原因 / 下一步”，不要只停在错误描述。</p></div></header><div class="trouble-grid">{troubleshooting}</div></section>'''
 
     css = r'''
     :root{--ink:#123a3d;--muted:#61787a;--paper:#f6f2e9;--card:#fffdf7;--teal:#006c68;--teal2:#0b8f86;--line:#cbd8d2;--amber:#f2a900;--red:#e43e36;--nav:#0b3334}
@@ -296,10 +337,11 @@ def render_manual(shots: dict | None = None) -> str:
 
     toc = "".join(f'<a href="#chapter-{i}">{i:02d} · {title}</a>' for i, title in [
         (1,"登录与角色"),(2,"项目与本体 v1"),(3,"建模并发布 v2"),(4,"写入固定材料"),(5,"脑图与三类台账"),
-        (6,"发布本体 v3"),(7,"受控重分类"),(8,"单独修改张三"),(9,"修订、删除与恢复"),(10,"三种版本关系")])
+        (6,"发布本体 v3"),(7,"受控重分类"),(8,"单独修改张三"),(9,"修订、删除与恢复"),(10,"三种版本关系"),
+        (11,"问答原文与运行验收")])
     return f'''<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>知序 Knowledge Service · 傻瓜级操作手册（服务 v1.1.0）</title><style>{css}</style></head>
     <body><header class="cover"><div class="kicker">知识从结构到可核验事实</div><h1>知序 Knowledge Service<br>傻瓜级操作手册</h1><p class="subtitle">服务 v1.1.0 · 一个案例走完全流程：建项目 → 改本体 → 写知识 → 看脑图与台账 → 迁移 → 修订与恢复。</p><div class="cover-meta"><span>离线单文件</span><span>32 张真实界面截图</span><span>每图 1～3 个编号框</span><span>演示数据：张三 / 产品部</span></div><div class="route"><span>① 登录</span><span>② 项目 + 本体 v1</span><span>③ 发布 <i>v2</i></span><span>④ 写入知识</span><span>⑤ 发布 <i>v3</i></span><span>⑥ 迁移 / 修订</span><span>⑦ 历史 / 恢复</span></div></header>
-    <div class="layout"><nav class="toc"><b>从头走到尾</b>{toc}<a href="#troubleshooting">11 · 排错</a></nav><main class="content"><section class="intro"><h2>怎么读这本手册</h2><p>每一步只做一件事。先看“操作”，再对照截图中的红框编号，最后确认“完成标志”。界面截图取自真实服务 v1.1.0 的隔离演示项目；截图里的随机项目后缀不需要照抄。</p><div class="legend"><span><i>1</i>编号框：这一步看这里</span><span><b>本体</b>＝项目结构</span><span><b>知识</b>＝实体 / 关系 / 属性实例</span><span><b>修订</b>＝某一条记录的历史</span></div></section>{body}</main></div>
+    <div class="layout"><nav class="toc"><b>从头走到尾</b>{toc}<a href="#troubleshooting">12 · 排错</a></nav><main class="content"><section class="intro"><h2>怎么读这本手册</h2><p>每一步只做一件事。先看“操作”，再对照截图中的红框编号，最后确认“完成标志”。界面截图取自真实服务 v1.1.0 的隔离演示项目；截图里的随机项目后缀不需要照抄。</p><div class="legend"><span><i>1</i>编号框：这一步看这里</span><span><b>本体</b>＝项目结构</span><span><b>知识</b>＝实体 / 关系 / 属性实例</span><span><b>修订</b>＝某一条记录的历史</span></div></section>{body}</main></div>
     <footer class="foot"><strong>知序 Knowledge Service · 服务 v1.1.0</strong><br>本手册不依赖网络资源；保存此 HTML 即可离线查看和打印。</footer></body></html>'''
 
 

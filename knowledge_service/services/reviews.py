@@ -153,7 +153,7 @@ def list_reviews(service, p):
     return {'reviews': result}
 
 
-def decide(service, p, doc_id, candidate_id, request):
+def decide(service, p, doc_id, candidate_id, request, *, actor='reviewer'):
     with service.lock:
         rows = {r['id']: r for r in service.repository.current_records(p)}
         doc = rows.get(doc_id)
@@ -175,7 +175,7 @@ def decide(service, p, doc_id, candidate_id, request):
             raise ValueError('候选尚未进入单值冲突状态，请先执行普通批准检查')
         if doc.get('metadata', {}).get('_deleted') or doc['metadata'].get('status') != 'ready':
             raise ValueError('来源文档不可用')
-        candidate.update(note=request.note, reviewed_at=utc_now())
+        candidate.update(note=request.note, reviewed_at=utc_now(), actor=actor)
         try:
             assertion = service.repository.get_assertion(p, candidate_id)
         except KeyError:
@@ -186,7 +186,7 @@ def decide(service, p, doc_id, candidate_id, request):
                 candidate['resolution'] = 'remediation_required'
             decisions = [] if assertion is None else [{'id': candidate_id,
                 'expected_version': assertion['decision_version'], 'status': 'rejected',
-                'reason': request.note, 'actor': 'reviewer'}]
+                'reason': request.note, 'actor': actor}]
             service.write(p, [], completion=(revised, doc['version']), operation='approve_review',
                           assertion_decisions=decisions)
             return {'status': 'rejected',
@@ -204,7 +204,7 @@ def decide(service, p, doc_id, candidate_id, request):
                              approved_ontology_id=ontology['id'])
             decisions = [] if assertion is None else [{'id': candidate_id,
                 'expected_version': assertion['decision_version'], 'status': 'accepted',
-                'reason': request.note, 'actor': 'reviewer',
+                'reason': request.note, 'actor': actor,
                 'canonical_record_id': candidate.get('record_id')}]
             service.write(p, [], completion=(revised, doc['version']), operation='approve_review',
                           assertion_decisions=decisions)
@@ -262,7 +262,7 @@ def decide(service, p, doc_id, candidate_id, request):
                                  conflict_code=conflict['code'], conflict_predicate=target)
                 decisions = [] if assertion is None else [{'id': candidate_id,
                     'expected_version': assertion['decision_version'], 'status': 'contradicting',
-                    'reason': request.note, 'actor': 'reviewer'}]
+                    'reason': request.note, 'actor': actor}]
                 service.write(p, [], completion=(revised, doc['version']),
                               operation='approve_review', assertion_decisions=decisions)
                 return {'status': 'contradicting', 'conflict': conflict}
@@ -290,7 +290,7 @@ def decide(service, p, doc_id, candidate_id, request):
         # 校验/向量化失败会保持审核为待处理状态。批准与关系写入共享同一个 PostgreSQL 事务。
         decisions = [] if assertion is None else [{'id': candidate_id,
             'expected_version': assertion['decision_version'], 'status': 'accepted',
-            'reason': request.note, 'actor': 'reviewer', 'canonical_record_id': record_id}]
+            'reason': request.note, 'actor': actor, 'canonical_record_id': record_id}]
         records = [record]
         if kind == 'attribute' and request.action == 'approve_replace':
             conflicting_ids = {item['record_id'] for item in
@@ -311,7 +311,7 @@ def decide(service, p, doc_id, candidate_id, request):
                         p, status='accepted', canonical_record_id=current['id']):
                     decisions.insert(0, {'id': support['id'],
                         'expected_version': support['decision_version'], 'status': 'superseded',
-                        'reason': request.note, 'actor': 'reviewer',
+                        'reason': request.note, 'actor': actor,
                         'canonical_record_id': current['id']})
             records = [*tombstones, record]
             expected.update(actual_versions)

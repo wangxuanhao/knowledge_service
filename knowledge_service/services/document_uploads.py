@@ -78,11 +78,12 @@ class DocumentUploads:
     def discard(self, staged: StagedUpload):
         staged.path.unlink(missing_ok=True)
 
-    def cleanup_old(self, max_age_seconds: int = 24 * 60 * 60):
+    def cleanup_old(self, max_age_seconds: int = 24 * 60 * 60, *, protected_paths=()):
         cutoff = time.time() - max_age_seconds
+        protected = {Path(path).resolve() for path in protected_paths}
         for path in self.root.iterdir():
             try:
-                if path.is_file() and path.stat().st_mtime < cutoff:
+                if path.resolve() not in protected and path.is_file() and path.stat().st_mtime < cutoff:
                     path.unlink()
             except FileNotFoundError:
                 pass

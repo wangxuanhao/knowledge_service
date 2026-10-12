@@ -19,7 +19,7 @@ def install(app, service):
     @app.get('/api/projects/{p}/answers/{answer_id}/evidence/{citation}/provenance')
     def answer_evidence_provenance(p: str, answer_id: str, citation: str):
         try:
-            answer = service.repository.get_provenance_activity(p, answer_id)
+            answer = service.data.get_provenance_activity(p, answer_id)
         except KeyError:
             return _not_found('answer')
         if answer['kind'] != 'answer':
@@ -27,6 +27,6 @@ def install(app, service):
         if not _CITATION.fullmatch(citation):
             return _not_found('citation')
         try:
-            return ProvenanceService(service.repository).trace_answer_evidence(p, answer_id, citation)
+            return ProvenanceService(service.data).trace_answer_evidence(p, answer_id, citation)
         except KeyError:
             return _not_found('citation')

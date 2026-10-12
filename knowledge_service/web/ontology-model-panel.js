@@ -1164,7 +1164,6 @@
         expected_ontology_id: (M.S && M.S.ontologyId) || draft.base_ontology_id,
         validation_fingerprint: draft.validation_fingerprint,
         acknowledged_warning_codes: [],
-        actor: (typeof M.actorName === 'function' ? M.actorName() : 'canvas-editor'),
       }, 'POST');
       const updated = (result && result.draft) || draft;
       const batch = (result && result.batch) || {};
@@ -1228,7 +1227,6 @@
         validation_fingerprint: fingerprint,
         acknowledged_warning_codes: warnings,
         idempotency_key: key,
-        actor: (typeof M.actorName === 'function' ? M.actorName() : 'canvas-editor'),
         note,
       }, 'POST');
       publishKey = { sig: '', key: '' };   // 一把键只对应一次成功发布；下次发布用新的

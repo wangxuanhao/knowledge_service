@@ -59,6 +59,17 @@ const evidence=id=>({answer_id:id,retrieval_run_id:'run-'+id,channels:{chunk:1},
   citation:'E1',kind:'chunk',text:'x'.repeat(500),version:2,provenance_ref:'answer:'+id+'#E1',
   metadata:{secret:1},properties:{private:true},embedding:[1],document:'full'}]});
 
+test('graph refresh does not strand an independent QA stream',async()=>{
+  const s=setup();s.submit();await settle();
+  s.context.wb.epoch++;
+  s.emit('evidence',evidence('graph-refresh'));
+  s.emit('delta',{text:'answer'});
+  s.emit('done',{answer_id:'graph-refresh'});
+  s.streams.at(-1).close();await settle();await settle();
+  assert.equal(s.get('qa-transcript').children.at(-1).dataset.state,'done');
+  assert.equal(s.get('qa').disabled,false);
+});
+
 test('running evidence opens once; safe done decorations and bounded history restore',async()=>{
   const env=setup();env.submit();env.emit('evidence',evidence('a'));await settle();
   const turn=env.get('qa-transcript').querySelector('.qa-turn-assistant');
@@ -81,6 +92,28 @@ test('running evidence opens once; safe done decorations and bounded history res
   assert.equal(env.get('qa-transcript').querySelector('.qa-answer').querySelectorAll('button').length,1);
   assert.ok(env.get('qa-transcript').querySelector('.qa-evidence-panel').querySelector('.provenance-citation'));
   assert.equal(env.provenance[0].options.signal.aborted,true);
+});
+
+test('first three evidence entries and first frozen source are visible by default',async()=>{
+  const env=setup();env.submit();
+  const rows=Array.from({length:4},(_,index)=>({
+    citation:'E'+(index+1),kind:'chunk',text:'证据 '+(index+1),version:1,
+    provenance_ref:'answer:visible#E'+(index+1),source_status:'complete',
+    sources:[
+      {document_id:'d'+index,record_version_id:'v'+index,version:1,title:'制度 '+index,quote:'第一段原文',channel:'hybrid'},
+      {document_id:'d'+index,record_version_id:'v'+index+'b',version:2,title:'附件 '+index,quote:'第二段原文',channel:'graph'},
+    ],
+  }));
+  env.emit('evidence',{answer_id:'visible',retrieval_run_id:'r',channels:{chunk:4},evidence:rows});await settle();
+  const panel=env.get('qa-transcript').querySelector('.qa-evidence-panel');
+  assert.equal(panel.hidden,false);
+  assert.deepEqual(panel.querySelectorAll('.qa-evidence-item').map(node=>node.hidden),[false,false,false,true]);
+  assert.deepEqual(panel.querySelectorAll('.qa-source-item').slice(0,2).map(node=>node.hidden),[false,true]);
+  const sourceMore=panel.querySelector('.qa-source-more');
+  assert.match(sourceMore.textContent,/另有 1 个来源/);sourceMore.dispatch('click');
+  assert.equal(panel.querySelectorAll('.qa-source-item')[1].hidden,false);
+  panel.querySelector('.qa-evidence-more').dispatch('click');
+  assert.equal(panel.querySelectorAll('.qa-evidence-item')[3].hidden,false);
 });
 
 test('retry replaces failed assistant history and new identifiers without duplicating question',async()=>{

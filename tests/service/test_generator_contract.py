@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from knowledge_service.api import create_app
-from knowledge_service.api import ontology_discovery as discovery_api
+from knowledge_service.services import ontology_discovery_workflow as discovery_api
 from knowledge_service.integrations.embeddings import HashingEncoder
 from knowledge_service.services.discovery_vocabulary import discovery_source_fingerprint
 

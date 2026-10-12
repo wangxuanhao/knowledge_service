@@ -49,11 +49,16 @@ def main() -> int:
     # 拼出来是 `--url/api/projects` → `unknown url type`。所有 verify_*.py 都遵守这条约定。
     parser = argparse.ArgumentParser(description='D3 停用/影响面真机只读探针')
     parser.add_argument('--url', default='http://127.0.0.1:8100', help='服务地址')
+    parser.add_argument('--project', default=None, help='指定验证项目')
     args = parser.parse_args()
     base = args.url.rstrip('/')
 
     # 用现有项目（只读探测，不动它的数据）；没有就现建一个可丢弃的
     projects = (req(base, '/api/projects') or {}).get('projects') or []
+    if args.project:
+        projects = [item for item in projects if item['id'] == args.project]
+        if not projects:
+            raise ValueError('指定验证项目不存在')
     disposable = None
     if projects:
         pid = projects[0]['id']
@@ -138,7 +143,7 @@ def main() -> int:
                 ok(disabled_after is False, '④ 填了原因后按钮变为可用')
 
                 # 留一张截图给人工核对（停在"按钮可用"这一刻，没有提交）
-                shot = Path(r'C:\Users\admin\AppData\Local\hermes\profiles\workspace\cache\scratch\ui-7-retire.png')
+                shot = Path(tempfile.gettempdir()) / 'knowledge-service-verification' / 'ui-7-retire.png'
                 page.screenshot(path=str(shot))
                 print(f'  截图 -> {shot}')
 

@@ -1,6 +1,6 @@
 /* Project-scoped task summaries and explicit ontology relation review. */
 (() => {
-  const states={queued:'排队中',running:'处理中',completed:'已完成',failed:'失败',interrupted:'已中断'};
+  const states={queued:'排队中',running:'处理中',completed:'已完成',failed:'失败',interrupted:'已中断',cancelled:'已取消'};
   const kinds={ingest:'文档解析',neo4j_sync:'Neo4j 同步',legacy_import:'旧项目导入',ontology_publish:'本体发布',semantic_index:'语义索引'};
   const beijingTime=value=>{
     if(!value)return '—';
@@ -155,10 +155,23 @@
       }
       const title=j.result?.document?.metadata?.title||logs.find(l=>l.includes('文档开始 · '))?.split('文档开始 · ')[1]?.split(' · ')[0]||kinds[j.kind]||j.kind;
       const key=j.id+'-raw';
-      return `<article class="card task-summary"><div class="row"><h3>${esc(title)}</h3><b>${esc(states[j.status]||j.status)}</b></div><small>${esc(kinds[j.kind]||j.kind)} · ${esc(j.id)} · ${esc(beijingTime(j.created_at))}（北京时间） · 已运行 ${j.elapsed_seconds??'—'} 秒</small><p>${esc(j.failed_stage||j.stage||'等待前序任务完成')}</p>${j.error?`<p class="error">${esc(j.error)}</p>`:''}${j.result?.pending_reviews?`<p>本次产生 ${j.result.pending_reviews} 条知识候选。<button data-open-review class="secondary">前往知识审核 ↗</button></p>`:''}<progress max="100" value="${j.progress||0}"></progress><small>阶段进度 ${j.progress||0}%（非模型处理比例）</small><ul>${Object.entries(last).map(([group,line])=>`<li><b>${group}</b> · ${esc(displayLog(line))}</li>`).join('')}</ul>${j.heartbeat_at?`<small>最近心跳 ${esc(beijingTime(j.heartbeat_at))}（北京时间），仅表示线程仍在等待，不代表实际推进。</small>`:''}<details data-key="${key}" ${open.has(key)?'open':''}><summary>完整日志与执行位置（${logs.length} 条，含重复等待）</summary><pre>${esc(logs.map(displayLog).join('\n'))}${j.worker_stack?'\n\n线程位置\n'+esc(j.worker_stack.join('\n')):''}${j.failure_stack?'\n\n失败位置\n'+esc(j.failure_stack.join('\n')):''}</pre></details></article>`;
+      const action=['queued','running'].includes(j.status)?'cancel':
+        ['failed','interrupted'].includes(j.status)?'retry':j.status==='cancelled'?'resume':null;
+      const controls=action&&Object.hasOwn(j,'payload')?
+        `<div class="admin-only"><button type="button" class="secondary" data-job-action="${action}" data-job-id="${esc(j.id)}">${{cancel:'取消任务',retry:'重试任务',resume:'重新排队'}[action]}</button></div>`:'';
+      return `<article class="card task-summary"><div class="row"><h3>${esc(title)}</h3><b>${esc(states[j.status]||j.status)}</b></div><small>${esc(kinds[j.kind]||j.kind)} · ${esc(j.id)} · ${esc(beijingTime(j.created_at))}（北京时间） · 已运行 ${j.elapsed_seconds??'—'} 秒</small><p>${esc(j.failed_stage||j.stage||'等待前序任务完成')}</p>${j.error?`<p class="error">${esc(j.error)}</p>`:''}${j.result?.pending_reviews?`<p>本次产生 ${j.result.pending_reviews} 条知识候选。<button data-open-review class="secondary">前往知识审核 ↗</button></p>`:''}<progress max="100" value="${j.progress||0}"></progress><small>阶段进度 ${j.progress||0}%（非模型处理比例）</small><ul>${Object.entries(last).map(([group,line])=>`<li><b>${group}</b> · ${esc(displayLog(line))}</li>`).join('')}</ul>${controls}${j.heartbeat_at?`<small>最近心跳 ${esc(beijingTime(j.heartbeat_at))}（北京时间），仅表示线程仍在等待，不代表实际推进。</small>`:''}<details data-key="${key}" ${open.has(key)?'open':''}><summary>完整日志与执行位置（${logs.length} 条，含重复等待）</summary><pre>${esc(logs.map(displayLog).join('\n'))}${j.worker_stack?'\n\n线程位置\n'+esc(j.worker_stack.join('\n')):''}${j.failure_stack?'\n\n失败位置\n'+esc(j.failure_stack.join('\n')):''}</pre></details></article>`;
     }).join('')||'<p>当前项目暂无任务。</p>';
     $('tasks').querySelectorAll('details[data-key]').forEach(d=>{const pre=d.querySelector('pre'),state=scrollState[d.dataset.key];if(pre&&state)pre.scrollTop=state.atBottom?pre.scrollHeight:state.top;});
     $('tasks').querySelectorAll('[data-open-review]').forEach(button=>button.onclick=()=>reviewNav.click());
+    $('tasks').querySelectorAll('[data-job-action]').forEach(button=>button.onclick=async()=>{
+      button.disabled=true;
+      try{
+        const job=await api('/api/jobs/'+encodeURIComponent(button.dataset.jobId)+'/'+button.dataset.jobAction,{},'POST');
+        if(['queued','running'].includes(job.status)&&typeof wb!=='undefined')wb.jobs.set(job.id,job);
+        status(job.status==='cancelled'?'取消已受理，将在下一处理检查点停止；已提交知识保留。':'任务已重新排队。');
+        await jobList();
+      }catch(error){button.disabled=false;status(error.message,true);}
+    });
     return result.jobs;
   };
   bind('load-jobs',refresh);

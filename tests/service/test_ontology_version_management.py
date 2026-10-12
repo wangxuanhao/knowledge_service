@@ -225,7 +225,8 @@ def test_version_list_carries_number_note_actor_and_time(tmp_path):
     assert [item['version'] for item in listed] == [1, 2]
     newest = listed[-1]
     assert newest['note'] == '新增「部件」，补齐设备域的对象'
-    assert newest['actor'] == 'publisher'
+    assert newest['actor'].startswith('未启用认证 ')
+    assert 'user:system:auth-disabled' in newest['actor']
     assert newest['created_at']
     assert newest['id'] == published.json()['id']
     assert newest['draft_id'] == draft['id']
