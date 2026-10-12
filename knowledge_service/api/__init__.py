@@ -99,9 +99,9 @@ def _build_milvus_store(encoder=None):
         host = os.environ.get('KG_MILVUS_HOST', 'localhost')
         port = os.environ.get('KG_MILVUS_PORT', '19530')
         dim = _resolve_milvus_dim(encoder)
-        dimension_source = getattr(encoder, 'dimension_source', '') if encoder is not None else ''
+        identity = getattr(encoder, 'identity', '') if encoder is not None else ''
         store = MilvusStore(
-            host=host, port=port, dim=dim, encoder_identity=dimension_source)
+            host=host, port=port, dim=dim, encoder_identity=identity)
         store.connect()
         store.ensure_collection()
         return store

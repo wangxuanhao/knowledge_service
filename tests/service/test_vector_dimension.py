@@ -217,6 +217,18 @@ def test_mismatch_between_env_and_encoder_raises_before_milvus_connect(monkeypat
     assert connected is False
 
 
+def test_milvus_store_keeps_encoder_identity_not_dimension_source(monkeypatch):
+    monkeypatch.setenv('KG_VECTOR_BACKEND', 'milvus')
+    monkeypatch.setenv('KG_MILVUS_DIM', '256')
+    monkeypatch.setattr(MilvusStore, 'connect', lambda self: self)
+    monkeypatch.setattr(MilvusStore, 'ensure_collection', lambda self: self)
+
+    store = _build_milvus_store(HashingEncoder())
+
+    assert store.encoder_identity == HashingEncoder.identity
+    assert store.encoder_identity != HashingEncoder.dimension_source
+
+
 def test_unknown_encoder_dimension_requires_an_explicit_positive_dimension(monkeypatch):
 
     class Opaque:
