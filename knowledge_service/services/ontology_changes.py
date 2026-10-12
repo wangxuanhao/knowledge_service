@@ -104,10 +104,21 @@ def impact(service, p, proposal, ontology, candidate):
             'risk': 'high' if proposal['operation'] == 'update' and (base_impact['record_count'] or base_impact['constraint_count']) else 'controlled'}
 
 
-def revalidation(service, p, document, candidate, ontology, ontology_id, proposal):
-    """发布后重新校验关联候选：关系端点/属性值是否满足新本体约束。"""
+def revalidation_record_ids(candidate):
+    """Return the record ids whose current values affect candidate validation."""
+    if candidate.get('kind') == 'relation':
+        return tuple(dict.fromkeys(filter(None, (
+            candidate.get('subject_id'), candidate.get('object_id')))))
+    if candidate.get('kind') == 'attribute' and candidate.get('entity_id'):
+        return (candidate['entity_id'],)
+    return ()
+
+
+def revalidation_from_records(
+        records, document, candidate, ontology, ontology_id, proposal):
+    """Revalidate a candidate against an explicit immutable record snapshot."""
     status = 'ready_for_review'; issues = []
-    rows = {r['id']: r for r in service.repository.current_records(p)}
+    rows = {record['id']: record for record in records}
     try:
         target = str(ontology.resolve(proposal['uri'], {'class': ontology.classes,
                                                         'relation': ontology.relations,
@@ -131,3 +142,10 @@ def revalidation(service, p, document, candidate, ontology, ontology_id, proposa
         status = 'needs_revision'; issues = [str(exc)]
     return {'proposal_id': proposal['id'], 'status': status, 'ontology_id': ontology_id,
             'target_type': proposal['uri'], 'checked_at': utc_now(), 'issues': issues}
+
+
+def revalidation(service, p, document, candidate, ontology, ontology_id, proposal):
+    """Compatibility wrapper using the current repository record snapshot."""
+    return revalidation_from_records(
+        service.repository.current_records(p), document, candidate, ontology,
+        ontology_id, proposal)

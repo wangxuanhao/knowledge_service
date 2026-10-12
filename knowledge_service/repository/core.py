@@ -516,6 +516,31 @@ class Repository:
             raise ValueError('写入操作上下文无效')
         return row['recorded_at']
 
+    @staticmethod
+    def formal_write_context(operation):
+        """Return a JSON-safe snapshot of a reserved record operation."""
+        if operation is None:
+            return None
+        if not isinstance(operation, _RecordOperation):
+            raise ValueError('写入操作上下文无效')
+        return {
+            'token': operation.token,
+            'project_id': operation.project_id,
+            'recorded_at': operation.recorded_at,
+        }
+
+    @staticmethod
+    def _restore_formal_write_context(snapshot):
+        if snapshot is None:
+            return None
+        if (not isinstance(snapshot, dict)
+                or set(snapshot) != {'token', 'project_id', 'recorded_at'}
+                or not all(isinstance(snapshot[key], str) and snapshot[key]
+                           for key in snapshot)):
+            raise ValueError('写入操作上下文无效')
+        return _RecordOperation(
+            snapshot['token'], snapshot['project_id'], snapshot['recorded_at'])
+
     def _put(self, project_id, record, expected_version=None, recorded_at=None,
              operation=None):
         record = self._validate_record(record)
@@ -699,6 +724,29 @@ class Repository:
             self.get_project(project_id)
             return [self._put(project_id, record, expected_versions.get(record['id']),
                               operation=operation) for record in records]
+
+    def execute_formal_write(self, plan):
+        """Validate and atomically execute a frozen service-owned write plan."""
+        required = {
+            'operation', 'project_id', 'assertions', 'expected', 'policy',
+            'recorded_at', 'operation_context', 'expected_ontology_id',
+            'fingerprint',
+        }
+        if not isinstance(plan, dict):
+            raise ValueError('正式写入计划必须是对象')
+        if missing := required - set(plan):
+            raise ValueError(f'正式写入计划缺少字段：{sorted(missing)}')
+        calculated = self._publish_fingerprint({
+            key: value for key, value in plan.items() if key != 'fingerprint'})
+        if calculated != plan['fingerprint']:
+            raise ValueError('正式写入计划指纹无效')
+        from .formal_write_executor import FormalWriteExecutor
+        return FormalWriteExecutor(self).execute(
+            plan['operation'], plan['project_id'], plan['assertions'],
+            plan['expected'], plan['policy'], plan['expected_ontology_id'],
+            recorded_at=plan['recorded_at'],
+            operation_context=self._restore_formal_write_context(
+                plan['operation_context']))
 
     @staticmethod
     def _record(row, vectors='none'):
@@ -1506,6 +1554,22 @@ class Repository:
             return [record['id'] for record in saved]
 
         if effect_kind == 'candidate':
+            dependencies = plan.get('record_dependencies') or []
+            dependency_ids = {item.get('id') for item in dependencies}
+            current_dependencies = {
+                item['id']: item for item in self.current_records(
+                    project_id, vectors='none')
+                if item['id'] in dependency_ids}
+            for dependency in dependencies:
+                current = current_dependencies.get(dependency.get('id'))
+                version_id = current.get('version_id') if current else None
+                fingerprint = (
+                    self._publish_fingerprint(current) if current else None)
+                if (version_id != dependency.get('version_id')
+                        or fingerprint != dependency.get('fingerprint')):
+                    raise OntologyPublicationConflict(
+                        'stale_source',
+                        'candidate revalidation input changed')
             document = self.get_record(project_id, plan.get('document_id'))
             if document['version'] != plan.get('expected_document_version'):
                 raise OntologyPublicationConflict(

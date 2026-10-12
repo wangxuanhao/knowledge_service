@@ -26,6 +26,23 @@ def _system(tmp_path):
     return repo, service, project_id
 
 
+def test_formal_write_plan_rechecks_ontology_snapshot_before_execution(tmp_path):
+    repo, _, project_id = _system(tmp_path)
+    writer = FormalFactWriter(repo)
+    plan = writer.prepare('manual_write', project_id, [], {}, {'records': [{
+        'id': 'planned-person', 'kind': 'entity', 'type': 'Person',
+        'text': '计划中的人物',
+    }]})
+    current = repo.get_ontology(project_id)
+    repo.save_ontology(project_id, current['turtle'], current['summary'])
+
+    with pytest.raises(ValueError, match='本体.*变更'):
+        repo.execute_formal_write(plan)
+
+    with pytest.raises(KeyError):
+        repo.get_record(project_id, 'planned-person')
+
+
 def test_new_facts_reject_deprecated_terms_but_old_version_records_remain_valid(tmp_path):
     repo, service, project_id = _system(tmp_path)
     old = repo.get_ontology(project_id)

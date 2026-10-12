@@ -9,6 +9,47 @@ TTL='''@prefix : <https://test/> . @prefix owl: <http://www.w3.org/2002/07/owl#>
 :Person a owl:Class .'''
 
 
+def _approve_all_and_publish(client, base, proposal, ontology_id, key):
+    submitted = client.post(
+        base + f"/ontology-change-proposals/{proposal['id']}/decision",
+        json={
+            'action': 'approve', 'note': '业务负责人确认',
+            'expected_revision': proposal['revision'],
+            'expected_ontology_id': ontology_id,
+        }).json()['draft']
+    warnings = [
+        item['code'] for item in submitted['validation_report']['warnings']
+        if item.get('code')]
+    current = submitted
+    for operation in submitted['operations']:
+        response = client.post(
+            base + f"/ontology-drafts/{proposal['draft_id']}/decisions",
+            json={
+                'expected_revision': current['revision'],
+                'expected_ontology_id': ontology_id,
+                'validation_fingerprint': submitted['validation_fingerprint'],
+                'acknowledged_warning_codes': warnings,
+                'actor': 'candidate-reviewer',
+                'decisions': [{
+                    'operation_id': operation['id'],
+                    'operation_fingerprint': operation['fingerprint'],
+                    'action': 'approve', 'reason': '候选证据已核验',
+                }],
+            })
+        assert response.status_code == 200, response.text
+        current = response.json()
+    return client.post(
+        base + f"/ontology-drafts/{proposal['draft_id']}/publish",
+        json={
+            'expected_revision': current['revision'],
+            'expected_ontology_id': ontology_id,
+            'validation_fingerprint': current['validation_fingerprint'],
+            'acknowledged_warning_codes': warnings,
+            'idempotency_key': key, 'actor': 'publisher',
+            'note': '候选变更已核验，发布为版本',
+        })
+
+
 def test_candidate_proposal_creates_and_submits_governed_draft(tmp_path):
     app=create_app(tmp_path/'proposal.sqlite',HashingEncoder())
     with TestClient(app) as client:
@@ -101,6 +142,62 @@ def test_new_proposal_generates_unicode_iri_when_client_omits_it(tmp_path):
 
         assert created.status_code==201,created.text
         assert created.json()['uri']==f'urn:knowledge:ontology:{project}:规则文件'
+
+
+def test_publish_revalidates_relation_after_endpoint_changes(tmp_path):
+    ttl = TTL + '\n:Organization a owl:Class .'
+    app = create_app(tmp_path / 'proposal-revalidation.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={
+            'name': 'proposal-revalidation', 'use_default_ontology': False,
+        }).json()['id']
+        base = '/api/projects/' + project
+        ontology = client.post(base + '/ontologies', json={'turtle': ttl}).json()
+        created = client.post(base + '/records', json={'records': [
+            {'id': 'person-a', 'kind': 'entity',
+             'type': 'https://test/Person', 'text': '甲'},
+            {'id': 'person-b', 'kind': 'entity',
+             'type': 'https://test/Person', 'text': '乙'},
+        ]})
+        assert created.status_code == 201, created.text
+        candidate = {
+            'id': 'candidate-1', 'kind': 'relation', 'predicate': 'worksFor',
+            'subject_id': 'person-a', 'object_id': 'person-b',
+            'subject': '甲', 'object': '乙', 'status': 'pending',
+            'start_char': 0, 'end_char': 3, 'source_hash': 'hash',
+            'chunk_id': 'chunk', 'created_at': '2026-01-01T00:00:00Z',
+        }
+        document = app.state.service.repository.put_record(project, {
+            'id': 'doc', 'kind': 'document', 'text': '甲和乙',
+            'metadata': {
+                'title': '来源', 'status': 'ready',
+                'review_candidates': [candidate],
+            },
+        })
+        proposal = client.post(base + '/ontology-change-proposals', json={
+            'document_id': 'doc', 'candidate_id': 'candidate-1',
+            'operation': 'add', 'kind': 'relation',
+            'uri': 'https://test/worksFor', 'label': '任职于',
+            'domain': 'https://test/Person', 'range': 'https://test/Person',
+            'rationale': '原文出现稳定的新关系',
+            'expected_ontology_id': ontology['id'],
+            'expected_document_version': document['version'],
+        }).json()
+
+        endpoint = app.state.service.repository.get_record(project, 'person-b')
+        app.state.service.repository.put_record(project, {
+            'id': endpoint['id'], 'kind': endpoint['kind'],
+            'type': 'https://test/Organization', 'text': endpoint['text'],
+            'metadata': endpoint['metadata'],
+        }, expected_version=endpoint['version'])
+
+        published = _approve_all_and_publish(
+            client, base, proposal, ontology['id'], 'candidate-revalidation')
+
+        assert published.status_code == 200, published.text
+        stored = app.state.service.repository.get_artifact(
+            'ontology_change', proposal['id'])
+        assert stored['revalidation']['status'] == 'constraint_conflict'
 
 
 def test_stale_or_rejected_proposal_never_changes_ontology(tmp_path):

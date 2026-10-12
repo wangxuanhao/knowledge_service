@@ -208,6 +208,9 @@ class DraftReviewPublishMixin:
             }
 
         if effect_kind == 'candidate':
+            from .ontology_changes import (
+                revalidation_from_records, revalidation_record_ids)
+
             document = self.repository.get_record(
                 project_id, effects.get('document_id'))
             candidates = (document.get('metadata') or {}).get(
@@ -225,7 +228,21 @@ class DraftReviewPublishMixin:
                     'project_id', 'version', 'version_id', 'recorded_at',
                     'superseded_at',
                 }}))
-            result = json.loads(_canonical_json(effects.get('revalidation') or {}))
+            records = self.repository.current_records(project_id, vectors='none')
+            records_by_id = {record['id']: record for record in records}
+            consulted_ids = revalidation_record_ids(candidate)
+            dependencies = []
+            for record_id in consulted_ids:
+                record = records_by_id.get(record_id)
+                dependencies.append({
+                    'id': record_id,
+                    'version_id': record.get('version_id') if record else None,
+                    'fingerprint': _fingerprint(record) if record else None,
+                })
+            result = revalidation_from_records(
+                records, document, candidate, Ontology(turtle),
+                '__PUBLISHED_ONTOLOGY_ID__', proposal)
+            result = json.loads(_canonical_json(result))
             revised_candidate = next(
                 item for item in (revised.get('metadata') or {}).get(
                     'review_candidates') or []
@@ -238,6 +255,7 @@ class DraftReviewPublishMixin:
                 'expected_candidate_fingerprint': expected_candidate_fingerprint,
                 'proposal_id': proposal['id'],
                 'expected_proposal_fingerprint': _fingerprint(proposal),
+                'record_dependencies': dependencies,
                 'document': revised, 'proposal': proposal,
                 'revalidation': result,
             }

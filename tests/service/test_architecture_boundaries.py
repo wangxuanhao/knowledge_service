@@ -47,6 +47,10 @@ def _resolved_imports(path: Path):
             else:
                 imported = node.module or ""
             yield node.lineno, imported
+            for alias in node.names:
+                if alias.name != "*":
+                    yield node.lineno, ".".join(
+                        part for part in (imported, alias.name) if part)
 
 
 def _forbidden_imports(source_layers, target_layers):
@@ -99,3 +103,21 @@ def test_api_does_not_access_repository_attributes():
 def test_api_and_services_do_not_use_private_repository_primitives():
     _assert_no_violations(
         _attributes(("api", "services"), PRIVATE_REPOSITORY_ATTRIBUTES))
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "statement"),
+    [
+        ("api/example.py", "from knowledge_service import services"),
+        ("repository/example.py", "from .. import services"),
+    ],
+)
+def test_resolved_imports_expand_import_from_aliases(
+        tmp_path, monkeypatch, relative_path, statement):
+    package_root = tmp_path / "knowledge_service"
+    path = package_root / relative_path
+    path.parent.mkdir(parents=True)
+    path.write_text(statement, encoding="utf-8")
+    monkeypatch.setitem(_resolved_imports.__globals__, "PACKAGE_ROOT", package_root)
+
+    assert (1, "knowledge_service.services") in set(_resolved_imports(path))
