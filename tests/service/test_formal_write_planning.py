@@ -6,8 +6,10 @@ import pytest
 
 from knowledge_service.services.formal_writes import (
     FormalFactWriter, canonical_attribute_key)
-from knowledge_service.repository import OntologyPublicationConflict, Repository
-from knowledge_service.repository.connection import SerializationFailure
+from knowledge_service.repository import (
+    FormalWriteConflict, OntologyPublicationConflict, Repository)
+from knowledge_service.repository.connection import (
+    DeadlockDetected, SerializationFailure)
 
 
 ONTOLOGY = (
@@ -71,31 +73,59 @@ def test_serializable_repository_transaction_uses_postgres_isolation_level():
     assert repository._db.commits == 1
 
 
-def test_publication_transaction_maps_serialization_failure_to_stale_source():
+@pytest.mark.parametrize('database_error', [
+    SerializationFailure('serialization failed'),
+    DeadlockDetected('deadlock detected'),
+])
+def test_publication_transaction_maps_retryable_database_conflicts(
+        database_error):
     repository = object.__new__(Repository)
     repository._lock = RLock()
     repository._db = RecordingDatabase()
 
     with pytest.raises(OntologyPublicationConflict) as caught:
         with repository._publication_transaction():
-            raise SerializationFailure('predicate dependency changed')
+            raise database_error
 
     assert caught.value.code == 'stale_source'
+    assert caught.value.retryable is True
     assert repository._db.rollbacks == 1
 
 
-def test_formal_write_dependency_lock_covers_absent_predicates():
+@pytest.mark.parametrize('database_error', [
+    SerializationFailure('serialization failed'),
+    DeadlockDetected('deadlock detected'),
+])
+def test_formal_write_transaction_maps_retryable_database_conflicts(
+        database_error):
+    repository = object.__new__(Repository)
+    repository._lock = RLock()
+    repository._db = RecordingDatabase()
+
+    with pytest.raises(FormalWriteConflict) as caught:
+        with repository._formal_write_transaction():
+            raise database_error
+
+    assert caught.value.code == 'stale_snapshot'
+    assert caught.value.retryable is True
+    assert repository._db.rollbacks == 1
+
+
+def test_shared_project_write_lock_has_one_deterministic_order():
     repository = object.__new__(Repository)
     repository._db = RecordingDatabase()
 
-    repository._lock_formal_write_dependencies()
+    repository._lock_project_write_tables()
 
     statement = repository._db.statements[0]
     assert 'SHARE ROW EXCLUSIVE' in statement
-    assert 'record_versions' in statement
-    assert 'assertions' in statement
-    assert 'fact_keys' in statement
-    assert 'merge_operations' in statement
+    expected_order = [
+        'projects', 'ontologies', 'record_versions', 'assertions',
+        'assertion_events', 'record_version_assertions', 'fact_keys',
+        'resolution_reviews', 'merge_operations',
+    ]
+    assert [statement.index(table) for table in expected_order] == sorted(
+        statement.index(table) for table in expected_order)
 
 
 def _record(record_id, subject_id):
@@ -140,15 +170,12 @@ class ExecutionGuard:
         self.writes = 0
 
     @contextmanager
-    def _transaction(self, **_):
+    def _formal_write_transaction(self):
         yield
 
     def _formal_write_snapshot_data(self, project_id):
         assert project_id == self.snapshot['project_id']
         return copy.deepcopy(self.snapshot)
-
-    def _lock_formal_write_dependencies(self):
-        pass
 
 
 def test_tampered_action_is_rejected_before_repository_writes():

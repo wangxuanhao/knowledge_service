@@ -861,6 +861,68 @@ def test_atomic_publish_rechecks_source_inside_repository_transaction(tmp_path):
     assert repo._ontology_drafts.get(project_id, draft['id'])['status'] == 'pending'
 
 
+def test_publish_rejects_tampered_summary_before_writing(tmp_path):
+    repo, service, project_id, base = setup_service(tmp_path)
+    service.publisher = repo
+    _, draft, reviewed = _review_candidate_draft(
+        repo, service, project_id, base, 'tampered-summary-source')
+    prepared = service.publish_preflight(
+        project_id, draft['id'], reviewed['revision'], base['id'],
+        reviewed['validation_fingerprint'], [], 'tampered-summary', 'publisher',
+        '用例：摘要必须受请求指纹保护')
+    prepared['summary'] = {'forged': True}
+
+    with pytest.raises(ValueError, match='hash'):
+        repo.publish_ontology_draft(**prepared)
+
+    assert len(repo.list_ontologies(project_id)) == 1
+
+
+def test_publish_plan_hashes_service_owned_reuse_decision(tmp_path):
+    repo, service, project_id, base = setup_service(tmp_path)
+    service.publisher = repo
+    _, draft, reviewed = _review_candidate_draft(
+        repo, service, project_id, base, 'tampered-reuse-source')
+    prepared = service.publish_preflight(
+        project_id, draft['id'], reviewed['revision'], base['id'],
+        reviewed['validation_fingerprint'], [], 'tampered-reuse', 'publisher',
+        '用例：版本复用裁决必须由服务层计划并受指纹保护')
+
+    assert prepared['reuse_version'] is True
+    prepared['reuse_version'] = False
+    with pytest.raises(ValueError, match='hash'):
+        repo.publish_ontology_draft(**prepared)
+
+    assert len(repo.list_ontologies(project_id)) == 1
+
+
+def test_sync_job_uses_transaction_reloaded_draft(tmp_path):
+    repo, service, project_id, base = setup_service(tmp_path)
+    service.publisher = repo
+    _, draft, reviewed = _review_candidate_draft(
+        repo, service, project_id, base, 'reloaded-sync-source')
+    prepared = service.publish_preflight(
+        project_id, draft['id'], reviewed['revision'], base['id'],
+        reviewed['validation_fingerprint'], [], 'reloaded-sync', 'publisher',
+        '用例：同步任务使用事务内重载草案')
+    persisted_draft = repo._ontology_drafts.get(project_id, draft['id'])
+    forged_context = {'document_id': 'forged', 'candidate_id': 'forged'}
+    prepared['draft']['source_context'] = forged_context
+
+    ontology = repo.publish_ontology_draft(**prepared)
+
+    jobs = repo.list_artifacts('ontology_sync_job', project_id)
+    assert len(jobs) == 1
+    assert jobs[0]['fingerprint'] == repo._publish_fingerprint({
+        'ontology_id': ontology['id'],
+        'source_context': persisted_draft['source_context'],
+    })
+    assert jobs[0]['fingerprint'] != repo._publish_fingerprint({
+        'ontology_id': ontology['id'],
+        'source_context': forged_context,
+    })
+
+
 def test_serializable_publish_aborts_absent_dependency_insert_race(
         tmp_path, monkeypatch):
     repo, service, project_id, base = setup_service(tmp_path)

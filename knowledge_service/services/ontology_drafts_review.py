@@ -348,6 +348,7 @@ class DraftReviewPublishMixin:
             'decisions': [decisions[row['id']] for row in approved],
             'turtle': approved_turtle,
             'summary': Ontology(approved_turtle).summary(),
+            'reuse_version': is_annotation_only(approved),
             'acknowledged_warning_codes': sorted(
                 set(acknowledged_warning_codes or [])),
             'idempotency_key': idempotency_key, 'actor': actor,
@@ -361,7 +362,7 @@ class DraftReviewPublishMixin:
             idempotency_key, actor, note)
         request['request_hash'] = _fingerprint({
             key: value for key, value in request.items()
-            if key not in {'draft', 'validation_report', 'summary'}})
+            if key not in {'draft', 'validation_report'}})
         return request
 
     # ------------------------------------------- 审查计划 / 发布门禁（只读投影）

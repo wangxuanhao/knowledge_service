@@ -25,7 +25,7 @@ from ..utils.ingest_runs import merge_readiness, readiness
 from ..core.time import normalize_time, utc_now
 from ..utils.attributes import primitive_datatype
 from .snapshot_validation import validate_restore_snapshot
-from .connection import SerializationFailure
+from .connection import DeadlockDetected, SerializationFailure
 
 
 def _json(value):
@@ -71,9 +71,20 @@ class OntologyNotPublished(Exception):
 class OntologyPublicationConflict(ValueError):
     """Stable conflict raised by the atomic ontology publication boundary."""
 
+    def __init__(self, code, message, *, details=None, retryable=False):
+        self.code = code
+        self.details = dict(details or {})
+        self.retryable = retryable
+        super().__init__(message)
+
+
+class FormalWriteConflict(ValueError):
+    """Stable retryable conflict at the formal-write execution boundary."""
+
     def __init__(self, code, message, *, details=None):
         self.code = code
         self.details = dict(details or {})
+        self.retryable = True
         super().__init__(message)
 
 
@@ -339,15 +350,43 @@ class Repository:
             yield
 
     @contextmanager
-    def _publication_transaction(self):
-        """Run publication at SERIALIZABLE and map predicate races to stale source."""
+    def _serialized_project_write(self, conflict):
+        """Serialize project writes with one lock order and stable conflicts."""
         try:
             with self._transaction(serializable=True):
+                self._lock_project_write_tables()
                 yield
-        except SerializationFailure as exc:
-            raise OntologyPublicationConflict(
+        except (DeadlockDetected, SerializationFailure) as exc:
+            raise conflict() from exc
+
+    @contextmanager
+    def _publication_transaction(self):
+        """Run publication at SERIALIZABLE and map retryable DB conflicts."""
+        def conflict():
+            return OntologyPublicationConflict(
                 'stale_source',
-                'ontology publication dependencies changed concurrently') from exc
+                'ontology publication dependencies changed concurrently',
+                retryable=True)
+        with self._serialized_project_write(conflict):
+            yield
+
+    @contextmanager
+    def _formal_write_transaction(self):
+        """Run formal execution with stable retryable conflict semantics."""
+        def conflict():
+            return FormalWriteConflict(
+                'stale_snapshot',
+                '版本冲突：正式写入依赖发生并发变更')
+        with self._serialized_project_write(conflict):
+            yield
+
+    def _lock_project_write_tables(self):
+        """Acquire the one repository-wide project-write table lock order."""
+        self._db.execute(
+            '''LOCK TABLE projects,ontologies,record_versions,assertions,
+                          assertion_events,record_version_assertions,fact_keys,
+                          resolution_reviews,merge_operations
+               IN SHARE ROW EXCLUSIVE MODE''')
 
     @contextmanager
     def _allow_ontology_history_delete(self):
@@ -759,8 +798,7 @@ class Repository:
         if calculated != plan['fingerprint']:
             raise ValueError('正式写入计划指纹无效')
         from .formal_write_executor import FormalWriteExecutor
-        with self._transaction(serializable=True):
-            self._lock_formal_write_dependencies()
+        with self._formal_write_transaction():
             snapshot = self._formal_write_snapshot_data(plan['project_id'])
             if self._formal_write_dependencies(snapshot) != plan['dependencies']:
                 raise ValueError('版本冲突：正式写入依赖已变更')
@@ -776,22 +814,6 @@ class Repository:
                     plan['project_id'], operation_context)
             return FormalWriteExecutor(self).execute(
                 plan, operation_context=operation_context)
-
-    def _lock_formal_write_dependencies(self):
-        """Close the plan-CAS interval against row and predicate changes.
-
-        PostgreSQL SSI only aborts dangerous dependency cycles; a concurrent
-        insert matching a previously empty predicate is not, by itself, such a
-        cycle.  SHARE ROW EXCLUSIVE keeps all tables represented in the public
-        planning snapshot stable until the prepared actions commit.  The lock
-        remains writable by this transaction, so the executor can mechanically
-        apply the plan while other writers wait for the next serial order.
-        """
-        self._db.execute(
-            '''LOCK TABLE projects,record_versions,ontologies,assertions,
-                          assertion_events,record_version_assertions,fact_keys,
-                          resolution_reviews,merge_operations
-               IN SHARE ROW EXCLUSIVE MODE''')
 
     def _formal_write_dependencies(self, snapshot):
         return {
@@ -1718,14 +1740,13 @@ class Repository:
         raise OntologyPublicationConflict(
             'stale_source', 'unsupported ontology publication effect kind')
 
-    def _create_ontology_sync_job(self, prepared, ontology, completed_at,
-                                  record_ids=None):
-        draft = prepared['draft']
+    def _create_ontology_sync_job(self, project_id, draft, ontology,
+                                  completed_at, record_ids=None):
         if draft['source_kind'] not in {'discovery', 'candidate', 'import'}:
             return None
         job = {
             'id': f"ontology-sync:{ontology['id']}",
-            'project_id': prepared['project_id'], 'status': 'pending',
+            'project_id': project_id, 'status': 'pending',
             'ontology_id': ontology['id'], 'draft_id': draft['id'],
             'fingerprint': self._publish_fingerprint({
                 'ontology_id': ontology['id'],
@@ -1737,7 +1758,7 @@ class Repository:
         self._db.execute(
             '''INSERT INTO artifacts(id,kind,project_id,payload)
                VALUES (?,'ontology_sync_job',?,?)''',
-            (job['id'], prepared['project_id'], _json(job)))
+            (job['id'], project_id, _json(job)))
         return job
 
     def _run_ontology_sync_after_commit(self, job):
@@ -1777,15 +1798,18 @@ class Repository:
             'validation_report', 'operations', 'decisions', 'turtle', 'summary',
             'acknowledged_warning_codes', 'idempotency_key', 'actor',
             'request_hash', 'client_request_hash', 'note', 'source_effect_plan',
+            'reuse_version',
         }
         if missing := required - set(prepared):
             raise ValueError(f'ontology publish request is missing {sorted(missing)}')
         calculated = self._publish_fingerprint({
             key: value for key, value in prepared.items()
-            if key not in {'draft', 'validation_report', 'summary', 'request_hash'}
+            if key not in {'draft', 'validation_report', 'request_hash'}
         })
         if calculated != prepared['request_hash']:
             raise ValueError('ontology publish request hash is invalid')
+        if type(prepared['reuse_version']) is not bool:
+            raise ValueError('ontology publish reuse_version must be boolean')
 
         sync_job = None
         with self._publication_transaction():
@@ -1824,16 +1848,10 @@ class Repository:
                     'note': prepared.get('note') or '',
                 },
             }
-            # E1：纯标注变更复用当前版本号（图结构没动），但照样插一行留痕。
-            # 判据内联在这里，**不去问 services 层**：repository 依赖 services 是分层倒挂，
-            # 而规则只有一个条件（这批操作全是标注动作）。services 里那份
-            # （ontology_drafts.is_annotation_only）是服务层自用的，两处刻意保持同一条规则。
-            _ops = [op for op in (prepared.get('operations') or []) if isinstance(op, dict)]
-            annotation_only = bool(_ops) and all(
-                op.get('action') in {'add_annotation', 'remove_annotation'} for op in _ops)
             ontology = self._insert_ontology_version(
                 prepared['project_id'], prepared['turtle'], prepared['summary'],
-                metadata, created_at=completed_at, reuse_version=annotation_only)
+                metadata, created_at=completed_at,
+                reuse_version=prepared['reuse_version'])
             effect_record_ids = self._apply_ontology_source_effects(
                 prepared, draft, ontology)
             self._record_ontology_publish_provenance(
@@ -1853,7 +1871,8 @@ class Repository:
             self._ontology_drafts._complete_publish_request(
                 request['id'], ontology['id'], completed_at)
             sync_job = self._create_ontology_sync_job(
-                prepared, ontology, completed_at, effect_record_ids)
+                prepared['project_id'], draft, ontology, completed_at,
+                effect_record_ids)
         self._run_ontology_sync_after_commit(sync_job)
         return ontology
 

@@ -15,6 +15,7 @@ from .core import (
     Repository,
     OntologyNotPublished,
     OntologyPublicationConflict,
+    FormalWriteConflict,
     vector_blob,
     vector_array,
     _json,
@@ -24,6 +25,7 @@ from .discovery_run_store import DiscoveryRunConflict, DiscoveryRunStore
 
 __all__ = [
     'Repository', 'OntologyNotPublished', 'OntologyPublicationConflict',
+    'FormalWriteConflict',
     'vector_blob', 'vector_array', '_json',
     'OntologyDraftConflict', 'OntologyDraftStore',
     'DiscoveryRunConflict', 'DiscoveryRunStore',
