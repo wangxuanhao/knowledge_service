@@ -41,33 +41,49 @@ LOG = logging.getLogger('knowledge_service')
 
 
 def _resolve_milvus_dim(encoder=None):
-    """决定 Milvus 的向量维度：显式 KG_MILVUS_DIM 优先，否则问编码器。
+    """在连接 Milvus 前解析并校验向量维度。
 
-    以前这里写死 `int(os.environ.get('KG_MILVUS_DIM', '1024'))` —— 于是换个编码器
-    （例如 demo 哈希编码器是 256 维）就会出现"建表 1024、写入 256"的错配，
-    而报错发生在写入时、只说"维度不对"，看不出该改哪里。
-    现在维度只认一个来源：显式配置 > 编码器自己的 dimension > 1024 兜底，
-    并且**配置与编码器不一致时立刻告警并说清怎么改**（不是等写入时才炸）。
+    编码器能声明维度时，它是唯一事实来源；``KG_MILVUS_DIM`` 只做旧配置兼容
+    校验，不能覆盖编码器。远端等无法自描述的编码器则必须显式给出正整数，绝不
+    猜测 1024。
     """
     declared = (os.environ.get('KG_MILVUS_DIM') or '').strip()
-    from ..integrations.embeddings import encoder_dimension
-    encoder_dim = encoder_dimension(encoder)
+    from ..integrations.embeddings import (
+        EmbeddingDimensionConfigurationError,
+        encoder_dimension,
+    )
+    declared_dim = None
     if declared:
-        dim = int(declared)
-        if encoder_dim and dim != encoder_dim:
-            identity = getattr(encoder, 'identity', '') if encoder is not None else ''
-            LOG.warning(
-                'Milvus 维度配置不一致：KG_MILVUS_DIM=%s，而当前编码器 %s 产出 %s 维。'
-                '写入/检索都会失败（collection 维度建表时固定）。'
-                '两种改法：把 KG_MILVUS_DIM 改成 %s 并重建索引；'
-                '或换回对应维度的编码器（KG_EMBEDDING_BACKEND/模型）。',
-                dim, identity or '(未知编码器)', encoder_dim, encoder_dim)
-        return dim
-    if encoder_dim:
-        LOG.info('KG_MILVUS_DIM 未设置：按当前编码器产出的 %s 维建/用索引。', encoder_dim)
+        try:
+            declared_dim = int(declared)
+        except ValueError as exc:
+            raise EmbeddingDimensionConfigurationError(
+                'KG_MILVUS_DIM 必须是正整数。') from exc
+        if declared_dim <= 0:
+            raise EmbeddingDimensionConfigurationError('KG_MILVUS_DIM 必须是正整数。')
+
+    encoder_dim = encoder_dimension(encoder)
+    if encoder_dim is not None:
+        try:
+            encoder_dim = int(encoder_dim)
+        except (TypeError, ValueError) as exc:
+            raise EmbeddingDimensionConfigurationError(
+                '编码器声明的 embedding 维度必须是正整数。') from exc
+        if encoder_dim <= 0:
+            raise EmbeddingDimensionConfigurationError(
+                '编码器声明的 embedding 维度必须是正整数。')
+        if declared_dim is not None and declared_dim != encoder_dim:
+            raise EmbeddingDimensionConfigurationError(
+                f'KG_MILVUS_DIM={declared_dim} 与编码器维度 {encoder_dim} 不一致；'
+                f'请把 KG_MILVUS_DIM 改成 {encoder_dim}，并显式重建已有 collection。')
+        LOG.info('按编码器声明的 %s 维建/用 Milvus 索引。', encoder_dim)
         return encoder_dim
-    LOG.info('KG_MILVUS_DIM 未设置且编码器维度未知（如远端 embedding）：按默认 1024 维处理。')
-    return 1024
+    if declared_dim is not None:
+        LOG.info('编码器维度未知：按显式 KG_MILVUS_DIM=%s 建/用 Milvus 索引。', declared_dim)
+        return declared_dim
+    raise EmbeddingDimensionConfigurationError(
+        '无法确定 embedding 维度；远端编码器请设置正整数 KG_EMBEDDING_DIMENSION'
+        '（或为旧部署显式设置 KG_MILVUS_DIM），拒绝猜测 1024。')
 
 
 def _build_milvus_store(encoder=None):
@@ -78,19 +94,24 @@ def _build_milvus_store(encoder=None):
     if os.environ.get('KG_VECTOR_BACKEND', '') != 'milvus':
         return None
     try:
+        from ..integrations.embeddings import EmbeddingDimensionConfigurationError
         from ..integrations.milvus_store import MilvusStore
         host = os.environ.get('KG_MILVUS_HOST', 'localhost')
         port = os.environ.get('KG_MILVUS_PORT', '19530')
         dim = _resolve_milvus_dim(encoder)
-        identity = getattr(encoder, 'identity', '') if encoder is not None else ''
-        store = MilvusStore(host=host, port=port, dim=dim, encoder_identity=identity)
+        dimension_source = getattr(encoder, 'dimension_source', '') if encoder is not None else ''
+        store = MilvusStore(
+            host=host, port=port, dim=dim, encoder_identity=dimension_source)
         store.connect()
         store.ensure_collection()
         return store
+    except EmbeddingDimensionConfigurationError:
+        # 配置矛盾不是暂时性外部故障；静默降级会让部署看似成功、实际永不写 Milvus。
+        raise
     except Exception as exc:
         # 维度不一致时这里会打印带"怎么修"的说明（VectorDimensionMismatch），
         # 而不是一句无法下手的内部错误。
-        LOG.warning('Milvus 不可用，降级本地检索: %s', exc)
+        LOG.warning('Milvus 不可用，降级本地检索: %s', redact(exc))
         return None
 
 

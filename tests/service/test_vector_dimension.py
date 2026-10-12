@@ -1,28 +1,18 @@
-"""向量维度只能有一个来源（编码器），不一致必须给出可执行的补救。
-
-背景（用户反馈"维度的问题，看下改成1024啊"）：
-`KG_MILVUS_DIM` 与编码器产出维度错配时，旧行为是把 1024 写死在建表里，换成
-256 维的 demo 哈希编码器后，每一次写入都抛「向量维度 256 != 预期 1024」——
-既看不出原因（谁产的 256？），也看不出该改哪一边，更没法通过重建接口自愈。
-更隐蔽的是：测试套件一旦继承本机 `.env`（`KG_VECTOR_BACKEND=milvus` +
-`KG_MILVUS_DIM=1024`），也会复现同一串失败，看起来像"环境数据坏了"。
-
-本文件锁住四条：
-  1. 编码器自己声明维度（demo=256、本地模型读 config.json 的 hidden_size）；
-  2. 建表维度解析顺序：显式 KG_MILVUS_DIM > 编码器 > 1024 兜底；
-  3. 显式配置与编码器矛盾时，启动阶段就告警并写清怎么改；
-  4. 表维度与当前维度不一致时：报可执行的错，且 `/indexes/rebuild` 能删表重建自愈。
-"""
+"""Embedding 与 Milvus 必须在连接前约定同一个、可证明的向量维度。"""
 import json
+import sys
 import time
+import types
 from pathlib import Path
 
 import pytest
 
-from knowledge_service.api import _resolve_milvus_dim, create_app
+from knowledge_service.api import _build_milvus_store, _resolve_milvus_dim, create_app
+from knowledge_service.integrations import embeddings
 from knowledge_service.integrations.embeddings import (
     HashingEncoder,
     LocalEncoder,
+    RemoteEncoder,
     encoder_dimension,
 )
 from knowledge_service.integrations.milvus_store import (
@@ -34,7 +24,152 @@ ROOT = Path(__file__).resolve().parents[2]
 MODEL_DIR = ROOT / 'data' / 'model'
 
 
-# --------------------------------------------------------------------------- 维度唯一的出处
+# --------------------------------------------------------------------------- model metadata
+
+def _write_json(path: Path, payload) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding='utf-8')
+
+
+def _model_dir(tmp_path: Path, *, root=None, modules=None, module_configs=None) -> Path:
+    model = tmp_path / 'model'
+    model.mkdir()
+    if root is not None:
+        _write_json(model / 'config.json', root)
+    if modules is not None:
+        _write_json(model / 'modules.json', modules)
+    for relative_path, payload in (module_configs or {}).items():
+        _write_json(model / relative_path / 'config.json', payload)
+    return model
+
+
+def test_local_encoder_reads_current_pooling_layout_as_1024(tmp_path):
+    model = _model_dir(
+        tmp_path,
+        root={'hidden_size': 768},
+        modules=[
+            {'idx': 0, 'name': '0', 'path': '', 'type': 'sentence_transformers.models.Transformer'},
+            {'idx': 1, 'name': '1', 'path': '1_Pooling', 'type': 'sentence_transformers.models.Pooling'},
+        ],
+        module_configs={'1_Pooling': {'word_embedding_dimension': 1024}},
+    )
+
+    encoder = LocalEncoder(model)
+
+    assert encoder.dimension == 1024
+    assert encoder.dimension_source == '1_Pooling/config.json:word_embedding_dimension'
+
+
+def test_local_encoder_uses_the_last_declared_transform_dimension(tmp_path):
+    model = _model_dir(
+        tmp_path,
+        root={'sentence_embedding_dimension': 768},
+        modules=[
+            {'idx': 0, 'path': '1_Pooling', 'type': 'sentence_transformers.models.Pooling'},
+            {'idx': 1, 'path': '2_Dense', 'type': 'sentence_transformers.models.Dense'},
+            {'idx': 2, 'path': '3_Output', 'type': 'custom.Output'},
+        ],
+        module_configs={
+            '1_Pooling': {'word_embedding_dimension': 1024},
+            '2_Dense': {'out_features': 512},
+            '3_Output': {'output_dimension': 384},
+        },
+    )
+
+    encoder = LocalEncoder(model)
+
+    assert encoder.dimension == 384
+    assert encoder.dimension_source == '3_Output/config.json:output_dimension'
+
+
+@pytest.mark.parametrize('root', [
+    {'sentence_embedding_dimension': 1536},
+    {'hidden_size': 768},
+    {'d_model': 512},
+])
+def test_local_encoder_falls_back_to_supported_root_dimension_keys(tmp_path, root):
+    model = _model_dir(tmp_path, root=root)
+    key, expected = next(iter(root.items()))
+
+    encoder = LocalEncoder(model)
+
+    assert encoder.dimension == expected
+    assert encoder.dimension_source == f'config.json:{key}'
+
+
+def test_local_encoder_ignores_malformed_module_metadata_and_uses_root(tmp_path):
+    model = _model_dir(tmp_path, root={'hidden_size': 768})
+    (model / 'modules.json').write_text('{bad json', encoding='utf-8')
+
+    encoder = LocalEncoder(model)
+
+    assert encoder.dimension == 768
+    assert encoder.dimension_source == 'config.json:hidden_size'
+
+
+def test_local_encoder_reports_unknown_when_configs_are_missing_or_invalid(tmp_path):
+    model = _model_dir(tmp_path)
+    (model / 'config.json').write_text('{bad json', encoding='utf-8')
+
+    encoder = LocalEncoder(model)
+
+    assert encoder.dimension is None
+    assert encoder.dimension_source == 'unavailable'
+
+
+def test_local_encoder_rejects_loaded_model_dimension_that_disagrees_with_config(
+        tmp_path, monkeypatch):
+    model = _model_dir(tmp_path, root={'hidden_size': 1024})
+
+    class FakeSentenceTransformer:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def get_sentence_embedding_dimension(self):
+            return 768
+
+        def encode(self, *_args, **_kwargs):
+            raise AssertionError('dimension mismatch must fail before encoding')
+
+    monkeypatch.setitem(
+        sys.modules,
+        'sentence_transformers',
+        types.SimpleNamespace(SentenceTransformer=FakeSentenceTransformer),
+    )
+
+    encoder = LocalEncoder(model)
+    with pytest.raises(embeddings.EmbeddingDimensionMismatch,
+                       match='配置声明 1024 维.*实际模型 768 维'):
+        encoder.encode(['test'])
+    assert encoder.dimension == 1024, '加载权重后也不能悄悄改变建表所用的维度'
+
+
+def test_local_encoder_checks_encoded_vector_when_model_cannot_report_dimension(
+        tmp_path, monkeypatch):
+    model = _model_dir(tmp_path, root={'hidden_size': 4})
+
+    class FakeSentenceTransformer:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def get_sentence_embedding_dimension(self):
+            return None
+
+        def encode(self, *_args, **_kwargs):
+            return types.SimpleNamespace(tolist=lambda: [[0.0, 0.0, 0.0]])
+
+    monkeypatch.setitem(
+        sys.modules,
+        'sentence_transformers',
+        types.SimpleNamespace(SentenceTransformer=FakeSentenceTransformer),
+    )
+
+    with pytest.raises(embeddings.EmbeddingDimensionMismatch,
+                       match='配置声明 4 维.*实际向量 3 维'):
+        LocalEncoder(model).encode(['test'])
+
+
+# --------------------------------------------------------------------------- dimension resolution
 
 def test_demo_encoder_declares_the_dimension_it_actually_produces():
     """demo 编码器声明 256，就必须真的产出 256 维——声明和实现不能各说各话。"""
@@ -43,14 +178,14 @@ def test_demo_encoder_declares_the_dimension_it_actually_produces():
     assert len(encoder.encode(['商户退款'])[0]) == 256
 
 
-def test_local_encoder_reads_dimension_from_model_config():
-    """本地模型维度读 config.json 的 hidden_size（本机 xlm-roberta，1024 维）。"""
-    if not (MODEL_DIR / 'config.json').exists():
+def test_checked_in_model_dimension_comes_from_pooling_config_when_available():
+    """部署模型很大；只读 metadata，绝不能为这个断言加载权重。"""
+    if not (MODEL_DIR / 'modules.json').exists():
         pytest.skip('本机没有 data/model，跳过')
-    expected = json.loads((MODEL_DIR / 'config.json').read_text(encoding='utf-8')).get('hidden_size')
-    assert expected, 'config.json 里应有 hidden_size'
-    assert LocalEncoder(MODEL_DIR).dimension == expected
-    assert encoder_dimension(LocalEncoder(MODEL_DIR)) == expected
+    encoder = LocalEncoder(MODEL_DIR)
+    assert encoder.dimension == 1024
+    assert encoder.dimension_source == '1_Pooling/config.json:word_embedding_dimension'
+    assert encoder_dimension(encoder) == 1024
 
 
 def test_dimension_falls_back_to_the_encoder_when_not_declared(monkeypatch):
@@ -59,32 +194,61 @@ def test_dimension_falls_back_to_the_encoder_when_not_declared(monkeypatch):
     assert _resolve_milvus_dim(HashingEncoder()) == 256
 
 
-def test_explicit_env_still_wins(monkeypatch):
-    monkeypatch.setenv('KG_MILVUS_DIM', '512')
-    assert _resolve_milvus_dim(HashingEncoder()) == 512
+def test_matching_compatibility_dimension_is_accepted(monkeypatch):
+    monkeypatch.setenv('KG_MILVUS_DIM', '256')
+    assert _resolve_milvus_dim(HashingEncoder()) == 256
 
 
-def test_mismatch_between_env_and_encoder_is_loud_and_actionable(monkeypatch, caplog):
-    """显式配置与编码器矛盾：启动就告警，并写明"把哪一边改成多少"。"""
+def test_mismatch_between_env_and_encoder_raises_before_milvus_connect(monkeypatch):
     monkeypatch.setenv('KG_MILVUS_DIM', '1024')
-    with caplog.at_level('WARNING'):
-        assert _resolve_milvus_dim(HashingEncoder()) == 1024
-    text = caplog.text
-    assert 'KG_MILVUS_DIM=1024' in text
-    assert '256' in text
-    assert '改成 256' in text
+    monkeypatch.setenv('KG_VECTOR_BACKEND', 'milvus')
+    connected = False
+
+    def unexpected_connect(_self):
+        nonlocal connected
+        connected = True
+
+    monkeypatch.setattr(MilvusStore, 'connect', unexpected_connect)
+
+    with pytest.raises(
+            embeddings.EmbeddingDimensionConfigurationError,
+            match='KG_MILVUS_DIM=1024.*编码器维度 256'):
+        _build_milvus_store(HashingEncoder())
+    assert connected is False
 
 
-def test_unknown_encoder_dimension_uses_declared_or_default(monkeypatch):
-    """远端 embedding 调用前问不出维度：用显式声明，没有就 1024 兜底（不瞎猜也不崩）。"""
+def test_unknown_encoder_dimension_requires_an_explicit_positive_dimension(monkeypatch):
 
     class Opaque:
-        identity = 'openai:https://example.invalid:v1'
+        identity = 'contains-a-secret-url-that-must-not-be-logged'
 
     monkeypatch.delenv('KG_MILVUS_DIM', raising=False)
-    assert _resolve_milvus_dim(Opaque()) == 1024
+    with pytest.raises(
+            embeddings.EmbeddingDimensionConfigurationError,
+            match='无法确定 embedding 维度.*KG_EMBEDDING_DIMENSION') as excinfo:
+        _resolve_milvus_dim(Opaque())
+    assert Opaque.identity not in str(excinfo.value)
+
     monkeypatch.setenv('KG_MILVUS_DIM', '1536')
     assert _resolve_milvus_dim(Opaque()) == 1536
+
+
+def test_remote_encoder_without_embedding_dimension_is_not_guessed(monkeypatch):
+    monkeypatch.delenv('KG_EMBEDDING_DIMENSION', raising=False)
+    monkeypatch.delenv('KG_MILVUS_DIM', raising=False)
+
+    encoder = RemoteEncoder()
+
+    assert encoder.dimension is None
+    with pytest.raises(embeddings.EmbeddingDimensionConfigurationError):
+        _resolve_milvus_dim(encoder)
+
+
+@pytest.mark.parametrize('declared', ['0', '-1', 'not-a-number'])
+def test_milvus_dimension_must_be_a_positive_integer(monkeypatch, declared):
+    monkeypatch.setenv('KG_MILVUS_DIM', declared)
+    with pytest.raises(embeddings.EmbeddingDimensionConfigurationError, match='正整数'):
+        _resolve_milvus_dim(HashingEncoder())
 
 
 # --------------------------------------------------------------------------- 表结构不一致
@@ -147,6 +311,7 @@ def test_ensure_collection_raises_an_actionable_error_on_dimension_mismatch():
     assert '1024' in message and '256' in message
     assert 'indexes/rebuild' in message
     assert 'demo-character-bigrams-sha256-256-v1' in message
+    assert store._client.dropped == []
 
 
 def test_ensure_collection_can_recreate_the_table_at_the_new_dimension():
