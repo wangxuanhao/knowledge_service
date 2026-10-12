@@ -346,7 +346,8 @@ def test_upsert_dimension_mismatch_raises_the_same_error_type():
 
 # --------------------------------------------------------------------------- 重建接口自愈
 
-def test_rebuild_endpoint_recreates_the_vector_table_when_dimension_changes(tmp_path):
+def test_rebuild_endpoint_recreates_the_vector_table_when_dimension_changes(
+        tmp_path, monkeypatch):
     """端到端：表是旧的 1024 维、编码器是 256 维 → 重建接口删表重建并回报 recreated。
 
     这是本次反馈的正解：维度是建表时固定的，物理上改不了，所以"换了模型"
@@ -354,6 +355,9 @@ def test_rebuild_endpoint_recreates_the_vector_table_when_dimension_changes(tmp_
     """
     from fastapi.testclient import TestClient
 
+    # create_app 不应连接本机真实 Milvus；本用例在装配后注入受控替身。
+    monkeypatch.setenv('KG_VECTOR_BACKEND', '')
+    monkeypatch.setenv('KG_MILVUS_DIM', '256')
     store = MilvusStore(dim=256, encoder_identity=HashingEncoder.identity)
     store._client = FakeMilvusClient(dim=1024)          # 旧表：1024 维
     app = create_app(tmp_path / 'dim.sqlite', HashingEncoder())
@@ -378,10 +382,13 @@ def test_rebuild_endpoint_recreates_the_vector_table_when_dimension_changes(tmp_
         assert job['result']['embedding_model'] == HashingEncoder.identity
 
 
-def test_rebuild_endpoint_does_not_touch_the_table_when_dimension_matches(tmp_path):
+def test_rebuild_endpoint_does_not_touch_the_table_when_dimension_matches(
+        tmp_path, monkeypatch):
     """维度一致时不做任何删表动作：recreated=False，重建就只是重灌。"""
     from fastapi.testclient import TestClient
 
+    monkeypatch.setenv('KG_VECTOR_BACKEND', '')
+    monkeypatch.setenv('KG_MILVUS_DIM', '256')
     store = MilvusStore(dim=256, encoder_identity=HashingEncoder.identity)
     store._client = FakeMilvusClient(dim=256)
     app = create_app(tmp_path / 'dim-ok.sqlite', HashingEncoder())
