@@ -300,7 +300,7 @@ class DraftCommandMixin:
         }
 
     def command(self, project_id, draft_id, expected_revision, command):
-        with self.repository._transaction():
+        with self.repository.unit_of_work():
             draft = self.store.get(project_id, draft_id)
             self._assert_revision(draft, expected_revision)
             _status_guard(draft, EDITABLE_STATES, '修改本体',

@@ -692,7 +692,7 @@ class OntologyDrafts(
             source_kind = source
         title = _text(title, 'title')
         actor = _text(actor, 'actor')
-        with self.repository._transaction():
+        with self.repository.unit_of_work():
             latest = self._latest_id(project_id)
             if source_kind == REVERT_SOURCE:
                 # 「回到某一版」：允许（也**必须**）以历史版本为基线。校验那一版属于本项目，
@@ -735,7 +735,7 @@ class OntologyDrafts(
             title=None, actor=None, *, source_context=None, summary='', command,
             base_ontology_id=None):
         """Create a draft and its initial compiled operations as one write."""
-        with self.repository._transaction():
+        with self.repository.unit_of_work():
             draft = self.create(
                 project_id, base_ontology_id_or_none, source, title, actor,
                 source_context=source_context, summary=summary,
@@ -870,7 +870,7 @@ class OntologyDrafts(
         self._assert_revision(draft, expected_revision)
         _status_guard(draft, OPEN_STATES, '重新校验')
         self._check_current(project_id, draft, expected_revision)
-        with self.repository._transaction():
+        with self.repository.unit_of_work():
             draft = self.store.get(project_id, draft_id)
             self._assert_revision(draft, expected_revision)
             self._check_current(project_id, draft, expected_revision)
@@ -892,7 +892,7 @@ class OntologyDrafts(
         self._assert_revision(draft, expected_revision)
         _status_guard(draft, EDITABLE_STATES, '提交审核')
         self._check_current(project_id, draft, expected_revision)
-        with self.repository._transaction():
+        with self.repository.unit_of_work():
             draft = self.store.get(project_id, draft_id)
             self._assert_revision(draft, expected_revision)
             _status_guard(draft, EDITABLE_STATES, '提交审核')
@@ -1050,7 +1050,7 @@ class OntologyDrafts(
                 'supersedes_decision_id': (
                     latest_decisions.get(operation['id']) or {}).get('id'),
             })
-        with self.repository._transaction():
+        with self.repository.unit_of_work():
             locked = self.store.get(project_id, draft_id)
             self._assert_revision(locked, expected_revision)
             _status_guard(locked, REVIEW_STATES, '做审核决定',
@@ -1109,7 +1109,7 @@ class OntologyDrafts(
 
     def close(self, project_id, draft_id, expected_revision, actor, reason):
         actor, reason = _text(actor, 'actor'), _text(reason, 'reason')
-        with self.repository._transaction():
+        with self.repository.unit_of_work():
             draft = self.store.get(project_id, draft_id)
             self._assert_revision(draft, expected_revision)
             _status_guard(draft, EDITABLE_STATES, '驳回',
@@ -1290,7 +1290,7 @@ class OntologyDrafts(
         context = dict(draft.get('source_context') or {})
         if draft['source_kind'] in {'discovery', 'candidate'}:
             context = refreshed_context
-        with self.repository._transaction():
+        with self.repository.unit_of_work():
             locked = self.store.get(project_id, draft_id)
             self._assert_revision(locked, expected_revision)
             if self._latest_id(project_id) != expected_ontology_id:

@@ -344,6 +344,15 @@ class Repository:
                 self._db.rollback()
                 raise
 
+    def unit_of_work(self, *, serializable=False):
+        """Return the public service-owned transaction seam.
+
+        Store methods called inside it keep using repository savepoints, while
+        the outer unit controls the single commit/rollback decision.
+        """
+        from .unit_of_work import UnitOfWork
+        return UnitOfWork(self, serializable=serializable)
+
     @contextmanager
     def read_snapshot(self):
         """Keep a compound read on one connection and transaction snapshot."""
