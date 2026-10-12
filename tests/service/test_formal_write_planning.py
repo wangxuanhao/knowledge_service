@@ -9,7 +9,7 @@ from knowledge_service.services.formal_writes import (
 from knowledge_service.repository import (
     FormalWriteConflict, OntologyPublicationConflict, Repository)
 from knowledge_service.repository.connection import (
-    DeadlockDetected, SerializationFailure)
+    DeadlockDetected, LockNotAvailable, SerializationFailure)
 
 
 ONTOLOGY = (
@@ -76,6 +76,7 @@ def test_serializable_repository_transaction_uses_postgres_isolation_level():
 @pytest.mark.parametrize('database_error', [
     SerializationFailure('serialization failed'),
     DeadlockDetected('deadlock detected'),
+    LockNotAvailable('lock not available'),
 ])
 def test_publication_transaction_maps_retryable_database_conflicts(
         database_error):
@@ -95,6 +96,7 @@ def test_publication_transaction_maps_retryable_database_conflicts(
 @pytest.mark.parametrize('database_error', [
     SerializationFailure('serialization failed'),
     DeadlockDetected('deadlock detected'),
+    LockNotAvailable('lock not available'),
 ])
 def test_formal_write_transaction_maps_retryable_database_conflicts(
         database_error):

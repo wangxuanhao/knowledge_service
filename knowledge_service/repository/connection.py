@@ -120,6 +120,7 @@ DatabaseError = psycopg.Error
 IntegrityError = psycopg.errors.IntegrityError
 SerializationFailure = psycopg.errors.SerializationFailure
 DeadlockDetected = psycopg.errors.DeadlockDetected
+LockNotAvailable = psycopg.errors.LockNotAvailable
 
 
 class Row:
@@ -507,7 +508,7 @@ def reset_process_database() -> None:
 
 __all__ = [
     'Database', 'DatabaseError', 'DeadlockDetected', 'IntegrityError',
-    'SerializationFailure',
+    'LockNotAvailable', 'SerializationFailure',
     'Row', 'Session', 'UnitOfWorkClosed',
     'process_database', 'reset_process_database', 'resolve_dsn',
     'DEFAULT_POOL_MIN', 'DEFAULT_POOL_MAX', 'DEFAULT_ACQUIRE_TIMEOUT',

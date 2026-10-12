@@ -25,7 +25,8 @@ from ..utils.ingest_runs import merge_readiness, readiness
 from ..core.time import normalize_time, utc_now
 from ..utils.attributes import primitive_datatype
 from .snapshot_validation import validate_restore_snapshot
-from .connection import DeadlockDetected, SerializationFailure
+from .connection import (
+    DeadlockDetected, LockNotAvailable, SerializationFailure)
 
 
 def _json(value):
@@ -356,7 +357,8 @@ class Repository:
             with self._transaction(serializable=True):
                 self._lock_project_write_tables()
                 yield
-        except (DeadlockDetected, SerializationFailure) as exc:
+        except (DeadlockDetected, LockNotAvailable,
+                SerializationFailure) as exc:
             raise conflict() from exc
 
     @contextmanager
