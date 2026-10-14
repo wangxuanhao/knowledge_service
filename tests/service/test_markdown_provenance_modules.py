@@ -68,3 +68,43 @@ def test_table_chunks_repeat_header_and_keep_rows():
     assert all(c['text'].startswith('A | B\n') for c in chunks)
     assert [line for c in chunks for line in c['metadata']['table_source_lines']]==[5,6,7]
     assert all(c['source_spans'][0]['block_id']==parsed['blocks'][1]['block_id'] for c in chunks)
+
+def _manifest_package(documents):
+    import json
+    stream=io.BytesIO()
+    with zipfile.ZipFile(stream,'w') as archive:
+        archive.writestr('rule.md','# Rule')
+        archive.writestr('manifest.json',json.dumps({'documents':documents}))
+    return stream.getvalue()
+
+
+def test_manifest_duplicates_rejected_before_any_document_parsing():
+    import pytest
+    from unittest.mock import patch
+    from knowledge_service.integrations import markdown_package
+    for duplicate in ('rule.md','./rule.md'):
+        with patch.object(markdown_package,'parse_markdown') as parser:
+            with pytest.raises(ValueError,match='Duplicate manifest document path'):
+                MarkdownPackageReader().read(_manifest_package(['rule.md',duplicate]))
+            parser.assert_not_called()
+
+
+def test_manifest_entry_schema_preflight_before_parsing():
+    import pytest
+    from unittest.mock import patch
+    from knowledge_service.integrations import markdown_package
+    bad_entries=[None,1,[],{}, {'path':None},{'path':''},{'path':' '},{'path':'.'},{'path':'./'},
+                 {'path':'rule.md','metadata':[]},{'path':'rule.md','metadata':None},
+                 {'path':'rule.md','title':None},{'path':'rule.md','title':1},
+                 {'path':'rule.md','title':''},{'path':'rule.md','title':'x'*301}]
+    for bad in bad_entries:
+        with patch.object(markdown_package,'parse_markdown') as parser:
+            with pytest.raises(ValueError): MarkdownPackageReader().read(_manifest_package(['rule.md',bad]))
+            parser.assert_not_called()
+
+
+def test_manifest_metadata_and_title_preserved():
+    result=MarkdownPackageReader().read(_manifest_package([{'path':'./rule.md','title':'Rule title','metadata':{'rule_id':'r1'}}]))
+    assert result['documents'][0]['path']=='rule.md'
+    assert result['documents'][0]['title']=='Rule title'
+    assert result['documents'][0]['metadata']=={'rule_id':'r1'}

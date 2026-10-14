@@ -10,9 +10,11 @@ from .markdown_parser import parse_markdown
 
 
 def safe_path(name):
+    if not isinstance(name,str) or not name.strip():
+        raise ValueError('Package path must be a nonempty string')
     name = name.replace('\\', '/')
     path = PurePosixPath(name)
-    if path.is_absolute() or '..' in path.parts or ':' in name or '\x00' in name:
+    if str(path)=='.' or path.is_absolute() or '..' in path.parts or ':' in name or '\x00' in name:
         raise ValueError('Unsafe package path')
     return str(path)
 
@@ -38,15 +40,28 @@ class MarkdownPackageReader:
                     raise ValueError('Package compression ratio limit exceeded')
                 files[path] = archive.read(info)
         manifest = json.loads(files.get('manifest.json', b'{}'))
-        entries = manifest.get('documents')
-        if entries is None:
+        if not isinstance(manifest,dict): raise ValueError('manifest must be an object')
+        if 'documents' not in manifest:
             entries = [{'path': p} for p in sorted(files) if p.lower().endswith('.md')]
+        else:
+            entries=manifest['documents']
         if not isinstance(entries, list): raise ValueError('manifest.documents must be a list')
-        documents = []
+        validated=[];paths=set()
         for entry in entries:
+            if not isinstance(entry,(str,dict)):
+                raise ValueError('Manifest document entry must be a string or object')
             entry = {'path': entry} if isinstance(entry, str) else entry
-            path = safe_path(entry['path'])
+            path = safe_path(entry.get('path'))
+            if path in paths: raise ValueError('Duplicate manifest document path')
+            paths.add(path)
+            if not isinstance(entry.get('metadata',{}),dict):
+                raise ValueError('Manifest document metadata must be an object')
+            if 'title' in entry and (not isinstance(entry['title'],str) or not entry['title'].strip() or len(entry['title'])>300):
+                raise ValueError('Manifest document title must be a nonempty string of at most 300 characters')
             if path not in files or not path.lower().endswith('.md'): raise ValueError('Manifest Markdown is missing')
+            validated.append((path,entry))
+        documents = []
+        for path,entry in validated:
             text = files[path].decode('utf-8-sig')
             parsed = parse_markdown(text)
             assets, warnings = [], []
