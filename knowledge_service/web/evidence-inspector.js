@@ -78,6 +78,10 @@
     }catch(error){$('create-relation-message').textContent='保存失败：'+error.message;$('create-relation-message').classList.add('error');button.disabled=false;}
   };
   function openSource(doc){
+    const location=doc.source_location;
+    if(location?.document_version_id&&window.SourceReader){
+      window.SourceReader.open({projectId:current,versionId:location.document_version_id,location});return;
+    }
     $('source-evidence-title').textContent=doc.title;
     $('source-evidence-note').textContent=`来源版本 ${doc.version} · ${doc.reason}${doc.source_content==='segments_only'?' · 旧数据只保存了片段，并非完整原文':''}`;
     const text=$('source-evidence-text');text.replaceChildren(document.createTextNode(doc.before||''));
@@ -149,7 +153,7 @@
     try{
       const result=await api(endpoint('/records/'+encodeURIComponent(row.id)+'/evidence'),scope());
       if(ticket!==serial||current!==p||stamp!==JSON.stringify(scope())||!$('inspector-source-list'))return;
-      $('inspector-source-list').innerHTML=result.documents.length?result.documents.map((doc,i)=>`<article class="source-evidence-card"><strong>${esc(doc.title)}</strong><small>来源 v${doc.version} · ${esc({exact:'精确证据位置',recovered_in_chunk:'历史切片内恢复定位',chunk:'仅保存切片级位置',offset:'记录偏移定位',passage:'证据文本匹配',text:'名称 / 内容匹配',unlocated:'历史来源无法定位'}[doc.mode])}</small><blockquote>${esc(doc.preview||'原文内容未保存')}</blockquote><button data-source-evidence="${i}">${doc.highlight?'查看原文并定位 ↗':'查看来源文档 ↗'}</button></article>`).join(''):`<p class="evidence-empty">${esc(result.message)}</p>`;
+      $('inspector-source-list').innerHTML=result.documents.length?result.documents.map((doc,i)=>`<article class="source-evidence-card"><strong>${esc(doc.title)}</strong><small>来源 v${doc.version} · ${esc({exact:'精确证据位置',recovered_in_chunk:'历史切片内恢复定位',chunk:'仅保存切片级位置',offset:'记录偏移定位',passage:'证据文本匹配',text:'名称 / 内容匹配',unlocated:'历史来源无法定位'}[doc.mode])}</small><blockquote>${esc(doc.preview||'原文内容未保存')}</blockquote><button data-source-evidence="${i}">${doc.source_location?.document_version_id?'在原文中打开 ↗':doc.highlight?'查看原文并定位 ↗':'查看来源文档 ↗'}</button></article>`).join(''):`<p class="evidence-empty">${esc(result.message)}</p>`;
       host.querySelectorAll('[data-source-evidence]').forEach(b=>b.onclick=()=>openSource(result.documents[Number(b.dataset.sourceEvidence)]));
     }catch(e){if(ticket===serial&&current===p&&$('inspector-source-list'))$('inspector-source-list').textContent='来源读取失败：'+e.message;}
   };

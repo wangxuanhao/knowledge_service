@@ -1,5 +1,6 @@
 """Project/version constrained source metadata persistence on Repository's connection."""
 import json
+from contextlib import contextmanager
 from uuid import uuid4
 from pathlib import PurePosixPath
 from ..core.time import utc_now
@@ -12,6 +13,12 @@ def encode(value):
 class SourceStore:
     def __init__(self, repo):
         self.repo = repo
+
+    @contextmanager
+    def publication_guard(self):
+        with self.repo.unit_of_work():
+            self.repo._db.execute('SELECT pg_advisory_xact_lock(hashtextextended(?,0))', ('source-object-gc',))
+            yield
 
     def _insert(self, table, value, conflict=''):
         fields = ','.join(value)

@@ -122,9 +122,9 @@ class HashingEncoder:
 class LocalEncoder:
     semantic = True
 
-    def __init__(self, path):
+    def __init__(self, path, *, identity=None):
         self.path = str(Path(path).resolve())
-        self.identity = f'sentence-transformers:{self.path}:normalized-v1'
+        self.identity = identity or f'sentence-transformers:{self.path}:normalized-v1'
         self._model = None
         self._lock = threading.RLock()
         self.dimension, self.dimension_source = _local_model_dimension_info(self.path)
@@ -207,8 +207,12 @@ class RemoteEncoder:
 def configured_encoder():
     backend = os.environ.get('KG_EMBEDDING_BACKEND', 'local')
     if backend == 'local':
-        default = Path(__file__).resolve().parents[2] / 'data' / 'model'
-        return LocalEncoder(os.environ.get('KG_EMBEDDING_PATH', str(default)))
+        root = Path(__file__).resolve().parents[2] / 'data' / 'model'
+        default = root / 'embedding' / 'bge-m3'
+        if not default.is_dir():
+            default = root
+        return LocalEncoder(os.environ.get('KG_EMBEDDING_PATH', str(default)),
+                            identity=os.environ.get('KG_EMBEDDING_IDENTITY') or None)
     if backend == 'openai':
         return RemoteEncoder()
     if backend == 'demo':

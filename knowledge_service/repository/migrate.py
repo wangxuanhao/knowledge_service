@@ -137,6 +137,8 @@ def apply_migrations(dsn: str, *, directory: Optional[Path] = None,
     with psycopg.connect(dsn, autocommit=True) as conn:
         with conn.cursor() as cur:
             cur.execute('SELECT pg_advisory_lock(%s)', (ADVISORY_LOCK_KEY,))
+            cur.execute("SELECT set_config('knowledge_service.app_role', %s, false)",
+                        (os.environ.get('POSTGRES_APP_USER', 'knowledge_app'),))
         try:
             _ensure_bookkeeping(conn)
             applied = _applied(conn)

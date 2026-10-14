@@ -312,5 +312,22 @@
   render();
 
   // ---- 对外接口 ------------------------------------------------------------
-  window.IngestResults = { watch, open, close };
+  async function showBatchItem(item, context = {}) {
+    const key = 'batch-item:' + item.id;
+    const d = {title: item.original_name, projectId: context.projectId, mode: context.mode,
+      status: 'completed', progress: 100, stage: '正在读取结果…', error: '', asserts: null, resultError: false};
+    jobs.set(key, d);open();render();
+    try {
+      const documentId = item.document_id || item.result?.document?.id || item.result?.document_id;
+      if (!d.projectId || !documentId) throw Error('批次结果缺少项目或文档 ID');
+      const result = await api('/api/projects/' + encodeURIComponent(d.projectId)
+        + '/assertions?document_id=' + encodeURIComponent(documentId), undefined, 'GET');
+      d.asserts = Array.isArray(result.assertions) ? result.assertions : [];
+      d.stage = '已完成';
+    } catch (error) {
+      d.resultError = true;d.stage = '结果读取失败：' + error.message;
+    }
+    render();
+  }
+  window.IngestResults = { watch, open, close, showBatchItem };
 })();

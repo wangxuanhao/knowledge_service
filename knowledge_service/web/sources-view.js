@@ -128,6 +128,11 @@
         title.textContent=d.metadata?.title||d.metadata?.source_file||d.id;
         const state=buildState(d);
         renderMeta(d,state);
+        if(d.metadata?.source_document_version_id&&window.SourceReader){
+          const open=document.createElement('button');open.type='button';open.className='secondary';open.textContent='在原文中打开';
+          open.onclick=()=>window.SourceReader.open({projectId:current,versionId:d.metadata.source_document_version_id});
+          $('source-meta').append(open);
+        }
         body.textContent=d.text||'旧项目未保存完整原文；可查片段与原始导入记录。';body.scrollTop=0;
         buttons.forEach(b=>b.setAttribute('aria-current','false'));
         button.setAttribute('aria-current','true');

@@ -1,16 +1,23 @@
 """Fixed-version source application service; all reads require project ownership."""
 import mimetypes
+import os
 import html
 import re
 from uuid import uuid4
 from urllib.parse import quote
 from ..integrations.markdown_parser import parse_markdown
 from ..integrations.markdown_package import MarkdownPackageReader
+from ..integrations.source_object_store import SourceObjectStore
+from ..integrations.image_ocr import OCRError as SourceOCRError
 from ..repository.source_store import SourceStore
 from .image_ocr import ImageOCRService
 
 
 class SourceDocumentService:
+    @classmethod
+    def for_service(cls, service):
+        return cls(service.repository, SourceObjectStore(os.getenv('KG_SOURCE_OBJECT_ROOT', 'data/sources')))
+
     def __init__(self, repo, object_store, ocr_adapter=None):
         self.store=SourceStore(repo)
         self.object_store=object_store
@@ -18,8 +25,7 @@ class SourceDocumentService:
 
     def persist(self,project_id,document_id,data,original_name,text=None,assets=None):
         # GC and source publication share a DB lock, including byte publication.
-        with self.store.repo.unit_of_work():
-            self.store.repo._db.execute('SELECT pg_advisory_xact_lock(hashtextextended(?,0))',('source-object-gc',))
+        with self.store.publication_guard():
             return self._persist(project_id,document_id,data,original_name,text,assets)
 
     def _persist(self,project_id,document_id,data,original_name,text=None,assets=None):

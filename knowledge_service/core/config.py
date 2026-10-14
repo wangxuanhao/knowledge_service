@@ -61,7 +61,8 @@ def load_environment(root=None, include_admin=False, keys=None):
     else:
         allowed = POSTGRES_APP_KEYS | (POSTGRES_ADMIN_KEYS if include_admin else frozenset())
         def accepted(key):
-            return key.startswith('KG_') or key in allowed
+            return (key.startswith(('KG_', 'KNOWLEDGE_INGEST_', 'KNOWLEDGE_OCR_'))
+                    or key == 'KNOWLEDGE_LLM_CONCURRENCY' or key in allowed)
     for key, value in dotenv_values(local, interpolate=False).items():
         if not value or key in os.environ:
             continue

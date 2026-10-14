@@ -233,7 +233,7 @@ function watch(job){wb.jobs.set(job.id,job);jobList();}
 bind('load-jobs',jobList);
 setInterval(async()=>{if(!wb.jobs.size)return;try{const jobs=await jobList();for(const j of jobs){if(wb.jobs.has(j.id)&&!['queued','running'].includes(j.status)){wb.jobs.delete(j.id);if(j.status==='completed'){await projects();if(j.result?.project){$('project').value=j.result.project.id;$('project').onchange();status('导入完成：'+j.result.project.name+'。进入图谱页查看。');}}}}}catch(e){status(e.message,true);}},3000);
 function readParseSettings(){
-  const settings={chunk_strategy:$('parse-strategy').value,chunk_size:Number($('parse-size').value),chunk_overlap:Number($('parse-overlap').value),extract_attributes:$('parse-attributes').checked,relation_constraint_mode:$('parse-relation-constraints').value,resolve_entities:$('parse-resolve').checked,auto_merge:$('parse-merge').checked,merge_threshold:Number($('parse-threshold').value)};
+  const settings={chunk_strategy:$('parse-strategy').value,chunk_size:Number($('parse-size').value),chunk_overlap:Number($('parse-overlap').value),extract_attributes:$('extraction-mode').value!=='documents'&&$('parse-attributes').checked,relation_constraint_mode:$('parse-relation-constraints').value,resolve_entities:$('parse-resolve').checked,auto_merge:$('parse-merge').checked,merge_threshold:Number($('parse-threshold').value)};
   if(!Number.isInteger(settings.chunk_size)||settings.chunk_size<100||settings.chunk_size>10000)throw Error('最大字符数需为 100–10000 的整数');
   if(!Number.isInteger(settings.chunk_overlap)||settings.chunk_overlap<0||settings.chunk_overlap>2000||settings.chunk_overlap>=settings.chunk_size)throw Error('重叠字符数需为 0–2000 的整数，且小于最大字符数');
   if(settings.auto_merge&&!settings.resolve_entities)throw Error('请先开启实体消歧，再开启语义合并');
@@ -370,6 +370,13 @@ bind('ingest',async()=>{
   const project=controlsProject(),mode=document.getElementById('extraction-mode').value,extract=mode!=='documents',settings=readParseSettings();
   const documents=await readDocumentBatch(),results=$('doc-submit-results');
   results.textContent='';let accepted=0,failed=0;
+  if(documents.every(doc=>doc.file)&&window.IngestBatches){
+    const requested=$('ingest-concurrency')?.value||'auto';
+    const batch=await window.IngestBatches.submit(project,documents,{...settings,extract,extraction_mode:mode,
+      requested_concurrency:requested==='auto'?'auto':Number(requested)});
+    results.textContent='文件上传完成，批次已开始。可在下方查看进度、暂停或处理失败文件。';
+    status('批次已开始 · '+batch.id);return;
+  }
   for(const document of documents){
     const entry=window.document.createElement('p');results.append(entry);
     entry.textContent=document.title+' · 正在提交…';

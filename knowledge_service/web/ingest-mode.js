@@ -1,13 +1,14 @@
 /* File uploads stay as binary File objects; parsing belongs to the server. */
 (() => {
-  const ALLOWED=/\.(txt|md|pdf|docx|html|htm)$/i;
-  const MAX_FILE=25_000_000,MAX_FILES=20,MAX_BATCH=100_000_000;
+  // Conservative fallback permits selection; submission requires capabilities.
+  let limits={max_file_bytes:25_000_000,max_batch_items:20,max_batch_bytes:100_000_000,
+    supported_extensions:['.txt','.md','.pdf','.docx','.html','.htm']};
   const file=document.getElementById('doc-file'),text=document.getElementById('doc-text');
   const modes=[...document.querySelectorAll('input[name="document-input-mode"]')];
   const rows=[];
   const mode=()=>modes.find(input=>input.checked)?.value||'file';
   const key=f=>[f.name,f.size||0,f.lastModified||0].join(':');
-  const size=value=>value<1024?value+' B':value<1024*1024?(value/1024).toFixed(1)+' KB':(value/1024/1024).toFixed(1)+' MB';
+  const size=value=>value<1000?value+' B':value<1_000_000?(value/1000).toFixed(1)+' KB':(value/1_000_000)+' MB';
   const icon=name=>/\.pdf$/i.test(name)?'PDF':/\.docx$/i.test(name)?'DOCX':/\.html?$/i.test(name)?'HTML':/\.md$/i.test(name)?'MD':'TXT';
   const statusText=item=>({ready:'待提交',uploading:'正在上传',queued:'已进入队列',failed:'提交失败'}[item.status]||item.status);
 
@@ -39,19 +40,31 @@
     add(files){
       const incoming=[...files];
       for(const value of incoming){
-        if(!ALLOWED.test(value.name||''))throw Error(value.name+'：仅支持 TXT、Markdown、PDF、DOCX、HTML 文件。');
-        if((value.size||0)>MAX_FILE)throw Error(value.name+'：单个文件不能超过 25 MB。');
+        const extension='.'+(value.name||'').split('.').pop().toLowerCase();
+        if(!limits.supported_extensions.map(x=>x.startsWith('.')?x:'.'+x).includes(extension))throw Error(value.name+'：不支持该文件格式。');
+        if((value.size||0)>limits.max_file_bytes)throw Error(value.name+'：单个文件不能超过 '+size(limits.max_file_bytes)+'。');
       }
       const known=new Set(rows.map(item=>key(item.file)));
       const unique=incoming.filter(value=>!known.has(key(value))&&(known.add(key(value)),true));
-      if(rows.length+unique.length>MAX_FILES)throw Error('单次最多选择 20 个文件。');
+      if(rows.length+unique.length>limits.max_batch_items)throw Error('单次最多选择 '+limits.max_batch_items+' 个文件。');
       const total=[...rows.map(item=>item.file),...unique].reduce((sum,value)=>sum+(value.size||0),0);
-      if(total>MAX_BATCH)throw Error('单批文件总大小不能超过 100 MB。');
+      if(total>limits.max_batch_bytes)throw Error('单批文件总大小不能超过 '+size(limits.max_batch_bytes)+'。');
       unique.forEach(value=>rows.push({file:value,status:'ready',detail:''}));
       render();return queue.items();
     },
     remove(value){const at=rows.findIndex(item=>item.file===value);if(at>=0)rows.splice(at,1);render();},
-    clear(){rows.splice(0);if(file)file.value='';render();},
+    clear(){rows.splice(0);queue.batchSession=null;if(file)file.value='';render();},
+    setCapabilities(value){
+      limits=value;
+      const extensions=value.supported_extensions.map(x=>x.startsWith('.')?x:'.'+x);
+      if(value.markdown_package&&!extensions.includes('.zip'))extensions.push('.zip');
+      limits={...value,supported_extensions:extensions};
+      if(file)file.accept=extensions.join(',');
+      const help=document.getElementById('doc-upload-limits');
+      if(help)help.textContent=`单文件最大 ${size(value.max_file_bytes)}，最多 ${value.max_batch_items} 个，单批合计不超过 ${size(value.max_batch_bytes)}。`;
+      const chip=document.querySelector('.document-limit-chip');if(chip)chip.textContent='单文件 '+size(value.max_file_bytes);
+      render();
+    },
     items(){return rows.slice();},
     eligible(){return rows.filter(item=>item.status==='ready'||item.status==='failed');},
     setStatus(value,statusValue,detail=''){const item=rows.find(entry=>entry.file===value);if(item){item.status=statusValue;item.detail=detail;render();}},

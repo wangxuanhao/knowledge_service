@@ -307,6 +307,21 @@ def render_manual(shots: dict | None = None) -> str:
         '能辨认当前用户、模型就绪、任务状态和权威版本与索引版本是否一致。',
         'Milvus 进程 healthy 或本体发布成功都不能替代项目索引对账。'))
 
+    chapters.append(chapter('chapter-13', '13', '批量上传、断点续跑与固定原文',
+        '在知识写入页监控批次；通过原文阅读器核对正文、表格和图片 OCR 来源。',
+        '''<h3>选择并发并提交批次</h3>
+        <p>在“知识写入 → 高级解析设置 → 解析并发”选择自动推荐或 1、2、4、8。文件和批次大小以服务能力提示为准；每批最多 1000 个文档，浏览器最多三路上传。补传上传失败文件后开始批次。</p>
+        <p>批次卡显示申请并发、实际并发和文件数量。使用状态筛选及下一页查找文件；可暂停、继续、重试全部失败、取消未开始文件和下载失败明细。</p>
+        <h3>遇到异常怎么继续</h3>
+        <p>临时模型错误自动退避重试，文件行显示次数、下次时间、失败阶段与切片。默认点“从断点继续”复用成功切片；“只重试失败切片”保留未开始切片；“整份重新处理”生成新尝试。本体、模型或关键配置变化时，不自动复用不兼容检查点。</p>
+        <h3>Markdown 知识包和图片 OCR</h3>
+        <p>规则脚本推荐 Markdown + 相对附件 ZIP，Word 继续用于办公文档。ZIP 内本地图片先 OCR 再提取文字知识。低置信度或失败时打开解析视图“重试 OCR”；若图片无知识文字，点击“该图片无知识文字，忽略并继续”并填写原因，系统保存身份与时间。缺失附件需补传完整知识包。</p>
+        <p>网络图片显示“外部图片，未固化”；OCR 不能判断流程线和图标的语义。</p>
+        <h3>查看固定版本原文</h3>
+        <p>在图谱知识证据或原文数据源点击“在原文中打开”。阅读视图展示正文、表格与固化图片；解析视图展示块、行号、OCR 文字与图片区域框；原始视图只读源码并下载固定版本原文件。多来源分别核对，历史映射缺失时不自动跳到新版文档。</p>''',
+        '批次完成后能核对结果；失败文件能选择正确恢复方式；证据能定位到固定原文。',
+        'OCR 低置信度必须人工处理；取消不会撤销已完成知识。'))
+
     troubleshooting = "".join([
         trouble("创建项目后看不到本体", "本体建模层提示读不到状态或空画布。", "项目尚未选中，或页面还在加载。", "先在左上角选择项目；仍为空就刷新页面，再确认项目模式是加载默认本体。"),
         trouble("发布按钮是灰的", "按钮不可点。", "草案未校验、仍有待审核操作、没有发布说明，或警告未确认。", "从底栏提示依次处理：校验并审核 → 逐条处理 → 填发布说明 → 确认警告。"),
@@ -341,7 +356,7 @@ def render_manual(shots: dict | None = None) -> str:
         (11,"问答原文与运行验收")])
     return f'''<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>知序 Knowledge Service · 傻瓜级操作手册（服务 v1.1.0）</title><style>{css}</style></head>
     <body><header class="cover"><div class="kicker">知识从结构到可核验事实</div><h1>知序 Knowledge Service<br>傻瓜级操作手册</h1><p class="subtitle">服务 v1.1.0 · 一个案例走完全流程：建项目 → 改本体 → 写知识 → 看脑图与台账 → 迁移 → 修订与恢复。</p><div class="cover-meta"><span>离线单文件</span><span>32 张真实界面截图</span><span>每图 1～3 个编号框</span><span>演示数据：张三 / 产品部</span></div><div class="route"><span>① 登录</span><span>② 项目 + 本体 v1</span><span>③ 发布 <i>v2</i></span><span>④ 写入知识</span><span>⑤ 发布 <i>v3</i></span><span>⑥ 迁移 / 修订</span><span>⑦ 历史 / 恢复</span></div></header>
-    <div class="layout"><nav class="toc"><b>从头走到尾</b>{toc}<a href="#troubleshooting">12 · 排错</a></nav><main class="content"><section class="intro"><h2>怎么读这本手册</h2><p>每一步只做一件事。先看“操作”，再对照截图中的红框编号，最后确认“完成标志”。界面截图取自真实服务 v1.1.0 的隔离演示项目；截图里的随机项目后缀不需要照抄。</p><div class="legend"><span><i>1</i>编号框：这一步看这里</span><span><b>本体</b>＝项目结构</span><span><b>知识</b>＝实体 / 关系 / 属性实例</span><span><b>修订</b>＝某一条记录的历史</span></div></section>{body}</main></div>
+    <div class="layout"><nav class="toc"><b>从头走到尾</b>{toc}<a href="#troubleshooting">12 · 排错</a><a href="#chapter-13">13 · 批次与原文</a></nav><main class="content"><section class="intro"><h2>怎么读这本手册</h2><p>每一步只做一件事。先看“操作”，再对照截图中的红框编号，最后确认“完成标志”。界面截图取自真实服务 v1.1.0 的隔离演示项目；截图里的随机项目后缀不需要照抄。</p><div class="legend"><span><i>1</i>编号框：这一步看这里</span><span><b>本体</b>＝项目结构</span><span><b>知识</b>＝实体 / 关系 / 属性实例</span><span><b>修订</b>＝某一条记录的历史</span></div></section>{body}</main></div>
     <footer class="foot"><strong>知序 Knowledge Service · 服务 v1.1.0</strong><br>本手册不依赖网络资源；保存此 HTML 即可离线查看和打印。</footer></body></html>'''
 
 

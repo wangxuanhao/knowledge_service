@@ -1,0 +1,180 @@
+[
+  {
+    "fixture": "live-batch-verification.json",
+    "status": "completed",
+    "counts": {
+      "queued": 0,
+      "running": 0,
+      "retry_wait": 0,
+      "completed": 5,
+      "needs_attention": 0,
+      "cancelled": 0,
+      "interrupted": 0
+    },
+    "items": [
+      {
+        "status": "completed",
+        "stage": "completed",
+        "name": "rule-1.md",
+        "version": "697d09c1-91b1-421c-82d1-377902eea54c",
+        "chunks": 2,
+        "blocks": 2,
+        "source_bytes": 137
+      },
+      {
+        "status": "completed",
+        "stage": "completed",
+        "name": "rule-2.md",
+        "version": "2db47506-147d-4dbc-9389-517b620f27be",
+        "chunks": 2,
+        "blocks": 2,
+        "source_bytes": 137
+      },
+      {
+        "status": "completed",
+        "stage": "completed",
+        "name": "rule-3.md",
+        "version": "4aab23c2-3f51-479d-b349-fb474ac634c8",
+        "chunks": 2,
+        "blocks": 2,
+        "source_bytes": 137
+      },
+      {
+        "status": "completed",
+        "stage": "completed",
+        "name": "rule-4.md",
+        "version": "52321407-2234-443a-bb92-d732f5094d15",
+        "chunks": 2,
+        "blocks": 2,
+        "source_bytes": 137
+      },
+      {
+        "status": "completed",
+        "stage": "completed",
+        "name": "rule-5.md",
+        "version": "ff6fc3b7-eb81-43e1-b0e3-813731c9e2e9",
+        "chunks": 2,
+        "blocks": 2,
+        "source_bytes": 137
+      }
+    ]
+  },
+  {
+    "fixture": "live-ocr-verification.json",
+    "status": "completed",
+    "counts": {
+      "queued": 0,
+      "running": 0,
+      "retry_wait": 0,
+      "completed": 3,
+      "needs_attention": 0,
+      "cancelled": 0,
+      "interrupted": 0
+    },
+    "items": [
+      {
+        "status": "completed",
+        "stage": "completed",
+        "name": "rule-0000.md",
+        "version": "eb04da49-ed00-410b-a896-63b2e6f4b4cc",
+        "chunks": 5,
+        "blocks": 4,
+        "source_bytes": 127,
+        "package_bytes": 15321,
+        "ocr": [
+          {
+            "status": "completed",
+            "blocks": 2
+          }
+        ]
+      },
+      {
+        "status": "completed",
+        "stage": "completed",
+        "name": "rule-0001.md",
+        "version": "114e08f6-1726-4640-ba3a-b0553b0e917b",
+        "chunks": 4,
+        "blocks": 4,
+        "source_bytes": 128,
+        "package_bytes": 15321,
+        "ocr": [
+          {
+            "status": "failed",
+            "blocks": 0
+          }
+        ]
+      },
+      {
+        "status": "completed",
+        "stage": "completed",
+        "name": "rule-0002.md",
+        "version": "d2275d03-7f33-4e33-b092-c72337afad2b",
+        "chunks": 4,
+        "blocks": 4,
+        "source_bytes": 130,
+        "package_bytes": 15321,
+        "ocr": [
+          {
+            "status": "pending",
+            "blocks": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "fixture": "live-ocr-extraction.json",
+    "status": "completed",
+    "counts": {
+      "queued": 0,
+      "running": 0,
+      "retry_wait": 0,
+      "completed": 1,
+      "needs_attention": 0,
+      "cancelled": 0,
+      "interrupted": 0
+    },
+    "items": [
+      {
+        "status": "completed",
+        "stage": "completed",
+        "name": "merchant-rule.md",
+        "result_keys": [
+          "active_stage",
+          "discovery_candidates",
+          "discovery_exceptions",
+          "document",
+          "pending_reviews",
+          "readiness",
+          "records",
+          "run_id",
+          "status"
+        ],
+        "formal_records": 8,
+        "record_kinds": [
+          "chunk",
+          "chunk",
+          "entity",
+          "entity",
+          "entity",
+          "entity",
+          "entity",
+          "relation"
+        ],
+        "graph_ocr_evidence": 4,
+        "located_ocr_boxes": 1,
+        "version": "5ab552f5-e018-499d-b628-69b8331e2f29",
+        "chunks": 2,
+        "blocks": 2,
+        "source_bytes": 42,
+        "package_bytes": 13561,
+        "ocr": [
+          {
+            "status": "completed",
+            "blocks": 1
+          }
+        ]
+      }
+    ]
+  }
+]

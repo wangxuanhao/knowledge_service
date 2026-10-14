@@ -190,13 +190,14 @@ def test_document_upload_workspace_contract():
     source = html + js
     for marker in ('选择文件', '文件清单', '处理选项', 'doc-dropzone', 'doc-upload-summary',
                    'doc-clear-files', 'doc-retry-files', '.pdf', '.docx', '.html', '25 MB',
-                   '最多 20 个', '100 MB'):
+                   '服务能力', 'ingest-concurrency'):
         assert marker in source, marker
     for marker in ('.document-upload-workspace', '.document-dropzone', '.document-queue-row',
                    '@media(max-width:850px)', ':focus-visible'):
         assert marker in css, marker
     assert '/assets/workbench.css?v=font-floor-11' in html
-    assert '/assets/ingest-mode.js?v=document-upload-1' in html
+    assert '/assets/ingest-mode.js?v=batch-ingest-1' in html
+    assert 'max_batch_items' in js and 'max_batch_bytes' in js
     assert re.search(r'/assets/workbench\.js\?v=[\w.-]+', html)
 
 
@@ -792,7 +793,7 @@ def test_ingest_results_drawer_uses_sse_and_assertions_with_real_data():
     # （根因：extract_attributes 默认 False、UI 无开关，导致属性永远抽不到）
     # id 与关系约束选择器按活文档 task_review_ui.test.cjs 对齐
     assert 'id="parse-attributes"' in ingest, '高级设置缺少「抽取实体属性」开关'
-    assert "extract_attributes:$('parse-attributes').checked" in wb, \
+    assert "extract_attributes:$('extraction-mode').value!=='documents'&&$('parse-attributes').checked" in wb, \
         'readParseSettings 没有把属性开关传给后端'
     assert 'id="parse-relation-constraints"' in ingest, '缺少关系约束模式选择器'
     assert "relation_constraint_mode:$('parse-relation-constraints').value" in wb, \

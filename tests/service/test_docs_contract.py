@@ -159,3 +159,12 @@ def test_manual_builder_reports_a_missing_screenshot_from_a_temporary_manifest(t
         assert 'does-not-exist.png' in message
     else:
         raise AssertionError('构建器缺图时必须失败')
+
+
+def test_manual_covers_resumable_batches_and_fixed_sources():
+    for path in (MANUAL, HTML_MANUAL):
+        text = path.read_text(encoding='utf-8')
+        for marker in ('申请并发', '实际并发', '从断点继续', '只重试失败切片',
+                       '整份重新处理', 'Markdown', '图片 OCR', '低置信度',
+                       '忽略并继续', '阅读视图', '解析视图', '原始视图', '在原文中打开'):
+            assert marker in text, (path.name, marker)

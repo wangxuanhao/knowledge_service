@@ -7,6 +7,7 @@ data/model/*
 data/rules/*
 data/service/
 data/log/
+data/sources/
 .omo
 .venv
 .preview

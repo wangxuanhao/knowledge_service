@@ -162,12 +162,26 @@ def _new_resolution(assertion):
             'start_char': None, 'end_char': None, 'text': None,
         },
         'location': _unlocated(),
+        'source_location': {'code': 'source_mapping_unavailable'},
         'integrity': {
             'complete': False,
             'source_hash_status': 'unavailable',
             'warnings': [],
         },
     }
+
+
+def _source_location(repository, project_id, document, chunk):
+    """Only follow identities pinned on the immutable document and chunk versions."""
+    version_id = (document.get('metadata') or {}).get('source_document_version_id')
+    chunk_version_id = chunk.get('version_id')
+    if not version_id or not chunk_version_id:
+        return {'code': 'source_mapping_unavailable'}
+    from ..repository.source_store import SourceStore
+    try:
+        return SourceStore(repository).locate(project_id, version_id, chunk_version_id=chunk_version_id)
+    except KeyError:
+        return {'code': 'source_mapping_unavailable'}
 
 
 def _apply_hash_integrity(resolution, document, chunk_complete):
@@ -248,6 +262,7 @@ def _resolve_assertion_evidence(repository, project_id, assertion):
         if not hash_complete:
             resolution['location'] = _unlocated('source_hash_mismatch')
         return resolution
+    resolution['source_location'] = _source_location(repository, project_id, document, chunk)
     metadata = chunk.get('metadata')
     metadata = metadata if isinstance(metadata, dict) else {}
     start, end = metadata.get('start_char'), metadata.get('end_char')
@@ -342,6 +357,7 @@ def _serialize_assertion_resolution(resolution):
         'document': _document_contract(resolution),
         'chunk': dict(resolution['chunk']),
         'location': dict(resolution['location']),
+        'source_location': dict(resolution['source_location']),
         'integrity': {
             **resolution['integrity'],
             'warnings': [dict(warning) for warning in resolution['integrity']['warnings']],
@@ -388,6 +404,7 @@ def _serialize_formal_document(resolution):
         'preview': (text[max(0, (start or 0) - 100):min(len(text), (start or 0) + 500)]
                     if document is not None else ''),
         'chunk': public['chunk'], 'integrity': public['integrity'],
+        'source_location': public['source_location'],
     }
 
 

@@ -9,11 +9,13 @@ def test_workbench_has_all_control_targets_and_no_native_dialogs():
     html=(ROOT/'index.html').read_text(encoding='utf-8')
     ids=re.findall(r'\bid="([^"]+)"',html)
     assert len(ids)==len(set(ids))
+    workspace=(ROOT/'workspace.js').read_text(encoding='utf-8')
+    declared_ids=set(ids)|set(re.findall(r"\.id=['\"]([^'\"]+)['\"]",workspace))
     for name in ('app.js','workbench.js'):
         js=(ROOT/name).read_text(encoding='utf-8')
         assert not re.search(r'\b(?:prompt|confirm|alert)\s*\(',js)
         refs=re.findall(r"\$\('([^']+)'\)|bind\('([^']+)'",js)
-        assert {a or b for a,b in refs}.issubset(set(ids)),{a or b for a,b in refs}-set(ids)
+        assert {a or b for a,b in refs}.issubset(declared_ids),{a or b for a,b in refs}-declared_ids
     for tab in ('dashboard','sources','mindmap','jobs','evaluation','records','ontology','search','qa','ingest'):
         assert f'tab-{tab}' in ids
     workspace=(ROOT/'workspace.js').read_text(encoding='utf-8')
