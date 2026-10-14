@@ -20,8 +20,11 @@ def safe_path(name):
 
 
 class MarkdownPackageReader:
-    def __init__(self, max_files=5000, max_uncompressed_bytes=512 * 1024 * 1024, max_ratio=200):
+    def __init__(self, max_files=5000, max_uncompressed_bytes=512 * 1024 * 1024, max_ratio=200,max_documents=1000):
+        if not isinstance(max_documents,int) or isinstance(max_documents,bool) or max_documents<1:
+            raise ValueError('Package document count limit must be positive')
         self.max_files, self.max_uncompressed_bytes, self.max_ratio = max_files, max_uncompressed_bytes, max_ratio
+        self.max_documents=max_documents
 
     def read(self, data, filename='package.zip'):
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
@@ -46,6 +49,7 @@ class MarkdownPackageReader:
         else:
             entries=manifest['documents']
         if not isinstance(entries, list): raise ValueError('manifest.documents must be a list')
+        if len(entries)>self.max_documents: raise ValueError('Package document count limit exceeded')
         validated=[];paths=set()
         for entry in entries:
             if not isinstance(entry,(str,dict)):

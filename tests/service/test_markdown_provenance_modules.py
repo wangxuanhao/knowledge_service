@@ -108,3 +108,17 @@ def test_manifest_metadata_and_title_preserved():
     assert result['documents'][0]['path']=='rule.md'
     assert result['documents'][0]['title']=='Rule title'
     assert result['documents'][0]['metadata']=={'rule_id':'r1'}
+
+def test_manifest_document_limit_checked_before_parsing():
+    import json,pytest
+    from unittest.mock import patch
+    from knowledge_service.integrations import markdown_package
+    stream=io.BytesIO()
+    with zipfile.ZipFile(stream,'w') as archive:
+        archive.writestr('one.md','# One')
+        archive.writestr('two.md','# Two')
+        archive.writestr('manifest.json',json.dumps({'documents':['one.md','two.md']}))
+    with patch.object(markdown_package,'parse_markdown') as parser:
+        with pytest.raises(ValueError,match='document count limit'):
+            MarkdownPackageReader(max_documents=1).read(stream.getvalue())
+        parser.assert_not_called()
