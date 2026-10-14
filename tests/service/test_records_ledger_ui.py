@@ -1,9 +1,9 @@
-"""知识台账（实例层）的真实浏览器契约：三视角 / 本体归属 / 原文断言 / 撤销入口 / 疑似重复。
+"""知识台账（实例层）的真实浏览器契约：三视角 / 本体归属 / 关联断言 / 撤销入口 / 疑似重复。
 
 为什么要有这一份：台账的价值全在"数字与列说的是不是真的"——
   · 顶部四个数字必须来自服务端（不是前端猜的、也不是写死的 0）；
   · 「挂在哪一版本体上」必须能区分**当前本体**与**旧版本体**（C2 受控重分类要解决的就是旧结构）；
-  · 「原文断言」是对"删了会不会丢证据"的回答，必须能命中两种情况且去重；
+  · 「关联断言」是对"删了会不会丢血缘"的回答，必须能命中两种情况且去重；
   · 「撤销」以前接口有、UI 点不到；这里钉住"点得到 + 真的打到撤销接口"。
 """
 from pathlib import Path
@@ -296,13 +296,13 @@ def test_four_views_are_tabs_and_switch_the_columns(page):
     """
     tabs = [node.inner_text().strip() for node in page.query_selector_all('.ledger-tab')]
     assert tabs == ['实体', '关系', '属性', '原文片段']
-    assert headers(page) == ['名称', '本体类型', '本体归属', '知识修订', '原文断言', '操作']
+    assert headers(page) == ['名称', '本体类型', '本体归属', '知识修订', '关联断言', '操作']
     page.click('.ledger-tab:nth-child(2)')
-    assert headers(page) == ['关系', '关系类型', '本体归属', '知识修订', '原文断言', '操作']
+    assert headers(page) == ['关系', '关系类型', '本体归属', '知识修订', '关联断言', '操作']
     page.click('.ledger-tab:nth-child(3)')
-    assert headers(page) == ['属性', '所属实体', '本体归属', '知识修订', '原文断言', '操作']
+    assert headers(page) == ['属性', '所属实体', '本体归属', '知识修订', '关联断言', '操作']
     page.click('.ledger-tab:nth-child(4)')
-    assert headers(page) == ['原文片段', '来源文档', '知识修订', '原文断言', '操作']
+    assert headers(page) == ['原文片段', '来源文档', '知识修订', '关联断言', '操作']
 
 
 def test_attribute_view_reads_predicate_subject_and_value(page):
@@ -442,7 +442,7 @@ def test_revision_timeline_failure_keeps_current_detail_and_can_retry(revision_p
 
 
 def test_supporting_assertion_count_merges_both_lineages_without_double_counting(page):
-    """原文断言：候选血缘 + 已归位血缘，同一句只算一次（assert-3 两条血缘都指着 e3 → 只能算 1）。"""
+    """关联断言：候选血缘 + 已归位血缘，同一句只算一次（assert-3 两条血缘都指着 e3 → 只能算 1）。"""
     rows = ledger_rows(page)
     # assert-1 走"候选血缘"（metadata.discovery_candidate_id），assert-2 走"已归位血缘"（canonical_record_id）。
     # 按"这一行挂在哪一版本体上"定位：e1（挂 v1）两条血缘都命中 → 2；e3（挂 v2）一条都没命中 → 0。
@@ -454,6 +454,18 @@ def test_supporting_assertion_count_merges_both_lineages_without_double_counting
             if name == '价格说明' and '本体 v2' in ownership][0].startswith('1'), support
     assert [value for (name, ownership), value in support.items()
             if name == '团购价'][0].startswith('0'), support
+
+
+def test_linked_assertions_show_review_state_without_claiming_all_are_support(page):
+    """关联断言不等于当前修订的有效支撑；列表必须把审核状态说出来。"""
+    rows = ledger_rows(page)
+    first = [item for item in rows
+             if item['name'] == '价格说明' and '本体 v1' in item['cells'][2].inner_text()][0]
+    text = first['cells'][4].inner_text().replace('\n', ' ')
+    assert '2 条关联断言' in text, text
+    assert '已采纳 1' in text and '待审核 1' in text, text
+    assert '支撑这条知识' not in first['cells'][4].get_attribute('title'), \
+        '关联断言可能仍待审或属于旧修订，不能一概宣称为有效支撑'
 
 
 def test_undo_is_reachable_and_hits_the_undo_endpoint(page):
@@ -501,6 +513,7 @@ def test_merge_preview_states_the_impact_before_confirming(page):
     cards.nth(1).locator('[data-drop]').click()               # e3 合并
     preview = page.inner_text('.governance-merge-preview')
     assert '影响面' in preview and '条关系' in preview
+    assert '关联断言' in preview and '原文断言' not in preview
     assert '已读的' in preview, '影响面要说清是按哪些记录统计出来的'
     assert page.is_disabled('#merge-entities') is True        # 还没勾确认
     page.check('#merge-confirm')

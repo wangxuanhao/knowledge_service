@@ -68,7 +68,25 @@ function bind(id,fn){$(id).onclick=async()=>{const button=$(id);button.disabled=
 async function projects(){const result=await api('/api/projects',undefined,'GET');$('project').innerHTML='<option value="">选择项目</option>'+result.projects.map(p=>`<option value="${esc(p.id)}" data-ontology-mode="${esc(p.metadata?.ontology_mode||'ontology')}">${esc(p.name)}</option>`).join('');if(current)$('project').value=current;}
 $('project').onchange=()=>{current=$('project').value;for(const id of ['hits','records','history','ontology-result','ontology-summary','search-summary'])$(id).textContent='';window.clearKnowledgeChat?.({notify:true});for(const id of ['turtle','revision','revision-id'])$(id).value='';$('revision-version').value=1;$('ontology-versions').innerHTML='';status('项目已切换');};
 $('project').addEventListener('change',()=>{loadOntologyTerms().catch(()=>{});});
-document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{document.querySelectorAll('.tab').forEach(t=>t.classList.add('hidden'));$('tab-'+button.dataset.tab).classList.remove('hidden');$('title').textContent=titles[button.dataset.tab];document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b===button));$('scope').classList.toggle('hidden',!['search','records','sources','runtime'].includes(button.dataset.tab));});
+function activateTab(name,button=null){
+  const page=$('tab-'+name);
+  if(!page)throw Error(`页面不存在：${name}`);
+  document.querySelectorAll('.tab').forEach(t=>t.classList.add('hidden'));
+  page.classList.remove('hidden');
+  $('title').textContent=titles[name]||name;
+  document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b===button));
+  $('scope').classList.toggle('hidden',!['search','records','sources','runtime'].includes(name));
+}
+document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>activateTab(button.dataset.tab,button));
+window.KnowledgeTabs={
+  open(name,{trigger=true}={}){
+    const button=document.querySelector(`[data-tab="${name}"]`);
+    // Preserve loaders registered by existing modules (records, ontology canvas,
+    // runtime). Direct activation is only for internal pages without a menu button.
+    if(button&&trigger){button.click();return;}
+    activateTab(name,button);
+  },
+};
 // Project creation is implemented by the inline workbench form.
 bind('add-filter',async()=>{const field=$('filter-field').value.trim();if(!field)throw Error('填写 metadata 字段路径');let value=$('filter-value').value;try{value=JSON.parse(value);}catch{}const condition={field,op:$('filter-op').value,value};const previous=json('filters');$('filters').value=JSON.stringify(previous?{and:[previous,condition]}:condition,null,2);});
 // Search lives in the linked workspace module (workspace.js); it owns #search, #query and the result rail.

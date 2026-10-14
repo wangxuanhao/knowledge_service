@@ -60,6 +60,10 @@ SHOTS = {
     "S04b": shot("S04b-ingest-options.png", "知识写入的切片与抽取选项",
                  marker(1, 18, 55, 79, 29, "核对标题、时间、切片和抽取模式"),
                  marker(2, 80, 86, 15, 8, "预览后再提交")),
+    "S04d": shot("S04d-ingest-results.png", "仅文档模式的知识写入结果工作区",
+                 marker(1, 58, 18, 39, 9, "核对任务完成状态与“仅文档·不抽取图谱”模式"),
+                 marker(2, 58, 29, 39, 11, "读取“主动未执行图谱知识抽取”的结果说明"),
+                 marker(3, 65, 42, 14, 6, "点击“去原文数据源”继续核对")),
     "S04c": shot("S04c-knowledge-written.png", "知识台账出现两实体一关系两属性",
                  marker(1, 18, 27, 55, 10, "统计卡显示 2 实体、1 关系、2 属性"),
                  marker(2, 18, 38, 42, 7, "用四个视角切换核对")),
@@ -117,7 +121,14 @@ SHOTS = {
 
 
 def data_url(path: Path) -> str:
-    return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode("ascii")
+    payload = path.read_bytes()
+    if payload.startswith(b"\x89PNG\r\n\x1a\n"):
+        mime = "image/png"
+    elif payload.startswith(b"\xff\xd8\xff"):
+        mime = "image/jpeg"
+    else:
+        raise ValueError(f"截图格式不支持：{path}")
+    return f"data:{mime};base64," + base64.b64encode(payload).decode("ascii")
 
 
 def screenshot(figure_id: str, path: Path, alt: str, markers: list[dict]) -> str:
@@ -195,12 +206,45 @@ def render_manual(shots: dict | None = None) -> str:
         "版本管理显示 v2，发布说明能回答“这一版改了什么”。",
         "草案计数增加不代表已经生效；只有通过审核并发布，消费层才读到新结构。"))
 
-    chapters.append(chapter("chapter-4", "04", "用固定材料写入演示知识",
-        "为保证每个人都能照着走，使用同一份两句材料。截图来自隔离演示环境；实际 LLM 的措辞、候选数量和置信度可能变化。",
-        f'''<div class="sample"><div><b>manual_employee_v2.txt</b><a download="manual_employee_v2.txt" href="{download}">下载演示材料</a></div><pre>{html.escape(sample)}</pre></div>'''
-        + step(1, "选择文件", "进入知识写入，选择固定文本文件。", "文件清单显示文件名和大小。", figures["S04a"])
-        + step(2, "预览并提交", "核对抽取模式为项目本体，先预览切片，再提交。", "任务完成后，演示数据应为两实体、一关系、两属性。", figures["S04b"])
-        + step(3, "到台账验收", "进入知识台账并刷新记录。", "顶部统计为 2 实体、1 关系、2 属性。", figures["S04c"])
+    chapters.append(chapter("chapter-4", "04", "知识写入：准备文件、批次处理与结果核对",
+        "按选模式、准备文件、设置解析与并发、上传、处理失败、核对结果和原文的顺序完成一次写入。固定材料用于演示，实际模型的措辞、数量和置信度可能变化。",
+        '''<h3>先选对知识写入模式</h3>
+        <p>这三项是“知识写入模式”，不是三种推理方式。只有前两种会做图谱抽取。</p>
+        <table><thead><tr><th>模式</th><th>什么时候用</th><th>是否入图</th><th>结果去向</th></tr></thead><tbody>
+          <tr><td><b>使用项目本体 · 正式入图</b></td><td>已有稳定的类、关系和属性定义，要按当前本体抽取。</td><td>通过的知识正式入图；待确认项保留待审核。</td><td>已入图去知识台账；待审核去知识审核。</td></tr>
+          <tr><td><b>开放本体发现 · 候选暂存</b></td><td>文档可能出现当前本体里没有的概念，先发现再人工决定。</td><td>开放发现不正式入图。发现结果全部作为待建模候选暂存，不直接进入正式图谱。</td><td>去本体画布处理候选；人工建模与审核后才能成为正式结构。</td></tr>
+          <tr><td><b>仅文档检索 · 不抽取图谱</b></td><td>只要保存切片供全文/向量检索，不需要实体、关系或属性。</td><td>否。这是主动不抽取，结果里没有实体是正常情况。</td><td>去原文数据源核对文档和切片。</td></tr>
+        </tbody></table>'''
+        + f'''<div class="sample"><div><b>manual_employee_v2.txt</b><a download="manual_employee_v2.txt" href="{download}">下载演示材料</a></div><pre>{html.escape(sample)}</pre></div>'''
+        + step(1, "选模式", "进入“知识写入”，根据上表选择模式。本章固定材料选“使用项目本体”。", "模式说明与你要的入图结果一致。")
+        + step(2, "选文件", "演示选择固定文本文件；批量规则推荐 Markdown + 相对附件 ZIP，办公文档可用 Word。图片路径须指向包内附件，网络图片只登记为外部链接。", "文件清单显示文件名和大小；按服务能力提示控制体积，每批最多 1000 个文档，更多材料拆成多个批次。", figures["S04a"])
+        + step(3, "预览切片并设置并发", "点击“预览切片”，核对完整性；在“高级解析设置”调整切片策略、长度、重叠及解析并发，选择自动推荐或 1、2、4、8。本章需要工号、入职日期时勾选抽取实体属性。", "预览区切片可读；设置与所选模式一致。实际并发由服务能力决定。", figures["S04b"])
+        + step(4, "上传并处理", "点击“上传并处理”。浏览器最多三路上传，全部文件上传成功后开始处理；部分上传失败时点“重试失败”补传，成功文件保留。", "页面出现批次卡，显示申请并发、实际并发和排队、处理中、完成、需要处理数量。")
+        + step(5, "查看批次进度", "按状态筛选文件，用“下一页”查看后续文件。需要时暂停或继续；取消未开始文件不撤销已完成知识。遇到失败先按下面的恢复说明处理。", "每个文件有明确状态，失败行显示阶段、切片、公开原因、自动重试次数和下次时间。")
+        + '''<h3>失败恢复：先处理原因，再选择继续方式</h3>
+        <p>临时超时、限流和服务不可用自动退避重试。同批大量相同模型错误会暂停批次，检查模型连接后点“继续”；自动重试耗尽后需要人工处理，可下载失败明细逐文件核对。</p>
+        <table><thead><tr><th>操作</th><th>何时使用</th><th>之后核对什么</th></tr></thead><tbody>
+          <tr><td><b>从断点继续</b></td><td>原因已解决，继续失败与未完成切片。</td><td>兼容的成功切片被复用，文档继续处理。</td></tr>
+          <tr><td><b>只重试失败切片</b></td><td>只重新执行明确失败的切片。</td><td>未开始切片仍待处理，之后用“从断点继续”完成。</td></tr>
+          <tr><td><b>整份重新处理</b></td><td>模型、本体或关键设置改变，旧检查点不兼容。</td><td>产生新尝试，旧尝试与来源保留；修正文件内容须重新上传。</td></tr>
+        </tbody></table>
+        <h4>图片 OCR 失败怎么处理</h4>
+        <p>ZIP 内本地图片先 OCR 再提取文字知识。OCR 失败或低置信度会阻止文档提交：点“查看原文与 OCR”，到解析视图核对文字、引擎和置信度，再点“重试 OCR”。若确认图片无知识文字，点“该图片无知识文字，忽略并继续”，填写原因；系统记录操作者与时间，然后回批次“从断点继续”。缺失附件应补齐知识包后重新上传。</p>
+        <p>网络图片显示“外部图片，未固化”；OCR 只识别文字，不能判断流程线与图标语义。</p>'''
+        + step(6, "打开结果工作区并按结果动作继续", "文件完成后点“查看抽取结果”，或打开结果工作区；按实际已入图、待审核、待建模、仅文档或失败分支继续。图中的仅文档任务应点“去原文数据源”。", "页面先切换到任务所属项目，再打开对应入口；不把“任务完成”当作知识正确的证明。", figures["S04d"])
+        + '''<div class="callout"><b>正式入图的验收位置：</b>使用项目本体并完成入图后，点“去知识台账核对”，再按下图核对实体、关系和属性。</div>''' + figures["S04c"]
+        + '''<h3>结果工作区五类分支</h3>
+        <table><thead><tr><th>看到什么</th><th>点击哪里</th><th>完成标志</th></tr></thead><tbody>
+          <tr><td><b>已入图</b></td><td>去知识台账核对</td><td>在实体、关系、属性视角核对到正确的知识和来源。</td></tr>
+          <tr><td><b>待审核</b></td><td>去知识审核</td><td>对待确认知识完成收下、退回或不收的决定。</td></tr>
+          <tr><td><b>待建模</b></td><td>去本体画布处理候选</td><td>在本体建模层核对新概念；需要时直接编辑草案并提交审核。</td></tr>
+          <tr><td><b>仅文档</b></td><td>去原文数据源</td><td>能找到上传文档和切片；不要期待出现实体。</td></tr>
+          <tr><td><b>失败</b></td><td>先核对批次行错误与失败明细；旧任务可查看任务日志</td><td>根据错误原因修正文件、模型或运行配置，再重试。</td></tr>
+        </tbody></table>
+        <div class="callout"><b>这是结果引导，不是新流程状态机。</b>本体建模层仍然可以直接编辑草案；结果卡只根据已有任务与断言状态告诉你下一步去哪里。</div>'''
+        + '''<h3>核对固定版本原文：确认知识来自哪里</h3>
+        <p>在图谱知识证据或原文数据源点击“在原文中打开”。阅读视图核对正文、表格与固化图片；解析视图核对块、行号、OCR 文字与图片区域框；原始视图只读源码并下载固定版本原文件。</p>
+        <p>来自图片 OCR 的知识应能定位到原图文字区域。多来源知识分别核对各个证据分支；历史映射缺失时页面明确说明，不自动跳到新版文档。</p>'''
         + '''<p class="demo-note">隔离演示环境截图：为了让手册可重复验证，演示结果固定为“张三、产品部、隶属于、工号、入职日期”。生产环境由实际模型与材料决定，数量不一致时按本章验收方法核对，而不要强求与截图数字相同。</p>''',
         "知识台账能找到张三、产品部、隶属于、工号 E001 和入职日期 2025-01-06。",
         "“抽取完成”只说明任务结束；是否正确必须回到台账分视角核对。"))
@@ -269,6 +313,7 @@ def render_manual(shots: dict | None = None) -> str:
     qa_runtime_body = '''<div class="callout"><b>问答先看原文，再看结论。</b>
       每条回答下方的前三条依据默认展开；每条依据的第一份冻结原文默认可见。
       “另有 N 个来源”只展开这一条依据的其他来源，“再看 N 条依据”才展开其余依据。</div>
+    <div class="rule"><b>图谱关系路径不是 OWL 推理。</b>它只展示命中实体沿现有关系边可到达的多跳路径，用来解释“这些实体在当前图中怎么连”。它不根据 OWL 公理生成新事实。<b>本阶段暂不实施 OWL 推理</b>，也不把路径展示宣称为 OWL 2 RL 能力。</div>
     <div class="version-grid">
       <article><span>冻结来源</span><h3>不追当前版本</h3><p>标题、摘录、文档版本与检索通道来自生成答案时保存的 offered 溯源分支；手工录入或历史缺口会明确标注，不拿今天的文档补写。</p></article>
       <article><span>运行能力</span><h3>Milvus collection_ready</h3><p>项目与运行的健康信息要同时核对 configured、connected、collection_ready、实际维度与期望维度。已配置但不可用时状态是 degraded。</p></article>
@@ -289,6 +334,7 @@ def render_manual(shots: dict | None = None) -> str:
     operations_body = '''<div class="callout"><b>审计人由登录身份决定。</b>
       创建、审核、发布和重分类由服务器记录用户 ID、用户名和显示名；页面不能指定另一位操作人。
       关闭认证的环境会明确显示“未启用认证”。</div>
+    <div class="callout"><b>统一运行环境：</b>本项目的 Python/pytest 命令使用 conda 环境 <code>llm_model</code>。</div>
     <ol><li>探活访问 /livez；就绪检查访问 /readyz。模型仍在加载或必需向量后端不可用时，就绪返回 503。</li>
       <li>/api/health 的 capability_matrix 分别报告 keyword、semantic、llm、ocr、neo4j。
       semantic 为 ready 才代表真实模型已完成编码验证且向量 collection 就绪；远程 LLM 未探测时显示 degraded。</li>
@@ -307,21 +353,6 @@ def render_manual(shots: dict | None = None) -> str:
         '能辨认当前用户、模型就绪、任务状态和权威版本与索引版本是否一致。',
         'Milvus 进程 healthy 或本体发布成功都不能替代项目索引对账。'))
 
-    chapters.append(chapter('chapter-13', '13', '批量上传、断点续跑与固定原文',
-        '在知识写入页监控批次；通过原文阅读器核对正文、表格和图片 OCR 来源。',
-        '''<h3>选择并发并提交批次</h3>
-        <p>在“知识写入 → 高级解析设置 → 解析并发”选择自动推荐或 1、2、4、8。文件和批次大小以服务能力提示为准；每批最多 1000 个文档，浏览器最多三路上传。补传上传失败文件后开始批次。</p>
-        <p>批次卡显示申请并发、实际并发和文件数量。使用状态筛选及下一页查找文件；可暂停、继续、重试全部失败、取消未开始文件和下载失败明细。</p>
-        <h3>遇到异常怎么继续</h3>
-        <p>临时模型错误自动退避重试，文件行显示次数、下次时间、失败阶段与切片。默认点“从断点继续”复用成功切片；“只重试失败切片”保留未开始切片；“整份重新处理”生成新尝试。本体、模型或关键配置变化时，不自动复用不兼容检查点。</p>
-        <h3>Markdown 知识包和图片 OCR</h3>
-        <p>规则脚本推荐 Markdown + 相对附件 ZIP，Word 继续用于办公文档。ZIP 内本地图片先 OCR 再提取文字知识。低置信度或失败时打开解析视图“重试 OCR”；若图片无知识文字，点击“该图片无知识文字，忽略并继续”并填写原因，系统保存身份与时间。缺失附件需补传完整知识包。</p>
-        <p>网络图片显示“外部图片，未固化”；OCR 不能判断流程线和图标的语义。</p>
-        <h3>查看固定版本原文</h3>
-        <p>在图谱知识证据或原文数据源点击“在原文中打开”。阅读视图展示正文、表格与固化图片；解析视图展示块、行号、OCR 文字与图片区域框；原始视图只读源码并下载固定版本原文件。多来源分别核对，历史映射缺失时不自动跳到新版文档。</p>''',
-        '批次完成后能核对结果；失败文件能选择正确恢复方式；证据能定位到固定原文。',
-        'OCR 低置信度必须人工处理；取消不会撤销已完成知识。'))
-
     troubleshooting = "".join([
         trouble("创建项目后看不到本体", "本体建模层提示读不到状态或空画布。", "项目尚未选中，或页面还在加载。", "先在左上角选择项目；仍为空就刷新页面，再确认项目模式是加载默认本体。"),
         trouble("发布按钮是灰的", "按钮不可点。", "草案未校验、仍有待审核操作、没有发布说明，或警告未确认。", "从底栏提示依次处理：校验并审核 → 逐条处理 → 填发布说明 → 确认警告。"),
@@ -330,10 +361,13 @@ def render_manual(shots: dict | None = None) -> str:
         trouble("发布 v3 后张三没变", "本体已有产品经理，张三仍是员工。", "发布本体不修改实例；员工在 v3 仍有效。", "先确认业务事实，再在知识台账单独编辑张三类型。"),
         trouble("受控重分类没有把员工变成产品经理", "预演没有该转换。", "重分类只处理有结构依据的归属迁移，不做岗位推断。", "若业务确认张三是产品经理，单独修订实体；不要强行扩大迁移范围。"),
         trouble("抽取数量和截图不同", "模型返回的实体或关系数量不同。", "真实 LLM、模型参数和文本细节会影响结果。", "以固定材料和本体约束为准，逐条审核；截图只教入口和验收方式。"),
+        trouble("仅文档模式没有实体", "任务完成，但结果工作区没有实体、关系或属性。", "“仅文档检索”主动不执行图谱知识抽取。", "去原文数据源核对文档和切片；需要入图时重新选择项目本体或开放发现模式。"),
+        trouble("抽取结果为空", "使用项目本体或开放发现模式，任务完成却没有识别出知识。", "系统已执行抽取，但材料、切片、本体匹配或模型输出没有产生可用断言。", "先查切片预览和任务日志，再核对模式与项目本体；修正材料或配置后重试。"),
+        trouble("待确认去哪里处理", "结果卡显示待审核或待建模，但不确定下一步。", "待审核是已有结构下的知识确认；待建模是本体中还没有相应概念。", "待审核点“去知识审核”；待建模点“去本体画布处理候选”。"),
         trouble("软删除后想找回", "当前关系视角不再显示该关系。", "软删除生成了删除修订，不是物理抹除。", "打开历史或可撤销操作，核对目标 ID 后恢复；恢复会生成新修订。"),
     ])
 
-    body = "".join(chapters) + f'''<section id="troubleshooting" class="appendix"><header class="chapter-head"><span>12</span><div><h2>卡住时按现象排查</h2><p>每一项都给出“看到什么 / 原因 / 下一步”，不要只停在错误描述。</p></div></header><div class="trouble-grid">{troubleshooting}</div></section>'''
+    body = "".join(chapters) + f'''<section id="troubleshooting" class="appendix"><header class="chapter-head"><span>13</span><div><h2>卡住时按现象排查</h2><p>每一项都给出“看到什么 / 原因 / 下一步”，不要只停在错误描述。</p></div></header><div class="trouble-grid">{troubleshooting}</div></section>'''
 
     css = r'''
     :root{--ink:#123a3d;--muted:#61787a;--paper:#f6f2e9;--card:#fffdf7;--teal:#006c68;--teal2:#0b8f86;--line:#cbd8d2;--amber:#f2a900;--red:#e43e36;--nav:#0b3334}
@@ -351,12 +385,12 @@ def render_manual(shots: dict | None = None) -> str:
     '''
 
     toc = "".join(f'<a href="#chapter-{i}">{i:02d} · {title}</a>' for i, title in [
-        (1,"登录与角色"),(2,"项目与本体 v1"),(3,"建模并发布 v2"),(4,"写入固定材料"),(5,"脑图与三类台账"),
+        (1,"登录与角色"),(2,"项目与本体 v1"),(3,"建模并发布 v2"),(4,"知识写入与批次处理"),(5,"脑图与三类台账"),
         (6,"发布本体 v3"),(7,"受控重分类"),(8,"单独修改张三"),(9,"修订、删除与恢复"),(10,"三种版本关系"),
-        (11,"问答原文与运行验收")])
+        (11,"问答原文与运行验收"),(12,"身份、任务与索引核查")])
     return f'''<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>知序 Knowledge Service · 傻瓜级操作手册（服务 v1.1.0）</title><style>{css}</style></head>
-    <body><header class="cover"><div class="kicker">知识从结构到可核验事实</div><h1>知序 Knowledge Service<br>傻瓜级操作手册</h1><p class="subtitle">服务 v1.1.0 · 一个案例走完全流程：建项目 → 改本体 → 写知识 → 看脑图与台账 → 迁移 → 修订与恢复。</p><div class="cover-meta"><span>离线单文件</span><span>32 张真实界面截图</span><span>每图 1～3 个编号框</span><span>演示数据：张三 / 产品部</span></div><div class="route"><span>① 登录</span><span>② 项目 + 本体 v1</span><span>③ 发布 <i>v2</i></span><span>④ 写入知识</span><span>⑤ 发布 <i>v3</i></span><span>⑥ 迁移 / 修订</span><span>⑦ 历史 / 恢复</span></div></header>
-    <div class="layout"><nav class="toc"><b>从头走到尾</b>{toc}<a href="#troubleshooting">12 · 排错</a><a href="#chapter-13">13 · 批次与原文</a></nav><main class="content"><section class="intro"><h2>怎么读这本手册</h2><p>每一步只做一件事。先看“操作”，再对照截图中的红框编号，最后确认“完成标志”。界面截图取自真实服务 v1.1.0 的隔离演示项目；截图里的随机项目后缀不需要照抄。</p><div class="legend"><span><i>1</i>编号框：这一步看这里</span><span><b>本体</b>＝项目结构</span><span><b>知识</b>＝实体 / 关系 / 属性实例</span><span><b>修订</b>＝某一条记录的历史</span></div></section>{body}</main></div>
+    <body><header class="cover"><div class="kicker">知识从结构到可核验事实</div><h1>知序 Knowledge Service<br>傻瓜级操作手册</h1><p class="subtitle">服务 v1.1.0 · 一个案例走完全流程：建项目 → 改本体 → 写知识 → 看脑图与台账 → 迁移 → 修订与恢复。</p><div class="cover-meta"><span>离线单文件</span><span>33 张真实界面截图</span><span>每图 1～3 个编号框</span><span>演示数据：张三 / 产品部</span></div><div class="route"><span>① 登录</span><span>② 项目 + 本体 v1</span><span>③ 发布 <i>v2</i></span><span>④ 写入知识</span><span>⑤ 发布 <i>v3</i></span><span>⑥ 迁移 / 修订</span><span>⑦ 历史 / 恢复</span></div></header>
+    <div class="layout"><nav class="toc"><b>从头走到尾</b>{toc}<a href="#troubleshooting">13 · 排错</a></nav><main class="content"><section class="intro"><h2>怎么读这本手册</h2><p>每一步只做一件事。先看“操作”，再对照截图中的红框编号，最后确认“完成标志”。界面截图取自真实服务 v1.1.0 的隔离演示项目；截图里的随机项目后缀不需要照抄。</p><div class="legend"><span><i>1</i>编号框：这一步看这里</span><span><b>本体</b>＝项目结构</span><span><b>知识</b>＝实体 / 关系 / 属性实例</span><span><b>修订</b>＝某一条记录的历史</span></div></section>{body}</main></div>
     <footer class="foot"><strong>知序 Knowledge Service · 服务 v1.1.0</strong><br>本手册不依赖网络资源；保存此 HTML 即可离线查看和打印。</footer></body></html>'''
 
 

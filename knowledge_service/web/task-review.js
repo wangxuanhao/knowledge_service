@@ -28,18 +28,9 @@
     document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b===reviewNav));
     $('title').textContent='知识审核';$('scope').classList.add('hidden');reviews();
   };
+  window.TaskReview={open:()=>reviewNav.click()};
   $('review-ontology').onclick=()=>showTab('ontology-model');
   $('review-kind').onchange=()=>reviews();
-  const attributeOption=document.createElement('label');attributeOption.className='check';
-  attributeOption.innerHTML='<input type="checkbox" id="parse-attributes">抽取实体业务属性（选填，每片额外调用一次 LLM，属性值全部待审核）';
-  const constraintOption=document.createElement('label');
-  constraintOption.innerHTML='关系两端约束<select id="parse-relation-constraints"><option value="review" selected>审核 · 冲突进入候选（推荐）</option><option value="advisory">提示 · 允许入图并记录警告</option><option value="strict">严格 · 任一冲突整份失败</option><option value="off">关闭 · 不检查类型组合</option></select><small>domain/range 始终用于引导模型；此项决定抽取后的处理方式。结构化 API 写入仍默认严格。</small>';
-  document.querySelector('.parse-settings').append(constraintOption);
-  document.querySelector('.parse-settings').append(attributeOption);
-  $('extraction-mode').onchange?.();
-  const parseSettings=readParseSettings;
-  readParseSettings=()=>({...parseSettings(),relation_constraint_mode:$('parse-relation-constraints').value,
-    ...($('extraction-mode').value!=='documents'&&$('parse-attributes').checked?{extract_attributes:true}:{})});
   let reviewView='facts';
   let generation=0;
   async function reviews(){

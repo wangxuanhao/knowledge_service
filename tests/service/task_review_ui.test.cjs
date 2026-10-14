@@ -74,7 +74,7 @@ test('durable task cards offer state-appropriate controls without reviving legac
   assert.doesNotMatch(get('tasks').innerHTML,/data-job-action/);
 });
 
-test('review menu is independent and attribute extraction is explicitly opt-in',async()=>{
+test('review menu is independent and does not own ingestion settings',async()=>{
   const {context,get,calls,created}=fixture();
   const page=created.find(e=>e.id==='tab-reviews'),nav=created.find(e=>e.dataset.tab==='reviews');
   assert.ok(get('main').children.includes(page));
@@ -83,15 +83,18 @@ test('review menu is independent and attribute extraction is explicitly opt-in',
   assert.ok(calls.includes('/api/projects/a/reviews'));
   assert.ok(!calls.includes('/api/jobs'));
   assert.equal(get('title').textContent,'知识审核');
-  get('extraction-mode').value='ontology';get('parse-attributes').checked=true;
-  assert.equal(context.readParseSettings().extract_attributes,true);
-  get('parse-relation-constraints').value='review';
-  assert.equal(context.readParseSettings().relation_constraint_mode,'review');
   assert.ok(!calls.includes('/api/projects/a/ontology-change-proposals'));
-  get('extraction-mode').value='documents';
-  assert.equal(context.readParseSettings().extract_attributes,undefined);
-  get('extraction-mode').value='discovery';get('parse-attributes').checked=true;
-  assert.equal(context.readParseSettings().extract_attributes,true);
+  assert.deepEqual(context.readParseSettings(),{chunk_size:1800});
+});
+
+test('visible review page requests the new project exactly once on project change',async()=>{
+  const {context,get,calls,created}=fixture();
+  created.find(e=>e.dataset.tab==='reviews').click();
+  await new Promise(resolve=>setImmediate(resolve));
+  context.current='b';
+  get('project').onchange();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(calls.filter(url=>url==='/api/projects/b/reviews').length,1);
 });
 
 test('missing ontology shows guidance instead of Not found',async()=>{

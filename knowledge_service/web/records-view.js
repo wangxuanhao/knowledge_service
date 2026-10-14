@@ -6,7 +6,7 @@
   const host=$('records'), tab=$('tab-records');let rows=[],total=0,request=0,page=0,view='entity';
   // 台账头部要用的四份"旁数据"，一次读取后缓存到本项目为止（点「刷新记录」重取）：
   //   ontology  本体版本表（本体归属列：这条知识挂在哪一版本体上）
-  //   assertions 原文断言（断言数列：有几条原文在支撑它）
+  //   assertions 关联断言（血缘数量与审核状态，不把全部关联都称为有效支撑）
   //   operations 可撤销的操作（撤销入口）
   //   duplicates 同名同类型实体分组（顶部「疑似重复」数字）
   let ontology=null,assertions=null,operations=[],duplicates=null;
@@ -32,10 +32,10 @@
     chunk:'知识背后的原文片段：只读 —— 要改原文请重新上传并解析文档。',
   };
   const COLUMNS={
-    entity:['名称','本体类型','本体归属','知识修订','原文断言','操作'],
-    relation:['关系','关系类型','本体归属','知识修订','原文断言','操作'],
-    attribute:['属性','所属实体','本体归属','知识修订','原文断言','操作'],
-    chunk:['原文片段','来源文档','知识修订','原文断言','操作'],
+    entity:['名称','本体类型','本体归属','知识修订','关联断言','操作'],
+    relation:['关系','关系类型','本体归属','知识修订','关联断言','操作'],
+    attribute:['属性','所属实体','本体归属','知识修订','关联断言','操作'],
+    chunk:['原文片段','来源文档','知识修订','关联断言','操作'],
   };
   /* 台账头部三件套：一句话边界 + 顶部可点数字 + 三视角页签。
      插在旧面板之前，`#records` 仍然是表格宿主（编辑/版本历史那套沿用旧通道，不动）。 */
@@ -103,7 +103,7 @@
       if(same){preview.innerHTML='<b>不能选择同一个实体</b><span>保留实体和待合并实体必须是两条不同记录。</span>';}
       else if(keep&&drop){
         const impact=impactOf(keepInput.value,dropInput.value);
-        const supportText=impact.support===null?'':' · 转移 '+impact.support+' 条原文断言';
+        const supportText=impact.support===null?'':' · 转移 '+impact.support+' 条关联断言';
         const selfText=impact.selfRelations?' （其中 '+impact.selfRelations+' 条是它自己指向自己的关系，会一并去掉）':'';
         preview.innerHTML=`<b>${esc(drop.text)}</b><span>将合并到</span><b>${esc(keep.text)}</b>`
           +`<small>影响面：转移 ${impact.relations} 条关系${selfText}${supportText} · 保留方沿用 ${impact.aliases?impact.aliases+' 个别名':'原名'}`
@@ -202,11 +202,12 @@
     return found?`${releaseLabel(found)}：${found.created_at||''}`:'该本体版本不在这个项目的版本列表里';
   }
   renderOntologyFilter();
-  /* 原文断言数：这条知识有几条原文在支撑它（发现时冻结的原句）。
+  /* 关联断言数：这条知识能追溯到几条断言（发现时冻结的原句）。
+     “关联”只描述血缘，不等于每条都已审核通过，也不保证它对应当前修订的全部内容。
      两条血缘都要数，且要**去重**，否则同一句会被算两次：
        ① 发现候选：记录里的 discovery_candidate_id(s) === 断言的 id；
        ② 已归位：断言的 canonical_record_id === 这条记录的 id。 */
-  function supportCount(row){
+  function linkedAssertions(row){
     if(!assertions||!row)return null;
     const metadata=row.metadata||{},ids=new Set();
     if(metadata.discovery_candidate_id)ids.add(metadata.discovery_candidate_id);
@@ -214,7 +215,19 @@
     const hits=new Set();
     for(const id of ids)if(assertions.byId.has(id))hits.add(id);
     for(const item of assertions.byCanonical.get(row.id)||[])hits.add(item.id);
-    return hits.size;
+    return [...hits].map(id=>assertions.byId.get(id)).filter(Boolean);
+  }
+  function supportCount(row){
+    const linked=linkedAssertions(row);return linked===null?null:linked.length;
+  }
+  function supportBreakdown(row){
+    const linked=linkedAssertions(row);if(linked===null)return null;
+    const counts={accepted:0,pending:0,superseded:0,rejected:0,other:0};
+    for(const item of linked){
+      const key=item.status==='contradicting'?'pending':item.status;
+      if(Object.hasOwn(counts,key))counts[key]++;else counts.other++;
+    }
+    return {total:linked.length,counts};
   }
   function kpiCounts(){
     return rows.reduce((acc,row)=>{if(acc[row.kind]!==undefined)acc[row.kind]++;return acc;},{entity:0,relation:0,attribute:0,chunk:0});
@@ -349,10 +362,15 @@
   }
   function cells(row){
     const ownershipCell=()=>{const cell=node('td');const label=node('b',null,ownership(row));label.title=ownershipDetail(row);cell.append(label);return cell;};
-    const supportCell=()=>{const cell=node('td');const count=supportCount(row);
-      if(count===null){cell.textContent='读取中…';return cell;}
-      const strong=node('b',null,count?String(count):'0');strong.title=count?'有原文原句在支撑这条知识':'没有找到支撑它的原文断言（可能是人工写入或断言未归位）';
-      cell.append(strong,node('small',null,count?'条原文':'条原文'));return cell;};
+    const supportCell=()=>{const cell=node('td'),summary=supportBreakdown(row);
+      if(summary===null){cell.textContent='读取中…';return cell;}
+      const {total:count,counts}=summary,strong=node('b',null,count?String(count):'0');
+      const statusText=[['accepted','已采纳'],['pending','待审核'],['superseded','已失效'],['rejected','已拒绝'],['other','其他状态']]
+        .filter(([key])=>counts[key]).map(([key,label])=>`${label} ${counts[key]}`).join(' · ');
+      cell.title=count?'这些断言与该知识存在血缘关联；审核状态见下方。是否支持当前修订需在来源详情中核对。':'未找到关联断言，可能是人工写入或旧数据未归位。';
+      cell.append(strong,node('small',null,'条关联断言'));
+      if(statusText)cell.append(node('small',null,statusText));
+      return cell;};
     const versionCell=()=>{const cell=node('td'),release=ontology?.byId.get(row.ontology_id);
       cell.append(node('b',null,'修订 r'+row.version),node('small',null,ownershipSummary(row)),
         node('small',null,row.recorded_at?new Date(row.recorded_at).toLocaleString():'—'));

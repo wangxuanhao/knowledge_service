@@ -14,6 +14,19 @@ def read(name):
     return (WEB / name).read_text(encoding='utf-8')
 
 
+def test_project_safe_navigation_assets_and_public_view_entries():
+    """结果快捷动作必须经统一导航，并复用各页面自己的加载入口。"""
+    html = read('index.html')
+    app = read('app.js')
+    sources = read('sources-view.js')
+    reviews = read('task-review.js')
+    assert re.search(r'knowledge-navigation\.js\?v=[^"\']+', html)
+    assert html.index('knowledge-navigation.js') < html.index('ingest-results.js')
+    assert 'window.KnowledgeTabs' in app and 'button.click()' in app
+    assert 'window.SourcesView' in sources and 'open' in sources
+    assert 'window.TaskReview' in reviews and 'open' in reviews
+
+
 def test_term_impact_panel_has_single_set_of_ids():
     """影响面板的新标记必须全套存在，旧的三个 id 必须彻底消失（两处标记已统一）。"""
     js = read('workspace.js')
@@ -199,6 +212,15 @@ def test_document_upload_workspace_contract():
     assert '/assets/ingest-mode.js?v=batch-ingest-1' in html
     assert 'max_batch_items' in js and 'max_batch_bytes' in js
     assert re.search(r'/assets/workbench\.js\?v=[\w.-]+', html)
+
+
+def test_qa_relationship_paths_use_accurate_user_facing_terms():
+    """问答展示的是现有图边的可达路径，不能把它表述成 OWL/逻辑推理。"""
+    js = read('workbench.js')
+    assert '<b>图谱关系路径</b>' in js
+    assert '命中实体沿现有关系边可到达的多跳路径' in js
+    assert '<b>推理路径</b>' not in js
+    assert 'reasoning_paths' in js, '后端响应字段必须保持兼容'
 
 
 # ============================================================================
@@ -777,7 +799,8 @@ def test_ingest_results_drawer_uses_sse_and_assertions_with_real_data():
     用户诉求（2026-10-05）：① 别再靠 ID 前缀猜来源；② 轮询改成 SSE；
     ③ 实体要显示本体类型。
     钉住：① 入口按钮存在；② ingest-results.js/css 带版本号；③ 脚本挂 .ingest-drawer、
-    订阅 /api/jobs/{id}/stream（SSE）并读 endpoint('/assertions?document_id=...')；
+    订阅 /api/jobs/{id}/stream（SSE），并按任务保存的 projectId 与 documentId
+    读取正式 assertions，不能在点击时改用当前项目；
     ④ 有实体／关系／属性三类胶囊渲染分支；⑤ 有对应样式。
     """
     html = read('index.html')
@@ -794,14 +817,22 @@ def test_ingest_results_drawer_uses_sse_and_assertions_with_real_data():
     # id 与关系约束选择器按活文档 task_review_ui.test.cjs 对齐
     assert 'id="parse-attributes"' in ingest, '高级设置缺少「抽取实体属性」开关'
     assert "extract_attributes:$('extraction-mode').value!=='documents'&&$('parse-attributes').checked" in wb, \
-        'readParseSettings 没有把属性开关传给后端'
+        'readParseSettings 必须只在知识抽取模式传递属性开关'
     assert 'id="parse-relation-constraints"' in ingest, '缺少关系约束模式选择器'
     assert "relation_constraint_mode:$('parse-relation-constraints').value" in wb, \
         'readParseSettings 没有传关系约束模式'
+    task_review = read('task-review.js')
+    assert html.count('id="parse-attributes"') == 1, '属性抽取开关必须只有一个 DOM 节点'
+    assert html.count('id="parse-relation-constraints"') == 1, '关系约束选择器必须只有一个 DOM 节点'
+    assert 'id="parse-attributes"' not in task_review, '运行时脚本不得再次创建同名属性开关'
+    assert 'id="parse-relation-constraints"' not in task_review, '运行时脚本不得再次创建同名约束选择器'
     # 抽屉 + SSE + assertions（真实口径，非写死）
     assert "'section', 'ingest-drawer'" in js, '没有构建右侧抽屉'
     assert "'/stream'" in js and 'splitSseBuffer' in js, '没有消费 SSE 进度流'
-    assert "endpoint('/assertions?document_id=" in js, '没有按文档读正式断言'
+    assert "'/api/projects/' + encodeURIComponent(d.projectId)" in js, \
+        '没有使用任务所属项目读取正式断言'
+    assert "'/assertions?document_id=' + encodeURIComponent(docId)" in js, \
+        '没有按任务文档读取正式断言'
     # 三类知识渲染分支 + 进度条 + 超量折叠
     for fn in ('assertChip', 'renderAsserts', 'loadAssertions', 'streamJob',
                'CHIP_PREVIEW_LIMIT'):
@@ -815,7 +846,8 @@ def test_ingest_results_drawer_shows_entity_type_and_status_honestly():
     """实体要带类型、区分入图/待确认；无知识与失败都如实说，并能关闭。
 
     钉住：① 实体胶囊拼「名字 · 类型短名」；② accepted/pending 用 is-pending 区分；
-    ③ 空知识说"没抽出"；④ 失败保留原文收据；⑤ 提交后自动滑出、Esc 可关。
+    ③ 抽取模式空结果与仅文档主动不抽取分开说明；④ 失败保留原文收据；
+    ⑤ 提交后自动滑出、Esc 可关。
     """
     js = read('ingest-results.js')
     # 实体类型：已入图用短 IRI；待确认候选字段不同（proposed_type），不许渲染成 —
@@ -833,7 +865,8 @@ def test_ingest_results_drawer_shows_entity_type_and_status_honestly():
     assert 'function watch' in js, '缺少订阅入口'
     assert "e.key === 'Escape'" in js, '不支持 Esc 关闭'
     # 诚实文案
-    assert '没有抽出实体' in js, '没有如实说明"本次没抽到知识"'
+    assert '已执行抽取但没有识别出知识' in js, '没有说明抽取模式的空知识结果'
+    assert '主动未执行图谱知识抽取' in js, '没有说明仅文档模式主动不抽取图谱'
     assert '原文收据已保留' in js, '失败时没有说明原文不丢'
 
 

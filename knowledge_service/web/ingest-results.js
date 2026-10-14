@@ -14,14 +14,31 @@
  *              payload.text / payload.type / payload.subject_id / payload.object_id /
  *              payload.value；quote=原文引用。
  *
- * 由 workbench.js 提交后调用 window.IngestResults.watch(jobId, docTitle)。
+ * 由 workbench.js 提交后调用
+ * window.IngestResults.watch(jobId, docTitle, { projectId, mode })。
  * ========================================================================== */
 (() => {
   'use strict';
 
   const MAX_JOBS = 12;
-  // 每个任务一个条目：进度用 SSE，结果用 assertions
-  const jobs = new Map();   // jobId -> { title, status, progress, stage, error, asserts }
+  // 每个任务一个条目：进度用 SSE，结果用 assertions。projectId/mode 在提交时固化，
+  // 后续即使用户切换项目，也只读取该任务所属项目的明细。
+  const jobs = new Map();
+
+  const MODE_INFO = {
+    ontology: {
+      label: '使用项目本体 · 正式入图',
+      description: '按项目当前本体抽取；通过校验的知识正式入图，待确认项进入知识审核。',
+    },
+    discovery: {
+      label: '开放本体发现 · 候选暂存',
+      description: '从原文发现候选概念和关系，候选暂存后可在本体画布继续处理。',
+    },
+    documents: {
+      label: '仅文档检索 · 不抽取图谱',
+      description: '只保存原文和切片供检索，不执行实体、关系或属性抽取。',
+    },
+  };
 
   // ---- 小工具 --------------------------------------------------------------
   const el = (tag, cls, text) => {
@@ -50,7 +67,7 @@
   header.append(title, closeBtn);
 
   const intro = el('p', 'ingest-drawer__intro',
-    '提交后这里实时显示每个文档的解析进度；完成后按实体／关系／属性列出抽到了什么，实体带本体类型。');
+    '提交后这里实时显示每个文档的处理进度、写入模式和结果；完成后可按结果直接前往对应页面继续。');
   const listEl = el('div', 'ingest-drawer__list');
   root.append(header, intro, listEl);
   document.body.appendChild(root);
@@ -66,12 +83,14 @@
   // ===========================================================================
   // 订阅一个任务：先看 SSE 实时进度，完成后拉 assertions 明细
   // ===========================================================================
-  function watch(jobId, docTitle) {
+  function watch(jobId, docTitle, context = {}) {
     if (!jobId) return;
     if (!jobs.has(jobId)) {
       jobs.set(jobId, {
         title: docTitle || jobId,
+        projectId: context.projectId || '', mode: context.mode || 'ontology',
         status: 'queued', progress: 0, stage: '已排队', error: '', asserts: null,
+        resultError: false,
       });
     }
     open();
@@ -151,16 +170,20 @@
   async function loadAssertions(jobId) {
     const d = jobs.get(jobId);
     try {
-      // ingest run 的 document_id 即文档 ID；job 工件里 result.document.id 可拿到。
-      // 这里直接取任务结果中的文档 ID（若取不到则用项目最近文档兜底由后端处理）。
+      if (!d?.projectId) throw Error('任务缺少所属项目，无法读取结果');
+      // ingest run 的 document_id 即文档 ID；只接受任务工件明确返回的文档 ID，
+      // 避免用“当前项目”或“最近文档”猜测任务归属。
       const job = await api('/api/jobs/' + encodeURIComponent(jobId), undefined, 'GET');
       const docId = job?.result?.document?.id || job?.result?.document_id;
       if (!docId) throw Error('任务结果里没有文档 ID');
-      const r = await api(endpoint('/assertions?document_id=' + encodeURIComponent(docId)),
-                         undefined, 'GET');
+      const assertionsUrl = '/api/projects/' + encodeURIComponent(d.projectId)
+        + '/assertions?document_id=' + encodeURIComponent(docId);
+      const r = await api(assertionsUrl, undefined, 'GET');
       d.asserts = Array.isArray(r.assertions) ? r.assertions : [];
+      d.resultError = false;
     } catch (e) {
       d.asserts = null;
+      d.resultError = true;
       d.stage = '结果读取失败：' + e.message;
     }
     render();
@@ -184,6 +207,12 @@
     head.append(el('span', 'ingest-job__badge', STATUS_ZH[d.status] || d.status));
     card.append(head);
 
+    const mode = MODE_INFO[d.mode] || MODE_INFO.ontology;
+    const modeRow = el('div', 'ingest-job__mode');
+    modeRow.append(el('span', 'ingest-job__mode-badge', mode.label));
+    modeRow.append(el('span', 'ingest-job__mode-description', mode.description));
+    card.append(modeRow);
+
     // 进度条（实时；完成 100%，失败不打满）
     const barWrap = el('div', 'ingest-job__bar');
     const bar = el('div', 'ingest-job__bar-fill');
@@ -197,15 +226,56 @@
     }
 
     // 明细分组（来自 assertions）
-    if (d.asserts) card.append(renderAsserts(d.asserts));
+    if (d.asserts) card.append(renderAsserts(d.asserts, d));
+    const actions = renderActions(d);
+    if (actions) card.append(actions);
     return card;
+  }
+
+  function actionTargets(d) {
+    if (['failed', 'cancelled', 'interrupted'].includes(d.status) || d.resultError) {
+      return [['查看任务日志', 'jobs']];
+    }
+    if (d.status !== 'completed') return [];
+    if (d.mode === 'documents') return [['去原文数据源', 'sources']];
+    if (!Array.isArray(d.asserts)) return [];
+    const targets = [];
+    if (d.asserts.some(a => a.status === 'accepted')) {
+      targets.push(['去知识台账核对', 'records']);
+    }
+    if (d.asserts.some(a => a.status === 'pending')) {
+      if (d.mode === 'ontology') targets.push(['去知识审核', 'reviews']);
+      if (d.mode === 'discovery') targets.push(['去本体画布处理候选', 'ontology-model']);
+    }
+    return targets;
+  }
+
+  function renderActions(d) {
+    const targets = actionTargets(d);
+    if (!targets.length) return null;
+    const box = el('div', 'ingest-job__actions');
+    box.append(el('span', 'ingest-job__actions-label', '下一步'));
+    for (const [label, target] of targets) {
+      const button = el('button', 'ingest-job__action', label);
+      button.type = 'button';
+      button.addEventListener('click', async () => {
+        try {
+          await window.KnowledgeNavigation.open(target, { projectId: d.projectId });
+          close();
+        } catch (e) {
+          if (typeof status === 'function') status(e.message || String(e), true);
+        }
+      });
+      box.append(button);
+    }
+    return box;
   }
 
   // 胶囊展示上限：超过则先折叠多余部分，点开才看全（避免候选上百条时首屏过长）
   const CHIP_PREVIEW_LIMIT = 12;
 
   // 三类知识分组：可折叠 details + 胶囊超量截断；入图/待确认计数写在标题
-  function renderAsserts(asserts) {
+  function renderAsserts(asserts, task) {
     const box = el('div', 'ingest-result');
     // 实体默认展开；关系、有大量待确认时默认收起，按需点开
     const groups = [
@@ -249,8 +319,10 @@
       box.append(g);
     }
     if (!anyShown) {
-      box.append(el('p', 'ingest-result__empty',
-        '本次只保存了原文和切片，没有抽出实体／关系／属性（「仅文档检索」模式，或原文里没有可抽取的知识）。'));
+      const message = task.mode === 'documents'
+        ? '本次主动未执行图谱知识抽取；原文和切片已保存，可前往原文数据源查看。'
+        : '本次已执行抽取但没有识别出知识；可检查原文内容、抽取模式和解析设置后重试。';
+      box.append(el('p', 'ingest-result__empty', message));
     }
     return box;
   }

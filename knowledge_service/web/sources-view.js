@@ -177,6 +177,12 @@
     inFlight=loadOnce().finally(()=>{inFlight=null;});
     return inFlight;
   }
+  window.SourcesView={
+    async open(){
+      window.KnowledgeTabs?.open('sources');
+      return load();
+    },
+  };
   // Cross-menu deep link: the knowledge chat opens the exact cited source instead of a raw record dump.
   window.selectSource=async sourceId=>{
     if(!sourceId)throw Error('该证据没有可定位的来源');

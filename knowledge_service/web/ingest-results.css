@@ -49,6 +49,11 @@
 .is-completed .ingest-job__badge{background:#e3efe7;color:#1f6b48}
 .is-failed .ingest-job__badge{background:#faeae7;color:#a8402f}
 
+.ingest-job__mode{display:flex;align-items:flex-start;gap:8px;margin:0 0 10px;flex-wrap:wrap}
+.ingest-job__mode-badge{font-size:10.5px;line-height:1.4;padding:3px 8px;border-radius:999px;
+  background:#edf4f0;color:#285a48;white-space:nowrap}
+.ingest-job__mode-description{font-size:11px;line-height:1.55;color:#6b8176;flex:1;min-width:190px}
+
 /* 进度条 */
 .ingest-job__bar{position:relative;height:18px;background:#eef2ef;border-radius:999px;overflow:hidden;
   display:flex;align-items:center;margin-bottom:8px}
@@ -62,6 +67,13 @@
 .ingest-job__stage{margin:0;font-size:12px;color:#556e63}
 .ingest-job__error{margin:9px 0 0;padding:8px 11px;font-size:11.5px;
   background:#fbeeee;border-left:3px solid #c0554a;border-radius:3px;color:#8f382d}
+
+.ingest-job__actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:11px;
+  padding-top:10px;border-top:1px solid #edf1ed}
+.ingest-job__actions-label{font-size:11px;color:#7a9085;margin-right:2px}
+.ingest-job__action{font:inherit;font-size:11.5px;padding:5px 10px;border-radius:5px;cursor:pointer;
+  background:#f1f6f3;color:#265c47;border:1px solid #c9ddd2}
+.ingest-job__action:hover{background:#e5f0e9;border-color:#a9c8b7}
 
 /* ---- 抽取明细分组（可折叠 details） ------------------------------------- */
 .ingest-result{margin-top:11px;border-top:1px solid #edf1ed;padding-top:10px}
