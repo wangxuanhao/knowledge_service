@@ -104,3 +104,12 @@ def test_parser_rejects_unsupported_empty_and_oversized_inputs(tmp_path):
     with pytest.raises(DocumentParseError) as error:
         parser.parse(large, large.name, size=25_000_001)
     assert error.value.code == 'file_too_large'
+
+
+def test_batch_parser_limit_can_be_injected_without_changing_legacy(tmp_path):
+    from knowledge_service.integrations.document_parser import DocumentParser, DocumentParseError
+    import pytest
+    path=tmp_path/'a.txt';path.write_text('twelve bytes',encoding='utf-8')
+    assert DocumentParser(max_upload_bytes=100).parse(path,'a.txt').text=='twelve bytes'
+    with pytest.raises(DocumentParseError) as error:DocumentParser(max_upload_bytes=2).parse(path,'a.txt')
+    assert error.value.code=='file_too_large'

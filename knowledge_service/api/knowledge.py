@@ -83,7 +83,7 @@ def install(app, service):
 
     @router.get('/api/projects/{project_id}/ingest-runs')
     def ingest_runs(project_id: str, document_id: str | None = None):
-        items = repository.list_ingest_runs(project_id, document_id=document_id)
+        items = service.ingest_runs(project_id, document_id=document_id)
         return {'runs': items, 'total': len(items)}
 
     @router.get('/api/projects/{project_id}/resolution-reviews')

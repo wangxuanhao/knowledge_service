@@ -7,6 +7,8 @@ import logging
 import os
 import threading
 from uuid import uuid4
+from contextlib import nullcontext
+from copy import deepcopy
 
 from ..core.net import external_client
 
@@ -560,11 +562,58 @@ class KnowledgeService:
                  len(result['hits']), result.get('_backend', '本地'))
         return result
 
+    def extract_ingest_chunk(self, extractor, text, *, ontology=None, discovery_options=None,
+                             checkpoint_context=None, ordinal=0, settings=None):
+        """Persist raw extraction before ID remapping, reconciliation and formal writes."""
+        from .ingest_checkpoints import checkpoint_fingerprint
+        def extract():
+            semaphore=getattr(self,'llm_semaphore',nullcontext())
+            with semaphore:
+                if checkpoint_context:checkpoint_context.guard()
+                input_text=text
+                if checkpoint_context and checkpoint_context.chunks[ordinal].get('metadata',{}).get('source_kind')=='image_ocr':
+                    input_text='以下文字来自图片 OCR，可能存在识别错误；仅使用下方原文提供的证据。\n\n'+text
+                records=(extractor.discover(input_text,**discovery_options) if discovery_options is not None
+                         else extractor.extract(input_text,ontology))
+            return {'records':deepcopy(records),
+                    'review_candidates':deepcopy(getattr(extractor,'review_candidates',[])),
+                    'diagnostics':deepcopy(getattr(extractor,'extraction_diagnostics',{}))}
+        if checkpoint_context is None:
+            result=extract()
+        else:
+            fingerprint=checkpoint_fingerprint(file_hash=checkpoint_context.file_hash,
+                text_hash=hashlib.sha256(text.encode()).hexdigest(),mode='discovery' if discovery_options is not None else 'ontology',
+                ontology=ontology.turtle if hasattr(ontology,'turtle') else checkpoint_context.ontology_fingerprint,
+                model=os.getenv('KG_LLM_MODEL',''),base_url=os.getenv('KG_LLM_BASE_URL',''),
+                prompt_version='semantica-v1',extractor_version=hashlib.sha256(
+                    (__import__('pathlib').Path(__file__).resolve().parents[1]/'integrations/semantica_adapter.py').read_bytes()).hexdigest(),
+                parser_version=hashlib.sha256(
+                    (__import__('pathlib').Path(__file__).resolve().parents[1]/'integrations/markdown_parser.py').read_bytes()).hexdigest(),
+                chunk_version=hashlib.sha256(
+                    (__import__('pathlib').Path(__file__).resolve().parent/'chunking.py').read_bytes()).hexdigest(),
+                max_tokens=os.getenv('KG_LLM_MAX_TOKENS',''),active_ontology=checkpoint_context.expected_active_ontology,
+                chunk_metadata=checkpoint_context.chunks[ordinal].get('metadata',{}),document_generation=checkpoint_context.item.get('document_generation',0),settings=settings)
+            result=checkpoint_context.execute(ordinal,fingerprint,extract)
+        extractor.review_candidates=deepcopy(result['review_candidates'])
+        extractor.extraction_diagnostics=deepcopy(result['diagnostics'])
+        return result['records']
+
+    def ingest_runs(self,project_id,document_id=None):
+        from .ingest_retry import public_failure
+        return [{**row,'failure':public_failure(row.get('failure'))}
+                for row in self.repository.list_ingest_runs(project_id,document_id)]
+
     def ingest(self, project_id, request):
         """文档收据在抽取失败时依然保留；派生知识原子化提交。"""
         extraction_mode=request.get('extraction_mode') or ('ontology' if request.get('extract',True) else 'documents')
         event(f"文档开始 · {request['title']} · {len(request['text'])} 字符 · 项目 {project_id} · 模式 {extraction_mode}",5)
         self.repository.get_project(project_id)
+        checkpoint_context=request.get('_checkpoint_context')
+        if checkpoint_context and extraction_mode in ('ontology','discovery'):
+            from ..repository import OntologyNotPublished
+            checkpoint_context.ontology_checked=True
+            try:checkpoint_context.expected_active_ontology=self.repository.get_ontology(project_id)['id']
+            except OntologyNotPublished:checkpoint_context.expected_active_ontology=None
         requested_ontology_id=request.get('ontology_id')
         selected_ontology_version=(
             self.repository.get_ontology(project_id,requested_ontology_id)
@@ -574,7 +623,16 @@ class KnowledgeService:
             request[key] = normalize_time(request.get(key))
         if request['valid_from'] and request['valid_until'] and request['valid_from'] >= request['valid_until']:
             raise ValueError('业务时间区间必须具有正时长')
-        doc_id = str(uuid4())
+        checkpoint_context=request.get('_checkpoint_context')
+        doc_id = request.get('_document_id') or str(uuid4())
+        prior=None
+        if request.get('_document_id'):
+            try:prior=self.repository.get_record(project_id,doc_id)
+            except KeyError:pass
+            if (prior and prior.get('metadata',{}).get('status')=='ready'
+                    and prior.get('metadata',{}).get('document_generation',0)==request.get('metadata',{}).get('document_generation',0)):
+                return {'document':public(prior),'records':[],'replayed':True}
+
         # 整篇文档的批次系统时间点：收据/切片/抽取结果/完成标记共享同一 recorded_at，
         # timeline 里"上传一个文档"= 一个时间点，且 known_at 时间旅行永远看到完整文档。
         operation_context = self.repository._reserve_record_operation(project_id)
@@ -584,8 +642,9 @@ class KnowledgeService:
                     'readiness':initial_readiness}
         document = dict(id=doc_id, kind='document', text=request['text'], metadata=metadata,
                         valid_from=request.get('valid_from'), valid_until=request.get('valid_until'))
-        receipt = self.repository._put_record_for_operation(
-            project_id, document, expected_version=0, operation=operation_context)
+        with self.repository._formal_write_transaction() if checkpoint_context else nullcontext():
+            receipt = self.repository._put_record_for_operation(
+                project_id, document, expected_version=prior['version'] if prior else 0, operation=operation_context)
         run=self.repository.create_ingest_run(project_id,doc_id,receipt['version_id'])
         run=self.repository.update_ingest_run(project_id,run['id'],run['version'],status='running',active_stage='chunking')
         metadata['run_id']=run['id']
@@ -601,14 +660,14 @@ class KnowledgeService:
             # 重叠段落保留来源偏移，并继承文档元数据/有效性。
             from .chunking import split_document
             with stage(f"切片 · 策略 {request.get('chunk_strategy','fixed')} · 长度 {request.get('chunk_size',1800)} · 重叠 {request.get('chunk_overlap',200)}",10):
-                chunks=split_document(request['text'], request)
+                chunks=request.get('_prepared_chunks') or split_document(request['text'], request)
             event(f'切片完成 · 共 {len(chunks)} 片',12)
             run=self.repository.update_ingest_run(project_id,run['id'],run['version'],active_stage='extraction',
                 counts_patch={'chunks_total':len(chunks),'chunks_succeeded':len(chunks)})
             for index, chunk in enumerate(chunks):
                 start, text = chunk['start_char'], chunk['text']
                 chunk_records.append(dict(id=f'{doc_id}:chunk:{index}', kind='chunk', text=text,
-                                    metadata={'start_char': start, 'end_char': start + len(text),
+                                    metadata={**chunk.get('metadata',{}),'start_char': start, 'end_char': chunk.get('end_char', start + len(text)),
                                               'chunk_strategy': request.get('chunk_strategy', 'fixed'),
                                               'chunk_size': request.get('chunk_size', 1800),
                                               'chunk_overlap': request.get('chunk_overlap', 200)}))
@@ -625,9 +684,16 @@ class KnowledgeService:
             for row in chunk_records:
                 row.update(source_id=doc_id,valid_from=request.get('valid_from'),valid_until=request.get('valid_until'))
                 row['metadata']={**metadata,**row['metadata'],'status':'ready','indexed_at':indexed_at}
-            indexed=self.write(
-                project_id, chunk_records, operation='extract',
-                operation_context=operation_context)
+            existing_chunks={}
+            if prior:
+                for chunk in chunk_records:
+                    try:existing_chunks[chunk['id']]=self.repository.get_record(project_id,chunk['id'])['version']
+                    except KeyError:existing_chunks[chunk['id']]=0
+            with self.lock:
+                indexed=self.write(
+                    project_id, chunk_records, expected_versions=existing_chunks if prior else None, operation='extract',
+                    operation_context=operation_context)
+                if checkpoint_context:checkpoint_context.map_chunks(project_id,indexed)
             saved_chunks=indexed
             run=self.repository.update_ingest_run(project_id,run['id'],run['version'],active_stage='extraction',
                 readiness_patch={'keyword_ready':True,'semantic_ready':True})
@@ -672,7 +738,11 @@ class KnowledgeService:
                         project_id, receipt['version_id'], chunk['id'],
                         'ontology_slice', slice_hash, slice_receipt)
                     with stage(f"片段 {index+1}/{len(chunks)} · 位置 {chunk['metadata']['start_char']}–{chunk['metadata']['end_char']} · {len(chunk['text'])} 字符",15+int(60*index/len(chunks))):
-                        extracted = extractor.extract(chunk['text'], ontology)
+                        extracted = self.extract_ingest_chunk(extractor,chunk['text'],ontology=ontology,
+                            checkpoint_context=checkpoint_context,ordinal=index,settings={
+                                **{k:v for k,v in request.items() if not k.startswith('_') and k not in ('title','text','metadata')},
+                                'ontology_id':version['id'],'ontology_hash':hashlib.sha256(version['turtle'].encode()).hexdigest(),
+                                'slice':slice_receipt})
                     processed_chunks += 1
                     event(f"片段 {index+1}/{len(chunks)} 结果 · 实体 {sum(r['kind']=='entity' for r in extracted)} · 关系 {sum(r['kind']=='relation' for r in extracted)}",15+int(60*(index+1)/len(chunks)))
                     diagnostics=getattr(extractor,'extraction_diagnostics',{})
@@ -740,9 +810,11 @@ class KnowledgeService:
                 event('开放本体发现已启用 · 候选不会直接进入正式图谱',15)
                 for index,chunk in enumerate(chunk_records):
                     with stage(f"开放发现片段 {index+1}/{len(chunks)} · 位置 {chunk['metadata']['start_char']}–{chunk['metadata']['end_char']}",15+int(60*index/len(chunks))):
-                        candidates=extractor.discover(chunk['text'],
-                            include_attributes=request.get('extract_attributes',False),
-                            reserved_class_names=baseline_class_names)
+                        candidates=self.extract_ingest_chunk(extractor,chunk['text'],discovery_options={
+                            'include_attributes':request.get('extract_attributes',False),
+                            'reserved_class_names':baseline_class_names},checkpoint_context=checkpoint_context,
+                            ordinal=index,settings={**{k:v for k,v in request.items() if not k.startswith('_') and k not in ('title','text','metadata')},
+                                'baseline':baseline_version['id'] if baseline_version else None})
                     processed_chunks += 1
                     id_map={item['id']:f"{chunk['id']}:discovery:{item['id']}" for item in candidates}
                     for item in candidates:
@@ -791,6 +863,16 @@ class KnowledgeService:
                     'payload':candidate,'actor':'extractor'})
             event('抽取阶段结束；等待融合／写入锁',78)
             with self.lock:
+                if checkpoint_context:
+                    checkpoint_context.guard()
+                    if extraction_mode in ('ontology','discovery'):
+                        from ..repository import OntologyNotPublished
+                        try:active_id=self.repository.get_ontology(project_id)['id']
+                        except OntologyNotPublished:active_id=None
+                        if active_id!=checkpoint_context.expected_active_ontology:
+                            error=ValueError('ontology changed during extraction')
+                            error.code='ontology_version_changed'
+                            raise error
                 expected_versions=None
                 if extraction_mode=='ontology' and request.get('resolve_entities',True):
                     from .reconciliation import reconcile
@@ -840,10 +922,11 @@ class KnowledgeService:
                             'created_at': utc_now()})
                     event(f'SHACL 本体异常 {len(seen)} 条已加入审核；知识未被阻塞')
                     completed['metadata'] = {**completed.get('metadata', {}), 'review_candidates': review_candidates}
-                    completed = self.repository._put_record_for_operation(project_id,
-                        {k: v for k, v in completed.items() if k not in ('embedding', 'embedding_model',
-                         'version', 'version_id', 'recorded_at', 'superseded_at', 'project_id')},
-                        expected_version=completed['version'], operation=operation_context)
+                    with self.repository._formal_write_transaction() if checkpoint_context else nullcontext():
+                        completed = self.repository._put_record_for_operation(project_id,
+                            {k: v for k, v in completed.items() if k not in ('embedding', 'embedding_model',
+                             'version', 'version_id', 'recorded_at', 'superseded_at', 'project_id')},
+                            expected_version=completed['version'], operation=operation_context)
             event(f'落库完成 · {len(saved)} 条派生记录 · 文档 {doc_id}',99)
             run=self.repository.update_ingest_run(project_id,run['id'],run['version'],status='completed',
                 active_stage='completed',readiness_patch={key:value for key,value in final_readiness.items() if key!='search_ready'},
@@ -855,6 +938,7 @@ class KnowledgeService:
                     'run_id':run['id'],'status':run['status'],'active_stage':run['active_stage'],
                     'readiness':run['readiness']}
         except Exception as exc:
+            if checkpoint_context:checkpoint_context.guard()
             failure_details={}
             if isinstance(exc,OntologyValidationError):
                 failure_details={'validation_error_count':len(exc.errors),'validation_errors':exc.errors[:100]}
@@ -876,20 +960,26 @@ class KnowledgeService:
                         expected_versions={chunk['id']:chunk['version'] for chunk in saved_chunks},operation='extract',
                         operation_context=operation_context)
                 else:
-                    self.repository._put_record_for_operation(
-                        project_id, document, expected_version=current_document['version'],
-                        operation=operation_context)
+                    with self.repository._formal_write_transaction() if checkpoint_context else nullcontext():
+                        self.repository._put_record_for_operation(
+                            project_id, document, expected_version=current_document['version'],
+                            operation=operation_context)
             except ValueError as conflict:
                 if '版本冲突' not in str(conflict):
                     raise
                 raise RuntimeError(f'文档 {doc_id} 在摄取期间已变更；已保留更新的修订版本') from exc
             if run:
+                from .ingest_retry import classify_error
+                public_error=classify_error(exc)
                 run=self.repository.update_ingest_run(project_id,run['id'],run['version'],status='failed',
                     active_stage='failed',
                     readiness_patch={'keyword_ready':False,'semantic_ready':False} if cleanup_chunks else None,
                     counts_patch={'chunks_failed':max(0,len(chunk_records)-processed_chunks)},
-                    failure={'type':type(exc).__name__,'message':str(exc)})
-            raise RuntimeError(f'文档 {doc_id} 已保留；摄取失败：{exc}') from exc
+                    failure={'type':type(exc).__name__,'code':public_error.code,'message':public_error.message,
+                             'retryable':public_error.retryable})
+            error=RuntimeError(f'文档 {doc_id} 已保留；摄取失败')
+            error.failed_chunk_ordinal=getattr(exc,'failed_chunk_ordinal',None)
+            raise error from exc
 
     def answer(self, project_id, request):
         # 注意：这个"一次性 JSON"入口与 answers.stream_events 是同一件事的两个入口，

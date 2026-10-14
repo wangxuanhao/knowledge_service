@@ -166,3 +166,29 @@ class OntologyWrite(Request):
 class Sparql(Scope):
     query: str = Field(min_length=1, max_length=10000)
     ontology_id: str | None = None
+
+class IngestCapabilities(BaseModel):
+    max_batch_items: int
+    max_file_bytes: int
+    max_batch_bytes: int
+    concurrency_choices: list[str | int]
+    server_concurrency_limit: int
+    llm_concurrency_limit: int
+    ocr_concurrency_limit: int
+    ocr_available: bool
+    ocr_languages: list[str]
+    ocr_image_extensions: list[str]
+    ocr_max_pixels: int
+    supported_extensions: list[str]
+    markdown_package: bool
+    source_reader: bool
+
+class IngestBatchSettings(IngestSettings):
+    requested_concurrency: Literal['auto',1,2,4,8] = 'auto'
+    extraction_mode: Literal['ontology','discovery','documents'] = 'ontology'
+
+class IngestBatchCreate(Request):
+    settings: IngestBatchSettings = Field(default_factory=IngestBatchSettings)
+
+class IngestItemRetry(Request):
+    mode: Literal['resume_checkpoint','retry_failed_chunks','restart_document'] = 'resume_checkpoint'

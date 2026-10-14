@@ -50,11 +50,14 @@ def _value(item: Any, *names: str, default=None):
 
 
 class DocumentParser:
-    def __init__(self, ocr_mode: str | None = None, parser_factory: Callable[..., Any] | None = None):
+    def __init__(self, ocr_mode: str | None = None, parser_factory: Callable[..., Any] | None = None,
+                 max_upload_bytes: int = MAX_UPLOAD_BYTES):
         self.ocr_mode = ocr_mode if ocr_mode is not None else os.environ.get('KG_DOCUMENT_OCR_MODE', 'auto')
         if self.ocr_mode not in {'auto', 'disabled'}:
             raise ValueError('KG_DOCUMENT_OCR_MODE 必须为 auto 或 disabled')
         self._parser_factory = parser_factory
+        if max_upload_bytes<1:raise ValueError('max_upload_bytes must be positive')
+        self.max_upload_bytes=max_upload_bytes
 
     def parse(self, path: str | Path, original_name: str, *, size: int | None = None,
               digest: str | None = None) -> ParsedDocument:
@@ -63,8 +66,8 @@ class DocumentParser:
         if extension not in SUPPORTED_EXTENSIONS:
             raise DocumentParseError('unsupported_format', '仅支持 TXT、Markdown、PDF、DOCX、HTML 文件')
         actual_size = source.stat().st_size if size is None else size
-        if actual_size > MAX_UPLOAD_BYTES:
-            raise DocumentParseError('file_too_large', '单个文件不能超过 25 MB')
+        if actual_size > self.max_upload_bytes:
+            raise DocumentParseError('file_too_large', f'单个文件超过服务端上限（{self.max_upload_bytes} 字节）')
         checksum = digest or sha256(source.read_bytes()).hexdigest()
 
         if extension in TEXT_EXTENSIONS:

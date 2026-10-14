@@ -1,7 +1,7 @@
 """探索、迁移、治理与持久化任务的 HTTP 契约。"""
 from typing import Literal
 from pydantic import Field, model_validator
-from fastapi import APIRouter, File, Form, UploadFile, Request as HttpRequest
+from fastapi import APIRouter, File, Form, Header, Query, UploadFile, Request as HttpRequest
 from .audit_identity import audit_actor
 from fastapi.responses import StreamingResponse, FileResponse
 from ..models import Request, Scope, Ingest, Question
@@ -77,6 +77,67 @@ def install(app,service):
     jobs=Jobs(service.data, handlers=job_handlers(service, app.state.document_uploads))
     reclassify=Reclassify(service)
     app.state.jobs=jobs
+    from ..models import IngestBatchCreate, IngestItemRetry, UploadOptions
+    from ..services.ingest_batches import IngestBatches, capabilities, public_batch, public_item
+    from ..services.ingest_batch_runner import IngestBatchRunner
+    limits=capabilities()
+    batches=IngestBatches(service,service.data.ingest_batches,limits,app.state.source_documents)
+    app.state.ingest_batches=batches
+    app.state.ingest_batch_runner=IngestBatchRunner(service,service.data.ingest_batches,
+        service.data.ingest_checkpoints,app.state.source_documents,
+        document_limit=limits.server_concurrency_limit,llm_limit=limits.llm_concurrency_limit,
+        ocr_limit=limits.ocr_concurrency_limit,file_limit=limits.max_file_bytes)
+
+    @router.get('/ingest/capabilities')
+    def ingest_capabilities():
+        result=limits.model_dump()
+        result['ocr_available']=app.state.source_documents.image_ocr.adapter.available()
+        result['ocr_max_pixels']=getattr(app.state.source_documents.image_ocr.adapter,'max_pixels',limits.ocr_max_pixels)
+        return result
+
+    @router.post('/projects/{p}/ingest-batches',status_code=201)
+    def create_ingest_batch(p:str,request:IngestBatchCreate,http:HttpRequest):
+        return public_batch(batches.create(p,request.settings,audit_actor(http)))
+
+    @router.get('/projects/{p}/ingest-batches')
+    def list_ingest_batches(p:str,limit:int=Query(50,ge=1,le=1000),cursor:int=Query(0,ge=0)):
+        service.data.get_project(p)
+        result=batches.store.list_batches(p,limit,cursor)
+        result['items']=[public_batch(row) for row in result['items']]
+        result['next_cursor']=str(cursor+len(result['items'])) if cursor+len(result['items'])<result['total'] else None
+        return result
+
+    @router.get('/projects/{p}/ingest-batches/{batch_id}')
+    def get_ingest_batch(p:str,batch_id:str):
+        return public_batch(batches.get(p,batch_id))
+
+    @router.post('/projects/{p}/ingest-batches/{batch_id}/files',status_code=201)
+    @router.post('/projects/{p}/ingest-batches/{batch_id}/items',status_code=201)
+    def upload_ingest_file(p:str,batch_id:str,file:UploadFile=File(...),options:str=Form('{}'),
+                           idempotency_key:str|None=Header(None,alias='Idempotency-Key')):
+        import json
+        raw=json.loads(options)
+        # Per-file overrides reuse the legacy upload validation and forbid transport/private keys.
+        UploadOptions.model_validate(raw)
+        return batches.upload(p,batch_id,file,idempotency_key,raw)
+
+    @router.get('/projects/{p}/ingest-batches/{batch_id}/items')
+    def list_ingest_items(p:str,batch_id:str,limit:int=Query(50,ge=1,le=1000),
+                          cursor:int=Query(0,ge=0),status:str|None=None):
+        batches.get(p,batch_id)
+        internal={'queued':'pending','staged':'pending','completed':'succeeded','needs_attention':'failed'}.get(status,status)
+        result=batches.store.list_items(p,batch_id,limit,cursor,internal)
+        result['items']=[public_item(row) for row in result['items']]
+        result['next_cursor']=str(cursor+len(result['items'])) if cursor+len(result['items'])<result['total'] else None
+        return result
+
+    @router.post('/projects/{p}/ingest-batches/{batch_id}/items/{item_id}/retry',status_code=202)
+    def retry_ingest_item(p:str,batch_id:str,item_id:str,request:IngestItemRetry):
+        return public_batch(batches.retry(p,batch_id,item_id,request.mode))
+
+    @router.post('/projects/{p}/ingest-batches/{batch_id}/{action}',status_code=202)
+    def control_ingest_batch(p:str,batch_id:str,action:Literal['start','pause','resume','cancel','retry-failed']):
+        return public_batch(batches.control(p,batch_id,action))
 
     @app.get('/vendor/echarts.min.js')
     def echarts():

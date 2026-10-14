@@ -11,7 +11,7 @@ import json
 import hashlib
 import math
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -144,6 +144,12 @@ class Repository:
         self._provenance = ProvenanceStore(self)
         self._ontology_drafts = OntologyDraftStore(self)
         self._discovery_runs = DiscoveryRunStore(self)
+        from .ingest_batch_store import IngestBatchStore
+        from .checkpoint_store import CheckpointStore
+        from .source_store import SourceStore
+        self.ingest_batches = IngestBatchStore(self)
+        self.ingest_checkpoints = CheckpointStore(self)
+        self.source_documents = SourceStore(self)
         with self._transaction():
             self._db.execute(
                 'INSERT INTO service_settings VALUES (?,?) ON CONFLICT (key) DO NOTHING',
@@ -156,7 +162,11 @@ class Repository:
                      WHERE r.project_id=ingest_runs.project_id
                        AND r.id=ingest_runs.document_id AND r.superseded_at IS NULL
                        AND a.kind='job' AND a.payload::jsonb->'payload' IS NOT NULL
-                       AND a.payload::jsonb->>'status' IN ('queued','running','retry_wait'))''',
+                       AND a.payload::jsonb->>'status' IN ('queued','running','retry_wait'))
+                   AND NOT EXISTS (
+                     SELECT 1 FROM ingest_batch_items i JOIN ingest_batches b ON b.id=i.batch_id
+                     WHERE i.project_id=ingest_runs.project_id AND i.document_id=ingest_runs.document_id
+                       AND i.status='running' AND b.status='running' AND i.lease_until>clock_timestamp())''',
                 (_json({'type': 'ProcessRestart', 'message': 'Ingest process restarted'}), utc_now()))
 
     def _verify_schema(self):
@@ -429,7 +439,10 @@ class Repository:
                 'stale_snapshot',
                 '版本冲突：正式写入依赖发生并发变更')
         with self._serialized_project_write(conflict):
-            yield
+            from ..core.ingest_context import ingest_commit_guard
+            guard=ingest_commit_guard.get()
+            with guard() if guard else nullcontext():
+                yield
 
     def _lock_project_write_tables(self):
         """Acquire the one repository-wide project-write table lock order."""

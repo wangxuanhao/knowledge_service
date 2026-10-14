@@ -22,7 +22,16 @@ def job_handlers(service, uploads):
         data['metadata'] = {**data.get('metadata', {}), 'durable_task_id': task_id,
                             'retry_of_documents': [r['id'] for r in existing]}
         with reporting(progress):
-            return service.ingest(project_id, Ingest.model_validate(data).model_dump())
+            try:
+                return service.ingest(project_id, Ingest.model_validate(data).model_dump())
+            except Exception as exc:
+                from .ingest_retry import classify_error
+                error=classify_error(exc)
+                failure=RuntimeError(error.message)
+                failure.code=error.code
+                failure.retryable=error.retryable
+                failure.stage=error.stage
+                raise failure from exc
 
     def upload(payload, project_id, progress, task_id):
         if any(r['kind'] == 'document'

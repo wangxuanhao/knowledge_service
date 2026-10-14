@@ -254,9 +254,11 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
         threading.Thread(target=service.warm_up, daemon=True).start()
         ontology_sync.start()
         app.state.jobs.start()
+        app.state.ingest_batch_runner.start()
         yield
         ontology_sync.close()
         app.state.jobs.close()
+        app.state.ingest_batch_runner.close()
         app.state.neo4j.close()
         repository.close()
 
@@ -310,6 +312,8 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
     install_projects(app, service)
     from .knowledge import install as install_knowledge
     install_knowledge(app, service)
+    from .source_documents import install as install_source_documents
+    install_source_documents(app, service)
     from .parity import install
     install(app, service)
     install_neo4j(app, service)
