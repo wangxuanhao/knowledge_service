@@ -38,7 +38,8 @@ class SourceDocumentService:
                 asset['object']=self.object_store.put(asset.pop('data'),mime)
             elif asset['kind']=='local': asset['status']='missing'
             prepared.append(asset)
-        mime='application/zip' if data.startswith(b'PK\x03\x04') else mimetypes.guess_type(original_name)[0] or 'application/octet-stream'
+        markdown_name=original_name.lower().endswith(('.md','.markdown'))
+        mime='application/zip' if markdown_name and data.startswith(b'PK\x03\x04') else mimetypes.guess_type(original_name)[0] or 'application/octet-stream'
         obj=self.object_store.put(data,mime)
         return self.store.create_version(project_id,document_id,obj,original_name,parsed,prepared)
 
@@ -70,7 +71,7 @@ class SourceDocumentService:
     def source(self,project_id,version_id):
         version=self.get(project_id,version_id)
         original=self.object_store.read(version['storage_key'])
-        if original.startswith(b'PK\x03\x04'):
+        if version['format']=='markdown' and original.startswith(b'PK\x03\x04'):
             # Raw reading and source download represent the selected Markdown, not binary ZIP.
             return dict(text=version['source_text'],original_name=version['original_name'],mime_type='text/markdown; charset=utf-8',data=version['source_text'].encode('utf-8'),package_data=original,package_mime_type='application/zip')
         return dict(text=version['source_text'],original_name=version['original_name'],mime_type=version['mime_type'],data=original)

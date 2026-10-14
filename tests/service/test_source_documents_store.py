@@ -83,9 +83,32 @@ def test_source_spans_are_project_scoped_and_immutable(tmp_path):
     service.store.add_spans(project['id'],version['id'],chunk['version_id'],[span])
     location=service.locate(project['id'],version['id'],chunk['version_id'])
     assert location['block_id']==span['block_id'] and len(location['spans'])==1
+    current=repo.put_record(project['id'],{'id':'chunk','kind':'chunk','text':'Revised current text'})
+    assert current['version_id']!=chunk['version_id']
+    fixed=service.get(project['id'],version['id'])['chunks']
+    assert len(fixed)==1 and fixed[0]['version_id']==chunk['version_id']
+    assert fixed[0]['text']=='Requirement' and fixed[0]['spans'][0]['block_id']==span['block_id']
     with pytest.raises(ValueError,match='conflict'):
         service.store.add_spans(project['id'],version['id'],chunk['version_id'],[dict(span,chunk_end_char=10)])
     foreign=repo.put_record(other['id'],{'id':'chunk','kind':'chunk','text':'Other'})
     with pytest.raises(Exception): service.store.add_spans(project['id'],version['id'],foreign['version_id'],[span])
     assert service.collect_unreferenced_objects()==[]
+    repo.close()
+
+def test_docx_zip_signature_keeps_original_download_bytes(tmp_path):
+    import io,zipfile
+    repo=Repository(target(tmp_path/'docx-source'))
+    project=repo.create_project('Word source')
+    service=SourceDocumentService(repo,SourceObjectStore(tmp_path/'objects'))
+    buffer=io.BytesIO()
+    with zipfile.ZipFile(buffer,'w') as archive:
+        archive.writestr('[Content_Types].xml','<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
+        archive.writestr('word/document.xml','<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body/></w:document>')
+    payload=buffer.getvalue()
+    version=service.persist(project['id'],'word',payload,'rules.docx',text='Parsed Word text')
+    result=service.source(project['id'],version['id'])
+    assert version['format']=='docx' and version['chunks']==[]
+    assert result['data']==payload and result['text']=='Parsed Word text'
+    assert result['mime_type']=='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    assert 'package_data' not in result
     repo.close()

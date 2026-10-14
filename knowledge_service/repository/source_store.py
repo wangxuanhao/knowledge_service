@@ -44,7 +44,27 @@ class SourceStore:
             result=dict(row)
             result['blocks']=self._list('parsed_blocks',project_id,version_id,'ordinal')
             result['assets']=self._list('source_assets',project_id,version_id,'id')
+            result['chunks']=self._version_chunks(project_id,version_id)
             return result
+
+    def _version_chunks(self,project_id,version_id):
+        """Read the immutable mapped record version; never substitute a current revision."""
+        rows=self.repo._db.execute('''SELECT s.*,r.id AS record_id,r.payload AS record_payload
+            FROM chunk_source_spans s JOIN record_versions r
+              ON r.project_id=s.project_id AND r.version_id=s.chunk_version_id
+            WHERE s.project_id=? AND s.document_version_id=?
+            ORDER BY r.recorded_at,r.id,s.ordinal''',(project_id,version_id)).fetchall()
+        chunks={}
+        for row in rows:
+            item=dict(row)
+            payload=json.loads(item.pop('record_payload'))
+            record_id=item.pop('record_id')
+            identity=item['chunk_version_id']
+            item['payload']=json.loads(item['payload'])
+            if identity not in chunks:
+                chunks[identity]=dict(id=record_id,version_id=identity,text=payload.get('text',''),metadata=payload.get('metadata',{}),spans=[])
+            chunks[identity]['spans'].append(item)
+        return list(chunks.values())
 
     def _list(self, table, project_id, version_id, order):
         rows=self.repo._db.execute(f'SELECT * FROM {table} WHERE project_id=? AND document_version_id=? ORDER BY {order}',(project_id,version_id)).fetchall()

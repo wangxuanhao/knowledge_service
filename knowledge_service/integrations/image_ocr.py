@@ -4,11 +4,49 @@ import io
 import json
 import os
 import threading
+import math
 from importlib.metadata import version
 from pathlib import Path
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 MANIFEST = Path(__file__).parents[1] / 'resources/ocr/pp-ocr-v6-small.json'
 _OCR_SEMAPHORE = threading.BoundedSemaphore(1)
+
+
+class OcrBlock(BaseModel):
+    text: str
+    normalized_text: str
+    confidence: float = Field(ge=0,le=1,allow_inf_nan=False)
+    x: float = Field(ge=0,le=1,allow_inf_nan=False)
+    y: float = Field(ge=0,le=1,allow_inf_nan=False)
+    width: float = Field(gt=0,le=1,allow_inf_nan=False)
+    height: float = Field(gt=0,le=1,allow_inf_nan=False)
+    page_or_frame: int = Field(default=1,ge=1)
+
+    @field_validator('text','normalized_text')
+    @classmethod
+    def nonempty_text(cls,value):
+        if not value.strip(): raise ValueError('OCR block text is empty')
+        return value
+
+    @model_validator(mode='after')
+    def within_image(self):
+        if self.x+self.width>1 or self.y+self.height>1:
+            raise ValueError('OCR box extends beyond image')
+        return self
+
+
+class OcrResult(BaseModel):
+    blocks: list[OcrBlock]
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    engine: str
+    engine_version: str
+    normalized_text: str
+    average_confidence: float = Field(ge=0,le=1,allow_inf_nan=False)
+    languages: list[str]
+    configuration_fingerprint: str
+    preprocess_fingerprint: str
 
 
 class OCRError(RuntimeError):
@@ -46,6 +84,11 @@ class RapidOCRAdapter:
         self._init_lock = threading.Lock()
 
     @property
+    def preprocess_fingerprint(self):
+        payload=dict(version=self.preprocess_version,max_side=self.max_side,max_pixels=self.max_pixels,exif='transpose',alpha='white_composite',colors='RGB_to_BGR',scale='aspect_preserving_thumbnail')
+        return hashlib.sha256(json.dumps(payload,sort_keys=True).encode()).hexdigest()
+
+    @property
     def configuration_fingerprint(self):
         payload = dict(manifest=json.loads(MANIFEST.read_text()),preprocess=self.preprocess_version,max_side=self.max_side,max_pixels=self.max_pixels,languages=self.languages,device='cpu')
         try:
@@ -56,10 +99,28 @@ class RapidOCRAdapter:
             raise OCRError('ocr_engine_unavailable','This OCR configuration supports CPU only')
         if os.getenv('KG_IMAGE_OCR_BACKEND','rapidocr')!='rapidocr':
             raise OCRError('ocr_engine_unavailable','Unsupported image OCR backend')
+        if not isinstance(self.max_side,int) or not isinstance(self.max_pixels,int) or self.max_side<1 or self.max_pixels<1:
+            raise OCRError('ocr_engine_unavailable','Invalid OCR image limits')
+        if set(self.languages.split(',')) - {'ch','en'} or not self.languages:
+            raise OCRError('ocr_engine_unavailable','Unsupported OCR language configuration')
         if self.config_path:
             path=Path(self.config_path)
             if not path.is_file(): raise OCRError('ocr_engine_unavailable','OCR configuration missing')
             payload['config_sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
+            import yaml
+            try:
+                config=yaml.safe_load(path.read_text(encoding='utf-8'))
+            except Exception as exc:
+                raise OCRError('ocr_engine_unavailable','Invalid OCR configuration') from exc
+            if not isinstance(config,dict) or not isinstance(config.get('EngineConfig',{}),dict):
+                raise OCRError('ocr_engine_unavailable','Invalid OCR configuration structure')
+            runtime=config.get('EngineConfig',{}).get('onnxruntime',{})
+            if not isinstance(runtime,dict) or any(not isinstance(config.get(section,{}),dict) for section in ('Det','Cls','Rec')):
+                raise OCRError('ocr_engine_unavailable','Invalid OCR runtime configuration')
+            if any(runtime.get('use_'+provider,False) for provider in ('cuda','dml','cann','coreml')):
+                raise OCRError('ocr_engine_unavailable','OCR configuration enables a non-CPU provider')
+            if any(config.get(section,{}).get('engine_type','onnxruntime')!='onnxruntime' for section in ('Det','Cls','Rec')):
+                raise OCRError('ocr_engine_unavailable','OCR configuration uses unsupported inference engine')
         return hashlib.sha256(json.dumps(payload,sort_keys=True).encode()).hexdigest()
 
     def available(self):
@@ -87,7 +148,10 @@ class RapidOCRAdapter:
         from PIL import Image, ImageOps
         import numpy as np
         try:
+            fingerprint=self.configuration_fingerprint
             with Image.open(io.BytesIO(data)) as source:
+                if source.format not in {'PNG','JPEG','GIF','BMP','TIFF','WEBP'}:
+                    raise OCRError('ocr_failed','Unsupported source image format')
                 if source.width * source.height > self.max_pixels: raise OCRError('ocr_failed','Image pixel limit exceeded')
                 image=ImageOps.exif_transpose(source).convert('RGBA')
                 original_width,original_height=image.size
@@ -101,11 +165,19 @@ class RapidOCRAdapter:
                 result=self._engine(pixels)
             blocks=[]
             if result.boxes is not None:
+                if result.txts is None or result.scores is None or not (len(result.boxes)==len(result.txts)==len(result.scores)):
+                    raise OCRError('ocr_failed','OCR output contains inconsistent block counts')
                 for box,text,confidence in zip(result.boxes,result.txts,result.scores):
+                    if len(box)!=4 or any(len(point)!=2 for point in box):
+                        raise OCRError('ocr_failed','OCR output contains an invalid polygon')
                     xs=[float(p[0]) for p in box]; ys=[float(p[1]) for p in box]
-                    x=max(0,min(1,min(xs)/width)); y=max(0,min(1,min(ys)/height))
-                    blocks.append(dict(text=text,normalized_text=' '.join(text.split()),confidence=float(confidence),x=x,y=y,width=max(0,min(1-x,(max(xs)-min(xs))/width)),height=max(0,min(1-y,(max(ys)-min(ys))/height)),page_or_frame=1))
+                    if any(not math.isfinite(point) for point in xs+ys) or min(xs)<0 or min(ys)<0 or max(xs)>width or max(ys)>height:
+                        raise OCRError('ocr_failed','OCR polygon is outside image bounds')
+                    x=min(xs)/width; y=min(ys)/height
+                    block=OcrBlock(text=text,normalized_text=' '.join(text.split()),confidence=float(confidence),x=x,y=y,width=max(xs)/width-x,height=max(ys)/height-y)
+                    blocks.append(block.model_dump())
             blocks.sort(key=lambda b:(round(b['y'],2),b['x']))
-            return dict(blocks=blocks,width=original_width,height=original_height,engine=self.engine,engine_version=version('rapidocr'),configuration_fingerprint=self.configuration_fingerprint,preprocess_fingerprint=hashlib.sha256(self.preprocess_version.encode()).hexdigest())
+            result=OcrResult(blocks=blocks,width=original_width,height=original_height,engine=self.engine,engine_version=version('rapidocr'),normalized_text='\n'.join(b['normalized_text'] for b in blocks),average_confidence=sum(b['confidence'] for b in blocks)/len(blocks) if blocks else 0,languages=self.languages.split(','),configuration_fingerprint=fingerprint,preprocess_fingerprint=self.preprocess_fingerprint)
+            return result.model_dump()
         except OCRError: raise
         except Exception as exc: raise OCRError('ocr_failed','Image recognition failed') from exc

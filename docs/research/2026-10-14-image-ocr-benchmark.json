@@ -1,0 +1,94 @@
+{
+  "recorded_at": "2026-10-14T04:20:15.953820+00:00",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "python": "3.12.0",
+  "device": "cpu",
+  "engine": "rapidocr",
+  "engine_version": "3.9.2",
+  "languages": [
+    "ch",
+    "en"
+  ],
+  "quality_policy": {
+    "min_confidence": 0.6,
+    "min_average_confidence": 0.75,
+    "max_low_confidence_ratio": 0.25,
+    "min_text_chars": 4
+  },
+  "configuration_fingerprint": "f961d02892c505c0b98bc273af0cdac987eee19f2819167627488c78b3055356",
+  "preprocess_fingerprint": "236efefc853c82a36d1de805190884bb57cab4d213a0383bf0581145f44d0c89",
+  "notes": [
+    "First sample includes model initialization.",
+    "Synthetic rule samples validate local execution, not production accuracy.",
+    "No LLM or database calls.",
+    "Rotated English may be misrecognized; confidence gates reject these samples with current defaults.",
+    "Latency depends on concurrent local workloads."
+  ],
+  "samples": [
+    {
+      "sample": "chinese_rule_fixture",
+      "cold_start": true,
+      "elapsed_seconds": 12.6146,
+      "expected_text": "设备温度超过 80 度时，应停止运行并检查冷却系统。",
+      "normalized_text": "设备温度超过 80 度时，\n应停止运行并检查冷却系统。",
+      "normalized_character_similarity": 1.0,
+      "average_confidence": 0.96478,
+      "blocks": 2,
+      "quality_status": "passed",
+      "width": 900,
+      "height": 180
+    },
+    {
+      "sample": "blank",
+      "cold_start": false,
+      "elapsed_seconds": 7.1212,
+      "expected_text": "",
+      "normalized_text": "",
+      "normalized_character_similarity": 1.0,
+      "average_confidence": 0.0,
+      "blocks": 0,
+      "quality_status": "ocr_low_confidence",
+      "width": 900,
+      "height": 180
+    },
+    {
+      "sample": "english",
+      "cold_start": false,
+      "elapsed_seconds": 9.3624,
+      "expected_text": "Stop operation when temperature exceeds 80 degrees.",
+      "normalized_text": "Stop operation when temperature exceeds 80 degrees.",
+      "normalized_character_similarity": 1.0,
+      "average_confidence": 0.9999,
+      "blocks": 1,
+      "quality_status": "passed",
+      "width": 900,
+      "height": 160
+    },
+    {
+      "sample": "english_rotated_180",
+      "cold_start": false,
+      "elapsed_seconds": 8.564,
+      "expected_text": "Stop operation when temperature exceeds 80 degrees.",
+      "normalized_text": "Ssep see ee e oeeo os",
+      "normalized_character_similarity": 0.3333,
+      "average_confidence": 0.64451,
+      "blocks": 1,
+      "quality_status": "ocr_low_confidence",
+      "width": 900,
+      "height": 160
+    },
+    {
+      "sample": "english_rotated_90",
+      "cold_start": false,
+      "elapsed_seconds": 9.8907,
+      "expected_text": "Stop operation when temperature exceeds 80 degrees.",
+      "normalized_text": "Sstere spee eeee e oero does",
+      "normalized_character_similarity": 0.2985,
+      "average_confidence": 0.64284,
+      "blocks": 1,
+      "quality_status": "ocr_low_confidence",
+      "width": 160,
+      "height": 900
+    }
+  ]
+}
