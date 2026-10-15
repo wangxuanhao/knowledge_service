@@ -211,7 +211,7 @@ def test_knowledge_ledger_is_the_instance_layer_home():
     assert all(view in records for view in ('实体','关系','属性','原文片段'))
     assert 'dataset.ledgerView' in records and 'ledger-tabs' in records
     # 本体归属：必须能分辨当前发布与历史发布（C2 受控重分类的前提）
-    assert '本体归属' in records and '（历史）' in records and '（当前）' in records
+    assert '本体归属' in records and 'RecordVersionContext' in records
     # 原文断言：两条血缘都要认（候选血缘 discovery_candidate_id + 已归位血缘 canonical_record_id）
     assert 'discovery_candidate_id' in records and 'byCanonical' in records
     # 撤销：以前接口有、UI 点不到；现在行内与"可撤销的操作"里都要能点到

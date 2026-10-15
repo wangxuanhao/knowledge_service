@@ -97,3 +97,34 @@ def test_non_entity_records_are_left_alone(tmp_path):
     record = client.get(f'/api/projects/{project_id}/records/rel').json()
     assert 'class_parents' not in record
     assert 'class_ancestors' not in record
+
+
+def test_historical_binding_keeps_its_family_after_a_new_release(tmp_path):
+    client, project_id = _project(tmp_path)
+    base = f'/api/projects/{project_id}'
+    repo = client.app.state.service.repository
+    first = repo.list_ontologies(project_id)[-1]
+    newer = HIERARCHY.replace('rdfs:subClassOf ex:电商平台', 'rdfs:subClassOf ex:孤立类')
+    second = repo.save_ontology(project_id, newer, {})
+    record = client.get(base + '/records/child').json()
+    node = _subgraph_nodes(client, project_id)['child']
+    assert record['ontology_id'] == node['ontology_id'] == first['id']
+    assert [parent['label'] for parent in record['class_parents']] == ['电商平台']
+    assert node['class_parents'] == record['class_parents']
+    # Each immutable release has its own family cache, independent of read order.
+    service = client.app.state.service
+    iri = 'https://example.test/hierarchy#价格类型'
+    assert service.ontology_family(project_id, second['id'])[iri]['parents'][0]['label'] == '孤立类'
+    assert service.ontology_family(project_id, first['id'])[iri]['parents'][0]['label'] == '电商平台'
+
+
+def test_unknown_binding_does_not_borrow_current_hierarchy(tmp_path):
+    client, project_id = _project(tmp_path)
+    repo = client.app.state.service.repository
+    repo.put_record(project_id, {'id': 'legacy', 'kind': 'entity', 'text': 'legacy',
+                                'type': 'https://example.test/hierarchy#价格类型'})
+    record = client.get(f'/api/projects/{project_id}/records/legacy').json()
+    node = _subgraph_nodes(client, project_id)['legacy']
+    assert record['class_parents'] == node['class_parents'] == []
+    assert record['class_ancestors'] == node['class_ancestors'] == []
+    assert record['class_ontology_id'] is None

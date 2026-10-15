@@ -425,23 +425,42 @@ class KnowledgeService:
             self._ontology_label_cache[project_id] = (signature, dict(labels))
         return labels
 
-    def ontology_family(self, project_id):
-        """类型 IRI → {'label','parents':[{id,label}],'ancestors':[{id,label}]}（当前本体版本的类层级）。
+    def record_family(self, project_id, row):
+        """Explain an entity using its bound release, never a guessed current one."""
+        ontology_id = row.get('ontology_id')
+        if not ontology_id:
+            return {}
+        try:
+            family = self.ontology_family(project_id, ontology_id)
+        except KeyError:
+            return {}
+        entry = family.get(row.get('type') or '')
+        return {**entry, 'ontology_id': ontology_id} if entry else {}
 
-        为什么单独做一个方法：检索页的实体详情与图谱节点都要显示"这个实体属于哪个类、它的父类是谁"，
-        两份数据必须同源。这里的"父类"是**当前（最新）版本**本体的 rdfs:subClassOf 直接父类，
-        祖先链是它的闭包（用户要的是"父类 A → 祖父类 B"这种能读懂的链，不是 IRI 集合）。
-        历史版本的陈旧层级不掺进来：界面上回答的是"现在这个本体怎么理解它"。
-        索引只随本体版本变化，按版本签名缓存（与 ontology_labels 同一套签名）。
+    def ontology_family(self, project_id, ontology_id=None):
+        """Class hierarchy for an explicit immutable release, or the current model.
+
+        Record consumers use record_family so unknown bindings never fall back.
+        Explicit releases are immutable and can reuse their cache without a query.
         """
+        cache_key = (project_id, ontology_id)
+        if ontology_id is not None:
+            with self.lock:
+                cached = self._ontology_family_cache.get(cache_key)
+                if cached:
+                    return dict(cached[1])
         versions = self.repository.list_ontologies(project_id)
-        signature = tuple(version['id'] for version in versions)
+        selected = next((version for version in reversed(versions)
+                         if ontology_id is None or version['id'] == ontology_id), None)
+        if ontology_id is not None and selected is None:
+            raise KeyError(ontology_id)
+        signature = selected['id'] if selected else None
         with self.lock:
-            cached = self._ontology_family_cache.get(project_id)
+            cached = self._ontology_family_cache.get(cache_key)
             if cached and cached[0] == signature:
                 return dict(cached[1])
-        index = (Ontology(versions[-1]['turtle']).expansion_index()
-                 if versions else {'labels': {}, 'parents': {}, 'ancestors': {}})
+        index = (Ontology(selected['turtle']).expansion_index()
+                 if selected else {'labels': {}, 'parents': {}, 'ancestors': {}})
         labels, direct = index['labels'], index.get('parents', {})
         family = {}
         for class_id in set(labels) | set(direct):
@@ -452,7 +471,7 @@ class KnowledgeService:
             family[class_id] = {'label': labels.get(class_id, class_id),
                                 'parents': parents, 'ancestors': self._class_chain(class_id, direct, labels)}
         with self.lock:
-            self._ontology_family_cache[project_id] = (signature, dict(family))
+            self._ontology_family_cache[cache_key] = (signature, dict(family))
         return family
 
     @staticmethod

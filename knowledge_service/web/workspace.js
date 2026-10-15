@@ -165,6 +165,7 @@
     for(const id of ['graph-version-scope','mindmap-version-scope']){
       const host=get(id);if(!host)continue;
       const label=make('span','知识范围：'+ontologyScopeLabel());
+      label.title='按所选时间范围内的知识修订筛选本体归属；本体筛选不等于整库历史快照，跨归属端点可能被过滤。';
       const reset=make('button','恢复全部本体','secondary');reset.type='button';
       reset.dataset.resetOntologyScope='';
       reset.hidden=(wb.versionContext?.ontologyScope||'all')==='all';
@@ -305,7 +306,7 @@
     const parents=(node.class_parents||[]).map(label).filter(Boolean);
     const rows=[`<b>${esc(node.text||point.data.name)}</b>`,
       `类型：${esc(node.class_label||point.data.categoryName||'—')}`];
-    rows.push(parents.length
+    rows.push(node.class_ontology_id===null?'父类：绑定本体或类型未知，无法解释层级':parents.length
       ? `父类：${esc(parents.join(' → '))}`
       : '父类：顶层类（本体里没有父类）');
     const ancestors=(node.class_ancestors||[]).map(label).filter(Boolean);

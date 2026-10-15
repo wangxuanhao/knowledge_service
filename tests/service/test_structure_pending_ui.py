@@ -148,6 +148,7 @@ def _open(browser, tmp_path, before=None):
     shell = tmp_path / 'structure-ui.html'
     shell.write_text(SHELL, encoding='utf-8')
     page.goto(shell.as_uri())
+    page.add_script_tag(path=str(WEB / 'record-version-context.js'))
     page.add_script_tag(path=str(WEB / 'records-view.js'))
     if before:
         page.evaluate(before)

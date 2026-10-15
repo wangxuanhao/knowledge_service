@@ -174,15 +174,15 @@ class Explorer:
             # 每个实体都带上它所属类的**父类/祖先**（用户反馈："检索没看到有父类的信息"、
             # "知识图谱也没父类相关的信息"）。实体节点本身没有父类 —— 层级在**类**之间，
             # 所以这里给的是"这个实体的类型在本体里的上位类"，图上与详情里都靠它显示归属。
-            family=self.service.ontology_family(p)
             presented=[]
             for row in nodes.values():
                 item=public(row)
                 if item.get('kind')=='entity':
-                    entry=family.get(item.get('type') or '') or {}
+                    entry=self.service.record_family(p, row)
                     item['class_label']=entry.get('label') or item.get('type_label') or ''
                     item['class_parents']=entry.get('parents') or []
                     item['class_ancestors']=entry.get('ancestors') or []
+                    item['class_ontology_id']=entry.get('ontology_id')
                 if attribute_mode!='none':item['attributes']=grouped.get(row['id'],[])
                 presented.append(item)
             presented_edges=[public(r) for r in edges]

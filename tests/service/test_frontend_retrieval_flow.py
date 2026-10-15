@@ -111,7 +111,8 @@ def workbench(browser, tmp_path):
         f"{json.dumps(INITIAL_GRAPH_HINT)}")
     paths.clear()
     try:
-        yield SimpleNamespace(page=page, project=project_id, paths=paths, errors=errors)
+        yield SimpleNamespace(page=page, project=project_id, paths=paths, errors=errors,
+                              service=app.state.service)
     finally:
         context.close()
         server.should_exit = True
@@ -1646,7 +1647,8 @@ def _family(label, parent=None, ancestor=None):
     parents = [{'id': 'urn:knowledge:ontology:' + parent, 'label': parent}] if parent else []
     ancestors = [{'id': 'urn:knowledge:ontology:' + (ancestor or parent),
                   'label': ancestor or parent}] if (parent or ancestor) else []
-    return {'class_label': label, 'class_parents': parents, 'class_ancestors': ancestors}
+    return {'class_label': label, 'class_parents': parents, 'class_ancestors': ancestors,
+            'class_ontology_id': 'fixture-bound-release'}
 
 
 def _inject_family(page, record_id, family):

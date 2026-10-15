@@ -19,7 +19,7 @@
   $('revision').setAttribute('aria-label','记录内容 JSON');
   const message=document.createElement('p');message.id='record-dialog-message';message.setAttribute('role','status');
   dialog.querySelector('.record-dialog-heading').after(message);
-  let request=0,activeRow=null;
+  let request=0,activeRow=null,activeOntologies=null;
   function close(){request++;dialog.close();}
   $('close-record-dialog').onclick=close;
   dialog.addEventListener('cancel',()=>{request++;});
@@ -36,19 +36,64 @@
     dialog.scrollTop=0;
   }
   function populateRaw(row){
-    const fields=['id','kind','text','type','metadata','properties','source_id','subject_id','object_id','ontology_id','valid_from','valid_until'];
+    const fields=['id','kind','text','type','metadata','properties','source_id','subject_id','object_id','ontology_id','valid_from','valid_until','value','datatype'];
     $('revision').value=JSON.stringify(Object.fromEntries(fields.filter(key=>row[key]!==undefined).map(key=>[key,row[key]])),null,2);
     $('revision-id').value=row.id;$('revision-version').value=row.version;$('keep-id').value=row.id;
   }
   const option=(value,label,selected)=>`<option value="${esc(value)}"${value===selected?' selected':''}>${esc(label)}</option>`;
+  function editContext(){
+    $('record-dialog-help').textContent=RecordVersionContext.summary(activeRow,activeOntologies)
+      +'。普通编辑保留本体归属，保存会生成下一次修订；使用新本体类型请先执行受控迁移。';
+  }
+  async function refreshViews(){
+    const results=await Promise.allSettled([
+      $('load-records')?.onclick?.(),window.drawGraph?window.drawGraph():$('draw-graph')?.onclick?.(),
+    ]);
+    return results.some(result=>result.status==='rejected'||result.value===false);
+  }
+  function syncInspector(saved){
+    const inspector=$('graph-detail'),node=wb.nodes.get(saved.id);
+    if(inspector?.dataset.recordId!==saved.id||!inspector.querySelector('.evidence-identity'))return;
+    // Preserve bound hierarchy only when the type and immutable release agree.
+    const sameModel=node?.type===saved.type&&node?.ontology_id===saved.ontology_id;
+    const displayed=sameModel?{...node,...saved}:{...saved,class_ontology_id:null};
+    return window.renderEvidenceInspector?.(displayed,[...wb.nodes.values()]);
+  }
+  async function saveRevision(record,expectedVersion){
+    const serial=request,p=current;
+    const saved=await api(endpoint('/records/'+encodeURIComponent(record.id)),{record,expected_version:expectedVersion},'PUT');
+    if(serial!==request||p!==current||!dialog.open)return;
+    activeRow=saved;populateRaw(saved);wb.records.set(saved.id,saved);editContext();
+    // Update the open card before announcing success; closing the modal cannot
+    // cancel an already-committed revision's immediate presentation.
+    syncInspector(saved);
+    const summary=RecordVersionContext.summary(saved,activeOntologies);
+    const message=`已保存${summary}；旧修订保留，本体结构未修改。`;
+    $('record-dialog-message').classList.remove('error');$('record-dialog-message').textContent=message;status(message);
+    const refreshFailed=await refreshViews();
+    if(serial!==request||p!==current||!dialog.open||activeRow?.version_id!==saved.version_id)return;
+    $('record-dialog-message').textContent=message+(refreshFailed?' 部分视图刷新失败，请刷新图谱或台账。':'');
+    await syncInspector(saved);
+    if(serial===request&&p===current&&dialog.open&&activeRow?.version_id===saved.version_id)return saved;
+  }
   async function renderStructured(row){
     const serial=request,p=current;structured.innerHTML='<p class="subtle">正在加载可选类型和实体…</p>';
     try{
+      const versions=await api(endpoint('/ontologies'),undefined,'GET');
+      if(serial!==request||p!==current||activeRow?.id!==row.id||activeRow?.version_id!==row.version_id)return;
+      activeOntologies=RecordVersionContext.build(versions.versions||[]);editContext();
+      if(['entity','relation','attribute'].includes(row.kind)&&!activeOntologies.byId.has(row.ontology_id)){
+        structured.innerHTML='<p class="error">未知本体归属，无法提供可靠的类型选项。请先通过受控治理明确本体归属。</p>';return;
+      }
+      if(!['entity','relation'].includes(row.kind)){
+        structured.innerHTML='<p class="subtle">属性、文档与原文片段可在下方高级 JSON 中查看。属性修订需保留 value 与 datatype；文档内容请修改源文件后重新解析。</p>';return;
+      }
       const [ontology,records]=await Promise.all([
-        api(endpoint('/ontology'),undefined,'GET'),
+        api(endpoint('/ontology')+'?ontology_id='+encodeURIComponent(row.ontology_id),undefined,'GET'),
         api(endpoint('/records/query?limit=1000'),{kinds:['entity']})
       ]);
-      if(serial!==request||p!==current||activeRow?.id!==row.id)return;
+      if(serial!==request||p!==current||activeRow?.id!==row.id||activeRow?.version_id!==row.version_id)return;
+      if(ontology.id!==row.ontology_id)throw Error('读取的本体与记录归属不一致');
       const collection=row.kind==='entity'?ontology.summary.classes:ontology.summary.relations;
       const labels=new Map(collection.map(item=>[item.id,item.label_zh||item.label||item.name]));
       if(row.type&&!labels.has(row.type))labels.set(row.type,labelOf(row.type));
@@ -79,17 +124,16 @@
           record.text=$('structured-record-text').value.trim();record.type=$('structured-record-type').value;
           record.valid_from=$('structured-valid-from').value.trim()||null;record.valid_until=$('structured-valid-until').value.trim()||null;
           if(activeRow.kind==='relation'){record.subject_id=$('structured-subject').value;record.object_id=$('structured-object').value;}
-          const saved=await api(endpoint('/records/'+encodeURIComponent(activeRow.id)),{record,expected_version:activeRow.version},'PUT');
-          activeRow=saved;populateRaw(saved);wb.records.set(saved.id,saved);$('record-dialog-message').classList.remove('error');$('record-dialog-message').textContent=`已保存修订 r${saved.version}；旧修订仍可恢复。`;status(`已保存 ${saved.kind==='relation'?'关系':'实体'}的新修订 r${saved.version}。`);
-          $('draw-graph').click();button.disabled=false;
-        }catch(error){$('record-dialog-message').textContent=error.message;$('record-dialog-message').classList.add('error');button.disabled=false;}
+          await saveRevision(record,activeRow.version);
+        }catch(error){if(serial===request&&p===current){$('record-dialog-message').textContent=error.message;$('record-dialog-message').classList.add('error');}}
+        finally{button.disabled=false;}
       };
-    }catch(error){if(serial===request)structured.innerHTML=`<p class="error">结构化编辑加载失败：${esc(error.message)}。仍可使用下方高级 JSON 编辑器。</p>`;}
+    }catch(error){if(serial===request&&p===current&&activeRow?.id===row.id&&activeRow?.version_id===row.version_id)structured.innerHTML=`<p class="error">结构化编辑加载失败：${esc(error.message)}。仍可使用下方高级 JSON 编辑器。</p>`;}
   }
   editRecord=row=>{
     request++;
     if(!row){status('记录已刷新，请重新查询后选择',true);return;}
-    activeRow=row;populateRaw(row);
+    activeRow=row;activeOntologies=null;populateRaw(row);
     open('edit','编辑记录 · '+(row.text||row.id).slice(0,70));
     $('delete-confirm').checked=false;
     renderStructured(row);
@@ -97,17 +141,10 @@
   const revisionKind={document:'文档',entity:'实体',relation:'关系',attribute:'属性',chunk:'原文片段'};
   const shortRevisionId=id=>{const text=String(id||'');return !text?'未知':(text.length>18?`${text.slice(0,9)}…${text.slice(-4)}`:text);};
   function ontologyIndex(versions){
-    const list=[...(versions||[])],currentId=list.length?list[list.length-1].id:null,counts=new Map();
-    list.forEach(item=>counts.set(item.version,(counts.get(item.version)||0)+1));
-    return new Map(list.map(item=>[item.id,{...item,isCurrent:item.id===currentId,
-      versionCollision:(counts.get(item.version)||0)>1}]));
+    return RecordVersionContext.build(versions||[]);
   }
   function revisionOntology(row,ontologies){
-    const release=row?.ontology_id&&ontologies.get(row.ontology_id);
-    if(!release)return '未知本体';
-    return `本体 v${release.version}${release.isCurrent?'（当前）':'（历史）'}`
-      +(release.version_reused?' · 标注修订':'')
-      +(release.versionCollision?` · ${shortRevisionId(release.id)}`:'');
+    return RecordVersionContext.ontology(row,ontologies);
   }
   function appendFact(list,label,value){
     const term=document.createElement('dt'),description=document.createElement('dd');
@@ -136,7 +173,7 @@
   function renderRevisionTimeline(record,result,ontologyResult){
     const host=$('record-history-view'),versions=[...(result.versions||[])]
       .sort((a,b)=>Number(b.version||0)-Number(a.version||0));
-    const ontologies=ontologyIndex(ontologyResult?.versions||[]);
+    const ontologies=ontologyResult?ontologyIndex(ontologyResult.versions||[]):null;
     host.replaceChildren();
     const summary=nodeText('p',`共 ${versions.length} 次修订${versions.length===1?'，尚未再次修订。':'，当前修订在前。'}`);
     summary.className='record-revision-summary';
@@ -168,7 +205,7 @@
     const message=nodeText('div','历史修订读取失败：'+error.message);message.className='error';
     const retry=nodeText('button','重试读取修订时间线');retry.type='button';retry.dataset.retryRevisionTimeline='';
     const detail=document.createElement('section');detail.id='record-revision-detail';
-    renderRevisionDetail(detail,record,true,new Map());
+    renderRevisionDetail(detail,record,true,null);
     retry.onclick=()=>{const serial=++request;loadRevisionTimeline(projectId,record,serial);};
     layout.append(message,retry,detail);host.replaceChildren(layout);
   }
@@ -198,16 +235,23 @@
   // Programmatic project changes also close the modal, not just DOM change events.
   const change=$('project').onchange;
   $('project').onchange=()=>{if(dialog.open)close();change();};
-  for(const id of ['revise','restore-version','soft-delete']){
+  $('revise').onclick=async()=>{
+    const serial=request,p=current,button=$('revise');button.disabled=true;
+    try{
+      const record=JSON.parse($('revision').value);
+      if(record.id&&record.id!==$('revision-id').value)throw Error('路径与记录 ID 不一致');
+      record.id=$('revision-id').value;
+      const saved=await saveRevision(record,Number($('revision-version').value));
+      if(saved&&serial===request&&p===current)await renderStructured(saved);
+    }catch(error){if(serial===request&&p===current){$('record-dialog-message').textContent=error.message;$('record-dialog-message').classList.add('error');}}
+    finally{button.disabled=false;}
+  };
+  for(const id of ['restore-version','soft-delete']){
     const run=$(id).onclick;
     $(id).onclick=async()=>{
       $('record-dialog-message').textContent='处理中…';
       try{await run();$('record-dialog-message').textContent=$('status').textContent;$('record-dialog-message').classList.toggle('error',$('status').classList.contains('error'));
-        if(id==='revise'&&!$('status').classList.contains('error')){
-          const value=JSON.parse($('revision').value),row=wb.records.get($('revision-id').value);
-          if(row)wb.records.set(row.id,{...row,...value,version:Number($('revision-version').value)});
-          await $('load-records').onclick();
-        }
+        if(!$('status').classList.contains('error'))await refreshViews();
       }catch(e){$('record-dialog-message').textContent=e.message;$('record-dialog-message').classList.add('error');}
     };
   }

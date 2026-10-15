@@ -233,6 +233,7 @@ def page(ledger_browser):
     pg.set_content(SHELL)
     pg.add_style_tag(path=str(WEB / 'style.css'))
     pg.add_style_tag(path=str(WEB / 'workspace.css'))
+    pg.add_script_tag(path=str(WEB / 'record-version-context.js'))
     pg.add_script_tag(path=str(WEB / 'records-view.js'))
     pg.click('[data-tab="records"]')
     pg.wait_for_selector('.ledger-kpi', timeout=10000)

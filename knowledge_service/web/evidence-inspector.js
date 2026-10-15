@@ -74,7 +74,7 @@
       const starts=[subject?.valid_from,target?.valid_from].filter(Boolean).sort(),ends=[subject?.valid_until,target?.valid_until].filter(Boolean).sort();
       const valid_from=starts.at(-1)||null,valid_until=ends[0]||null;if(valid_from&&valid_until&&valid_from>=valid_until)throw Error('两个实体的业务有效期没有重叠，不能建立关系');
       const result=await api(endpoint('/records'),{records:[{kind:'relation',text:`${subject?.text||subjectId} ${relationLabel} ${objectLabel}`,type,subject_id:subjectId,object_id:objectId,ontology_id:event.currentTarget.dataset.ontologyId,valid_from,valid_until,metadata:{created_via:'interactive_graph'}}]});
-      const saved=result.records[0];wb.records.set(saved.id,saved);relationDialog.close();status(`已新增关系：${subject?.text||subjectId} → ${relationLabel} → ${objectLabel}；版本 v${saved.version}。`);$('draw-graph').click();
+      const saved=result.records[0];wb.records.set(saved.id,saved);relationDialog.close();status(`已新增关系：${subject?.text||subjectId} → ${relationLabel} → ${objectLabel}；修订 r${saved.version}。`);$('draw-graph').click();
     }catch(error){$('create-relation-message').textContent='保存失败：'+error.message;$('create-relation-message').classList.add('error');button.disabled=false;}
   };
   function openSource(doc){
@@ -99,6 +99,7 @@
   const typeHint=type=>{const primary=labelOf(type),local=term(type);return primary===local?esc(primary):`${esc(primary)} <span class="subtle">${esc(local)}</span>`;};
   window.renderEvidenceInspector=async(row,options)=>{
     const ticket=++serial,p=current,stamp=JSON.stringify(scope());
+    host.dataset.recordId=row.id;
     const name=id=>options.find(n=>n.id===id)?.text||id;
     const aliases=Array.isArray(row.metadata?.aliases)?row.metadata.aliases:[];
     const formalAttributes=row.kind==='entity'?attributeDetailsHtml(row.attributes,esc):'';
@@ -114,7 +115,7 @@
       // 读者分不清哪个是父类、哪个是当前类（视觉审查就是这么反馈的）。
       // 同时明确写出"父类"两个字，用户原话是"检索没看到有父类的信息"。
       const rows=[['当前类',esc(current)]];
-      rows.push(['父类',parents.length?esc(parents.join('、')):'顶层类（本体里没有父类）']);
+      rows.push(['父类',row.class_ontology_id===null?'绑定本体或类型未知，无法解释层级':parents.length?esc(parents.join('、')):'顶层类（本体里没有父类）']);
       if(ancestors.length>parents.length){
         rows.push(['完整继承链',esc([current,...ancestors].join(' → '))]);
       }
@@ -124,8 +125,27 @@
     })():'';
     const legacyAttributes=row.kind==='entity'&&!formalAttributes&&row.properties&&Object.keys(row.properties).length?
       `<section class="evidence-attributes"><h4>兼容属性</h4><dl>${Object.entries(row.properties).map(([key,value])=>`<dt>${esc(key)}</dt><dd>${esc(typeof value==='string'?value:JSON.stringify(value))}</dd>`).join('')}</dl></section>`:'';
-    host.innerHTML=`<section class="evidence-identity"><span class="evidence-kind">${esc({entity:'实体',relation:'关系',chunk:'原文片段',document:'文档'}[row.kind]||row.kind)} · ${typeHint(row.type)}</span><h3>${esc(row.text)}</h3>${row.kind==='relation'?`<div class="relation-path"><b>${esc(name(row.subject_id))}</b><span>↓ ${typeHint(row.type)}</span><b>${esc(name(row.object_id))}</b></div>`:''}${aliases.length?'<p class="evidence-aliases">别名：'+aliases.map(esc).join('、')+'</p>':''}<div class="evidence-action-groups"><div class="evidence-actions"><button data-action="edit">编辑</button>${row.kind==='entity'?'<button data-action="add-relation">新增关系</button>':''}<button data-action="history" class="secondary">版本历史 · v${row.version}</button>${row.kind==='entity'||row.kind==='relation'?'<button data-action="ledger" class="secondary">在台账查看</button>':''}${row.kind==='entity'?'<button data-action="mindmap" class="secondary">展开脑图</button>':''}</div>${row.kind==='entity'||row.kind==='relation'?'<div class="evidence-danger"><span>危险操作</span></div>':''}</div></section>${formalAttributes?`<section class="evidence-attributes"><h4>实体属性</h4>${formalAttributes}</section>`:legacyAttributes}${entityFamily}<section class="evidence-sources"><h4>原文证据</h4><div id="inspector-source-list" aria-live="polite">正在查找来源…</div></section><section class="evidence-time"><h4>时间</h4><dl><dt>业务生效</dt><dd>${esc(row.valid_from?localTime(row.valid_from):'未知')}</dd><dt>业务失效</dt><dd>${esc(row.valid_until?localTime(row.valid_until):'未设定')}</dd><dt>系统记录</dt><dd>${esc(localTime(row.recorded_at))}</dd></dl></section><details class="evidence-technical"><summary>Metadata / 属性 / 技术标识</summary><pre>${esc(JSON.stringify({id:row.id,type:row.type,source_id:row.source_id,ontology_id:row.ontology_id,metadata:row.metadata,properties:row.properties},null,2))}</pre></details>`;
+    host.innerHTML=`<section class="evidence-identity"><span class="evidence-kind">${esc({entity:'实体',relation:'关系',chunk:'原文片段',document:'文档'}[row.kind]||row.kind)} · ${typeHint(row.type)}</span><h3>${esc(row.text)}</h3>${row.kind==='relation'?`<div class="relation-path"><b>${esc(name(row.subject_id))}</b><span>↓ ${typeHint(row.type)}</span><b>${esc(name(row.object_id))}</b></div>`:''}${aliases.length?'<p class="evidence-aliases">别名：'+aliases.map(esc).join('、')+'</p>':''}<div class="evidence-action-groups"><div class="evidence-actions"><button data-action="edit">编辑</button>${row.kind==='entity'?'<button data-action="add-relation">新增关系</button>':''}<button data-action="history" class="secondary">修订历史 · r${row.version}</button>${row.kind==='entity'||row.kind==='relation'?'<button data-action="ledger" class="secondary">在台账查看</button>':''}${row.kind==='entity'?'<button data-action="mindmap" class="secondary">展开脑图</button>':''}</div>${row.kind==='entity'||row.kind==='relation'?'<div class="evidence-danger"><span>危险操作</span></div>':''}</div></section>${formalAttributes?`<section class="evidence-attributes"><h4>实体属性</h4>${formalAttributes}</section>`:legacyAttributes}${entityFamily}<section class="evidence-sources"><h4>原文证据</h4><div id="inspector-source-list" aria-live="polite">正在查找来源…</div></section><section class="evidence-time"><h4>时间</h4><dl><dt>业务生效</dt><dd>${esc(row.valid_from?localTime(row.valid_from):'未知')}</dd><dt>业务失效</dt><dd>${esc(row.valid_until?localTime(row.valid_until):'未设定')}</dd><dt>系统记录</dt><dd>${esc(localTime(row.recorded_at))}</dd></dl></section><details class="evidence-technical"><summary>Metadata / 属性 / 技术标识</summary><pre>${esc(JSON.stringify({id:row.id,type:row.type,source_id:row.source_id,ontology_id:row.ontology_id,metadata:row.metadata,properties:row.properties},null,2))}</pre></details>`;
     host.querySelector('[data-action="edit"]').onclick=()=>editRecord(row);
+    const version=document.createElement('p');version.id='inspector-version';version.className='subtle';
+    version.textContent=RecordVersionContext.revision(row)+' · 本体归属读取中…';
+    host.querySelector('.evidence-identity h3').after(version);
+    const historyButton=host.querySelector('[data-action="history"]');
+    historyButton.textContent='修订历史 · '+RecordVersionContext.revision(row);
+    const governance=row.structure_pending;
+    if(governance){
+      const note=document.createElement('p');note.className='subtle';
+      note.textContent=`当前治理视角：${governance.state==='pending'?'结构待定':'待定已解除'}（按当前本体判断，不代表已迁移或通过绑定本体校验）。`;
+      version.after(note);
+    }
+    api(endpoint('/ontologies'),undefined,'GET').then(result=>{
+      if(ticket===serial&&current===p&&stamp===JSON.stringify(scope())){
+        version.textContent=RecordVersionContext.summary(row,RecordVersionContext.build(result.versions||[]));
+        version.title='普通编辑只增加知识修订；本体归属由每次修订保存的本体发布标识确定。';
+      }
+    }).catch(()=>{
+      if(ticket===serial&&current===p)version.textContent=RecordVersionContext.summary(row,null);
+    });
     host.querySelector('[data-action="edit"]').textContent=row.kind==='relation'?'编辑这条关系':row.kind==='entity'?'编辑这个实体':'编辑';
     host.querySelector('[data-action="history"]').onclick=()=>historyFor(row);
     host.querySelector('[data-action="add-relation"]')?.addEventListener('click',()=>openRelationCreator(row));
@@ -153,7 +173,7 @@
     try{
       const result=await api(endpoint('/records/'+encodeURIComponent(row.id)+'/evidence'),scope());
       if(ticket!==serial||current!==p||stamp!==JSON.stringify(scope())||!$('inspector-source-list'))return;
-      $('inspector-source-list').innerHTML=result.documents.length?result.documents.map((doc,i)=>`<article class="source-evidence-card"><strong>${esc(doc.title)}</strong><small>来源 v${doc.version} · ${esc({exact:'精确证据位置',recovered_in_chunk:'历史切片内恢复定位',chunk:'仅保存切片级位置',offset:'记录偏移定位',passage:'证据文本匹配',text:'名称 / 内容匹配',unlocated:'历史来源无法定位'}[doc.mode])}</small><blockquote>${esc(doc.preview||'原文内容未保存')}</blockquote><button data-source-evidence="${i}">${doc.source_location?.document_version_id?'在原文中打开 ↗':doc.highlight?'查看原文并定位 ↗':'查看来源文档 ↗'}</button></article>`).join(''):`<p class="evidence-empty">${esc(result.message)}</p>`;
+      $('inspector-source-list').innerHTML=result.documents.length?result.documents.map((doc,i)=>`<article class="source-evidence-card"><strong>${esc(doc.title)}</strong><small>来源修订 r${doc.version} · ${esc({exact:'精确证据位置',recovered_in_chunk:'历史切片内恢复定位',chunk:'仅保存切片级位置',offset:'记录偏移定位',passage:'证据文本匹配',text:'名称 / 内容匹配',unlocated:'历史来源无法定位'}[doc.mode])}</small><blockquote>${esc(doc.preview||'原文内容未保存')}</blockquote><button data-source-evidence="${i}">${doc.source_location?.document_version_id?'在原文中打开 ↗':doc.highlight?'查看原文并定位 ↗':'查看来源文档 ↗'}</button></article>`).join(''):`<p class="evidence-empty">${esc(result.message)}</p>`;
       host.querySelectorAll('[data-source-evidence]').forEach(b=>b.onclick=()=>openSource(result.documents[Number(b.dataset.sourceEvidence)]));
     }catch(e){if(ticket===serial&&current===p&&$('inspector-source-list'))$('inspector-source-list').textContent='来源读取失败：'+e.message;}
   };

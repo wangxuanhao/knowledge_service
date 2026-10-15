@@ -40,10 +40,11 @@ def install(app, service):
         # 实体详情要能看出"它属于哪个类、父类是谁"：层级在类之间，实体节点上没有，
         # 所以这里补上它类型的父类与祖先链（与 /subgraph 同一份数据：service.ontology_family）。
         if detail.get('kind') == 'entity':
-            entry = service.ontology_family(project_id).get(detail.get('type') or '') or {}
+            entry = service.record_family(project_id, row)
             detail['class_label'] = entry.get('label') or detail.get('type') or ''
             detail['class_parents'] = entry.get('parents') or []
             detail['class_ancestors'] = entry.get('ancestors') or []
+            detail['class_ontology_id'] = entry.get('ontology_id')
         return detail
 
     @router.put('/api/projects/{project_id}/records/{record_id}')
@@ -58,6 +59,11 @@ def install(app, service):
                 raise KeyError(record_id)
             if history[-1]['kind'] != row['kind']:
                 raise ValueError('修订期间记录类型不能改变')
+            # Omitting a binding in a plain edit must not silently migrate it.
+            if row.get('ontology_id') is None:
+                row['ontology_id'] = history[-1].get('ontology_id')
+                if row['kind'] in ('entity', 'relation', 'attribute') and not row['ontology_id']:
+                    raise ValueError('未知本体归属：请显式指定本体或使用受控迁移')
             return public(service.write(project_id, [row], request.expected_version, revision=True)[0])
 
     @router.get('/api/projects/{project_id}/records/{record_id}/history')

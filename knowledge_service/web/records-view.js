@@ -155,18 +155,10 @@
   /* 本体归属只信 /ontologies 返回的权威 version；同一个 vN 可以有多次不可变发布，
      因此碰撞时必须带短 ID，后发布的同版本条目标作「标注修订」，不能按数组位置推成 vN+1。 */
   function buildOntology(versions){
-    const list=[...versions],currentId=list.length?list[list.length-1].id:null,counts=new Map();
-    list.forEach(item=>counts.set(item.version,(counts.get(item.version)||0)+1));
-    const releases=list.map(item=>({...item,isCurrent:item.id===currentId,
-      versionCollision:(counts.get(item.version)||0)>1}));
-    return {list:releases,currentId,byId:new Map(releases.map(item=>[item.id,item]))};
+    return RecordVersionContext.build(versions);
   }
   function releaseLabel(release){
-    if(!release)return '未知本体';
-    const state=release.isCurrent?'当前':'历史';
-    const revision=release.version_reused?' · 标注修订':'';
-    const identity=release.versionCollision?` · ${shortId(release.id)}`:'';
-    return `本体 v${release.version}（${state}）${revision}${identity}`;
+    return RecordVersionContext.releaseLabel(release);
   }
   function renderOntologyFilter(){
     const select=$('record-ontology');if(!select)return;
@@ -185,7 +177,7 @@
     if(!row||!row.ontology_id)return '未知本体';
     if(!ontology)return '本体归属读取中…';
     const found=ontology.byId.get(row.ontology_id);
-    return found?`依据本体 v${found.version}${found.isCurrent?'（当前）':'（历史）'}`:'未知本体';
+    return found?`依据${releaseLabel(found)}`:'未知本体';
   }
   function ownership(row){
     if(!row)return '—';
@@ -343,6 +335,7 @@
     badge.title=pending
       ?`类型「${(state.terms||[]).join('、')||'（未命名）'}」在本体里还没有${state.via?.length?'（因为端点 '+(state.via||[]).map(nameOf).join('、')+' 的概念还没有）':''}。这条知识已收下：能查、能看原文、能被引用，但不作为正式证据；去「本体建模层」把概念建出来并发布，标记自动解除。`
       :`本体里已经有这些概念了（${(state.marked||[]).join('、')}），标记自动解除，不需要人工清理。`;
+    badge.title+=' 当前治理状态按当前本体判断，不代表已迁移或通过绑定本体校验。';
     return badge;
   }
   function migrationBadge(row,release){
@@ -509,7 +502,7 @@
       const r=await api(endpoint('/records/query?limit=1000'),filter);
       if(serial!==request||p!==current||stamp!==JSON.stringify({baseScope:scope(),ontologyScope:versionFields()}))return;
       rows=r.records;total=r.total;wb.records=new Map(rows.map(r=>[r.id,r]));renderTabs();render();syncKindSelect();
-    }catch(error){if(serial===request&&p===current)host.textContent='读取失败：'+error.message+'；可点击“刷新记录”重试。';}
+    }catch(error){if(serial===request&&p===current)host.textContent='读取失败：'+error.message+'；可点击“刷新记录”重试。';return false;}
     // 台账的旁数据：任何一份失败都不能让表格消失 —— 缺哪个就把哪一列如实写成"读不到"。
     const project=endpoint('');
     const [versions,assertionList,operationList,groups,pending,reclassify]=await Promise.all([
