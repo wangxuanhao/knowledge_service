@@ -85,26 +85,38 @@
       if(['entity','relation','attribute'].includes(row.kind)&&!activeOntologies.byId.has(row.ontology_id)){
         structured.innerHTML='<p class="error">未知本体归属，无法提供可靠的类型选项。请先通过受控治理明确本体归属。</p>';return;
       }
-      if(!['entity','relation'].includes(row.kind)){
-        structured.innerHTML='<p class="subtle">属性、文档与原文片段可在下方高级 JSON 中查看。属性修订需保留 value 与 datatype；文档内容请修改源文件后重新解析。</p>';return;
+      if(!['entity','relation','attribute'].includes(row.kind)){
+        structured.innerHTML='<p class="subtle">文档与原文片段可在下方高级 JSON 中查看。文档内容请修改源文件后重新解析。</p>';return;
       }
+      const entityScope=typeof scope==='function'?scope():{},scopeStamp=JSON.stringify(entityScope);
       const [ontology,records]=await Promise.all([
         api(endpoint('/ontology')+'?ontology_id='+encodeURIComponent(row.ontology_id),undefined,'GET'),
-        api(endpoint('/records/query?limit=1000'),{kinds:['entity']})
+        api(endpoint('/records/query?limit=1000'),{...entityScope,kinds:['entity']})
       ]);
       if(serial!==request||p!==current||activeRow?.id!==row.id||activeRow?.version_id!==row.version_id)return;
+      if(scopeStamp!==JSON.stringify(typeof scope==='function'?scope():{}))throw Error('查询范围已变化，请重新打开编辑器');
       if(ontology.id!==row.ontology_id)throw Error('读取的本体与记录归属不一致');
-      const collection=row.kind==='entity'?ontology.summary.classes:ontology.summary.relations;
+      const collection=row.kind==='entity'?ontology.summary.classes:row.kind==='attribute'?ontology.summary.attributes:ontology.summary.relations;
+      if(!Array.isArray(collection))throw Error('绑定本体缺少对应类型目录');
       const labels=new Map(collection.map(item=>[item.id,item.label_zh||item.label||item.name]));
       if(row.type&&!labels.has(row.type))labels.set(row.type,labelOf(row.type));
       const entities=records.records||[];const entityLabels=new Map(entities.map(item=>[item.id,item.text]));
-      for(const id of [row.subject_id,row.object_id])if(id&&!entityLabels.has(id))entityLabels.set(id,id);
+      for(const id of [row.subject_id,row.object_id])if(id&&!entityLabels.has(id))entityLabels.set(id,id+'（原所属实体，未在当前选项内）');
       const typeOptions=[...labels].map(([id,label])=>option(id,label,row.type)).join('');
       if(row.kind==='entity'){
         structured.innerHTML=`<div class="record-structured-heading"><h3>维护具体实体</h3><p>这里修改的是图谱中的一个实体，不会修改本体类定义。</p></div><label>实体名称<input id="structured-record-text" value="${esc(row.text)}"></label><label>实体类型<select id="structured-record-type">${typeOptions}</select></label><div class="record-time-fields"><label>业务生效时间<input id="structured-valid-from" value="${esc(row.valid_from||'')}" placeholder="可留空"></label><label>业务失效时间<input id="structured-valid-until" value="${esc(row.valid_until||'')}" placeholder="可留空"></label></div><button id="save-structured-record">保存实体修改为新修订</button>`;
       }else if(row.kind==='relation'){
         const entityOptions=selected=>[...entityLabels].map(([id,label])=>option(id,label,selected)).join('');
         structured.innerHTML=`<div class="record-structured-heading"><h3>维护实体关系</h3><p>可修改关系类型、起点实体或终点实体；这不会修改本体中的关系类型定义。</p></div><label>关系显示文本<input id="structured-record-text" value="${esc(row.text)}"></label><label>关系类型<select id="structured-record-type">${typeOptions}</select></label><div class="record-endpoints"><label>起点实体<select id="structured-subject">${entityOptions(row.subject_id)}</select></label><span>→</span><label>终点实体<select id="structured-object">${entityOptions(row.object_id)}</select></label></div><div class="record-time-fields"><label>业务生效时间<input id="structured-valid-from" value="${esc(row.valid_from||'')}" placeholder="可留空"></label><label>业务失效时间<input id="structured-valid-until" value="${esc(row.valid_until||'')}" placeholder="可留空"></label></div><button id="save-structured-record">保存关系修改为新修订</button>`;
+      }else if(row.kind==='attribute'){
+        if(!window.RecordAttributeEditor)throw Error('属性编辑器资源未加载，请刷新页面');
+        const xsd='http://www.w3.org/2001/XMLSchema#';
+        const modes=[['string','字符串'],['boolean','布尔值（true / false）'],['integer','整数'],['double','数值（自动识别整数）'],['date','日期（校验后保存为字符串）'],['dateTime','日期时间（校验后保存为字符串）'],['json','JSON（校验后保存为字符串）']];
+        const mode=row.datatype?.startsWith(xsd)?row.datatype.slice(xsd.length):'';
+        const knownMode=modes.some(([value])=>value===mode);
+        if(!knownMode)modes.unshift([row.datatype||'unknown','原数据类型（请先选择受支持类型）']);
+        const entityOptions=[option('','请选择所属实体',row.subject_id),...[...entityLabels].map(([id,label])=>option(id,label,row.subject_id))].join('');
+        structured.innerHTML=`<div class="record-structured-heading"><h3>维护实体属性</h3><p>修改具体实体的属性值；类型取自该记录绑定的本体发布。</p></div><label>属性显示文本<input id="structured-record-text" value="${esc(row.text)}"></label><label>属性类型<select id="structured-record-type">${typeOptions}</select></label><label>所属实体<select id="structured-subject">${entityOptions}</select></label><label>数据类型<select id="structured-datatype">${modes.map(([id,label])=>option(id,label,knownMode?mode:row.datatype||'unknown')).join('')}</select></label><p class="subtle">实体选项来自当前查询范围，最多 1000 条；未加载的原所属实体会保留。日期与 JSON 按字符串保存，数值按原生整数或浮点数保存。</p><label>属性值<input id="structured-value" value="${esc(String(row.value??''))}"></label><div class="record-time-fields"><label>业务生效时间<input id="structured-valid-from" value="${esc(row.valid_from||'')}" placeholder="YYYY-MM-DD 或带时区 ISO 时间"></label><label>业务失效时间<input id="structured-valid-until" value="${esc(row.valid_until||'')}" placeholder="可留空"></label></div><button id="save-structured-record">保存属性修改为新修订</button>`;
       }else{
         const kindLabel=row.kind==='document'?'文档收据':'原文片段';
         const reason=row.kind==='document'
@@ -117,8 +129,19 @@
         return;
       }
       $('save-structured-record').onclick=async()=>{
-        const button=$('save-structured-record');button.disabled=true;
+        const button=$('save-structured-record');if(button.disabled)return;
+        if(serial!==request||p!==current||!dialog.open)return;
+        button.disabled=true;
         try{
+          if(scopeStamp!==JSON.stringify(typeof scope==='function'?scope():{}))throw Error('查询范围已变化，请重新打开编辑器');
+          if(activeRow.kind==='attribute'){
+            const record=RecordAttributeEditor.buildRecord(activeRow,{
+              text:$('structured-record-text').value,type:$('structured-record-type').value,
+              subject_id:$('structured-subject').value,mode:$('structured-datatype').value,value:$('structured-value').value,
+              valid_from:$('structured-valid-from').value,valid_until:$('structured-valid-until').value,
+            });
+            await saveRevision(record,activeRow.version);return;
+          }
           const fields=['id','kind','metadata','properties','source_id','subject_id','object_id','ontology_id','valid_from','valid_until'];
           const record=Object.fromEntries(fields.filter(key=>activeRow[key]!==undefined).map(key=>[key,activeRow[key]]));
           record.text=$('structured-record-text').value.trim();record.type=$('structured-record-type').value;

@@ -1,9 +1,6 @@
 /* Linked graph workspace: preserve existing editing/governance controls. */
 (() => {
-  // 图谱是**只读画布**：节点不可拖动（力导向布局只负责初始摆放，节点位置不承载编辑语义）。
-  // 空白处拖动＝平移画布（ECharts 的 roam:true）；点节点/连线＝看详情；双击空白＝适应画布。
-  // 以前那套「移动节点」zrender 拖动 + 开关按钮已整体移除：对一张检索浏览用的图，
-  // 拖动节点不是能力而是负担——布局会被拖乱，也偏离"正常画布操作"的直觉。
+  // 节点拖动调整视图布局；空白拖动平移。事实修改仍走版本化编辑器。
   const ui = {request:0, options:[], ontology:null, graph:null};
   const graphRequests=GraphTypeFilter.createGraphRequestGate();
   const get = id => document.getElementById(id);
@@ -294,6 +291,7 @@
     const isEntity=row.kind==='entity';
     if(isEntity){selectedEntityId=row.id;get('graph-node').value=row.id;get('mindmap-root').value=row.id;get('graph-entity-choice').value=row.id;}
     window.renderEvidenceInspector(row,ui.options);
+    GraphWorkbench.selection(row);
   }
   // 图谱悬停提示：把"这个实体是什么、它的类在本体里挂在谁下面"一次说清。
   // 用户反馈："检索 没看到有父类的信息" + "知识图谱也没父类相关的信息" ——
@@ -342,11 +340,14 @@
     const dot=label=>label?`<i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${colorFor(label)};margin-right:5px;vertical-align:middle"></i>`:'';
     bar.innerHTML='<small>按实体类型查看 · 只显示所选类型，不展开邻居</small><div>'+['',...groups].map((type,i)=>`<button class="secondary" data-type-index="${i}" aria-pressed="${type===selectedType}" title="${esc(type?term(type):'恢复当前检索范围全部类型')}">${dot(type?displayType(type):'')}${esc(type?displayType(type):'全部类型')} <b>${type?baseEntities.filter(n=>n.type===type).length:baseEntities.length}</b></button>`).join('')+'</div>';
     bar.querySelectorAll('button').forEach(button=>button.onclick=()=>renderGraph(base,['',...groups][Number(button.dataset.typeIndex)],base));
+    const positioned=GraphWorkbench.positions(result,current);
+    const viewport=GraphWorkbench.viewport(current,graphScope(),positioned);
     ui.graph=result;wb.nodes=new Map(result.nodes.map(n=>[n.id,n]));
     const chart=initChart(), types=[...new Set(result.nodes.map(n=>GraphTypeFilter.isAttributeNode(n)?'属性值':(n.type_label||displayType(n.type))))], matched=new Set(result.matched_ids||[]);
     chart.resize();
     bindPanAffordances();   // 双击空白＝适应画布（幂等）
     chart.off('click');chart.on('click',p=>{
+      if(!GraphWorkbench.canClick())return;
       const row=p.dataType==='edge'?result.edges.find(e=>e.id===p.data.id):wb.nodes.get(p.data.id);
       if(!row)return;
       if(GraphTypeFilter.isAttributeEdge(row)||GraphTypeFilter.isAttributeNode(row)){
@@ -354,14 +355,16 @@
       }
       inspect(row);
     });
+    chart.dispatchAction({type:'hideTip'});
     const showLabels=get('graph-labels').checked;
     // The force layout plus the fit pass below are the client half of "the graph feels
     // slow"; the server half is the `subgraph` line logged by drawGraph.
     const layoutDone=kgTime('graph-layout');
     const catIndex=label=>Math.max(0,types.indexOf(label));
-chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:types.length>1,type:'scroll',data:types,bottom:0,textStyle:{fontSize:11}}],series:[{type:'graph',layout:'force',roam:true,center:['50%','50%'],zoom:.85,label:{show:showLabels,position:'right',fontSize:11,width:110,overflow:'truncate'},edgeSymbol:['none','arrow'],edgeLabel:{show:result.nodes.length<=20,formatter:'{c}',fontSize:10},emphasis:{focus:'adjacency',label:{show:showLabels},edgeLabel:{show:true}},force:{repulsion:320,edgeLength:100,gravity:.1,initLayout:'circular',layoutAnimation:false},categories:types.map(name=>({name,itemStyle:{color:name==='属性值'?attrColor:colorFor(name)}})),data:result.nodes.map(n=>{const attribute=GraphTypeFilter.isAttributeNode(n),label=attribute?'属性值':(n.type_label||displayType(n.type));const index=catIndex(label);return {id:n.id,name:n.text,category:index,categoryName:label,symbol:attribute?'roundRect':'circle',symbolSize:attribute?[72,22]:(matched.has(n.id)?34:22),itemStyle:{color:attribute?attrColor:colorFor(label),...(attribute&&n.status==='contradicting'?{borderColor:'#b42318',borderWidth:2,borderType:'dashed'}:{}),...(matched.has(n.id)?{borderColor:'#df7d37',borderWidth:4}:{})}}}),links:result.edges.map(e=>{const attribute=GraphTypeFilter.isAttributeEdge(e);return {id:e.id,source:e.subject_id,target:e.object_id,name:e.type_label||displayType(e.type),value:e.type_label||displayType(e.type),rawType:term(e.type),lineStyle:attribute?{type:'dashed',opacity:.55,width:1}:undefined};}),lineStyle:{opacity:.35,curveness:.12}}]},true);
+chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:types.length>1,type:'scroll',data:types,bottom:0,textStyle:{fontSize:11}}],series:[{type:'graph',layout:'none',draggable:true,roam:'scale',scaleLimit:{min:.05,max:4},...GraphWorkbench.bounds(positioned,chart.getWidth(),chart.getHeight()),center:null,zoom:1,...viewport,label:{show:showLabels,position:'right',fontSize:11,width:110,overflow:'truncate'},edgeSymbol:['none','arrow'],edgeLabel:{show:result.nodes.length<=20,formatter:'{c}',fontSize:10},emphasis:{focus:'adjacency',label:{show:showLabels},edgeLabel:{show:true}},force:{repulsion:320,edgeLength:100,gravity:.1,initLayout:'circular',layoutAnimation:false},categories:types.map(name=>({name,itemStyle:{color:name==='属性值'?attrColor:colorFor(name)}})),data:positioned.map(n=>{const attribute=GraphTypeFilter.isAttributeNode(n),label=attribute?'属性值':(n.type_label||displayType(n.type));const index=catIndex(label);return {id:n.id,name:n.text,x:n.x,y:n.y,category:index,categoryName:label,symbol:attribute?'roundRect':'circle',symbolSize:attribute?[72,22]:(matched.has(n.id)?34:22),itemStyle:{color:attribute?attrColor:colorFor(label),...(attribute&&n.status==='contradicting'?{borderColor:'#b42318',borderWidth:2,borderType:'dashed'}:{}),...(matched.has(n.id)?{borderColor:'#df7d37',borderWidth:4}:{})}}}),links:result.edges.map(e=>{const attribute=GraphTypeFilter.isAttributeEdge(e);return {id:e.id,source:e.subject_id,target:e.object_id,name:e.type_label||displayType(e.type),value:e.type_label||displayType(e.type),rawType:term(e.type),lineStyle:attribute?{type:'dashed',opacity:.55,width:1}:undefined};}),lineStyle:{opacity:.35,curveness:.12}}]},{replaceMerge:['series']});
     const visibleEntities=GraphTypeFilter.entityNodes(result),visibleRelations=GraphTypeFilter.relationEdges(result),attributeCount=result.nodes.length-visibleEntities.length;
-    chart.resize();fitGraph(chart);layoutDone({nodes:result.nodes.length,edges:result.edges.length});get('graph-summary').textContent=`${selectedType?'只看 '+labelOf(selectedType)+' · ':''}${visibleEntities.length} 实体 / ${visibleRelations.length} 关系${attributeCount?' · '+attributeCount+' 个属性值':''}${selectedType?' · 隐藏其他类型及跨类型连线':''}${matched.size?' · 橙色边框为检索命中':''}${result.timing_ms?' · 服务 '+result.timing_ms.total+' ms':''}`;
+    GraphWorkbench.mount(chart,result,current,inspect,graphScope());
+    chart.resize();layoutDone({nodes:result.nodes.length,edges:result.edges.length});get('graph-summary').textContent=`${selectedType?'只看 '+labelOf(selectedType)+' · ':''}${visibleEntities.length} 实体 / ${visibleRelations.length} 关系${attributeCount?' · '+attributeCount+' 个属性值':''}${selectedType?' · 隐藏其他类型及跨类型连线':''}${matched.size?' · 橙色边框为检索命中':''}${result.timing_ms?' · 服务 '+result.timing_ms.total+' ms':''}`;
     // Compact, discrete history navigation; no drag/playback re-query loop.
     const tl=createTimeline();get('graph-type-buttons')?.after(tl);
     // The type and timeline rows reduce the remaining flex height after ECharts has
@@ -370,39 +373,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
     requestAnimationFrame(()=>{if(ui.graph===result||ui.graph===base)chart.resize();});
     loadTimelineEvents().catch(error=>status(error.message,true));
   }
-  function fitGraph(chart){
-    // PERF: getOption() deep-clones the entire option, and the second
-    // setOption(...,true) at the end re-inits the force layout. Left exactly as it was:
-    // changing it alters where nodes land, so it is a styling decision, not a capability
-    // one. `kgTime` reports what it costs so that decision can be made with numbers.
-    const done=kgTime('fit-graph');
-    const series=chart.getModel().getSeriesByIndex(0), data=series.getData(), points=[];
-    for(let i=0;i<data.count();i++){const p=data.getItemLayout(i);if(p&&p.every(Number.isFinite))points.push(p);}
-    if(!points.length||points.length!==data.count()){kgLog('fit-graph',{skipped:'layout-incomplete'});return;}
-    // 节点很少(1-2个)时不做强制拉伸适配：孤立点会被放大到怪异位置/大小，
-    // 保持自然正圆居中即可，避免"变抽象/变椭圆"。
-    if(data.count()<=3){chart.resize();done({nodes:data.count(),skipped:'few-nodes'});return;}
-    const xs=points.map(p=>p[0]),ys=points.map(p=>p[1]);
-    const minX=Math.min(...xs),minY=Math.min(...ys);
-    const spanX=Math.max(1,Math.max(...xs)-minX),spanY=Math.max(1,Math.max(...ys)-minY);
-    // Persist the solved positions so fitting does not restart the simulation.
-    const option=chart.getOption();
-    const nodeCount=series.option.data.length;
-    // 斥力按节点数放大：节点越多要撑得越开，否则标签互相压住。
-    const spread=Math.round(420+nodeCount*22);
-    Object.assign(option.series[0],{left:25,right:120,top:30,bottom:30,center:null,zoom:1,
-      // 这里以前写成 force:{initLayout:null,layoutAnimation:true}，把 repulsion/edgeLength
-      // 一起抹掉了 → ECharts 回落到默认斥力与边长，25 个节点就挤成一团。
-      // 用户原话："初始化的图谱能不能分散点，为什么一开始就都聚集在一起"。
-      // 现在显式给出斥力/边长/重力，配合下面的坐标归一化，初始就铺满画布。
-      force:{repulsion:spread,edgeLength:[70,150],gravity:.07,initLayout:null,layoutAnimation:true},
-      data:series.option.data.map((node,i)=>{
-      const p=data.getItemLayout(i);
-      return {...node,x:(p[0]-minX)/spanX*Math.max(1,chart.getWidth()-145),y:(p[1]-minY)/spanY*Math.max(1,chart.getHeight()-60),fixed:false};
-    })});
-    chart.setOption(option,true);
-    done({nodes:series.option.data.length});
-  }
+  function fitGraph(chart){GraphWorkbench.fit(chart);}
   function renderHits(result){
     const sourceChunks=result.source_chunks||[];
     const contextChunks=result.context_chunks||[];
@@ -509,8 +480,9 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
     }
   };
   window.clearGraphWorkspace=({preserveSearchResults=false}={})=>{
+    GraphWorkbench.clear();
     graphRequests.invalidate();invalidatePendingDetail();
-    wb.epoch++;ui.graph=null;wb.nodes.clear();wb.chart?.clear();
+    wb.epoch++;ui.graph=null;wb.nodes.clear();wb.chart?.dispatchAction({type:'hideTip'});wb.chart?.clear();
     selectedEntityId='';get('graph-node').value='';get('graph-entity-choice').value='';get('graph-detail').replaceChildren();
     get('graph-summary').textContent='从左侧检索结果选择实体或关系';
     get('graph-type-buttons')?.remove();get('graph-timeline')?.remove();
@@ -543,7 +515,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
     const chart=wb.chart;
     if(!chart||!ui.graph){status('图谱还没渲染：先点「重新渲染全图」，或从左侧检索结果里选一个实体/关系。');return;}
     chart.resize();fitGraph(chart);
-    status('已适应画布：缩放比例与节点分布都重置为铺满画布；拖乱或缩没了都可以再点这个按钮。');
+    status('已适应画布：保留节点位置并恢复视图。需要重新排列时点“重新布局”。');
   });
   // 平移/缩放的可发现性：双击空白处＝适应画布。
   // ECharts 的 zr 事件点在节点上时 event.target 有值，空白处没有 —— 用这个区分，

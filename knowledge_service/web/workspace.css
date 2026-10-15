@@ -396,4 +396,13 @@ tr.ledger-row-located td{animation:ledger-locate-flash 1.6s ease}
 .version-scope-banner{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:7px 0;padding:7px 9px;border:1px solid var(--ks-accent-line);border-radius:6px;background:var(--ks-accent-soft);color:var(--ks-accent);font-size:11px;font-weight:650}
 .version-scope-banner button{margin:0;padding:4px 8px;font-size:11px;white-space:nowrap}
 .version-scope-banner button[hidden]{display:none}
+.graph-path-tools{margin:8px 0;padding:8px 10px;border:1px solid var(--ks-accent-line);border-radius:7px;background:var(--ks-accent-soft);max-height:240px;overflow:auto;flex-shrink:0}
+.graph-path-tools summary{cursor:pointer;font-weight:650;color:var(--ks-accent)}
+.graph-path-controls{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.graph-path-controls label{display:flex;flex-direction:column;gap:3px;min-width:100px;flex:1}
+.graph-path-controls select{max-width:100%;width:100%;min-width:0}
+.graph-path-actions,#graph-path-result{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+#graph-path-result p{flex-basis:100%;margin:8px 0 3px}
+#graph-path-result button{max-width:100%;overflow-wrap:anywhere;white-space:normal}
+#graph-canvas{touch-action:none}
 @media(max-width:700px){.version-scope-banner{align-items:flex-start;flex-direction:column}.version-scope-banner button{width:100%}}

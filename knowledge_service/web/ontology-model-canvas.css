@@ -43,7 +43,8 @@
 .ontology-model .om-canvas-empty[hidden]{display:none}
 
 /* 工具条：画布底部常驻，白纸浮卡 + 青灰描边；左统计、中提示、右动作。 */
-.ontology-model .om-canvas-bar{position:absolute;left:12px;right:12px;bottom:12px;z-index:6;display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid #d5e4e4;border-radius:11px;background:rgba(255,255,255,.96);box-shadow:0 12px 30px -16px rgba(13,60,58,.4);backdrop-filter:blur(6px)}
+.ontology-model .om-canvas-bar{position:absolute;left:12px;right:12px;bottom:12px;z-index:6;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 12px;border:1px solid #d5e4e4;border-radius:11px;background:rgba(255,255,255,.96);box-shadow:0 12px 30px -16px rgba(13,60,58,.4);backdrop-filter:blur(6px)}
+.ontology-model .om-canvas-help{position:absolute;left:12px;right:78px;top:12px;z-index:3;color:#3d5e5e;font-size:11px;line-height:1.5;pointer-events:none}
 .ontology-model .om-canvas-stats{color:#688585;font-size:11.5px;white-space:nowrap;flex:0 0 auto}
 .ontology-model .om-canvas-hint{color:#0e7c7b;font-size:11.5px;flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
 /* 工具条按钮：白底青灰描边的 ghost 工具钮，hover 浅青。 */

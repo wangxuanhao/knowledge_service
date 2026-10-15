@@ -57,6 +57,7 @@
     ready: false, host: null, ctx: null, cy: null, stage: null, svg: null, ro: null,
     onResize: null, view: 'graph', sig: '', graph: null, selected: null,
     mode: '', linkFrom: null, pending: null, bands: [], els: {}, didFit: false,
+    layoutView: null, dragged: false,
   };
 
   // ---- 小工具 --------------------------------------------------------------
@@ -171,7 +172,7 @@
     ];
   }
 
-  // ---- 元素同步（增量 diff：保留用户拖过的节点位置，只在增删时重排） ----------
+  // ---- 元素同步（增量 diff：已有节点位置不动，新节点放在当前图右侧） ----------
   function applyElements(graph) {
     const cy = M.cy;
     const nodes = (graph && graph.nodes) || [];
@@ -192,7 +193,11 @@
         };
         const el = cy.getElementById(n.id);
         if (el.length) el.data(data);
-        else cy.add({ group: 'nodes', data });
+        else {
+          const existing = cy.nodes();
+          const right = existing.length ? Math.max(...existing.map(x => x.position('x'))) + NODE_W + GAP_X : 0;
+          cy.add({ group: 'nodes', data, position: { x: right, y: 0 } });
+        }
       }
       for (const e of edges) {
         // 两端必须都在图上，否则 Cytoscape 会抛错（主控已过滤，这里再兜一层）。
@@ -208,7 +213,7 @@
     });
   }
 
-  // 结构指纹：只有「节点/边集合」或「视图」变了才重排；选中变化不重排（否则会跳）。
+  // 结构指纹用于刷新层带归属；结构增量和选中变化都不自动重排已有节点。
   function signature(graph, view) {
     if (!graph) return view + '|';
     const n = graph.nodes.map(x => x.id).sort().join(',');
@@ -278,7 +283,8 @@
     // 浮层预留。图例默认【收成右上角小按钮】，上下预留设成【相等】，
     // 让节点群组的几何中心严格落在容器中心（offsetY=0）。
     // 底部 72 足够避开悬浮工具条，顶部 72 也远高于小图例按钮。
-    const PAD = { left: 30, top: 72, right: 30, bottom: 72 };
+    const PAD = { left: 30, top: 72, right: 30,
+      bottom: Math.max(72, ((M.els.bar && M.els.bar.offsetHeight) || 0) + 24) };
 
     const bb = eles.boundingBox();
     const bw = Math.max(1, bb.w), bh = Math.max(1, bb.h);
@@ -350,7 +356,7 @@
         if (column === 0) {
           const cols = Math.min(MAX_PER_ROW, row.length - index);
           // shade：隔层交替上色（按深度序号奇偶），既分得清层又不至于整屏色块。
-          bands.push({ depth: depthKey, y, cols, cont: index > 0, shade: order.indexOf(depthKey) % 2 === 0 });
+          bands.push({ depth: depthKey, y, cols, ids: row.slice(index, index + MAX_PER_ROW).map(n => n.id), cont: index > 0, shade: order.indexOf(depthKey) % 2 === 0 });
         }
         positions[nd.id] = { x: column * (NODE_W + GAP_X), y };
         rank.set(nd.id, cursor * MAX_PER_ROW + column);
@@ -369,8 +375,29 @@
 
   function runLayout() {
     if (!M.cy) return;
+    M.layoutView = M.view;
     if (M.view === 'hierarchy') layoutHierarchy();
     else layoutGraph();
+  }
+
+  // 结构刷新只更新层级归属；每条带的实际范围由成员节点当前位置决定。
+  function refreshHierarchyBands() {
+    const depth = computeDepths(M.graph);
+    const rows = new Map();
+    for (const n of M.graph.nodes) {
+      const d = depth.get(n.id) || 0;
+      if (!rows.has(d)) rows.set(d, []);
+      rows.get(d).push(n.id);
+    }
+    const bands = [];
+    [...rows.keys()].sort((a, b) => a - b).forEach((d, index) => {
+      const ids = rows.get(d);
+      for (let i = 0; i < ids.length; i += MAX_PER_ROW) {
+        const members = ids.slice(i, i + MAX_PER_ROW);
+        bands.push({ depth: d, y: 0, cols: members.length, ids: members, cont: i > 0, shade: index % 2 === 0 });
+      }
+    });
+    drawBands(bands);
   }
 
   // ---- 层带覆盖层（HTML/SVG，叠在 Cytoscape 画布之上，pointer-events:none） -----
@@ -404,7 +431,7 @@
       // 且整个框相对卡片右偏 NODE_W/2，fit 后节点整体偏左——层级树"节点不在框里"由此而来。
       const mx = -NODE_W / 2 - BAND_PAD;
       M.bands.push({
-        el: rect, label,
+        el: rect, label, ids: b.ids || [],
         mx, my, w: contentW + BAND_PAD * 2, h,
         lx: mx + 4, ly: my + 4,   // 层号标签画在带**内侧**左上角（随带左/顶缘走）
       });
@@ -427,6 +454,14 @@
     if (!cy) return;
     const zoom = cy.zoom(), pan = cy.pan();
     for (const b of M.bands) {
+      const positions = b.ids.map(id => cy.getElementById(id)).filter(n => n.length).map(n => n.position());
+      if (positions.length) {
+        b.mx = Math.min(...positions.map(p => p.x)) - NODE_W / 2 - BAND_PAD;
+        b.my = Math.min(...positions.map(p => p.y)) - NODE_H / 2 - BAND_PAD;
+        b.w = Math.max(...positions.map(p => p.x)) + NODE_W / 2 + BAND_PAD - b.mx;
+        b.h = Math.max(...positions.map(p => p.y)) + NODE_H / 2 + BAND_PAD - b.my;
+        b.lx = b.mx + 4; b.ly = b.my + 4;
+      }
       b.el.setAttribute('x', (b.mx * zoom + pan.x).toFixed(1));
       b.el.setAttribute('y', (b.my * zoom + pan.y).toFixed(1));
       b.el.setAttribute('width', (b.w * zoom).toFixed(1));
@@ -441,7 +476,10 @@
     if (!M.cy) return;
     const eles = M.cy.elements();
     if (!eles.length) return;
-    try { M.cy.fit(eles, 40); } catch (e) { /* 忽略：空图时 fit 无意义 */ }
+    try {
+      if (M.cy.container()) fitWithChrome();
+      else M.cy.fit(eles, 40);
+    } catch (e) { /* 忽略：空图时 fit 无意义 */ }
     syncBands();
   }
 
@@ -466,6 +504,8 @@
 
   // ---- 交互：选中 / 连线（两步点击 + 确认，无橡皮筋） ------------------------
   function onNodeTap(evt) {
+    // Cytoscape 通常会抑制拖动后的 tap；这里同时保护两步连线不被拖动推进。
+    if (M.dragged) return;
     const node = evt.target;
     const iri = node.data('iri') || node.id();
     if (!iri) return;
@@ -638,12 +678,16 @@
     const btnParent = mkButton('改父类（连线）', startParentLink, '', BAR_TITLES.parent);
     const btnRelation = mkButton('连关系', startRelationLink, '', BAR_TITLES.relation);
     const btnFit = mkButton('适应画布', fitAll, '',
-      '做什么：把所有节点缩放到刚好铺满画布。不做什么：不改动任何数据。');
+      '缩放和平移以显示全部节点，保留手动摆放的位置。');
+    const btnLayout = mkButton('重新布局', runLayout, '',
+      '按当前视图重新排列全部节点，替换手动摆放的位置；仅改变视图。');
     const btnCancel = mkButton('取消', cancelLink, 'om-canvas-cancel',
       '做什么：退出连线模式，不写任何改动。');
     btnCancel.hidden = true;
 
-    bar.append(stats, hint, btnNew, btnParent, btnRelation, btnFit, btnCancel);
+    bar.append(stats, hint, btnNew, btnParent, btnRelation, btnFit, btnLayout, btnCancel);
+    const help = mkEl('div', 'om-canvas-help', '点节点选中 · 拖节点调整位置 · 拖空白平移 · 滚轮缩放；布局仅在当前视图保留，不修改本体。');
+    stage.appendChild(help);
     stage.appendChild(bar);
     Object.assign(M.els, { bar, stats, hint, btnNew, btnParent, btnRelation, btnCancel });
   }
@@ -742,18 +786,22 @@
     e.btnParent.title = locked ? BAR_TITLES.locked : BAR_TITLES.parent;
     e.btnRelation.title = locked ? BAR_TITLES.locked : BAR_TITLES.relation;
     e.btnCancel.hidden = !(M.mode || M.pending);
+    // 窄栏时工具条会换行，确认条始终放在实际工具条上方。
+    if (e.confirm) e.confirm.style.bottom = ((e.bar.offsetHeight || 40) + 22) + 'px';
   }
 
   // ---- 生命周期 -------------------------------------------------------------
   function bindCyEvents() {
     const cy = M.cy;
+    cy.on('tapstart', 'node', () => { M.dragged = false; });
+    cy.on('drag', 'node', () => { M.dragged = true; });
     cy.on('tap', 'node', onNodeTap);
     cy.on('tap', evt => { if (evt.target === cy) onBackgroundTap(); });
     // 双击空白 = 适应画布（双击节点不触发，避免误操作）。
     cy.on('dblclick', evt => { if (evt.target === cy) fitAll(); });
     cy.on('doubleTap', evt => { if (evt.target === cy) fitAll(); });
     // 平移/缩放后同步层带位置（自带滚轮以光标为锚点缩放 + 拖空白平移）。
-    cy.on('pan zoom', syncBands);
+    cy.on('pan zoom position', syncBands);
   }
 
   function mount(host, ctx) {
@@ -776,6 +824,7 @@
         wheelSensitivity: 0.2,
         minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM,
         boxSelectionEnabled: false,
+        autounselectify: true,
         userZoomingEnabled: true, userPanningEnabled: true,
         styleEnabled: true, motionBlur: false,
         style: cyStyle(),
@@ -808,6 +857,7 @@
       M.ro = new ResizeObserver(() => {
         if (!M.cy) return;
         M.cy.resize();
+        updateBar();
         syncBands();
         if (!M.didFit && M.stage && M.stage.clientWidth > 0) {
           M.didFit = true; M.sig = ''; runLayout();
@@ -815,7 +865,7 @@
       });
       M.ro.observe(stage);
     }
-    M.onResize = () => { if (M.cy) { M.cy.resize(); syncBands(); } };
+    M.onResize = () => { if (M.cy) { M.cy.resize(); updateBar(); syncBands(); } };
     window.addEventListener('resize', M.onResize);
 
     M.ready = true;
@@ -836,13 +886,17 @@
     updateBar();
 
     const sig = signature(M.graph, M.view);
-    let need = sig !== M.sig;
+    let need = M.layoutView !== M.view;
     if (!M.didFit && M.stage && M.stage.clientWidth > 0) { M.didFit = true; need = true; }
-    if (need) { M.sig = sig; runLayout(); }
+    if (need) runLayout();
+    else if (M.view === 'hierarchy' && sig !== M.sig) refreshHierarchyBands();
+    M.sig = sig;
   }
 
   function setView(mode) {
-    M.view = mode === 'hierarchy' ? 'hierarchy' : 'graph';
+    const next = mode === 'hierarchy' ? 'hierarchy' : 'graph';
+    if (M.view === next) return;
+    M.view = next;
     if (!M.ready || !M.cy) return;
     M.sig = signature(M.graph, M.view);   // 记下指纹，避免紧随其后的 render 再排一次
     runLayout();
@@ -869,6 +923,7 @@
     if (M.host) { try { M.host.replaceChildren(); } catch (e) { /* 忽略 */ } }
     M.ready = false; M.host = null; M.stage = null; M.svg = null;
     M.bands = []; M.els = {}; M.sig = ''; M.didFit = false;
+    M.layoutView = null; M.dragged = false; M.graph = null; M.selected = null; M.view = 'graph';
     M.mode = ''; M.linkFrom = null; M.pending = null;
   }
 
