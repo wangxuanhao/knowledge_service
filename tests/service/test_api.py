@@ -21,6 +21,28 @@ def project(client, *, use_default_ontology=True):
     return result.json()['id']
 
 
+def test_project_applicability_values_endpoint_returns_current_dictionary(client):
+    p = project(client, use_default_ontology=False)
+    for title, applicability in [
+        ('美团规则', {'platforms': ['美团'], 'businesses': ['外卖']}),
+        ('京东规则', {'platforms': {'mode': 'specific', 'values': ['京东']},
+                  'audiences': {'mode': 'specific', 'values': ['商户']}}),
+    ]:
+        response = client.post(f'/api/projects/{p}/documents', json={
+            'title': title, 'text': title, 'extract': False,
+            'applicability': applicability,
+        })
+        assert response.status_code == 201, response.text
+
+    response = client.get(f'/api/projects/{p}/applicability-values')
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        'platforms': ['京东', '美团'], 'businesses': ['外卖'],
+        'audiences': ['商户'],
+    }
+
+
 def test_ontology_scope_accepts_each_legal_combination(client):
     p = project(client, use_default_ontology=False)
 
@@ -306,7 +328,14 @@ def test_malformed_llm_response_is_service_unavailable(client, monkeypatch):
     for key in ('KG_LLM_API_KEY','KG_LLM_BASE_URL','KG_LLM_MODEL'):
         monkeypatch.setenv(key, 'configured')
     p = project(client)
-    client.post(f'/api/projects/{p}/documents', json={'title':'证据','text':'退款规则','extract':False})
+    client.post(f'/api/projects/{p}/documents', json={
+        'title':'证据','text':'退款规则','extract':False,
+        'applicability': {
+            'platforms': {'mode': 'all', 'values': []},
+            'businesses': {'mode': 'all', 'values': []},
+            'audiences': {'mode': 'all', 'values': []},
+        },
+    })
     monkeypatch.setattr(httpx.Client, 'post', lambda *a, **k: httpx.Response(
         200, json={'choices':[]}, request=httpx.Request('POST','https://example.invalid')))
     # TestClient inherits httpx.Client, so invoke the ASGI transport through request.

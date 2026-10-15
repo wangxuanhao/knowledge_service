@@ -308,7 +308,11 @@ def _route_open_facts(text,entity_candidates,facts,include_attributes=False,*,re
         if source_kind=='ambiguous':
             exceptions.append(_open_exception(text,'ambiguous','relation_attribute_ambiguous',
                 '宾语既可能是实体也可能是标量值，需人工选择关系或属性',raw));continue
-        if source_kind=='relation' or object_entity is not None:
+        explicit_scalar = source_kind=='attribute' and raw.get('literal_type') not in (None, '', 'entity', 'unknown')
+        if source_kind=='attribute' and object_entity is not None and not explicit_scalar:
+            exceptions.append(_open_exception(text,'ambiguous','relation_attribute_ambiguous',
+                '属性值与正文实体同名但未明确标量类型，需人工核对',raw));continue
+        if source_kind=='relation':
             if object_entity is None:
                 exceptions.append(_open_exception(text,'relation','relation_object_not_resolved',
                     '关系宾语未唯一命中正文实体，不能作为正常关系候选',raw));continue
@@ -709,11 +713,10 @@ class SemanticaExtractor:
                 object_type_short=''
                 if object_entity is not None:
                     object_type_short=str(object_entity.label).rsplit('#',1)[-1].rsplit('/',1)[-1]
-                # 已声明的数据属性必须保持为属性；对象属性和未知谓词在值唯一命中实体时
-                # 进入关系审核，避免未知关系在获准进入审核前就被压回属性。
+                # 只有本体明确声明的对象属性才允许实体值改判关系。
                 can_be_relation=(object_entity is not None
-                    and (declared_object_property(item.attribute)
-                         or not declared_datatype_property(item.attribute))
+                    and declared_object_property(item.attribute)
+                    and not declared_datatype_property(item.attribute)
                     and object_type_short not in LITERAL_FALLBACK_CLASSES)
                 if can_be_relation:
                     object_id=next(iter(object_ids));key=(entity_id,item.attribute.strip().casefold(),object_id)

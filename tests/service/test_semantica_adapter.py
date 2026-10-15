@@ -155,14 +155,15 @@ def test_open_discovery_routes_entity_objects_and_scalar_values_once(monkeypatch
     monkeypatch.setattr(providers,'create_provider',lambda *a,**k:FakeProvider())
     result=mod.SemanticaExtractor().discover('账号甲使用抖音，封禁期限为7天',include_attributes=True)
     assert calls==['_OpenEntities','_OpenFacts']
-    assert [item['kind'] for item in result].count('relation')==1
-    assert [item['kind'] for item in result].count('attribute')==1
-    relation=next(item for item in result if item['kind']=='relation')
-    attribute=next(item for item in result if item['kind']=='attribute')
-    assert relation['object']=='抖音'
-    assert relation['metadata']['classification_reason']=='object_matches_entity'
-    assert attribute['value']=='7天' and attribute['value_type']=='duration'
-    assert all(item.get('evidence_status')=='exact' for item in (relation,attribute))
+    assert [item['kind'] for item in result].count('relation')==0
+    attributes=[item for item in result if item['kind']=='attribute']
+    assert len(attributes)==2
+    platform=next(item for item in attributes if item['proposed_type']=='使用平台')
+    duration=next(item for item in attributes if item['proposed_type']=='封禁期限')
+    assert platform['value']=='抖音' and platform['value_type']=='text'
+    assert platform['metadata']['classification_reason']=='scalar_literal'
+    assert duration['value']=='7天' and duration['value_type']=='duration'
+    assert all(item.get('evidence_status')=='exact' for item in attributes)
 
 
 def test_open_discovery_isolates_missing_source_and_unresolved_facts(monkeypatch):

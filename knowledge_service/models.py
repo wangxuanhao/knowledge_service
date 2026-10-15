@@ -2,6 +2,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .utils.attributes import primitive_datatype
+from .core.time import normalize_time
+from .domain.applicability import normalize_applicability
 
 
 class Request(BaseModel):
@@ -62,7 +64,24 @@ class RecordBatch(Request):
     records: list[RecordWrite] = Field(min_length=1, max_length=1000)
 
 
+class ApplicabilityDimension(Request):
+    mode: Literal['specific', 'all', 'unknown'] = 'unknown'
+    values: list[str] = Field(default_factory=list)
+
+
+class Applicability(Request):
+    platforms: ApplicabilityDimension = Field(default_factory=ApplicabilityDimension)
+    businesses: ApplicabilityDimension = Field(default_factory=ApplicabilityDimension)
+    audiences: ApplicabilityDimension = Field(default_factory=ApplicabilityDimension)
+
+    @model_validator(mode='before')
+    @classmethod
+    def normalize_scope(cls, value):
+        return normalize_applicability(value)
+
+
 class Scope(Request):
+    applicability: Applicability | None = None
     filters: dict[str, Any] | None = None
     valid_at: str | None = None
     known_at: str | None = None
@@ -90,6 +109,8 @@ class Search(Scope):
     k_entities: int = Field(default=5, ge=0, le=50)
     k_chunks: int = Field(default=5, ge=0, le=50)
     k_relations: int = Field(default=5, ge=0, le=50)
+    k_per_platform: int = Field(default=5, ge=1, le=20)
+    k_unknown: int = Field(default=3, ge=1, le=20)
     # 本体扩展（P0-1）：开启后顺着本体的父子关系补召回 —— 查询里出现类名（含业务标签）时，
     # 命中该类的**全部子类**；这些子类实例即使正文里没有查询词也会被召回，关键词也会按类名/别名
     # 多词 OR 扩召回（同一条记录取最高分，不累加）。
@@ -120,6 +141,8 @@ class ResolutionReviewDecision(Request):
 
 class IngestSettings(Request):
     metadata: dict[str, Any] = Field(default_factory=dict)
+    applicability: Applicability | None = None
+    published_at: str | None = None
     valid_from: str | None = None
     valid_until: str | None = None
     extract: bool = True
@@ -143,6 +166,21 @@ class IngestSettings(Request):
             raise ValueError('语义合并需要先开启实体消歧')
         if self.review_threshold >= self.merge_threshold:
             raise ValueError('审核阈值必须低于自动合并阈值')
+        self.metadata = dict(self.metadata)
+        scope = normalize_applicability(self.applicability if self.applicability is not None
+                                        else self.metadata.get('applicability'))
+        self.metadata['applicability'] = scope
+        published = self.published_at if self.published_at is not None else self.metadata.get('published_at')
+        self.published_at = normalize_time(published)
+        if self.published_at is not None:
+            self.metadata['published_at'] = self.published_at
+        explicit = self.valid_from is not None
+        self.valid_from = normalize_time(self.valid_from) if explicit else self.published_at
+        self.valid_until = normalize_time(self.valid_until)
+        if self.valid_from and self.valid_until and self.valid_until <= self.valid_from:
+            raise ValueError('失效时间必须晚于生效时间')
+        self.metadata['effective_time_source'] = ('explicit' if explicit else
+            'published_at' if self.published_at else 'unknown')
         return self
 
     def effective_extraction_mode(self):

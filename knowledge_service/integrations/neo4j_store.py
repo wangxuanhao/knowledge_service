@@ -7,9 +7,12 @@ import hashlib
 import json
 import os
 import threading
+from datetime import datetime
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 from ..core.time import utc_now
+from ..domain.applicability import normalize_applicability, scope_identity
 
 
 def encoded(value):
@@ -65,7 +68,7 @@ class Neo4jProjection:
         try:
             from neo4j import GraphDatabase
         except ImportError:
-            raise RuntimeError('请在 model_agent 环境中安装可选的 neo4j 驱动') from None
+            raise RuntimeError('请在 llm_model 环境中安装可选的 neo4j 驱动') from None
         self.driver = GraphDatabase.driver(self.uri, auth=(self.username, self.password),
                                           connection_timeout=5, connection_acquisition_timeout=10,
                                           max_transaction_retry_time=10)
@@ -114,6 +117,11 @@ class Neo4jProjection:
             namespace = self.repo.storage_namespace
             driver = self._driver()
             with driver.session(database=self.database) as session:
+                for label in ('KSRecordV3', 'KSScope', 'KSScopeValue',
+                              'KSProjection', 'KSProjectionPointer'):
+                    session.run(
+                        f'MATCH (n:{label} {{namespace:$ns, project_id:$pid}}) '
+                        'DETACH DELETE n', ns=namespace, pid=project_id).consume()
                 session.run(
                     'MATCH ()-[e:KS_FACT {namespace:$ns, project_id:$pid}]->() DELETE e',
                     ns=namespace, pid=project_id).consume()
@@ -265,11 +273,516 @@ class Neo4jProjection:
                 turtle=ontology['turtle'], payload=encoded(ontology))
 
 
+class Neo4jSchemaMismatch(RuntimeError):
+    requires_rebuild = True
+
+
+class Neo4jProjectionAdapter:
+    """Ordered, generation-scoped Neo4j projection used by the outbox worker."""
+
+    INDEXED_KINDS = frozenset({'entity', 'relation', 'chunk'})
+    PROJECTED_KINDS = INDEXED_KINDS | frozenset({'attribute'})
+
+    def __init__(self, driver, *, namespace, database='neo4j',
+                 fence_is_current=None, repair_authority=None):
+        self.driver = driver
+        self.namespace = namespace
+        self.database = database
+        self._fence_is_current = fence_is_current
+        self._repair_authority = repair_authority
+        self._lock = threading.RLock()
+        self._positions = {}
+
+    def _driver(self):
+        return self.driver() if callable(self.driver) else self.driver
+
+    def _session(self):
+        return self._driver().session(database=self.database)
+
+    @staticmethod
+    def _instant(value):
+        if value is None:
+            return False, 0
+        parsed = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+        return True, int(parsed.timestamp() * 1000)
+
+    def _record_row(self, project_id, generation, record, seq, fence):
+        applicability = normalize_applicability(
+            (record.get('metadata') or {}).get('applicability'))
+        start_known, start_epoch = self._instant(record.get('valid_from'))
+        until_known, until_epoch = self._instant(record.get('valid_until'))
+        props = record_properties(record, self.namespace, project_id)
+        props.update(
+            generation=generation, projection_seq=int(seq), fence=fence,
+            active=True,
+            platform_mode=applicability['platforms']['mode'],
+            platform_values=applicability['platforms']['values'],
+            business_mode=applicability['businesses']['mode'],
+            business_values=applicability['businesses']['values'],
+            audience_mode=applicability['audiences']['mode'],
+            audience_values=applicability['audiences']['values'],
+            scope_identity=scope_identity(applicability),
+            valid_from_known=start_known, valid_from_epoch_ms=start_epoch,
+            valid_until_known=until_known, valid_until_epoch_ms=until_epoch,
+        )
+        key = digest([self.namespace, project_id, generation, record['id']])
+        scope_key = digest([self.namespace, project_id, generation,
+                            props['scope_identity']])
+        return {'key': key, 'scope_key': scope_key, 'props': props}
+
+    @staticmethod
+    def _consume(result):
+        consume = getattr(result, 'consume', None)
+        if consume is not None:
+            consume()
+
+    @classmethod
+    def _write_rows(cls, tx, namespace, project_id, generation, rows):
+        result = tx.run(
+            'UNWIND $keys AS key MATCH (r:KSRecordV3 {key:key})'
+            '-[old:KS_SCOPE]->() DELETE old',
+            keys=[row['key'] for row in rows])
+        cls._consume(result)
+        result = tx.run(
+            'UNWIND $rows AS row '
+            'MATCH (g:KSProjection {namespace:$ns,project_id:$pid,generation:$generation}) '
+            'MERGE (r:KSRecordV3 {key:row.key}) SET r += row.props '
+            'MERGE (g)-[:KS_CONTAINS]->(r) '
+            'MERGE (s:KSScope {key:row.scope_key}) '
+            'SET s.namespace=$ns,s.project_id=$pid,s.generation=$generation,'
+            's.scope_identity=row.props.scope_identity '
+            'MERGE (r)-[:KS_SCOPE]->(s)',
+            ns=namespace, pid=project_id, generation=generation, rows=rows)
+        cls._consume(result)
+        values = []
+        for row in rows:
+            for dimension, field in (('platform', 'platform_values'),
+                                     ('business', 'business_values'),
+                                     ('audience', 'audience_values')):
+                for value in row['props'][field]:
+                    values.append({
+                        'scope_key': row['scope_key'], 'dimension': dimension,
+                        'value': value,
+                        'key': digest([namespace, project_id, generation,
+                                       dimension, value]),
+                    })
+        if values:
+            result = tx.run(
+                'UNWIND $rows AS row MATCH (s:KSScope {key:row.scope_key}) '
+                'MERGE (v:KSScopeValue {key:row.key}) '
+                'SET v.namespace=$ns,v.project_id=$pid,v.generation=$generation,'
+                'v.dimension=row.dimension,v.value=row.value '
+                'MERGE (s)-[:KS_VALUE]->(v)',
+                ns=namespace, pid=project_id, generation=generation,
+                rows=values)
+            cls._consume(result)
+        result = tx.run(
+            'MATCH (s:KSScope {namespace:$ns,project_id:$pid,generation:$generation}) '
+            'WHERE NOT ()-[:KS_SCOPE]->(s) DETACH DELETE s',
+            ns=namespace, pid=project_id, generation=generation)
+        cls._consume(result)
+        result = tx.run(
+            'MATCH (v:KSScopeValue {namespace:$ns,project_id:$pid,generation:$generation}) '
+            'WHERE NOT ()-[:KS_VALUE]->(v) DETACH DELETE v',
+            ns=namespace, pid=project_id, generation=generation)
+        cls._consume(result)
+        relations = [
+            {'key': row['key'],
+             'subject_key': digest([namespace, project_id, generation,
+                                    row['props']['subject_id']]),
+             'object_key': digest([namespace, project_id, generation,
+                                   row['props']['object_id']]),
+             'props': row['props']}
+            for row in rows
+            if row['props']['kind'] == 'relation'
+            and not row['props']['deleted']
+        ]
+        if relations:
+            cls._write_relations(tx, relations)
+        attributes = [
+            {'key': row['key'],
+             'subject_key': digest([namespace, project_id, generation,
+                                    row['props']['subject_id']]),
+             'props': row['props']}
+            for row in rows
+            if row['props']['kind'] == 'attribute'
+            and not row['props']['deleted']
+        ]
+        if attributes:
+            cls._write_attributes(tx, attributes)
+
+    @classmethod
+    def _write_relations(cls, tx, relations):
+        if relations:
+            result = tx.run(
+                'MATCH ()-[old:KS_FACT]->() WHERE old.key IN $keys DELETE old',
+                keys=[row['key'] for row in relations])
+            cls._consume(result)
+            result = tx.run(
+                'UNWIND $rows AS row '
+                'MATCH (a:KSRecordV3 {key:row.subject_key}),'
+                '(b:KSRecordV3 {key:row.object_key}) '
+                'MERGE (a)-[e:KS_FACT {key:row.key}]->(b) SET e += row.props',
+                rows=relations)
+            cls._consume(result)
+
+    @classmethod
+    def _write_attributes(cls, tx, attributes):
+        if attributes:
+            result = tx.run(
+                'MATCH ()-[old:KS_ATTRIBUTE]->() WHERE old.key IN $keys DELETE old',
+                keys=[row['key'] for row in attributes])
+            cls._consume(result)
+            result = tx.run(
+                'UNWIND $rows AS row '
+                'MATCH (a:KSRecordV3 {key:row.subject_key}),'
+                '(v:KSRecordV3 {key:row.key}) '
+                'MERGE (a)-[e:KS_ATTRIBUTE {key:row.key}]->(v) SET e += row.props',
+                rows=attributes)
+            cls._consume(result)
+
+    def _ensure_schema(self, session):
+        statements = (
+            'CREATE CONSTRAINT ksprojection_key IF NOT EXISTS FOR (n:KSProjection) REQUIRE (n.namespace,n.project_id,n.generation) IS UNIQUE',
+            'CREATE CONSTRAINT kspointer_key IF NOT EXISTS FOR (n:KSProjectionPointer) REQUIRE (n.namespace,n.project_id) IS UNIQUE',
+            'CREATE CONSTRAINT ksrecordv3_key IF NOT EXISTS FOR (n:KSRecordV3) REQUIRE n.key IS UNIQUE',
+            'CREATE CONSTRAINT ksscope_key IF NOT EXISTS FOR (n:KSScope) REQUIRE n.key IS UNIQUE',
+            'CREATE CONSTRAINT ksscopevalue_key IF NOT EXISTS FOR (n:KSScopeValue) REQUIRE n.key IS UNIQUE',
+            'CREATE INDEX ksrecordv3_lookup IF NOT EXISTS FOR (n:KSRecordV3) ON (n.namespace,n.project_id,n.generation,n.id)',
+            'CREATE INDEX ksscope_lookup IF NOT EXISTS FOR (n:KSScope) ON (n.namespace,n.project_id,n.scope_identity)',
+            'CREATE INDEX ksscopevalue_lookup IF NOT EXISTS FOR (n:KSScopeValue) ON (n.namespace,n.project_id,n.dimension,n.value)',
+        )
+        for statement in statements:
+            self._consume(session.run(statement))
+
+    def begin_rebuild(self, project_id, schema_version, state, fence=None):
+        generation = str(state.get('build_id') or uuid4())
+        with self._lock, self._session() as session:
+            self._ensure_schema(session)
+            self._consume(session.run(
+                'MERGE (g:KSProjection {namespace:$ns,project_id:$pid,generation:$generation}) '
+                'SET g.schema_version=$schema_version,g.active=false,g.fence=$fence,'
+                'g.projection_seq=0',
+                ns=self.namespace, pid=project_id, generation=generation,
+                schema_version=int(schema_version), fence=fence or ''))
+        return generation
+
+    def reset_rebuild(self, project_id, destination, build_id, fence=None):
+        with self._lock, self._session() as session:
+            self._consume(session.run(
+                'MATCH (g:KSProjection {namespace:$ns,project_id:$pid,generation:$generation}) '
+                'OPTIONAL MATCH (g)-[:KS_CONTAINS]->(r:KSRecordV3) '
+                'OPTIONAL MATCH (r)-[:KS_SCOPE]->(s:KSScope) '
+                'OPTIONAL MATCH (s)-[:KS_VALUE]->(v:KSScopeValue) '
+                'DETACH DELETE r,s,v', ns=self.namespace, pid=project_id,
+                generation=destination))
+
+    def load_snapshot(self, project_id, destination, records, snapshot_seq,
+                      fence=None):
+        selected = [row for row in records
+                    if row.get('kind') in self.PROJECTED_KINDS
+                    and not (row.get('metadata') or {}).get('_deleted')]
+        rows = [self._record_row(project_id, destination, row, snapshot_seq,
+                                 fence or '') for row in selected]
+        with self._lock, self._session() as session:
+            self._ensure_schema(session)
+            self._consume(session.run(
+                'MERGE (g:KSProjection {namespace:$ns,project_id:$pid,generation:$generation}) '
+                'SET g.projection_seq=$seq,g.fence=$fence',
+                ns=self.namespace, pid=project_id, generation=destination,
+                seq=int(snapshot_seq), fence=fence or ''))
+            for offset in range(0, len(rows), 256):
+                session.execute_write(self._write_rows, self.namespace,
+                                      project_id, destination,
+                                      rows[offset:offset + 256])
+            relation_rows = [
+                {'key': row['key'],
+                 'subject_key': digest([self.namespace, project_id, destination,
+                                        row['props']['subject_id']]),
+                 'object_key': digest([self.namespace, project_id, destination,
+                                       row['props']['object_id']]),
+                 'props': row['props']}
+                for row in rows if row['props']['kind'] == 'relation']
+            for offset in range(0, len(relation_rows), 256):
+                session.execute_write(
+                    self._write_relations,
+                    relation_rows[offset:offset + 256])
+            attribute_rows = [
+                {'key': row['key'],
+                 'subject_key': digest([self.namespace, project_id, destination,
+                                        row['props']['subject_id']]),
+                 'props': row['props']}
+                for row in rows if row['props']['kind'] == 'attribute']
+            for offset in range(0, len(attribute_rows), 256):
+                session.execute_write(
+                    self._write_attributes,
+                    attribute_rows[offset:offset + 256])
+        return len(rows)
+
+    def current_destination(self, project_id):
+        with self._lock, self._session() as session:
+            result = session.run(
+                'MATCH (:KSProjectionPointer {namespace:$ns,project_id:$pid})'
+                '-[:KS_ACTIVE]->(g:KSProjection) RETURN g.generation AS generation',
+                ns=self.namespace, pid=project_id)
+            row = result.single() if hasattr(result, 'single') else next(iter(result), None)
+            return row.get('generation') if row else None
+
+    def apply(self, project_id, event, destination=None, fence=None):
+        if not isinstance(fence, str) or not fence:
+            raise ValueError('Neo4j projection apply requires a fence token')
+        generation = destination or self.current_destination(project_id)
+        if not generation:
+            raise Neo4jSchemaMismatch('Neo4j active generation is missing')
+        seq = int(event['seq'])
+        key = (project_id, generation)
+        with self._lock:
+            previous = self._positions.get(key)
+            if previous is not None and seq <= previous[0]:
+                return False
+            payload = dict(event.get('payload') or {})
+            operation = event.get('operation')
+            with self._session() as session:
+                if operation == 'upsert' and payload.get('kind') in self.PROJECTED_KINDS:
+                    row = self._record_row(project_id, generation, payload, seq, fence)
+                    session.execute_write(self._write_rows, self.namespace,
+                                          project_id, generation, [row])
+                elif operation == 'tombstone':
+                    record_id = payload.get('record_id') or payload.get('id')
+                    if not record_id:
+                        raise ValueError('Neo4j tombstone requires record_id')
+                    tombstone_key=digest([self.namespace,project_id,generation,
+                                          record_id])
+                    self._consume(session.run(
+                        'MATCH ()-[e:KS_FACT {key:$key}]->() DELETE e',
+                        key=tombstone_key))
+                    self._consume(session.run(
+                        'MATCH (r:KSRecordV3 {namespace:$ns,project_id:$pid,'
+                        'generation:$generation,id:$record_id}) DETACH DELETE r',
+                        ns=self.namespace, pid=project_id, generation=generation,
+                        record_id=record_id))
+                    self._consume(session.run(
+                        'MATCH (s:KSScope {namespace:$ns,project_id:$pid,generation:$generation}) '
+                        'WHERE NOT ()-[:KS_SCOPE]->(s) DETACH DELETE s',
+                        ns=self.namespace,pid=project_id,generation=generation))
+                    self._consume(session.run(
+                        'MATCH (v:KSScopeValue {namespace:$ns,project_id:$pid,generation:$generation}) '
+                        'WHERE NOT ()-[:KS_VALUE]->(v) DETACH DELETE v',
+                        ns=self.namespace,pid=project_id,generation=generation))
+                elif operation != 'upsert':
+                    raise ValueError(f'unsupported projection operation: {operation}')
+                self._consume(session.run(
+                    'MATCH (g:KSProjection {namespace:$ns,project_id:$pid,generation:$generation}) '
+                    'SET g.projection_seq=$seq,g.fence=$fence',
+                    ns=self.namespace, pid=project_id, generation=generation,
+                    seq=seq, fence=fence))
+            record_id = payload.get('id') or payload.get('record_id')
+            if (self._fence_is_current is not None
+                    and not self._fence_is_current(project_id, seq, fence)):
+                if self._repair_authority is not None:
+                    self._repair_authority(project_id, record_id, generation)
+                return False
+            self._positions[key] = (seq, fence)
+            return True
+
+    def repair_record(self, project_id, record_id, records, destination, seq):
+        """Restore a record and its authoritative current incident bundle."""
+        bundle = ([] if records is None else
+                  [records] if isinstance(records, dict) else list(records))
+        with self._lock, self._session() as session:
+            self._consume(session.run(
+                'MATCH ()-[e:KS_FACT {namespace:$ns,project_id:$pid,'
+                'generation:$generation}]->() '
+                'WHERE e.id=$record_id OR e.subject_id=$record_id OR '
+                'e.object_id=$record_id DELETE e',
+                ns=self.namespace,pid=project_id,generation=destination,
+                record_id=record_id))
+            self._consume(session.run(
+                'MATCH (relation:KSRecordV3 {namespace:$ns,project_id:$pid,'
+                'generation:$generation,kind:"relation"}) '
+                'WHERE relation.id=$record_id OR relation.subject_id=$record_id '
+                'OR relation.object_id=$record_id '
+                'DETACH DELETE relation',ns=self.namespace,pid=project_id,
+                generation=destination,record_id=record_id))
+            self._consume(session.run(
+                'MATCH (r:KSRecordV3 {namespace:$ns,project_id:$pid,'
+                'generation:$generation,id:$record_id}) DETACH DELETE r',
+                ns=self.namespace, pid=project_id, generation=destination,
+                record_id=record_id))
+            selected=[row for row in bundle
+                      if row.get('kind') in self.PROJECTED_KINDS
+                      and not (row.get('metadata') or {}).get('_deleted')]
+            if selected:
+                rows=[self._record_row(project_id,destination,row,seq,
+                                       'authority-repair') for row in selected]
+                session.execute_write(self._write_rows, self.namespace,
+                                      project_id, destination, rows)
+
+    def validate_rebuild(self, project_id, destination, fence=None, state=None):
+        expected = dict((state or {}).get('expected_versions') or {})
+        if not expected and 'expected_versions' not in (state or {}):
+            return {'ok': False, 'reason': 'expected versions missing'}
+        with self._lock, self._session() as session:
+            result = session.run(
+                'MATCH (g:KSProjection {namespace:$ns,project_id:$pid,generation:$generation}) '
+                'OPTIONAL MATCH (g)-[:KS_CONTAINS]->(r:KSRecordV3) '
+                'WHERE r.kind IN ["entity","relation","chunk"] '
+                'RETURN g.schema_version AS schema_version, '
+                'collect([r.id,r.version_id]) AS versions,'
+                'collect({id:r.id,version_id:r.version_id,'
+                'platform:{mode:r.platform_mode,values:r.platform_values},'
+                'business:{mode:r.business_mode,values:r.business_values},'
+                'audience:{mode:r.audience_mode,values:r.audience_values},'
+                'scope_identity:r.scope_identity,'
+                'valid_from:[r.valid_from_known,r.valid_from_epoch_ms],'
+                'valid_until:[r.valid_until_known,r.valid_until_epoch_ms]}) AS projections',
+                ns=self.namespace, pid=project_id, generation=destination)
+            row = result.single() if hasattr(result, 'single') else next(iter(result), None)
+        if row is None:
+            return {'ok': False, 'reason': 'generation missing'}
+        actual = {item[0]: item[1] for item in row.get('versions', []) if item[0]}
+        expected_projection=(state or {}).get('expected_projection')
+        projections={item['id']:{key:value for key,value in item.items()
+                                  if key!='id'}
+                     for item in row.get('projections',[]) if item.get('id')}
+        scope_ok=(expected_projection is None or projections==expected_projection)
+        return {'ok': actual == expected and scope_ok,
+                'scope_ok':scope_ok,'expected_count': len(expected),
+                'actual_count': len(actual)}
+
+    def switch_alias(self, project_id, destination, build_id=None, fence=None):
+        def switch(tx):
+            self._consume(tx.run(
+                'MATCH (g:KSProjection {namespace:$ns,project_id:$pid,generation:$generation}) '
+                'MERGE (p:KSProjectionPointer {namespace:$ns,project_id:$pid}) '
+                'OPTIONAL MATCH (p)-[old:KS_ACTIVE]->(:KSProjection) DELETE old '
+                'MERGE (p)-[:KS_ACTIVE]->(g) '
+                'WITH p,g MATCH (other:KSProjection {namespace:$ns,project_id:$pid}) '
+                'SET other.active=(other.generation=$generation),p.fence=$fence,'
+                'p.projection_seq=g.projection_seq,p.schema_version=g.schema_version',
+                ns=self.namespace, pid=project_id, generation=destination,
+                fence=fence or ''))
+        with self._lock, self._session() as session:
+            return session.execute_write(switch)
+
+    def retire(self, project_id, destination):
+        if not destination or destination == self.current_destination(project_id):
+            return False
+        with self._lock, self._session() as session:
+            self._consume(session.run(
+                'MATCH (g:KSProjection {namespace:$ns,project_id:$pid,generation:$generation}) '
+                'OPTIONAL MATCH (g)-[:KS_CONTAINS]->(r:KSRecordV3) '
+                'OPTIONAL MATCH (r)-[:KS_SCOPE]->(s:KSScope) '
+                'OPTIONAL MATCH (s)-[:KS_VALUE]->(v:KSScopeValue) '
+                'DETACH DELETE g,r,s,v', ns=self.namespace, pid=project_id,
+                generation=destination))
+        return True
+
+    @staticmethod
+    def _scope_predicate(alias):
+        return (
+            f'{alias}.namespace=$ns AND {alias}.project_id=$pid AND '
+            f'{alias}.generation=$generation AND {alias}.active=true AND '
+            f'($platform_mode <> "specific" OR {alias}.platform_mode = "all" OR '
+            f'({alias}.platform_mode = "specific" AND '
+            f'{alias}.scope_identity IN allowed_platform_scope_ids)) AND '
+            f'($business_mode <> "specific" OR {alias}.business_mode = "all" OR '
+            f'({alias}.business_mode = "specific" AND '
+            f'{alias}.scope_identity IN allowed_business_scope_ids)) AND '
+            f'($audience_mode <> "specific" OR {alias}.audience_mode = "all" OR '
+            f'({alias}.audience_mode = "specific" AND '
+            f'{alias}.scope_identity IN allowed_audience_scope_ids)) AND '
+            f'($valid_epoch_ms IS NULL OR (($include_unknown OR {alias}.valid_from_known) '
+            f'AND (NOT {alias}.valid_from_known OR {alias}.valid_from_epoch_ms <= $valid_epoch_ms) '
+            f'AND (NOT {alias}.valid_until_known OR {alias}.valid_until_epoch_ms > $valid_epoch_ms)))')
+
+    def expand(self, project_id, seeds, hops, applicability=None, valid_at=None,
+               include_unknown=True, known_at=None):
+        if not isinstance(hops, int) or not 0 <= hops <= 2:
+            raise ValueError('Neo4j expand hops 必须为 0 到 2')
+        if known_at is not None:
+            raise ValueError('Neo4j current projection 不支持 known_at 历史读取')
+        scope = normalize_applicability(applicability)
+        generation = self.current_destination(project_id)
+        if not generation:
+            raise Neo4jSchemaMismatch('Neo4j active generation is missing')
+        params = {
+            'ns': self.namespace, 'pid': project_id, 'generation': generation,
+            'seed_ids': list(dict.fromkeys(seeds)),
+            'platform_mode': scope['platforms']['mode'],
+            'platform_values': scope['platforms']['values'],
+            'business_mode': scope['businesses']['mode'],
+            'business_values': scope['businesses']['values'],
+            'audience_mode': scope['audiences']['mode'],
+            'audience_values': scope['audiences']['values'],
+            'include_unknown': include_unknown is not False,
+            'valid_epoch_ms': self._instant(valid_at or utc_now())[1],
+        }
+        n0 = self._scope_predicate('n0')
+        imports=('WITH g,allowed_platform_scope_ids,allowed_business_scope_ids,'
+                 'allowed_audience_scope_ids ')
+        branches = [
+            f'{imports}MATCH (n0:KSRecordV3) WHERE n0.id IN $seed_ids AND {n0} '
+            'RETURN n0.version_id AS node_version, null AS relation_version']
+        if hops >= 1:
+            e1, n1 = self._scope_predicate('e1'), self._scope_predicate('n1')
+            branches.append(
+                f'{imports}MATCH (n0:KSRecordV3)-[e1:KS_FACT]-(n1:KSRecordV3) '
+                f'WHERE n0.id IN $seed_ids AND {n0} AND {e1} AND {n1} '
+                'RETURN n1.version_id AS node_version,e1.version_id AS relation_version')
+        if hops >= 2:
+            e1, n1 = self._scope_predicate('e1'), self._scope_predicate('n1')
+            e2, n2 = self._scope_predicate('e2'), self._scope_predicate('n2')
+            branches.append(
+                f'{imports}MATCH (n0:KSRecordV3)-[e1:KS_FACT]-(n1:KSRecordV3)'
+                f'-[e2:KS_FACT]-(n2:KSRecordV3) WHERE n0.id IN $seed_ids '
+                f'AND {n0} AND {e1} AND {n1} '
+                f'AND {e2} AND {n2} '
+                'RETURN n2.version_id AS node_version,e2.version_id AS relation_version')
+        scope_lookup = (
+            'MATCH (pointer:KSProjectionPointer {namespace:$ns,project_id:$pid})'
+            '-[:KS_ACTIVE]->(g:KSProjection {generation:$generation}) '
+            'WHERE g.namespace=$ns AND g.project_id=$pid AND g.active=true '
+            'CALL { WITH g MATCH (sv:KSScopeValue {namespace:$ns,project_id:$pid,'
+            'generation:$generation,dimension:"platform"}) '
+            'WHERE sv.value IN $platform_values MATCH (s:KSScope)-[:KS_VALUE]->(sv) '
+            'WHERE s.namespace=$ns AND s.project_id=$pid AND s.generation=$generation '
+            'RETURN collect(DISTINCT s.scope_identity) AS allowed_platform_scope_ids } '
+            'CALL { WITH g MATCH (sv:KSScopeValue {namespace:$ns,project_id:$pid,'
+            'generation:$generation,dimension:"business"}) '
+            'WHERE sv.value IN $business_values MATCH (s:KSScope)-[:KS_VALUE]->(sv) '
+            'WHERE s.namespace=$ns AND s.project_id=$pid AND s.generation=$generation '
+            'RETURN collect(DISTINCT s.scope_identity) AS allowed_business_scope_ids } '
+            'CALL { WITH g MATCH (sv:KSScopeValue {namespace:$ns,project_id:$pid,'
+            'generation:$generation,dimension:"audience"}) '
+            'WHERE sv.value IN $audience_values MATCH (s:KSScope)-[:KS_VALUE]->(sv) '
+            'WHERE s.namespace=$ns AND s.project_id=$pid AND s.generation=$generation '
+            'RETURN collect(DISTINCT s.scope_identity) AS allowed_audience_scope_ids } ')
+        query = (scope_lookup + 'CALL { ' + ' UNION ALL '.join(branches) + ' } '
+                 'WITH collect(DISTINCT node_version) AS node_versions,'
+                 'collect(DISTINCT relation_version) AS relation_versions,g,'
+                 'allowed_platform_scope_ids,allowed_business_scope_ids,'
+                 'allowed_audience_scope_ids UNWIND node_versions AS selected_version '
+                 'MATCH (selected:KSRecordV3 {version_id:selected_version}) '
+                 'WHERE ' + self._scope_predicate('selected') + ' '
+                 'OPTIONAL MATCH (selected)-[ae:KS_ATTRIBUTE]->(attr:KSRecordV3) '
+                 'WHERE ' + self._scope_predicate('ae') + ' AND ' +
+                 self._scope_predicate('attr') + ' '
+                 'RETURN node_versions + relation_versions + '
+                 'collect(DISTINCT attr.version_id) AS version_ids')
+        with self._lock, self._session() as session:
+            result = session.run(query, **params)
+            row = result.single() if hasattr(result, 'single') else next(iter(result), None)
+        return list(dict.fromkeys(
+            item for item in (row.get('version_ids', []) if row else []) if item))
+
+
 def install(app, service):
     projection = Neo4jProjection(service.repository)
     app.state.neo4j = projection
     app.state.jobs.handlers['neo4j_sync'] = (
-        lambda payload, project_id, progress, task_id: projection.sync(project_id, progress))
+        lambda payload, project_id, progress, task_id:
+        app.state.projection_sync.rebuild(project_id, 'neo4j'))
 
     @app.get('/api/storage')
     def storage():

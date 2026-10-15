@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from .applicability import scope_identity
 
 
 FORMAL_OPERATIONS = frozenset({
@@ -39,6 +40,9 @@ def canonical_relation_key(record):
         record['type'], record['subject_id'], record['object_id'],
         record.get('valid_from'), record.get('valid_until'),
     ]
+    scope = scope_identity((record.get('metadata') or {}).get('applicability'))
+    if scope:
+        identity.append(scope)
     return 'fact_' + hashlib.sha256(
         deterministic_json(identity).encode('utf-8')).hexdigest()
 
@@ -52,6 +56,9 @@ def canonical_attribute_key(record):
         record['subject_id'], record['type'], record['value'],
         record['datatype'], record.get('valid_from'), record.get('valid_until'),
     ]
+    scope = scope_identity((record.get('metadata') or {}).get('applicability'))
+    if scope:
+        identity.append(scope)
     return 'fact_' + hashlib.sha256(
         deterministic_json(identity).encode('utf-8')).hexdigest()
 

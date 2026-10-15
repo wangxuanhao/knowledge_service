@@ -9,6 +9,9 @@
   const get = id => document.getElementById(id);
   const make = (tag, html, className='') => {const e=document.createElement(tag);e.innerHTML=html;e.className=className;return e;};
   const graphExpandState={busy:false,pendingDetail:false};
+  const platformGroupLabel=group=>group?.source_scope==='all'?'通用规则':
+    group?.source_scope==='unknown'?'范围待确认（不参与确定性答案）':
+    '平台：'+(group?.platform||'未命名');
   function syncGraphExpandDisabled(){get('graph-expand').disabled=graphExpandState.busy||graphExpandState.pendingDetail;}
   function setActionBusy(id,busy){
     if(id==='graph-expand'){graphExpandState.busy=busy;syncGraphExpandDisabled();}
@@ -402,6 +405,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
   }
   function renderHits(result){
     const sourceChunks=result.source_chunks||[];
+    const contextChunks=result.context_chunks||[];
     const chunkHits=result.hits.filter(r=>r.kind==='chunk');
     // 单条命中条目：isSource 区分「命中知识的来源原文」与「原文全文匹配」。
     // 实体/关系给「在图谱中查看」，原文片段给「查看原文」。
@@ -411,19 +415,25 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
       const btn=kind==='entity'||kind==='relation'
         ?`<button data-graph-node="${esc(kind==='entity'?r.id:r.subject_id)}">在图谱中查看</button>`
         :(kind==='chunk'&&r.source_id?`<button data-source-record="${esc(r.source_id)}" class="secondary">查看原文</button>`:'');
-      return `<article class="hit-entry${isSource?' hit-source':''}"><b>${esc((r.text||'').slice(0,80))}</b><span>${esc(tag)} · ${score}</span><p>${esc((r.text||'').slice(0,180))}</p>${btn?`<div class="row">${btn}</div>`:''}</article>`;
+      const applicability=window.ApplicabilityUI?.describe?.(r);
+      return `<article class="hit-entry${isSource?' hit-source':''}"><b>${esc((r.text||'').slice(0,80))}</b><span>${esc(tag)} · ${score}${applicability?' · '+esc(applicability):''}</span><p>${esc((r.text||'').slice(0,180))}</p>${btn?`<div class="row">${btn}</div>`:''}</article>`;
     };
     const entities=result.hits.filter(r=>r.kind==='entity');
     const relations=result.hits.filter(r=>r.kind==='relation');
     // 「原文片段」组 = 命中实体/关系的来源原文 + chunk 全文命中，两部分分块展示。
     // 这是检索溯源的落点：搜「商家」命中「商户」时，来源原文里其实没有「商家」这个词，
     // 但它支撑了命中的实体，必须一并展示，否则用户只看到实体、看不到它来自哪段原文。
-    const chunkTotal=sourceChunks.length+chunkHits.length;
+    const chunkTotal=sourceChunks.length+chunkHits.length+contextChunks.length;
     const chunkSection=`<section><h3 class="hit-kind">原文片段 <small>${chunkTotal} / ${result.channel_quotas?.chunk??5}</small></h3>`+
       (sourceChunks.length?`<div class="hit-source-label">命中知识的来源原文</div>`+sourceChunks.map(r=>entry(r,'chunk',true)).join(''):'')+
       (chunkHits.length?`<div class="hit-source-label">原文全文匹配</div>`+chunkHits.map(r=>entry(r,'chunk')).join(''):'')+
+      (contextChunks.length?`<div class="hit-source-label">命中条款的前后文（不参与排名）</div>`+contextChunks.map(r=>entry(r,'chunk',true)).join(''):'')+
       (chunkTotal?'':'<p class="subtle">暂无命中</p>')+`</section>`;
+    const platformSummary=(result.platform_groups||[]).length
+      ?`<section><h3 class="hit-kind">按适用范围分组</h3>${result.platform_groups.map(group=>
+        `<p class="subtle">${esc(platformGroupLabel(group))} · ${group.hits?.length||0} 条命中${group.hits?.length?'':'（当前范围无资料）'}</p>`).join('')}</section>`:'';
     get('hits').innerHTML=[
+      platformSummary,
       `<section><h3 class="hit-kind">匹配实体 <small>${entities.length} / ${result.channel_quotas?.entity??5}</small></h3>${entities.map(r=>entry(r,'entity')).join('')||'<p class="subtle">暂无命中</p>'}</section>`,
       chunkSection,
       `<section><h3 class="hit-kind">关系链路 <small>${relations.length} / ${result.channel_quotas?.relation??5}</small></h3>${relations.map(r=>entry(r,'relation')).join('')||'<p class="subtle">暂无命中</p>'}</section>`,
@@ -463,7 +473,8 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
     delete result.nodes;delete result.edges;
     renderHits(result);
     const modeLabel={hybrid:'混合',semantic:'语义',keyword:'关键词'}[result.active_mode]||result.active_mode;
-    get('search-summary').textContent=`${modeLabel}${result.degraded?' · 已降级':''} · ${result.candidate_count} 候选 · ${result.hits.length} 命中 · ${(performance.now()-started).toFixed(0)} ms${expansionSummary(result)}`;
+    const resolvedScope=window.ApplicabilityUI?.describe?.(result.query_scope||result.scope||result);
+    get('search-summary').textContent=`${modeLabel}${result.degraded?' · 已降级':''} · ${result.candidate_count} 候选 · ${result.hits.length} 命中 · ${(performance.now()-started).toFixed(0)} ms${expansionSummary(result)}${resolvedScope?' · '+resolvedScope:''}`;
     updateChip();
   }
   // 图谱渲染器的唯一实现，显式挂到 window（不再依赖非严格模式下的隐式全局赋值）。
@@ -524,7 +535,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
   act('apply-scope',async()=>{details.open=false;window.clearGraphWorkspace({preserveSearchResults:true});window.clearKnowledgeChat?.({notify:true});await Promise.all([options(),discoverMetadata()]);if(!get('tab-mindmap').classList.contains('hidden')&&get('mindmap-root').value)await get('draw-mindmap').onclick();});
   const previousAddFilter=get('add-filter')?.onclick;
   if(previousAddFilter)get('add-filter').onclick=async()=>{await previousAddFilter();if(!get('status').classList.contains('error'))await get('apply-scope').onclick();};
-  act('reset-scope',async()=>{for(const id of ['known-at','filters','type-scope','predicate-scope'])get(id).value='';cb.conditions=[];renderCB();resetTimeline();window.clearGraphWorkspace({preserveSearchResults:true});window.clearKnowledgeChat?.({notify:true});await options();});
+  act('reset-scope',async()=>{for(const id of ['known-at','filters','type-scope','predicate-scope','query-platforms'])get(id).value='';cb.conditions=[];renderCB();resetTimeline();window.clearGraphWorkspace({preserveSearchResults:true});window.clearKnowledgeChat?.({notify:true});await options();});
   act('build-index',async()=>{watch(await api(endpoint('/indexes/rebuild'),{}));status('索引任务已提交；可继续浏览图谱或使用关键词检索。');});
   // 原来只 dispatch restore：返回 series 里写的 zoom:1，而 fitGraph 之后本来就是 zoom:1，
   // 于是"点了没什么作用"（用户原话）。现在＝适应画布：重新铺开节点 + 缩放到刚好占满画布。

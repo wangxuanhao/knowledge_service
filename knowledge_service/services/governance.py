@@ -3,6 +3,7 @@ import json
 from uuid import uuid4
 
 from ..models import RecordWrite
+from ..domain.applicability import scope_identity
 from .service import public
 from ..core.time import utc_now
 
@@ -159,6 +160,9 @@ class Governance:
                 raise ValueError('版本冲突：请刷新实体版本')
             if keep['type']!=drop['type']:
                 raise ValueError('合并要求相同的稳定类型 IRI')
+            if scope_identity((keep.get('metadata') or {}).get('applicability')) != scope_identity(
+                    (drop.get('metadata') or {}).get('applicability')):
+                raise ValueError('合并要求相同的适用范围')
             if any(keep.get(k)!=drop.get(k) for k in ('valid_from','valid_until')):
                 raise ValueError('合并要求相同的业务时间区间；请显式修正区间')
             attributes=[r for r in rows.values() if r['kind']=='attribute' and

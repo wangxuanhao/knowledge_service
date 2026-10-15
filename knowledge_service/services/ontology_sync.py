@@ -79,27 +79,17 @@ class OntologySync:
                 state = {}
             if state.get('status') == 'rebuilding':
                 raise RuntimeError('索引重建中，发布同步等待重建完成')
-            # A pending old event repairs the current authoritative projection,
-            # never pushes an obsolete ontology over a newer index.
             ontology = self.repo.get_ontology(task['project_id'])
             rows = [r for r in self.repo.current_records(task['project_id'])
                     if r['kind'] in {'entity','relation','chunk'}
                     and not r.get('metadata', {}).get('_deleted')]
             signature = self._signature(rows)
-            store.ensure_collection()
-            for offset in range(0, len(rows), 64):
-                batch = rows[offset:offset + 64]
-                vectors = self.service.encoder.encode([r['text'] for r in batch])
-                if len(vectors) != len(batch):
-                    raise RuntimeError('embedding 输出数量不匹配')
-                for row, vector in zip(batch, vectors):
-                    row.update(embedding=vector,
-                               embedding_model=self.service.encoder.identity)
-                # An expired worker cannot continue publishing batches after a
-                # newer worker has reclaimed the event.
-                if self.repo.update_task('ontology_sync_job', task, {}) is None:
-                    return True
-                store.upsert(batch, flush=True)
+            worker = getattr(self.service, 'projection_worker', None)
+            if worker is None:
+                raise RuntimeError('Milvus projection worker is unavailable')
+            worker.drain_project(task['project_id'])
+            if not self.repo.projection_ready(task['project_id'], 'milvus', 3):
+                raise RuntimeError('Milvus projection has not reached its watermark')
             current = self.repo.get_ontology(task['project_id'])
             latest_rows = [r for r in self.repo.current_records(task['project_id'])
                           if r['kind'] in {'entity','relation','chunk'}

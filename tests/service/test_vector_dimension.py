@@ -346,13 +346,9 @@ def test_upsert_dimension_mismatch_raises_the_same_error_type():
 
 # --------------------------------------------------------------------------- 重建接口自愈
 
-def test_rebuild_endpoint_recreates_the_vector_table_when_dimension_changes(
+def test_rebuild_endpoint_uses_generation_without_dropping_shared_collection(
         tmp_path, monkeypatch):
-    """端到端：表是旧的 1024 维、编码器是 256 维 → 重建接口删表重建并回报 recreated。
-
-    这是本次反馈的正解：维度是建表时固定的，物理上改不了，所以"换了模型"
-    只能删表重建；Milvus 里全是派生数据，重建后全量重编码即可补回。
-    """
+    """重建任务委托投影协调器创建新代，不删除共享旧 collection。"""
     from fastapi.testclient import TestClient
 
     # create_app 不应连接本机真实 Milvus；本用例在装配后注入受控替身。
@@ -360,8 +356,13 @@ def test_rebuild_endpoint_recreates_the_vector_table_when_dimension_changes(
     monkeypatch.setenv('KG_MILVUS_DIM', '256')
     store = MilvusStore(dim=256, encoder_identity=HashingEncoder.identity)
     store._client = FakeMilvusClient(dim=1024)          # 旧表：1024 维
+    store.ping = lambda: True
     app = create_app(tmp_path / 'dim.sqlite', HashingEncoder())
     app.state.service.milvus_store = store              # 测试里直接注入替身
+    class Sync:
+        def rebuild(self, project_id, target):
+            return {'destination': 'generation-v2'}
+    app.state.service.projection_sync = Sync()
 
     with TestClient(app) as client:
         project = client.post('/api/projects', json={'name': '维度'}).json()['id']
@@ -375,24 +376,30 @@ def test_rebuild_endpoint_recreates_the_vector_table_when_dimension_changes(
                 break
             time.sleep(0.02)
         assert job['status'] == 'completed', job
-        assert store._client.dropped == ['knowledge_records'], '必须先删掉旧维度的表'
-        assert store._client.collections['knowledge_records'] == 256, '必须按当前编码器维度重建'
+        assert store._client.dropped == [], '任务不得直接删除共享 collection'
+        assert store._client.collections['knowledge_records'] == 1024
         assert job['result']['recreated'] is True
+        assert job['result']['destination'] == 'generation-v2'
         assert job['result']['dim'] == 256
         assert job['result']['embedding_model'] == HashingEncoder.identity
 
 
-def test_rebuild_endpoint_does_not_touch_the_table_when_dimension_matches(
+def test_rebuild_endpoint_uses_generation_when_dimension_matches(
         tmp_path, monkeypatch):
-    """维度一致时不做任何删表动作：recreated=False，重建就只是重灌。"""
+    """维度一致时也通过隔离代和别名切换完成受控重建。"""
     from fastapi.testclient import TestClient
 
     monkeypatch.setenv('KG_VECTOR_BACKEND', '')
     monkeypatch.setenv('KG_MILVUS_DIM', '256')
     store = MilvusStore(dim=256, encoder_identity=HashingEncoder.identity)
     store._client = FakeMilvusClient(dim=256)
+    store.ping = lambda: True
     app = create_app(tmp_path / 'dim-ok.sqlite', HashingEncoder())
     app.state.service.milvus_store = store
+    class Sync:
+        def rebuild(self, project_id, target):
+            return {'destination': 'generation-v2'}
+    app.state.service.projection_sync = Sync()
 
     with TestClient(app) as client:
         project = client.post('/api/projects', json={'name': '维度一致'}).json()['id']
@@ -406,4 +413,5 @@ def test_rebuild_endpoint_does_not_touch_the_table_when_dimension_matches(
             time.sleep(0.02)
         assert job['status'] == 'completed', job
         assert store._client.dropped == []
-        assert job['result']['recreated'] is False
+        assert job['result']['recreated'] is True
+        assert job['result']['destination'] == 'generation-v2'

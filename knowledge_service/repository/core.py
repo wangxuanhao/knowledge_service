@@ -12,7 +12,7 @@ import hashlib
 import math
 import threading
 from contextlib import contextmanager, nullcontext
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -24,6 +24,10 @@ from ..utils.filters import matches_filter, validate_filter
 from ..utils.ingest_runs import merge_readiness, readiness
 from ..core.time import normalize_time, utc_now
 from ..utils.attributes import primitive_datatype
+from ..domain.applicability import (
+    DIMENSIONS, dimension_mode, dimension_values, normalize_applicability,
+    scope_identity,
+)
 from .snapshot_validation import validate_restore_snapshot
 from .connection import (
     DeadlockDetected, LockNotAvailable, SerializationFailure)
@@ -34,6 +38,31 @@ def _json(value):
         return json.dumps(value, ensure_ascii=False, allow_nan=False)
     except (ValueError, TypeError) as exc:
         raise ValueError('载荷必须只含有限 JSON 值') from exc
+
+
+def _epoch_ms(value):
+    if value is None:
+        return None
+    parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    return math.floor(parsed.timestamp() * 1000)
+
+
+def _native_record_fields(record):
+    applicability = normalize_applicability(
+        (record.get('metadata') or {}).get('applicability'))
+    valid_from = record.get('valid_from')
+    valid_until = record.get('valid_until')
+    return (
+        dimension_mode(applicability, 'platforms'),
+        dimension_values(applicability, 'platforms'),
+        dimension_mode(applicability, 'businesses'),
+        dimension_values(applicability, 'businesses'),
+        dimension_mode(applicability, 'audiences'),
+        dimension_values(applicability, 'audiences'),
+        scope_identity(applicability),
+        valid_from is not None, 0 if valid_from is None else _epoch_ms(valid_from),
+        valid_until is not None, 0 if valid_until is None else _epoch_ms(valid_until),
+    )
 
 
 class _RecordOperation:
@@ -106,6 +135,34 @@ def vector_array(blob):
     return np.frombuffer(blob, dtype='<f4').copy()
 
 
+def drain_projection_cleanups(repository, handlers, owner, limit=100):
+    """Drain leased projection cleanup events through caller-owned handlers."""
+    if not isinstance(handlers, dict):
+        raise ValueError('cleanup handlers must be a target mapping')
+    events = repository.claim_projection_cleanups(owner, limit=limit)
+    cleaned = failed = 0
+    for event in events:
+        project_id = event['project_id']
+        target = event['target']
+        token = event['claim_token']
+        handler = handlers.get(target)
+        try:
+            if not callable(handler):
+                raise RuntimeError(f'cleanup handler is not configured: {target}')
+            handler(project_id)
+        except Exception as exc:
+            repository.release_projection_cleanup(
+                project_id, target, owner, token, exc)
+            failed += 1
+            continue
+        if repository.ack_projection_cleanup(
+                project_id, target, owner, token):
+            cleaned += 1
+        else:
+            failed += 1
+    return {'claimed': len(events), 'cleaned': cleaned, 'failed': failed}
+
+
 class Repository:
     # 如实标识底层存储：作业日志与健康检查都从这里取文案，避免**写死**导致
     # 「数据进了 A、日志却说 B」这种误导性输出。
@@ -132,6 +189,8 @@ class Repository:
         self._lock = threading.RLock()
         self.closed = False
         self._verify_schema()
+        from .projection_store import ProjectionStore
+        self.projections = ProjectionStore(self)
         from .assertions_store import AssertionStore
         from .ingest_store import IngestRunStore
         from .review_store import ReviewStore
@@ -282,22 +341,41 @@ class Repository:
                 'INSERT INTO projects (id,name,metadata,created_at) VALUES (?,?,?,?)',
                 (project_id, project['name'], _json(project.get('metadata', {})),
                  project['created_at']))
+            self._db.execute(
+                '''INSERT INTO project_projection_sequences(project_id,projection_seq)
+                   VALUES (?,0)''', (project_id,))
 
             # Artifacts and immutable ontology versions precede draft references.
             insert_rows('artifacts', artifacts, ('payload',))
             insert_rows('ontologies', snapshot.get('ontologies', ()), ('summary', 'metadata'))
             self._ontology_drafts._restore(project_id, ontology_history)
 
+            restored_current = []
             for record in snapshot.get('records', ()):
                 payload = {key: value for key, value in record.items() if key not in {
                     'project_id', 'version', 'version_id', 'recorded_at',
                     'superseded_at', 'embedding'}}
+                native = _native_record_fields(payload)
                 self._db.execute(
                     '''INSERT INTO record_versions
-                       (project_id,id,version,version_id,payload,recorded_at,superseded_at)
-                       VALUES (?,?,?,?,?,?,?)''',
+                       (project_id,id,version,version_id,payload,recorded_at,superseded_at,
+                        platform_mode,platform_values,business_mode,business_values,
+                        audience_mode,audience_values,scope_identity,
+                        valid_from_known,valid_from_epoch_ms,valid_until_known,valid_until_epoch_ms)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                     (project_id, record['id'], record['version'], record['version_id'],
-                     _json(payload), record['recorded_at'], record.get('superseded_at')))
+                     _json(payload), record['recorded_at'], record.get('superseded_at'),
+                     *native))
+                if record.get('superseded_at') is None:
+                    restored_current.append({
+                        **payload, 'project_id': project_id,
+                        'version': record['version'],
+                        'version_id': record['version_id'],
+                        'recorded_at': record['recorded_at'],
+                        'superseded_at': None,
+                    })
+            for record in restored_current:
+                self.projections.enqueue_record_change(project_id, None, record)
             if snapshot.get('records'):
                 self.rebuild_fts(project_id)
 
@@ -381,6 +459,112 @@ class Repository:
             self._db.execute('SELECT 1').fetchone()
         return {'database': 'ready', 'migrations': 'ready'}
 
+    def projection_ready(self, project_id, target, schema_version):
+        """Return whether a native projection exactly matches authority."""
+        self.get_project(project_id)
+        return self.projections.projection_ready(
+            project_id, target, schema_version)
+
+    def claim_projection_cleanups(self, owner, *, limit=100, lease_seconds=60):
+        """Lease durable project-cleanup work without depending on projects."""
+        if not isinstance(owner, str) or not owner.strip():
+            raise ValueError('cleanup claim owner is required')
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise ValueError('cleanup claim limit must be 1..1000')
+        if type(lease_seconds) is not int or not 1 <= lease_seconds <= 3600:
+            raise ValueError('cleanup lease must be 1..3600 seconds')
+        claim_until = (
+            datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)
+        ).isoformat(timespec='microseconds').replace('+00:00', 'Z')
+        with self._transaction():
+            rows = self._db.execute(
+                '''SELECT project_id,target,created_at,attempts,last_error
+                   FROM projection_cleanup_outbox
+                   WHERE claim_until IS NULL OR claim_until<=clock_timestamp()
+                   ORDER BY created_at,project_id,target
+                   LIMIT ? FOR UPDATE SKIP LOCKED''', (limit,)).fetchall()
+            claimed = []
+            for row in rows:
+                claim_token = str(uuid4())
+                self._db.execute(
+                    '''UPDATE projection_cleanup_outbox
+                       SET claim_owner=?,claim_token=?,claim_until=?,
+                           attempts=attempts+1
+                       WHERE project_id=? AND target=?''',
+                    (owner, claim_token, claim_until,
+                     row['project_id'], row['target']))
+                claimed.append({**dict(row), 'claim_owner': owner,
+                                'claim_token': claim_token,
+                                'claim_until': claim_until,
+                                'attempts': int(row['attempts']) + 1})
+            return claimed
+
+    def claim_projection_cleanup(self, project_id, target, owner, *,
+                                 lease_seconds=60):
+        """Lease one known cleanup event without claiming unrelated projects."""
+        if target not in {'milvus', 'neo4j'}:
+            raise ValueError('unknown projection cleanup target')
+        if not isinstance(owner, str) or not owner.strip():
+            raise ValueError('cleanup claim owner is required')
+        if type(lease_seconds) is not int or not 1 <= lease_seconds <= 3600:
+            raise ValueError('cleanup lease must be 1..3600 seconds')
+        claim_until = (
+            datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)
+        ).isoformat(timespec='microseconds').replace('+00:00', 'Z')
+        with self._transaction():
+            row = self._db.execute(
+                '''SELECT project_id,target,created_at,attempts,last_error
+                   FROM projection_cleanup_outbox
+                   WHERE project_id=? AND target=? AND
+                         (claim_until IS NULL OR claim_until<=clock_timestamp())
+                   FOR UPDATE''', (project_id, target)).fetchone()
+            if row is None:
+                return None
+            claim_token = str(uuid4())
+            self._db.execute(
+                '''UPDATE projection_cleanup_outbox
+                   SET claim_owner=?,claim_token=?,claim_until=?,
+                       attempts=attempts+1
+                   WHERE project_id=? AND target=?''',
+                (owner, claim_token, claim_until, project_id, target))
+            return {**dict(row), 'claim_owner': owner,
+                    'claim_token': claim_token, 'claim_until': claim_until,
+                    'attempts': int(row['attempts']) + 1}
+
+    def ack_projection_cleanup(self, project_id, target, owner, claim_token):
+        """Remove a cleanup event after its external projection was deleted."""
+        if target not in {'milvus', 'neo4j'}:
+            raise ValueError('unknown projection cleanup target')
+        if not all(isinstance(value, str) and value
+                   for value in (owner, claim_token)):
+            raise ValueError('cleanup acknowledgement requires owner and token')
+        with self._transaction():
+            return self._db.execute(
+                '''DELETE FROM projection_cleanup_outbox
+                   WHERE project_id=? AND target=?
+                     AND claim_owner=? AND claim_token=?
+                     AND claim_until>clock_timestamp()''',
+                (project_id, target, owner, claim_token)).rowcount == 1
+
+    def release_projection_cleanup(self, project_id, target, owner, claim_token,
+                                   error):
+        """Release failed cleanup work so a background worker can retry it."""
+        if target not in {'milvus', 'neo4j'}:
+            raise ValueError('unknown projection cleanup target')
+        if not all(isinstance(value, str) and value
+                   for value in (owner, claim_token)):
+            raise ValueError('cleanup release requires owner and token')
+        with self._transaction():
+            return self._db.execute(
+                '''UPDATE projection_cleanup_outbox
+                   SET claim_owner=NULL,claim_token=NULL,claim_until=NULL,
+                       last_error=?
+                   WHERE project_id=? AND target=?
+                     AND claim_owner=? AND claim_token=?
+                     AND claim_until>clock_timestamp()''',
+                (str(error), project_id, target, owner,
+                 claim_token)).rowcount == 1
+
     def update_task(self, kind, task, updates):
         from .task_store import TaskStore
         return TaskStore(self).update(kind, task, updates)
@@ -391,7 +575,9 @@ class Repository:
 
     def insert_if_absent(self, project_id, record):
         """Insert a stable record only when it has no existing version."""
-        return self._put(project_id, record, 0)
+        with self._transaction():
+            self.get_project(project_id)
+            return self._put(project_id, record, 0)
 
     @contextmanager
     def read_snapshot(self):
@@ -485,6 +671,9 @@ class Repository:
         project = {'id': str(uuid4()), 'name': name, 'metadata': json.loads(_json(metadata)), 'created_at': utc_now()}
         with self._transaction():
             self._db.execute('INSERT INTO projects VALUES (?,?,?,?)', (project['id'], name, _json(metadata), project['created_at']))
+            self._db.execute(
+                '''INSERT INTO project_projection_sequences(project_id,projection_seq)
+                   VALUES (?,0)''', (project['id'],))
         return project
 
     def get_project(self, project_id):
@@ -505,6 +694,15 @@ class Repository:
     def delete_project(self, project_id):
         with self._transaction():
             self.get_project(project_id)
+            for target in ('milvus', 'neo4j'):
+                self._db.execute(
+                    '''INSERT INTO projection_cleanup_outbox
+                       (project_id,target,created_at)
+                       VALUES (?,?,?)
+                       ON CONFLICT(project_id,target) DO UPDATE SET
+                           claim_owner=NULL,claim_token=NULL,claim_until=NULL,
+                           last_error=NULL''',
+                    (project_id, target, utc_now()))
             assertions_deleted = self._db.execute(
                 'SELECT COUNT(*) FROM assertions WHERE project_id=?', (project_id,)
             ).fetchone()[0]
@@ -668,7 +866,11 @@ class Repository:
         record = self._validate_record(record)
         if expected_version is not None and (type(expected_version) is not int or expected_version < 0):
             raise ValueError('期望版本必须是非负整数')
-        old = self._db.execute('SELECT version,recorded_at FROM record_versions WHERE project_id=? AND id=? AND superseded_at IS NULL', (project_id, record['id'])).fetchone()
+        old = self._db.execute(
+            '''SELECT version,recorded_at,id,version_id,payload
+               FROM record_versions
+               WHERE project_id=? AND id=? AND superseded_at IS NULL''',
+            (project_id, record['id'])).fetchone()
         version = old['version'] if old else 0
         if expected_version is not None and expected_version != version:
             raise ValueError('版本冲突：记录已变更')
@@ -697,12 +899,31 @@ class Repository:
         # 向量以 float32 字节存储，不放在 payload 的 JSON 里（避免反序列化出浮点对象列表）。
         # 列清单是显式写出的，因为该表在最初的按位置 INSERT 之后新增了 `vector` 列。
         embedding = record.pop('embedding', None)  # 向量只走 Milvus，不存 PostgreSQL
+        native = _native_record_fields(record)
         self._db.execute('''INSERT INTO record_versions
-            (project_id,id,version,version_id,payload,recorded_at,superseded_at)
-            VALUES (?,?,?,?,?,?,NULL)''',
-            (project_id, record['id'], version + 1, version_id, _json(record), now))
+            (project_id,id,version,version_id,payload,recorded_at,superseded_at,
+             platform_mode,platform_values,business_mode,business_values,
+             audience_mode,audience_values,scope_identity,
+             valid_from_known,valid_from_epoch_ms,valid_until_known,valid_until_epoch_ms)
+            VALUES (?,?,?,?,?,?,NULL,?,?,?,?,?,?,?,?,?,?,?)''',
+            (project_id, record['id'], version + 1, version_id, _json(record), now,
+             *native))
         self._refresh_fts_record(project_id, record)
         saved = {**record, 'project_id': project_id, 'version': version + 1, 'version_id': version_id, 'recorded_at': now, 'superseded_at': None}
+        old_record = None
+        if old is not None:
+            old_record = {
+                **json.loads(old['payload']),
+                'project_id': project_id,
+                'version': old['version'],
+                'version_id': old['version_id'],
+                'recorded_at': old['recorded_at'],
+                'superseded_at': now,
+            }
+        projection_record = ({**saved, 'embedding': embedding}
+                             if embedding is not None else saved)
+        self.projections.enqueue_record_change(
+            project_id, old_record, projection_record)
         if embedding is not None:
             saved['embedding'] = embedding
         return saved
@@ -1001,6 +1222,67 @@ class Repository:
             raise KeyError(version_id)
         return self._record(row, vectors='list')
 
+    def records_by_version_ids(self, project_id, version_ids):
+        """Read only the requested immutable versions and preserve caller order."""
+        if not isinstance(version_ids, (list, tuple)) or any(
+                not isinstance(item, str) or not item for item in version_ids):
+            raise ValueError('版本 ID 必须是字符串列表')
+        self.get_project(project_id)
+        if not version_ids:
+            return []
+        unique_ids = list(dict.fromkeys(version_ids))
+        with self._lock:
+            rows = self._db.execute(
+                '''SELECT * FROM record_versions
+                   WHERE project_id=? AND version_id = ANY(?::text[])''',
+                (project_id, unique_ids)).fetchall()
+        by_id = {row['version_id']: self._record(row, vectors='list') for row in rows}
+        return [by_id[item] for item in version_ids if item in by_id]
+
+    def current_records_by_version_ids(self, project_id, version_ids):
+        """Read requested versions only when they are still current.
+
+        The current-version predicate belongs in SQL. Callers cannot infer it
+        from a partially populated payload, and checking each record separately
+        would turn bounded projection backfill into an N+1 query pattern.
+        """
+        if not isinstance(version_ids, (list, tuple)) or any(
+                not isinstance(item, str) or not item for item in version_ids):
+            raise ValueError('版本 ID 必须是字符串列表')
+        self.get_project(project_id)
+        if not version_ids:
+            return []
+        unique_ids = list(dict.fromkeys(version_ids))
+        with self._lock:
+            rows = self._db.execute(
+                '''SELECT * FROM record_versions
+                   WHERE project_id=? AND version_id = ANY(?::text[])
+                     AND superseded_at IS NULL''',
+                (project_id, unique_ids)).fetchall()
+        by_id = {row['version_id']: self._record(row, vectors='list') for row in rows}
+        return [by_id[item] for item in version_ids if item in by_id]
+
+    def distinct_applicability_values(self, project_id):
+        """Return canonical values from current, non-deleted record versions."""
+        self.get_project(project_id)
+        values = {dimension: set() for dimension in DIMENSIONS}
+        columns = (
+            ('platforms', 'platform_mode', 'platform_values'),
+            ('businesses', 'business_mode', 'business_values'),
+            ('audiences', 'audience_mode', 'audience_values'),
+        )
+        with self._lock:
+            for dimension, mode_column, values_column in columns:
+                rows = self._db.execute(
+                    f'''SELECT DISTINCT unnest({values_column}) AS value
+                        FROM record_versions
+                        WHERE project_id=? AND superseded_at IS NULL
+                          AND {mode_column}='specific'
+                          AND payload::jsonb#>>'{{metadata,_deleted}}' IS DISTINCT FROM 'true'
+                        ORDER BY value''', (project_id,)).fetchall()
+                values[dimension].update(row['value'] for row in rows)
+        return {dimension: sorted(items) for dimension, items in values.items()}
+
     def current_records(self, project_id, vectors='list', kinds=None):
         """读取当前活跃版本（含已过期和未来事实）。
 
@@ -1048,18 +1330,16 @@ class Repository:
         return {'events': events, 'total': total, 'truncated': total > len(events)}
 
     def query(self, project_id, filters=None, valid_at=None, known_at=None, kinds=None,
-              include_unknown=True, include_embeddings=True, vectors='list'):
+              include_unknown=True, include_embeddings=True, vectors='list',
+              applicability=None):
         """读取 ``known_at`` 时刻可见的每个系统版本，并在 Python 侧过滤。
 
-        PERF：下面的语句只下推了 *系统时间* 条件。``kinds``、业务有效性和
-        元数据谓词都在行解码之后求值，因此工作量是 O(项目版本历史) 而不是
-        O(结果集)。只需要一部分数据的调用方（图邻域、选项列表、单个元数据
-        分面）仍要付出全量扫描的成本。若需要加快读取速度，按顺序可用的手段：
-
-        1. 用 ``(payload::jsonb->>'kind') IN (...)`` 下推 ``kinds``；
-        2. 除非调用方要按向量排序，否则保持 ``include_embeddings=False``，
-           因为解码带向量的 payload 远比不带向量的贵；
-        3. 只取前 N 行的调用方加 ``LIMIT``。
+        PERF：未传 ``known_at`` 时使用 ``superseded_at IS NULL`` 的 current
+        partial indexes；显式传入时使用 recorded/system-end 两组历史索引。
+        业务时间、applicability 和 ``kinds`` 也在解码 payload 前下推。复杂的
+        元数据 ``filters`` 仍在 Python 侧求值，因此宽泛过滤的成本取决于 SQL
+        条件先缩小后的候选集。调用方不需要向量时应保持
+        ``include_embeddings=False``，避免构造无用的 float 列表。
 
         嵌入被包含时 ``vectors`` 决定表示形式：``'list'``（默认）保持历史
         的 JSON 友好 float 列表；``'array'`` 返回从紧凑列读出的 numpy float32
@@ -1068,8 +1348,11 @@ class Repository:
         """
         validate_filter(filters)
         now = utc_now()
+        historical = known_at is not None
         valid_at = normalize_time(valid_at) or now
         known_at = normalize_time(known_at) or now
+        selected_scope = normalize_applicability(applicability)
+        valid_at_epoch_ms = _epoch_ms(valid_at)
         if kinds is not None and (not isinstance(kinds, (list, tuple, set)) or any(k not in {'document', 'entity', 'relation', 'attribute', 'chunk'} for k in kinds)):
             raise ValueError('无效的记录类型')
         self.get_project(project_id)
@@ -1081,10 +1364,30 @@ class Repository:
                 # 迁移 10 已把每个 payload 副本搬进该列，因此下面的读取
                 # 不会出现拿不到向量的情况。
                 statement = '''SELECT project_id,id,version,version_id,recorded_at,superseded_at,
-                    payload
-                    FROM record_versions WHERE project_id=? AND recorded_at<=?
-                    AND (superseded_at IS NULL OR superseded_at>?)'''
-                params = [project_id, known_at, known_at]
+                    payload FROM record_versions WHERE project_id=?'''
+                params = [project_id]
+                if historical:
+                    statement += (''' AND recorded_at<=?
+                        AND (superseded_at IS NULL OR superseded_at>?)''')
+                    params.extend((known_at, known_at))
+                else:
+                    statement += ' AND superseded_at IS NULL'
+                if include_unknown:
+                    statement += (' AND (NOT valid_from_known OR valid_from_epoch_ms<=?)'
+                                  ' AND (NOT valid_until_known OR valid_until_epoch_ms>?)')
+                else:
+                    statement += (' AND valid_from_known AND valid_from_epoch_ms<=?'
+                                  ' AND (NOT valid_until_known OR valid_until_epoch_ms>?)')
+                params.extend((valid_at_epoch_ms, valid_at_epoch_ms))
+                for dimension, prefix in (
+                        ('platforms', 'platform'), ('businesses', 'business'),
+                        ('audiences', 'audience')):
+                    selected = selected_scope[dimension]
+                    if selected['mode'] == 'specific':
+                        statement += (
+                            f" AND ({prefix}_mode='all' OR ({prefix}_mode='specific'"
+                            f' AND {prefix}_values && ?::text[]))')
+                        params.append(selected['values'])
                 # `kinds` 现在总是下推：jsonb 取值在 470 条记录的项目上约耗 78 ms，
                 # 但能省掉每个被排除行上的 json_remove 工作，实测解码量从
                 # 3.55 MB 降到 1.20 MB、耗时从 119 ms 降到 98 ms。

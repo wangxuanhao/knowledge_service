@@ -1,6 +1,7 @@
 """可选的增量实体融合，不丢弃来源出现记录。"""
 from .governance import writable
 from .service import public
+from ..domain.applicability import scope_identity
 from ..utils.diagnostics import event
 
 
@@ -17,7 +18,9 @@ def reconcile(service,p,derived,request,receipt):
         if row['kind']!='entity':continue
         # 稳定的类型 IRI 是跨版本契约。本体版本 ID 描述抽取来源，
         # 当类型本身在各本体版本间保持不变时，不得据此拆分同一实体。
-        eligible=[r for r in pool.values() if all(r.get(k)==row.get(k) for k in ('type','valid_from','valid_until'))]
+        row_scope = scope_identity((row.get('metadata') or {}).get('applicability'))
+        eligible=[r for r in pool.values() if all(r.get(k)==row.get(k) for k in ('type','valid_from','valid_until'))
+                  and scope_identity((r.get('metadata') or {}).get('applicability')) == row_scope]
         target=next((r for r in eligible if row['text'].casefold() in
                     [n.casefold() for n in [r['text'],*r.get('metadata',{}).get('aliases',[])] if isinstance(n,str)]),None)
         if target is None and eligible:
@@ -76,7 +79,9 @@ def reconcile(service,p,derived,request,receipt):
         if row['kind']!='relation' or row.get('metadata',{}).get('_deleted'):continue
         target=next((candidate for candidate in relation_pool.values() if all(
             candidate.get(key)==row.get(key) for key in
-            ('type','subject_id','object_id','valid_from','valid_until'))),None)
+            ('type','subject_id','object_id','valid_from','valid_until')) and
+            scope_identity((candidate.get('metadata') or {}).get('applicability')) ==
+            scope_identity((row.get('metadata') or {}).get('applicability'))),None)
         if target is None:
             relation_pool[row['id']]=row
             continue

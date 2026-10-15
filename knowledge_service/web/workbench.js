@@ -1,5 +1,7 @@
 /* Rich exploration on the new service. No native browser prompt/confirm APIs. */
 const wb={epoch:0,chart:null,tree:null,nodes:new Map(),records:new Map(),jobs:new Map()};
+const baseScope=scope;
+scope=()=>({...baseScope(),...(window.ApplicabilityUI?.readQueryScope?.()||{})});
 const emptyVersionContext=()=>({
   ontologyScope:'all',ontologyIds:null,ontologyVersion:null,source:null,
 });
@@ -14,6 +16,9 @@ wb.setVersionContext=next=>{
 wb.clearVersionContext=()=>wb.setVersionContext(emptyVersionContext());
 window.wb=wb;
 const term=s=>{try{const value=decodeURIComponent(String(s||'').split(/[\/#]/).pop());return value.startsWith('urn:')?value.split(':').pop():value}catch{return String(s||'')}};
+const platformGroupLabel=group=>group?.source_scope==='all'?'通用规则':
+  group?.source_scope==='unknown'?'范围待确认（不参与确定性答案）':
+  '平台：'+(group?.platform||'未命名');
 function showTab(name){document.querySelector(`[data-tab="${name}"]`).click();}
 // 打开「项目与运行」里的某个分区。合并后 后台任务 / 快照·评测 不再是独立页签，
 // 但仍需要一个把用户送到那儿的入口（例如文档提交成功 → 直接看任务日志）。
@@ -240,6 +245,11 @@ function readParseSettings(){
   if(!Number.isFinite(settings.merge_threshold)||settings.merge_threshold<0||settings.merge_threshold>1)throw Error('合并阈值需在 0–1 之间');
   return settings;
 }
+function documentUploadOptions(document){
+  const options={metadata:document.metadata,applicability:document.applicability};
+  for(const key of ['published_at','valid_from','valid_until'])if(document[key])options[key]=document[key];
+  return options;
+}
 const chunkPreviewState={chunks:[],selected:0,trigger:null};
 function chunkPreviewBackground(active){
   for(const element of [document.querySelector('body>aside'),document.querySelector('body>main')]){
@@ -358,9 +368,9 @@ bind('preview-chunks',async()=>{
   let result;
   if(doc.file){
     const form=new FormData();form.append('file',doc.file,doc.file.name);
-    form.append('options',JSON.stringify({title:doc.title,metadata:doc.metadata,...settings}));
+    form.append('options',JSON.stringify({title:doc.title,...documentUploadOptions(doc),...settings}));
     result=await api('/api/projects/'+encodeURIComponent(p)+'/documents/upload/preview',form);
-  }else result=await api('/api/projects/'+encodeURIComponent(p)+'/documents/preview',{title:doc.title,text:doc.text,...settings});
+  }else result=await api('/api/projects/'+encodeURIComponent(p)+'/documents/preview',{title:doc.title,text:doc.text,...documentUploadOptions(doc),...settings});
   if(p!==current)return;
   renderChunkPreview(result,doc.title);
   openChunkPreview();
@@ -372,7 +382,7 @@ bind('ingest',async()=>{
   results.textContent='';let accepted=0,failed=0;
   if(documents.every(doc=>doc.file)&&window.IngestBatches){
     const requested=$('ingest-concurrency')?.value||'auto';
-    const batch=await window.IngestBatches.submit(project,documents,{...settings,extract,extraction_mode:mode,
+    const batch=await window.IngestBatches.submit(project,documents,{...settings,...documentUploadOptions(documents[0]),extract,extraction_mode:mode,
       requested_concurrency:requested==='auto'?'auto':Number(requested)});
     results.textContent='文件上传完成，批次已开始。可在下方查看进度、暂停或处理失败文件。';
     status('批次已开始 · '+batch.id);return;
@@ -385,10 +395,10 @@ bind('ingest',async()=>{
       if(document.file){
         window.DocumentUploadQueue.setStatus(document.file,'uploading');
         const form=new FormData();form.append('file',document.file,document.file.name);
-        form.append('options',JSON.stringify({title:document.title,metadata:document.metadata,extract,extraction_mode:mode,...settings}));
+        form.append('options',JSON.stringify({title:document.title,...documentUploadOptions(document),extract,extraction_mode:mode,...settings}));
         job=await api('/api/projects/'+encodeURIComponent(project)+'/documents/upload/jobs',form);
         window.DocumentUploadQueue.setStatus(document.file,'queued',job.id);
-      }else job=await api('/api/projects/'+encodeURIComponent(project)+'/documents/jobs',{title:document.title,text:document.text,metadata:document.metadata,extract,extraction_mode:mode,...settings});
+      }else job=await api('/api/projects/'+encodeURIComponent(project)+'/documents/jobs',{title:document.title,text:document.text,...documentUploadOptions(document),extract,extraction_mode:mode,...settings});
       wb.jobs.set(job.id,job);accepted++;entry.textContent=document.title+' · 已加入解析队列 · '+job.id;
       // 提交后在右侧工作区实时看进度（SSE）与抽取结果，不跳后台任务页
       window.IngestResults?.watch(job.id,document.title,{projectId:project,mode});
@@ -499,9 +509,10 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
   function addEvidence(turn,payload){
     const rows=Array.isArray(payload?.evidence)?payload.evidence:[];
     const pendingCount=payload?.structure_pending?.count||0;
+    const platformGroups=Array.isArray(payload?.platform_groups)?payload.platform_groups:[];
     // 以前"没有证据"就整块不渲染；现在还要看有没有结构待定的知识 —— 有就得说出来，
     // 否则用户看到的就是"问答没反应"，而真相是"有知识、但概念还没建模"。
-    if(!rows.length&&!pendingCount)return;
+    if(!rows.length&&!pendingCount&&!platformGroups.length)return;
     const panelId='qa-evidence-'+(++evidenceSerial),block=document.createElement('div');block.className='qa-evidence-block';
     const toggle=document.createElement('button');
     toggle.type='button';toggle.className='qa-evidence-toggle secondary';
@@ -517,6 +528,17 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       '给模型的提示就是这份清单：系统把「你的问题 + 这些依据（每条带编号）」「以 {"question":"…","evidence":[{"id":"E1","text":"…"}]} 的形状发过去，并要求模型只依据这些证据回答、每条结论标注 [E编号]。所以答案里出现的 [E1] 一定能在这里找到对应；没有勾选「用已配置的语言模型组织答案」时，返回的就是同一份清单的原文。',
     ]){const p=document.createElement('p');p.textContent=line;note.append(p);}
     panel.append(note);
+    if(platformGroups.length){
+      const platformBlock=document.createElement('div');platformBlock.className='qa-reasoning-block';
+      const head=document.createElement('p');head.className='qa-reasoning-head';head.innerHTML='<b>按平台检索结果</b><span>各平台分别筛选和排名。</span>';platformBlock.append(head);
+      for(const group of platformGroups){
+        const count=Number(group.evidence_count??group.evidence_rows?.length??group.hits?.length??0);
+        const line=document.createElement('p');line.className='qa-evidence-meta subtle';
+        line.textContent=platformGroupLabel(group)+' · '+count+' 条证据'+(count?'':'（当前范围无资料）');
+        platformBlock.append(line);
+      }
+      panel.append(platformBlock);
+    }
     // 图谱关系路径：命中实体沿现有关系边可到达的多跳路径，不表示 OWL 或逻辑推理。
     const paths=payload?.reasoning_paths||[];
     if(paths.length){
@@ -550,7 +572,8 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       }
       const excerpt=document.createElement('p');excerpt.textContent=row.text_preview??row.text??'';
       const meta=document.createElement('p');meta.className='qa-evidence-meta subtle';
-      meta.textContent=(row.kind||'')+' · '+(labelOf(row.type)||'—')+' · 版本 '+(row.version??'—');
+      const applicability=window.ApplicabilityUI?.describe?.(row);
+      meta.textContent=(row.kind||'')+' · '+(labelOf(row.type)||'—')+' · 版本 '+(row.version??'—')+(applicability?' · '+applicability:'');
       article.append(link,excerpt,meta);
       const sources=Array.isArray(row.sources)?row.sources:[];
       if(sources.length){
@@ -560,7 +583,8 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
           const title=document.createElement('b');title.textContent=source.title||source.document_id||'历史原文';
           const quote=document.createElement('p');quote.textContent=(source.quote||'').slice(0,240);
           const sourceMeta=document.createElement('p');sourceMeta.className='qa-evidence-meta subtle';
-          sourceMeta.textContent='文档版本 '+(source.version??'—')+' · '+(source.channel||row.retrieval_channel||'冻结来源');
+          const sourceApplicability=window.ApplicabilityUI?.describe?.(source);
+          sourceMeta.textContent='文档版本 '+(source.version??'—')+' · '+(source.channel||row.retrieval_channel||'冻结来源')+(sourceApplicability?' · '+sourceApplicability:'');
           sourceItem.append(title,quote,sourceMeta);sourceBox.append(sourceItem);
         });
         if(sources.length>1){
@@ -677,6 +701,11 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       if(item.event==='error')throw Error(item.data?.detail||'回答失败');
       if(item.event==='evidence'){
         capture(item.data);record.evidence=evidenceSummary(item.data?.evidence);
+        const platformGroups=item.data?.platform_groups||[];
+        if(platformGroups.length)record.platform_groups=platformGroups.map(group=>({
+          platform:group.platform,source_scope:group.source_scope,candidate_count:group.candidate_count,
+          evidence_count:Array.isArray(group.evidence_rows)?group.evidence_rows.length:0,
+        }));
         // C1：结构待定的知识单列，不进证据清单 —— 但历史重绘时要原样恢复（否则切一次标签就"消失"）。
         record.structure_pending=item.data?.structure_pending||null;
         const channels=item.data?.channels||{};

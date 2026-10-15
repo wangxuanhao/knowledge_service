@@ -8,8 +8,8 @@
      改一条旧迁移，导致同一版本号在不同环境对应不同 schema）。
   2. 使用 advisory lock 串行迁移：多个实例/多个人同时执行时只有一个真正跑，
      其余等待后识别为「已应用」而直接返回。
-  3. 幂等：重复执行是安全的；单条迁移在**一个事务内**执行，失败整体回滚，
-     绝不留下半套 schema。
+  3. 默认迁移在**一个事务内**执行；必须自动提交的 PostgreSQL DDL 可用精确
+     directive 声明非事务执行与语句边界，并由幂等 SQL 保证失败后安全重跑。
   4. 迁移使用**迁移角色**（owner/超级用户）凭据；应用角色无 DDL 权限，见
      `docker/postgres/initdb/10-app-role.sh`。
   5. 迁移 SQL 纳入安装包 package-data，源码目录之外安装 wheel 后同样可用
@@ -43,12 +43,24 @@ MIGRATIONS_DIR = Path(__file__).resolve().parent / 'migrations'
 # advisory lock 键：固定值，保证所有迁移者竞争同一把锁。
 # 取值无业务含义，只要全局唯一即可；这里是 "kschema" 的十六进制。
 ADVISORY_LOCK_KEY = 0x6B736368656D61
+DEFAULT_MIGRATION_LOCK_TIMEOUT_MS = 5_000
 
 _FILENAME = re.compile(r'^(\d{4})_([A-Za-z0-9_\-]+)\.sql$')
+_NO_TRANSACTION_DIRECTIVE = '-- knowledge-service-migration: no-transaction'
+_STATEMENT_BREAK_DIRECTIVE = '-- knowledge-service-migration: statement-break'
+_CONCURRENT_INDEX = re.compile(
+    r'(?im)^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY'
+    r'(?:\s+IF\s+NOT\s+EXISTS)?\s+([A-Za-z_][A-Za-z0-9_]*)\b')
 
 
 class MigrationError(RuntimeError):
     """迁移失败（编号冲突、校验和不符、SQL 执行失败等）。"""
+
+
+@dataclass(frozen=True)
+class MigrationExecution:
+    transactional: bool
+    statements: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -69,6 +81,41 @@ class Migration:
 
     def sql(self) -> str:
         return self.path.read_text(encoding='utf-8').replace('\r\n', '\n')
+
+    def execution(self) -> MigrationExecution:
+        """解析极小、可审计的迁移执行指令。
+
+        默认迁移仍作为一个 SQL 块在单个事务中执行。只有首个非空行精确为
+        ``no-transaction`` 时才切换到自动提交；这类迁移必须用精确的
+        ``statement-break`` 行声明每个执行边界，迁移器不会猜测 SQL 分号
+        （函数体、字符串和注释都可能合法包含分号）。
+        """
+        source = self.sql()
+        lines = source.splitlines()
+        first = next((index for index, line in enumerate(lines) if line.strip()), None)
+        if first is None or lines[first].strip() != _NO_TRANSACTION_DIRECTIVE:
+            return MigrationExecution(transactional=True, statements=(source,))
+
+        body = '\n'.join(lines[first + 1:])
+        parts = re.split(
+            rf'^\s*{re.escape(_STATEMENT_BREAK_DIRECTIVE)}\s*$',
+            body,
+            flags=re.MULTILINE,
+        )
+        statements = tuple(part.strip() for part in parts)
+        if not statements or any(not statement for statement in statements):
+            raise MigrationError(
+                f'迁移 {self.version:04d}_{self.name} 的 statement-break 前后必须有 SQL')
+        for statement in statements:
+            # CREATE INDEX CONCURRENTLY is the motivating operation. Reject the
+            # easy-to-miss case of two such commands in one chunk, while still
+            # permitting function/DO bodies whose SQL grammar contains semicolons.
+            if len(re.findall(r'(?im)^\s*CREATE\s+INDEX\s+CONCURRENTLY\b',
+                              statement)) > 1:
+                raise MigrationError(
+                    f'迁移 {self.version:04d}_{self.name} 是非事务迁移；'
+                    '每条 SQL 必须用 statement-break 明确分隔')
+        return MigrationExecution(transactional=False, statements=statements)
 
 
 def discover_migrations(directory: Optional[Path] = None) -> List[Migration]:
@@ -119,9 +166,48 @@ def _applied(conn) -> dict[int, tuple[str, str]]:
         return {row[0]: (row[1], row[2]) for row in cur.fetchall()}
 
 
+def _lock_timeout_ms(explicit: Optional[int]) -> int:
+    raw = explicit if explicit is not None else os.environ.get(
+        'KG_MIGRATION_LOCK_TIMEOUT_MS', DEFAULT_MIGRATION_LOCK_TIMEOUT_MS)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise MigrationError(
+            f'KG_MIGRATION_LOCK_TIMEOUT_MS 必须是正整数，实际为 {raw!r}') from exc
+    if value <= 0:
+        raise MigrationError('迁移 lock_timeout 必须大于 0 毫秒')
+    return value
+
+
+def _index_state(cur, name: str):
+    cur.execute('''SELECT i.indisvalid, i.indisready
+                     FROM pg_class c JOIN pg_index i ON i.indexrelid = c.oid
+                    WHERE c.oid = to_regclass(%s)''', (name,))
+    return cur.fetchone()
+
+
+def _prepare_concurrent_index(conn, name: str) -> None:
+    """并发建索引失败会遗留同名 invalid index；IF NOT EXISTS 不会修复它。"""
+    with conn.cursor() as cur:
+        state = _index_state(cur, name)
+        if state is not None and not (state[0] and state[1]):
+            # name 来自受限正则，只包含普通 PostgreSQL identifier 字符。
+            cur.execute(f'DROP INDEX CONCURRENTLY IF EXISTS "{name}"')
+
+
+def _validate_concurrent_indexes(conn, names: Iterable[str]) -> None:
+    with conn.cursor() as cur:
+        for name in names:
+            state = _index_state(cur, name)
+            if state is None or not (state[0] and state[1]):
+                raise MigrationError(
+                    f'并发索引 {name} 缺失或无效（indisvalid/indisready 未就绪）')
+
+
 def apply_migrations(dsn: str, *, directory: Optional[Path] = None,
                      verbose: bool = True,
-                     allow_checksum_mismatch: bool = False) -> dict:
+                     allow_checksum_mismatch: bool = False,
+                     lock_timeout_ms: Optional[int] = None) -> dict:
     """应用全部待执行迁移。返回 {'applied': [...], 'current': n}。
 
     整个过程持有 advisory lock；每条迁移在自己的事务里执行，做到
@@ -132,10 +218,15 @@ def apply_migrations(dsn: str, *, directory: Optional[Path] = None,
     重写台账 checksum 再继续（CLI 的 ``--rewrite-checksums`` 对应此开关）。
     """
     migrations = discover_migrations(directory)
+    lock_timeout_ms = _lock_timeout_ms(lock_timeout_ms)
 
     # autocommit=True：迁移里显式 BEGIN/COMMIT，避免驱动隐式开事务干扰
     with psycopg.connect(dsn, autocommit=True) as conn:
         with conn.cursor() as cur:
+            # 必须在 advisory/DDL 锁之前设置，避免迁移进入在线请求的锁队列后
+            # 无限等待。超时不会写台账，下次运行按幂等语义收敛。
+            cur.execute("SELECT set_config('lock_timeout', %s, false)",
+                        (f'{lock_timeout_ms}ms',))
             cur.execute('SELECT pg_advisory_lock(%s)', (ADVISORY_LOCK_KEY,))
             cur.execute("SELECT set_config('knowledge_service.app_role', %s, false)",
                         (os.environ.get('POSTGRES_APP_USER', 'knowledge_app'),))
@@ -179,22 +270,44 @@ def apply_migrations(dsn: str, *, directory: Optional[Path] = None,
                 if verbose:
                     print(f'  → 应用 {migration.version:04d}_{migration.name} ...',
                           end='', flush=True)
+                execution = None
                 try:
-                    with conn.cursor() as cur:
-                        cur.execute('BEGIN')
-                        cur.execute(migration.sql())
-                        cur.execute(
-                            'INSERT INTO schema_migrations (version, name, checksum) '
-                            'VALUES (%s, %s, %s)',
-                            (migration.version, migration.name, migration.checksum))
-                        cur.execute('COMMIT')
-                except Exception as exc:
-                    # 事务已由 BEGIN 开启；失败时显式回滚，保证不残留半套 schema
-                    try:
+                    execution = migration.execution()
+                    if execution.transactional:
                         with conn.cursor() as cur:
-                            cur.execute('ROLLBACK')
-                    except Exception:
-                        pass
+                            cur.execute('BEGIN')
+                            cur.execute(execution.statements[0])
+                            cur.execute(
+                                'INSERT INTO schema_migrations (version, name, checksum) '
+                                'VALUES (%s, %s, %s)',
+                                (migration.version, migration.name, migration.checksum))
+                            cur.execute('COMMIT')
+                    else:
+                        concurrent_indexes = []
+                        for statement in execution.statements:
+                            match = _CONCURRENT_INDEX.search(statement)
+                            if match:
+                                name = match.group(1)
+                                _prepare_concurrent_index(conn, name)
+                                concurrent_indexes.append(name)
+                            with conn.cursor() as cur:
+                                cur.execute(statement)
+                        _validate_concurrent_indexes(conn, concurrent_indexes)
+                        with conn.cursor() as cur:
+                            # 台账只在全部自动提交语句成功后登记。中途失败会留下
+                            # 已完成的幂等 DDL，重跑由 IF NOT EXISTS 安全收敛。
+                            cur.execute(
+                                'INSERT INTO schema_migrations (version, name, checksum) '
+                                'VALUES (%s, %s, %s)',
+                                (migration.version, migration.name, migration.checksum))
+                except Exception as exc:
+                    if execution is not None and execution.transactional:
+                        # 事务迁移失败时整体回滚；非事务迁移依靠幂等语句重跑。
+                        try:
+                            with conn.cursor() as cur:
+                                cur.execute('ROLLBACK')
+                        except Exception:
+                            pass
                     raise MigrationError(
                         f'迁移 {migration.version:04d}_{migration.name} 失败：'
                         f'{type(exc).__name__}: {exc}') from exc

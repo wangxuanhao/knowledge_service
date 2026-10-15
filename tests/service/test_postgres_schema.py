@@ -88,6 +88,15 @@ TABLES_WITHOUT_PRIMARY_KEY = frozenset({
     'provenance_activities', 'record_version_assertions',
 })
 
+NATIVE_APPLICABILITY_COLUMNS = {
+    'platform_mode', 'platform_values',
+    'business_mode', 'business_values',
+    'audience_mode', 'audience_values',
+    'scope_identity',
+    'valid_from_known', 'valid_from_epoch_ms',
+    'valid_until_known', 'valid_until_epoch_ms',
+}
+
 
 @pytest.fixture(scope='module')
 def owner_conn():
@@ -208,6 +217,45 @@ def test_insertion_order_columns_are_identity(owner_conn):
                    for t, cols in indexes):
             problems.append(f'{table} 缺 (project_id,..,seq) 索引')
     assert not problems, '插入顺序列不合格：' + '; '.join(problems)
+
+
+def test_record_versions_has_native_applicability_columns_and_indexes(owner_conn):
+    with owner_conn.cursor() as cur:
+        cur.execute("""select column_name from information_schema.columns
+                        where table_schema = 'public' and table_name = 'record_versions'""")
+        columns = {row[0] for row in cur.fetchall()}
+        cur.execute("""select indexname,indexdef from pg_indexes
+                        where schemaname = 'public' and tablename = 'record_versions'""")
+        indexes = dict(cur.fetchall())
+        cur.execute("""select c.relname,i.indisvalid,i.indisready
+                          from pg_class c
+                          join pg_index i on i.indexrelid = c.oid
+                          join pg_class t on t.oid = i.indrelid
+                         where t.oid = 'record_versions'::regclass""")
+        index_states = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
+
+    assert NATIVE_APPLICABILITY_COLUMNS <= columns
+    for dimension in ('platform', 'business', 'audience'):
+        mode = indexes[f'versions_current_{dimension}_mode']
+        values = indexes[f'versions_current_{dimension}_values_gin']
+        assert f'(project_id, {dimension}_mode)' in mode
+        assert 'WHERE (superseded_at IS NULL)' in mode
+        assert 'USING gin' in values and f'{dimension}_values' in values
+        assert f"{dimension}_mode = 'specific'::text" in values
+        assert 'superseded_at IS NULL' in values
+    assert '(project_id, valid_from_epoch_ms)' in indexes['versions_current_valid_from']
+    assert 'valid_from_known' in indexes['versions_current_valid_from']
+    assert '(project_id, valid_until_epoch_ms)' in indexes['versions_current_valid_until']
+    assert 'valid_until_known' in indexes['versions_current_valid_until']
+    assert '(project_id, superseded_at, recorded_at)' in indexes['versions_system_end']
+    for name in {
+        'versions_current_platform_mode', 'versions_current_business_mode',
+        'versions_current_audience_mode', 'versions_current_platform_values_gin',
+        'versions_current_business_values_gin', 'versions_current_audience_values_gin',
+        'versions_current_valid_from', 'versions_current_valid_until',
+        'versions_system_end',
+    }:
+        assert index_states[name] == (True, True), f'{name} is not ready and valid'
 
 
 # ── 触发器行为验收 ──────────────────────────────────────────────────────────

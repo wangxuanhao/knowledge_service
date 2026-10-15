@@ -2,6 +2,7 @@
 from collections import Counter,defaultdict,deque
 import hashlib
 import json
+import logging
 from time import perf_counter
 from uuid import uuid4
 from ..repository import OntologyNotPublished
@@ -10,6 +11,9 @@ from .service import public
 from .governance import writable
 from .retrieval import RetrievalEngine
 from ..core.time import utc_now
+
+
+LOG = logging.getLogger('knowledge_service.explorer')
 
 
 class Explorer:
@@ -126,6 +130,41 @@ class Explorer:
             groups.sort(key=lambda group:(group['label'],group['predicate']))
         return result
 
+    def _native_graph_rows(self, project_id, scope, node_id, hops,
+                           attribute_mode):
+        """Return a bounded native read decision and explicit fallback reason."""
+        adapter=getattr(self.service,'neo4j_projection',None)
+        readiness=getattr(self.repo,'projection_ready',None)
+        reason=None
+        if adapter is None:reason='neo4j_unconfigured'
+        elif not node_id:reason='unseeded_graph'
+        elif not isinstance(hops,int) or not 0<=hops<=2:reason='unsupported_hops'
+        elif (scope.get('known_at') is not None or scope.get('filters')
+                or scope.get('entity_type') or scope.get('predicate')
+                or scope.get('ontology_scope','all')!='all'):
+            reason='unsupported_scope'
+        if reason:
+            return {'rows':None,'backend':'postgres_bfs','degraded_reason':reason}
+        try:
+            if not callable(readiness) or not readiness(project_id,'neo4j',3):
+                return {'rows':None,'backend':'postgres_bfs',
+                        'degraded_reason':'readiness_stale'}
+            version_ids=adapter.expand(
+                project_id,[node_id],hops,
+                applicability=scope.get('applicability'),
+                valid_at=scope.get('valid_at'),
+                include_unknown=scope.get('include_unknown',True))
+            rows=self.repo.current_records_by_version_ids(project_id,version_ids)
+            if len(rows)!=len(dict.fromkeys(version_ids)):
+                return {'rows':None,'backend':'postgres_bfs',
+                        'degraded_reason':'current_backfill_mismatch'}
+            return {'rows':rows,'backend':'neo4j_native','degraded_reason':None}
+        except Exception:
+            LOG.warning('Neo4j scoped expansion failed; using PostgreSQL BFS',
+                        exc_info=True)
+            return {'rows':None,'backend':'postgres_bfs',
+                    'degraded_reason':'neo4j_read_failed'}
+
     def graph(self,p,scope,node_id=None,hops=1,attribute_mode='summary'):
         """返回以 ``node_id`` 为中心的局部子图（省略时返回整个范围）。
 
@@ -147,7 +186,13 @@ class Explorer:
                                          'entity_type','predicate'}}
             graph_kinds=['entity','relation']
             if attribute_mode!='none':graph_kinds.append('attribute')
-            rows=self.service.scoped(p,{**record_scope,'kinds':graph_kinds})
+            native=self._native_graph_rows(
+                p,{**record_scope,'entity_type':entity_type,
+                   'predicate':predicate},node_id,hops,attribute_mode)
+            native_rows=native['rows']
+            rows=(native_rows if native_rows is not None else
+                  self.service.scoped(p,{**record_scope,'kinds':graph_kinds}))
+            record['backend']=native['backend']
             record['rows']=len(rows)
             nodes={r['id']:r for r in rows
                    if r['kind']=='entity' and (not entity_type or r['type']==entity_type)}
@@ -210,6 +255,8 @@ class Explorer:
             # `timing_ms.total`，而 /subgraph 从不返回它，所以 renderGraph 中的该分支是死代码。
             return {'nodes':presented,'edges':presented_edges,
                     'attribute_mode':attribute_mode,'selected_node_id':node_id,
+                    'backend':native['backend'],
+                    'degraded_reason':native['degraded_reason'],
                     'timing_ms':{'total':round((perf_counter()-started)*1000,1)}}
 
     def dashboard(self,p,scope):

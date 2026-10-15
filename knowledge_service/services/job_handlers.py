@@ -57,83 +57,22 @@ def job_handlers(service, uploads):
             build_vectors=payload['build_vectors'], project_id=payload.get('project_id'))
 
     def semantic_index(payload, project_id, progress, task_id):
-        from ..integrations.milvus_store import VectorDimensionMismatch
-        from ..core.time import utc_now
-        from .ontology_sync import OntologySync
-        from ..repository import OntologyNotPublished
-
-        def ontology_id(target):
-            try:
-                return service.data.get_ontology(target)['id']
-            except OntologyNotPublished:
-                # Discovery projects may have searchable chunks before their
-                # first ontology publication; they still share the collection.
-                return None
         start = perf_counter()
         store = service.reconnect_vector_store()
         if store is None:
             raise RuntimeError('未配置或无法连接 Milvus，索引未建立')
-        recreated = False
-        try:
-            store.ensure_collection()
-        except VectorDimensionMismatch:
-            recreated = True
-        # The collection is shared. Persist the whole migration scope BEFORE
-        # recreation; retry must restore other projects even if the new schema
-        # now matches and the original process died midway through encoding.
-        unfinished = [s for s in service.data.list_artifacts('ontology_index_state')
-                      if s.get('status') == 'rebuilding'
-                      and s.get('scope') == 'collection']
-        collection_scope = recreated or bool(unfinished)
-        targets = ([p['id'] for p in service.data.list_projects()]
-                   if collection_scope else [project_id])
-        with service.data.unit_of_work():
-            for target in targets:
-                service.data.save_artifact('ontology_index_state', {
-                    'id': 'ontology-index:' + target, 'project_id': target,
-                    'status': 'rebuilding', 'scope': 'collection' if collection_scope else 'project',
-                    'rebuild_task_id': task_id, 'updated_at': utc_now()})
-        if recreated:
-            progress('迁移共享 Milvus 集合；恢复全部项目', 5)
-            store.recreate_collection()
-        counts = {}
-        for target in targets:
-            version = ontology_id(target)
-            rows = [r for r in service.data.current_records(target)
-                    if r['kind'] in {'entity','relation','chunk'}
-                    and not r.get('metadata', {}).get('_deleted')]
-            signature = OntologySync._signature(rows)
-            encoded = []
-            for offset in range(0, len(rows), 16):
-                progress(f'{target}: 向量编码 {offset}/{len(rows)}', int(90*offset/max(1,len(rows))))
-                batch = rows[offset:offset + 16]
-                vectors = service.encoder.encode([r['text'] for r in batch])
-                if len(vectors) != len(batch):
-                    raise RuntimeError('embedding 输出数量不匹配')
-                for row, vector in zip(batch, vectors):
-                    row.update(embedding=vector, embedding_model=service.encoder.identity,
-                               project_id=target)
-                encoded.extend(batch)
-            progress(f'{target}: 写入 Milvus', 95)
-            saved = store.rebuild_project(target, encoded)
-            latest = [r for r in service.data.current_records(target)
-                      if r['kind'] in {'entity','relation','chunk'}
-                      and not r.get('metadata', {}).get('_deleted')]
-            if (ontology_id(target) != version
-                    or OntologySync._signature(latest) != signature):
-                raise RuntimeError('重建期间权威版本已变更，请重试补偿')
-            counts[target] = (saved, len(rows))
-            progress(f'{target}: 校验索引收据', 98)
-            service.data.save_artifact('ontology_index_state', {
-                'id': 'ontology-index:' + target, 'project_id': target,
-                'status': 'completed', 'ontology_id': version,
-                'record_signature': signature, 'embedding_model': service.encoder.identity,
-                'updated_at': utc_now()})
-        saved, total = counts[project_id]
-        return {'indexed': saved, 'backend': 'milvus', 'total': total,
-                'scope': 'collection' if collection_scope else 'project',
-                'restored_projects': targets,
-                'recreated': recreated, 'dim': store.dim,
+        if not hasattr(service, 'projection_sync'):
+            raise RuntimeError('Milvus projection coordinator is unavailable')
+        progress('创建隔离的 Milvus 索引代并加载快照', 10)
+        result = service.projection_sync.rebuild(project_id, 'milvus')
+        total = len([r for r in service.data.current_records(project_id)
+                     if r['kind'] in {'entity', 'relation', 'chunk'}
+                     and not r.get('metadata', {}).get('_deleted')])
+        progress('切换 Milvus 项目别名', 98)
+        return {'indexed': total, 'backend': 'milvus', 'total': total,
+                'scope': 'project', 'restored_projects': [project_id],
+                'recreated': True, 'destination': result['destination'],
+                'dim': store.dim,
                 'embedding_model': service.encoder.identity,
                 'elapsed_seconds': round(perf_counter() - start, 2)}
 

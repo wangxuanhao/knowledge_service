@@ -90,7 +90,7 @@ def test_adapter_queues_unknown_entity_and_dependent_known_relation(monkeypatch)
     assert extractor.review_candidates[0]['record_id']==extractor.review_candidates[2]['entity_id']
 
 
-def test_guided_attribute_value_matching_an_entity_is_reclassified_as_relation(monkeypatch):
+def test_guided_unknown_attribute_stays_attribute_even_when_value_matches_entity(monkeypatch):
     import knowledge_service.integrations.semantica_adapter as adapter
     import knowledge_service.services.attribute_extraction as attributes
     from knowledge_service.services.attribute_extraction import AttributeProposal
@@ -106,11 +106,12 @@ def test_guided_attribute_value_matching_an_entity_is_reclassified_as_relation(m
     extractor=SemanticaExtractor();extractor.include_attributes=True
     records=extractor.extract('甲的负责人是乙',Ontology(TTL))
     assert len([row for row in records if row['kind']=='entity'])==2
-    assert [item['kind'] for item in extractor.review_candidates]==['relation']
+    assert [item['kind'] for item in extractor.review_candidates]==['attribute']
     candidate=extractor.review_candidates[0]
-    assert candidate['subject']=='甲' and candidate['object']=='乙'
-    assert candidate['reason']=='属性值命中正文实体，已按关系候选处理'
-    assert extractor.extraction_diagnostics['attribute_reclassified_relation']==1
+    assert candidate['subject']=='甲' and candidate['value']=='乙'
+    assert candidate['proposed_type']=='负责人'
+    assert candidate['reason']=='属性值需核对原文与本体定义'
+    assert extractor.extraction_diagnostics['attribute_reclassified_relation']==0
 
 
 def test_guided_ambiguous_datatype_property_stays_an_attribute(monkeypatch):

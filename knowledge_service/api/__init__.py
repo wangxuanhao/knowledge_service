@@ -15,6 +15,7 @@ from importlib.metadata import PackageNotFoundError, version
 import logging
 import os
 from pathlib import Path
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -43,6 +44,12 @@ from ..services.ontology_drafts import OntologyDraftError
 from ..services.service import KnowledgeService
 from ..services.runtime_capabilities import RuntimeCapabilities
 from ..services.ontology_sync import OntologySync
+from ..services.projection_sync import ProjectionSync
+from ..services.projection_runtime import (
+    MilvusProjectionAdapter,
+    ProjectionWorker,
+)
+from ..integrations.neo4j_store import Neo4jProjectionAdapter
 from ..core.time import utc_now
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -241,6 +248,7 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
 
     ontology_sync = OntologySync(service,
         configured=os.environ.get('KG_VECTOR_BACKEND', '') == 'milvus')
+    projection_worker = None
 
     @asynccontextmanager
     async def lifespan(app):
@@ -253,10 +261,12 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
         import threading
         threading.Thread(target=service.warm_up, daemon=True).start()
         ontology_sync.start()
+        projection_worker.start()
         app.state.jobs.start()
         app.state.ingest_batch_runner.start()
         yield
         ontology_sync.close()
+        projection_worker.close()
         app.state.jobs.close()
         app.state.ingest_batch_runner.close()
         app.state.neo4j.close()
@@ -317,6 +327,128 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
     from .parity import install
     install(app, service)
     install_neo4j(app, service)
+    projection_adapters = {}
+    cleanup_handlers = {'neo4j': app.state.neo4j.delete_project}
+    if app.state.neo4j.status()['configured']:
+        def neo4j_fence_is_current(project_id, seq, fence):
+            cursor = repository.projections.cursor(project_id, 'neo4j') or {}
+            expiry = cursor.get('claim_until')
+            return bool(
+                cursor.get('claim_token') == fence
+                and int(cursor.get('claimed_from_seq') or 0) <= int(seq)
+                <= int(cursor.get('claimed_to_seq') or -1)
+                and expiry
+                and datetime.fromisoformat(expiry.replace('Z', '+00:00'))
+                > datetime.now(timezone.utc))
+
+        neo4j_adapter = Neo4jProjectionAdapter(
+            app.state.neo4j._driver,
+            namespace=repository.storage_namespace,
+            database=app.state.neo4j.database,
+            fence_is_current=neo4j_fence_is_current)
+
+        def repair_neo4j_authority(project_id, record_id, destination):
+            # One current-only SQL result supplies the repaired record, its
+            # incident facts/attributes, and relation endpoint records.  This
+            # avoids an N+1 repair and prevents DETACH DELETE from losing valid
+            # authoritative edges.
+            with repository._lock:
+                rows = repository._db.execute(
+                    '''WITH current_rows AS (
+                         SELECT * FROM record_versions
+                         WHERE project_id=? AND superseded_at IS NULL
+                       ), incident AS (
+                         SELECT payload::jsonb AS doc FROM current_rows
+                         WHERE (payload::jsonb->>'kind'='relation' AND
+                                (payload::jsonb->>'id'=? OR
+                                 payload::jsonb->>'subject_id'=? OR
+                                 payload::jsonb->>'object_id'=?))
+                            OR (payload::jsonb->>'kind'='attribute' AND
+                                (payload::jsonb->>'id'=? OR
+                                 payload::jsonb->>'subject_id'=?))
+                       ), wanted AS (
+                         SELECT ?::text AS id
+                         UNION SELECT doc->>'id' FROM incident
+                         UNION SELECT doc->>'subject_id' FROM incident
+                         UNION SELECT doc->>'object_id' FROM incident
+                       )
+                       SELECT current_rows.* FROM current_rows
+                       WHERE id IN (SELECT id FROM wanted WHERE id IS NOT NULL)
+                       ORDER BY id''',
+                    (project_id, record_id, record_id, record_id, record_id,
+                     record_id, record_id)).fetchall()
+            bundle = [repository._record(row, vectors='list') for row in rows]
+            return neo4j_adapter.repair_record(
+                project_id, record_id, bundle, destination,
+                repository.projections.project_watermark(project_id))
+
+        neo4j_adapter._repair_authority = repair_neo4j_authority
+        projection_adapters['neo4j'] = neo4j_adapter
+        service.neo4j_projection = neo4j_adapter
+    if os.environ.get('KG_VECTOR_BACKEND', '') == 'milvus':
+        def fence_is_current(project_id, seq, fence):
+            cursor = repository.projections.cursor(project_id, 'milvus') or {}
+            expiry = cursor.get('claim_until')
+            return bool(
+                cursor.get('claim_token') == fence
+                and int(cursor.get('claimed_from_seq') or 0) <= int(seq)
+                <= int(cursor.get('claimed_to_seq') or -1)
+                and expiry
+                and datetime.fromisoformat(expiry.replace('Z', '+00:00'))
+                > datetime.now(timezone.utc))
+
+        def repair_authority(project_id, record_id, destination):
+            store = service.milvus_store
+            if store is None:
+                raise RuntimeError('Milvus projection store is unavailable')
+            try:
+                record = repository.get_record(project_id, record_id)
+            except KeyError:
+                return store.delete(
+                    project_id, record_id=record_id, destination=destination)
+            if ((record.get('metadata') or {}).get('_deleted')
+                    or record.get('kind') not in {'entity', 'relation', 'chunk'}):
+                return store.delete(
+                    project_id, record_id=record_id, destination=destination)
+            # version_id is the primary key, so an upsert alone cannot remove a
+            # late worker's obsolete version. Delete the whole record lineage
+            # in this destination before restoring the authoritative version.
+            store.delete(project_id, record_id=record_id,
+                         destination=destination)
+            if record.get('embedding') is None:
+                vectors = service.encoder.encode([str(record.get('text') or '')])
+                if len(vectors) != 1:
+                    raise RuntimeError('embedding output count mismatch')
+                record = dict(record, embedding=vectors[0],
+                              embedding_model=service.encoder.identity)
+            return store.upsert(
+                [dict(record, project_id=project_id)], flush=True,
+                destination=destination,
+                projection_seq=repository.projections.project_watermark(project_id),
+                fence='authority-repair')
+
+        projection_adapters['milvus'] = MilvusProjectionAdapter(
+            lambda: service.milvus_store, fence_is_current=fence_is_current,
+            repair_authority=repair_authority, encoder=service.encoder)
+
+        def cleanup_milvus(project_id):
+            store = service.milvus_store
+            if store is None:
+                raise RuntimeError('Milvus projection store is unavailable')
+            return store.cleanup_project(project_id)
+
+        cleanup_handlers['milvus'] = cleanup_milvus
+    projection_sync = ProjectionSync(
+        repository.projections, projection_adapters, schema_version=3)
+    projection_worker = ProjectionWorker(
+        repository, projection_sync, cleanup_handlers=cleanup_handlers,
+        reconnect=(service.reconnect_vector_store
+                   if 'milvus' in projection_adapters else None))
+    service.projection_drain = projection_worker.drain_project
+    service.projection_sync = projection_sync
+    service.projection_worker = projection_worker
+    app.state.projection_sync = projection_sync
+    app.state.projection_worker = projection_worker
     from .workspace import install as install_workspace
     install_workspace(app, service)
     from .evidence import install as install_evidence

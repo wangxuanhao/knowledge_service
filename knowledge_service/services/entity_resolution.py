@@ -3,6 +3,7 @@ import logging
 from dataclasses import dataclass
 
 from .retrieval import has_vector, rank_candidates
+from ..domain.applicability import scope_identity
 
 LOG = logging.getLogger('knowledge_service.entity_resolution')
 
@@ -29,7 +30,8 @@ class EntityResolver:
         rows = [row for row in self.repository.current_records(project_id, kinds=['entity'])
                 if row['kind'] == 'entity' and not row.get('metadata', {}).get('_deleted')
                 and row['id'] != mention.get('id')]
-        eligible = [row for row in rows if all(row.get(key) == mention.get(key)
+        mention_scope = scope_identity((mention.get('metadata') or {}).get('applicability'))
+        eligible = [row for row in rows if scope_identity((row.get('metadata') or {}).get('applicability')) == mention_scope and all(row.get(key) == mention.get(key)
                     for key in ('type', 'valid_from', 'valid_until'))]
         folded = mention.get('text', '').casefold()
         exact = [row for row in eligible if folded in [name.casefold() for name in

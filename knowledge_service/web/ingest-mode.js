@@ -11,6 +11,84 @@
   const size=value=>value<1000?value+' B':value<1_000_000?(value/1000).toFixed(1)+' KB':(value/1_000_000)+' MB';
   const icon=name=>/\.pdf$/i.test(name)?'PDF':/\.docx$/i.test(name)?'DOCX':/\.html?$/i.test(name)?'HTML':/\.md$/i.test(name)?'MD':'TXT';
   const statusText=item=>({ready:'待提交',uploading:'正在上传',queued:'已进入队列',failed:'提交失败'}[item.status]||item.status);
+  const field=id=>document.getElementById(id);
+  const splitList=value=>[...new Set(String(value||'').split(/[,，]/).map(item=>item.trim()).filter(Boolean))];
+  const instant=(id,label)=>{
+    const value=field(id)?.value?.trim();
+    if(!value)return undefined;
+    const parsed=new Date(value);
+    if(!Number.isFinite(parsed.getTime())){field(id)?.focus();throw Error('请输入有效的'+label+'。');}
+    return parsed.toISOString();
+  };
+  const localTime=value=>value?String(value).replace('T',' '):'';
+  const applicabilityOf=value=>value?.applicability||value?.metadata?.applicability||{};
+  const dimensionValues=value=>Array.isArray(value)?value:(value?.mode==='specific'?value.values||[]:[]);
+  const dimensionText=(label,value)=>{
+    if(Array.isArray(value))return value.length?label+'：'+value.join('、'):label+'：暂不确定';
+    if(value?.mode==='all')return label+'：全部适用';
+    if(value?.mode==='specific')return label+'：'+dimensionValues(value).join('、');
+    return label+'：暂不确定';
+  };
+  const describe=value=>{
+    const applicability=applicabilityOf(value),parts=[];
+    if(Object.keys(applicability).length){
+      parts.push(dimensionText('平台',applicability.platforms));
+      parts.push(dimensionText('业务',applicability.businesses));
+      parts.push(dimensionText('对象',applicability.audiences));
+    }
+    const effective=value?.valid_from||value?.effective_at||value?.published_at;
+    if(effective)parts.push('生效：'+localTime(effective));
+    if(value?.valid_until)parts.push('失效：'+localTime(value.valid_until));
+    else if(effective&&value&&'valid_until' in value)parts.push('持续有效');
+    return parts.join(' · ');
+  };
+  const readDimension=name=>{
+    const mode=field('doc-'+name+'-mode')?.value||'unknown';
+    const values=mode==='specific'?splitList(field('doc-'+name)?.value):[];
+    if(mode==='specific'&&!values.length){field('doc-'+name)?.focus();throw Error('指定范围时请至少填写一个值。');}
+    if(values.length>64)throw Error('适用范围每个维度最多包含 64 个值。');
+    return {mode,values};
+  };
+  const readApplicability=()=>({
+    platforms:readDimension('platforms'),businesses:readDimension('businesses'),
+    audiences:readDimension('audiences'),
+  });
+  const cloneApplicability=value=>JSON.parse(JSON.stringify(value));
+  const syncDimension=name=>{
+    const input=field('doc-'+name),mode=field('doc-'+name+'-mode')?.value||'unknown';
+    if(input){input.disabled=mode!=='specific';input.setAttribute?.('aria-disabled',String(input.disabled));}
+  };
+  const updateEffectiveHelp=()=>{
+    const help=field('doc-effective-help');if(!help)return;
+    const published=field('doc-published-at')?.value?.trim(),explicit=field('doc-valid-from')?.value?.trim();
+    const until=field('doc-valid-until')?.value?.trim(),effective=explicit||published;
+    const source=explicit?'显式生效时间':published?'沿用发布时间':'尚未提供发布时间或生效时间';
+    help.textContent=(effective?'实际生效：'+localTime(effective)+'（'+source+'）':source)+'；'+
+      (until?'失效：'+localTime(until):effective?'未设失效时间，持续有效。':'未设失效时间。')+
+      '时间区间按左闭右开 [生效, 失效) 解释。';
+  };
+  window.ApplicabilityUI={
+    splitList,describe,dimensionValues,
+    readQueryScope(){
+      const platforms=splitList(field('query-platforms')?.value);
+      return platforms.length?{applicability:{platforms,businesses:[],audiences:[]}}:{};
+    },
+  };
+
+  async function loadApplicabilityVocabulary(){
+    const project=field('project')?.value;
+    const targets={platforms:'doc-platform-options',businesses:'doc-business-options',audiences:'doc-audience-options'};
+    let values={platforms:[],businesses:[],audiences:[]};
+    if(project){
+      try{values=await api(endpoint('/applicability-values'),undefined,'GET');}
+      catch(error){window.uploadQueueError?.(error);}
+    }
+    for(const [dimension,id] of Object.entries(targets)){
+      const list=field(id);if(!list)continue;list.replaceChildren();
+      for(const value of values[dimension]||[]){const option=document.createElement('option');option.value=value;list.append(option);}
+    }
+  }
+  window.loadApplicabilityVocabulary=loadApplicabilityVocabulary;
 
   function render(){
     const list=document.getElementById('doc-file-list');
@@ -29,7 +107,7 @@
     const summary=document.getElementById('doc-upload-summary');
     if(summary)summary.textContent=rows.length?`${rows.length} 个文件 · ${size(total)} · ${rows.filter(item=>item.status==='queued').length} 个已提交`:'尚未选择文件';
     const help=document.getElementById('doc-batch-help');
-    if(help)help.textContent=rows.length>1?'多文件分别以文件名作为标题；发布时间和 Metadata 为本批共用。':'';
+    if(help)help.textContent=rows.length>1?'多文件分别以文件名作为标题；适用范围、发布时间、生效/失效时间和 Metadata 为本批共用。':'';
     const title=document.getElementById('doc-title');
     if(title){title.disabled=mode()==='file'&&rows.length>1;title.required=mode()==='text';}
     const submit=document.getElementById('ingest');
@@ -105,6 +183,21 @@
     if(published){const instant=new Date(published);if(!Number.isFinite(instant.getTime()))throw Error('请输入有效的发布时间。');metadata.published_at=instant.toISOString();}
     return metadata;
   };
+  window.readDocumentUploadOptions=()=>{
+    const applicability=readApplicability();
+    const options={metadata:validateMetadata(),applicability};
+    options.metadata.applicability=cloneApplicability(applicability);
+    const published_at=instant('doc-published-at','发布时间');
+    const valid_from=instant('doc-valid-from','生效时间');
+    const valid_until=instant('doc-valid-until','失效时间');
+    const effective=valid_from||published_at;
+    if(effective&&valid_until&&valid_until<=effective)throw Error('失效时间必须晚于生效时间。');
+    if(published_at)options.published_at=published_at;
+    if(valid_from)options.valid_from=valid_from;
+    if(valid_until)options.valid_until=valid_until;
+    updateEffectiveHelp();
+    return options;
+  };
   window.readDocumentInput=async()=>{
     if(!document.getElementById('project').value)throw Error('请先在左侧选择或创建项目（必填）。');
     validateMetadata();
@@ -120,14 +213,21 @@
   };
   window.readDocumentBatch=async(includeSubmitted=false)=>{
     await window.readDocumentInput();
-    const metadata=window.readDocumentMetadata();
-    if(mode()==='text')return [{title:document.getElementById('doc-title').value.trim(),text:text.value,metadata}];
+    const options=window.readDocumentUploadOptions();
+    if(mode()==='text')return [{title:document.getElementById('doc-title').value.trim(),text:text.value,...options}];
     const custom=document.getElementById('doc-title').value.trim();
     if(custom.length>300)throw Error('文档标题不能超过 300 个字符。');
     const selected=includeSubmitted?queue.items():queue.eligible();
     if(!selected.length)throw Error('没有待提交或失败重试的文件。');
-    return selected.map(item=>({file:item.file,queueItem:item,title:rows.length===1&&custom?custom:item.file.name,metadata:{...metadata}}));
+    return selected.map(item=>({file:item.file,queueItem:item,title:rows.length===1&&custom?custom:item.file.name,
+      ...options,metadata:{...options.metadata,applicability:cloneApplicability(options.applicability)},
+      applicability:cloneApplicability(options.applicability)}));
   };
   window.uploadQueueError=error=>{const target=document.getElementById('doc-batch-help');if(target)target.textContent=error.message;};
-  refresh();
+  for(const id of ['doc-published-at','doc-valid-from','doc-valid-until'])field(id)?.addEventListener('input',updateEffectiveHelp);
+  for(const name of ['platforms','businesses','audiences']){
+    field('doc-'+name+'-mode')?.addEventListener('change',()=>syncDimension(name));syncDimension(name);
+  }
+  field('project')?.addEventListener('change',loadApplicabilityVocabulary);
+  updateEffectiveHelp();refresh();
 })();

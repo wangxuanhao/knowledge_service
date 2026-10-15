@@ -5,6 +5,7 @@ PostgreSQL 主表 + FTS + Milvus 分区 + Neo4j 副本（外部副本失败不�
 """
 import logging
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import APIRouter
 
@@ -12,6 +13,44 @@ from ..models import ProjectCreate, ProjectUpdate
 from ..services.ontology import Ontology
 
 LOG = logging.getLogger('knowledge_service')
+
+
+def _cleanup_project_projections(app, service, repository, project_id):
+    """Try cleanup now; durable events remain when a projection is unavailable."""
+    cleaned = {'milvus': False, 'neo4j': False}
+    owner = f'api-delete:{uuid4()}'
+    targets = []
+    if service.milvus_store is not None:
+        targets.append(('milvus', lambda: service.milvus_store.delete(project_id)))
+    targets.append(('neo4j', lambda: app.state.neo4j.delete_project(project_id)))
+    for target, cleanup in targets:
+        try:
+            claim = repository.claim_projection_cleanup(
+                project_id, target, owner)
+        except Exception:
+            LOG.exception('领取项目 %s 的 %s 清理事件时出错', project_id, target)
+            continue
+        if claim is None:
+            continue
+        token = claim['claim_token']
+        try:
+            cleanup()
+            cleaned[target] = True
+        except Exception as exc:
+            try:
+                repository.release_projection_cleanup(
+                    project_id, target, owner, token, exc)
+            except Exception:
+                LOG.exception('记录项目 %s 的 %s 清理失败状态时出错', project_id, target)
+            LOG.warning('项目删除后清理 %s 投影失败，已保留重试事件: %s', target, exc)
+            continue
+        try:
+            repository.ack_projection_cleanup(
+                project_id, target, owner, token)
+        except Exception:
+            # External deletion is idempotent. Keeping the event safely retries it.
+            LOG.exception('确认项目 %s 的 %s 清理事件时出错', project_id, target)
+    return cleaned
 
 
 def install(app, service):
@@ -38,6 +77,11 @@ def install(app, service):
     def project(project_id: str):
         return repository.get_project(project_id)
 
+    @router.get('/api/projects/{project_id}/applicability-values')
+    def applicability_values(project_id: str):
+        repository.get_project(project_id)
+        return repository.distinct_applicability_values(project_id)
+
     @router.put('/api/projects/{project_id}')
     def rename_project(project_id: str, request: ProjectUpdate):
         return repository.rename_project(project_id, request.name)
@@ -45,19 +89,8 @@ def install(app, service):
     @router.delete('/api/projects/{project_id}')
     def delete_project(project_id: str):
         deleted = repository.delete_project(project_id)
-        # PostgreSQL 删除成功后，再清理可选的派生存储（Milvus 向量分区 / Neo4j 副本）。
-        # 任一外部存储失败都不回滚 PostgreSQL 删除，只记录告警——它们都是可重建的副本。
-        cleaned = {'milvus': False, 'neo4j': False}
-        if service.milvus_store is not None:
-            try:
-                service.milvus_store.delete(project_id)
-                cleaned['milvus'] = True
-            except Exception as exc:
-                LOG.warning('项目删除后清理 Milvus 分区失败（可经重建索引恢复）: %s', exc)
-        try:
-            cleaned['neo4j'] = app.state.neo4j.delete_project(project_id)
-        except Exception as exc:
-            LOG.warning('项目删除后清理 Neo4j 副本失败（可手动重新同步清理）: %s', exc)
+        cleaned = _cleanup_project_projections(
+            app, service, repository, project_id)
         return {'deleted': deleted, 'cleaned': cleaned}
 
     app.include_router(router)

@@ -2,6 +2,7 @@ import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +10,10 @@ import knowledge_service.repository as repository_module
 from knowledge_service.repository import Repository
 from knowledge_service.utils.filters import matches_filter, validate_filter
 from knowledge_service.core.time import normalize_time
+from knowledge_service.domain.applicability import (
+    normalize_applicability,
+    scope_identity,
+)
 
 
 def test_versions_temporal_boundaries_and_restart(tmp_path):
@@ -44,6 +49,275 @@ def test_atomicity_isolation_and_unknown_dates(tmp_path):
         repo.put_record(p, {'kind': 'entity', 'text': 'a', 'recorded_at': '2020-01-01'})
     with pytest.raises(ValueError):
         repo.query(q, filters={'field': 'x', 'op': 'bad', 'value': 1})
+
+
+def test_query_uses_historical_native_applicability_and_business_time(tmp_path):
+    repo = Repository(tmp_path / 'native-applicability-history')
+    project = repo.create_project('native applicability')['id']
+    old = repo.put_record(project, {
+        'id': 'policy', 'kind': 'entity', 'text': 'old',
+        'metadata': {'applicability': {
+            'platforms': ['美团'], 'businesses': [],
+        }},
+        'valid_from': '2025-01-01', 'valid_until': '2025-02-01',
+    }, recorded_at='2026-01-01T00:00:00Z')
+    new = repo.put_record(project, {
+        'id': 'policy', 'kind': 'entity', 'text': 'new',
+        'metadata': {'applicability': {
+            'platforms': {'mode': 'all', 'values': []},
+            'businesses': {'mode': 'specific', 'values': ['直播']},
+            'audiences': {'mode': 'unknown', 'values': []},
+        }},
+        'valid_from': '2025-02-01',
+    }, expected_version=1, recorded_at='2026-02-01T00:00:00Z')
+
+    assert [row['text'] for row in repo.query(
+        project, applicability={'platforms': ['美团']},
+        valid_at='2025-01-01', known_at=old['recorded_at'])] == ['old']
+    assert repo.query(
+        project, applicability={'platforms': ['京东']},
+        valid_at='2025-01-01', known_at=old['recorded_at']) == []
+    assert [row['text'] for row in repo.query(
+        project, applicability={'platforms': ['京东'], 'businesses': ['直播']},
+        valid_at='2025-02-01', known_at=new['recorded_at'])] == ['new']
+
+    # 结构列不能改写不透明 payload：旧列表形状仍逐版本保留。
+    assert repo.history(project, 'policy')[0]['metadata']['applicability'] == {
+        'platforms': ['美团'], 'businesses': [],
+    }
+
+
+def test_query_native_scope_modes_and_half_open_unknown_time(tmp_path):
+    repo = Repository(tmp_path / 'native-applicability-modes')
+    project = repo.create_project('native applicability modes')['id']
+    records = [
+        {'id': 'specific', 'kind': 'entity', 'text': 'specific',
+         'metadata': {'applicability': {'platforms': ['美团']}},
+         'valid_from': '2025-01-01', 'valid_until': '2025-02-01'},
+        {'id': 'all', 'kind': 'entity', 'text': 'all',
+         'metadata': {'applicability': {
+             'platforms': {'mode': 'all', 'values': []}}},
+         'valid_from': '2025-01-01', 'valid_until': '2025-02-01'},
+        {'id': 'unknown-scope', 'kind': 'entity', 'text': 'unknown scope'},
+        {'id': 'unknown-start', 'kind': 'entity', 'text': 'unknown start',
+         'metadata': {'applicability': {'platforms': ['美团']}},
+         'valid_until': '2025-02-01'},
+    ]
+    repo.put_batch(project, records)
+
+    unknown_time = repo._db.execute('''SELECT valid_from_known,valid_from_epoch_ms,
+        valid_until_known,valid_until_epoch_ms FROM record_versions
+        WHERE project_id=? AND id=?''', (project, 'unknown-scope')).fetchone()
+    assert dict(unknown_time) == {
+        'valid_from_known': False, 'valid_from_epoch_ms': 0,
+        'valid_until_known': False, 'valid_until_epoch_ms': 0,
+    }
+
+    selected = {'platforms': {'mode': 'specific', 'values': ['美团']}}
+    assert {row['id'] for row in repo.query(
+        project, applicability=selected, valid_at='2025-01-01')} == {
+            'specific', 'all', 'unknown-start'}
+    assert {row['id'] for row in repo.query(
+        project, applicability=selected, valid_at='2025-01-01',
+        include_unknown=False)} == {'specific', 'all'}
+    assert repo.query(
+        project, applicability=selected, valid_at='2025-02-01') == []
+
+
+def test_query_pushes_scope_time_and_kinds_into_record_versions_sql(tmp_path,
+                                                                    monkeypatch):
+    repo = Repository(tmp_path / 'native-applicability-sql')
+    project = repo.create_project('native applicability sql')['id']
+    repo.put_record(project, {
+        'id': 'target', 'kind': 'entity', 'text': 'target',
+        'metadata': {'applicability': {'platforms': ['美团']}},
+        'valid_from': '2025-01-01',
+    })
+    statements = []
+    execute = repo._db.execute
+
+    def capture(statement, params=()):
+        statements.append(statement)
+        return execute(statement, params)
+
+    monkeypatch.setattr(repo._db, 'execute', capture)
+    rows = repo.query(
+        project, applicability={'platforms': ['美团']}, valid_at='2025-01-01',
+        kinds=['entity'], include_unknown=False)
+
+    assert [row['id'] for row in rows] == ['target']
+    query_sql = next(sql for sql in statements if 'FROM record_versions' in sql)
+    assert 'platform_values &&' in query_sql
+    assert 'valid_from_known' in query_sql and 'valid_from_epoch_ms' in query_sql
+    assert 'valid_until_known' in query_sql and 'valid_until_epoch_ms' in query_sql
+    assert "payload::jsonb->>'kind'" in query_sql
+
+
+def test_query_uses_distinct_current_and_historical_system_time_paths(tmp_path,
+                                                                       monkeypatch):
+    repo = Repository(tmp_path / 'native-applicability-system-time')
+    project = repo.create_project('native applicability system time')['id']
+    saved = repo.put_record(project, {
+        'id': 'target', 'kind': 'entity', 'text': 'target',
+        'metadata': {'applicability': {'platforms': ['美团']}},
+    })
+    statements = []
+    execute = repo._db.execute
+
+    def capture(statement, params=()):
+        if 'FROM record_versions' in statement:
+            statements.append(statement)
+        return execute(statement, params)
+
+    monkeypatch.setattr(repo._db, 'execute', capture)
+    repo.query(project, applicability={'platforms': ['美团']})
+    current_sql = statements[-1]
+    repo.query(project, applicability={'platforms': ['美团']},
+               known_at=saved['recorded_at'])
+    historical_sql = statements[-1]
+
+    assert 'superseded_at IS NULL' in current_sql
+    assert 'recorded_at<=' not in current_sql
+    assert 'recorded_at<=' in historical_sql
+    assert 'superseded_at>?' in historical_sql
+
+
+def test_repository_applicability_dictionary_and_ordered_version_reads(tmp_path,
+                                                                        monkeypatch):
+    repo = Repository(tmp_path / 'native-applicability-helpers')
+    project = repo.create_project('native applicability helpers')['id']
+    first = repo.put_record(project, {
+        'id': 'first', 'kind': 'entity', 'text': 'first',
+        'metadata': {'applicability': {
+            'platforms': ['meituan'], 'businesses': ['直播'],
+            'audiences': ['商家'],
+        }},
+    })
+    obsolete = repo.put_record(project, {
+        'id': 'obsolete', 'kind': 'entity', 'text': 'obsolete',
+        'metadata': {'applicability': {'platforms': ['京东']}},
+    })
+    deleted = repo.put_record(project, {
+        'id': 'deleted', 'kind': 'entity', 'text': 'deleted',
+        'metadata': {'_deleted': True, 'applicability': {'platforms': ['淘宝']}},
+    })
+    revised = repo.put_record(project, {
+        'id': 'obsolete', 'kind': 'entity', 'text': 'revised',
+        'metadata': {'applicability': {'platforms': ['美团']}},
+    }, expected_version=1)
+
+    assert repo.distinct_applicability_values(project) == {
+        'platforms': ['美团'], 'businesses': ['直播'], 'audiences': ['商家'],
+    }
+    statements = []
+    execute = repo._db.execute
+
+    def capture(statement, params=()):
+        statements.append((statement, params))
+        return execute(statement, params)
+
+    monkeypatch.setattr(repo._db, 'execute', capture)
+    assert [row['version_id'] for row in repo.records_by_version_ids(
+        project, [revised['version_id'], first['version_id'],
+                  deleted['version_id'], obsolete['version_id']])] == [
+        revised['version_id'], first['version_id'],
+        deleted['version_id'], obsolete['version_id'],
+    ]
+    version_sql, version_params = next(
+        item for item in statements if 'FROM record_versions' in item[0])
+    assert 'version_id = ANY(?::text[])' in version_sql
+    assert version_params == (project, [
+        revised['version_id'], first['version_id'],
+        deleted['version_id'], obsolete['version_id'],
+    ])
+
+
+def test_native_applicability_migration_backfills_all_history_idempotently(tmp_path):
+    repo = Repository(tmp_path / 'native-applicability-migration')
+    project = repo.create_project('native applicability migration')['id']
+    applicability = {
+        'platforms': ['\u2003ｍｅｉｔｕａｎ\u2003', '京东'],
+        'businesses': ['\u0085直播\u0085'],
+        'audiences': {'mode': 'all', 'values': []},
+    }
+    saved = repo.put_record(project, {
+        'id': 'legacy', 'kind': 'entity', 'text': 'legacy',
+        'metadata': {'applicability': applicability},
+        'valid_from': '2025-01-01', 'valid_until': '2025-02-01',
+    })
+    projection_columns = (
+        'platform_mode', 'platform_values', 'business_mode', 'business_values',
+        'audience_mode', 'audience_values', 'scope_identity', 'valid_from_known',
+        'valid_from_epoch_ms', 'valid_until_known', 'valid_until_epoch_ms')
+    repo._db._conn.execute(
+        'ALTER TABLE record_versions ' + ','.join(
+            f'ALTER COLUMN {column} DROP NOT NULL' for column in projection_columns))
+    repo._db.execute(
+        'UPDATE record_versions SET ' + ','.join(
+            f'{column}=NULL' for column in projection_columns) +
+        ' WHERE project_id=? AND version_id=?', (project, saved['version_id']))
+
+    from knowledge_service.repository.migrate import Migration
+    migration_path = (Path(__file__).resolve().parents[2] / 'knowledge_service' /
+                      'repository' / 'migrations' /
+                      '0014_backfill_native_applicability.sql')
+    execution = Migration(14, 'backfill_native_applicability', migration_path).execution()
+    # Run through the first pass, then emulate an old application write in the
+    # phase gap. With no 0013 defaults it remains visibly NULL, never false data.
+    first_pass = next(
+        index for index, sql in enumerate(execution.statements)
+        if sql.strip() == 'SELECT pg_temp.ks_backfill_native_applicability();')
+    for statement in execution.statements[:first_pass + 1]:
+        repo._db._conn.execute(statement)
+    late_payload = {
+        'id': 'late-legacy', 'kind': 'entity', 'text': 'late legacy',
+        'metadata': {'applicability': applicability},
+        'valid_from': '2025-01-01', 'valid_until': '2025-02-01',
+    }
+    repo._db.execute('''INSERT INTO record_versions
+        (project_id,id,version,version_id,payload,recorded_at,superseded_at)
+        VALUES (?,?,1,?,?,now(),NULL)''',
+        (project, 'late-legacy', 'late-legacy-v1', json.dumps(late_payload)))
+    late_before = repo._db.execute('''SELECT platform_mode FROM record_versions
+        WHERE project_id=? AND version_id=?''',
+        (project, 'late-legacy-v1')).fetchone()
+    assert late_before['platform_mode'] is None
+    for statement in execution.statements[first_pass + 1:]:
+        repo._db._conn.execute(statement)
+    # The full migration is repeatable after constraints and NOT NULL are in place.
+    for statement in execution.statements:
+        repo._db._conn.execute(statement)
+    row = repo._db.execute('''SELECT platform_mode,platform_values,business_mode,
+        business_values,audience_mode,audience_values,scope_identity,
+        valid_from_known,valid_from_epoch_ms,valid_until_known,valid_until_epoch_ms
+        FROM record_versions WHERE project_id=? AND version_id=?''',
+        (project, saved['version_id'])).fetchone()
+
+    normalized = normalize_applicability(applicability)
+    assert dict(row) == {
+        'platform_mode': normalized['platforms']['mode'],
+        'platform_values': normalized['platforms']['values'],
+        'business_mode': normalized['businesses']['mode'],
+        'business_values': normalized['businesses']['values'],
+        'audience_mode': 'all', 'audience_values': [],
+        'scope_identity': scope_identity(applicability),
+        'valid_from_known': True,
+        'valid_from_epoch_ms': 1735689600000,
+        'valid_until_known': True,
+        'valid_until_epoch_ms': 1738368000000,
+    }
+    late = repo._db.execute('''SELECT platform_mode,platform_values,business_mode,
+        business_values,audience_mode,audience_values,scope_identity
+        FROM record_versions WHERE project_id=? AND version_id=?''',
+        (project, 'late-legacy-v1')).fetchone()
+    assert dict(late) == {
+        'platform_mode': normalized['platforms']['mode'],
+        'platform_values': normalized['platforms']['values'],
+        'business_mode': normalized['businesses']['mode'],
+        'business_values': normalized['businesses']['values'],
+        'audience_mode': 'all', 'audience_values': [],
+        'scope_identity': scope_identity(applicability),
+    }
 
 
 def test_filters_typed_missing_nested_and_unsafe_paths():

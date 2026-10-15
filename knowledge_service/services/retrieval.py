@@ -8,8 +8,15 @@ import numpy as np
 # 数据库错误的唯一出处：降级通道必须捕获驱动无关的 DatabaseError；否则一次
 # 查询失败会让整个检索抛错，而不是按设计降级。
 from ..repository.connection import DatabaseError
+from ..domain.applicability import (
+    dimension_mode, dimension_values, normalize_applicability,
+)
 
 LOG = logging.getLogger('knowledge_service.retrieval')
+
+# Native projection readers must explicitly opt into the schema they understand.
+# A missing cursor is deliberately stale; authority remains PostgreSQL.
+PROJECTION_SCHEMA_VERSIONS = {'milvus': 3, 'neo4j': 3}
 
 
 def has_vector(row):
@@ -23,14 +30,17 @@ def has_vector(row):
     return vector is not None and len(vector) > 0
 
 
-def rank_candidates(candidates, query, k, encoder, timings=None):
+def rank_candidates(candidates, query, k, encoder, timings=None,
+                    query_vector=None):
     if not candidates:
         return []
     if any(not has_vector(row) for row in candidates):
         raise RuntimeError('语义索引尚未就绪，请先构建语义索引；仍可使用关键词检索和图谱浏览')
     vectors = []
     started = perf_counter()
-    query_vector = np.asarray(encoder.encode([query]), dtype='float32')
+    query_vector = np.asarray(
+        encoder.encode([query]) if query_vector is None else [query_vector],
+        dtype='float32')
     encoded_at = perf_counter()
     if timings is not None:
         timings['query_embedding'] = round((encoded_at-started)*1000, 1)
@@ -61,6 +71,21 @@ def rank_candidates(candidates, query, k, encoder, timings=None):
         timings['vector_ranking'] = round((perf_counter()-encoded_at)*1000, 1)
     return [{**{key: value for key, value in candidates[int(i)].items() if key != 'embedding'},
              'score': float(similarities[int(i)])} for i in indices]
+
+
+def cached_query_vector(encoder, query, cache=None):
+    """Encode a request query once when callers share a cache across workers."""
+    if cache is None:
+        return encoder.encode([query])[0]
+    lock = cache.get('lock')
+    if lock is None:
+        if 'vector' not in cache:
+            cache['vector'] = encoder.encode([query])[0]
+        return cache['vector']
+    with lock:
+        if 'vector' not in cache:
+            cache['vector'] = encoder.encode([query])[0]
+        return cache['vector']
 
 
 def rrf_fuse(rankings, limit, constant=60):
@@ -125,37 +150,84 @@ class RetrievalEngine:
     """先限定范围，再由独立后端各自排名，最后用 RRF 融合。"""
     MODES = frozenset({'hybrid', 'semantic', 'keyword'})
 
-    def __init__(self, repository, encoder, milvus_store=None):
+    def __init__(self, repository, encoder, milvus_store=None, *,
+                 projection_schema_versions=None, projection_readiness=None):
         self.repository = repository
         self.encoder = encoder
         self.milvus = milvus_store
+        self.projection_schema_versions = {
+            **PROJECTION_SCHEMA_VERSIONS,
+            **(projection_schema_versions or {}),
+        }
+        self.projection_readiness = (
+            projection_readiness or
+            getattr(repository, 'projection_ready', None))
 
-    def _search_via_milvus(self, project_id, query, retrieval_mode, candidates,
-                           channels, k, content_k, scope):
+    def _projection_ready(self, project_id, target):
+        schema_version = self.projection_schema_versions[target]
+        if not callable(self.projection_readiness):
+            return False
+        try:
+            return bool(self.projection_readiness(
+                project_id, target, schema_version))
+        except Exception:
+            LOG.warning('%s 投影就绪检查失败，降级 PostgreSQL 本地检索',
+                        target, exc_info=True)
+            return False
+
+    def _search_via_milvus(self, project_id, query, retrieval_mode,
+                           channels, k, content_k, scope,
+                           platform_match=None, query_vector_cache=None):
         """Milvus 排名快路径：dense(向量)/sparse(BM25关键词)/原生RRF(混合)。
 
-        candidates 是已由 scope 过滤的候选 rows（含 version_id）。Milvus 只做排名，
-        返回 version_id+score 后按 version_id 从 candidates 回填完整 row，不二次查
-        PostgreSQL。content_k 在回填后按 channel 分通道截断。
+        Milvus V2 原生执行范围和业务时间过滤。这里只把 top-k version_id 交给
+        PostgreSQL 小量回填，在线请求不预载整个项目，也不传 candidate_ids。
         """
-        candidate_ids = [row["version_id"] for row in candidates if "version_id" in row]
-        by_version = {row["version_id"]: row for row in candidates if "version_id" in row}
         milvus_kinds = [ch for ch in channels if ch in {"entity", "relation", "chunk"}]
-        query_vector = self.encoder.encode([query])[0]
+        if not milvus_kinds:
+            return {
+                "hits": [], "candidate_count": 0, "filter_stage": "before_ranking",
+                "requested_mode": retrieval_mode, "active_mode": retrieval_mode,
+                "degraded": False, "_backend": "milvus",
+                "backends": {"milvus": {"active": True, "hits": 0}},
+                "content_channels": channels, "channel_quotas": content_k,
+                "keyword_backend": "milvus_bm25" if retrieval_mode in {"hybrid", "keyword"} else None,
+                "valid_at": scope.get("valid_at"), "known_at": scope.get("known_at"),
+            }
+        query_vector = cached_query_vector(
+            self.encoder, query, query_vector_cache)
+
+        milvus_scope = dict(scope)
+        if platform_match:
+            applicability = normalize_applicability(
+                milvus_scope.get('applicability'))
+            applicability['platforms'] = {
+                'mode': platform_match,
+                'values': (dimension_values(applicability, 'platforms')
+                           if platform_match == 'specific_only' else []),
+            }
+            milvus_scope['applicability'] = applicability
 
         if retrieval_mode == "hybrid":
             hits = self.milvus.search_hybrid(project_id, query, query_vector,
-                                             kinds=milvus_kinds, k=k, candidate_ids=candidate_ids)
+                                             kinds=milvus_kinds, k=k,
+                                             scope=milvus_scope)
             active = "hybrid"
         elif retrieval_mode == "semantic":
             hits = self.milvus.search_dense(project_id, query_vector,
-                                            kinds=milvus_kinds, k=k, candidate_ids=candidate_ids)
+                                            kinds=milvus_kinds, k=k,
+                                            scope=milvus_scope)
             active = "semantic"
         else:
             hits = self.milvus.search_bm25(project_id, query,
-                                           kinds=milvus_kinds, k=k, candidate_ids=candidate_ids)
+                                           kinds=milvus_kinds, k=k,
+                                           scope=milvus_scope)
             active = "keyword"
 
+        version_ids = [hit['version_id'] for hit in hits if hit.get('version_id')]
+        rows = self.repository.current_records_by_version_ids(
+            project_id, version_ids)
+        by_version = {row['version_id']: row for row in rows}
         ranked = []
         for h in hits:
             row = by_version.get(h["version_id"])
@@ -174,7 +246,7 @@ class RetrievalEngine:
 
         return {
             "hits": ranked,
-            "candidate_count": len(candidates),
+            "candidate_count": len(version_ids),
             "filter_stage": "before_ranking",
             "requested_mode": retrieval_mode,
             "active_mode": active,
@@ -195,7 +267,9 @@ class RetrievalEngine:
         }
 
     def search(self, project_id, query, *, retrieval_mode='hybrid', scope=None,
-               content_channels=None, k=10, content_k=None, candidates=None):
+               content_channels=None, k=10, content_k=None, candidates=None,
+               platform_match=None, candidates_authoritative=False,
+               fallback_cache=None, query_vector_cache=None):
         if retrieval_mode not in self.MODES:
             raise ValueError('retrieval_mode 必须是 hybrid、semantic 或 keyword')
         if not isinstance(query, str) or not query.strip():
@@ -203,6 +277,9 @@ class RetrievalEngine:
         if type(k) is not int or not 1 <= k <= 100:
             raise ValueError('搜索结果数量必须在 1 到 100 之间')
         scope = dict(scope or {})
+        if platform_match not in {None, 'specific_only', 'all_only',
+                                  'unknown_only'}:
+            raise ValueError('platform_match 必须是 specific_only、all_only 或 unknown_only')
         candidate_ids = scope.pop('_candidate_ids', None)
         lexical_aliases = scope.pop('_lexical_aliases', {})
         # P0-1 本体查询扩展：默认不存在 → 下面的所有分支一行都不会执行，
@@ -229,15 +306,78 @@ class RetrievalEngine:
         # Milvus，PostgreSQL 不再读 vector 列）。Milvus 失败会透明降级到下方本地逻辑。
         # 开了本体扩展就不走它：类型通道（子类实例召回）是本地按已过滤候选算出来的，
         # Milvus 只负责排名，交出去会静默丢掉子类命中。扩展是显式开关，默认不受影响。
-        use_milvus = (self.milvus is not None and self.milvus.available
-                      and scope.get('known_at') is None)
+        native_scope = (scope.get('known_at') is None
+                        and scope.get('filters') is None
+                        and candidate_ids is None
+                        and not lexical_aliases
+                        and not expansion_type_iris)
+        projection_current = (self.milvus is not None and self.milvus.available
+                              and scope.get('known_at') is None)
+        milvus_ready = (self._projection_ready(project_id, 'milvus')
+                        if projection_current else False)
+        milvus_current = projection_current and native_scope
+        projection_stale = projection_current and not milvus_ready
+        use_milvus = milvus_current and milvus_ready
+        if use_milvus:
+            try:
+                LOG.debug('检索走 Milvus V2 原生范围快路径：mode=%s', retrieval_mode)
+                return self._search_via_milvus(
+                    project_id, query, retrieval_mode, channels, k,
+                    channel_quotas, scope, platform_match,
+                    query_vector_cache)
+            except Exception:
+                LOG.warning('Milvus V2 排名失败，降级到 PostgreSQL', exc_info=True)
+                use_milvus = False
         include_embeddings = (retrieval_mode in {'hybrid', 'semantic'}
                               and not use_milvus) if channels else False
-        scoped_rows = list(candidates) if candidates is not None else (
-            self.repository.query(
+        # A caller-provided candidate list may itself have come from a stale
+        # projection. Once readiness fails, discard it and re-read authority.
+        authoritative_candidates = (candidates if candidates_authoritative
+                                    or not projection_stale else None)
+        fallback_applicability = (
+            (fallback_cache or {}).get('applicability')
+            or scope.get('applicability'))
+        if platform_match in {'all_only', 'unknown_only'}:
+            fallback_applicability = normalize_applicability(
+                fallback_applicability)
+            fallback_applicability['platforms'] = {
+                'mode': 'unknown', 'values': []}
+        if authoritative_candidates is not None:
+            scoped_rows = list(authoritative_candidates)
+        elif fallback_cache is not None:
+            lock = fallback_cache.get('lock')
+            if lock is None:
+                cached_rows = fallback_cache.get('rows')
+                if cached_rows is None:
+                    cached_rows = (self.repository.query(
+                        project_id, filters=scope.get('filters'),
+                        valid_at=scope.get('valid_at'),
+                        known_at=scope.get('known_at'),
+                        include_unknown=scope.get('include_unknown', True),
+                        kinds=channels, applicability=fallback_applicability,
+                        include_embeddings=include_embeddings) if channels else [])
+                    fallback_cache['rows'] = list(cached_rows)
+                scoped_rows = list(cached_rows)
+            else:
+                with lock:
+                    cached_rows = fallback_cache.get('rows')
+                    if cached_rows is None:
+                        cached_rows = (self.repository.query(
+                            project_id, filters=scope.get('filters'),
+                            valid_at=scope.get('valid_at'),
+                            known_at=scope.get('known_at'),
+                            include_unknown=scope.get('include_unknown', True),
+                            kinds=channels, applicability=fallback_applicability,
+                            include_embeddings=include_embeddings) if channels else [])
+                        fallback_cache['rows'] = list(cached_rows)
+                scoped_rows = list(cached_rows)
+        else:
+            scoped_rows = (self.repository.query(
                 project_id, filters=scope.get('filters'), valid_at=scope.get('valid_at'),
                 known_at=scope.get('known_at'),
                 include_unknown=scope.get('include_unknown', True),
+                kinds=channels,
+                applicability=fallback_applicability,
                 include_embeddings=include_embeddings) if channels else [])
         # PERF：`candidates=` 是快路径——知识对话等调用方传入已经读过的行，
         # 因此每个请求只扫描一次范围，而不是两次。没有它，每次搜索都会重读
@@ -245,6 +385,19 @@ class RetrievalEngine:
         # 嵌入向量，这就是为什么 /search 的 keyword 比 hybrid 快约 3 倍。
         scoped_rows = [row for row in scoped_rows if not row.get('metadata', {}).get('_deleted')
                        and not row.get('metadata', {}).get('_audit')]
+        if platform_match:
+            requested_platforms = set(dimension_values(
+                normalize_applicability(scope.get('applicability')), 'platforms'))
+            def platform_matches(row):
+                applicability = (row.get('metadata') or {}).get('applicability')
+                mode = dimension_mode(applicability, 'platforms')
+                if platform_match == 'all_only':
+                    return mode == 'all'
+                if platform_match == 'unknown_only':
+                    return mode == 'unknown'
+                return (mode == 'specific' and bool(requested_platforms.intersection(
+                    dimension_values(applicability, 'platforms'))))
+            scoped_rows = [row for row in scoped_rows if platform_matches(row)]
         visible_entities = {row['id'] for row in scoped_rows if row['kind'] == 'entity'}
         scoped_rows = [row for row in scoped_rows if row['kind'] != 'relation' or
                        {row.get('subject_id'), row.get('object_id')}.issubset(visible_entities)]
@@ -263,33 +416,6 @@ class RetrievalEngine:
             return sorted(({key: value for key, value in row.items() if key != 'embedding'}
                            for row in rows), key=lambda row: row['id'])
 
-        if use_milvus:
-            try:
-                LOG.debug('检索走 Milvus 快路径：mode=%s 候选=%d', retrieval_mode, len(candidates))
-                response = self._search_via_milvus(project_id, query, retrieval_mode,
-                                                   candidates, channels, k, channel_quotas, scope)
-                # 本体扩展的「类型通道」在 Milvus 之外：本地按 type∈type_iris 扫候选，
-                # 把子类实例补进结果（去重），不因走了 Milvus 就丢掉子类召回。
-                if expansion_type_iris:
-                    ontology_rows = _rank_ontology_types()
-                    if ontology_rows:
-                        existing = {row['id'] for row in response['hits']}
-                        entity_quota = (channel_quotas.get('entity', k)
-                                        if channel_quotas else k)
-                        extra = [row for row in ontology_rows if row['id'] not in existing][:entity_quota]
-                        response['hits'] = [*response['hits'], *extra]
-                        response['backends']['ontology'] = {
-                            'active': True, 'hits': len(ontology_rows)}
-                        response['ontology_expansion'] = {
-                            'terms': list((expansion or {}).get('terms') or []),
-                            'subclasses': list((expansion or {}).get('subclasses') or []),
-                            'type_iris': sorted(expansion_type_iris),
-                            'keyword_terms': list(expansion_terms),
-                            'type_hits': len(ontology_rows),
-                        }
-                return response
-            except Exception:
-                LOG.warning('Milvus 排名失败，降级到本地检索', exc_info=True)
         rankings = {}
         errors = {}
         keyword_backend = None
@@ -337,16 +463,22 @@ class RetrievalEngine:
                 errors['keyword'] = str(exc)
         if retrieval_mode in {'hybrid', 'semantic'}:
             try:
+                shared_query_vector = (
+                    cached_query_vector(self.encoder, query,
+                                        query_vector_cache)
+                    if query_vector_cache is not None and candidates else None)
                 if channel_quotas:
                     semantic = []
                     for kind in channels:
                         rows = [row for row in candidates if row['kind'] == kind]
                         semantic.extend(rank_candidates(
-                            rows, query, min(max(channel_quotas[kind] * 5, 50), len(rows)), self.encoder))
+                            rows, query, min(max(channel_quotas[kind] * 5, 50), len(rows)),
+                            self.encoder, query_vector=shared_query_vector))
                     rankings['semantic'] = semantic
                 else:
                     rankings['semantic'] = rank_candidates(
-                        candidates, query, min(per_backend_limit, len(candidates)), self.encoder)
+                        candidates, query, min(per_backend_limit, len(candidates)),
+                        self.encoder, query_vector=shared_query_vector)
             except (ValueError, RuntimeError) as exc:
                 errors['semantic'] = str(exc)
         # semantic 模式失败时降级 keyword 兜底（向量已迁 Milvus，本地无向量时 semantic 不可用）
@@ -410,6 +542,14 @@ class RetrievalEngine:
             'valid_at': scope.get('valid_at'),
             'known_at': scope.get('known_at'),
         }
+        if projection_stale:
+            response.update(
+                _backend='postgres_local', degraded=True,
+                degraded_reason='milvus_projection_stale')
+            response['backends']['milvus'] = {
+                'active': False, 'hits': 0,
+                'error': 'projection cursor is missing or behind authority',
+            }
         if 'ontology' in rankings or expansion_type_iris:
             # 扩展的台账：命中了哪些类/子类、关键词通道 OR 了哪些词、类型通道召回多少条。
             # 没有它，命中数变化就成了"魔法"，排查时无从下手。
