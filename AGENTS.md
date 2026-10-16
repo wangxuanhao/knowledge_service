@@ -12,8 +12,8 @@ FastAPI + PostgreSQL 的知识图谱服务：双时态版本、本体/SHACL 治�
 
 | 项 | 值 |
 |---|---|
-| Python | **3.13**，conda env **`model_agent`**（**唯一**环境，**绝不要建 `.venv`**） |
-| 解释器 | `D:/Anaconda3/envs/model_agent/python.exe` |
+| Python | **3.12**，conda env **`llm_model`**（**唯一**环境，**绝不要建 `.venv`**） |
+| 解释器 | `D:/anaconda/envs/llm_model/python.exe` |
 | 存储 | **PostgreSQL 是唯一权威存储**（SQLite 后端已移除；遗留 `KG_DATABASE` 被明确拒绝） |
 | 向量 | 可选 Milvus（`integrations/milvus_store.py`） |
 | 前端 | 原生 JS/CSS，**无构建工具、无 `node_modules`、无 `package.json`**；`web/` 挂载为 HTTP 路径 `/assets/` |
@@ -42,7 +42,7 @@ FastAPI + PostgreSQL 的知识图谱服务：双时态版本、本体/SHACL 治�
 
 ### 起服务（端口 **8100**）
 ```bash
-conda activate model_agent
+conda activate llm_model
 python -u -m knowledge_service --port 8100
 ```
 - **PostgreSQL 必须先跑**，否则服务拒绝启动：`docker compose up -d --wait`（仓库根，含 PG/Milvus/MinIO/etcd/Attu）
@@ -56,7 +56,7 @@ python -m knowledge_service.repository.migrate   # 幂等
 ### 跑测试 —— 两套，要分开跑
 ```bash
 # ① Python 测试（含 PG 集成与浏览器契约）
-conda activate model_agent
+conda activate llm_model
 python -m pytest -q
 
 # ② 前端契约测试（.cjs，pytest 不收集它们，必须单独跑）

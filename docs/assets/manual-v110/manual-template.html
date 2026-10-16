@@ -1,0 +1,286 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>知序 Knowledge Service · 傻瓜级操作手册（服务 v1.1.0）</title><style>
+    :root{--ink:#123a3d;--muted:#61787a;--paper:#f6f2e9;--card:#fffdf7;--teal:#006c68;--teal2:#0b8f86;--line:#cbd8d2;--amber:#f2a900;--red:#e43e36;--nav:#0b3334}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;color:var(--ink);background:linear-gradient(120deg,#ede7d9,#f8f5ec 45%,#e5efeb);font-family:"Microsoft YaHei UI","Noto Sans CJK SC",sans-serif;line-height:1.72}
+    .cover{min-height:82vh;padding:72px max(7vw,40px);color:#effffb;background:radial-gradient(circle at 80% 15%,#0ba59655,transparent 33%),linear-gradient(135deg,#072f31,#0b5653 70%,#08766e);position:relative;overflow:hidden}.cover:after{content:"";position:absolute;right:-90px;bottom:-160px;width:480px;height:480px;border:1px solid #6ee6d855;border-radius:50%;box-shadow:0 0 0 55px #6ee6d815,0 0 0 110px #6ee6d810}.kicker{letter-spacing:.23em;color:#67eadc;font-weight:800}.cover h1{font-family:"STZhongsong","SimSun",serif;font-size:clamp(42px,6vw,86px);line-height:1.06;margin:.22em 0}.cover .subtitle{font-size:20px;max-width:780px;color:#c7e6e1}.cover-meta{display:flex;gap:12px;flex-wrap:wrap;margin-top:34px}.cover-meta span{border:1px solid #78d8cd66;border-radius:99px;padding:8px 15px;background:#ffffff0d}.route{display:grid;grid-template-columns:repeat(7,1fr);gap:7px;margin-top:56px;max-width:1100px}.route span{padding:10px 8px;text-align:center;border:1px solid #83dcd155;border-radius:8px;background:#062929aa;font-size:13px}.route i{font-style:normal;color:#f8b933}
+    .layout{display:grid;grid-template-columns:260px minmax(0,1120px);gap:34px;max-width:1460px;margin:0 auto;padding:42px 28px}.toc{position:sticky;top:20px;align-self:start;background:var(--nav);color:#d8f2ee;border-radius:16px;padding:20px;box-shadow:0 16px 40px #143b3630}.toc b{display:block;color:#67eadc;margin-bottom:10px}.toc a{display:block;color:#d8f2ee;text-decoration:none;border-left:2px solid #2b7470;padding:7px 11px;font-size:14px}.toc a:hover{border-color:var(--amber);color:#fff}.content{min-width:0}.intro{background:var(--card);border:1px solid var(--line);padding:28px;border-radius:16px;margin-bottom:28px}.intro h2{margin-top:0}.legend{display:flex;gap:14px;flex-wrap:wrap}.legend span{font-size:13px}.legend i{display:inline-grid;place-items:center;width:24px;height:24px;margin-right:5px;border-radius:50%;background:var(--red);color:#fff;font-style:normal;font-weight:900}
+    .core-chapter,.appendix{background:var(--card);border:1px solid var(--line);border-radius:18px;margin:0 0 32px;padding:32px;box-shadow:0 10px 30px #153e3820}.chapter-head{display:flex;gap:18px;border-bottom:1px solid var(--line);padding-bottom:19px;margin-bottom:24px}.chapter-head>span{font:800 36px/1 Georgia,serif;color:var(--teal2)}.chapter-head h2{margin:0;font-family:"STZhongsong","SimSun",serif;font-size:29px}.chapter-head p{margin:4px 0 0;color:var(--muted)}
+    .step{display:grid;grid-template-columns:54px minmax(0,1fr);gap:14px;margin:28px 0}.step-no{font:800 20px/46px Georgia,serif;text-align:center;width:46px;height:46px;border-radius:50%;background:var(--ink);color:#fff}.step-body h3{margin:4px 0 7px}.step-body>p{margin:4px 0}.step-body>p b{color:var(--teal)}
+    figure{margin:20px 0 30px;border:1px solid #b9ccc6;border-radius:12px;overflow:hidden;background:#eef5f2}.shot-head{display:flex;gap:12px;align-items:center;padding:9px 13px;background:#113e40;color:#effffb}.shot-head span{background:var(--amber);color:#173437;border-radius:4px;padding:2px 8px;font-weight:900}.shot-stage{position:relative;line-height:0;background:#fff}.shot-stage img{display:block;width:100%;height:auto}.shot-marker{position:absolute;left:var(--x);top:var(--y);width:var(--w);height:var(--h);border:3px solid var(--red);border-radius:8px;box-shadow:0 0 0 2px #fff8,0 5px 14px #6b100b45;pointer-events:none}.shot-marker:before{content:attr(data-n);position:absolute;left:-4px;top:-30px;display:grid;place-items:center;width:27px;height:27px;border-radius:50%;background:var(--red);color:#fff;font:900 14px/1 sans-serif;box-shadow:0 2px 0 #9f1e19}.shot-stage:hover .shot-marker{animation:pulse 1.15s ease-in-out infinite alternate}@keyframes pulse{to{box-shadow:0 0 0 5px #fff9,0 6px 17px #6b100b55}}
+    figcaption{padding:15px 18px 17px;background:#f3f8f6;line-height:1.6}figcaption ol{margin:0;padding:0;list-style:none;display:grid;gap:5px}figcaption li b{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--red);color:#fff;margin-right:8px}.completion-sign{border-left:4px solid #10a37f;background:#e8f7f1;padding:11px 14px;margin-top:12px}.chapter-close{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-top:28px}.chapter-close>div{margin:0}.chapter-close b{display:block}.common-misunderstanding{border-left:4px solid var(--amber);background:#fff5d9;padding:11px 14px}.callout,.rule,.demo-note{padding:15px 18px;border-radius:10px;margin:20px 0}.callout{background:#e7f3f0;border:1px solid #acd2ca}.rule{background:#173f40;color:#effffb;border-left:6px solid var(--amber)}.demo-note{background:#fff2d8;border:1px dashed #d69715}.sample{background:#102f31;color:#dff6f2;border-radius:12px;padding:16px 18px;margin:18px 0}.sample>div{display:flex;justify-content:space-between}.sample a{color:#ffd56a}.sample pre{white-space:pre-wrap;font:16px/1.8 "Microsoft YaHei UI",sans-serif;margin:12px 0 0;color:#fff}
+    .version-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.version-grid article{border-top:5px solid var(--teal);background:#eef5f2;padding:17px;border-radius:8px}.version-grid span{font-size:12px;color:var(--muted);letter-spacing:.15em}.version-grid h3{margin:4px 0}table{width:100%;border-collapse:collapse;margin:22px 0;font-size:14px}th,td{text-align:left;padding:10px 9px;border-bottom:1px solid var(--line)}th{background:#143f40;color:#fff}.compare{display:grid;grid-template-columns:1fr 1fr;gap:14px}.compare article{border:1px solid var(--line);padding:16px;border-radius:10px}.compare h3{margin-top:0;color:var(--teal)}
+    .trouble-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px}.troubleshooting-item{border:1px solid var(--line);border-radius:10px;padding:16px;background:#fff}.troubleshooting-item h3{margin:0 0 8px}.troubleshooting-item p{margin:7px 0;color:#334f50}.troubleshooting-item p b{display:inline-block;min-width:72px;color:var(--teal)}.foot{text-align:center;padding:34px;color:#607675}.foot strong{color:var(--ink)}
+    @media(max-width:900px){.layout{grid-template-columns:1fr}.toc{position:static}.route{grid-template-columns:repeat(2,1fr)}.chapter-close,.version-grid,.compare,.trouble-grid{grid-template-columns:1fr}.core-chapter,.appendix{padding:20px}.step{grid-template-columns:42px 1fr}.step-no{width:38px;height:38px;line-height:38px}.shot-head{align-items:flex-start}}
+    @media print{body{background:#fff}.cover{min-height:auto;padding:34px;background:#0b5653;-webkit-print-color-adjust:exact;print-color-adjust:exact}.layout{display:block;max-width:none;padding:0}.toc{display:none}.core-chapter,.appendix,.intro{box-shadow:none;border:0;border-radius:0;padding:18px 0;margin:0;break-before:page}figure{break-inside:avoid;page-break-inside:avoid}.shot-stage:hover .shot-marker{animation:none}.chapter-close{break-inside:avoid}}
+    </style></head>
+    <body><header class="cover"><div class="kicker">知识从结构到可核验事实</div><h1>知序 Knowledge Service<br>傻瓜级操作手册</h1><p class="subtitle">服务 v1.1.0 · 一个案例走完全流程：建项目 → 改本体 → 写知识 → 看脑图与台账 → 迁移 → 修订与恢复。</p><div class="cover-meta"><span>离线单文件</span><span>界面截图与隔离交互示例</span><span>交互更新：2026-10-15</span><span>每图 1～3 个编号框</span><span>演示数据：张三 / 产品部</span></div><div class="route"><span>① 登录</span><span>② 项目 + 本体 v1</span><span>③ 发布 <i>v2</i></span><span>④ 写入知识</span><span>⑤ 发布 <i>v3</i></span><span>⑥ 迁移 / 修订</span><span>⑦ 历史 / 恢复</span></div></header>
+    <div class="layout"><nav class="toc"><b>从头走到尾</b><a href="#chapter-1">01 · 登录与角色</a><a href="#chapter-2">02 · 项目与本体 v1</a><a href="#chapter-3">03 · 建模并发布 v2</a><a href="#chapter-4">04 · 知识写入与批次处理</a><a href="#chapter-5">05 · 脑图与三类台账</a><a href="#graph-canvas-workflow">05A · 拖节点与平移画布</a><a href="#graph-path-workflow">05B · 路径循迹</a><a href="#chapter-6">06 · 发布本体 v3</a><a href="#chapter-7">07 · 受控重分类</a><a href="#chapter-8">08 · 单独修改张三</a><a href="#chapter-9">09 · 属性表单、删除与恢复</a><a href="#chapter-10">10 · 三种版本关系</a><a href="#chapter-11">11 · 问答原文与运行验收</a><a href="#chapter-12">12 · 身份、任务与索引核查</a><a href="#troubleshooting">13 · 排错</a></nav><main class="content"><section class="intro"><h2>怎么读这本手册</h2><p>每一步只做一件事。先看“操作”，再对照截图中的红框编号，最后确认“完成标志”。界面截图取自真实服务 v1.1.0 的隔离演示项目；截图里的随机项目后缀不需要照抄。</p><p class="demo-note">2026-10-15 补充：本体画布与主图谱手势、局部路径循迹、属性表单。原有截图继续说明主案例；新增 P15 示例来自当前前端与隔离 API fixture，未写业务库，也不代表后端 OAG 已完成验收。</p><div class="legend"><span><i>1</i>编号框：这一步看这里</span><span><b>本体</b>＝项目结构</span><span><b>知识</b>＝实体 / 关系 / 属性实例</span><span><b>修订</b>＝某一条记录的历史</span></div></section><section id="chapter-1" class="core-chapter">
+      <header class="chapter-head"><span>01</span><div><h2>登录与角色：先确认自己能做什么</h2><p>主流程用管理员执行。超级管理员负责开账号；只读用户只能查看消费层。</p></div></header>
+      <article class="step"><div class="step-no">01</div><div class="step-body">
+      <h3>超级管理员开管理员账号</h3><p><b>操作：</b>进入“用户与权限”，创建一个管理员账号。</p><p><b>看到：</b>账号清单出现新行，角色是管理员，状态是启用。</p>{{SHOT:S01a}}{{SHOT:S01b}}
+    </div></article><article class="step"><div class="step-no">02</div><div class="step-body">
+      <h3>切换到管理员</h3><p><b>操作：</b>退出超级管理员，用新账号登录。</p><p><b>看到：</b>左下角角色徽章为“管理员”，本体层和实例层可见。</p>{{SHOT:S01c}}
+    </div></article>
+      <div class="chapter-close"><div class="completion-sign"><b>完成标志</b>管理员账号能看到“本体建模层、知识写入、知识台账”。</div>
+      <div class="common-misunderstanding"><b>常见误解</b>看得到按钮不等于权限只靠前端；真正的写权限仍由服务端校验。</div></div>
+    </section><section id="chapter-2" class="core-chapter">
+      <header class="chapter-head"><span>02</span><div><h2>创建项目并识别默认本体 v1</h2><p>选择“加载默认本体”后，项目创建完成时已经有一份可用的结构版本。</p></div></header>
+      <article class="step"><div class="step-no">01</div><div class="step-body">
+      <h3>创建项目</h3><p><b>操作：</b>项目与运行 → 项目设置 → 创建项目，选择“加载默认本体”。</p><p><b>看到：</b>项目卡片出现，并成为当前项目。</p>{{SHOT:S02a}}{{SHOT:S02b}}
+    </div></article><article class="step"><div class="step-no">02</div><div class="step-body">
+      <h3>查看默认结构</h3><p><b>操作：</b>进入“本体建模层”。</p><p><b>看到：</b>标题为已发布本体，画布有默认类和关系；这就是本体 v1。</p>{{SHOT:S02c}}
+    </div></article><div class="callout"><b>先记住：</b>项目创建后并不是“还没有本体”。加载默认本体模式会自动得到本体 v1；后面的第一次自定义发布会得到本体 v2。</div>
+      <div class="chapter-close"><div class="completion-sign"><b>完成标志</b>当前项目可切换，且本体建模层显示“已发布本体”。</div>
+      <div class="common-misunderstanding"><b>常见误解</b>画布上的类节点不是张三、产品部这类实例；它们是允许出现哪些知识的结构定义。</div></div>
+    </section><section id="chapter-3" class="core-chapter">
+      <header class="chapter-head"><span>03</span><div><h2>本体建模层：从草案发布本体 v2</h2><p>完整建立员工、部门、工号、入职日期和隶属于。草案只有发布后才成为正式结构。</p></div></header>
+      <article class="step"><div class="step-no">01</div><div class="step-body">
+      <h3>新增两个实体类</h3><p><b>操作：</b>新增“员工”和“部门”，每次动作写入同一份草案。</p><p><b>看到：</b>顶部显示草案未发布，画布出现两个类。</p>{{SHOT:S03a}}
+    </div></article><article class="step"><div class="step-no">02</div><div class="step-body">
+      <h3>新增两个属性定义</h3><p><b>操作：</b>新增“工号”“入职日期”，domain 选员工，range 选字符串。</p><p><b>看到：</b>属性计数增加；属性挂在员工类的定义上。</p>{{SHOT:S03b}}
+    </div></article><div class="rule"><b>属性不会单独画成节点。</b>本体画布把属性作为类详情里的定义，不把“工号”画成与“员工”平级的节点。这是刻意的视觉口径，不是属性丢了。</div><article class="step"><div class="step-no">03</div><div class="step-body">
+      <h3>新增关系并审核</h3><p><b>操作：</b>创建“隶属于”，起点选员工，终点选部门；再点“校验并审核”。</p><p><b>看到：</b>连线出现，阻断项处理完毕，发布按钮可用。</p>{{SHOT:S03c}}{{SHOT:S03d}}
+    </div></article><article class="step"><div class="step-no">04</div><div class="step-body">
+      <h3>写说明并发布</h3><p><b>操作：</b>发布说明写“新增员工、部门、属性和隶属关系”，发布。</p><p><b>看到：</b>版本管理中出现本体 v2，并保留 v1。</p>{{SHOT:S03e}}
+    </div></article>
+      <div class="chapter-close"><div class="completion-sign"><b>完成标志</b>版本管理显示 v2，发布说明能回答“这一版改了什么”。</div>
+      <div class="common-misunderstanding"><b>常见误解</b>草案计数增加不代表已经生效；只有通过审核并发布，消费层才读到新结构。</div></div>
+    <h3 id="ontology-canvas-gestures">先分清本体画布的布局与结构修改</h3>
+<p><b>操作：</b>按住类节点拖动调整位置；拖空白平移，滚轮缩放。点击“适应画布”把现有节点放回可见范围；需要自动重新排列时点“重新布局”。</p>
+<p><b>看到：</b>拖动不会触发选中或连关系的下一步；新增节点后，已有节点的位置与视口保留。层级视图的层带跟随节点移动。</p>
+<div class="completion-sign">完成标志：仅调整布局时，草案没有新增语义操作，本体版本不变。只有新增类、修改父类或关系定义等动作才进入草案与审核发布流程。</div>
+<div class="common-misunderstanding">布局仅在当前浏览会话保留；换项目或刷新整页后可重新布局。移动类节点不等于改变继承关系；改变父类仍用已有“改父类”操作。</div>
+</section><section id="chapter-4" class="core-chapter">
+      <header class="chapter-head"><span>04</span><div><h2>知识写入：准备文件、批次处理与结果核对</h2><p>按选模式、准备文件、设置解析与并发、上传、处理失败、核对结果和原文的顺序完成一次写入。固定材料用于演示，实际模型的措辞、数量和置信度可能变化。</p></div></header>
+      <h3>先选对知识写入模式</h3>
+        <p>这三项是“知识写入模式”，不是三种推理方式。只有前两种会做图谱抽取。</p>
+        <table><thead><tr><th>模式</th><th>什么时候用</th><th>是否入图</th><th>结果去向</th></tr></thead><tbody>
+          <tr><td><b>使用项目本体 · 正式入图</b></td><td>已有稳定的类、关系和属性定义，要按当前本体抽取。</td><td>通过的知识正式入图；待确认项保留待审核。</td><td>已入图去知识台账；待审核去知识审核。</td></tr>
+          <tr><td><b>开放本体发现 · 候选暂存</b></td><td>文档可能出现当前本体里没有的概念，先发现再人工决定。</td><td>开放发现不正式入图。发现结果全部作为待建模候选暂存，不直接进入正式图谱。</td><td>去本体画布处理候选；人工建模与审核后才能成为正式结构。</td></tr>
+          <tr><td><b>仅文档检索 · 不抽取图谱</b></td><td>只要保存切片供全文/向量检索，不需要实体、关系或属性。</td><td>否。这是主动不抽取，结果里没有实体是正常情况。</td><td>去原文数据源核对文档和切片。</td></tr>
+        </tbody></table><div class="sample"><div><b>manual_employee_v2.txt</b><a download="manual_employee_v2.txt" href="{{SAMPLE_DOWNLOAD}}">下载演示材料</a></div><pre>{{SAMPLE_TEXT}}</pre></div><article class="step"><div class="step-no">01</div><div class="step-body">
+      <h3>选模式</h3><p><b>操作：</b>进入“知识写入”，根据上表选择模式。本章固定材料选“使用项目本体”。</p><p><b>看到：</b>模式说明与你要的入图结果一致。</p>
+    </div></article><article class="step"><div class="step-no">02</div><div class="step-body">
+      <h3>选文件</h3><p><b>操作：</b>演示选择固定文本文件；批量规则推荐 Markdown + 相对附件 ZIP，办公文档可用 Word。图片路径须指向包内附件，网络图片只登记为外部链接。</p><p><b>看到：</b>文件清单显示文件名和大小；按服务能力提示控制体积，每批最多 1000 个文档，更多材料拆成多个批次。</p>{{SHOT:S04a}}
+    </div></article><article class="step"><div class="step-no">03</div><div class="step-body">
+      <h3>预览切片并设置并发</h3><p><b>操作：</b>点击“预览切片”，核对完整性；在“高级解析设置”调整切片策略、长度、重叠及解析并发，选择自动推荐或 1、2、4、8。本章需要工号、入职日期时勾选抽取实体属性。</p><p><b>看到：</b>预览区切片可读；设置与所选模式一致。实际并发由服务能力决定。</p>{{SHOT:S04b}}
+    </div></article><article class="step"><div class="step-no">04</div><div class="step-body">
+      <h3>上传并处理</h3><p><b>操作：</b>点击“上传并处理”。浏览器最多三路上传，全部文件上传成功后开始处理；部分上传失败时点“重试失败”补传，成功文件保留。</p><p><b>看到：</b>页面出现批次卡，显示申请并发、实际并发和排队、处理中、完成、需要处理数量。</p>
+    </div></article><article class="step"><div class="step-no">05</div><div class="step-body">
+      <h3>查看批次进度</h3><p><b>操作：</b>按状态筛选文件，用“下一页”查看后续文件。需要时暂停或继续；取消未开始文件不撤销已完成知识。遇到失败先按下面的恢复说明处理。</p><p><b>看到：</b>每个文件有明确状态，失败行显示阶段、切片、公开原因、自动重试次数和下次时间。</p>
+    </div></article><h3>失败恢复：先处理原因，再选择继续方式</h3>
+        <p>临时超时、限流和服务不可用自动退避重试。同批大量相同模型错误会暂停批次，检查模型连接后点“继续”；自动重试耗尽后需要人工处理，可下载失败明细逐文件核对。</p>
+        <table><thead><tr><th>操作</th><th>何时使用</th><th>之后核对什么</th></tr></thead><tbody>
+          <tr><td><b>从断点继续</b></td><td>原因已解决，继续失败与未完成切片。</td><td>兼容的成功切片被复用，文档继续处理。</td></tr>
+          <tr><td><b>只重试失败切片</b></td><td>只重新执行明确失败的切片。</td><td>未开始切片仍待处理，之后用“从断点继续”完成。</td></tr>
+          <tr><td><b>整份重新处理</b></td><td>模型、本体或关键设置改变，旧检查点不兼容。</td><td>产生新尝试，旧尝试与来源保留；修正文件内容须重新上传。</td></tr>
+        </tbody></table>
+        <h4>图片 OCR 失败怎么处理</h4>
+        <p>ZIP 内本地图片先 OCR 再提取文字知识。OCR 失败或低置信度会阻止文档提交：点“查看原文与 OCR”，到解析视图核对文字、引擎和置信度，再点“重试 OCR”。若确认图片无知识文字，点“该图片无知识文字，忽略并继续”，填写原因；系统记录操作者与时间，然后回批次“从断点继续”。缺失附件应补齐知识包后重新上传。</p>
+        <p>网络图片显示“外部图片，未固化”；OCR 只识别文字，不能判断流程线与图标语义。</p><article class="step"><div class="step-no">06</div><div class="step-body">
+      <h3>打开结果工作区并按结果动作继续</h3><p><b>操作：</b>文件完成后点“查看抽取结果”，或打开结果工作区；按实际已入图、待审核、待建模、仅文档或失败分支继续。图中的仅文档任务应点“去原文数据源”。</p><p><b>看到：</b>页面先切换到任务所属项目，再打开对应入口；不把“任务完成”当作知识正确的证明。</p>{{SHOT:S04d}}
+    </div></article><div class="callout"><b>正式入图的验收位置：</b>使用项目本体并完成入图后，点“去知识台账核对”，再按下图核对实体、关系和属性。</div>{{SHOT:S04c}}<h3>结果工作区五类分支</h3>
+        <table><thead><tr><th>看到什么</th><th>点击哪里</th><th>完成标志</th></tr></thead><tbody>
+          <tr><td><b>已入图</b></td><td>去知识台账核对</td><td>在实体、关系、属性视角核对到正确的知识和来源。</td></tr>
+          <tr><td><b>待审核</b></td><td>去知识审核</td><td>对待确认知识完成收下、退回或不收的决定。</td></tr>
+          <tr><td><b>待建模</b></td><td>去本体画布处理候选</td><td>在本体建模层核对新概念；需要时直接编辑草案并提交审核。</td></tr>
+          <tr><td><b>仅文档</b></td><td>去原文数据源</td><td>能找到上传文档和切片；不要期待出现实体。</td></tr>
+          <tr><td><b>失败</b></td><td>先核对批次行错误与失败明细；旧任务可查看任务日志</td><td>根据错误原因修正文件、模型或运行配置，再重试。</td></tr>
+        </tbody></table>
+        <div class="callout"><b>这是结果引导，不是新流程状态机。</b>本体建模层仍然可以直接编辑草案；结果卡只根据已有任务与断言状态告诉你下一步去哪里。</div><h3>核对固定版本原文：确认知识来自哪里</h3>
+        <p>在图谱知识证据或原文数据源点击“在原文中打开”。阅读视图核对正文、表格与固化图片；解析视图核对块、行号、OCR 文字与图片区域框；原始视图只读源码并下载固定版本原文件。</p>
+        <p>来自图片 OCR 的知识应能定位到原图文字区域。多来源知识分别核对各个证据分支；历史映射缺失时页面明确说明，不自动跳到新版文档。</p><p class="demo-note">隔离演示环境截图：为了让手册可重复验证，演示结果固定为“张三、产品部、隶属于、工号、入职日期”。生产环境由实际模型与材料决定，数量不一致时按本章验收方法核对，而不要强求与截图数字相同。</p>
+      <div class="chapter-close"><div class="completion-sign"><b>完成标志</b>知识台账能找到张三、产品部、隶属于、工号 E001 和入职日期 2025-01-06。</div>
+      <div class="common-misunderstanding"><b>常见误解</b>“抽取完成”只说明任务结束；是否正确必须回到台账分视角核对。</div></div>
+    </section><section id="chapter-5" class="core-chapter">
+      <header class="chapter-head"><span>05</span><div><h2>同一份知识，在脑图和台账中怎么看</h2><p>脑图回答“实体如何相连”；台账回答“每条记录是什么、挂在哪个本体、修订到第几版”。</p></div></header>
+      <article class="step"><div class="step-no">01</div><div class="step-body">
+      <h3>看实体脑图</h3><p><b>操作：</b>选择张三为根节点并生成脑图。</p><p><b>看到：</b>张三与产品部通过隶属于相连。</p>{{SHOT:S05a}}
+    </div></article><div class="rule"><b>实体脑图当前不展示属性分支。</b>在服务 v1.1.0 中，工号和入职日期不会成为张三下面的脑图分支；需要去知识台账的属性视角查看。</div><article class="step"><div class="step-no">02</div><div class="step-body">
+      <h3>依次核对三类正式知识</h3><p><b>操作：</b>在知识台账切换实体、关系、属性。</p><p><b>看到：</b>实体看类型，关系看两端，属性看 subject、值与各自修订。</p>{{SHOT:S05b}}{{SHOT:S05c}}{{SHOT:S05d}}
+    </div></article><div class="callout"><b>知识台账可以切换到“属性”视角。</b>属性在这里是一等记录：有自己的记录 ID、本体归属、当前值和修订历史。</div>
+      <div class="chapter-close"><div class="completion-sign"><b>完成标志</b>脑图关系正确；实体、关系、属性三张台账都能对上固定材料。</div>
+      <div class="common-misunderstanding"><b>常见误解</b>脑图没显示工号不等于工号没入库；脑图和属性台账服务于不同核对问题。</div></div>
+    <h3 id="graph-canvas-workflow">主知识图谱：拖节点、平移、缩放</h3>
+<p><b>操作：</b>进入“检索与交互图谱”，选实体或点“重新渲染全图”。拖节点调整位置，拖空白平移；滚轮或“放大 / 缩小”按钮调整缩放。点节点或连线查看右侧详情。</p>
+<table><thead><tr><th>动作</th><th>看到什么</th><th>是否修改知识</th></tr></thead><tbody>
+<tr><td>拖动节点</td><td>仅被拖节点移动；松手不弹详情、不把全图重新缩放</td><td>否</td></tr>
+<tr><td>拖空白 / 滚轮</td><td>画布平移 / 缩放</td><td>否</td></tr>
+<tr><td>适应画布 / 双击空白</td><td>恢复可见视图，保留已摆放节点的坐标</td><td>否</td></tr>
+<tr><td>重新布局</td><td>自动重新排列节点，放弃本次手工摆放</td><td>否</td></tr>
+<tr><td>在详情点编辑并保存</td><td>创建新修订，台账与图谱刷新</td><td>是；仍走原版本校验</td></tr>
+</tbody></table>
+<div class="completion-sign">完成标志：同范围刷新后，节点摆放和缩放保持；单纯拖动没有生成知识修订。切项目或清理工作区会清理本次布局与路径会话。</div>
+<h3 id="graph-path-workflow">路径循迹：看清两个对象如何关联</h3>
+<p><b>操作：</b>展开画布下方“路径循迹 · 当前已加载图谱”。选择起点、终点；也可点一个实体，在详情中使用“设为路径起点 / 设为路径终点”。同名对象在选项中附编号，请核对后选择。</p>
+<p>选择“按关系箭头”或“忽略方向”，设置最大跳数，再点“寻找路径”。示例：平台 A → 适用规则 → 规则 R → 要求材料 → 材料 M。</p>
+<p><b>看到：</b>画布突出显示一条按边数最短的路径，下方链条给出关系与跳数。点链中的关系查看该条事实的证据、有效期和修订；逆向经过的步骤明确标注，原关系箭头不改变。</p>
+<p>改起终点、方向、跳数后重新寻找；切范围、更新关系端点或修订后，旧路径清理。点“清除路径”恢复普通展示。</p>
+<div class="completion-sign">完成标志：路径链条与高亮相符，每条关系可回查；无结果会说明“当前已加载图谱及所选方向、跳数内未找到”。</div>
+<div class="common-misunderstanding">循迹只搜索当前画布已显示的实体和关系，不是全库寻路；类型筛选或局部邻域可能隐藏中间节点。需要时先扩大已加载范围。最短链只说明关联，不代表因果或业务规则推导；虚拟属性值节点不参加寻路。</div>
+<figure data-fixture-shot-id="P15a"><div class="shot-head"><span>P15a</span><strong>主知识图谱：稳定画布与路径循迹（隔离示例）</strong></div>
+<div class="shot-stage"><img src="{{ASSET:P15a}}" alt="主知识图谱：稳定画布与路径循迹（隔离示例）"><span class="shot-marker" data-n="1" data-x="38" data-y="72" data-w="40" data-h="24" style="--x:38%;--y:72%;--w:40%;--h:24%"></span><span class="shot-marker" data-n="2" data-x="38" data-y="19" data-w="40" data-h="8" style="--x:38%;--y:19%;--w:40%;--h:8%"></span></div>
+<figcaption><ol><li><b>1</b>展开路径面板，选择起终点、方向和跳数。</li><li><b>2</b>“适应画布”保留摆放，“重新布局”重新排列；链条按钮可查看实体或关系详情。</li></ol><p>本图的平台 A、规则 R、材料 M 是隔离演示对象，不延续张三案例。</p><div class="completion-sign">完成标志：按文字步骤核对当前界面；示例中的实体名称和数值不需要照抄。</div></figcaption></figure></section><section id="chapter-6" class="core-chapter">
+      <header class="chapter-head"><span>06</span><div><h2>发布本体 v3：结构变了，知识不会跟着猜</h2><p>在员工下面新增产品经理，再发布一版；然后立刻回到台账观察张三。</p></div></header>
+      <article class="step"><div class="step-no">01</div><div class="step-body">
+      <h3>新增产品经理</h3><p><b>操作：</b>新增实体类“产品经理”，父类选择员工。</p><p><b>看到：</b>草案中出现员工 → 产品经理的继承关系。</p>{{SHOT:S06a}}
+    </div></article><article class="step"><div class="step-no">02</div><div class="step-body">
+      <h3>发布本体 v3</h3><p><b>操作：</b>校验、审核、填写发布说明并发布。</p><p><b>看到：</b>已发布结构包含产品经理，本体版本成为 v3。</p>{{SHOT:S06b}}{{SHOT:S07a}}
+    </div></article><article class="step"><div class="step-no">03</div><div class="step-body">
+      <h3>验证知识没有自动变化</h3><p><b>操作：</b>回到实体台账查张三。</p><p><b>看到：</b>张三仍是员工，仍挂在写入时的本体 v2。</p>{{SHOT:S07b}}
+    </div></article><div class="rule"><b>发布本体不会自动修改已有知识。</b>发布改变的是“允许怎样描述知识”的结构，不是“张三究竟是什么岗位”的业务事实。</div>
+      <div class="chapter-close"><div class="completion-sign"><b>完成标志</b>本体 v3 有产品经理；张三的实体记录仍保持员工。</div>
+      <div class="common-misunderstanding"><b>常见误解</b>新增子类不是批量改数据命令。系统不会根据姓名或上下级关系自行推断张三应变成产品经理。</div></div>
+    </section><section id="chapter-7" class="core-chapter">
+      <header class="chapter-head"><span>07</span><div><h2>受控重分类：只迁本体归属，不替你判断业务事实</h2><p>先预演，再执行。员工在 v3 仍有效，可以保持类型不变、只迁本体归属；这同样会生成新的知识修订。迁移不等于业务岗位变化。</p></div></header>
+      <article class="step"><div class="step-no">01</div><div class="step-body">
+      <h3>打开迁移入口并预演</h3><p><b>操作：</b>在本体建模层查看待迁移、冲突和阻断，再执行预演。</p><p><b>看到：</b>预演列出会迁移的组；没有依据的类型转换不会被加入。</p>{{SHOT:S08a}}{{SHOT:S08b}}
+    </div></article><article class="step"><div class="step-no">02</div><div class="step-body">
+      <h3>执行并回查</h3><p><b>操作：</b>只执行经过核对的迁移组，然后回到实体台账。记录张三当前的修订号和依据本体，作为下一步编辑的基线。</p><p><b>看到：</b>被选中且成功迁移的记录生成 rN+1、关联本体 v3；未选中的记录保持不变。张三不会因此自动成为产品经理。</p>{{SHOT:S08c}}{{SHOT:S08d}}
+    </div></article><div class="rule"><b>受控重分类不会自动把“员工”改成“产品经理”。</b>它解决术语停用、替换或本体归属迁移；它不创造岗位晋升这一业务事实。</div>
+      <div class="chapter-close"><div class="completion-sign"><b>完成标志</b>迁移结果可解释，张三仍为员工，没有出现系统擅自推断的类型变化。</div>
+      <div class="common-misunderstanding"><b>常见误解</b>“本体有一个更具体的子类”不等于“所有父类实例都应归到这个子类”。</div></div>
+    </section><section id="chapter-8" class="core-chapter">
+      <header class="chapter-head"><span>08</span><div><h2>单独修改张三，并核对脑图和历史</h2><p>业务确认张三确实是产品经理后，先确认这条记录已迁到包含该类型的本体 v3，再从图谱或台账编辑同一条记录。普通编辑不会自动迁移本体。</p></div></header>
+      <article class="step"><div class="step-no">01</div><div class="step-body">
+      <h3>编辑实体类型</h3><p><b>操作：</b>在张三行点编辑，核对“修订 rN · 依据本体 v3”，再把员工改为产品经理并保存。若仍依据 v2，先执行上一章的受控迁移。</p><p><b>看到：</b>保存回执显示新的修订 rN+1，本体归属仍是 v3。迁移若已生成 r2，本次编辑通常生成 r3；不能照抄旧截图中的修订号。</p>{{SHOT:S09a}}
+    </div></article><article class="step"><div class="step-no">02</div><div class="step-body">
+      <h3>查看修订历史</h3><p><b>操作：</b>点击“修订历史”，依次选择旧修订和新修订。</p><p><b>看到：</b>旧的员工记录、迁移产生的修订和本次编辑都可追溯；每次修订保留自己的本体发布 ID。</p>{{SHOT:S09b}}
+    </div></article><article class="step"><div class="step-no">03</div><div class="step-body">
+      <h3>重新生成脑图</h3><p><b>操作：</b>回到实体脑图刷新张三。</p><p><b>看到：</b>脑图使用所选时间范围内的实体和关系，仍不展示属性分支。</p>{{SHOT:S09c}}
+    </div></article><h3 id="graph-edit-workflow">直接在图谱编辑：和台账核对同一条修订</h3>
+        <p class="demo-note">本节操作与版本规则更新于 2026-10-15。已有截图用于说明入口；按钮文案、修订号和本体归属以当前界面及保存回执为准。</p>
+        <ol>
+          <li><b>选择项目和知识范围。</b>进入“检索与交互图谱”，点击实体节点或关系连线；若设置了系统时间或本体归属筛选，先确认正在查看的范围。</li>
+          <li><b>打开编辑弹窗。</b>详情中点击“编辑这个实体”或“编辑这条关系”。核对记录名称、知识修订 rN 和依据本体 vN；同号本体的标注发布还需核对发布短标识。</li>
+          <li><b>修改具体知识。</b>实体可修改名称、类型和业务有效时间；关系可修改显示文本、关系类型、起点、终点和业务有效时间。类型选项来自这条知识绑定的本体；要用新本体才有的类型，先迁移，再重新打开编辑。</li>
+          <li><b>保存新修订。</b>点击“保存实体修改为新修订”或“保存关系修改为新修订”。保存成功生成该记录的 rN+1，旧修订保留；普通编辑不改变本体发布 ID、不创建本体版本，也不增加无关实体或关系的修订号。</li>
+          <li><b>核对图谱与台账。</b>保存回执、已打开的图谱详情和台账自动刷新到新修订。关闭弹窗后点击详情中的“在台账查看”，核对同一记录 ID、相同 rN+1 和相同“依据本体 vN”；台账不会另外生成一份记录或再增一次修订。</li>
+          <li><b>查看历史。</b>点击“修订历史”，核对前后内容、不可变修订 ID、本体归属、记录时间和业务有效期。选择旧修订只读查看，不会覆盖当前记录。</li>
+        </ol>
+        <div class="rule"><b>完成标志：</b>图谱详情与台账的同一条记录显示相同的新修订，历史保留旧修订，本体归属与普通编辑前一致。仅打开、取消或保存失败不会新增修订。</div>
+        <h4>保存时遇到问题</h4>
+        <ul>
+          <li><b>版本冲突：</b>其他操作已修改记录。重新读取最新修订，核对变化后再编辑；不要手工提高预期修订号强行覆盖。</li>
+          <li><b>未知本体或本体加载失败：</b>结构化编辑不会回退到当前本体。先核对项目、网络与本体归属；归属确实未知时通过治理明确目标，勿随意在高级 JSON 中改本体 ID。</li>
+          <li><b>已保存，但部分视图刷新失败：</b>修订已经提交，先刷新图谱或台账核对回执中的修订号，不要把“保存”当成刷新按钮重复提交。</li>
+          <li><b>切到历史范围后看到旧内容：</b>系统时间和本体归属是查询条件。本体筛选表示所选时间内仍绑定该发布的知识，不是整库历史快照；跨归属端点可能被过滤。先统一查询范围，再比较图谱和台账。</li>
+        </ul>
+      <div class="chapter-close"><div class="completion-sign"><b>完成标志</b>张三当前类型为产品经理，历史中仍能看到员工版本。</div>
+      <div class="common-misunderstanding"><b>常见误解</b>知识修订 rN 不等于本体 vN；图谱与台账共用同一份记录，不存在各自独立的一套知识版本。</div></div>
+    </section><section id="chapter-9" class="core-chapter">
+      <header class="chapter-head"><span>09</span><div><h2>属性修订、关系软删除与恢复</h2><p>实体、关系、属性各自有修订历史；改一条不会让另外两类记录的修订号同步增加。</p></div></header>
+      <article class="step"><div class="step-no">01</div><div class="step-body">
+      <h3 id="attribute-form-workflow">用属性表单修订工号</h3>
+<p><b>操作：</b>进入“知识台账 → 属性”，找到张三的工号，点“编辑”。核对弹窗显示的修订号与依据本体；属性类型保持工号，所属实体保持张三，数据类型选择字符串，把属性值改为 E001-A，再点“保存属性修改为新修订”。</p>
+<p><b>看到：</b>回执显示 rN+1；台账属性值刷新，旧修订保留。张三实体记录不因此再增一版，工号记录的本体绑定保持不变。</p>
+<div class="completion-sign">完成标志：新属性值、修订号、本体归属与历史记录相符。保存版本冲突时先重新读取最新记录，不要覆盖别人刚做的修改。</div>
+<p>布尔值输入 true 或 false，数值选择整数或小数；日期和 JSON 模式会校验格式，并按当前后端能力以字符串保存。业务失效时间必须晚于生效时间。高级 JSON 是补充入口，普通属性维护使用表单即可。</p>
+<div class="common-misunderstanding">实体选项来自当前查询范围，最多 1000 条，不代表全库。未加载的原所属实体会保留并标注，不要因列表缺项误改主体。未知本体归属无法提供可靠类型选项，应先处理归属问题。</div>{{SHOT:S10a}}
+    </div></article><article class="step"><div class="step-no">02</div><div class="step-body">
+      <figure data-fixture-shot-id="P15b"><div class="shot-head"><span>P15b</span><strong>知识台账：结构化属性编辑（隔离示例）</strong></div>
+<div class="shot-stage"><img src="{{ASSET:P15b}}" alt="知识台账：结构化属性编辑（隔离示例）"><span class="shot-marker" data-n="1" data-x="24" data-y="28" data-w="51" data-h="47" style="--x:24%;--y:28%;--w:51%;--h:47%"></span></div>
+<figcaption><ol><li><b>1</b>核对类型、所属实体、数据类型、值与时间后保存新修订。</li></ol><p>截图用审核天数演示整数表单；工号 E001-A 应使用字符串。该截图只展示界面，未写业务数据库。</p><div class="completion-sign">完成标志：按文字步骤核对当前界面；示例中的实体名称和数值不需要照抄。</div></figcaption></figure><h3>软删除关系</h3><p><b>操作：</b>删除“张三隶属于产品部”并确认影响。</p><p><b>看到：</b>关系退出当前视图，但旧版和操作记录仍保留。</p>{{SHOT:S10b}}
+    </div></article><article class="step"><div class="step-no">03</div><div class="step-body">
+      <h3>恢复关系</h3><p><b>操作：</b>从可撤销操作或历史版本恢复。</p><p><b>看到：</b>恢复生成新修订，当前关系重新出现。</p>{{SHOT:S10c}}
+    </div></article>
+      <div class="chapter-close"><div class="completion-sign"><b>完成标志</b>工号有自己的新修订；关系软删除后可恢复且历史仍可查。</div>
+      <div class="common-misunderstanding"><b>常见误解</b>软删除不是数据库物理删除；恢复也不是把时间倒回去，而是生成一个新的当前修订。</div></div>
+    </section><section id="chapter-10" class="core-chapter">
+      <header class="chapter-head"><span>10</span><div><h2>三种版本到底是什么关系</h2><p>版本号看起来相似，但它们的对象、触发动作和影响范围完全不同。</p></div></header>
+      <div class="version-grid">
+      <article><span>软件</span><h3>服务 v1.1.0</h3><p>整套应用的发布版本。手册截图和界面能力以它为准。</p></article>
+      <article><span>项目结构</span><h3>本体 v1 / v2 / v3</h3><p>一个项目内的不可变结构发布：默认 v1，自定义 v2，产品经理 v3。</p></article>
+      <article><span>单条知识</span><h3>记录修订 rN</h3><p>每条实体、关系、属性、片段各自递增；张三 r2 不会让产品部也变 r2。</p></article>
+    </div>
+    <p><b>两条独立版本轴：</b>知识用不可变的 ontology_id 关联具体本体发布，不是按 rN 与 vN 的数字相等关联。以下以单条实体为例；关系和属性遵循相同规则。这里的本体版本是项目当前发布，知识自己的“依据本体”另行列明。</p>
+    <table><thead><tr><th>动作</th><th>服务版本</th><th>当前本体</th><th>张三记录及其依据本体</th><th>工号属性</th></tr></thead><tbody>
+      <tr><td>创建项目</td><td>v1.1.0</td><td>v1</td><td>—</td><td>—</td></tr>
+      <tr><td>发布员工/部门结构</td><td>v1.1.0</td><td>v2</td><td>—</td><td>—</td></tr>
+      <tr><td>写入固定材料</td><td>v1.1.0</td><td>v2</td><td>员工 · r1 · 依据 v2</td><td>E001 · r1 · 依据 v2</td></tr>
+      <tr><td>在图谱修改张三名称</td><td>v1.1.0</td><td>v2</td><td>员工 · r2 · 仍依据 v2；台账同步为 r2</td><td>r1（不变）</td></tr>
+      <tr><td>发布产品经理类型</td><td>v1.1.0</td><td>v3</td><td>员工 · r2 · 仍依据 v2</td><td>r1 · 仍依据 v2</td></tr>
+      <tr><td>只将张三迁到 v3</td><td>v1.1.0</td><td>v3</td><td>员工 · r3 · 依据 v3</td><td>未选中则不变；若一并迁移则产生自己的新修订</td></tr>
+      <tr><td>单独编辑张三为产品经理</td><td>v1.1.0</td><td>v3</td><td>产品经理 · r4 · 仍依据 v3</td><td>不因实体编辑而增修订</td></tr>
+      <tr><td>单独修订工号</td><td>v1.1.0</td><td>v3</td><td>r4（不变）</td><td>仅工号增加修订；保留它当时的依据本体</td></tr>
+    </tbody></table>
+    <div class="compare"><article><h3>只发布 v3</h3><p>本体画布：出现产品经理。</p><p>图谱与台账：已有知识的内容、修订号和本体归属保持不变。</p></article><article><h3>迁移 + 单独编辑张三</h3><p>本体结构仍是 v3。</p><p>迁移和编辑分别产生新的知识修订；图谱与台账按相同时间范围读取同一份结果。</p><p>修订号取决于实际操作次数，不能用截图数字判断成功与否。</p></article></div>
+      <div class="chapter-close"><div class="completion-sign"><b>完成标志</b>能对任意一个版本号回答：它属于软件、项目结构，还是某一条知识记录。</div>
+      <div class="common-misunderstanding"><b>常见误解</b>不要说“现在是 v2”而不带对象；应说“本体 v2”或“张三记录 r2”。</div></div>
+    </section><section id="chapter-11" class="core-chapter">
+      <header class="chapter-head"><span>11</span><div><h2>问答原文、Milvus 与本体质量怎么验收</h2><p>把消费层看到的依据、运行时向量能力和本体发布门禁放在同一套验收口径里。</p></div></header>
+      <div class="callout"><b>问答先看原文，再看结论。</b>
+      每条回答下方的前三条依据默认展开；每条依据的第一份冻结原文默认可见。
+      “另有 N 个来源”只展开这一条依据的其他来源，“再看 N 条依据”才展开其余依据。</div>
+    <div class="rule"><b>图谱关系路径不是 OWL 推理。</b>它只展示命中实体沿现有关系边可到达的多跳路径，用来解释“这些实体在当前图中怎么连”。它不根据 OWL 公理生成新事实。<b>本阶段暂不实施 OWL 推理</b>，也不把路径展示宣称为 OWL 2 RL 能力。</div>
+    <div class="version-grid">
+      <article><span>冻结来源</span><h3>不追当前版本</h3><p>标题、摘录、文档版本与检索通道来自生成答案时保存的 offered 溯源分支；手工录入或历史缺口会明确标注，不拿今天的文档补写。</p></article>
+      <article><span>运行能力</span><h3>Milvus collection_ready</h3><p>项目与运行的健康信息要同时核对 configured、connected、collection_ready、实际维度与期望维度。已配置但不可用时状态是 degraded。</p></article>
+      <article><span>发布门禁</span><h3>Semantica 质量检查</h3><p>草案校验保留 Semantica 版本、指标、阈值与问题列表；质量引擎不可用属于阻断错误，不能假装校验通过。</p></article>
+    </div>
+    <div class="rule"><b>本体切片收据：</b>受控抽取应记录用了哪个本体版本、命中了哪些术语以及选择原因；看到降级为全本体时要单独审核，绝不能静默切换成开放发现。</div>
+    <ol><li>问答完成后，先直接阅读默认展开的原文，再核对答案中的 [E1] / [E2]。</li>
+      <li>需要审计时点击引用编号，打开完整的历史溯源抽屉。</li>
+      <li>到“项目与运行”核对本地模型 identity 与 1024 维是否和 Milvus collection 一致。</li>
+      <li>草案接口的 validation_report.semantica_quality 保存 Semantica 质量报告；阻断项修复后重新校验。
+      当前页面主要展示现有业务校验警告，Semantica 警告尚未统一接入逐条确认入口，需另行核对质量报告。</li></ol>
+      <div class="chapter-close"><div class="completion-sign"><b>完成标志</b>问答能直接看到冻结原文；运行状态显示 1024 维且 collection_ready；草案保存 Semantica 质量报告。</div>
+      <div class="common-misunderstanding"><b>常见误解</b>只看到回答正文不代表可追溯；只看到 Milvus 进程 healthy 也不代表 collection 与模型维度一致。</div></div>
+    </section><section id="chapter-12" class="core-chapter">
+      <header class="chapter-head"><span>12</span><div><h2>身份、任务和索引同步怎么核查</h2><p>发布版本与索引同步分别核查；任务失败可查看原因并重新处理。</p></div></header>
+      <div class="callout"><b>审计人由登录身份决定。</b>
+      创建、审核、发布和重分类由服务器记录用户 ID、用户名和显示名；页面不能指定另一位操作人。
+      关闭认证的环境会明确显示“未启用认证”。</div>
+    <div class="callout"><b>统一运行环境：</b>本项目的 Python/pytest 命令使用 conda 环境 <code>llm_model</code>。</div>
+    <ol><li>探活访问 /livez；就绪检查访问 /readyz。模型仍在加载或必需向量后端不可用时，就绪返回 503。</li>
+      <li>/api/health 的 capability_matrix 分别报告 keyword、semantic、llm、ocr、neo4j。
+      semantic 为 ready 才代表真实模型已完成编码验证且向量 collection 就绪；远程 LLM 未探测时显示 degraded。</li>
+      <li>本体发布成功意味着权威版本已提交。索引由后台 outbox 同步，pending/running/retry_wait 都不表示索引已完成。
+      disabled 表示未启用 Milvus，failed 保留失败原因。只有 completed 才表示消费成功。</li>
+      <li>GET /api/projects/{项目ID}/ontology-index 查看权威版本与索引版本；POST 同一路径的 /repair 触发补偿。</li>
+      <li>维度自动读取本地 model 的 config 并核对真实编码输出；不要把 1024 当成所有模型的固定值。
+      换模型导致维度不匹配时，“构建语义索引”会迁移共享集合并恢复全部项目；普通重建只处理当前项目。
+      rebuilding 期间项目对账不报告 ready；失败后重试会继续恢复全项目，不能把空集合当完成。</li>
+      <li>进入“项目与运行 → 后台任务”，任务卡片可取消、重试或重新排队。
+      接口对应 POST /api/jobs/{任务ID}/retry、/cancel、/resume。
+      重启后持久任务会在原租约过期后重新领取；取消在下一个处理检查点生效，已提交的事实不自动回滚。
+      上传文件在停止任务期间保留以支持重试。</li></ol>
+      <div class="chapter-close"><div class="completion-sign"><b>完成标志</b>能辨认当前用户、模型就绪、任务状态和权威版本与索引版本是否一致。</div>
+      <div class="common-misunderstanding"><b>常见误解</b>Milvus 进程 healthy 或本体发布成功都不能替代项目索引对账。</div></div>
+    </section><section id="troubleshooting" class="appendix"><header class="chapter-head"><span>13</span><div><h2>卡住时按现象排查</h2><p>每一项都给出“看到什么 / 原因 / 下一步”，不要只停在错误描述。</p></div></header><div class="trouble-grid"><article class="troubleshooting-item"><h3>拖节点后想恢复摆放</h3><p data-field="看到什么"><b>看到什么</b>节点位置被手动调整。</p><p data-field="原因"><b>原因</b>拖动只改布局，不改知识。</p><p data-field="下一步"><b>下一步</b>只想找回视图点“适应画布”；想自动重排点“重新布局”。</p></article>
+<article class="troubleshooting-item"><h3>循迹找不到路径</h3><p data-field="看到什么"><b>看到什么</b>当前方向和跳数内未找到。</p><p data-field="原因"><b>原因</b>可能有方向限制、中间实体被类型筛选隐藏，或邻域尚未加载。</p><p data-field="下一步"><b>下一步</b>核对起终点与方向，适当增加跳数，扩大当前已加载图；不要据此断言全库没有关系。</p></article>
+<article class="troubleshooting-item"><h3>属性表单无法保存</h3><p data-field="看到什么"><b>看到什么</b>格式、时间、版本冲突或本体归属提示。</p><p data-field="原因"><b>原因</b>值类型、有效期或预期修订不满足保存条件。</p><p data-field="下一步"><b>下一步</b>按提示修正，核对所属实体；版本冲突先刷新再比较，未知归属先治理。失败不会清空已填表单。</p></article>
+<article class="troubleshooting-item"><h3>创建项目后看不到本体</h3>
+      <p data-field="看到什么"><b>看到什么</b>本体建模层提示读不到状态或空画布。</p>
+      <p data-field="原因"><b>原因</b>项目尚未选中，或页面还在加载。</p>
+      <p data-field="下一步"><b>下一步</b>先在左上角选择项目；仍为空就刷新页面，再确认项目模式是加载默认本体。</p></article><article class="troubleshooting-item"><h3>发布按钮是灰的</h3>
+      <p data-field="看到什么"><b>看到什么</b>按钮不可点。</p>
+      <p data-field="原因"><b>原因</b>草案未校验、仍有待审核操作、没有发布说明，或警告未确认。</p>
+      <p data-field="下一步"><b>下一步</b>从底栏提示依次处理：校验并审核 → 逐条处理 → 填发布说明 → 确认警告。</p></article><article class="troubleshooting-item"><h3>属性没有画在本体节点上</h3>
+      <p data-field="看到什么"><b>看到什么</b>画布只看到类和关系。</p>
+      <p data-field="原因"><b>原因</b>v1.1.0 以类详情承载属性定义，属性不是独立节点。</p>
+      <p data-field="下一步"><b>下一步</b>选中员工查看属性定义；实例值到知识台账的属性视角核对。</p></article><article class="troubleshooting-item"><h3>脑图里没有工号</h3>
+      <p data-field="看到什么"><b>看到什么</b>张三脑图只有实体和关系。</p>
+      <p data-field="原因"><b>原因</b>实体脑图当前排除属性分支。</p>
+      <p data-field="下一步"><b>下一步</b>进入知识台账 → 属性，按张三筛选并查看工号、入职日期。</p></article><article class="troubleshooting-item"><h3>发布 v3 后张三没变</h3>
+      <p data-field="看到什么"><b>看到什么</b>本体已有产品经理，张三仍是员工。</p>
+      <p data-field="原因"><b>原因</b>发布本体不修改实例；员工在 v3 仍有效。</p>
+      <p data-field="下一步"><b>下一步</b>先确认业务事实，再在知识台账单独编辑张三类型。</p></article><article class="troubleshooting-item"><h3>受控重分类没有把员工变成产品经理</h3>
+      <p data-field="看到什么"><b>看到什么</b>预演没有该转换。</p>
+      <p data-field="原因"><b>原因</b>重分类只处理有结构依据的归属迁移，不做岗位推断。</p>
+      <p data-field="下一步"><b>下一步</b>若业务确认张三是产品经理，单独修订实体；不要强行扩大迁移范围。</p></article><article class="troubleshooting-item"><h3>抽取数量和截图不同</h3>
+      <p data-field="看到什么"><b>看到什么</b>模型返回的实体或关系数量不同。</p>
+      <p data-field="原因"><b>原因</b>真实 LLM、模型参数和文本细节会影响结果。</p>
+      <p data-field="下一步"><b>下一步</b>以固定材料和本体约束为准，逐条审核；截图只教入口和验收方式。</p></article><article class="troubleshooting-item"><h3>仅文档模式没有实体</h3>
+      <p data-field="看到什么"><b>看到什么</b>任务完成，但结果工作区没有实体、关系或属性。</p>
+      <p data-field="原因"><b>原因</b>“仅文档检索”主动不执行图谱知识抽取。</p>
+      <p data-field="下一步"><b>下一步</b>去原文数据源核对文档和切片；需要入图时重新选择项目本体或开放发现模式。</p></article><article class="troubleshooting-item"><h3>抽取结果为空</h3>
+      <p data-field="看到什么"><b>看到什么</b>使用项目本体或开放发现模式，任务完成却没有识别出知识。</p>
+      <p data-field="原因"><b>原因</b>系统已执行抽取，但材料、切片、本体匹配或模型输出没有产生可用断言。</p>
+      <p data-field="下一步"><b>下一步</b>先查切片预览和任务日志，再核对模式与项目本体；修正材料或配置后重试。</p></article><article class="troubleshooting-item"><h3>待确认去哪里处理</h3>
+      <p data-field="看到什么"><b>看到什么</b>结果卡显示待审核或待建模，但不确定下一步。</p>
+      <p data-field="原因"><b>原因</b>待审核是已有结构下的知识确认；待建模是本体中还没有相应概念。</p>
+      <p data-field="下一步"><b>下一步</b>待审核点“去知识审核”；待建模点“去本体画布处理候选”。</p></article><article class="troubleshooting-item"><h3>软删除后想找回</h3>
+      <p data-field="看到什么"><b>看到什么</b>当前关系视角不再显示该关系。</p>
+      <p data-field="原因"><b>原因</b>软删除生成了删除修订，不是物理抹除。</p>
+      <p data-field="下一步"><b>下一步</b>打开历史或可撤销操作，核对目标 ID 后恢复；恢复会生成新修订。</p></article></div></section></main></div>
+    <footer class="foot"><strong>知序 Knowledge Service · 服务 v1.1.0</strong><br>本手册不依赖网络资源；保存此 HTML 即可离线查看和打印。</footer></body></html>

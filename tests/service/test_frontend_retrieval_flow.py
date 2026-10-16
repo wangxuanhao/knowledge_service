@@ -48,7 +48,7 @@ def _project(repository, name):
 
 
 def _seed(repository, project_id):
-    repository.put_batch(project_id, [
+    rows = [
         {'id': 'a', 'kind': 'entity', 'type': 'Thing', 'text': '退款商户', 'metadata': {}},
         {'id': 'b', 'kind': 'entity', 'type': 'Thing', 'text': '退款平台', 'metadata': {}},
         {'id': 'x', 'kind': 'entity', 'type': 'Thing', 'text': '无关实体', 'metadata': {}},
@@ -61,7 +61,12 @@ def _seed(repository, project_id):
          'subject_id': 'a', 'object_id': 's', 'metadata': {}},
         {'id': 'c', 'kind': 'chunk', 'text': '退款需要原始凭证', 'source_id': 'd', 'metadata': {}},
         {'id': 'd', 'kind': 'document', 'text': '退款规则原文', 'metadata': {'title': '退款规则'}},
-    ])
+    ]
+    # These interaction fixtures are usable evidence. Unknown applicability is
+    # deliberately excluded from answers and has its own retrieval tests.
+    for row in rows:
+        row['metadata']['applicability'] = {'platforms': {'mode': 'all'}}
+    repository.put_batch(project_id, rows)
 
 
 @pytest.fixture(scope='module')
@@ -119,12 +124,20 @@ def workbench(browser, tmp_path):
         thread.join(timeout=10)
 
 
+def _channel_sections(page):
+    # Applicability summaries precede the three ranked retrieval channels.
+    return page.locator('#hits > section').filter(
+        has=page.locator('.hit-kind').filter(
+            has_text=re.compile(r'^(匹配实体|原文片段|关系链路)')))
+
+
 def _search(page, query='退款', mode='keyword'):
     page.select_option('#search-mode', mode)
     page.fill('#query', query)
     with page.expect_response(lambda response: response.url.endswith('/search')):
         page.click('#search')
-    page.wait_for_function("document.querySelectorAll('#hits .hit-kind').length === 3")
+    page.wait_for_function("""() => [...document.querySelectorAll('#hits > section > .hit-kind')]
+        .filter(el => /^(匹配实体|原文片段|关系链路)/.test(el.textContent)).length === 3""")
 
 
 def test_ontology_preview_sets_ephemeral_version_context_and_project_change_resets_it(
@@ -315,7 +328,7 @@ def _assert_complete_entity_inspector(page, text):
     detail = page.locator('#graph-detail')
     detail_text = detail.inner_text()
     assert text in detail_text
-    assert '版本历史 · v1' in detail_text
+    assert '修订历史 · 修订 r1' in detail_text
     assert '新增关系' in detail_text
     assert '展开脑图' in detail_text
     assert 'undefined' not in detail_text
@@ -405,7 +418,7 @@ def test_search_updates_only_the_result_rail_and_ignores_graph_keys(workbench):
     _search(page)
 
     # Every channel owns a heading, a quota count and its own empty state.
-    sections = page.locator('#hits > section')
+    sections = _channel_sections(page)
     assert sections.count() == 3
     for index, label in enumerate(CHANNEL_LABELS):
         heading = sections.nth(index).locator('.hit-kind').inner_text()
@@ -876,7 +889,7 @@ def test_entity_and_relation_hits_select_consistent_detail_without_redraw(workbe
 
     for index, expected_seed in ((0, 'a'), (2, 'a')):
         workbench.paths.clear()
-        page.locator('#hits > section').nth(index).locator('[data-graph-node]').first.click()
+        _channel_sections(page).nth(index).locator('[data-graph-node]').first.click()
         page.evaluate("""() => new Promise(resolve =>
           requestAnimationFrame(() => requestAnimationFrame(resolve)))""")
         assert not any(path.endswith('/subgraph') for path in workbench.paths)
@@ -894,7 +907,7 @@ def test_project_and_scope_changes_clear_isolated_state(workbench):
     page = workbench.page
     page.click('[data-tab="search"]')
     _search(page)
-    page.locator('#hits > section').nth(0).locator('[data-graph-node]').first.click()
+    _channel_sections(page).nth(0).locator('[data-graph-node]').first.click()
     page.wait_for_function(
         "document.querySelector('#graph-detail').textContent.includes('退款商户')")
     with page.expect_response(lambda response: response.url.endswith('/subgraph')):
@@ -919,7 +932,7 @@ def test_project_and_scope_changes_clear_isolated_state(workbench):
     assert not any(path.endswith('/subgraph') for path in workbench.paths)
 
     # The knowledge-time switch clears the graph without re-loading it.
-    page.locator('#hits > section').nth(0).locator('[data-graph-node]').first.click()
+    _channel_sections(page).nth(0).locator('[data-graph-node]').first.click()
     page.wait_for_function(
         "document.querySelector('#graph-detail').textContent.includes('退款商户')")
     with page.expect_response(lambda response: response.url.endswith('/subgraph')):
@@ -1106,7 +1119,7 @@ def test_draw_and_expand_buttons_share_the_single_graph_renderer(workbench):
     _search(page)
 
     # 检索命中先走统一详情选择；只有下方显式「展开邻域」才请求子图。
-    page.locator('#hits > section').nth(0).locator('[data-graph-node]').first.click()
+    _channel_sections(page).nth(0).locator('[data-graph-node]').first.click()
     page.wait_for_function(
         "document.querySelector('#graph-detail').textContent.includes('退款商户')")
     assert page.locator('#graph-type-buttons').count() == 1

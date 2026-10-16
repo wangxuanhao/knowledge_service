@@ -55,7 +55,12 @@ def test_ingest_flow_is_ordered_inside_knowledge_ingest_chapter():
     assert '<section id="chapter-13"' not in html_manual
     assert '\n# 批量知识写入与断点续跑' not in markdown_manual
     toc = re.search(r'<nav class="toc">(.*?)</nav>', html_manual, re.S).group(1)
-    assert re.findall(r'href="([^"]+)"', toc) == [f'#chapter-{i}' for i in range(1, 13)] + ['#troubleshooting']
+    expected_links = [f'#chapter-{i}' for i in range(1, 6)]
+    expected_links += ['#graph-canvas-workflow', '#graph-path-workflow']
+    expected_links += [f'#chapter-{i}' for i in range(6, 13)] + ['#troubleshooting']
+    assert re.findall(r'href="([^"]+)"', toc) == expected_links
+    for anchor in expected_links:
+        assert f'id="{anchor[1:]}"' in html_manual
     assert [int(n) for n in re.findall(r'<header class="chapter-head"><span>(\d+)</span>', html_manual)] == list(range(1, 14))
 
 
@@ -218,6 +223,19 @@ def test_v110_manual_has_every_verified_screenshot_once():
             x, y, width, height = map(float, (x, y, width, height))
             assert min(x, y, width, height) >= 0
             assert x + width <= 100 and y + height <= 100
+
+
+def test_fixture_screenshots_are_distinct_from_verified_service_case():
+    manual = HTML_MANUAL.read_text(encoding='utf-8')
+    figures = re.findall(
+        r'<figure\b[^>]*data-fixture-shot-id="([^"]+)"[^>]*>(.*?)</figure>',
+        manual, re.S)
+    assert [key for key, _ in figures] == ['P15a', 'P15b']
+    for _, body in figures:
+        payload = re.search(r'data:image/png;base64,([^"]+)', body)[1]
+        assert struct.unpack('>II', base64.b64decode(payload)[16:24]) == (1500, 1000)
+        assert '隔离' in body and 'completion-sign' in body
+    assert 'data-shot-id="P15' not in manual
 
 
 def test_v110_manual_chapters_and_troubleshooting_are_structured():

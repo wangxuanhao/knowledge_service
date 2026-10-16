@@ -217,6 +217,45 @@ class ContractClient:
     def drop_alias(self, alias): self.aliases.pop(alias, None)
 
 
+def test_fence_control_collection_satisfies_milvus_vector_requirement():
+    from pymilvus import DataType
+
+    class Milvus3Client(ContractClient):
+        def create_collection(self, name, schema):
+            assert any(field.dtype == DataType.FLOAT_VECTOR for field in schema.fields), (
+                'Milvus requires a vector field even for scalar control collections')
+            super().create_collection(name, schema)
+
+        def load_collection(self, name):
+            assert any(index['field_name'] == 'marker_vector'
+                       for index in self.indexes[name])
+            super().load_collection(name)
+
+        def upsert(self, name, rows):
+            assert all(row.get('marker_vector') == [0.0, 0.0] for row in rows)
+            return super().upsert(name, rows)
+
+    store = MilvusStore(dim=2)
+    store._client = Milvus3Client()
+    store.write_fence_marker('p', 'generation', 4, 'claim')
+    assert store.read_fence_marker('p', 'generation') == {
+        'projection_seq': 4, 'fences': {'claim'}}
+
+
+def test_empty_generation_with_zero_watermark_can_validate():
+    import hashlib
+
+    store = MilvusStore(dim=2)
+    store._client = ContractClient()
+    store._create_collection('empty')
+    store.write_fence_marker('p', 'empty', 0, 'claim-zero')
+    result = store.validate_destination(
+        'p', 'empty', expected_count=0, expected_version_ids=[],
+        expected_projection={}, expected_digest=hashlib.sha256(b'{}').hexdigest(),
+        fence='claim-zero')
+    assert result['ok'], result
+
+
 def test_physical_schema_indexes_control_audit_and_cleanup_contract():
     client = ContractClient()
     store = MilvusStore(dim=2)
@@ -230,7 +269,7 @@ def test_physical_schema_indexes_control_audit_and_cleanup_contract():
     control = store._control_name(destination)
     assert control in client.loaded
     assert {row['field_name'] for row in client.indexes[control]} == {
-        'project_id', 'projection_seq'}
+        'project_id', 'projection_seq', 'marker_vector'}
     assert store.read_fence_marker('p', destination) == {
         'projection_seq': 4, 'fences': {'claim'}}
 

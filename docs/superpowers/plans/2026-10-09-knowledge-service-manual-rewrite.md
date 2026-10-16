@@ -63,7 +63,7 @@ For every core chapter, assert one `.completion-sign` and one `.common-misunders
 Run:
 
 ```powershell
-D:\Anaconda3\envs\model_agent\python.exe -m pytest tests/service/test_docs_contract.py -q
+D:\anaconda\envs\llm_model\python.exe -m pytest tests/service/test_docs_contract.py -q
 ```
 
 Expected: FAIL because the current manual lacks the new version/attribute/migration contract or still contains the obsolete name.
@@ -139,7 +139,7 @@ Create `docs/assets/manual-v110/manual_employee_v2.txt` as UTF-8 with the exact 
 Run:
 
 ```powershell
-D:\Anaconda3\envs\model_agent\python.exe scripts/build_knowledge_service_manual.py
+D:\anaconda\envs\llm_model\python.exe scripts/build_knowledge_service_manual.py
 ```
 
 Expected: either a complete HTML artifact or a precise list of screenshot files still missing.
@@ -162,7 +162,7 @@ Confirm that only the planned manual files changed in addition to the saved user
 
 - [ ] **Step 1: Implement an isolated capture runner**
 
-Create `scripts/capture_knowledge_service_manual.py` using the repository's PostgreSQL admin DSN loader, migration runner, app factory, and Playwright from `D:\Anaconda3\envs\model_agent`. Reuse only the already running local PostgreSQL cluster, but create a unique database named `knowledge_manual_<12 hex chars>` via an admin connection to `postgres`; reject any generated name that does not match `^knowledge_manual_[0-9a-f]{12}$`. Apply the repository migrations to that exact DSN and inject only that DSN into the capture app. Start the demo server on `127.0.0.1` with an unused local port and use a dedicated temporary Chromium profile. Never connect the app to the default service database, current browser profile, or port 8100.
+Create `scripts/capture_knowledge_service_manual.py` using the repository's PostgreSQL admin DSN loader, migration runner, app factory, and Playwright from `D:\anaconda\envs\llm_model`. Reuse only the already running local PostgreSQL cluster, but create a unique database named `knowledge_manual_<12 hex chars>` via an admin connection to `postgres`; reject any generated name that does not match `^knowledge_manual_[0-9a-f]{12}$`. Apply the repository migrations to that exact DSN and inject only that DSN into the capture app. Start the demo server on `127.0.0.1` with an unused local port and use a dedicated temporary Chromium profile. Never connect the app to the default service database, current browser profile, or port 8100.
 
 The script must set `NO_PROXY=127.0.0.1,localhost`, create only synthetic accounts/projects in the temporary database, and terminate the server/browser in `finally`. After startup call its own `/api/health`; require `status == 'ok'` and version `1.1.0` before any capture. In `finally`, first stop the app and close all connections, then reconnect to `postgres`, revalidate the exact database-name regex, and execute `DROP DATABASE <exact-name> WITH (FORCE)`. It must not install packages, create a virtual environment, start Docker, connect to any non-generated database, or call the shared test-suite teardown.
 
@@ -188,7 +188,7 @@ Run:
 
 ```powershell
 $env:NO_PROXY='127.0.0.1,localhost'
-D:\Anaconda3\envs\model_agent\python.exe scripts/capture_knowledge_service_manual.py --output docs/assets/manual-v110
+D:\anaconda\envs\llm_model\python.exe scripts/capture_knowledge_service_manual.py --output docs/assets/manual-v110
 ```
 
 Expected: one `captured Sxx -> ...png` line for every manifest entry, followed by `captured 32/32`; any missing locator, wrong UI text, health/version mismatch, or incomplete output is a hard failure.
@@ -249,7 +249,7 @@ Use a short read-only validation command to parse the HTML, count headings/figur
 - [ ] **Step 2: Run the focused document tests**
 
 ```powershell
-D:\Anaconda3\envs\model_agent\python.exe -m pytest tests/service/test_docs_contract.py -q
+D:\anaconda\envs\llm_model\python.exe -m pytest tests/service/test_docs_contract.py -q
 ```
 
 Expected: PASS.

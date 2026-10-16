@@ -406,3 +406,9 @@ tr.ledger-row-located td{animation:ledger-locate-flash 1.6s ease}
 #graph-path-result button{max-width:100%;overflow-wrap:anywhere;white-space:normal}
 #graph-canvas{touch-action:none}
 @media(max-width:700px){.version-scope-banner{align-items:flex-start;flex-direction:column}.version-scope-banner button{width:100%}}
+
+/* Keep the shared platform scope in one compact, readable toolbar row. */
+#scope .query-platform-scope{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+#scope .query-platform-scope input{width:200px;max-width:100%;margin:0;padding:7px 9px;font-size:11px}
+#scope .query-platform-scope small{max-width:330px;font-size:11px;line-height:1.4}
+@media(max-width:700px){#scope .query-platform-scope{width:100%}#scope .query-platform-scope small{flex-basis:100%;max-width:none}}

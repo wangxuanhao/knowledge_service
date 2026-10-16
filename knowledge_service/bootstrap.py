@@ -10,8 +10,8 @@ from .integrations.embeddings import (
     configured_encoder,
     encoder_dimension,
 )
-from .integrations.milvus_store import MilvusStore, VectorDimensionMismatch
-from .integrations.neo4j_store import install as install_neo4j
+from .integrations.milvus_store import MilvusSchemaMismatch, MilvusStore, VectorDimensionMismatch
+from .integrations.neo4j_store import Neo4jProjectionAdapter, install as install_neo4j
 from .repository import (
     OntologyNotPublished,
     OntologyPublicationConflict,
@@ -22,7 +22,7 @@ from .repository.users_store import UserStore
 
 __all__ = [
     'DocumentParseError', 'EmbeddingDimensionConfigurationError',
-    'configured_encoder', 'encoder_dimension', 'MilvusStore',
-    'VectorDimensionMismatch', 'install_neo4j', 'OntologyNotPublished',
+    'configured_encoder', 'encoder_dimension', 'MilvusStore', 'MilvusSchemaMismatch',
+    'VectorDimensionMismatch', 'Neo4jProjectionAdapter', 'install_neo4j', 'OntologyNotPublished',
     'OntologyPublicationConflict', 'Repository', 'resolve_dsn', 'UserStore',
 ]

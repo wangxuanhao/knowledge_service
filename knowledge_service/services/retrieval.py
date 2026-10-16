@@ -307,6 +307,7 @@ class RetrievalEngine:
         # 开了本体扩展就不走它：类型通道（子类实例召回）是本地按已过滤候选算出来的，
         # Milvus 只负责排名，交出去会静默丢掉子类命中。扩展是显式开关，默认不受影响。
         native_scope = (scope.get('known_at') is None
+                        and (scope.get('ontology_scope') or 'all') == 'all'
                         and scope.get('filters') is None
                         and candidate_ids is None
                         and not lexical_aliases

@@ -61,7 +61,7 @@ from knowledge_service import create_app, Repository, KnowledgeService
 |---|---|---|
 | PostgreSQL | `repository/` | **唯一真相源**：双时态版本、本体版本链、制品、任务收据 |
 | Milvus | `integrations/milvus_store.py` | 派生检索索引（dense + sparse），可经 `/indexes/rebuild` 重建 |
-| Neo4j | `integrations/neo4j_store.py` | 可选图谱投影副本，按项目手动同步 |
+| Neo4j | `integrations/neo4j_store.py` | 可选图谱投影副本；配置后由 projection worker 按项目自动投递 |
 | 编码器 | `integrations/embeddings.py` | 本地 bge-m3 / OpenAI 兼容 / demo 哈希 |
 
 PostgreSQL 是真值，Milvus / Neo4j 是可重建副本——副本丢失或损坏不影响权威数据。
@@ -169,10 +169,10 @@ knowledge_service/
 
 ## 启动服务
 
-在仓库根目录执行（当前使用 conda 环境 `model_agent`，Python 3.13，Semantica 0.7.x）：
+在仓库根目录执行（当前使用 conda 环境 `llm_model`，Python 3.12，Semantica 0.7.x）：
 
 ```powershell
-conda activate model_agent
+conda activate llm_model
 python -u -m knowledge_service --port 8100
 ```
 
@@ -193,14 +193,14 @@ python -m knowledge_service.repository.migrate    # 应用待执行迁移（幂�
 
 - 模型配置写入仓库根目录 `.env`；启动时读取 `KG_` 变量，已设置的 shell 环境变量优先。不要提交或分享真实密钥。
 - 抽取和生成式证据问答使用 `KG_LLM_BASE_URL`、`KG_LLM_MODEL`、`KG_LLM_API_KEY`，支持 DeepSeek 的 OpenAI 兼容接入，可能产生模型调用费用。
-- 本地向量模型使用 `KG_EMBEDDING_BACKEND=local`、`KG_EMBEDDING_PATH`（默认 `data/model`）。本地模式不需要远程 embedding 的 URL / API Key。
+- 本地向量模型使用 `KG_EMBEDDING_BACKEND=local`、`KG_EMBEDDING_PATH`（优先 `data/model/embedding/bge-m3`，兼容旧 `data/model`）。本地模式不需要远程 embedding 的 URL / API Key。已有模型目录迁移使用 `scripts/prepare_model_layout.py --verify-encoding --env .env`，校验成功后保留原模型标识及旧权重。
 - `--demo` 使用非语义哈希向量，仅用于流程验证，不代表真实语义检索，也不会自动关闭 LLM 抽取。
 - 权威存储是 PostgreSQL（容器 `knowledge-postgres`，端口 5432）：项目、原文、知识版本、任务收据等都在库里；schema 由编号迁移管理（`repository/migrations/`），应用启动只校验版本、不建表。
 - 应用以**应用角色** `knowledge_app` 连库（无 DDL 权限）；建表/建索引必须用迁移器 `python -m knowledge_service.repository.migrate`，它使用 owner 凭据。应用进程读不到超级用户口令（最小权限）。
 - 向量检索必须显式 `KG_VECTOR_BACKEND=milvus` 才开启（Docker 容器 `milvus-standalone`，端口 19530）。向量已不再存于关系库的本地列；未开启 Milvus 时**没有**语义通道，检索自动降级为关键词（PostgreSQL `pg_trgm` + 全文）。
 - 基础设施用仓库根目录 `docker-compose.yml` 一条命令拉起：`docker compose up -d --wait`。包含 PostgreSQL、独立 etcd、minio、Milvus standalone 与 Attu（<http://127.0.0.1:30001>）五个容器，全部端口只绑 `127.0.0.1`，持久化数据统一落在 `./volumes`。
 - Milvus **不使用内嵌 etcd**：元数据由独立的 `milvus-etcd` 承担，避免 Milvus 与 etcd 争抢同一数据目录与 2379 端口。维护与迁移见 `docs/2026-10-01-Docker基础设施维护手册.md`，一键验证 `bash scripts/verify-compose-stack.sh`。
-- Neo4j 是按项目手动同步的图谱副本，检索仍走本地。多个项目可共用一个 database，通过项目标识隔离；切换页面项目不会自动同步。
+- Neo4j 是可重建的图谱投影副本。完成连接配置后，projection worker 会自动消费项目 outbox 并追平水位；手动入口用于显式重建或故障恢复。多个项目可共用一个 database，并以项目和 generation 隔离。
 - 配置只从 `.env` 加载（全部 `KG_` 前缀键）；`.env.example` 仅是参考模板，不作为配置源。shell 环境变量优先级最高，已设置的键不会被 `.env` 覆盖。
 
 ### 环境变量一览
@@ -212,9 +212,11 @@ python -m knowledge_service.repository.migrate    # 应用待执行迁移（幂�
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` | **仅迁移器**使用的 owner 凭据（应用进程读不到） | — |
 | `KG_DATABASE_HOST` / `KG_DATABASE_PORT` | PostgreSQL 地址 / 端口 | `127.0.0.1` / `5432` |
 | `KG_MIGRATION_DATABASE_URL` | 迁移器连接串（建表需 DDL 权限）；留空回退 `POSTGRES_USER/PASSWORD` | 空 |
+| `KG_MIGRATION_LOCK_TIMEOUT_MS` | 迁移 DDL/advisory lock 最长等待毫秒数；超时不登记迁移，可修复阻塞后重跑 | `5000` |
 | `KG_LLM_BASE_URL` / `KG_LLM_MODEL` / `KG_LLM_API_KEY` | LLM 抽取与问答 | — |
 | `KG_EMBEDDING_BACKEND` | `local` / `openai` / `demo` | `local` |
-| `KG_EMBEDDING_PATH` | 本地 bge-m3 模型目录（backend=local） | `data/model` |
+| `KG_EMBEDDING_PATH` | 本地 bge-m3 模型目录（backend=local） | `data/model/embedding/bge-m3` |
+| `KG_EMBEDDING_IDENTITY` | 相同权重迁移时保留已有向量的模型标识 | 留空时使用路径标识 |
 | `KG_EMBEDDING_BATCH_SIZE` | 编码批大小 1..64（backend=local） | `4` |
 | `KG_EMBEDDING_BASE_URL` / `KG_EMBEDDING_MODEL` / `KG_EMBEDDING_API_KEY` | OpenAI 兼容 embedding 提供商（backend=openai） | — |
 | `KG_VECTOR_BACKEND` | `milvus` 开启 Milvus 向量索引 | 关闭（无向量后端） |
@@ -228,6 +230,46 @@ python -m knowledge_service.repository.migrate    # 应用待执行迁移（幂�
 | `KG_SEED_ADMIN_USERNAME` / `KG_SEED_ADMIN_PASSWORD` | 首启播种的超级管理员账号/口令（仅空库时用） | `admin` / `admin123` |
 | `KG_ALLOW_SELF_REGISTRATION` | `1` 才开放自助注册（注册出的恒为只读）；默认关 | 关 |
 | `KG_AUTH_DISABLED` | `1` 关闭认证授权中间件（**仅测试进程用**，生产绝不设） | 关 |
+
+### 原生范围投影的发布与验收
+
+每个服务进程都会启动 projection worker。默认每 2 秒扫描、每项目每目标最多连续投递 10 个 batch，并每 60 秒做一次权威审计；多个实例依靠 PostgreSQL lease/fence 协调。Milvus 或 Neo4j 不可用时，worker 记录失败并重试，在线读取只在 cursor schema 正确、状态 `ready` 且 `applied_seq` 追平项目 watermark 时使用投影，否则走 PostgreSQL 范围下推降级路径。
+
+0013–0015 需要按以下顺序滚动发布，不能把 0013–0015 当成一个无停顿步骤：
+
+1. 使用 owner 凭据执行 0013，只增加 nullable 原生范围列。
+2. 部署支持这些列的新写入版本，并确认所有旧 writer 已从流量中摘除。
+3. 执行 0014 回填、约束和非空化，再执行 0015 并发索引以及 0016 之后的 outbox/cleanup 迁移。锁等待由 `KG_MIGRATION_LOCK_TIMEOUT_MS` 控制；超时不会写入迁移台账。
+4. 逐实例部署包含 projection worker 的新版本。观察 `projection_cursors`，等待 Milvus/Neo4j 均为 `ready` 且水位追平后再结束发布。
+5. schema mismatch 会触发 rebuild；切 alias 后旧 destination 保留 7 天。回滚窗口内继续双写，过期 destination 由 maintenance 清理。
+
+0018 为配置的应用角色补齐五张投影表的 SELECT / INSERT / UPDATE / DELETE 权限，不授予 DDL；已有数据库也必须执行。显式选择本体发布或未知本体归属时，当前 Milvus 结构无法表达该过滤，检索先在 PostgreSQL 权威范围中过滤再排名，来源及相邻片段复用同一范围。
+
+先生成不会连接服务的验收计划：
+
+```powershell
+python scripts/verify_native_applicability_capacity.py --dry-run `
+  --report artifacts/native-applicability-capacity-plan.json
+python scripts/rehearse_migration_0013.py --dry-run `
+  --report artifacts/migration-0013-plan.json
+```
+
+真实容量命令要求显式设置 `KG_CAPACITY_POSTGRES_DSN`、`KG_CAPACITY_MILVUS_URI`、`KG_CAPACITY_MILVUS_COLLECTION`、`KG_CAPACITY_NEO4J_URI`、`KG_CAPACITY_NEO4J_USERNAME`、`KG_CAPACITY_NEO4J_PASSWORD` 和 `KG_CAPACITY_PROJECT_ID`，然后运行：
+
+```powershell
+python scripts/verify_native_applicability_capacity.py --execute `
+  --report artifacts/native-applicability-capacity.json
+```
+
+迁移演练只能使用名称以 `kg_acceptance_` 开头的 disposable database：
+
+```powershell
+$env:KG_ACCEPTANCE_MIGRATION_DSN = 'postgresql://owner:...@127.0.0.1:5432/kg_acceptance_applicability'
+python scripts/rehearse_migration_0013.py --execute --allow-disposable-database `
+  --report artifacts/migration-0013-rehearsal.json
+```
+
+详细阈值、JSON 状态与退出码见 [多平台规则的适用范围与检索](docs/applicability-retrieval.md)。2026-10-15 已完成本机现有六个项目的 Milvus 分代投影恢复、零水位校验及检索/图谱读取验收。Neo4j 当前未配置，5000 文档/10 平台/10 万记录的重型验收尚未执行，不能据此声称容量已经通过。
 
 ---
 
@@ -281,10 +323,10 @@ python -m knowledge_service.repository.migrate    # 应用待执行迁移（幂�
 安装文档解析依赖：
 
 ```powershell
-D:\Anaconda3\envs\model_agent\python.exe -m pip install -e ".[semantica-runtime]"
+D:\anaconda\envs\llm_model\python.exe -m pip install -e ".[semantica-runtime]"
 ```
 
-当前锁定 Semantica `>=0.7,<0.8` 与 Docling `>=2.130,<3`。Docling 首次解析某些 PDF 时可能需要本机已有的模型缓存；模型权重由部署者本地安装和管理。`KG_DOCUMENT_OCR_MODE=auto`（默认）为扫描 PDF 保留 OCR 路径，设为 `disabled` 可关闭。上传的原始二进制只进入临时目录，任务结束即删除；异常中断遗留文件会在下次启动时清理（24 小时阈值）。
+当前锁定 Semantica `>=0.7,<0.8` 与 Docling `>=2.130,<3`。Docling 首次解析某些 PDF 时可能需要本机已有的模型缓存；模型权重由部署者本地安装和管理。`KG_DOCUMENT_OCR_MODE=auto`（默认）为扫描 PDF 保留 OCR 路径，设为 `disabled` 可关闭。批次上传将原文件和附件固化到 `KG_SOURCE_OBJECT_ROOT`（默认 `data/sources`），通过项目授权的原文阅读器读取固定版本。Markdown + 相对附件 ZIP 可展开为多份文档，本地图片经独立 `KG_IMAGE_OCR_*` 的 RapidOCR 识别和质量门后再抽取；OCR 权重放在 `data/model/ocr/pp-ocr-v6-small`，请求不下载权重。批次并发、断点恢复和人工忽略操作见 [运维说明](docs/2026-10-14-批量知识写入与断点续跑运维说明.md)。旧上传接口继续兼容其暂存和任务行为。
 
 文件预览使用 `POST /api/projects/{project_id}/documents/upload/preview`，后台解析使用 `POST /api/projects/{project_id}/documents/upload/jobs`，均为 `multipart/form-data`，包含 `file` 与 JSON 字符串 `options`。原有 JSON `/documents/preview`、`/documents/jobs` 和同步 `/documents/upload` 保持兼容。
 
@@ -339,10 +381,10 @@ D:\Anaconda3\envs\model_agent\python.exe -m pip install -e ".[semantica-runtime]
 |---|---|
 | `metadata.published_at` | 上传表单的“发布时间”，选填，表示原文对外发布的时间 |
 | `metadata.uploaded_at` | 系统接收文档时自动记录的添加时间 |
-| `valid_from / valid_until` | 事实的业务有效期，不等于发布时间或添加时间 |
+| `valid_from / valid_until` | 业务有效期；显式 `valid_from` 优先，未填时以 `published_at` 回退，绝不以 `uploaded_at`（系统接收时间）代替 |
 | `recorded_at / superseded_at` | 系统记录与更正知识版本的时间 |
 
-知识写入表单不再统一填写生效／失效时间，发布时间不会自动赋给实体或关系作为有效期。关系抽取会识别原文明示的事实有效期并保存时间证据；没有明确时间信号时保持为空，不会用发布时间猜测。旧接口仍保留有效期字段。文件级更新时间目前也没有统一接入，不能将版本记录时间等同于文件更新时间。
+知识写入表单允许填写发布时间和可选的显式生效／失效时间。显式 `valid_from` 优先；未填时，发布时间作为默认生效时间，并在 metadata 中记录来源。关系抽取识别出的明确事实有效期可覆盖该默认值。没有显式时间和发布时间时保持未知；系统接收时间 `uploaded_at` 与版本记录时间都不能当作业务生效时间。
 
 图谱和检索支持项目范围、业务有效时点、系统已知时点及 Metadata 前置筛选。发布时间／添加时间可以作为 Metadata 条件使用，但专用的多时间维度筛选界面、按来源汇总筛选融合实体尚未完整接入。
 
@@ -414,7 +456,7 @@ D:\Anaconda3\envs\model_agent\python.exe -m pip install -e ".[semantica-runtime]
 
 本体变更草案绑定来源文档、知识候选、文档版本和本体基准版本。批准前展示现有知识引用、约束引用和关联候选数量；调整被引用的术语属于高影响变更，必须额外确认。批准发布本体版本、草案决定和候选重校验结果采用同一个 PostgreSQL 事务。本体或候选已变化时返回版本冲突，要求重新评估，不会覆盖新版。
 
-批准后重新检索/加载图谱查看，时间及 metadata 筛选仍然生效；Neo4j 副本需要手动重新同步。当前是本机服务的审核留痕，不包含审核员身份认证、角色权限、多级审批或批量批准。拒绝/批准没有专用撤销按钮；已入图关系可通过现有知识治理功能处理。
+批准后重新检索/加载图谱查看，时间及 metadata 筛选仍然生效；配置 Neo4j 后，projection worker 会自动投递审核产生的新版本，手动重建仅用于恢复异常投影。当前是本机服务的审核留痕，不包含审核员身份认证、角色权限、多级审批或批量批准。拒绝/批准没有专用撤销按钮；已入图关系可通过现有知识治理功能处理。
 
 知识审核接口：`GET /api/projects/{p}/reviews`，`POST /api/projects/{p}/reviews/{document_id}/{candidate_id}`。本体草案接口：`GET/POST /api/projects/{p}/ontology-change-proposals`，`GET /api/projects/{p}/ontology-change-proposals/{id}`，`POST /api/projects/{p}/ontology-change-proposals/{id}/decision`。候选 `kind` 为 entity/relation/attribute；旧版无 kind 的候选按 relation 兼容。属性批准后的实体版本使用审核时本体，其他知识不自动迁移。
 
@@ -477,10 +519,10 @@ D:\Anaconda3\envs\model_agent\python.exe -m pip install -e ".[semantica-runtime]
 
 ## 测试
 
-回归测试在 `tests/service/`（74 个 Python 测试文件，pytest 收集 **1490 用例**；另有 8 个前端契约 `.cjs`），全量约 5 分钟，两套要分开跑：
+回归测试在 `tests/service/`，用例数量以 pytest 实际收集结果为准。Python 回归包含 PostgreSQL 集成和浏览器检查，耗时取决于数据库与浏览器环境；`.cjs` 前端契约需另外执行，两套都要跑：
 
 ```bash
-conda activate model_agent
+conda activate llm_model
 python -m pytest -q                      # ① Python 测试（含 PG 集成与浏览器契约）
 node --test tests/service/*.test.cjs     # ② 前端契约测试（.cjs，pytest 不收集它们，必须单独跑）
 ```
@@ -488,7 +530,7 @@ node --test tests/service/*.test.cjs     # ② 前端契约测试（.cjs，pytes
 - 需要**真实 PostgreSQL**：测试用 `tests/service/pg_support.py` 在独立的 `knowledge_test` 库上建隔离 schema（每个 `Repository(路径)` 映射到一个槽位），跑完自动清理。数据库不可用时相关用例**自动 skip**，不会假绿。
 - **切勿并行开两个 pytest 会话**：`pg_support.teardown` 会 `DROP DATABASE knowledge_test`，两个会话会互相删库，表现为假失败/error。
 - **pytest 必须密闭运行**：直接 `python -m pytest`，绝不要 `source .env`；一旦 `KG_VECTOR_BACKEND=milvus` / `KG_MILVUS_DIM=1024` / `KG_EMBEDDING_BACKEND=local` 渗进测试进程，会与测试用的 256 维 demo 哈希编码器错配，表现为十几个「向量维度 256 != 预期 1024」的假失败。
-- 浏览器契约测试（Python 的 Playwright 用例）用 conda env `model_agent` 的解释器即可（已含 playwright），浏览器用**系统 Edge**（headless），不需要 `.venv`。
+- 浏览器契约测试（Python 的 Playwright 用例）用 conda env `llm_model` 的解释器即可（已含 playwright），浏览器用**系统 Edge**（headless），不需要 `.venv`。
 - `node --test` 不能用目录形式（Node 26 下报 `Cannot find module`），必须用显式 glob。
 
 ---
@@ -496,7 +538,7 @@ node --test tests/service/*.test.cjs     # ② 前端契约测试（.cjs，pytes
 ## 快速开始（仓库根执行）
 
 ```powershell
-conda activate model_agent
+conda activate llm_model
 docker compose up -d --wait
 python -m knowledge_service.repository.migrate
 python -u -m knowledge_service --port 8100
@@ -506,7 +548,7 @@ python -u -m knowledge_service --port 8100
 - 首次登录：默认超级管理员 `admin` / `admin123`（或 `.env` 里 `KG_SEED_ADMIN_*` 指定的），登录后立即改口令。
 - 服务验收：`python scripts/smoke_service.py`（针对运行中的 8100 服务）。
 
-> 环境：conda env `model_agent`（Python 3.13，另含 rdflib、sentence-transformers）。
+> 环境：conda env `llm_model`（Python 3.12，另含 rdflib、sentence-transformers）。
 > 权威存储是 PostgreSQL（`docker compose` 的 `knowledge-postgres`），**启动前必须可用**。
 > 向量模型 `data/model`（bge-m3）与本体文件可本地读取；LLM 抽取和生成式问答是否联网取决于供应商配置，并非整个流程默认全离线。
 

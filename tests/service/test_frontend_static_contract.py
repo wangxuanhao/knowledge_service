@@ -282,36 +282,23 @@ def test_same_type_same_color_across_pages_palette_is_deterministic():
     assert "if (used.has(color))" in palette, '缺少撞色挪位'
 
 
-def test_graph_is_readonly_canvas_pan_and_click_but_no_node_drag():
-    """图谱是**只读画布**：节点不可拖动（力导向布局只负责初始摆放，节点位置不承载编辑语义）。
-
-    空白处拖动＝平移画布（ECharts 的 roam:true）；点节点/连线＝看详情；双击空白＝适应画布。
-    以前那套「移动节点」zrender 拖动（bindNodeDrag + nearestNode）+ 开关按钮已整体移除：
-    对一张检索浏览用的图，拖动节点是负担不是能力——布局会被拖乱，也偏离"正常画布操作"的直觉。
-    """
+def test_graph_layout_drag_preserves_pan_zoom_and_details():
+    """Layout dragging is a view action; gestures and evidence remain available."""
     workspace = read('workspace.js')
-    # 平移画布：ECharts graph 的 roam:true（空白处拖动）
-    assert "type:'graph',layout:'force',roam:true" in workspace, '必须允许拖动空白处平移画布（roam）'
-    # 点节点/连线看详情
-    assert "chart.on('click'" in workspace, '点节点或连线必须能看详情'
-    # 双击空白＝适应画布
-    assert "getZr().on('dblclick'" in workspace, '双击空白处＝适应画布'
+    gestures = read('graph-workbench.js')
+    assert "type:'graph',layout:'none',draggable:true,roam:'scale'" in workspace
+    assert "chart.on('click'" in workspace and 'GraphWorkbench.canClick()' in workspace
+    assert "getZr().on('dblclick'" in workspace
     assert 'bindPanAffordances' in workspace
-    # 节点拖动必须整体移除：既没有 zrender 拖动实现，也没有开关按钮
-    assert 'bindNodeDrag' not in workspace, '节点拖动实现应已移除'
-    assert 'nearestNode' not in workspace, '节点拖动实现应已移除'
-    assert 'dragNodes' not in workspace, '「移动节点」开关状态应已移除'
+    assert "if(!event.target)pan=" in gestures
+    assert "type:'graphRoam'" in gestures
     html = read('index.html')
-    assert 'id="graph-drag-nodes"' not in html, '「移动节点」开关按钮应已移除'
-    assert 'id="graph-pan-hint"' in html, '缺少拖动/缩放操作提示'
-    assert 'graph-palette.js' in html, '必须引入调色板模块'
-    # 同上：按"带版本号"匹配，不锁死 fix13 这类具体值。
-    assert html.index('graph-palette.js') < re.search(r'workspace\.js\?v=', html).start(), \
-        '调色板要先于 workspace.js 加载'
-    css = read('workspace.css')
-    assert '.graph-canvas canvas{cursor:grab}' in css, '缺少可拖动的光标反馈'
-    # 同类：候选图也是 roam + draggable，拖动同样会被节点吃掉
-    assert 'draggable:false' in read('candidate-mindmap.js'), '候选图也必须关掉节点拖动'
+    for asset in ('graph-palette.js', 'graph-interaction.js', 'graph-workbench.js'):
+        assert html.index(asset) < re.search(r'workspace\.js\?v=', html).start()
+    assert 'id="graph-drag-nodes"' not in html
+    assert 'id="graph-pan-hint"' in html
+    assert '.graph-canvas canvas{cursor:grab}' in read('workspace.css')
+    assert 'draggable:false' in read('candidate-mindmap.js')
 
 
 def test_pan_hint_says_what_each_action_does():

@@ -111,6 +111,10 @@ def _json(value):
 
 def _decode_row(row):
     result = dict(row)
+    # The shared row factory hides legacy internal ordering columns named seq.
+    # Outbox sequence numbers are part of the internal delivery contract.
+    if 'outbox_seq' in result:
+        result['seq'] = result.pop('outbox_seq')
     for name in ('payload', 'rebuild_state'):
         if isinstance(result.get(name), str):
             result[name] = json.loads(result[name])
@@ -121,6 +125,35 @@ class ProjectionStore:
     def __init__(self, repository):
         self.repository = repository
         self._db = repository._db
+
+    def authority_bundle(self, project_id, record_id):
+        """Current target, incident facts and endpoints for projection repair."""
+        with self.repository._lock:
+            rows = self._db.execute(
+                '''WITH current_rows AS (
+                     SELECT * FROM record_versions
+                     WHERE project_id=? AND superseded_at IS NULL
+                   ), incident AS (
+                     SELECT payload::jsonb AS doc FROM current_rows
+                     WHERE (payload::jsonb->>'kind'='relation' AND
+                            (payload::jsonb->>'id'=? OR
+                             payload::jsonb->>'subject_id'=? OR
+                             payload::jsonb->>'object_id'=?))
+                        OR (payload::jsonb->>'kind'='attribute' AND
+                            (payload::jsonb->>'id'=? OR
+                             payload::jsonb->>'subject_id'=?))
+                   ), wanted AS (
+                     SELECT ?::text AS id
+                     UNION SELECT doc->>'id' FROM incident
+                     UNION SELECT doc->>'subject_id' FROM incident
+                     UNION SELECT doc->>'object_id' FROM incident
+                   )
+                   SELECT current_rows.* FROM current_rows
+                   WHERE id IN (SELECT id FROM wanted WHERE id IS NOT NULL)
+                   ORDER BY id''',
+                (project_id, record_id, record_id, record_id, record_id,
+                 record_id, record_id)).fetchall()
+        return [self.repository._record(row, vectors='list') for row in rows]
 
     @staticmethod
     def rollback_deadline(switched_at=None):
@@ -218,7 +251,7 @@ class ProjectionStore:
                     raise ProjectionLeaseLost('projection rebuild lease was lost')
                 base = int(after_seq if after_seq is not None else cursor['applied_seq'])
             rows = self._db.execute(
-                '''SELECT project_id,seq,operation,version_id,payload,created_at
+                '''SELECT project_id,seq AS outbox_seq,operation,version_id,payload,created_at
                    FROM projection_outbox WHERE project_id=? AND seq>?
                    ORDER BY seq LIMIT ?''', (project_id, base, limit)).fetchall()
             events = tuple(_decode_row(row) for row in rows)
@@ -277,10 +310,10 @@ class ProjectionStore:
             if int(cursor['schema_version']) != int(schema_version):
                 raise ProjectionGap('projection schema changed while acknowledging')
             rows = self._db.execute(
-                '''SELECT seq FROM projection_outbox
+                '''SELECT seq AS outbox_seq FROM projection_outbox
                    WHERE project_id=? AND seq BETWEEN ? AND ? ORDER BY seq''',
                 (claimed.project_id, claimed.from_seq, claimed.to_seq)).fetchall()
-            actual = [int(row['seq']) for row in rows]
+            actual = [int(row['outbox_seq']) for row in rows]
             expected = [int(event['seq']) for event in claimed.events]
             if actual != expected:
                 raise ProjectionGap('claimed events no longer match authoritative outbox')

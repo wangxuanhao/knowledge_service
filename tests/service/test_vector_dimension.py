@@ -17,6 +17,7 @@ from knowledge_service.integrations.embeddings import (
 )
 from knowledge_service.integrations.milvus_store import (
     MilvusStore,
+    MilvusSchemaMismatch,
     VectorDimensionMismatch,
 )
 
@@ -227,6 +228,22 @@ def test_milvus_store_keeps_encoder_identity_not_dimension_source(monkeypatch):
 
     assert store.encoder_identity == HashingEncoder.identity
     assert store.encoder_identity != HashingEncoder.dimension_source
+
+
+def test_legacy_milvus_schema_keeps_connected_store_for_generation_rebuild(monkeypatch):
+    monkeypatch.setenv('KG_VECTOR_BACKEND', 'milvus')
+    monkeypatch.setenv('KG_MILVUS_DIM', '256')
+    monkeypatch.setattr(MilvusStore, 'connect', lambda self: self)
+
+    def legacy_schema(self):
+        raise MilvusSchemaMismatch('legacy collection requires V2 rebuild')
+
+    monkeypatch.setattr(MilvusStore, 'ensure_collection', legacy_schema)
+    diagnostics = []
+    store = _build_milvus_store(HashingEncoder(), diagnostics=diagnostics)
+
+    assert isinstance(store, MilvusStore)
+    assert diagnostics and 'V2 rebuild' in diagnostics[0]
 
 
 def test_unknown_encoder_dimension_requires_an_explicit_positive_dimension(monkeypatch):

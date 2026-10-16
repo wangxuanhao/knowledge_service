@@ -134,6 +134,9 @@ def ensure_test_database() -> None:
             conn.execute(f'CREATE DATABASE "{TEST_DB}"')
     # 操作符类必须落在 search_path 可见的 schema 里；放 public 最省事。
     _conn().execute('CREATE EXTENSION IF NOT EXISTS pg_trgm')
+    # 0013 uses digest(); installing pgcrypto inside the first slot would make
+    # it invisible to every other slot's search_path (slot, public).
+    _conn().execute('CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public')
     # 测试库是一次性的，没必要为每次提交付 fsync；顺带让测试里的写入更快。
     with psycopg.connect(admin_dsn('postgres'), autocommit=True) as admin:
         admin.execute(f'ALTER DATABASE "{TEST_DB}" SET synchronous_commit = off')
@@ -199,7 +202,8 @@ def target(path) -> str:
             return _slot_dsn(_slots[bound][0])
 
         taken = set(_binding.values())
-        index = next((i for i in range(1, POOL_SIZE + 1) if i not in taken), None)
+        capacity = max(POOL_SIZE, max(_slots, default=0))
+        index = next((i for i in range(1, capacity + 1) if i not in taken), None)
         if index is None:
             # 该测试同时需要多于 POOL_SIZE 个库：扩容而不是复用 —— 复用会让
             # 两个本应互相隔离的库串数据，那是最难查的一类测试失败。

@@ -559,6 +559,10 @@ class KnowledgeService:
             'applicability': applicability,
             'lock': threading.Lock(),
         }
+        if (scope.get('ontology_scope') or 'all') != 'all':
+            # V2 projections do not carry ontology release IDs. Apply the
+            # authority scope before ranking and before adding source neighbors.
+            fallback_cache['rows'] = self.scoped(project_id, scope)
         query_vector_cache = {'lock': threading.Lock()}
 
         def retrieve(group_scope, platform_match=None, query_platform=None,

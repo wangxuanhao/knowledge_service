@@ -532,11 +532,15 @@ class MilvusStore:
                             max_length=64),
                 FieldSchema(name='projection_seq', dtype=DataType.INT64),
                 FieldSchema(name='fence', dtype=DataType.VARCHAR, max_length=128),
+                # Milvus 3 requires every collection to contain an indexed
+                # vector, including control collections queried only by scalars.
+                FieldSchema(name='marker_vector', dtype=DataType.FLOAT_VECTOR, dim=2),
             ], description='knowledge_service projection fence markers')
             self._client.create_collection(control, schema=schema)
             index_params = IndexParams()
             index_params.add_index('project_id', index_type='INVERTED')
             index_params.add_index('projection_seq', index_type='INVERTED')
+            index_params.add_index('marker_vector', index_type='FLAT', metric_type='L2')
             self._client.create_index(control, index_params)
             self._client.load_collection(control)
         marker_id = hashlib.sha256(
@@ -545,6 +549,7 @@ class MilvusStore:
             'marker_id': marker_id, 'project_id': str(project_id),
             'projection_seq': int(seq),
             'fence': str(fence),
+            'marker_vector': [0.0, 0.0],
         }])
         self._rpc(self._client.flush, control)
 
@@ -626,7 +631,8 @@ class MilvusStore:
                   and expected_projection is not None
                   and actual_projection == expected_projection
                   and expected_digest is not None and digest == expected_digest
-                  and int(marker.get('projection_seq') or -1) >= maximum)
+                  and marker.get('projection_seq') is not None
+                  and int(marker['projection_seq']) >= maximum)
         if fence:
             ok = ok and fence in latest_fences
         return {'ok': ok, 'count': actual, 'expected_count': expected_count,

@@ -130,9 +130,13 @@ def test_pending_records_are_not_inputs_to_constraint_validation(tmp_path):
 def test_answer_evidence_chain_excludes_pending_and_labels_it(tmp_path):
     """问答：待定知识不进证据链，但**显式标注**出来（能查、能引用、不算正式证据）。"""
     repo, service, project_id = _service(tmp_path, 'answer.sqlite')
-    service.write(project_id, [{'id': 'known', 'kind': 'entity', 'type': 'Person', 'text': '张三'},
+    # This test isolates unknown ontology terms, rather than unknown platform scope.
+    applicability = {'platforms': {'mode': 'all'}}
+    service.write(project_id, [{'id': 'known', 'kind': 'entity', 'type': 'Person', 'text': '张三',
+                                'metadata': {'applicability': applicability}},
                                {'id': 'pending', 'kind': 'entity',
-                                'type': 'urn:knowledge:ontology:甲:包裹', 'text': '一个包裹'}])
+                                'type': 'urn:knowledge:ontology:甲:包裹', 'text': '一个包裹',
+                                'metadata': {'applicability': applicability}}])
     request = {'query': '包裹', 'k': 10, 'k_entities': 5, 'k_chunks': 5,
                'retrieval_mode': 'keyword', 'hops': 0}
     context = question_context(service, project_id, request)

@@ -1132,7 +1132,7 @@ def test_mapping_finalize_does_not_treat_unrelated_id_collision_as_reused(tmp_pa
         p=project['id'];base=f'/api/projects/{p}';repo=app.state.service.repository
         repo.save_ontology(p,baseline,Ontology(baseline).summary())
         run=client.post(base+'/ontology-discovery/drafts',json={'name':'ID 冲突'}).json()['run']
-        unrelated=repo._put(p,{'id':_formal_id(p,candidates[0]),'kind':'entity',
+        unrelated=repo.put_record(p,{'id':_formal_id(p,candidates[0]),'kind':'entity',
             'text':'非候选记录','type':'urn:test:Subject','metadata':{}},0)
         response=client.post(base+f"/ontology-discovery/runs/{run['id']}/finalize")
         assert response.status_code==409,response.text

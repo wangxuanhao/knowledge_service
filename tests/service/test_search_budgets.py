@@ -20,6 +20,9 @@ def test_keyword_search_three_channel_response_and_performance_budget(tmp_path, 
             records.append({'id': f'r-{index}', 'kind': 'relation', 'type': 'mentions',
                             'subject_id': f'e-{index}', 'object_id': f'e-{index + 1}',
                             'text': f'退款关系 {index}', 'metadata': {}})
+        # This quota budget uses common evidence; unknown scope has its own k_unknown cap.
+        for record in records:
+            record['metadata']['applicability'] = {'platforms': {'mode': 'all'}}
         repository.put_batch(project_id, records)
         original_query = repository.query
         query_calls = 0

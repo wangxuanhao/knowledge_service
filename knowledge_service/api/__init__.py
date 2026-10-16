@@ -29,6 +29,8 @@ from ..bootstrap import (
     DocumentParseError,
     EmbeddingDimensionConfigurationError,
     MilvusStore,
+    MilvusSchemaMismatch,
+    Neo4jProjectionAdapter,
     VectorDimensionMismatch,
     OntologyNotPublished,
     OntologyPublicationConflict,
@@ -49,7 +51,6 @@ from ..services.projection_runtime import (
     MilvusProjectionAdapter,
     ProjectionWorker,
 )
-from ..integrations.neo4j_store import Neo4jProjectionAdapter
 from ..core.time import utc_now
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -115,7 +116,7 @@ def _build_milvus_store(encoder=None, diagnostics=None):
         store.connect()
         store.ensure_collection()
         return store
-    except VectorDimensionMismatch as exc:
+    except (VectorDimensionMismatch, MilvusSchemaMismatch) as exc:
         LOG.warning('Milvus collection 需要重建: %s', redact(exc))
         if diagnostics is not None:
             diagnostics.append(redact(exc))
@@ -348,36 +349,7 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
             fence_is_current=neo4j_fence_is_current)
 
         def repair_neo4j_authority(project_id, record_id, destination):
-            # One current-only SQL result supplies the repaired record, its
-            # incident facts/attributes, and relation endpoint records.  This
-            # avoids an N+1 repair and prevents DETACH DELETE from losing valid
-            # authoritative edges.
-            with repository._lock:
-                rows = repository._db.execute(
-                    '''WITH current_rows AS (
-                         SELECT * FROM record_versions
-                         WHERE project_id=? AND superseded_at IS NULL
-                       ), incident AS (
-                         SELECT payload::jsonb AS doc FROM current_rows
-                         WHERE (payload::jsonb->>'kind'='relation' AND
-                                (payload::jsonb->>'id'=? OR
-                                 payload::jsonb->>'subject_id'=? OR
-                                 payload::jsonb->>'object_id'=?))
-                            OR (payload::jsonb->>'kind'='attribute' AND
-                                (payload::jsonb->>'id'=? OR
-                                 payload::jsonb->>'subject_id'=?))
-                       ), wanted AS (
-                         SELECT ?::text AS id
-                         UNION SELECT doc->>'id' FROM incident
-                         UNION SELECT doc->>'subject_id' FROM incident
-                         UNION SELECT doc->>'object_id' FROM incident
-                       )
-                       SELECT current_rows.* FROM current_rows
-                       WHERE id IN (SELECT id FROM wanted WHERE id IS NOT NULL)
-                       ORDER BY id''',
-                    (project_id, record_id, record_id, record_id, record_id,
-                     record_id, record_id)).fetchall()
-            bundle = [repository._record(row, vectors='list') for row in rows]
+            bundle = repository.projections.authority_bundle(project_id, record_id)
             return neo4j_adapter.repair_record(
                 project_id, record_id, bundle, destination,
                 repository.projections.project_watermark(project_id))
