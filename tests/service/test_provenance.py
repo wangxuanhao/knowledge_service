@@ -1058,7 +1058,8 @@ def test_sse_evidence_is_committed_and_trace_running_until_done(provenance, monk
     assert service.trace_answer_evidence(project, answer, 'E1')['answer']['status'] == 'running'
     name, done = _sse_item(next(stream))
     assert (name, done) == ('done', {'answer': '[E1] evidence\n\n', 'mode': 'evidence_only',
-        'answer_id': answer, 'retrieval_run_id': run, 'provenance_complete': True})
+        'answer_id': answer, 'retrieval_run_id': run, 'provenance_complete': True,
+        'eligibility_audit': {'passed': True, 'invalid_citations': []}})
     assert not repo._db.in_transaction
     assert service.trace_answer_evidence(project, answer, 'E1')['answer'] == {
         'status': 'completed', 'citation_status': 'cited'}
@@ -1073,11 +1074,12 @@ def test_sse_llm_citations_are_committed_before_done(provenance, monkeypatch):
     evidence = _sse_item(next(stream))[1]
     assert _sse_item(next(stream)) == ('delta', {'text': '[E1] [E1] [E99]'})
     name, done = _sse_item(next(stream))
-    assert name == 'done' and done['mode'] == 'llm' and done['provenance_complete'] is True
-    assert done['answer'] == '[E1] [E1] [E99]'
+    assert name == 'done' and done['mode'] == 'evidence_only' and done['provenance_complete'] is True
+    assert done['answer'] == '[E1] evidence'
+    assert done['eligibility_audit'] == {'passed': False, 'invalid_citations': ['E99']}
     trace = service.trace_answer_evidence(project, evidence['answer_id'], 'E1')
     assert trace['answer']['status'] == 'completed'
-    assert 'unknown_citation' in _codes(trace)
+    assert 'unknown_citation' not in _codes(trace)
     cites = [edge for edge in repo.list_provenance_edges(project) if edge['relation'] == 'cites']
     assert len(cites) == 1 and cites[0]['source_ref'] == f"answer:{done['answer_id']}#E1"
     stream.close()
@@ -1159,7 +1161,7 @@ def test_sse_empty_evidence_commits_empty_offered_and_completes(provenance, monk
     assert [name for name, _ in items] == ['evidence', 'delta', 'done']
     done = items[-1][1]
     assert done['provenance_complete'] is True and done['mode'] == 'evidence_only'
-    assert done['answer'] == '当前查询范围没有证据。'
+    assert done['answer'] == '未找到在该时点确认有效的依据。'
     answer = repo.get_provenance_activity(project, done['answer_id'])
     assert answer['status'] == 'completed' and answer['payload']['offered'] == []
     assert answer['payload']['cited'] == []

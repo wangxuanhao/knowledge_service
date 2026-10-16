@@ -1331,7 +1331,7 @@ class Repository:
 
     def query(self, project_id, filters=None, valid_at=None, known_at=None, kinds=None,
               include_unknown=True, include_embeddings=True, vectors='list',
-              applicability=None):
+              applicability=None, _reference_mode=False, _reference_limit=501):
         """读取 ``known_at`` 时刻可见的每个系统版本，并在 Python 侧过滤。
 
         PERF：未传 ``known_at`` 时使用 ``superseded_at IS NULL`` 的 current
@@ -1372,13 +1372,16 @@ class Repository:
                     params.extend((known_at, known_at))
                 else:
                     statement += ' AND superseded_at IS NULL'
-                if include_unknown:
+                if _reference_mode:
+                    pass  # Internal QA reference read bypasses business time only.
+                elif include_unknown:
                     statement += (' AND (NOT valid_from_known OR valid_from_epoch_ms<=?)'
                                   ' AND (NOT valid_until_known OR valid_until_epoch_ms>?)')
                 else:
                     statement += (' AND valid_from_known AND valid_from_epoch_ms<=?'
                                   ' AND (NOT valid_until_known OR valid_until_epoch_ms>?)')
-                params.extend((valid_at_epoch_ms, valid_at_epoch_ms))
+                if not _reference_mode:
+                    params.extend((valid_at_epoch_ms, valid_at_epoch_ms))
                 for dimension, prefix in (
                         ('platforms', 'platform'), ('businesses', 'business'),
                         ('audiences', 'audience')):
@@ -1395,14 +1398,21 @@ class Repository:
                 if kinds:
                     statement += " AND (payload::jsonb->>'kind') IN (%s)" % ','.join('?' * len(kinds))
                     params.extend(kinds)
-                rows = self._db.execute(statement + ' ORDER BY id,version', tuple(params)).fetchall()
+                if _reference_mode:
+                    if type(_reference_limit) is not int or not 1 <= _reference_limit <= 1001:
+                        raise ValueError('无效的参考读取预算')
+                    statement += ' ORDER BY id,version LIMIT ?'
+                    params.append(_reference_limit)
+                else:
+                    statement += ' ORDER BY id,version'
+                rows = self._db.execute(statement, tuple(params)).fetchall()
             stage['rows'] = len(rows)
             warn_scan('存储查询', len(rows))
             result = []
             for row in rows:
                 record = self._record(row, vectors=vectors if include_embeddings else 'none')
                 start, end = record['valid_from'], record['valid_until']
-                if (not include_unknown and start is None) or (start is not None and start > valid_at) or (end is not None and end <= valid_at):
+                if not _reference_mode and ((not include_unknown and start is None) or (start is not None and start > valid_at) or (end is not None and end <= valid_at)):
                     continue
                 if kinds is not None and record['kind'] not in kinds:
                     continue

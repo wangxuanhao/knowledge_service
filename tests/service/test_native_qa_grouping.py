@@ -9,7 +9,7 @@ import pytest
 from knowledge_service.models import Search
 from knowledge_service.repository.core import Repository
 from knowledge_service.services import service as service_module
-from knowledge_service.services.answers import answer_messages, question_context
+from knowledge_service.services.answers import answer_messages, _retrieved_question_context as question_context
 from knowledge_service.services.retrieval import RetrievalEngine
 from knowledge_service.services.service import KnowledgeService
 

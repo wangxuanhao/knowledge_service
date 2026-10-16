@@ -14,7 +14,12 @@
       x.original_name,x.stage,x.failed_chunk_ordinal,x.error_code,x.public_error,x.auto_retry_count,x.next_retry_at])]
       .map(row=>row.map(cell).join(',')).join('\r\n');
   }
-  const helpers={pool,retryLabels,failureCsv};
+  function assertSessionSettings(previous,current){
+    if(previous?.extraction_mode!==current.extraction_mode||(previous?.ontology_id??null)!==(current.ontology_id??null)){
+      throw Error('未完成上传批次的提取模式或本体版本与当前选择不同。请先清空文件列表，再重新选择文件提交新批次。');
+    }
+  }
+  const helpers={pool,retryLabels,failureCsv,assertSessionSettings};
   if(typeof module!=='undefined')module.exports=helpers;
   if(typeof window==='undefined')return;
   const states={draft:'待上传',uploading:'上传中',staged:'已上传',queued:'排队',running:'处理中',parsing:'解析',parse:'解析',chunking:'切片',extracting:'抽取',extraction:'抽取',merging:'融合',validating:'校验',committing:'写入',commit:'写入',completed:'完成',completed_with_errors:'部分失败',retry_wait:'等待自动重试',needs_attention:'需要处理',interrupted:'已中断',paused:'已暂停',skipped:'已跳过',cancelled:'已取消'};
@@ -77,7 +82,7 @@
           if(item.error_code){row.append(node('p',`${states[item.stage]||item.stage||'处理'}${item.failed_chunk_ordinal!=null?' · 切片 '+item.failed_chunk_ordinal:''} · ${item.public_error||item.error_code}`,'batch-error'),node('small','自动重试 '+(item.auto_retry_count||0)+' 次'+(item.next_retry_at?' · 下次 '+new Date(item.next_retry_at).toLocaleString():'')));
             const tools=node('div','','batch-actions');for(const [mode,label] of Object.entries(retryLabels))tools.append(button(label,()=>request(url+'/items/'+encodeURIComponent(item.id)+'/retry',{mode}).then(refresh)));row.append(tools);
           }
-          if(item.status==='completed'&&(item.document_id||item.result?.document?.id))row.append(button('查看抽取结果',()=>window.IngestResults?.showBatchItem(item,{projectId:project,mode:batch.settings?.extraction_mode||'ontology'})));
+          if(item.status==='completed'&&(item.document_id||item.result?.document?.id))row.append(button('查看抽取结果',()=>window.IngestResults?.showBatchItem(item,{projectId:project,mode:batch.settings?.extraction_mode||'ontology',ontologyId:batch.settings?.ontology_id})));
           rows.append(row);
         }
         nextCursor=list.next_cursor;pages.replaceChildren();if(cursor)pages.append(button('回到首页',()=>{cursor='';return refresh();}));if(nextCursor)pages.append(button('下一页',()=>{cursor=nextCursor;return refresh();}));
@@ -90,6 +95,7 @@
     if(!capabilities)throw Error('未取得服务能力，请刷新后重试。'+(capabilityError?.message||''));
     const queue=window.DocumentUploadQueue;
     let session=queue?.batchSession;
+    if(session?.project===project)assertSessionSettings(session.batch.settings,settings);
     if(!session||session.project!==project){const created=await request(base(project),{settings});session={project,batch:created};if(queue)queue.batchSession=session;}
     const batch=session.batch;
     const results=await pool(documents,3,async(doc)=>{

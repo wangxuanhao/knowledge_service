@@ -949,10 +949,12 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
   const slot=document.getElementById('ingest-mode-slot');
   if(slot)slot.append(modeLabel,help);
   else{oldToggle.closest('label').before(modeLabel,help);}
+  window.IngestOntology.mount(mode,help);
   oldToggle.closest('label').classList.add('hidden');
   const descriptions={ontology:'按当前项目本体抽取、校验和实体融合，合法知识进入正式图谱。',discovery:'不要求预设本体；Semantica 自由抽取并持续累计候选，不直接写入正式图谱。',documents:'只保存原文、切片和向量，不抽取实体、关系或属性。'};
   mode.onchange=()=>{
     help.textContent=descriptions[mode.value];oldToggle.checked=mode.value!=='documents';
+    window.IngestOntology.refresh();
     for(const id of ['parse-resolve','parse-merge','parse-relation-constraints'])if(get(id))get(id).disabled=mode.value!=='ontology';
     syncMergeThreshold();
     if(get('parse-attributes'))get('parse-attributes').disabled=mode.value==='documents';

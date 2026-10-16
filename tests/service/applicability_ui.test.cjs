@@ -96,14 +96,14 @@ test('query platform scope is compact, optional, and preserves the existing scop
   });
   const source=fs.readFileSync('knowledge_service/web/workbench.js','utf8');
   assert.match(source,/readQueryScope\?\.\(\)/);
-  assert.match(source,/\.\.\.scope\(\),valid_at:null,query/);
+  assert.match(source,/\.\.\.scope\(\),valid_at:asOf\?new Date\(asOf\)\.toISOString\(\):null/);
   const workspace=fs.readFileSync('knowledge_service/web/workspace.js','utf8');
   assert.match(workspace,/\.\.\.scope\(\),valid_at:null,query/);
   assert.match(workspace,/ApplicabilityUI\?\.describe\?\.\(r\)/);
   assert.match(workspace,/context_chunks/);
   assert.match(workspace,/platform_groups/);
   assert.match(source,/按平台检索结果/);
-  assert.match(source,/当前范围无资料/);
+  assert.match(source,/未检索到本次时点确认有效的依据/);
   assert.match(source,/!rows\.length&&!pendingCount&&!platformGroups\.length/);
 });
 

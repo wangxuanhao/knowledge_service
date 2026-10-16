@@ -9,6 +9,19 @@
 
 /* 页面外壳：留白与节奏 */
 .ingest-upload-shell{display:flex;flex-direction:column;gap:14px}
+.ingest-mode-slot .ingest-ontology-version{
+  margin:10px 0;padding:12px 14px;border:1px solid var(--ui-line);
+  border-left:3px solid var(--ui-accent);border-radius:var(--ui-radius-sm);
+  background:var(--ui-surface-2);color:var(--ui-ink-2);font-size:12.5px;line-height:1.65;
+  overflow-wrap:anywhere;
+}
+.ingest-mode-slot .ingest-ontology-version[hidden]{display:none}
+.ingest-mode-slot .ingest-ontology-version strong{color:var(--ui-ink);font-size:14px}
+.ingest-mode-slot .ingest-ontology-version p{margin:5px 0}
+.ingest-mode-slot .ingest-ontology-version details{margin:8px 0;max-height:240px;overflow:auto}
+.ingest-mode-slot .ingest-ontology-version summary{cursor:pointer;color:var(--ui-accent)}
+.ingest-mode-slot .ingest-ontology-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:9px}
+.ingest-mode-slot .ingest-ontology-actions button{padding:5px 10px;font-size:12px}
 #tab-ingest .ingest-upload-purpose{
   margin:2px 0 0;font-size:12.5px;line-height:1.65;color:var(--ui-ink-2);
   padding:9px 12px;border-left:3px solid var(--ui-accent);

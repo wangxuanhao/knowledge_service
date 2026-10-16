@@ -84,6 +84,18 @@ function payload(answer='a') {return {subject:{answer_id:answer,citation:'E1'},n
   edges:[{source_ref:'r',target_ref:'o',relation:'sourced-from'},{source_ref:'o',target_ref:'d',relation:'sourced-from'}],integrity:{complete:false,warnings:[{code:'missing',node_ref:'d',message:'历史缺口'}]}};}
 function deferred(){let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};}
 
+test('frozen document and occurrence show their own business dates and readable time source',async()=>{
+  const data=payload();
+  for(const node of data.nodes.filter(node=>['source_occurrence','document_version'].includes(node.type))){
+    Object.assign(node.details,{valid_from:'2020-01-01',valid_until:'2025-01-01',effective_time_source:'published_at'});
+  }
+  const {drawer,doc}=setup(async()=>({ok:true,json:async()=>data}));await drawer.open({projectId:'p',answerId:'a',citation:'E1'});
+  const cards=flatten(doc.getElementById('provenance-chain')).filter(node=>node.className==='provenance-node');
+  for(const card of cards.slice(1)){
+    assert.match(card.textContent,/2020-01-01/);assert.match(card.textContent,/2025-01-01/);assert.match(card.textContent,/发布日期推定/);
+  }
+});
+
 test('drawer is initially hidden, accessible and renders fixed fields, branches, warnings, and raw JSON',async()=>{
   const data=payload();const {drawer,doc,window}=setup(async()=>({ok:true,json:async()=>data}));
   const root=doc.getElementById('provenance-drawer');assert.ok(root.hidden);

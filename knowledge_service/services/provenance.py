@@ -9,9 +9,14 @@ import math
 import re
 from uuid import uuid4
 
+from ..core.time import normalize_time
 
-_CITATION = re.compile(r'E[1-9][0-9]*\Z')
-_ANSWER_CITATION = re.compile(r'\[(E[1-9][0-9]*)\]')
+
+_CITATION = re.compile(r'[EURF][1-9][0-9]*\Z')
+_ANSWER_CITATION = re.compile(r'\[([EURF][1-9][0-9]*)\]')
+_QUALIFIED_TITLE = '文档表述（有效性待核对，不作为已确认有效规则依据）'
+_TEMPORAL_FIELDS = ('validity_status', 'validity_basis', 'answer_eligible', 'usage',
+                    'exclusion_reasons', 'source_eligibility')
 _NODE_ORDER = {kind: index for index, kind in enumerate((
     'answer', 'retrieval', 'record_version', 'assertion', 'review_event',
     'chunk_version', 'source_occurrence', 'document_version', 'ingest_run'))}
@@ -43,6 +48,36 @@ def _public_json(value):
 def _node(node_type, ref, label, status=None, occurred_at=None, **details):
     return {'type': node_type, 'ref': ref, 'label': label, 'status': status,
             'occurred_at': occurred_at, 'details': details}
+
+
+def _source_details(document):
+    metadata = document.get('metadata') or {}
+    return {'valid_from': document.get('valid_from'), 'valid_until': document.get('valid_until'),
+            **{key: _public_json(metadata.get(key)) for key in (
+                'applicability', 'published_at', 'effective_time_source')}}
+
+
+def _source_eligibility(raw):
+    """Freeze only the exact source and business-governance version decision."""
+    keys = ('document_version_id', 'governance_version_id', 'validity_status')
+    result = []
+    for item in raw if isinstance(raw, list) else ():
+        if not (isinstance(item, dict)
+                and all(isinstance(item.get(key), str) and item[key] for key in keys)
+                and item['validity_status'] in {
+                    'effective', 'expired', 'not_yet_effective', 'unknown', 'conflict'}):
+            continue
+        entry = {key: item[key] for key in keys}
+        for key in ('valid_from', 'valid_until'):
+            if key in item:
+                try:
+                    entry[key] = normalize_time(item[key])
+                except ValueError:
+                    continue
+        if isinstance(item.get('effective_time_source'), str):
+            entry['effective_time_source'] = _text(item['effective_time_source'])
+        result.append(entry)
+    return result
 
 
 def _warning(code, ref, message):
@@ -125,12 +160,16 @@ class ProvenanceService:
         for rank, item in enumerate(evidence, 1):
             citation = item.get('citation')
             if not isinstance(citation, str) or not _CITATION.fullmatch(citation) or citation in citations:
-                raise ValueError('证据引用必须是唯一的大写 E 编号')
+                raise ValueError('证据引用必须是唯一的大写 E/U/R/F 编号')
             graph = _SourceCapture(
                 repo, project_id, f'{answer_id}#{citation}').capture(item)
             score = item.get('score')
             audit = {'rank': rank, 'score': score if type(score) in (int, float) and math.isfinite(score) else None,
                      'channel': _text(item.get('channel') or item.get('kind')), 'selected': True}
+            audit.update({key: _public_json(item[key]) for key in _TEMPORAL_FIELDS
+                          if key in item and key != 'source_eligibility'})
+            if 'source_eligibility' in item:
+                audit['source_eligibility'] = _source_eligibility(item['source_eligibility'])
             record_ref = graph['record_ref']
             citation_ref = f'answer:{answer_id}#{citation}'
             frozen = {**audit, 'answer_id': answer_id, 'citation': citation,
@@ -153,7 +192,7 @@ class ProvenanceService:
             'run_id': run_id, 'offered': citations, 'cited': [],
             'warnings': [], 'answer': '', 'mode': None, 'graph_schema': 'edge-v1'}, edges
 
-    def complete_answer(self, project_id, answer_id, run_id, answer, mode, evidence):
+    def complete_answer(self, project_id, answer_id, run_id, answer, mode, evidence, *, eligibility_audit=None):
         activity = self.repository.get_provenance_activity(project_id, answer_id)
         activity = self._ensure_edge_v1(project_id, activity)
         payload = activity['payload']
@@ -165,12 +204,30 @@ class ProvenanceService:
         # is the authoritative allowlist, even if the caller's list has changed.
         offered = set(payload['offered'])
         mentioned = set(_ANSWER_CITATION.findall(answer))
-        cited = sorted(offered & mentioned, key=lambda value: (len(value), value))
         warnings = [_warning('unknown_citation', f'answer:{answer_id}',
                              f'答案引用了未提供的证据 [{citation[:100]}]。')
                     for citation in sorted(mentioned - offered, key=lambda value: (len(value), value))]
         edges = [edge for edge in self.repository.list_provenance_edges(project_id, activity_id=answer_id)
                  if edge['relation'] != 'cites']
+        qualified = set()
+        if _QUALIFIED_TITLE in answer:
+            section = answer.split(_QUALIFIED_TITLE, 1)[1]
+            qualified = set(re.findall(r'^\[(U[1-9][0-9]*)\] 文档写明：', section, re.MULTILINE))
+        cited = []
+        for citation in sorted(offered & mentioned, key=lambda value: (len(value), value)):
+            audit = self._offered_edge(answer_id, citation, edges)['payload']
+            eligible = (citation.startswith('E') and audit.get('answer_eligible', True) is True
+                        and audit.get('usage', 'effective_basis') == 'effective_basis'
+                        and audit.get('validity_status', 'effective') == 'effective')
+            if citation.startswith('U'):
+                eligible = (citation in qualified and audit.get('usage') == 'qualified_quote'
+                            and audit.get('validity_status') == 'unknown'
+                            and len(re.findall(r'\[' + re.escape(citation) + r'\]', answer)) == 1)
+            if eligible:
+                cited.append(citation)
+            else:
+                warnings.append(_warning('ineligible_citation', f'answer:{answer_id}#{citation}',
+                                         f'引用 [{citation}] 不符合本次答案的证据用途。'))
         next_ordinal = max((edge['ordinal'] for edge in edges), default=-1) + 1
         for citation in cited:
             offered_edge = self._offered_edge(answer_id, citation, edges)
@@ -178,8 +235,17 @@ class ProvenanceService:
                           'relation': 'cites', 'target_ref': offered_edge['target_ref'],
                           'ordinal': next_ordinal, 'payload': {}})
             next_ordinal += 1
-        self.repository.complete_provenance_activity(project_id, answer_id, {
-            **payload, 'answer': answer, 'mode': mode, 'cited': cited, 'warnings': warnings}, edges=edges)
+        completed = {**payload, 'answer': answer, 'mode': mode, 'cited': cited, 'warnings': warnings}
+        if isinstance(eligibility_audit, dict):
+            invalid = eligibility_audit.get('invalid_citations')
+            completed['eligibility_audit'] = {
+                'passed': eligibility_audit.get('passed') is True,
+                'invalid_citations': [value for value in invalid[:100]
+                                      if isinstance(value, str) and len(value) <= 100
+                                      and re.fullmatch(r'[A-Z][0-9]+', value)]
+                if isinstance(invalid, list) else [],
+            }
+        self.repository.complete_provenance_activity(project_id, answer_id, completed, edges=edges)
 
     def fail_activity(self, project_id, activity_id, status, public_error):
         if status not in {'failed', 'cancelled'}:
@@ -249,6 +315,7 @@ class ProvenanceService:
             'answer': {'status': activity['status'], 'citation_status': citation_status},
             'retrieval': {'run_ref': f'retrieval-run:{run_id}', 'query': request['query'],
                           'requested_mode': request['requested_mode'], 'active_modes': request['active_modes'],
+                          **{key: offered['payload'][key] for key in _TEMPORAL_FIELDS if key in offered['payload']},
                           **{key: offered['payload'][key] for key in ('rank', 'score', 'selected')}},
             'nodes': sorted(nodes, key=lambda node: (_NODE_ORDER[node['type']], node['ref'])),
             'edges': [{key: edge[key] for key in ('source_ref', 'relation', 'target_ref', 'ordinal', 'payload')}
@@ -450,6 +517,14 @@ class _SourceCapture:
             self.warnings.append(warning)
 
     def capture(self, evidence):
+        self.allowed_sources = None
+        self.allowed_assertions = None
+        if '_allowed_source_version_ids' in evidence:
+            allowed = evidence['_allowed_source_version_ids']
+            self.allowed_sources = {value for value in allowed if isinstance(value, str)} if isinstance(allowed, list) else set()
+        if '_allowed_assertion_ids' in evidence:
+            allowed = evidence['_allowed_assertion_ids']
+            self.allowed_assertions = {value for value in allowed if isinstance(value, str)} if isinstance(allowed, list) else set()
         version_id = evidence.get('version_id')
         if not isinstance(version_id, str) or not version_id:
             raise ValueError('检索证据缺少不可变 version_id')
@@ -462,8 +537,9 @@ class _SourceCapture:
             kind=record['kind'], text_preview=_text(record['text']), valid_from=record.get('valid_from'),
             valid_until=record.get('valid_until'), recorded_at=record['recorded_at'], terminal_reason=None))
         if record['kind'] == 'chunk':
-            chunk_ref = self.chunk(record)
-            self.edge(ref, 'supported-by', chunk_ref)
+            if self.source_allowed((record.get('metadata') or {}).get('source_version_id')):
+                chunk_ref = self.chunk(record)
+                self.edge(ref, 'supported-by', chunk_ref)
         elif record['kind'] in {'entity', 'relation'}:
             mappings = self.repo.list_record_version_assertions(self.project, record_version_id=version_id)
             if not mappings:
@@ -476,16 +552,27 @@ class _SourceCapture:
                 if manual:
                     self.nodes[ref]['details']['terminal_reason'] = 'manual_record'
         elif record['kind'] == 'document':
-            self.document(record, ref, {}, {})
+            if self.source_allowed(record['version_id']):
+                self.document(record, ref, {}, {})
+        if self.allowed_sources is not None and not any(
+                edge['relation'] == 'sourced-from' for edge in self.edges):
+            self.warn('source_not_eligible', ref, '没有符合本次证据用途的精确文档来源。')
         return {'record_ref': ref, 'nodes': list(self.nodes.values()),
                 'edges': self.edges, 'warnings': self.warnings}
 
+    def source_allowed(self, version_id):
+        return self.allowed_sources is None or version_id in self.allowed_sources
+
     def assertion(self, record_ref, mapping):
+        if self.allowed_assertions is not None and mapping['assertion_id'] not in self.allowed_assertions:
+            return False
         assertion_ref = 'assertion:' + mapping['assertion_id']
         try:
             assertion = self.repo.get_assertion(self.project, mapping['assertion_id'])
         except KeyError:
             self.warn('assertion_missing', record_ref, '已映射断言不存在。')
+            return False
+        if not self.source_allowed(assertion.get('document_version_id')):
             return False
         self.add_node(_node('assertion', assertion_ref, _text(assertion.get('quote')) or '断言',
             assertion['status'], assertion['created_at'], assertion_id=assertion['id'],
@@ -580,7 +667,8 @@ class _SourceCapture:
                 self.warn('source_span_invalid', source_ref, '历史来源的定位区间缺失或无效。')
         details = {'document_id': document['id'], 'version_id': document['version_id'],
                    'version': document['version'],
-                   'title': _text(document.get('metadata', {}).get('title')) or document['id']}
+                   'title': _text(document.get('metadata', {}).get('title')) or document['id'],
+                   **_source_details(document)}
         ref = self.add_node(_node('document_version', 'document-version:' + document['version_id'],
             details['title'], 'captured', document['recorded_at'], **details))
         self.occurrence_index += 1
@@ -659,7 +747,7 @@ class _TraceProjection:
             title = _text(document.get('metadata', {}).get('title')) or document['id']
             return _node('document_version', ref, title, 'captured', document['recorded_at'],
                 document_id=document['id'], version_id=document['version_id'],
-                version=document['version'], title=title, source_content='full_version')
+                version=document['version'], title=title, source_content='full_version', **_source_details(document))
         if ref.startswith('source-occurrence:'):
             return self._occurrence(ref)
         if ref.startswith('assertion:'):
@@ -719,7 +807,7 @@ class _TraceProjection:
         title = _text(document.get('metadata', {}).get('title')) or document['id']
         return _node('source_occurrence', ref, '原文定位', 'captured', document['recorded_at'],
             document_id=document['id'], version_id=document['version_id'], version=document['version'],
-            title=title, source_content='full_version', start_char=start, end_char=end,
+            title=title, source_content='full_version', start_char=start, end_char=end, **_source_details(document),
             excerpt_before=text[max(0, start - 240):start],
             highlight=text[start:min(end, start + 1000)], excerpt_after=text[end:end + 240])
 

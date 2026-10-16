@@ -21,3 +21,12 @@ test('failure CSV quotes formulas, separators and newlines',()=>{
   const csv=ui.failureCsv([{original_name:'=SUM(1,2)',public_error:'a\nb',error_code:'llm_timeout'}]);
   assert.match(csv,/"'=SUM\(1,2\)"/);assert.match(csv,/"a\nb"/);
 });
+
+test('partial upload sessions cannot silently retain a different ontology release',()=>{
+  assert.throws(()=>ui.assertSessionSettings({extraction_mode:'ontology',ontology_id:'old'},
+    {extraction_mode:'ontology',ontology_id:'new'}),/本体版本/);
+  assert.doesNotThrow(()=>ui.assertSessionSettings({extraction_mode:'ontology',ontology_id:'old'},
+    {extraction_mode:'ontology',ontology_id:'old'}));
+  assert.doesNotThrow(()=>ui.assertSessionSettings({extraction_mode:'discovery',ontology_id:null},
+    {extraction_mode:'discovery'}));
+});

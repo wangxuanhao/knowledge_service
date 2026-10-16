@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from ..services.provenance import ProvenanceService
 
 
-_CITATION = re.compile(r'E[1-9][0-9]*\Z')
+_CITATION = re.compile(r'[EURF][1-9][0-9]*\Z')
 
 
 def _not_found(subject):

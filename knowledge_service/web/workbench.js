@@ -378,6 +378,8 @@ bind('preview-chunks',async()=>{
 });
 bind('ingest',async()=>{
   const project=controlsProject(),mode=document.getElementById('extraction-mode').value,extract=mode!=='documents',settings=readParseSettings();
+  Object.assign(settings,window.IngestOntology.settings(project,mode));
+  const ontologyRelease=mode==='ontology'?{...window.IngestOntology.state().release}:null;
   const documents=await readDocumentBatch(),results=$('doc-submit-results');
   results.textContent='';let accepted=0,failed=0;
   if(documents.every(doc=>doc.file)&&window.IngestBatches){
@@ -401,7 +403,7 @@ bind('ingest',async()=>{
       }else job=await api('/api/projects/'+encodeURIComponent(project)+'/documents/jobs',{title:document.title,text:document.text,...documentUploadOptions(document),extract,extraction_mode:mode,...settings});
       wb.jobs.set(job.id,job);accepted++;entry.textContent=document.title+' · 已加入解析队列 · '+job.id;
       // 提交后在右侧工作区实时看进度（SSE）与抽取结果，不跳后台任务页
-      window.IngestResults?.watch(job.id,document.title,{projectId:project,mode});
+      window.IngestResults?.watch(job.id,document.title,{projectId:project,mode,ontologyRelease});
     }catch(error){if(document.file)window.DocumentUploadQueue.setStatus(document.file,'failed',error.message);failed++;entry.textContent=document.title+' · 提交失败：'+error.message;}
   }
   // 提交后留在「知识写入」本页：逐文件结果已写进 #doc-submit-results，不再把人跳到后台任务页。
@@ -469,7 +471,49 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
   const persist=()=>{try{localStorage.setItem(historyKey(),JSON.stringify(qaHistory));}catch{}};
   const evidenceSummary=rows=>(Array.isArray(rows)?rows:[]).map(row=>
     provenance.sanitizeEvidenceSummary({...row,text_preview:row?.text_preview??row?.text}));
-  const answerContext=item=>({projectId:current,answerId:item.answer_id,evidence:item.evidence});
+  const answerContext=item=>({projectId:current,answerId:item.answer_id,evidence:[...(item.evidence||[]),...(item.uncertain_references||[])]});
+  const referenceKinds=[['historical_references','历史参考'],['future_references','尚未生效参考'],['uncertain_references','有效性待核对']];
+  const platformText=row=>{
+    const platforms=row.metadata?.applicability?.platforms;
+    if(row.source_scope==='all'||platforms?.mode==='all')return '通用规则';
+    if(row.query_platform)return '平台：'+row.query_platform;
+    if(platforms?.mode==='specific'&&platforms.values?.length)return '平台：'+platforms.values.join('、');
+    return '平台范围待确认';
+  };
+  const validityText=row=>{
+    const labels={effective:'本次时点有效',expired:'已失效',not_yet_effective:'尚未生效',unknown:'有效性待核对',conflict:'有效性冲突待核对'};
+    const basisLabels={explicit:'明确维护',valid_from:'规范生效时间',valid_until:'规范失效时间',source_validity:'来源有效期',missing_valid_from:'未维护生效时间',published_at:'发布日期推定',unknown:'待核对'};
+    return (labels[row.validity_status]||'有效性待核对')
+      +' · 生效：'+(row.valid_from||'未维护')+' · 失效（不含）：'+(row.valid_until||'未维护')
+      +(row.metadata?.published_at?' · 发布：'+row.metadata.published_at:'')
+      +(row.validity_basis?' · 判定依据：'+(basisLabels[row.validity_basis]||row.validity_basis):'')
+      +(row.metadata?.effective_time_source?' · 时间来源：'+(basisLabels[row.metadata.effective_time_source]||row.metadata.effective_time_source):'');
+  };
+  function addSourceEligibility(article,row){
+    for(const source of row.source_eligibility||[]){
+      const line=document.createElement('p');line.className='qa-source-governance subtle';
+      line.textContent='有效期核对：版本 '+(source.governance_version_id||'未提供')+' · 生效：'+(source.valid_from||'未维护')
+        +' · 失效（不含）：'+(source.valid_until||'未维护')+' · 原文版本：'+(source.document_version_id||'未提供');
+      article.append(line);
+    }
+  }
+  function markDraft(turn,failed=false){
+    let note=turn.querySelector('.qa-draft-status');
+    if(!note){note=document.createElement('p');note.className='qa-draft-status subtle';note.setAttribute('role','status');turn.append(note);}
+    note.textContent=failed?'未完成的草稿，未通过最终依据校验':'生成中，尚未完成依据校验';
+  }
+  function frozenCitation(row,projectId,answerId){
+    const citation=provenance.sanitizeEvidenceSummary(row).citation;
+    const available=answerId&&citation&&row.provenance_ref;
+    const link=document.createElement(available?'button':'b');
+    link.className='qa-citation';link.textContent='['+(citation||'—')+']';
+    if(available){
+      link.type='button';link.className+=' secondary provenance-citation';
+      link.setAttribute('aria-label','查看引用 '+citation+' 的冻结原文与溯源');
+      link.onclick=()=>provenance.open({projectId,answerId,citation,trigger:link});
+    }
+    return link;
+  }
 
   const atEnd=()=>{const box=$c('qa-scroll');if(box)box.scrollTop=box.scrollHeight;};
   function addTurn(kind,text){
@@ -497,6 +541,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
         }
         if(item.error){
           turn.dataset.state='error';
+          markDraft(turn,true);
           const box=document.createElement('div');box.className='qa-error';box.setAttribute('role','alert');
           const t=document.createElement('span');t.className='qa-error-text';t.textContent='回答失败：'+item.error;
           box.append(t);turn.append(box);
@@ -512,29 +557,42 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     const platformGroups=Array.isArray(payload?.platform_groups)?payload.platform_groups:[];
     // 以前"没有证据"就整块不渲染；现在还要看有没有结构待定的知识 —— 有就得说出来，
     // 否则用户看到的就是"问答没反应"，而真相是"有知识、但概念还没建模"。
-    if(!rows.length&&!pendingCount&&!platformGroups.length)return;
+    const references=referenceKinds.map(([key,title])=>({key,title,items:Array.isArray(payload?.[key])?payload[key]:[]}));
+    const warnings=Array.isArray(payload?.coverage_warnings)?payload.coverage_warnings:[];
+    const referenceCount=references.reduce((sum,group)=>sum+group.items.length,0);
+    if(!rows.length&&!pendingCount&&!platformGroups.length&&!referenceCount&&!warnings.length&&!payload?.as_of)return;
     const panelId='qa-evidence-'+(++evidenceSerial),block=document.createElement('div');block.className='qa-evidence-block';
     const toggle=document.createElement('button');
     toggle.type='button';toggle.className='qa-evidence-toggle secondary';
     toggle.setAttribute('aria-expanded','true');toggle.setAttribute('aria-controls',panelId);
-    toggle.textContent='收起 '+rows.length+' 条依据'+(pendingCount?"（另有 "+pendingCount+" 条结构待定）":"");
+    const counts=rows.length+' 条回答依据'+(referenceCount?' · '+referenceCount+' 条独立参考':'')+(pendingCount?' · '+pendingCount+' 条结构待定':'');
+    toggle.textContent='收起 '+counts;
     const panel=document.createElement('div');panel.className='qa-evidence-panel';panel.id=panelId;panel.hidden=false;
     // 这块面板用户反馈"看不懂 E1/E2 是什么、下面这些为什么要展示"。它其实是
     // 模型回答的输入清单，所以先给一段说明，再列条目。
     const note=document.createElement('div');note.className='qa-evidence-note';
     for(const line of [
       '[E1] [E2] … 是这条答案里的引用编号：证据从 E1 开始按检索顺序编号，答案正文里的 [E1] 就指下面第 1 条。点编号可以看它的完整溯源链（原文 → 记录版本 → 断言 → 审核决定）。',
-      '下面每一条 = 一条依据：摘录是该依据的内容（实体名、关系描述或原文片段），meta 是它的来源类型与本体版本；「在图谱中查看」「查看来源」可以顺着跳到对应位置。',
-      '给模型的提示就是这份清单：系统把「你的问题 + 这些依据（每条带编号）」「以 {"question":"…","evidence":[{"id":"E1","text":"…"}]} 的形状发过去，并要求模型只依据这些证据回答、每条结论标注 [E编号]。所以答案里出现的 [E1] 一定能在这里找到对应；没有勾选「用已配置的语言模型组织答案」时，返回的就是同一份清单的原文。',
+      'E 为本次时点的回答依据；历史 R、未来 F、有效性待核对 U 在下方单列，不计入已确认有效的依据。缺少属性不影响合格原文查询。',
+      '模型依据 E 清单组织答案；有效性待核对的原文仅作带限定语的文档说明，不代表当前有效规则。点引用查看回答生成时冻结的原文与记录版本。',
     ]){const p=document.createElement('p');p.textContent=line;note.append(p);}
     panel.append(note);
+    if(payload.as_of||payload.known_at){
+      const time=document.createElement('p');time.className='qa-time-context subtle';
+      time.textContent='规则判断时点：'+(payload.as_of||'—')+' · 系统知识时点：'+(payload.known_at||'—');panel.append(time);
+    }
+    if(warnings.length){
+      const coverage=document.createElement('div');coverage.className='qa-coverage-warnings';coverage.setAttribute('role','status');
+      for(const warning of warnings){const line=document.createElement('p');line.textContent=typeof warning==='string'?warning:JSON.stringify(warning);coverage.append(line);}
+      panel.append(coverage);
+    }
     if(platformGroups.length){
       const platformBlock=document.createElement('div');platformBlock.className='qa-reasoning-block';
       const head=document.createElement('p');head.className='qa-reasoning-head';head.innerHTML='<b>按平台检索结果</b><span>各平台分别筛选和排名。</span>';platformBlock.append(head);
       for(const group of platformGroups){
         const count=Number(group.evidence_count??group.evidence_rows?.length??group.hits?.length??0);
         const line=document.createElement('p');line.className='qa-evidence-meta subtle';
-        line.textContent=platformGroupLabel(group)+' · '+count+' 条证据'+(count?'':'（当前范围无资料）');
+        line.textContent=platformGroupLabel(group)+' · '+count+' 条证据'+(count?'':'（未检索到本次时点确认有效的依据）');
         platformBlock.append(line);
       }
       panel.append(platformBlock);
@@ -575,6 +633,8 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       const applicability=window.ApplicabilityUI?.describe?.(row);
       meta.textContent=(row.kind||'')+' · '+(labelOf(row.type)||'—')+' · 版本 '+(row.version??'—')+(applicability?' · '+applicability:'');
       article.append(link,excerpt,meta);
+      if(row.validity_status){const validity=document.createElement('p');validity.className='qa-validity subtle';validity.textContent=validityText(row);article.append(validity);}
+      addSourceEligibility(article,row);
       const sources=Array.isArray(row.sources)?row.sources:[];
       if(sources.length){
         const sourceBox=document.createElement('div');sourceBox.className='qa-source-list';
@@ -601,7 +661,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       const seed=row.kind==='entity'?row.id:(row.kind==='relation'?row.subject_id:'');
       const actions=document.createElement('div');actions.className='row';
       if(seed){const button=document.createElement('button');button.type='button';button.dataset.evidenceNode=seed;button.textContent='在图谱中查看';actions.append(button);}
-      if(row.source_id){const button=document.createElement('button');button.type='button';button.className='secondary';button.dataset.evidenceSource=row.source_id;button.textContent='查看来源';actions.append(button);}
+      if(row.provenance_ref&&answerId){const button=frozenCitation(row,projectId,answerId);button.textContent='查看冻结原文';actions.append(button);}
       if(actions.childElementCount)article.append(actions);
       panel.append(article);
     }
@@ -610,6 +670,29 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       more.textContent='再看 '+(rows.length-3)+' 条依据';more.setAttribute('aria-expanded','false');
       more.onclick=()=>{const open=more.getAttribute('aria-expanded')==='true';[...panel.querySelectorAll('.qa-evidence-item')].slice(3).forEach(node=>node.hidden=open);more.setAttribute('aria-expanded',String(!open));more.textContent=open?'再看 '+(rows.length-3)+' 条依据':'收起其余依据';};
       panel.append(more);
+    }
+    for(const group of references){
+      if(!group.items.length)continue;
+      const section=document.createElement('section');section.className='qa-reference-section';section.dataset.referenceKind=group.key;
+      const heading=document.createElement('h4');heading.textContent=group.title+' · '+group.items.length+' 条';section.append(heading);
+      for(const row of group.items){
+        const article=document.createElement('article');article.className='qa-reference-item';
+        const excerpt=document.createElement('p');excerpt.textContent=row.text_preview??row.text??'';
+        const use=document.createElement('p');use.className='qa-reference-usage';
+        use.textContent=row.usage==='qualified_quote'?'仅用于文档说明，未作为已确认有效规则依据':'未参与本次回答';
+        const meta=document.createElement('p');meta.className='qa-evidence-meta subtle';
+        meta.textContent=platformText(row)+' · '+validityText(row)+' · 记录版本：'+(row.version_id||row.version||'—');
+        article.append(frozenCitation(row,projectId,answerId),excerpt,use,meta);
+        addSourceEligibility(article,row);
+        if(row.exclusion_reasons?.length){const reasons=document.createElement('p');reasons.className='qa-reference-exclusions subtle';reasons.textContent='排除原因：'+row.exclusion_reasons.join('、');article.append(reasons);}
+        for(const source of row.sources||[]){
+          const sourceLine=document.createElement('p');sourceLine.className='qa-source-item subtle';
+          sourceLine.textContent=(source.title||source.document_id||'冻结原文')+' · 文档版本：'+(source.document_version_id||source.record_version_id||source.version||'—')+' · '+(source.quote||'');article.append(sourceLine);
+        }
+        if(!row.provenance_ref||!answerId){const missing=document.createElement('p');missing.className='qa-source-missing subtle';missing.textContent='冻结来源不可用，无法打开历史原文（未使用当前版本补写）';article.append(missing);}
+        section.append(article);
+      }
+      panel.append(section);
     }
     /* C1「结构待定」：这些知识**不是证据**（它们的类型还没进本体），但也不能让它们凭空消失 ——
        用户问的东西可能正好落在它们身上，那就必须显式说出来，并说清"为什么不算、去哪儿补"。
@@ -641,7 +724,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       if(!rows.length)toggle.textContent='查看 '+pending.count+' 条结构待定的知识';
       panel.append(block);
     }
-    toggle.onclick=()=>{const open=toggle.getAttribute('aria-expanded')==='true';toggle.setAttribute('aria-expanded',String(!open));panel.hidden=open;toggle.textContent=(open?'查看 ':'收起 ')+rows.length+' 条依据'+(pendingCount?"（另有 "+pendingCount+" 条结构待定）":"");};
+    toggle.onclick=()=>{const open=toggle.getAttribute('aria-expanded')==='true';toggle.setAttribute('aria-expanded',String(!open));panel.hidden=open;toggle.textContent=(open?'查看 ':'收起 ')+counts;};
     panel.querySelectorAll('[data-evidence-node]').forEach(node=>{node.onclick=async()=>{
       // 这次跳转由我们指定"看这个实体"，别让进入检索页的自动补画再抢一次画布：
       // 那条路径会先清空图谱再发全图请求，把刚选中的实体冲掉（契约用例抓到过）。
@@ -688,6 +771,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     const target=turn||addTurn('assistant','');
     target.dataset.state='streaming';target.replaceChildren();
     const answer=document.createElement('div');answer.className='qa-answer';answer.dataset.answer='';target.append(answer);
+    markDraft(target);
     live.textContent='';
     let buffer='',spoken='',pending='',text='',finished=false,failed=false;
     const speak=force=>{
@@ -701,6 +785,9 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       if(item.event==='error')throw Error(item.data?.detail||'回答失败');
       if(item.event==='evidence'){
         capture(item.data);record.evidence=evidenceSummary(item.data?.evidence);
+        for(const [key] of referenceKinds)if(Array.isArray(item.data?.[key]))record[key]=evidenceSummary(item.data[key]);
+        for(const key of ['as_of','known_at'])if(typeof item.data?.[key]==='string')record[key]=item.data[key];
+        if(Array.isArray(item.data?.coverage_warnings))record.coverage_warnings=item.data.coverage_warnings.slice(0,100);
         const platformGroups=item.data?.platform_groups||[];
         if(platformGroups.length)record.platform_groups=platformGroups.map(group=>({
           platform:group.platform,source_scope:group.source_scope,candidate_count:group.candidate_count,
@@ -716,7 +803,11 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       }else if(item.event==='delta'){
         const chunk=String(item.data?.text??'');
         text+=chunk;pending+=chunk;answer.textContent=text;speak(false);atEnd();
-      }else if(item.event==='done'){capture(item.data);finished=true;}
+      }else if(item.event==='done'){
+        capture(item.data);
+        if(typeof item.data?.answer==='string'){text=item.data.answer;answer.textContent=text;spoken='';pending=text;live.textContent='';}
+        finished=true;
+      }
     };
     try{
       const response=await fetch(endpoint('/qa/stream'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});
@@ -740,12 +831,14 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       if(!finished)throw Error('回答流提前结束');
       speak(true);
       target.dataset.state='done';progress.textContent='回答完成';
+      target.querySelector('.qa-draft-status')?.remove();
       record.text=text;
-      provenance.decorateAnswer(answer,text,{projectId:project,answerId:record.answer_id,evidence:record.evidence});
+      provenance.decorateAnswer(answer,text,{...answerContext(record),projectId:project});
       persist();
     }catch(error){
       if(mine!==serial||project!==current)return;
       failed=true;target.dataset.state='error';progress.textContent='';
+      markDraft(target,true);
       const emsg=error?.message||String(error);
       record.text=text;record.error=emsg;persist();
       addFailure(target,emsg,()=>stream(body,target,historyIndex));
@@ -757,7 +850,9 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     if(busy)return;
     const query=input.value.trim();if(!query)return;
     addTurn('user',query);qaHistory.push({kind:'user',text:query});persist();input.value='';
-    stream({...scope(),valid_at:null,query,generate:$c('generate').checked,retrieval_mode:$c('qa-mode')?.value||'hybrid',k_entities:5,k_chunks:5});
+    const asOf=$c('qa-as-of')?.value;
+    stream({...scope(),valid_at:asOf?new Date(asOf).toISOString():null,include_references:$c('qa-include-references')?.checked??true,
+      query,generate:$c('generate').checked,retrieval_mode:$c('qa-mode')?.value||'hybrid',k_entities:5,k_chunks:5});
   }
   window.clearKnowledgeChat=({notify=false,clearPersist=false}={})=>{
     const had=transcript.childElementCount>0;

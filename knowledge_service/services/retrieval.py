@@ -121,9 +121,21 @@ def _lexical_rank(candidates, query, limit):
             ' '.join(row.get('_retrieval_aliases', []))).casefold()
         phrase = haystack.count(needle) if needle else 0
         matched = sum(haystack.count(token) for token in tokens)
-        if phrase or matched:
+        score = phrase * 10 + matched
+        if not score:
+            # Historical / degraded reads cannot rely on the vector index or
+            # PostgreSQL tokenization. Chinese questions are often one token;
+            # use lower-priority text bigrams only when exact matching fails.
+            fragments = {part[index:index + 2]
+                         for part in re.findall(r'[\u4e00-\u9fff]+', needle)
+                         for index in range(len(part) - 1)}
+            fragments -= {'什么', '哪些', '如何', '是否', '怎么', '多少'}
+            text = row.get('text', '').casefold()
+            if fragments:
+                score = sum(fragment in text for fragment in fragments) / (len(fragments) + 1)
+        if score:
             ranked.append(({**{key: value for key, value in row.items() if key != 'embedding'},
-                            'keyword_score': phrase * 10 + matched}, phrase * 10 + matched))
+                            'keyword_score': score}, score))
     ranked.sort(key=lambda item: (-item[1], item[0]['id']))
     return [item[0] for item in ranked[:limit]]
 
@@ -306,14 +318,14 @@ class RetrievalEngine:
         # Milvus，PostgreSQL 不再读 vector 列）。Milvus 失败会透明降级到下方本地逻辑。
         # 开了本体扩展就不走它：类型通道（子类实例召回）是本地按已过滤候选算出来的，
         # Milvus 只负责排名，交出去会静默丢掉子类命中。扩展是显式开关，默认不受影响。
-        native_scope = (scope.get('known_at') is None
+        native_scope = ((scope.get('known_at') is None or scope.get('_qa_current_snapshot') is True)
                         and (scope.get('ontology_scope') or 'all') == 'all'
                         and scope.get('filters') is None
                         and candidate_ids is None
                         and not lexical_aliases
                         and not expansion_type_iris)
         projection_current = (self.milvus is not None and self.milvus.available
-                              and scope.get('known_at') is None)
+                              and (scope.get('known_at') is None or scope.get('_qa_current_snapshot') is True))
         milvus_ready = (self._projection_ready(project_id, 'milvus')
                         if projection_current else False)
         milvus_current = projection_current and native_scope

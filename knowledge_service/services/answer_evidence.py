@@ -13,6 +13,10 @@ class AnswerEvidence:
         citation = row['citation']
         trace = self.provenance.trace_answer_evidence(
             project_id, answer_id, citation)
+        retrieval = trace.get('retrieval') or {}
+        purpose = {key: retrieval.get(key, row.get(key)) for key in (
+            'validity_status', 'validity_basis', 'answer_eligible', 'usage', 'exclusion_reasons',
+            'source_eligibility')}
         nodes = {node.get('ref'): node for node in trace.get('nodes', ())
                  if isinstance(node, dict)}
         occurrence_edges = sorted((
@@ -34,18 +38,22 @@ class AnswerEvidence:
             sources.append({
                 'document_id': details.get('document_id'),
                 'record_version_id': details.get('version_id'),
+                'document_version_id': details.get('version_id'),
                 'version': details.get('version'),
                 'title': details.get('title') or details.get('document_id'),
                 'quote': quote,
                 'start_char': details.get('start_char'),
                 'end_char': details.get('end_char'),
+                **{key: details.get(key) for key in (
+                    'valid_from', 'valid_until', 'applicability', 'published_at', 'effective_time_source')},
+                **purpose,
             })
         warnings = trace.get('integrity', {}).get('warnings') or []
         reason = next((warning.get('code') for warning in warnings
                        if isinstance(warning, dict) and warning.get('code')), None)
-        retrieval = trace.get('retrieval') or {}
         return {
-            **row,
+            **{key: value for key, value in row.items() if not key.startswith('_')},
+            **purpose,
             'citation': citation,
             'record_version_id': row.get('version_id'),
             'retrieval_channel': retrieval.get('requested_mode'),

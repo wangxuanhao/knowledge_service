@@ -384,6 +384,9 @@ class KnowledgeService:
         """
         params = {k: scope.get(k) for k in ('filters', 'valid_at', 'known_at')}
         params['include_unknown'] = scope.get('include_unknown', True)
+        if scope.get('_reference_mode'):
+            params.update(_reference_mode=True, _reference_limit=501,
+                          kinds=scope.get('kinds'), applicability=scope.get('applicability'))
         # 向量已迁到 Milvus，PostgreSQL 不再读 vector 列；scoped 只做时态/元数据过滤
         with timed('范围过滤', kinds=len(scope.get('kinds') or [])) as record:
             rows = self.repository.query(project_id, **params)
@@ -1197,36 +1200,42 @@ class KnowledgeService:
             raise error from exc
 
     def answer(self, project_id, request):
-        # 注意：这个"一次性 JSON"入口与 answers.stream_events 是同一件事的两个入口，
-        # Q1「结构待定」的口径必须**共用** answers 里的构建函数 —— 各写一套就会自相矛盾。
-        from .answers import (
-            answer_messages, no_evidence_text, pending_block, question_context,
-        )
-        retrieval = question_context(self,project_id,request)
-        pending = pending_block([{'citation': f'P{i+1}', **row}
-                                 for i, row in enumerate(retrieval.pop('structure_pending_rows', []))])
-        evidence = [{'citation': f'E{i+1}', **row} for i, row in enumerate(retrieval.pop('evidence_rows'))]
-        answer = '\n\n'.join(f"[{r['citation']}] {r['text']}" for r in evidence)
-        if not evidence and pending['count']:
-            answer = no_evidence_text(pending)
-        mode = 'evidence_only'
-        if request.get('generate') and evidence:
-            url = os.environ.get('KG_LLM_BASE_URL', '').rstrip('/')
-            key = os.environ.get('KG_LLM_API_KEY', '')
-            model = os.environ.get('KG_LLM_MODEL', '')
-            if not all((url, key, model)):
-                raise RuntimeError('请配置 KG_LLM_BASE_URL、KG_LLM_API_KEY、KG_LLM_MODEL 以生成回答')
-            with external_client(120) as client:
-                response = client.post(url+'/chat/completions', headers={'Authorization': f'Bearer {key}'}, json={
-                    'model': model,
-                    'messages': answer_messages(request['query'], evidence)})
-                response.raise_for_status()
-                try:
-                    answer = response.json()['choices'][0]['message']['content']
-                    if not isinstance(answer, str) or not answer.strip():
-                        raise ValueError('期望非空的回答文本')
-                except (ValueError, KeyError, IndexError, TypeError) as exc:
-                    raise RuntimeError('LLM 提供商返回了无效的回答响应') from exc
+        from .answers import prepare_answer, final_answer, answer_messages
+        from .answer_validity import freeze_request
+        from .provenance import ProvenanceService
+        request = freeze_request(request)
+        provenance = ProvenanceService(self.repository)
+        run_id = provenance.begin_retrieval(project_id, request)
+        answer_id = None
+        try:
+            retrieval, evidence, answer_id = prepare_answer(self, project_id, request, provenance, run_id)
+            answer = '\n\n'.join(f"[{row['citation']}] {row['text']}" for row in evidence)
+            mode = 'evidence_only'
+            if request.get('generate') and evidence:
+                url = os.environ.get('KG_LLM_BASE_URL', '').rstrip('/')
+                key = os.environ.get('KG_LLM_API_KEY', '')
+                model = os.environ.get('KG_LLM_MODEL', '')
+                if not all((url, key, model)):
+                    raise RuntimeError('请配置 KG_LLM_BASE_URL、KG_LLM_API_KEY、KG_LLM_MODEL 以生成回答')
+                with external_client(120) as client:
+                    response = client.post(url+'/chat/completions', headers={'Authorization': f'Bearer {key}'}, json={
+                        'model': model, 'messages': answer_messages(request['query'], evidence,
+                            as_of=retrieval.get('as_of'), known_at=retrieval.get('known_at'))})
+                    response.raise_for_status()
+                    try:
+                        answer = response.json()['choices'][0]['message']['content']
+                        if not isinstance(answer, str) or not answer.strip():
+                            raise ValueError('期望非空的回答文本')
+                    except (ValueError, KeyError, IndexError, TypeError) as exc:
+                        raise RuntimeError('LLM 提供商返回了无效的回答响应') from exc
                 mode = 'llm'
-        return {**retrieval, 'answer': answer or '在所选时间和 metadata 范围内没有找到证据。',
-                'evidence': evidence, 'structure_pending': pending, 'mode': mode}
+            answer, mode, audit = final_answer(answer, mode, evidence, retrieval)
+            provenance.complete_answer(project_id, answer_id, run_id, answer, mode, evidence,
+                                       eligibility_audit=audit)
+            return {**retrieval, 'answer': answer, 'evidence': evidence, 'mode': mode,
+                    'answer_id': answer_id, 'retrieval_run_id': run_id,
+                    'provenance_complete': True, 'eligibility_audit': audit}
+        except Exception as exc:
+            provenance.fail_activity(project_id, answer_id or run_id, 'failed',
+                                     {'type': type(exc).__name__, 'message': '回答不可用。'})
+            raise

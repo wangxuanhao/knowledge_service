@@ -2,13 +2,13 @@
 (() => {
   'use strict';
   const LEGACY_NOTE='该历史回答生成于溯源记录启用前';
-  const validCitation=value=>typeof value==='string'&&/^E[1-9][0-9]*$/.test(value);
+  const validCitation=value=>typeof value==='string'&&/^[ERFU][1-9][0-9]*$/.test(value);
 
   function tokenizeCitations(text,allowed){
     if(typeof text!=='string'||!text)return [];
     const offered=allowed==null?null:new Set(allowed),segments=[];
     let start=0;
-    for(const match of text.matchAll(/\[(E[1-9][0-9]*)\]/g)){
+    for(const match of text.matchAll(/\[([ERFU][1-9][0-9]*)\]/g)){
       if(offered&&!offered.has(match[1]))continue;
       if(match.index>start)segments.push({type:'text',text:text.slice(start,match.index)});
       segments.push({type:'citation',text:match[0],citation:match[1]});
@@ -27,10 +27,38 @@
       if(own(key)&&typeof item[key]==='string')result[key]=key==='text_preview'?item[key].slice(0,240):item[key];
     }
     if(own('version')&&Number.isSafeInteger(item.version)&&item.version>0)result.version=item.version;
+    for(const key of ['version_id','valid_from','valid_until','validity_status','validity_basis','usage','query_platform','source_scope']){
+      if(own(key)&&typeof item[key]==='string')result[key]=item[key].slice(0,500);
+    }
+    if(typeof item.answer_eligible==='boolean')result.answer_eligible=item.answer_eligible;
+    if(Array.isArray(item.exclusion_reasons))result.exclusion_reasons=item.exclusion_reasons.filter(value=>typeof value==='string').slice(0,20).map(value=>value.slice(0,500));
+    if(Array.isArray(item.source_eligibility))result.source_eligibility=item.source_eligibility.slice(0,20).flatMap(source=>{
+      if(!source||typeof source!=='object')return [];
+      const clean={};
+      for(const key of ['document_version_id','governance_version_id','validity_status','valid_from','valid_until','effective_time_source']){
+        if(typeof source[key]==='string')clean[key]=source[key].slice(0,500);
+        else if(source[key]===null)clean[key]=null;
+      }
+      return Object.keys(clean).length?[clean]:[];
+    });
+    if(item.metadata&&typeof item.metadata==='object'){
+      const metadata={};
+      for(const key of ['published_at','effective_time_source'])if(typeof item.metadata[key]==='string')metadata[key]=item.metadata[key].slice(0,500);
+      if(item.metadata.applicability&&typeof item.metadata.applicability==='object'){
+        const applicability={};
+        for(const key of ['platforms','businesses','audiences']){
+          const dimension=item.metadata.applicability[key];
+          if(!dimension||typeof dimension!=='object'||!['all','specific','unknown'].includes(dimension.mode))continue;
+          applicability[key]={mode:dimension.mode,values:Array.isArray(dimension.values)?dimension.values.filter(value=>typeof value==='string').slice(0,30).map(value=>value.slice(0,200)):[]};
+        }
+        if(Object.keys(applicability).length)metadata.applicability=applicability;
+      }
+      if(Object.keys(metadata).length)result.metadata=metadata;
+    }
     if(own('sources')&&Array.isArray(item.sources))result.sources=item.sources.slice(0,20).flatMap(source=>{
       if(!source||typeof source!=='object'||Array.isArray(source))return [];
       const clean={};
-      for(const key of ['document_id','record_version_id','title','quote','channel']){
+      for(const key of ['document_id','document_version_id','record_version_id','title','quote','channel','valid_from','valid_until']){
         if(typeof source[key]==='string')clean[key]=key==='quote'?source[key].slice(0,240):source[key];
       }
       if(Number.isSafeInteger(source.version)&&source.version>0)clean.version=source.version;
@@ -52,8 +80,8 @@
     assertion:['assertion_id','kind','status_at_capture','quote','start_char','end_char'],
     review_event:['event_id','from_status','to_status','actor','reason','created_at'],
     chunk_version:['record_id','version_id','text_preview','start_char','end_char'],
-    source_occurrence:['document_id','version_id','version','title','source_content','start_char','end_char','excerpt_before','highlight','excerpt_after'],
-    document_version:['document_id','version_id','version','title','source_content'],
+    source_occurrence:['document_id','version_id','version','title','source_content','valid_from','valid_until','effective_time_source','start_char','end_char','excerpt_before','highlight','excerpt_after'],
+    document_version:['document_id','version_id','version','title','source_content','valid_from','valid_until','effective_time_source'],
     ingest_run:['run_id','attempt','status_at_capture','created_at','updated_at_at_capture']
   };
   const fieldLabels={answer_id:'答案标识',citation:'引用',mode:'生成模式',run_id:'运行标识',record_id:'记录标识',
@@ -61,7 +89,7 @@
     terminal_reason:'链路终点',assertion_id:'断言标识',status_at_capture:'生成答案时的状态',quote:'证据原文',
     start_char:'起始位置',end_char:'结束位置',event_id:'事件标识',from_status:'此前状态',to_status:'决定状态',
     actor:'操作人',reason:'原因',created_at:'创建时间',version_id:'版本标识',document_id:'文档标识',title:'标题',
-    source_content:'原文完整性',excerpt_before:'前文',highlight:'定位原文',excerpt_after:'后文',
+    source_content:'原文完整性',effective_time_source:'有效时间来源',excerpt_before:'前文',highlight:'定位原文',excerpt_after:'后文',
     attempt:'尝试次数',updated_at_at_capture:'当时更新时间'};
   const scalar=value=>typeof value==='string'||typeof value==='number'||typeof value==='boolean'?String(value):'';
   const list=value=>Array.isArray(value)?value:[];
@@ -220,7 +248,8 @@
       const fields=element('dl');
       for(const key of detailFields[node.type]){
         const value=scalar(details[key]);if(!value)continue;
-        fields.append(element('dt',fieldLabels[key]),element('dd',value));
+        const timeLabels={explicit:'明确维护',valid_from:'规范生效时间',valid_until:'规范失效时间',source_validity:'来源有效期',missing_valid_from:'未维护生效时间',published_at:'发布日期推定',unknown:'待核对'};
+        fields.append(element('dt',fieldLabels[key]),element('dd',key==='effective_time_source'?(timeLabels[value]||value):value));
       }
       card.appendChild(fields);
       if(node.type==='source_occurrence'){

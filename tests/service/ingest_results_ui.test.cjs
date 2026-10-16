@@ -35,6 +35,11 @@ function fixture({event='completed',assertions=[],assertionError=null}={}){
   let emitted=false;
   const context=vm.createContext({
     window:{
+      IngestOntology:{...require('../../knowledge_service/web/ingest-ontology.js'),
+        resolveResult:(project,assertions,pinned)=>require('../../knowledge_service/web/ingest-ontology.js')
+          .resultRelease(project,assertions,pinned,async()=>({versions:[
+            {id:'old-ontology',version:2},{id:'new-ontology',version:4},
+          ]}))},
       KnowledgeChat:{splitSseBuffer(buffer){
         if(emitted||!buffer.includes('server-event'))return {events:[],rest:buffer};
         emitted=true;
@@ -200,4 +205,26 @@ test('completed batch items open existing results with fixed project and documen
   assert.ok(f.apiCalls.includes('/api/projects/batch-project/assertions?document_id=batch-doc'));
   assert.ok(!f.apiCalls.some(url=>url.startsWith('/api/jobs/')));
   assert.match(f.text(),/主动未执行图谱知识抽取/);
+});
+
+test('results show the actual historical ontology instead of the latest release',async()=>{
+  const f=fixture({assertions:[{kind:'entity',status:'accepted',ontology_id:'old-ontology',
+    payload:{text:'商户',type:'Merchant'}}]});
+  f.context.window.IngestResults.watch('job-version','规则.md',{projectId:'p',mode:'ontology',
+    ontologyRelease:{id:'new-ontology',version:4}});
+  await f.settle();
+  assert.match(f.text(),/实际提取本体：本体 v2/);
+  assert.match(f.text(),/old-ontology/);
+  assert.doesNotMatch(f.text(),/实际提取本体：本体 v4/);
+});
+
+test('empty completed batch retains its pinned ontology and unknown legacy results stay unknown',async()=>{
+  const f=fixture();
+  await f.context.window.IngestResults.showBatchItem({id:'version-item',original_name:'规则.md',document_id:'d'},
+    {projectId:'p',mode:'ontology',ontologyId:'old-ontology'});
+  assert.match(f.text(),/实际提取本体：本体 v2/);
+  const legacy=fixture();
+  await legacy.context.window.IngestResults.showBatchItem({id:'legacy',original_name:'旧.md',document_id:'d'},
+    {projectId:'p',mode:'ontology'});
+  assert.match(legacy.text(),/实际本体版本未知/);
 });

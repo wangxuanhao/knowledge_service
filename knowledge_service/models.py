@@ -122,6 +122,8 @@ class Search(Scope):
 
 
 class Question(Search):
+    include_references: bool = True
+    reference_k: int = Field(default=5, ge=1, le=20)
     generate: bool = False
     hops:int=Field(default=2,ge=0,le=3)
 

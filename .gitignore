@@ -25,6 +25,7 @@ data/sources/
 *.db
 *.db-shm
 *.db-wal
+.benchmarks
 .superpowers
 /.worktrees/
 __pycache__

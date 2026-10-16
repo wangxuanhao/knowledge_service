@@ -28,7 +28,7 @@
   const MODE_INFO = {
     ontology: {
       label: '使用项目本体 · 正式入图',
-      description: '按项目当前本体抽取；通过校验的知识正式入图，待确认项进入知识审核。',
+      description: '按任务绑定的已发布本体抽取；通过校验的知识正式入图，待确认项进入知识审核。',
     },
     discovery: {
       label: '开放本体发现 · 候选暂存',
@@ -89,6 +89,7 @@
       jobs.set(jobId, {
         title: docTitle || jobId,
         projectId: context.projectId || '', mode: context.mode || 'ontology',
+        ontologyRelease: context.ontologyRelease ? {...context.ontologyRelease} : null,
         status: 'queued', progress: 0, stage: '已排队', error: '', asserts: null,
         resultError: false,
       });
@@ -180,6 +181,8 @@
         + '/assertions?document_id=' + encodeURIComponent(docId);
       const r = await api(assertionsUrl, undefined, 'GET');
       d.asserts = Array.isArray(r.assertions) ? r.assertions : [];
+      if(d.mode==='ontology')d.ontologyRelease=await window.IngestOntology.resolveResult(
+        d.projectId,d.asserts,d.ontologyRelease);
       d.resultError = false;
     } catch (e) {
       d.asserts = null;
@@ -212,6 +215,12 @@
     modeRow.append(el('span', 'ingest-job__mode-badge', mode.label));
     modeRow.append(el('span', 'ingest-job__mode-description', mode.description));
     card.append(modeRow);
+    if(d.mode==='ontology'){
+      const label=window.IngestOntology?.releaseLabel(d.ontologyRelease)||'实际本体版本未知';
+      card.append(el('p','ingest-job__mode-description',
+        (d.status==='completed'?'实际提取本体：':'绑定提取本体：')+label+
+        (d.ontologyRelease?.id?' · ID：'+d.ontologyRelease.id:'')));
+    }
 
     // 进度条（实时；完成 100%，失败不打满）
     const barWrap = el('div', 'ingest-job__bar');
@@ -387,6 +396,7 @@
   async function showBatchItem(item, context = {}) {
     const key = 'batch-item:' + item.id;
     const d = {title: item.original_name, projectId: context.projectId, mode: context.mode,
+      ontologyRelease: context.ontologyId ? {id: context.ontologyId} : null,
       status: 'completed', progress: 100, stage: '正在读取结果…', error: '', asserts: null, resultError: false};
     jobs.set(key, d);open();render();
     try {
@@ -395,6 +405,8 @@
       const result = await api('/api/projects/' + encodeURIComponent(d.projectId)
         + '/assertions?document_id=' + encodeURIComponent(documentId), undefined, 'GET');
       d.asserts = Array.isArray(result.assertions) ? result.assertions : [];
+      if(d.mode==='ontology')d.ontologyRelease=await window.IngestOntology.resolveResult(
+        d.projectId,d.asserts,d.ontologyRelease);
       d.stage = '已完成';
     } catch (error) {
       d.resultError = true;d.stage = '结果读取失败：' + error.message;

@@ -185,15 +185,15 @@ def test_question_context_adds_same_version_neighbors_as_evidence(system):
     _, service, project_id = system
     document = service.write(project_id, [{
         'id': 'doc', 'kind': 'document', 'text': '总则。一般要求。例外条款。',
-        'metadata': {'title': '美团规则', **_scope('美团')},
+        'metadata': {'title': '美团规则', **_scope('美团')}, 'valid_from': '2020-01-01',
     }])[0]
     service.write(project_id, [
         {'id': 'c0', 'kind': 'chunk', 'source_id': 'doc', 'text': '总则',
-         'metadata': {'start_char': 0}},
+         'valid_from': '2020-01-01', 'metadata': {'start_char': 0}},
         {'id': 'c1', 'kind': 'chunk', 'source_id': 'doc', 'text': '美团直播一般要求',
-         'metadata': {'start_char': 3}},
+         'valid_from': '2020-01-01', 'metadata': {'start_char': 3}},
         {'id': 'c2', 'kind': 'chunk', 'source_id': 'doc', 'text': '但特定商户适用例外条款',
-         'metadata': {'start_char': 12}},
+         'valid_from': '2020-01-01', 'metadata': {'start_char': 12}},
     ])
 
     context = question_context(service, project_id, {
@@ -210,10 +210,17 @@ def test_question_context_adds_same_version_neighbors_as_evidence(system):
 
 def test_multi_platform_question_context_keeps_evidence_groups_separate(system):
     _, service, project_id = system
-    service.write(project_id, [
-        {'id': 'mt', 'kind': 'chunk', 'text': '直播管理要求', 'metadata': _scope('美团')},
-        {'id': 'jd', 'kind': 'chunk', 'text': '直播管理要求', 'metadata': _scope('京东')},
-    ])
+    for record_id, platform in [('mt', '美团'), ('jd', '京东')]:
+        doc = service.write(project_id, [{
+            'id': 'doc-' + record_id, 'kind': 'document', 'text': '直播管理要求',
+            'valid_from': '2020-01-01', 'metadata': _scope(platform),
+        }])[0]
+        service.write(project_id, [{
+            'id': record_id, 'kind': 'chunk', 'source_id': doc['id'], 'text': doc['text'],
+            'valid_from': '2020-01-01', 'metadata': {
+                **_scope(platform), 'source_version_id': doc['version_id'],
+                'start_char': 0, 'end_char': len(doc['text'])},
+        }])
     context = question_context(service, project_id, {
         'query': '直播管理', 'retrieval_mode': 'keyword', 'k': 1,
         'k_entities': 0, 'k_chunks': 1, 'hops': 0,

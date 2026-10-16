@@ -40,10 +40,12 @@ def no_evidence_text(block):
             '去「本体建模层」把概念建出来并发布后，这些知识会自动回到证据链里。')
 
 
-def answer_messages(question, evidence):
+def answer_messages(question, evidence, *, as_of=None, known_at=None):
     """Build one platform-aware prompt shared by JSON and SSE answers."""
     groups = {}
     for row in evidence:
+        if row.get('answer_eligible') is False or not str(row.get('citation', '')).startswith('E'):
+            continue
         key = (row.get('query_platform'), row.get('source_scope') or 'unscoped')
         groups.setdefault(key, []).append({
             'id': row['citation'], 'text': row['text'],
@@ -51,6 +53,7 @@ def answer_messages(question, evidence):
             'published_at': (row.get('metadata') or {}).get('published_at'),
             'valid_from': row.get('valid_from'),
             'valid_until': row.get('valid_until'),
+            'source_eligibility': row.get('source_eligibility', []),
         })
     platform_evidence = [
         {'platform': platform, 'source_scope': source_scope, 'evidence': rows}
@@ -59,12 +62,21 @@ def answer_messages(question, evidence):
     return [
         {'role': 'system', 'content':
          '你回答知识图谱问题，只依据给定证据推理，不得引入证据之外的事实。'
+         'query_context.as_of 是本次业务判断时点，known_at 是系统知识时点；不得混用。'
+         '回答必须明确按该业务判断时点说明，历史查询不能改答今天的现行规则。'
+         'E 依据已经服务端按该时点核对；原文中的旧版或已失效措辞不自动否定其在历史时点有效，'
+         '应结合有效期和 source_eligibility 的核对日期解释；存在矛盾时说明待核对。'
          '证据已按平台分组；每个平台必须独立给出结论，禁止把不同平台证据合并成一个结论。'
          '通用组可用于各平台，但仍须在对应平台结论中明确引用。'
+         '适用平台未知的原文只作未指定平台的文档说明，不得视为通用规则或归给任一平台。'
+         '比较时对齐适用对象、前提条件、时限及起算点、例外和生效范围；每个比较项引用本平台 E 依据。'
+         '缺项只能说未检索到确认有效的依据，不能断言没有该规则；自然日与工作日、不同起算点不得强行归一。'
+         '检索 top-k 不是总数，不得声称穷尽平台或规则；不作业务合规判定。'
          '按「结论 → 推理 → 依据」三层输出，每条结论引用 [E编号]；'
          '证据不足时明确说明，不要编造。'},
         {'role': 'user', 'content': json.dumps({
             'question': question, 'platform_evidence': platform_evidence,
+            'query_context': {'as_of': as_of, 'known_at': known_at},
         }, ensure_ascii=False)},
     ]
 
@@ -94,8 +106,6 @@ def _reasoning_paths(seeds, relations, max_hops):
         for edge in relations:
             if edge['subject_id'] == node:
                 other = edge['object_id']
-            elif edge['object_id'] == node:
-                other = edge['subject_id']
             else:
                 continue
             if other in seen:
@@ -103,7 +113,9 @@ def _reasoning_paths(seeds, relations, max_hops):
             seen.add(other)
             step = {'from': node, 'to': other,
                     'relation': _label(edge),
-                    'relation_id': edge['id']}
+                    'relation_id': edge['id'], 'direction': 'forward',
+                    'subject_id': edge['subject_id'], 'object_id': edge['object_id'],
+                    'relation_version_id': edge.get('version_id')}
             reached[other] = path + [step]
             queue.append(other)
     # 只保留非空路径（种子到自身是空路径，不算推理）；steps[0]['from'] 即种子。
@@ -234,7 +246,7 @@ def _legacy_question_context(service,p,request):
             'valid_at':request.get('valid_at'),'known_at':request.get('known_at')}
 
 
-def question_context(service, p, request):
+def _retrieved_question_context(service, p, request):
     """Build QA context from the same grouped retrieval used by search.
 
     Native current-view retrieval runs before any broad PostgreSQL scope read.
@@ -338,7 +350,7 @@ def question_context(service, p, request):
         for edge in relations:
             if len(found) >= 200:
                 break
-            if frontier.intersection((edge['subject_id'], edge['object_id'])):
+            if edge['subject_id'] in frontier:
                 found[edge['id']] = {
                     key: value for key, value in edge.items()
                     if key != 'embedding'}
@@ -346,7 +358,7 @@ def question_context(service, p, request):
         frontier = next_nodes - seeds
         seeds.update(next_nodes)
     reasoning_paths = _reasoning_paths(
-        seed_ids, relations, min(request.get('hops', 2), 3))
+        seed_ids, list(found.values()), min(request.get('hops', 2), 3))
     labels = {row['id']: row['text'] for row in entities}
     for path in reasoning_paths:
         path['start_label'] = labels.get(path['start'], path['start'])
@@ -386,8 +398,56 @@ def question_context(service, p, request):
     }
 
 
+def question_context(service, p, request):
+    from .answer_validity import apply_validity, freeze_request
+    request = freeze_request(request)
+    context = _retrieved_question_context(service, p, request)
+    scoped_request = {**request, 'applicability': context.get('applicability') or request.get('applicability')}
+    return apply_validity(service, p, context, scoped_request)
+
+
+def prepare_answer(service, p, request, provenance, run_id):
+    from .answer_evidence import AnswerEvidence
+    context = question_context(service, p, request)
+    context['structure_pending'] = pending_block([
+        {'citation': f'P{i+1}', **row}
+        for i, row in enumerate(context.pop('structure_pending_rows', []))])
+    evidence = [{'citation': f'E{i+1}', **row}
+                for i, row in enumerate(context.pop('evidence_rows'))]
+    frozen = list(evidence)
+    for key, prefix in (('historical_references', 'R'), ('future_references', 'F'),
+                        ('uncertain_references', 'U')):
+        context[key] = [{**row, 'citation': f'{prefix}{i+1}'}
+                        for i, row in enumerate(context.get(key, []))]
+        frozen.extend(context[key])
+    answer_id = provenance.complete_retrieval(p, run_id, context, frozen)
+    summaries = AnswerEvidence(provenance)
+    evidence = summaries.summaries(p, answer_id, evidence)
+    for key in ('historical_references', 'future_references', 'uncertain_references'):
+        context[key] = summaries.summaries(p, answer_id, context[key])
+    return context, evidence, answer_id
+
+
+def final_answer(answer, mode, evidence, context):
+    import re
+    from .answer_validity import qualified_text, quote_text
+    offered = {row['citation'] for row in evidence}
+    mentioned = set(re.findall(r'\[([EURF][1-9][0-9]*)\]', answer))
+    audit = {'passed': mentioned <= offered, 'invalid_citations': sorted(mentioned - offered)}
+    if not audit['passed']:
+        answer = '\n\n'.join(f"[{row['citation']}] {quote_text(row['text'])}" for row in evidence)
+        mode = 'evidence_only'
+    if not answer.strip():
+        answer = (no_evidence_text(context['structure_pending'])
+                  if context['structure_pending']['count'] else '未找到在该时点确认有效的依据。')
+    answer += qualified_text(context)
+    return answer, mode, audit
+
+
 def stream_events(service,p,request):
     def event(name,payload):return 'event: '+name+'\ndata: '+json.dumps(payload,ensure_ascii=False)+'\n\n'
+    from .answer_validity import freeze_request
+    request = freeze_request(request)
     provenance=ProvenanceService(service.repository)
     run_id=answer_id=None
     logger=logging.getLogger('knowledge_service.qa')
@@ -404,21 +464,15 @@ def stream_events(service,p,request):
 
     try:
         run_id=provenance.begin_retrieval(p,request)
-        context=question_context(service,p,request)
-        peer_rows=[{'citation':f'P{i+1}',**r} for i,r in enumerate(context.pop('structure_pending_rows',[]))]
-        evidence=[{'citation':f'E{i+1}',**r} for i,r in enumerate(context.pop('evidence_rows'))]
-        # 结构待定单独记一份（不是证据，也不进证据链）：别人问"这条为什么没进答案"时有据可查。
-        context['structure_pending']=pending_block(peer_rows)
-        answer_id=provenance.complete_retrieval(p,run_id,context,evidence)
-        from .answer_evidence import AnswerEvidence
-        evidence=AnswerEvidence(provenance).summaries(p,answer_id,evidence)
+        context,evidence,answer_id=prepare_answer(service,p,request,provenance,run_id)
         yield event('evidence',{**context,'evidence':evidence,
                                'answer_id':answer_id,'retrieval_run_id':run_id})
         answer='';mode='evidence_only'
         if request.get('generate') and evidence:
             url=os.getenv('KG_LLM_BASE_URL','').rstrip('/');key=os.getenv('KG_LLM_API_KEY','');model=os.getenv('KG_LLM_MODEL','')
             if not all((url,key,model)):raise RuntimeError('请配置 KG_LLM_BASE_URL、KG_LLM_API_KEY、KG_LLM_MODEL')
-            messages=answer_messages(request['query'], evidence)
+            messages=answer_messages(request['query'], evidence,
+                                     as_of=context.get('as_of'), known_at=context.get('known_at'))
             with external_client(180) as client:
                 with client.stream('POST',url+'/chat/completions',headers={'Authorization':'Bearer '+key},json={'model':model,'messages':messages,'stream':True}) as response:
                     response.raise_for_status()
@@ -441,11 +495,12 @@ def stream_events(service,p,request):
                 if context['structure_pending']['count']:
                     answer=no_evidence_text(context['structure_pending'])
                 else:
-                    answer='当前查询范围没有证据。'
+                    answer='未找到在该时点确认有效的依据。'
                 yield event('delta',{'text':answer})
-        provenance.complete_answer(p,answer_id,run_id,answer,mode,evidence)
+        answer,mode,audit=final_answer(answer,mode,evidence,context)
+        provenance.complete_answer(p,answer_id,run_id,answer,mode,evidence,eligibility_audit=audit)
         yield event('done',{'answer':answer,'mode':mode,'answer_id':answer_id,
-                           'retrieval_run_id':run_id,'provenance_complete':True})
+                           'retrieval_run_id':run_id,'provenance_complete':True,'eligibility_audit':audit})
     except (GeneratorExit,asyncio.CancelledError) as exc:
         finish_running('cancelled',{'type':type(exc).__name__,'message':'回答流已取消。'})
         raise
