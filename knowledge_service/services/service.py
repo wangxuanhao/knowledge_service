@@ -387,6 +387,8 @@ class KnowledgeService:
         if scope.get('_reference_mode'):
             params.update(_reference_mode=True, _reference_limit=501,
                           kinds=scope.get('kinds'), applicability=scope.get('applicability'))
+            if '_reference_terms' in scope:
+                params['_reference_terms'] = scope['_reference_terms']
         # 向量已迁到 Milvus，PostgreSQL 不再读 vector 列；scoped 只做时态/元数据过滤
         with timed('范围过滤', kinds=len(scope.get('kinds') or [])) as record:
             rows = self.repository.query(project_id, **params)
@@ -1200,9 +1202,11 @@ class KnowledgeService:
             raise error from exc
 
     def answer(self, project_id, request):
-        from .answers import prepare_answer, final_answer, answer_messages
+        from time import perf_counter
+        from .answers import prepare_answer, final_answer, answer_messages, finish_timings
         from .answer_validity import freeze_request
         from .provenance import ProvenanceService
+        started = perf_counter()
         request = freeze_request(request)
         provenance = ProvenanceService(self.repository)
         run_id = provenance.begin_retrieval(project_id, request)
@@ -1212,6 +1216,7 @@ class KnowledgeService:
             answer = '\n\n'.join(f"[{row['citation']}] {row['text']}" for row in evidence)
             mode = 'evidence_only'
             if request.get('generate') and evidence:
+                llm_started = perf_counter()
                 url = os.environ.get('KG_LLM_BASE_URL', '').rstrip('/')
                 key = os.environ.get('KG_LLM_API_KEY', '')
                 model = os.environ.get('KG_LLM_MODEL', '')
@@ -1229,9 +1234,13 @@ class KnowledgeService:
                     except (ValueError, KeyError, IndexError, TypeError) as exc:
                         raise RuntimeError('LLM 提供商返回了无效的回答响应') from exc
                 mode = 'llm'
+                retrieval['timings_ms']['llm'] = (perf_counter() - llm_started) * 1000
+            complete_started = perf_counter()
             answer, mode, audit = final_answer(answer, mode, evidence, retrieval)
             provenance.complete_answer(project_id, answer_id, run_id, answer, mode, evidence,
                                        eligibility_audit=audit)
+            retrieval['timings_ms']['complete'] = (perf_counter() - complete_started) * 1000
+            finish_timings(retrieval, started)
             return {**retrieval, 'answer': answer, 'evidence': evidence, 'mode': mode,
                     'answer_id': answer_id, 'retrieval_run_id': run_id,
                     'provenance_complete': True, 'eligibility_audit': audit}

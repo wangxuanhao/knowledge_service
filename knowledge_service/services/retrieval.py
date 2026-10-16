@@ -206,8 +206,10 @@ class RetrievalEngine:
                 "keyword_backend": "milvus_bm25" if retrieval_mode in {"hybrid", "keyword"} else None,
                 "valid_at": scope.get("valid_at"), "known_at": scope.get("known_at"),
             }
-        query_vector = cached_query_vector(
-            self.encoder, query, query_vector_cache)
+        # BM25 does not consume an embedding. Computing one here used to make
+        # pure keyword queries pay for the local model's cold start as well.
+        query_vector = (cached_query_vector(self.encoder, query, query_vector_cache)
+                        if retrieval_mode in {'semantic', 'hybrid'} else None)
 
         milvus_scope = dict(scope)
         if platform_match:

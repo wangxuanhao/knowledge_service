@@ -7,12 +7,13 @@ class AnswerEvidence:
         self.provenance = provenance
 
     def summaries(self, project_id, answer_id, evidence):
-        return [self._summary(project_id, answer_id, row) for row in evidence]
+        traces = self.provenance.trace_answer_evidences(
+            project_id, answer_id, [row['citation'] for row in evidence])
+        return [self._summary(row, traces[row['citation']]) for row in evidence]
 
-    def _summary(self, project_id, answer_id, row):
+    def _summary(self, row, trace):
         citation = row['citation']
-        trace = self.provenance.trace_answer_evidence(
-            project_id, answer_id, citation)
+        answer_id = trace['subject']['answer_id']
         retrieval = trace.get('retrieval') or {}
         purpose = {key: retrieval.get(key, row.get(key)) for key in (
             'validity_status', 'validity_basis', 'answer_eligible', 'usage', 'exclusion_reasons',

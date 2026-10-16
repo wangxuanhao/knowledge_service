@@ -156,13 +156,26 @@ class ProvenanceService:
         })
         used = {'activity_id': answer_id, 'source_ref': f'answer:{answer_id}',
                 'relation': 'used', 'target_ref': f'retrieval-run:{run_id}', 'ordinal': 0, 'payload': {}}
+        reader = _CaptureReadCache(repo, project_id)
+        reader.load_versions([row['version_id'] for row in evidence if row.get('version_id')])
+        source_versions = set()
+        for row in reader.versions.values():
+            metadata = row.get('metadata')
+            version = metadata.get('source_version_id') if isinstance(metadata, dict) else None
+            if isinstance(version, str) and version:
+                source_versions.add(version)
+        for row in evidence:
+            allowed = row.get('_allowed_source_version_ids')
+            if isinstance(allowed, list):
+                source_versions.update(version for version in allowed if isinstance(version, str) and version)
+        reader.load_versions(sorted(source_versions))
         citations, edges = [], [used]
         for rank, item in enumerate(evidence, 1):
             citation = item.get('citation')
             if not isinstance(citation, str) or not _CITATION.fullmatch(citation) or citation in citations:
                 raise ValueError('证据引用必须是唯一的大写 E/U/R/F 编号')
             graph = _SourceCapture(
-                repo, project_id, f'{answer_id}#{citation}').capture(item)
+                reader, project_id, f'{answer_id}#{citation}').capture(item)
             score = item.get('score')
             audit = {'rank': rank, 'score': score if type(score) in (int, float) and math.isfinite(score) else None,
                      'channel': _text(item.get('channel') or item.get('kind')), 'selected': True}
@@ -265,23 +278,64 @@ class ProvenanceService:
                           edges=self.repository.list_provenance_edges(project_id, activity_id=activity_id))
 
     def trace_answer_evidence(self, project_id, answer_id, citation):
+        return self.trace_answer_evidences(project_id, answer_id, [citation])[citation]
+
+    def trace_answer_evidences(self, project_id, answer_id, citations):
+        """Project multiple frozen branches with one set of shared reads.
+
+        All caches belong to this call. Never cache mutable answer status across
+        requests, and never fall back to a current record for a missing version.
+        """
+        citations = list(dict.fromkeys(citations))
+        if not citations:
+            return {}
         activity = self.repository.get_provenance_activity(project_id, answer_id)
         activity = self._ensure_edge_v1(project_id, activity)
         payload = activity['payload']
-        if activity['kind'] != 'answer' or citation not in payload.get('offered', ()):
-            raise KeyError(citation)
+        for citation in citations:
+            if activity['kind'] != 'answer' or citation not in payload.get('offered', ()):
+                raise KeyError(citation)
         run_id = payload['run_id']
         retrieval = self.repository.get_provenance_activity(project_id, run_id)
-        request = retrieval['payload']
         answer_edges = self.repository.list_provenance_edges(project_id, activity_id=answer_id)
+        retrieval_edges = self.repository.list_provenance_edges(project_id, activity_id=run_id)
+        branches = {citation: [] for citation in citations}
+        used = []
+        for edge in answer_edges:
+            if edge['relation'] == 'used':
+                used.append(edge)
+                continue
+            citation = edge['payload'].get('citation')
+            if citation in branches:
+                branches[citation].append(edge)
+            elif edge['relation'] == 'cites':
+                citation = edge['source_ref'].removeprefix(f'answer:{answer_id}#')
+                if citation in branches:
+                    branches[citation].append(edge)
+        considered = {citation: [] for citation in citations}
+        for edge in retrieval_edges:
+            citation = edge['payload'].get('citation')
+            if edge['relation'] == 'considered' and citation in considered:
+                considered[citation].append(edge)
+        reader = _TraceReadCache(self.repository, project_id)
+        reader.prefetch_versions([edge for edges in branches.values() for edge in edges])
+        return {citation: self._trace_branch(
+                    project_id, answer_id, citation, activity, retrieval,
+                    [*used, *branches[citation]], considered[citation], reader)
+                for citation in citations}
+
+    def _trace_branch(self, project_id, answer_id, citation, activity, retrieval,
+                      answer_edges, considered, reader):
+        payload = activity['payload']
+        run_id = payload['run_id']
+        request = retrieval['payload']
         offered = self._offered_edge(answer_id, citation, answer_edges)
         graph_edges = [edge for edge in answer_edges
                        if edge['relation'] == 'used' or
                        edge['payload'].get('citation') == citation or
                        (edge['relation'] == 'cites' and
                         edge['source_ref'] == f'answer:{answer_id}#{citation}')]
-        considered = [edge for edge in self.repository.list_provenance_edges(
-            project_id, activity_id=run_id)
+        considered = [edge for edge in considered
             if edge['relation'] == 'considered'
             and edge['target_ref'] == offered['target_ref']
             and edge['payload'].get('citation') == citation]
@@ -293,7 +347,7 @@ class ProvenanceService:
         citation_status = ('cited' if citation in payload['cited'] else
                            'uncited' if activity['status'] == 'completed' else 'offered')
         nodes = _TraceProjection(
-            self.repository, project_id, graph_edges).nodes() + [
+            reader, project_id, graph_edges).nodes() + [
             _node('answer', f'answer:{answer_id}', '答案', activity['status'], activity['started_at'],
                   answer_id=answer_id, mode=payload['mode']),
             _node('answer', f'answer:{answer_id}#{citation}', citation, citation_status,
@@ -692,6 +746,83 @@ class _SourceCapture:
         run_ref = self.add_node(_node('ingest_run', 'ingest-run:' + run['id'], '摄取运行',
             run['status'], run['created_at'], **snapshot))
         self.edge(ref, 'processed-by', run_ref, snapshot)
+
+
+class _TraceReadCache:
+    """A project-bound, call-local reader for immutable trace projections."""
+
+    def __init__(self, repository, project):
+        self.repo, self.project = repository, project
+        self.versions, self.assertions, self.events = {}, {}, {}
+
+    def prefetch_versions(self, edges):
+        prefixes = ('record-version:', 'chunk-version:', 'document-version:')
+        ids = list(dict.fromkeys(ref.split(':', 1)[1]
+            for edge in edges for ref in (edge['source_ref'], edge['target_ref'])
+            if ref.startswith(prefixes)))
+        self.load_versions(ids)
+
+    def load_versions(self, ids):
+        ids = [version for version in dict.fromkeys(ids) if version not in self.versions]
+        if ids:
+            self.versions.update((row['version_id'], row)
+                                 for row in self.repo.records_by_version_ids(self.project, ids))
+
+    def get_record_version(self, project, version):
+        if project != self.project or version not in self.versions:
+            raise KeyError(version)
+        return self.versions[version]
+
+    def get_assertion(self, project, assertion):
+        if project != self.project:
+            raise KeyError(assertion)
+        if assertion not in self.assertions:
+            self.assertions[assertion] = self.repo.get_assertion(project, assertion)
+        return self.assertions[assertion]
+
+    def list_assertion_events(self, project, assertion):
+        if project != self.project:
+            raise KeyError(assertion)
+        if assertion not in self.events:
+            self.events[assertion] = self.repo.list_assertion_events(project, assertion)
+        return self.events[assertion]
+
+
+class _CaptureReadCache(_TraceReadCache):
+    """Shared reads only inside the source-capture transaction."""
+
+    def __init__(self, repository, project):
+        super().__init__(repository, project)
+        self.histories, self.runs, self.mappings = {}, {}, {}
+
+    def get_record_version(self, project, version):
+        if project != self.project:
+            raise KeyError(version)
+        if version not in self.versions:
+            self.versions[version] = self.repo.get_record_version(project, version)
+        return self.versions[version]
+
+    def history(self, project, record):
+        if project != self.project:
+            raise KeyError(record)
+        if record not in self.histories:
+            self.histories[record] = self.repo.history(project, record)
+        return self.histories[record]
+
+    def get_ingest_run(self, project, run):
+        if project != self.project:
+            raise KeyError(run)
+        if run not in self.runs:
+            self.runs[run] = self.repo.get_ingest_run(project, run)
+        return self.runs[run]
+
+    def list_record_version_assertions(self, project, record_version_id):
+        if project != self.project:
+            raise KeyError(record_version_id)
+        if record_version_id not in self.mappings:
+            self.mappings[record_version_id] = self.repo.list_record_version_assertions(
+                project, record_version_id=record_version_id)
+        return self.mappings[record_version_id]
 
 
 class _TraceProjection:

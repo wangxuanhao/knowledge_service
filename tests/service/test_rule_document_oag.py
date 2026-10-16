@@ -234,7 +234,9 @@ def test_common_evidence_never_populates_unknown_scope_group():
     row = {'id': 'common', 'version_id': 'cv', 'kind': 'chunk', 'text': 'COMMON_RULE',
            'source_id': 'doc', 'valid_from': '2020-01-01', 'query_platform': None, 'source_scope': 'all',
            'metadata': {**doc['metadata'], 'source_version_id': 'dv'}}
-    repo = SimpleNamespace(get_record_version=lambda *_: doc, history=lambda *_: [doc])
+    repo = SimpleNamespace(get_record_version=lambda *_: doc, history=lambda *_: [doc],
+                           records_by_version_ids=lambda *_: [doc],
+                           records_at_knowledge_time=lambda *_: [doc])
     context = {'hits': [row], 'evidence_rows': [row], 'platform_groups': [
         {'platform': None, 'source_scope': 'all', 'hits': [row]},
         {'platform': None, 'source_scope': 'unknown', 'hits': []},

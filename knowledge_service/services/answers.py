@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import os
+from time import perf_counter
 
 from ..core.net import external_client
 from . import structure_pending
@@ -72,7 +73,8 @@ def answer_messages(question, evidence, *, as_of=None, known_at=None):
          '比较时对齐适用对象、前提条件、时限及起算点、例外和生效范围；每个比较项引用本平台 E 依据。'
          '缺项只能说未检索到确认有效的依据，不能断言没有该规则；自然日与工作日、不同起算点不得强行归一。'
          '检索 top-k 不是总数，不得声称穷尽平台或规则；不作业务合规判定。'
-         '按「结论 → 推理 → 依据」三层输出，每条结论引用 [E编号]；'
+         '默认直接回答问题，每条结论引用 [E编号]；解释仅保留相关关键条件，不重复结论和大段原文。'
+         '复杂比较可分段或列表说明，保留各平台的前提、例外和起算点；用户要求详细时再展开。'
          '证据不足时明确说明，不要编造。'},
         {'role': 'user', 'content': json.dumps({
             'question': question, 'platform_evidence': platform_evidence,
@@ -401,14 +403,20 @@ def _retrieved_question_context(service, p, request):
 def question_context(service, p, request):
     from .answer_validity import apply_validity, freeze_request
     request = freeze_request(request)
+    started = perf_counter()
     context = _retrieved_question_context(service, p, request)
+    retrieved = perf_counter()
     scoped_request = {**request, 'applicability': context.get('applicability') or request.get('applicability')}
-    return apply_validity(service, p, context, scoped_request)
+    context = apply_validity(service, p, context, scoped_request)
+    context['timings_ms'] = {'retrieval': (retrieved - started) * 1000,
+                             'eligibility': (perf_counter() - retrieved) * 1000}
+    return context
 
 
 def prepare_answer(service, p, request, provenance, run_id):
     from .answer_evidence import AnswerEvidence
     context = question_context(service, p, request)
+    context.setdefault('timings_ms', {})
     context['structure_pending'] = pending_block([
         {'citation': f'P{i+1}', **row}
         for i, row in enumerate(context.pop('structure_pending_rows', []))])
@@ -420,11 +428,16 @@ def prepare_answer(service, p, request, provenance, run_id):
         context[key] = [{**row, 'citation': f'{prefix}{i+1}'}
                         for i, row in enumerate(context.get(key, []))]
         frozen.extend(context[key])
+    started = perf_counter()
     answer_id = provenance.complete_retrieval(p, run_id, context, frozen)
+    context['timings_ms']['freeze'] = (perf_counter() - started) * 1000
+    started = perf_counter()
     summaries = AnswerEvidence(provenance)
-    evidence = summaries.summaries(p, answer_id, evidence)
+    summarized = {row['citation']: row for row in summaries.summaries(p, answer_id, frozen)}
+    evidence = [summarized[row['citation']] for row in evidence]
     for key in ('historical_references', 'future_references', 'uncertain_references'):
-        context[key] = summaries.summaries(p, answer_id, context[key])
+        context[key] = [summarized[row['citation']] for row in context[key]]
+    context['timings_ms']['summaries'] = (perf_counter() - started) * 1000
     return context, evidence, answer_id
 
 
@@ -444,7 +457,17 @@ def final_answer(answer, mode, evidence, context):
     return answer, mode, audit
 
 
+def finish_timings(context, started):
+    """Public numeric timings only; no prompts, query text, or credentials."""
+    timings = context['timings_ms']
+    timings['total'] = (perf_counter() - started) * 1000
+    timings.update((key, round(value, 3)) for key, value in list(timings.items()))
+    logging.getLogger('knowledge_service.timing').info('QA timings_ms=%s', timings)
+    return timings
+
+
 def stream_events(service,p,request):
+    started = perf_counter()
     def event(name,payload):return 'event: '+name+'\ndata: '+json.dumps(payload,ensure_ascii=False)+'\n\n'
     from .answer_validity import freeze_request
     request = freeze_request(request)
@@ -469,6 +492,7 @@ def stream_events(service,p,request):
                                'answer_id':answer_id,'retrieval_run_id':run_id})
         answer='';mode='evidence_only'
         if request.get('generate') and evidence:
+            llm_started = perf_counter()
             url=os.getenv('KG_LLM_BASE_URL','').rstrip('/');key=os.getenv('KG_LLM_API_KEY','');model=os.getenv('KG_LLM_MODEL','')
             if not all((url,key,model)):raise RuntimeError('请配置 KG_LLM_BASE_URL、KG_LLM_API_KEY、KG_LLM_MODEL')
             messages=answer_messages(request['query'], evidence,
@@ -483,8 +507,10 @@ def stream_events(service,p,request):
                         item=json.loads(data);choices=item.get('choices',[])
                         content=choices[0].get('delta',{}).get('content','') if choices else ''
                         if isinstance(content,str) and content:
+                            context['timings_ms'].setdefault('llm_first_content', (perf_counter() - llm_started) * 1000)
                             answer+=content;yield event('delta',{'text':content})
             if not answer:raise RuntimeError('模型未返回任何回答文本')
+            context['timings_ms']['llm'] = (perf_counter() - llm_started) * 1000
             mode='llm'
         else:
             for row in evidence:
@@ -497,10 +523,14 @@ def stream_events(service,p,request):
                 else:
                     answer='未找到在该时点确认有效的依据。'
                 yield event('delta',{'text':answer})
+        complete_started = perf_counter()
         answer,mode,audit=final_answer(answer,mode,evidence,context)
         provenance.complete_answer(p,answer_id,run_id,answer,mode,evidence,eligibility_audit=audit)
+        context['timings_ms']['complete'] = (perf_counter() - complete_started) * 1000
+        timings = finish_timings(context, started)
         yield event('done',{'answer':answer,'mode':mode,'answer_id':answer_id,
-                           'retrieval_run_id':run_id,'provenance_complete':True,'eligibility_audit':audit})
+                           'retrieval_run_id':run_id,'provenance_complete':True,'eligibility_audit':audit,
+                           'timings_ms': timings})
     except (GeneratorExit,asyncio.CancelledError) as exc:
         finish_running('cancelled',{'type':type(exc).__name__,'message':'回答流已取消。'})
         raise

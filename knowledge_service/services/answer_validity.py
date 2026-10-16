@@ -76,7 +76,7 @@ def classify(service, project, row, request):
             doc = source_cache[('version', version)]
         except KeyError:
             return None
-        if doc.get('kind') != 'document' or doc['id'] != document_id or not visible(doc, request, source_artifact=True):
+        if not doc or doc.get('kind') != 'document' or doc['id'] != document_id or not visible(doc, request, source_artifact=True):
             return None
         # Source text remains the original immutable version. Business validity
         # follows the document authority version visible at knowledge time.
@@ -161,16 +161,17 @@ def classify(service, project, row, request):
 
 def reference_candidates(service, project, request):
     """Bounded authority fallback, with independent quota and explicit coverage."""
-    scope = {**request, '_reference_mode': True, '_include_embeddings': False,
-             'kinds': ['chunk', 'entity'], 'include_unknown': True}
-    rows = service.scoped(project, scope)
-    service.annotate_structure_pending(project, rows)
-    # A stable bounded read is deliberately not advertised as exhaustive history.
     query = request['query'].casefold()
     terms = set(re.findall(r'[a-z0-9_]+', query))
     for phrase in re.findall(r'[\u4e00-\u9fff]+', query):
         terms.add(phrase)
         terms.update(phrase[index:index + 2] for index in range(len(phrase) - 1))
+    scope = {**request, '_reference_mode': True, '_include_embeddings': False,
+             '_reference_terms': sorted(terms),
+             'kinds': ['chunk', 'entity'], 'include_unknown': True}
+    rows = service.scoped(project, scope)
+    service.annotate_structure_pending(project, rows)
+    # A stable bounded read is deliberately not advertised as exhaustive history.
     ranked = []
     for row in rows:
         if structure_pending.is_pending(row):
@@ -189,7 +190,26 @@ def reference_candidates(service, project, request):
             if platform and selected and platform not in selected:
                 continue
             grouped.append({**row, 'query_platform': platform, 'source_scope': mode})
-    return grouped, ['参考检索使用有界权威关键词读取；最多 501 条候选在 metadata 匹配前截断，可能遗漏匹配项，并非全库历史穷尽检索。']
+    return grouped, ['参考检索先在数据库匹配关键词，再有界读取最多 501 条候选；复杂 metadata 筛选与相关性排序前仍可能截断，并非全库历史穷尽检索。']
+
+
+def _prefetch_chunk_sources(repository, project, rows, request):
+    """Batch exact source text and governance versions, never whole histories."""
+    sources = {(row.get('metadata') or {}).get('source_version_id')
+               for row in rows if row.get('kind') == 'chunk'} - {None, ''}
+    if not sources:
+        return
+    cache = request['_source_read_cache']
+    docs = repository.records_by_version_ids(project, sorted(sources))
+    by_version = {row['version_id']: row for row in docs}
+    for version in sources:
+        cache[('version', version)] = by_version.get(version)
+    ids = {doc['id'] for doc in docs if doc.get('kind') == 'document'}
+    governance = repository.records_at_knowledge_time(project, sorted(ids), request['known_at'])
+    for record_id in ids:
+        cache[('history', record_id)] = []
+    for doc in governance:
+        cache[('history', doc['id'])].append(doc)
 
 
 def apply_validity(service, project, context, request):
@@ -218,6 +238,7 @@ def apply_validity(service, project, context, request):
             warnings.extend(notes)
         except (AttributeError, NotImplementedError):
             warnings.append('参考检索不可用，无法据此判断是否存在历史或未来规则。')
+    _prefetch_chunk_sources(service.repository, project, [*direct, *extra], request)
     direct_keys = {(row.get('version_id') or row['id'], row.get('query_platform')) for row in direct}
     seen, classified = set(), []
     for row in [*direct, *extra]:

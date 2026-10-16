@@ -1239,6 +1239,21 @@ class Repository:
         by_id = {row['version_id']: self._record(row, vectors='list') for row in rows}
         return [by_id[item] for item in version_ids if item in by_id]
 
+    def records_at_knowledge_time(self, project_id, record_ids, known_at):
+        """Read only each requested identity's system version at knowledge time."""
+        self.get_project(project_id)
+        if not record_ids:
+            return []
+        known_at = normalize_time(known_at)
+        if known_at is None:
+            raise ValueError('需要明确的系统知识时点')
+        with self._lock:
+            rows = self._db.execute('''SELECT * FROM record_versions
+                WHERE project_id=? AND id = ANY(?::text[]) AND recorded_at<=?
+                AND (superseded_at IS NULL OR superseded_at>?)''',
+                (project_id, list(dict.fromkeys(record_ids)), known_at, known_at)).fetchall()
+        return [self._record(row, vectors='none') for row in rows]
+
     def current_records_by_version_ids(self, project_id, version_ids):
         """Read requested versions only when they are still current.
 
@@ -1331,7 +1346,8 @@ class Repository:
 
     def query(self, project_id, filters=None, valid_at=None, known_at=None, kinds=None,
               include_unknown=True, include_embeddings=True, vectors='list',
-              applicability=None, _reference_mode=False, _reference_limit=501):
+              applicability=None, _reference_mode=False, _reference_limit=501,
+              _reference_terms=None):
         """读取 ``known_at`` 时刻可见的每个系统版本，并在 Python 侧过滤。
 
         PERF：未传 ``known_at`` 时使用 ``superseded_at IS NULL`` 的 current
@@ -1401,6 +1417,20 @@ class Repository:
                 if _reference_mode:
                     if type(_reference_limit) is not int or not 1 <= _reference_limit <= 1001:
                         raise ValueError('无效的参考读取预算')
+                    if _reference_terms is not None:
+                        if not isinstance(_reference_terms, (list, tuple)) or any(
+                                not isinstance(term, str) or not term for term in _reference_terms):
+                            raise ValueError('无效的参考检索词')
+                        terms = list(dict.fromkeys(term.lower() for term in _reference_terms))
+                        # The GIN prefilter is a necessary condition only. Always
+                        # recheck the full substring to avoid bigram false positives.
+                        if terms and all(len(term) >= 2 for term in terms):
+                            pairs = sorted({term[i:i+2] for term in terms for i in range(len(term)-1)})
+                            statement += " AND qa_text_bigrams(lower(COALESCE(payload::jsonb->>'text', ''))) && ?::text[]"
+                            params.append(pairs)
+                        statement += """ AND EXISTS (SELECT 1 FROM unnest(?::text[]) AS t(term)
+                            WHERE strpos(lower(COALESCE(payload::jsonb->>'text', '')), t.term)>0)"""
+                        params.append(terms)
                     statement += ' ORDER BY id,version LIMIT ?'
                     params.append(_reference_limit)
                 else:

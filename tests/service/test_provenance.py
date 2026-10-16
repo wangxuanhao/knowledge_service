@@ -1057,6 +1057,8 @@ def test_sse_evidence_is_committed_and_trace_running_until_done(provenance, monk
     assert _sse_item(next(stream))[0] == 'delta'
     assert service.trace_answer_evidence(project, answer, 'E1')['answer']['status'] == 'running'
     name, done = _sse_item(next(stream))
+    timings = done.pop('timings_ms')
+    assert timings['total'] >= timings['freeze'] >= 0
     assert (name, done) == ('done', {'answer': '[E1] evidence\n\n', 'mode': 'evidence_only',
         'answer_id': answer, 'retrieval_run_id': run, 'provenance_complete': True,
         'eligibility_audit': {'passed': True, 'invalid_citations': []}})
