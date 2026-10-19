@@ -7,6 +7,32 @@ from knowledge_service.services.retrieval import RetrievalEngine
 from knowledge_service.services.projection_sync import ProjectionSync
 
 
+def test_scoped_vectors_read_project_generation_and_exact_versions_in_bounded_batches():
+    store = object.__new__(MilvusStore)
+    store._search_destination = lambda project: 'project_generation'
+    store._load_if_needed = lambda destination: destination
+    calls = []
+
+    def pages(collection, expression, fields):
+        calls.append((collection, expression, fields))
+        return [{'version_id': 'v0', 'embedding': [1., 0.], 'embedding_model': 'model'},
+                {'version_id': 'unrequested', 'embedding': [0., 1.], 'embedding_model': 'model'}]
+
+    store._query_pages = pages
+    assert store.vectors_by_version_ids('p', []) == {}
+    result = store.vectors_by_version_ids('p', [f'v{i}' for i in range(257)])
+    assert list(result) == ['v0']
+    assert len(calls) == 2
+    for collection, expression, fields in calls:
+        assert collection == 'project_generation'
+        assert 'project_id == "p"' in expression
+        assert 'active == true' in expression
+        assert 'version_id in [' in expression
+        assert 'valid_from' not in expression
+        assert 'valid_until' not in expression
+        assert fields == ['version_id', 'embedding', 'embedding_model']
+
+
 def test_v2_filter_compiles_scope_and_half_open_business_time_without_candidates():
     store = MilvusStore(dim=2)
     expression = store._filter_expr(

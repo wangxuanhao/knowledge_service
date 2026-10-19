@@ -26,6 +26,59 @@ import json
 class DraftCommandMixin:
     """本体变更命令的编译与影响评估（把前端命令展开成服务端可校验的操作集）。"""
 
+    def discover_parents(self, project_id, draft_id, expected_revision):
+        """Append fresh hierarchy suggestions without replacing existing draft edits."""
+        from collections import Counter
+        from . import hierarchy_suggestion
+
+        draft = self.store.get(project_id, draft_id)
+        self._assert_revision(draft, expected_revision)
+        _status_guard(draft, EDITABLE_STATES, '发现父类')
+        self._check_current(project_id, draft, expected_revision)
+        turtle, _ = self._ontology_for_draft(project_id, draft)
+        ontology = Ontology(turtle)
+        classes = [item for item in ontology.summary()['classes'] if item.get('active') is not False]
+        labels = [str(item.get('label_zh') or item.get('label') or item.get('name')
+                      or local_name(item['id'])).strip() or str(item['id']) for item in classes]
+        frequencies = Counter(label.casefold() for label in labels)
+        lookup = {(label if frequencies[label.casefold()] == 1
+                   else f"{label} [class {index + 1}: {item['id']}]"): URIRef(item['id'])
+                  for index, (label, item) in enumerate(zip(labels, classes))}
+        if len(lookup) < 2:
+            return {'draft': self.get(project_id, draft_id), 'added_count': 0, 'skipped_count': 0}
+        try:
+            raw = hierarchy_suggestion.suggest_hierarchy(
+                list(lookup), request_name=draft.get('title') or '', refresh=True)
+        except hierarchy_suggestion.HierarchySuggestionsUnavailable:
+            raise
+        except Exception as exc:
+            raise hierarchy_suggestion.HierarchySuggestionsUnavailable(
+                '父类发现模型请求失败，请稍后重试') from exc
+        suggestions = hierarchy_suggestion.parse_suggestions(raw, list(lookup))
+        graph = ontology.graph
+        added = skipped = 0
+        for child_name, parents in suggestions.items():
+            child = lookup[child_name]
+            for parent_name in parents:
+                parent = lookup[parent_name]
+                if ((child, RDFS.subClassOf, parent) in graph
+                        or child in graph.transitive_objects(parent, RDFS.subClassOf)):
+                    skipped += 1
+                    continue
+                graph.add((child, RDFS.subClassOf, parent))
+                added += 1
+        # No database transaction is held across the model request. A concurrent
+        # edit or publication must reject the stale result, including no-op runs.
+        fresh = self.store.get(project_id, draft_id)
+        self._assert_revision(fresh, expected_revision)
+        _status_guard(fresh, EDITABLE_STATES, '发现父类')
+        self._check_current(project_id, fresh, expected_revision)
+        updated = (self.command(project_id, draft_id, expected_revision, {
+            'action': 'diff_turtle', 'edited_turtle': graph.serialize(format='turtle'),
+            'reason': '根据当前结构重新发现父类，待人工审核',
+        }) if added else self.get(project_id, draft_id))
+        return {'draft': updated, 'added_count': added, 'skipped_count': skipped}
+
     @staticmethod
     def _operation_args(command):
         action = command.get('action')
@@ -225,6 +278,11 @@ class DraftCommandMixin:
                 project_id, draft, self._expand_restore(operation, ontology),
                 ontology, command)
         action, before, after = self._operation_args(command)
+        if action == 'set_datatype' and before is None:
+            # The command API accepts a requested datatype; freeze its reviewed
+            # precondition from the current draft, including earlier edits.
+            before = self._rebase_before(ontology, {
+                'action': action, 'target_iri': target})
         # Risk, warnings and fingerprints are always recomputed here.  Client
         # supplied values with those names are intentionally ignored.
         return self._rebuild_operations(project_id, draft, [{
@@ -329,6 +387,18 @@ class DraftCommandMixin:
                 }]
                 compiled[0]['fingerprint'] = operation_fingerprint(compiled[0])
             else:
+                if action == 'set_datatype' and command.get('before') is None and supersedes:
+                    slot = next((index for index, row in enumerate(effective)
+                                 if row['id'] == supersedes), None)
+                    if slot is not None:
+                        # A replacement replays at the original logical slot,
+                        # so its precondition comes from that slot's input.
+                        prefix = [row for row in effective[:slot]
+                                  if (row.get('validation') or {}).get('rebase_status') != 'conflict'
+                                  and not (row.get('validation') or {}).get('errors')]
+                        ontology = Ontology(apply_operations(
+                            self._base_turtle(project_id, draft['base_ontology_id']),
+                            map(_semantic_operation, prefix)))
                 compiled = self._compile_command(
                     project_id, draft, command, ontology)
             if supersedes:

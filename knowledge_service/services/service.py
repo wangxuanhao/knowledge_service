@@ -16,7 +16,7 @@ from ..core.net import external_client
 from ..models import IngestSettings, RecordWrite
 from ..domain.applicability import (
     dimension_mode, dimension_values, matches_applicability,
-    normalize_applicability, resolve_query_applicability,
+    normalize_applicability,
 )
 from .ontology import Ontology, UnknownOntologyTerm, match_query_expansion
 from .retrieval import RetrievalEngine
@@ -532,11 +532,8 @@ class KnowledgeService:
 
     def search(self, project_id, request):
         scope = dict(request)
-        vocabulary = (self.repository.distinct_applicability_values(project_id)
-                      if hasattr(self.repository, 'distinct_applicability_values')
-                      else {})
-        applicability = resolve_query_applicability(
-            request.get('query', ''), request.get('applicability'), vocabulary)
+        # Query words express relevance. Only explicit metadata controls scope.
+        applicability = normalize_applicability(request.get('applicability'))
         if any(dimension_mode(applicability, dimension) != 'unknown'
                for dimension in ('platforms', 'businesses', 'audiences')):
             scope['applicability'] = applicability
@@ -556,10 +553,9 @@ class KnowledgeService:
         explicit_platform = dimension_mode(applicability, 'platforms') == 'specific'
         platforms = (dimension_values(applicability, 'platforms')
                      if explicit_platform
-                     else list(vocabulary.get('platforms') or ()))
+                     else [])
         platforms = list(dict.fromkeys(platforms))[:20]
         per_platform_k = max(1, min(20, request.get('k_per_platform', 5)))
-        unknown_k = max(1, min(20, request.get('k_unknown', 3)))
         fallback_cache = {
             'applicability': applicability,
             'lock': threading.Lock(),
@@ -606,11 +602,27 @@ class KnowledgeService:
                                  for platform, result in platform_results)
         common_scope = dict(scope)
         common_scope['applicability'] = applicability
-        group_results.append((None, 'all', retrieve(
-            common_scope, 'all_only', None, 'all', per_platform_k)))
-        if (not explicit_platform and request.get('include_unknown', True)):
-            group_results.append((None, 'unknown', retrieve(
-                common_scope, 'unknown_only', None, 'unknown', unknown_k)))
+        unrestricted = None
+        if explicit_platform:
+            group_results.append((None, 'all', retrieve(
+                common_scope, 'all_only', None, 'all', per_platform_k)))
+        else:
+            # One global ranking: grouping is presentation, not a hidden set of
+            # platform searches or per-platform recall limits.
+            unrestricted = retrieve(common_scope)
+            grouped_hits = {}
+            for row in unrestricted.get('hits', []):
+                source = (row.get('metadata') or {}).get('applicability')
+                mode = dimension_mode(source, 'platforms')
+                values = dimension_values(source, 'platforms') if mode == 'specific' else [None]
+                for platform in values:
+                    grouped_hits.setdefault((platform, mode), []).append({
+                        **row, 'query_platform': platform, 'source_scope': mode})
+            group_results.extend((platform, mode, {
+                **unrestricted, 'hits': hits, 'candidate_count': len(hits)})
+                for (platform, mode), hits in grouped_hits.items())
+            if not group_results:
+                group_results.append((None, 'unrestricted', unrestricted))
         template = group_results[0][2]
         groups = [{
             'platform': platform, 'source_scope': source_scope,
@@ -638,6 +650,17 @@ class KnowledgeService:
                     break
             if len(flattened) >= 100:
                 break
+        if unrestricted is not None:
+            tagged = {(row.get('version_id') or ('record', row.get('id'))): row
+                      for group in groups for row in group['hits']}
+            flattened, seen_versions = [], set()
+            for row in unrestricted.get('hits', []):
+                identity = row.get('version_id') or ('record', row.get('id'))
+                if identity not in seen_versions:
+                    seen_versions.add(identity)
+                    flattened.append(tagged.get(identity, row))
+                if len(flattened) >= 100:
+                    break
         backends = {
             item[2].get('_backend') or 'postgres_local'
             for item in group_results
@@ -655,7 +678,8 @@ class KnowledgeService:
                     grouped_errors[f'{label}:{name}'] = info['error']
         result = {
             **template, 'hits': flattened, 'platform_groups': groups,
-            'candidate_count': sum(group['candidate_count'] for group in groups),
+            'candidate_count': (unrestricted.get('candidate_count', 0) if unrestricted is not None
+                                else sum(group['candidate_count'] for group in groups)),
             'applicability': applicability,
             '_backend': (next(iter(backends)) if len(backends) == 1 else 'mixed'),
             'degraded': any(item[2].get('degraded', False)
@@ -1203,9 +1227,10 @@ class KnowledgeService:
 
     def answer(self, project_id, request):
         from time import perf_counter
-        from .answers import prepare_answer, final_answer, answer_messages, finish_timings
+        from .answers import prepare_answer, final_answer, answer_messages, finish_timings, generation_state
         from .answer_validity import freeze_request
         from .provenance import ProvenanceService
+        from .qa_policy import model_evidence
         started = perf_counter()
         request = freeze_request(request)
         provenance = ProvenanceService(self.repository)
@@ -1215,17 +1240,21 @@ class KnowledgeService:
             retrieval, evidence, answer_id = prepare_answer(self, project_id, request, provenance, run_id)
             answer = '\n\n'.join(f"[{row['citation']}] {row['text']}" for row in evidence)
             mode = 'evidence_only'
-            if request.get('generate') and evidence:
+            called = False
+            material = model_evidence(evidence, retrieval)
+            if request.get('generate') and material:
                 llm_started = perf_counter()
                 url = os.environ.get('KG_LLM_BASE_URL', '').rstrip('/')
                 key = os.environ.get('KG_LLM_API_KEY', '')
                 model = os.environ.get('KG_LLM_MODEL', '')
                 if not all((url, key, model)):
                     raise RuntimeError('请配置 KG_LLM_BASE_URL、KG_LLM_API_KEY、KG_LLM_MODEL 以生成回答')
+                called = True
                 with external_client(120) as client:
                     response = client.post(url+'/chat/completions', headers={'Authorization': f'Bearer {key}'}, json={
-                        'model': model, 'messages': answer_messages(request['query'], evidence,
-                            as_of=retrieval.get('as_of'), known_at=retrieval.get('known_at'))})
+                        'model': model, 'messages': answer_messages(request['query'], material,
+                            as_of=retrieval.get('as_of'), known_at=retrieval.get('known_at'),
+                            answer_purpose=retrieval.get('answer_purpose'))})
                     response.raise_for_status()
                     try:
                         answer = response.json()['choices'][0]['message']['content']
@@ -1234,14 +1263,17 @@ class KnowledgeService:
                     except (ValueError, KeyError, IndexError, TypeError) as exc:
                         raise RuntimeError('LLM 提供商返回了无效的回答响应') from exc
                 mode = 'llm'
+                called = True
                 retrieval['timings_ms']['llm'] = (perf_counter() - llm_started) * 1000
             complete_started = perf_counter()
             answer, mode, audit = final_answer(answer, mode, evidence, retrieval)
             provenance.complete_answer(project_id, answer_id, run_id, answer, mode, evidence,
-                                       eligibility_audit=audit)
+                                       eligibility_audit=audit,
+                                       generation=generation_state(request, evidence, retrieval, called=called))
             retrieval['timings_ms']['complete'] = (perf_counter() - complete_started) * 1000
             finish_timings(retrieval, started)
             return {**retrieval, 'answer': answer, 'evidence': evidence, 'mode': mode,
+                    'generation': generation_state(request, evidence, retrieval, called=called),
                     'answer_id': answer_id, 'retrieval_run_id': run_id,
                     'provenance_complete': True, 'eligibility_audit': audit}
         except Exception as exc:

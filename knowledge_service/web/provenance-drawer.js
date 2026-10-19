@@ -307,6 +307,16 @@
   function decorateAnswer(container,text,context={}){
     const summaries=list(context.evidence).map(sanitizeEvidenceSummary);
     const offered=new Set(summaries.map(item=>item.citation).filter(Boolean));
+    if(window.QaPresentation){
+      window.QaPresentation.render(container,text,token=>{
+        const citation=token.slice(1,-1);
+        if(!offered.has(citation)||!context.answerId||!context.projectId)return null;
+        const link=button(token,()=>open({...context,citation,trigger:link}));
+        link.className='secondary provenance-citation';link.setAttribute('aria-label','查看引用 '+citation+' 的证据溯源');
+        return link;
+      });
+      return;
+    }
     container.replaceChildren();
     for(const segment of tokenizeCitations(text,offered)){
       if(segment.type==='citation'&&context.answerId&&context.projectId){

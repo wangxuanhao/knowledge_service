@@ -1365,10 +1365,10 @@ class Repository:
         validate_filter(filters)
         now = utc_now()
         historical = known_at is not None
-        valid_at = normalize_time(valid_at) or now
+        valid_at = normalize_time(valid_at)
         known_at = normalize_time(known_at) or now
         selected_scope = normalize_applicability(applicability)
-        valid_at_epoch_ms = _epoch_ms(valid_at)
+        valid_at_epoch_ms = _epoch_ms(valid_at) if valid_at is not None else None
         if kinds is not None and (not isinstance(kinds, (list, tuple, set)) or any(k not in {'document', 'entity', 'relation', 'attribute', 'chunk'} for k in kinds)):
             raise ValueError('无效的记录类型')
         self.get_project(project_id)
@@ -1388,15 +1388,15 @@ class Repository:
                     params.extend((known_at, known_at))
                 else:
                     statement += ' AND superseded_at IS NULL'
-                if _reference_mode:
-                    pass  # Internal QA reference read bypasses business time only.
+                if _reference_mode or valid_at is None:
+                    pass  # Business validity is filtered only when explicitly selected.
                 elif include_unknown:
                     statement += (' AND (NOT valid_from_known OR valid_from_epoch_ms<=?)'
                                   ' AND (NOT valid_until_known OR valid_until_epoch_ms>?)')
                 else:
                     statement += (' AND valid_from_known AND valid_from_epoch_ms<=?'
                                   ' AND (NOT valid_until_known OR valid_until_epoch_ms>?)')
-                if not _reference_mode:
+                if not _reference_mode and valid_at is not None:
                     params.extend((valid_at_epoch_ms, valid_at_epoch_ms))
                 for dimension, prefix in (
                         ('platforms', 'platform'), ('businesses', 'business'),
@@ -1442,7 +1442,7 @@ class Repository:
             for row in rows:
                 record = self._record(row, vectors=vectors if include_embeddings else 'none')
                 start, end = record['valid_from'], record['valid_until']
-                if not _reference_mode and ((not include_unknown and start is None) or (start is not None and start > valid_at) or (end is not None and end <= valid_at)):
+                if not _reference_mode and valid_at is not None and ((not include_unknown and start is None) or (start is not None and start > valid_at) or (end is not None and end <= valid_at)):
                     continue
                 if kinds is not None and record['kind'] not in kinds:
                     continue

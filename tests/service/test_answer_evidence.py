@@ -2,8 +2,13 @@ from knowledge_service.services.answer_evidence import AnswerEvidence
 
 
 class FrozenTrace:
+    def trace_answer_evidences(self, project_id, answer_id, citations):
+        return {citation: self.trace_answer_evidence(project_id, answer_id, citation)
+                for citation in citations}
+
     def trace_answer_evidence(self, project_id, answer_id, citation):
         return {
+            'subject': {'answer_id': answer_id},
             'retrieval': {'requested_mode': 'hybrid', 'rank': 2},
             'nodes': [
                 {'type': 'source_occurrence', 'ref': 'occ:2', 'details': {

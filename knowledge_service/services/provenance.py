@@ -10,13 +10,14 @@ import re
 from uuid import uuid4
 
 from ..core.time import normalize_time
+from .qa_policy import DOCUMENT, original_quote_allowed
 
 
 _CITATION = re.compile(r'[EURF][1-9][0-9]*\Z')
 _ANSWER_CITATION = re.compile(r'\[([EURF][1-9][0-9]*)\]')
 _QUALIFIED_TITLE = '文档表述（有效性待核对，不作为已确认有效规则依据）'
 _TEMPORAL_FIELDS = ('validity_status', 'validity_basis', 'answer_eligible', 'usage',
-                    'exclusion_reasons', 'source_eligibility')
+                    'exclusion_reasons', 'source_eligibility', 'document_quote_allowed')
 _NODE_ORDER = {kind: index for index, kind in enumerate((
     'answer', 'retrieval', 'record_version', 'assertion', 'review_event',
     'chunk_version', 'source_occurrence', 'document_version', 'ingest_run'))}
@@ -122,6 +123,7 @@ class ProvenanceService:
         scope = {key: _public_json(request.get(key)) for key in (
             'filters', 'valid_at', 'known_at', 'kinds')}
         scope['include_unknown'] = request.get('include_unknown', True) is not False
+        scope['explicit_valid_at'] = request.get('_explicit_valid_at', request.get('valid_at') is not None)
         run_id = 'rr_' + uuid4().hex
         self.repository.begin_provenance_activity(project_id, run_id, 'retrieval', {
             'query': query.strip()[:10000], 'scope': scope, 'requested_mode': mode})
@@ -185,7 +187,15 @@ class ProvenanceService:
                 audit['source_eligibility'] = _source_eligibility(item['source_eligibility'])
             record_ref = graph['record_ref']
             citation_ref = f'answer:{answer_id}#{citation}'
+            captured_original = any(node['type'] == 'record_version'
+                                    and node['ref'] == record_ref
+                                    and node.get('details', {}).get('kind') == 'chunk'
+                                    for node in graph['nodes'])
+            captured_source = any(edge['relation'] == 'sourced-from' for edge in graph['edges'])
             frozen = {**audit, 'answer_id': answer_id, 'citation': citation,
+                      'document_quote_allowed': (context.get('answer_purpose') == DOCUMENT
+                                                 and original_quote_allowed(item)
+                                                 and captured_original and captured_source),
                       'warnings': graph['warnings']}
             initial = [
                 {'activity_id': run_id, 'source_ref': f'retrieval-run:{run_id}',
@@ -203,9 +213,12 @@ class ProvenanceService:
             citations.append(citation)
         return retrieval_payload, {
             'run_id': run_id, 'offered': citations, 'cited': [],
+            'answer_purpose': context.get('answer_purpose', 'rule_judgment'),
+            'answer_label': context.get('answer_label', ''),
+            'as_of': context.get('as_of'), 'known_at': context.get('known_at'),
             'warnings': [], 'answer': '', 'mode': None, 'graph_schema': 'edge-v1'}, edges
 
-    def complete_answer(self, project_id, answer_id, run_id, answer, mode, evidence, *, eligibility_audit=None):
+    def complete_answer(self, project_id, answer_id, run_id, answer, mode, evidence, *, eligibility_audit=None, generation=None):
         activity = self.repository.get_provenance_activity(project_id, answer_id)
         activity = self._ensure_edge_v1(project_id, activity)
         payload = activity['payload']
@@ -225,14 +238,17 @@ class ProvenanceService:
         qualified = set()
         if _QUALIFIED_TITLE in answer:
             section = answer.split(_QUALIFIED_TITLE, 1)[1]
-            qualified = set(re.findall(r'^\[(U[1-9][0-9]*)\] 文档写明：', section, re.MULTILINE))
+            for prefix in re.findall(r'^(\[U[1-9][0-9]*\](?: \[U[1-9][0-9]*\])*) 文档写明：', section, re.MULTILINE):
+                qualified.update(_ANSWER_CITATION.findall(prefix))
         cited = []
         for citation in sorted(offered & mentioned, key=lambda value: (len(value), value)):
             audit = self._offered_edge(answer_id, citation, edges)['payload']
             eligible = (citation.startswith('E') and audit.get('answer_eligible', True) is True
                         and audit.get('usage', 'effective_basis') == 'effective_basis'
                         and audit.get('validity_status', 'effective') == 'effective')
-            if citation.startswith('U'):
+            if payload.get('answer_purpose') == DOCUMENT and citation.startswith(('U', 'R', 'F')):
+                eligible = audit.get('document_quote_allowed') is True
+            elif citation.startswith('U'):
                 eligible = (citation in qualified and audit.get('usage') == 'qualified_quote'
                             and audit.get('validity_status') == 'unknown'
                             and len(re.findall(r'\[' + re.escape(citation) + r'\]', answer)) == 1)
@@ -249,6 +265,9 @@ class ProvenanceService:
                           'ordinal': next_ordinal, 'payload': {}})
             next_ordinal += 1
         completed = {**payload, 'answer': answer, 'mode': mode, 'cited': cited, 'warnings': warnings}
+        if isinstance(generation, dict):
+            completed['generation'] = {key: generation.get(key) for key in (
+                'requested', 'called', 'skip_reason', 'material_status')}
         if isinstance(eligibility_audit, dict):
             invalid = eligibility_audit.get('invalid_citations')
             completed['eligibility_audit'] = {

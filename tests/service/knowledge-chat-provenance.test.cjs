@@ -94,7 +94,7 @@ test('running evidence opens once; safe done decorations and bounded history res
   assert.equal(env.provenance[0].options.signal.aborted,true);
 });
 
-test('first three evidence entries and first frozen source are visible by default',async()=>{
+test('evidence is collapsed initially and shows three entries and one frozen source on expansion',async()=>{
   const env=setup();env.submit();
   const rows=Array.from({length:4},(_,index)=>({
     citation:'E'+(index+1),kind:'chunk',text:'证据 '+(index+1),version:1,
@@ -106,6 +106,8 @@ test('first three evidence entries and first frozen source are visible by defaul
   }));
   env.emit('evidence',{answer_id:'visible',retrieval_run_id:'r',channels:{chunk:4},evidence:rows});await settle();
   const panel=env.get('qa-transcript').querySelector('.qa-evidence-panel');
+  assert.equal(panel.hidden,true);
+  env.get('qa-transcript').querySelector('.qa-evidence-toggle').dispatch('click');
   assert.equal(panel.hidden,false);
   assert.deepEqual(panel.querySelectorAll('.qa-evidence-item').map(node=>node.hidden),[false,false,false,true]);
   assert.deepEqual(panel.querySelectorAll('.qa-source-item').slice(0,2).map(node=>node.hidden),[false,true]);

@@ -1,0 +1,2037 @@
+{
+  "project_id": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+  "repairs": [
+    {
+      "record_id": "discovery-05034c706bf1954a3acf88dadffd",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "2ad06fbf-95c2-4f36-b854-a15418ca951a",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_28b629be73202856cc42884a",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-06133c571b9f50b4e3c38b822f81",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "e10df7eb-0844-4427-b189-8ca04d2afaf7",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_e6016df5e893cd9516a01935",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-08717983b4bf0a45edc7626afb64",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "e825c742-943b-4014-bb3d-0b00e2255216",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_b800bf82fc3d91e1d5c25439",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-0ae06da779212e7753fab9812265",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "16dd0499-c53a-447b-913d-a82ae02da28f",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_4d8218209c87221264c34f6f",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-11ed1453acbf985ac36f5e81dc71",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "89b2b8a9-ee59-46f9-93ab-72a2263d5e1e",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_57ea938efe25a6ca3dd22682",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-1551b78f92df827ba5b10053868f",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "eac0101c-22c2-420f-a153-8d88c5f7e99a",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_76854fd1aceaddbbfbe160d5",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-15cacfeba90ed852443c0920ced5",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "f7d6cee1-d923-4df7-abf1-c553c83c9e0f",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_576ab396b52506c15c7f1769",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-18b86a86d2607e5bc92fe4114732",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "0c384c71-7c9d-44f1-9d37-a03100cf3b9a",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_91ed3950b471f31da40738d2",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-1cc52038857f768d1a1f61efbdf4",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "e2fbc58c-e898-4ee8-a66b-6440b2bf8877",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_7d64bb07b308e5297b4c332a",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-213900209e000c9d1195ebd2bce3",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "d99cc014-1ca5-41c6-9383-03e2f76c0cb2",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_8b33c58d6cac73152a8c5db7",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-2a65fa4384ce689ba6f2082bd4c7",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "142bd9f8-c244-45e6-a3f6-0ce6cbf69532",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_11a7eb86df3b3e6183c92c61",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-2afb90e741c161a0642ea0968ea3",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "f1a873f5-8a18-4be0-b66f-bfc783a3c80e",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_a25c525ae44d1998330723fa",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-2e1b26943e8348bb14d8ff8e2e99",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "e49f1368-f1f9-4669-9dd9-629c564faa8c",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_ba2fbe265fdd15190d731e39",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-303152f6ac5254903737610883f3",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "005d5aeb-ebed-4e46-9806-2abf7b54ee4d",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_04701861c958afe14e0851f3",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-3082fd3c8ab4aee0537fb0f11f44",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "17c9cd0e-af80-40f4-9085-bec40f356a6a",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_976bb916e47b5fe0f9d6c303",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-3646496ae45919020fac2bcb2e92",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "229abe04-72aa-4d82-ba6a-6be18fc428e2",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_784c078826995410ed5ac69f",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-3ecee4493aeca7b4d1a04075db5a",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "2133feac-c4ad-425d-a3ee-d9909ca7724e",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_eaa2cc4de676cc549d2d2192",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-41f93e9b3685a36a5851b12b3ab8",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "af4ca3f9-9c3a-4acb-abaa-67ac63c2b24c",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_6463183c91fe76caf975d4ee",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-483fa2f0e93f2919febc1109b3d2",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "0d9f0345-d9b6-4359-8a15-9f84d97b7eed",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_ca7bd7816796a8cb101c894d",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-4d06523bf9fabc9686d70eec6a50",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "9ca90017-07d3-4c75-8c5a-764d41992edc",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_39b5033402e6b79e27bce57b",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-5113acfd3c9df0b7dc74b835f7fd",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "f4b98437-580d-4f33-ad17-d3330390697e",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_2ceb43361c3c8335133e538e",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-54aa3076554229ac9803c667ded0",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "3ff1ded2-ccd5-478c-9915-80a5d1fba72c",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_7581c896503c945cdc7bb363",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-61fcb0aa6688f3486e807a8a47d1",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "b35a0fe6-d393-47c4-a708-113c1fae63f4",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_cf0ea9200483bef4e3cf3096",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-64b770cf43a81dc07199842b5e09",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "50a939c2-bb88-4865-9758-65e228997886",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_22b74639f1b7287618828f33",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-71867bc276eb5a18cc298f3870e3",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "2abdaef9-2db8-4914-b66a-17bcaad83cdf",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_0c6ffc799710b51448fe13d9",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-7a28507c5447150b5f8b36e7ba62",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "e19d404b-d3f0-4312-8c96-17c6207c88e9",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_a1336e018a1236159e2edfb6",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-7b123b5d5a0da8c67433d505e4c3",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "28ef4f00-349e-4866-86fb-3e13ad3b0c87",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_05e6924058c340f389eed268",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-807c1a9d160c773867caa99d8d30",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "84d8af6f-755a-458d-a78c-2662d2aa19f0",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_a4145419f7732bbc7ac34f7e",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-849d4159d3ca81834c43eb0779f6",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "2afba8dc-ff4a-4ffb-959a-2bd24f4778c6",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_03562d1bd5086d7e1d7eb8b7",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-84cc5d281cf2288545a15b1cec01",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "6a69b64c-6e13-4d10-8428-f2214ce05e13",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_14129677fb64335b24f87ea7",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-84efe2ee7c1e3d820d8cb521f1ad",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "9fc9381f-42c8-412d-84bd-beb03f22a12f",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_38f1431e28ad6e97bab1ad96",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-8a9a770a6880c2a59baf30e01eea",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "6f68364f-30f2-496e-9670-80f92e31aba8",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_52a57841dcb6e537a0081659",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-94cc400bf14552f4c1ad0b9ec59b",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "03afc2fc-4bca-48e9-ab70-47588d787c01",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_a2ab38a1c952582be32680fd",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-97ba8da9f3b746654c532970d663",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "d0cbe218-7837-4c1c-b275-28518726d337",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_8f4a44eca5ba788ead7ecb9d",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-97f535eb7d796b25022fbc687f6e",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "81aa8e21-d090-463a-b289-1c939660b5ba",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_969dc5bc51d53ba043b0d121",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-9a557c1bd335c3e994433e3ffff4",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "c39bed9d-a66e-4ee9-bccb-9df42f3eb383",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_7e460f4ac55dca847488e26d",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-9ac706786c97eb15f16085ca8918",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "1ea814c9-6c82-470e-b5d6-c961b90ebbe5",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_4ab70ae7af42d1fb691cb81e",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-9afaba42fb14df896b585e471874",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "f5515178-779d-4f03-9b5b-fcd7486313b7",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_2bffec5fe9b7d79a0b57329c",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-acb90d5bd00237254091e200cdf1",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "a300f53d-f239-4af3-80b1-47e8106b2db7",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_f2059e0dc8a4bda1c9f980f8",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-ad7b9d9b2f904e075fcddf10a0fd",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "e1650dd1-c6ff-4e79-8bb9-3c25b3c55b52",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_a99ed02f5ad29e815a77e5fa",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-b6e3d4fbefc5fac6db9d50915a60",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "c4134ec6-7706-4f8d-8a77-900905fef27c",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_dca25151996a7ce028859959",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-b8bed98726f6d97b2056701cbfec",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "ad84fe5e-0eed-4ce7-86b1-5ebae24b5efc",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_a61c8361c072db186d7885f8",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-bb4a593dbebf2dc6b3c11dd3cdae",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "2c768e42-0675-4ff0-b96a-4d82cda53873",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_3f43cd2985195233dadc4812",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-bf790efc2552b6ca3bb3f07d849b",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "98cfa9d1-b013-44e9-a7a2-ea96a8ab7cd1",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_2170af38fe4943bfe2321d66",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-c09817cb6a8b762dc2d9091f2a95",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "872f9c69-7ef8-4aba-98b0-cd350bcbea54",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_0324c89b836c34e6a149b379",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-c4b3f958bbf746a9edf7b3b0c939",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "02365703-26db-4566-8e63-eda1755a2115",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_1aac400f58d18a9f4298b84e",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-c5844747d886d4e72886d1129f2a",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "d314056c-fe0a-4cf3-857b-3ad3c37058cb",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_e28c67224641819b363abdaa",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-ca3d5549c6a28cd37b5e7d2eba55",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "69ba2bc2-f1ad-40a9-af95-d98e27ffff6c",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_9b1b334a35f9ac8e250e3ea3",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-ccba88f0c6dd39236ebe691893b0",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "1bf52f02-9ca4-4222-8972-6098fda03504",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_b5c750933026571a6a08b9db",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-ce4fb5ef191acde4bfbe5f8bcbf6",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "36c51edd-13b9-4226-a6b7-cb4542639b2e",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_62dea533ff225a6aca393829",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-d19c1bc49614a5460ace84942925",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "0f265d94-5ad9-4d06-a0c9-29944faa23de",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_c5b2cc946d797c299d86ba0e",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-d1dc9ff4ee40a69e5975562b8754",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "d6c19951-2387-407a-ac22-cbe412172537",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_c03482d7a019d769fef1ddd4",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-d31cf8abf9d966d0da74638934a6",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "9157138c-6618-4b64-9623-5479015abcd6",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_83e047d528a5dc96472b70ff",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-d61fff5e118c729b1f61c659eb94",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "2d3f54df-4529-4079-b249-e515b00087ab",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_94c365cee3cae33a66b3e91a",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-ee53a49b08b9e25db5676c35493c",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "d0f36380-3b50-4452-ba13-7d6bef3fda1f",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_44db6f712c4702873651cef1",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-f169a330793c1abb2f121467b17c",
+      "kind": "relation",
+      "expected_version": 1,
+      "expected_version_id": "d1526552-0b2d-4414-b95e-a42bcce05d72",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:relation_e454e64a3847483a0762c438",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-fb266b4455ed89b0b5841a175a61",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "9e7f3883-e976-48c1-8eb3-e99e3ab152cd",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_45e98c1def350c465edef208",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    },
+    {
+      "record_id": "discovery-fd331aa631f76ac62d78ee9ce156",
+      "kind": "entity",
+      "expected_version": 1,
+      "expected_version_id": "a05d2d2a-4f88-4e65-a68f-ff20cdfb8171",
+      "applicability": {
+        "platforms": {
+          "mode": "specific",
+          "values": [
+            "美团"
+          ]
+        },
+        "businesses": {
+          "mode": "unknown",
+          "values": []
+        },
+        "audiences": {
+          "mode": "unknown",
+          "values": []
+        }
+      },
+      "sources": [
+        {
+          "assertion_id": "b1a028ddc8f44d49ad61bf9d2dd0637a:chunk:0:discovery:entity_730cfad36909d40f3fe004c2",
+          "assertion_status": "pending",
+          "expected_assertion_version": 1,
+          "document_id": "b1a028ddc8f44d49ad61bf9d2dd0637a",
+          "document_version_id": "2cb17db6-49a3-444e-9207-a27e4366df14",
+          "valid_from": null,
+          "valid_until": null
+        }
+      ],
+      "valid_from": null,
+      "valid_until": null
+    }
+  ],
+  "conflicts": [],
+  "preserved": []
+}

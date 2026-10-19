@@ -121,13 +121,22 @@ def install(app, service):
         return drafts.stage_state(p, draft_id)
 
     @router.get('/{draft_id}')
-    def get(p: str, draft_id: str):
-        return drafts.get(p, draft_id)
+    def get(p: str, draft_id: str, view: str = Query('full', pattern='^(full|canvas)$')):
+        return drafts.get(p, draft_id, canvas=view == 'canvas')
 
     @router.post('/{draft_id}/commands')
     def command(p: str, draft_id: str, request: CommandRequest):
         return drafts.command(
             p, draft_id, request.expected_revision, request.command)
+
+    @router.post('/{draft_id}/discover-parents')
+    def discover_parents(p: str, draft_id: str, request: RevisionRequest):
+        from fastapi import HTTPException
+        from ..services.hierarchy_suggestion import HierarchySuggestionsUnavailable
+        try:
+            return drafts.discover_parents(p, draft_id, request.expected_revision)
+        except HierarchySuggestionsUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @router.post('/{draft_id}/validate')
     def validate(p: str, draft_id: str, request: RevisionRequest):

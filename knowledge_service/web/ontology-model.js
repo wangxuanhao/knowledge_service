@@ -51,6 +51,8 @@
     generating: false,        // 正在生成本体（默认秒级；inferringHierarchy=true 时要几分钟）
     inferringHierarchy: false,// 本次生成是否同时让模型推断父子层级（可选的慢操作）
     error: null,
+    loading: false,
+    finalizing: false,
   };
 
   // ---- 事件总线（主控 ↔ 子模块的唯一通道） ----------------------------------
@@ -116,56 +118,77 @@
   //   ③ **有草案就画草案**（GET /ontology-drafts/{id} 的 `ontology` 就是草案自己的结构）。
   // 改动③之前这里只读已发布本体，后果是"编辑写进草案、画布却按已发布版本画" ——
   // 改了半天屏幕上一个字没变，用户以为没改成功。顶栏会标明现在画的是草案还是已发布版本。
+  let refreshEpoch = 0;
+  let gateEpoch = 0;
   async function refresh() {
+    const epoch = ++refreshEpoch;
+    ++gateEpoch;
+    const project = typeof current === 'undefined' ? null : current;
+    const stillCurrent = () => epoch === refreshEpoch && current === project;
     if (typeof current === 'undefined' || !current) {
       S.summary = null; S.ontologyId = null; S.ontologyVersion = null;
       S.error = null; S.showingDraft = false; compileGraph(); render();
       return S;
     }
+    S.loading = true;
+    S.gatesLoading = true;
+    S.stageAvailability = null; S.readiness = null;
+    render();
     // ① 已发布本体（失败也不致命：有草案时照样能画）
-    let published = null;
-    try { published = await api(endpoint('/ontology'), undefined, 'GET'); }
-    catch (e) { published = null; }
+    const [published, discovery] = await Promise.all([
+      api(endpoint('/ontology'), undefined, 'GET').catch(() => null),
+      loadDiscovery(),
+    ]);
+    if (!stillCurrent()) return S;
     S.ontologyId = published ? (published.id || null) : S.ontologyId;
     S.ontologyVersion = published ? (published.version ?? null) : null;
     // 读开放发现概览（是否已发布本体、待纳入候选数）。它是\"没发布本体时画布该画什么\"的唯一依据，
     // 所以先于草案选择读出来；读不到就置空，绝不因发现信息缺失挡住正常本体展示。
-    await loadDiscovery();
+    S.discovery = discovery;
 
     // ①' 只读预览历史版本：优先于草案展示（用户刚点了「查看这一版」），
     //     但**不销毁**草稿状态 —— 横幅会说明"改动没丢，点这里回去"。
     if (S.preview && S.preview.id) {
       try {
         const item = await api(endpoint(`/ontology?ontology_id=${encodeURIComponent(S.preview.id)}`), undefined, 'GET');
+        if (!stillCurrent()) return S;
         S.summary = item.summary || EMPTY_SUMMARY;
         S.showingDraft = false;
         S.error = null;
-        await refreshDraftState();
         compileGraph();
         emit('graph:changed', { graph: S.graph });
+        S.loading = false;
         render();
+        await refreshDraftState();
+        if (stillCurrent()) render();
         return S;
       } catch (e) {
+        if (!stillCurrent()) return S;
         // 读不到那一版就退出预览：不能把用户困在一张点不动的画布上
         S.preview = null;
       }
     }
 
     // ② 选草案（不新建 —— 新建只在真正要写的时候发生，否则一进页面就堆草案）
-    let draft = (S.draft && S.draft.id) ? S.draft : null;
+    let draft = (S.draft && S.draft.id && OPEN_STATES.includes(S.draft.status)) ? S.draft : null;
     if (!draft) {
       try {
         const list = await api(endpoint('/ontology-drafts'), undefined, 'GET');
-        draft = (list.items || []).find(d => OPEN_STATES.includes(d.status)) || null;
+        if (!stillCurrent()) return S;
+        const pending = (list.items || []).filter(d => OPEN_STATES.includes(d.status));
+        const latestDraftId = S.discovery && S.discovery.latest_run && S.discovery.latest_run.unified_draft_id;
+        draft = pending.find(d => d.id === latestDraftId)
+          || pending.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0] || null;
       } catch (e) { draft = null; }
     }
 
     // ③ 有草案就画草案；读不到草案详情才回落到已发布本体（绝不画空白）
     let detail = null;
     if (draft && draft.id) {
-      try { detail = await api(endpoint(`/ontology-drafts/${draft.id}`), undefined, 'GET'); }
+      try { detail = await api(endpoint(`/ontology-drafts/${draft.id}?view=canvas`), undefined, 'GET'); }
       catch (e) { detail = null; }
     }
+    if (!stillCurrent()) return S;
     if (detail) {
       S.draft = detail;
       S.summary = detail.ontology || EMPTY_SUMMARY;
@@ -182,10 +205,12 @@
       }
       else { S.summary = null; S.error = '读取当前本体失败'; }
     }
-    await refreshDraftState();
     compileGraph();
     emit('graph:changed', { graph: S.graph });
+    S.loading = false;
     render();
+    await refreshDraftState();
+    if (stillCurrent()) render();
     return S;
   }
 
@@ -195,27 +220,32 @@
   // 不能把\"接口失败\"和\"空项目\"混成一句。
   async function loadDiscovery() {
     try {
-      S.discovery = await api(endpoint('/ontology-discovery'), undefined, 'GET');
+      return await api(endpoint('/ontology-discovery?compact=true'), undefined, 'GET');
     } catch (e) {
-      S.discovery = null;
+      return null;
     }
   }
 
   // 读阶段门禁（服务端唯一出处）+ 发布清单。拿不到就置空 —— 子模块据此显示"读不到"，
   // 而不是自己推规则（skill：门禁只有一处出处，前端不自己算）。
   async function refreshDraftState() {
-    if (!S.draft || !S.draft.id) { S.stageAvailability = null; S.readiness = null; return; }
+    const epoch = ++gateEpoch;
+    if (!S.draft || !S.draft.id) { S.stageAvailability = null; S.readiness = null; S.gatesLoading = false; return; }
+    S.gatesLoading = true;
+    const project = current, draftId = S.draft.id, revision = S.draft.revision;
     const base = `/ontology-drafts/${S.draft.id}`;
     // stage-availability 是**项目级**路由，草案用 draft_id 查询参数指定；
     // 写成 /{draft_id}/stage-availability 会 404，还会被 catch 吞掉 —— 门禁永远为空、按钮永远禁用。
-    try {
-      S.stageAvailability = await api(
+    const [stage, readiness] = await Promise.all([
+      api(
         endpoint(`/ontology-drafts/stage-availability?draft_id=${encodeURIComponent(S.draft.id)}`),
-        undefined, 'GET');
-    } catch (e) { S.stageAvailability = null; }
-    try {
-      S.readiness = await api(endpoint(base + '/publish-readiness'), undefined, 'GET');
-    } catch (e) { S.readiness = null; }
+        undefined, 'GET').catch(() => null),
+      api(endpoint(base + '/publish-readiness'), undefined, 'GET').catch(() => null),
+    ]);
+    if (epoch !== gateEpoch || current !== project || !S.draft
+        || S.draft.id !== draftId || S.draft.revision !== revision) return;
+    S.stageAvailability = stage; S.readiness = readiness;
+    S.gatesLoading = false;
     emit('stage:changed', { stageAvailability: S.stageAvailability, readiness: S.readiness });
   }
 
@@ -223,6 +253,10 @@
   // 迁移 0005 后「请求」只有三态：pending（待处理）→ accepted（已收下）/ rejected（已驳回）；
   // 旧词 editing/submitted/reviewed/stale_* 已并入 pending，别再用旧词筛（会永远筛不到、每次编辑都新建草案）。
   async function ensureDraft() {
+    const project = current, projectBase = endpoint('');
+    const assertProject = () => {
+      if (current !== project) throw new Error('项目已切换，已停止准备原项目草案。');
+    };
     // 只有**待处理**的草案能继续改。发布过（accepted）或已驳回（rejected）的草案是终态：
     // 服务端对它们发 commands 一律 422「已经收下」。以前这里只看 `S.draft && S.draft.id`，
     // 于是发布完当场再编辑，命令还打给那份终态草案 —— 用户看到的就是"发布了就不能再改了"，
@@ -231,26 +265,32 @@
     S.draft = null;
     // 优先复用项目里未完结的草案（避免每次编辑都新建；选择口径同审核台的 pickDraft）
     try {
-      const list = await api(endpoint('/ontology-drafts'), undefined, 'GET');
+      const list = await api(projectBase + '/ontology-drafts', undefined, 'GET');
+      assertProject();
       const open = (list.items || []).find(d => OPEN_STATES.includes(d.status));
       if (open) {
         // 列表项是轻量记录：补一次详读，才能拿到最新 revision（乐观锁）与草案结构
-        const detail = await api(endpoint(`/ontology-drafts/${open.id}`), undefined, 'GET')
+        const detail = await api(projectBase + `/ontology-drafts/${open.id}`, undefined, 'GET')
           .catch(() => open);
+        assertProject();
         S.draft = detail;
         await refreshDraftState();
+        assertProject();
         emit('draft:changed', { draft: detail });
         return detail;
       }
-    } catch (e) { /* 读不到列表就按"没有"处理，下面新建 */ }
+    } catch (e) { assertProject(); /* 读不到列表就按"没有"处理，下面新建 */ }
     // 没有就新建：基线必须是**项目当前最新本体**，否则服务端会 409 stale_base
-    const ont = await api(endpoint('/ontology'), undefined, 'GET');
-    const draft = await api(endpoint('/ontology-drafts'), {
+    const ont = await api(projectBase + '/ontology', undefined, 'GET');
+    assertProject();
+    const draft = await api(projectBase + '/ontology-drafts', {
       base_ontology_id: ont.id, source_kind: 'manual',
       title: '画布编辑', summary: '在本体建模层画布上编辑',
     }, 'POST');
+    assertProject();
     S.draft = draft;
     await refreshDraftState();
+    assertProject();
     emit('draft:changed', { draft });
     return draft;
   }
@@ -288,6 +328,12 @@
   function render() {
     const el = root(); if (!el) return;
     if (!built) { buildSkeleton(el); built = true; }
+    const parentButton = document.getElementById('om-discover-parents');
+    if (parentButton) {
+      parentButton.disabled = !!(S.loading || S.preview || S.generating || S.finalizing || S.discoveringParents)
+        || (S.summary && S.summary.classes || []).filter(c => c.active !== false).length < 2;
+      parentButton.textContent = S.discoveringParents ? '正在发现父类…' : '发现父类';
+    }
     renderSidebar();
     renderVersionContext();
     // 子模块可能尚未加载（脚本顺序 / 测试 mock shell）——用可选链，缺谁都不崩
@@ -324,6 +370,7 @@
         <div class="om-topbar">
           <span class="om-brand">◆ 本体建模层</span>
           <span class="om-ctx" id="om-version">当前本体 v?</span>
+          <button type="button" class="om-btn ghost" id="om-discover-parents" title="根据当前草案或本体重新发现父类（调用模型）；只补充新建议到草案，保留已有关系，审核发布后生效">发现父类</button>
           <div class="om-seg" role="group" aria-label="视图切换">
             <button type="button" data-om-view="graph" class="on" title="图谱视图：力导向铺开全部关系，适合整体鸟瞰——不保证层级位置固定">图谱视图</button>
             <button type="button" data-om-view="hierarchy" title="层级树：按继承深度分带排列，看清谁在第几层——关系线只作参考，不参与分层">层级树</button>
@@ -346,6 +393,8 @@
         <div class="om-actionbar" id="om-actions-host" aria-label="校验与发布"></div>
       </div>`;
     // 视图切换：只改 S.view 并发事件，布局由画布模块负责
+    const parentButton = document.getElementById('om-discover-parents');
+    if (parentButton) parentButton.addEventListener('click', () => { void discoverParents(); });
     el.querySelectorAll('[data-om-view]').forEach(btn => btn.addEventListener('click', () => {
       S.view = btn.dataset.omView;
       el.querySelectorAll('[data-om-view]').forEach(b => b.classList.toggle('on', b === btn));
@@ -420,12 +469,17 @@
     };
     // 已发布本体之后又抽出新候选：左栏顶部给一条"增量归纳"入口（基于当前版本，不影响已发布）。
     // 否则新知识只会静默躺在 discovery 里，用户不知道"后续加知识怎么显示"。
-    const pendingN = (S.discovery && S.discovery.unpublished_candidate_count) || 0;
-    const discTip = pendingN > 0 ? `<div class="om-discovery-inline">
+    const counts = S.discovery && S.discovery.candidate_status_counts;
+    const pendingN = counts ? (counts.pending || 0) : ((S.discovery && S.discovery.unpublished_candidate_count) || 0);
+    const includedN = counts && counts.included_in_draft || 0;
+    const run = S.discovery && S.discovery.latest_run;
+    const canFinalize = run && run.result_kind === 'mapping_only' && run.status === 'ready_to_finalize';
+    const draftTip = includedN > 0 ? `<div class="om-discovery-inline"><b>${includedN} 个候选已纳入草案</b><p>等待校验、审核和发布，无需重复生成。正式知识会在发布后显示。</p></div>` : '';
+    const discTip = (pendingN > 0 ? `<div class="om-discovery-inline">
       <b>又抽出 ${pendingN} 个新候选</b>
-      <p>后续添加的知识已抽出。可再次生成本体：新候选会整理成类型（或并入已有类型），基于当前版本、不影响已发布内容。</p>
-      <button type="button" id="om-generate-draft-inline" class="om-btn primary">把这 ${pendingN} 个新候选生成进本体（约 1 秒）</button>
-    </div>` : '';
+      <p>${canFinalize ? '本次归纳可沿用已有类型。确认后将通过校验的候选写为正式知识，供检索使用。' : '后续添加的知识已抽出。可再次生成本体：新候选会整理成类型（或并入已有类型），基于当前版本、不影响已发布内容。'}</p>
+      <button type="button" id="om-generate-draft-inline" class="om-btn primary" ${S.generating || S.finalizing ? 'disabled' : ''}>${canFinalize ? (S.finalizing ? '正在写入…' : '确认写入已有类型的候选') : `把这 ${pendingN} 个新候选生成进本体`}</button>
+    </div>` : '') + draftTip;
     host.innerHTML = `${discTip}
       <h4><i class="om-dot"></i>本体类型 · ${classes.length}</h4>
       <ul class="om-tree">${classTree() || '<li class="om-none">（还没有类）</li>'}</ul>
@@ -441,7 +495,9 @@
       select(li.dataset.sel);
     }));
     const genInline = document.getElementById('om-generate-draft-inline');
-    if (genInline) genInline.addEventListener('click', () => { void generateDraftFromDiscovery(); });
+    if (genInline) genInline.addEventListener('click', () => {
+      void (canFinalize ? finalizeDiscoveryRun() : generateDraftFromDiscovery());
+    });
     const ver = document.getElementById('om-version');
     if (ver) {
       // 必须一眼看出"现在画的是什么、算不算数"：用户改完看不见变化时，
@@ -465,6 +521,7 @@
   // 没有本体结构时的三种空态（左栏）。\"没发布本体\"是开放发现的正常中间态，不是故障——
   // 这一句不能省，否则用户看到空画布会以为是坏了（本轮\"本体建模没内容\"就是它造成的）。
   function renderEmptyState() {
+    if (S.loading && !S.generating) return '<div class="om-side-empty" role="status">正在加载本体与草案…</div>';
     // 归纳中：顶部给一个明确的"正在归纳"说明，回答"点了之后呢"——
     // 不只让按钮变灰，而是把"正在做什么 / 接下来会怎样"讲清楚。
     if (S.generating) {
@@ -474,7 +531,7 @@
              <p>类型马上就好；模型同时在判断"谁是谁的父类"，这一步要跑几分钟，别关页面。</p>
              <p class="om-guide-note">不想要层级也可以等完，层级之后在画布上也能手动画。</p>`
           : `<h4>正在生成本体…</h4>
-             <p>正在把候选整理成实体类型和关系类型，约 1 秒，不调用模型。</p>`}
+             <p>正在把候选整理成实体类型和关系类型，不调用模型；完成后自动加载草案。</p>`}
       </div>`;
     }
     const d = S.discovery;
@@ -485,6 +542,10 @@
     // ② 已发布本体但结构读不到（罕见，接口异常）：按错误提示。
     if (d.published !== false) {
       return `<div class="om-side-empty">${escHtml(S.error || '读取本体结构失败')}</div>`;
+    }
+    if (d.candidate_status_counts && !d.candidate_status_counts.pending
+        && d.candidate_status_counts.included_in_draft) {
+      return `<div class="om-side-empty"><h4>${d.candidate_status_counts.included_in_draft} 个候选已纳入草案</h4><p>无需重复生成。请重新加载草案结构后校验、审核并发布。</p></div>`;
     }
     // ③ 没发布本体：分"有候选"和"没候选"两种。
     const hasCandidates = (d.candidate_count || 0) > 0;
@@ -497,7 +558,7 @@
         <p>知识写入已抽出 ${d.candidate_count} 个候选，将整理成
           <b>${entityTypeN}</b> 个实体类型、<b>${relationTypeN}</b> 个关系类型
           （同名概念会合并，不是把 ${d.entity_count || 0} 个实体名逐个建类）。</p>
-        <button type="button" id="om-generate-draft" class="om-btn primary">生成本体（约 1 秒）</button>
+        <button type="button" id="om-generate-draft" class="om-btn primary">生成本体</button>
         <button type="button" id="om-infer-hierarchy" class="om-btn ghost">让模型顺便推断父子层级（要几分钟）</button>
         <p class="om-guide-do">这一步做什么：把候选整理成一份待审核的本体（实体类型＋关系类型）。<br>
         不做什么：不会直接发布，也不把候选当成正式知识写进台账；默认类型彼此平级，不调用模型。</p>
@@ -510,29 +571,87 @@
     </div>`;
   }
 
-  // 生成本体。默认 infer_hierarchy=false：建类型是确定性操作、约 1 秒、不调模型；
+  // 生成本体。默认 infer_hierarchy=false：建类型是确定性操作、不调模型；
   // 仅当用户显式要「让模型推断父子层级」才传 true，多等几分钟。
   async function generateDraftFromDiscovery(inferHierarchy = false) {
+    if (S.generating || S.finalizing || S.discoveringParents) return;
+    const counts = S.discovery && S.discovery.candidate_status_counts;
+    if (counts && !counts.pending) {
+      if (typeof status === 'function') status(counts.included_in_draft
+        ? '候选已纳入草案，请校验并审核、发布，无需重复生成。' : '没有新的待归纳候选。', false);
+      return;
+    }
     // 生成中状态交给 render() 统一重绘：左栏引导态和底栏一起切到"正在生成"。
+    const project = current;
     S.generating = true;
     S.inferringHierarchy = !!inferHierarchy;
     render();
     if (typeof status === 'function') {
       status(inferHierarchy
         ? '正在生成本体，并让模型推断父子层级：类型很快好，层级要跑几分钟，别关页面。'
-        : '正在生成本体（约 1 秒，不调用模型）…', false);
+        : '正在生成本体（不调用模型）…', false);
     }
     try {
-      await api(endpoint('/ontology-discovery/drafts'),
+      const result = await api(endpoint('/ontology-discovery/drafts'),
         { name: '开放发现归纳', infer_hierarchy: !!inferHierarchy }, 'POST');
-      S.generating = false; S.inferringHierarchy = false;
+      if (current !== project) return;
       if (typeof status === 'function') status('本体已生成，正在刷新画布…', false);
       S.preview = null;
+      const draftId = result.unified_draft_id || (result.result_kind === 'draft' ? result.id : null);
+      if (draftId) S.draft = { id: draftId, status: 'pending' };
       await refresh();
+      if (current !== project) return;
+      if (typeof status === 'function') status(draftId
+        ? '新草案已生成并加载。请校验并审核、发布后，再到检索图谱查看正式知识。'
+        : (result.result_kind === 'mapping_only' && result.run && result.run.status === 'ready_to_finalize'
+          ? '候选可沿用已有类型。请点击左侧「确认写入已有类型的候选」，完成后即可检索。'
+          : '候选归纳已完成，已刷新当前状态；请查看候选处理结果。'), false);
     } catch (e) {
+      if (current === project && typeof status === 'function') status('生成失败：' + (e.message || e), true);
+    } finally {
       S.generating = false; S.inferringHierarchy = false;
       render();
-      if (typeof status === 'function') status('生成失败：' + (e.message || e), true);
+    }
+  }
+
+  async function discoverParents() {
+    if (S.discoveringParents || S.generating || S.finalizing || S.loading || S.preview) return;
+    if ((S.summary && S.summary.classes || []).filter(c => c.active !== false).length < 2) return;
+    const project = current;
+    S.discoveringParents = true; render();
+    if (typeof status === 'function') status('正在根据当前结构发现父类（调用模型），已有父类关系会保留…');
+    try {
+      const draft = await ensureDraft();
+      if (current !== project || S.preview) return;
+      const result = await api(endpoint(`/ontology-drafts/${encodeURIComponent(draft.id)}/discover-parents`),
+        { expected_revision: draft.revision }, 'POST');
+      if (current !== project || S.preview || !S.draft || S.draft.id !== draft.id) return;
+      S.draft = result.draft;
+      await refresh();
+      if (current !== project) return;
+      if (typeof status === 'function') status(result.added_count
+        ? `已补充 ${result.added_count} 条父类建议到草案，请校验并审核、发布后生效。`
+        : '没有发现新增的父类关系；已存在的关系不会重复添加，可稍后再次发现。');
+    } catch (error) {
+      if (current === project && typeof status === 'function') status('发现父类失败：' + (error.message || error), true);
+    } finally { S.discoveringParents = false; render(); }
+  }
+
+  async function finalizeDiscoveryRun() {
+    const run = S.discovery && S.discovery.latest_run;
+    if (!run || run.result_kind !== 'mapping_only' || run.status !== 'ready_to_finalize' || S.finalizing || S.discoveringParents) return;
+    S.finalizing = true;
+    render();
+    try {
+      const result = await api(endpoint(`/ontology-discovery/runs/${encodeURIComponent(run.id)}/finalize`), undefined, 'POST');
+      await refresh();
+      const skipped = (result.skipped_candidates || []).length;
+      if (typeof status === 'function') status(`已写入 ${result.materialized_count || 0} 条正式知识，可到检索图谱查看。${skipped ? `另有 ${skipped} 条未通过校验，请查看候选处理结果。` : ''}`, false);
+    } catch (e) {
+      if (typeof status === 'function') status('候选写入失败：' + (e.message || e), true);
+    } finally {
+      S.finalizing = false;
+      render();
     }
   }
 
@@ -542,6 +661,8 @@
     if (tab) tab.addEventListener('click', () => { void refresh(); });
     const proj = document.getElementById('project');
     if (proj) proj.addEventListener('change', () => {
+      ++refreshEpoch; ++gateEpoch;
+      S.discovery = null; S.loading = false; S.gatesLoading = false;
       S.summary = null; S.ontologyId = null; S.ontologyVersion = null;
       S.graph = null; S.selected = null; S.draft = null;
       S.showingDraft = false; S.preview = null;
@@ -623,7 +744,7 @@
 
   window.OntologyModel = {
     S, on, emit, render, refresh, refreshDraftState, ensureDraft, sendCommand, select, compileGraph,
-    actorName, uid, previewVersion, clearPreview, forkFrom, generateDraftFromDiscovery,
+    actorName, uid, previewVersion, clearPreview, forkFrom, generateDraftFromDiscovery, finalizeDiscoveryRun, discoverParents,
     status: (m, e) => (typeof status === 'function' ? status(m, e) : console.log(m)),
     helpers: { label, shortIri, dtypeOf, esc: escHtml },
   };

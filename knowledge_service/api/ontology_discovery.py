@@ -51,8 +51,8 @@ def install(app, service):
             'details':exc.details})
 
     @router.get('')
-    def overview(p:str):
-        return workflow.overview(p)
+    def overview(p:str, compact:bool=False):
+        return workflow.overview(p, compact=compact)
 
     @router.get('/runs')
     def list_runs(p: str):

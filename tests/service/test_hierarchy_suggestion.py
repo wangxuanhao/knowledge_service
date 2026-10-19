@@ -132,6 +132,48 @@ class _FakeClient:
         return _FakeResponse(self._content)
 
 
+def test_explicit_parent_discovery_refresh_calls_the_model_again(monkeypatch):
+    from knowledge_service.services import hierarchy_suggestion as module
+    calls = []
+    monkeypatch.setattr(module, '_llm_settings', lambda: ('https://llm.example/v1', 'test', 'test'))
+    monkeypatch.setattr(module, 'external_client',
+                        lambda *_a, **_k: _FakeClient(calls, '{"Child": ["Parent"]}'))
+    module.clear_cache()
+    module.suggest_hierarchy(['Child', 'Parent'])
+    module.suggest_hierarchy(['Child', 'Parent'], refresh=True)
+    assert len(calls) == 2
+
+
+def test_repeated_discovery_disambiguates_case_only_class_names_and_iris(monkeypatch):
+    from types import SimpleNamespace
+    from rdflib import Graph, RDFS, URIRef
+    from knowledge_service.services import hierarchy_suggestion as module
+    from knowledge_service.services.ontology_drafts_commands import DraftCommandMixin
+    turtle = '''@prefix ex: <urn:test:> .
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        ex:Root a owl:Class; rdfs:label "Root" .
+        ex:Shop a owl:Class; rdfs:label " Shop " .
+        ex:shop a owl:Class; rdfs:label "shop" .'''
+    draft = {'id': 'test', 'revision': 1, 'status': 'pending', 'title': 'Test'}
+    class Probe(DraftCommandMixin):
+        store = SimpleNamespace(get=lambda *args: draft)
+        def _assert_revision(self, *args): pass
+        def _check_current(self, *args): pass
+        def _ontology_for_draft(self, *args): return turtle, []
+        def command(self, project, identifier, revision, command):
+            return {'turtle': command['edited_turtle']}
+    def suggest(names, **kwargs):
+        assert len({name.strip().casefold() for name in names}) == len(names)
+        child = next(name for name in names if 'urn:test:shop' in name)
+        return {child: ['Root']}
+    monkeypatch.setattr(module, 'suggest_hierarchy', suggest)
+    result = Probe().discover_parents('project', 'test', 1)
+    graph = Graph().parse(data=result['draft']['turtle'], format='turtle')
+    assert (URIRef('urn:test:shop'), RDFS.subClassOf, URIRef('urn:test:Root')) in graph
+    assert not list(graph.objects(URIRef('urn:test:Shop'), RDFS.subClassOf))
+
+
 def test_repeated_suggestion_for_the_same_classes_only_calls_the_llm_once(monkeypatch):
     """同一批候选类 + 同一草案名只问一次 LLM。
 

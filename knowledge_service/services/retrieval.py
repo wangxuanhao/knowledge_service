@@ -478,6 +478,20 @@ class RetrievalEngine:
                 errors['keyword'] = str(exc)
         if retrieval_mode in {'hybrid', 'semantic'}:
             try:
+                # Scope has already been resolved by PostgreSQL. Vectors live
+                # in Milvus, including newly published formal facts. Fetch by
+                # exact version rather than globally ranking then filtering.
+                vector_reader = getattr(self.milvus, 'vectors_by_version_ids', None)
+                missing = [row['version_id'] for row in candidates
+                           if not has_vector(row) and row.get('version_id')]
+                if missing and projection_current and milvus_ready and callable(vector_reader):
+                    try:
+                        vectors = vector_reader(project_id, missing)
+                    except Exception as exc:
+                        raise RuntimeError('读取项目向量索引失败，请检查索引状态后重试') from exc
+                    candidates = [
+                        {**row, **vectors.get(row.get('version_id'), {})}
+                        if not has_vector(row) else row for row in candidates]
                 shared_query_vector = (
                     cached_query_vector(self.encoder, query,
                                         query_vector_cache)

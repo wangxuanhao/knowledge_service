@@ -20,8 +20,8 @@ def ontology_payload(ontology):
         properties.append({
             'uri': str(term), 'name': str(term),
             'type': 'data_property' if is_data else 'object_property',
-            'domain': sorted(str(value) for value in ontology.graph.objects(term, RDFS.domain)),
-            'range': sorted(str(value) for value in ontology.graph.objects(term, RDFS.range)),
+            'domain': sorted(str(value) for value in ontology.constraint_types(term, RDFS.domain)),
+            'range': sorted(str(value) for value in ontology.constraint_types(term, RDFS.range)),
         })
     return {'classes': classes, 'properties': properties}
 

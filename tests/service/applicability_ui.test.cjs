@@ -6,7 +6,7 @@ const vm=require('node:vm');
 function setup(){
   const ids=['doc-file','doc-text','doc-title','doc-meta','doc-published-at','doc-valid-from','doc-valid-until',
     'doc-platforms','doc-businesses','doc-audiences','doc-platforms-mode','doc-businesses-mode','doc-audiences-mode',
-    'doc-effective-help','query-platforms','project','ingest',
+    'doc-effective-help','query-platforms','query-businesses','query-audiences','project','ingest',
     'doc-file-list','doc-batch-help','doc-upload-summary','doc-clear-files','doc-retry-files','doc-dropzone'];
   const fields=Object.fromEntries(ids.map(id=>[id,{id,value:'',files:[],hidden:false,disabled:false,required:false,
     textContent:'',listeners:{},focus(){},addEventListener(type,fn){(this.listeners[type]??=[]).push(fn);},
@@ -105,6 +105,20 @@ test('query platform scope is compact, optional, and preserves the existing scop
   assert.match(source,/按平台检索结果/);
   assert.match(source,/未检索到本次时点确认有效的依据/);
   assert.match(source,/!rows\.length&&!pendingCount&&!platformGroups\.length/);
+});
+
+test('unified metadata applicability sends platform, business and audience together',()=>{
+  const {fields:f,window}=setup();
+  f['query-platforms'].value='美团';
+  f['query-businesses'].value='外卖';
+  f['query-audiences'].value='商户';
+  assert.deepEqual(JSON.parse(JSON.stringify(window.ApplicabilityUI.readQueryScope())),{
+    applicability:{platforms:['美团'],businesses:['外卖'],audiences:['商户']},
+  });
+  f['query-platforms'].value='';
+  assert.deepEqual(JSON.parse(JSON.stringify(window.ApplicabilityUI.readQueryScope())),{
+    applicability:{platforms:[],businesses:['外卖'],audiences:['商户']},
+  });
 });
 
 test('HTML exposes three-state upload fields, project vocabularies, time semantics, and grouped labels',()=>{

@@ -35,6 +35,8 @@ from __future__ import annotations
 
 import os
 import json
+from threading import RLock
+from time import monotonic
 import hashlib
 import re
 from datetime import datetime
@@ -112,15 +114,19 @@ class MilvusStore:
         self.collection_name = collection
         self.encoder_identity = encoder_identity
         self._client: Optional[MilvusClient] = None
+        self._preparation_lock = RLock()
+        self._prepared_collections = {}
 
     # ------------------------------------------------------------------ 连接与建表
     def connect(self) -> "MilvusStore":
-        try:
-            self._client = MilvusClient(uri=f"http://{self.host}:{self.port}")
-        except Exception as exc:
-            self._client = None
-            raise RuntimeError(f"Milvus 连接失败 {self.host}:{self.port}: {exc}") from exc
-        return self
+        with self._preparation_lock:
+            self._prepared_collections.clear()
+            try:
+                self._client = MilvusClient(uri=f"http://{self.host}:{self.port}")
+            except Exception as exc:
+                self._client = None
+                raise RuntimeError(f"Milvus 连接失败 {self.host}:{self.port}: {exc}") from exc
+            return self
 
     @property
     def available(self) -> bool:
@@ -270,12 +276,14 @@ class MilvusStore:
 
     def recreate_collection(self, destination: Optional[str] = None) -> "MilvusStore":
         """删掉旧 collection 并按当前 dim 重建。Milvus 里是派生数据，可全量重编码补回。"""
-        if self._client is None:
-            self.connect()
-        collection = destination or self.collection_name
-        if self._client.has_collection(collection):
-            self._client.drop_collection(collection)
-        return self._create_collection(collection)
+        with self._preparation_lock:
+            if self._client is None:
+                self.connect()
+            collection = destination or self.collection_name
+            self._invalidate_preparation(collection)
+            if self._client.has_collection(collection):
+                self._client.drop_collection(collection)
+            return self._create_collection(collection)
 
     def _create_collection(self, collection: Optional[str] = None) -> "MilvusStore":
         """按 self.dim 建 schema + BM25 function + 双索引。"""
@@ -335,11 +343,13 @@ class MilvusStore:
         return self
 
     def close(self) -> None:
-        if self._client is not None:
-            try:
-                self._client.close()
-            finally:
-                self._client = None
+        with self._preparation_lock:
+            self._prepared_collections.clear()
+            if self._client is not None:
+                try:
+                    self._client.close()
+                finally:
+                    self._client = None
 
     # ------------------------------------------------------------------ 写入/删除
     @staticmethod
@@ -478,13 +488,15 @@ class MilvusStore:
         return previous
 
     def drop_destination(self, destination: str) -> bool:
-        if destination and self._client.has_collection(destination):
-            self._client.drop_collection(destination)
-            control = self._control_name(destination)
-            if self._client.has_collection(control):
-                self._client.drop_collection(control)
-            return True
-        return False
+        with self._preparation_lock:
+            self._invalidate_preparation(destination)
+            if destination and self._client.has_collection(destination):
+                self._client.drop_collection(destination)
+                control = self._control_name(destination)
+                if self._client.has_collection(control):
+                    self._client.drop_collection(control)
+                return True
+            return False
 
     @staticmethod
     def _control_name(destination: str) -> str:
@@ -775,7 +787,9 @@ class MilvusStore:
             parts.append(
                 f'({prefix}_mode == "all" or ({prefix}_mode == "specific" '
                 f'and array_contains_any({prefix}_values, {values})))')
-        valid_at = normalize_time(scope.get('valid_at')) or utc_now()
+        valid_at = normalize_time(scope.get('valid_at'))
+        if valid_at is None:
+            return " and ".join(parts)
         epoch_ms = int(datetime.fromisoformat(
             valid_at.replace('Z', '+00:00')).timestamp() * 1000)
         if scope.get('include_unknown', True) is False:
@@ -790,22 +804,67 @@ class MilvusStore:
 
     def _load_if_needed(self, collection: Optional[str] = None) -> str:
         collection = collection or self.collection_name
-        self.ensure_collection(destination=collection)
-        try:
-            self._client.load_collection(collection)
-        except Exception:
-            pass  # 已 load 时重复 load 会抛，忽略
+        # Validate/load once per physical generation, not once per platform
+        # query. Expiry also catches out-of-process schema replacement.
+        with self._preparation_lock:
+            prepared = self._prepared_collections.get(collection)
+            if prepared is not None and monotonic() - prepared < 60:
+                return collection
+            self._prepared_collections.pop(collection, None)
+            self.ensure_collection(destination=collection)
+            self._rpc(self._client.load_collection, collection)
+            self._prepared_collections[collection] = monotonic()
         return collection
+
+    def _invalidate_preparation(self, collection):
+        with self._preparation_lock:
+            self._prepared_collections.pop(collection, None)
+
+    def _search_rpc(self, method, collection, **kwargs):
+        try:
+            return method(collection_name=collection, **kwargs)
+        except Exception:
+            self._invalidate_preparation(collection)
+            raise
 
     def _search_destination(self, project_id: str) -> str:
         return self.current_destination(project_id) or self.collection_name
+
+    def vectors_by_version_ids(self, project_id: str, version_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Read exact vectors for authority-filtered versions, without global top-k.
+
+        PostgreSQL owns scope/visibility; its records no longer store vectors.
+        The project predicate remains mandatory even for explicit version IDs.
+        """
+        versions = list(dict.fromkeys(str(value) for value in version_ids if value))
+        if not versions:
+            return {}
+        collection = self._load_if_needed(self._search_destination(project_id))
+        vectors = {}
+        for offset in range(0, len(versions), 256):
+            selected = versions[offset:offset + 256]
+            # PostgreSQL already applied the requested business time. Do not
+            # reuse _filter_expr: its default "now" would exclude a version
+            # selected for a past/future valid_at despite the exact ID match.
+            expression = (
+                f'project_id == {json.dumps(str(project_id), ensure_ascii=False)}'
+                ' and active == true and version_id in ' +
+                json.dumps(selected, ensure_ascii=False))
+            for row in self._query_pages(collection, expression,
+                                         ['version_id', 'embedding', 'embedding_model']):
+                if row.get('version_id') in selected:
+                    vectors[row['version_id']] = {
+                        'embedding': row.get('embedding'),
+                        'embedding_model': row.get('embedding_model'),
+                    }
+        return vectors
 
     def search_dense(self, project_id: str, query_vector: List[float], kinds: Optional[List[str]] = None,
                      k: int = 10, scope: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         collection = self._load_if_needed(self._search_destination(project_id))
         qvec = np.asarray(query_vector, dtype="float32").reshape(1, -1)
-        res = self._client.search(
-            collection_name=collection, data=qvec, anns_field="embedding",
+        res = self._search_rpc(self._client.search, collection,
+            data=qvec, anns_field="embedding",
             filter=self._filter_expr(project_id, kinds, scope=scope), limit=k,
             search_params={"metric_type": _METRIC_DENSE},
             output_fields=["record_id", "kind", "type", "text"])
@@ -814,8 +873,8 @@ class MilvusStore:
     def search_bm25(self, project_id: str, query: str, kinds: Optional[List[str]] = None,
                     k: int = 10, scope: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         collection = self._load_if_needed(self._search_destination(project_id))
-        res = self._client.search(
-            collection_name=collection, data=[query], anns_field="sparse",
+        res = self._search_rpc(self._client.search, collection,
+            data=[query], anns_field="sparse",
             filter=self._filter_expr(project_id, kinds, scope=scope), limit=k,
             search_params={"metric_type": _METRIC_SPARSE},
             output_fields=["record_id", "kind", "type", "text"])
@@ -836,8 +895,8 @@ class MilvusStore:
                                       param={"metric_type": _METRIC_SPARSE}, limit=k, expr=expr)
         ranker = (WeightedRanker(dense_weight, 1.0 - dense_weight)
                   if dense_weight > 0 else RRFRanker())
-        res = self._client.hybrid_search(
-            collection_name=collection, reqs=[dense_req, sparse_req], ranker=ranker,
+        res = self._search_rpc(self._client.hybrid_search, collection,
+            reqs=[dense_req, sparse_req], ranker=ranker,
             limit=k, output_fields=["record_id", "kind", "type", "text"])
         return self._hits(res)
 

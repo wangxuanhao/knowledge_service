@@ -273,7 +273,8 @@ def test_answer_payload_keeps_only_frozen_refs_not_a_second_source_graph(provena
     encoded = json.dumps(payload, ensure_ascii=False)
 
     assert set(payload) == {
-        'run_id', 'offered', 'cited', 'warnings', 'answer', 'mode', 'graph_schema'}
+        'run_id', 'offered', 'cited', 'warnings', 'answer', 'mode', 'graph_schema',
+        'answer_purpose', 'answer_label', 'as_of', 'known_at'}
     assert payload['graph_schema'] == 'edge-v1'
     assert 'graphs' not in payload
     assert all(value not in encoded for value in (

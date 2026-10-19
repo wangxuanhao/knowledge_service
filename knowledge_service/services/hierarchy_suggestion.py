@@ -11,7 +11,7 @@
 
 ## 边界（和"扩展只进审核、不自动改本体"一致）
 
-* 只在**生成发现草案**时跑一次，结果存进草案 provenance（`hierarchy_suggestions`）；
+* 生成发现草案时可求建议；建模台也可主动再次发现父类，把新关系写入当前草案；
 * 建议被写进生成的 Turtle，走**既有**的 `add_parent` 操作 → 审核 → 发布，没有旁路，
   也不会绕过发布门禁；
 * LLM 没配置、超时、返回垃圾 —— 一律**降级为空建议**（发现照常完成），
@@ -187,7 +187,7 @@ def build_prompt(class_names, *, examples=(), request_name=''):
     }, ensure_ascii=False)
 
 
-def suggest_hierarchy(class_names, *, examples=(), request_name='', timeout=120):
+def suggest_hierarchy(class_names, *, examples=(), request_name='', timeout=120, refresh=False):
     """调一次 LLM 求层级建议；未配置 LLM 时抛 :class:`HierarchySuggestionsUnavailable`。
 
     返回规范化后的 ``{子类: [父类]}``（可能为空 dict）。网络/格式错误不在这里吞掉：
@@ -195,11 +195,12 @@ def suggest_hierarchy(class_names, *, examples=(), request_name='', timeout=120)
 
     同一批候选类 + 同一草案名 + 同一提示词版本会命中**进程内缓存**（见 `_SUGGESTION_CACHE`），
     返回的是副本 —— 调用方改坏返回值不会污染后续调用。
+    ``refresh=True`` 用于用户主动再次发现，跳过缓存且不覆盖自动发现的缓存结果。
     """
     url, key, model = _llm_settings()
     names = sorted({name for name in class_names if isinstance(name, str) and name.strip()})
     cache_key = (PROMPT_VERSION, request_name or '', tuple(names))
-    if cache_key in _SUGGESTION_CACHE:
+    if not refresh and cache_key in _SUGGESTION_CACHE:
         LOG.info('层级建议命中缓存：候选类 %d 个', len(names))
         return deepcopy(_SUGGESTION_CACHE[cache_key])
     with external_client(timeout) as client:
@@ -216,10 +217,11 @@ def suggest_hierarchy(class_names, *, examples=(), request_name='', timeout=120)
         response.raise_for_status()
         content = response.json()['choices'][0]['message']['content']
     suggestions = parse_suggestions(content, class_names)
-    if len(_SUGGESTION_CACHE) >= _CACHE_LIMIT:
+    if not refresh and len(_SUGGESTION_CACHE) >= _CACHE_LIMIT:
         # 简单粗暴地上限控制：只缓存"最近一批"，避免长期运行后无界增长。
         _SUGGESTION_CACHE.clear()
-    _SUGGESTION_CACHE[cache_key] = deepcopy(suggestions)
+    if not refresh:
+        _SUGGESTION_CACHE[cache_key] = deepcopy(suggestions)
     LOG.info('层级建议完成：提示词 %s，候选类 %d 个，得到 %d 条父子边',
              PROMPT_VERSION, len(names), sum(len(v) for v in suggestions.values()))
     return suggestions

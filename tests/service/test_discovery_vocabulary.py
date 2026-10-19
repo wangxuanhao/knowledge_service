@@ -48,6 +48,39 @@ def test_generated_vocabulary_guard_accepts_valid_governed_graph():
     assert len(graph) == 9
 
 
+@pytest.mark.parametrize('predicate', ['domain', 'range'])
+def test_generated_vocabulary_guard_accepts_union_endpoints(predicate):
+    validate_generated_term_kinds(VALID_GENERATED_TURTLE + f'''
+        ex:relatedTo rdfs:{predicate} [ owl:unionOf (ex:Parent ex:Child) ] .
+    ''')
+
+
+@pytest.mark.parametrize('list_shape', [
+    '_:head rdf:first ex:Parent .',
+    '_:head rdf:first ex:Parent, ex:Child; rdf:rest rdf:nil .',
+    '_:head rdf:first ex:Parent; rdf:rest rdf:nil, _:other .',
+    '_:head rdf:first ex:Parent; rdf:rest _:head .',
+    '_:head rdf:first ex:Parent; rdf:rest ex:Parent .',
+    '_:head rdf:first ex:Parent; rdf:rest rdf:nil; owl:intersectionOf rdf:nil .',
+    '_:head rdf:first ex:Unknown; rdf:rest rdf:nil .',
+    '_:head rdf:rest rdf:nil .',
+])
+def test_generated_vocabulary_guard_rejects_malformed_union_lists(list_shape):
+    turtle = VALID_GENERATED_TURTLE + '''
+        @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+        ex:relatedTo rdfs:domain [ owl:unionOf _:head ] .
+    ''' + list_shape
+    with pytest.raises(GeneratedVocabularyConflict):
+        validate_generated_term_kinds(turtle)
+
+
+def test_generated_vocabulary_guard_rejects_empty_union():
+    with pytest.raises(GeneratedVocabularyConflict):
+        validate_generated_term_kinds(VALID_GENERATED_TURTLE + '''
+            ex:relatedTo rdfs:domain [ owl:unionOf () ] .
+        ''')
+
+
 def test_generated_vocabulary_guard_ignores_unchanged_range_less_datatype_property():
     turtle = VALID_GENERATED_TURTLE + """
         ex:legacyCode a owl:DatatypeProperty .

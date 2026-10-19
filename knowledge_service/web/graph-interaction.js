@@ -23,6 +23,23 @@
     const minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
     return {center:[(minX+maxX)/2,(minY+maxY)/2],zoom:Math.max(.05,Math.min(2,(width-100)/Math.max(100,maxX-minX),(height-100)/Math.max(100,maxY-minY)))};
   }
-  root.GraphInteraction={createSession,fitViewport};
+  function createPanQueue({apply,schedule=fn=>root.requestAnimationFrame(fn),cancel=id=>root.cancelAnimationFrame(id)}){
+    let dx=0,dy=0,frame=null,epoch=0;
+    function flush(){
+      if(frame!==null){cancel(frame);frame=null;}
+      const x=dx,y=dy;dx=0;dy=0;
+      if(x||y)apply(x,y);
+    }
+    return {
+      move(x,y){
+        if(!Number.isFinite(x)||!Number.isFinite(y)||(!x&&!y))return;
+        dx+=x;dy+=y;
+        if(frame===null){const stamp=epoch;frame=schedule(()=>{if(stamp!==epoch)return;frame=null;flush();});}
+      },
+      flush,
+      clear(){epoch++;if(frame!==null)cancel(frame);frame=null;dx=0;dy=0;},
+    };
+  }
+  root.GraphInteraction={createSession,fitViewport,createPanQueue};
   if(typeof module!=='undefined')module.exports=root.GraphInteraction;
 })(globalThis);

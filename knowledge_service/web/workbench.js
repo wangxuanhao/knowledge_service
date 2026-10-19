@@ -17,6 +17,7 @@ wb.clearVersionContext=()=>wb.setVersionContext(emptyVersionContext());
 window.wb=wb;
 const term=s=>{try{const value=decodeURIComponent(String(s||'').split(/[\/#]/).pop());return value.startsWith('urn:')?value.split(':').pop():value}catch{return String(s||'')}};
 const platformGroupLabel=group=>group?.source_scope==='all'?'通用规则':
+  group?.source_scope==='unrestricted'?'全部范围':
   group?.source_scope==='unknown'?'范围待确认（不参与确定性答案）':
   '平台：'+(group?.platform||'未命名');
 function showTab(name){document.querySelector(`[data-tab="${name}"]`).click();}
@@ -471,7 +472,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
   const persist=()=>{try{localStorage.setItem(historyKey(),JSON.stringify(qaHistory));}catch{}};
   const evidenceSummary=rows=>(Array.isArray(rows)?rows:[]).map(row=>
     provenance.sanitizeEvidenceSummary({...row,text_preview:row?.text_preview??row?.text}));
-  const answerContext=item=>({projectId:current,answerId:item.answer_id,evidence:[...(item.evidence||[]),...(item.uncertain_references||[])]});
+  const answerContext=item=>({projectId:current,answerId:item.answer_id,evidence:['evidence','uncertain_references','historical_references','future_references'].flatMap(key=>item[key]||[])});
   const referenceKinds=[['historical_references','历史参考'],['future_references','尚未生效参考'],['uncertain_references','有效性待核对']];
   const platformText=row=>{
     const platforms=row.metadata?.applicability?.platforms;
@@ -539,6 +540,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
           if(answer)answer.textContent=item.text||'';
           provenance.renderLegacyNote(turn);
         }
+        window.QaPresentation?.annotate(turn,item);
         if(item.error){
           turn.dataset.state='error';
           markDraft(turn,true);
@@ -564,17 +566,17 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     const panelId='qa-evidence-'+(++evidenceSerial),block=document.createElement('div');block.className='qa-evidence-block';
     const toggle=document.createElement('button');
     toggle.type='button';toggle.className='qa-evidence-toggle secondary';
-    toggle.setAttribute('aria-expanded','true');toggle.setAttribute('aria-controls',panelId);
+    toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-controls',panelId);
     const counts=rows.length+' 条回答依据'+(referenceCount?' · '+referenceCount+' 条独立参考':'')+(pendingCount?' · '+pendingCount+' 条结构待定':'');
-    toggle.textContent='收起 '+counts;
-    const panel=document.createElement('div');panel.className='qa-evidence-panel';panel.id=panelId;panel.hidden=false;
+    toggle.textContent='查看 '+counts;
+    const panel=document.createElement('div');panel.className='qa-evidence-panel';panel.id=panelId;panel.hidden=true;
     // 这块面板用户反馈"看不懂 E1/E2 是什么、下面这些为什么要展示"。它其实是
     // 模型回答的输入清单，所以先给一段说明，再列条目。
     const note=document.createElement('div');note.className='qa-evidence-note';
     for(const line of [
       '[E1] [E2] … 是这条答案里的引用编号：证据从 E1 开始按检索顺序编号，答案正文里的 [E1] 就指下面第 1 条。点编号可以看它的完整溯源链（原文 → 记录版本 → 断言 → 审核决定）。',
       'E 为本次时点的回答依据；历史 R、未来 F、有效性待核对 U 在下方单列，不计入已确认有效的依据。缺少属性不影响合格原文查询。',
-      '模型依据 E 清单组织答案；有效性待核对的原文仅作带限定语的文档说明，不代表当前有效规则。点引用查看回答生成时冻结的原文与记录版本。',
+      '规则判断使用 E 依据；文档说明可以引用带状态标识的原文，不代表当前有效规则。点引用查看回答生成时冻结的原文与记录版本。',
     ]){const p=document.createElement('p');p.textContent=line;note.append(p);}
     panel.append(note);
     if(payload.as_of||payload.known_at){
@@ -767,7 +769,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     busy=true;send.disabled=true;controller=new AbortController();
     progress.textContent='正在检索证据…';summary.textContent='';
     // 开启 LLM 组织答案时，检索完证据后还要等模型生成，明确提示避免误以为卡住
-    if($c('generate').checked)progress.textContent='正在检索证据…（勾选了 LLM 组织答案，检索完还会等待模型生成，可能需数秒~数十秒）';
+    if(body.generate)progress.textContent='正在检索，找到有效依据后调用模型…';
     const target=turn||addTurn('assistant','');
     target.dataset.state='streaming';target.replaceChildren();
     const answer=document.createElement('div');answer.className='qa-answer';answer.dataset.answer='';target.append(answer);
@@ -799,12 +801,15 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
         summary.textContent='实体证据 '+(channels.entity??0)+' · 原文证据 '+(channels.chunk??0)+' · 图关系证据 '+(channels.graph_evidence??0)
           +(item.data?.structure_pending?.count?' · 结构待定 '+(item.data.structure_pending.count)+' 条（不算证据）':'');
         addEvidence(target,{...item.data,answer_id:record.answer_id});
+        progress.textContent=body.generate&&record.evidence.length?'模型正在组织答案…':'正在整理检索结果…';
         showRetrievalNotice(item.data);
       }else if(item.event==='delta'){
         const chunk=String(item.data?.text??'');
         text+=chunk;pending+=chunk;answer.textContent=text;speak(false);atEnd();
       }else if(item.event==='done'){
         capture(item.data);
+        record.generation=item.data?.generation;record.timings_ms=item.data?.timings_ms;record.mode=item.data?.mode;
+        record.answer_purpose=item.data?.answer_purpose;record.answer_label=item.data?.answer_label;
         if(typeof item.data?.answer==='string'){text=item.data.answer;answer.textContent=text;spoken='';pending=text;live.textContent='';}
         finished=true;
       }
@@ -834,6 +839,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       target.querySelector('.qa-draft-status')?.remove();
       record.text=text;
       provenance.decorateAnswer(answer,text,{...answerContext(record),projectId:project});
+      window.QaPresentation?.annotate(target,record);
       persist();
     }catch(error){
       if(mine!==serial||project!==current)return;
@@ -871,8 +877,8 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     const notice=$c('qa-notice'),text=$c('qa-notice-text');
     if(!notice||!text)return;
     const errors=payload?.retrieval_errors||{};
-    const noVector=String(errors.semantic||'').includes('语义索引尚未就绪')
-      ||String(errors.semantic||'').includes('Embedding model differs');
+    const semanticErrors=Object.entries(errors).filter(([key])=>key==='semantic'||key.endsWith(':semantic')).map(([,value])=>String(value)).join('；');
+    const noVector=/语义索引尚未就绪|Embedding model differs|嵌入模型|嵌入维度/.test(semanticErrors);
     if(noVector){
       text.textContent='语义索引未构建，已降级关键词检索。可点右侧按钮构建索引后重新提问。';
       notice.hidden=false;

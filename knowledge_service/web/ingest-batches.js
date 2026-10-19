@@ -49,7 +49,7 @@
   function monitor(project,batch){
     const key=project+':'+batch.id;if(mounted.has(key))return mounted.get(key);
     const card=node('section','','ingest-batch-card');card.dataset.batchId=batch.id;
-    const heading=node('h3'),summary=node('p','','batch-counts'),parallel=node('p','','subtle'),error=node('p','','batch-error');error.setAttribute('role','status');
+    const heading=node('h3'),summary=node('div','','batch-counts'),parallel=node('p','','subtle'),error=node('p','','batch-error');error.setAttribute('role','status');
     const actions=node('div','','batch-actions'),filter=node('select');filter.setAttribute('aria-label','筛选文件状态');
     for(const [value,label] of [['','全部文件'],['needs_attention','需要处理'],['retry_wait','等待重试'],['completed','完成'],['interrupted','中断']]){const o=node('option',label);o.value=value;filter.append(o);}
     const rows=node('div','','batch-items'),pages=node('div','','batch-actions');
@@ -58,10 +58,11 @@
     card.append(heading,summary,parallel,error,actions,filter,rows,pages);root?.prepend(card);
     async function action(name,body={}){await request(url+'/'+name,body);await refresh();}
     const start=button('开始处理',()=>action('start')),pause=button('暂停',()=>action('pause')),resume=button('继续',()=>action('resume'));
-    actions.append(start,pause,resume,button('重试全部失败',()=>action('retry-failed',{mode:'resume_checkpoint'})),button('取消未开始文件',()=>action('cancel')),button('下载失败明细',async()=>{
+    const retry=button('重试全部失败',()=>action('retry-failed',{mode:'resume_checkpoint'})),cancel=button('取消未开始文件',()=>action('cancel')),download=button('下载失败明细',async()=>{
       allFailures=[];let c='';do{const r=await request(url+'/items?status=needs_attention&limit=100'+(c?'&cursor='+encodeURIComponent(c):''));allFailures.push(...(r.items||[]));c=r.next_cursor;}while(c);
       const blob=new Blob([failureCsv(allFailures)],{type:'text/csv;charset=utf-8'}),link=node('a');link.href=URL.createObjectURL(blob);link.download='批次失败明细.csv';link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);
-    }));
+    });
+    actions.append(start,pause,resume,retry,cancel,download);
     filter.onchange=()=>{cursor='';refresh();};
     async function refresh(){
       clearTimeout(timer);if(busy)return;
@@ -71,24 +72,32 @@
         const list=await request(url+'/items?limit=50&status='+encodeURIComponent(filter.value)+(cursor?'&cursor='+encodeURIComponent(cursor):''));
         if(project!==currentProject())return;
         heading.textContent='知识写入批次 · '+(states[batch.status]||batch.status);
-        summary.textContent=Object.entries(batch.counts||batch.summary||{}).map(([s,n])=>(states[s]||s)+' '+n).join('　')||'总文件 '+(batch.total_items||0);
-        parallel.textContent='申请并发 '+batch.requested_concurrency+' · 实际并发 '+batch.effective_concurrency;
-        for(const [b,enabled] of [[start,['draft','uploading','queued'].includes(batch.status)],[pause,batch.status==='running'],[resume,batch.status==='paused']]){b.dataset.inactive=String(!enabled);b.disabled=!enabled;}
+        card.dataset.status=batch.status;
+        const counts=batch.counts||batch.summary||{};
+        summary.replaceChildren();
+        for(const [s,n] of Object.entries(counts)){if(!n)continue;const chip=node('span',(states[s]||s)+' '+n,'batch-count');chip.dataset.status=s;summary.append(chip);}
+        if(!summary.childElementCount)summary.append(node('span','总文件 '+(batch.total_items||0),'batch-count'));
+        parallel.textContent='并发设置：'+(batch.requested_concurrency==='auto'?'自动推荐':batch.requested_concurrency)+' · 当前并发 '+batch.effective_concurrency;
+        const failures=(counts.needs_attention||0)+(counts.interrupted||0);
+        const pending=['draft','uploading','staged','queued','retry_wait'].some(s=>counts[s]>0);
+        for(const [b,enabled] of [[start,['draft','uploading','queued'].includes(batch.status)],[pause,batch.status==='running'],[resume,batch.status==='paused'],[retry,failures>0],[cancel,pending],[download,counts.needs_attention>0]]){b.dataset.inactive=String(!enabled);b.disabled=!enabled;}
         error.textContent=batch.status==='paused'?(pauseReasons[batch.paused_reason]||batch.paused_reason||''):'';rows.replaceChildren();
         for(const item of list.items||[]){
           const row=node('article','','batch-item');row.dataset.status=item.status;
           row.append(node('strong',item.original_name),node('span',states[item.status]||item.status));
-          if(item.source_version_id)row.append(button('查看原文与 OCR',()=>window.SourceReader?.open({projectId:project,versionId:item.source_version_id})));
+          const rowActions=node('div','','batch-item-actions');
+          if(item.source_version_id)rowActions.append(button('查看原文与 OCR',()=>window.SourceReader?.open({projectId:project,versionId:item.source_version_id})));
           if(item.error_code){row.append(node('p',`${states[item.stage]||item.stage||'处理'}${item.failed_chunk_ordinal!=null?' · 切片 '+item.failed_chunk_ordinal:''} · ${item.public_error||item.error_code}`,'batch-error'),node('small','自动重试 '+(item.auto_retry_count||0)+' 次'+(item.next_retry_at?' · 下次 '+new Date(item.next_retry_at).toLocaleString():'')));
             const tools=node('div','','batch-actions');for(const [mode,label] of Object.entries(retryLabels))tools.append(button(label,()=>request(url+'/items/'+encodeURIComponent(item.id)+'/retry',{mode}).then(refresh)));row.append(tools);
           }
-          if(item.status==='completed'&&(item.document_id||item.result?.document?.id))row.append(button('查看抽取结果',()=>window.IngestResults?.showBatchItem(item,{projectId:project,mode:batch.settings?.extraction_mode||'ontology',ontologyId:batch.settings?.ontology_id})));
+          if(item.status==='completed'&&(item.document_id||item.result?.document?.id))rowActions.append(button('查看抽取结果',()=>window.IngestResults?.showBatchItem(item,{projectId:project,mode:batch.settings?.extraction_mode||'ontology',ontologyId:batch.settings?.ontology_id})));
+          if(rowActions.childElementCount)row.append(rowActions);
           rows.append(row);
         }
         nextCursor=list.next_cursor;pages.replaceChildren();if(cursor)pages.append(button('回到首页',()=>{cursor='';return refresh();}));if(nextCursor)pages.append(button('下一页',()=>{cursor=nextCursor;return refresh();}));
-      }catch(e){error.textContent=e.message;}finally{busy=false;if(!['completed','completed_with_errors','cancelled'].includes(batch.status))timer=setTimeout(refresh,2000);}
+      }catch(e){error.textContent='批次更新失败：'+(e.message==='Failed to fetch'?'无法连接服务，请检查连接后重试。':e.message);}finally{busy=false;if(project===currentProject()&&!['completed','completed_with_errors','cancelled'].includes(batch.status))timer=setTimeout(refresh,2000);}
     }
-    const control={refresh,stop(){clearTimeout(timer);card.remove();mounted.delete(key);}};mounted.set(key,control);refresh();return control;
+    const control={refresh,hide(){card.hidden=true;clearTimeout(timer);},stop(){clearTimeout(timer);card.remove();mounted.delete(key);}};mounted.set(key,control);refresh();return control;
   }
   async function submit(project,documents,settings){
     await ready;if(!capabilities)await loadCapabilities();
@@ -111,19 +120,22 @@
     await request(base(project)+'/'+encodeURIComponent(batch.id)+'/start',{});if(queue)queue.batchSession=null;
     return batch;
   }
+  const listError=node('div','','batch-list-error');listError.setAttribute('role','alert');listError.hidden=true;
+  root?.prepend(listError);
   async function loadRecent(){
     const project=currentProject();if(!project)return;
     try{
       const result=await request(base(project)+'?limit=20');if(project!==currentProject())return;
+      listError.hidden=true;listError.replaceChildren();
       const tasks=document.getElementById('ingest-batch-tasks');if(tasks)tasks.replaceChildren();
       for(const batch of result.items||result.batches||[]){
-        monitor(project,batch);
+        const control=monitor(project,batch);control.refresh();
         if(tasks){const card=node('article','','ingest-batch-card');card.append(node('strong','知识写入批次 · '+(states[batch.status]||batch.status)),node('p','总文件 '+(batch.total||batch.total_items||0)+' · 实际并发 '+batch.effective_concurrency));
           card.append(button('查看批次详情',()=>{window.KnowledgeTabs?.open('ingest');const host=root?.querySelector('[data-batch-id="'+batch.id+'"]');host?.scrollIntoView({block:'start'});}));tasks.append(card);}
       }
-    }catch(e){if(project===currentProject()&&root){const error=node('p','批次列表读取失败：'+e.message,'batch-error');root.prepend(error);}}
+    }catch(e){if(project===currentProject()&&root){listError.hidden=false;listError.replaceChildren(node('span','批次列表读取失败：'+(e.message==='Failed to fetch'?'无法连接服务，请检查连接。':e.message)),button('重新加载',loadRecent));}}
   }
-  document.getElementById('project')?.addEventListener('change',()=>{for(const c of mounted.values())c.refresh();if(!capabilities)loadCapabilities();loadRecent();});
+  document.getElementById('project')?.addEventListener('change',()=>{for(const c of mounted.values())c.hide();listError.hidden=true;document.getElementById('ingest-batch-tasks')?.replaceChildren();if(!capabilities)loadCapabilities();loadRecent();});
   document.getElementById('load-jobs')?.addEventListener('click',loadRecent);
   window.RuntimeView?.on('jobs',loadRecent);
   ready.then(loadRecent);

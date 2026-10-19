@@ -805,6 +805,7 @@
   // 「校验并审核」是否能点：只认服务端 stage-availability 的 review 阶段
   function gateReview(state) {
     const st = state || S();
+    if (st.gatesLoading) return { enabled: false, reason: '正在读取审核与发布条件，画布可以先浏览…' };
     if (!st.draft || !st.draft.id) {
       return { enabled: false, reason: '还没有草案：先在画布上新增或调整术语，草案会自动建立，之后这里才能校验并审核。' };
     }
@@ -817,6 +818,7 @@
   // 「发布」是否能点：只认服务端 publish-readiness（ready 且已收下至少一条）
   function gatePublish(state) {
     const st = state || S();
+    if (st.gatesLoading) return { enabled: false, reason: '正在计算发布校验结果…' };
     if (!st.draft || !st.draft.id) {
       return { enabled: false, reason: '还没有草案：先在画布上改，草案建立且服务端判定就绪时这里才启用发布。' };
     }
@@ -842,7 +844,9 @@
   // 还因为发布说明输入框最小 180px 把按钮挤成两行（用户反馈「校验和发布是两行」）。
   function renderEmptyActions(st) {
     const disc = st.discovery || null;
-    const pending = disc ? (disc.unpublished_candidate_count || 0) : 0;
+    const candidateCounts = disc && disc.candidate_status_counts;
+    const pending = candidateCounts ? (candidateCounts.pending || 0) : (disc ? (disc.unpublished_candidate_count || 0) : 0);
+    const included = candidateCounts && candidateCounts.included_in_draft || 0;
     const generating = !!st.generating;
     const inferring = !!st.inferringHierarchy;
     // 这一步整理出的是【实体类型 / 关系类型】，不是一条条实体，所以 chip 直接讲类型。
@@ -867,9 +871,9 @@
     if (generating) {
       actions.append(el('span', 'om-ab-busy', inferring
         ? '正在生成，并让模型推断父子层级（类型很快好，层级要几分钟，别关页面）…'
-        : '正在生成本体（约 1 秒，不调用模型）…'));
+        : '正在生成本体（不调用模型）…'));
     } else if (pending > 0) {
-      const btn = el('button', 'om-btn primary', '生成本体（约 1 秒）');
+      const btn = el('button', 'om-btn primary', '生成本体');
       btn.type = 'button';
       btn.title = '把候选整理成一份待审核的本体（实体类型＋关系类型），默认平级、不调模型';
       btn.addEventListener('click', () => {
@@ -885,7 +889,8 @@
         : '马上好。')
       : (pending > 0
         ? '本体生成、审核、发布后，这里才会出现「校验并审核 / 发布」；想要自动父子层级，用左栏的慢按钮。'
-        : '这个项目还没有候选：先去「知识写入」页上传文档做开放发现。')));
+        : (included ? `${included} 个候选已纳入草案，无需重复生成。请加载草案后校验、审核并发布。`
+          : '这个项目还没有候选：先去「知识写入」页上传文档做开放发现。'))));
     put(actionsHost, bar);
   }
 
@@ -902,7 +907,10 @@
     // 「待收下」读开放发现概览的真实计数（unpublished_candidate_count），
     // 而不是画布虚线节点的 candidates.length（那一路从没接过数据源，恒为 0）。
     const disc = st.discovery || null;
-    const pendingCandidates = disc ? (disc.unpublished_candidate_count || 0) : (candidates.length || 0);
+    const candidateCounts = disc && disc.candidate_status_counts;
+    const pendingCandidates = candidateCounts ? (candidateCounts.pending || 0)
+      : (disc ? (disc.unpublished_candidate_count || 0) : (candidates.length || 0));
+    const includedCandidates = candidateCounts && candidateCounts.included_in_draft || 0;
     const draft = st.draft || null;
     const ops = (draft && draft.operations) || [];
     // 「冲突」= 草案里与基线冲突、需重新基线的变更（真实字段：operation.validation.rebase_status）
@@ -925,7 +933,8 @@
       chip('类型', summary ? classes.length : null, 'cls', '当前本体的实体类数量'),
       chip('关系', summary ? rels.length : null, 'rel', '当前本体的关系类型数量'),
       chip('属性', summary ? attrs.length : null, 'attr', '当前本体的实体属性数量'),
-      chip('待收下', pendingCandidates, 'pending', '知识写入抽出、还没收进本体的候选概念'),
+      chip('待生成', pendingCandidates, 'pending', '新抽出、尚未纳入本体草案的候选'),
+      ...(includedCandidates ? [chip('草案中', includedCandidates, 'pending', '已纳入草案，等待审核发布的候选')] : []),
       chip('冲突', draft ? conflicts : 0, 'conflict', '草案里与基线冲突、需要重新基线的变更数'),
       chip('阻断', blockers, 'block', '服务端发布清单里 error 级阻断项数量（读不到显示 —）'),
     );
@@ -1058,7 +1067,12 @@
 
     // 操作区：发布说明 + 校验并审核 + 发布，包成一行（.om-ab-ops 不换行，避免按钮被挤到两行）。
     const opRow = el('div', 'om-ab-ops');
-    opRow.append(btnReview, noteInput, btnPub);
+    const manualReview = el('button', 'om-btn', '逐条审核');
+    manualReview.type = 'button';
+    manualReview.disabled = previewing || !draft || !draft.submitted_at || draft.status !== 'pending';
+    manualReview.title = '查看每条变更的内容，填写理由并确认收下或不收；先点「校验并审核」提交当前草案';
+    manualReview.addEventListener('click', openManualReview);
+    opRow.append(btnReview, manualReview, noteInput, btnPub);
     actions.append(opRow);
     bar.append(actions);
 
@@ -1085,7 +1099,8 @@
       // 没草案时只提示一条：不再把「校验」「发布」各自的"还没有草案"变体重复 push（原文案几乎一样）。
       msgs.push('还没有草案：先在画布上新增或调整术语，草案会自动建立；之后这里才能「校验并审核」和发布。');
     } else {
-      if (!st.stageAvailability) msgs.push('读不到服务端阶段门禁（stage-availability）——按未判定处理，按钮不猜可用性。');
+      if (st.gatesLoading) msgs.push('正在读取审核条件并计算发布校验结果，画布可以先浏览…');
+      else if (!st.stageAvailability) msgs.push('读不到服务端阶段门禁（stage-availability）——按未判定处理，按钮不猜可用性。');
       else if (!reviewGate.enabled && reviewGate.reason) msgs.push(reviewGate.reason);
       if (!pubGate.enabled && pubGate.reason) msgs.push(pubGate.reason);
     }
@@ -1140,6 +1155,110 @@
       status(error && error.message ? error.message : (isSource ? '刷新来源失败' : '重新基线失败'), true);
     }
     if (typeof M.refresh === 'function') await M.refresh();
+  }
+
+  async function openManualReview() {
+    const M = model();
+    if (!M || !M.S.draft || M.S.preview) return;
+    const project = current, draftId = M.S.draft.id;
+    const base = endpoint(`/ontology-drafts/${encodeURIComponent(draftId)}`);
+    const stillCurrent = () => current === project && M.S.draft && M.S.draft.id === draftId && !M.S.preview;
+    try {
+      let fresh = await api(base, undefined, 'GET');
+      const plan = await api(base + '/review-plan', undefined, 'GET');
+      if (!stillCurrent()) return;
+      if (!fresh.submitted_at || !plan.validation_fingerprint) {
+        status('先点「校验并审核」提交当前草案，再逐条处理。', true); return;
+      }
+      const previous = document.querySelector('.om-review-dialog');
+      if (previous) previous.remove();
+      const dialog = el('dialog', 'om-review-dialog');
+      dialog.setAttribute('aria-labelledby', 'om-review-title');
+      const heading = el('h3', null, '逐条审核'); heading.id = 'om-review-title';
+      const close = el('button', 'om-btn', '关闭'); close.type = 'button';
+      close.setAttribute('aria-label', '关闭逐条审核');
+      close.addEventListener('click', () => dialog.close());
+      const header = el('div', 'om-review-header'); header.append(heading, close);
+      const feedback = el('p', 'om-review-feedback'); feedback.setAttribute('role', 'status');
+      const warnings = [];
+      const warningBox = el('div', 'om-review-warnings');
+      for (const warning of plan.warnings || []) {
+        const label = el('label', 'om-review-warning');
+        if (warning.code) {
+          const input = el('input'); input.type = 'checkbox';
+          warnings.push({ input, code: warning.code }); label.append(input);
+        }
+        label.append(el('span', null, warning.message || warning.code)); warningBox.append(label);
+      }
+      dialog.append(header, el('p', null, '核对每条变更后明确收下或不收；全部处理后，关闭此窗口并填写发布说明。'), warningBox, feedback);
+      const actions = { create_term: '新增术语', add_parent: '添加父类', remove_parent: '移除父类',
+        add_domain: '添加所属类', remove_domain: '移除所属类', add_range: '添加客体类',
+        remove_range: '移除客体类', set_datatype: '修改数据类型', retire_term: '停用术语',
+        add_annotation: '添加说明', remove_annotation: '移除说明', restore_term: '恢复术语' };
+      let busy = false;
+      const syncControls = [];
+      for (const item of plan.items || []) {
+        const row = el('section', 'om-review-item');
+        row.append(el('h4', null, `${actions[item.action] || item.action} · ${labelOfIri(item.target_iri, M.S.summary)}`));
+        const state = el('p', 'om-review-state', item.decision
+          ? (item.decision.action === 'approve' ? '已收下' : '已不收')
+          : (item.approvable ? (item.risk === 'high' ? '高风险，需填写理由并逐条确认' : '待处理') : '校验阻断：修正后才能收下'));
+        row.append(state);
+        for (const error of item.errors || []) row.append(el('p', 'om-review-error', error.message || error.code));
+        const operation = (fresh.operations || []).find(op => op.id === item.operation_id);
+        if (operation) {
+          const details = el('details'); details.append(el('summary', null, '查看变更前后内容'));
+          details.append(el('pre', null, '修改前：' + JSON.stringify(operation.before, null, 2)
+            + '\n修改后：' + JSON.stringify(operation.after, null, 2))); row.append(details);
+        }
+        const reason = el('textarea'); reason.setAttribute('aria-label', '处理理由');
+        reason.placeholder = '说明为何收下或不收这条变更'; reason.value = item.decision && item.decision.reason || '';
+        const approve = el('button', 'om-btn primary', '收下'), reject = el('button', 'om-btn', '不收');
+        approve.type = reject.type = 'button';
+        const sync = () => {
+          approve.disabled = busy || !!item.decision || item.approvable !== true;
+          reject.disabled = busy || !!item.decision;
+          reason.disabled = busy || !!item.decision;
+        };
+        syncControls.push(sync); sync();
+        const decide = async action => {
+          if (busy || item.decision) return;
+          if (!stillCurrent()) { dialog.close(); status('项目或草案已切换，请重新打开逐条审核。', true); return; }
+          if (!reason.value.trim() && (action === 'reject' || item.requires_reason)) {
+            feedback.textContent = '请填写处理理由。'; reason.focus(); return;
+          }
+          if (action === 'approve' && warnings.some(w => !w.input.checked)) {
+            feedback.textContent = '请先逐项确认上方的草案警告。'; return;
+          }
+          busy = true; syncControls.forEach(update => update());
+          dialog.setAttribute('aria-busy', 'true');
+          feedback.textContent = '正在保存审核决定…';
+          try {
+            const updated = await api(base + '/decisions', {
+              expected_revision: fresh.revision,
+              expected_ontology_id: fresh.base_ontology_id,
+              validation_fingerprint: plan.validation_fingerprint,
+              acknowledged_warning_codes: warnings.filter(w => w.input.checked).map(w => w.code),
+              actor: typeof M.actorName === 'function' ? M.actorName() : 'canvas-editor',
+              decisions: [{ operation_id: item.operation_id, operation_fingerprint: item.operation_fingerprint,
+                action, reason: reason.value.trim() }],
+            }, 'POST');
+            fresh = updated; item.decision = { action };
+            state.textContent = action === 'approve' ? '已收下' : '已不收';
+            feedback.textContent = '审核决定已保存。';
+            if (stillCurrent()) { M.S.draft = updated; await M.refresh(); }
+          } catch (error) { feedback.textContent = '处理失败：' + (error.message || error); }
+          finally { busy = false; dialog.setAttribute('aria-busy', 'false'); syncControls.forEach(update => update()); }
+        };
+        approve.addEventListener('click', () => { void decide('approve'); });
+        reject.addEventListener('click', () => { void decide('reject'); });
+        const buttons = el('div', 'om-review-buttons'); buttons.append(approve, reject);
+        row.append(reason, buttons); dialog.append(row);
+      }
+      dialog.addEventListener('close', () => dialog.remove(), { once: true });
+      (document.getElementById('tab-ontology-model') || document.body).append(dialog);
+      dialog.showModal();
+    } catch (error) { status('读取审核清单失败：' + (error.message || error), true); }
   }
 
   /* ---- 「校验并审核」：validate → submit → batch-approve ------------------- */

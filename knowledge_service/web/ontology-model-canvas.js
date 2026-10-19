@@ -58,6 +58,8 @@
     onResize: null, view: 'graph', sig: '', graph: null, selected: null,
     mode: '', linkFrom: null, pending: null, bands: [], els: {}, didFit: false,
     layoutView: null, dragged: false,
+    bandLayer: null, bandByNode: new Map(), dirtyBands: new Set(), bandFrame: null,
+    bandTransform: '', bandZoom: null,
   };
 
   // ---- 小工具 --------------------------------------------------------------
@@ -407,9 +409,11 @@
   function drawBands(bands) {
     const svg = M.svg;
     if (!svg) return null;
-    svg.replaceChildren();
-    M.bands = [];
+    clearBands();
     if (!bands.length) return null;
+    const layer = svgEl('g');
+    svg.appendChild(layer);
+    M.bandLayer = layer;
     const maxCols = bands.reduce((m, b) => Math.max(m, b.cols), 1);
     const contentW = (maxCols - 1) * (NODE_W + GAP_X) + NODE_W;
     let top = Infinity, bottom = -Infinity;
@@ -417,11 +421,12 @@
       const rect = svgEl('rect');
       rect.setAttribute('class', 'om-canvas-band' + (b.shade ? ' is-shade' : ''));
       rect.setAttribute('rx', '14');
+      rect.setAttribute('vector-effect', 'non-scaling-stroke');
       const label = svgEl('text');
       label.setAttribute('class', 'om-canvas-band-label');
       label.textContent = `第 ${b.depth + 1} 层${b.depth === 0 ? '（根类）' : ''}${b.cont ? '（续）' : ''}`;
-      svg.appendChild(rect);
-      svg.appendChild(label);
+      layer.appendChild(rect);
+      layer.appendChild(label);
       // 层带上下也要对称：节点中心在 b.y、卡片高 NODE_H → 范围 [b.y-21, b.y+21]，
       // 层带 = 卡片范围上下各外扩 BAND_PAD（[b.y-35, b.y+35]）。原来 my=b.y-16、h=NODE_H+32
       // 是 [b.y-16, b.y+58]——上只留 5px、下空出 37px，框在节点下方空一大截，看着"不对应"。
@@ -430,11 +435,14 @@
       // 再向两侧外扩 BAND_PAD。原来从 -BAND_PAD 起，最左一列节点的左半边整段露在框外，
       // 且整个框相对卡片右偏 NODE_W/2，fit 后节点整体偏左——层级树"节点不在框里"由此而来。
       const mx = -NODE_W / 2 - BAND_PAD;
-      M.bands.push({
+      const band = {
         el: rect, label, ids: b.ids || [],
         mx, my, w: contentW + BAND_PAD * 2, h,
         lx: mx + 4, ly: my + 4,   // 层号标签画在带**内侧**左上角（随带左/顶缘走）
-      });
+      };
+      M.bands.push(band);
+      for (const id of band.ids) M.bandByNode.set(id, band);
+      M.dirtyBands.add(band);
       top = Math.min(top, my);
       bottom = Math.max(bottom, my + h);
     }
@@ -444,16 +452,35 @@
   }
 
   function clearBands() {
+    if (M.bandFrame !== null) window.cancelAnimationFrame(M.bandFrame);
+    M.bandFrame = null;
     if (M.svg) M.svg.replaceChildren();
     M.bands = [];
+    M.bandLayer = null; M.bandByNode.clear(); M.dirtyBands.clear();
+    M.bandTransform = ''; M.bandZoom = null;
   }
 
-  // 把模型坐标 × zoom + pan 映射成像素坐标（与 Cytoscape 同一套变换）。
+  // 指针事件只标记脏层带；高频移动合并到一帧，平移不重新扫描节点几何。
+  function scheduleBands(evt) {
+    if (!M.bandLayer) return;
+    if (evt.type === 'position') {
+      const band = M.bandByNode.get(evt.target.id());
+      if (!band) return;
+      M.dirtyBands.add(band);
+    }
+    if (M.bandFrame !== null) return;
+    M.bandFrame = window.requestAnimationFrame(() => {
+      M.bandFrame = null;
+      syncBands();
+    });
+  }
+
+  // 层带保留模型坐标；视口变化仅更新整个 SVG 组的变换。
   function syncBands() {
     const cy = M.cy;
-    if (!cy) return;
+    if (!cy || !M.bandLayer) return;
     const zoom = cy.zoom(), pan = cy.pan();
-    for (const b of M.bands) {
+    for (const b of M.dirtyBands) {
       const positions = b.ids.map(id => cy.getElementById(id)).filter(n => n.length).map(n => n.position());
       if (positions.length) {
         b.mx = Math.min(...positions.map(p => p.x)) - NODE_W / 2 - BAND_PAD;
@@ -462,13 +489,23 @@
         b.h = Math.max(...positions.map(p => p.y)) + NODE_H / 2 + BAND_PAD - b.my;
         b.lx = b.mx + 4; b.ly = b.my + 4;
       }
-      b.el.setAttribute('x', (b.mx * zoom + pan.x).toFixed(1));
-      b.el.setAttribute('y', (b.my * zoom + pan.y).toFixed(1));
-      b.el.setAttribute('width', (b.w * zoom).toFixed(1));
-      b.el.setAttribute('height', (b.h * zoom).toFixed(1));
-      b.label.setAttribute('x', (b.lx * zoom + pan.x).toFixed(1));
-      b.label.setAttribute('y', (b.ly * zoom + pan.y).toFixed(1));
-      b.label.setAttribute('font-size', Math.max(8, Math.min(14, 11 * zoom)).toFixed(1));
+      b.el.setAttribute('x', b.mx.toFixed(1));
+      b.el.setAttribute('y', b.my.toFixed(1));
+      b.el.setAttribute('width', b.w.toFixed(1));
+      b.el.setAttribute('height', b.h.toFixed(1));
+      b.label.setAttribute('x', b.lx.toFixed(1));
+      b.label.setAttribute('y', b.ly.toFixed(1));
+    }
+    M.dirtyBands.clear();
+    const transform = `translate(${pan.x} ${pan.y}) scale(${zoom})`;
+    if (transform !== M.bandTransform) {
+      M.bandLayer.setAttribute('transform', transform);
+      M.bandTransform = transform;
+    }
+    if (zoom !== M.bandZoom) {
+      // Inline style must override the stylesheet's 11px before group scaling.
+      for (const b of M.bands) b.label.style.fontSize = (Math.max(8, Math.min(14, 11 * zoom)) / zoom) + 'px';
+      M.bandZoom = zoom;
     }
   }
 
@@ -801,7 +838,7 @@
     cy.on('dblclick', evt => { if (evt.target === cy) fitAll(); });
     cy.on('doubleTap', evt => { if (evt.target === cy) fitAll(); });
     // 平移/缩放后同步层带位置（自带滚轮以光标为锚点缩放 + 拖空白平移）。
-    cy.on('pan zoom position', syncBands);
+    cy.on('pan zoom position', scheduleBands);
   }
 
   function mount(host, ctx) {
@@ -881,12 +918,15 @@
     const cy = M.cy;
     if (!cy) { updateEmpty(); updateBar(); return; }
 
+    // 空态可能先于异步本体数据渲染；首次出现节点时仍须布局，
+    // 否则增量插入的默认坐标会把所有类堆成一条横线。
+    const firstNodes = cy.nodes().length === 0 && M.graph.nodes.length > 0;
     applyElements(M.graph);
     updateEmpty();
     updateBar();
 
     const sig = signature(M.graph, M.view);
-    let need = M.layoutView !== M.view;
+    let need = M.layoutView !== M.view || firstNodes;
     if (!M.didFit && M.stage && M.stage.clientWidth > 0) { M.didFit = true; need = true; }
     if (need) runLayout();
     else if (M.view === 'hierarchy' && sig !== M.sig) refreshHierarchyBands();
@@ -917,6 +957,7 @@
   }
 
   function destroy() {
+    clearBands();
     if (M.ro) { try { M.ro.disconnect(); } catch (e) { /* 忽略 */ } M.ro = null; }
     if (M.onResize) { window.removeEventListener('resize', M.onResize); M.onResize = null; }
     if (M.cy) { try { M.cy.destroy(); } catch (e) { /* 忽略 */ } M.cy = null; }

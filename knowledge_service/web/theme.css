@@ -556,7 +556,7 @@ body main .ontology-model .om-seg > button.on {
 }
 
 /* 三栏：左侧清单 / 画布 / 右侧详情，都走白纸浅青 */
-body main .ontology-model .om-body { background: var(--ui-bg); overflow-x: auto; }
+body main .ontology-model .om-body { background: var(--ui-bg); min-width:0; }
 body main .ontology-model .om-side,
 body main .ontology-model .om-detail {
   background: var(--ui-surface);
@@ -586,7 +586,7 @@ body main .ontology-model .om-tree .om-tree-count {
 body main .ontology-model .om-canvas-host {
   background: var(--ui-surface);
   border-color: var(--ui-line);
-  min-width: 520px;   /* 画布不能被左右两栏压成一条缝：层级树/图谱在窄视口也有可用宽度 */
+  min-width: 0;
 }
 body main .ontology-model .om-canvas-stage {
   background: radial-gradient(var(--ui-line-2) .8px, transparent .8px);
@@ -634,7 +634,6 @@ body main .ontology-model .om-preview-banner {
   border-color: rgba(202, 138, 4, .3);
   color: #8a6108;
 }
-body main .ontology-model .om-pub-note,
 body main .ontology-model .om-history-pub-note { background: var(--ui-ok-dim); color: var(--ui-ok); }
 body main .ontology-model .om-retire,
 body main .ontology-model .om-retire-reason { background: var(--ui-danger-dim); border-color: rgba(190, 18, 60, .3); color: var(--ui-danger); }
@@ -789,7 +788,7 @@ body main #tab-dashboard .metric-card.highlight {
   background: var(--ui-accent-dim);
   border-color: rgba(14, 124, 123, .4);
 }
-body main #tab-dashboard .metric-icon { background: var(--ui-accent-dim); color: var(--ui-accent); }
+body main #tab-dashboard .metric-icon { display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:9px;background:var(--ui-accent-dim);color:var(--ui-accent);font-size:19px; }
 body main #tab-dashboard .distribution { border-bottom-color: var(--ui-line); color: var(--ui-ink-2); }
 
 /* 项目卡 */
@@ -919,4 +918,121 @@ body dialog header button:hover,
 }
 @media (prefers-reduced-motion: no-preference) {
   body aside .nav-group > button.active { animation: ui-breathe 3.6s ease-in-out infinite; }
+}
+
+/* Complete the ontology light theme and keep controls within their own panels. */
+body main #status:not(:empty){padding:0;border:0;background:transparent;box-shadow:none}
+body main #status.error{background:transparent}
+body main .ontology-model .om-version-context{flex-wrap:wrap;background:var(--ui-surface-2);border-color:var(--ui-line);color:var(--ui-ink-2)}
+body main .ontology-model .om-version-context-current{color:var(--ui-ok)}
+body main .ontology-model .om-version-context-viewed{color:var(--ui-accent)}
+body main .ontology-model .om-version-context-divider{color:var(--ui-muted)}
+body main .ontology-model .om-topbar{flex-wrap:wrap}
+body main .ontology-model .om-ctx{white-space:normal;overflow-wrap:anywhere}
+body main .ontology-model .om-side{width:206px;flex:0 0 206px;min-width:0}
+body main .ontology-model .om-detail{width:288px;flex:0 0 288px;min-width:0}
+body main .ontology-model .om-side li{color:var(--ui-ink-2);overflow-wrap:anywhere}
+body main .ontology-model .om-side li.sel{color:var(--ui-accent);background:var(--ui-accent-dim);box-shadow:none}
+body main .ontology-model .om-side .om-tree-label{min-width:0;overflow-wrap:anywhere}
+body main .ontology-model .om-discovery-inline{border-color:var(--ui-line);background:var(--ui-surface-2)}
+body main .ontology-model .om-discovery-inline b,body main .ontology-model .om-discovery-guide.is-generating h4{color:var(--ui-accent)}
+body main .ontology-model .om-discovery-inline p,body main .ontology-model .om-discovery-guide p{color:var(--ui-ink-2)}
+body main .ontology-model .om-side .om-btn{width:100%;max-width:100%;white-space:normal;overflow-wrap:anywhere;line-height:1.6;padding:8px 10px}
+body main .ontology-model .om-btn.primary,body .ontology-model .om-history-actions .om-btn.primary{background:var(--ui-accent-strong);color:var(--ui-surface);border-color:var(--ui-accent-strong);box-shadow:none}
+body main .ontology-model .om-btn:disabled{background:var(--ui-surface-2);border-color:var(--ui-line);color:var(--ui-muted);opacity:1;box-shadow:none}
+body main .ontology-model :is(.om-detail-name,.om-detail-row,.om-detail-desc,.om-detail-line,.om-detail-row-label){color:var(--ui-ink-2)}
+body main .ontology-model :is(.om-detail-title,.om-detail-note,.om-detail-iri,.om-detail-empty,.om-new-hint,.om-new-help){color:var(--ui-muted);overflow-wrap:anywhere}
+body main .ontology-model .om-detail-sec,body main .ontology-model .om-detail-head{border-color:var(--ui-line)}
+body main .ontology-model .om-new-term{min-width:0}
+body main .ontology-model .om-new-term :is(input,select,textarea){min-width:0;max-width:100%}
+body main .ontology-model .om-ab-counts{gap:6px}
+body main .ontology-model .om-ab-chip{border-color:var(--ui-line)}
+body main .ontology-model .om-ab-chip b,body main .ontology-model .om-ab-chip i{color:inherit}
+body main .ontology-model .om-ab-actions{min-width:0;max-width:100%;flex:1 1 340px;justify-content:flex-end}
+body main .ontology-model .om-pub-note{min-width:0;flex:1 1 180px;max-width:100%;background:var(--ui-surface);color:var(--ui-ink);border-color:var(--ui-line)}
+body main .ontology-model .om-canvas-stats{white-space:normal}
+body main .ontology-model .om-history-item{background:var(--ui-surface);border-color:var(--ui-line)}
+body main .ontology-model .om-history-item :is(b,strong){color:var(--ui-ink)}
+body main .ontology-model .om-history-item :is(p,small){color:var(--ui-muted)}
+body main #tab-dashboard .metric-card{text-align:left;padding:18px 20px}
+body main #tab-dashboard .metric-value-row{justify-content:flex-start}
+body main #tab-dashboard .metric-card strong{font-size:30px;color:var(--ui-ink)}
+body main #tab-dashboard .metric-card.highlight{background:var(--ui-surface);border-color:var(--ui-line)}
+body main .ingest-results-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin:16px 0;padding:16px 20px;background:var(--ui-surface);border:1px solid var(--ui-line);border-radius:var(--ui-radius)}
+@media(max-width:1200px){
+  body main .ontology-model .om-body{display:grid;grid-template-columns:180px minmax(0,1fr);max-height:none}
+  body main .ontology-model .om-side{width:auto;max-height:520px}
+  body main .ontology-model .om-canvas-host{min-height:480px}
+  body main .ontology-model .om-detail{grid-column:1/-1;width:auto;border-left:0;border-top:1px solid var(--ui-line);max-height:420px}
+}
+@media(max-width:760px){
+  body main .ontology-model .om-body{grid-template-columns:minmax(0,1fr)}
+  body main .ontology-model .om-side{width:auto;max-height:240px;border-right:0;border-bottom:1px solid var(--ui-line)}
+  body main .ontology-model .om-canvas-host{min-height:480px}
+  body main .ontology-model .om-canvas-bar{left:8px;right:8px;bottom:8px;padding:8px;gap:6px}
+  body main .ontology-model .om-canvas-bar button{padding:6px 8px}
+  body main .ontology-model .om-ab-actions{justify-content:flex-start}
+  body main #tab-dashboard .dashboard-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+body main .ontology-model .om-new-term .om-detail-title{color:var(--ui-accent)}
+body main .ontology-model .om-new-field-label{color:var(--ui-muted)}
+body main .ontology-model .om-new-input::placeholder,body main .ontology-model .om-pub-note::placeholder{color:var(--ui-muted)}
+body main .ontology-model .om-pub-note:focus,body main .ontology-model .om-new-input:focus{border-color:var(--ui-accent);box-shadow:var(--ui-glow)}
+body main .ontology-model .om-detail-actions{flex-wrap:wrap}
+body main .ontology-model .om-knowledge-context{background:var(--ui-surface-2);border-color:var(--ui-line);color:var(--ui-ink-2)}
+body main .ontology-model .om-history-pub-note b{color:var(--ui-ok)}
+
+/* Scope is one local, collapsible Metadata editor, not a row of independent filters. */
+body main #scope{position:relative;display:block;padding:12px 16px;min-width:0}
+body main #scope>#cb-details{display:block;margin:0;padding:0;border:0;background:transparent;min-width:0}
+body main #scope>#cb-details[open]{position:static;inset:auto;width:auto;max-width:none;padding:0;border:0;background:transparent;box-shadow:none;z-index:auto}
+body main #scope>#cb-details>summary{display:flex;align-items:center;gap:12px;min-height:38px;padding-right:220px;color:var(--ui-ink);cursor:pointer;list-style:none}
+body main #scope>#cb-details>summary::before{content:'›';font-size:20px;line-height:1;color:var(--ui-accent)}
+body main #scope>#cb-details[open]>summary::before{transform:rotate(90deg)}
+body main #scope>#cb-details>summary::-webkit-details-marker{display:none}
+body main #scope #scope-chip{font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ui-muted)}
+body main #scope .scope-actions{position:absolute;right:16px;top:12px;display:flex;gap:8px;align-items:center}
+body main #scope .cb-body{max-height:none;overflow:visible;padding-top:4px}
+body main #scope .scope-section{padding:16px 0;border-top:1px solid var(--ui-line)}
+body main #scope .scope-section:last-child{padding-bottom:0}
+body main #scope .scope-section h3{font-size:13px;margin:0 0 10px;color:var(--ui-ink)}
+body main #scope .scope-section>p{margin:0 0 12px;font-size:12px}
+body main #scope .scope-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+body main #scope .scope-fields label{display:grid;gap:6px;min-width:0;margin:0}
+body main #scope .scope-fields :is(input,select){width:100%;min-width:0;margin:0;font-size:13px}
+body main #scope .scope-types{grid-template-columns:repeat(2,minmax(0,1fr));max-width:760px}
+body main #scope .cb-row{flex-wrap:wrap;gap:8px}
+body main #scope .cb-field{flex:1 1 220px;max-width:none}
+body main #scope .cb-op{max-width:130px}
+body main #scope .metadata-discovery{grid-template-columns:repeat(2,minmax(0,1fr));max-width:760px;border-top:0;padding-top:0}
+body main #scope .metadata-discovery select{width:100%;margin-top:6px}
+body main #scope .cb-advanced{margin-top:16px}
+body main #scope .cb-advanced[open]{position:static;width:auto;box-shadow:none;border:1px solid var(--ui-line);background:var(--ui-surface-2);padding:12px;border-radius:8px}
+body main #scope .cb-advanced .check{display:flex;align-items:center;gap:8px;margin:12px 0}
+body main #scope .cb-advanced textarea{width:100%;margin-top:8px}
+body main #scope .cb-empty{padding:0 0 10px}
+/* Path tracing lives beside the inspected facts, with a toolbar entry. */
+body main .search-graph-workspace{position:relative}
+body main .inspector-rail .graph-path-tools{margin:0;padding:14px;border:0;border-bottom:1px solid var(--ui-line);border-radius:0;background:var(--ui-surface);max-height:none;overflow:visible}
+body main .inspector-rail .graph-path-tools>summary{font-size:13px;color:var(--ui-ink)}
+body main .graph-path-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+body main .graph-path-controls label{min-width:0;font-size:12px}
+body main .graph-path-controls label:nth-child(-n+2){grid-column:1/-1}
+body main .graph-path-controls select{font-size:12px;padding:7px 9px}
+body main #graph-path-result{display:block;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+body main .graph-path-chain{list-style:none;padding:0;margin:12px 0;display:grid;gap:4px}
+body main .graph-path-chain li{min-width:0}
+body main .graph-path-chain button{text-align:left;width:100%;font-size:12px}
+body main .graph-path-chain .graph-path-edge{padding-left:14px;border-left:2px solid var(--ui-line);margin-left:8px}
+body main .graph-path-chain .graph-path-edge button{border:0;color:var(--ui-accent);background:var(--ui-surface-2)}
+body main #graph-path-toggle[aria-expanded=true]{color:var(--ui-accent);border-color:var(--ui-accent);background:var(--ui-accent-dim)}
+@media(max-width:1100px) and (min-width:701px){
+  body main #tab-search .search-graph-workspace .inspector-rail.is-path-open{display:block;position:absolute;top:0;right:0;bottom:auto;width:min(340px,100%);max-height:100%;z-index:10;box-shadow:var(--ui-shadow-lift)}
+}
+@media(max-width:700px){
+  body main #scope>#cb-details>summary{padding-right:0;flex-wrap:wrap;gap:8px}
+  body main #scope #scope-chip{flex-basis:100%;padding-left:18px}
+  body main #scope .scope-actions{position:static;justify-content:flex-end;margin-top:10px}
+  body main #scope :is(.scope-fields,.scope-types,.metadata-discovery){grid-template-columns:minmax(0,1fr)}
+  body main #tab-search .search-graph-workspace .inspector-rail.is-path-open{display:block;position:static;width:100%;max-height:none}
 }

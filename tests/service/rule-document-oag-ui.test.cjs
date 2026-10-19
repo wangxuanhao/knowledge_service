@@ -120,8 +120,10 @@ test('U citations remain offered after finalization and history preserves only a
 
 test('changed QA assets and accessible temporal controls have current cache versions',()=>{
   const html=fs.readFileSync(path.join(web,'index.html'),'utf8');
-  assert.ok(html.includes('/assets/workbench.js?v=ontology-version-1'));
-  for(const asset of ['workbench.css','provenance-drawer.js'])assert.ok(html.includes('/assets/'+asset+'?v=rule-oag-2'));
+  assert.ok(html.includes('/assets/workbench.js?v=source-scope-document-qa-20261016'));
+  assert.ok(html.includes('/assets/workbench.css?v=rule-oag-2'));
+  assert.ok(html.includes('/assets/qa-presentation.js?v=source-scope-document-qa-20261016'));
+  for(const asset of ['provenance-drawer.js','qa-page.css'])assert.ok(html.includes('/assets/'+asset+'?v=qa-readability-20261016'));
   assert.match(html,/id="qa-include-references"[^>]*checked/);
   assert.match(html,/id="qa-as-of"[^>]*type="datetime-local"/);
 });

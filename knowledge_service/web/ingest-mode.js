@@ -71,7 +71,9 @@
     splitList,describe,dimensionValues,
     readQueryScope(){
       const platforms=splitList(field('query-platforms')?.value);
-      return platforms.length?{applicability:{platforms,businesses:[],audiences:[]}}:{};
+      const businesses=splitList(field('query-businesses')?.value);
+      const audiences=splitList(field('query-audiences')?.value);
+      return platforms.length||businesses.length||audiences.length?{applicability:{platforms,businesses,audiences}}:{};
     },
   };
 

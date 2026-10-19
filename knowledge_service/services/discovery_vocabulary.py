@@ -183,9 +183,38 @@ def validate_generated_term_kinds(turtle: str, *, changed_iris=None) -> Graph:
             if not is_changed(property_node):
                 continue
             for target in sorted(graph.objects(property_node, predicate), key=str):
-                if not _generated_class_target(graph, target):
-                    _raise_generated_conflict(
-                        reason, property=str(property_node), target=str(target))
+                targets = [target]
+                heads = list(graph.objects(target, OWL.unionOf)) if isinstance(target, BNode) else []
+                if heads:
+                    # Multi-value governed endpoint constraints are encoded
+                    # as an OWL union; validate the members, not its list node.
+                    valid_shape = (len(heads) == 1
+                                   and set(graph.predicates(target)) <= {RDF.type, OWL.unionOf}
+                                   and set(graph.objects(target, RDF.type)) <= {OWL.Class, RDFS.Class})
+                    targets = []
+                    cell = heads[0]
+                    visited = set()
+                    while valid_shape and cell != RDF.nil:
+                        if not isinstance(cell, BNode) or cell in visited:
+                            valid_shape = False
+                            break
+                        visited.add(cell)
+                        first = list(graph.objects(cell, RDF.first))
+                        rest = list(graph.objects(cell, RDF.rest))
+                        valid_shape = (len(first) == len(rest) == 1
+                                       and set(graph.predicates(cell)) <= {RDF.first, RDF.rest, RDF.type}
+                                       and set(graph.objects(cell, RDF.type)) <= {RDF.List})
+                        if valid_shape:
+                            targets.append(first[0])
+                            cell = rest[0]
+                    if not valid_shape:
+                        targets = []
+                    if not targets:
+                        _raise_generated_conflict(reason, property=str(property_node), target=str(target))
+                for member in targets:
+                    if not _generated_class_target(graph, member):
+                        _raise_generated_conflict(
+                            reason, property=str(property_node), target=str(member))
 
     for property_node in sorted(
             graph.subjects(RDF.type, OWL.DatatypeProperty), key=str):

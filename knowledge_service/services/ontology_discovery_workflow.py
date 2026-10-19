@@ -636,7 +636,7 @@ class OntologyDiscoveryWorkflow:
                     }
                     proposed, skipped = _materialize_candidates(
                         p, draft, parent_id,
-                        run.get('candidate_outcomes') or [])
+                        run.get('candidate_outcomes') or [], repository=service.data)
                     proposed = _reuse_materialized_records(
                         proposed, existing_records, previous_ids)
                     accepted, skipped, validation = _validated_materialization(
@@ -675,7 +675,7 @@ class OntologyDiscoveryWorkflow:
             raise stale_error
         return result
 
-    def overview(self, p:str):
+    def overview(self, p:str, *, compact=False):
         service = self.service
         governed = self.governed
         service.data.get_project(p)
@@ -691,12 +691,12 @@ class OntologyDiscoveryWorkflow:
         latest_run=service.data.latest_discovery_run(p)
         states,status_counts=_candidate_lifecycle(service.data,p,candidates,drafts,records)
         enriched_drafts=[]
-        for draft in drafts:
+        for draft in (() if compact else drafts):
             try:summary=draft.get('summary') or Ontology(draft.get('turtle','')).summary()
             except (ValueError,TypeError):summary={'classes':[],'relations':[],'attributes':[]}
             enriched_drafts.append({**draft,'schema_summary':summary})
         return {**_summary(candidates),
-            'drafts':enriched_drafts,
+            **({} if compact else {'drafts':enriched_drafts}),
             'quality_warnings':_quality_warnings(candidates),
             'relation_constraint_policy':'open_no_domain_range',
             'published':bool(ontologies),

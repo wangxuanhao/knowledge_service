@@ -158,7 +158,8 @@ class DraftReviewPublishMixin:
             proposed, skipped = _materialize_candidates(
                 project_id, materialization_source,
                 '__PUBLISHED_ONTOLOGY_ID__',
-                [*(run.get('candidate_outcomes') or []), *required_outcomes])
+                [*(run.get('candidate_outcomes') or []), *required_outcomes],
+                repository=self.repository)
             previous_ids = set(run.get('materialized_candidate_ids') or [])
             existing_records = self.repository.current_records(
                 project_id, vectors='none',

@@ -487,9 +487,16 @@ class OntologyDrafts(
         return latest
 
     # --------------------------------------------------------------- lifecycle
-    def get(self, project_id, draft_id):
+    def get(self, project_id, draft_id, *, canvas=False):
         """Return a draft with its current operations, decisions and preview."""
-        return self._preview(project_id, self.store.get(project_id, draft_id))
+        result = self._preview(project_id, self.store.get(project_id, draft_id))
+        if canvas:
+            result = {key: value for key, value in result.items()
+                      if key not in {'source_context', 'draft', 'turtle'}}
+            result['operations'] = [
+                {key: value for key, value in operation.items() if key != 'evidence'}
+                for operation in result['operations']]
+        return result
 
     def list(self, project_id, status=None):
         """List lightweight draft records; previews remain an explicit read."""

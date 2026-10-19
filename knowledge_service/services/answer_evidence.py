@@ -17,7 +17,7 @@ class AnswerEvidence:
         retrieval = trace.get('retrieval') or {}
         purpose = {key: retrieval.get(key, row.get(key)) for key in (
             'validity_status', 'validity_basis', 'answer_eligible', 'usage', 'exclusion_reasons',
-            'source_eligibility')}
+            'source_eligibility', 'document_quote_allowed')}
         nodes = {node.get('ref'): node for node in trace.get('nodes', ())
                  if isinstance(node, dict)}
         occurrence_edges = sorted((

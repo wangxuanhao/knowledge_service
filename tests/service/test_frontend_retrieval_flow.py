@@ -975,6 +975,7 @@ def test_graph_scope_filters_survive_expand_and_explicit_full_redraw(workbench):
     bodies = []
     page.on('request', lambda request: bodies.append(request.post_data_json)
             if request.url.endswith('/subgraph') else None)
+    page.locator('#cb-details').evaluate('(element) => {element.open = true;}')
     page.select_option('#type-scope', 'Thing')
     page.select_option('#predicate-scope', 'mentions')
     with page.expect_response(lambda response: response.url.endswith('/metadata/facets')):

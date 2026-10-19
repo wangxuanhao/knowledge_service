@@ -98,9 +98,17 @@ class MilvusProjectionAdapter:
         selected = selected or getattr(store, 'collection_name', 'active')
         key = (project_id, str(selected))
         with self._lock:
+            if (self._fence_is_current is not None
+                    and not self._fence_is_current(project_id, seq, fence)):
+                return False
             position = self._positions.get(key)
             if position is not None and seq <= position[0]:
-                return False
+                # A failed batch is retried from its unacknowledged start,
+                # possibly under a new lease. The local prefix was recorded
+                # only after its write, marker and fence check succeeded.
+                # Skip it without rewriting newer state, but only when the
+                # authoritative claim verifies this retry's fence and range.
+                return self._fence_is_current is not None
             operation = event.get('operation')
             payload = dict(event.get('payload') or {})
             if operation == 'upsert':
@@ -114,6 +122,10 @@ class MilvusProjectionAdapter:
                             raise RuntimeError('embedding output count mismatch')
                         payload['embedding'] = vectors[0]
                         payload['embedding_model'] = self._encoder.identity
+                        if (self._fence_is_current is not None
+                                and not self._fence_is_current(
+                                    project_id, seq, fence)):
+                            return False
                     payload['project_id'] = project_id
                     try:
                         store.upsert([payload], flush=True, destination=selected,
@@ -171,8 +183,10 @@ class MilvusProjectionAdapter:
         return destination
 
     def reset_rebuild(self, project_id, destination, build_id, fence=None):
-        self._store().recreate_collection(destination=destination)
-        self._expected.pop((project_id, destination), None)
+        with self._lock:
+            self._store().recreate_collection(destination=destination)
+            self._expected.pop((project_id, destination), None)
+            self._positions.pop((project_id, str(destination)), None)
 
     def _prepare_records(self, project_id, records, projection_seq, fence,
                          heartbeat=None):

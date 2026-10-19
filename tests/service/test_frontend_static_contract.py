@@ -209,7 +209,7 @@ def test_document_upload_workspace_contract():
                    '@media(max-width:850px)', ':focus-visible'):
         assert marker in css, marker
     assert '/assets/workbench.css?v=rule-oag-2' in html
-    assert '/assets/ingest-mode.js?v=applicability-2' in html
+    assert '/assets/ingest-mode.js?v=unified-scope-20261016-2' in html
     assert 'max_batch_items' in js and 'max_batch_bytes' in js
     assert re.search(r'/assets/workbench\.js\?v=[\w.-]+', html)
 
@@ -291,7 +291,7 @@ def test_graph_layout_drag_preserves_pan_zoom_and_details():
     assert "getZr().on('dblclick'" in workspace
     assert 'bindPanAffordances' in workspace
     assert "if(!event.target)pan=" in gestures
-    assert "type:'graphRoam'" in gestures
+    assert '._controller.trigger(type,payload)' in gestures
     html = read('index.html')
     for asset in ('graph-palette.js', 'graph-interaction.js', 'graph-workbench.js'):
         assert html.index(asset) < re.search(r'workspace\.js\?v=', html).start()
@@ -510,12 +510,13 @@ def test_ontology_model_shows_discovery_guide_when_not_yet_published():
     """
     model = read('ontology-model.js')
     # 读开放发现概览，拿到「是否已发布本体 + 待纳入候选数」
-    assert "'/ontology-discovery'" in model
+    assert "'/ontology-discovery?compact=true'" in model
     # 没发布本体时走引导态，不再误报「读取失败」
     assert 'S.discovery.published === false' in model
     # 有候选时给生成本体入口；这一步默认秒级、不调模型
     assert "'/ontology-discovery/drafts'" in model
-    assert '生成本体（约 1 秒）' in model
+    assert '生成本体</button>' in model
+    assert '约 1 秒' not in model
     # 「模型推断父子层级」是可选的慢入口（默认不阻塞拿到本体）
     assert 'om-infer-hierarchy' in model
     # 这一步做什么 / 不做什么都要写清（用户核心要求：新功能一句话说明它做什么、不做什么）

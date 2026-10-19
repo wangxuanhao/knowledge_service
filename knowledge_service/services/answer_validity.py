@@ -7,8 +7,11 @@ from . import structure_pending
 
 
 def freeze_request(request):
+    from .qa_policy import purpose
     now = utc_now()
-    return {**request, '_explicit_known_at': request.get('_explicit_known_at', request.get('known_at') is not None),
+    return {**request, 'answer_purpose': purpose(request),
+            '_explicit_valid_at': request.get('_explicit_valid_at', request.get('valid_at') is not None),
+            '_explicit_known_at': request.get('_explicit_known_at', request.get('known_at') is not None),
             '_qa_current_snapshot': not request.get('_explicit_known_at', request.get('known_at') is not None),
             'valid_at': normalize_time(request.get('valid_at')) or now,
             'known_at': normalize_time(request.get('known_at')) or now}
@@ -311,10 +314,19 @@ def qualified_text(context):
     rows = [row for row in context.get('uncertain_references', []) if row.get('usage') == 'qualified_quote']
     if not rows:
         return ''
+    grouped = {}
+    for row in rows:
+        platform = row.get('query_platform') or row.get('source_scope') or '见文档适用范围'
+        identity = (row['text'], platform)
+        grouped.setdefault(identity, []).append(row['citation'])
+    # Identical copies remain distinct frozen sources but need not duplicate
+    # the entire quotation in the reader's answer.
     return '\n\n文档表述（有效性待核对，不作为已确认有效规则依据）\n' + '\n\n'.join(
-        f"[{row['citation']}] 文档写明：{quote_text(row['text'])}（平台：{row.get('query_platform') or row.get('source_scope') or '见文档适用范围'}）" for row in rows)
+        ' '.join(f'[{citation}]' for citation in citations)
+        + f' 文档写明：\n{quote_text(text)}\n\n适用平台：{platform}'
+        for (text, platform), citations in grouped.items())
 
 
 def quote_text(text):
     """Keep citation-like tokens inside source text distinct from server citations."""
-    return re.sub(r'\[([EURF][1-9][0-9]*)\]', r'［\1］', text)
+    return re.sub(r'\[([A-Z][0-9]+)\]', r'［\1］', text)

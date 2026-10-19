@@ -1,8 +1,16 @@
 /* Interactive layout and local path exploration; never changes stored knowledge. */
 (() => {
   const session=GraphInteraction.createSession();
-  let state=null,path=null,host=null,scopeStamp='',generation=0;
+  let state=null,path=null,host=null,toggle=null,scopeStamp='',generation=0,closeBound=false;
   const $=id=>document.getElementById(id);
+  function roam(chart,type,payload){
+    const series=chart.getModel().getSeriesByIndex(0);
+    // ECharts graphRoam is registered with update:'none': dispatching it alone
+    // changes the model but leaves the rendered group still. Reuse the bundled
+    // GraphView controller so transforms, symbol scales, edges and labels follow
+    // the same path as a native wheel/pan, without rebuilding the graph data.
+    chart.getViewOfSeriesModel(series)._controller.trigger(type,payload);
+  }
   function capture(){
     if(!state)return;
     const data=state.chart.getModel()?.getSeriesByIndex(0)?.getData();
@@ -35,7 +43,7 @@
   }
   function preserveTransform(nodes,chart){
     const transform=chart.getModel().getSeriesByIndex(0).coordinateSystem.transform;
-    const zoom=chart.getOption().series[0].zoom||1;
+    const zoom=chart.getModel().getSeriesByIndex(0).get('zoom')||1;
     let minX=Math.min(...nodes.map(n=>n.x)),maxX=Math.max(...nodes.map(n=>n.x));
     let minY=Math.min(...nodes.map(n=>n.y)),maxY=Math.max(...nodes.map(n=>n.y));
     if(minX===maxX){minX--;maxX++;}if(minY===maxY){minY--;maxY++;}
@@ -48,7 +56,7 @@
   }
   function commitDrag(){
     capture();if(!state)return;
-    const option=state.chart.getOption().series[0];
+    const option=state.chart.getModel().getSeriesByIndex(0).option;
     const nodes=option.data.map(node=>{
       const point=session.position(state.project,node.id);
       return point?{...node,x:point[0],y:point[1]}:node;
@@ -58,7 +66,7 @@
   function fit(chart){
     capture();
     const data=chart.getModel()?.getSeriesByIndex(0)?.getData();if(!data)return;
-    const current=chart.getOption().series[0];
+    const current=chart.getModel().getSeriesByIndex(0).option;
     // Keep raw coordinates and disable simulation; ECharts fits their bounding box.
     const nodes=current.data.map((item,i)=>{
       const point=data.getItemLayout(i);return point?{...item,x:point[0],y:point[1]}:item;
@@ -68,6 +76,7 @@
   }
   function highlight(){
     if(!state)return;
+    if(!path&&!state.highlighted)return;
     capture();
     const selected=new Set(path?.nodes||[]),edges=new Set(path?.steps.map(s=>s.edge.id)||[]);
     const data=state.styles.data.map(node=>{
@@ -78,6 +87,7 @@
     const links=state.styles.links.map(edge=>({...edge,lineStyle:{...edge.lineStyle,
       ...(path?{opacity:edges.has(edge.id)?1:.12,...(edges.has(edge.id)?{color:'#167d79',width:3}:{})}:{})}}));
     state.chart.setOption({series:[{data,links,emphasis:{focus:path?'none':'adjacency'}}]});
+    state.highlighted=Boolean(path);
   }
   function clearPath(message='已清除路径高亮。'){
     path=null;highlight();if($('graph-path-result'))$('graph-path-result').textContent=message;
@@ -93,32 +103,53 @@
     highlight();const result=$('graph-path-result');result.replaceChildren();
     if(!path){result.textContent='当前已加载图谱及所选方向、跳数内未找到路径；不代表全库没有关联。';return;}
     const summary=document.createElement('p');summary.textContent=`当前图内最短路径 · ${path.steps.length} 跳；关系链不代表因果或规则证明。`;result.append(summary);
-    result.append(button(name(from),()=>state.inspect(state.graph.nodes.find(n=>n.id===from))));
+    const chain=document.createElement('ol');chain.className='graph-path-chain';result.append(chain);
+    function stepRow(control,kind){const row=document.createElement('li');row.className='graph-path-'+kind;row.append(control);chain.append(row);}
+    stepRow(button(name(from),()=>state.inspect(state.graph.nodes.find(n=>n.id===from))),'node');
     for(const step of path.steps){
       const label=step.edge.type_label||step.edge.text||step.edge.type||'关系';
       const edge=button(`${step.reverse?'←':'→'} ${label}${step.reverse?'（逆向经过）':''}`,()=>state.inspect(step.edge));
-      edge.dataset.pathEdge=step.edge.id;edge.title='查看这条关系的原文、版本和有效期';result.append(edge);
-      result.append(button(name(step.to),()=>state.inspect(state.graph.nodes.find(n=>n.id===step.to))));
+      edge.dataset.pathEdge=step.edge.id;edge.title='查看这条关系的原文、版本和有效期';stepRow(edge,'edge');
+      stepRow(button(name(step.to),()=>state.inspect(state.graph.nodes.find(n=>n.id===step.to))),'node');
     }
   }
+  function syncTools(){
+    if(!host)return;
+    toggle?.setAttribute('aria-expanded',String(host.open));
+    host.closest('.inspector-rail')?.classList.toggle('is-path-open',host.open);
+  }
+  function openTools(){host.open=true;syncTools();host.scrollIntoView({block:'nearest'});}
   function ensureTools(){
     if(host?.isConnected)return;
     host=document.createElement('details');host.id='graph-path-tools';host.className='graph-path-tools';
     host.innerHTML='<summary>路径循迹 · 当前已加载图谱</summary><p class="subtle">选择两个实体寻找关联链；只搜索当前画布显示的事实，可点路径上的关系查看证据。</p><div class="graph-path-controls"><label>起点<select id="graph-path-from" aria-label="路径起点"></select></label><label>终点<select id="graph-path-to" aria-label="路径终点"></select></label><label>方向<select id="graph-path-direction"><option value="directed">按关系箭头</option><option value="any">忽略方向</option></select></label><label>最大跳数<select id="graph-path-hops"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option><option>10</option></select></label></div><div class="graph-path-actions"></div><div id="graph-path-result" role="status" aria-live="polite"></div>';
     host.querySelector('.graph-path-actions').append(button('寻找路径',search),button('清除路径',()=>clearPath()));
     for(const id of ['graph-path-from','graph-path-to','graph-path-direction','graph-path-hops'])host.querySelector('#'+id).onchange=()=>clearPath('条件已改变，请重新寻找路径。');
-    $('graph-canvas').after(host);
+    const rail=document.querySelector('.search-graph-workspace .inspector-rail');
+    rail.prepend(host);
+    host.addEventListener('toggle',syncTools);
+    toggle=button('路径循迹',()=>{host.open=!host.open;syncTools();if(host.open)host.scrollIntoView({block:'nearest'});});
+    toggle.id='graph-path-toggle';toggle.setAttribute('aria-controls','graph-path-tools');toggle.setAttribute('aria-expanded','false');
+    document.querySelector('.graph-toolbar').append(toggle);
+    const close=$('detail-drawer-close');
+    if(close&&!closeBound){close.addEventListener('click',()=>{if(host){host.open=false;syncTools();}});closeBound=true;}
     const relayout=button('重新布局',()=>{
       if(!state)return;session.clear();path=null;
       const nodes=positions(state.graph,state.project,true);
-      const current=state.chart.getOption().series[0];
-      state.chart.setOption({series:[{data:current.data.map(n=>({...n,...nodes.find(p=>p.id===n.id)})),center:null,zoom:1}]});
-      fit(state.chart);clearPath('已重新布局，知识内容未修改。');
+      const byId=new Map(nodes.map(n=>[n.id,n]));
+      const data=state.styles.data.map(n=>({...n,...byId.get(n.id)}));
+      state.chart.setOption({series:[{data,links:state.styles.links,
+        ...bounds(data,state.chart.getWidth(),state.chart.getHeight()),center:null,zoom:1,
+        emphasis:{focus:'adjacency'}}]});
+      state.highlighted=false;capture();clearPath('已重新布局，知识内容未修改。');
     });
     relayout.id='graph-relayout';relayout.title='重新排列节点；只改变本次浏览布局';$('graph-reset-view').after(relayout);
   }
   function mount(chart,graph,project,inspect,scope){
-    ensureTools();state={chart,graph,project,inspect,scope:JSON.stringify(scope),styles:chart.getOption().series[0]};generation++;
+    chart.__maintenanceResetGesture?.();
+    const option=chart.getModel().getSeriesByIndex(0).option;
+    ensureTools();state={chart,graph,project,inspect,scope:JSON.stringify(scope),
+      styles:{data:option.data,links:option.links},highlighted:false};generation++;
     const stamp=JSON.stringify([project,scope,
       graph.nodes.map(n=>[n.id,n.version_id,n.version,n.type,n.text]),
       graph.edges.map(e=>[e.id,e.version_id,e.version,e.subject_id,e.object_id,e.type,e.text])]);
@@ -140,27 +171,37 @@
       chart.__maintenanceGestures=true;
       const zr=chart.getZr();
       let pan=null;
+      const queued=GraphInteraction.createPanQueue({apply:(dx,dy)=>{
+        if(state?.chart===chart)roam(chart,'pan',{dx,dy});
+      }});
+      chart.__maintenanceResetGesture=()=>{queued.clear();pan=null;session.release();};
       zr.on('mousedown',event=>{
+        if(state?.chart!==chart)return;
+        queued.clear();pan=null;
         session.press(event.offsetX,event.offsetY);
         if(!event.target)pan=[event.offsetX,event.offsetY];
       });
       zr.on('mousemove',event=>{
         session.move(event.offsetX,event.offsetY);
         if(pan){
-          chart.dispatchAction({type:'graphRoam',seriesIndex:0,dx:event.offsetX-pan[0],dy:event.offsetY-pan[1]});
+          queued.move(event.offsetX-pan[0],event.offsetY-pan[1]);
           pan=[event.offsetX,event.offsetY];
         }
       });
-      zr.on('mouseup',()=>{pan=null;if(session.release())commitDrag();});
-      zr.on('globalout',()=>{pan=null;if(session.release())commitDrag();});
+      const release=()=>{const panning=Boolean(pan);if(panning)queued.flush();pan=null;
+        if(session.release()&&!panning&&state?.chart===chart)commitDrag();};
+      zr.on('mouseup',release);
+      zr.on('globalout',release);
       if(typeof ResizeObserver!=='undefined'){
-        let size='';
+        const element=chart.getDom();
+        let size=element.clientWidth+':'+element.clientHeight;
         chart.__maintenanceResizeObserver=new ResizeObserver(()=>{
           if(state?.chart!==chart)return;
           const element=chart.getDom(),next=element.clientWidth+':'+element.clientHeight;
           if(next===size)return;size=next;
-          capture();chart.resize();
-          const data=chart.getOption().series?.[0]?.data||[];
+          capture();
+          if(chart.getWidth()!==element.clientWidth||chart.getHeight()!==element.clientHeight)chart.resize();
+          const data=chart.getModel().getSeriesByIndex(0)?.option.data||[];
           if(data.length)chart.setOption({series:[bounds(data,chart.getWidth(),chart.getHeight())]});
         });
         chart.__maintenanceResizeObserver.observe(chart.getDom());
@@ -174,11 +215,18 @@
     if(!state||!actions||row.kind!=='entity'||!state.graph.nodes.some(n=>n.id===row.id))return;
     for(const [id,label] of [['graph-path-from','设为路径起点'],['graph-path-to','设为路径终点']]){
       actions.append(button(label,()=>{
-        host.open=true;$(id).value=row.id;clearPath('已设置'+(id.endsWith('from')?'起点':'终点')+'，选择另一端后寻找路径。');
-        host.scrollIntoView({block:'nearest'});
+        openTools();$(id).value=row.id;clearPath('已设置'+(id.endsWith('from')?'起点':'终点')+'，选择另一端后寻找路径。');
       }));
     }
   }
-  function clear(){generation++;state=null;path=null;scopeStamp='';session.clear();if(host){host.remove();host=null;}$('graph-relayout')?.remove();}
-  window.GraphWorkbench={positions,viewport,bounds,mount,fit,selection,canClick:()=>session.canClick(),clear};
+  function zoom(chart,factor){
+    const current=Number(chart.getModel().getSeriesByIndex(0).get('zoom'))||1;
+    if(!Number.isFinite(factor)||factor<=0)return current;
+    const next=Math.min(4,Math.max(.2,current*factor));
+    if(next!==current)roam(chart,'zoom',{scale:next/current,
+      originX:chart.getWidth()/2,originY:chart.getHeight()/2});
+    return next;
+  }
+  function clear(){generation++;state?.chart.__maintenanceResetGesture?.();state=null;path=null;scopeStamp='';session.clear();if(host){host.open=false;syncTools();host.remove();host=null;}toggle?.remove();toggle=null;$('graph-relayout')?.remove();}
+  window.GraphWorkbench={positions,viewport,bounds,mount,fit,zoom,selection,canClick:()=>session.canClick(),clear};
 })();

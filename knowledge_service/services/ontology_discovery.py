@@ -20,6 +20,7 @@ from ..services.discovery_vocabulary import (
     validate_generated_term_kinds,
 )
 from ..services.ontology_shape import structurally_changed_iris
+from ..services.ontology_operations import _constraint_values, _set_constraint
 from ..core.time import utc_now
 from ..utils.attributes import primitive_datatype
 from ..utils.diagnostics import timed
@@ -77,7 +78,7 @@ def _candidate_outcome_skip(item, outcome):
     }
 
 
-def _materialize_candidates(project_id,draft,ontology_id,candidate_outcomes=()):
+def _materialize_candidates(project_id,draft,ontology_id,candidate_outcomes=(), *, repository=None):
     """把已审核候选转换为可追溯的正式记录，无需再次调用模型。"""
     candidates=draft.get('candidate_snapshot') or []
     excluded=set(draft.get('excluded_candidate_ids') or [])
@@ -137,6 +138,14 @@ def _materialize_candidates(project_id,draft,ontology_id,candidate_outcomes=()):
             'metadata':{'discovery_candidate_id':item.get('id'),'discovery_candidate_ids':[item.get('id')],
                 'discovery_draft_id':draft.get('id'),'confidence':item.get('confidence'),
                 'evidence':item.get('evidence'),'chunk_id':item.get('chunk_id')}})
+    from .source_scope import inherit_source_scope
+    sources = {item['id']: item for item in candidates}
+    cache = {}
+    for record in records:
+        candidate = sources[record['metadata']['discovery_candidate_id']]
+        if (candidate.get('metadata') or {}).get('applicability') is not None:
+            record['metadata']['applicability'] = deepcopy(candidate['metadata']['applicability'])
+        inherit_source_scope(record, candidate, repository, project_id, cache)
     return records,skipped
 
 
@@ -639,9 +648,13 @@ def _induce(project_id,name,candidates,baseline_turtle=None,hierarchy_suggestion
         if not is_object:
             domains=item.get('domain',[]) if isinstance(item.get('domain',[]),list) else [item.get('domain')]
             ranges=item.get('range',[]) if isinstance(item.get('range',[]),list) else [item.get('range')]
-            for value in domains:
-                resolved=class_lookup.get(str(value).lower()) if value else None
-                if resolved:graph.add((uri,RDFS.domain,resolved))
+            resolved_domains={class_lookup[str(value).lower()] for value in domains
+                              if value and str(value).lower() in class_lookup}
+            existing_domains=set(_constraint_values(graph,uri,RDFS.domain))
+            if resolved_domains-existing_domains:
+                # Governed add_domain represents an allowed class set as a
+                # union, so generation must use the same shape for its diff.
+                _set_constraint(graph,uri,RDFS.domain,existing_domains|resolved_domains)
             for value in ranges:
                 if not value:continue
                 resolved=class_lookup.get(str(value).lower())

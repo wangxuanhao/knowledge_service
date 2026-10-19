@@ -14,23 +14,27 @@ function element(tag) {
     addEventListener(key, fn) { this.listeners[key] = fn; },
   };
 }
-function fixture(view = 'graph') {
+function fixture(view = 'graph', initialGraph) {
   const selected = [], commands = [], host = element('host');
+  const frames = new Map(); let frameId = 0;
   const window = { cytoscape: options => {
     const { wheelSensitivity, ...headlessOptions } = options;
     return cytoscape({ ...headlessOptions, container: undefined, headless: true, styleEnabled: false });
   },
-    addEventListener() {}, removeEventListener() {} };
+    addEventListener() {}, removeEventListener() {},
+    requestAnimationFrame(fn) { frames.set(++frameId, fn); return frameId; },
+    cancelAnimationFrame(id) { frames.delete(id); } };
+  const flush = () => { const pending = [...frames.values()]; frames.clear(); pending.forEach(fn => fn()); };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../knowledge_service/web/ontology-model-canvas.js'), 'utf8'), {
     window, document: { createElement: element, createElementNS: (_, tag) => element(tag) }, setTimeout, console,
   });
   const canvas = window.OntologyCanvas;
   canvas.mount(host, { S: {}, select: id => selected.push(id), sendCommand: cmd => commands.push(cmd), status() {} });
-  let graph = { nodes: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }], edges: [{ id: 'ab', source: 'a', target: 'b', kind: 'inherit' }] };
+  let graph = initialGraph || { nodes: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }], edges: [{ id: 'ab', source: 'a', target: 'b', kind: 'inherit' }] };
   const render = () => canvas.render({ graph, view, selected: 'a' });
   render();
   const all = node => [node, ...node.children.flatMap(all)];
-  return { canvas, cy: canvas.__cy(), selected, commands, host, graph, render,
+  return { canvas, cy: canvas.__cy(), selected, commands, host, graph, render, flush, frames,
     button: text => all(host).find(x => x.tag === 'button' && x.textContent === text),
     bands: () => all(host).filter(x => x.tag === 'rect'),
   };
@@ -47,6 +51,18 @@ test('incremental additions and repeated view selection preserve dragged positio
   assert.equal(f.cy.zoom(), 1.3);
   assert.deepEqual({ ...f.cy.pan() }, { x: 22, y: 35 });
   assert.notDeepEqual(f.cy.$id('c').position(), { x: 0, y: 0 });
+});
+
+test('first asynchronous graph load lays out classes after an empty loading render', t => {
+  const f = fixture('graph', { nodes: [], edges: [] });
+  t.after(() => f.canvas.destroy());
+  for (let i = 0; i < 8; i++) f.graph.nodes.push({ id: `class-${i}`, label: `Class ${i}` });
+  f.render();
+  const rows = new Set(f.cy.nodes().map(n => n.position('y')));
+  assert.ok(rows.size > 1, 'initial data must use the full canvas instead of a thin horizontal strip');
+  const before = f.cy.nodes().map(n => ({ ...n.position() }));
+  f.render();
+  assert.deepEqual(f.cy.nodes().map(n => ({ ...n.position() })), before, 'repeated renders preserve the layout');
 });
 
 test('drag cannot select a node or advance the two-click relation workflow', t => {
@@ -94,12 +110,56 @@ test('hierarchy bands track node motion and incremental nodes', t => {
   const f = fixture('hierarchy'); t.after(() => f.canvas.destroy());
   const before = f.bands()[0].attributes.x;
   f.cy.$id('a').position({ x: 500, y: 220 });
+  f.flush();
   assert.notEqual(f.bands()[0].attributes.x, before);
   f.graph.nodes.push({ id: 'c', label: 'C' });
   f.graph.edges.push({ id: 'bc', source: 'b', target: 'c', kind: 'inherit' });
   f.render();
   assert.equal(f.bands().length, 3);
   assert.deepEqual({ ...f.cy.$id('a').position() }, { x: 500, y: 220 });
+});
+
+test('hierarchy gesture bursts update only the moved band once per frame', t => {
+  const graph = { nodes: Array.from({ length: 160 }, (_, i) => ({ id: `n${i}`, label: `N${i}` })), edges: [] };
+  const f = fixture('hierarchy', graph); t.after(() => f.canvas.destroy());
+  let writes = 0, lookups = 0;
+  const all = node => [node, ...node.children.flatMap(all)];
+  for (const el of all(f.host)) {
+    const set = el.setAttribute.bind(el);
+    el.setAttribute = (...args) => { writes++; set(...args); };
+  }
+  const node = f.cy.$id('n0'), get = f.cy.getElementById.bind(f.cy);
+  f.cy.getElementById = (...args) => { lookups++; return get(...args); };
+  const before = f.bands()[0].attributes.x;
+  for (let i = 1; i <= 120; i++) node.position({ x: i + 500, y: i });
+  assert.equal(writes, 0, 'pointer events must not synchronously rewrite SVG');
+  assert.equal(f.frames.size, 1);
+  f.flush();
+  assert.ok(writes <= 10, `one changed band requires bounded writes, got ${writes}`);
+  assert.ok(lookups <= 4, `only band members need querying, got ${lookups}`);
+  assert.notEqual(f.bands()[0].attributes.x, before);
+  writes = 0; lookups = 0;
+  for (let i = 0; i < 120; i++) f.cy.pan({ x: i, y: i });
+  f.flush();
+  assert.equal(lookups, 0, 'viewport changes use cached model geometry');
+  assert.equal(writes, 1, 'all bands move with one SVG transform');
+});
+
+test('destroy cancels pending band updates before mounting another project', () => {
+  const f = fixture('hierarchy');
+  f.cy.$id('a').position({ x: 400, y: 200 });
+  assert.equal(f.frames.size, 1);
+  f.canvas.destroy();
+  assert.equal(f.frames.size, 0);
+  f.flush();
+});
+
+test('hierarchy label size remains readable after group zoom', t => {
+  const f = fixture('hierarchy'); t.after(() => f.canvas.destroy());
+  f.cy.zoom(0.25); f.flush();
+  const all = node => [node, ...node.children.flatMap(all)];
+  const label = all(f.host).find(el => el.attributes.class === 'om-canvas-band-label');
+  assert.equal(parseFloat(label.style.fontSize) * f.cy.zoom(), 8);
 });
 
 test('link confirmation clears a wrapped toolbar', t => {

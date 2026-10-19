@@ -49,6 +49,95 @@ def command(client, project_id, draft, payload):
     return response.json()
 
 
+def test_canvas_read_excludes_audit_payload_and_keeps_structure_and_revision(workbench):
+    client, project_id, ontology = workbench
+    draft = create_draft(client, project_id, ontology,
+                         source_context={'note': 'source provenance ' * 10000})
+    draft = command(client, project_id, draft, {
+        'action': 'create_term', 'target_iri': 'urn:test:New', 'kind': 'class'})
+    path = f"/api/projects/{project_id}/ontology-drafts/{draft['id']}"
+    full = client.get(path).json()
+    response = client.get(path, params={'view': 'canvas'})
+    assert response.status_code == 200, response.text
+    canvas = response.json()
+    assert canvas['ontology'] == full['ontology']
+    assert canvas['revision'] == full['revision']
+    assert canvas['operations'][0]['id'] == full['operations'][0]['id']
+    assert 'source_context' not in canvas
+    assert 'draft' not in canvas and 'turtle' not in canvas
+    assert 'evidence' not in canvas['operations'][0]
+    assert len(response.content) < len(client.get(path).content) / 5
+
+
+def test_compact_discovery_overview_keeps_counts_without_draft_snapshots(workbench):
+    client, project_id, ontology = workbench
+    full = client.get(f'/api/projects/{project_id}/ontology-discovery').json()
+    response = client.get(f'/api/projects/{project_id}/ontology-discovery', params={'compact': True})
+    assert response.status_code == 200, response.text
+    compact = response.json()
+    for key in ('published', 'candidate_count', 'candidate_status_counts', 'latest_run',
+                'unpublished_candidate_count'):
+        assert compact[key] == full[key]
+    assert 'drafts' not in compact
+
+
+def test_parent_discovery_can_repeat_without_duplicate_or_cyclic_edges(workbench, monkeypatch):
+    from knowledge_service.services import hierarchy_suggestion
+    client, project_id, ontology = workbench
+    calls = []
+    def suggest(names, **kwargs):
+        calls.append(kwargs)
+        return {'Root': ['Alt root', 'Child'], 'Child': ['Root']}
+    monkeypatch.setattr(hierarchy_suggestion, 'suggest_hierarchy', suggest)
+    draft = create_draft(client, project_id, ontology)
+    path = f"/api/projects/{project_id}/ontology-drafts/{draft['id']}/discover-parents"
+    first = client.post(path, json={'expected_revision': draft['revision']})
+    assert first.status_code == 200, first.text
+    assert first.json()['added_count'] == 1
+    updated = first.json()['draft']
+    second = client.post(path, json={'expected_revision': updated['revision']})
+    assert second.status_code == 200, second.text
+    assert second.json()['added_count'] == 0
+    assert second.json()['draft']['revision'] == updated['revision']
+    assert len(calls) == 2 and all(c['refresh'] is True for c in calls)
+    summary = second.json()['draft']['ontology']
+    child = next(c for c in summary['classes'] if c['id'].endswith('#Child'))
+    assert set(child['parents']) == {'https://example.test/ns#Root', 'https://example.test/ns#AltRoot'}
+    assert len(second.json()['draft']['operations']) == 1
+    assert client.get(f'/api/projects/{project_id}/ontology').json()['id'] == ontology['id']
+
+
+def test_parent_discovery_failure_is_visible_and_does_not_change_draft(workbench, monkeypatch):
+    from knowledge_service.services import hierarchy_suggestion
+    client, project_id, ontology = workbench
+    def unavailable(*args, **kwargs):
+        raise hierarchy_suggestion.HierarchySuggestionsUnavailable('model unavailable')
+    monkeypatch.setattr(hierarchy_suggestion, 'suggest_hierarchy', unavailable)
+    draft = create_draft(client, project_id, ontology)
+    path = f"/api/projects/{project_id}/ontology-drafts/{draft['id']}"
+    result = client.post(path + '/discover-parents', json={'expected_revision': draft['revision']})
+    assert result.status_code == 503, result.text
+    assert client.get(path).json()['revision'] == draft['revision']
+
+
+def test_parent_discovery_rejects_a_result_after_a_concurrent_edit(workbench, monkeypatch):
+    from knowledge_service.services import hierarchy_suggestion
+    client, project_id, ontology = workbench
+    draft = create_draft(client, project_id, ontology)
+    engine = client.app.state.service.ontology_drafts(publish=True)
+    def suggest(*args, **kwargs):
+        engine.command(project_id, draft['id'], draft['revision'], {
+            'action': 'add_annotation', 'target_iri': 'https://example.test/ns#Root',
+            'predicate': 'http://www.w3.org/2000/01/rdf-schema#comment', 'value': 'Concurrent edit'})
+        return {'Root': ['Alt root']}
+    monkeypatch.setattr(hierarchy_suggestion, 'suggest_hierarchy', suggest)
+    path = f"/api/projects/{project_id}/ontology-drafts/{draft['id']}"
+    result = client.post(path + '/discover-parents', json={'expected_revision': draft['revision']})
+    assert result.status_code == 409, result.text
+    current = client.get(path).json()
+    assert [operation['action'] for operation in current['operations']] == ['add_annotation']
+
+
 def test_create_list_get_command_close_and_required_revision(workbench):
     client, project_id, ontology = workbench
     draft = create_draft(client, project_id, ontology)

@@ -100,6 +100,7 @@ def test_single_platform_search_splits_specific_common_and_unknown(monkeypatch):
 
     result = service.search('project', {
         'query': '美团直播', 'retrieval_mode': 'keyword', 'k': 20,
+        'applicability': {'platforms': ['美团']},
         'k_entities': 0, 'k_relations': 0, 'k_chunks': 20,
     })
 
@@ -115,7 +116,7 @@ def test_single_platform_search_splits_specific_common_and_unknown(monkeypatch):
     assert len(result['hits']) == 10
 
 
-def test_platform_free_query_enumerates_dictionary_with_one_common_group(monkeypatch):
+def test_platform_free_query_uses_one_global_ranking_without_dictionary_limits(monkeypatch):
     calls = []
     service = native_service(monkeypatch, calls)
 
@@ -126,10 +127,9 @@ def test_platform_free_query_enumerates_dictionary_with_one_common_group(monkeyp
     })
 
     groups = result['platform_groups']
-    assert [(group['platform'], group['source_scope']) for group in groups] == [
-        ('美团', 'specific'), ('京东', 'specific'), (None, 'all')]
-    assert sum(call['platform_match'] == 'all_only' for call in calls) == 1
-    assert len(result['hits']) == 15
+    assert [(group['platform'], group['source_scope']) for group in groups] == [(None, 'unknown')]
+    assert len(calls) == 1 and calls[0]['platform_match'] is None
+    assert len(result['hits']) == 3
     assert len(result['hits']) <= 100
     assert all(call.get('candidates') is None for call in calls)
 
@@ -195,6 +195,7 @@ def test_group_plan_is_bounded_and_per_platform_limit_is_configurable(monkeypatc
 
     result = service.search('project', {
         'query': '直播', 'retrieval_mode': 'keyword', 'k': 100,
+        'applicability': {'platforms': [f'平台{index:02d}' for index in range(30)]},
         'k_per_platform': 50, 'include_unknown': False,
         'k_entities': 0, 'k_relations': 0, 'k_chunks': 50,
     })
@@ -233,13 +234,14 @@ def test_flat_hits_deduplicate_versions_but_groups_keep_membership(monkeypatch):
     service.scoped = lambda *_args, **_kwargs: []
 
     result = service.search('project', {
-        'query': '直播', 'retrieval_mode': 'keyword', 'include_unknown': False})
+        'query': '直播', 'retrieval_mode': 'keyword', 'include_unknown': False,
+        'applicability': {'platforms': ['美团', '京东']}})
 
     assert len(result['hits']) == 1
     assert [len(group['hits']) for group in result['platform_groups']] == [1, 1, 1]
 
 
-def test_common_and_unknown_groups_exist_without_specific_platform_vocabulary(
+def test_unrestricted_groups_follow_returned_metadata_without_vocabulary_queries(
         monkeypatch):
     calls = []
     service = native_service(monkeypatch, calls)
@@ -251,7 +253,7 @@ def test_common_and_unknown_groups_exist_without_specific_platform_vocabulary(
 
     assert [(group['platform'], group['source_scope'])
             for group in result['platform_groups']] == [
-                (None, 'all'), (None, 'unknown')]
+                (None, 'unknown')]
 
 
 def test_ungrouped_unknown_scope_never_enters_answer_evidence():
@@ -363,6 +365,7 @@ def test_mixed_group_backend_reuses_fallback_rows_for_source_and_context(
 
     result = service.search('project', {
         'query': '直播', 'retrieval_mode': 'keyword',
+        'applicability': {'platforms': ['美团', '京东']},
         'include_unknown': False})
 
     assert result['_backend'] == 'mixed'
@@ -477,6 +480,7 @@ def test_group_backend_errors_are_preserved_and_exposed_to_qa(monkeypatch):
 
     result = service.search('project', {
         'query': '直播', 'retrieval_mode': 'keyword',
+        'applicability': {'platforms': ['美团', '京东']},
         'include_unknown': False})
 
     groups = {group['platform']: group for group in result['platform_groups']}
@@ -552,7 +556,8 @@ def test_grouped_semantic_search_encodes_query_once_for_all_platforms(
 
     result = service.search('project', {
         'query': '直播', 'retrieval_mode': retrieval_mode,
+        'applicability': {'platforms': [f'平台{index:02d}' for index in range(20)]},
         'include_unknown': True})
 
-    assert len(result['platform_groups']) == 22
+    assert len(result['platform_groups']) == 21
     assert service.encoder.calls == 1

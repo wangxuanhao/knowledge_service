@@ -57,7 +57,9 @@ function status(message, error=false){
 }
 async function api(path,body,method='POST'){
   const multipart=typeof FormData!=='undefined'&&body instanceof FormData;
-  const response=await fetch(path,{method,headers:body===undefined||multipart?{}:{'Content-Type':'application/json'},body:body===undefined?undefined:multipart?body:JSON.stringify(body)});
+  let response;
+  try{response=await fetch(path,{method,headers:body===undefined||multipart?{}:{'Content-Type':'application/json'},body:body===undefined?undefined:multipart?body:JSON.stringify(body)});}
+  catch(error){if(error.name==='AbortError')throw error;throw Error('无法连接知识服务，请检查服务状态和网络连接后重试。');}
   const text=await response.text();let result;
   try{result=text?JSON.parse(text):{};}catch{throw Error(response.ok?'服务返回了无法解析的数据':`服务请求失败（HTTP ${response.status}）：${text.slice(0,180)||'无错误详情'}`);}
   if(!response.ok)throw Error(typeof result.detail==='string'?result.detail:JSON.stringify(result.detail));return result;

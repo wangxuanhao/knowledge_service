@@ -7,6 +7,7 @@
   const make = (tag, html, className='') => {const e=document.createElement(tag);e.innerHTML=html;e.className=className;return e;};
   const graphExpandState={busy:false,pendingDetail:false};
   const platformGroupLabel=group=>group?.source_scope==='all'?'通用规则':
+    group?.source_scope==='unrestricted'?'全部范围':
     group?.source_scope==='unknown'?'范围待确认（不参与确定性答案）':
     '平台：'+(group?.platform||'未命名');
   function syncGraphExpandDisabled(){get('graph-expand').disabled=graphExpandState.busy||graphExpandState.pendingDetail;}
@@ -21,13 +22,17 @@
   const scopePanel=get('scope');
   const details=get('cb-details');
   const TIME_FIELDS=new Set(['valid_from','valid_until']);
-  const cb={conditions:[],nextId:1,facets:[]};
+  const cb={conditions:[],nextId:1,facets:[],custom:false};
   const opLabel=op=>({eq:'等于',ne:'不等于',contains:'包含',in:'属于集合',gte:'大于等于',lte:'小于等于',exists:'存在',interval:'区间'}[op]||op);
   const TIME_OPS=[{v:'eq',t:'等于'},{v:'ne',t:'不等于'},{v:'gte',t:'大于等于'},{v:'lte',t:'小于等于'},{v:'interval',t:'区间'}];
   const TEXT_OPS=[{v:'eq',t:'等于'},{v:'ne',t:'不等于'},{v:'contains',t:'包含'},{v:'in',t:'属于集合'},{v:'gte',t:'大于等于'},{v:'lte',t:'小于等于'},{v:'exists',t:'字段存在'}];
+  const fieldLabel=field=>window.ScopeFields.label(field);
+  const visibleFacets=()=>window.ScopeFields.visibleFacets(cb.facets,{
+    showSystem:Boolean(get('cb-show-system')?.checked),selected:cb.conditions.map(c=>c.field),
+  });
   function fieldOptions(){
-    return [{v:'valid_from',l:'valid_from（业务生效时间）'},{v:'valid_until',l:'valid_until（业务失效时间）'},
-      ...cb.facets.map(f=>({v:f.field,l:f.field.replace(/^metadata\./,'')+' · '+f.records+' 条'}))];
+    return [{v:'valid_from',l:'生效时间'},{v:'valid_until',l:'失效时间'},
+      ...visibleFacets().map(f=>({v:f.field,l:fieldLabel(f.field)+' · '+f.records+' 条'}))];
   }
   function addCondition(field='valid_from',op='eq',value='',from='',to=''){
     cb.conditions.push({id:cb.nextId++,field,op,value,from,to});
@@ -36,7 +41,9 @@
   function removeCondition(id){cb.conditions=cb.conditions.filter(c=>c.id!==id);renderCB();syncFilters();}
   function renderCB(){
     const rows=get('cb-rows');
-    if(!cb.conditions.length){rows.innerHTML='<p class="cb-empty">暂无条件，点击下方按钮添加</p>';}
+    for(const id of ['cb-add','metadata-field-choice','metadata-value-choice'])get(id).disabled=cb.custom;
+    if(cb.custom){rows.innerHTML='<p class="cb-empty">正在使用高级 JSON 条件；清空 JSON 后可恢复逐项编辑。</p>';}
+    else if(!cb.conditions.length){rows.innerHTML='<p class="cb-empty">未添加其他条件</p>';}
     else{rows.innerHTML='';for(const c of cb.conditions){
       const isTime=TIME_FIELDS.has(c.field),ops=isTime?TIME_OPS:TEXT_OPS,showInterval=c.op==='interval';
       const row=make('div','','cb-row');row.dataset.id=c.id;
@@ -47,15 +54,28 @@
   }
   function renderChips(){
     get('cb-active-chips').innerHTML=cb.conditions.map(c=>{
-      const label=TIME_FIELDS.has(c.field)?(c.op==='interval'?`${c.field} ${c.from||'?'} → ${c.to||'?'}`:`${c.field} ${opLabel(c.op)} ${c.value||''}`):`${c.field} ${opLabel(c.op)} ${c.value||''}`;
+      const label=c.op==='interval'?`${fieldLabel(c.field)} ${c.from||'?'} → ${c.to||'?'}`:`${fieldLabel(c.field)} ${opLabel(c.op)} ${c.value||''}`;
       return `<span class="cb-chip"><span>${esc(label)}</span><button data-id="${c.id}" title="删除">×</button></span>`;
     }).join('');
   }
   function updateChip(){
-    const n=cb.conditions.length;
-    get('scope-chip').textContent=n?`已启用 ${n} 个条件`:'无 metadata 条件';
+    const parts=[];
+    for(const [id,label] of [['query-platforms','平台'],['query-businesses','业务'],['query-audiences','适用对象']]){
+      const value=get(id)?.value.trim();if(value)parts.push(label+'：'+value);
+    }
+    for(const id of ['type-scope','predicate-scope']){const select=get(id);if(select.value)parts.push(select.selectedOptions[0]?.textContent||select.value);}
+    try{
+      const filters=get('filters').value.trim(),count=filters?window.ScopeFields.countConditions(JSON.parse(filters)):0;
+      if(cb.custom&&filters)parts.push('高级 JSON'+(count?' · '+count+' 个条件':''));
+      else if(count)parts.push(count+' 个其他条件');
+    }catch{parts.push('JSON 格式待修正');}
+    get('scope-chip').textContent=parts.join(' · ')||'未设置限制';
+  }
+  for(const id of ['query-platforms','query-businesses','query-audiences','type-scope','predicate-scope']){
+    get(id)?.addEventListener('input',updateChip);get(id)?.addEventListener('change',updateChip);
   }
   function syncFilters(){
+    if(cb.custom)return;
     const conds=[];
     for(const c of cb.conditions){
       if(c.op==='interval'){if(c.from)conds.push({field:c.field,op:'gte',value:c.from});if(c.to)conds.push({field:c.field,op:'lte',value:c.to});}
@@ -64,6 +84,7 @@
     const json=conds.length?JSON.stringify({and:conds},null,2):'';
     get('filters').value=json;
     const raw=get('cb-raw-json');if(raw&&document.activeElement!==raw)raw.value=json;
+    updateChip();
   }
   get('cb-rows').addEventListener('change',e=>{const row=e.target.closest('.cb-row');if(!row)return;const id=Number(row.dataset.id),c=cb.conditions.find(x=>x.id===id);if(!c)return;
     if(e.target.classList.contains('cb-field')){c.field=e.target.value;const isTime=TIME_FIELDS.has(c.field);if(isTime&&!['eq','ne','gte','lte','interval'].includes(c.op))c.op='eq';else if(!isTime&&c.op==='interval')c.op='eq';renderCB();}
@@ -85,21 +106,25 @@
   }
   get('metadata-field-choice').onchange=()=>{selectFacet();const val=get('metadata-field-choice').value;if(val)addCondition(val,'eq','');};
   get('metadata-value-choice').onchange=()=>{const field=cb.facets.find(f=>f.field===get('metadata-field-choice').value),i=get('metadata-value-choice').value;if(field&&i!==''){const item=field.values[Number(i)];const last=cb.conditions[cb.conditions.length-1];if(last){last.value=typeof item.value==='string'?item.value:JSON.stringify(item.value);last.op=item.op||'eq';renderCB();syncFilters();}}};
+  function renderFacetChoices(records){
+    const previous=get('metadata-field-choice').value,fields=visibleFacets();
+    get('metadata-field-choice').innerHTML='<option value="">选择其他 Metadata 字段</option>'+fields.map(f=>`<option value="${esc(f.field)}">${esc(fieldLabel(f.field))} · ${f.records} 条</option>`).join('');
+    if(fields.some(f=>f.field===previous)){get('metadata-field-choice').value=previous;selectFacet();}
+    else{get('metadata-value-choice').innerHTML='<option value="">先选择字段</option>';get('metadata-facet-summary').textContent=`${fields.length} 个可选字段${records!=null?' · '+records+' 条记录':''}${get('cb-show-system')?.checked?' · 包含系统字段':' · 系统字段已收起'}`;}
+  }
+  get('cb-show-system')?.addEventListener('change',()=>{renderFacetChoices();renderCB();});
   async function discoverMetadata(){
     const p=current,stamp=JSON.stringify(scope());if(!p)return;
     const result=await api(endpoint('/metadata/facets'),scope());
     if(p!==current||stamp!==JSON.stringify(scope()))return;
     cb.facets=result.fields;
-    const previous=get('metadata-field-choice').value;
-    get('metadata-field-choice').innerHTML='<option value="">选择字段（自动读取项目数据）</option>'+cb.facets.map(f=>`<option value="${esc(f.field)}">${esc(f.field.replace(/^metadata\./,''))} · ${f.records} 条</option>`).join('');
-    if(cb.facets.some(f=>f.field===previous)){get('metadata-field-choice').value=previous;selectFacet();}
-    else{get('metadata-value-choice').innerHTML='<option value="">先选择字段</option>';get('metadata-facet-summary').textContent=`发现 ${cb.facets.length} 个字段 · ${result.records} 条记录${result.truncated?' · 已限制展示规模':''}`;}
+    renderFacetChoices(result.records);
     renderCB();
   }
   document.addEventListener('keydown',e=>{if(e.key==='Escape')details.open=false;});
   document.addEventListener('pointerdown',e=>{if(details.open&&!details.contains(e.target))details.open=false;});
   // Advanced JSON edits flow into the canonical #filters textarea.
-  get('cb-raw-json').addEventListener('change',()=>{const v=get('cb-raw-json').value.trim();try{get('filters').value=v?JSON.stringify(JSON.parse(v),null,2):'';}catch{get('filters').value=v;}});
+  get('cb-raw-json').addEventListener('change',()=>{const v=get('cb-raw-json').value.trim();try{get('filters').value=v?JSON.stringify(JSON.parse(v),null,2):'';}catch{get('filters').value=v;}cb.custom=Boolean(v);cb.conditions=[];renderCB();});
 
   // Search and graph live in one workspace; graph changes only after an explicit selection.
   const graphTab=get('tab-search');
@@ -435,17 +460,25 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
       // 它只补召回，不放宽可见范围（权限/时态仍由 scope 决定）；关闭时读路径与旧行为一致。
       ontology_expansion:Boolean(get('ontology-expansion')?.checked),
       k_entities:5,k_chunks:5,k_relations:5};
-    get('search-summary').textContent='读取所选范围…';
+    get('search-summary').textContent=body.retrieval_mode==='keyword'?'读取所选范围…':'正在进行语义检索，首次加载模型可能需要较长时间…';
     get('hits').textContent='';
     const done=kgTime('search');
-    const result=await api(endpoint('/search'),body);
+    let result;
+    try{result=await api(endpoint('/search'),body);}
+    catch(error){if(serial===ui.request&&p===current)get('search-summary').textContent='检索未完成：'+error.message;throw error;}
     done({mode:result.active_mode,candidates:result.candidate_count,hits:result.hits.length});
     if(serial!==ui.request||p!==current)return;
     delete result.nodes;delete result.edges;
     renderHits(result);
     const modeLabel={hybrid:'混合',semantic:'语义',keyword:'关键词'}[result.active_mode]||result.active_mode;
-    const resolvedScope=window.ApplicabilityUI?.describe?.(result.query_scope||result.scope||result);
+    const explicitScope=body.applicability&&Object.values(body.applicability).some(value=>Array.isArray(value)?value.length:value?.mode==='specific');
+    const resolvedScope=explicitScope?window.ApplicabilityUI?.describe?.(result.query_scope||result.scope||result):
+      body.filters||body.valid_at||body.known_at?'按已设置的 Metadata 条件检索':'全项目 · 未设置 Metadata 限制';
     get('search-summary').textContent=`${modeLabel}${result.degraded?' · 已降级':''} · ${result.candidate_count} 候选 · ${result.hits.length} 命中 · ${(performance.now()-started).toFixed(0)} ms${expansionSummary(result)}${resolvedScope?' · '+resolvedScope:''}`;
+    if(result.degraded){
+      const reasons=[...new Set(Object.values(result.retrieval_errors||{}))];
+      get('hits').prepend(noticeCard('部分检索通道不可用，当前使用'+modeLabel+'检索。'+(reasons.join('；')||'可在后台任务中检查索引构建状态。'),{tone:'warning'}));
+    }
     updateChip();
   }
   // 图谱渲染器的唯一实现，显式挂到 window（不再依赖非严格模式下的隐式全局赋值）。
@@ -507,7 +540,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
   act('apply-scope',async()=>{details.open=false;window.clearGraphWorkspace({preserveSearchResults:true});window.clearKnowledgeChat?.({notify:true});await Promise.all([options(),discoverMetadata()]);if(!get('tab-mindmap').classList.contains('hidden')&&get('mindmap-root').value)await get('draw-mindmap').onclick();});
   const previousAddFilter=get('add-filter')?.onclick;
   if(previousAddFilter)get('add-filter').onclick=async()=>{await previousAddFilter();if(!get('status').classList.contains('error'))await get('apply-scope').onclick();};
-  act('reset-scope',async()=>{for(const id of ['known-at','filters','type-scope','predicate-scope','query-platforms'])get(id).value='';cb.conditions=[];renderCB();resetTimeline();window.clearGraphWorkspace({preserveSearchResults:true});window.clearKnowledgeChat?.({notify:true});await options();});
+  act('reset-scope',async()=>{for(const id of ['known-at','filters','cb-raw-json','metadata-field-choice','metadata-value-choice','type-scope','predicate-scope','query-platforms','query-businesses','query-audiences'])get(id).value='';cb.conditions=[];cb.custom=false;if(get('cb-show-system'))get('cb-show-system').checked=false;renderFacetChoices();renderCB();resetTimeline();window.clearGraphWorkspace({preserveSearchResults:true});window.clearKnowledgeChat?.({notify:true});await options();});
   act('build-index',async()=>{watch(await api(endpoint('/indexes/rebuild'),{}));status('索引任务已提交；可继续浏览图谱或使用关键词检索。');});
   // 原来只 dispatch restore：返回 series 里写的 zoom:1，而 fitGraph 之后本来就是 zoom:1，
   // 于是"点了没什么作用"（用户原话）。现在＝适应画布：重新铺开节点 + 缩放到刚好占满画布。
@@ -536,10 +569,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
   function zoomGraph(factor){
     const chart=wb.chart;
     if(!chart||!ui.graph)throw Error('先渲染图谱（点「重新渲染全图」或选择实体），再缩放。');
-    const series=chart.getOption()?.series?.[0];
-    const current=Number(series?.zoom)||1;
-    const next=Math.min(4,Math.max(.2,current*factor));
-    chart.setOption({series:[{zoom:next}]});
+    const next=GraphWorkbench.zoom(chart,factor);
     status(`图谱缩放 ${(next*100).toFixed(0)}%（滚轮也可缩放，拖动可平移）`);
   }
   act('graph-zoom-in',()=>zoomGraph(1.18));
@@ -550,7 +580,9 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
   const priorChange=get('project').onchange;
   get('project').onchange=()=>{
     priorChange();ui.request++;ui.options=[];choices();ui.ontology=null;resetTimeline();window.clearGraphWorkspace();get('ontology-browser')?.replaceChildren();
-    get('graph-entity-filter').value='';cb.facets=[];cb.conditions=[];renderCB();get('metadata-field-choice').innerHTML='<option value="">读取项目字段…</option>';get('metadata-value-choice').innerHTML='<option value="">先选择字段</option>';get('metadata-facet-summary').textContent='';
+    for(const id of ['filters','cb-raw-json','query-platforms','query-businesses','query-audiences'])get(id).value='';
+    if(get('cb-show-system'))get('cb-show-system').checked=false;
+    get('graph-entity-filter').value='';cb.facets=[];cb.conditions=[];cb.custom=false;renderCB();get('metadata-field-choice').innerHTML='<option value="">读取项目字段…</option>';get('metadata-value-choice').innerHTML='<option value="">先选择字段</option>';get('metadata-facet-summary').textContent='';
     get('project').title=get('project').selectedOptions[0]?.textContent||'';
     get('type-scope').value='';get('predicate-scope').value='';
     get('query').value='';get('graph-node').value='';updateChip();

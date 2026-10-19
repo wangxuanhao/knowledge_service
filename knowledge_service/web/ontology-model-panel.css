@@ -6,6 +6,19 @@
  * ========================================================================== */
 
 /* ---------- 右栏详情 ---------- */
+.ontology-model .om-review-dialog{width:min(760px,calc(100vw - 40px));max-height:85vh;box-sizing:border-box;overflow:auto;border:1px solid #8fbcb2;border-radius:14px;padding:22px;background:#f5faf8;color:#173e38;box-shadow:0 20px 70px #123c3966}
+.ontology-model .om-review-dialog::backdrop{background:#0a2529aa}
+.ontology-model .om-review-header,.ontology-model .om-review-buttons{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.ontology-model .om-review-header h3,.ontology-model .om-review-item h4{margin:0}
+.ontology-model .om-review-item{border:1px solid #b8d4cd;border-radius:10px;padding:14px;margin-top:14px;background:#fff}
+.ontology-model .om-review-item textarea{display:block;width:100%;box-sizing:border-box;min-height:68px;margin:10px 0;color:#173e38;background:#fff}
+.ontology-model .om-review-item pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}
+.ontology-model .om-review-item summary{cursor:pointer}
+.ontology-model .om-review-buttons{justify-content:flex-end}
+.ontology-model .om-review-warning{display:flex;align-items:flex-start;gap:8px;margin:8px 0}
+.ontology-model .om-review-warning input{width:auto}
+.ontology-model .om-review-error{color:#a02e3a}
+.ontology-model .om-review-feedback{position:sticky;top:0;background:#f5faf8;padding:6px 0;min-height:20px}
 .ontology-model .om-detail-empty{color:#8296ad;font-size:12.5px;line-height:1.6}
 .ontology-model .om-detail-card{display:flex;flex-direction:column;gap:4px}
 .ontology-model .om-detail-head{display:flex;flex-wrap:wrap;align-items:center;gap:7px;padding-bottom:9px;margin-bottom:4px;border-bottom:1px solid #1d2a3d}
