@@ -32,7 +32,7 @@
     },
     discovery: {
       label: '开放本体发现 · 候选暂存',
-      description: '从原文发现候选概念和关系，候选暂存后可在本体画布继续处理。',
+      description: '候选先暂存；核对后复用正式术语写入事实，或把新结构明确加入工作草案。',
     },
     documents: {
       label: '仅文档检索 · 不抽取图谱',
@@ -177,6 +177,7 @@
       const job = await api('/api/jobs/' + encodeURIComponent(jobId), undefined, 'GET');
       const docId = job?.result?.document?.id || job?.result?.document_id;
       if (!docId) throw Error('任务结果里没有文档 ID');
+      d.documentId = docId;
       const assertionsUrl = '/api/projects/' + encodeURIComponent(d.projectId)
         + '/assertions?document_id=' + encodeURIComponent(docId);
       const r = await api(assertionsUrl, undefined, 'GET');
@@ -254,7 +255,7 @@
     }
     if (d.asserts.some(a => a.status === 'pending')) {
       if (d.mode === 'ontology') targets.push(['去知识审核', 'reviews']);
-      if (d.mode === 'discovery') targets.push(['去本体画布处理候选', 'ontology-model']);
+      if (d.mode === 'discovery') targets.push(['核对候选与完善结构', 'ontology-model']);
     }
     return targets;
   }
@@ -271,6 +272,12 @@
         try {
           await window.KnowledgeNavigation.open(target, { projectId: d.projectId });
           close();
+          if(target==='ontology-model'&&d.mode==='discovery'){
+            if(!d.documentId)throw Error('任务结果缺少准确文档身份，请重新读取结果。');
+            if(!window.OntologyIntake)throw Error('结构候选模块尚未就绪，请刷新页面。');
+            await window.OntologyIntake.open({projectId:d.projectId,documentId:d.documentId,
+              candidateIds:(d.asserts||[]).filter(item=>item.status==='pending'&&item.id).map(item=>item.id),trigger:button});
+          }
         } catch (e) {
           if (typeof status === 'function') status(e.message || String(e), true);
         }
@@ -402,6 +409,7 @@
     try {
       const documentId = item.document_id || item.result?.document?.id || item.result?.document_id;
       if (!d.projectId || !documentId) throw Error('批次结果缺少项目或文档 ID');
+      d.documentId = documentId;
       const result = await api('/api/projects/' + encodeURIComponent(d.projectId)
         + '/assertions?document_id=' + encodeURIComponent(documentId), undefined, 'GET');
       d.asserts = Array.isArray(result.assertions) ? result.assertions : [];

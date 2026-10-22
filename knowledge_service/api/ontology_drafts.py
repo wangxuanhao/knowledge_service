@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from .audit_identity import audit_actor, audit_identity
 
@@ -19,16 +19,6 @@ from ..services.ontology_drafts import OntologyDrafts
 
 class _Request(BaseModel):
     model_config = ConfigDict(extra='forbid')
-
-    @model_validator(mode='before')
-    @classmethod
-    def discard_legacy_actor(cls, value):
-        # Old clients may still send actor; it is never authoritative and is
-        # absent from the published request schema.
-        if isinstance(value, dict):
-            return {key: item for key, item in value.items() if key != 'actor'}
-        return value
-
 
 class DraftCreate(_Request):
     base_ontology_id: str | None = None
@@ -172,9 +162,10 @@ def install(app, service):
         return drafts.review_plan(p, draft_id)
 
     @router.get('/{draft_id}/publish-readiness')
-    def publish_readiness(p: str, draft_id: str):
+    def publish_readiness(
+            p: str, draft_id: str, view: str = Query('full', pattern='^(full|editing)$')):
         """只读发布清单：逐条返回未满足条件、严重级别与修复建议。"""
-        return drafts.publish_readiness(p, draft_id)
+        return drafts.publish_readiness(p, draft_id, editing=view == 'editing')
 
     @router.get('/{draft_id}/evidence')
     def evidence(p: str, draft_id: str):

@@ -1,0 +1,40 @@
+{
+  "scope": "delivered main app; retained project; read-only business data",
+  "page_errors": [],
+  "checks": {
+    "drawer_escape_backdrop": true,
+    "visible_relationship_pixels": {
+      "changed_pixels": 24228,
+      "max_green_darkening": 142,
+      "gl_error": 0
+    },
+    "hop_four": {
+      "nodes": 9,
+      "edges": 16,
+      "truncated": false
+    }
+  },
+  "project": {
+    "id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+    "name": "容量验收 · 15万实体 / 30万关系（保留测试）",
+    "counts": {
+      "documents": 0,
+      "entities": 150001,
+      "relations": 300000,
+      "attributes": 0,
+      "chunks": 0
+    }
+  },
+  "first_batch": {
+    "seconds": 2.2020999999977646,
+    "state": "paused",
+    "session": "39ce0d8e-c1c7-4906-ad90-4670c4aabcdd",
+    "nodes": 401,
+    "edges": 400,
+    "manifest": {
+      "entities": 150001,
+      "relations": 300000
+    },
+    "gl_error": 0
+  }
+}

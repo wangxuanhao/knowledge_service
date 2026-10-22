@@ -50,7 +50,7 @@ def test_missing_frozen_source_is_explicit_and_never_falls_back():
             value['nodes'] = []
             value['edges'] = []
             value['integrity'] = {'complete': False, 'warnings': [
-                {'code': 'legacy_unversioned_source', 'message': '无历史版本'}]}
+                {'code': 'source_version_missing', 'message': '无历史版本'}]}
             return value
 
     result = AnswerEvidence(Missing()).summaries(
@@ -58,4 +58,4 @@ def test_missing_frozen_source_is_explicit_and_never_falls_back():
 
     assert result['sources'] == []
     assert result['source_status'] == 'missing'
-    assert result['source_reason'] == 'legacy_unversioned_source'
+    assert result['source_reason'] == 'source_version_missing'

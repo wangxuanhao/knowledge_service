@@ -1,3 +1,4 @@
+from ontology_seed import seed_ontology
 from decimal import Decimal
 from threading import Event, Thread
 
@@ -23,7 +24,7 @@ def _system(tmp_path):
            '@prefix xsd: <http://www.w3.org/2001/XMLSchema#> . '
            'ex:Person a owl:Class . ex:knows a owl:ObjectProperty . '
            'ex:age a owl:DatatypeProperty; rdfs:domain ex:Person; rdfs:range xsd:integer .')
-    repo.save_ontology(project_id, ttl, Ontology(ttl).summary())
+    seed_ontology(repo, project_id, ttl, Ontology(ttl).summary())
     return repo, service, project_id
 
 
@@ -35,7 +36,7 @@ def test_formal_write_plan_rechecks_ontology_snapshot_before_execution(tmp_path)
         'text': '计划中的人物',
     }]})
     current = repo.get_ontology(project_id)
-    repo.save_ontology(project_id, current['turtle'], current['summary'])
+    seed_ontology(repo, project_id, current['turtle'], current['summary'])
 
     with pytest.raises(ValueError, match='版本冲突'):
         repo.execute_formal_write(plan)
@@ -52,7 +53,7 @@ def test_new_facts_reject_deprecated_terms_but_old_version_records_remain_valid(
         'text': '历史人物', 'ontology_id': old['id'],
     }])
     deprecated_ttl = old['turtle'] + ' ex:Person owl:deprecated true .'
-    current = repo.save_ontology(project_id, deprecated_ttl, Ontology(deprecated_ttl).summary())
+    current = seed_ontology(repo, project_id, deprecated_ttl, Ontology(deprecated_ttl).summary())
 
     with pytest.raises(ValueError, match='停用'):
         service.write(project_id, [{
@@ -90,7 +91,7 @@ def test_revision_rejects_term_deprecated_after_v1(
     current = repo.get_ontology(project_id)
     deprecated = current['turtle'] + (
         f' ex:{deprecated_term} owl:deprecated true .')
-    repo.save_ontology(
+    seed_ontology(repo,
         project_id, deprecated, Ontology(deprecated).summary())
 
     revision = {**record, 'text': 'v2'}

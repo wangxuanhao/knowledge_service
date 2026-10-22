@@ -18,14 +18,6 @@ from ..domain.ontology_names import canonical_name
 from ..utils.diagnostics import event, redact, stage
 
 LOG = logging.getLogger('knowledge_service.semantica_adapter')
-_DEFAULT_ATTRIBUTE_EXTRACTOR: Callable[..., Any] | None = None
-
-
-def configure_attribute_extractor(extractor: Callable[..., Any]) -> None:
-    """Register the service-owned optional attribute extraction capability."""
-    global _DEFAULT_ATTRIBUTE_EXTRACTOR
-    _DEFAULT_ATTRIBUTE_EXTRACTOR = extractor
-
 def snapshot(records: list[dict], valid_at: str) -> dict:
     try:
         from semantica.context.context_graph import ContextGraph
@@ -675,16 +667,14 @@ class SemanticaExtractor:
                                 text=f'{relation.subject.text} {relation.predicate} {relation.object.text}',
                                 valid_from=vf, valid_until=vu, metadata=relation_metadata)
         if getattr(self,'include_attributes',False) and entities:
-            attribute_extractor = (
-                self.attribute_extractor or _DEFAULT_ATTRIBUTE_EXTRACTOR)
+            attribute_extractor = self.attribute_extractor
             if attribute_extractor is None:
                 raise RuntimeError(
                     'attribute extraction is enabled but no extractor was configured')
             with stage('LLM 实体属性抽取（结果全部待审核）'):
                 batch=attribute_extractor(text,entities,ontology,config)
-            # 兼容集成/测试使用的自定义抽取器。
-            attributes=getattr(batch,'attributes',batch)
-            attribute_diagnostics=getattr(batch,'diagnostics',{})
+            attributes=batch.attributes
+            attribute_diagnostics=batch.diagnostics
             for key,value in attribute_diagnostics.items():
                 self.extraction_diagnostics['attribute_'+key]=value
             # 判据：谓词是否在本体里明确声明为「对象属性」（关系）。

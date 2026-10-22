@@ -153,6 +153,15 @@ def test_required_business_tables_exist(owner_conn):
     assert not missing, f'缺失业务表：{missing}'
 
 
+def test_current_draft_schema_has_no_legacy_artifact_link(owner_conn):
+    columns = {row[0] for row in owner_conn.execute('''
+        SELECT column_name FROM information_schema.columns
+        WHERE table_schema=current_schema() AND table_name='ontology_drafts'
+    ''').fetchall()}
+    assert 'submitted_at' in columns and 'validated_at' in columns
+    assert 'legacy_artifact_id' not in columns
+
+
 def test_every_table_has_a_candidate_key(owner_conn):
     """每张表都必须有行身份：主键，或有意为之的唯一约束（候选键）。
 

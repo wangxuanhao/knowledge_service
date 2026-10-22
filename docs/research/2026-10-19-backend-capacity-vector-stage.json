@@ -1,0 +1,362 @@
+{
+  "scope": "real PostgreSQL/Milvus, synthetic read corpus, precomputed real-model embeddings",
+  "database": "knowledge_redesign_capacity",
+  "collection": "knowledge_redesign_capacity",
+  "required_entities": 150000,
+  "required_relations": 300000,
+  "keyset_plan_reason": "OFFSET 0 keeps endpoint eligibility checks correlated so the outer keyset can stop at LIMIT instead of scanning and sorting the relation corpus.",
+  "keyset_plan_reference_measurement": {
+    "fixture": {
+      "entities": 150000,
+      "relations": 300000,
+      "database": "knowledge_redesign_capacity"
+    },
+    "probe": "EXPLAIN (ANALYZE, BUFFERS), first compact relation page, limit 10001",
+    "conditions": "After VACUUM marked all 24708 heap pages all-visible; separate pytest and Milvus preparation were active. One paired plan probe, not a latency percentile.",
+    "reason": "Flattened endpoint EXISTS predicates selected full relation scans and sorts before LIMIT. OFFSET 0 preserves correlated endpoint checks so the outer keyset scan stops after the requested page.",
+    "before": {
+      "seconds": 13.784020299997792,
+      "relation_rows_examined": 300000,
+      "plan": "Gather Merge -> Sort -> Merge Semi Join -> Sort -> Hash Semi Join -> parallel relation sequential scan",
+      "endpoint_heap_fetches": 0
+    },
+    "after": {
+      "seconds": 1.581005100000766,
+      "relation_rows_examined": 10001,
+      "plan": "Limit -> visible graph keyset index scan -> two correlated entity index-only subplans",
+      "endpoint_subplan_loops_each": 10001,
+      "endpoint_heap_fetches": 0
+    },
+    "improvement_factor": 8.718517290039806,
+    "scope": "All scope, historical time, visibility and endpoint predicates are retained. The fence changes query planning only. Final complete graph and retrieval acceptance are measured separately."
+  },
+  "last_completed_phase": "Milvus capacity measured",
+  "migration_seconds": 0.06995930000266526,
+  "project_id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+  "seed_seconds": 1.1175788000000466,
+  "complete_graph_measured": false,
+  "encoder_initialization_seconds": 0.009385800000018207,
+  "encoder_first_batch_seconds": 49.847577999997156,
+  "query_encoding_warm_seconds": 0.12263329999768757,
+  "dimension": 1024,
+  "projection_reused": false,
+  "projection_submissions": {
+    "entity": {
+      "count": 150000,
+      "seconds": 210.958617100001
+    },
+    "relation": {
+      "count": 300000,
+      "seconds": 516.9135888000019
+    }
+  },
+  "index_seconds": 729.4330205999977,
+  "milvus_count": 450000,
+  "milvus_active_model_count": 450000,
+  "milvus_kind_counts": {
+    "entity": 150000,
+    "relation": 300000
+  },
+  "milvus_indexes": [
+    {
+      "field_name": "kind",
+      "index_type": "INVERTED",
+      "state": "InProgress",
+      "total_rows": 530000,
+      "indexed_rows": 271512,
+      "pending_index_rows": 421488
+    },
+    {
+      "field_name": "active",
+      "index_type": "INVERTED",
+      "state": "InProgress",
+      "total_rows": 530000,
+      "indexed_rows": 271512,
+      "pending_index_rows": 421488
+    },
+    {
+      "field_name": "audience_mode",
+      "index_type": "INVERTED",
+      "state": "InProgress",
+      "total_rows": 530000,
+      "indexed_rows": 271512,
+      "pending_index_rows": 421488
+    },
+    {
+      "field_name": "business_values",
+      "index_type": "INVERTED",
+      "state": "InProgress",
+      "total_rows": 530000,
+      "indexed_rows": 271512,
+      "pending_index_rows": 421488
+    },
+    {
+      "field_name": "valid_until_known",
+      "index_type": "INVERTED",
+      "state": "InProgress",
+      "total_rows": 530000,
+      "indexed_rows": 271512,
+      "pending_index_rows": 421488
+    },
+    {
+      "field_name": "scope_identity",
+      "index_type": "INVERTED",
+      "state": "InProgress",
+      "total_rows": 530000,
+      "indexed_rows": 271512,
+      "pending_index_rows": 421488
+    },
+    {
+      "field_name": "embedding",
+      "index_type": "HNSW",
+      "state": "InProgress",
+      "total_rows": 530000,
+      "indexed_rows": 244512,
+      "pending_index_rows": 448488
+    },
+    {
+      "field_name": "sparse",
+      "index_type": "SPARSE_INVERTED_INDEX",
+      "state": "InProgress",
+      "total_rows": 530000,
+      "indexed_rows": 244512,
+      "pending_index_rows": 448488
+    },
+    {
+      "field_name": "record_id",
+      "index_type": "INVERTED",
+      "state": "InProgress",
+      "total_rows": 530000,
+      "indexed_rows": 244512,
+      "pending_index_rows": 448488
+    },
+    {
+      "field_name": "projection_seq",
+      "index_type": "INVERTED",
+      "state": "InProgress",
+      "total_rows": 530000,
+      "indexed_rows": 244512,
+      "pending_index_rows": 448488
+    },
+    {
+      "field_name": "platform_mode",
+      "index_type": "INVERTED",
+      "state": "InProgress",
+      "total_rows": 530000,
+      "indexed_rows": 244512,
+      "pending_index_rows": 448488
+    },
+    {
+      "field_name": "business_mode",
+      "index_type": "INVERTED",
+      "state": "InProgress",
+      "total_rows": 530000,
+      "indexed_rows": 244512,
+      "pending_index_rows": 448488
+    },
+    {
+      "field_name": "valid_until_epoch_ms",
+      "index_type": "INVERTED",
+      "state": "InProgress",
+      "total_rows": 530000,
+      "indexed_rows": 244512,
+      "pending_index_rows": 448488
+    },
+    {
+      "field_name": "valid_from_known",
+      "index_type": "INVERTED",
+      "state": "InProgress",
+      "total_rows": 530000,
+      "indexed_rows": 244512,
+      "pending_index_rows": 448488
+    },
+    {
+      "field_name": "valid_from_epoch_ms",
+      "index_type": "INVERTED",
+      "state": "InProgress",
+      "total_rows": 530000,
+      "indexed_rows": 244512,
+      "pending_index_rows": 448488
+    },
+    {
+      "field_name": "platform_values",
+      "index_type": "INVERTED",
+      "state": "InProgress",
+      "total_rows": 530000,
+      "indexed_rows": 244512,
+      "pending_index_rows": 448488
+    },
+    {
+      "field_name": "audience_values",
+      "index_type": "INVERTED",
+      "state": "InProgress",
+      "total_rows": 530000,
+      "indexed_rows": 244512,
+      "pending_index_rows": 448488
+    }
+  ],
+  "searches": [
+    {
+      "temperature": "first",
+      "mode": "semantic",
+      "advanced_scope": false,
+      "hits": 20,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "seconds": 1.0262997000027099,
+      "excludes_query_encoding": true,
+      "backend": "milvus"
+    },
+    {
+      "temperature": "warm",
+      "mode": "semantic",
+      "advanced_scope": false,
+      "hits": 20,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "seconds": 0.2564770999997563,
+      "excludes_query_encoding": true,
+      "backend": "milvus"
+    },
+    {
+      "temperature": "warm",
+      "mode": "semantic",
+      "advanced_scope": false,
+      "hits": 20,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "seconds": 0.281693400000222,
+      "excludes_query_encoding": true,
+      "backend": "milvus"
+    },
+    {
+      "temperature": "warm",
+      "mode": "semantic",
+      "advanced_scope": false,
+      "hits": 20,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "seconds": 0.3544916999999259,
+      "excludes_query_encoding": true,
+      "backend": "milvus"
+    },
+    {
+      "temperature": "warm",
+      "mode": "semantic",
+      "advanced_scope": false,
+      "hits": 20,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "seconds": 0.20500779999929364,
+      "excludes_query_encoding": true,
+      "backend": "milvus"
+    },
+    {
+      "temperature": "warm",
+      "mode": "semantic",
+      "advanced_scope": false,
+      "hits": 20,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "seconds": 0.21454950000043027,
+      "excludes_query_encoding": true,
+      "backend": "milvus"
+    },
+    {
+      "temperature": "warm",
+      "mode": "hybrid",
+      "advanced_scope": false,
+      "hits": 20,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "seconds": 0.24086499999975786,
+      "excludes_query_encoding": true,
+      "backend": "milvus"
+    },
+    {
+      "temperature": "warm",
+      "mode": "hybrid",
+      "advanced_scope": false,
+      "hits": 20,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "seconds": 0.24113049999868963,
+      "excludes_query_encoding": true,
+      "backend": "milvus"
+    },
+    {
+      "temperature": "warm",
+      "mode": "hybrid",
+      "advanced_scope": false,
+      "hits": 20,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "seconds": 0.24315610000121524,
+      "excludes_query_encoding": true,
+      "backend": "milvus"
+    },
+    {
+      "temperature": "warm",
+      "mode": "hybrid",
+      "advanced_scope": false,
+      "hits": 20,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "seconds": 0.28323810000074445,
+      "excludes_query_encoding": true,
+      "backend": "milvus"
+    },
+    {
+      "temperature": "warm",
+      "mode": "hybrid",
+      "advanced_scope": false,
+      "hits": 20,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "seconds": 0.23089470000195433,
+      "excludes_query_encoding": true,
+      "backend": "milvus"
+    },
+    {
+      "temperature": "advanced",
+      "mode": "semantic",
+      "advanced_scope": true,
+      "hits": 10,
+      "channel_counts": {
+        "entity": 10
+      },
+      "seconds": 7.917123699997319,
+      "excludes_query_encoding": true,
+      "backend": "milvus"
+    }
+  ],
+  "vector_acceptance_checked": true,
+  "native_warm_p95_seconds": {
+    "semantic": 0.3544916999999259,
+    "hybrid": 0.28323810000074445
+  },
+  "native_warm_retrieval_within_2_seconds": true,
+  "accepted": null
+}

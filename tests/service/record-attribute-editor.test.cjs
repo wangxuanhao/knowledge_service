@@ -53,7 +53,7 @@ const vm=require('node:vm');
 function dialogHarness(overrides={}){
   const elements=new Map(),calls=[];
   class Element{
-    constructor(id=''){this.id=id;this.value='';this.dataset={};this.classList={add(){},remove(){},toggle(){}};this.open=false;this.disabled=false;}
+    constructor(id=''){this.id=id;this.value='';this.dataset={};this.children=[];this.classList={add(){},remove(){},toggle(){}};this.open=false;this.disabled=false;}
     set innerHTML(html){
       this.html=html;
       for(const match of html.matchAll(/<(\w+)[^>]*\bid="([^"]+)"[^>]*>/g)){
@@ -68,14 +68,14 @@ function dialogHarness(overrides={}){
     }
     get innerHTML(){return this.html||'';}
     setAttribute(){} appendChild(child){if(child.id)elements.set(child.id,child);return child;}
-    append(){} after(){} addEventListener(){} closest(){return panel;}
+    append(...children){this.children.push(...children);}replaceChildren(...children){this.children=children;} after(){} addEventListener(){} closest(){return panel;}
     querySelector(selector){return selector==='.record-dialog-heading'?new Element():null;}
     showModal(){this.open=true;} close(){this.open=false;}
   }
   const panel=new Element(),body=new Element();
   const get=id=>{if(!elements.has(id))elements.set(id,new Element(id));return elements.get(id);};
   const fixture={ontology:{id:'historical',summary:{attributes:[{id:'t',label_zh:'状态'}]}},records:{records:[{id:'e',text:'Visible entity'}],total:1500},...overrides};
-  const context={document:{createElement:()=>new Element(),body},$:get,current:'p',esc:String,labelOf:String,status(){},
+  const context={document:{createElement:()=>new Element(),body,getElementById:get,addEventListener(){}},$:get,current:'p',esc:String,labelOf:String,status(){},Auth:{isAdmin:()=>true},
     wb:{nodes:new Map(),records:new Map()},RecordAttributeEditor:editor,
     RecordVersionContext:{build:()=>({byId:new Map([['historical',{}]])}),summary:()=>''},
     endpoint:p=>'/p'+p,api:async(url,data,method)=>{
@@ -83,23 +83,30 @@ function dialogHarness(overrides={}){
       if(method==='PUT')return fixture.save?fixture.save(data):{...data.record,version:data.expected_version+1,version_id:'new'};
       if(url.endsWith('/ontologies'))return {versions:[{id:'historical'}]};
       if(url.includes('/ontology?'))return fixture.ontology;
-      if(url.includes('/records/query'))return fixture.records;
+      if(url.includes('/records/page'))return {...fixture.records,next_cursor:null};
+      if(url.endsWith('/records/a'))return fixture.latest;
     },scope:()=>({filters:{platform:'A'},known_at:null}),editRecord:null,historyFor:null,
   };
   context.window=context;vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../../knowledge_service/web/record-create.js'),'utf8'),context);
   vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../../knowledge_service/web/record-dialog.js'),'utf8'),context);
   return {context,get,calls,fixture,async open(row={}){
     context.editRecord({id:'a',kind:'attribute',text:'Status',subject_id:'unloaded',type:'t',value:false,datatype:xsd+'boolean',ontology_id:'historical',version:7,version_id:'v7',...row});
     await new Promise(resolve=>setImmediate(resolve));
   }};
 }
-test('dialog uses bound attribute types and scoped entity choices with visible page limitation',async()=>{
+test('dialog uses bound attribute types and paginated entity selectors without preloading a prefix',async()=>{
   const harness=dialogHarness();await harness.open();
   assert.ok(harness.get('record-structured-edit').innerHTML.includes('维护实体属性'));
-  assert.ok(harness.get('record-structured-edit').innerHTML.includes('最多 1000'));
+  assert.ok(harness.get('record-structured-edit').innerHTML.includes('structured-subject-picker'));
   assert.equal(harness.get('structured-subject').value,'unloaded');
   assert.equal(harness.get('structured-record-type').value,'t');
-  assert.equal(harness.calls.find(call=>call.url.includes('/records/query')).data.filters.platform,'A');
+  assert.equal(harness.calls.some(call=>call.url.includes('/records/query')),false);
+  const picker=harness.get('structured-subject-picker').children[0];
+  const tools=picker.children.find(child=>child.className==='record-entity-tools');
+  tools.children[0].value='Visible';await tools.children[1].onclick();await new Promise(resolve=>setImmediate(resolve));
+  const lookup=harness.calls.find(call=>call.url.includes('/records/page'));
+  assert.equal(lookup.data.filters.platform,'A');assert.equal(lookup.data.query,'Visible');assert.equal(lookup.data.limit,50);
 });
 test('attribute dialog saves booleans, prevents duplicate in-flight submits and advances expected version',async()=>{
   let resolveSave;const harness=dialogHarness({save:data=>new Promise(resolve=>{resolveSave=()=>resolve({...data.record,version:data.expected_version+1,version_id:'new'});})});
@@ -150,4 +157,26 @@ test('a response from a previous project cannot replace the active attribute edi
   harness.context.current='other';release();await pending;
   assert.equal(harness.get('revision-version').value,7);
   assert.equal(harness.context.wb.records.size,0);
+});
+test('revision conflict preserves entered fields and offers the latest server revision for comparison',async()=>{
+  const harness=dialogHarness({save:async()=>{throw Error('版本冲突');},latest:{id:'a',kind:'attribute',text:'服务端已改',version:8,ontology_id:'historical'}});
+  await harness.open();harness.get('structured-record-text').value='我的未保存修改';
+  await harness.get('save-structured-record').onclick();
+  assert.equal(harness.get('structured-record-text').value,'我的未保存修改');
+  assert.equal(harness.get('revision-version').value,7);
+  const comparison=harness.get('record-conflict-view');assert.equal(comparison.hidden,false);
+  assert.ok(comparison.children.some(child=>String(child.textContent).includes('r8')));
+  assert.ok(comparison.children.some(child=>String(child.textContent).includes('服务端已改')));
+});
+test('a role revoked while the editor is open prevents structured revision submission',async()=>{
+  const harness=dialogHarness();await harness.open();harness.context.Auth.isAdmin=()=>false;
+  await harness.get('save-structured-record').onclick();
+  assert.equal(harness.calls.filter(call=>call.method==='PUT').length,0);
+  assert.match(harness.get('record-dialog-message').textContent,/管理员/);
+});
+test('advanced JSON cannot submit a form opened under a previous scope',async()=>{
+  const harness=dialogHarness();await harness.open();harness.context.scope=()=>({known_at:'2020-01-01'});
+  await harness.get('revise').onclick();
+  assert.equal(harness.calls.filter(call=>call.method==='PUT').length,0);
+  assert.match(harness.get('record-dialog-message').textContent,/范围已变化/);
 });

@@ -1,0 +1,22 @@
+{
+  "checked_utc": "2026-10-21T04:55:20.199784+00:00",
+  "measured_normal_service_pid": 49500,
+  "measured_pid_no_longer_exists": true,
+  "listener_address": "127.0.0.1",
+  "listener_port": 8100,
+  "handoff_service_pid": 36216,
+  "handoff_process_created_utc": "2026-10-21T04:50:38.041392+00:00",
+  "handoff_is_ordinary_knowledge_service_module": true,
+  "health_http_status": 200,
+  "handoff_instance_performance_certified": false,
+  "note": "A new ordinary application instance replaced the measured process after the test samples. This recertification did not initiate that replacement. Do not attribute PID49500 warm percentiles or projection state snapshots to PID36216. The reason for the former process exit is not established; this is not evidence of OOM or a service crash.",
+  "late_log_evidence": {
+    "source": "capacity-restored-service.err.log (private, redacted inspection)",
+    "observed_log_utc": "2026-10-21T04:47:46+00:00",
+    "project_id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+    "phase": "projection_runtime.run_once -> projection_sync.rebuild -> projection_store.begin_rebuild -> repository.records_by_version_ids",
+    "exception_class": "psycopg.errors.QueryCanceled",
+    "message": "canceling statement due to statement timeout",
+    "interpretation": "The full rebuild snapshot record retrieval hit a database statement timeout. This is distinct from observed application RLock waits and does not by itself prove a database lock wait or a hardware cause."
+  }
+}

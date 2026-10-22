@@ -1,0 +1,240 @@
+{
+  "scope": "delivered assets; actual ontology; no business writes",
+  "errors": [],
+  "viewports": {
+    "1440": {
+      "overflow": false,
+      "toolbarOverflow": false,
+      "controls": [
+        {
+          "id": "om-seg",
+          "x": 915,
+          "y": 72,
+          "width": 228,
+          "height": 36,
+          "margin": "0px 0px 0px 382.984px",
+          "border": "1px solid rgb(220, 230, 220)",
+          "background": "rgb(237, 242, 236)"
+        },
+        {
+          "id": "om-display-control",
+          "x": 1153,
+          "y": 72,
+          "width": 148,
+          "height": 36,
+          "margin": "0px",
+          "border": "0px none rgb(117, 135, 121)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "id": "om-node-display",
+          "x": 1185,
+          "y": 72,
+          "width": 116,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(189, 206, 194)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "id": "om-history",
+          "x": 1311,
+          "y": 72,
+          "width": 96,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(148, 181, 166)",
+          "background": "rgb(237, 246, 242)"
+        }
+      ]
+    },
+    "1280": {
+      "overflow": false,
+      "toolbarOverflow": false,
+      "controls": [
+        {
+          "id": "om-seg",
+          "x": 671,
+          "y": 103,
+          "width": 228,
+          "height": 36,
+          "margin": "0px 0px 0px 330px",
+          "border": "1px solid rgb(220, 230, 220)",
+          "background": "rgb(237, 242, 236)"
+        },
+        {
+          "id": "om-display-control",
+          "x": 909,
+          "y": 103,
+          "width": 148,
+          "height": 36,
+          "margin": "0px",
+          "border": "0px none rgb(117, 135, 121)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "id": "om-node-display",
+          "x": 941,
+          "y": 103,
+          "width": 116,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(189, 206, 194)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "id": "om-history",
+          "x": 1151,
+          "y": 103,
+          "width": 96,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(148, 181, 166)",
+          "background": "rgb(237, 246, 242)"
+        }
+      ]
+    },
+    "1024": {
+      "overflow": false,
+      "toolbarOverflow": false,
+      "controls": [
+        {
+          "id": "om-seg",
+          "x": 423,
+          "y": 101,
+          "width": 228,
+          "height": 36,
+          "margin": "0px 0px 0px 90px",
+          "border": "1px solid rgb(220, 230, 220)",
+          "background": "rgb(237, 242, 236)"
+        },
+        {
+          "id": "om-display-control",
+          "x": 661,
+          "y": 101,
+          "width": 148,
+          "height": 36,
+          "margin": "0px",
+          "border": "0px none rgb(117, 135, 121)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "id": "om-node-display",
+          "x": 693,
+          "y": 101,
+          "width": 116,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(189, 206, 194)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "id": "om-history",
+          "x": 903,
+          "y": 101,
+          "width": 96,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(148, 181, 166)",
+          "background": "rgb(237, 246, 242)"
+        }
+      ]
+    },
+    "768": {
+      "overflow": false,
+      "toolbarOverflow": false,
+      "controls": [
+        {
+          "id": "om-seg",
+          "x": 294,
+          "y": 98,
+          "width": 228,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(220, 230, 220)",
+          "background": "rgb(237, 242, 236)"
+        },
+        {
+          "id": "om-display-control",
+          "x": 529,
+          "y": 98,
+          "width": 148,
+          "height": 36,
+          "margin": "0px",
+          "border": "0px none rgb(117, 135, 121)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "id": "om-node-display",
+          "x": 561,
+          "y": 98,
+          "width": 116,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(189, 206, 194)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "id": "om-history",
+          "x": 294,
+          "y": 141,
+          "width": 96,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(148, 181, 166)",
+          "background": "rgb(237, 246, 242)"
+        }
+      ]
+    },
+    "390": {
+      "overflow": false,
+      "toolbarOverflow": false,
+      "controls": [
+        {
+          "id": "om-seg",
+          "x": 102,
+          "y": 489.59375,
+          "width": 228,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(220, 230, 220)",
+          "background": "rgb(237, 242, 236)"
+        },
+        {
+          "id": "om-display-control",
+          "x": 21,
+          "y": 532.59375,
+          "width": 148,
+          "height": 36,
+          "margin": "0px",
+          "border": "0px none rgb(117, 135, 121)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "id": "om-node-display",
+          "x": 53,
+          "y": 532.59375,
+          "width": 116,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(189, 206, 194)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "id": "om-history",
+          "x": 257,
+          "y": 532.59375,
+          "width": 96,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(148, 181, 166)",
+          "background": "rgb(237, 246, 242)"
+        }
+      ]
+    }
+  },
+  "ontology_classes": 29,
+  "project_id": "463f2e99-ec8b-4ca2-9c0d-e469bc4d1411",
+  "history_opens": true,
+  "switching_preserved": true
+}

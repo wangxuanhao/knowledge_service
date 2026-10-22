@@ -1,0 +1,65 @@
+{
+  "captured_utc": "2026-10-21T04:45:54.128807+00:00",
+  "files": [
+    {
+      "file": "knowledge_service/repository/core.py",
+      "sha256": "f8f129c426d465606a9be085f2f1958731d3c9fda3797c7dff679a048ad2a97b",
+      "mtime_utc": "2026-10-21T04:37:24.071557+00:00"
+    },
+    {
+      "file": "knowledge_service/repository/pg_engine.py",
+      "sha256": "2dc0c0bb95d2e84a9a27b1f9d6c396597a317a6ba6f05fb65ac288dd3a1832bf",
+      "mtime_utc": "2026-10-20T11:04:51.046357+00:00"
+    },
+    {
+      "file": "knowledge_service/repository/scoped_reads.py",
+      "sha256": "cbd40015d974e236b6b9f095fc5a652b9216dde8daa6636fd1cf9e48fea0245d",
+      "mtime_utc": "2026-10-20T10:08:22.481705+00:00"
+    },
+    {
+      "file": "knowledge_service/services/service.py",
+      "sha256": "dbe2cd50b9b0d2d70e98d2b07ae0c0e41d74b81fe2f6c4b35949e11cedc325ab",
+      "mtime_utc": "2026-10-21T04:38:31.787448+00:00"
+    },
+    {
+      "file": "knowledge_service/services/formal_writes.py",
+      "sha256": "148bcaa104f6de1fd8611c7efb39b5e12e9b0ffe257483e7c7ac3627c72b4813",
+      "mtime_utc": "2026-10-21T03:50:53.372178+00:00"
+    },
+    {
+      "file": "knowledge_service/services/retrieval.py",
+      "sha256": "e45751bd116799d15f279b57ae97d96ac8261ca1f398056942eea472fb88a1e7",
+      "mtime_utc": "2026-10-21T04:36:53.290612+00:00"
+    },
+    {
+      "file": "knowledge_service/services/graph_sessions.py",
+      "sha256": "75f7dc4a7538c7ebf0163d16ddc231c8e24a4fda70cc265b8117da37558fc5d5",
+      "mtime_utc": "2026-10-20T10:24:07.917941+00:00"
+    },
+    {
+      "file": "knowledge_service/services/graph_neighborhood.py",
+      "sha256": "01fad733d6237fbdf226eb9ba4b4f9c7ee27f89b28334c956581131e0e47e29b",
+      "mtime_utc": "2026-10-19T05:47:31.901685+00:00"
+    },
+    {
+      "file": "knowledge_service/services/projection_runtime.py",
+      "sha256": "267dda2ddc31ab5f7793abf94573e9062644e29cb7e01427d291c89ad146e215",
+      "mtime_utc": "2026-10-21T04:36:36.564673+00:00"
+    },
+    {
+      "file": "knowledge_service/web/full-graph.js",
+      "sha256": "ce3255999601455e94f7e5b9e89d1753ce6427a8cf0bf9bbd8c903a6b8dc1eaa",
+      "mtime_utc": "2026-10-20T06:23:48.532922+00:00"
+    },
+    {
+      "file": "knowledge_service/web/full-graph-view.js",
+      "sha256": "d9f5fe4280c2a42f4aa55908f0ecb1131e5dea9786f3268751988eb920cca4aa",
+      "mtime_utc": "2026-10-20T06:12:53.233809+00:00"
+    },
+    {
+      "file": "knowledge_service/web/full-graph-worker.js",
+      "sha256": "7cda0aa88d0674550fcb9164491515b28c612cd7be2a588ed28a490e276d5acf",
+      "mtime_utc": "2026-10-19T05:47:32.619663+00:00"
+    }
+  ]
+}

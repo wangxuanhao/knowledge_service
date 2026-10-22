@@ -103,6 +103,7 @@ const discoveryBridge = (() => {
       case'bridge-start':openDialog('bridge-start',{doc:b.dataset.doc});break;
       case'bridge-candidates':openDialog('bridge-candidates');break;
       case'bridge-coverage':openDialog('bridge-coverage');break;
+      case'bridge-scale':openDialog('bridge-scale');break;
       case'bridge-insert':openDialog('bridge-insert');break;
       case'bridge-child':{const c=current();if(!c.draft.editable||c.selection.kind!=='class'){toast('请先选中可编辑的类型。');break;}openDialog('studio-add-class',{parent:c.selection.id});break;}
       case'bridge-link-parent':{const c=current();if(!c.draft.editable||c.selection.kind!=='class'){toast('请先进入草案并选中一个子类。');break;}linkMode={kind:'parent',child:c.selection.id};render();toast('再点一个类型作为父类，确认后写入草案。');break;}
@@ -156,6 +157,7 @@ const discoveryBridge = (() => {
     if(d.kind==='bridge-start')return startDialog(d.doc);
     if(d.kind==='bridge-candidates')return candidateDialog();
     if(d.kind==='bridge-coverage')return coverage();
+    if(d.kind==='bridge-scale')return modal('检索、编辑与 15 万实体验收','设计要求与当前验证状态',`<div class="callout warn">要求同时满足全库 15 万实体可检索、同一图谱加载并绘制 15 万实体。当前草图与小图测试没有证明这两项。</div><div class="table-wrap spaced"><table class="bridge-coverage"><thead><tr><th>工作区</th><th>应具备能力</th><th>当前状态</th></tr></thead><tbody><tr><td>本体建模</td><td>类、关系类型、属性和约束编辑</td><td>结构示例；类型卡片不等于 15 万实体实例</td></tr><tr><td>结果列表</td><td>全库查询、分页、按 ID 定位</td><td>草图仅含少量示例；需验证原生与降级检索一致性</td></tr><tr><td>局部探索</td><td>选中实体的邻域、关系、证据和编辑</td><td>局部展示；不能据此声称已加载全库</td></tr><tr><td>全量大图</td><td>15 万实体同图、拾取、缩放、共享详情与编辑</td><td>必做能力；全量数据接口、WebGL 和容量实测尚未交付</td></tr></tbody></table></div><p class="note spaced">已有图性能文档主要验证 500 节点 / 1500 边。所有数据集、边数、硬件、加载耗时、实际帧率与内存必须单独记录；聚合图和只加载前 N 条都不算全量验收。</p><p class="note spaced">完整编辑、来源/版本、融合/撤销不能因换渲染器而减少。当前原型检查不代替产品 API 与容量验收。</p>`,'<span></span><button data-act="close-dialog">关闭</button>',true);
     if(d.kind==='bridge-insert'){
       const c=current(),disabled=!c.draft.editable,childDisabled=disabled||c.selection.kind!=='class';
       const owner=c.classes.find(x=>x.id===(c.selection.owner||c.selection.id))?.id||c.classes[0]?.id||'';
@@ -177,6 +179,8 @@ const discoveryBridge = (() => {
   }
   function install(){
     installUpload();
+    const originalSearch=renderSearch;
+    renderSearch=function(){return `<details class="bridge-scale-note"><summary>示例视图 · 15 万实体全量模式尚未验证</summary><p>检索结果、局部探索和全量大图分别验收；本页小样例不代表真实容量或编辑能力已全部接通。</p>${button('scale','查看能力与容量要求','','link small')}</details>`+originalSearch();};
     const originalDocument=documentDialog;
     documentDialog=function(id,tab){let html=originalDocument(id,tab);const d=allDocs().find(x=>x.id===id);if(d&&!['failed','queued'].includes(d.state))html=html.replace('<button data-act="go-qa">',button('start','从此资料继续建模',`data-doc="${d.id}"`)+ '<button data-act="go-qa">');return html;};
     const originalJob=jobDialog;
@@ -189,6 +193,7 @@ const discoveryBridge = (() => {
       if(tools){const c=current();tools.insertAdjacentHTML('beforeend',button('insert','＋ 插入',!c.draft.editable?'disabled':'')+button('link-parent','改父类（连线）',!c.draft.editable?'disabled':'')+button('link-relation','连关系',!c.draft.editable?'disabled':'')+(linkMode?button('cancel-link','取消连线','','link'):''));}
     }
     if(!document.querySelector('[data-act="bridge-coverage"]'))document.querySelector('.preview-shortcuts')?.insertAdjacentHTML('beforeend',button('coverage','操作覆盖'));
+    if(!document.querySelector('[data-act="bridge-scale"]'))document.querySelector('.preview-shortcuts')?.insertAdjacentHTML('beforeend',button('scale','规模与能力'));
   }
   return {handleAction,handleChange,renderDialog,install,augment};
 })();

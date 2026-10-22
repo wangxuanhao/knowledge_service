@@ -12,6 +12,8 @@
 4. ``/subgraph`` 的实体节点与 ``/records/{record_id}`` 用的是同一份数据
    （``service.ontology_family``），两处不能各算各的，否则同一张卡片两个说法。
 """
+from ontology_seed import seed_project_ontology
+from ontology_seed import seed_ontology
 from fastapi.testclient import TestClient
 
 from knowledge_service.api import create_app
@@ -36,7 +38,7 @@ def _project(tmp_path):
     client = TestClient(app)
     project_id = client.post('/api/projects', json={
         'name': '父类可见性', 'use_default_ontology': False}).json()['id']
-    client.post(f'/api/projects/{project_id}/ontologies', json={'turtle': HIERARCHY})
+    seed_project_ontology(client, f'/api/projects/{project_id}', HIERARCHY)
     client.post(f'/api/projects/{project_id}/records', json={'records': [
         {'id': 'child', 'kind': 'entity', 'type': 'https://example.test/hierarchy#价格类型',
          'text': '实体门店指导价'},
@@ -105,7 +107,7 @@ def test_historical_binding_keeps_its_family_after_a_new_release(tmp_path):
     repo = client.app.state.service.repository
     first = repo.list_ontologies(project_id)[-1]
     newer = HIERARCHY.replace('rdfs:subClassOf ex:电商平台', 'rdfs:subClassOf ex:孤立类')
-    second = repo.save_ontology(project_id, newer, {})
+    second = seed_ontology(repo, project_id, newer, {})
     record = client.get(base + '/records/child').json()
     node = _subgraph_nodes(client, project_id)['child']
     assert record['ontology_id'] == node['ontology_id'] == first['id']

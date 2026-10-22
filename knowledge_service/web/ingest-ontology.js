@@ -11,14 +11,17 @@
 
   function createController({readVersions, readDraftState, onChange = () => {}}) {
     let generation = 0;
+    let inFlight = null;
     let current = {projectId: '', mode: '', status: 'idle', release: null};
     const state = () => ({...current});
-    async function refresh(projectId, mode) {
+    function refresh(projectId, mode) {
+      if (inFlight?.projectId === projectId && inFlight.mode === mode) return inFlight.promise;
       const ticket = ++generation;
       current = {projectId, mode, status: projectId && mode === 'ontology' ? 'loading' : 'idle',
         release: null, openDraftCount: null, draftError: '', error: ''};
       onChange(state());
-      if (current.status === 'idle') return state();
+      if (current.status === 'idle') { inFlight = null; return Promise.resolve(state()); }
+      const promise = (async () => {
       const [versions, drafts] = await Promise.allSettled([
         readVersions(projectId), readDraftState(projectId),
       ]);
@@ -35,6 +38,9 @@
       } else current.draftError = drafts.reason?.message || '草案状态响应无效';
       onChange(state());
       return state();
+      })().finally(() => { if (ticket === generation) inFlight = null; });
+      inFlight = {projectId, mode, promise};
+      return promise;
     }
     function settings(projectId, mode) {
       if (mode !== 'ontology') return {};
@@ -43,7 +49,12 @@
       }
       return {ontology_id: current.release.id};
     }
-    return {refresh, state, settings};
+    function invalidate(projectId, mode) {
+      generation++; inFlight = null;
+      current = {projectId, mode, status:'idle', release:null};
+      onChange(state());
+    }
+    return {refresh, state, settings, invalidate};
   }
 
   async function resultRelease(projectId, assertions, pinned, readVersions) {
@@ -69,7 +80,15 @@
     readDraftState: project => api(base(project) + '/ontology-drafts/stage-availability', undefined, 'GET'),
     onChange: render});
   const projectId = () => document.getElementById('project')?.value || '';
-  function refresh() { return controller.refresh(projectId(), modeControl?.value || ''); }
+  function refresh() {
+    const project = projectId(), mode = modeControl?.value || '';
+    const page = document.getElementById('tab-ingest');
+    if (!page || page.classList.contains('hidden') || modeControl?.closest?.('.library-operation')?.hidden) {
+      if (controller.state().projectId !== project || controller.state().mode !== mode) controller.invalidate(project, mode);
+      return Promise.resolve(controller.state());
+    }
+    return controller.refresh(project, mode);
+  }
   function render(s) {
     if (!host) return;
     host.hidden = s.mode !== 'ontology';
@@ -116,7 +135,9 @@
     host = node('section'); host.id = 'ingest-ontology-version'; host.className = 'ingest-ontology-version';
     host.setAttribute('aria-live', 'polite'); after.after(host);
     document.addEventListener('ontology-model:published', event => {
-      if (event.detail?.projectId === projectId()) refresh();
+      if (event.detail?.projectId !== projectId()) return;
+      controller.invalidate(projectId(), modeControl?.value || '');
+      return refresh();
     });
     document.querySelector('[data-tab="ingest"]')?.addEventListener('click', refresh);
     window.addEventListener('focus', refresh);

@@ -179,7 +179,8 @@ JS_SMALL_TEXT = """() => {
 
 def run(base: str, p: str, suffix: str) -> None:
     # ── 准备：一份小本体 + 2 实体 1 关系 + 1 份快照 ────────────────────────────────
-    call(base, f'/api/projects/{p}/ontologies', {'turtle': TURTLE, 'expected_ontology_id': None})
+    from ontology_validation_helpers import publish_validation_ontology
+    publish_validation_ontology(lambda method,path,body: call(base,path,body,method), f'/api/projects/{p}', TURTLE)
     call(base, f'/api/projects/{p}/records', {'records': [
         {'id': f'e-{suffix}-1', 'kind': 'entity', 'type': '商户', 'text': '商户甲'},
         {'id': f'e-{suffix}-2', 'kind': 'entity', 'type': '结算服务', 'text': '结算服务A'},

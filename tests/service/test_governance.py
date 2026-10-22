@@ -1,3 +1,4 @@
+from ontology_seed import seed_ontology
 import pytest
 from knowledge_service.repository import Repository
 from knowledge_service.integrations.embeddings import HashingEncoder
@@ -22,7 +23,7 @@ def system(tmp_path):
     ex:nickname a owl:DatatypeProperty; rdfs:domain ex:Person; rdfs:range xsd:string .
     ex:PersonShape a sh:NodeShape; sh:targetClass ex:Person;
       sh:property [sh:path ex:age; sh:maxCount 1; sh:datatype xsd:integer] .'''
-    repo.save_ontology(project, ttl, Ontology(ttl).summary())
+    seed_ontology(repo, project, ttl, Ontology(ttl).summary())
     service.write(project, [
         dict(id='a',kind='entity',type='Person',text='张三',metadata={'city':'北京'}),
         dict(id='b',kind='entity',type='Person',text='张先生',metadata={'city':'北京','source':'other'}),
@@ -220,6 +221,152 @@ def test_max_count_attribute_merge_requires_valid_winner_and_supersedes_loser_at
 def test_merge_request_defaults_attribute_winners_to_empty_list():
     request = Merge(keep_id='a', drop_id='b', expected_versions={'a': 1, 'b': 1})
     assert request.attribute_winners == []
+    assert request.preview_fingerprint is None
+
+
+@pytest.mark.parametrize('change', ['revise_winner', 'add_attribute'])
+def test_confirmed_merge_rejects_another_session_attribute_change(system, tmp_path, change):
+    from knowledge_service.services.governance import writable
+    service, governance, p = system
+    service.write(p, [
+        dict(id='age-a', kind='attribute', type='age', text='年龄 20',
+             subject_id='a', value=20, datatype='http://www.w3.org/2001/XMLSchema#integer'),
+        dict(id='age-b', kind='attribute', type='age', text='年龄 30',
+             subject_id='b', value=30, datatype='http://www.w3.org/2001/XMLSchema#integer'),
+    ])
+    preview = governance.merge_preview(p, 'a', 'b', {'a': 1, 'b': 1})
+    concurrent = Repository(tmp_path / 'govern.sqlite')
+    try:
+        other = KnowledgeService(concurrent, HashingEncoder())
+        if change == 'revise_winner':
+            record = writable(concurrent.get_record(p, 'age-a'))
+            record.update(value=99, text='其他会话修正年龄为99')
+            other.write(p, [record], expected_versions={'age-a': 1})
+        else:
+            other.write(p, [dict(id='late-nickname', kind='attribute', type='nickname',
+                text='新昵称', subject_id='a', value='新昵称',
+                datatype='http://www.w3.org/2001/XMLSchema#string')])
+        before = service.repository.export_projection(p)
+        with pytest.raises(ValueError, match='重新预览'):
+            governance.merge(p, 'a', 'b', {'a': 1, 'b': 1}, attribute_winners=['age-a'],
+                preview_fingerprint=preview['preview_fingerprint'])
+        assert service.repository.export_projection(p) == before
+        assert service.repository.list_merge_operations(p) == []
+        assert service.repository.get_record(p, 'a')['version'] == 1
+    finally:
+        concurrent.close()
+
+
+@pytest.mark.parametrize('change', ['revise_winner', 'add_attribute'])
+def test_merge_transaction_rechecks_changes_after_service_preparation(system, tmp_path, monkeypatch, change):
+    from knowledge_service.services.governance import writable
+    from knowledge_service.core.ingest_context import ingest_commit_guard
+    service, governance, p = system
+    service.write(p, [
+        dict(id='age-a', kind='attribute', type='age', text='年龄 20',
+             subject_id='a', value=20, datatype='http://www.w3.org/2001/XMLSchema#integer'),
+        dict(id='age-b', kind='attribute', type='age', text='年龄 30',
+             subject_id='b', value=30, datatype='http://www.w3.org/2001/XMLSchema#integer'),
+    ])
+    preview = governance.merge_preview(p, 'a', 'b', {'a': 1, 'b': 1})
+    concurrent = Repository(tmp_path / 'govern.sqlite')
+    other = KnowledgeService(concurrent, HashingEncoder())
+    original_write = service.write
+
+    def write_after_other_session_commits(*args, **kwargs):
+        if change == 'revise_winner':
+            record = writable(concurrent.get_record(p, 'age-a'))
+            record.update(value=99, text='预览后由其他会话修正')
+            other.write(p, [record], expected_versions={'age-a': 1})
+        else:
+            other.write(p, [dict(id='late-nickname', kind='attribute', type='nickname',
+                text='新昵称', subject_id='a', value='新昵称',
+                datatype='http://www.w3.org/2001/XMLSchema#string')])
+        return original_write(*args, **kwargs)
+
+    monkeypatch.setattr(service, 'write', write_after_other_session_commits)
+    try:
+        with pytest.raises(ValueError, match='重新预览'):
+            governance.merge(p, 'a', 'b', {'a': 1, 'b': 1}, attribute_winners=['age-a'],
+                preview_fingerprint=preview['preview_fingerprint'])
+        assert service.repository.list_merge_operations(p) == []
+        assert service.repository.get_record(p, 'a')['version'] == 1
+        assert service.repository.get_record(p, 'b')['version'] == 1
+        assert ingest_commit_guard.get() is None
+    finally:
+        concurrent.close()
+
+
+def test_merge_recheck_holds_formal_transaction_locks_until_commit(system, tmp_path):
+    from contextlib import contextmanager
+    from threading import Event, Thread
+    from knowledge_service.core.ingest_context import ingest_commit_guard
+    from knowledge_service.services.governance import writable
+    service, governance, p = system
+    service.write(p, [
+        dict(id='age-a', kind='attribute', type='age', text='年龄 20',
+             subject_id='a', value=20, datatype='http://www.w3.org/2001/XMLSchema#integer'),
+        dict(id='age-b', kind='attribute', type='age', text='年龄 30',
+             subject_id='b', value=30, datatype='http://www.w3.org/2001/XMLSchema#integer'),
+    ])
+    preview = governance.merge_preview(p, 'a', 'b', {'a': 1, 'b': 1})
+    concurrent = Repository(tmp_path / 'govern.sqlite')
+    other = KnowledgeService(concurrent, HashingEncoder())
+    guarded, release, started, finished = Event(), Event(), Event(), Event()
+    merged, changed = [], []
+
+    @contextmanager
+    def parent_guard():
+        assert service.repository._db.in_transaction
+        guarded.set()
+        assert release.wait(10)
+        yield
+
+    def merge():
+        token = ingest_commit_guard.set(parent_guard)
+        try:
+            merged.append(governance.merge(p, 'a', 'b', {'a': 1, 'b': 1},
+                attribute_winners=['age-a'], preview_fingerprint=preview['preview_fingerprint']))
+        except Exception as error:
+            merged.append(error)
+        finally:
+            assert ingest_commit_guard.get() is parent_guard
+            ingest_commit_guard.reset(token)
+
+    def update_attribute():
+        started.set()
+        try:
+            record = writable(concurrent.get_record(p, 'age-a'))
+            record.update(value=99, text='并发更新')
+            changed.append(other.write(p, [record], expected_versions={'age-a': 1}))
+        except Exception as error:
+            changed.append(error)
+        finally:
+            finished.set()
+
+    merger = Thread(target=merge)
+    writer = Thread(target=update_attribute)
+    try:
+        merger.start()
+        assert guarded.wait(10)
+        writer.start()
+        assert started.wait(10)
+        assert not finished.wait(0.2), 'the external writer must stay blocked through the merge recheck'
+    finally:
+        release.set()
+        if merger.ident is not None:
+            merger.join(15)
+        if writer.ident is not None:
+            writer.join(15)
+        concurrent.close()
+    assert not merger.is_alive() and not writer.is_alive()
+    assert len(merged) == 1 and isinstance(merged[0], dict), merged
+    assert len(changed) == 1
+    assert isinstance(changed[0], list) or isinstance(changed[0], ValueError), changed
+    audit = service.repository.get_record(p, 'audit:' + merged[0]['operation_id'])
+    assert audit['metadata']['preview_fingerprint'] == preview['preview_fingerprint']
+    ledger = service.repository.list_merge_operations(p)[-1]
+    assert ledger['expected_versions']['age-a'] == 1
 
 
 def test_max_count_winner_from_dropped_entity_is_rewritten_to_kept_entity(system):

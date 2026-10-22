@@ -1,4 +1,5 @@
 """Continuous API acceptance: discovery, governed edits, inheritance and facts."""
+from ontology_seed import seed_project_ontology
 from fastapi.testclient import TestClient
 from rdflib import OWL, RDF, RDFS, URIRef, XSD
 
@@ -30,14 +31,14 @@ def publish(client, base, draft):
             'expected_revision': current['revision'],
             'expected_ontology_id': draft['base_ontology_id'],
             'validation_fingerprint': fingerprint,
-            'acknowledged_warning_codes': warnings, 'actor': 'acceptance-reviewer',
+            'acknowledged_warning_codes': warnings,
             'decisions': [{'operation_id': operation['id'],
                            'operation_fingerprint': operation['fingerprint'],
                            'action': 'approve', 'reason': 'Synthetic acceptance fixture reviewed'}]}))
     body = {'expected_revision': current['revision'],
             'expected_ontology_id': draft['base_ontology_id'],
             'validation_fingerprint': current['validation_fingerprint'],
-            'acknowledged_warning_codes': warnings, 'actor': 'acceptance-publisher',
+            'acknowledged_warning_codes': warnings,
             'idempotency_key': 'acceptance-' + draft['id'],
             'note': 'Synthetic acceptance: incremental ontology change'}
     result = checked(client.post(path + '/publish', json=body))
@@ -48,7 +49,15 @@ def publish(client, base, draft):
 def manual(client, base, ontology_id):
     return checked(client.post(base + '/ontology-drafts', json={
         'base_ontology_id': ontology_id, 'source_kind': 'manual',
-        'title': 'Incremental parents and attributes', 'actor': 'acceptance'}), 201)
+        'title': 'Incremental parents and attributes'}), 201)
+
+
+
+class AcceptanceQualityEngine:
+    def check(self, ontology):
+        return {'engine': 'acceptance', 'engine_version': '1', 'passed': True,
+                'issues': [], 'stats': {}, 'metrics': {}, 'thresholds': {},
+                'threshold_failures': [], 'competency_questions': []}
 
 
 def test_datatype_commands_capture_the_current_draft_precondition(tmp_path):
@@ -88,22 +97,11 @@ def test_datatype_commands_capture_the_current_draft_precondition(tmp_path):
     assert replacement['ontology']['attributes'][0]['range'] == [str(XSD.string)]
 
 
-def test_induction_merges_attribute_domains_using_governed_union_shape(monkeypatch):
-    import semantica.ontology
-    from knowledge_service.services.ontology_discovery import _induce
-    from knowledge_service.services.ontology_operations import canonical_turtle_diff, apply_operations
+def test_commands_merge_attribute_domains_using_governed_union_shape():
+    from knowledge_service.services.ontology_operations import (
+        build_operation, canonical_turtle_diff, apply_operations)
     from rdflib.compare import isomorphic
 
-    class Generator:
-        def __init__(self, **kwargs):
-            pass
-        def generate_ontology(self, data, **kwargs):
-            types = sorted({row['type'] for row in data['entities']})
-            attribute = next(iter(data['entities'][0]['properties']))
-            return {'classes': [{'name': value} for value in types], 'properties': [{
-                'name': attribute, 'type': 'data', 'domain': types, 'range': ['xsd:integer']}]}
-
-    monkeypatch.setattr(semantica.ontology, 'OntologyGenerator', Generator)
     baseline = '''@prefix : <urn:baseline:> .
         @prefix owl: <http://www.w3.org/2002/07/owl#> .
         @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
@@ -111,18 +109,21 @@ def test_induction_merges_attribute_domains_using_governed_union_shape(monkeypat
         :Merchant a owl:Class; rdfs:label "Merchant" .
         :employeeCount a owl:DatatypeProperty; rdfs:label "employeeCount";
             rdfs:domain :Merchant; rdfs:range xsd:integer .'''
-    candidates = [
-        {'id': 'one', 'kind': 'entity', 'text': 'One', 'proposed_type': 'Merchant'},
-        {'id': 'two', 'kind': 'entity', 'text': 'Two', 'proposed_type': 'Shop'},
-        {'id': 'a', 'kind': 'attribute', 'entity_id': 'one', 'proposed_type': 'employeeCount', 'value': 1},
-        {'id': 'b', 'kind': 'attribute', 'entity_id': 'two', 'proposed_type': 'employeeCount', 'value': 2},
+    merchant, shop, attribute = map(URIRef, (
+        'urn:baseline:Merchant', 'urn:baseline:Shop', 'urn:baseline:employeeCount'))
+    operations = [
+        build_operation('create_term', str(shop), after={'kind': 'class'}),
+        build_operation('add_domain', str(attribute), after={'value': str(shop)}),
     ]
-    turtle, mappings, _ = _induce('acceptance', 'Additional type', candidates, baseline_turtle=baseline)
-    operations = canonical_turtle_diff(baseline, turtle)
-    applied = Ontology(apply_operations(baseline, operations))
-    assert isomorphic(applied.graph, Ontology(turtle).graph)
-    assert set(applied.constraint_types(URIRef('urn:baseline:employeeCount'), RDFS.domain)) == {
-        URIRef('urn:baseline:Merchant'), URIRef(mappings['entity_types']['Shop'])}
+    edited = Ontology(apply_operations(baseline, operations))
+    domain = edited.graph.value(attribute, RDFS.domain)
+    assert (domain, OWL.unionOf, None) in edited.graph
+    assert set(edited.constraint_types(attribute, RDFS.domain)) == {merchant, shop}
+    assert set(edited.graph.objects(attribute, RDFS.range)) == {XSD.integer}
+    rebuilt = Ontology(apply_operations(baseline, canonical_turtle_diff(
+        baseline, edited.graph.serialize(format='turtle'))))
+    assert isomorphic(rebuilt.graph, edited.graph)
+    assert set(Ontology(baseline).constraint_types(attribute, RDFS.domain)) == {merchant}
 
 
 def test_four_ingestion_rounds_keep_multiple_parents_attributes_and_history(tmp_path, monkeypatch):
@@ -145,6 +146,7 @@ def test_four_ingestion_rounds_keep_multiple_parents_attributes_and_history(tmp_
 
     monkeypatch.setattr(SemanticaExtractor, 'discover', discover)
     app = create_app(tmp_path / 'continuous-acceptance.sqlite', HashingEncoder())
+    app.state.ontology_drafts.quality_engine = AcceptanceQualityEngine()
     with TestClient(app) as client:
         pid = checked(client.post('/api/projects', json={
             'name': 'Isolated four-round acceptance', 'use_default_ontology': False,
@@ -155,13 +157,13 @@ def test_four_ingestion_rounds_keep_multiple_parents_attributes_and_history(tmp_
         saved_facts = {}
         parent_a, parent_b, rating = map(URIRef, (
             'urn:acceptance:Entity', 'urn:acceptance:Business', 'urn:acceptance:rating'))
-        merchant_iri = None
+        merchant_iri = shop_iri = None
 
         def assert_preserved():
             for ontology_id, old_turtle in frozen_versions.items():
                 old = checked(client.get(base + '/ontology', params={'ontology_id': ontology_id}))
                 assert old['turtle'] == old_turtle
-            records = repo.current_records(pid, vectors='none', kinds=['entity', 'relation', 'attribute'])
+            records = repo.current_records(pid, kinds=['entity', 'relation', 'attribute'])
             assert saved_facts.keys() <= {row['id'] for row in records}
             for row in records:
                 if row['id'] in saved_facts:
@@ -181,24 +183,62 @@ def test_four_ingestion_rounds_keep_multiple_parents_attributes_and_history(tmp_
                 'resolve_entities': False}), 201)
             assert document['discovery_candidates'] == 5
             assert len(assert_preserved()) == (n - 1) * 5
-            generated = checked(client.post(base + '/ontology-discovery/drafts', json={
-                'name': f'Round {n}', 'infer_hierarchy': False}), 201)
+            path = base + '/ontology-discovery'
+            inventory = checked(client.get(path + '/candidates'))
+            candidates = inventory['items']
+            assert len(candidates) == inventory['total'] == 5
+            assert len({item['document_id'] for item in candidates}) == 1
+            assert all(item.get('assertion_id') and not item['materialized'] for item in candidates)
+            confirmed = {item['id']: item['suggested_mapping']['target_iri'] for item in candidates
+                         if item['suggested_mapping'] is not None}
+            body = {'candidate_ids': [item['id'] for item in candidates],
+                    'expected_ontology_id': inventory['expected_ontology_id'],
+                    'confirmed_mappings': confirmed, 'name': f'Round {n}',
+                    'create_new_draft': n == 1}
+            if n == 3:
+                # A new subtype may reuse a published field only after its
+                # parent edge is explicitly included in the chosen working draft.
+                shop_iri = URIRef(f'urn:knowledge:ontology:{pid}:Shop')
+                prepared = manual(client, base, inventory['expected_ontology_id'])
+                prepared = edit(client, base, prepared, action='batch', commands=[
+                    {'action': 'create_term', 'target_iri': str(shop_iri), 'kind': 'class'},
+                    {'action': 'add_annotation', 'target_iri': str(shop_iri),
+                     'predicate': str(RDFS.label), 'value': 'Shop', 'language': 'zh'},
+                    {'action': 'add_parent', 'target_iri': str(shop_iri), 'value': str(merchant_iri)},
+                ])
+                body.update(target_draft_id=prepared['id'], expected_revision=prepared['revision'])
+            before_preview = (len(repo.list_ontologies(pid)),
+                              len(app.state.ontology_drafts.store.list(pid)),
+                              len(repo.list_intake_runs(pid)))
+            preview = checked(client.post(path + '/selection-preview', json=body))
+            assert (len(repo.list_ontologies(pid)), len(app.state.ontology_drafts.store.list(pid)),
+                    len(repo.list_intake_runs(pid))) == before_preview
+            frozen_request = {**body, 'preview_fingerprint': preview['preview_fingerprint'],
+                              'source_fingerprint': preview['source_fingerprint'],
+                              'idempotency_key': f'round-{n}'}
             if n in (1, 3):
-                assert generated['result_kind'] == 'draft'
-                draft = checked(client.get(base + '/ontology-drafts/' + generated['unified_draft_id']))
-                if n == 3:
-                    # Shop can reuse Merchant's employeeCount only after this
-                    # parent relation is included in the published schema.
-                    shop = URIRef(generated['mappings']['entity_types']['Shop'])
-                    draft = edit(client, base, draft, action='add_parent', target_iri=str(shop), value=str(merchant_iri))
+                assert preview['can_add'], preview
+                result = checked(client.post(path + '/add-selection', json=frozen_request))
+                draft = result['draft']
+                if n == 1:
+                    merchant_candidate = next(item['id'] for item in candidates
+                                              if item['kind'] == 'entity' and item['proposed_type'] == 'Merchant')
+                    merchant_iri = URIRef(next(item['target_iri'] for item in result['new']
+                                              if item['candidate_id'] == merchant_candidate))
+                else:
+                    assert draft['id'] == prepared['id']
+                    assert {op['id'] for op in prepared['operations']} <= {op['id'] for op in draft['operations']}
                 publish(client, base, draft)
+                retry_path = path + '/add-selection'
             else:
-                assert generated['result_kind'] == 'mapping_only'
+                assert len(confirmed) == 5
+                assert preview['can_confirm_reuse'] and not preview['can_add'], preview
                 count_before = len(repo.list_ontologies(pid))
-                path = base + f"/ontology-discovery/runs/{generated['run']['id']}/finalize"
-                assert checked(client.post(path))['materialized_count'] == 5
-                checked(client.post(path))
+                result = checked(client.post(path + '/confirm-reuse', json=frozen_request))
+                assert result['receipt']['facts']['added'] == 5
+                assert result['receipt']['facts']['skipped'] == 0
                 assert len(repo.list_ontologies(pid)) == count_before
+                retry_path = path + '/confirm-reuse'
             records = assert_preserved()
             assert len(records) == n * 5
             assert sum(row['kind'] == 'attribute' for row in records) == n * 2
@@ -208,18 +248,12 @@ def test_four_ingestion_rounds_keep_multiple_parents_attributes_and_history(tmp_
             assert all(row['subject_id'] in entities for row in records if row['kind'] in ('relation', 'attribute'))
             assert all(row['object_id'] in entities for row in records if row['kind'] == 'relation')
             versions_before_retry = len(repo.list_ontologies(pid))
-            retry = checked(client.post(base + '/ontology-discovery/drafts', json={
-                'name': f'Round {n}', 'infer_hierarchy': False}), 201)
-            if n in (2, 4):
-                assert retry['run']['id'] == generated['run']['id']
-            # Publishing changes the baseline fingerprint, so a subsequent run
-            # may have a new ID; it must still produce no duplicate draft/facts.
-            assert retry['result_kind'] != 'draft'
+            retry = checked(client.post(retry_path, json=frozen_request))
+            assert retry['receipt'] == result['receipt']
             assert len(repo.list_ontologies(pid)) == versions_before_retry
             assert len(assert_preserved()) == n * 5
             current, graph = freeze_current()
             if n == 1:
-                merchant_iri = URIRef(generated['mappings']['entity_types']['Merchant'])
                 # First manual release: a parent and a typed attribute.
                 draft = manual(client, base, current['id'])
                 for iri, kind in ((parent_a, 'class'), (rating, 'attribute')):
@@ -248,7 +282,7 @@ def test_four_ingestion_rounds_keep_multiple_parents_attributes_and_history(tmp_
             elif n == 3:
                 # New discovered types must preserve the two existing parents and attribute.
                 assert set(graph.objects(merchant_iri, RDFS.subClassOf)) == {parent_a, parent_b}
-                shop = URIRef(generated['mappings']['entity_types']['Shop'])
+                shop = shop_iri
                 draft = manual(client, base, current['id'])
                 draft = edit(client, base, draft, action='add_parent', target_iri=str(shop), value=str(parent_b))
                 publish(client, base, draft)
@@ -276,7 +310,8 @@ def test_four_ingestion_rounds_keep_multiple_parents_attributes_and_history(tmp_
         assert overview['candidate_status_counts']['materialized'] == 20
         assert overview['unpublished_candidate_count'] == 0
         assert len(repo.list_ontologies(pid)) == 6
-        ledger = checked(client.post(base + '/records/query', json={}))['records']
+        ledger = checked(client.post(base + '/records/page', json={
+            'kinds': ['entity', 'relation', 'attribute'], 'limit': 1000}))['records']
         assert len([row for row in ledger if row['kind'] in ('entity', 'relation', 'attribute')]) == 20
         graph = checked(client.post(base + '/subgraph', json={}))
         visible = {row['id'] for row in graph['nodes'] + graph['edges']}
@@ -311,11 +346,12 @@ def test_browser_repeated_parent_and_attribute_edits_use_real_api(tmp_path, monk
         :rating a owl:DatatypeProperty; rdfs:label "Rating";
             rdfs:domain :Child; rdfs:range xsd:decimal .'''
     app = create_app(tmp_path / 'browser-edit-acceptance.sqlite', HashingEncoder())
+    app.state.ontology_drafts.quality_engine = AcceptanceQualityEngine()
     with TestClient(app) as client, playwright.sync_playwright() as runtime:
         pid = checked(client.post('/api/projects', json={
             'name': 'Isolated browser editing', 'use_default_ontology': False}), 201)['id']
         base = f'/api/projects/{pid}'
-        initial = checked(client.post(base + '/ontologies', json={'turtle': turtle}), 201)
+        initial = seed_project_ontology(client, base + '', turtle)
         bootstrap = f'''let current={json.dumps(pid)};
             function endpoint(s){{return '/api/projects/'+current+s;}}
             let status=(m)=>{{window.lastNotice=m;}};
@@ -355,7 +391,13 @@ def test_browser_repeated_parent_and_attribute_edits_use_real_api(tmp_path, monk
         page.route('http://acceptance.test/**', respond)
         page.goto('http://acceptance.test/')
         page.evaluate('window.loaded')
-        page.locator('#om-side [data-sel="urn:acceptance:Child"]').click()
+        def select_definition(iri):
+            directory = page.locator('.om-hierarchy-directory')
+            if not directory.evaluate('(node) => node.open'):
+                directory.locator(':scope > summary').click()
+            page.locator('#om-side [data-sel="' + iri + '"]').click()
+
+        select_definition('urn:acceptance:Child')
         for parent in ('ParentA', 'ParentB'):
             page.get_by_text('编辑继承（父类）', exact=True).click()
             row = page.locator('.om-constraint-edit .om-ce-row')
@@ -400,7 +442,7 @@ def test_browser_repeated_parent_and_attribute_edits_use_real_api(tmp_path, monk
         page.wait_for_function('''() => !OntologyModel.S.loading && OntologyModel.S.summary.classes
             .find(c=>c.id==='urn:acceptance:Child').parents.length===1''')
         assert page.evaluate('OntologyModel.S.draft.id') != draft_id
-        page.locator('#om-side [data-sel="urn:acceptance:rating"]').click()
+        select_definition('urn:acceptance:rating')
         page.get_by_text('编辑所属类 / 数据类型', exact=True).click()
         domain = page.locator('.om-ce-row').filter(has_text='所属类 domain')
         domain.locator('select').select_option('urn:acceptance:ParentB')

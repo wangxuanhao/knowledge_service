@@ -1,3 +1,4 @@
+from ontology_seed import seed_project_ontology
 from fastapi.testclient import TestClient
 from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
@@ -35,7 +36,7 @@ def test_entity_relation_attribute_dependency_and_version_lifecycle(tmp_path,mon
     with TestClient(app) as c:
         p=c.post('/api/projects',json={'name':'typed','use_default_ontology':False}).json()['id']
         base='/api/projects/'+p;repo=app.state.service.repository
-        assert c.post(base+'/ontologies',json={'turtle':TTL}).status_code==201
+        assert bool(seed_project_ontology(c, base+'', TTL)['id'])
         result=c.post(base+'/documents',json={'title':'样例','text':'甲认识乙，数量2','resolve_entities':False})
         assert result.status_code==201,result.text
         assert result.json()['pending_reviews']==3
@@ -75,14 +76,14 @@ def test_adapter_queues_unknown_entity_and_dependent_known_relation(monkeypatch)
     import knowledge_service.integrations.semantica_adapter as adapter
     from semantica.semantic_extract import methods
     from semantica.semantic_extract.types import Entity,Relation
-    from knowledge_service.services.attribute_extraction import AttributeProposal
+    from knowledge_service.services.attribute_extraction import AttributeProposal, AttributeExtractionBatch
     import knowledge_service.services.attribute_extraction as attributes
     for key in ['KG_LLM_API_KEY','KG_LLM_BASE_URL','KG_LLM_MODEL']:monkeypatch.setenv(key,'test')
     a,b=Entity('甲','NewPerson',0,1),Entity('乙','Person',2,3)
     monkeypatch.setattr(methods,'extract_entities_llm',lambda *args,**kw:[a,b])
     monkeypatch.setattr(adapter,'_extract_relations_guided',lambda *args,**kw:[Relation(a,'knows',b)])
-    monkeypatch.setattr(attributes,'extract_attributes',lambda *args:[AttributeProposal(entity_index=0,attribute='count',value=2,evidence='2',confidence=.8)])
-    extractor=SemanticaExtractor();extractor.include_attributes=True
+    monkeypatch.setattr(attributes,'extract_attributes',lambda *args:AttributeExtractionBatch(attributes=[AttributeProposal(entity_index=0,attribute='count',value=2,evidence='2',confidence=.8)]))
+    extractor=SemanticaExtractor(attribute_extractor=attributes.extract_attributes);extractor.include_attributes=True
     records=extractor.extract('甲乙2',Ontology(TTL))
     assert len(records)==1 and records[0]['text']=='乙'
     assert [r['kind'] for r in extractor.review_candidates]==['entity','relation','attribute']
@@ -93,7 +94,7 @@ def test_adapter_queues_unknown_entity_and_dependent_known_relation(monkeypatch)
 def test_guided_unknown_attribute_stays_attribute_even_when_value_matches_entity(monkeypatch):
     import knowledge_service.integrations.semantica_adapter as adapter
     import knowledge_service.services.attribute_extraction as attributes
-    from knowledge_service.services.attribute_extraction import AttributeProposal
+    from knowledge_service.services.attribute_extraction import AttributeProposal, AttributeExtractionBatch
     from semantica.semantic_extract import methods
     from semantica.semantic_extract.types import Entity
     for key in ['KG_LLM_API_KEY','KG_LLM_BASE_URL','KG_LLM_MODEL']:
@@ -101,9 +102,9 @@ def test_guided_unknown_attribute_stays_attribute_even_when_value_matches_entity
     left,right=Entity('甲','Person',0,1),Entity('乙','Person',4,5)
     monkeypatch.setattr(methods,'extract_entities_llm',lambda *args,**kw:[left,right])
     monkeypatch.setattr(adapter,'_extract_relations_guided',lambda *args,**kw:[])
-    monkeypatch.setattr(attributes,'extract_attributes',lambda *args:[
-        AttributeProposal(entity_index=0,attribute='负责人',value='乙',evidence='甲的负责人是乙',confidence=.9)])
-    extractor=SemanticaExtractor();extractor.include_attributes=True
+    monkeypatch.setattr(attributes,'extract_attributes',lambda *args:AttributeExtractionBatch(attributes=[
+        AttributeProposal(entity_index=0,attribute='负责人',value='乙',evidence='甲的负责人是乙',confidence=.9)]))
+    extractor=SemanticaExtractor(attribute_extractor=attributes.extract_attributes);extractor.include_attributes=True
     records=extractor.extract('甲的负责人是乙',Ontology(TTL))
     assert len([row for row in records if row['kind']=='entity'])==2
     assert [item['kind'] for item in extractor.review_candidates]==['attribute']
@@ -117,7 +118,7 @@ def test_guided_unknown_attribute_stays_attribute_even_when_value_matches_entity
 def test_guided_ambiguous_datatype_property_stays_an_attribute(monkeypatch):
     import knowledge_service.integrations.semantica_adapter as adapter
     import knowledge_service.services.attribute_extraction as attributes
-    from knowledge_service.services.attribute_extraction import AttributeProposal
+    from knowledge_service.services.attribute_extraction import AttributeProposal, AttributeExtractionBatch
     from semantica.semantic_extract import methods
     from semantica.semantic_extract.types import Entity
     for key in ['KG_LLM_API_KEY','KG_LLM_BASE_URL','KG_LLM_MODEL']:
@@ -125,11 +126,11 @@ def test_guided_ambiguous_datatype_property_stays_an_attribute(monkeypatch):
     left,right=Entity('甲','Person',0,1),Entity('乙','Person',4,5)
     monkeypatch.setattr(methods,'extract_entities_llm',lambda *args,**kw:[left,right])
     monkeypatch.setattr(adapter,'_extract_relations_guided',lambda *args,**kw:[])
-    monkeypatch.setattr(attributes,'extract_attributes',lambda *args:[
-        AttributeProposal(entity_index=0,attribute='owner',value='乙',evidence='甲的 owner 是乙',confidence=.9)])
+    monkeypatch.setattr(attributes,'extract_attributes',lambda *args:AttributeExtractionBatch(attributes=[
+        AttributeProposal(entity_index=0,attribute='owner',value='乙',evidence='甲的 owner 是乙',confidence=.9)]))
     duplicate_attributes=TTL+'''\n@prefix one: <https://one/> . @prefix two: <https://two/> .
     one:owner a owl:DatatypeProperty . two:owner a owl:DatatypeProperty .'''
-    extractor=SemanticaExtractor();extractor.include_attributes=True
+    extractor=SemanticaExtractor(attribute_extractor=attributes.extract_attributes);extractor.include_attributes=True
     extractor.extract('甲的 owner 是乙',Ontology(duplicate_attributes))
     assert [item['kind'] for item in extractor.review_candidates]==['attribute']
     assert extractor.review_candidates[0]['proposed_type']=='owner'
@@ -147,7 +148,7 @@ def test_max_count_one_conflict_stays_reviewable_and_can_be_rejected(tmp_path,mo
     with TestClient(app) as client:
         p=client.post('/api/projects',json={'name':'attribute-conflict','use_default_ontology':False}).json()['id']
         base='/api/projects/'+p
-        ontology=client.post(base+'/ontologies',json={'turtle':TTL_MAX_ONE}).json()
+        ontology=seed_project_ontology(client, base+'', TTL_MAX_ONE)
         ingested=client.post(base+'/documents',json={'title':'新证据','text':'甲数量2','resolve_entities':False})
         assert ingested.status_code==201,ingested.text
         items=client.get(base+'/reviews').json()['reviews']
@@ -196,7 +197,7 @@ def test_approve_replace_supersedes_supports_and_tombstones_old_attribute_atomic
     with TestClient(app) as client:
         p=client.post('/api/projects',json={'name':'attribute-replace','use_default_ontology':False}).json()['id']
         base='/api/projects/'+p;repo=app.state.service.repository
-        ontology=client.post(base+'/ontologies',json={'turtle':TTL_MAX_ONE}).json()
+        ontology=seed_project_ontology(client, base+'', TTL_MAX_ONE)
         assert client.post(base+'/documents',json={
             'title':'新证据','text':'甲数量2','resolve_entities':False}).status_code==201
         entity=next(r for r in client.get(base+'/reviews').json()['reviews'] if r['kind']=='entity')
@@ -254,7 +255,7 @@ def test_approve_replace_cannot_remap_a_registered_conflict_predicate(tmp_path,m
     with TestClient(app) as client:
         p=client.post('/api/projects',json={'name':'predicate-lock','use_default_ontology':False}).json()['id']
         base='/api/projects/'+p;repo=app.state.service.repository
-        ontology=client.post(base+'/ontologies',json={'turtle':TTL_TWO_SINGLE}).json()
+        ontology=seed_project_ontology(client, base+'', TTL_TWO_SINGLE)
         assert client.post(base+'/documents',json={
             'title':'候选','text':'甲数量2','resolve_entities':False}).status_code==201
         entity=next(r for r in client.get(base+'/reviews').json()['reviews'] if r['kind']=='entity')
@@ -296,7 +297,7 @@ def test_approve_replace_accepts_when_registered_conflict_has_disappeared(
     with TestClient(app) as client:
         p=client.post('/api/projects',json={'name':'conflict-gone','use_default_ontology':False}).json()['id']
         base='/api/projects/'+p;service=app.state.service;repo=service.repository
-        ontology=client.post(base+'/ontologies',json={'turtle':TTL_MAX_ONE}).json()
+        ontology=seed_project_ontology(client, base+'', TTL_MAX_ONE)
         assert client.post(base+'/documents',json={
             'title':'候选','text':'甲数量2','resolve_entities':False}).status_code==201
         entity=next(r for r in client.get(base+'/reviews').json()['reviews'] if r['kind']=='entity')
@@ -351,7 +352,7 @@ def test_same_attribute_value_reuses_canonical_fact_and_adds_candidate_support(t
     with TestClient(app) as client:
         p=client.post('/api/projects',json={'name':'attribute-reuse','use_default_ontology':False}).json()['id']
         base='/api/projects/'+p;repo=app.state.service.repository
-        ontology=client.post(base+'/ontologies',json={'turtle':TTL}).json()
+        ontology=seed_project_ontology(client, base+'', TTL)
         assert client.post(base+'/documents',json={
             'title':'同值证据','text':'甲数量2','resolve_entities':False}).status_code==201
         entity=next(r for r in client.get(base+'/reviews').json()['reviews'] if r['kind']=='entity')
@@ -465,7 +466,7 @@ def test_review_safety_for_attribute_dependencies(tmp_path,monkeypatch,mode):
     with TestClient(app) as client:
         p=client.post('/api/projects',json={'name':'safety','use_default_ontology':False}).json()['id']
         base='/api/projects/'+p;repo=app.state.service.repository
-        client.post(base+'/ontologies',json={'turtle':TTL})
+        seed_project_ontology(client, base+'', TTL)
         result=client.post(base+'/documents',json={'title':'原文','text':'甲数量2','resolve_entities':False})
         assert result.status_code==201,result.text
         def items():return client.get(base+'/reviews').json()['reviews']

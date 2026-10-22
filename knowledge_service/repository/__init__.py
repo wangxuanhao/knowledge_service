@@ -7,7 +7,7 @@
 - review_store       消歧审核与合并账本
 - pg_engine.py       PostgreSQL 连接与方言适配层
 
-Repository 保持方法名不变、内部转发到各 Store，对外导入路径零破坏。
+Repository 聚合各 Store 的项目与记录访问入口。
 
 schema 由编号迁移管理（`migrations/` + `migrate.py`），Repository 不再自建表。
 """
@@ -16,8 +16,6 @@ from .core import (
     OntologyNotPublished,
     OntologyPublicationConflict,
     FormalWriteConflict,
-    vector_blob,
-    vector_array,
     _json,
 )
 from .ontology_draft_store import OntologyDraftConflict, OntologyDraftStore
@@ -26,7 +24,7 @@ from .discovery_run_store import DiscoveryRunConflict, DiscoveryRunStore
 __all__ = [
     'Repository', 'OntologyNotPublished', 'OntologyPublicationConflict',
     'FormalWriteConflict',
-    'vector_blob', 'vector_array', '_json',
+    '_json',
     'OntologyDraftConflict', 'OntologyDraftStore',
     'DiscoveryRunConflict', 'DiscoveryRunStore',
 ]

@@ -10,7 +10,7 @@
     const overlay = document.createElement('div');
     overlay.className = 'projects-modal-overlay';
     overlay.innerHTML = `
-      <div class="projects-modal" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+      <div class="projects-modal management-drawer" role="dialog" aria-modal="true" aria-label="${esc(title)}">
         <div class="projects-modal-header">
           <h3 class="projects-modal-title">${esc(title)}</h3>
           <button type="button" class="projects-modal-close" aria-label="关闭">×</button>
@@ -63,22 +63,22 @@
           <h3>${esc(p.name)}</h3>
           ${isCurrent ? '<span class="project-current-badge">当前项目</span>' : ''}
         </div>
-        <p class="project-created">创建于 ${esc(p.created_at || '—')}</p>
+        <p class="project-created">创建于 ${esc(p.created_at || '—')} · ${Number.isInteger(p.ontology_publications)?(p.ontology_publications?'本体已发布 · '+p.ontology_publications+' 个发布快照':'尚未发布本体'):'前往本体建模层查看发布状态'}</p>
         <p class="project-id" title="项目 ID：接口路径、日志、向量库分区都用它定位">
           <span>项目 ID</span>
           <code>${esc(p.id)}</code>
           <button type="button" class="project-id-copy" data-copy-id="${esc(p.id)}" aria-label="复制项目 ID">复制</button>
         </p>
         <div class="project-counts">
-          <div class="project-count"><strong>${counts.documents ?? 0}</strong><span>文档</span></div>
-          <div class="project-count"><strong>${counts.entities ?? 0}</strong><span>实体</span></div>
-          <div class="project-count"><strong>${counts.relations ?? 0}</strong><span>关系</span></div>
-          <div class="project-count"><strong>${counts.chunks ?? 0}</strong><span>片段</span></div>
+          <div class="project-count"><strong>${counts.documents ?? counts.document ?? '待获取'}</strong><span>文档</span></div>
+          <div class="project-count"><strong>${counts.entities ?? counts.entity ?? '待获取'}</strong><span>实体</span></div>
+          <div class="project-count"><strong>${counts.relations ?? counts.relation ?? '待获取'}</strong><span>关系</span></div>
+          <div class="project-count"><strong>${counts.chunks ?? counts.chunk ?? '待获取'}</strong><span>片段</span></div>
         </div>
         <div class="project-actions">
-          <button data-switch="${esc(p.id)}">切换</button>
-          <button data-rename="${esc(p.id)}" class="secondary">重命名</button>
-          <button data-delete="${esc(p.id)}" class="danger">删除</button>
+          <button data-switch="${esc(p.id)}">进入项目</button>
+          <button data-rename="${esc(p.id)}" class="secondary">设置</button>
+
         </div>
       </article>`;
   }
@@ -88,10 +88,10 @@
     try{
       await projects();
       $('project').value = id;
-      $('project').onchange();
+      $('project').dispatchEvent(new Event('change'));
       const name = $('project').selectedOptions[0]?.textContent || id;
       status('已切换到项目：' + name);
-      await renderProjects();
+      const chosen=projectsCache.find(item=>item.id===id);window.KnowledgeTabs.open((chosen?.counts?.documents||0)>0?'qa':'sources');
     }catch(e){
       status(e.message, true);
     }
@@ -101,11 +101,14 @@
     const project = projectsCache.find(p => p.id === id);
     if(!project) return;
     const {overlay, close} = openModal({
-      title: '重命名项目',
-      body: `<label>项目名称<input id="projects-rename-input" maxlength="200"></label>`,
+      title: '项目设置',
+      body: `<label>项目名称<input id="projects-rename-input" maxlength="200"></label><p class="subtle">处理方式在每次上传时选择。</p><div class="project-settings-links"><button id="project-index-config" class="secondary">项目向量化</button><button id="project-overview" class="secondary">项目概览</button><button id="project-backup" class="secondary">知识备份</button></div><hr><button id="project-remove" class="danger">删除项目…</button>`,
       footer: `<button id="projects-rename-confirm">保存</button><button class="secondary" id="projects-rename-cancel">取消</button>`
     });
     const field = overlay.querySelector('#projects-rename-input');
+    overlay.querySelector('#project-index-config').onclick=()=>{close();window.ProjectVectorIndex.open(id).catch(e=>status(e.message,true));};
+    overlay.querySelector('#project-remove').onclick=()=>{close();openDelete(id);};
+    for(const [button,view] of [['project-overview','overview'],['project-backup','snapshots']])overlay.querySelector('#'+button).onclick=async()=>{await projects();$('project').value=id;$('project').dispatchEvent(new Event('change'));close();window.RuntimeView.show(view,{load:false});window.KnowledgeTabs.open('runtime');};
     field.value = project.name;
     field.focus();
     field.select();
@@ -135,23 +138,18 @@
     const {overlay, close} = openModal({
       title: '删除项目',
       body: `
-        <div class="projects-delete-warning">删除不可恢复，将同时删除该项目全部记录、本体与产物。请输入项目名称或勾选确认后删除。</div>
+        <div class="projects-delete-warning">删除不可恢复，将同时删除该项目全部记录、本体与产物。请输入项目名称后删除。</div>
         <label>项目名称<input id="projects-delete-input" maxlength="200" placeholder="输入项目名称以确认"></label>
-        <div class="projects-confirm-row">
-          <input type="checkbox" id="projects-delete-confirm">
-          <label for="projects-delete-confirm">我确认删除该项目</label>
-        </div>`,
+`,
       footer: `<button id="projects-delete-confirm-btn" class="danger" disabled>删除</button><button class="secondary" id="projects-delete-cancel">取消</button>`
     });
     const input = overlay.querySelector('#projects-delete-input');
-    const checkbox = overlay.querySelector('#projects-delete-confirm');
     const confirmBtn = overlay.querySelector('#projects-delete-confirm-btn');
     const update = ()=>{
       const typed = input.value.trim() === project.name;
-      confirmBtn.disabled = !(typed || checkbox.checked);
+      confirmBtn.disabled = !typed;
     };
     input.addEventListener('input', update);
-    checkbox.addEventListener('change', update);
     overlay.querySelector('#projects-delete-cancel').onclick = close;
     confirmBtn.onclick = async ()=>{
       confirmBtn.disabled = true;
@@ -160,13 +158,15 @@
         const r = await api('/api/projects/' + encodeURIComponent(id), undefined, 'DELETE');
         await projects();
         if(current === id){
-          current = '';
-          $('project').value = '';
-          $('project').onchange();
+          window.WorkspaceContext?.store.removeProject(id);
+          try{localStorage.removeItem('kg_qa_v1_'+id);sessionStorage.removeItem('knowledge-project');}catch{}
+          $('project').value = [...$('project').options].find(option=>option.value)?.value||'';
+          $('project').dispatchEvent(new Event('change'));
           $('dashboard').textContent = '';
         }
         const deleted = r.deleted || {};
-        status(`项目已删除：${project.name}（记录 ${deleted.records ?? 0} · 本体 ${deleted.ontologies ?? 0} · 产物 ${deleted.artifacts ?? 0}）`);
+        const cleaned=r.cleaned||r.cleared||{};const pending=['milvus','neo4j'].filter(target=>cleaned[target]!==true);
+        status(`项目已删除：${project.name}（记录 ${deleted.records ?? 0} · 本体 ${deleted.ontologies ?? 0} · 产物 ${deleted.artifacts ?? 0}）${pending.length?'；派生投影清理待核验：'+pending.join('、'):'；派生投影清理已确认'}`);
         close();
         await renderProjects();
       }catch(e){
@@ -183,7 +183,7 @@
       title: '创建项目',
       body: `
         <label>项目名称<input id="create-name" maxlength="200" placeholder="新项目名称"></label>
-        <label>知识建模方式<select id="project-ontology-mode"><option value="ontology">加载默认本体 · 直接构建正式图谱</option><option value="discovery">开放本体发现 · 先抽取候选再归纳</option><option value="documents">仅文档检索 · 不抽取图谱</option></select></label>`,
+        <p class="subtle">先创建空项目，再添加文件。处理时可选仅文档、按已有本体抽取或开放发现。</p>`,
       footer: `<button id="create-project">创建</button><button class="secondary" id="cancel-project">取消</button>`
     });
     const nameField = overlay.querySelector('#create-name');
@@ -196,14 +196,13 @@
       button.disabled = true;
       status('处理中…');
       try{
-        const mode = overlay.querySelector('#project-ontology-mode').value;
-        const p = await api('/api/projects', {name, ontology_mode:mode, use_default_ontology:mode==='ontology'});
+        const p = await api('/api/projects', window.WorkspaceContext.projectPayload(name));
         await projects();
         $('project').value = p.id;
-        $('project').onchange();
+        $('project').dispatchEvent(new Event('change'));
         status('项目已创建：' + name);
         close();
-        await renderProjects();
+        window.KnowledgeTabs.open('sources');
       }catch(e){
         status(e.message, true);
         button.disabled = false;
@@ -215,6 +214,8 @@
   async function renderProjects(){
     const epoch = ++renderEpoch;
     try{
+      await (window.Auth&&window.Auth.whenReady?window.Auth.whenReady():Promise.resolve());
+      if(epoch !== renderEpoch) return;
       const result = await api('/api/projects', undefined, 'GET');
       if(epoch !== renderEpoch) return;
       projectsCache = result.projects || [];
@@ -225,13 +226,15 @@
             <h2>项目管理</h2>
             <p class="subtle">共 ${projects.length} 个项目 · 创建、重命名或删除项目</p>
           </div>
-          <button id="new-project">＋ 创建项目</button>
+          <div class="row"><button id="new-project">＋ 创建项目</button></div>
         </div>
+        <input id="projects-find" placeholder="查找项目名称" aria-label="查找项目" style="margin-bottom:16px;width:100%">
         ${projects.length
           ? `<div class="projects-grid">${projects.map(projectCard).join('')}</div>`
           : `<div class="projects-empty"><div class="projects-empty-icon">📂</div><div class="projects-empty-title">暂无项目</div><div class="projects-empty-text">点击“＋ 创建项目”创建第一个知识项目</div></div>`}
       `;
       $('new-project').onclick = openCreate;
+      $('projects-find').oninput=()=>{const query=$('projects-find').value.trim().toLowerCase();root.querySelectorAll('.project-card').forEach(card=>{card.hidden=!card.querySelector('h3').textContent.toLowerCase().includes(query);});};
       root.querySelectorAll('[data-switch]').forEach(b=>b.onclick=()=>switchProject(b.dataset.switch));
       root.querySelectorAll('[data-rename]').forEach(b=>b.onclick=()=>openRename(b.dataset.rename));
       root.querySelectorAll('[data-delete]').forEach(b=>b.onclick=()=>openDelete(b.dataset.delete));
@@ -242,10 +245,7 @@
     }
   }
 
-  /* 进入「项目与运行 → 项目设置」分区时重新拉一次；首次加载也渲染一次 */
-  // 项目管理并入「项目与运行」的「项目设置」分区：进入该分区时重新拉一次项目列表。
-  window.RuntimeView?.on('project', renderProjects);
-  // 首次加载也要等认证就绪：未登录时先挂着，别带着空令牌打 /api/projects 拿 401。
-  (window.Auth&&window.Auth.whenReady?window.Auth.whenReady():Promise.resolve())
-    .then(renderProjects);
+  // Navigation owns project-card reads. The shared project selector has its own
+  // startup inventory; a hidden management page must not request it again.
+  window.ProjectsView={refresh:renderProjects,create:openCreate};
 })();

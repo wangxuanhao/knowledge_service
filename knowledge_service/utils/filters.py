@@ -1,6 +1,7 @@
 """在任何向量检索之前求值的、经过校验的类型化谓词。"""
 import json
 import re
+from decimal import Decimal
 
 from ..core.time import normalize_time
 
@@ -8,6 +9,22 @@ _MISSING = object()
 _TOP = {'id', 'kind', 'type', 'source_id', 'valid_from', 'valid_until', 'recorded_at'}
 _TIME = {'valid_from', 'valid_until', 'recorded_at'}
 _OPS = {'eq', 'ne', 'in', 'contains', 'gt', 'gte', 'lt', 'lte', 'exists'}
+
+
+def encode_filter_json(value):
+    """Encode source decimals as JSON numbers, without binary-float conversion."""
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise ValueError('过滤器数值必须有限')
+        return str(value)
+    if isinstance(value, list):
+        return '[' + ','.join(encode_filter_json(item) for item in value) + ']'
+    if isinstance(value, dict):
+        if any(not isinstance(key, str) for key in value):
+            raise ValueError('JSON 对象键必须为字符串')
+        return '{' + ','.join(json.dumps(key, ensure_ascii=False) + ':' + encode_filter_json(value[key])
+                              for key in sorted(value)) + '}'
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False)
 
 
 def validate_filter(filters, _depth=0):
@@ -33,14 +50,14 @@ def validate_filter(filters, _depth=0):
     if not isinstance(op, str) or op not in _OPS:
         raise ValueError('不支持的过滤器运算符')
     try:
-        json.dumps(value, allow_nan=False)
+        encode_filter_json(value)
     except (ValueError, TypeError) as exc:
         raise ValueError('过滤器值必须是 JSON') from exc
     if op == 'in' and not isinstance(value, list):
         raise ValueError('in 运算符需要一个列表')
     if op == 'exists' and not isinstance(value, bool):
         raise ValueError('exists 运算符需要一个布尔值')
-    if op in {'gt', 'gte', 'lt', 'lte'} and (isinstance(value, bool) or not isinstance(value, (str, int, float))):
+    if op in {'gt', 'gte', 'lt', 'lte'} and (isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal))):
         raise ValueError('比较运算需要数字或字符串')
     if field in _TIME and op != 'exists':
         for item in value if op == 'in' else [value]:
@@ -50,8 +67,10 @@ def validate_filter(filters, _depth=0):
 def _equal(a, b):
     if isinstance(a, bool) or isinstance(b, bool):
         return type(a) is type(b) and a == b
-    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
-        return a == b
+    if isinstance(a, (int, float, Decimal)) and isinstance(b, (int, float, Decimal)):
+        # PostgreSQL jsonb stores the JSON decimal value. Binary-float
+        # coercion would disagree at large integer/float boundaries.
+        return Decimal(str(a)) == Decimal(str(b))
     if type(a) is not type(b):
         return False
     if isinstance(a, list):
@@ -98,7 +117,9 @@ def _matches(record, filters):
         if isinstance(actual, list):
             return any(_equal(v, target) for v in actual)
         return isinstance(actual, str) and isinstance(target, str) and target in actual
-    comparable = (isinstance(actual, (int, float)) and not isinstance(actual, bool) and isinstance(target, (int, float)) and not isinstance(target, bool)) or (isinstance(actual, str) and isinstance(target, str))
+    comparable = (isinstance(actual, (int, float, Decimal)) and not isinstance(actual, bool) and isinstance(target, (int, float, Decimal)) and not isinstance(target, bool)) or (isinstance(actual, str) and isinstance(target, str))
     if not comparable:
         return False
+    if isinstance(actual, (int, float, Decimal)):
+        actual, target = Decimal(str(actual)), Decimal(str(target))
     return {'gt': lambda: actual > target, 'gte': lambda: actual >= target, 'lt': lambda: actual < target, 'lte': lambda: actual <= target}[op]()

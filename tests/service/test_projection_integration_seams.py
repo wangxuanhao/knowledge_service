@@ -2,6 +2,7 @@ from contextlib import contextmanager
 import json
 from pathlib import Path
 import threading
+import pytest
 
 from knowledge_service.repository.core import Repository
 from knowledge_service.repository.projection_store import ProjectionStore
@@ -69,6 +70,7 @@ def test_insert_if_absent_runs_put_and_outbox_inside_one_transaction():
 
 class Encoder:
     identity = 'test-v1'
+    semantic = True
 
     def encode(self, texts):
         return [[1.0, 0.0] for _ in texts]
@@ -93,6 +95,11 @@ class ReadinessRepository:
         by_version = {row['version_id']: row for row in self.authority_rows}
         return [by_version[item] for item in version_ids if item in by_version]
 
+    def keyword_candidates(self, project_id, term, **kwargs):
+        # An empty FTS result still exercises lexical ranking over the engine's
+        # freshly qualified authority rows, including the explicit ID scope.
+        return []
+
 
 class RecordingMilvus:
     available = True
@@ -115,21 +122,22 @@ def test_new_authoritative_write_blocks_milvus_until_projection_catches_up():
     }]
     repository.authority_rows = candidates
 
-    stale = engine.search(
-        'project', '规则', retrieval_mode='semantic', candidates=candidates)
+    with pytest.raises(RuntimeError, match='Milvus 投影未就绪'):
+        engine.search('project', '规则', retrieval_mode='semantic',
+                      content_channels=['chunk'], candidates=candidates)
     assert milvus.calls == []
-    assert stale['_backend'] == 'postgres_local'
-    assert stale['degraded_reason'] == 'milvus_projection_stale'
+    assert repository.query_calls == []
 
     repository.ready = True
     ready = engine.search(
-        'project', '规则', retrieval_mode='semantic', candidates=candidates)
+        'project', '规则', retrieval_mode='semantic',
+        content_channels=['chunk'], candidates=candidates)
     assert len(milvus.calls) == 1
     assert ready['_backend'] == 'milvus'
     assert repository.readiness_calls[-1][:2] == ('project', 'milvus')
 
 
-def test_stale_projection_discards_passed_candidates_and_reapplies_id_scope():
+def test_explicit_keyword_with_stale_projection_discards_candidates_and_reapplies_id_scope():
     repository = ReadinessRepository()
     repository.authority_rows = [
         {'id': 'authority', 'version_id': 'version-2', 'kind': 'chunk',
@@ -147,7 +155,7 @@ def test_stale_projection_discards_passed_candidates_and_reapplies_id_scope():
     engine = RetrievalEngine(repository, Encoder(), RecordingMilvus())
 
     result = engine.search(
-        'project', '规则', retrieval_mode='semantic',
+        'project', '规则', retrieval_mode='keyword',
         scope={'_candidate_ids': ['authority']}, candidates=stale_candidates)
 
     assert repository.query_calls

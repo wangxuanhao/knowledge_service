@@ -5,6 +5,7 @@ Run through verify_authenticated.py; creates and removes only its own project.
 import argparse
 import json
 import time
+from urllib.error import HTTPError
 import urllib.request
 from uuid import uuid4
 
@@ -26,6 +27,14 @@ def main():
                         for block in raw.split('\n\n') if block.startswith('event: ')}
             return json.loads(raw) if raw else None
 
+    def reject_client_actor(path, body):
+        try:
+            request(path, {**body, 'actor': 'forged-actor'})
+        except HTTPError as error:
+            assert error.code == 422, error.code
+        else:
+            raise AssertionError('Obsolete actor field was accepted')
+
     health = request('/api/health')
     assert health['semantic'] and health['embedding']['ready'], health
     assert health['embedding']['dimension'] == health['vector']['dimension'], health
@@ -36,9 +45,12 @@ def main():
     root = '/api/projects/' + project['id']
     try:
         ontology = request(root + '/ontology')
-        draft = request(root + '/ontology-drafts', {
+        create_body = {
             'base_ontology_id': ontology['id'], 'title': 'Live audit validation',
-            'actor': 'forged-actor', 'source_context': {'actor': 'forged-actor'}})
+            'source_context': {'actor': 'forged-actor'}}
+        reject_client_actor(root + '/ontology-drafts', create_body)
+        assert request(root + '/ontology-drafts')['items'] == []
+        draft = request(root + '/ontology-drafts', create_body)
         assert 'forged-actor' not in draft['source_context']['actor']
         assert 'user:' in draft['source_context']['actor']
         draft = request(root + f"/ontology-drafts/{draft['id']}/commands", {
@@ -48,22 +60,32 @@ def main():
         path = root + '/ontology-drafts/' + draft['id']
         draft = request(path + '/submit', {'expected_revision': draft['revision']})
         warning_codes = [w['code'] for w in draft['validation_report']['warnings']]
-        draft = request(path + '/decisions', {
+        review_body = {
             'expected_revision': draft['revision'], 'expected_ontology_id': ontology['id'],
             'validation_fingerprint': draft['validation_fingerprint'],
-            'acknowledged_warning_codes': warning_codes, 'actor': 'forged-reviewer',
+            'acknowledged_warning_codes': warning_codes,
             'decisions': [{'operation_id': op['id'], 'operation_fingerprint': op['fingerprint'],
                            'action': 'approve', 'reason': 'live verification'}
-                          for op in draft['operations']]})
-        version = request(path + '/publish', {
+                          for op in draft['operations']]}
+        reject_client_actor(path + '/decisions', review_body)
+        unchanged = request(path)
+        assert unchanged['revision'] == draft['revision']
+        assert unchanged['decisions'] == draft['decisions']
+        draft = request(path + '/decisions', review_body)
+        publish_body = {
             'expected_revision': draft['revision'], 'expected_ontology_id': ontology['id'],
             'validation_fingerprint': draft['validation_fingerprint'],
             'acknowledged_warning_codes': warning_codes, 'idempotency_key': str(uuid4()),
-            'actor': 'forged-publisher', 'note': 'Live outbox and audit validation'})
+            'note': 'Live outbox and audit validation'}
+        versions = request(root + '/ontologies')['versions']
+        reject_client_actor(path + '/publish', publish_body)
+        assert request(root + '/ontologies')['versions'] == versions
+        assert request(path)['revision'] == draft['revision']
+        version = request(path + '/publish', publish_body)
         assert 'forged' not in version['metadata']['publication']['actor']
         print('PASS authenticated creation/review/publication identity')
         source = '冻结验证原文：张三使用测试系统，系统保留原文版本用于追溯。'
-        doc = request(root + '/documents', {'title': '冻结验证原文', 'text': source, 'extract': False})
+        doc = request(root + '/documents', {'title': '冻结验证原文', 'text': source, 'extraction_mode': 'documents'})
         request(root + '/ontology-index/repair', {}, 'POST')
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:

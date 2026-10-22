@@ -1,3 +1,4 @@
+from ontology_seed import seed_ontology
 import json
 
 import pytest
@@ -617,10 +618,10 @@ def test_restore_builder_requires_same_project_immutable_source_and_captures_tem
     project_id = repo.create_project('p')['id']
     other_id = repo.create_project('other')['id']
     source_ttl = BASE + 'ex:C a owl:Class; rdfs:subClassOf ex:Root .'
-    source = repo.save_ontology(project_id, source_ttl, Ontology(source_ttl).summary())
-    other_source = repo.save_ontology(other_id, source_ttl, Ontology(source_ttl).summary())
+    source = seed_ontology(repo, project_id, source_ttl, Ontology(source_ttl).summary())
+    other_source = seed_ontology(repo, other_id, source_ttl, Ontology(source_ttl).summary())
     current = source_ttl + 'ex:C owl:deprecated true .'
-    repo.save_ontology(project_id, current, Ontology(current).summary())
+    seed_ontology(repo, project_id, current, Ontology(current).summary())
 
     with pytest.raises(ValueError, match='source_ontology_id'):
         build_restore_operation(repo, project_id, 'http://ex/C', None, selected_fields=['parents'])
@@ -657,9 +658,9 @@ def test_restore_builder_rejects_empty_duplicate_or_unsupported_fields(
         tmp_path, selected_fields):
     repo = Repository(tmp_path / 'restore-fields.sqlite')
     project_id = repo.create_project('p')['id']
-    source = repo.save_ontology(project_id, BASE, Ontology(BASE).summary())
+    source = seed_ontology(repo, project_id, BASE, Ontology(BASE).summary())
     current = BASE + 'ex:rel owl:deprecated true .'
-    repo.save_ontology(project_id, current, Ontology(current).summary())
+    seed_ontology(repo, project_id, current, Ontology(current).summary())
     with pytest.raises(ValueError, match='显式|重复|字段|field'):
         build_restore_operation(
             repo, project_id, 'http://ex/rel', source['id'],

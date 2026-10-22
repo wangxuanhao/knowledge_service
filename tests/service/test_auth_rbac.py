@@ -158,7 +158,8 @@ def test_viewer_readonly_post_allowed(tmp_path):
         viewer = _login(client, 'alice', 'pass123').json()['access_token']
         pid = client.post('/api/projects', json={'name': 'p'},
                           headers=_h(super_)).json()['id']
-        resp = client.post(f'/api/projects/{pid}/search', json={'query': '退款'},
+        resp = client.post(f'/api/projects/{pid}/search', json={
+            'query': '退款', 'retrieval_mode': 'keyword'},
                            headers=_h(viewer))
         assert resp.status_code not in (401, 403)
         assert 'hits' in resp.json()

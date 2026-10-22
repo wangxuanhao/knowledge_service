@@ -1,9 +1,51 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const path=require('node:path');
+const fs=require('node:fs');
+const vm=require('node:vm');
 
 const {frozenSourceDocument,attributeDetailsHtml}=require(path.resolve(
   __dirname,'../../knowledge_service/web/evidence-inspector.js'));
+
+async function renderEntity(attributes){
+  const elements=new Map();
+  const make=()=>({dataset:{},children:[],setAttribute(){},appendChild(node){this.children.push(node);},
+    after(){},addEventListener(){},querySelector(){return make();},querySelectorAll(){return [];}});
+  const get=id=>{if(!elements.has(id))elements.set(id,make());return elements.get(id);};
+  const window={},context={window,current:'p',$:get,scope:()=>({}),endpoint:s=>s,
+    document:{createElement:make,body:make()},esc:value=>String(value??'').replaceAll('<','&lt;').replaceAll('>','&gt;'),
+    labelOf:value=>value,term:value=>value,RecordVersionContext:{revision:()=>1,summary:()=>''},
+    api:async url=>url==='/ontologies'?{versions:[]}:{documents:[],message:'没有来源'}};
+  vm.runInNewContext(fs.readFileSync(path.resolve(__dirname,'../../knowledge_service/web/evidence-inspector.js'),'utf8'),context);
+  await window.renderEvidenceInspector({id:'entity',kind:'entity',type:'urn:test:Thing',text:'事物',version:1,
+    properties:{age:'raw metadata value'},attributes},[]);
+  return get('graph-detail').innerHTML;
+}
+
+test('raw properties never become a formal attribute section when canonical attributes are absent',async()=>{
+  for(const attributes of [undefined,[]]){
+    const html=await renderEntity(attributes);
+    assert.doesNotMatch(html,/<section class="evidence-attributes">|兼容属性/);
+    assert.match(html,/<details class="evidence-technical">[\s\S]*raw metadata value/);
+  }
+});
+
+test('canonical attribute values stay visible while unrelated properties remain technical metadata',async()=>{
+  const html=await renderEntity([{predicate:'urn:test:age',label:'年龄',values:[
+    {record_id:'age',value:20,datatype:'http://www.w3.org/2001/XMLSchema#integer',accepted_support_count:1,status:'accepted'},
+  ]}]);
+  const visible=html.split('<details class="evidence-technical">')[0];
+  assert.match(visible,/<section class="evidence-attributes">[\s\S]*年龄[\s\S]*20[\s\S]*1 条支撑/);
+  assert.doesNotMatch(visible,/raw metadata value|兼容属性/);
+});
+
+test('graph detail uses the shared scoped creators for relationships and independent attributes',()=>{
+  const source=require('node:fs').readFileSync(path.resolve(__dirname,'../../knowledge_service/web/evidence-inspector.js'),'utf8');
+  assert.match(source,/RecordCreate\?\.open\('relation',\{subject:row\}\)/);
+  assert.match(source,/RecordCreate\?\.open\('attribute',\{subject:row\}\)/);
+  assert.doesNotMatch(source,/records\/query\?limit=1000/);
+  assert.match(source,/data-action="add-attribute" class="admin-only"/);
+});
 
 test('changed provenance source assets use fresh cache versions',()=>{
   const html=require('node:fs').readFileSync(path.resolve(

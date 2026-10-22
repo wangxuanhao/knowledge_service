@@ -1,0 +1,370 @@
+[
+  {
+    "repeat": 0,
+    "method": "GET",
+    "path": "/api/health",
+    "status": 200,
+    "ms": 92.2,
+    "decode_ms": 0.12,
+    "bytes": 1425,
+    "body": null,
+    "counts": {}
+  },
+  {
+    "repeat": 0,
+    "method": "GET",
+    "path": "/api/auth/policy",
+    "status": 200,
+    "ms": 5.9,
+    "decode_ms": 0.04,
+    "bytes": 21,
+    "body": null,
+    "counts": {}
+  },
+  {
+    "repeat": 0,
+    "method": "GET",
+    "path": "/api/auth/me",
+    "status": 200,
+    "ms": 48.3,
+    "decode_ms": 0.04,
+    "bytes": 126,
+    "body": null,
+    "counts": {}
+  },
+  {
+    "repeat": 0,
+    "method": "GET",
+    "path": "/api/projects",
+    "status": 200,
+    "ms": 300.3,
+    "decode_ms": 0.2,
+    "bytes": 3861,
+    "body": null,
+    "counts": {
+      "projects": 12
+    }
+  },
+  {
+    "repeat": 0,
+    "method": "GET",
+    "path": "/api/projects?include_counts=false",
+    "status": 200,
+    "ms": 82.6,
+    "decode_ms": 0.1,
+    "bytes": 2082,
+    "body": null,
+    "counts": {
+      "projects": 12
+    }
+  },
+  {
+    "repeat": 0,
+    "method": "GET",
+    "path": "/api/ingest/capabilities",
+    "status": 200,
+    "ms": 67.6,
+    "decode_ms": 0.05,
+    "bytes": 478,
+    "body": null,
+    "counts": {}
+  },
+  {
+    "repeat": 0,
+    "method": "GET",
+    "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology",
+    "status": 200,
+    "ms": 84.1,
+    "decode_ms": 0.22,
+    "bytes": 10960,
+    "body": null,
+    "counts": {}
+  },
+  {
+    "repeat": 0,
+    "method": "GET",
+    "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontologies",
+    "status": 200,
+    "ms": 125.6,
+    "decode_ms": 0.23,
+    "bytes": 11136,
+    "body": null,
+    "counts": {
+      "versions": 1
+    }
+  },
+  {
+    "repeat": 0,
+    "method": "GET",
+    "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology-drafts",
+    "status": 200,
+    "ms": 234.2,
+    "decode_ms": 1.13,
+    "bytes": 109619,
+    "body": null,
+    "counts": {}
+  },
+  {
+    "repeat": 0,
+    "method": "GET",
+    "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology-drafts/stage-availability",
+    "status": 200,
+    "ms": 408.4,
+    "decode_ms": 0.12,
+    "bytes": 570,
+    "body": null,
+    "counts": {}
+  },
+  {
+    "repeat": 0,
+    "method": "GET",
+    "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology-discovery?compact=true",
+    "status": 200,
+    "ms": 1430.0,
+    "decode_ms": 0.46,
+    "bytes": 15525,
+    "body": null,
+    "counts": {}
+  },
+  {
+    "repeat": 0,
+    "method": "GET",
+    "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/reclassify",
+    "status": 200,
+    "ms": 255.0,
+    "decode_ms": 0.1,
+    "bytes": 832,
+    "body": null,
+    "counts": {
+      "groups": 0
+    }
+  },
+  {
+    "repeat": 0,
+    "method": "POST",
+    "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/sources?limit=50&summary_only=true",
+    "status": 200,
+    "ms": 263.0,
+    "decode_ms": 0.17,
+    "bytes": 4959,
+    "body": {},
+    "counts": {
+      "documents": 4
+    }
+  },
+  {
+    "repeat": 0,
+    "method": "POST",
+    "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+    "status": 200,
+    "ms": 167.2,
+    "decode_ms": 0.7,
+    "bytes": 35766,
+    "body": {
+      "kinds": [
+        "entity"
+      ],
+      "limit": 50
+    },
+    "counts": {
+      "records": 28
+    }
+  },
+  {
+    "repeat": 0,
+    "method": "POST",
+    "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/metadata/facets",
+    "status": 200,
+    "ms": 400.3,
+    "decode_ms": 0.71,
+    "bytes": 19001,
+    "body": {},
+    "counts": {
+      "fields": 45
+    }
+  },
+  {
+    "repeat": 1,
+    "method": "GET",
+    "path": "/api/health",
+    "status": 200,
+    "ms": 54.6,
+    "decode_ms": 0.13,
+    "bytes": 1425,
+    "body": null,
+    "counts": {}
+  },
+  {
+    "repeat": 1,
+    "method": "GET",
+    "path": "/api/auth/policy",
+    "status": 200,
+    "ms": 5.7,
+    "decode_ms": 0.05,
+    "bytes": 21,
+    "body": null,
+    "counts": {}
+  },
+  {
+    "repeat": 1,
+    "method": "GET",
+    "path": "/api/auth/me",
+    "status": 200,
+    "ms": 34.6,
+    "decode_ms": 0.05,
+    "bytes": 126,
+    "body": null,
+    "counts": {}
+  },
+  {
+    "repeat": 1,
+    "method": "GET",
+    "path": "/api/projects",
+    "status": 200,
+    "ms": 275.6,
+    "decode_ms": 0.2,
+    "bytes": 3861,
+    "body": null,
+    "counts": {
+      "projects": 12
+    }
+  },
+  {
+    "repeat": 1,
+    "method": "GET",
+    "path": "/api/projects?include_counts=false",
+    "status": 200,
+    "ms": 42.7,
+    "decode_ms": 0.09,
+    "bytes": 2082,
+    "body": null,
+    "counts": {
+      "projects": 12
+    }
+  },
+  {
+    "repeat": 1,
+    "method": "GET",
+    "path": "/api/ingest/capabilities",
+    "status": 200,
+    "ms": 55.9,
+    "decode_ms": 0.07,
+    "bytes": 478,
+    "body": null,
+    "counts": {}
+  },
+  {
+    "repeat": 1,
+    "method": "GET",
+    "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology",
+    "status": 200,
+    "ms": 100.0,
+    "decode_ms": 0.22,
+    "bytes": 10960,
+    "body": null,
+    "counts": {}
+  },
+  {
+    "repeat": 1,
+    "method": "GET",
+    "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontologies",
+    "status": 200,
+    "ms": 97.8,
+    "decode_ms": 0.21,
+    "bytes": 11136,
+    "body": null,
+    "counts": {
+      "versions": 1
+    }
+  },
+  {
+    "repeat": 1,
+    "method": "GET",
+    "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology-drafts",
+    "status": 200,
+    "ms": 68.5,
+    "decode_ms": 1.12,
+    "bytes": 109619,
+    "body": null,
+    "counts": {}
+  },
+  {
+    "repeat": 1,
+    "method": "GET",
+    "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology-drafts/stage-availability",
+    "status": 200,
+    "ms": 55.5,
+    "decode_ms": 0.15,
+    "bytes": 570,
+    "body": null,
+    "counts": {}
+  },
+  {
+    "repeat": 1,
+    "method": "GET",
+    "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology-discovery?compact=true",
+    "status": 200,
+    "ms": 1432.9,
+    "decode_ms": 0.47,
+    "bytes": 15525,
+    "body": null,
+    "counts": {}
+  },
+  {
+    "repeat": 1,
+    "method": "GET",
+    "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/reclassify",
+    "status": 200,
+    "ms": 290.7,
+    "decode_ms": 0.13,
+    "bytes": 832,
+    "body": null,
+    "counts": {
+      "groups": 0
+    }
+  },
+  {
+    "repeat": 1,
+    "method": "POST",
+    "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/sources?limit=50&summary_only=true",
+    "status": 200,
+    "ms": 218.5,
+    "decode_ms": 0.15,
+    "bytes": 4959,
+    "body": {},
+    "counts": {
+      "documents": 4
+    }
+  },
+  {
+    "repeat": 1,
+    "method": "POST",
+    "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+    "status": 200,
+    "ms": 118.1,
+    "decode_ms": 1.05,
+    "bytes": 35766,
+    "body": {
+      "kinds": [
+        "entity"
+      ],
+      "limit": 50
+    },
+    "counts": {
+      "records": 28
+    }
+  },
+  {
+    "repeat": 1,
+    "method": "POST",
+    "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/metadata/facets",
+    "status": 200,
+    "ms": 299.6,
+    "decode_ms": 0.52,
+    "bytes": 19001,
+    "body": {},
+    "counts": {
+      "fields": 45
+    }
+  }
+]

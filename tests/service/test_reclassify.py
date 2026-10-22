@@ -14,6 +14,7 @@
 校验抽成 ``KnowledgeService._timeline_check`` 就是为了这个），以及
 「停用类时指定的替代类」与这里的重分类**共用一份数据**（``dcterms:isReplacedBy``）。
 """
+from ontology_seed import seed_ontology
 import json
 
 import pytest
@@ -109,7 +110,7 @@ def _rows(service, project_id, known_at=None):
 def system(tmp_path):
     """v1 上写着四条知识（含一条关系和一堆要改名的类），随后发布 v2。"""
     repo, service, p = _service(tmp_path, 'reclassify.sqlite')
-    v1 = repo.save_ontology(p, V1, Ontology(V1).summary())
+    v1 = seed_ontology(repo, p, V1, Ontology(V1).summary())
     service.write(p, [
         {'id': 'e1', 'kind': 'entity', 'type': '包裹', 'text': '一号包裹',
          'ontology_id': v1['id']},
@@ -120,7 +121,7 @@ def system(tmp_path):
         {'id': 'r1', 'kind': 'relation', 'type': '存放', 'text': '一号包裹存放于自身',
          'subject_id': 'e1', 'object_id': 'e1', 'ontology_id': v1['id']},
     ])
-    v2 = repo.save_ontology(p, V2, Ontology(V2).summary())
+    v2 = seed_ontology(repo, p, V2, Ontology(V2).summary())
     return repo, service, p, v1, v2
 
 
@@ -291,11 +292,11 @@ def test_rename_falls_back_to_replacement_mapping_recorded_on_older_version(tmp_
     v3 干脆把这个类删了。只看当前版本会误判成"没有去处"，把本来能自动迁的知识丢给人工。
     """
     repo, service, p = _service(tmp_path, 'reclassify-fallback.sqlite')
-    v1 = repo.save_ontology(p, V1_ACTIVE, Ontology(V1_ACTIVE).summary())
+    v1 = seed_ontology(repo, p, V1_ACTIVE, Ontology(V1_ACTIVE).summary())
     service.write(p, [{'id': 'e1', 'kind': 'entity', 'type': '包', 'text': '旧名叫包的东西',
                        'ontology_id': v1['id']}])
-    repo.save_ontology(p, V2_RETIRED, Ontology(V2_RETIRED).summary())
-    v3 = repo.save_ontology(p, V3_WITHOUT_RETIRED, Ontology(V3_WITHOUT_RETIRED).summary())
+    seed_ontology(repo, p, V2_RETIRED, Ontology(V2_RETIRED).summary())
+    v3 = seed_ontology(repo, p, V3_WITHOUT_RETIRED, Ontology(V3_WITHOUT_RETIRED).summary())
 
     plan = Reclassify(service).plan(p)
     group = plan['groups'][0]
@@ -316,7 +317,7 @@ def test_preview_and_write_reach_the_same_verdict(tmp_path):
     类型**在新本体里还在**（所以不会被「结构待定」豁免）—— 这种就一定会被拦。
     """
     repo, service, p = _service(tmp_path, 'reclassify-verdict.sqlite')
-    v1 = repo.save_ontology(p, V1_LOOSE, Ontology(V1_LOOSE).summary())
+    v1 = seed_ontology(repo, p, V1_LOOSE, Ontology(V1_LOOSE).summary())
     service.write(p, [
         {'id': 'e1', 'kind': 'entity', 'type': '包裹', 'text': '一号包裹',
          'ontology_id': v1['id']},
@@ -325,7 +326,7 @@ def test_preview_and_write_reach_the_same_verdict(tmp_path):
         {'id': 'r1', 'kind': 'relation', 'type': '存放', 'text': '包裹存放于站点',
          'subject_id': 'e1', 'object_id': 'e2', 'ontology_id': v1['id']},
     ])
-    repo.save_ontology(p, V2_CONSTRAINED, Ontology(V2_CONSTRAINED).summary())
+    seed_ontology(repo, p, V2_CONSTRAINED, Ontology(V2_CONSTRAINED).summary())
 
     plan = Reclassify(service).plan(p)
     # 只迁实体、不迁那条关系：关系还挂在 v1 上，新本体管不到它 → 预演必须说"能迁"
@@ -356,14 +357,14 @@ def test_clearing_structure_pending_hands_the_batch_over_to_reclassify(tmp_path)
       ② 本体归属迁移 = 这条知识还挂在旧版本上（这里才动手，且默认不跑）。
     """
     repo, service, p = _service(tmp_path, 'reclassify-handoff.sqlite')
-    v1 = repo.save_ontology(p, V1, Ontology(V1).summary())
+    v1 = seed_ontology(repo, p, V1, Ontology(V1).summary())
     service.write(p, [{'id': 'e9', 'kind': 'entity', 'type': '站点', 'text': '一个站点',
                        'ontology_id': v1['id']}])
     assert service.structure_pending_report(p)['pending_structure'] == 1, 'C1：先被标成结构待定'
 
     # 本体补上「站点」这个概念并发布新版本（C1 收件箱的那条出路）
     turtle = V1 + 'ex:站点 a owl:Class ; rdfs:label "站点" .\n'
-    v2 = repo.save_ontology(p, turtle, Ontology(turtle).summary())
+    v2 = seed_ontology(repo, p, turtle, Ontology(turtle).summary())
     assert v2['id'] != v1['id']
     cleared = _rows(service, p)['e9']['structure_pending']
     assert cleared['state'] == 'cleared', '概念进本体后状态自动解除（不需要人工清标记）'
@@ -391,7 +392,7 @@ def test_reclassify_endpoints_are_read_only_until_confirmed(tmp_path):
         {'id': 'e1', 'kind': 'entity', 'type': '包裹', 'text': '一号包裹',
          'ontology_id': v1['id']},
     ])
-    repo.save_ontology(p, V2, Ontology(V2).summary())
+    seed_ontology(repo, p, V2, Ontology(V2).summary())
 
     with TestClient(app) as client:
         response = client.get(f'/api/projects/{p}/reclassify')
@@ -408,8 +409,11 @@ def test_reclassify_endpoints_are_read_only_until_confirmed(tmp_path):
         # 默认不跑：不指定分组 = 422，不是"帮你迁全部"
         assert client.post(f'/api/projects/{p}/reclassify', json={}).status_code == 422
 
-        applied = client.post(f'/api/projects/{p}/reclassify',
-                              json={'groups': [key], 'actor': '审核员'})
+        forged = client.post(f'/api/projects/{p}/reclassify',
+                             json={'groups': [key], 'actor': '审核员'})
+        assert forged.status_code == 422, forged.text
+        assert _rows(service, p)['e1']['ontology_id'] == v1['id'], '旧 actor 输入不写库'
+        applied = client.post(f'/api/projects/{p}/reclassify', json={'groups': [key]})
         assert applied.status_code == 200, applied.text
         operation_id = applied.json()['operation_id']
         assert applied.json()['migrated'] == 1

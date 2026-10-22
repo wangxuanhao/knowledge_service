@@ -64,8 +64,8 @@ def main():
             payload = dict(projects=[dict(id='p', name='交互验收', metadata={'ontology_mode': 'ontology'})])
         elif path.endswith('/subgraph'):
             payload = dict(nodes=nodes, edges=edges)
-        elif path.endswith('/records/query'):
-            payload = dict(records=nodes+[attribute], total=len(nodes)+1)
+        elif path.endswith('/records/page'):
+            payload = dict(records=nodes+[attribute], total=len(nodes)+1, next_cursor=None)
         elif path.endswith('/ontologies'):
             payload = dict(versions=[ontology])
         elif path.endswith('/ontology'):

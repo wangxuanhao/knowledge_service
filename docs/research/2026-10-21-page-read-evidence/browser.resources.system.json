@@ -1,0 +1,2212 @@
+{
+  "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+  "steps": [
+    {
+      "action": "project_select",
+      "observed_s": 2.365,
+      "content_ms": null,
+      "requests": [
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology-discovery",
+          "queryKeys": [
+            "compact"
+          ],
+          "query": "?compact=true",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-search",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "project_select",
+          "start": 5080.799999999814,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at renderDiscoveryHint (http://127.0.0.1:8100/assets/workbench.js?v=page-read-20261021-2:45:18)",
+            "    at $.onchange (http://127.0.0.1:8100/assets/workbench.js?v=page-read-20261021-2:53:419)",
+            "    at get.onchange (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:714:5)",
+            "    at $.onchange (http://127.0.0.1:8100/assets/record-dialog.js?v=redesign-20261019-2:291:53)",
+            "    at $.onchange (http://127.0.0.1:8100/assets/evidence-inspector.js?v=progressive-graph-20261020-1:148:89)",
+            "    at $.onchange (http://127.0.0.1:8100/assets/task-review.js?v=page-read-20261021-2:128:66)",
+            "    at projectControl.onchange (http://127.0.0.1:8100/assets/full-graph-view.js?v=progressive-graph-20261020-1:87:80)"
+          ],
+          "headers": 5670.199999999255,
+          "status": 200,
+          "bytes": 15525
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-search",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "project_select",
+          "start": 5083.5,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at loadOntologyTerms (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:24:17)",
+            "    at get.onchange (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:722:91)",
+            "    at $.onchange (http://127.0.0.1:8100/assets/record-dialog.js?v=redesign-20261019-2:291:53)",
+            "    at $.onchange (http://127.0.0.1:8100/assets/evidence-inspector.js?v=progressive-graph-20261020-1:148:89)",
+            "    at $.onchange (http://127.0.0.1:8100/assets/task-review.js?v=page-read-20261021-2:128:66)",
+            "    at projectControl.onchange (http://127.0.0.1:8100/assets/full-graph-view.js?v=progressive-graph-20261020-1:87:80)"
+          ],
+          "headers": 5194.0999999996275,
+          "status": 200,
+          "bytes": 10960
+        }
+      ],
+      "visible": "tab-search",
+      "longtasks": []
+    },
+    {
+      "action": "open_records",
+      "observed_s": 1.866,
+      "content_ms": 313.4,
+      "requests": [
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/resolution-reviews",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_records",
+          "start": 7486.199999999255,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at refresh (http://127.0.0.1:8100/assets/entity-governance.js?v=redesign-20261019-2:116:24)",
+            "    at Object.mount (http://127.0.0.1:8100/assets/entity-governance.js?v=redesign-20261019-2:150:77)",
+            "    at HTMLButtonElement.load (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:579:95)"
+          ],
+          "headers": 7581.699999999255,
+          "status": 200,
+          "bytes": 24
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "kinds": [
+              "entity"
+            ],
+            "limit": 50,
+            "cursor": null,
+            "known_at": null,
+            "valid_at": null,
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown",
+            "ontology_scope",
+            "ontology_ids",
+            "kinds",
+            "query",
+            "cursor",
+            "limit"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_records",
+          "start": 7488.799999999814,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:550:51",
+            "    at fetchPage (http://127.0.0.1:8100/assets/record-create.js?v=library-drawers-20261020-1:93:26)",
+            "    at Object.load (http://127.0.0.1:8100/assets/record-create.js?v=library-drawers-20261020-1:98:112)",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:554:105)",
+            "    at HTMLButtonElement.load (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:580:104)"
+          ],
+          "headers": 7644.0999999996275,
+          "status": 200,
+          "bytes": 35766
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontologies",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_records",
+          "start": 7679,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:561:39)"
+          ],
+          "headers": 7831.299999999814,
+          "status": 200,
+          "bytes": 11136
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "kinds": [
+              "relation"
+            ],
+            "limit": 1,
+            "cursor": null,
+            "known_at": null,
+            "valid_at": null,
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown",
+            "ontology_scope",
+            "ontology_ids",
+            "kinds",
+            "query",
+            "cursor",
+            "limit"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_records",
+          "start": 7679.899999999441,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:563:31",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:562:106)"
+          ],
+          "headers": 7861.699999999255,
+          "status": 200,
+          "bytes": 1586
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "kinds": [
+              "attribute"
+            ],
+            "limit": 1,
+            "cursor": null,
+            "known_at": null,
+            "valid_at": null,
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown",
+            "ontology_scope",
+            "ontology_ids",
+            "kinds",
+            "query",
+            "cursor",
+            "limit"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_records",
+          "start": 7680.899999999441,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:563:31",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:562:106)"
+          ],
+          "headers": 7840.299999999814,
+          "status": 200,
+          "bytes": 43
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "kinds": [
+              "chunk"
+            ],
+            "limit": 1,
+            "cursor": null,
+            "known_at": null,
+            "valid_at": null,
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown",
+            "ontology_scope",
+            "ontology_ids",
+            "kinds",
+            "query",
+            "cursor",
+            "limit"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_records",
+          "start": 7681.799999999814,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:563:31",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:562:106)"
+          ],
+          "headers": 7814.699999999255,
+          "status": 200,
+          "bytes": 3114
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/assertions/batch",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "record_ids_count": 28
+          },
+          "bodyKeys": [
+            "record_ids"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_records",
+          "start": 7683.199999999255,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at pageAssertions (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:521:28)",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:565:85)"
+          ],
+          "headers": 7830.899999999441,
+          "status": 200,
+          "bytes": 5322
+        }
+      ],
+      "visible": "tab-records",
+      "longtasks": [
+        {
+          "start": 7482.299999999814,
+          "ms": 96,
+          "action": "open_records"
+        },
+        {
+          "start": 7685.399999999441,
+          "ms": 63,
+          "action": "open_records"
+        }
+      ]
+    },
+    {
+      "action": "records_open_filters",
+      "observed_s": 1.704,
+      "content_ms": null,
+      "requests": [
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/metadata/facets",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "known_at": null,
+            "valid_at": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "records_open_filters",
+          "start": 9565.699999999255,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at discoverMetadata (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:126:24)",
+            "    at HTMLDetailsElement.<anonymous> (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:132:58)"
+          ],
+          "headers": 9789.399999999441,
+          "status": 200,
+          "bytes": 19001
+        }
+      ],
+      "visible": "tab-records",
+      "longtasks": [
+        {
+          "start": 9452.299999999814,
+          "ms": 104,
+          "action": "records_open_filters"
+        }
+      ]
+    },
+    {
+      "action": "records_apply",
+      "observed_s": 1.611,
+      "content_ms": null,
+      "requests": [
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/resolution-reviews",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "records_apply",
+          "start": 11229.399999999441,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at refresh (http://127.0.0.1:8100/assets/entity-governance.js?v=redesign-20261019-2:116:24)",
+            "    at Object.mount (http://127.0.0.1:8100/assets/entity-governance.js?v=redesign-20261019-2:150:77)",
+            "    at load (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:579:95)",
+            "    at HTMLDocument.<anonymous> (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:644:79)",
+            "    at changed (http://127.0.0.1:8100/assets/workspace-context-ui.js?v=redesign-1:32:14)",
+            "    at Object.apply (http://127.0.0.1:8100/assets/workspace-context-ui.js?v=redesign-1:34:97)",
+            "    at Object.apply (http://127.0.0.1:8100/assets/workspace-context.js?v=redesign-1:51:28)"
+          ],
+          "headers": 11394.599999999627,
+          "status": 200,
+          "bytes": 24
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "kinds": [
+              "entity"
+            ],
+            "limit": 50,
+            "cursor": null,
+            "known_at": null,
+            "valid_at": null,
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown",
+            "ontology_scope",
+            "ontology_ids",
+            "kinds",
+            "query",
+            "cursor",
+            "limit"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "records_apply",
+          "start": 11232.399999999441,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:550:51",
+            "    at fetchPage (http://127.0.0.1:8100/assets/record-create.js?v=library-drawers-20261020-1:93:26)",
+            "    at Object.load (http://127.0.0.1:8100/assets/record-create.js?v=library-drawers-20261020-1:98:112)",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:554:105)",
+            "    at load (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:580:104)",
+            "    at HTMLDocument.<anonymous> (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:644:79)",
+            "    at changed (http://127.0.0.1:8100/assets/workspace-context-ui.js?v=redesign-1:32:14)"
+          ],
+          "headers": 11349.599999999627,
+          "status": 200,
+          "bytes": 35766
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontologies",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "records_apply",
+          "start": 11358.099999999627,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:561:39)"
+          ],
+          "headers": 11481.699999999255,
+          "status": 200,
+          "bytes": 11136
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "kinds": [
+              "relation"
+            ],
+            "limit": 1,
+            "cursor": null,
+            "known_at": null,
+            "valid_at": null,
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown",
+            "ontology_scope",
+            "ontology_ids",
+            "kinds",
+            "query",
+            "cursor",
+            "limit"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "records_apply",
+          "start": 11358.799999999814,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:563:31",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:562:106)"
+          ],
+          "headers": 11510.599999999627,
+          "status": 200,
+          "bytes": 1586
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "kinds": [
+              "attribute"
+            ],
+            "limit": 1,
+            "cursor": null,
+            "known_at": null,
+            "valid_at": null,
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown",
+            "ontology_scope",
+            "ontology_ids",
+            "kinds",
+            "query",
+            "cursor",
+            "limit"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "records_apply",
+          "start": 11359.599999999627,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:563:31",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:562:106)"
+          ],
+          "headers": 11496.099999999627,
+          "status": 200,
+          "bytes": 43
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "kinds": [
+              "chunk"
+            ],
+            "limit": 1,
+            "cursor": null,
+            "known_at": null,
+            "valid_at": null,
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown",
+            "ontology_scope",
+            "ontology_ids",
+            "kinds",
+            "query",
+            "cursor",
+            "limit"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "records_apply",
+          "start": 11360.5,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:563:31",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:562:106)"
+          ],
+          "headers": 11468.399999999441,
+          "status": 200,
+          "bytes": 3114
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/assertions/batch",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "record_ids_count": 28
+          },
+          "bodyKeys": [
+            "record_ids"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "records_apply",
+          "start": 11361.299999999814,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at pageAssertions (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:521:28)",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:565:85)"
+          ],
+          "headers": 11496.899999999441,
+          "status": 200,
+          "bytes": 5322
+        }
+      ],
+      "visible": "tab-records",
+      "longtasks": []
+    },
+    {
+      "action": "records_reset",
+      "observed_s": 1.638,
+      "content_ms": null,
+      "requests": [
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/resolution-reviews",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "records_reset",
+          "start": 12971.099999999627,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at refresh (http://127.0.0.1:8100/assets/entity-governance.js?v=redesign-20261019-2:116:24)",
+            "    at Object.mount (http://127.0.0.1:8100/assets/entity-governance.js?v=redesign-20261019-2:150:77)",
+            "    at load (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:579:95)",
+            "    at HTMLDocument.<anonymous> (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:644:79)",
+            "    at changed (http://127.0.0.1:8100/assets/workspace-context-ui.js?v=redesign-1:32:14)",
+            "    at Object.reset (http://127.0.0.1:8100/assets/workspace-context-ui.js?v=redesign-1:35:64)",
+            "    at Object.reset (http://127.0.0.1:8100/assets/workspace-context.js?v=redesign-1:52:28)"
+          ],
+          "headers": 13123.299999999814,
+          "status": 200,
+          "bytes": 24
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "kinds": [
+              "entity"
+            ],
+            "limit": 50,
+            "cursor": null,
+            "known_at": null,
+            "valid_at": null,
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown",
+            "ontology_scope",
+            "ontology_ids",
+            "kinds",
+            "query",
+            "cursor",
+            "limit"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "records_reset",
+          "start": 12973.899999999441,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:550:51",
+            "    at fetchPage (http://127.0.0.1:8100/assets/record-create.js?v=library-drawers-20261020-1:93:26)",
+            "    at Object.load (http://127.0.0.1:8100/assets/record-create.js?v=library-drawers-20261020-1:98:112)",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:554:105)",
+            "    at load (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:580:104)",
+            "    at HTMLDocument.<anonymous> (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:644:79)",
+            "    at changed (http://127.0.0.1:8100/assets/workspace-context-ui.js?v=redesign-1:32:14)"
+          ],
+          "headers": 13260.399999999441,
+          "status": 200,
+          "bytes": 35766
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontologies",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "records_reset",
+          "start": 13267,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:561:39)"
+          ],
+          "headers": 13335.099999999627,
+          "status": 200,
+          "bytes": 11136
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "kinds": [
+              "relation"
+            ],
+            "limit": 1,
+            "cursor": null,
+            "known_at": null,
+            "valid_at": null,
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown",
+            "ontology_scope",
+            "ontology_ids",
+            "kinds",
+            "query",
+            "cursor",
+            "limit"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "records_reset",
+          "start": 13267.699999999255,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:563:31",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:562:106)"
+          ],
+          "headers": 13445.899999999441,
+          "status": 200,
+          "bytes": 1586
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "kinds": [
+              "attribute"
+            ],
+            "limit": 1,
+            "cursor": null,
+            "known_at": null,
+            "valid_at": null,
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown",
+            "ontology_scope",
+            "ontology_ids",
+            "kinds",
+            "query",
+            "cursor",
+            "limit"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "records_reset",
+          "start": 13268.399999999441,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:563:31",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:562:106)"
+          ],
+          "headers": 13414.599999999627,
+          "status": 200,
+          "bytes": 43
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "kinds": [
+              "chunk"
+            ],
+            "limit": 1,
+            "cursor": null,
+            "known_at": null,
+            "valid_at": null,
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown",
+            "ontology_scope",
+            "ontology_ids",
+            "kinds",
+            "query",
+            "cursor",
+            "limit"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "records_reset",
+          "start": 13269.599999999627,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:563:31",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:562:106)"
+          ],
+          "headers": 13426.299999999814,
+          "status": 200,
+          "bytes": 3114
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/assertions/batch",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "record_ids_count": 28
+          },
+          "bodyKeys": [
+            "record_ids"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "records_reset",
+          "start": 13270.599999999627,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+            "    at pageAssertions (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:521:28)",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:565:85)"
+          ],
+          "headers": 13419.299999999814,
+          "status": 200,
+          "bytes": 5322
+        }
+      ],
+      "visible": "tab-records",
+      "longtasks": []
+    }
+  ],
+  "errors": [],
+  "startup": [
+    {
+      "path": "/api/auth/policy",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": null,
+      "project": null,
+      "action": "startup",
+      "start": 1576.199999999255,
+      "stack": [
+        "    at loadAuthPolicy (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:224:23)",
+        "    at bootstrap (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:233:9)",
+        "    at http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:280:5",
+        "    at http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:281:3"
+      ],
+      "headers": 2118.899999999441,
+      "status": 200,
+      "bytes": 21
+    },
+    {
+      "path": "/api/auth/me",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-search",
+      "project": "",
+      "action": "startup",
+      "start": 2618.2999999998137,
+      "stack": [
+        "    at checkSession (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:252:9)",
+        "    at http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:236:13"
+      ],
+      "headers": 3163.699999999255,
+      "status": 200,
+      "bytes": 126
+    },
+    {
+      "path": "/api/projects",
+      "queryKeys": [
+        "include_counts"
+      ],
+      "query": "?include_counts=false",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-search",
+      "project": "",
+      "action": "startup",
+      "start": 3265.0999999996275,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at projects (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:87:46)",
+        "    at http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:1108:14"
+      ],
+      "headers": 3440,
+      "status": 200,
+      "bytes": 2082
+    },
+    {
+      "path": "/api/projects/463f2e99-ec8b-4ca2-9c0d-e469bc4d1411/ontology",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-search",
+      "project": "463f2e99-ec8b-4ca2-9c0d-e469bc4d1411",
+      "action": "startup",
+      "start": 3446.7999999998137,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at loadOntologyTerms (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:24:17)",
+        "    at get.onchange (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:722:91)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/record-dialog.js?v=redesign-20261019-2:291:53)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/evidence-inspector.js?v=progressive-graph-20261020-1:148:89)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/task-review.js?v=page-read-20261021-2:128:66)",
+        "    at projectControl.onchange (http://127.0.0.1:8100/assets/full-graph-view.js?v=progressive-graph-20261020-1:87:80)",
+        "    at http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:1108:292"
+      ],
+      "headers": 3601.5999999996275,
+      "status": 200,
+      "bytes": 26221
+    }
+  ],
+  "resources": [
+    {
+      "path": "/api/auth/policy",
+      "start": 1578.0999999996275,
+      "request": 2103.199999999255,
+      "response": 2106.899999999441,
+      "end": 2108.0999999996275,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/auth/me",
+      "start": 2618.7999999998137,
+      "request": 2651.7999999998137,
+      "response": 2740.199999999255,
+      "end": 2740.899999999441,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects",
+      "start": 3266.0999999996275,
+      "request": 3267.2999999998137,
+      "response": 3438.7999999998137,
+      "end": 3439.5,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/463f2e99-ec8b-4ca2-9c0d-e469bc4d1411/ontology",
+      "start": 3447.7999999998137,
+      "request": 3449.0999999996275,
+      "response": 3599.899999999441,
+      "end": 3600.7999999998137,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology-discovery",
+      "start": 5082.5999999996275,
+      "request": 5083.699999999255,
+      "response": 5668.399999999441,
+      "end": 5669.199999999255,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology",
+      "start": 5084,
+      "request": 5085.199999999255,
+      "response": 5191.5999999996275,
+      "end": 5193.0999999996275,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/resolution-reviews",
+      "start": 7487.199999999255,
+      "request": 7488.199999999255,
+      "response": 7558.5999999996275,
+      "end": 7559.299999999814,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "start": 7489.899999999441,
+      "request": 7491,
+      "response": 7642.5999999996275,
+      "end": 7643.199999999255,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontologies",
+      "start": 7679.299999999814,
+      "request": 7681.799999999814,
+      "response": 7827.399999999441,
+      "end": 7829.5999999996275,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "start": 7680.399999999441,
+      "request": 7683.199999999255,
+      "response": 7860.0999999996275,
+      "end": 7860.699999999255,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "start": 7681.399999999441,
+      "request": 7688,
+      "response": 7838.5,
+      "end": 7839.299999999814,
+      "connect": 2.2999999998137355,
+      "dns": 0.5
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "start": 7682.299999999814,
+      "request": 7691.299999999814,
+      "response": 7812.5,
+      "end": 7813.399999999441,
+      "connect": 2.2999999998137355,
+      "dns": 0.09999999962747097
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/assertions/batch",
+      "start": 7683.899999999441,
+      "request": 7694.5999999996275,
+      "response": 7829,
+      "end": 7830,
+      "connect": 2.300000000745058,
+      "dns": 0.09999999962747097
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/metadata/facets",
+      "start": 9566.399999999441,
+      "request": 9567.299999999814,
+      "response": 9787.699999999255,
+      "end": 9790.199999999255,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/resolution-reviews",
+      "start": 11230.199999999255,
+      "request": 11231.399999999441,
+      "response": 11393.099999999627,
+      "end": 11393.799999999814,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "start": 11233.399999999441,
+      "request": 11234.5,
+      "response": 11348.5,
+      "end": 11349.5,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontologies",
+      "start": 11358.599999999627,
+      "request": 11359.699999999255,
+      "response": 11480.5,
+      "end": 11483.5,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "start": 11359.199999999255,
+      "request": 11360.699999999255,
+      "response": 11509.199999999255,
+      "end": 11509.699999999255,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "start": 11360,
+      "request": 11361.699999999255,
+      "response": 11492.5,
+      "end": 11494.799999999814,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "start": 11360.799999999814,
+      "request": 11362.599999999627,
+      "response": 11466.399999999441,
+      "end": 11467.5,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/assertions/batch",
+      "start": 11361.699999999255,
+      "request": 11366.299999999814,
+      "response": 11494,
+      "end": 11495.099999999627,
+      "connect": 2.099999999627471,
+      "dns": 0.7000000001862645
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/metadata/facets",
+      "start": 12862.799999999814,
+      "request": 12863.799999999814,
+      "response": 13145.799999999814,
+      "end": 13146.399999999441,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/resolution-reviews",
+      "start": 12971.699999999255,
+      "request": 12972.799999999814,
+      "response": 13121.799999999814,
+      "end": 13122.5,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "start": 12974.5,
+      "request": 12975.5,
+      "response": 13258.5,
+      "end": 13259.199999999255,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontologies",
+      "start": 13267.399999999441,
+      "request": 13268.599999999627,
+      "response": 13333.899999999441,
+      "end": 13335.599999999627,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "start": 13268.099999999627,
+      "request": 13269.699999999255,
+      "response": 13444.5,
+      "end": 13445.099999999627,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "start": 13269,
+      "request": 13270.699999999255,
+      "response": 13413,
+      "end": 13413.699999999255,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "start": 13270.099999999627,
+      "request": 13271.699999999255,
+      "response": 13424.599999999627,
+      "end": 13425.399999999441,
+      "connect": 0,
+      "dns": 0
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/assertions/batch",
+      "start": 13271.099999999627,
+      "request": 13272.5,
+      "response": 13417.899999999441,
+      "end": 13421,
+      "connect": 0,
+      "dns": 0
+    }
+  ],
+  "all_requests": [
+    {
+      "path": "/api/auth/policy",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": null,
+      "project": null,
+      "action": "startup",
+      "start": 1576.199999999255,
+      "stack": [
+        "    at loadAuthPolicy (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:224:23)",
+        "    at bootstrap (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:233:9)",
+        "    at http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:280:5",
+        "    at http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:281:3"
+      ],
+      "headers": 2118.899999999441,
+      "status": 200,
+      "bytes": 21
+    },
+    {
+      "path": "/api/auth/me",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-search",
+      "project": "",
+      "action": "startup",
+      "start": 2618.2999999998137,
+      "stack": [
+        "    at checkSession (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:252:9)",
+        "    at http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:236:13"
+      ],
+      "headers": 3163.699999999255,
+      "status": 200,
+      "bytes": 126
+    },
+    {
+      "path": "/api/projects",
+      "queryKeys": [
+        "include_counts"
+      ],
+      "query": "?include_counts=false",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-search",
+      "project": "",
+      "action": "startup",
+      "start": 3265.0999999996275,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at projects (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:87:46)",
+        "    at http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:1108:14"
+      ],
+      "headers": 3440,
+      "status": 200,
+      "bytes": 2082
+    },
+    {
+      "path": "/api/projects/463f2e99-ec8b-4ca2-9c0d-e469bc4d1411/ontology",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-search",
+      "project": "463f2e99-ec8b-4ca2-9c0d-e469bc4d1411",
+      "action": "startup",
+      "start": 3446.7999999998137,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at loadOntologyTerms (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:24:17)",
+        "    at get.onchange (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:722:91)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/record-dialog.js?v=redesign-20261019-2:291:53)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/evidence-inspector.js?v=progressive-graph-20261020-1:148:89)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/task-review.js?v=page-read-20261021-2:128:66)",
+        "    at projectControl.onchange (http://127.0.0.1:8100/assets/full-graph-view.js?v=progressive-graph-20261020-1:87:80)",
+        "    at http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:1108:292"
+      ],
+      "headers": 3601.5999999996275,
+      "status": 200,
+      "bytes": 26221
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology-discovery",
+      "queryKeys": [
+        "compact"
+      ],
+      "query": "?compact=true",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-search",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "project_select",
+      "start": 5080.799999999814,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at renderDiscoveryHint (http://127.0.0.1:8100/assets/workbench.js?v=page-read-20261021-2:45:18)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/workbench.js?v=page-read-20261021-2:53:419)",
+        "    at get.onchange (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:714:5)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/record-dialog.js?v=redesign-20261019-2:291:53)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/evidence-inspector.js?v=progressive-graph-20261020-1:148:89)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/task-review.js?v=page-read-20261021-2:128:66)",
+        "    at projectControl.onchange (http://127.0.0.1:8100/assets/full-graph-view.js?v=progressive-graph-20261020-1:87:80)"
+      ],
+      "headers": 5670.199999999255,
+      "status": 200,
+      "bytes": 15525
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-search",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "project_select",
+      "start": 5083.5,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at loadOntologyTerms (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:24:17)",
+        "    at get.onchange (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:722:91)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/record-dialog.js?v=redesign-20261019-2:291:53)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/evidence-inspector.js?v=progressive-graph-20261020-1:148:89)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/task-review.js?v=page-read-20261021-2:128:66)",
+        "    at projectControl.onchange (http://127.0.0.1:8100/assets/full-graph-view.js?v=progressive-graph-20261020-1:87:80)"
+      ],
+      "headers": 5194.0999999996275,
+      "status": 200,
+      "bytes": 10960
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/resolution-reviews",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_records",
+      "start": 7486.199999999255,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at refresh (http://127.0.0.1:8100/assets/entity-governance.js?v=redesign-20261019-2:116:24)",
+        "    at Object.mount (http://127.0.0.1:8100/assets/entity-governance.js?v=redesign-20261019-2:150:77)",
+        "    at HTMLButtonElement.load (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:579:95)"
+      ],
+      "headers": 7581.699999999255,
+      "status": 200,
+      "bytes": 24
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "kinds": [
+          "entity"
+        ],
+        "limit": 50,
+        "cursor": null,
+        "known_at": null,
+        "valid_at": null,
+        "ontology_scope": "all",
+        "ontology_ids": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown",
+        "ontology_scope",
+        "ontology_ids",
+        "kinds",
+        "query",
+        "cursor",
+        "limit"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_records",
+      "start": 7488.799999999814,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:550:51",
+        "    at fetchPage (http://127.0.0.1:8100/assets/record-create.js?v=library-drawers-20261020-1:93:26)",
+        "    at Object.load (http://127.0.0.1:8100/assets/record-create.js?v=library-drawers-20261020-1:98:112)",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:554:105)",
+        "    at HTMLButtonElement.load (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:580:104)"
+      ],
+      "headers": 7644.0999999996275,
+      "status": 200,
+      "bytes": 35766
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontologies",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_records",
+      "start": 7679,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:561:39)"
+      ],
+      "headers": 7831.299999999814,
+      "status": 200,
+      "bytes": 11136
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "kinds": [
+          "relation"
+        ],
+        "limit": 1,
+        "cursor": null,
+        "known_at": null,
+        "valid_at": null,
+        "ontology_scope": "all",
+        "ontology_ids": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown",
+        "ontology_scope",
+        "ontology_ids",
+        "kinds",
+        "query",
+        "cursor",
+        "limit"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_records",
+      "start": 7679.899999999441,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:563:31",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:562:106)"
+      ],
+      "headers": 7861.699999999255,
+      "status": 200,
+      "bytes": 1586
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "kinds": [
+          "attribute"
+        ],
+        "limit": 1,
+        "cursor": null,
+        "known_at": null,
+        "valid_at": null,
+        "ontology_scope": "all",
+        "ontology_ids": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown",
+        "ontology_scope",
+        "ontology_ids",
+        "kinds",
+        "query",
+        "cursor",
+        "limit"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_records",
+      "start": 7680.899999999441,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:563:31",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:562:106)"
+      ],
+      "headers": 7840.299999999814,
+      "status": 200,
+      "bytes": 43
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "kinds": [
+          "chunk"
+        ],
+        "limit": 1,
+        "cursor": null,
+        "known_at": null,
+        "valid_at": null,
+        "ontology_scope": "all",
+        "ontology_ids": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown",
+        "ontology_scope",
+        "ontology_ids",
+        "kinds",
+        "query",
+        "cursor",
+        "limit"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_records",
+      "start": 7681.799999999814,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:563:31",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:562:106)"
+      ],
+      "headers": 7814.699999999255,
+      "status": 200,
+      "bytes": 3114
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/assertions/batch",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "record_ids_count": 28
+      },
+      "bodyKeys": [
+        "record_ids"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_records",
+      "start": 7683.199999999255,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at pageAssertions (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:521:28)",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:565:85)"
+      ],
+      "headers": 7830.899999999441,
+      "status": 200,
+      "bytes": 5322
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/metadata/facets",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "known_at": null,
+        "valid_at": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "records_open_filters",
+      "start": 9565.699999999255,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at discoverMetadata (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:126:24)",
+        "    at HTMLDetailsElement.<anonymous> (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:132:58)"
+      ],
+      "headers": 9789.399999999441,
+      "status": 200,
+      "bytes": 19001
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/resolution-reviews",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "records_apply",
+      "start": 11229.399999999441,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at refresh (http://127.0.0.1:8100/assets/entity-governance.js?v=redesign-20261019-2:116:24)",
+        "    at Object.mount (http://127.0.0.1:8100/assets/entity-governance.js?v=redesign-20261019-2:150:77)",
+        "    at load (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:579:95)",
+        "    at HTMLDocument.<anonymous> (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:644:79)",
+        "    at changed (http://127.0.0.1:8100/assets/workspace-context-ui.js?v=redesign-1:32:14)",
+        "    at Object.apply (http://127.0.0.1:8100/assets/workspace-context-ui.js?v=redesign-1:34:97)",
+        "    at Object.apply (http://127.0.0.1:8100/assets/workspace-context.js?v=redesign-1:51:28)"
+      ],
+      "headers": 11394.599999999627,
+      "status": 200,
+      "bytes": 24
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "kinds": [
+          "entity"
+        ],
+        "limit": 50,
+        "cursor": null,
+        "known_at": null,
+        "valid_at": null,
+        "ontology_scope": "all",
+        "ontology_ids": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown",
+        "ontology_scope",
+        "ontology_ids",
+        "kinds",
+        "query",
+        "cursor",
+        "limit"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "records_apply",
+      "start": 11232.399999999441,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:550:51",
+        "    at fetchPage (http://127.0.0.1:8100/assets/record-create.js?v=library-drawers-20261020-1:93:26)",
+        "    at Object.load (http://127.0.0.1:8100/assets/record-create.js?v=library-drawers-20261020-1:98:112)",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:554:105)",
+        "    at load (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:580:104)",
+        "    at HTMLDocument.<anonymous> (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:644:79)",
+        "    at changed (http://127.0.0.1:8100/assets/workspace-context-ui.js?v=redesign-1:32:14)"
+      ],
+      "headers": 11349.599999999627,
+      "status": 200,
+      "bytes": 35766
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontologies",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "records_apply",
+      "start": 11358.099999999627,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:561:39)"
+      ],
+      "headers": 11481.699999999255,
+      "status": 200,
+      "bytes": 11136
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "kinds": [
+          "relation"
+        ],
+        "limit": 1,
+        "cursor": null,
+        "known_at": null,
+        "valid_at": null,
+        "ontology_scope": "all",
+        "ontology_ids": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown",
+        "ontology_scope",
+        "ontology_ids",
+        "kinds",
+        "query",
+        "cursor",
+        "limit"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "records_apply",
+      "start": 11358.799999999814,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:563:31",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:562:106)"
+      ],
+      "headers": 11510.599999999627,
+      "status": 200,
+      "bytes": 1586
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "kinds": [
+          "attribute"
+        ],
+        "limit": 1,
+        "cursor": null,
+        "known_at": null,
+        "valid_at": null,
+        "ontology_scope": "all",
+        "ontology_ids": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown",
+        "ontology_scope",
+        "ontology_ids",
+        "kinds",
+        "query",
+        "cursor",
+        "limit"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "records_apply",
+      "start": 11359.599999999627,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:563:31",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:562:106)"
+      ],
+      "headers": 11496.099999999627,
+      "status": 200,
+      "bytes": 43
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "kinds": [
+          "chunk"
+        ],
+        "limit": 1,
+        "cursor": null,
+        "known_at": null,
+        "valid_at": null,
+        "ontology_scope": "all",
+        "ontology_ids": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown",
+        "ontology_scope",
+        "ontology_ids",
+        "kinds",
+        "query",
+        "cursor",
+        "limit"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "records_apply",
+      "start": 11360.5,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:563:31",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:562:106)"
+      ],
+      "headers": 11468.399999999441,
+      "status": 200,
+      "bytes": 3114
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/assertions/batch",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "record_ids_count": 28
+      },
+      "bodyKeys": [
+        "record_ids"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "records_apply",
+      "start": 11361.299999999814,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at pageAssertions (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:521:28)",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:565:85)"
+      ],
+      "headers": 11496.899999999441,
+      "status": 200,
+      "bytes": 5322
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/metadata/facets",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "known_at": null,
+        "valid_at": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "records_apply",
+      "start": 12862.399999999441,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at discoverMetadata (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:126:24)",
+        "    at HTMLDetailsElement.<anonymous> (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:132:58)"
+      ],
+      "headers": 13147.299999999814,
+      "status": 200,
+      "bytes": 19001
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/resolution-reviews",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "records_reset",
+      "start": 12971.099999999627,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at refresh (http://127.0.0.1:8100/assets/entity-governance.js?v=redesign-20261019-2:116:24)",
+        "    at Object.mount (http://127.0.0.1:8100/assets/entity-governance.js?v=redesign-20261019-2:150:77)",
+        "    at load (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:579:95)",
+        "    at HTMLDocument.<anonymous> (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:644:79)",
+        "    at changed (http://127.0.0.1:8100/assets/workspace-context-ui.js?v=redesign-1:32:14)",
+        "    at Object.reset (http://127.0.0.1:8100/assets/workspace-context-ui.js?v=redesign-1:35:64)",
+        "    at Object.reset (http://127.0.0.1:8100/assets/workspace-context.js?v=redesign-1:52:28)"
+      ],
+      "headers": 13123.299999999814,
+      "status": 200,
+      "bytes": 24
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "kinds": [
+          "entity"
+        ],
+        "limit": 50,
+        "cursor": null,
+        "known_at": null,
+        "valid_at": null,
+        "ontology_scope": "all",
+        "ontology_ids": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown",
+        "ontology_scope",
+        "ontology_ids",
+        "kinds",
+        "query",
+        "cursor",
+        "limit"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "records_reset",
+      "start": 12973.899999999441,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:550:51",
+        "    at fetchPage (http://127.0.0.1:8100/assets/record-create.js?v=library-drawers-20261020-1:93:26)",
+        "    at Object.load (http://127.0.0.1:8100/assets/record-create.js?v=library-drawers-20261020-1:98:112)",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:554:105)",
+        "    at load (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:580:104)",
+        "    at HTMLDocument.<anonymous> (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:644:79)",
+        "    at changed (http://127.0.0.1:8100/assets/workspace-context-ui.js?v=redesign-1:32:14)"
+      ],
+      "headers": 13260.399999999441,
+      "status": 200,
+      "bytes": 35766
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontologies",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "records_reset",
+      "start": 13267,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:561:39)"
+      ],
+      "headers": 13335.099999999627,
+      "status": 200,
+      "bytes": 11136
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "kinds": [
+          "relation"
+        ],
+        "limit": 1,
+        "cursor": null,
+        "known_at": null,
+        "valid_at": null,
+        "ontology_scope": "all",
+        "ontology_ids": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown",
+        "ontology_scope",
+        "ontology_ids",
+        "kinds",
+        "query",
+        "cursor",
+        "limit"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "records_reset",
+      "start": 13267.699999999255,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:563:31",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:562:106)"
+      ],
+      "headers": 13445.899999999441,
+      "status": 200,
+      "bytes": 1586
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "kinds": [
+          "attribute"
+        ],
+        "limit": 1,
+        "cursor": null,
+        "known_at": null,
+        "valid_at": null,
+        "ontology_scope": "all",
+        "ontology_ids": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown",
+        "ontology_scope",
+        "ontology_ids",
+        "kinds",
+        "query",
+        "cursor",
+        "limit"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "records_reset",
+      "start": 13268.399999999441,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:563:31",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:562:106)"
+      ],
+      "headers": 13414.599999999627,
+      "status": 200,
+      "bytes": 43
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "kinds": [
+          "chunk"
+        ],
+        "limit": 1,
+        "cursor": null,
+        "known_at": null,
+        "valid_at": null,
+        "ontology_scope": "all",
+        "ontology_ids": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown",
+        "ontology_scope",
+        "ontology_ids",
+        "kinds",
+        "query",
+        "cursor",
+        "limit"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "records_reset",
+      "start": 13269.599999999627,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:563:31",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:562:106)"
+      ],
+      "headers": 13426.299999999814,
+      "status": 200,
+      "bytes": 3114
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/assertions/batch",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "record_ids_count": 28
+      },
+      "bodyKeys": [
+        "record_ids"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "records_reset",
+      "start": 13270.599999999627,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-read-20261021-2:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-read-20261021-2:72:22)",
+        "    at pageAssertions (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:521:28)",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=page-read-20261021-2:565:85)"
+      ],
+      "headers": 13419.299999999814,
+      "status": 200,
+      "bytes": 5322
+    }
+  ]
+}

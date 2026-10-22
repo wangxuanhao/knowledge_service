@@ -1,6 +1,6 @@
 import copy
 from contextlib import contextmanager
-from threading import RLock
+from threading import RLock, local
 
 import pytest
 
@@ -50,7 +50,8 @@ class RecordingDatabase:
 
     def execute(self, statement):
         self.statements.append(statement)
-        self.in_transaction = statement.startswith('BEGIN')
+        if statement.startswith('BEGIN'):
+            self.in_transaction = True
 
     def commit(self):
         self.commits += 1
@@ -65,6 +66,7 @@ def test_serializable_repository_transaction_uses_postgres_isolation_level():
     repository = object.__new__(Repository)
     repository._lock = RLock()
     repository._db = RecordingDatabase()
+    repository._transaction_state = local()
 
     with repository._transaction(serializable=True):
         pass
@@ -83,6 +85,7 @@ def test_publication_transaction_maps_retryable_database_conflicts(
     repository = object.__new__(Repository)
     repository._lock = RLock()
     repository._db = RecordingDatabase()
+    repository._transaction_state = local()
 
     with pytest.raises(OntologyPublicationConflict) as caught:
         with repository._publication_transaction():
@@ -103,6 +106,7 @@ def test_formal_write_transaction_maps_retryable_database_conflicts(
     repository = object.__new__(Repository)
     repository._lock = RLock()
     repository._db = RecordingDatabase()
+    repository._transaction_state = local()
 
     with pytest.raises(FormalWriteConflict) as caught:
         with repository._formal_write_transaction():

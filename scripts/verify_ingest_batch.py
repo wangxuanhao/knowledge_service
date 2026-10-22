@@ -25,7 +25,7 @@ def verify(base_url, files, *, project_id=None, mode='documents', concurrency='a
                                 'ontology_mode': mode})['id']
         base = f'/api/projects/{project_id}/ingest-batches'
         batch = request('POST', base, json={'settings': {'extraction_mode': mode,
-                        'requested_concurrency': concurrency, 'extract': mode != 'documents'}})
+                        'requested_concurrency': concurrency}})
         url = base + '/' + batch['id']
         for path in files:
             with path.open('rb') as stream:

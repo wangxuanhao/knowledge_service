@@ -1,4 +1,5 @@
 """Real-browser contract for the linked search/graph workspace and the one-shot knowledge chat."""
+from ontology_seed import seed_ontology
 import json
 import re
 import socket
@@ -22,9 +23,17 @@ SEARCH_BODY_FIELDS = {
     'k_entities', 'k_chunks', 'k_relations',
 }
 SUBGRAPH_BODY_FIELDS = {
-    'node_id', 'hops', 'filters', 'valid_at', 'known_at', 'include_unknown',
-    'attribute_mode', 'entity_type', 'predicate', 'ontology_scope', 'ontology_ids',
+    'seeds', 'hops', 'direction', 'max_nodes', 'max_edges',
+    'filters', 'valid_at', 'known_at', 'include_unknown', 'ontology_scope', 'ontology_ids',
 }
+
+
+def _is_graph_exchange(exchange):
+    """A canvas neighborhood; hops=0 only enriches a record inspector."""
+    request = exchange.request if hasattr(exchange, 'request') else exchange
+    return (request.method == 'POST'
+            and urlparse(request.url).path.endswith('/graph-neighborhood')
+            and (request.post_data_json or {}).get('hops', 1) > 0)
 
 
 def _browser_path():
@@ -43,7 +52,7 @@ def _project(repository, name):
     project_id = repository.create_project(name, {'ontology_mode': 'ontology'})['id']
     turtle = (Path(__file__).resolve().parents[2] / 'knowledge_service' /
               'resources' / 'default_ontology.ttl').read_text(encoding='utf-8')
-    repository.save_ontology(project_id, turtle, Ontology(turtle).summary())
+    seed_ontology(repository, project_id, turtle, Ontology(turtle).summary())
     return project_id
 
 
@@ -60,13 +69,42 @@ def _seed(repository, project_id):
         {'id': 'r-cross', 'kind': 'relation', 'type': 'supports', 'text': '服务支持',
          'subject_id': 'a', 'object_id': 's', 'metadata': {}},
         {'id': 'c', 'kind': 'chunk', 'text': '退款需要原始凭证', 'source_id': 'd', 'metadata': {}},
-        {'id': 'd', 'kind': 'document', 'text': '退款规则原文', 'metadata': {'title': '退款规则'}},
+        {'id': 'd', 'kind': 'document', 'text': '退款规则原文：退款需要原始凭证',
+         'metadata': {'title': '退款规则'}},
     ]
-    # These interaction fixtures are usable evidence. Unknown applicability is
-    # deliberately excluded from answers and has its own retrieval tests.
+    # Real QA uses fixed, effective sources and accepted assertion mappings.
+    # Keep the document and its pinned chunk in the same ingest operation so
+    # evidence resolution can identify the exact source occurrence.
     for row in rows:
+        row['valid_from'] = '2020-01-01'
+        row['metadata']['effective_time_source'] = 'explicit'
         row['metadata']['applicability'] = {'platforms': {'mode': 'all'}}
-    repository.put_batch(project_id, rows)
+    operation = repository._reserve_record_operation(project_id)
+    document = repository._put_record_for_operation(project_id, rows[-1], 0, operation)
+    saved = {}
+    for row in rows[:-1]:
+        if row['kind'] == 'chunk':
+            row['metadata']['source_version_id'] = document['version_id']
+            row['metadata']['start_char'] = document['text'].index(row['text'])
+            row['metadata']['end_char'] = row['metadata']['start_char'] + len(row['text'])
+        saved[row['id']] = repository._put_record_for_operation(project_id, row, 0, operation)
+    chunk = saved['c']
+    start = document['text'].index(chunk['text'])
+    for row in saved.values():
+        if row['kind'] not in {'entity', 'relation'}:
+            continue
+        assertion = repository.create_assertion(project_id, {
+            'id': f"{project_id}:fixture:{row['id']}", 'kind': row['kind'],
+            'payload': {'text': row['text']}, 'document_id': document['id'],
+            'document_version_id': document['version_id'], 'chunk_id': chunk['id'],
+            'quote': chunk['text'], 'start_char': start, 'end_char': start + len(chunk['text']),
+        })
+        repository.transition_assertion(project_id, assertion['id'], 1, 'accepted',
+                                        'browser fixture verified', 'fixture',
+                                        canonical_record_id=row['id'])
+        event = repository.list_assertion_events(project_id, assertion['id'])[-1]
+        repository.add_record_version_assertion(project_id, row['id'], row['version_id'],
+                                                assertion['id'], event['id'])
 
 
 @pytest.fixture(scope='module')
@@ -105,18 +143,36 @@ def workbench(browser, tmp_path):
     page = context.new_page()
     errors, paths = [], []
     page.on('pageerror', lambda error: errors.append(str(error)))
-    page.on('request', lambda request: paths.append(urlparse(request.url).path)
-            if '/api/' in request.url else None)
+    # Inspector enrichment uses the same endpoint with hops=0 and never redraws
+    # the canvas. Keep it separate so no-redraw assertions remain about rendering.
+    detail_paths = []
+    def log_request(request):
+        if '/api/' not in request.url:
+            return
+        path = urlparse(request.url).path
+        if path.endswith('/graph-neighborhood') and not _is_graph_exchange(request):
+            detail_paths.append(path)
+        else:
+            paths.append(path)
+    page.on('request', log_request)
     page.goto(f'http://127.0.0.1:{port}/', wait_until='load')
     page.wait_for_function("() => document.querySelectorAll('#project option').length > 1")
-    with page.expect_response(lambda response: response.url.endswith('/entity-options')):
-        page.select_option('#project', project_id)
+    # Project selection initializes only the visible graph workspace. The ledger
+    # owns /records/page and does not load until its page is opened.
+    page.select_option('#project', project_id)
+    page.wait_for_function('project => current === project', arg=project_id)
     page.wait_for_function(
         "document.querySelector('#graph-summary').textContent !== "
         f"{json.dumps(INITIAL_GRAPH_HINT)}")
+    # Interaction tests start from an explicitly seeded bounded fixture graph.
+    # Product boot itself remains unseeded and does not scan the whole project.
+    page.evaluate("""async () => {
+      document.getElementById('graph-node').value='a';
+      await window.drawGraph('a',3);
+    }""")
     paths.clear()
     try:
-        yield SimpleNamespace(page=page, project=project_id, paths=paths, errors=errors,
+        yield SimpleNamespace(page=page, project=project_id, paths=paths, detail_paths=detail_paths, errors=errors,
                               service=app.state.service)
     finally:
         context.close()
@@ -138,6 +194,25 @@ def _search(page, query='退款', mode='keyword'):
         page.click('#search')
     page.wait_for_function("""() => [...document.querySelectorAll('#hits > section > .hit-kind')]
         .filter(el => /^(匹配实体|原文片段|关系链路)/.test(el.textContent)).length === 3""")
+
+
+def _select_keyword_qa(page):
+    """The browser fixture has no vector service; select its real supported mode."""
+    page.locator('#qa-mode + .ks-select .ks-select-trigger').click()
+    page.locator('#qa-mode + .ks-select [data-value="keyword"]').click()
+    assert page.locator('#qa-mode').input_value() == 'keyword'
+    assert not page.locator('#generate').is_checked()
+
+
+def _expand_qa_evidence(page, index=0):
+    toggle = page.locator('#qa-transcript .qa-evidence-toggle').nth(index)
+    assert toggle.get_attribute('aria-expanded') == 'false'
+    panel = page.locator('#' + toggle.get_attribute('aria-controls'))
+    assert panel.is_hidden()
+    toggle.click()
+    assert toggle.get_attribute('aria-expanded') == 'true'
+    assert panel.is_visible()
+    return panel
 
 
 def test_ontology_preview_sets_ephemeral_version_context_and_project_change_resets_it(
@@ -177,7 +252,7 @@ def test_ontology_preview_sets_ephemeral_version_context_and_project_change_rese
         "headers: {'Content-Type': 'application/json'}, "
         "body: JSON.stringify({name: '版本上下文切换'})})).json(); "
         "await projects(); return created.id;}")
-    with page.expect_response(lambda response: response.url.endswith('/entity-options')):
+    with page.expect_response(lambda response: response.url.endswith('/records/page')):
         page.select_option('#project', other)
     assert page.evaluate('window.wb.versionContext') == empty
 
@@ -311,7 +386,7 @@ def _trigger_graph_click(page, data_type, row_id):
 def _graph_node_ids(page):
     return page.evaluate("""() => {
       const chart = window.echarts.getInstanceByDom(document.getElementById('graph-canvas'));
-      const series = chart.getOption().series.find(item => item.type === 'graph');
+      const series = (chart?.getOption().series || []).find(item => item.type === 'graph');
       return (series?.data || []).map(item => String(item.id)).sort();
     }""")
 
@@ -319,7 +394,7 @@ def _graph_node_ids(page):
 def _graph_edge_ids(page):
     return page.evaluate("""() => {
       const chart = window.echarts.getInstanceByDom(document.getElementById('graph-canvas'));
-      const series = chart.getOption().series.find(item => item.type === 'graph');
+      const series = (chart?.getOption().series || []).find(item => item.type === 'graph');
       return (series?.links || series?.edges || []).map(item => String(item.id)).sort();
     }""")
 
@@ -338,7 +413,7 @@ def _render_a_neighborhood(page):
     page.select_option('#graph-entity-choice', 'a')
     page.wait_for_function(
         "document.querySelector('#graph-detail').textContent.includes('退款商户')")
-    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+    with page.expect_response(lambda response: _is_graph_exchange(response)):
         page.click('#graph-expand')
     page.wait_for_function("""() => {
       const chart = window.echarts.getInstanceByDom(document.getElementById('graph-canvas'));
@@ -348,11 +423,14 @@ def _render_a_neighborhood(page):
 
 
 def _hold_record_request(page, record_id='x'):
-    pattern = re.compile(rf'/records/{re.escape(record_id)}(?:\?.*)?$')
+    pattern = re.compile(r'/records/page$')
     held = []
 
     def hold(route):
-        held.append(route)
+        if _is_record_exchange(route.request, record_id):
+            held.append(route)
+        else:
+            route.continue_()
 
     page.route(pattern, hold)
     return pattern, hold, held
@@ -360,8 +438,9 @@ def _hold_record_request(page, record_id='x'):
 
 def _is_record_exchange(exchange, record_id='x'):
     request = exchange.request if hasattr(exchange, 'request') else exchange
-    return (request.method == 'GET'
-            and urlparse(request.url).path.endswith(f'/records/{record_id}'))
+    return (request.method == 'POST'
+            and urlparse(request.url).path.endswith('/records/page')
+            and (request.post_data_json or {}).get('record_ids') == [record_id])
 
 
 def _release_record_request(page, held, record_id='x'):
@@ -372,13 +451,14 @@ def _release_record_request(page, held, record_id='x'):
     response.body()
     page.evaluate("""() => new Promise(resolve =>
       requestAnimationFrame(() => requestAnimationFrame(resolve)))""")
+    page.wait_for_function("!document.querySelector('#graph-expand').disabled")
     return response
 
 
 def _stable_graph_summary(page):
     summary = page.locator('#graph-summary').inner_text()
-    assert ' · 服务' in summary
-    return summary.split(' · 服务', 1)[0]
+    assert '局部邻域' in summary
+    return summary
 
 
 def _settle_graph(page, timeout_ms=6000):
@@ -393,7 +473,7 @@ def _settle_graph(page, timeout_ms=6000):
     waited = 0
     while waited < timeout_ms:
         current = page.locator('#graph-summary').inner_text()
-        if current and current == previous and ' · 服务' in current:
+        if current and current == previous and ('局部邻域' in current or '请选择实体' in current):
             return current
         previous = current
         page.wait_for_timeout(100)
@@ -447,7 +527,7 @@ def test_search_updates_only_the_result_rail_and_ignores_graph_keys(workbench):
     assert page.locator('#graph-canvas').evaluate('(el) => el.outerHTML') == graph_before
     assert page.locator('#graph-detail').evaluate('(el) => el.outerHTML') == detail_before
     assert page.locator('#graph-summary').inner_text() == summary_before
-    assert not any(path.endswith('/subgraph') for path in workbench.paths)
+    assert not any(path.endswith('/graph-neighborhood') for path in workbench.paths)
 
 
 def test_graph_node_click_updates_only_details(workbench):
@@ -460,7 +540,7 @@ def test_graph_node_click_updates_only_details(workbench):
         "document.querySelector('#graph-detail').textContent.includes('退款商户')")
     page.wait_for_timeout(120)
 
-    assert not any(path.endswith('/subgraph') for path in workbench.paths)
+    assert not any(path.endswith('/graph-neighborhood') for path in workbench.paths)
     assert page.locator('#graph-summary').inner_text() == summary_before
     assert page.locator('#graph-node').input_value() == 'a'
     assert page.locator('#graph-entity-choice').input_value() == 'a'
@@ -476,87 +556,52 @@ def test_graph_edge_click_updates_only_details(workbench):
         "document.querySelector('#graph-detail').textContent.includes('退款关系')")
     page.wait_for_timeout(120)
 
-    assert not any(path.endswith('/subgraph') for path in workbench.paths)
+    assert not any(path.endswith('/graph-neighborhood') for path in workbench.paths)
     assert page.locator('#graph-summary').inner_text() == summary_before
 
 
 def test_entity_selection_requires_explicit_expand_and_full_graph_ignores_selection(workbench):
+    """Selection changes details; local redraw stays seeded and full mode is explicit."""
     page = workbench.page
-    page.wait_for_function("""() => {
-      const chart = window.echarts.getInstanceByDom(document.getElementById('graph-canvas'));
-      const series = chart.getOption().series.find(item => item.type === 'graph');
-      return series?.data.some(item => item.id === 'x');
-    }""")
-    full_node_ids = _graph_node_ids(page)
-    assert 'x' in full_node_ids
-    full_stable_summary = _stable_graph_summary(page)
-    full_summary = page.locator('#graph-summary').inner_text()
-    bodies = []
-    page.on('request', lambda request: bodies.append(request.post_data_json)
-            if request.url.endswith('/subgraph') else None)
-    workbench.paths.clear()
-
+    original_nodes = _graph_node_ids(page)
+    assert 'x' in original_nodes
+    summary_before = page.locator('#graph-summary').inner_text()
     page.select_option('#graph-entity-choice', 'a')
-    page.wait_for_function(
-        "document.querySelector('#graph-detail').textContent.includes('退款商户')")
-    page.wait_for_timeout(120)
-    assert not any(path.endswith('/subgraph') for path in workbench.paths)
-    assert page.locator('#graph-summary').inner_text() == full_summary
+    page.wait_for_function("document.querySelector('#graph-detail').textContent.includes('退款商户')")
     _assert_complete_entity_inspector(page, '退款商户')
-
-    detail_before = page.locator('#graph-detail').inner_html()
+    assert _graph_node_ids(page) == original_nodes
+    assert page.locator('#graph-summary').inner_text() == summary_before
     workbench.paths.clear()
-    # 选回空白项＝清空选择、详情归零、并重绘当前范围全图。
-    # 这条契约以前断言的是"值被弹回上一个实体、不发任何请求"——那正是用户反馈的
-    # "选择实体下拉框，点其他之后切不回空白了"，所以按用户要求反过来了。
-    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
-        page.select_option('#graph-entity-choice', '')
-    page.wait_for_timeout(120)
-    assert page.locator('#graph-entity-choice').input_value() == ''
+    page.select_option('#graph-entity-choice', '')
+    page.wait_for_function("document.querySelector('#graph-summary').textContent.includes('请选择实体')")
     assert page.locator('#graph-node').input_value() == ''
-    assert page.locator('#graph-detail').inner_html() != detail_before
-    assert any(path.endswith('/subgraph') for path in workbench.paths)
-    page.wait_for_function("""() => {
-      const chart = window.echarts.getInstanceByDom(document.getElementById('graph-canvas'));
-      const series = chart.getOption().series.find(item => item.type === 'graph');
-      return series?.data.some(item => item.id === 'x');
-    }""")
-    assert 'x' in _graph_node_ids(page)
-    # 用去掉耗时的那一版比：这里真的重绘了全图，服务端耗时当然会变
-    # （原断言能相等，恰恰是因为以前根本没重绘）。
-    assert _stable_graph_summary(page) == full_stable_summary
-
-    # 回到"选中实体 → 展开邻域"这步：重新选中 a 再展开。
+    assert page.locator('#graph-detail').inner_html() == ''
+    assert _graph_node_ids(page) == []
+    assert not any(path.endswith('/graph-neighborhood') for path in workbench.paths)
     page.select_option('#graph-entity-choice', 'a')
-    page.wait_for_function(
-        "document.querySelector('#graph-detail').textContent.includes('退款商户')")
-    workbench.paths.clear()
-    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+    page.wait_for_function("document.querySelector('#graph-detail').textContent.includes('退款商户')")
+    bodies = []
+    page.on('request', lambda request: bodies.append(request.post_data_json) if _is_graph_exchange(request) else None)
+    with page.expect_response(_is_graph_exchange):
         page.click('#graph-expand')
-    page.wait_for_function("""() => {
-      const chart = window.echarts.getInstanceByDom(document.getElementById('graph-canvas'));
-      const series = chart.getOption().series.find(item => item.type === 'graph');
-      return series && !series.data.some(item => item.id === 'x');
-    }""")
-    assert bodies[-1]['node_id'] == 'a'
-    assert bodies[-1]['attribute_mode'] == 'expanded'
-    expanded_node_ids = _graph_node_ids(page)
-    assert 'x' not in expanded_node_ids
-    assert len(expanded_node_ids) < len(full_node_ids)
-
-    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+    page.wait_for_function("window.wb.nodes.has('b') && !window.wb.nodes.has('x')")
+    expanded = _graph_node_ids(page)
+    assert len(expanded) < len(original_nodes)
+    with page.expect_response(_is_graph_exchange):
         page.click('#draw-graph')
-    page.wait_for_function("""() => {
-      const chart = window.echarts.getInstanceByDom(document.getElementById('graph-canvas'));
-      const series = chart.getOption().series.find(item => item.type === 'graph');
-      return series?.data.some(item => item.id === 'x');
-    }""")
-    assert bodies[-1]['node_id'] is None
-    assert bodies[-1]['attribute_mode'] == 'summary'
-    assert _graph_node_ids(page) == full_node_ids
-    assert _stable_graph_summary(page) == full_stable_summary
-    assert page.locator('#graph-entity-choice').input_value() == 'a'
+    assert bodies[-1]['seeds'] == ['a']
+    assert bodies[-1]['hops'] == 1
+    assert _graph_node_ids(page) == expanded
     assert page.locator('#graph-node').input_value() == 'a'
+    assert page.locator('#graph-entity-choice').input_value() == 'a'
+    workbench.paths.clear()
+    page.click('[data-fg-mode="full"]')
+    assert page.locator('.full-graph-section').is_visible()
+    assert not page.locator('#graph-canvas').is_visible()
+    assert page.locator('#graph-node').input_value() == 'a'
+    assert not any(path.endswith('/graph-neighborhood') for path in workbench.paths)
+    page.click('[data-fg-mode="local"]')
+    assert _graph_node_ids(page) == expanded
     assert '退款商户' in page.locator('#graph-detail').inner_text()
 
 
@@ -586,8 +631,8 @@ def test_entity_selection_fetches_complete_detail_outside_rendered_neighborhood(
             route.abort()
         page.unroute(pattern, handler)
 
-    assert f'/api/projects/{workbench.project}/records/x' in workbench.paths
-    assert not any(path.endswith('/subgraph') for path in workbench.paths)
+    assert f'/api/projects/{workbench.project}/records/page' in workbench.paths
+    assert not any(path.endswith('/graph-neighborhood') for path in workbench.paths)
     assert _graph_node_ids(page) == neighborhood_node_ids
     assert page.locator('#graph-summary').inner_text() == summary_before
     assert page.locator('#graph-node').input_value() == 'x'
@@ -598,16 +643,19 @@ def test_entity_selection_fetches_complete_detail_outside_rendered_neighborhood(
 def test_expand_stays_disabled_until_pending_entity_detail_resolves(workbench):
     page = workbench.page
     _render_a_neighborhood(page)
-    subgraph_pattern = re.compile(r'/subgraph$')
+    subgraph_pattern = re.compile(r'/graph-neighborhood$')
     held_subgraphs = []
 
     def hold_subgraph(route):
-        held_subgraphs.append(route)
+        if _is_graph_exchange(route.request):
+            held_subgraphs.append(route)
+        else:
+            route.continue_()
 
     page.route(subgraph_pattern, hold_subgraph)
     record_pattern, record_handler, held_records = _hold_record_request(page)
     try:
-        with page.expect_request(lambda request: request.url.endswith('/subgraph')):
+        with page.expect_request(lambda request: _is_graph_exchange(request)):
             page.click('#graph-expand')
         assert page.locator('#graph-expand').is_disabled()
 
@@ -617,7 +665,7 @@ def test_expand_stays_disabled_until_pending_entity_detail_resolves(workbench):
 
         assert len(held_subgraphs) == 1
         with page.expect_response(
-                lambda response: response.url.endswith('/subgraph')) as info:
+                lambda response: _is_graph_exchange(response)) as info:
             held_subgraphs.pop().continue_()
         assert info.value.status == 200
         info.value.body()
@@ -645,7 +693,10 @@ def test_entity_filter_removal_rolls_back_pending_detail(workbench):
             page.select_option('#graph-entity-choice', 'x')
         assert page.locator('#graph-expand').is_disabled()
 
-        page.fill('#graph-entity-filter', '退款')
+        with page.expect_response(lambda response: response.url.endswith('/records/page')
+                                  and response.request.post_data_json.get('query') == '退款'):
+            page.fill('#graph-entity-filter', '退款')
+        page.wait_for_function("document.querySelector('#graph-entity-choice').value === 'a'")
         assert page.locator('#graph-entity-choice').input_value() == 'a'
         assert page.locator('#graph-node').input_value() == 'a'
         assert page.locator('#graph-expand').is_enabled()
@@ -670,7 +721,10 @@ def test_entity_filter_keeps_committed_fallback_when_no_entities_match(workbench
             page.select_option('#graph-entity-choice', 'x')
         assert page.locator('#graph-expand').is_disabled()
 
-        page.fill('#graph-entity-filter', '完全不匹配')
+        with page.expect_response(lambda response: response.url.endswith('/records/page')
+                                  and response.request.post_data_json.get('query') == '完全不匹配'):
+            page.fill('#graph-entity-filter', '完全不匹配')
+        page.wait_for_function("document.querySelector('#graph-entity-choice').value === 'a'")
         assert page.locator('#graph-entity-filter').input_value() == '完全不匹配'
         assert page.locator('#graph-entity-choice option').evaluate_all(
             '(options) => options.map(option => option.value)') == ['', 'a']
@@ -691,20 +745,17 @@ def test_entity_filter_keeps_committed_fallback_when_no_entities_match(workbench
     assert '无关实体' not in page.locator('#graph-detail').inner_text()
 
 
-def test_invalid_detail_scope_rolls_back_pending_detail(workbench):
+def test_invalid_scope_draft_keeps_applied_scope_and_current_detail(workbench):
     page = workbench.page
     _render_a_neighborhood(page)
-    page.fill('#filters', '{')
-
-    page.select_option('#graph-entity-choice', 'x')
-    page.evaluate("""() => new Promise(resolve =>
-      requestAnimationFrame(() => requestAnimationFrame(resolve)))""")
-
-    assert page.locator('#graph-entity-choice').input_value() == 'a'
+    page.click('#scope-toggle')
+    page.locator('.cb-advanced').evaluate('(node)=>{node.open=true}')
+    page.fill('#cb-raw-json','{')
+    page.click('#apply-scope')
+    assert 'JSON' in page.locator('#status').inner_text()
+    assert page.evaluate('scope().filters') is None
     assert page.locator('#graph-node').input_value() == 'a'
-    assert page.locator('#graph-expand').is_enabled()
     assert '退款商户' in page.locator('#graph-detail').inner_text()
-    assert not any(path.endswith('/records/x') for path in workbench.paths)
     assert workbench.errors == []
 
 
@@ -740,10 +791,10 @@ def test_late_entity_detail_does_not_replace_relation_detail(workbench):
 
     bodies = []
     page.on('request', lambda request: bodies.append(request.post_data_json)
-            if request.url.endswith('/subgraph') else None)
-    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+            if _is_graph_exchange(request) else None)
+    with page.expect_response(lambda response: _is_graph_exchange(response)):
         page.click('#graph-expand')
-    assert bodies[-1]['node_id'] == 'a'
+    assert bodies[-1]['seeds'][0] == 'a'
 
 
 def test_late_entity_detail_does_not_reopen_closed_drawer(workbench):
@@ -782,7 +833,7 @@ def test_failed_entity_read_restores_committed_selection(workbench):
     def fail_record(route):
         route.fulfill(status=500, json={'detail': 'record failed'})
 
-    pattern = re.compile(r'/records/x(?:\?.*)?$')
+    pattern = re.compile(r'/records/page$')
     page.route(pattern, fail_record)
     try:
         with page.expect_response(_is_record_exchange):
@@ -812,10 +863,10 @@ def test_relation_detail_preserves_entity_selection_for_expand(workbench):
 
     bodies = []
     page.on('request', lambda request: bodies.append(request.post_data_json)
-            if request.url.endswith('/subgraph') else None)
-    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+            if _is_graph_exchange(request) else None)
+    with page.expect_response(lambda response: _is_graph_exchange(response)):
         page.click('#graph-expand')
-    assert bodies[-1]['node_id'] == 'b'
+    assert bodies[-1]['seeds'][0] == 'b'
 
 
 def test_search_button_and_enter_each_issue_exactly_one_search(workbench):
@@ -892,7 +943,7 @@ def test_entity_and_relation_hits_select_consistent_detail_without_redraw(workbe
         _channel_sections(page).nth(index).locator('[data-graph-node]').first.click()
         page.evaluate("""() => new Promise(resolve =>
           requestAnimationFrame(() => requestAnimationFrame(resolve)))""")
-        assert not any(path.endswith('/subgraph') for path in workbench.paths)
+        assert not any(path.endswith('/graph-neighborhood') for path in workbench.paths)
         assert not any(path.endswith('/explore') or path.endswith('/search')
                        for path in workbench.paths)
         assert page.locator('#graph-entity-choice').input_value() == expected_seed
@@ -903,156 +954,103 @@ def test_entity_and_relation_hits_select_consistent_detail_without_redraw(workbe
         assert page.locator('[data-tab="search"]').get_attribute('class') == 'active'
 
 
-def test_project_and_scope_changes_clear_isolated_state(workbench):
+def test_scope_application_preserves_qa_and_isolates_project_pages(workbench):
     page = workbench.page
     page.click('[data-tab="search"]')
-    _search(page)
-    _channel_sections(page).nth(0).locator('[data-graph-node]').first.click()
-    page.wait_for_function(
-        "document.querySelector('#graph-detail').textContent.includes('退款商户')")
-    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
-        page.click('#graph-expand')
-    hits_after_graph = page.locator('#hits').inner_html()
-
-    # Scope change clears graph, selection and details but keeps the result rail.
-    workbench.paths.clear()
-    _watch_graph_clear(page, '#apply-scope', '__scopeClearSnapshot')
-    with page.expect_response(lambda response: response.url.endswith('/metadata/facets')):
-        page.click('#apply-scope')
-    scope_cleared = _graph_clear_snapshot(page, '__scopeClearSnapshot')
-    assert scope_cleared == {
-        'hits': hits_after_graph, 'summary': INITIAL_GRAPH_HINT, 'detail': '', 'node': ''}
-    page.wait_for_function(
-        "document.querySelector('#graph-summary').textContent === "
-        f"{json.dumps(INITIAL_GRAPH_HINT)}")
-    assert page.locator('#graph-summary').inner_text() == INITIAL_GRAPH_HINT
-    assert page.locator('#graph-detail').inner_html() == ''
-    assert page.locator('#graph-node').input_value() == ''
-    assert page.locator('#hits').inner_html() == hits_after_graph
-    assert not any(path.endswith('/subgraph') for path in workbench.paths)
-
-    # The knowledge-time switch clears the graph without re-loading it.
-    _channel_sections(page).nth(0).locator('[data-graph-node]').first.click()
-    page.wait_for_function(
-        "document.querySelector('#graph-detail').textContent.includes('退款商户')")
-    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
-        page.click('#graph-expand')
-    page.wait_for_function(
-        "document.querySelectorAll('#graph-timeline .tl-points option').length > 1")
-    hits_before_time = page.locator('#hits').inner_html()
-    workbench.paths.clear()
-    _watch_graph_clear(page, '#graph-timeline .tl-prev', '__timeClearSnapshot')
-    page.click('#graph-timeline .tl-prev')
-    time_cleared = _graph_clear_snapshot(page, '__timeClearSnapshot')
-    assert time_cleared == {
-        'hits': hits_before_time, 'summary': INITIAL_GRAPH_HINT, 'detail': '', 'node': ''}
-    page.wait_for_function(
-        "document.querySelector('#graph-summary').textContent === "
-        f"{json.dumps(INITIAL_GRAPH_HINT)}")
-    assert page.locator('#graph-summary').inner_text() == INITIAL_GRAPH_HINT
-    assert page.locator('#graph-detail').inner_html() == ''
-    assert page.locator('#hits').inner_html() == hits_before_time
-    assert not any(path.endswith('/subgraph') for path in workbench.paths)
-
-    # Switching project clears results, graph, selection and details without loading a graph.
-    other = page.evaluate(
-        "async () => {const created = await (await fetch('/api/projects', {method: 'POST', "
-        "headers: {'Content-Type': 'application/json'}, "
-        "body: JSON.stringify({name: '第二个项目'})})).json(); "
-        "await projects(); return created.id;}")
-    _watch_graph_clear(page, '#project', '__projectClearSnapshot', event='change')
-    with page.expect_response(lambda response: response.url.endswith('/entity-options')):
-        page.select_option('#project', other)
-    cleared = _graph_clear_snapshot(page, '__projectClearSnapshot')
-    assert cleared == {'hits': '', 'summary': INITIAL_GRAPH_HINT, 'detail': '', 'node': ''}
+    page.click('#scope-toggle')
+    page.fill('#query-platforms','美团')
+    assert page.evaluate('scope().applicability || null') is None
+    page.click('#apply-scope')
+    assert page.evaluate('scope().applicability.platforms.values') == ['美团']
+    assert '平台：美团' in page.locator('#applied-scope-chips').inner_text()
+    page.click('[data-tab="qa"]')
+    assert page.evaluate('scope().applicability || null') is None
+    page.fill('#qa-query','退款')
+    _select_keyword_qa(page)
+    page.click('#qa')
+    page.wait_for_function("() => document.querySelector('#qa-transcript .qa-turn-assistant')?.dataset.state === 'done'")
+    count=page.locator('#qa-transcript .qa-turn').count()
+    page.click('#scope-toggle');page.fill('#query-platforms','淘宝');page.click('#apply-scope')
+    assert page.locator('#qa-transcript .qa-turn').count() == count
+    assert '仅影响下一次提问' in page.locator('#qa-summary').inner_text()
+    page.click('[data-tab="search"]')
+    assert page.evaluate('scope().applicability.platforms.values') == ['美团']
+    assert workbench.errors == []
 
 
 def test_graph_scope_filters_survive_expand_and_explicit_full_redraw(workbench):
+    """Canvas type choices survive seed expansion and explicit bounded redraw."""
     page = workbench.page
     assert _graph_node_ids(page) == ['a', 'b', 's', 'x']
-    assert _graph_edge_ids(page) == ['r', 'r-alt', 'r-cross']
-
-    bodies = []
-    page.on('request', lambda request: bodies.append(request.post_data_json)
-            if request.url.endswith('/subgraph') else None)
-    page.locator('#cb-details').evaluate('(element) => {element.open = true;}')
-    page.select_option('#type-scope', 'Thing')
-    page.select_option('#predicate-scope', 'mentions')
-    with page.expect_response(lambda response: response.url.endswith('/metadata/facets')):
-        page.click('#apply-scope')
-    assert page.locator('#type-scope').input_value() == 'Thing'
-    assert page.locator('#predicate-scope').input_value() == 'mentions'
-
-    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
-        page.click('#draw-graph')
-    assert _graph_node_ids(page) == ['a', 'b', 'x']
-    assert _graph_edge_ids(page) == ['r']
-
     page.select_option('#graph-entity-choice', 'a')
-    page.wait_for_function(
-        "document.querySelector('#graph-detail').textContent.includes('退款商户')")
-    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
-        page.click('#graph-expand')
+    with page.expect_response(_is_graph_exchange):
+        page.select_option('#type-scope', 'Thing')
+    with page.expect_response(_is_graph_exchange):
+        page.select_option('#predicate-scope', 'mentions')
+    page.wait_for_function("window.wb.nodes.size === 2")
     assert _graph_node_ids(page) == ['a', 'b']
     assert _graph_edge_ids(page) == ['r']
-
-    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+    bodies = []
+    page.on('request', lambda request: bodies.append(request.post_data_json) if _is_graph_exchange(request) else None)
+    with page.expect_response(_is_graph_exchange):
         page.click('#draw-graph')
+    page.select_option('#graph-entity-choice', 'b')
+    page.wait_for_function("document.querySelector('#graph-node').value === 'b'")
+    with page.expect_response(_is_graph_exchange):
+        page.click('#graph-expand')
+    page.wait_for_function("window.wb.nodes.has('x')")
     assert _graph_node_ids(page) == ['a', 'b', 'x']
     assert _graph_edge_ids(page) == ['r']
+    with page.expect_response(_is_graph_exchange):
+        page.click('#draw-graph')
+    assert _graph_node_ids(page) == ['a', 'b', 'x']
     assert page.locator('#type-scope').input_value() == 'Thing'
     assert page.locator('#predicate-scope').input_value() == 'mentions'
-    assert len(bodies) == 3
-    assert [body['node_id'] for body in bodies] == [None, 'a', None]
-    assert all(body['entity_type'] == 'Thing' and body['predicate'] == 'mentions'
-               for body in bodies)
+    assert [body['seeds'] for body in bodies] == [['a'], ['b'], ['b']]
+    assert all('entity_type' not in body and 'predicate' not in body for body in bodies)
+    assert all(body['max_nodes'] == 500 and body['max_edges'] == 1000 for body in bodies)
 
 
 def test_ontology_scope_reaches_graph_redraw_expand_and_mindmap(workbench):
     page = workbench.page
+    repo = workbench.service.repository
+    release = repo.list_ontologies(workbench.project)[-1]
+    rows = repo.current_records(workbench.project)
+    repo.put_batch(workbench.project, [
+        {**{key: value for key, value in row.items() if key not in {
+            'project_id', 'version', 'version_id', 'recorded_at', 'superseded_at'}},
+         'ontology_id': release['id']} for row in rows])
     graph_bodies, mindmap_bodies = [], []
-    page.on('request', lambda request: graph_bodies.append(request.post_data_json)
-            if request.url.endswith('/subgraph') else None)
-    page.on('request', lambda request: mindmap_bodies.append(request.post_data_json)
-            if request.url.endswith('/mindmap') else None)
-
-    page.evaluate("""() => window.wb.setVersionContext({
-      ontologyScope: 'ids', ontologyIds: ['ontology-v1'],
-      ontologyVersion: 1, source: 'test'
-    })""")
-    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+    page.on('request', lambda request: graph_bodies.append(request.post_data_json) if _is_graph_exchange(request) else None)
+    page.on('request', lambda request: mindmap_bodies.append(request.post_data_json) if request.url.endswith('/mindmap') else None)
+    page.evaluate("id => window.wb.setVersionContext({ontologyScope:'ids',ontologyIds:[id],ontologyVersion:1,source:'test'})", release['id'])
+    # Version changes invalidate the old seed. Explicitly select a new seed in
+    # this bound release before drawing or expanding.
+    with page.expect_response(_is_graph_exchange):
+        page.evaluate("async () => {await window.drawGraph('a',1);}")
+    page.select_option('#graph-entity-choice', 'a')
+    with page.expect_response(_is_graph_exchange):
+        page.click('#graph-expand')
+    with page.expect_response(_is_graph_exchange):
         page.click('#draw-graph')
     page.select_option('#graph-entity-choice', 'a')
-    page.wait_for_function(
-        "document.querySelector('#graph-detail').textContent.includes('退款商户')")
-    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
-        page.click('#graph-expand')
-    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
-        page.click('#draw-graph')
-
-    page.click('[data-tab="mindmap"]')
-    page.wait_for_function(
-        "() => [...document.querySelectorAll('#mindmap-root option')]"
-        ".some(option => option.value === 'a')")
+    page.wait_for_function("document.querySelector('#graph-detail').textContent.includes('退款商户')")
+    with page.expect_response(lambda response: response.url.endswith('/mindmap')):
+        page.click('#graph-detail [data-action="mindmap"]')
+    assert page.locator('#tab-mindmap').is_visible()
+    page.wait_for_function("[...document.querySelector('#mindmap-root').options].some(row=>row.value==='a')")
     page.select_option('#mindmap-root', 'a')
     with page.expect_response(lambda response: response.url.endswith('/mindmap')):
         page.click('#draw-mindmap')
-
     assert len(graph_bodies) == 3
-    assert all(body['ontology_scope'] == 'ids' and
-               body['ontology_ids'] == ['ontology-v1'] for body in graph_bodies)
+    assert all(body['ontology_scope'] == 'ids' and body['ontology_ids'] == [release['id']] for body in graph_bodies)
     assert mindmap_bodies[-1]['ontology_scope'] == 'ids'
-    assert mindmap_bodies[-1]['ontology_ids'] == ['ontology-v1']
-
-    page.evaluate("""() => window.wb.setVersionContext({
-      ontologyScope: 'unknown', ontologyIds: null,
-      ontologyVersion: null, source: 'test'
-    })""")
+    assert mindmap_bodies[-1]['ontology_ids'] == [release['id']]
+    page.evaluate("() => window.wb.setVersionContext({ontologyScope:'unknown',source:'test'})")
     with page.expect_response(lambda response: response.url.endswith('/mindmap')):
         page.click('#draw-mindmap')
     assert mindmap_bodies[-1]['ontology_scope'] == 'unknown'
     assert mindmap_bodies[-1]['ontology_ids'] is None
-
     page.evaluate('() => window.wb.clearVersionContext()')
     with page.expect_response(lambda response: response.url.endswith('/mindmap')):
         page.click('#draw-mindmap')
@@ -1063,25 +1061,21 @@ def test_ontology_scope_reaches_graph_redraw_expand_and_mindmap(workbench):
 def test_ontology_scope_banner_reset_redraws_graph_with_all_scope(workbench):
     page = workbench.page
     bodies = []
-    page.on('request', lambda request: bodies.append(request.post_data_json)
-            if request.url.endswith('/subgraph') else None)
-    page.evaluate("""() => window.wb.setVersionContext({
-      ontologyScope: 'ids', ontologyIds: ['ontology-v1'],
-      ontologyVersion: 1, source: 'test'
-    })""")
-
+    page.on('request', lambda request: bodies.append(request.post_data_json) if _is_graph_exchange(request) else None)
+    page.evaluate("() => window.wb.setVersionContext({ontologyScope:'ids',ontologyIds:['ontology-v1'],ontologyVersion:1,source:'test'})")
     assert '知识范围：本体 v1' in page.locator('#graph-version-scope').inner_text()
     assert '知识范围：本体 v1' in page.locator('#mindmap-version-scope').inner_text()
-    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
-        page.click('#graph-version-scope [data-reset-ontology-scope]')
-
+    page.click('#graph-version-scope [data-reset-ontology-scope]')
+    page.wait_for_function("document.querySelector('#graph-summary').textContent.includes('请选择实体')")
+    assert bodies == []
+    assert page.evaluate('window.wb.versionContext') == {'ontologyScope':'all','ontologyIds':None,'ontologyVersion':None,'source':None}
+    assert '知识范围：全部本体' in page.locator('#graph-version-scope').inner_text()
+    page.select_option('#graph-entity-choice', 'a')
+    page.wait_for_function("document.querySelector('#graph-node').value === 'a'")
+    with page.expect_response(_is_graph_exchange):
+        page.click('#graph-expand')
     assert bodies[-1]['ontology_scope'] == 'all'
     assert bodies[-1]['ontology_ids'] is None
-    assert page.evaluate('window.wb.versionContext') == {
-        'ontologyScope': 'all', 'ontologyIds': None,
-        'ontologyVersion': None, 'source': None,
-    }
-    assert '知识范围：全部本体' in page.locator('#graph-version-scope').inner_text()
 
 
 # ── 图谱渲染器只能有一份实现（双 UI 收敛的防回归闸门） ──
@@ -1124,25 +1118,25 @@ def test_draw_and_expand_buttons_share_the_single_graph_renderer(workbench):
     page.wait_for_function(
         "document.querySelector('#graph-detail').textContent.includes('退款商户')")
     assert page.locator('#graph-type-buttons').count() == 1
-    assert '服务' in page.locator('#graph-summary').inner_text()
+    assert '局部邻域' in page.locator('#graph-summary').inner_text()
 
     # 「展开邻域」这个按钮原先绑在 workbench.js 的旧副本上；收敛后必须和上面同源：
     # 请求体带 valid_at（旧副本不发这个字段），并且类型筛选按钮/时间轴仍在（旧副本不会创建）。
     bodies = []
     page.on('request', lambda request: bodies.append(request.post_data_json)
-            if request.url.endswith('/subgraph') else None)
+            if _is_graph_exchange(request) else None)
     workbench.paths.clear()
-    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+    with page.expect_response(lambda response: _is_graph_exchange(response)):
         page.click('#graph-expand')
     page.wait_for_timeout(120)
 
-    assert workbench.paths.count(f'/api/projects/{workbench.project}/subgraph') == 1
+    assert workbench.paths.count(f'/api/projects/{workbench.project}/graph-neighborhood') == 1
     assert bodies and set(bodies[-1]) == SUBGRAPH_BODY_FIELDS, \
         f'展开邻域必须走收敛后的实现（请求体含 valid_at）: {bodies[-1] if bodies else None}'
-    assert bodies[-1]['node_id'] == 'a' and bodies[-1]['hops'] == 1
+    assert bodies[-1]['seeds'][0] == 'a' and bodies[-1]['hops'] == 1
     assert page.locator('#graph-type-buttons').count() == 1
     assert page.locator('#graph-timeline').count() == 1
-    assert '服务' in page.locator('#graph-summary').inner_text()
+    assert '局部邻域' in page.locator('#graph-summary').inner_text()
     # 提示现在是实体卡片（图标 + 正文 + 关闭按钮）：断言正文那一段，
     # 不能拿整个容器跟一句话做全等比较。
     assert page.locator('#status .ks-notice__text').inner_text() == '已展开 1 跳邻域'
@@ -1152,7 +1146,7 @@ def test_draw_and_expand_buttons_share_the_single_graph_renderer(workbench):
     workbench.paths.clear()
     page.click('#graph-expand')
     page.wait_for_timeout(120)
-    assert not any(path.endswith('/subgraph') for path in workbench.paths)
+    assert not any(path.endswith('/graph-neighborhood') for path in workbench.paths)
     assert '请先选择实体' in page.locator('#status').inner_text()
     assert workbench.errors == []
 
@@ -1167,15 +1161,15 @@ def test_load_graph_button_uses_the_shipped_renderer(workbench):
     page = workbench.page
     bodies = []
     page.on('request', lambda request: bodies.append(request.post_data_json)
-            if request.url.endswith('/subgraph') else None)
-    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
+            if _is_graph_exchange(request) else None)
+    with page.expect_response(lambda response: _is_graph_exchange(response)):
         page.evaluate("() => document.getElementById('load-graph').click()")
     page.wait_for_timeout(120)
 
     assert bodies and set(bodies[-1]) == SUBGRAPH_BODY_FIELDS
     assert page.locator('[data-tab="search"]').get_attribute('class') == 'active'
     assert page.locator('#graph-type-buttons').count() == 1
-    assert '服务' in page.locator('#graph-summary').inner_text()
+    assert '局部邻域' in page.locator('#graph-summary').inner_text()
     assert workbench.errors == []
 
 
@@ -1233,17 +1227,20 @@ def test_sse_parser_handles_split_boundaries_crlf_multiline_and_malformed(workbe
 def test_knowledge_chat_streams_evidence_deltas_and_done(workbench):
     page = workbench.page
     page.click('[data-tab="qa"]')
+    _select_keyword_qa(page)
     assert page.locator('#qa-hero').is_visible()
     assert page.locator('.qa-example').count() == 3
 
     page.fill('#qa-query', '退款')
     workbench.paths.clear()
-    with page.expect_response(lambda response: response.url.endswith('/qa/stream')):
+    with page.expect_response(lambda response: response.url.endswith('/qa/stream')) as streamed:
         page.click('#qa')
     page.wait_for_function(
         "document.querySelector('#qa-transcript .qa-turn-assistant')?.dataset.state === 'done'")
 
     assert workbench.paths.count(f'/api/projects/{workbench.project}/qa/stream') == 1
+    assert streamed.value.request.post_data_json['retrieval_mode'] == 'keyword'
+    assert streamed.value.request.post_data_json['generate'] is False
     assert not any(path.endswith('/explore') or path.endswith('/search')
                    for path in workbench.paths)
     turns = page.locator('#qa-transcript .qa-turn')
@@ -1346,33 +1343,30 @@ def test_knowledge_chat_retry_replays_the_exact_request(workbench):
 def test_knowledge_chat_evidence_disclosure_and_cross_menu_navigation(workbench):
     page = workbench.page
     page.click('[data-tab="qa"]')
+    _select_keyword_qa(page)
     page.fill('#qa-query', '退款')
     with page.expect_response(lambda response: response.url.endswith('/qa/stream')):
         page.click('#qa')
     page.wait_for_function(
         "document.querySelector('#qa-transcript .qa-turn-assistant')?.dataset.state === 'done'")
 
-    toggle = page.locator('#qa-transcript .qa-evidence-toggle').first
-    assert toggle.get_attribute('aria-expanded') == 'true'
-    panel_id = toggle.get_attribute('aria-controls')
-    assert page.locator(f'#{panel_id}').is_visible()
-
-    graph_buttons = page.locator(f'#{panel_id} [data-evidence-node]')
+    panel = _expand_qa_evidence(page)
+    graph_buttons = panel.locator('[data-evidence-node]')
     assert graph_buttons.count() >= 1
     graph_nodes = _graph_node_ids(page)
     graph_summary = page.locator('#graph-summary').inner_text()
     subgraph_bodies = []
     page.on('request', lambda request: subgraph_bodies.append(request.post_data_json)
-            if request.url.endswith('/subgraph') else None)
+            if _is_graph_exchange(request) else None)
     workbench.paths.clear()
     graph_buttons.first.click()
     page.wait_for_function(
         "document.querySelector('#graph-detail').textContent.includes('退款商户')")
     offenders = [path for path in workbench.paths
-                 if path.endswith(('/subgraph', '/search', '/explore'))]
+                 if path.endswith(('/graph-neighborhood', '/search', '/explore'))]
     # 断言里带上"到底是哪个请求、带了什么载荷"：只报 True/False 时排查得靠猜。
     key_fields = {k: v for k, v in (subgraph_bodies[-1] if subgraph_bodies else {}).items()
-                  if k in ('node_id', 'hops', 'attribute_mode', 'include_unknown', 'record_id')}
+                  if k in ('seeds', 'hops', 'direction', 'max_nodes', 'max_edges', 'include_unknown', 'record_ids')}
     assert not offenders, (offenders, key_fields)
     assert page.locator('#graph-entity-choice').input_value() == 'a'
     assert page.locator('#graph-node').input_value() == 'a'
@@ -1382,14 +1376,15 @@ def test_knowledge_chat_evidence_disclosure_and_cross_menu_navigation(workbench)
     assert page.locator('[data-tab="search"]').get_attribute('class') == 'active'
     assert page.evaluate("() => document.activeElement.id") == 'graph-heading'
 
-    # A chunk citation without a source must not offer an unusable action.
+    # The fixed citation also exposes its historical source action.
     page.click('[data-tab="qa"]')
-    assert page.locator(f'#{panel_id} [data-evidence-source]').count() >= 1
+    assert panel.get_by_text('查看冻结原文', exact=True).count() >= 1
 
 
 def test_knowledge_chat_keyboard_ime_and_scope_change(workbench):
     page = workbench.page
     page.click('[data-tab="qa"]')
+    _select_keyword_qa(page)
 
     # Shift+Enter inserts a newline, Enter sends.
     page.click('#qa-query')
@@ -1409,10 +1404,12 @@ def test_knowledge_chat_keyboard_ime_and_scope_change(workbench):
     page.evaluate("""() => document.getElementById('qa-query')
       .dispatchEvent(new CompositionEvent('compositionend', {bubbles: true}))""")
 
-    page.click('#qa')
+    with page.expect_response(lambda response: response.url.endswith('/qa/stream')):
+        page.locator('#qa-query').press('Enter')
     page.wait_for_function(
         "document.querySelector('#qa-transcript .qa-turn-assistant')?.dataset.state === 'done'")
     assert page.locator('#qa-transcript .qa-turn').count() == 2
+    assert workbench.paths.count(f'/api/projects/{workbench.project}/qa/stream') == 1
 
     # The project selector is the visible owner of QA scope. Changing it clears the
     # conversation without reaching into the hidden search-only scope controls.
@@ -1422,7 +1419,7 @@ def test_knowledge_chat_keyboard_ime_and_scope_change(workbench):
         "body: JSON.stringify({name: '问答范围'})})).json(); "
         "await projects(); return created.id;}")
     assert page.locator('#project').is_visible()
-    with page.expect_response(lambda response: response.url.endswith('/entity-options')):
+    with page.expect_response(lambda response: response.url.endswith('/records/page')):
         page.select_option('#project', other)
     page.wait_for_function(
         "document.querySelectorAll('#qa-transcript .qa-turn').length === 0 && "
@@ -1438,12 +1435,14 @@ def test_mobile_composer_stays_reachable_with_expanded_evidence(workbench):
     page = workbench.page
     page.set_viewport_size({'width': 390, 'height': 844})
     page.click('[data-tab="qa"]')
-    for question in ('退款', '退款商户'):
+    _select_keyword_qa(page)
+    for index, question in enumerate(('退款', '退款商户')):
         page.fill('#qa-query', question)
         page.click('#qa')
         page.wait_for_function(
             "() => {const turns = document.querySelectorAll('#qa-transcript .qa-turn-assistant'); "
             "return turns.length && turns[turns.length - 1].dataset.state === 'done';}")
+        _expand_qa_evidence(page, index)
     assert page.locator('#qa-transcript .qa-evidence-panel').first.is_visible()
     page.wait_for_timeout(250)
 
@@ -1465,28 +1464,54 @@ def test_mobile_composer_stays_reachable_with_expanded_evidence(workbench):
     assert workbench.errors == []
 
 
-def test_chunk_evidence_declares_its_home_when_source_is_merged(workbench):
-    """P0：原文数据源并入「知识写入」，问答证据的来源按钮不再跳来源页，而是明确提示去向。
-
-    旧的 test_chunk_evidence_navigates_to_the_exact_source 断言"点来源 → 跳到 sources 页"，
-    那测的是被合并掉的**独立原文数据源页**。合并后 sources 无侧栏入口，落点改到「知识写入」
-    （P1 接入），P0 期间点来源必须给出明确提示，不能静默失效。
-    """
+def test_chunk_evidence_opens_the_exact_frozen_source(workbench):
+    """A citation keeps its exact source version after the current document changes."""
     page = workbench.page
+    repo = workbench.service.repository
+    document = next(row for row in repo.current_records(workbench.project) if row['id'] == 'd')
     page.click('[data-tab="qa"]')
+    _select_keyword_qa(page)
     page.fill('#qa-query', '退款')
     with page.expect_response(lambda response: response.url.endswith('/qa/stream')):
         page.click('#qa')
     page.wait_for_function(
         "document.querySelector('#qa-transcript .qa-turn-assistant')?.dataset.state === 'done'")
-    assert page.locator('#qa-transcript .qa-evidence-panel').first.is_visible()
-
-    source_button = page.locator('#qa-transcript [data-evidence-source]').first
+    panel = _expand_qa_evidence(page)
+    chunk = panel.locator('.qa-evidence-item').filter(
+        has=page.locator('.qa-evidence-meta').filter(has_text=re.compile(r'^chunk ·')))
+    assert chunk.count() == 1
+    if not chunk.is_visible():
+        panel.locator('.qa-evidence-more').click()
+    assert chunk.is_visible()
+    source_button = chunk.get_by_text('查看冻结原文', exact=True)
     assert source_button.count() == 1
-    source_button.click()
-    # P0：不再跳 sources（侧栏无此入口），改为明确提示去向，且全程不报错。
-    page.wait_for_function(
-        "() => document.getElementById('status').textContent.includes('原文正文查看将并入')")
+    updated = repo.put_record(workbench.project, {
+        'id': 'd', 'kind': 'document', 'text': '更新后的原文不得替换已冻结内容',
+        'valid_from': '2020-01-01', 'metadata': {
+            'title': '后来的修订', 'effective_time_source': 'explicit',
+            'applicability': {'platforms': {'mode': 'all'}},
+        },
+    }, expected_version=document['version'])
+    assert updated['version'] == document['version'] + 1
+    assert updated['version_id'] != document['version_id']
+    workbench.paths.clear()
+    with page.expect_response(lambda response: response.url.endswith('/provenance')) as traced:
+        source_button.click()
+    page.wait_for_function("document.querySelector('#provenance-drawer').dataset.state === 'ready'")
+    trace = traced.value.json()
+    documents = [node['details'] for node in trace['nodes'] if node['type'] == 'document_version']
+    assert len(documents) == 1
+    assert documents[0]['document_id'] == 'd'
+    assert documents[0]['version_id'] == document['version_id']
+    assert documents[0]['version'] == 1
+    page.locator('#provenance-chain').get_by_role('button', name='查看历史原文', exact=True).click()
+    assert page.locator('#source-evidence-dialog').is_visible()
+    assert page.locator('#source-evidence-title').inner_text() == '退款规则'
+    assert '来源版本 1' in page.locator('#source-evidence-note').inner_text()
+    assert page.locator('#source-evidence-text').inner_text() == document['text']
+    assert page.locator('#source-evidence-anchor').inner_text() == '退款需要原始凭证'
+    assert page.locator('[data-tab="qa"]').get_attribute('class') == 'active'
+    assert not any(path.endswith('/sources') or '/records/' in path for path in workbench.paths)
     assert workbench.errors == []
 
 
@@ -1540,10 +1565,10 @@ def test_knowledge_chat_provenance_running_safe_done_and_history(workbench):
     page.fill('#qa-query', 'provenance')
     page.click('#qa')
     _emit(page, 'evidence', _provenance_evidence())
-    toggle = page.locator('.qa-evidence-toggle')
-    assert toggle.get_attribute('aria-expanded') == 'true'
-    citation = page.locator('.qa-evidence-panel button.provenance-citation')
+    _expand_qa_evidence(page)
+    citation = page.locator('.qa-evidence-item > button.provenance-citation')
     assert citation.count() == 1
+    assert page.get_by_text('查看冻结原文', exact=True).count() == 1
     assert page.locator('.qa-turn-assistant').get_attribute('data-state') == 'streaming'
     citation.click()
     page.wait_for_function("document.querySelector('#provenance-drawer').dataset.state === 'ready'")
@@ -1581,8 +1606,8 @@ def test_knowledge_chat_provenance_running_safe_done_and_history(workbench):
     page.click('[data-tab="qa"]')
     page.wait_for_function("document.querySelectorAll('.qa-answer button').length === 1")
     assert page.locator('.qa-answer').inner_text() == literal
-    assert page.locator('.qa-evidence-panel').is_visible()
-    assert page.locator('.qa-evidence-panel button.provenance-citation').count() == 1
+    _expand_qa_evidence(page)
+    assert page.locator('.qa-evidence-item > button.provenance-citation').count() == 1
     page.locator('.qa-answer button').click()
     page.wait_for_function("document.querySelector('#provenance-drawer').dataset.state === 'ready'")
     assert len(seen) == 2
@@ -1593,7 +1618,7 @@ def test_knowledge_chat_provenance_running_safe_done_and_history(workbench):
     assert workbench.errors == []
 
 
-def test_knowledge_chat_provenance_legacy_and_retry_replaces_history(workbench):
+def test_knowledge_chat_missing_answer_identity_and_retry_replaces_history(workbench):
     page = workbench.page
     page.click('[data-tab="qa"]')
     key = 'kg_qa_v1_' + workbench.project
@@ -1601,7 +1626,7 @@ def test_knowledge_chat_provenance_legacy_and_retry_replaces_history(workbench):
                   [key, [{'kind': 'user', 'text': 'old'}, {'kind': 'assistant', 'text': 'old [E1]'}]])
     assert page.locator('.qa-answer').inner_text() == 'old [E1]'
     assert page.locator('.qa-answer button').count() == 0
-    assert page.locator('.provenance-legacy-note').inner_text() == '该历史回答生成于溯源记录启用前'
+    assert page.locator('.qa-provenance-unresolved').inner_text() == '缺少答案标识，无法定位已冻结证据链'
     page.click('#qa-clear')
     _provenance_stream(page)
     page.fill('#qa-query', 'retry provenance')
@@ -1640,8 +1665,8 @@ def test_knowledge_chat_provenance_clear_aborts_and_ignores_stale_response(workb
     page.fill('#qa-query', 'clear pending')
     page.click('#qa')
     _emit(page, 'evidence', _provenance_evidence())
-    assert page.locator('.qa-evidence-panel').is_visible()
-    page.locator('.qa-evidence-panel button.provenance-citation').click()
+    _expand_qa_evidence(page)
+    page.locator('.qa-evidence-item > button.provenance-citation').click()
     page.evaluate('clearKnowledgeChat({clearPersist:true})')
     assert page.evaluate('window.__provenanceSignal.aborted')
     page.evaluate("""() => {
@@ -1666,23 +1691,25 @@ def _family(label, parent=None, ancestor=None):
 
 
 def _inject_family(page, record_id, family):
-    """把 /records/<id> 与 /subgraph 里这个实体的类家族换成测试数据。"""
-    record_pattern = re.compile(rf'/records/{re.escape(record_id)}(?:\?.*)?$')
-
+    """Inject the same bound-release family into exact details and canvas rows."""
+    record_pattern = re.compile(r'/records/page$')
     def inject_record(route):
         response = route.fetch()
-        route.fulfill(response=response, json={**response.json(), **family})
-
-    def inject_subgraph(route):
+        payload = response.json()
+        if _is_record_exchange(route.request, record_id):
+            for row in payload.get('records', []):
+                if row.get('id') == record_id:
+                    row.update(family)
+        route.fulfill(response=response, json=payload)
+    def inject_neighborhood(route):
         response = route.fetch()
         payload = response.json()
-        for node in payload.get('nodes', []):
-            if node.get('id') == record_id and node.get('kind') == 'entity':
-                node.update(family)
+        for row in payload.get('records', []):
+            if row.get('id') == record_id and row.get('kind') == 'entity':
+                row.update(family)
         route.fulfill(response=response, json=payload)
-
     page.route(record_pattern, inject_record)
-    page.route(re.compile(r'/subgraph(?:\?.*)?$'), inject_subgraph)
+    page.route(re.compile(r'/graph-neighborhood$'), inject_neighborhood)
     return record_pattern
 
 
@@ -1702,23 +1729,13 @@ def _tooltip_text(page, node_id):
 
 
 def _open_entity_with_family(page, record_id, family):
-    """注入类家族并**强制重新取数**（进页面时那份详情/图谱是缓存，不重取就看不到注入）。
-
-    细节：先注册路由，再重画图谱（让 /subgraph 带上注入数据），最后选实体（让 /records/<id>
-    重新走一遍）。断言等的是注入的类名，注入没生效就会超时失败 —— 不会静默读旧数据通过。
-    """
+    """Read a fresh, explicitly seeded neighborhood before inspecting the row."""
     _inject_family(page, record_id, family)
-    with page.expect_response(lambda response: response.url.endswith('/subgraph')):
-        page.click('#draw-graph')
-    page.wait_for_function("""(id) => {
-      const chart = window.echarts.getInstanceByDom(document.getElementById('graph-canvas'));
-      const series = chart.getOption().series.find(item => item.type === 'graph');
-      return Boolean(series && series.data.some(item => item.id === id));
-    }""", arg=record_id)
+    with page.expect_response(_is_graph_exchange):
+        page.evaluate("async id => {await window.drawGraph(id,1);}", record_id)
+    page.wait_for_function("id => window.wb.nodes.has(id)", arg=record_id)
     page.select_option('#graph-entity-choice', record_id)
-    page.wait_for_function(
-        "(label) => document.querySelector('#graph-detail').textContent.includes(label)",
-        arg=family['class_label'])
+    page.wait_for_function("label => document.querySelector('#graph-detail').textContent.includes(label)", arg=family['class_label'])
 
 
 def test_entity_detail_and_graph_tooltip_name_the_parent_class(workbench):

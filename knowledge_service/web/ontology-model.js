@@ -41,18 +41,20 @@
     graph: null,              // 编译好的画布图 { nodes, edges }
     selected: null,           // 选中的术语 IRI
     draft: null,              // 当前草案（id / revision / status / ontology）
+    draftChoices: [],         // 多份草案必须由工作区明确选择
+    draftLoadError: null,
     showingDraft: false,      // true = 画布画的是**草案**（未发布）；false = 已发布本体
     preview: null,            // 只读预览的历史版本 { id, version }；null = 不看历史
-    view: 'graph',            // 'graph'（图谱视图）| 'hierarchy'（层级树）
+    view: 'types',            // 连接的类型卡片 / 层级布局 / 完整术语卡片清单
+    nodeDisplay: 'cards',     // 卡片 / 紧凑节点，与布局独立
     stageAvailability: null,  // GET /stage-availability（阶段门禁，服务端唯一出处）
     readiness: null,          // GET /publish-readiness（发布清单）
+    gatesLoading: false,
+    gateLoadError: null,
     candidates: [],           // 待收下候选（画布上的虚线节点）
     discovery: null,          // GET /ontology-discovery：开放发现候选（published、待纳入候选数等）
-    generating: false,        // 正在生成本体（默认秒级；inferringHierarchy=true 时要几分钟）
-    inferringHierarchy: false,// 本次生成是否同时让模型推断父子层级（可选的慢操作）
     error: null,
     loading: false,
-    finalizing: false,
   };
 
   // ---- 事件总线（主控 ↔ 子模块的唯一通道） ----------------------------------
@@ -76,8 +78,10 @@
     const classes = (S.summary && S.summary.classes || []).filter(c => c.active !== false);
     const classIds = new Set(classes.map(c => c.id));
     for (const c of classes) {
+      const card=window.OntologyCatalog?.typeCard(c,S.summary);
       nodes.push({ id: c.id, iri: c.id, label: label(c), kind: 'class', dtype: '',
-        state: S.selected === c.id ? 'selected' : 'published' });
+        parents:[...(c.parents||[])],attributes:card?.attributes||[],inheritedAttributes:card?.inheritedAttributes||[],
+        state: S.selected === c.id ? 'selected' : S.showingDraft ? 'draft' : 'published' });
     }
     // 待收下候选（机器抽出的新概念）→ 虚线节点，来源标记 pending
     for (const cand of S.candidates) {
@@ -99,7 +103,7 @@
       const rngs = (r.range || []).filter(g => known.has(g));
       for (const d of doms) for (const g of rngs) {
         edges.push({ id: 'rel:' + r.id + ':' + d + '>' + g, source: d, target: g,
-          kind: 'relation', label: label(r) });
+          kind: 'relation', label: label(r), termIri:r.id });
       }
     }
     S.graph = { nodes, edges };
@@ -120,6 +124,7 @@
   // 改了半天屏幕上一个字没变，用户以为没改成功。顶栏会标明现在画的是草案还是已发布版本。
   let refreshEpoch = 0;
   let gateEpoch = 0;
+  let projectEpoch = 0;
   async function refresh() {
     const epoch = ++refreshEpoch;
     ++gateEpoch;
@@ -135,11 +140,15 @@
     S.stageAvailability = null; S.readiness = null;
     render();
     // ① 已发布本体（失败也不致命：有草案时照样能画）
-    const [published, discovery] = await Promise.all([
+    let [published, discovery, directory] = await Promise.all([
       api(endpoint('/ontology'), undefined, 'GET').catch(() => null),
       loadDiscovery(),
+      api(endpoint('/ontology-drafts'), undefined, 'GET')
+        .then(list => ({items:list.items || []})).catch(() => ({error:true})),
     ]);
     if (!stillCurrent()) return S;
+    if (directory.error) S.draftLoadError='工作草案列表读取失败，请重试后再保存。';
+    else { S.draftChoices=directory.items.filter(d=>OPEN_STATES.includes(d.status)); S.draftLoadError=null; }
     S.ontologyId = published ? (published.id || null) : S.ontologyId;
     S.ontologyVersion = published ? (published.version ?? null) : null;
     // 读开放发现概览（是否已发布本体、待纳入候选数）。它是\"没发布本体时画布该画什么\"的唯一依据，
@@ -159,8 +168,7 @@
         emit('graph:changed', { graph: S.graph });
         S.loading = false;
         render();
-        await refreshDraftState();
-        if (stillCurrent()) render();
+        refreshGatesInBackground();
         return S;
       } catch (e) {
         if (!stillCurrent()) return S;
@@ -171,24 +179,23 @@
 
     // ② 选草案（不新建 —— 新建只在真正要写的时候发生，否则一进页面就堆草案）
     let draft = (S.draft && S.draft.id && OPEN_STATES.includes(S.draft.status)) ? S.draft : null;
-    if (!draft) {
-      try {
-        const list = await api(endpoint('/ontology-drafts'), undefined, 'GET');
-        if (!stillCurrent()) return S;
-        const pending = (list.items || []).filter(d => OPEN_STATES.includes(d.status));
-        const latestDraftId = S.discovery && S.discovery.latest_run && S.discovery.latest_run.unified_draft_id;
-        draft = pending.find(d => d.id === latestDraftId)
-          || pending.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0] || null;
-      } catch (e) { draft = null; }
-    }
+    if (!draft && !directory.error) draft = S.draftChoices.length===1 ? S.draftChoices[0] : null;
 
     // ③ 有草案就画草案；读不到草案详情才回落到已发布本体（绝不画空白）
-    let detail = null;
+    let detail = null,terminalDraft=false;
     if (draft && draft.id) {
       try { detail = await api(endpoint(`/ontology-drafts/${draft.id}?view=canvas`), undefined, 'GET'); }
       catch (e) { detail = null; }
     }
     if (!stillCurrent()) return S;
+    if(detail&&!OPEN_STATES.includes(detail.status)){
+      terminalDraft=true;S.draftChoices=S.draftChoices.filter(item=>item.id!==detail.id);
+      draft=null;detail=null;
+      // A concurrent publication may have happened after the first formal read.
+      published=await api(endpoint('/ontology'),undefined,'GET').catch(()=>null);
+      if(!stillCurrent())return S;
+      S.ontologyId=published?.id||null;S.ontologyVersion=published?.version??null;
+    }
     if (detail) {
       S.draft = detail;
       S.summary = detail.ontology || EMPTY_SUMMARY;
@@ -198,6 +205,7 @@
       S.draft = draft;
       S.showingDraft = false;
       if (published) { S.summary = published.summary || EMPTY_SUMMARY; S.error = null; }
+      else if (terminalDraft){S.summary=null;S.error='这份草案已结束，读取最新正式本体失败；请重试。';}
       else if (S.discovery && S.discovery.published === false) {
         // 没发布本体：这不是\"读取失败\"，而是\"这个项目还没生成本体\"（开放发现的正常中间态）。
         // 画布该画的是引导态（有多少候选、怎么归纳生成本体），由 renderSidebar 依 S.discovery 渲染。
@@ -209,8 +217,7 @@
     emit('graph:changed', { graph: S.graph });
     S.loading = false;
     render();
-    await refreshDraftState();
-    if (stillCurrent()) render();
+    refreshGatesInBackground();
     return S;
   }
 
@@ -220,7 +227,7 @@
   // 不能把\"接口失败\"和\"空项目\"混成一句。
   async function loadDiscovery() {
     try {
-      return await api(endpoint('/ontology-discovery?compact=true'), undefined, 'GET');
+      return await api(endpoint('/ontology-discovery'), undefined, 'GET');
     } catch (e) {
       return null;
     }
@@ -228,24 +235,49 @@
 
   // 读阶段门禁（服务端唯一出处）+ 发布清单。拿不到就置空 —— 子模块据此显示"读不到"，
   // 而不是自己推规则（skill：门禁只有一处出处，前端不自己算）。
+  function readGate(route) {
+    const request=api(endpoint(route),undefined,'GET');
+    if(typeof setTimeout!=='function')return request;
+    let timer;
+    const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('审核条件读取超时')),15000);});
+    return Promise.race([request,deadline]).finally(()=>clearTimeout(timer));
+  }
+
+  function refreshGatesInBackground() {
+    const project=current,draftId=S.draft?.id;
+    void refreshDraftState().catch(()=>{
+      if(current!==project||S.draft?.id!==draftId)return;
+      S.gatesLoading=false;S.gateLoadError='未能读取审核条件，可以重试；草案内容已保留。';
+      emit('stage:changed', { stageAvailability: S.stageAvailability, readiness: S.readiness });
+    });
+  }
+
   async function refreshDraftState() {
     const epoch = ++gateEpoch;
-    if (!S.draft || !S.draft.id) { S.stageAvailability = null; S.readiness = null; S.gatesLoading = false; return; }
+    if (!S.draft || !S.draft.id) { S.stageAvailability = null; S.readiness = null; S.gatesLoading = false; S.gateLoadError=null; return; }
     S.gatesLoading = true;
+    S.gateLoadError=null;
+    emit('stage:changed', { stageAvailability: S.stageAvailability, readiness: S.readiness });
     const project = current, draftId = S.draft.id, revision = S.draft.revision;
     const base = `/ontology-drafts/${S.draft.id}`;
     // stage-availability 是**项目级**路由，草案用 draft_id 查询参数指定；
     // 写成 /{draft_id}/stage-availability 会 404，还会被 catch 吞掉 —— 门禁永远为空、按钮永远禁用。
-    const [stage, readiness] = await Promise.all([
-      api(
-        endpoint(`/ontology-drafts/stage-availability?draft_id=${encodeURIComponent(S.draft.id)}`),
-        undefined, 'GET').catch(() => null),
-      api(endpoint(base + '/publish-readiness'), undefined, 'GET').catch(() => null),
+    const isCurrent=()=>epoch===gateEpoch&&current===project&&S.draft?.id===draftId&&S.draft?.revision===revision;
+    const [stage, editingReadiness] = await Promise.all([
+      readGate(`/ontology-drafts/stage-availability?draft_id=${encodeURIComponent(draftId)}`).catch(() => null),
+      readGate(base + '/publish-readiness?view=editing').catch(() => null),
     ]);
-    if (epoch !== gateEpoch || current !== project || !S.draft
-        || S.draft.id !== draftId || S.draft.revision !== revision) return;
+    if(!isCurrent())return;
+    let readiness=editingReadiness;
+    // Only the server decides when a fresh full validation can unlock publish.
+    // Editing projections never count as a completed publication validation.
+    if(editingReadiness?.requires_full_validation===true){
+      readiness=await readGate(base+'/publish-readiness').catch(()=>null);
+      if(!isCurrent())return;
+    }
     S.stageAvailability = stage; S.readiness = readiness;
     S.gatesLoading = false;
+    S.gateLoadError=stage&&readiness?null:'未能在限定时间内读取完整审核条件，请重试；草案内容已保留。';
     emit('stage:changed', { stageAvailability: S.stageAvailability, readiness: S.readiness });
   }
 
@@ -253,9 +285,11 @@
   // 迁移 0005 后「请求」只有三态：pending（待处理）→ accepted（已收下）/ rejected（已驳回）；
   // 旧词 editing/submitted/reviewed/stale_* 已并入 pending，别再用旧词筛（会永远筛不到、每次编辑都新建草案）。
   async function ensureDraft() {
+    if (S.preview) throw new Error('历史版本只读：请先回到最新，或从版本管理创建新草案。');
     const project = current, projectBase = endpoint('');
     const assertProject = () => {
       if (current !== project) throw new Error('项目已切换，已停止准备原项目草案。');
+      if (S.preview) throw new Error('历史版本只读：已停止准备草案。');
     };
     // 只有**待处理**的草案能继续改。发布过（accepted）或已驳回（rejected）的草案是终态：
     // 服务端对它们发 commands 一律 422「已经收下」。以前这里只看 `S.draft && S.draft.id`，
@@ -263,33 +297,47 @@
     // 刷新一下才好（刷新后 S.draft 归零才重开）。这里改成按状态判断 + 直接换新草案。
     if (S.draft && S.draft.id && OPEN_STATES.includes(S.draft.status)) return S.draft;
     S.draft = null;
-    // 优先复用项目里未完结的草案（避免每次编辑都新建；选择口径同审核台的 pickDraft）
-    try {
+    // 列表失败不能冒充“没有草案”；多份草案不替用户挑第一份。
+    {
       const list = await api(projectBase + '/ontology-drafts', undefined, 'GET');
       assertProject();
-      const open = (list.items || []).find(d => OPEN_STATES.includes(d.status));
+      const pending=(list.items||[]).filter(d=>OPEN_STATES.includes(d.status));
+      S.draftChoices=pending;
+      if(pending.length>1){
+        const management=document.getElementById('om-work-changes');if(management)management.open=true;
+        throw new Error('项目有多份工作草案，请先在「本轮修改 → 草案管理」选择目标；当前表单已保留。');
+      }
+      const open = pending[0];
       if (open) {
         // 列表项是轻量记录：补一次详读，才能拿到最新 revision（乐观锁）与草案结构
-        const detail = await api(projectBase + `/ontology-drafts/${open.id}`, undefined, 'GET')
-          .catch(() => open);
+        const detail = await api(projectBase + `/ontology-drafts/${open.id}?view=canvas`, undefined, 'GET');
         assertProject();
+        if(!OPEN_STATES.includes(detail.status))throw new Error('这份草案已结束，请重新选择目标。');
         S.draft = detail;
-        await refreshDraftState();
+        refreshGatesInBackground();
         assertProject();
         emit('draft:changed', { draft: detail });
         return detail;
       }
-    } catch (e) { assertProject(); /* 读不到列表就按"没有"处理，下面新建 */ }
+    }
     // 没有就新建：基线必须是**项目当前最新本体**，否则服务端会 409 stale_base
-    const ont = await api(projectBase + '/ontology', undefined, 'GET');
+    let baseOntologyId;
+    try {
+      const ont = await api(projectBase + '/ontology', undefined, 'GET');
+      if (!ont || typeof ont.id !== 'string' || !ont.id) throw new Error('当前本体响应缺少发布身份，请刷新后重试。');
+      baseOntologyId = ont.id;
+    } catch (error) {
+      if (error.status !== 404 || error.code !== 'ontology_not_published') throw error;
+      baseOntologyId = null;
+    }
     assertProject();
     const draft = await api(projectBase + '/ontology-drafts', {
-      base_ontology_id: ont.id, source_kind: 'manual',
+      base_ontology_id: baseOntologyId, source_kind: 'manual',
       title: '画布编辑', summary: '在本体建模层画布上编辑',
     }, 'POST');
     assertProject();
     S.draft = draft;
-    await refreshDraftState();
+    refreshGatesInBackground();
     assertProject();
     emit('draft:changed', { draft });
     return draft;
@@ -297,18 +345,95 @@
 
   // 发一条命令到当前草案：自动建草案 → 带乐观锁 revision → 返回更新后的草案并刷新
   async function sendCommand(command) {
+    if (S.preview) throw new Error('历史版本只读：请先回到最新，或从版本管理创建新草案。');
+    const project = current;
     const draft = await ensureDraft();
+    if (current !== project) throw new Error('项目已切换，已停止原项目编辑。');
+    if (S.preview) throw new Error('历史版本只读：已停止编辑。');
     const updated = await api(endpoint(`/ontology-drafts/${draft.id}/commands`), {
       expected_revision: draft.revision, command,
     }, 'POST');
+    if (current !== project) throw new Error('项目已切换，请重新读取当前项目。');
+    if(S.preview||S.draft?.id!==draft.id||S.draft?.revision!==draft.revision)
+      throw new Error(`修改已保存到原草案 ${draft.id}，当前查看目标已变化；请返回原草案核对，避免重复提交。`);
     S.draft = updated;
     emit('draft:changed', { draft: updated });
     await refresh();
     return updated;
   }
 
-  // 提交人标识：app.js 无用户体系，单用户场景用固定标识（可被 window.KS_ACTOR 覆盖）
-  const actorName = () => (typeof window !== 'undefined' && window.KS_ACTOR) || 'canvas-editor';
+  async function selectDraft(id) {
+    if (S.preview) throw new Error('历史版本只读，请先回到最新。');
+    const project=current,base=endpoint('');
+    const draft=await api(base+'/ontology-drafts/'+encodeURIComponent(id),undefined,'GET');
+    if(current!==project)throw new Error('项目已切换，已停止选择草案。');
+    if(!OPEN_STATES.includes(draft.status))throw new Error('这份草案已结束，请选择待处理草案。');
+    S.draft=draft;S.selected=null;await refresh();return S.draft;
+  }
+
+  async function createTerm(spec) {
+    if (S.preview) throw new Error('历史版本只读：请先回到最新。');
+    const kind = spec.kind, labelZh = String(spec.label_zh || '').trim();
+    const label = String(spec.label || labelZh).trim();
+    if (!['class', 'relation', 'attribute'].includes(kind) || !label)
+      throw new Error('请选择术语类型并填写名称。');
+    // Match ontology.generated_term_iri, retaining readable Unicode names.
+    const segment = Array.from((labelZh || label).normalize('NFC'), character => {
+      if (/[\p{L}\p{N}\p{M}._~-]/u.test(character)) return character;
+      if (/\s/u.test(character)) return '-';
+      return encodeURIComponent(character).replace(/[!'()*]/g, value => '%' + value.charCodeAt(0).toString(16).toUpperCase());
+    }).join('').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    if (!segment) throw new Error('术语名必须包含可用 IRI 字符。');
+    const iri = spec.uri || `urn:knowledge:ontology:${current}:${segment}`;
+    const commands = [{action: 'create_term', target_iri: iri, kind},
+      {action: 'add_annotation', target_iri: iri, predicate: 'http://www.w3.org/2000/01/rdf-schema#label', value: label}];
+    if (labelZh) commands.push({action: 'add_annotation', target_iri: iri,
+      predicate: 'http://www.w3.org/2000/01/rdf-schema#label', value: labelZh, language: 'zh'});
+    if (kind === 'class' && spec.parent)
+      commands.push({action: 'add_parent', target_iri: iri, value: spec.parent});
+    if (kind !== 'class') {
+      for (const value of new Set(spec.domains || (spec.domain ? [spec.domain] : [])))
+        commands.push({action: 'add_domain', target_iri: iri, value});
+      if (kind === 'relation') for (const value of new Set(spec.ranges || (spec.range ? [spec.range] : [])))
+        commands.push({action: 'add_range', target_iri: iri, value});
+      if (kind === 'attribute' && spec.datatype)
+        commands.push({action: 'set_datatype', target_iri: iri, datatype: spec.datatype});
+    }
+    return sendCommand({action: 'batch', commands, reason: `新增本体术语：${labelZh || label}`});
+  }
+  async function createDraft() {
+    if(S.preview)throw new Error('历史版本只读，请从版本管理创建历史新草案。');
+    const project=current,base=endpoint('');
+    const published=await api(base+'/ontology',undefined,'GET').catch(error=>{if(error.status===404&&error.code==='ontology_not_published')return null;throw error;});
+    if(current!==project)throw new Error('项目已切换，已停止新建草案。');
+    const draft=await api(base+'/ontology-drafts',{base_ontology_id:published?.id||null,
+      source_kind:'manual',title:'手工建模草案',summary:'在本体目录中显式创建'},'POST');
+    if(current!==project)throw new Error('项目已切换，请回原项目查看新草案。');
+    S.draft=draft;S.selected=null;await refresh();return S.draft;
+  }
+  async function closeDraft() {
+    if(S.preview)throw new Error('历史版本只读，请先回到最新。');
+    const draft=S.draft,project=current,base=endpoint('');
+    if(!draft||!OPEN_STATES.includes(draft.status))throw new Error('没有可关闭的待处理草案。');
+    const reason=window.prompt('关闭当前草案的原因（变更和审计保留）');
+    if(reason===null)return;
+    if(!reason.trim())throw new Error('关闭草案必须填写原因。');
+    await api(base+'/ontology-drafts/'+encodeURIComponent(draft.id)+'/close',{
+      expected_revision:draft.revision,reason:reason.trim()},'POST');
+    if(current!==project)return;
+    if(S.draft?.id!==draft.id){status(`原草案 ${draft.id} 已关闭；当前工作草案选择保留。`);return;}
+    S.draft=null;S.selected=null;await refresh();status('草案已关闭，变更审计保留。');
+  }
+  function openCreate(preset={}) {
+    if(S.preview){status('历史版本只读，请先回到最新。',true);return;}
+    setInspector(true);
+    if(window.OntologyPanel?.openCreate)window.OntologyPanel.openCreate(preset);
+  }
+  function openIntake(scope={}) {
+    if(S.preview){status('历史版本只读，请先回到最新。',true);return;}
+    if(window.OntologyIntake)void window.OntologyIntake.open({projectId:current,...scope});
+    else status('候选处理模块尚未加载，请刷新页面重试。',true);
+  }
 
   // 幂等键：一次发布动作生成一次、重试间复用（服务端要求 idempotency_key 必填）
   const uid = () => (typeof crypto !== 'undefined' && crypto.randomUUID)
@@ -318,6 +443,7 @@
   // ---- 选中：唯一入口，三条路径（左清单 / 画布 / 详情跳转）都走这里 ----------
   function select(iri) {
     S.selected = iri || null;
+    if(iri)setInspector(true);
     compileGraph();
     emit('select', { iri: S.selected });
     render();
@@ -325,12 +451,27 @@
 
   // ---- 渲染：骨架构建一次，其余只更新可变部分 --------------------------------
   let built = false;
+  const collapsedBranches=new Set();
+  let inspectorOpen=false;
+  function setInspector(open,focus=false) {
+    inspectorOpen=!!open;root()?.classList?.toggle('om-inspector-open',inspectorOpen);
+    const toggle=document.getElementById('om-inspector-toggle');
+    toggle?.setAttribute('aria-expanded',String(inspectorOpen));
+    if(focus){const target=inspectorOpen?document.getElementById('om-inspector-close'):toggle;target?.focus?.();}
+  }
   function render() {
     const el = root(); if (!el) return;
     if (!built) { buildSkeleton(el); built = true; }
+    el.setAttribute?.('data-ontology-view',S.view);
+    el.querySelectorAll('[data-om-view]').forEach(button=>button.classList.toggle('on',button.dataset.omView===S.view));
+    const display=document.getElementById('om-node-display');
+    el.querySelectorAll('[data-om-create]').forEach(button=>button.disabled=!!S.preview);
+    const pendingButton=document.getElementById('om-pending-intake');if(pendingButton)pendingButton.disabled=!!S.preview;
+    if(display){display.value=S.nodeDisplay;display.disabled=S.view==='cards';}
+    setInspector(inspectorOpen);
     const parentButton = document.getElementById('om-discover-parents');
     if (parentButton) {
-      parentButton.disabled = !!(S.loading || S.preview || S.generating || S.finalizing || S.discoveringParents)
+      parentButton.disabled = !!(S.loading || S.preview || S.discoveringParents)
         || (S.summary && S.summary.classes || []).filter(c => c.active !== false).length < 2;
       parentButton.textContent = S.discoveringParents ? '正在发现父类…' : '发现父类';
     }
@@ -339,18 +480,23 @@
     // 子模块可能尚未加载（脚本顺序 / 测试 mock shell）——用可选链，缺谁都不崩
     if (window.OntologyCanvas) window.OntologyCanvas.render(S);
     if (window.OntologyPanel) window.OntologyPanel.render(S);
+    const canvas=document.getElementById('om-canvas-host'),cards=document.getElementById('om-cards-host');
+    if(canvas)canvas.hidden=S.view==='cards';if(cards)cards.hidden=S.view!=='cards';
+    if(window.OntologyCatalog)window.OntologyCatalog.render(S);
   }
 
   function renderVersionContext() {
     const host = document.getElementById('om-version-context');
     if (!host) return;
     const currentLabel = S.ontologyVersion == null
-      ? '尚未发布本体' : `当前生效本体：v${S.ontologyVersion}`;
+      ? '尚未发布正式本体' : `正式本体 v${S.ontologyVersion} · 已发布`;
     let viewedLabel;
     if (S.preview) viewedLabel = `正在查看：v${S.preview.version ?? '?'}（历史·只读）`;
-    else if (S.showingDraft) viewedLabel = `正在查看：草案（未发布）${S.ontologyVersion == null ? '' : ` · 基于 v${S.ontologyVersion}`}`;
-    else viewedLabel = S.ontologyVersion == null
-      ? '正在查看：尚未发布' : `正在查看：v${S.ontologyVersion}（当前）`;
+    else if (S.showingDraft) {
+      const base=S.draft.base_ontology_id;
+      viewedLabel=`本轮修改 ${S.draft.id} · 修订 r${S.draft.revision??'?'} · 基于 ${!base?'空基线':base===S.ontologyId&&S.ontologyVersion!=null?'v'+S.ontologyVersion:base} · 未发布`;
+      if(base&&base!==S.ontologyId)viewedLabel+=' · 基线变化';
+    } else viewedLabel=S.draftLoadError||(S.draftChoices.length>1?'有多份工作草案，请在本轮修改中明确选择。':'当前没有未发布的结构修改；保存第一项结构调整时自动建立。');
     host.replaceChildren();
     const currentPart = document.createElement('span');
     currentPart.className = 'om-version-context-current';
@@ -370,11 +516,16 @@
         <div class="om-topbar">
           <span class="om-brand">◆ 本体建模层</span>
           <span class="om-ctx" id="om-version">当前本体 v?</span>
+          <details class="om-definition-menu admin-only" id="om-definition-menu"><summary class="om-btn primary">新增定义 ▾</summary><div role="group" aria-label="新增定义种类"><button type="button" data-om-create="class">实体类型</button><button type="button" data-om-create="relation">关系类型</button><button type="button" data-om-create="attribute">属性字段</button></div></details>
+          <button type="button" class="om-btn ghost admin-only" id="om-pending-intake">待完善结构</button>
           <button type="button" class="om-btn ghost" id="om-discover-parents" title="根据当前草案或本体重新发现父类（调用模型）；只补充新建议到草案，保留已有关系，审核发布后生效">发现父类</button>
           <div class="om-seg" role="group" aria-label="视图切换">
-            <button type="button" data-om-view="graph" class="on" title="图谱视图：力导向铺开全部关系，适合整体鸟瞰——不保证层级位置固定">图谱视图</button>
-            <button type="button" data-om-view="hierarchy" title="层级树：按继承深度分带排列，看清谁在第几层——关系线只作参考，不参与分层">层级树</button>
+            <button type="button" data-om-view="types" class="on" title="连接的实体类卡片，显示直属属性、数据类型与继承摘要">类型卡片</button>
+            <button type="button" data-om-view="hierarchy" title="按继承深度排列；左侧层级树可展开和折叠，多父类保留引用">继承层级</button>
+            <button type="button" data-om-view="cards" title="完整的类、关系、属性定义清单，包括无端点与已停用术语">术语卡片</button>
           </div>
+          <label class="om-display-control">节点 <select id="om-node-display" aria-label="节点显示方式"><option value="cards">属性卡片</option><option value="compact">紧凑节点</option></select></label>
+          <button type="button" class="om-btn ghost om-inspector-toggle" id="om-inspector-toggle" aria-controls="om-inspector-shell" aria-expanded="false">定义详情</button>
           <button type="button" class="om-btn ghost" id="om-history" title="版本管理：看每一版是谁、什么时候、为什么发的；可以查看任意一版，也可以以某一版为基础开一份新草案（历史不改写）">版本管理</button>
         </div>
         <div class="om-preview-banner" id="om-preview-banner" hidden>
@@ -382,24 +533,41 @@
           <button type="button" class="om-btn ghost" id="om-preview-exit">回到最新</button>
         </div>
         <div class="om-version-context" id="om-version-context" aria-live="polite"></div>
+        <details class="om-work-changes" id="om-work-changes"><summary>本轮修改 · 草案管理与变更</summary><div id="om-work-changes-host"></div></details>
         <div class="om-body">
           <!-- 用 div 不用 aside：全站 style.css 有一条给应用侧栏的全局规则
                aside{position:fixed;inset:0 auto 0 0;width:206px}，任何 aside 都会被固定到
                视口左上角、脱离三栏流（P1 实测踩到：三栏塌成空白）。 -->
-          <div class="om-side" id="om-side" aria-label="本体三维清单"></div>
-          <div class="om-canvas-host" id="om-canvas-host"></div>
-          <div class="om-detail" id="om-detail-host" aria-label="节点详情"></div>
+          <div class="om-side" aria-label="本体术语目录">
+            <div id="om-catalog-host"></div>
+            <details class="om-hierarchy-directory"><summary>继承导航与项目候选</summary><div id="om-side" aria-label="本体三维清单"></div></details>
+          </div>
+          <div class="om-stage"><div class="om-cards-host" id="om-cards-host"></div><div class="om-canvas-host" id="om-canvas-host" hidden></div></div>
+          <button type="button" class="om-inspector-backdrop" id="om-inspector-backdrop" aria-label="关闭定义详情"></button>
+          <div class="om-inspector-shell" id="om-inspector-shell" role="complementary" aria-label="定义详情"><div class="om-inspector-heading"><strong>定义详情</strong><button type="button" class="om-btn ghost" id="om-inspector-close" aria-label="关闭定义详情">×</button></div><div class="om-detail" id="om-detail-host" aria-label="节点详情"></div></div>
         </div>
         <div class="om-actionbar" id="om-actions-host" aria-label="校验与发布"></div>
       </div>`;
     // 视图切换：只改 S.view 并发事件，布局由画布模块负责
     const parentButton = document.getElementById('om-discover-parents');
+    el.querySelectorAll('[data-om-create]').forEach(button=>button.addEventListener('click',()=>{
+      const menu=document.getElementById('om-definition-menu');if(menu)menu.open=false;openCreate({kind:button.dataset.omCreate});
+    }));
+    document.getElementById('om-pending-intake')?.addEventListener('click',()=>openIntake());
     if (parentButton) parentButton.addEventListener('click', () => { void discoverParents(); });
+    const display=document.getElementById('om-node-display');
+    display?.addEventListener('change',()=>{S.nodeDisplay=display.value;window.OntologyCanvas?.setDisplay(S.nodeDisplay);});
+    document.getElementById('om-inspector-toggle')?.addEventListener('click',()=>setInspector(!inspectorOpen,true));
+    for(const id of ['om-inspector-close','om-inspector-backdrop'])document.getElementById(id)?.addEventListener('click',()=>setInspector(false,true));
+    el.addEventListener?.('keydown',event=>{if(event.key==='Escape'&&inspectorOpen)setInspector(false,true);});
     el.querySelectorAll('[data-om-view]').forEach(btn => btn.addEventListener('click', () => {
       S.view = btn.dataset.omView;
       el.querySelectorAll('[data-om-view]').forEach(b => b.classList.toggle('on', b === btn));
       emit('view:changed', { view: S.view });
-      if (window.OntologyCanvas) window.OntologyCanvas.setView(S.view);
+      if (S.view!=='cards'&&window.OntologyCanvas) window.OntologyCanvas.setView(S.view);
+      if(S.view==='hierarchy'){const directory=el.querySelector?.('.om-hierarchy-directory');if(directory)directory.open=true;}
+      if(display)display.disabled=S.view==='cards';
+      render();
     }));
     const history = document.getElementById('om-history');
     if (history) history.addEventListener('click', () => window.OntologyPanel && window.OntologyPanel.openHistory());
@@ -412,6 +580,7 @@
     });
     // 装配子模块（各挂自己那一块 DOM）
     const ctx = window.OntologyModel;
+    if(window.OntologyCatalog)window.OntologyCatalog.mount(document.getElementById('om-catalog-host'),document.getElementById('om-cards-host'),ctx);
     if (window.OntologyCanvas) window.OntologyCanvas.mount(document.getElementById('om-canvas-host'), ctx);
     if (window.OntologyPanel) window.OntologyPanel.mount(
       document.getElementById('om-detail-host'), document.getElementById('om-actions-host'), ctx);
@@ -425,15 +594,15 @@
       // 每种给一句人话 + 能点的下一步，绝不再把"没发布本体"误报成"读取失败"。
       host.innerHTML = renderEmptyState();
       const gen = document.getElementById('om-generate-draft');
-      if (gen) gen.addEventListener('click', () => { void generateDraftFromDiscovery(false); });
+      if (gen) gen.addEventListener('click', () => openIntake());
       // 第二个慢入口：显式让模型推断父子层级（传 true）
       const inferH = document.getElementById('om-infer-hierarchy');
-      if (inferH) inferH.addEventListener('click', () => { void generateDraftFromDiscovery(true); });
+      if (inferH) inferH.addEventListener('click', () => { void discoverParents(); });
       // 顶栏版本徽标不能停在占位「当前本体 v?」：没本体就说清"尚未发布"，别留个 v?。
       const ver = document.getElementById('om-version');
       if (ver) {
-        ver.textContent = S.discovery && S.discovery.published === false
-          ? '尚未发布本体' : (S.error || '读不到本体状态');
+        ver.textContent = S.loading ? '正在加载本体与草案…' : S.discovery && S.discovery.published === false
+          ? '尚未发布本体' : (S.error || '等待读取本体状态');
         ver.classList.toggle('is-draft', false);
         ver.classList.toggle('is-preview', false);
       }
@@ -444,59 +613,46 @@
     const attrs = (S.summary.attributes || []).filter(a => a.active !== false);
     const row = (it, chip) => `<li class="${it.id === S.selected ? 'sel' : ''}" data-sel="${escHtml(it.id)}">
         <span class="om-chip ${chip}"></span>${escHtml(label(it))}</li>`;
-    // 本体类型 → 纵向继承缩进树：根类无缩进，子类按继承层级逐层缩进（点击 = 选中，
-    // 与画布/详情联动）。用「第一个有效父类」挂到树里，避免多重继承重复显示。
+    // 导航树保留多父类引用；展开状态是纯视图状态，不写回本体。
     const classTree = () => {
-      const byId = new Map(classes.map(c => [c.id, c]));
-      const children = new Map();
-      const roots = [];
-      for (const c of classes) {
-        const parent = (c.parents || []).map(p => byId.get(p)).find(Boolean);
-        if (parent) {
-          if (!children.has(parent.id)) children.set(parent.id, []);
-          children.get(parent.id).push(c);
-        } else roots.push(c);
+      if(window.OntologyCatalog?.hierarchyRows){
+        return window.OntologyCatalog.hierarchyRows(S.summary,{collapsed:collapsedBranches}).map(c=>`<li role="treeitem" aria-level="${c.depth+1}"${c.childCount&&!c.reference?` aria-expanded="${c.expanded}"`:''} class="om-tree-row ${c.id===S.selected?'sel':''}" style="--tree-depth:${c.depth}">
+          <div class="om-tree-line">${c.childCount&&!c.reference?`<button type="button" class="om-tree-toggle" data-tree-toggle="${escHtml(c.id)}" aria-label="${c.expanded?'折叠':'展开'}${escHtml(label(c))}" aria-expanded="${c.expanded}">${c.expanded?'⌄':'›'}</button>`:'<span class="om-tree-spacer"></span>'}
+          <button type="button" class="om-tree-select" data-sel="${escHtml(c.id)}" title="${escHtml(c.id)}"><span class="om-chip cls"></span>${escHtml(label(c))}${c.reference?`<small>${c.cycle?'循环引用':'多父类引用'}</small>`:''}${c.childCount&&!c.reference?`<small class="om-tree-count" title="${c.childCount} 个直属子类 · ${c.descendantCount} 个后代">${c.childCount}</small>`:''}</button></div>${c.externalParents.length?`<small class="om-tree-external">${c.externalParents.length} 个外部父类</small>`:''}</li>`).join('');
       }
-      const byName = a => a.sort((x, y) => String(label(x)).localeCompare(String(label(y)), 'zh-CN'));
-      byName(roots); children.forEach(byName);
-      const walk = list => list.map(c => {
-        const kids = children.get(c.id) || [];
-        return `<li data-sel="${escHtml(c.id)}" class="${c.id === S.selected ? 'sel' : ''}">
-          <span class="om-chip cls"></span>${escHtml(label(c))}${kids.length ? `<small class="om-tree-count">${kids.length}</small>` : ''}
-          ${kids.length ? `<ul class="om-tree-children">${walk(kids)}</ul>` : ''}</li>`;
-      }).join('');
-      return walk(roots);
+      return classes.map(c=>row(c,'cls')).join('');
     };
     // 已发布本体之后又抽出新候选：左栏顶部给一条"增量归纳"入口（基于当前版本，不影响已发布）。
     // 否则新知识只会静默躺在 discovery 里，用户不知道"后续加知识怎么显示"。
     const counts = S.discovery && S.discovery.candidate_status_counts;
     const pendingN = counts ? (counts.pending || 0) : ((S.discovery && S.discovery.unpublished_candidate_count) || 0);
+    const directoryHeading=host.parentElement?.querySelector?.('summary');
+    if(directoryHeading)directoryHeading.textContent='继承导航与项目候选'+(pendingN?` · 待处理 ${pendingN}`:'');
     const includedN = counts && counts.included_in_draft || 0;
-    const run = S.discovery && S.discovery.latest_run;
-    const canFinalize = run && run.result_kind === 'mapping_only' && run.status === 'ready_to_finalize';
     const draftTip = includedN > 0 ? `<div class="om-discovery-inline"><b>${includedN} 个候选已纳入草案</b><p>等待校验、审核和发布，无需重复生成。正式知识会在发布后显示。</p></div>` : '';
     const discTip = (pendingN > 0 ? `<div class="om-discovery-inline">
       <b>又抽出 ${pendingN} 个新候选</b>
-      <p>${canFinalize ? '本次归纳可沿用已有类型。确认后将通过校验的候选写为正式知识，供检索使用。' : '后续添加的知识已抽出。可再次生成本体：新候选会整理成类型（或并入已有类型），基于当前版本、不影响已发布内容。'}</p>
-      <button type="button" id="om-generate-draft-inline" class="om-btn primary" ${S.generating || S.finalizing ? 'disabled' : ''}>${canFinalize ? (S.finalizing ? '正在写入…' : '确认写入已有类型的候选') : `把这 ${pendingN} 个新候选生成进本体`}</button>
+      <p>先选择候选并核对来源；复用正式术语可直接确认知识，需补结构时明确加入工作草案。</p>
+      <button type="button" id="om-generate-draft-inline" class="om-btn primary" ${S.preview || S.loading || S.discoveringParents ? 'disabled' : ''}>选择候选并完善结构</button>
     </div>` : '') + draftTip;
     host.innerHTML = `${discTip}
       <h4><i class="om-dot"></i>本体类型 · ${classes.length}</h4>
-      <ul class="om-tree">${classTree() || '<li class="om-none">（还没有类）</li>'}</ul>
+      <ul class="om-tree" role="tree" aria-label="实体类继承导航">${classTree() || '<li class="om-none">（还没有类）</li>'}</ul>
       <h4 class="rel"><i class="om-dot"></i>关系类型 · ${rels.length}</h4>
       <ul>${rels.map(r => row(r, 'rel')).join('') || '<li class="om-none">（还没有关系）</li>'}</ul>
       <h4 class="attr"><i class="om-dot"></i>属性类型 · ${attrs.length}</h4>
       <ul>${attrs.map(a => `<li class="${a.id === S.selected ? 'sel' : ''}" data-sel="${escHtml(a.id)}">
           <span class="om-chip attr"></span>${escHtml(label(a))}
           <span class="om-dtype">${escHtml(dtypeOf(a) || '?')}</span></li>`).join('') || '<li class="om-none">（还没有属性）</li>'}</ul>
-      <div class="om-tip">点谁 = 选中谁（左栏/画布一致）<br>实线 = 父子 · 紫虚线 = 关系 · 黄虚线 = 待收下</div>`;
+      <div class="om-tip">点名称查看定义 · 箭头展开子类<br>实线箭头 = 业务关系 · 虚线空心箭头 = 继承</div>`;
+    host.querySelectorAll('[data-tree-toggle]').forEach(button=>button.addEventListener('click',event=>{event.stopPropagation();const id=button.dataset.treeToggle;if(collapsedBranches.has(id))collapsedBranches.delete(id);else collapsedBranches.add(id);renderSidebar();}));
     host.querySelectorAll('[data-sel]').forEach(li => li.addEventListener('click', (e) => {
       e.stopPropagation(); // 树是嵌套 li：阻止子类点击冒泡到父类，否则点到子类却选中父类
       select(li.dataset.sel);
     }));
     const genInline = document.getElementById('om-generate-draft-inline');
     if (genInline) genInline.addEventListener('click', () => {
-      void (canFinalize ? finalizeDiscoveryRun() : generateDraftFromDiscovery());
+      openIntake();
     });
     const ver = document.getElementById('om-version');
     if (ver) {
@@ -521,19 +677,10 @@
   // 没有本体结构时的三种空态（左栏）。\"没发布本体\"是开放发现的正常中间态，不是故障——
   // 这一句不能省，否则用户看到空画布会以为是坏了（本轮\"本体建模没内容\"就是它造成的）。
   function renderEmptyState() {
-    if (S.loading && !S.generating) return '<div class="om-side-empty" role="status">正在加载本体与草案…</div>';
+    if (S.loading) return '<div class="om-side-empty" role="status">正在加载本体与草案…</div>';
     // 归纳中：顶部给一个明确的"正在归纳"说明，回答"点了之后呢"——
     // 不只让按钮变灰，而是把"正在做什么 / 接下来会怎样"讲清楚。
-    if (S.generating) {
-      return `<div class="om-side-empty om-discovery-guide is-generating">
-        ${S.inferringHierarchy
-          ? `<h4>正在生成本体，并让模型推断父子层级…</h4>
-             <p>类型马上就好；模型同时在判断"谁是谁的父类"，这一步要跑几分钟，别关页面。</p>
-             <p class="om-guide-note">不想要层级也可以等完，层级之后在画布上也能手动画。</p>`
-          : `<h4>正在生成本体…</h4>
-             <p>正在把候选整理成实体类型和关系类型，不调用模型；完成后自动加载草案。</p>`}
-      </div>`;
-    }
+
     const d = S.discovery;
     // ① 读不到发现概览（接口失败 / 网络问题）：诚实说"读不到"，不假装是空项目。
     if (!d) {
@@ -558,64 +705,19 @@
         <p>知识写入已抽出 ${d.candidate_count} 个候选，将整理成
           <b>${entityTypeN}</b> 个实体类型、<b>${relationTypeN}</b> 个关系类型
           （同名概念会合并，不是把 ${d.entity_count || 0} 个实体名逐个建类）。</p>
-        <button type="button" id="om-generate-draft" class="om-btn primary">生成本体</button>
-        <button type="button" id="om-infer-hierarchy" class="om-btn ghost">让模型顺便推断父子层级（要几分钟）</button>
-        <p class="om-guide-do">这一步做什么：把候选整理成一份待审核的本体（实体类型＋关系类型）。<br>
-        不做什么：不会直接发布，也不把候选当成正式知识写进台账；默认类型彼此平级，不调用模型。</p>
-        <p class="om-guide-note">想要"谁是谁的父类"就点第二个按钮，或生成后在画布上手动连线。</p>
+        <button type="button" id="om-generate-draft" class="om-btn primary" ${S.preview || S.discoveringParents ? 'disabled' : ''}>选择候选并预览</button>
+        <p class="om-guide-do">打开清单与预览不会创建草案；明确目标并确认加入后，才保存本轮结构修改。</p>
+        <p class="om-guide-note">加入后可通过顶部「发现父类」补充建议，或在画布上编辑继承。</p>
       </div>`;
     }
     return `<div class="om-side-empty">
       <h4>这个项目还没有本体，也没有待纳入的候选</h4>
-      <p>先去「知识写入」页上传文档，选「开放本体发现」模式抽取候选，再回到这里生成本体。</p>
+      <p>可使用顶部「新增定义」手动建模，或在资料库添加文件并开放抽取候选，再从「待完善结构」处理。</p>
     </div>`;
   }
 
-  // 生成本体。默认 infer_hierarchy=false：建类型是确定性操作、不调模型；
-  // 仅当用户显式要「让模型推断父子层级」才传 true，多等几分钟。
-  async function generateDraftFromDiscovery(inferHierarchy = false) {
-    if (S.generating || S.finalizing || S.discoveringParents) return;
-    const counts = S.discovery && S.discovery.candidate_status_counts;
-    if (counts && !counts.pending) {
-      if (typeof status === 'function') status(counts.included_in_draft
-        ? '候选已纳入草案，请校验并审核、发布，无需重复生成。' : '没有新的待归纳候选。', false);
-      return;
-    }
-    // 生成中状态交给 render() 统一重绘：左栏引导态和底栏一起切到"正在生成"。
-    const project = current;
-    S.generating = true;
-    S.inferringHierarchy = !!inferHierarchy;
-    render();
-    if (typeof status === 'function') {
-      status(inferHierarchy
-        ? '正在生成本体，并让模型推断父子层级：类型很快好，层级要跑几分钟，别关页面。'
-        : '正在生成本体（不调用模型）…', false);
-    }
-    try {
-      const result = await api(endpoint('/ontology-discovery/drafts'),
-        { name: '开放发现归纳', infer_hierarchy: !!inferHierarchy }, 'POST');
-      if (current !== project) return;
-      if (typeof status === 'function') status('本体已生成，正在刷新画布…', false);
-      S.preview = null;
-      const draftId = result.unified_draft_id || (result.result_kind === 'draft' ? result.id : null);
-      if (draftId) S.draft = { id: draftId, status: 'pending' };
-      await refresh();
-      if (current !== project) return;
-      if (typeof status === 'function') status(draftId
-        ? '新草案已生成并加载。请校验并审核、发布后，再到检索图谱查看正式知识。'
-        : (result.result_kind === 'mapping_only' && result.run && result.run.status === 'ready_to_finalize'
-          ? '候选可沿用已有类型。请点击左侧「确认写入已有类型的候选」，完成后即可检索。'
-          : '候选归纳已完成，已刷新当前状态；请查看候选处理结果。'), false);
-    } catch (e) {
-      if (current === project && typeof status === 'function') status('生成失败：' + (e.message || e), true);
-    } finally {
-      S.generating = false; S.inferringHierarchy = false;
-      render();
-    }
-  }
-
   async function discoverParents() {
-    if (S.discoveringParents || S.generating || S.finalizing || S.loading || S.preview) return;
+    if (S.discoveringParents || S.loading || S.preview) return;
     if ((S.summary && S.summary.classes || []).filter(c => c.active !== false).length < 2) return;
     const project = current;
     S.discoveringParents = true; render();
@@ -637,37 +739,23 @@
     } finally { S.discoveringParents = false; render(); }
   }
 
-  async function finalizeDiscoveryRun() {
-    const run = S.discovery && S.discovery.latest_run;
-    if (!run || run.result_kind !== 'mapping_only' || run.status !== 'ready_to_finalize' || S.finalizing || S.discoveringParents) return;
-    S.finalizing = true;
-    render();
-    try {
-      const result = await api(endpoint(`/ontology-discovery/runs/${encodeURIComponent(run.id)}/finalize`), undefined, 'POST');
-      await refresh();
-      const skipped = (result.skipped_candidates || []).length;
-      if (typeof status === 'function') status(`已写入 ${result.materialized_count || 0} 条正式知识，可到检索图谱查看。${skipped ? `另有 ${skipped} 条未通过校验，请查看候选处理结果。` : ''}`, false);
-    } catch (e) {
-      if (typeof status === 'function') status('候选写入失败：' + (e.message || e), true);
-    } finally {
-      S.finalizing = false;
-      render();
-    }
-  }
-
   // ---- 挂载：点「本体建模层」页签 / 切项目时加载 ------------------------------
   function wire() {
     const tab = document.querySelector('[data-tab="ontology-model"]');
     if (tab) tab.addEventListener('click', () => { void refresh(); });
     const proj = document.getElementById('project');
     if (proj) proj.addEventListener('change', () => {
-      ++refreshEpoch; ++gateEpoch;
+      ++refreshEpoch; ++gateEpoch; ++projectEpoch;
+      S.discoveringParents = false;
       S.discovery = null; S.loading = false; S.gatesLoading = false;
       S.summary = null; S.ontologyId = null; S.ontologyVersion = null;
       S.graph = null; S.selected = null; S.draft = null;
+      S.draftChoices=[];S.draftLoadError=null;window.OntologyIntake?.projectChanged();
       S.showingDraft = false; S.preview = null;
       S.stageAvailability = null; S.readiness = null; S.candidates = [];
-      built = false; render();
+      collapsedBranches.clear();inspectorOpen=false;
+      built = false;
+      if (root() && !root().classList.contains('hidden')) render();
     });
   }
 
@@ -743,8 +831,9 @@
   }
 
   window.OntologyModel = {
-    S, on, emit, render, refresh, refreshDraftState, ensureDraft, sendCommand, select, compileGraph,
-    actorName, uid, previewVersion, clearPreview, forkFrom, generateDraftFromDiscovery, finalizeDiscoveryRun, discoverParents,
+    S, on, emit, render, refresh, refreshDraftState, ensureDraft, sendCommand, createTerm, select, compileGraph,
+    selectDraft, createDraft, closeDraft, openCreate,openIntake,
+    uid, previewVersion, clearPreview, forkFrom, discoverParents,setInspector,
     status: (m, e) => (typeof status === 'function' ? status(m, e) : console.log(m)),
     helpers: { label, shortIri, dtypeOf, esc: escHtml },
   };

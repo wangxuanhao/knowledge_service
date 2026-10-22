@@ -76,7 +76,7 @@ def main() -> int:
             'title': f'F2 受理决策样本 {stamp}',
             'text': CONFLICT_TEXT,
             'metadata': {'source': 'f2-verification'},
-            'extract': True,
+            'extraction_mode': 'ontology',
             'extraction_mode': 'ontology',
             'chunk_strategy': 'paragraph',
             'chunk_size': 800,

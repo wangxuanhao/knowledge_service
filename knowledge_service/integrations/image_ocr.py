@@ -11,6 +11,20 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 MANIFEST = Path(__file__).parents[1] / 'resources/ocr/pp-ocr-v6-small.json'
 _OCR_SEMAPHORE = threading.BoundedSemaphore(1)
+_AVAILABILITY_LOCK_TIMEOUT = 1.0
+_AVAILABILITY_LOCK = threading.Lock()
+_AVAILABILITY_CACHE = None
+
+
+def _file_identity(path):
+    """Cheap identity for invalidation; model contents are verified separately."""
+    path = Path(path).resolve()
+    try:
+        stat = path.stat()
+        return (str(path), stat.st_dev, stat.st_ino, stat.st_mode, stat.st_size,
+                stat.st_mtime_ns, stat.st_ctime_ns)
+    except OSError as exc:
+        return (str(path), type(exc).__name__, exc.errno)
 
 
 class OcrBlock(BaseModel):
@@ -123,13 +137,56 @@ class RapidOCRAdapter:
                 raise OCRError('ocr_engine_unavailable','OCR configuration uses unsupported inference engine')
         return hashlib.sha256(json.dumps(payload,sort_keys=True).encode()).hexdigest()
 
-    def available(self):
+    def _availability_identity(self):
+        root = Path(self.model_root).resolve()
+        manifest_identity = _file_identity(MANIFEST)
+        packages = {'rapidocr', 'onnxruntime'}
         try:
-            verify_models(self.model_root)
-            self.configuration_fingerprint
-            return True
+            manifest = json.loads(MANIFEST.read_text(encoding='utf-8'))
+            files = tuple(_file_identity(root / entry['path']) for entry in manifest['files'])
+            packages.update(manifest['runtime'])
+        except Exception as exc:
+            files = ('invalid_manifest', type(exc).__name__)
+        runtimes = []
+        for package in sorted(packages):
+            try:
+                runtimes.append((package, version(package)))
+            except Exception as exc:
+                runtimes.append((package, type(exc).__name__, str(exc)))
+        return (str(root), manifest_identity, files, tuple(runtimes),
+                _file_identity(self.config_path) if self.config_path else None,
+                self.preprocess_version, self.max_side, self.max_pixels, self.languages,
+                os.getenv('KG_IMAGE_OCR_DEVICE', 'cpu'),
+                os.getenv('KG_IMAGE_OCR_BACKEND', 'rapidocr'))
+
+    def available(self):
+        global _AVAILABILITY_CACHE
+        # Capability routes create adapters per request: share one bounded cache
+        # entry across instances. A slow concurrent validation cannot
+        # leave capability requests waiting indefinitely; contention fails closed.
+        if not _AVAILABILITY_LOCK.acquire(timeout=_AVAILABILITY_LOCK_TIMEOUT):
+            return False
+        try:
+            identity = self._availability_identity()
+            if _AVAILABILITY_CACHE is not None and identity == _AVAILABILITY_CACHE[0]:
+                return _AVAILABILITY_CACHE[1]
+            try:
+                verify_models(self.model_root)
+                self.configuration_fingerprint
+                result = True
+            except Exception:
+                result = False
+            # A file/settings change during validation has not been validated as
+            # a consistent identity. Retry on the next read instead of caching it.
+            if self._availability_identity() != identity:
+                _AVAILABILITY_CACHE = None
+                return False
+            _AVAILABILITY_CACHE = (identity, result)
+            return result
         except Exception:
             return False
+        finally:
+            _AVAILABILITY_LOCK.release()
 
     def _initialize(self):
         with self._init_lock:

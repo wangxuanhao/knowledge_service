@@ -71,10 +71,10 @@ class RuntimeCapabilities:
                              ('KG_LLM_BASE_URL','KG_LLM_API_KEY','KG_LLM_MODEL'))
         capabilities = {
             'keyword': {'status': 'ready'},
-            'semantic': {'status': 'ready' if semantic_ready else
-                         'degraded' if self.milvus_configured else 'disabled',
+            'semantic': {'status': 'ready' if semantic_ready else 'unavailable',
+                         'vector_backend': 'milvus', 'fallback': False,
                          'reason': None if semantic_ready else
-                         '模型尚未完成编码验证或语义向量后端未就绪'},
+                         '语义与混合检索不可用：编码模型或 Milvus 索引未就绪；不会自动更换检索模式'},
             'llm': {'status': 'degraded' if llm_configured else 'disabled',
                     'reason': '已配置，远程可用性尚未探测' if llm_configured else '未配置'},
             'ocr': {'status': 'degraded' if find_spec('docling') else 'disabled',

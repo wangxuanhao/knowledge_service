@@ -15,15 +15,26 @@ class ScopeRepository:
     def __init__(self):
         self.rows = []
         self.query_count = 0
+        self.reference_reads = []
+        self.source_reads = []
+        self.source = {'id': 'document', 'version_id': 'source:1', 'version': 1,
+                       'kind': 'document', 'text': 'refund source',
+                       'ontology_id': 'release-a', 'recorded_at': '2020-01-01T00:00:00Z',
+                       'valid_from': '2020-01-01T00:00:00Z', 'valid_until': None,
+                       'metadata': {'effective_time_source': 'explicit',
+                                    'applicability': {'platforms': {'mode': 'all'}}}}
         for index, (key, ontology, text) in enumerate((
             ('a', 'release-a', 'refund'), ('b-neighbor', 'release-b', 'secret'),
             ('a-neighbor', 'release-a', 'neighbor'), ('b', 'release-b', 'refund'),
             ('orphan', 'foreign-release', 'refund'), ('unbound', None, 'refund'),
         )):
             self.rows.append({
-                'id': key, 'version_id': key + ':1', 'kind': 'chunk',
+                'id': key, 'version_id': key + ':1', 'version': 1, 'kind': 'chunk',
                 'text': text, 'ontology_id': ontology, 'source_id': 'document',
+                'recorded_at': '2020-01-01T00:00:00Z',
+                'valid_from': '2020-01-01T00:00:00Z', 'valid_until': None,
                 'metadata': {'start_char': index, 'source_version_id': 'source:1',
+                             'effective_time_source': 'explicit',
                              'applicability': {'platforms': {'mode': 'all'}}},
             })
 
@@ -31,8 +42,19 @@ class ScopeRepository:
         return [{'id': 'release-a'}, {'id': 'release-b'}]
 
     def query(self, project, **kwargs):
-        self.query_count += 1
+        if kwargs.get('_reference_mode'):
+            self.reference_reads.append(kwargs)
+        else:
+            self.query_count += 1
         return list(self.rows)
+
+    def records_by_version_ids(self, project, versions):
+        self.source_reads.append((project, list(versions)))
+        return [dict(self.source)] if self.source['version_id'] in versions else []
+
+    def records_at_knowledge_time(self, project, record_ids, known_at):
+        return [dict(self.source)] if ('document' in record_ids and
+            self.source['recorded_at'] <= known_at) else []
 
     def distinct_applicability_values(self, project):
         return {}
@@ -79,5 +101,10 @@ def test_search_and_qa_keep_hits_and_adjacent_context_inside_release_scope(conne
     assert {row['id'] for row in context['evidence_rows']} <= allowed
     assert {row['id'] for row in context['context_chunks']} <= allowed
     assert service.repository.query_count == 2
+    assert service.repository.source_reads == [('p', ['source:1'])]
+    assert len(service.repository.reference_reads) == 1
+    reference = service.repository.reference_reads[0]
+    assert reference['_reference_limit'] == 501
+    assert reference['_reference_terms'] == ['refund']
     if store:
         assert store.calls == 0

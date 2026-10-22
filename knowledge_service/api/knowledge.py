@@ -3,27 +3,38 @@
 负责知识 CRUD、摄取、检索、问答、图谱、本体查询与 SPARQL。
 业务逻辑全部委托 services/repository，本文件只做请求解析与响应包装。
 """
-from fastapi import APIRouter, File, Form, Response, UploadFile, Request
+from fastapi import APIRouter, Depends, File, Form, UploadFile, Request, Query
+from pydantic import BaseModel, ConfigDict, Field
+from typing import Annotated
 from .audit_identity import audit_actor
 
 from ..models import (
-    Ingest, OntologyWrite, Question, RecordBatch, ResolutionReviewDecision,
+    Ingest, Question, RecordBatch, ResolutionReviewDecision,
     Revision, Scope, Search, Sparql,
 )
 from ..services.ontology import Ontology
-from ..services.ontology_adapters import (
-    add_deprecation_headers,
-    turtle_draft,
-)
 from ..services.service import public
 from ..services.version_context import OntologyVersionContext
 from ..services import structure_pending
 from ..core.time import utc_now
 
 
+class AssertionBatchRead(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    record_ids: list[Annotated[str, Field(min_length=1,max_length=1000)]] = Field(min_length=1,max_length=100)
+
+
 def install(app, service):
     router = APIRouter()
     repository = service.data
+
+    async def exact_search(http_request: Request):
+        from ..domain.search_filter_catalog import parse_filter_json
+        return Search.model_validate(parse_filter_json(await http_request.body()))
+
+    async def exact_question(http_request: Request):
+        from ..domain.search_filter_catalog import parse_filter_json
+        return Question.model_validate(parse_filter_json(await http_request.body()))
 
     # ------------------------------------------------------------------ 知识 CRUD
     @router.post('/api/projects/{project_id}/records', status_code=201)
@@ -73,18 +84,17 @@ def install(app, service):
             raise KeyError(record_id)
         return {'versions': [public(r) for r in versions]}
 
-    @router.post('/api/projects/{project_id}/records/query')
-    def query_records(project_id: str, request: Scope, limit: int = 200, offset: int = 0):
-        if not 1 <= limit <= 1000 or offset < 0:
-            raise ValueError('limit 必须在 1..1000 且 offset 不能为负')
-        records = service.scoped(project_id, request.model_dump())
-        return {'total': len(records), 'records': [public(r) for r in records[offset:offset + limit]]}
+    @router.post('/api/projects/{project_id}/assertions/batch')
+    def assertion_batch(project_id: str, request: AssertionBatchRead):
+        return service.data.assertions_batch(project_id,request.record_ids)
 
     @router.get('/api/projects/{project_id}/assertions')
     def assertions(project_id: str, status: str | None = None,
-                   canonical_record_id: str | None = None, document_id: str | None = None):
+                   canonical_record_id: str | None = None, document_id: str | None = None,
+                   assertion_ids: list[str] | None = Query(default=None, max_length=100)):
         items = repository.list_assertions(project_id, status=status,
-            canonical_record_id=canonical_record_id, document_id=document_id)
+            canonical_record_id=canonical_record_id, document_id=document_id,
+            assertion_ids=assertion_ids)
         return {'assertions': items, 'total': len(items)}
 
     @router.get('/api/projects/{project_id}/ingest-runs')
@@ -110,8 +120,11 @@ def install(app, service):
                 'decision': 'merged', 'reason': request.reason, 'actor': audit_actor(http_request)}
             operation = Governance(service).merge(project_id, review['candidate_entity_id'],
                 review['source_entity_id'], request.expected_entity_versions,
-                resolution_decision=decision, actor=audit_actor(http_request))
-            return {'review': repository.list_resolution_reviews(project_id, status='merged')[-1],
+                resolution_decision=decision, attribute_winners=request.attribute_winners,
+                preview_fingerprint=request.preview_fingerprint,
+                actor=audit_actor(http_request))
+            return {'review': next(item for item in repository.list_resolution_reviews(project_id, status='merged')
+                                   if item['id'] == review_id),
                     'merge': operation}
         return {'review': repository.decide_resolution_review(project_id, review_id,
             request.expected_version, request.decision, request.reason, audit_actor(http_request))}
@@ -140,11 +153,11 @@ def install(app, service):
 
     # ------------------------------------------------------------------ 检索/问答/图谱
     @router.post('/api/projects/{project_id}/search')
-    def search(project_id: str, request: Search):
+    def search(project_id: str, request: Annotated[Search, Depends(exact_search)]):
         return service.search(project_id, request.model_dump())
 
     @router.post('/api/projects/{project_id}/qa')
-    def answer(project_id: str, request: Question):
+    def answer(project_id: str, request: Annotated[Question, Depends(exact_question)]):
         return service.answer(project_id, request.model_dump())
 
     @router.post('/api/projects/{project_id}/graph')
@@ -173,7 +186,7 @@ def install(app, service):
             publication = (item.get('metadata') or {}).get('publication') or {}
             history.append({
                 **item,
-                'summary': Ontology(item['turtle']).summary(),
+                'summary': item['summary'],
                 'version': item['version'],
                 'version_reused': item['version_reused'],
                 'note': publication.get('note') or '',
@@ -186,36 +199,11 @@ def install(app, service):
     @router.get('/api/projects/{project_id}/ontology')
     def ontology(project_id: str, ontology_id: str | None = None):
         item = repository.get_ontology(project_id, ontology_id)
-        # 已保存的摘要是缓存。重新构建，使新摘要字段引入之前创建的版本
-        # 仍保持 API 兼容。
-        return {**item, 'summary': Ontology(item['turtle']).summary()}
+        return item
 
     @router.get('/api/projects/{project_id}/ontologies/{ontology_id}/knowledge-context')
     def ontology_knowledge_context(project_id: str, ontology_id: str):
         return OntologyVersionContext(service).get(project_id, ontology_id)
-
-    @router.post('/api/projects/{project_id}/ontologies', status_code=201)
-    def save_ontology(project_id: str, request: OntologyWrite, response: Response):
-        parsed = Ontology(request.turtle)
-        with service.lock:
-            versions = repository.list_ontologies(project_id)
-            # Compatibility for a project explicitly created without a base
-            # ontology.  Subsequent edits are always governed drafts.
-            if not versions and request.expected_ontology_id is None:
-                add_deprecation_headers(response)
-                return repository.bootstrap_ontology(
-                    project_id, request.turtle, parsed.summary(), {
-                        'actor': 'api:knowledge',
-                        'write_path': 'compatibility_initial_bootstrap',
-                    })
-            result = turtle_draft(
-                repository, project_id, request.turtle, source_kind='turtle',
-                title='Turtle 编辑草案', actor='api:knowledge',
-                expected_ontology_id=request.expected_ontology_id,
-                source_context={'legacy_route': 'POST /ontologies'},
-                summary='由旧 Turtle 写接口转换')
-            add_deprecation_headers(response)
-            return result
 
     @router.post('/api/projects/{project_id}/ontology/validate')
     def validate(project_id: str, request: Scope, ontology_id: str | None = None):

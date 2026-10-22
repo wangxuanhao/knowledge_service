@@ -92,13 +92,14 @@ test('query platform scope is compact, optional, and preserves the existing scop
   assert.deepEqual(JSON.parse(JSON.stringify(window.ApplicabilityUI.readQueryScope())),{});
   f['query-platforms'].value='美团, 淘宝，美团';
   assert.deepEqual(JSON.parse(JSON.stringify(window.ApplicabilityUI.readQueryScope())),{
-    applicability:{platforms:['美团','淘宝'],businesses:[],audiences:[]},
+    applicability:{platforms:{mode:'specific',values:['美团','淘宝']},
+      businesses:{mode:'unknown',values:[]},audiences:{mode:'unknown',values:[]}},
   });
   const source=fs.readFileSync('knowledge_service/web/workbench.js','utf8');
   assert.match(source,/readQueryScope\?\.\(\)/);
-  assert.match(source,/\.\.\.scope\(\),valid_at:asOf\?new Date\(asOf\)\.toISOString\(\):null/);
+  assert.match(source,/\.\.\.scope\(\),valid_at:asOf\?new Date\(asOf\)\.toISOString\(\):\(scope\(\)\.valid_at\|\|null\)/);
   const workspace=fs.readFileSync('knowledge_service/web/workspace.js','utf8');
-  assert.match(workspace,/\.\.\.scope\(\),valid_at:null,query/);
+  assert.match(workspace,/\.\.\.scope\(\),query/);
   assert.match(workspace,/ApplicabilityUI\?\.describe\?\.\(r\)/);
   assert.match(workspace,/context_chunks/);
   assert.match(workspace,/platform_groups/);
@@ -113,11 +114,13 @@ test('unified metadata applicability sends platform, business and audience toget
   f['query-businesses'].value='外卖';
   f['query-audiences'].value='商户';
   assert.deepEqual(JSON.parse(JSON.stringify(window.ApplicabilityUI.readQueryScope())),{
-    applicability:{platforms:['美团'],businesses:['外卖'],audiences:['商户']},
+    applicability:{platforms:{mode:'specific',values:['美团']},
+      businesses:{mode:'specific',values:['外卖']},audiences:{mode:'specific',values:['商户']}},
   });
   f['query-platforms'].value='';
   assert.deepEqual(JSON.parse(JSON.stringify(window.ApplicabilityUI.readQueryScope())),{
-    applicability:{platforms:[],businesses:['外卖'],audiences:['商户']},
+    applicability:{platforms:{mode:'unknown',values:[]},
+      businesses:{mode:'specific',values:['外卖']},audiences:{mode:'specific',values:['商户']}},
   });
 });
 

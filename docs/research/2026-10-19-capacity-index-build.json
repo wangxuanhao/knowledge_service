@@ -1,0 +1,5973 @@
+{
+  "collection": "knowledge_redesign_capacity",
+  "samples": [
+    {
+      "at": "2026-10-19T07:03:26.334566+00:00",
+      "seconds": 0.5251879000024928,
+      "indexes": [
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 518512,
+          "indexed_rows": 271512,
+          "pending_index_rows": 410000
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 518512,
+          "indexed_rows": 244512,
+          "pending_index_rows": 437000
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 518512,
+          "indexed_rows": 244512,
+          "pending_index_rows": 437000
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 518512,
+          "indexed_rows": 244512,
+          "pending_index_rows": 437000
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 518512,
+          "indexed_rows": 244512,
+          "pending_index_rows": 437000
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 518512,
+          "indexed_rows": 244512,
+          "pending_index_rows": 437000
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 518512,
+          "indexed_rows": 244512,
+          "pending_index_rows": 437000
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 518512,
+          "indexed_rows": 244512,
+          "pending_index_rows": 437000
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 518512,
+          "indexed_rows": 244512,
+          "pending_index_rows": 437000
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 518512,
+          "indexed_rows": 244512,
+          "pending_index_rows": 437000
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 518512,
+          "indexed_rows": 244512,
+          "pending_index_rows": 437000
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 518512,
+          "indexed_rows": 244512,
+          "pending_index_rows": 437000
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 518512,
+          "indexed_rows": 271512,
+          "pending_index_rows": 410000
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 518512,
+          "indexed_rows": 271512,
+          "pending_index_rows": 410000
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 518512,
+          "indexed_rows": 271512,
+          "pending_index_rows": 410000
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 518512,
+          "indexed_rows": 271512,
+          "pending_index_rows": 410000
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 518512,
+          "indexed_rows": 271512,
+          "pending_index_rows": 410000
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:03:46.549648+00:00",
+      "seconds": 20.740706399999908,
+      "indexes": [
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 244512,
+          "pending_index_rows": 448488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 244512,
+          "pending_index_rows": 448488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 244512,
+          "pending_index_rows": 448488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 244512,
+          "pending_index_rows": 448488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 244512,
+          "pending_index_rows": 448488
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 244512,
+          "pending_index_rows": 448488
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 244512,
+          "pending_index_rows": 448488
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 244512,
+          "pending_index_rows": 448488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 244512,
+          "pending_index_rows": 448488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 244512,
+          "pending_index_rows": 448488
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 244512,
+          "pending_index_rows": 448488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:04:06.666044+00:00",
+      "seconds": 40.85683120000249,
+      "indexes": [
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:04:26.941373+00:00",
+      "seconds": 61.13228069999968,
+      "indexes": [
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:04:47.171157+00:00",
+      "seconds": 81.3618959000014,
+      "indexes": [
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 271512,
+          "pending_index_rows": 421488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:05:07.432103+00:00",
+      "seconds": 101.62304439999934,
+      "indexes": [
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:05:27.691187+00:00",
+      "seconds": 121.88224020000052,
+      "indexes": [
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 300000,
+          "pending_index_rows": 393000
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:05:47.935995+00:00",
+      "seconds": 142.1266617000001,
+      "indexes": [
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:06:08.158038+00:00",
+      "seconds": 162.3495170999995,
+      "indexes": [
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 328000,
+          "pending_index_rows": 365000
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:06:28.322291+00:00",
+      "seconds": 182.51308570000037,
+      "indexes": [
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:06:48.518841+00:00",
+      "seconds": 202.70989890000055,
+      "indexes": [
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 354768,
+          "pending_index_rows": 338232
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:07:08.773242+00:00",
+      "seconds": 222.96399810000003,
+      "indexes": [
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:07:28.943448+00:00",
+      "seconds": 243.1345509999992,
+      "indexes": [
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:07:49.134892+00:00",
+      "seconds": 263.325721600002,
+      "indexes": [
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:08:09.350877+00:00",
+      "seconds": 283.54216760000054,
+      "indexes": [
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:08:29.683625+00:00",
+      "seconds": 303.8752777000009,
+      "indexes": [
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:08:49.918791+00:00",
+      "seconds": 324.1093624000023,
+      "indexes": [
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:09:10.184021+00:00",
+      "seconds": 344.3751114000006,
+      "indexes": [
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:09:30.401591+00:00",
+      "seconds": 364.5924339000012,
+      "indexes": [
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:09:50.691307+00:00",
+      "seconds": 384.8820906000001,
+      "indexes": [
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:10:10.916758+00:00",
+      "seconds": 405.10744610000256,
+      "indexes": [
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:10:31.134493+00:00",
+      "seconds": 425.3252160000011,
+      "indexes": [
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:10:51.308698+00:00",
+      "seconds": 445.4996979999996,
+      "indexes": [
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:11:11.498326+00:00",
+      "seconds": 465.6892735000001,
+      "indexes": [
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 147488
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 310488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:11:31.610708+00:00",
+      "seconds": 485.80156999999963,
+      "indexes": [
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 312488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 312488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 312488
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 312488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 312488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 312488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 312488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 312488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 312488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:11:51.792532+00:00",
+      "seconds": 505.98356480000075,
+      "indexes": [
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 312488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 312488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 312488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 312488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 312488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 312488
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 312488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 312488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 382512,
+          "pending_index_rows": 312488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:12:12.090650+00:00",
+      "seconds": 526.2815320000009,
+      "indexes": [
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:12:32.518565+00:00",
+      "seconds": 546.7099205000013,
+      "indexes": [
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 411000,
+          "pending_index_rows": 284000
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:12:52.756834+00:00",
+      "seconds": 566.9478552,
+      "indexes": [
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:13:12.977099+00:00",
+      "seconds": 587.1678597000027,
+      "indexes": [
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 437768,
+          "pending_index_rows": 257232
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:13:33.155826+00:00",
+      "seconds": 607.3464779999995,
+      "indexes": [
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:13:53.349215+00:00",
+      "seconds": 627.5404546999998,
+      "indexes": [
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 464512,
+          "pending_index_rows": 230488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:14:13.546319+00:00",
+      "seconds": 647.7371860000021,
+      "indexes": [
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:14:33.756497+00:00",
+      "seconds": 667.9475712999993,
+      "indexes": [
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:14:53.972250+00:00",
+      "seconds": 688.1629071999996,
+      "indexes": [
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:15:14.240046+00:00",
+      "seconds": 708.4310178000014,
+      "indexes": [
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:15:34.501133+00:00",
+      "seconds": 728.6919678000013,
+      "indexes": [
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 204232
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:15:54.726591+00:00",
+      "seconds": 748.9171693000026,
+      "indexes": [
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:16:15.023940+00:00",
+      "seconds": 769.2147150000019,
+      "indexes": [
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:16:35.270831+00:00",
+      "seconds": 789.4621485000025,
+      "indexes": [
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 518512,
+          "pending_index_rows": 94976
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "InProgress",
+          "total_rows": 530000,
+          "indexed_rows": 490768,
+          "pending_index_rows": 122720
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:16:55.504104+00:00",
+      "seconds": 809.6948889000014,
+      "indexes": [
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 83488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 83488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 83488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 83488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 83488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 83488
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 0
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 0
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 0
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 0
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 0
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 0
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 0
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 0
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 83488
+        },
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 83488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 83488
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T07:17:15.878048+00:00",
+      "seconds": 830.0690420999999,
+      "indexes": [
+        {
+          "field_name": "sparse",
+          "index_type": "SPARSE_INVERTED_INDEX",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 83488
+        },
+        {
+          "field_name": "record_id",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 83488
+        },
+        {
+          "field_name": "projection_seq",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 83488
+        },
+        {
+          "field_name": "platform_mode",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 83488
+        },
+        {
+          "field_name": "business_mode",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 83488
+        },
+        {
+          "field_name": "valid_until_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 83488
+        },
+        {
+          "field_name": "valid_from_known",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 83488
+        },
+        {
+          "field_name": "valid_from_epoch_ms",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 83488
+        },
+        {
+          "field_name": "platform_values",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 0
+        },
+        {
+          "field_name": "audience_values",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 0
+        },
+        {
+          "field_name": "kind",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 0
+        },
+        {
+          "field_name": "active",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 0
+        },
+        {
+          "field_name": "audience_mode",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 0
+        },
+        {
+          "field_name": "business_values",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 0
+        },
+        {
+          "field_name": "valid_until_known",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 0
+        },
+        {
+          "field_name": "scope_identity",
+          "index_type": "INVERTED",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 0
+        },
+        {
+          "field_name": "embedding",
+          "index_type": "HNSW",
+          "state": "Finished",
+          "total_rows": 530000,
+          "indexed_rows": 530000,
+          "pending_index_rows": 83488
+        }
+      ]
+    }
+  ],
+  "all_indexes_finished": false,
+  "observation_status": "stopped after final backend benchmark; server index building continues",
+  "observation_ended_at": "2026-10-19T07:19:13.643936+00:00",
+  "scope": "Operational background-index samples during the strict 450k capacity fixture. Index physical counts include historical upsert versions; logical fixture counts were verified separately."
+}

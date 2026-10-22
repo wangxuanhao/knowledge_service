@@ -1,6 +1,6 @@
 """探索、迁移、治理与持久化任务的 HTTP 契约。"""
 from typing import Literal
-from pydantic import Field, model_validator
+from pydantic import Field
 from fastapi import APIRouter, File, Form, Header, Query, UploadFile, Request as HttpRequest
 from .audit_identity import audit_actor
 from fastapi.responses import StreamingResponse, FileResponse
@@ -13,11 +13,6 @@ from ..services.reclassify import Reclassify
 from ..services.answers import stream_events
 
 
-class LocalImport(Request):
-    name:str=Field(min_length=1,max_length=300)
-    kind:str='project'
-    build_vectors:bool=False
-    project_id:str|None=None
 
 class Subgraph(Scope):
     node_id:str|None=None
@@ -44,6 +39,7 @@ class Merge(Request):
     drop_id:str
     expected_versions:dict[str,int]
     attribute_winners:list[str]=[]
+    preview_fingerprint:str|None=Field(default=None,min_length=64,max_length=64)
 
 class Delete(Request):
     record_id:str
@@ -64,11 +60,7 @@ class ReclassifyGroups(Request):
     groups:list[str]=Field(default_factory=list,max_length=500)
 
 class ReclassifyApply(ReclassifyGroups):
-    @model_validator(mode='before')
-    @classmethod
-    def discard_legacy_actor(cls, value):
-        return ({key: item for key, item in value.items() if key != 'actor'}
-                if isinstance(value, dict) else value)
+    pass
 
 
 def install(app,service):
@@ -151,15 +143,7 @@ def install(app,service):
         from pathlib import Path
         return FileResponse(Path(__file__).resolve().parents[1]/'web/vendor/cytoscape.min.js',media_type='application/javascript')
 
-    @router.get('/local-projects')
-    def local_projects():
-        from ..services.legacy_import import LegacyImporter
-        return {'projects':LegacyImporter(service).list_projects()}
 
-    @router.post('/local-projects/import',status_code=202)
-    def local_import(request:LocalImport):
-        from ..services.legacy_import import LegacyImporter
-        return jobs.enqueue('legacy_import',request.model_dump(), request.project_id)
 
     @router.get('/jobs/{job_id}')
     def job(job_id:str):return service.data.get_artifact('job',job_id)
@@ -294,7 +278,10 @@ def install(app,service):
     def dashboard(p:str,request:Scope):return explorer.dashboard(p,request.model_dump())
 
     @router.post('/projects/{p}/sources')
-    def sources(p:str,request:Scope):return explorer.sources(p,request.model_dump())
+    def sources(p:str,request:Scope,limit:int=50,cursor:str|None=None,
+                summary_only:bool=False,state:str='all',document_id:str|None=None):
+        return explorer.sources(p,request.model_dump(),limit=limit,cursor=cursor,
+            summary_only=summary_only,state=state,document_id=document_id)
 
     @router.post('/projects/{p}/subgraph')
     def subgraph(p:str,request:Subgraph):return explorer.graph(
@@ -313,7 +300,12 @@ def install(app,service):
     @router.post('/projects/{p}/merge')
     def merge(p:str,request:Merge,http_request:HttpRequest):return governance.merge(
         p,request.keep_id,request.drop_id,request.expected_versions,
-        attribute_winners=request.attribute_winners, actor=audit_actor(http_request))
+        attribute_winners=request.attribute_winners, preview_fingerprint=request.preview_fingerprint,
+        actor=audit_actor(http_request))
+
+    @router.post('/projects/{p}/merge/preview')
+    def merge_preview(p:str,request:Merge):return governance.merge_preview(
+        p,request.keep_id,request.drop_id,request.expected_versions)
 
     @router.post('/projects/{p}/delete')
     def delete(p:str,request:Delete):return governance.delete(p,request.record_id,request.expected_version)

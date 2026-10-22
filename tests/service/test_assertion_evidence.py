@@ -1,5 +1,4 @@
 import hashlib
-from time import perf_counter
 
 import pytest
 from fastapi.testclient import TestClient
@@ -96,41 +95,6 @@ def test_exact_assertion_returns_complete_chunk_and_exact_highlight(evidence_rep
         'complete': True, 'source_hash_status': 'matched', 'warnings': []}
 
 
-def test_legacy_entity_after_character_500_is_recovered_inside_chunk(evidence_repo):
-    repo, project_id = evidence_repo
-    text = 'x' * 520 + 'Needle' + 'z' * 40
-    document, chunk = _document_and_chunk(
-        repo, project_id, text=text, chunk_start=500, chunk_end=len(text))
-    assertion = _assertion(
-        repo, project_id, document, chunk, quote=chunk['text'],
-        payload={'text': 'Needle'})
-
-    result = resolve_assertion_evidence(repo, project_id, assertion['id'])
-
-    assert result['location']['mode'] == 'recovered_in_chunk'
-    assert result['location']['start_char'] == 520
-    assert result['location']['highlight'] == 'Needle'
-    assert result['location']['before'] == 'x' * 20
-
-
-def test_duplicate_legacy_entity_degrades_to_verified_chunk(evidence_repo):
-    repo, project_id = evidence_repo
-    text = 'Alpha then Alpha'
-    document, chunk = _document_and_chunk(repo, project_id, text=text)
-    assertion = _assertion(
-        repo, project_id, document, chunk, quote=chunk['text'],
-        payload={'text': 'Alpha'})
-
-    result = resolve_assertion_evidence(repo, project_id, assertion['id'])
-
-    assert result['location'] == {
-        'mode': 'chunk', 'reason': 'highlight_not_unique',
-        'start_char': None, 'end_char': None,
-        'before': '', 'highlight': '', 'after': ''}
-    assert result['chunk']['text'] == text
-    assert result['integrity']['complete'] is True
-
-
 def test_verified_modern_whole_chunk_evidence_remains_exact(evidence_repo):
     repo, project_id = evidence_repo
     document, chunk = _document_and_chunk(repo, project_id, text='Alpha')
@@ -145,80 +109,24 @@ def test_verified_modern_whole_chunk_evidence_remains_exact(evidence_repo):
     assert result['location']['highlight'] == 'Alpha'
 
 
-def test_legacy_relation_recovers_unique_minimal_subject_object_span(evidence_repo):
-    repo, project_id = evidence_repo
-    text = 'Acme signed with Beta yesterday.'
-    document, chunk = _document_and_chunk(repo, project_id, text=text)
-    assertion = _assertion(
-        repo, project_id, document, chunk, kind='relation', quote=chunk['text'],
-        payload={'subject': 'Acme', 'object': 'Beta'})
-
-    result = resolve_assertion_evidence(repo, project_id, assertion['id'])
-
-    assert result['location']['mode'] == 'recovered_in_chunk'
-    assert result['location']['highlight'] == 'Acme signed with Beta'
-    assert result['location']['start_char'] == 0
-    assert result['location']['end_char'] == len('Acme signed with Beta')
-
-
-def test_legacy_relation_recovers_smaller_unique_quote_before_endpoints(evidence_repo):
-    repo, project_id = evidence_repo
-    text = 'Acme signed with Beta. Acme later called Beta.'
-    document, chunk = _document_and_chunk(repo, project_id, text=text)
-    assertion = _assertion(
-        repo, project_id, document, chunk, kind='relation',
-        quote='signed with Beta',
-        payload={'subject': 'Acme', 'object': 'Beta'})
-
-    result = resolve_assertion_evidence(repo, project_id, assertion['id'])
-
-    assert result['location']['mode'] == 'recovered_in_chunk'
-    assert result['location']['reason'] == 'legacy_quote_recovered'
-    assert result['location']['highlight'] == 'signed with Beta'
-
-
-def test_relation_recovery_is_bounded_for_repetitive_1800_character_chunk():
-    text = ('A B ' * 450)[:1800]
-
-    started = perf_counter()
-    for _ in range(20):
-        evidence_module._relation_span(text, {'subject': 'A', 'object': 'B'})
-    elapsed = perf_counter() - started
-
-    assert elapsed < 0.25
-
-
-def test_legacy_attribute_prefers_attribute_evidence(evidence_repo):
-    repo, project_id = evidence_repo
-    text = 'Acme has 42 employees; 42 is the audited total.'
-    document, chunk = _document_and_chunk(repo, project_id, text=text)
-    assertion = _assertion(
-        repo, project_id, document, chunk, kind='attribute', quote=chunk['text'],
-        payload={'text': '42', 'evidence': '42',
-                 'attribute_evidence': '42 employees'})
-
-    result = resolve_assertion_evidence(repo, project_id, assertion['id'])
-
-    assert result['location']['mode'] == 'recovered_in_chunk'
-    assert result['location']['highlight'] == '42 employees'
-
-
-@pytest.mark.parametrize(('payload', 'code'), [
-    ({'text': '42'}, 'attribute_evidence_missing'),
-    ({'attribute_evidence': '42'}, 'attribute_evidence_non_unique'),
+@pytest.mark.parametrize(('kind', 'payload'), [
+    ('entity', {'text': 'Alpha'}),
+    ('relation', {'subject': 'Alpha', 'object': 'Beta'}),
+    ('attribute', {'attribute_evidence': 'Alpha'}),
 ])
-def test_legacy_attribute_without_unique_evidence_warns_and_returns_chunk(
-        evidence_repo, payload, code):
+def test_unverified_chunk_anchors_do_not_recover_payload_highlights(
+        evidence_repo, kind, payload):
     repo, project_id = evidence_repo
-    document, chunk = _document_and_chunk(repo, project_id, text='42 then 42')
+    document, chunk = _document_and_chunk(repo, project_id, text='Alpha then Beta')
     assertion = _assertion(
-        repo, project_id, document, chunk, kind='attribute', quote=chunk['text'],
-        payload=payload)
+        repo, project_id, document, chunk, kind=kind, quote=chunk['text'], payload=payload)
 
     result = resolve_assertion_evidence(repo, project_id, assertion['id'])
 
     assert result['location']['mode'] == 'chunk'
-    assert _warning_codes(result) == [code]
+    assert result['location']['highlight'] == ''
+    assert result['location']['start_char'] is None
+    assert result['chunk']['text'] == chunk['text']
 
 
 def test_missing_pinned_version_is_unlocated_without_current_fallback(evidence_repo):
@@ -237,10 +145,10 @@ def test_missing_pinned_version_is_unlocated_without_current_fallback(evidence_r
     assert _warning_codes(result) == ['document_version_missing']
 
 
-def test_missing_source_hash_is_unavailable_but_verified_legacy_chunk_is_complete(evidence_repo):
+def test_missing_source_hash_is_unavailable_but_exact_version_chunk_is_complete(evidence_repo):
     repo, project_id = evidence_repo
     document, chunk = _document_and_chunk(
-        repo, project_id, text='prefix Alpha suffix', versioned=False)
+        repo, project_id, text='prefix Alpha suffix')
     assertion = _assertion(
         repo, project_id, document, chunk, quote=chunk['text'],
         payload={'text': 'Alpha'}, source_hash=None)
@@ -252,14 +160,13 @@ def test_missing_source_hash_is_unavailable_but_verified_legacy_chunk_is_complet
 
     assert result['integrity']['complete'] is True
     assert result['integrity']['source_hash_status'] == 'unavailable'
-    assert _warning_codes(result) == [
-        'legacy_chunk_version_assumed', 'source_hash_unavailable']
+    assert _warning_codes(result) == ['source_hash_unavailable']
     assert result['integrity']['warnings'][-1]['message'] == (
         '该历史断言未保存来源文档哈希，无法进行额外的哈希一致性校验；'
         '固定文档版本与历史切片仍可正常溯源。')
 
 
-def test_source_version_metadata_does_not_override_recorded_at_mismatch(evidence_repo):
+def test_source_version_metadata_selects_exact_version_despite_recorded_at_difference(evidence_repo):
     repo, project_id = evidence_repo
     document, chunk = _document_and_chunk(repo, project_id)
     assertion = _assertion(
@@ -271,8 +178,9 @@ def test_source_version_metadata_does_not_override_recorded_at_mismatch(evidence
 
     result = resolve_assertion_evidence(repo, project_id, assertion['id'])
 
-    assert result['location']['mode'] == 'unlocated'
-    assert _warning_codes(result) == ['chunk_history_mismatch']
+    assert result['location']['mode'] == 'exact'
+    assert result['location']['highlight'] == 'Alpha'
+    assert _warning_codes(result) == []
 
 
 def test_source_hash_mismatch_makes_integrity_incomplete(evidence_repo):

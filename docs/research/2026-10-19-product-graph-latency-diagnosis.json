@@ -1,0 +1,271 @@
+{
+  "scope": "Read-only authenticated local HTTP plus independent read-only PostgreSQL observation; no payload output",
+  "actual_scope": {
+    "applicability": null,
+    "filters": null,
+    "valid_at": null,
+    "known_at": null,
+    "include_unknown": true,
+    "ontology_scope": "all",
+    "ontology_ids": null
+  },
+  "scope_compilation": {
+    "entity": {
+      "sql_equal": true,
+      "params_equal": true,
+      "sql_sha256": "d8834f6bbb215b21e7be89f8aadb13f8bc6382f3c4d786be56adf0b346f6efd6"
+    },
+    "relation": {
+      "sql_equal": true,
+      "params_equal": true,
+      "sql_sha256": "5ffd98aa2cfda8ae942f6baefb40426a80f6ef03d7c1474c6d5e68f102c259ae"
+    }
+  },
+  "http_requests_checked": 49,
+  "slow_requests": [
+    {
+      "at": 1792395215.6151795,
+      "kind": "relations",
+      "limit": 5000,
+      "after": "r149999",
+      "ttfb_seconds": 33.24774720000278,
+      "body_seconds": 0.0205121999970288,
+      "json_decode_seconds": 0.0213737999984005,
+      "bytes": 925447,
+      "records": 5000
+    },
+    {
+      "at": 1792395276.0273547,
+      "kind": "entities",
+      "limit": 5000,
+      "after": null,
+      "ttfb_seconds": 33.24633040000117,
+      "body_seconds": 0.004065400000399677,
+      "json_decode_seconds": 0.021152500001335284,
+      "bytes": 984335,
+      "records": 5000
+    }
+  ],
+  "slow_start_interval_seconds": 60.41217517852783,
+  "current_records_sql_sha256": "76232cb0fd56cddaad98d3ae9db3257a2beea40a9c1b5629a5580ac575c46f20",
+  "slow_windows": [
+    {
+      "start": 1792395215.6151795,
+      "ttfb_seconds": 33.24774720000278,
+      "observation_samples": 201,
+      "samples_without_active_queries": 157,
+      "exact_current_records_fingerprint_observations": 43,
+      "max_observed_current_records_query_seconds": 8.29523,
+      "wait_events": {
+        "ClientWrite": 37,
+        "None": 5,
+        "DataFileRead": 1
+      }
+    },
+    {
+      "start": 1792395276.0273547,
+      "ttfb_seconds": 33.24633040000117,
+      "observation_samples": 200,
+      "samples_without_active_queries": 157,
+      "exact_current_records_fingerprint_observations": 42,
+      "max_observed_current_records_query_seconds": 7.680384,
+      "wait_events": {
+        "ClientWrite": 37,
+        "None": 3,
+        "DataFileRead": 2
+      }
+    }
+  ],
+  "page_plans": [
+    {
+      "after": null,
+      "limit": 5000,
+      "execution_ms": 165.884,
+      "plan": {
+        "Node Type": "Limit",
+        "Actual Rows": 5001.0,
+        "Actual Loops": 1,
+        "children": [
+          {
+            "Node Type": "Index Scan",
+            "Index Name": "versions_visible_graph_keyset",
+            "Actual Rows": 5001.0,
+            "Actual Loops": 1,
+            "children": [
+              {
+                "Node Type": "Index Only Scan",
+                "Index Name": "versions_visible_graph_keyset",
+                "Actual Rows": 1.0,
+                "Actual Loops": 5001,
+                "Heap Fetches": 0
+              },
+              {
+                "Node Type": "Index Only Scan",
+                "Index Name": "versions_visible_graph_keyset",
+                "Actual Rows": 1.0,
+                "Actual Loops": 5001,
+                "Heap Fetches": 0
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "after": null,
+      "limit": 10000,
+      "execution_ms": 292.819,
+      "plan": {
+        "Node Type": "Limit",
+        "Actual Rows": 10001.0,
+        "Actual Loops": 1,
+        "children": [
+          {
+            "Node Type": "Index Scan",
+            "Index Name": "versions_visible_graph_keyset",
+            "Actual Rows": 10001.0,
+            "Actual Loops": 1,
+            "children": [
+              {
+                "Node Type": "Index Only Scan",
+                "Index Name": "versions_visible_graph_keyset",
+                "Actual Rows": 1.0,
+                "Actual Loops": 10001,
+                "Heap Fetches": 0
+              },
+              {
+                "Node Type": "Index Only Scan",
+                "Index Name": "versions_visible_graph_keyset",
+                "Actual Rows": 1.0,
+                "Actual Loops": 10001,
+                "Heap Fetches": 0
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "after": [
+        "r149999",
+        1
+      ],
+      "limit": 5000,
+      "execution_ms": 202.93,
+      "plan": {
+        "Node Type": "Limit",
+        "Actual Rows": 5001.0,
+        "Actual Loops": 1,
+        "children": [
+          {
+            "Node Type": "Index Scan",
+            "Index Name": "versions_visible_graph_keyset",
+            "Actual Rows": 5001.0,
+            "Actual Loops": 1,
+            "children": [
+              {
+                "Node Type": "Index Only Scan",
+                "Index Name": "versions_visible_graph_keyset",
+                "Actual Rows": 1.0,
+                "Actual Loops": 5001,
+                "Heap Fetches": 0
+              },
+              {
+                "Node Type": "Index Only Scan",
+                "Index Name": "versions_visible_graph_keyset",
+                "Actual Rows": 1.0,
+                "Actual Loops": 5001,
+                "Heap Fetches": 0
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "after": [
+        "r149999",
+        1
+      ],
+      "limit": 10000,
+      "execution_ms": 337.194,
+      "plan": {
+        "Node Type": "Limit",
+        "Actual Rows": 10001.0,
+        "Actual Loops": 1,
+        "children": [
+          {
+            "Node Type": "Index Scan",
+            "Index Name": "versions_visible_graph_keyset",
+            "Actual Rows": 10001.0,
+            "Actual Loops": 1,
+            "children": [
+              {
+                "Node Type": "Index Only Scan",
+                "Index Name": "versions_visible_graph_keyset",
+                "Actual Rows": 1.0,
+                "Actual Loops": 10001,
+                "Heap Fetches": 0
+              },
+              {
+                "Node Type": "Index Only Scan",
+                "Index Name": "versions_visible_graph_keyset",
+                "Actual Rows": 1.0,
+                "Actual Loops": 10001,
+                "Heap Fetches": 0
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "root_cause": {
+    "maintenance_interval_seconds": 60,
+    "code": "ProjectionWorker.audit_project -> Repository.read_snapshot -> Repository._transaction global RLock -> current_records full payload fetch/decoding",
+    "scheduling": "run_once schedules next audit from the monotonic time captured before auditing",
+    "proposed_repair": "Independent read-only compact ID/version manifest; hydrate only captured repair version IDs in bounded batches; keep lease and sequence checks before writes"
+  },
+  "compact_authority_readonly_measurements": [
+    {
+      "seconds": 2.825638700000127,
+      "sequence": 0,
+      "identities": 450000,
+      "primary_reads_during_scan": 77,
+      "max_primary_read_seconds": 0.1586764999992738
+    },
+    {
+      "seconds": 2.5122439000006125,
+      "sequence": 0,
+      "identities": 450000,
+      "primary_reads_during_scan": 69,
+      "max_primary_read_seconds": 0.20292590000099153
+    }
+  ],
+  "repair": {
+    "files": [
+      "knowledge_service/repository/pg_engine.py",
+      "knowledge_service/repository/core.py",
+      "knowledge_service/repository/projection_authority.py",
+      "knowledge_service/services/projection_runtime.py"
+    ],
+    "keeps_periodic_audit": true,
+    "uses_independent_repeatable_read_read_only_connection": true,
+    "loads_payload_only_for_captured_repair_version_ids": true,
+    "repair_batch_size": 256,
+    "preserves_deleted_falsy_and_audit_flag_semantics": true,
+    "rechecks_maintenance_lease_and_project_watermark_before_external_write": true,
+    "aborts_if_captured_version_is_not_current": true
+  },
+  "regression_validation": {
+    "initial_new_regressions_failed_before_fix": 4,
+    "final_targeted_passed": 20,
+    "final_targeted_failed": 0,
+    "test_files": [
+      "tests/service/test_projection_audit_reads.py",
+      "tests/service/test_projection_runtime.py",
+      "tests/service/test_projection_authority_bundle.py"
+    ],
+    "scope_note": "Separate expanded integration-seams run had two pre-existing fake Encoder.semantic guard failures; reported to parent without altering retrieval guards. Real product end-to-end remeasurement belongs to the parent task."
+  }
+}

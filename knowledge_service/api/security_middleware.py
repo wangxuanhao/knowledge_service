@@ -28,6 +28,7 @@ import re
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from ..core.security import TokenError, credential_fingerprint, decode_access_token
 
@@ -37,6 +38,7 @@ LOG = logging.getLogger('knowledge_service')
 PUBLIC_API_PATHS = frozenset({
     '/api/health',
     '/api/auth/login',
+    '/api/auth/policy',
 })
 
 # 「不需要管理员」的 POST 白名单：命中其中任一模式的 POST，viewer 也可以访问。
@@ -47,12 +49,17 @@ _READ_ONLY_POST_PATTERNS = (
     # ── auth.py：改自己的口令（任何已登录用户都可做）──
     r'^/api/auth/password$',
     # ── knowledge.py：检索 / 问答 / 图谱 / 查询 / 校验 / SPARQL ──
-    r'^/api/projects/[^/]+/records/query$',
+    r'^/api/projects/[^/]+/records/page$',
+    r'^/api/projects/[^/]+/assertions/batch$',
     r'^/api/projects/[^/]+/search$',
     r'^/api/projects/[^/]+/qa$',
     r'^/api/projects/[^/]+/qa/stream$',
     r'^/api/projects/[^/]+/graph$',
     r'^/api/projects/[^/]+/graph/semantica$',
+    r'^/api/projects/[^/]+/graph-sessions$',
+    r'^/api/projects/[^/]+/graph-sessions/[^/]+/page$',
+    r'^/api/projects/[^/]+/graph-neighborhood$',
+    r'^/api/projects/[^/]+/merge/preview$',
     r'^/api/projects/[^/]+/sparql$',
     r'^/api/projects/[^/]+/ontology/validate$',
     # ── parity.py：各类只读视图与「预览/干跑」（不落库）──
@@ -163,7 +170,7 @@ def install_auth_middleware(app, *, users, jwt_secret: str):
 
         # 3) 回查数据库：token 有效不代表账号仍有效（可能登录后被禁用/删除，
         #    也可能口令已被改或被管理员重置 —— 后者靠令牌里的口令指纹识别）。
-        row = users.get_by_id(payload.get('sub'))
+        row = await run_in_threadpool(users.get_for_authentication, payload.get('sub'))
         if row is None or not row['is_active']:
             return _unauthorized('账号不可用或已被禁用', code='account_disabled')
         if payload.get('pw') != credential_fingerprint(row['password_hash']):

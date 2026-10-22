@@ -1,0 +1,12 @@
+{
+  "observed_utc": "2026-10-21T04:50:30.731Z",
+  "url": "http://127.0.0.1:8100/#projects",
+  "project_id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+  "project_name": "容量验收 · 15万实体 / 30万关系（保留测试）",
+  "entities": 150001,
+  "relations": 300000,
+  "project_card_visible": true,
+  "frontend_initialization_error": "syncGeneratedIri is not defined",
+  "screenshot": "2026-10-21-capacity-retained-project.jpg",
+  "temporary_audit_widget_absent": true
+}

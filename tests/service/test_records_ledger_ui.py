@@ -72,6 +72,7 @@ SHELL = """<!doctype html><html><head><meta charset="utf-8"></head><body>
   };
   window.wb.clearVersionContext=()=>window.wb.setVersionContext();
   window.current='p1';
+  window.Auth={isAdmin:()=>true};
   window.$=id=>document.getElementById(id);
   window.esc=value=>String(value===undefined||value===null?'':value);
   // 真实 app 里 typeHint 把类型 IRI 翻成中文标签；这里取末段就够用了，而且属实行要能读出「属性名 = 值」。
@@ -153,6 +154,11 @@ MOCKS = r"""() => {
       ontology_id:null,version:1,recorded_at:'2026-10-01T09:00:00Z',valid_from:null,valid_until:null,
       properties:{},metadata:{source_file:'价格说明.md',title:'价格说明.md'}},
   ];
+  const assertions = [
+    {id:'assert-1',canonical_record_id:null,status:'pending'},
+    {id:'assert-2',canonical_record_id:'e1',status:'accepted'},
+    {id:'assert-3',canonical_record_id:'e3',status:'accepted'},
+  ];
   const original = window.fetch;
   window.fetch = async (input,options={}) => {
     const url = typeof input === 'string' ? input : input.url;
@@ -165,24 +171,36 @@ MOCKS = r"""() => {
       if(window.mockFailSide==='history') return new Response('{"error":"history boom"}',{status:500,headers:{'Content-Type':'application/json'}});
       return payload({versions:window.historyRevisions});
     }
-    if(parsed.pathname.endsWith('/records/query')) {
+    if(parsed.pathname.endsWith('/records/page')) {
       const body = JSON.parse(options.body||'{}');
       window.recordQueryBodies.push(body);
-      const filtered = body.ontology_scope==='ids'
+      let filtered = body.ontology_scope==='ids'
         ? records.filter(row=>(body.ontology_ids||[]).includes(row.ontology_id))
         : body.ontology_scope==='unknown'
           ? records.filter(row=>!row.ontology_id||!['o1','o2','o2-note'].includes(row.ontology_id))
           : records;
-      return payload({total:filtered.length,records:filtered});
+      filtered=filtered.filter(row=>(!body.kinds?.length||body.kinds.includes(row.kind))&&(!body.query||(row.id+' '+row.text).includes(body.query)));
+      const offset=Number(body.cursor||0),limit=body.limit||50;
+      return payload({total:filtered.length,records:filtered.slice(offset,offset+limit),next_cursor:offset+limit<filtered.length?String(offset+limit):null});
     }
+    const recordId=parsed.pathname.match(/\/records\/([^/]+)$/)?.[1];
+    if(recordId)return payload(records.find(row=>row.id===decodeURIComponent(recordId))||{});
     if(parsed.pathname.endsWith('/ontologies')) return payload({versions:[
       {id:'o1',version:1,version_reused:false,created_at:'2026-01-01T00:00:00Z'},
       {id:'o2',version:2,version_reused:false,created_at:'2026-02-01T00:00:00Z'},
       {id:'o2-note',version:2,version_reused:true,created_at:'2026-03-01T00:00:00Z'}]});
-    if(parsed.pathname.endsWith('/assertions')) return payload({total:3,assertions:[
-      {id:'assert-1',canonical_record_id:null,status:'pending'},
-      {id:'assert-2',canonical_record_id:'e1',status:'accepted'},
-      {id:'assert-3',canonical_record_id:'e3',status:'accepted'}]});
+    if(parsed.pathname.endsWith('/assertions/batch')) {
+      const body=JSON.parse(options.body||'{}');
+      const assertions_by_record=Object.fromEntries([...new Set(body.record_ids||[])].map(id=>{
+        const metadata=records.find(row=>row.id===id)?.metadata||{};
+        const candidates=new Set([metadata.discovery_candidate_id,...(metadata.discovery_candidate_ids||[])].filter(Boolean));
+        // One filter over the stored assertions preserves both associations
+        // without counting an assertion twice when both point to this record.
+        return [id,assertions.filter(item=>item.canonical_record_id===id||candidates.has(item.id))];
+      }));
+      return payload({assertions_by_record,total:Object.values(assertions_by_record).reduce((sum,items)=>sum+items.length,0),truncated_record_ids:[]});
+    }
+    if(parsed.pathname.endsWith('/assertions')) return payload({total:3,assertions:assertions.filter(item=>item.canonical_record_id===parsed.searchParams.get('canonical_record_id')||parsed.searchParams.getAll('assertion_ids').includes(item.id))});
     if(parsed.pathname.endsWith('/duplicate-groups')) {
       if(window.mockFailSide==='duplicate-groups') return new Response('{"error":"boom"}',{status:500,headers:{'Content-Type':'application/json'}});
       return payload({groups:[
@@ -234,11 +252,14 @@ def page(ledger_browser):
     pg.add_style_tag(path=str(WEB / 'style.css'))
     pg.add_style_tag(path=str(WEB / 'workspace.css'))
     pg.add_script_tag(path=str(WEB / 'record-version-context.js'))
+    pg.add_script_tag(path=str(WEB / 'record-attribute-editor.js'))
+    pg.add_script_tag(path=str(WEB / 'record-create.js'))
     pg.add_script_tag(path=str(WEB / 'records-view.js'))
     pg.click('[data-tab="records"]')
     pg.wait_for_selector('.ledger-kpi', timeout=10000)
-    pg.wait_for_function("() => [...document.querySelectorAll('.ledger-kpi b')].every(node => node.textContent.trim() !== '—')",
+    pg.wait_for_function("() => [...document.querySelectorAll('.ledger-kpi:not([data-ledger-kpi=duplicates]) b')].every(node => node.textContent.trim() !== '—')",
                          timeout=10000)
+    pg.wait_for_function("() => !document.getElementById('records').hasAttribute('aria-busy') || document.getElementById('records').getAttribute('aria-busy')==='false'")
     pg.set_default_timeout(5000)
     pg._errors = errors
     yield pg
@@ -273,6 +294,12 @@ def headers(page):
     return [cell.inner_text().strip() for cell in page.query_selector_all('.record-library thead th')]
 
 
+def select_view(page, kind):
+    page.click(f'[data-ledger-view="{kind}"]')
+    page.wait_for_selector(f'table.ledger-{kind}')
+    page.wait_for_function("() => document.getElementById('records').getAttribute('aria-busy')==='false'")
+
+
 def test_ledger_speaks_its_scope_and_names_the_other_pages(page):
     """一句话边界：这里管具体的东西；改分类、审结构都去「本体建模层」。"""
     intro = page.inner_text('.ledger-intro')
@@ -281,6 +308,8 @@ def test_ledger_speaks_its_scope_and_names_the_other_pages(page):
 
 
 def test_top_numbers_come_from_the_server_not_from_guesswork(page):
+    page.click('.ledger-kpi[data-ledger-kpi="duplicates"]')
+    page.wait_for_function("() => document.querySelector('[data-ledger-kpi=duplicates] b').textContent==='1'")
     numbers = kpis(page)
     assert numbers['entity'].startswith('3') and '实体' in numbers['entity']
     assert numbers['relation'].startswith('1') and '关系' in numbers['relation']
@@ -298,11 +327,11 @@ def test_four_views_are_tabs_and_switch_the_columns(page):
     tabs = [node.inner_text().strip() for node in page.query_selector_all('.ledger-tab')]
     assert tabs == ['实体', '关系', '属性', '原文片段']
     assert headers(page) == ['名称', '本体类型', '本体归属', '知识修订', '关联断言', '操作']
-    page.click('.ledger-tab:nth-child(2)')
+    select_view(page, 'relation')
     assert headers(page) == ['关系', '关系类型', '本体归属', '知识修订', '关联断言', '操作']
-    page.click('.ledger-tab:nth-child(3)')
+    select_view(page, 'attribute')
     assert headers(page) == ['属性', '所属实体', '本体归属', '知识修订', '关联断言', '操作']
-    page.click('.ledger-tab:nth-child(4)')
+    select_view(page, 'chunk')
     assert headers(page) == ['原文片段', '来源文档', '知识修订', '关联断言', '操作']
 
 
@@ -311,7 +340,7 @@ def test_attribute_view_reads_predicate_subject_and_value(page):
 
     属性本身不是图上的点，所以「在图谱定位」转发的是它所属实体（与关系行转发 subject_id 同一条规矩）。
     """
-    page.click('.ledger-tab:nth-child(3)')
+    select_view(page, 'attribute')
     rows = ledger_rows(page)
     assert len(rows) == 1, rows
     assert rows[0]['name'] == '重量 = 12', rows[0]['name']
@@ -376,6 +405,8 @@ def test_ontology_history_navigation_preselects_the_ledger_filter(page):
 
 
 def test_record_revision_and_migration_status_are_truthful(page):
+    page.get_by_role('button',name='检查本体归属',exact=True).click()
+    page.wait_for_function("() => document.querySelector('.ledger-migration-badge').textContent==='待迁移'")
     rows = ledger_rows(page)
     old = next(item for item in rows if item['name'] == '价格说明' and '本体 v1' in item['cells'][2].inner_text())
     assert '修订 r4' in old['row'].inner_text()
@@ -388,23 +419,22 @@ def test_record_revision_and_migration_status_are_truthful(page):
     assert '待迁移' not in current['row'].inner_text()
     assert '迁移阻塞' not in current['row'].inner_text()
 
-    page.click('.ledger-tab:nth-child(2)')
+    select_view(page, 'relation')
     relation = ledger_rows(page)[0]
     assert '修订 r2' in relation['row'].inner_text()
     assert '迁移阻塞' in relation['row'].inner_text()
 
 
 def test_missing_ontology_and_unavailable_plan_are_explicit(page):
-    page.click('.ledger-tab:nth-child(4)')
+    select_view(page, 'chunk')
     assert '未知本体' in ledger_rows(page)[0]['row'].inner_text()
 
     page.evaluate("() => { window.mockFailSide = 'reclassify'; }")
     page.click('#load-records')
-    page.wait_for_function("() => document.querySelector('.ledger-kpi[data-ledger-kpi=duplicates] b').textContent.trim() !== '—'",
-                           timeout=10000)
-    page.click('.ledger-tab:nth-child(1)')
+    page.wait_for_function("() => document.getElementById('records').getAttribute('aria-busy')==='false'",timeout=10000)
+    select_view(page, 'entity')
     old = next(item for item in ledger_rows(page) if item['name'] == '价格说明' and '本体 v1' in item['cells'][2].inner_text())
-    assert '迁移状态未知' in old['row'].inner_text()
+    assert '迁移状态未检查' in old['row'].inner_text()
 
 
 def test_revision_timeline_orders_immutable_revisions_and_resolves_ontology(revision_page):
@@ -470,6 +500,8 @@ def test_linked_assertions_show_review_state_without_claiming_all_are_support(pa
 
 
 def test_undo_is_reachable_and_hits_the_undo_endpoint(page):
+    page.get_by_role('button',name='读取操作历史',exact=True).click()
+    page.wait_for_selector('.ledger-operation')
     section = page.inner_text('#ledger-operations')
     assert '可撤销的操作' in section and '合并实体' in section
     page.click('[data-undo-operation="op1"]')
@@ -485,6 +517,8 @@ def test_operations_list_is_newest_first_and_says_how_many(page):
 
     这条来自真机：一次验收下来列表里堆了十几条，"哪条才是刚做的那个动作"看不出来。
     """
+    page.get_by_role('button',name='读取操作历史',exact=True).click()
+    page.wait_for_selector('.ledger-operation')
     rows = [row.inner_text().replace('\n', ' ') for row in page.query_selector_all('.ledger-operation')]
     assert len(rows) == 2, rows
     assert rows[0].startswith('软删除'), f'最新的（delete 2026-10-02）必须排在最上面：{rows}'
@@ -515,7 +549,7 @@ def test_merge_preview_states_the_impact_before_confirming(page):
     preview = page.inner_text('.governance-merge-preview')
     assert '影响面' in preview and '条关系' in preview
     assert '关联断言' in preview and '原文断言' not in preview
-    assert '已读的' in preview, '影响面要说清是按哪些记录统计出来的'
+    assert '仅当前页' in preview, '当前页参考不能冒充完整服务端预检'
     assert page.is_disabled('#merge-entities') is True        # 还没勾确认
     page.check('#merge-confirm')
     assert page.is_disabled('#merge-entities') is False
@@ -525,11 +559,14 @@ def test_ledger_never_blanks_the_table_when_a_side_request_fails(page):
     """旁数据（本体版本 / 断言 / 操作 / 分组）任一读不到，表格也不能消失 —— 那一格如实写"还没读到"。"""
     page.evaluate("() => { window.mockFailSide = 'duplicate-groups'; }")
     page.click('#load-records')
+    page.wait_for_function("() => document.getElementById('records').getAttribute('aria-busy')==='false'")
+    page.click('.ledger-kpi[data-ledger-kpi="duplicates"]')
     page.wait_for_function("() => document.querySelector('.ledger-kpi[data-ledger-kpi=duplicates] b').textContent.trim() === '—'",
                            timeout=10000)
     assert page.query_selector_all('.record-library tbody tr'), '分组接口挂了，表格也不能消失'
     assert page.evaluate("() => window.__errors === undefined")
-    assert page.evaluate("() => window.__status === undefined"), '读取失败不该弹一条假成功回执'
+    page.wait_for_function("() => (window.__status?.message||'').includes('治理信息读取失败')")
+    assert page.evaluate("() => window.__status.isError"), '显式读取失败应报告失败，不能显示成功'
 
 
 # —— D1「台账 ⇄ 图谱双向直达」的浏览器契约 ——
@@ -547,14 +584,14 @@ def test_entity_row_locate_button_forwards_the_entity_id_to_the_graph(page):
 
 
 def test_relation_row_locate_button_forwards_the_subject_entity(page):
-    page.click('.ledger-tab:nth-child(2)')          # 切到「关系」视角，只有 r1 一行
+    select_view(page, 'relation')          # 切到「关系」视角，只有 r1 一行
     assert page.query_selector_all('[data-locate-graph="e1"]'), '关系行应转发 subject_id（e1）而不是关系自身 id'
     page.click('[data-locate-graph="e1"]')
     assert page.evaluate("() => window.__graphLocated") == 'e1'
 
 
 def test_chunk_rows_have_no_locate_button(page):
-    page.click('.ledger-tab:nth-child(4)')          # 「原文片段」不是图谱节点，不该给「在图谱定位」
+    select_view(page, 'chunk')          # 「原文片段」不是图谱节点，不该给「在图谱定位」
     assert page.query_selector_all('[data-locate-graph]') == []
 
 
@@ -564,4 +601,4 @@ def test_focus_ledger_record_locates_and_highlights_the_row(page):
     page.wait_for_selector('tr.ledger-row-located[data-record-id="e2"]', timeout=5000)
     assert page.evaluate("() => document.querySelector('[data-record-id=e2]')") is not None
     # 定位要清掉上一次搜索，否则目标行可能被过滤掉、找不到。
-    assert page.input_value('#record-search') == ''
+    assert page.input_value('#record-search') == 'e2'

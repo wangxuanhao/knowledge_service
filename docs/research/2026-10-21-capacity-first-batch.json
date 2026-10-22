@@ -1,0 +1,289 @@
+{
+  "schema": "capacity-audit-v1",
+  "source": "opt-in passive product instrumentation",
+  "running": true,
+  "started_utc": "2026-10-21T03:42:14.181Z",
+  "updated_utc": "2026-10-21T03:43:12.685Z",
+  "timing_definitions": {
+    "first_visible": "begin invocation to next visible rAF after a nonempty complete draw of the current partial dataset",
+    "first_batch": "begin invocation to its original promise resolving",
+    "all_loaded": "begin invocation to loader state complete",
+    "all_drawn": "begin invocation to final draw, unique-ID audit and one GL error probe",
+    "active_frames": "visible rAF intervals inside 500 ms after trusted canvas pointer/wheel/key input",
+    "selection": "trusted pointerdown/click to next visible rAF with the selected record identity in #graph-detail; source/version follow-up requests excluded"
+  },
+  "elapsed_seconds": 58.503,
+  "visible_seconds": 58.503,
+  "hidden_seconds": 0,
+  "current_visibility": "visible",
+  "mode": "full",
+  "loader_state": "paused",
+  "current": {
+    "loaded_entities": 401,
+    "loaded_relations": 400,
+    "drawn_entities": 401,
+    "drawn_relations": 400,
+    "relation_layer": "complete-world-cache",
+    "cached_relations": 400,
+    "layout": "stable-id-v1",
+    "last_pick_ms": 0,
+    "gpu": "WebKit WebGL",
+    "context_lost": false
+  },
+  "completed_loads": 0,
+  "loads": [
+    {
+      "number": 1,
+      "state": "paused",
+      "phase": "connected",
+      "manifest": {
+        "entities": 150001,
+        "relations": 300000,
+        "project_id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f"
+      },
+      "first_batch_ms": 5119,
+      "first_visible_ms": 5145,
+      "all_loaded_ms": null,
+      "all_drawn_ms": null,
+      "complete": false,
+      "resume_calls": 0,
+      "next_calls": 1,
+      "draw_calls": 3,
+      "sync_calls": 2,
+      "resume_ms": null,
+      "elapsed_ms": 57583.1
+    }
+  ],
+  "load_distribution": {
+    "first_visible": {
+      "count": 0,
+      "retained": 0,
+      "retention": "most recent samples",
+      "min_ms": null,
+      "max_ms": null,
+      "mean_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "p99_ms": null
+    },
+    "first_batch": {
+      "count": 0,
+      "retained": 0,
+      "retention": "most recent samples",
+      "min_ms": null,
+      "max_ms": null,
+      "mean_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "p99_ms": null
+    },
+    "all_loaded": {
+      "count": 0,
+      "retained": 0,
+      "retention": "most recent samples",
+      "min_ms": null,
+      "max_ms": null,
+      "mean_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "p99_ms": null
+    },
+    "all_drawn": {
+      "count": 0,
+      "retained": 0,
+      "retention": "most recent samples",
+      "min_ms": null,
+      "max_ms": null,
+      "mean_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "p99_ms": null
+    }
+  },
+  "frames": {
+    "active": {
+      "count": 0,
+      "retained": 0,
+      "retention": "most recent samples",
+      "min_ms": null,
+      "max_ms": null,
+      "mean_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "p99_ms": null
+    },
+    "idle": {
+      "count": 3479,
+      "retained": 3479,
+      "retention": "most recent samples",
+      "min_ms": 14.5,
+      "max_ms": 146,
+      "mean_ms": 16.81,
+      "p50_ms": 16.7,
+      "p95_ms": 16.9,
+      "p99_ms": 17.3
+    },
+    "trusted_input_events": {
+      "pointerdown": 0,
+      "pointermove": 0,
+      "pointerup": 0,
+      "wheel": 0,
+      "keydown": 0
+    },
+    "interaction_windows": 0,
+    "quiet_window_ms": 500
+  },
+  "renderer_calls": {
+    "scope": "CPU method wall time; GPU completion time is unavailable",
+    "draw": {
+      "count": 3,
+      "retained": 3,
+      "retention": "most recent samples",
+      "min_ms": 0.6,
+      "max_ms": 8.2,
+      "mean_ms": 3.8,
+      "p50_ms": 2.6,
+      "p95_ms": 8.2,
+      "p99_ms": 8.2
+    },
+    "sync": {
+      "count": 2,
+      "retained": 2,
+      "retention": "most recent samples",
+      "min_ms": 0.7,
+      "max_ms": 0.7,
+      "mean_ms": 0.7,
+      "p50_ms": 0.7,
+      "p95_ms": 0.7,
+      "p99_ms": 0.7
+    }
+  },
+  "selection": {
+    "latency": {
+      "count": 0,
+      "retained": 0,
+      "retention": "most recent samples",
+      "min_ms": null,
+      "max_ms": null,
+      "mean_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "p99_ms": null
+    },
+    "attempts": 0,
+    "empty_picks": 0,
+    "timeouts": 0,
+    "pending": false
+  },
+  "longtasks": {
+    "available": true,
+    "durations": {
+      "count": 1,
+      "retained": 1,
+      "retention": "most recent samples",
+      "min_ms": 160,
+      "max_ms": 160,
+      "mean_ms": 160,
+      "p50_ms": 160,
+      "p95_ms": 160,
+      "p99_ms": 160
+    }
+  },
+  "memory": {
+    "source": "performance.memory.usedJSHeapSize",
+    "first_js_heap_bytes": 15727975,
+    "last_js_heap_bytes": 11286401,
+    "max_js_heap_bytes": 16343026,
+    "browser_rss": "unavailable from product JavaScript",
+    "cdp_metrics": "not collected"
+  },
+  "stability": {
+    "evidence_samples": 19,
+    "complete_graph_checks": 0,
+    "count_mismatch_checks": 0,
+    "context_lost_events": 0,
+    "context_restored_events": 0,
+    "errors": []
+  },
+  "http": {
+    "available": true,
+    "scope": "same-origin /api ResourceTiming entries observed since measurement start; no headers or response bodies",
+    "count": 2,
+    "transfer_bytes": 153972,
+    "duration": {
+      "count": 2,
+      "retained": 2,
+      "retention": "most recent samples",
+      "min_ms": 776.6,
+      "max_ms": 4246.1,
+      "mean_ms": 2511.35,
+      "p50_ms": 776.6,
+      "p95_ms": 4246.1,
+      "p99_ms": 4246.1
+    },
+    "groups": [
+      {
+        "path": "/api/projects/:project/graph-sessions",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 4246.1,
+          "max_ms": 4246.1,
+          "mean_ms": 4246.1,
+          "p50_ms": 4246.1,
+          "p95_ms": 4246.1,
+          "p99_ms": 4246.1
+        },
+        "transfer_bytes": 724,
+        "statuses": {
+          "200": 1
+        }
+      },
+      {
+        "path": "/api/projects/:project/graph-sessions/:session/page",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 776.6,
+          "max_ms": 776.6,
+          "mean_ms": 776.6,
+          "p50_ms": 776.6,
+          "p95_ms": 776.6,
+          "p99_ms": 776.6
+        },
+        "transfer_bytes": 153248,
+        "statuses": {
+          "200": 1
+        }
+      }
+    ],
+    "recent": [
+      {
+        "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/graph-sessions",
+        "duration_ms": 4246.1,
+        "transfer_bytes": 724,
+        "encoded_bytes": 424,
+        "decoded_bytes": 424,
+        "status": 200,
+        "initiator": "fetch"
+      },
+      {
+        "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/graph-sessions/d1b638c6-31b5-4763-8fc0-526b99fd2563/page",
+        "duration_ms": 776.6,
+        "transfer_bytes": 153248,
+        "encoded_bytes": 152948,
+        "decoded_bytes": 152948,
+        "status": 200,
+        "initiator": "fetch"
+      }
+    ]
+  },
+  "overhead": {
+    "instrumentation_ms_observed": 21.6,
+    "scope": "Opt-in wrappers; one extra visible rAF loop; 250 ms discovery; DOM JSON at most every 2 seconds; exact one-time O(entities + relations) audit per completed load; one GL error consumption per completed load. Percentiles use bounded recent samples; min/mean/max/count cover all observations. Overhead includes measured report/audit work only, not all observer overhead.",
+    "raw_numeric_sample_cap": 194248,
+    "max_retained_loads": 20
+  }
+}

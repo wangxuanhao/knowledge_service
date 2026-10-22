@@ -32,7 +32,6 @@ def create_draft(client, project_id, ontology, **overrides):
         'base_ontology_id': ontology['id'],
         'source_kind': 'manual',
         'title': 'Workbench draft',
-        'actor': 'architect@example.test',
     }
     body.update(overrides)
     response = client.post(
@@ -167,7 +166,7 @@ def test_create_list_get_command_close_and_required_revision(workbench):
         client, project_id, ontology, title='Disposable')
     closed = client.post(
         f"/api/projects/{project_id}/ontology-drafts/{disposable['id']}/close",
-        json={'expected_revision': 1, 'actor': 'owner', 'reason': 'obsolete'})
+        json={'expected_revision': 1, 'reason': 'obsolete'})
     assert closed.status_code == 200
     assert closed.json()['status'] == 'rejected'
 
@@ -223,7 +222,6 @@ def test_validation_submit_decision_and_idempotent_publish(workbench):
             'expected_ontology_id': ontology['id'],
             'validation_fingerprint': submitted['validation_fingerprint'],
             'acknowledged_warning_codes': warnings,
-            'actor': 'reviewer@example.test',
             'decisions': [{
                 'operation_id': operation['id'],
                 'operation_fingerprint': operation['fingerprint'],
@@ -240,7 +238,6 @@ def test_validation_submit_decision_and_idempotent_publish(workbench):
         'validation_fingerprint': reviewed['validation_fingerprint'],
         'acknowledged_warning_codes': warnings,
         'idempotency_key': 'publish-api-test-1',
-        'actor': 'publisher@example.test',
         'note': '用例：接口发布与幂等重放',
     }
     first = client.post(
@@ -338,7 +335,7 @@ def test_validation_failure_and_batch_policy_are_stable_422(workbench):
             'expected_ontology_id': ontology['id'],
             'validation_fingerprint': submitted['validation_fingerprint'],
             'acknowledged_warning_codes': warnings,
-            'actor': 'reviewer', 'decisions': decisions,
+            'decisions': decisions,
         })
     assert rejected_batch.status_code == 422
     assert rejected_batch.json()['code'] == 'batch_not_allowed'
@@ -501,7 +498,6 @@ def test_one_click_review_approves_only_auto_approvable_and_reports_the_rest(
             'expected_ontology_id': ontology['id'],
             'validation_fingerprint': submitted['validation_fingerprint'],
             'acknowledged_warning_codes': [],
-            'actor': 'reviewer@workbench',
         })
     assert response.status_code == 200, response.text
     payload = response.json()
@@ -541,7 +537,6 @@ def test_one_click_review_is_stale_revision_safe(workbench):
             'expected_ontology_id': ontology['id'],
             'validation_fingerprint': submitted['validation_fingerprint'],
             'acknowledged_warning_codes': [],
-            'actor': 'reviewer@workbench',
         })
     assert response.status_code == 409
     assert response.json()['code'] == 'revision_conflict'
@@ -704,7 +699,6 @@ def test_stage_availability_is_the_single_source_of_truth_for_the_gate(workbench
             'expected_ontology_id': ontology['id'],
             'validation_fingerprint': confirmed['validation_fingerprint'],
             'acknowledged_warning_codes': warnings,
-            'actor': 'reviewer@example.test',
             'decisions': [{
                 'operation_id': operation['id'],
                 'operation_fingerprint': operation['fingerprint'],
@@ -762,7 +756,6 @@ def test_terminal_draft_locks_every_stage_but_discover(workbench):
             'expected_ontology_id': ontology['id'],
             'validation_fingerprint': submitted['validation_fingerprint'],
             'acknowledged_warning_codes': warnings,
-            'actor': 'reviewer@example.test',
             'decisions': [{
                 'operation_id': operation['id'],
                 'operation_fingerprint': operation['fingerprint'],
@@ -778,7 +771,6 @@ def test_terminal_draft_locks_every_stage_but_discover(workbench):
             'validation_fingerprint': reviewed['validation_fingerprint'],
             'acknowledged_warning_codes': warnings,
             'idempotency_key': 'terminal-gate-test-1',
-            'actor': 'publisher@example.test',
             'note': '用例：终态门禁前的正常发布',
         })
     assert published.status_code == 200, published.text
@@ -812,7 +804,6 @@ def test_terminal_draft_locks_every_stage_but_discover(workbench):
             'validation_fingerprint': reviewed['validation_fingerprint'],
             'acknowledged_warning_codes': warnings,
             'idempotency_key': 'terminal-gate-test-2',
-            'actor': 'publisher@example.test',
             'note': '用例：终态草案不许再发',
         })
     # A3：写操作的门禁抛 DraftImmutable（code=draft_immutable）。它不属于"修订冲突/基线过期"
@@ -847,8 +838,7 @@ def test_terminal_draft_beside_editable_draft_still_locks_design(workbench):
     discarded = create_draft(client, project_id, ontology, title='要被关闭的那份')
     closed = client.post(
         f"/api/projects/{project_id}/ontology-drafts/{discarded['id']}/close",
-        json={'expected_revision': discarded['revision'], 'reason': '不做了',
-              'actor': 'architect@example.test'})
+        json={'expected_revision': discarded['revision'], 'reason': '不做了'})
     assert closed.status_code == 200, closed.text
     assert closed.json()['status'] == 'rejected'
 

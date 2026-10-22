@@ -1,4 +1,6 @@
 from fastapi.testclient import TestClient
+from ontology_seed import seed_ontology
+from knowledge_service.services.ontology import Ontology
 
 from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
@@ -29,7 +31,6 @@ def _approve_all_and_publish(client, base, proposal, ontology_id, key):
                 'expected_ontology_id': ontology_id,
                 'validation_fingerprint': submitted['validation_fingerprint'],
                 'acknowledged_warning_codes': warnings,
-                'actor': 'candidate-reviewer',
                 'decisions': [{
                     'operation_id': operation['id'],
                     'operation_fingerprint': operation['fingerprint'],
@@ -45,7 +46,7 @@ def _approve_all_and_publish(client, base, proposal, ontology_id, key):
             'expected_ontology_id': ontology_id,
             'validation_fingerprint': current['validation_fingerprint'],
             'acknowledged_warning_codes': warnings,
-            'idempotency_key': key, 'actor': 'publisher',
+            'idempotency_key': key,
             'note': '候选变更已核验，发布为版本',
         })
 
@@ -55,7 +56,7 @@ def test_candidate_proposal_creates_and_submits_governed_draft(tmp_path):
     with TestClient(app) as client:
         project=client.post('/api/projects',json={'name':'proposal','use_default_ontology':False}).json()['id']
         base='/api/projects/'+project
-        ontology=client.post(base+'/ontologies',json={'turtle':TTL}).json()
+        ontology=seed_ontology(app.state.service.repository,project,TTL,Ontology(TTL).summary())
         entities=client.post(base+'/records',json={'records':[
             {'id':'person-a','kind':'entity','type':'https://test/Person','text':'甲'},
             {'id':'person-b','kind':'entity','type':'https://test/Person','text':'乙'}]})
@@ -73,7 +74,9 @@ def test_candidate_proposal_creates_and_submits_governed_draft(tmp_path):
         assert created.status_code==201,created.text
         draft=created.json()
         assert draft['status']=='pending' and draft['impact']['linked_candidates']==1
-        assert draft['draft_id'] and draft['deprecation']['deprecated'] is True
+        assert draft['draft_id'] and 'deprecation' not in draft
+        context=app.state.service.ontology_drafts().get(project,draft['draft_id'])['source_context']
+        assert 'legacy_route' not in context and context['publication_effects']['kind']=='candidate'
         assert len(app.state.service.repository.list_ontologies(project))==1
         approved=client.post(base+'/ontology-change-proposals/'+draft['id']+'/decision',json={
             'action':'approve','note':'业务负责人确认','expected_revision':draft['revision'],
@@ -100,7 +103,6 @@ def test_candidate_proposal_creates_and_submits_governed_draft(tmp_path):
                     'expected_ontology_id':ontology['id'],
                     'validation_fingerprint':submitted['validation_fingerprint'],
                     'acknowledged_warning_codes':warnings,
-                    'actor':'candidate-reviewer',
                     'decisions':[{
                         'operation_id':operation['id'],
                         'operation_fingerprint':operation['fingerprint'],
@@ -114,7 +116,7 @@ def test_candidate_proposal_creates_and_submits_governed_draft(tmp_path):
                 'expected_ontology_id':ontology['id'],
                 'validation_fingerprint':current['validation_fingerprint'],
                 'acknowledged_warning_codes':warnings,
-                'idempotency_key':'candidate-publish-1','actor':'publisher',
+                'idempotency_key':'candidate-publish-1',
                 'note':'候选变更已核验，发布为版本',
             })
         assert published.status_code==200,published.text
@@ -132,7 +134,7 @@ def test_new_proposal_generates_unicode_iri_when_client_omits_it(tmp_path):
     with TestClient(app) as client:
         project=client.post('/api/projects',json={'name':'proposal','use_default_ontology':False}).json()['id']
         base='/api/projects/'+project
-        ontology=client.post(base+'/ontologies',json={'turtle':TTL}).json()
+        ontology=seed_ontology(app.state.service.repository,project,TTL,Ontology(TTL).summary())
         doc=app.state.service.repository.put_record(project,{'id':'doc','kind':'document','text':'平台规范',
             'metadata':{'status':'ready','review_candidates':[{'id':'c','kind':'entity','text':'平台规范',
                 'proposed_type':'规则文件','status':'pending'}]}})
@@ -152,7 +154,7 @@ def test_publish_revalidates_relation_after_endpoint_changes(tmp_path):
             'name': 'proposal-revalidation', 'use_default_ontology': False,
         }).json()['id']
         base = '/api/projects/' + project
-        ontology = client.post(base + '/ontologies', json={'turtle': ttl}).json()
+        ontology = seed_ontology(app.state.service.repository,project,ttl,Ontology(ttl).summary())
         created = client.post(base + '/records', json={'records': [
             {'id': 'person-a', 'kind': 'entity',
              'type': 'https://test/Person', 'text': '甲'},
@@ -205,7 +207,7 @@ def test_stale_or_rejected_proposal_never_changes_ontology(tmp_path):
     with TestClient(app) as client:
         project=client.post('/api/projects',json={'name':'proposal','use_default_ontology':False}).json()['id']
         base='/api/projects/'+project
-        ontology=client.post(base+'/ontologies',json={'turtle':TTL}).json()
+        ontology=seed_ontology(app.state.service.repository,project,TTL,Ontology(TTL).summary())
         doc=app.state.service.repository.put_record(project,{'id':'doc','kind':'document','text':'甲',
             'metadata':{'status':'ready','review_candidates':[{'id':'c','kind':'entity','text':'甲',
                 'proposed_type':'Worker','status':'pending'}]}})
@@ -228,7 +230,7 @@ def test_high_impact_adjustment_requires_explicit_confirmation(tmp_path):
     with TestClient(app) as client:
         project=client.post('/api/projects',json={'name':'impact','use_default_ontology':False}).json()['id']
         base='/api/projects/'+project
-        ontology=client.post(base+'/ontologies',json={'turtle':TTL}).json()
+        ontology=seed_ontology(app.state.service.repository,project,TTL,Ontology(TTL).summary())
         assert client.post(base+'/records',json={'records':[{'id':'p','kind':'entity','type':'https://test/Person','text':'甲'}]}).status_code==201
         doc=app.state.service.repository.put_record(project,{'id':'doc','kind':'document','text':'甲',
             'metadata':{'status':'ready','review_candidates':[{'id':'c','kind':'entity','text':'甲',

@@ -1,0 +1,109 @@
+{
+  "scope": "Actual authenticated HTTP PUT of the same governed entity in 150001 entities and 300000 relations",
+  "samples_per_variant": 1,
+  "before": {
+    "label": "before",
+    "entities": 150001,
+    "relations": 300000,
+    "seconds": 144.093,
+    "status": 200,
+    "before_version": 2,
+    "after_version": 3,
+    "workload": "one governed record revision through real authenticated HTTP; no unrelated pytest or browser workload"
+  },
+  "after": {
+    "label": "after",
+    "entities": 150001,
+    "relations": 300000,
+    "seconds": 125.454,
+    "status": 200,
+    "before_version": 3,
+    "after_version": 4,
+    "workload": "one governed record revision through real authenticated HTTP; no unrelated pytest or browser workload",
+    "excluded_encoder_warmup_seconds": [
+      1.328,
+      0.579
+    ]
+  },
+  "single_pair_improvement_percent": 12.94,
+  "conditions": [
+    "No concurrent pytest or unrelated browser was running during either PUT.",
+    "The before encoder was warm from the preceding real product run; the after encoder had two explicit warmups, reported separately.",
+    "The entity revision increased from r2 to r3 before optimization, and r3 to r4 afterward. Entity and relation counts stayed fixed.",
+    "Other desktop applications and background storage/index maintenance were not stopped. This is one observational pair, not a latency percentile or a universal speedup."
+  ],
+  "changes": [
+    "Reuse one detached authority planning snapshot for service validation and FormalFactWriter.prepare.",
+    "Remove redundant full-snapshot JSON roundtrip and planner deepcopy; use copy-on-write for changed rows and inherited source metadata.",
+    "Keep a fresh complete execution snapshot, canonical SHA256 fingerprint, dependencies, transaction and table-lock guards."
+  ],
+  "before_profiler": {
+    "duration_seconds": 20,
+    "rate_hz": 20,
+    "samples": 463,
+    "errors": 0,
+    "leaf_sample_counts": [
+      {
+        "function": "raw_decode",
+        "module": "decoder.py",
+        "samples": 185
+      },
+      {
+        "function": "iterencode",
+        "module": "encoder.py",
+        "samples": 163
+      },
+      {
+        "function": "_poll",
+        "module": "windows_events.py",
+        "samples": 30
+      },
+      {
+        "function": "_send_query_prepared",
+        "module": "_cursor_base.py",
+        "samples": 26
+      },
+      {
+        "function": "_publish_fingerprint",
+        "module": "core.py",
+        "samples": 22
+      },
+      {
+        "function": "_transaction",
+        "module": "core.py",
+        "samples": 8
+      },
+      {
+        "function": "decode",
+        "module": "decoder.py",
+        "samples": 5
+      },
+      {
+        "function": "decode",
+        "module": "decoder.py",
+        "samples": 5
+      },
+      {
+        "function": "_record",
+        "module": "core.py",
+        "samples": 4
+      },
+      {
+        "function": "prepare",
+        "module": "formal_writes.py",
+        "samples": 3
+      }
+    ]
+  },
+  "verification": {
+    "authority_governance_planning_pg_suite_passed": 75,
+    "final_snapshot_copy_on_write_regressions_passed": 7,
+    "focused_independent_review": "No unresolved P1/P2 after the inherited-source-metadata regression was fixed."
+  },
+  "remaining_limit": "Ordinary formal writes still take full project planning and fresh execution snapshots. The measured 125.454 seconds remains slow; bounded formal planning and an equally strong authority proof need separate design and validation.",
+  "after_module_sha256": {
+    "knowledge_service/services/service.py": "7c4172daaa6f38a876f39c1d4de9f9f948b5f3ed0fa78d03f8128a39d3b12caa",
+    "knowledge_service/services/formal_writes.py": "9f9a356aacbd3087ffb74247a251f05bc95a5fc977f83e69d2ea0cb78ddc3363",
+    "knowledge_service/repository/core.py": "55bf8481f8075dcee3ec73e1d2d70416e465882030d088f88ddafbb7dc300e60"
+  }
+}

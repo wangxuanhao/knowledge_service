@@ -1,0 +1,347 @@
+{
+  "started_at": "2026-10-22T01:04:47.333486+00:00",
+  "scope": "live authenticated API vs independent PG authority; no latency certification",
+  "business_writes": false,
+  "checks": [
+    {
+      "check": "retained_capacity_project_visible",
+      "passed": true
+    },
+    {
+      "check": "ordinary_record_page",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 37,
+      "content_sha256": "979aa3ccee661f81df6a3f1bc6d2d6c357756cc47181f10e1a849995c48246b5"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "045fc227ea101941e2d05ed1fcaa88e95373078169314d906640cc8c2807cf57"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "f3d5e9774847ae323149548a5e6f2ca3f1a53cd08f06a26efc84aa0b87505532"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "71433cbd4e3fd96efa250c0a1a3be167eaaf15d4d93bf5cec5958e5b1fa6e7fd"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "800e15c3d72c67a0a06c33a337f5c2927829680bf0fee0137b591e13f94450c0"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "40d5597d2f49e2b865cc5eb73d0e4a09c22225a11063192d4892d953d2925c20"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "5163c357ddbb7bc07d3fb644b6258046d664c07fbee48dc1e4515856719f08f5"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "7a6c8f72441514977b1f4df5d3248d72e4d44da06e170357b671ae730ec3d6f7"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "41691d33d12a9dae459ce1a4014bb46897255def9be76e24ba2c017beb02b3a0"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "2b900dc6de8aae06c91edbefad62bb27b4a47772e16541f654b270eb15be0a09"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "c780d54da785af58aab8e51de44017ed30fb156e4b35975354cecbd6e8055cbf"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "64eeda77ca37ef69177fc171b69d1033125b9f82108b8ca8e928ab819e3711cc"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "89104a030f1540344389f644668af2a55ed72a0d149418c9fb9c022ee2c5596d"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "a84712d0c08afd28d08a84b6696c35f1b0cefda866c1aef93abe76009344763a"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "ae853f4e3d4f62450af0245f71d4d4a1650c9a40d462b2365c7382ef3ae22ff3"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "1eb4fe45230f8037635ca0f6d4c83dce353247c1f2680c5197d3f8b58b7f2913"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "6aab2a081f542bfb1785a11604cba6ef5d777703e089c3fc9439a9b5cc66f6b1"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "b0e961a9c28177bfe534696d9ce04cf5ae988d9120d04c63a10c4f7446b09571"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "d8e766b281809be731288927e33b3932266f4208616dde9516c35d6df208b5ee"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "dc347a8eae7b7d06d5a42c12111981f35b61e8c27cc4a11bc7f5ca50a484965a"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "de77004cef87ccb9dae7cc1fc3c171a47bbc9f9f057f13cb267d54e3872de5e5"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "bca0baa12d4b2058430a81aaebf940e0e2664edb46ed17d3d424c971ebd4ca4e"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "17593d677187b8491e9459df657128e1cafd16792b1f8023c982815497da497e"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "8cecbce0b671f4712eac7659e66d3772dbcfd2a9da6380ce016c02891b8a1852"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "54e643e4b131781843f0143054ef72ffe46058808081643740767d0ad4a87125"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "8452c052ebe31c9b0eef9c232dbab2b12d05685948c83347e1e220b6dd3d0acc"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "73df7940c162f0ef9a2a851caa73818132d2bd0f3a9481a15c18966864ac8c2e"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "917e4e8d8b12a001171af7c8fa8d7c5b1192cfac8f4c75c2cbb25d28589a69e8"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "f1efea6effba9db5af6fa440d419835381264a178f5de39eb599c16f2a47ea8c"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "55ff91c6049100b6185073e4033f46a8d4ad3b980713a26dadb73336da08f81a"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "a9a9d561c2d42e38f2e04ea30b9bd20ea04672ccd151d055cb07b71adbb534eb"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "b7a4ecd84aa934f3825d35b734e88f4be86bc2178b92d7748bc3e790b1c8114a"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "59f059f7a14fc7c0f9617280a28982a6e8c01d0affbdd2bf3deb243173fcca8c"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "93cee216655a2bd20fb7c226ae666460f8bd0c16ab683b72dc348977f285ac2d"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "1743a13f699fe1e5c18cf43121e9de185bc82cb8e3ff13eae3eca95140c941cd"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "a05897e94f94116074d0035b01504e9aa70768e4f65cfe6e169ab03a5e525e83"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "bc04303eff64de13b84edbe75752046395764820476ebd6d30021926119f2a51"
+    },
+    {
+      "check": "shared_detail",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 1,
+      "content_sha256": "12b8e31aa2e3f74ceff24f0a8945fdf864b47d4803741f0bb9f8dcea40edbe9e"
+    },
+    {
+      "check": "complete_small_graph_matches_authority",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "nodes": 25,
+      "edges": 2
+    },
+    {
+      "check": "current_keyword_native_hits",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 12,
+      "content_sha256": "9a0e8294d1b138ea698ab8e1b5f438910aa100091f0a730482ee514f3bed09a6"
+    },
+    {
+      "check": "current_keyword_metadata_missing_hits",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 12,
+      "content_sha256": "7d65a45164fd729def1b8dee9f5af212cb6a0a2350bb876b73a6ad580ec77292"
+    },
+    {
+      "check": "metadata_negative_scope_keyword",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6"
+    },
+    {
+      "check": "current_semantic_native_hits",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 12,
+      "content_sha256": "3fbf9ad04065f238f78e6192eeca8576e660f6485ba3fe737d398b8e1b9b754a"
+    },
+    {
+      "check": "current_semantic_metadata_missing_hits",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 12,
+      "content_sha256": "14699eb9b34c46b519d001204ba87bb773b0cc3dca79a5613d4683fff882741e"
+    },
+    {
+      "check": "metadata_negative_scope_semantic",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6"
+    },
+    {
+      "check": "current_hybrid_native_hits",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 12,
+      "content_sha256": "4473cdf154f987c095cf08af5e150b710e1e853637fbfec9d438a0541a9fce3e"
+    },
+    {
+      "check": "current_hybrid_metadata_missing_hits",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+      "records": 12,
+      "content_sha256": "a45c7c5ccc39c3ffaea4e2d235b0c7ce5c9d8d160513f4bc4207c96c49b81098"
+    },
+    {
+      "check": "metadata_negative_scope_hybrid",
+      "passed": true,
+      "project_id": "eeb3a4dc-7475-4937-9966-74aa261334e6"
+    }
+  ],
+  "validation_passed": false,
+  "error": {
+    "type": "AssertionError",
+    "detail": "/api/projects/eeb3a4dc-7475-4937-9966-74aa261334e6/qa: HTTP 422: {\"detail\":\"1 validation error for Question\\ngraph_context\\n  Extra inputs are not permitted [type=extra_forbidden, input_value=True, input_type=bool]\\n    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden\"}"
+  },
+  "finished_at": "2026-10-22T01:06:25.773783+00:00"
+}

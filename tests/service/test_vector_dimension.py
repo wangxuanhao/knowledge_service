@@ -230,6 +230,15 @@ def test_milvus_store_keeps_encoder_identity_not_dimension_source(monkeypatch):
     assert store.encoder_identity != HashingEncoder.dimension_source
 
 
+def test_milvus_collection_is_configurable_for_isolated_deployments(monkeypatch):
+    monkeypatch.setenv('KG_VECTOR_BACKEND', 'milvus')
+    monkeypatch.setenv('KG_MILVUS_DIM', '256')
+    monkeypatch.setenv('KG_MILVUS_COLLECTION', 'knowledge_redesign_validation')
+    monkeypatch.setattr(MilvusStore, 'connect', lambda self: self)
+    monkeypatch.setattr(MilvusStore, 'ensure_collection', lambda self: self)
+    assert _build_milvus_store(HashingEncoder()).collection_name == 'knowledge_redesign_validation'
+
+
 def test_legacy_milvus_schema_keeps_connected_store_for_generation_rebuild(monkeypatch):
     monkeypatch.setenv('KG_VECTOR_BACKEND', 'milvus')
     monkeypatch.setenv('KG_MILVUS_DIM', '256')

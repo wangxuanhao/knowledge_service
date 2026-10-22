@@ -1,0 +1,1396 @@
+{
+  "date": "2026-10-20",
+  "collected_at_utc": "2026-10-20T11:24:17.342272+00:00",
+  "environment": {
+    "python": "D:/anaconda/envs/llm_model/python.exe",
+    "service": "http://127.0.0.1:8100",
+    "repository": "D:\\workspace\\knowledge_service_v2\\knowledge_service",
+    "schema_version": 22,
+    "large_project_records": 450001,
+    "performance_probes_run_after_pytest_completion": true
+  },
+  "conclusion": "Confirmed and repaired whole-project payload reads, shared writer/read/auth queueing, hidden-view duplicate reads, login shell flash and unbounded ledger lineage transport.",
+  "changes": [
+    "Independent repeatable-read pooled snapshots, threadpool authentication and separate ontology cache synchronization.",
+    "Candidate-only discovery reads; scope-preserving paginated source metadata, lazy bodies, historical assertion associations.",
+    "Indexed lightweight batch assertion lineage; explicit bounds/truncation; exact SQL reclassification groups with bounded samples.",
+    "Metadata-only streaming facets; optional missing validity bounds tolerated without rewriting retained records.",
+    "Auth cloak, visible-view ownership, in-flight generation invalidation after publication and navigation, versioned assets."
+  ],
+  "http_before": [
+    {
+      "size": "small",
+      "path": "/records/page",
+      "started_at": 1792490145.3915026,
+      "ttfb_s": 0.035,
+      "http_s": 0.036,
+      "status": 200,
+      "bytes": 43,
+      "json_ms": 0.05,
+      "response_counts": {
+        "records": 0
+      },
+      "total": 0,
+      "slow_over_2s": false
+    },
+    {
+      "size": "small",
+      "path": "/ontology",
+      "started_at": 1792490145.4306827,
+      "ttfb_s": 0.015,
+      "http_s": 0.016,
+      "status": 404,
+      "bytes": 222,
+      "json_ms": 0.04,
+      "response_counts": {},
+      "error_detail": "本项目尚未发布本体。可先持续开放发现并累计候选，再在本体发现中生成、审核和发布本体版本；仅文档检索模式不产生图谱本体。",
+      "slow_over_2s": false
+    },
+    {
+      "size": "small",
+      "path": "/sources",
+      "started_at": 1792490145.4507174,
+      "ttfb_s": 0.023,
+      "http_s": 0.023,
+      "status": 200,
+      "bytes": 1718,
+      "json_ms": 0.08,
+      "response_counts": {
+        "documents": 1
+      },
+      "slow_over_2s": false
+    },
+    {
+      "size": "small",
+      "path": "/ontology-discovery?compact=true",
+      "started_at": 1792490145.4773216,
+      "ttfb_s": 0.053,
+      "http_s": 0.053,
+      "status": 200,
+      "bytes": 480,
+      "json_ms": 0.04,
+      "response_counts": {},
+      "slow_over_2s": false
+    },
+    {
+      "size": "small",
+      "path": "/metadata/facets",
+      "started_at": 1792490145.5385265,
+      "ttfb_s": 0.02,
+      "http_s": 0.022,
+      "status": 200,
+      "bytes": 4882,
+      "json_ms": 0.14,
+      "response_counts": {
+        "fields": 36
+      },
+      "slow_over_2s": false
+    },
+    {
+      "size": "large",
+      "path": "/records/page",
+      "started_at": 1792490145.5647185,
+      "ttfb_s": 0.123,
+      "http_s": 0.123,
+      "status": 200,
+      "bytes": 15955,
+      "json_ms": 0.33,
+      "response_counts": {
+        "records": 50
+      },
+      "total": 150001,
+      "slow_over_2s": false
+    },
+    {
+      "size": "large",
+      "path": "/ontology",
+      "started_at": 1792490145.6934319,
+      "ttfb_s": 0.016,
+      "http_s": 0.016,
+      "status": 200,
+      "bytes": 751,
+      "json_ms": 0.06,
+      "response_counts": {},
+      "slow_over_2s": false
+    },
+    {
+      "size": "large",
+      "path": "/sources",
+      "started_at": 1792490145.713503,
+      "ttfb_s": 28.121,
+      "http_s": 28.122,
+      "status": 404,
+      "bytes": 35,
+      "json_ms": 0.04,
+      "response_counts": {},
+      "error_detail": "未找到：valid_from",
+      "slow_over_2s": true
+    },
+    {
+      "size": "large",
+      "path": "/ontology-discovery?compact=true",
+      "started_at": 1792490173.8388782,
+      "ttfb_s": 32.501,
+      "http_s": 32.502,
+      "status": 200,
+      "bytes": 513,
+      "json_ms": 0.04,
+      "response_counts": {},
+      "slow_over_2s": true
+    },
+    {
+      "size": "large",
+      "path": "/metadata/facets",
+      "started_at": 1792490206.3439498,
+      "ttfb_s": 13.984,
+      "http_s": 13.985,
+      "status": 404,
+      "bytes": 35,
+      "json_ms": 0.04,
+      "response_counts": {},
+      "error_detail": "未找到：valid_from",
+      "slow_over_2s": true
+    }
+  ],
+  "http_after": [
+    {
+      "size": "small",
+      "path": "/records/page",
+      "started_at": 1792495212.623854,
+      "ttfb_s": 0.807,
+      "http_s": 0.808,
+      "status": 200,
+      "bytes": 43,
+      "json_ms": 0.06,
+      "response_counts": {
+        "records": 0
+      },
+      "total": 0,
+      "slow_over_2s": false
+    },
+    {
+      "size": "small",
+      "path": "/ontology",
+      "started_at": 1792495213.4377298,
+      "ttfb_s": 0.047,
+      "http_s": 0.047,
+      "status": 404,
+      "bytes": 222,
+      "json_ms": 0.05,
+      "response_counts": {},
+      "error_detail": "本项目尚未发布本体。可先持续开放发现并累计候选，再在本体发现中生成、审核和发布本体版本；仅文档检索模式不产生图谱本体。",
+      "slow_over_2s": false
+    },
+    {
+      "size": "small",
+      "path": "/sources",
+      "started_at": 1792495213.4919379,
+      "ttfb_s": 0.15,
+      "http_s": 0.151,
+      "status": 200,
+      "bytes": 1816,
+      "json_ms": 0.22,
+      "response_counts": {
+        "documents": 1
+      },
+      "total": 1,
+      "slow_over_2s": false
+    },
+    {
+      "size": "small",
+      "path": "/ontology-discovery?compact=true",
+      "started_at": 1792495213.6473806,
+      "ttfb_s": 0.047,
+      "http_s": 0.047,
+      "status": 200,
+      "bytes": 480,
+      "json_ms": 0.04,
+      "response_counts": {},
+      "slow_over_2s": false
+    },
+    {
+      "size": "small",
+      "path": "/reclassify",
+      "started_at": 1792495213.697129,
+      "ttfb_s": 0.03,
+      "http_s": 0.032,
+      "status": 422,
+      "bytes": 82,
+      "json_ms": 0.05,
+      "response_counts": {},
+      "error_detail": "这个项目还没有本体：先在本体建模层建一份并发布",
+      "slow_over_2s": false
+    },
+    {
+      "size": "small",
+      "path": "/metadata/facets",
+      "started_at": 1792495213.7340333,
+      "ttfb_s": 0.064,
+      "http_s": 0.065,
+      "status": 200,
+      "bytes": 4882,
+      "json_ms": 0.12,
+      "response_counts": {
+        "fields": 36
+      },
+      "slow_over_2s": false
+    },
+    {
+      "size": "large",
+      "path": "/records/page",
+      "started_at": 1792495213.80206,
+      "ttfb_s": 0.193,
+      "http_s": 0.203,
+      "status": 200,
+      "bytes": 15955,
+      "json_ms": 0.51,
+      "response_counts": {
+        "records": 50
+      },
+      "total": 150001,
+      "slow_over_2s": false
+    },
+    {
+      "size": "large",
+      "path": "/ontology",
+      "started_at": 1792495214.0095859,
+      "ttfb_s": 0.026,
+      "http_s": 0.026,
+      "status": 200,
+      "bytes": 751,
+      "json_ms": 0.07,
+      "response_counts": {},
+      "slow_over_2s": false
+    },
+    {
+      "size": "large",
+      "path": "/sources",
+      "started_at": 1792495214.0388134,
+      "ttfb_s": 0.048,
+      "http_s": 0.049,
+      "status": 200,
+      "bytes": 100,
+      "json_ms": 0.04,
+      "response_counts": {
+        "documents": 0
+      },
+      "total": 0,
+      "slow_over_2s": false
+    },
+    {
+      "size": "large",
+      "path": "/ontology-discovery?compact=true",
+      "started_at": 1792495214.0906913,
+      "ttfb_s": 0.046,
+      "http_s": 0.046,
+      "status": 200,
+      "bytes": 513,
+      "json_ms": 0.04,
+      "response_counts": {},
+      "slow_over_2s": false
+    },
+    {
+      "size": "large",
+      "path": "/reclassify",
+      "started_at": 1792495214.140295,
+      "ttfb_s": 3.697,
+      "http_s": 3.709,
+      "status": 200,
+      "bytes": 3916,
+      "json_ms": 0.16,
+      "response_counts": {},
+      "slow_over_2s": true
+    },
+    {
+      "size": "large",
+      "path": "/metadata/facets",
+      "started_at": 1792495217.852781,
+      "ttfb_s": 4.425,
+      "http_s": 4.425,
+      "status": 200,
+      "bytes": 421,
+      "json_ms": 0.06,
+      "response_counts": {
+        "fields": 1
+      },
+      "slow_over_2s": true
+    }
+  ],
+  "remaining_heavy_exact_aggregates": [
+    {
+      "path": "/reclassify",
+      "http_s": 3.709
+    },
+    {
+      "path": "/metadata/facets",
+      "http_s": 4.425
+    }
+  ],
+  "browser_before": [
+    {
+      "size": "small",
+      "page": "records",
+      "requests": 6,
+      "network_span_s": 0.331,
+      "primary_rows_ready_ms": null,
+      "longtask_ms": 131,
+      "record_rows": 0,
+      "response_errors": []
+    },
+    {
+      "size": "small",
+      "page": "sources",
+      "requests": 1,
+      "network_span_s": 0.117,
+      "primary_rows_ready_ms": null,
+      "longtask_ms": 117,
+      "record_rows": 0,
+      "response_errors": []
+    },
+    {
+      "size": "small",
+      "page": "ontology-model",
+      "requests": 4,
+      "network_span_s": 0.371,
+      "primary_rows_ready_ms": null,
+      "longtask_ms": 83,
+      "record_rows": 0,
+      "response_errors": [
+        {
+          "path": "/api/projects/f428088c-ea1d-434a-8cb4-4c843d01612e/reclassify",
+          "start": 13912.59999999404,
+          "headers": 14012.19999999553,
+          "status": 422,
+          "finish": 14012.19999999553
+        },
+        {
+          "path": "/api/projects/f428088c-ea1d-434a-8cb4-4c843d01612e/ontology",
+          "start": 13981.69999999553,
+          "headers": 14034.5,
+          "status": 404,
+          "finish": 14034.5
+        }
+      ]
+    },
+    {
+      "size": "small",
+      "page": "search",
+      "requests": 1,
+      "network_span_s": 1.965,
+      "primary_rows_ready_ms": null,
+      "longtask_ms": 0,
+      "record_rows": 0,
+      "response_errors": [
+        {
+          "path": "/api/projects/f428088c-ea1d-434a-8cb4-4c843d01612e/ontology",
+          "start": 18545.69999999553,
+          "headers": 20510.69999999553,
+          "status": 404,
+          "finish": 20510.79999999702
+        }
+      ]
+    },
+    {
+      "size": "large",
+      "page": "records",
+      "requests": 56,
+      "network_span_s": 26.469,
+      "primary_rows_ready_ms": null,
+      "longtask_ms": 135,
+      "record_rows": 50,
+      "response_errors": []
+    },
+    {
+      "size": "large",
+      "page": "sources",
+      "requests": 1,
+      "network_span_s": 19.401,
+      "primary_rows_ready_ms": null,
+      "longtask_ms": 0,
+      "record_rows": 50,
+      "response_errors": [
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/sources",
+          "start": 51325.19999999553,
+          "headers": 70726.09999999404,
+          "status": 404,
+          "finish": 70726.09999999404
+        }
+      ]
+    },
+    {
+      "size": "large",
+      "page": "ontology-model",
+      "requests": 9,
+      "network_span_s": 45.426,
+      "primary_rows_ready_ms": null,
+      "longtask_ms": 0,
+      "record_rows": 50,
+      "response_errors": [
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/reclassify",
+          "start": 71168.59999999404,
+          "headers": 90695.89999999851,
+          "status": 404,
+          "finish": 90695.89999999851
+        }
+      ]
+    },
+    {
+      "size": "large",
+      "page": "search",
+      "requests": 1,
+      "network_span_s": 0.023,
+      "primary_rows_ready_ms": null,
+      "longtask_ms": 0,
+      "record_rows": 50,
+      "response_errors": []
+    }
+  ],
+  "browser_after": [
+    {
+      "size": "small",
+      "page": "records",
+      "requests": 6,
+      "network_span_s": 1.128,
+      "primary_rows_ready_ms": null,
+      "longtask_ms": 83,
+      "record_rows": 0,
+      "response_errors": []
+    },
+    {
+      "size": "small",
+      "page": "sources",
+      "requests": 1,
+      "network_span_s": 0.19,
+      "primary_rows_ready_ms": null,
+      "longtask_ms": 59,
+      "record_rows": 0,
+      "response_errors": []
+    },
+    {
+      "size": "small",
+      "page": "ontology-model",
+      "requests": 4,
+      "network_span_s": 0.176,
+      "primary_rows_ready_ms": null,
+      "longtask_ms": 51,
+      "record_rows": 0,
+      "response_errors": [
+        {
+          "path": "/api/projects/f428088c-ea1d-434a-8cb4-4c843d01612e/reclassify",
+          "start": 14157.60000000149,
+          "headers": 14242.29999999702,
+          "status": 422,
+          "finish": 14242.29999999702
+        },
+        {
+          "path": "/api/projects/f428088c-ea1d-434a-8cb4-4c843d01612e/ontology",
+          "start": 14199.5,
+          "headers": 14261.10000000149,
+          "status": 404,
+          "finish": 14261.10000000149
+        }
+      ]
+    },
+    {
+      "size": "small",
+      "page": "search",
+      "requests": 1,
+      "network_span_s": 0.027,
+      "primary_rows_ready_ms": null,
+      "longtask_ms": 0,
+      "record_rows": 0,
+      "response_errors": [
+        {
+          "path": "/api/projects/f428088c-ea1d-434a-8cb4-4c843d01612e/ontology",
+          "start": 18724.19999999553,
+          "headers": 18750.79999999702,
+          "status": 404,
+          "finish": 18750.79999999702
+        }
+      ]
+    },
+    {
+      "size": "large",
+      "page": "records",
+      "requests": 7,
+      "network_span_s": 1.281,
+      "primary_rows_ready_ms": 412.29999999701977,
+      "longtask_ms": 51,
+      "record_rows": 50,
+      "response_errors": []
+    },
+    {
+      "size": "large",
+      "page": "sources",
+      "requests": 1,
+      "network_span_s": 0.066,
+      "primary_rows_ready_ms": null,
+      "longtask_ms": 0,
+      "record_rows": 50,
+      "response_errors": []
+    },
+    {
+      "size": "large",
+      "page": "ontology-model",
+      "requests": 9,
+      "network_span_s": 3.277,
+      "primary_rows_ready_ms": null,
+      "longtask_ms": 0,
+      "record_rows": 50,
+      "response_errors": []
+    },
+    {
+      "size": "large",
+      "page": "search",
+      "requests": 1,
+      "network_span_s": 0.044,
+      "primary_rows_ready_ms": null,
+      "longtask_ms": 0,
+      "record_rows": 50,
+      "response_errors": []
+    }
+  ],
+  "login_after": {
+    "unauthenticated_actual_navigation": {
+      "requests": [
+        {
+          "path": "/",
+          "at_ms": 30.3
+        },
+        {
+          "path": "/assets/auth.js",
+          "at_ms": 451.1
+        },
+        {
+          "path": "/assets/style.css",
+          "at_ms": 451.9
+        },
+        {
+          "path": "/assets/workbench.css",
+          "at_ms": 452.9
+        },
+        {
+          "path": "/assets/provenance-drawer.css",
+          "at_ms": 453.8
+        },
+        {
+          "path": "/assets/sources-filter.css",
+          "at_ms": 454.6
+        },
+        {
+          "path": "/assets/ontology-modal.css",
+          "at_ms": 455.3
+        },
+        {
+          "path": "/assets/tasks.css",
+          "at_ms": 456.1
+        },
+        {
+          "path": "/assets/dashboard.css",
+          "at_ms": 456.6
+        },
+        {
+          "path": "/assets/mindmap.css",
+          "at_ms": 457.6
+        },
+        {
+          "path": "/assets/projects.css",
+          "at_ms": 458.4
+        },
+        {
+          "path": "/assets/evaluation.css",
+          "at_ms": 459.0
+        },
+        {
+          "path": "/assets/candidate-mindmap.css",
+          "at_ms": 460.2
+        },
+        {
+          "path": "/assets/menu-hierarchy.css",
+          "at_ms": 460.9
+        },
+        {
+          "path": "/assets/runtime.css",
+          "at_ms": 461.8
+        },
+        {
+          "path": "/assets/ontology-details.js",
+          "at_ms": 462.5
+        },
+        {
+          "path": "/assets/record-create.css",
+          "at_ms": 463.5
+        },
+        {
+          "path": "/assets/records-view.css",
+          "at_ms": 465.0
+        },
+        {
+          "path": "/assets/brand-mark.png",
+          "at_ms": 466.1
+        },
+        {
+          "path": "/assets/workspace.css",
+          "at_ms": 467.7
+        },
+        {
+          "path": "/assets/ontology-model.css",
+          "at_ms": 468.7
+        },
+        {
+          "path": "/assets/ontology-model-canvas.css",
+          "at_ms": 469.6
+        },
+        {
+          "path": "/assets/ontology-model-panel.css",
+          "at_ms": 470.3
+        },
+        {
+          "path": "/assets/ontology-model-reclassify.css",
+          "at_ms": 471.0
+        },
+        {
+          "path": "/assets/ingest-upload.css",
+          "at_ms": 472.3
+        },
+        {
+          "path": "/assets/ingest-results.css",
+          "at_ms": 473.0
+        },
+        {
+          "path": "/assets/record-dialog.css",
+          "at_ms": 473.4
+        },
+        {
+          "path": "/assets/evidence-inspector.css",
+          "at_ms": 474.6
+        },
+        {
+          "path": "/assets/theme.css",
+          "at_ms": 476.4
+        },
+        {
+          "path": "/assets/auth.css",
+          "at_ms": 477.9
+        },
+        {
+          "path": "/vendor/echarts.min.js",
+          "at_ms": 478.9
+        },
+        {
+          "path": "/vendor/cytoscape.min.js",
+          "at_ms": 479.8
+        },
+        {
+          "path": "/assets/user-admin.js",
+          "at_ms": 480.6
+        },
+        {
+          "path": "/assets/workspace-context.js",
+          "at_ms": 481.2
+        },
+        {
+          "path": "/assets/app.js",
+          "at_ms": 481.7
+        },
+        {
+          "path": "/assets/runtime-view.js",
+          "at_ms": 482.1
+        },
+        {
+          "path": "/assets/ingest-mode.js",
+          "at_ms": 482.5
+        },
+        {
+          "path": "/assets/qa-page.css",
+          "at_ms": 482.7
+        },
+        {
+          "path": "/assets/qa-presentation.js",
+          "at_ms": 482.9
+        },
+        {
+          "path": "/assets/provenance-drawer.js",
+          "at_ms": 483.2
+        },
+        {
+          "path": "/assets/ingest-batches.css",
+          "at_ms": 483.4
+        },
+        {
+          "path": "/assets/source-reader.css",
+          "at_ms": 483.7
+        },
+        {
+          "path": "/assets/ingest-batches.js",
+          "at_ms": 484.8
+        },
+        {
+          "path": "/assets/source-reader.js",
+          "at_ms": 485.3
+        },
+        {
+          "path": "/assets/ingest-ontology.js",
+          "at_ms": 485.5
+        },
+        {
+          "path": "/assets/workbench.js",
+          "at_ms": 485.7
+        },
+        {
+          "path": "/assets/storage.js",
+          "at_ms": 485.9
+        },
+        {
+          "path": "/assets/graph-types.js",
+          "at_ms": 486.2
+        },
+        {
+          "path": "/assets/graph-palette.js",
+          "at_ms": 486.7
+        },
+        {
+          "path": "/assets/graph-interaction.js",
+          "at_ms": 487.1
+        },
+        {
+          "path": "/assets/graph-paths.js",
+          "at_ms": 487.5
+        },
+        {
+          "path": "/assets/graph-workbench.js",
+          "at_ms": 487.8
+        },
+        {
+          "path": "/assets/scope-fields.js",
+          "at_ms": 488.5
+        },
+        {
+          "path": "/assets/entity-mindmap.js",
+          "at_ms": 488.9
+        },
+        {
+          "path": "/assets/workspace.js",
+          "at_ms": 489.3
+        },
+        {
+          "path": "/assets/record-version-context.js",
+          "at_ms": 489.8
+        },
+        {
+          "path": "/assets/record-attribute-editor.js",
+          "at_ms": 490.1
+        },
+        {
+          "path": "/assets/workspace-drawers.js",
+          "at_ms": 490.7
+        },
+        {
+          "path": "/assets/record-create.js",
+          "at_ms": 491.0
+        },
+        {
+          "path": "/assets/record-dialog.js",
+          "at_ms": 491.5
+        },
+        {
+          "path": "/assets/evidence-inspector.js",
+          "at_ms": 492.3
+        },
+        {
+          "path": "/assets/sources-view.js",
+          "at_ms": 492.9
+        },
+        {
+          "path": "/assets/entity-governance.css",
+          "at_ms": 493.9
+        },
+        {
+          "path": "/assets/entity-governance.js",
+          "at_ms": 494.8
+        },
+        {
+          "path": "/assets/records-view.js",
+          "at_ms": 495.4
+        },
+        {
+          "path": "/assets/task-review.js",
+          "at_ms": 495.8
+        },
+        {
+          "path": "/assets/projects-view.js",
+          "at_ms": 496.3
+        },
+        {
+          "path": "/assets/candidate-mindmap.js",
+          "at_ms": 496.9
+        },
+        {
+          "path": "/assets/menu-hierarchy.js",
+          "at_ms": 497.7
+        },
+        {
+          "path": "/assets/ontology-model-catalog.css",
+          "at_ms": 498.5
+        },
+        {
+          "path": "/assets/ontology-model-catalog.js",
+          "at_ms": 498.9
+        },
+        {
+          "path": "/assets/ontology-model.js",
+          "at_ms": 500.0
+        },
+        {
+          "path": "/assets/ontology-model-canvas.js",
+          "at_ms": 500.6
+        },
+        {
+          "path": "/assets/ontology-model-panel.js",
+          "at_ms": 501.8
+        },
+        {
+          "path": "/assets/ontology-model-reclassify.js",
+          "at_ms": 502.8
+        },
+        {
+          "path": "/assets/ingest-upload.js",
+          "at_ms": 503.6
+        },
+        {
+          "path": "/assets/knowledge-navigation.js",
+          "at_ms": 504.3
+        },
+        {
+          "path": "/assets/ingest-results.js",
+          "at_ms": 505.1
+        },
+        {
+          "path": "/assets/workspace-context.css",
+          "at_ms": 505.7
+        },
+        {
+          "path": "/assets/user-admin.css",
+          "at_ms": 507.4
+        },
+        {
+          "path": "/assets/full-graph.css",
+          "at_ms": 508.6
+        },
+        {
+          "path": "/assets/full-graph.js",
+          "at_ms": 509.1
+        },
+        {
+          "path": "/assets/full-graph-view.js",
+          "at_ms": 509.8
+        },
+        {
+          "path": "/assets/retrieval-experiments.css",
+          "at_ms": 510.4
+        },
+        {
+          "path": "/assets/retrieval-experiments.js",
+          "at_ms": 510.7
+        },
+        {
+          "path": "/assets/workspace-context-ui.js",
+          "at_ms": 511.0
+        },
+        {
+          "path": "/assets/library-workspace.css",
+          "at_ms": 511.3
+        },
+        {
+          "path": "/assets/sources-library.css",
+          "at_ms": 513.2
+        },
+        {
+          "path": "/assets/library-workspace.js",
+          "at_ms": 514.5
+        },
+        {
+          "path": "/api/health",
+          "at_ms": 540.1
+        },
+        {
+          "path": "/login",
+          "at_ms": 1687.3
+        },
+        {
+          "path": "/assets/style.css",
+          "at_ms": 1706.1
+        },
+        {
+          "path": "/assets/theme.css",
+          "at_ms": 1706.7
+        },
+        {
+          "path": "/assets/auth.css",
+          "at_ms": 1707.1
+        },
+        {
+          "path": "/assets/login-bg.js",
+          "at_ms": 1707.5
+        },
+        {
+          "path": "/assets/login.js",
+          "at_ms": 1707.8
+        }
+      ],
+      "login_navigation_ms": 1817.3
+    },
+    "unauthenticated_shell_before_policy": {
+      "url": "/",
+      "asideVisible": false,
+      "mainVisible": false,
+      "bodyVisibility": "hidden",
+      "title": "知序 · Knowledge Service",
+      "policyResponseHeld": true
+    }
+  },
+  "concurrency_after": {
+    "scope": "One slow authenticated read plus ordinary public/authenticated reads; no configuration change",
+    "requests": [
+      {
+        "label": "baseline_health",
+        "path": "/api/health",
+        "started_at": 1792495369.9718108,
+        "http_s": 0.045,
+        "status": 200,
+        "bytes": 1425
+      },
+      {
+        "label": "slow_overview",
+        "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/ontology-discovery?compact=true",
+        "started_at": 1792495370.02001,
+        "http_s": 0.056,
+        "status": 200,
+        "bytes": 513
+      },
+      {
+        "label": "auth_me_during_scan",
+        "path": "/api/auth/me",
+        "started_at": 1792495370.2237642,
+        "http_s": 0.015,
+        "status": 200,
+        "bytes": 126
+      },
+      {
+        "label": "public_health_during_scan",
+        "path": "/api/health",
+        "started_at": 1792495370.5251,
+        "http_s": 0.036,
+        "status": 200,
+        "bytes": 1425
+      },
+      {
+        "label": "static_html_during_scan",
+        "path": "/",
+        "started_at": 1792495370.6267793,
+        "http_s": 0.036,
+        "status": 200,
+        "bytes": 36912
+      },
+      {
+        "label": "small_project_during_scan",
+        "path": "/api/projects/f428088c-ea1d-434a-8cb4-4c843d01612e/records/page",
+        "started_at": 1792495370.728589,
+        "http_s": 0.044,
+        "status": 200,
+        "bytes": 1520
+      },
+      {
+        "label": "baseline_health_after",
+        "path": "/api/health",
+        "started_at": 1792495370.7732322,
+        "http_s": 0.063,
+        "status": 200,
+        "bytes": 1425
+      },
+      {
+        "label": "large_sources_failure_detail",
+        "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/sources",
+        "started_at": 1792495370.836204,
+        "http_s": 0.079,
+        "status": 200,
+        "bytes": 100
+      }
+    ],
+    "independent_slow_metadata_scan": [
+      {
+        "label": "fullscope_facets",
+        "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/metadata/facets",
+        "started_at": 1792495370.9166763,
+        "http_s": 4.221,
+        "status": 200,
+        "bytes": 421
+      },
+      {
+        "label": "auth_during_facets",
+        "path": "/api/auth/me",
+        "started_at": 1792495371.119519,
+        "http_s": 0.021,
+        "status": 200,
+        "bytes": 126
+      },
+      {
+        "label": "public_health_during_facets",
+        "path": "/api/health",
+        "started_at": 1792495371.2209406,
+        "http_s": 0.038,
+        "status": 200,
+        "bytes": 1425
+      },
+      {
+        "label": "small_project_during_facets",
+        "path": "/api/projects/f428088c-ea1d-434a-8cb4-4c843d01612e/records/page",
+        "started_at": 1792495371.3221536,
+        "http_s": 0.04,
+        "status": 200,
+        "bytes": 1520
+      }
+    ],
+    "db_observation_samples": [
+      {
+        "at": 1792495370.007492,
+        "db_probe_ms": 9.84,
+        "active": [],
+        "available_mb": 2393
+      },
+      {
+        "at": 1792495370.4144292,
+        "db_probe_ms": 5.7,
+        "active": [],
+        "available_mb": 2362
+      },
+      {
+        "at": 1792495370.8236933,
+        "db_probe_ms": 4.79,
+        "active": [],
+        "available_mb": 2338
+      },
+      {
+        "at": 1792495371.2420142,
+        "db_probe_ms": 6.02,
+        "active": [
+          {
+            "pid": 53034,
+            "app": "knowledge-service-reader",
+            "wait_type": null,
+            "wait": null,
+            "age_s": 0.255749,
+            "kind": "other",
+            "blockers": 0
+          }
+        ],
+        "available_mb": 2379
+      },
+      {
+        "at": 1792495371.6609669,
+        "db_probe_ms": 7.62,
+        "active": [
+          {
+            "pid": 53034,
+            "app": "knowledge-service-reader",
+            "wait_type": null,
+            "wait": null,
+            "age_s": 0.675139,
+            "kind": "other",
+            "blockers": 0
+          }
+        ],
+        "available_mb": 2385
+      },
+      {
+        "at": 1792495372.0808864,
+        "db_probe_ms": 9.15,
+        "active": [
+          {
+            "pid": 53034,
+            "app": "knowledge-service-reader",
+            "wait_type": null,
+            "wait": null,
+            "age_s": 1.095267,
+            "kind": "other",
+            "blockers": 0
+          }
+        ],
+        "available_mb": 2376
+      },
+      {
+        "at": 1792495372.4941573,
+        "db_probe_ms": 3.93,
+        "active": [
+          {
+            "pid": 53034,
+            "app": "knowledge-service-reader",
+            "wait_type": null,
+            "wait": null,
+            "age_s": 1.509045,
+            "kind": "other",
+            "blockers": 0
+          }
+        ],
+        "available_mb": 2403
+      },
+      {
+        "at": 1792495372.910689,
+        "db_probe_ms": 4.69,
+        "active": [
+          {
+            "pid": 53034,
+            "app": "knowledge-service-reader",
+            "wait_type": null,
+            "wait": null,
+            "age_s": 1.925194,
+            "kind": "other",
+            "blockers": 0
+          }
+        ],
+        "available_mb": 2384
+      },
+      {
+        "at": 1792495373.3182726,
+        "db_probe_ms": 4.49,
+        "active": [
+          {
+            "pid": 53034,
+            "app": "knowledge-service-reader",
+            "wait_type": null,
+            "wait": null,
+            "age_s": 2.332732,
+            "kind": "other",
+            "blockers": 0
+          }
+        ],
+        "available_mb": 2388
+      },
+      {
+        "at": 1792495373.725395,
+        "db_probe_ms": 4.14,
+        "active": [
+          {
+            "pid": 53034,
+            "app": "knowledge-service-reader",
+            "wait_type": null,
+            "wait": null,
+            "age_s": 2.740453,
+            "kind": "other",
+            "blockers": 0
+          }
+        ],
+        "available_mb": 2390
+      },
+      {
+        "at": 1792495374.1326265,
+        "db_probe_ms": 4.21,
+        "active": [
+          {
+            "pid": 53034,
+            "app": "knowledge-service-reader",
+            "wait_type": null,
+            "wait": null,
+            "age_s": 3.147765,
+            "kind": "other",
+            "blockers": 0
+          }
+        ],
+        "available_mb": 2381
+      },
+      {
+        "at": 1792495374.546404,
+        "db_probe_ms": 4.8,
+        "active": [
+          {
+            "pid": 53034,
+            "app": "knowledge-service-reader",
+            "wait_type": null,
+            "wait": null,
+            "age_s": 3.560523,
+            "kind": "other",
+            "blockers": 0
+          }
+        ],
+        "available_mb": 2404
+      },
+      {
+        "at": 1792495374.9536588,
+        "db_probe_ms": 6.03,
+        "active": [
+          {
+            "pid": 53034,
+            "app": "knowledge-service-reader",
+            "wait_type": null,
+            "wait": null,
+            "age_s": 3.96666,
+            "kind": "other",
+            "blockers": 0
+          }
+        ],
+        "available_mb": 2384
+      }
+    ]
+  },
+  "local_graph_after": {
+    "scope": "Actual neighborhood and renderer, first with startup side effects then after settling; no business data writes",
+    "seed": "e000000",
+    "result": {
+      "success": true,
+      "nodes": 3,
+      "edges": 4,
+      "ms": 365.29999999701977
+    },
+    "wall_s": 0.378,
+    "responses": [
+      {
+        "status": 200,
+        "records": 7,
+        "entities": 3,
+        "relations": 4,
+        "timing_ms": null
+      },
+      {
+        "status": 200,
+        "records": 7,
+        "entities": 3,
+        "relations": 4,
+        "timing_ms": null
+      }
+    ],
+    "debug_logs": [
+      "[kg] graph-neighborhood · node=e000000 hops=1 nodes=3 edges=4 truncated=false ms=185.1",
+      "[kg] graph-layout · nodes=3 edges=4 ms=84.3",
+      "[kg] graph-neighborhood · node=e000000 hops=1 nodes=3 edges=4 truncated=false ms=172.6",
+      "[kg] graph-layout · nodes=3 edges=4 ms=17.2"
+    ],
+    "errors": [],
+    "longtasks": [
+      {
+        "start": 2750.0999999940395,
+        "ms": 101
+      },
+      {
+        "start": 2851.1999999955297,
+        "ms": 96
+      }
+    ],
+    "fetches": [
+      {
+        "path": "/api/health",
+        "start": 111.09999999403954,
+        "headers": 268.29999999701977,
+        "status": 200,
+        "finish": 268.29999999701977
+      },
+      {
+        "path": "/api/auth/me",
+        "start": 270.79999999701977,
+        "headers": 547.3999999985099,
+        "status": 200,
+        "finish": 547.3999999985099
+      },
+      {
+        "path": "/api/ingest/capabilities",
+        "start": 953.6999999955297,
+        "headers": 1165.7999999970198,
+        "status": 200,
+        "finish": 1165.8999999985099
+      },
+      {
+        "path": "/api/projects",
+        "start": 1012.5,
+        "headers": 1166.5,
+        "status": 200,
+        "finish": 1166.5
+      },
+      {
+        "path": "/api/projects",
+        "start": 1013.5999999940395,
+        "headers": 1288.7999999970198,
+        "status": 200,
+        "finish": 1288.8999999985099
+      },
+      {
+        "path": "/api/projects/463f2e99-ec8b-4ca2-9c0d-e469bc4d1411/ingest-batches",
+        "start": 1172.5,
+        "headers": 1478.8999999985099,
+        "status": 200,
+        "finish": 1479
+      },
+      {
+        "path": "/api/projects/463f2e99-ec8b-4ca2-9c0d-e469bc4d1411/ontology",
+        "start": 1177.1999999955297,
+        "headers": 1573.5,
+        "status": 200,
+        "finish": 1573.5
+      },
+      {
+        "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/ontology",
+        "start": 2019.5999999940395,
+        "headers": 2073.5,
+        "status": 200,
+        "finish": 2073.5
+      },
+      {
+        "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/graph-neighborhood",
+        "start": 2566.5,
+        "headers": 2748.0999999940395,
+        "status": 200,
+        "finish": 2748.0999999940395
+      },
+      {
+        "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/timeline",
+        "start": 2850.1999999955297
+      }
+    ],
+    "settled_repeat": {
+      "result": {
+        "success": true,
+        "nodes": 3,
+        "edges": 4,
+        "ms": 219.79999999701977
+      },
+      "debug_logs": [
+        "[kg] graph-neighborhood · node=e000000 hops=1 nodes=3 edges=4 truncated=false ms=172.6",
+        "[kg] graph-layout · nodes=3 edges=4 ms=17.2"
+      ]
+    }
+  },
+  "verification": {
+    "page-latency-regression.log": {
+      "passed": 452,
+      "failed": 4
+    },
+    "reclassify-sample-and-explorer-recheck.log": {
+      "passed": 18,
+      "failed": 0
+    },
+    "reclassify-remaining-qa.log": {
+      "passed": 99,
+      "failed": 0
+    },
+    "frontend_node": {
+      "passed": 336,
+      "failed": 0
+    }
+  },
+  "regression_resolution": "The four broad-run failures were repaired and rerun in the remaining-QA suite: writer-bound instrumentation isolation, asset expectation, and two ledger batch fixture contracts. An additional isolated test-schema teardown error passed both standalone and full Explorer reruns.",
+  "limitations": [
+    "Single-machine observations, not percentile or production load claims.",
+    "Local graph measurement is the observed 3-node, 4-edge neighborhood, not the full 450k-record graph.",
+    "The retained large capacity project has 0 source documents; source pagination/lazy detail were additionally checked with a 52-document browser fixture and a real 1-document project.",
+    "Exact full-scope facets and reclassification counts still scan qualified SQL data; payload transport and Python decoding are bounded.",
+    "The baseline large source/facet requests returned404; the repaired requests return200, so timings include correctness repairs.",
+    "Reader pool remains bounded to 8 connections with 32 waiters and 5-second acquisition timeout."
+  ],
+  "evidence_directory": "D:\\workspace\\knowledge_service_v2\\knowledge_service\\.benchmarks\\page-latency-20261020",
+  "delivery": {
+    "service_pid": 43796,
+    "interpreter": "D:/anaconda/envs/llm_model/python.exe",
+    "source_modified_before_process_started": true,
+    "all_final_probe_modes_exit_code": 0
+  }
+}

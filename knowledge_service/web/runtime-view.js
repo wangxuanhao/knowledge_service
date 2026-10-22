@@ -18,9 +18,9 @@
  * 这里只负责"什么时候该拉"，避免把四份加载逻辑复制到这个文件里。
  */
 (()=>{
-  const VIEWS=['project','overview','jobs','snapshots'];
+  const VIEWS=['overview','jobs','snapshots'];
   const DEFAULT='overview';
-  const LABELS={project:'项目设置',overview:'运行总览',jobs:'后台任务',snapshots:'快照与评测'};
+  const LABELS={overview:'项目概览',jobs:'后台任务',snapshots:'知识备份'};
   // 面板 id 沿用原来的四个 id：既有的"当前是否在这一屏"判断（如 tab-jobs / tab-dashboard）
   // 不用改，改动面收在导航与显隐这一层。
   const PANEL_IDS={project:'tab-projects',overview:'tab-dashboard',jobs:'tab-jobs',snapshots:'tab-evaluation'};
@@ -44,17 +44,21 @@
     }
   }
 
-  function show(view,{load=true}={}){
+  function show(view,{load=true,quality=false}={}){
     if(!VIEWS.includes(view))view=DEFAULT;
     currentView=view;
+    document.body.classList.toggle('quality-mode',quality);
+    document.getElementById('tab-runtime').classList.toggle('hidden',quality);
+    window.WorkspaceContext?.enter(quality?'quality':'runtime');
     // 恒有一个分区是选中的（aria-pressed），并且同一时刻只有一个面板可见（一屏一问）。
     for(const [name,button] of buttons)button.setAttribute('aria-pressed',String(name===view));
     for(const [name,panel] of panels){if(panel)panel.classList.toggle('hidden',name!==view);}
+    window.IngestBatches?.visibilityChanged();
     // 注意别写成 data-runtime-view：那个属性名已经被分区按钮占用了，
     // 写在页面上会让 [data-runtime-view] 多匹配到一个元素（契约测试第一版就踩了这个）。
     page.dataset.activeView=view;
     const title=document.getElementById('title');
-    if(title)title.textContent=`项目与运行 · ${LABELS[view]}`;
+    if(title)title.textContent=quality?'质量评测':`构建与任务 · ${LABELS[view]}`;
     if(load)run(view);
     return view;
   }

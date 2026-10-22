@@ -39,7 +39,7 @@ def build_scope_repair(repository, project_id):
     assertions = repository.list_assertions(project_id)
     by_id = {item['id']: item for item in assertions}
     repairs, conflicts, preserved = [], [], []
-    for record in repository.current_records(project_id, vectors='none', kinds=['entity', 'relation', 'attribute']):
+    for record in repository.current_records(project_id, kinds=['entity', 'relation', 'attribute']):
         metadata = record.get('metadata') or {}
         scope = normalize_applicability(metadata.get('applicability'))
         if metadata.get('_deleted') or any(value['mode'] != 'unknown' for value in scope.values()):

@@ -47,6 +47,7 @@ function setup(){
     fetch,endpoint:s=>'/api/projects/'+context.current+s,scope:()=>({known_at:null}),setTimeout,
     esc:String,labelOf:x=>x,platformGroupLabel:group=>'平台：'+group.platform,showTab(){throw Error('citation must not navigate');},status(){}};
   vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(web,'scope-fields.js'),'utf8'),context);
   vm.runInContext(fs.readFileSync(path.join(web,'provenance-drawer.js'),'utf8'),context);
   const source=fs.readFileSync(path.join(web,'workbench.js'),'utf8');
   vm.runInContext(source.slice(source.indexOf('/* Knowledge chat:'),source.lastIndexOf("window.addEventListener('resize',()=>{wb.chart")),context);
@@ -120,10 +121,11 @@ test('U citations remain offered after finalization and history preserves only a
 
 test('changed QA assets and accessible temporal controls have current cache versions',()=>{
   const html=fs.readFileSync(path.join(web,'index.html'),'utf8');
-  assert.ok(html.includes('/assets/workbench.js?v=source-scope-document-qa-20261016'));
+  assert.ok(html.includes('/assets/workbench.js?v=authority-retrieval-20261021-2'));
   assert.ok(html.includes('/assets/workbench.css?v=rule-oag-2'));
   assert.ok(html.includes('/assets/qa-presentation.js?v=source-scope-document-qa-20261016'));
-  for(const asset of ['provenance-drawer.js','qa-page.css'])assert.ok(html.includes('/assets/'+asset+'?v=qa-readability-20261016'));
+  assert.ok(html.includes('/assets/provenance-drawer.js?v=canonical-20261021-4'));
+  assert.ok(html.includes('/assets/qa-page.css?v=redesign-20261019-final'));
   assert.match(html,/id="qa-include-references"[^>]*checked/);
   assert.match(html,/id="qa-as-of"[^>]*type="datetime-local"/);
 });

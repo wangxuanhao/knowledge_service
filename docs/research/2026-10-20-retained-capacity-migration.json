@@ -1,0 +1,108 @@
+{
+  "project_id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+  "project_name": "容量验收 · 15万实体 / 30万关系（保留测试）",
+  "source_preserved": true,
+  "auth_tables_copied": false,
+  "source_corpus": "synthetic capacity fixture; representative real-model vectors per kind; not semantic relevance acceptance",
+  "phases": {
+    "vector_copy_seconds": 672.9465933000001,
+    "vector_readback_seconds": 291.4548272000002,
+    "database_copy_seconds": 285.9053504000003
+  },
+  "tables": {
+    "projects": {
+      "count": 1,
+      "logical_digest": "8e711be02eedc64df009cb8abd5f3ad900f738d0e19b3aa07ea42dee5da716c6",
+      "verified": true
+    },
+    "artifacts": {
+      "count": 44,
+      "logical_digest": "cc5649e3a28a0bfdb45d566dc9b9849f1571fc6f978ef3982e5cac9801b176dd",
+      "verified": true
+    },
+    "ontologies": {
+      "count": 1,
+      "logical_digest": "494a13a8dd1c4efda12b6ee2a6e89f1e093172d645cf9d3a2332bbc5984460cf",
+      "verified": true
+    },
+    "record_versions": {
+      "count": 450004,
+      "logical_digest": "6af32ba09b11eba12a9632a31cf30a57bd0dc06dbaab5fd1b8452832086072e1",
+      "verified": true
+    },
+    "assertions": {
+      "count": 4,
+      "logical_digest": "c6eaff2d95b92a54fcb48d033fb743e9cdb1e06ad63c95fa1f677d7b1769e72c",
+      "verified": true
+    },
+    "assertion_events": {
+      "count": 8,
+      "logical_digest": "568b772629460e0f31a007207c7590c41f014d66b04d6e90ce5a9a40485a6b18",
+      "verified": true
+    },
+    "fact_keys": {
+      "count": 0,
+      "logical_digest": "62a74fd0e2d1e3a59b88b5b71c06ca8d43662c6787430c516b8e0bc28bbbda02",
+      "verified": true
+    },
+    "record_operation_reservations": {
+      "count": 4,
+      "logical_digest": "69f60adcf3ee2048dd701126ed4a63c4ec360c2039ee3673a0d4455b79b7279e",
+      "verified": true
+    },
+    "record_version_assertions": {
+      "count": 4,
+      "logical_digest": "4501cb14690f16f3ec9b620082ac7a5d3621caf752391183db635072fd1abd22",
+      "verified": true
+    },
+    "provenance_activities": {
+      "count": 1,
+      "logical_digest": "4e909615381a1adfdc27c3ca09a66711cc0a882e338e90276339d5b6c920fa47",
+      "verified": true
+    },
+    "provenance_edges": {
+      "count": 1,
+      "logical_digest": "4df04f6895a0baef27234b40db73d0fd9ecd5ef45cc4373ee61371c791992124",
+      "verified": true
+    },
+    "record_fts": {
+      "count": 1,
+      "logical_digest": "1551e421fb024a7d8097e93191847d63a5837469fe1a15199d8d5f4376b3a4a6",
+      "verified": true
+    },
+    "project_projection_sequences": {
+      "count": 1,
+      "logical_digest": "1a275059415894bc625a6983d84a1e9da691021b9444d24e068200f092317c6b",
+      "verified": true
+    },
+    "projection_outbox": {
+      "count": 7,
+      "logical_digest": "3988f15f362de0d4b124500bcd68cdf565eb0607a961fb8b6dd2e2f715737c30",
+      "verified": true
+    }
+  },
+  "last_phase": "Main project and independently verified Milvus generation committed",
+  "vector_validation": {
+    "copied": 450001,
+    "readback_exact": 450001,
+    "authority_fields_match": true,
+    "model_identity_match": true,
+    "dimension": 1024,
+    "fence_verified": true,
+    "destination": "knowledge_records__p_37458c99da40d3eb__g_retained_20261020"
+  },
+  "existing_projects_unchanged": 8,
+  "existing_users_unchanged": 2,
+  "counts": [
+    {
+      "read_kind": "entity",
+      "count": 150001
+    },
+    {
+      "read_kind": "relation",
+      "count": 300000
+    }
+  ],
+  "editable_history_versions": 4,
+  "recovery_note": "Vector transfer/readback completed before migration connection idle timeout. Resumed SQL-only using unchanged source watermark and verified destination fence/count; no record reseed or vector re-encoding."
+}

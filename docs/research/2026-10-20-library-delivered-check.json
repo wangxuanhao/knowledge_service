@@ -1,0 +1,13 @@
+{
+  "errors": [],
+  "health": 200,
+  "asset_hash_matches": 12,
+  "capacity_counts_preserved": {
+    "documents": 0,
+    "entities": 150001,
+    "relations": 300000,
+    "attributes": 0,
+    "chunks": 0
+  },
+  "real_delivered_ui": "PASS"
+}

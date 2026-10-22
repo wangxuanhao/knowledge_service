@@ -208,7 +208,7 @@ def test_ten_thousand_reference_rows_decode_only_matching_candidates(qa, monkeyp
     monkeypatch.setattr(repo, '_record', decode)
     started = time.perf_counter()
     result = repo.query(project, kinds=['chunk'], _reference_mode=True,
-                        _reference_terms=['罕见退款'], include_embeddings=False)
+                        _reference_terms=['罕见退款'])
     elapsed_ms = (time.perf_counter() - started) * 1000
     assert [row['id'] for row in result] == ['z-match']
     assert decoded == ['z-match']

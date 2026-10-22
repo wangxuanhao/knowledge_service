@@ -57,17 +57,18 @@ SHELL = """<!doctype html><html><head><meta charset="utf-8"></head><body>
   <select id="project"><option value="p1" selected>测试项目</option></select>
   <button id="apply-scope"></button><button id="reset-scope"></button>
   <script>
-  window.wb={records:new Map(),nodes:new Map()};
+  window.wb={records:new Map(),nodes:new Map(),versionContext:{
+    ontologyScope:'all',ontologyIds:null,ontologyVersion:null,source:null}};
   window.current='p1';
+  window.Auth={isAdmin:()=>true};
   window.$=id=>document.getElementById(id);
-  window.esc=value=>String(value===undefined||value===null?'':value);
-  // typeHint 取末段（urn:ex:重量 → 重量）：断言才读得出"属性名 = 值"。
-  window.typeHint=value=>value?String(value).split(':').pop():'';
+  // Labels resolve this fixture's URNs; esc/typeHint are loaded from app.js below.
+  window.term=value=>value?String(value).split(':').pop():'';
   window.labelOf=value=>value?String(value).split(':').pop():'';
   function status(message,isError){window.__status={message,isError:Boolean(isError)};}
   window.editRecord=row=>{};
   window.historyFor=row=>{};
-  window.scope=()=>({metadata:{}});
+  window.scope=()=>window.WorkspaceContext.read(current,'records');
   window.endpoint=suffix=>'/api/projects/p1'+suffix;
   window.api=async(url,body,method)=>{
     const options={method:method||(body===undefined?'GET':'POST'),headers:{'Content-Type':'application/json'}};
@@ -110,15 +111,32 @@ MOCKS = r"""() => {
   });
   const reply = body => new Response(JSON.stringify(body),{status:200,
     headers:{'Content-Type':'application/json'}});
-  window.__applied=null;window.__previewed=null;window.__planRead=false;
+  window.__applied=null;window.__previewed=null;window.__planRead=false;window.__planReads=0;
+  window.__recordPageBodies=[];window.__unexpectedRequests=[];window.__reclassifyRequests=[];
   window.fetch = async (input,options={}) => {
     const url = typeof input === 'string' ? input : input.url;
     const parsed = new URL(url,'http://localhost');
     const method = options.method || 'GET';
     const body = options.body ? JSON.parse(options.body) : null;
-    if(parsed.pathname.endsWith('/records/query')) return reply({total:records.length,records});
+    if(/\/reclassify(?:\/preview)?$/.test(parsed.pathname)){
+      window.__reclassifyRequests.push({method,path:parsed.pathname,body});
+    }
+    if(parsed.pathname.endsWith('/records/page')){
+      window.__recordPageBodies.push(body);
+      let filtered=records.filter(row=>!body.kinds?.length||body.kinds.includes(row.kind));
+      if(body.record_ids)filtered=filtered.filter(row=>body.record_ids.includes(row.id));
+      if(body.ontology_scope==='ids')filtered=filtered.filter(row=>body.ontology_ids.includes(row.ontology_id));
+      if(body.ontology_scope==='unknown')filtered=filtered.filter(row=>!row.ontology_id);
+      if(body.query)filtered=filtered.filter(row=>(row.id+' '+row.text).includes(body.query));
+      const offset=Number(body.cursor||0),limit=body.limit||50;
+      return reply({total:filtered.length,records:filtered.slice(offset,offset+limit),
+        next_cursor:offset+limit<filtered.length?String(offset+limit):null});
+    }
+    const recordId=parsed.pathname.match(/\/records\/([^/]+)$/)?.[1];
+    if(recordId)return reply(records.find(row=>row.id===decodeURIComponent(recordId))||{});
     if(parsed.pathname.endsWith('/ontologies')) return reply({versions:[
-      {id:'o1',created_at:'2026-01-01T00:00:00Z'},{id:'o2',created_at:'2026-03-01T00:00:00Z'}]});
+      {id:'o1',version:1,created_at:'2026-01-01T00:00:00Z'},
+      {id:'o2',version:2,created_at:'2026-03-01T00:00:00Z'}]});
     if(parsed.pathname.endsWith('/assertions')) return reply({total:0,assertions:[]});
     if(parsed.pathname.endsWith('/duplicate-groups')) return reply({groups:[]});
     if(parsed.pathname.endsWith('/structure-pending')) return reply({pending_structure:0,pending_records:0,terms:[]});
@@ -127,13 +145,14 @@ MOCKS = r"""() => {
     if(parsed.pathname.endsWith('/reclassify/preview')){window.__previewed=body&&body.groups;return reply({blocked:false});}
     if(parsed.pathname.endsWith('/reclassify')){
       if(method==='POST'){window.__applied=body;return reply({migrated:0,groups:[],note:'不该发生'});}
-      window.__planRead=true;
+      window.__planRead=true;window.__planReads++;
       if(window.mockPlanFail) return new Response('{"detail":"boom"}',{status:500,
         headers:{'Content-Type':'application/json'}});
       if(window.mockNoStale) return reply({...plan(),stale_records:0,migratable_records:0,unmapped_records:0,groups:[]});
       return reply(plan());
     }
-    return reply({});
+    window.__unexpectedRequests.push(method+' '+parsed.pathname);
+    throw Error('未模拟的请求：'+method+' '+parsed.pathname);
   };
 }"""
 
@@ -153,24 +172,49 @@ def browser():
 
 def _open(browser, tmp_path, before=None, ready=None):
     page = browser.new_page()
+    errors = []
+    page.on('pageerror', lambda error: errors.append(str(error)))
     page.on('dialog', lambda dialog: dialog.accept())
     shell = tmp_path / 'reclassify-ui.html'
     shell.write_text(SHELL, encoding='utf-8')
     page.goto(shell.as_uri())
-    page.add_script_tag(path=str(WEB / 'record-version-context.js'))
-    page.add_script_tag(path=str(WEB / 'records-view.js'))
     page.evaluate(MOCKS)
     if before:
         page.evaluate(before)
+    # Keep the real HTML-producing display helpers and bounded pager, without
+    # booting app.js or invoking any application/database service.
+    helpers = [line for line in (WEB / 'app.js').read_text(encoding='utf-8').splitlines()
+               if line.startswith(('const esc =', 'const typeHint='))]
+    assert len(helpers) == 2
+    page.add_script_tag(content='\n'.join(helpers))
+    for stylesheet in ('style.css', 'workspace.css', 'records-view.css'):
+        page.add_style_tag(path=str(WEB / stylesheet))
+    for script in ('workspace-context.js', 'record-version-context.js',
+                   'record-attribute-editor.js', 'record-create.js', 'records-view.js'):
+        page.add_script_tag(path=str(WEB / script))
+    page.evaluate("() => window.WorkspaceContext.enter('records')")
     page.click('#load-records')
     page.wait_for_selector('#records table', timeout=5000)
-    # 台账的旁数据（含 /reclassify）是第二次请求：等它落地再断言，
-    # 否则读到的是"读取中"那一瞬 —— 那不是被测行为。
-    page.wait_for_function('() => window.__planRead === true', timeout=5000)
+    page.wait_for_function("document.getElementById('records').getAttribute('aria-busy')==='false'")
+    first_page = page.evaluate('window.__recordPageBodies[0]')
+    assert first_page['kinds'] == ['entity']
+    assert first_page['limit'] == 50 and first_page['cursor'] is None
+    assert first_page['ontology_scope'] == 'all'
+    # The ledger now reads governance only on explicit request. Opening it
+    # neither scans migration plans nor previews/applies a migration.
+    assert page.evaluate('window.__planRead') is False
+    assert page.evaluate('window.__applied') is None
+    assert page.evaluate('window.__previewed') is None
+    page.get_by_role('button', name='检查本体归属', exact=True).click()
+    page.wait_for_function("""() => window.__planRead && (
+      document.getElementById('ledger-stale-notice').textContent.includes('另有') ||
+      window.__status?.message.includes('当前没有待迁移') ||
+      window.__status?.message.includes('治理信息读取失败'))""", timeout=5000)
     if ready:
         page.wait_for_function(ready, timeout=5000)
-    else:
-        page.wait_for_timeout(150)
+    assert page.evaluate('window.__planReads') == 1
+    assert page.evaluate('window.__unexpectedRequests') == []
+    assert errors == []
     return page
 
 
@@ -194,7 +238,7 @@ def test_ledger_has_no_migration_panel_and_points_at_the_workbench(browser, tmp_
     assert '本体建模层' in text, '没有说清去哪儿处理'
     assert '能查' in text and '旧结构' in text, '没有说清这类知识是什么状态'
 
-    # ③ 默认不跑：进页面只是读了一次计划，绝不写、也不干跑
+    # ③ 默认不跑：显式检查后只读一次计划，绝不写、也不干跑
     assert page.evaluate('window.__applied') is None, '台账不该再发起任何迁移写入'
     assert page.evaluate('window.__previewed') is None, '台账不该再发起干跑'
     page.close()
@@ -236,6 +280,7 @@ def test_ledger_has_an_attribute_view_with_subject_and_value(browser, tmp_path):
     assert labels == ['实体', '关系', '属性', '原文片段'], f'台账视角不对：{labels}'
     page.click('[data-ledger-view="attribute"]')
     page.wait_for_selector('#records table.ledger-attribute', timeout=5000)
+    page.wait_for_function("document.getElementById('records').getAttribute('aria-busy')==='false'")
     headers = [h.strip() for h in page.locator('#records thead th').all_inner_texts()]
     assert headers == ['属性', '所属实体', '本体归属', '知识修订', '关联断言', '操作']
     row = page.locator('#records tbody tr').first
@@ -247,17 +292,23 @@ def test_ledger_has_an_attribute_view_with_subject_and_value(browser, tmp_path):
     page.close()
 
 
-def test_ledger_only_reads_the_reclassify_plan():
+def test_ledger_only_reads_the_reclassify_plan(browser, tmp_path):
     """台账只读那份重分类计划（渲染那一行提示），不干跑、不写入。
 
     迁移/重分类的 UI 入口原在旧审核台（ontology-workbench.js），该文件已随旧三页删除；
-    入口待搬回「本体建模层」发布流程（已知缺口）。台账这一侧的口径保持不变：
+    当前入口在「本体建模层」发布流程。台账这一侧的口径保持不变：
     只读服务端计划、不自己判断替代映射、撤销列表仍认得出这次迁移。
     """
+    page = _open(browser, tmp_path)
+    # Inspect the real request made by the visible action. The generic reader
+    # composes this URL, so a literal or an actor label cannot prove read-only use.
+    assert page.evaluate('window.__reclassifyRequests') == [{
+        'method': 'GET', 'path': '/api/projects/p1/reclassify', 'body': None,
+    }], '台账只能读取迁移计划，不能请求预演或迁移写入'
+    assert page.evaluate('window.__applied') is None
+    assert page.evaluate('window.__previewed') is None
+    page.close()
     view = (WEB / 'records-view.js').read_text(encoding='utf-8')
-    # 台账只读那份计划（渲染那一行提示），不再有干跑与写入
-    assert '/reclassify' in view and '/reclassify/preview' not in view, '台账不该再有干跑'
-    assert "'人工（知识台账）'" not in view, '台账不该再有迁移写入的调用点'
     assert 'isReplacedBy' not in view, '替代映射是服务端的事：前端自己判断必然与台账/问答说岔'
     # 撤销列表里仍要认得这次迁移（历史操作要读得懂）
     assert "'reclassify':'迁到新本体'" in view

@@ -1,0 +1,33 @@
+{
+  "scope": "real PostgreSQL/Milvus, synthetic read corpus, precomputed real-model embeddings",
+  "database": "knowledge_redesign_capacity",
+  "collection": "knowledge_redesign_capacity",
+  "required_entities": 150000,
+  "required_relations": 300000,
+  "last_completed_phase": "PostgreSQL capacity measured",
+  "migration_seconds": 0.5910327999990841,
+  "project_id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+  "seed_seconds": 17.878341999999975,
+  "manifest_seconds": 39.18600030000016,
+  "manifest_counts": {
+    "entity_count": 150000,
+    "relation_count": 300000
+  },
+  "enumeration": {
+    "entities": {
+      "count": 150000,
+      "pages": 15,
+      "seconds": 9.818389099989872,
+      "max_page_seconds": 1.102708899998106
+    },
+    "relations": {
+      "count": 300000,
+      "pages": 30,
+      "seconds": 90.86016870001913,
+      "max_page_seconds": 11.329441900001257
+    }
+  },
+  "complete_graph_seconds": 139.86455810000916,
+  "complete_graph_within_30_seconds": false,
+  "vector_acceptance_checked": false
+}

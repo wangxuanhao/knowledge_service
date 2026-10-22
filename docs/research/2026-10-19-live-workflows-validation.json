@@ -1,0 +1,77 @@
+{
+  "project_id": "9f4ff60e-1eef-444b-b44c-e740647e3683",
+  "crud": [
+    {
+      "kind": "relation",
+      "created": 201,
+      "edited": 200,
+      "revision_before_edit": 4,
+      "revision_after_edit": 5,
+      "history_before_edit": 4,
+      "history_revisions": 5
+    },
+    {
+      "kind": "attribute",
+      "created": 201,
+      "edited": 200,
+      "revision_before_edit": 2,
+      "revision_after_edit": 3,
+      "history_before_edit": 2,
+      "history_revisions": 3
+    }
+  ],
+  "retrieval": [
+    {
+      "requested_mode": "keyword",
+      "active_mode": "keyword",
+      "backend": "milvus",
+      "hits": 5
+    },
+    {
+      "requested_mode": "semantic",
+      "active_mode": "semantic",
+      "backend": "milvus",
+      "hits": 7
+    },
+    {
+      "requested_mode": "hybrid",
+      "active_mode": "hybrid",
+      "backend": "milvus",
+      "hits": 7
+    }
+  ],
+  "page_errors": [],
+  "metadata": {
+    "management_has_no_filter_rail": true,
+    "closed_rail_scan_requests": 0,
+    "opening_rail_loads_real_fields": true,
+    "toggle_closes_rail": true
+  },
+  "index_retries": 1,
+  "experiment": {
+    "status": "completed",
+    "variants": 5,
+    "exported_results": 5,
+    "omitted_stages": {
+      "basic": [],
+      "document_only": [
+        "graph_neighbors_and_paths",
+        "ontology_query_expansion",
+        "ontology_label_resolution",
+        "structured_entity_relation_retrieval"
+      ],
+      "no_graph": [
+        "graph_neighbors_and_paths"
+      ],
+      "no_ontology": [
+        "ontology_query_expansion",
+        "ontology_label_resolution"
+      ],
+      "combined": [
+        "graph_neighbors_and_paths",
+        "ontology_query_expansion",
+        "ontology_label_resolution"
+      ]
+    }
+  }
+}

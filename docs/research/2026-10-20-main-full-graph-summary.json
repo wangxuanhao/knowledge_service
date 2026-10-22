@@ -1,0 +1,243 @@
+{
+  "schema": "measured-full-graph-analysis-v1",
+  "date": "2026-10-20",
+  "sources": [
+    {
+      "file": "2026-10-20-main-full-graph-server-phases.json",
+      "sha256": "71eda0c476f559e3010082d5f864c100c8827534940dbe5683e7041683a42708"
+    },
+    {
+      "file": "2026-10-20-main-full-graph-client-phases.json",
+      "sha256": "de7272a27762e4d56c0166acc49817499ed38603076f63d53c9a37438ad83374"
+    }
+  ],
+  "中文结论": [
+    "77.516s完整加载并绘制150001个实体和300000条关系，92个标记请求均200且阶段错误为0。",
+    "最大离群点为第3个请求、第二个实体页：HTTP26.656939s，其中首次仓储RLock获取等待26.256052s；直接证明此处是应用锁等待，非SQL、JSON或布局。",
+    "仓储RLock获取等待合计32.725277s，SQL execute合计20.137345s。未采集锁拥有者线程或图谱PG观察者，不能指认某后台任务或Milvus索引为持锁者。",
+    "实体页31次：HTTP累计35.238829s，RLock等待28.288480s、SQL execute2.515330s、fetchall1.519867s、响应JSON render0.664288s。",
+    "关系页60次：HTTP累计26.894591s，RLock等待3.768786s、SQL execute14.997762s、fetchall1.843146s、响应JSON render1.433763s。",
+    "manifest一次3.344266s，其中两次记录计数SQL execute2.523200s；全部SQL execute2.624254s，RLock等待0.668010s。",
+    "响应JSON render包含dumps，Renderer.sync包含edgePositions；父子inclusive禁止重复相加。",
+    "浏览器JSON.parse约0.446s、worker往返0.1795s、Renderer.sync1.8314s、draw CPU0.0371s远小于总加载时间；CPU提交计时不代表GPU实际完成时间。"
+  ],
+  "by_kind": {
+    "manifest": {
+      "requests": 1,
+      "http_sum_seconds": 3.3442663,
+      "route_sum_seconds": 3.3275392,
+      "request_thread_cpu_sum_seconds": 0.0,
+      "nonoverlap_seconds": {
+        "仓储RLock获取等待": 0.6680103,
+        "SQL_execute驱动服务端传输": 2.6242538,
+        "SQL_fetchall解码物化": 0,
+        "SQL_fetchone扣子JSON": 0.0005896,
+        "SQL_commit": 0.0307322,
+        "JSON_dumps": 0.0001136,
+        "JSON_loads": 0.0001831,
+        "其余路由内构造与仪器开销": 0.003656599999999788,
+        "路由前后其他层": 0.016727100000000217
+      },
+      "record_versions_sql_execute_seconds": 2.5232002,
+      "record_versions_fetchall_rows": 0,
+      "scoped_page_inclusive_seconds": 0,
+      "response_render_inclusive_seconds": 0,
+      "response_render_json_dumps_child_seconds": 0,
+      "max_http_seconds": 3.3442663,
+      "median_http_seconds": 3.3442663,
+      "response_bytes": 424
+    },
+    "entities": {
+      "requests": 31,
+      "http_sum_seconds": 35.2388292,
+      "route_sum_seconds": 34.4390185,
+      "request_thread_cpu_sum_seconds": 3.5625,
+      "nonoverlap_seconds": {
+        "仓储RLock获取等待": 28.28848040000001,
+        "SQL_execute驱动服务端传输": 2.5153300000000005,
+        "SQL_fetchall解码物化": 1.519867,
+        "SQL_fetchone扣子JSON": 0.010214500000000001,
+        "SQL_commit": 0.17420530000000004,
+        "JSON_dumps": 0.5824808,
+        "JSON_loads": 0.005668299999999999,
+        "其余路由内构造与仪器开销": 1.3427721999999918,
+        "路由前后其他层": 0.7998106999999948
+      },
+      "record_versions_sql_execute_seconds": 1.5111129000000003,
+      "record_versions_fetchall_rows": 150031,
+      "scoped_page_inclusive_seconds": 3.9449989,
+      "response_render_inclusive_seconds": 0.6642884,
+      "response_render_json_dumps_child_seconds": 0.5759052,
+      "max_http_seconds": 26.6569386,
+      "median_http_seconds": 0.2154355,
+      "response_bytes": 29752625
+    },
+    "relations": {
+      "requests": 60,
+      "http_sum_seconds": 26.8945906,
+      "route_sum_seconds": 25.3083067,
+      "request_thread_cpu_sum_seconds": 6.734375,
+      "nonoverlap_seconds": {
+        "仓储RLock获取等待": 3.7687858999999997,
+        "SQL_execute驱动服务端传输": 14.9977616,
+        "SQL_fetchall解码物化": 1.8431458,
+        "SQL_fetchone扣子JSON": 0.019494400000000002,
+        "SQL_commit": 0.34905990000000003,
+        "JSON_dumps": 1.2817443000000002,
+        "JSON_loads": 0.010912400000000003,
+        "其余路由内构造与仪器开销": 3.0374023999999977,
+        "路由前后其他层": 1.5862839000000015
+      },
+      "record_versions_sql_execute_seconds": 13.0177343,
+      "record_versions_fetchall_rows": 300059,
+      "scoped_page_inclusive_seconds": 17.2104339,
+      "response_render_inclusive_seconds": 1.4337631999999998,
+      "response_render_json_dumps_child_seconds": 1.2699976000000002,
+      "max_http_seconds": 2.6397719,
+      "median_http_seconds": 0.38339715,
+      "response_bytes": 55526553
+    }
+  },
+  "aggregate_nonoverlap_seconds": {
+    "仓储RLock获取等待": 32.72527660000001,
+    "SQL_execute驱动服务端传输": 20.1373454,
+    "SQL_fetchall解码物化": 3.3630128,
+    "SQL_fetchone扣子JSON": 0.030298500000000003,
+    "SQL_commit": 0.5539974000000001,
+    "JSON_dumps": 1.8643387000000002,
+    "JSON_loads": 0.016763800000000002,
+    "其余路由内构造与仪器开销": 4.383831199999989,
+    "路由前后其他层": 2.4028216999999965
+  },
+  "worst_request": {
+    "index": 3,
+    "kind": "entities",
+    "http_seconds": 26.6569386,
+    "process_cpu_seconds": 15.609375,
+    "request_thread_cpu_seconds": 0.078125,
+    "largest_lock_wait": {
+      "phase": "lock.repository.first.wait",
+      "parent": "graph.session_page",
+      "calls": 1,
+      "rows": 0,
+      "inclusive_wall_seconds": 26.2560522,
+      "exclusive_wall_seconds": 26.2560522,
+      "inclusive_thread_cpu_seconds": 0.0,
+      "first_start_seconds": 0.0970491,
+      "last_end_seconds": 26.3531013
+    },
+    "lock_owner": "unknown",
+    "note": "等待线程CPU很低，进程CPU15.609s来自其他同时工作线程；不能据此确定线程身份。"
+  },
+  "browser": {
+    "complete_seconds": 77.51599999999962,
+    "ttfb_sum_seconds": 71.435812,
+    "body_transfer_sum_seconds": 0.837876,
+    "json_parse_sum_seconds": 0.44609999999217687,
+    "body_decode_wait_sum_seconds": 1.720800000003539,
+    "network_by_kind": {
+      "manifest": {
+        "requests": 1,
+        "response_wait_ms": 3345.728,
+        "body_transfer_ms": 2.418999999999869
+      },
+      "entities": {
+        "requests": 31,
+        "response_wait_ms": 35662.894,
+        "body_transfer_ms": 300.94400000000036
+      },
+      "relations": {
+        "requests": 60,
+        "response_wait_ms": 32427.19,
+        "body_transfer_ms": 534.5129999999997
+      }
+    },
+    "cpu_calls": {
+      "Renderer.draw": {
+        "count": 86,
+        "total_ms": 37.10000000055879,
+        "max_ms": 2.099999999627471
+      },
+      "GraphDataset.edgePositions": {
+        "count": 84,
+        "total_ms": 1759.2999999951571,
+        "max_ms": 53.700000000186265
+      },
+      "Renderer.buildEdgeCache": {
+        "count": 84,
+        "total_ms": 5.300000001676381,
+        "max_ms": 0.20000000018626451
+      },
+      "Renderer.sync": {
+        "count": 84,
+        "total_ms": 1831.3999999994412,
+        "max_ms": 55.19999999925494
+      },
+      "worker.layoutRoundtrip": {
+        "count": 31,
+        "total_ms": 179.50000000279397,
+        "max_ms": 84.40000000037253
+      },
+      "GraphDataset.addNodes": {
+        "count": 31,
+        "total_ms": 178.89999999757856,
+        "max_ms": 9.200000000186265
+      },
+      "GraphDataset.addEdges": {
+        "count": 60,
+        "total_ms": 473.5000000046566,
+        "max_ms": 22.199999999254942
+      }
+    },
+    "stats": {
+      "loaded_entities": 150001,
+      "loaded_relations": 300000,
+      "drawn_entities": 150001,
+      "drawn_relations": 300000,
+      "relation_layer": "complete-world-cache",
+      "cached_relations": 300000,
+      "layout": "stable-id-v1",
+      "last_pick_ms": 0,
+      "gpu": "WebKit WebGL",
+      "context_lost": false
+    },
+    "gl_error": 0,
+    "selection_opens_detail": true,
+    "errors": []
+  },
+  "timeline": {
+    "server_http_sum_seconds": 65.4776861,
+    "first_server_start_to_last_response_seconds": 76.76125560000001,
+    "between_request_gaps_sum_seconds": 11.283569499999986,
+    "requests_nonoverlapping": true,
+    "note": "本次服务端请求区间无重叠。间隙混有浏览器、传输、调度、诊断报告写入等，未分开归因；服务端HTTP与浏览器TTFB边界不同。"
+  },
+  "integrity": {
+    "app_pid": 34548,
+    "run_id": "main-graph-20261020",
+    "requests": 92,
+    "kind_counts": {
+      "manifest": 1,
+      "entities": 31,
+      "relations": 60
+    },
+    "statuses": [
+      200
+    ],
+    "endpoint_all": true,
+    "phase_errors": 0,
+    "exclusive_accounting_closes_each_kind": true,
+    "max_requests": 160,
+    "max_seconds": 1800,
+    "capture_within_limits": true,
+    "graph_pg_observer": false
+  },
+  "limits": [
+    "单次带仪器测量，不建立P95或目标达标；不能与不同条件旧结果声称提速。",
+    "RLock等待直接可测，锁拥有者身份未记录。图谱未配置PG等待观察，不能据此判断PG是否有锁等待。",
+    "SQL execute包含驱动、PG执行与传输，未分离执行计划或IO。",
+    "响应render包含dumps；body_decode_wait包含传输/调度；Renderer.sync包含edgePositions，各inclusive不能相加。",
+    "draw CPU不是GPU完成时间；JS heap不是浏览器或GPU总内存。",
+    "本轮未改后端或实施任何优化。"
+  ]
+}

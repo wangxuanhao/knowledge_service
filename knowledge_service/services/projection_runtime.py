@@ -1,27 +1,36 @@
-"""Production delivery loop for durable external projections.
-
-The current Milvus adapter deliberately provides only the guarantees available
-with the existing single collection: version-id upserts are idempotent, and a
-process-local sequence/fence watermark rejects obvious late delivery.  The
-database claim is renewed immediately before every apply by :class:`ProjectionSync`.
-
-Task 4 must persist ``projection_seq`` and the fence in each new Milvus
-destination and validate them before an alias switch.  Until then this module
-does not claim cross-process atomic compare-and-set semantics in Milvus.
-"""
+"""Fenced PG delivery to project/build-scoped rows in the shared Milvus index."""
 from __future__ import annotations
 
 import logging
 import threading
 import time
+from itertools import islice
 from uuid import uuid4
 
 from ..repository.core import drain_projection_cleanups
-from ..repository.projection_store import ProjectionRebuildRequired
+from ..repository.projection_store import ProjectionLeaseLost, ProjectionRebuildRequired
 from ..integrations.milvus_store import MilvusSchemaMismatch
 
 
 LOG = logging.getLogger('knowledge_service.projection_runtime')
+
+
+class ProjectedRows:
+    """Rebuild rows rehydrate the captured PG version pages on each pass."""
+
+    def __init__(self, inputs, catalog, index_version, count):
+        self.inputs, self.catalog = inputs, catalog
+        self.index_version, self.count = index_version, count
+
+    def __len__(self):
+        return self.count
+
+    def __iter__(self):
+        from ..domain.search_projection import build_projection
+        for value in self.inputs:
+            row = build_projection(value, self.catalog, index_version=self.index_version)
+            if row is not None:
+                yield row
 
 
 class LeaseHeartbeat:
@@ -65,226 +74,143 @@ class LeaseHeartbeat:
 
 
 class MilvusProjectionAdapter:
-    """Apply ordered outbox events to the existing Milvus store."""
+    """Apply frozen PG projection envelopes to one project/build scope."""
 
     INDEXED_KINDS = frozenset({'entity', 'relation', 'chunk'})
 
-    def __init__(self, store, *, fence_is_current=None, repair_authority=None,
-                 encoder=None):
+    def __init__(self, store, *, fence_is_current=None, encoder=None):
         self._store_source = store
         self._fence_is_current = fence_is_current
-        self._repair_authority = repair_authority
         self._encoder = encoder
         self._lock = threading.RLock()
-        self._positions = {}
-        self._expected = {}
 
     def _store(self):
-        store = (self._store_source() if callable(self._store_source)
-                 else self._store_source)
+        store = self._store_source() if callable(self._store_source) else self._store_source
         if store is None:
             raise RuntimeError('Milvus projection store is unavailable')
         return store
 
-    def apply(self, project_id, event, destination=None, fence=None):
-        seq = int(event['seq'])
+    def _check(self, project_id, seq, fence):
         if not isinstance(fence, str) or not fence:
             raise ValueError('Milvus projection apply requires a fence token')
-        store = self._store()
-        selected = destination
-        if selected is None:
-            resolver = getattr(store, 'current_destination', None)
-            selected = resolver(project_id) if resolver is not None else None
-        selected = selected or getattr(store, 'collection_name', 'active')
-        key = (project_id, str(selected))
+        if self._fence_is_current is not None and not self._fence_is_current(project_id, seq, fence):
+            raise ProjectionLeaseLost('Milvus projection lease was lost')
+
+    def _encode(self, rows):
+        if not rows:
+            return []
+        if self._encoder is None:
+            raise RuntimeError('Milvus projection encoder is unavailable')
+        vectors = self._encoder.encode([row['text'] for row in rows])
+        if len(vectors) != len(rows):
+            raise RuntimeError('embedding output count mismatch')
+        return [dict(row, embedding=vector) for row, vector in zip(rows, vectors)]
+
+    def apply(self, project_id, event, destination=None, fence=None, *, index_version, catalog,
+              lease_is_current=None):
+        # A never-built project's CRUD event contains no Milvus envelope.
+        envelope = (event.get('payload') or {}).get('_milvus_projection')
+        if envelope is None:
+            return True
+        if (envelope.get('index_version') != index_version or
+                envelope.get('catalog_fingerprint') != catalog.fingerprint):
+            raise ValueError('outbox 投影与冻结项目构建版本不符')
+        if self._encoder is None or envelope.get('embedding_model') != self._encoder.identity:
+            raise MilvusSchemaMismatch('项目构建模型与当前编码器不符，请重新向量化')
+        seq = int(event['seq'])
+        def current():
+            if lease_is_current is not None and not lease_is_current():
+                raise ProjectionLeaseLost('Milvus projection heartbeat was lost')
+            self._check(project_id, seq, fence)
         with self._lock:
-            if (self._fence_is_current is not None
-                    and not self._fence_is_current(project_id, seq, fence)):
-                return False
-            position = self._positions.get(key)
-            if position is not None and seq <= position[0]:
-                # A failed batch is retried from its unacknowledged start,
-                # possibly under a new lease. The local prefix was recorded
-                # only after its write, marker and fence check succeeded.
-                # Skip it without rewriting newer state, but only when the
-                # authoritative claim verifies this retry's fence and range.
-                return self._fence_is_current is not None
-            operation = event.get('operation')
-            payload = dict(event.get('payload') or {})
-            if operation == 'upsert':
-                if payload.get('kind') in self.INDEXED_KINDS:
-                    if payload.get('embedding') is None:
-                        if self._encoder is None:
-                            raise RuntimeError(
-                                'indexed Milvus projection record has no embedding')
-                        vectors = self._encoder.encode([str(payload.get('text') or '')])
-                        if len(vectors) != 1:
-                            raise RuntimeError('embedding output count mismatch')
-                        payload['embedding'] = vectors[0]
-                        payload['embedding_model'] = self._encoder.identity
-                        if (self._fence_is_current is not None
-                                and not self._fence_is_current(
-                                    project_id, seq, fence)):
-                            return False
-                    payload['project_id'] = project_id
-                    try:
-                        store.upsert([payload], flush=True, destination=selected,
-                                     projection_seq=seq, fence=fence)
-                    except TypeError as exc:
-                        # Compatibility for lightweight adapters used by callers/tests.
-                        if 'unexpected keyword argument' not in str(exc):
-                            raise
-                        store.upsert([payload], flush=True)
-            elif operation == 'tombstone':
-                record_id = payload.get('record_id')
-                if not record_id:
-                    raise ValueError('Milvus tombstone requires record_id')
-                try:
-                    store.delete(project_id, record_id=record_id,
-                                 destination=selected)
-                except TypeError as exc:
-                    if 'unexpected keyword argument' not in str(exc):
-                        raise
-                    store.delete(project_id, record_id=record_id)
+            current()
+            if event['operation'] == 'tombstone':
+                self._store().delete_records([envelope['record_id']], project_id=project_id,
+                                            index_version=index_version, catalog=catalog)
+            elif event['operation'] == 'upsert':
+                row = envelope.get('row')
+                if row is None:
+                    return True
+                if row['project_id'] != project_id or row['index_version'] != index_version:
+                    raise ValueError('outbox 投影项目范围不符')
+                # Missing/incompatible storage must fail before loading or
+                # invoking a potentially expensive semantic model.
+                self._store().check_collection(catalog=catalog)
+                current()
+                prepared = self._encode([row])
+                current()
+                self._store().upsert_rows(prepared, project_id=project_id,
+                                         index_version=index_version, catalog=catalog)
             else:
-                raise ValueError(f'unsupported projection operation: {operation}')
-            marker = getattr(store, 'write_fence_marker', None)
-            if marker is not None:
-                marker(project_id, selected, seq, fence)
-            if (self._fence_is_current is not None
-                    and not self._fence_is_current(project_id, seq, fence)):
-                if self._repair_authority is None:
-                    raise RuntimeError('Milvus projection fence expired after write')
-                self._repair_authority(
-                    project_id, payload.get('id') or payload.get('record_id'),
-                    selected)
-                return False
-            expected = self._expected.get((project_id, str(selected)))
-            if expected is not None:
-                record_id = payload.get('id') or payload.get('record_id')
-                if operation == 'tombstone':
-                    expected.discard(record_id)
-                elif payload.get('kind') in self.INDEXED_KINDS:
-                    expected.add(record_id)
-            self._positions[key] = (seq, fence)
+                raise ValueError('unsupported projection operation')
+            current()
             return True
 
-    def current_destination(self, project_id):
-        store = self._store()
-        resolver = getattr(store, 'current_destination', None)
-        if resolver is not None:
-            return resolver(project_id)
-        return getattr(store, 'collection_name', 'active')
+    def index_configuration(self):
+        from ..integrations.milvus_store import VectorDimensionMismatch
+        if self._encoder is None:
+            raise RuntimeError('Milvus projection encoder is unavailable')
+        dimension = int(self._store().dim)
+        declared = getattr(self._encoder, 'dimension', None)
+        if declared is not None and int(declared) != dimension:
+            raise VectorDimensionMismatch('knowledge_vectors', dimension, int(declared), self._encoder.identity)
+        return {'embedding_model': self._encoder.identity, 'dim': dimension}
 
-    def begin_rebuild(self, project_id, schema_version, state, fence=None):
-        store = self._store()
-        destination = store.generation_name(project_id, state['build_id'])
-        store.ensure_collection(destination=destination)
-        return destination
+    def preflight(self, project_id, state, inputs):
+        from ..domain.search_filter_catalog import default_catalog
+        from ..domain.search_projection import build_projection
+        configuration = self.index_configuration()
+        if any(key in state and state[key] != value for key, value in configuration.items()):
+            raise MilvusSchemaMismatch('项目构建模型已改变，需要新构建版本重新向量化')
+        catalog = default_catalog()
+        if state.get('catalog') and state['catalog'] != catalog.to_dict():
+            raise MilvusSchemaMismatch('旧扩展字段构建不能继续，请显式重新向量化当前项目')
+        from ..integrations.milvus_store import row_bytes
+        if iter(inputs) is inputs:
+            raise ValueError('构建输入需要可重复读取的 PG 快照页')
+        count = 0
+        for value in inputs:
+            row = build_projection(value, catalog, index_version=state['index_version'])
+            if row is not None:
+                if row_bytes(row) + int(self._store().dim) * 4 + 128 > 24 * 1024 * 1024:
+                    raise ValueError('平铺投影单行超过 RPC 字节预算')
+                count += 1
+        if self._encoder is None:
+            raise RuntimeError('Milvus projection encoder is unavailable')
+        state.update(catalog=catalog.to_dict(), **configuration, destination='knowledge_vectors')
+        # All type/capacity checks above complete before any encoder or write RPC.
+        self._store().ensure_collection(project_id=project_id,
+                                        index_version=state['index_version'], catalog=catalog)
+        return catalog, ProjectedRows(inputs, catalog, state['index_version'], count)
 
-    def reset_rebuild(self, project_id, destination, build_id, fence=None):
-        with self._lock:
-            self._store().recreate_collection(destination=destination)
-            self._expected.pop((project_id, destination), None)
-            self._positions.pop((project_id, str(destination)), None)
+    def load_rows(self, project_id, rows, state, catalog, *, lease_is_current,
+                  receipt_page=None):
+        def check_lease():
+            if not lease_is_current():
+                raise ProjectionLeaseLost('Milvus rebuild lease was lost')
+        indexed = 0
+        iterator = iter(rows)
+        while True:
+            check_lease()
+            page = list(islice(iterator, 64))
+            if not page:
+                break
+            prepared = self._encode(page)
+            check_lease()
+            self._store().upsert_rows(prepared, project_id=project_id,
+                                     index_version=state['index_version'], catalog=catalog)
+            check_lease()
+            if receipt_page is not None:
+                receipt_page(page)
+            indexed += len(prepared)
+        return indexed
 
-    def _prepare_records(self, project_id, records, projection_seq, fence,
-                         heartbeat=None):
-        prepared = []
-        missing = []
-        for record in records:
-            if record.get('kind') not in self.INDEXED_KINDS:
-                continue
-            row = dict(record, project_id=project_id,
-                       projection_seq=int(projection_seq), fence=fence)
-            if row.get('embedding') is None:
-                missing.append(row)
-            prepared.append(row)
-        if missing:
-            if self._encoder is None:
-                raise RuntimeError('indexed Milvus snapshot record has no embedding')
-            for offset in range(0, len(missing), 64):
-                if heartbeat is not None and not heartbeat():
-                    raise RuntimeError('projection maintenance lease was lost')
-                batch = missing[offset:offset + 64]
-                vectors = self._encoder.encode(
-                    [str(row.get('text') or '') for row in batch])
-                if len(vectors) != len(batch):
-                    raise RuntimeError('embedding output count mismatch')
-                for row, vector in zip(batch, vectors):
-                    row['embedding'] = vector
-                    row['embedding_model'] = self._encoder.identity
-        return prepared
+    def validate(self, project_id, state, catalog, *, expected):
+        return self._store().validate_projection(expected,
+                  project_id=project_id, index_version=state['index_version'], catalog=catalog)
 
-    def load_snapshot(self, project_id, destination, records, snapshot_seq,
-                      fence=None):
-        prepared = self._prepare_records(
-            project_id, records, snapshot_seq, fence or '')
-        for offset in range(0, len(prepared), 256):
-            self._store().upsert(
-                prepared[offset:offset + 256], flush=True,
-                destination=destination, projection_seq=snapshot_seq,
-                fence=fence or '')
-        marker = getattr(self._store(), 'write_fence_marker', None)
-        if marker is not None:
-            marker(project_id, destination, snapshot_seq, fence or '')
-        self._expected[(project_id, destination)] = {
-            row['id'] for row in prepared}
-        return len(prepared)
-
-    def validate_rebuild(self, project_id, destination, fence=None, state=None):
-        store = self._store()
-        store.ensure_collection(destination=destination)
-        validator = getattr(store, 'validate_destination', None)
-        state = dict(state or {})
-        expected_ids = list((state.get('expected_versions') or {}).values())
-        expected = set(expected_ids) if 'expected_versions' in state else None
-        if validator is None:
-            return {'ok': expected is not None, 'expected_count': len(expected or ())}
-        return validator(
-            project_id, destination,
-            expected_count=(None if expected is None else len(expected)),
-            expected_version_ids=(None if expected is None else expected_ids),
-            expected_projection=state.get('expected_projection'),
-            expected_digest=state.get('expected_digest'), fence=fence)
-
-    def switch_alias(self, project_id, destination, build_id=None, fence=None):
-        return self._store().switch_alias(project_id, destination)
-
-    def audit_authority(self, project_id, records, projection_seq,
-                        lease_is_current):
-        store = self._store()
-        destination = self.current_destination(project_id)
-        if destination is None:
-            return {'checked': 0, 'repaired': 0}
-        expected = {str(row['id']): str(row['version_id']) for row in records
-                    if row.get('kind') in self.INDEXED_KINDS
-                    and not (row.get('metadata') or {}).get('_deleted')}
-        repair_ids = store.authority_repair_ids(
-            project_id, destination, expected, heartbeat=lease_is_current)
-        if not lease_is_current():
-            return {'aborted': True, 'repaired': 0}
-        selected = [row for row in records if str(row.get('id')) in repair_ids]
-        prepared = self._prepare_records(
-            project_id, selected, projection_seq, 'authority-audit',
-            heartbeat=lease_is_current)
-        if not lease_is_current():
-            return {'aborted': True, 'repaired': 0}
-        result = store.apply_authority_repairs(
-            project_id, destination, prepared, repair_ids,
-            projection_seq=projection_seq, before_write=lease_is_current)
-        if not lease_is_current():
-            return {'aborted': True, **result}
-        store.write_fence_marker(
-            project_id, destination, projection_seq, 'authority-audit')
-        return {'aborted': False, **result}
-
-    def retire(self, project_id, destination):
-        current = self.current_destination(project_id)
-        if destination is None or destination == current:
-            return False
-        self._expected.pop((project_id, destination), None)
-        return self._store().drop_destination(destination)
+    def retire_versions(self, project_id, versions):
+        return self._store().delete_versions(project_id, versions)
 
 
 class ProjectionWorker:
@@ -310,13 +236,6 @@ class ProjectionWorker:
     def targets(self):
         return tuple(self.sync.adapters)
 
-    def resume_pending(self):
-        for target in self.targets:
-            try:
-                self.sync.resume_pending(target)
-            except Exception:
-                LOG.exception('恢复 %s 投影重建失败，后台循环稍后重试', target)
-
     def drain_project(self, project_id):
         delivered = 0
         for target in self.targets:
@@ -324,25 +243,16 @@ class ProjectionWorker:
                 try:
                     result = self.sync.drain_once(project_id, target)
                 except (ProjectionRebuildRequired, MilvusSchemaMismatch):
-                    self.sync.rebuild(project_id, target)
+                    LOG.warning('投影需要在项目页面显式重建，项目=%s，目标=%s',
+                                project_id, target)
                     break
                 except Exception:
                     if self.reconnect is not None:
-                        try:
-                            self.reconnect(force=True)
-                        except TypeError:
-                            self.reconnect()
+                        self.reconnect(force=True)
                     raise
                 count = int(result)
                 delivered += count
                 if count == 0:
-                    readiness = getattr(self.repository, 'projection_ready', None)
-                    if (getattr(result, 'status', 'empty') == 'empty'
-                            and not getattr(result, 'active_lease', False)
-                            and readiness is not None
-                            and not readiness(project_id, target,
-                                              self.sync.schema_version)):
-                        self.sync.rebuild(project_id, target)
                     break
         return delivered
 
@@ -356,11 +266,14 @@ class ProjectionWorker:
             if claim is None:
                 continue
             try:
-                with self.repository.read_snapshot():
-                    sequence = self.repository.projections.project_watermark(
-                        project_id)
-                    records = self.repository.current_records(
-                        project_id, vectors='none')
+                compact = getattr(adapter, 'audit_authority_manifest', None)
+                manifest_reader = getattr(self.repository, 'projection_authority_manifest', None)
+                if compact is not None and manifest_reader is not None:
+                    sequence, expected = manifest_reader(project_id, adapter.INDEXED_KINDS)
+                else:
+                    with self.repository.read_snapshot():
+                        sequence = self.repository.projections.project_watermark(project_id)
+                        records = self.repository.current_records(project_id)
                 def current():
                     renewed = self.repository.projections.renew_maintenance(
                         project_id, target, claim.owner, claim.token)
@@ -368,7 +281,19 @@ class ProjectionWorker:
                                 self.repository.projections.maintenance_is_current(
                                     claim, sequence))
                 with LeaseHeartbeat(current) as heartbeat:
-                    audit(project_id, records, sequence, heartbeat.check)
+                    if compact is not None and manifest_reader is not None:
+                        compact(project_id, expected, sequence, heartbeat.check,
+                            load_records=lambda versions: self.repository.projection_authority_records(project_id, versions),
+                            before_write=lambda: heartbeat.check() and current())
+                    else:
+                        audit(project_id, records, sequence, heartbeat.check)
+            except Exception as exc:
+                try:
+                    self.repository.projections.mark_failed(
+                        claim, exc, self.sync.schema_version)
+                except ProjectionLeaseLost:
+                    pass
+                raise
             finally:
                 self.repository.projections.release_maintenance(claim)
 
@@ -379,14 +304,15 @@ class ProjectionWorker:
                 self.reconnect()
             except Exception:
                 LOG.exception('Milvus 重连失败，后台循环稍后重试')
-        for project in self.repository.list_projects():
+        projects = self.repository.list_project_directory()
+        for project in projects:
             try:
                 delivered += self.drain_project(project['id'])
             except Exception:
                 LOG.exception('投影投递失败，项目=%s', project['id'])
         now = time.monotonic()
         if now >= self._next_audit:
-            for project in self.repository.list_projects():
+            for project in projects:
                 try:
                     self.audit_project(project['id'])
                 except Exception:
@@ -394,9 +320,16 @@ class ProjectionWorker:
             self._next_audit = now + self.audit_interval_seconds
         cleanup = drain_projection_cleanups(
             self.repository, self.cleanup_handlers, self.owner)
+        maintain_generations = getattr(self.sync, 'maintain_generations', None)
+        if maintain_generations is not None:
+            try:
+                maintain_generations()
+            except Exception:
+                LOG.exception('清理退役 Milvus 代际失败，后台稍后重试')
         for target in self.targets:
             try:
-                self.sync.maintain_rollbacks(target)
+                if target != 'milvus':
+                    self.sync.maintain_rollbacks(target)
             except Exception:
                 LOG.exception('维护 %s 投影回滚窗口失败', target)
         return {'delivered': delivered, 'cleanup': cleanup}
@@ -412,7 +345,6 @@ class ProjectionWorker:
         with self._lock:
             if self.thread is not None and self.thread.is_alive():
                 return
-            self.resume_pending()
             self._stop.clear()
             self.thread = threading.Thread(
                 target=self._run, name='projection-worker', daemon=True)

@@ -5,6 +5,7 @@ Task 4/6 adapters must persist the highest sequence/fence and reject late writes
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from dataclasses import dataclass
 import hashlib
@@ -39,6 +40,8 @@ class DrainResult:
 
 
 class ProjectionSync:
+    REBUILD_HEARTBEAT_SECONDS = 10.0
+
     def __init__(self, store, adapters, *, schema_version):
         self.store = store
         self.adapters = dict(adapters)
@@ -125,7 +128,10 @@ class ProjectionSync:
             json.dumps(expected, sort_keys=True, ensure_ascii=False,
                        separators=(',', ':')).encode()).hexdigest()
 
-    def _apply_claimed(self, adapter, project_id, claimed, destination=None):
+    def _apply_claimed(self, adapter, project_id, claimed, destination=None,
+                       *, renew_in_background=False):
+        if claimed.target == 'milvus':
+            return self._apply_milvus_claimed(adapter, project_id, claimed, renew_in_background=renew_in_background)
         active = destination if destination is not None else claimed.active_destination
         rollback = self._rollback_active(claimed)
         destinations = [active]
@@ -138,10 +144,13 @@ class ProjectionSync:
             claimed.previous_destination = None
         for event in claimed.events:
             for selected in destinations:
-                self.store.renew_claim(claimed)
-                applied = adapter.apply(
-                    project_id, event, destination=selected,
-                    fence=claimed.token)
+                if renew_in_background:
+                    applied = self._rebuild_external(claimed, adapter.apply,
+                        project_id, event, destination=selected, fence=claimed.token)
+                else:
+                    self.store.renew_claim(claimed)
+                    applied = adapter.apply(
+                        project_id, event, destination=selected, fence=claimed.token)
                 if applied is False:
                     raise ProjectionLeaseLost(
                         'projection fence was lost during external write')
@@ -153,7 +162,7 @@ class ProjectionSync:
             project_id, target, self.schema_version, limit=limit,
             after_seq=after_seq, owner=self.owner)
         if claimed is None:
-            state = (self.store.delivery_state(project_id, target)
+            state = (self.store.delivery_state(project_id, target, self.schema_version)
                      if hasattr(self.store, 'delivery_state') else 'empty')
             return DrainResult(state, 0, state == 'leased')
         try:
@@ -167,7 +176,8 @@ class ProjectionSync:
                 pass
             if getattr(exc, 'requires_rebuild', False):
                 raise
-            return DrainResult('empty', 0, False)
+            return DrainResult(
+                'requires_rebuild' if target == 'milvus' else 'failed', 0, False)
 
     def _fail_rebuild(self, claimed, exc):
         try:
@@ -175,18 +185,46 @@ class ProjectionSync:
         except ProjectionLeaseLost:
             pass
 
+    @contextmanager
+    def _rebuild_lease_guard(self, claimed):
+        """Keep the owned claim alive across slow reads and external phases."""
+        from .projection_runtime import LeaseHeartbeat
+
+        def renew():
+            self.store.renew_claim(claimed)
+            return True
+
+        with LeaseHeartbeat(renew, interval_seconds=self.REBUILD_HEARTBEAT_SECONDS) as heartbeat:
+            def current():
+                if not heartbeat.check():
+                    raise ProjectionLeaseLost('projection rebuild lease was lost during external work')
+                self.store.renew_claim(claimed)
+                return True
+
+            yield current
+            # A blocked/delayed heartbeat cannot authorize the next phase.
+            current()
+
+    def _rebuild_external(self, claimed, operation, *args, _with_lease_check=False, **kwargs):
+        with self._rebuild_lease_guard(claimed) as current:
+            if _with_lease_check:
+                kwargs['lease_is_current'] = current
+            return operation(*args, **kwargs)
+
     def rebuild(self, project_id, target):
+        if target == 'milvus':
+            return self._rebuild_milvus(project_id)
         adapter = self._adapter(target)
         claimed = None
         try:
             rebuild = self.store.begin_rebuild(
-                project_id, target, self.schema_version, self.owner)
+                project_id, target, self.schema_version, self.owner,
+                lease_guard=self._rebuild_lease_guard)
             claimed = rebuild['claim']
             state = dict(rebuild['state'])
             destination = state.get('destination')
             if destination is None:
-                self.store.renew_claim(claimed)
-                destination = adapter.begin_rebuild(
+                destination = self._rebuild_external(claimed, adapter.begin_rebuild,
                     project_id, self.schema_version, state, fence=claimed.token)
                 state.update(destination=destination, phase='snapshot_loading')
                 self.store.record_rebuild_progress(
@@ -203,17 +241,16 @@ class ProjectionSync:
                     claimed, self.schema_version, state)
             if phase in {'snapshot', 'snapshot_loading', 'capturing'}:
                 if phase == 'snapshot_loading':
-                    self.store.renew_claim(claimed)
-                    adapter.reset_rebuild(
+                    self._rebuild_external(claimed, adapter.reset_rebuild,
                         project_id, destination, state['build_id'],
                         fence=claimed.token)
                 state['phase'] = 'snapshot_loading'
                 self.store.record_rebuild_progress(
                     claimed, self.schema_version, state)
-                self.store.renew_claim(claimed)
-                adapter.load_snapshot(
+                self._rebuild_external(claimed, adapter.load_snapshot,
                     project_id, destination, rebuild['records'],
-                    rebuild['snapshot_seq'], fence=claimed.token)
+                    rebuild['snapshot_seq'], fence=claimed.token,
+                    _with_lease_check=True)
                 expected = self._expected_from_records(rebuild['records'])
                 projection = self._projection_from_records(rebuild['records'])
                 state.update(phase='snapshot_loaded',
@@ -235,7 +272,8 @@ class ProjectionSync:
                 if next_claim is None:
                     raise RuntimeError('projection rebuild cannot reach watermark')
                 claimed = next_claim
-                self._apply_claimed(adapter, project_id, claimed, destination)
+                self._apply_claimed(adapter, project_id, claimed, destination,
+                    renew_in_background=True)
                 expected = dict(state.get('expected_versions') or {})
                 self._advance_expected(expected, claimed.events)
                 projection = dict(state.get('expected_projection') or {})
@@ -253,16 +291,12 @@ class ProjectionSync:
                 state['phase'] = 'validating'
                 self.store.record_rebuild_progress(
                     claimed, self.schema_version, state)
-                self.store.renew_claim(claimed)
-                try:
-                    validation = adapter.validate_rebuild(
-                        project_id, destination, fence=claimed.token,
-                        state=state)
-                except TypeError as exc:
-                    if 'unexpected keyword argument' not in str(exc):
-                        raise
-                    validation = adapter.validate_rebuild(
-                        project_id, destination, fence=claimed.token)
+                # A resumed build owns a new claim token even when its snapshot
+                # and outbox prefix were already loaded by the previous owner.
+                self._rebuild_external(claimed, adapter.seal_rebuild,
+                    project_id, destination, applied, fence=claimed.token)
+                validation = self._rebuild_external(claimed, adapter.validate_rebuild,
+                    project_id, destination, fence=claimed.token, state=state)
                 state['validation'] = validation
                 if not _validation_ok(validation):
                     raise RuntimeError('projection rebuild validation failed')
@@ -289,15 +323,9 @@ class ProjectionSync:
                                  expected_projection=projection,
                                  expected_digest=self._expected_digest(projection))
                 self.store.renew_claim(claimed)
-                try:
-                    locked_validation = adapter.validate_rebuild(
-                        project_id, destination, fence=claimed.token,
-                        state=state)
-                except TypeError as exc:
-                    if 'unexpected keyword argument' not in str(exc):
-                        raise
-                    locked_validation = adapter.validate_rebuild(
-                        project_id, destination, fence=claimed.token)
+                adapter.seal_rebuild(project_id, destination, applied, fence=claimed.token)
+                locked_validation = adapter.validate_rebuild(
+                    project_id, destination, fence=claimed.token, state=state)
                 if not _validation_ok(locked_validation):
                     raise RuntimeError(
                         'projection rebuild locked validation failed')
@@ -330,11 +358,145 @@ class ProjectionSync:
                 self._fail_rebuild(claimed, exc)
             raise
 
-    def resume_pending(self, target=None):
-        results = []
-        for project_id, selected_target in self.store.list_incomplete_rebuilds(target):
-            results.append(self.rebuild(project_id, selected_target))
-        return results
+    def _freeze_build_event(self, project_id, claimed, event, state, catalog):
+        """Complete only the brief capture-window events before first delivery."""
+        from ..domain.search_projection import build_projection
+        from ..repository.projection_inputs import ProjectionInputs
+        payload = event.get('payload') or {}
+        envelope = payload.get('_milvus_projection')
+        if envelope is not None:
+            return envelope
+        envelope = {'index_version': state['index_version'],
+                    'catalog_fingerprint': catalog.fingerprint,
+                    'embedding_model': state['embedding_model']}
+        if event['operation'] == 'tombstone':
+            envelope['record_id'] = payload['record_id']
+        else:
+            inputs = ProjectionInputs(self.store.repository).snapshot_versions(project_id, [event['version_id']])
+            envelope['row'] = build_projection(inputs[0], catalog,
+                index_version=state['index_version']) if inputs else None
+        self.store.freeze_milvus_event(claimed, event, envelope)
+        return envelope
+
+    def _apply_milvus_claimed(self, adapter, project_id, claimed, *, renew_in_background=False):
+        from ..domain.search_filter_catalog import FilterCatalog
+        state = self.store.cursor(project_id, 'milvus')['rebuild_state']
+        catalog = FilterCatalog.from_dict(state['catalog'])
+        if state['index_version'] != claimed.index_version:
+            raise ProjectionLeaseLost('project index version changed during delivery')
+        for event in claimed.events:
+            envelope = (event.get('payload') or {}).get('_milvus_projection')
+            if envelope is None and claimed.build_id:
+                envelope = self._freeze_build_event(project_id, claimed, event, state, catalog)
+            if envelope is None:
+                raise ProjectionRebuildRequired(project_id, 'milvus',
+                    current_schema=claimed.schema_version, required_schema=self.schema_version)
+            kwargs = {'fence': claimed.token, 'index_version': claimed.index_version, 'catalog': catalog}
+            # Cold encoding can outlive the claim even during ordinary delivery.
+            # The same guard fences both incremental and explicit build writes.
+            applied = self._rebuild_external(claimed, adapter.apply, project_id, event,
+                                             _with_lease_check=True, **kwargs)
+            if applied is False:
+                raise ProjectionLeaseLost('project index lease was lost during delivery')
+
+    @staticmethod
+    def _milvus_manifest(rows):
+        from ..domain.search_projection import projection_fingerprint
+        return {row['record_id']: {'version_id': row['version_id'],
+                                  'fingerprint': projection_fingerprint(row)} for row in rows}
+
+    @classmethod
+    def _advance_milvus_manifest(cls, expected, events):
+        for event in events:
+            envelope = (event.get('payload') or {}).get('_milvus_projection') or {}
+            if event['operation'] == 'tombstone':
+                expected.pop(envelope.get('record_id'), None)
+            elif envelope.get('row') is not None:
+                expected.update(cls._milvus_manifest([envelope['row']]))
+
+    def _rebuild_milvus(self, project_id):
+        adapter = self._adapter('milvus')
+        claimed = None
+        preflight_finished = False
+        try:
+            rebuild = self.store.begin_rebuild(project_id, 'milvus', self.schema_version,
+                         self.owner, lease_guard=self._rebuild_lease_guard,
+                         **adapter.index_configuration())
+            claimed, state = rebuild['claim'], dict(rebuild['state'])
+            # Pure preflight checks every row before encoding any text.
+            catalog, rows = self._rebuild_external(claimed, adapter.preflight,
+                                                  project_id, state, rebuild['records'])
+            preflight_finished = True
+            claimed.index_version, claimed.catalog = state['index_version'], state['catalog']
+            self.store.record_rebuild_progress(claimed, self.schema_version, state)
+            phase = state.get('phase')
+            if phase in {'snapshot', 'capturing', 'snapshot_loading'}:
+                state['phase'] = 'snapshot_loading'
+                self.store.record_rebuild_progress(claimed, self.schema_version, state)
+                # Clean explicit retries reuse this version; no collection drop.
+                self._rebuild_external(claimed, adapter._store().delete_records, None,
+                    project_id=project_id, index_version=state['index_version'], catalog=catalog)
+                self._rebuild_external(claimed, self.store.receipts.reset, claimed)
+                indexed = self._rebuild_external(claimed, adapter.load_rows,
+                    project_id, rows, state, catalog, _with_lease_check=True,
+                    receipt_page=lambda page: self.store.receipts.replace_page(claimed, page))
+                state.update(phase='catchup', applied_seq=rebuild['snapshot_seq'],
+                             indexed=indexed)
+                state.pop('expected_projection', None)
+                self.store.record_rebuild_progress(claimed, self.schema_version, state)
+            applied = int(state.get('applied_seq', rebuild['snapshot_seq']))
+
+            def catch_up(watermark):
+                nonlocal claimed, applied, state
+                while applied < watermark:
+                    next_claim = self.store.claim_contiguous_batch(project_id, 'milvus',
+                        self.schema_version, after_seq=applied, owner=self.owner, build=claimed)
+                    if next_claim is None:
+                        raise RuntimeError('project index cannot reach watermark')
+                    claimed = next_claim
+                    self._apply_milvus_claimed(adapter, project_id, claimed, renew_in_background=True)
+                    applied = self.store.ack_contiguous(claimed, self.schema_version)
+                    state.update(phase='catchup', applied_seq=applied)
+                    self.store.record_rebuild_progress(claimed, self.schema_version, state)
+
+            activated = False
+            for _attempt in range(3):
+                catch_up(self.store.project_watermark(project_id))
+                state['phase'] = 'validating'
+                self.store.record_rebuild_progress(claimed, self.schema_version, state)
+                validation = self._rebuild_external(claimed, adapter.validate, project_id, state, catalog,
+                    expected=self.store.receipts.manifest(project_id, state['index_version']))
+                if not _validation_ok(validation):
+                    raise RuntimeError('project index validation failed')
+                # The short PG guard contains only a watermark comparison and
+                # activation CAS. Encoding and Milvus RPCs always happen outside.
+                with self.store.activation_guard(project_id, claimed, self.schema_version) as watermark:
+                    if watermark == applied:
+                        state['validation'] = validation
+                        self.store.activate_index(claimed, self.schema_version, applied, state)
+                        activated = True
+                if activated:
+                    break
+            if not activated:
+                raise RuntimeError('项目持续变更，3轮追平后仍有新写入；请稍后重试向量化')
+            return {'ready': True, 'applied_seq': applied, 'destination': 'knowledge_vectors',
+                    'index_version': state['index_version'],
+                    'indexed': self.store.receipts.count(project_id, state['index_version'])}
+        except Exception as exc:
+            if claimed is not None:
+                if not preflight_finished and isinstance(exc, ValueError):
+                    try:
+                        self.store.discard_preflight_capture(claimed, self.schema_version)
+                    except ProjectionLeaseLost:
+                        pass
+                self._fail_rebuild(claimed, exc)
+            raise
+
+    def maintain_generations(self):
+        adapter = self.adapters.get('milvus')
+        if adapter is None:
+            return {'claimed': 0, 'cleaned': 0, 'failed': 0}
+        return self.store.generation_cleanups.drain(self.owner, adapter.retire_versions)
 
     def maintain_rollbacks(self, target=None):
         retired = 0

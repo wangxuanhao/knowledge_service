@@ -47,7 +47,7 @@ body main #tab-qa .qa-example{padding:10px 14px;border:1px solid var(--ui-line);
 #tab-qa .qa-progress{font-size:11px;max-width:220px;overflow-wrap:anywhere}
 #tab-qa .qa-summary:empty{display:none}
 @media(max-width:700px){
-  #tab-qa .qa-page{gap:10px;height:var(--qa-fit,75dvh);min-height:600px;grid-template-rows:auto minmax(260px,1fr) auto}
+  #tab-qa .qa-page{gap:10px;height:var(--qa-fit,75dvh);min-height:0;grid-template-rows:auto minmax(0,1fr) auto}
   #tab-qa .qa-page-heading>span{display:none}
   body main #tab-qa .qa-hero{padding:10px 4px;margin:14px auto}
   body main #tab-qa .qa-hero h2{font-size:22px}

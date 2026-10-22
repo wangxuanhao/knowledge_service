@@ -1,0 +1,24 @@
+{
+  "errors": [],
+  "checks": {
+    "real_browser_workflow": true,
+    "reuse_receipt_without_new_ontology": true,
+    "manual_only_does_not_publish_unadded_candidate": true,
+    "mobile_stage_0": {
+      "no_overflow": true
+    },
+    "mobile_stage_1": {
+      "no_overflow": true
+    },
+    "mobile_stage_2": {
+      "no_overflow": true
+    },
+    "mobile_stage_3": {
+      "no_overflow": true
+    },
+    "mobile_stage_4": {
+      "no_overflow": true
+    }
+  },
+  "scope": "static interactive design only; no production API calls"
+}

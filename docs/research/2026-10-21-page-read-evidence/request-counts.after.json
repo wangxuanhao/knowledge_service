@@ -1,0 +1,346 @@
+{
+  "generated_at": "2026-10-21T01:57:07.417Z",
+  "kind": "deterministic request ownership audit",
+  "service_traffic": false,
+  "browser": false,
+  "modules_sha256": {
+    "app.js": "c28694323f2322733d5df7958d628f1386a21752775d52c027205af0c1d36532",
+    "workspace.js": "a5312de7d5e803143586699da32d816ff8e9d375075aeffbb1f455ce17bab6e3",
+    "projects-view.js": "70bdcc5354bc16b768b2dc4a4f5e10e9fa69be12cd8a3a85b2ad72833aecc67d",
+    "workspace-context.js": "c76c05312fff8e6b3319096682c33db6c58bdc30ace1a7634e074031ce46df5e",
+    "workspace-context-ui.js": "9ba230a7ee35883c3eb522f17c6c027ac015bfd8b90add204deedcca46830153",
+    "ingest-batches.js": "080bd0df001c4eadc46fb8611f9a03a9bbada01a2f3f0a8c9b9f9385301ba130"
+  },
+  "probes": [
+    {
+      "id": "startup_project_inventory",
+      "status": "GREEN",
+      "expected_max": 1,
+      "observed": 1,
+      "requests": [
+        {
+          "url": "/api/projects?include_counts=false",
+          "method": "GET",
+          "owner": [
+            "at context.api (D:\\workspace\\knowledge_service_v2\\knowledge_service\\.benchmarks\\page-request-count-audit.cjs:30:84)",
+            "at projects (D:\\workspace\\knowledge_service_v2\\knowledge_service\\knowledge_service\\web\\app.js:87:46)",
+            "at D:\\workspace\\knowledge_service_v2\\knowledge_service\\knowledge_service\\web\\workspace.js:1108:14"
+          ]
+        }
+      ],
+      "trigger": "auth ready; project management page hidden",
+      "production_excerpts": [
+        "app.js projects() definition",
+        "workspace.js auth-ready bootstrap chain"
+      ],
+      "whole_modules": [
+        "projects-view.js"
+      ],
+      "note": "Bootstrap sources are executed verbatim with original line offsets; broad workspace DOM setup is omitted."
+    },
+    {
+      "id": "records_apply-scope",
+      "status": "GREEN",
+      "expected_max": 1,
+      "observed": 1,
+      "requests": [
+        {
+          "url": "/api/projects/p/records/page",
+          "body": {
+            "include_unknown": true,
+            "filters": {
+              "field": "metadata.city",
+              "op": "eq",
+              "value": "杭州"
+            },
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "kinds": [
+              "entity"
+            ],
+            "query": "",
+            "cursor": null,
+            "limit": 50
+          },
+          "owner": [
+            "at context.api (D:\\workspace\\knowledge_service_v2\\knowledge_service\\.benchmarks\\page-request-count-audit.cjs:40:103)",
+            "at evalmachine.<anonymous>:550:51",
+            "at fetchPage (D:\\workspace\\knowledge_service_v2\\knowledge_service\\knowledge_service\\web\\record-create.js:93:26)",
+            "at Object.load (D:\\workspace\\knowledge_service_v2\\knowledge_service\\knowledge_service\\web\\record-create.js:98:112)",
+            "at loadPage (evalmachine.<anonymous>:554:105)",
+            "at load (evalmachine.<anonymous>:580:104)",
+            "at evalmachine.<anonymous>:644:79"
+          ]
+        },
+        {
+          "url": "/api/projects/p/ontologies",
+          "owner": [
+            "at context.api (D:\\workspace\\knowledge_service_v2\\knowledge_service\\.benchmarks\\page-request-count-audit.cjs:40:103)",
+            "at loadPage (evalmachine.<anonymous>:561:39)"
+          ]
+        },
+        {
+          "url": "/api/projects/p/records/page",
+          "body": {
+            "include_unknown": true,
+            "filters": {
+              "field": "metadata.city",
+              "op": "eq",
+              "value": "杭州"
+            },
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "kinds": [
+              "relation"
+            ],
+            "query": "",
+            "cursor": null,
+            "limit": 1
+          },
+          "owner": [
+            "at context.api (D:\\workspace\\knowledge_service_v2\\knowledge_service\\.benchmarks\\page-request-count-audit.cjs:40:103)",
+            "at evalmachine.<anonymous>:563:31",
+            "at Array.map (<anonymous>)",
+            "at loadPage (evalmachine.<anonymous>:562:106)"
+          ]
+        },
+        {
+          "url": "/api/projects/p/records/page",
+          "body": {
+            "include_unknown": true,
+            "filters": {
+              "field": "metadata.city",
+              "op": "eq",
+              "value": "杭州"
+            },
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "kinds": [
+              "attribute"
+            ],
+            "query": "",
+            "cursor": null,
+            "limit": 1
+          },
+          "owner": [
+            "at context.api (D:\\workspace\\knowledge_service_v2\\knowledge_service\\.benchmarks\\page-request-count-audit.cjs:40:103)",
+            "at evalmachine.<anonymous>:563:31",
+            "at Array.map (<anonymous>)",
+            "at loadPage (evalmachine.<anonymous>:562:106)"
+          ]
+        },
+        {
+          "url": "/api/projects/p/records/page",
+          "body": {
+            "include_unknown": true,
+            "filters": {
+              "field": "metadata.city",
+              "op": "eq",
+              "value": "杭州"
+            },
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "kinds": [
+              "chunk"
+            ],
+            "query": "",
+            "cursor": null,
+            "limit": 1
+          },
+          "owner": [
+            "at context.api (D:\\workspace\\knowledge_service_v2\\knowledge_service\\.benchmarks\\page-request-count-audit.cjs:40:103)",
+            "at evalmachine.<anonymous>:563:31",
+            "at Array.map (<anonymous>)",
+            "at loadPage (evalmachine.<anonymous>:562:106)"
+          ]
+        },
+        {
+          "url": "/api/projects/p/assertions/batch",
+          "body": {
+            "record_ids": [
+              "first"
+            ]
+          },
+          "owner": [
+            "at context.api (D:\\workspace\\knowledge_service_v2\\knowledge_service\\.benchmarks\\page-request-count-audit.cjs:40:103)",
+            "at pageAssertions (evalmachine.<anonymous>:521:28)",
+            "at loadPage (evalmachine.<anonymous>:565:85)"
+          ]
+        }
+      ],
+      "trigger": "#apply-scope click on visible records page",
+      "registered_click_listeners": 0,
+      "scope_event_listeners": 1,
+      "whole_modules": [
+        "records-view.js (loaded by existing ledger fixture)",
+        "workspace-context.js",
+        "workspace-context-ui.js"
+      ],
+      "production_excerpts": [
+        "workspace.js action wrapper",
+        "workspace.js Apply/Reset registration"
+      ],
+      "statuses": []
+    },
+    {
+      "id": "records_reset-scope",
+      "status": "GREEN",
+      "expected_max": 1,
+      "observed": 1,
+      "requests": [
+        {
+          "url": "/api/projects/p/records/page",
+          "body": {
+            "include_unknown": true,
+            "filters": {
+              "field": "metadata.city",
+              "op": "eq",
+              "value": "杭州"
+            },
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "kinds": [
+              "entity"
+            ],
+            "query": "",
+            "cursor": null,
+            "limit": 50
+          },
+          "owner": [
+            "at context.api (D:\\workspace\\knowledge_service_v2\\knowledge_service\\.benchmarks\\page-request-count-audit.cjs:40:103)",
+            "at evalmachine.<anonymous>:550:51",
+            "at fetchPage (D:\\workspace\\knowledge_service_v2\\knowledge_service\\knowledge_service\\web\\record-create.js:93:26)",
+            "at Object.load (D:\\workspace\\knowledge_service_v2\\knowledge_service\\knowledge_service\\web\\record-create.js:98:112)",
+            "at loadPage (evalmachine.<anonymous>:554:105)",
+            "at load (evalmachine.<anonymous>:580:104)",
+            "at evalmachine.<anonymous>:644:79"
+          ]
+        },
+        {
+          "url": "/api/projects/p/ontologies",
+          "owner": [
+            "at context.api (D:\\workspace\\knowledge_service_v2\\knowledge_service\\.benchmarks\\page-request-count-audit.cjs:40:103)",
+            "at loadPage (evalmachine.<anonymous>:561:39)"
+          ]
+        },
+        {
+          "url": "/api/projects/p/records/page",
+          "body": {
+            "include_unknown": true,
+            "filters": {
+              "field": "metadata.city",
+              "op": "eq",
+              "value": "杭州"
+            },
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "kinds": [
+              "relation"
+            ],
+            "query": "",
+            "cursor": null,
+            "limit": 1
+          },
+          "owner": [
+            "at context.api (D:\\workspace\\knowledge_service_v2\\knowledge_service\\.benchmarks\\page-request-count-audit.cjs:40:103)",
+            "at evalmachine.<anonymous>:563:31",
+            "at Array.map (<anonymous>)",
+            "at loadPage (evalmachine.<anonymous>:562:106)"
+          ]
+        },
+        {
+          "url": "/api/projects/p/records/page",
+          "body": {
+            "include_unknown": true,
+            "filters": {
+              "field": "metadata.city",
+              "op": "eq",
+              "value": "杭州"
+            },
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "kinds": [
+              "attribute"
+            ],
+            "query": "",
+            "cursor": null,
+            "limit": 1
+          },
+          "owner": [
+            "at context.api (D:\\workspace\\knowledge_service_v2\\knowledge_service\\.benchmarks\\page-request-count-audit.cjs:40:103)",
+            "at evalmachine.<anonymous>:563:31",
+            "at Array.map (<anonymous>)",
+            "at loadPage (evalmachine.<anonymous>:562:106)"
+          ]
+        },
+        {
+          "url": "/api/projects/p/records/page",
+          "body": {
+            "include_unknown": true,
+            "filters": {
+              "field": "metadata.city",
+              "op": "eq",
+              "value": "杭州"
+            },
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "kinds": [
+              "chunk"
+            ],
+            "query": "",
+            "cursor": null,
+            "limit": 1
+          },
+          "owner": [
+            "at context.api (D:\\workspace\\knowledge_service_v2\\knowledge_service\\.benchmarks\\page-request-count-audit.cjs:40:103)",
+            "at evalmachine.<anonymous>:563:31",
+            "at Array.map (<anonymous>)",
+            "at loadPage (evalmachine.<anonymous>:562:106)"
+          ]
+        },
+        {
+          "url": "/api/projects/p/assertions/batch",
+          "body": {
+            "record_ids": [
+              "first"
+            ]
+          },
+          "owner": [
+            "at context.api (D:\\workspace\\knowledge_service_v2\\knowledge_service\\.benchmarks\\page-request-count-audit.cjs:40:103)",
+            "at pageAssertions (evalmachine.<anonymous>:521:28)",
+            "at loadPage (evalmachine.<anonymous>:565:85)"
+          ]
+        }
+      ],
+      "trigger": "#reset-scope click on visible records page",
+      "registered_click_listeners": 0,
+      "scope_event_listeners": 1,
+      "whole_modules": [
+        "records-view.js (loaded by existing ledger fixture)",
+        "workspace-context.js",
+        "workspace-context-ui.js"
+      ],
+      "production_excerpts": [
+        "workspace.js action wrapper",
+        "workspace.js Apply/Reset registration"
+      ],
+      "statuses": []
+    },
+    {
+      "id": "hidden_ingest_batch_requests",
+      "status": "GREEN",
+      "expected_max": 0,
+      "observed": 0,
+      "requests": [],
+      "trigger": "module ready while upload/batches drawer hidden; then one controlled timer tick",
+      "drawer_visible": false,
+      "batch_requests_before_tick": 0,
+      "batch_requests_on_one_tick": 0,
+      "scheduled_delays_ms": [],
+      "rescheduled_delays_ms": [],
+      "whole_modules": [
+        "ingest-batches.js"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "project_id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+  "searches": [
+    {
+      "mode": "semantic",
+      "status": 200,
+      "seconds": 1.13,
+      "backend": "milvus",
+      "requested_mode": "semantic",
+      "active_mode": "semantic",
+      "degraded": false,
+      "hits": 5,
+      "backends": {
+        "milvus": true,
+        "keyword": false,
+        "semantic": true
+      },
+      "error_count": 0
+    },
+    {
+      "mode": "hybrid",
+      "status": 200,
+      "seconds": 0.346,
+      "backend": "milvus",
+      "requested_mode": "hybrid",
+      "active_mode": "hybrid",
+      "degraded": false,
+      "hits": 5,
+      "backends": {
+        "milvus": true,
+        "keyword": true,
+        "semantic": true
+      },
+      "error_count": 0
+    },
+    {
+      "mode": "keyword",
+      "status": 200,
+      "seconds": 0.068,
+      "backend": "milvus",
+      "requested_mode": "keyword",
+      "active_mode": "keyword",
+      "degraded": false,
+      "hits": 5,
+      "backends": {
+        "milvus": true,
+        "keyword": true,
+        "semantic": false
+      },
+      "error_count": 0
+    }
+  ],
+  "health_status": 200,
+  "project_visible": true,
+  "counts": {
+    "documents": 0,
+    "entities": 150001,
+    "relations": 300000,
+    "attributes": 0,
+    "chunks": 0
+  }
+}

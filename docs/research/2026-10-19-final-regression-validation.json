@@ -1,0 +1,96 @@
+{
+  "status": "regression_passed_with_documented_limits",
+  "python": {
+    "collected": 2156,
+    "passed": 2153,
+    "failed": 0,
+    "errors": 0,
+    "skipped": [
+      {
+        "test": "tests.service.test_legacy_import.test_symlink_file_escape_rejected",
+        "reason": "Symlink creation unavailable on this Windows host"
+      },
+      {
+        "test": "tests.service.test_vector_dimension.test_checked_in_model_dimension_comes_from_pooling_config_when_available",
+        "reason": "本机没有 data/model，跳过"
+      }
+    ],
+    "xfailed": [
+      {
+        "test": "tests.service.test_provenance.test_concurrent_ingest_update_cannot_produce_mixed_captured_states",
+        "reason": "PostgreSQL MVCC：READ COMMITTED 下并发提交不会阻塞捕获期间的读取，同一答案的两次读取可能看到不同的摄取状态。需要重复读隔离级别，或让一次捕获只取一次摄取运行快照。若实现了快照共享，本用例会 XPASS，请移除该标记。"
+      }
+    ],
+    "seconds": 2971.89,
+    "junit_seconds": 2970.995
+  },
+  "node_worktree": {
+    "tests": 247,
+    "pass": 247,
+    "fail": 0,
+    "skipped": 0
+  },
+  "node_delivered_directory": {
+    "tests": 247,
+    "pass": 247,
+    "fail": 0,
+    "skipped": 0
+  },
+  "static_mobile_browser": {
+    "passed": 2,
+    "failed": 0,
+    "test": "tests/service/qa-viewport-layout.browser.cjs"
+  },
+  "manual": {
+    "chapters": 27,
+    "explanatory_fields_per_chapter": 7,
+    "screenshots": 9,
+    "anchors": 258,
+    "static_check_passed": true,
+    "browser_report": "2026-10-19-manual-reader-validation.json"
+  },
+  "frozen_source": {
+    "files": 440,
+    "changed_during_run": [],
+    "manifest_sha256": "6bed00bd6243ef6333efccb4cea3cc90bb4f49a433aa340dbc68e66fb9d64bf6"
+  },
+  "delivered_source_parity": {
+    "hashed_files": 440,
+    "line_ending_only": 90,
+    "content_differences": []
+  },
+  "database_schema_contracts": {
+    "enabled": true,
+    "database": "knowledge_redesign_schema_verify"
+  },
+  "known_limits": {
+    "complete_graph_load_p95_seconds": 48.187,
+    "target_seconds": 30,
+    "complete_graph_load_target_met": false,
+    "large_corpus_governed_write_seconds": 125.454,
+    "large_write_samples": 1,
+    "capacity_spec_fully_accepted": false,
+    "future_phases": [
+      "community Global/DRIFT",
+      "project membership ACL",
+      "precise source revision and candidate manifests",
+      "cross-draft merging"
+    ]
+  },
+  "evidence_reports": [
+    "2026-10-19-live-ui-validation.json",
+    "2026-10-19-live-workflows-validation.json",
+    "2026-10-19-backend-capacity.json",
+    "2026-10-19-product-capacity-validation.json",
+    "2026-10-19-product-capacity-isolated-loads.json",
+    "2026-10-19-governed-write-latency.json"
+  ],
+  "delivered_runtime_report": "2026-10-19-delivered-runtime-validation.json",
+  "integration": {
+    "tracked_files": 191,
+    "original_backups": 84,
+    "unresolved_merge_conflicts": 0,
+    "application_url": "http://127.0.0.1:8100/",
+    "runtime_health": "ok"
+  }
+}

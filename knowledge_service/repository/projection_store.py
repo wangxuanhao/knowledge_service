@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import json
+from itertools import islice
 from uuid import uuid4
 
 from ..core.time import normalize_time, utc_now
@@ -49,6 +50,8 @@ class ClaimedBatch:
     active_destination: str | None = None
     previous_destination: str | None = None
     rollback_until: str | None = None
+    index_version: int | None = None
+    catalog: dict | None = None
 
     def assert_matches(self, cursor, now=None):
         now = now or utc_now()
@@ -76,6 +79,40 @@ def claim_is_available(claim_token, claim_until, now):
     return (not claim_token or not claim_until
             or normalize_time(claim_until, allow_none=False)
             <= normalize_time(now, allow_none=False))
+
+
+def milvus_delivery_state(cursor, schema_version=None, now=None):
+    """Only an explicitly activated, healthy generation accepts incremental work."""
+    if cursor is None:
+        return 'not_built'
+    if cursor.get('status') in {'failed', 'requires_rebuild'}:
+        return 'requires_rebuild'
+    if (schema_version is not None
+            and int(cursor.get('schema_version') or 0) != int(schema_version)):
+        return 'requires_rebuild'
+    now = now or utc_now()
+    leased = not claim_is_available(
+        cursor.get('claim_token'), cursor.get('claim_until'), now)
+    rebuild = cursor.get('rebuild_state') or {}
+    if (rebuild.get('catalog') or {}).get('fields'):
+        return 'requires_rebuild'
+    if (cursor.get('status') in {'rebuilding', 'validating', 'switching'}
+            or (rebuild.get('build_id') and rebuild.get('phase') != 'ready')):
+        return 'building' if leased else 'requires_rebuild'
+    if not cursor.get('active_destination') or not rebuild.get('index_version'):
+        return 'not_built'
+    if leased:
+        return 'leased'
+    if (cursor.get('claim_token')
+            and cursor.get('claimed_from_seq') is not None
+            and cursor.get('claimed_to_seq') is not None
+            and int(cursor['claimed_from_seq']) <= int(cursor['claimed_to_seq'])):
+        # The previous RPC may still complete. An ordinary claim must never
+        # adopt this generation or turn a new token into a new generation.
+        return 'requires_rebuild'
+    if cursor.get('status') not in {'ready', 'pending'}:
+        return 'requires_rebuild'
+    return 'available'
 
 
 def claim_matches(cursor, claimed, now):
@@ -126,6 +163,16 @@ class ProjectionStore:
         self.repository = repository
         self._db = repository._db
 
+    @property
+    def receipts(self):
+        from .projection_receipts import ProjectionReceipts
+        return ProjectionReceipts(self)
+
+    @property
+    def generation_cleanups(self):
+        from .generation_cleanup import GenerationCleanupStore
+        return GenerationCleanupStore(self)
+
     def authority_bundle(self, project_id, record_id):
         """Current target, incident facts and endpoints for projection repair."""
         with self.repository._lock:
@@ -153,7 +200,7 @@ class ProjectionStore:
                    ORDER BY id''',
                 (project_id, record_id, record_id, record_id, record_id,
                  record_id, record_id)).fetchall()
-        return [self.repository._record(row, vectors='list') for row in rows]
+        return [self.repository._record(row) for row in rows]
 
     @staticmethod
     def rollback_deadline(switched_at=None):
@@ -174,12 +221,48 @@ class ProjectionStore:
         self._db.execute(
             '''UPDATE project_projection_sequences SET projection_seq=?
                WHERE project_id=?''', (seq, project_id))
+        payload = {key: value for key, value in payload.items() if key != 'embedding'}
+        envelope = self._milvus_envelope(project_id, operation, version_id, payload)
+        if envelope is not None:
+            payload['_milvus_projection'] = envelope
         self._db.execute(
             '''INSERT INTO projection_outbox
                (project_id,seq,operation,version_id,payload,created_at)
                VALUES (?,?,?,?,?,?)''',
             (project_id, seq, operation, version_id, _json(payload), utc_now()))
         return seq
+
+    def _milvus_envelope(self, project_id, operation, version_id, payload):
+        from ..domain.search_filter_catalog import FilterCatalog
+        from ..domain.search_projection import build_projection
+        from .projection_inputs import ProjectionInputs
+        cursor = self.cursor(project_id, 'milvus')
+        if cursor is None or cursor.get('status') in {'failed', 'requires_rebuild'}:
+            return None
+        state = cursor.get('rebuild_state') or {}
+        if not state.get('index_version') or not state.get('catalog'):
+            return None
+        if state['catalog'].get('fields'):
+            return None
+        if cursor.get('status') not in {'ready', 'pending', 'applying', 'rebuilding', 'validating', 'switching'}:
+            return None
+        envelope = {'index_version': state['index_version'],
+                    'catalog_fingerprint': FilterCatalog.from_dict(state['catalog']).fingerprint,
+                    'embedding_model': state['embedding_model']}
+        if operation == 'tombstone':
+            return {**envelope, 'record_id': payload['record_id']}
+        try:
+            catalog = FilterCatalog.from_dict(state['catalog'])
+            inputs = ProjectionInputs(self.repository).collect(project_id, version_ids=[version_id])
+            if not inputs:
+                return {**envelope, 'row': None}
+            row = build_projection(inputs[0], catalog, index_version=state['index_version'])
+            return {**envelope, 'row': row}
+        except ValueError as exc:
+            self._db.execute("""UPDATE projection_cursors SET status='requires_rebuild',
+                last_error=?,updated_at=? WHERE project_id=? AND target='milvus'""",
+                (str(exc), utc_now(), project_id))
+            return None
 
     def enqueue_record_change(self, project_id, old_record, new_record):
         sequences = []
@@ -188,7 +271,7 @@ class ProjectionStore:
                 project_id, 'tombstone', old_record['version_id'], {
                     'record_id': old_record['id'],
                     'version_id': old_record['version_id']}))
-        if (new_record.get('metadata') or {}).get('_deleted') is not True:
+        if not any((new_record.get('metadata') or {}).get(key) for key in ('_deleted', '_audit')):
             sequences.append(self.enqueue(
                 project_id, 'upsert', new_record['version_id'], new_record))
         return sequences
@@ -225,13 +308,20 @@ class ProjectionStore:
             raise ValueError('projection batch limit must be 1..1000')
         owner = owner or target
         with self.repository._transaction():
-            self._ensure_cursor(project_id, target, schema_version)
-            cursor = _decode_row(self._db.execute(
+            if target != 'milvus' or build is not None:
+                self._ensure_cursor(project_id, target, schema_version)
+            row = self._db.execute(
                 '''SELECT * FROM projection_cursors
                    WHERE project_id=? AND target=? FOR UPDATE''',
-                (project_id, target)).fetchone())
+                (project_id, target)).fetchone()
+            cursor = None if row is None else _decode_row(row)
             now = utc_now()
             if build is None:
+                if target == 'milvus':
+                    state = self._milvus_delivery_state_locked(
+                        project_id, target, cursor, schema_version, now)
+                    if state != 'available':
+                        return None
                 current_schema = int(cursor.get('schema_version') or 0)
                 if current_schema != int(schema_version):
                     raise ProjectionRebuildRequired(
@@ -272,7 +362,9 @@ class ProjectionStore:
                 events, owner, token, expires, start, end, project_id, target,
                 schema_version, build.build_id if build else None,
                 cursor.get('active_destination'), cursor.get('previous_destination'),
-                cursor.get('rollback_until'))
+                cursor.get('rollback_until'),
+                (cursor.get('rebuild_state') or {}).get('index_version'),
+                (cursor.get('rebuild_state') or {}).get('catalog'))
 
     def renew_claim(self, claimed, lease_seconds=30):
         with self.repository._transaction():
@@ -299,6 +391,8 @@ class ProjectionStore:
                WHERE project_id=? AND target=? FOR UPDATE''',
             (claimed.project_id, claimed.target)).fetchone())
         claimed.assert_matches(cursor)
+        if claimed.target == 'milvus' and cursor.get('status') == 'requires_rebuild':
+            raise ProjectionLeaseLost('project index was invalidated while delivery was in flight')
         if claimed.build_id and not rebuild_matches(
                 cursor, claimed, claimed.schema_version, utc_now()):
             raise ProjectionLeaseLost('projection rebuild lease was lost')
@@ -317,6 +411,13 @@ class ProjectionStore:
             expected = [int(event['seq']) for event in claimed.events]
             if actual != expected:
                 raise ProjectionGap('claimed events no longer match authoritative outbox')
+            if claimed.target == 'milvus':
+                state = dict(cursor.get('rebuild_state') or {})
+                self.receipts.apply_events(claimed, claimed.events, cursor=cursor)
+                state.pop('expected_projection', None)
+                state.update(applied_seq=claimed.to_seq)
+                self._db.execute('UPDATE projection_cursors SET rebuild_state=? WHERE project_id=? AND target=? AND claim_token=?',
+                                 (_json(state), claimed.project_id, claimed.target, claimed.token))
             end = contiguous_end(int(cursor['applied_seq']), claimed.events)
             watermark = self.project_watermark(claimed.project_id)
             rebuilding = claimed.build_id is not None
@@ -349,22 +450,59 @@ class ProjectionStore:
             cursor = self._locked_claim(claimed)
             if schema_version is not None and int(cursor['schema_version']) != int(schema_version):
                 raise ProjectionLeaseLost('projection failure schema CAS failed')
+            if claimed.target == 'milvus' and claimed.build_id and getattr(error, 'requires_rebuild', False):
+                state = dict(cursor.get('rebuild_state') or {})
+                state['requires_new_snapshot'] = True
+                self._db.execute('UPDATE projection_cursors SET rebuild_state=? WHERE project_id=? AND target=?', (_json(state), claimed.project_id, claimed.target))
+            if claimed.target == 'milvus' and (isinstance(error, ProjectionLeaseLost) or getattr(error, 'uncertain_write', False)):
+                state = dict(cursor.get('rebuild_state') or {})
+                state['uncertain_write'] = True
+                self._db.execute('UPDATE projection_cursors SET rebuild_state=? WHERE project_id=? AND target=?', (_json(state), claimed.project_id, claimed.target))
+            status = ('requires_rebuild'
+                      if claimed.target == 'milvus' and not claimed.build_id
+                      else 'failed')
             result = self._db.execute(
-                '''UPDATE projection_cursors SET status='failed',last_error=?,
+                '''UPDATE projection_cursors SET status=?,last_error=?,
                        claim_owner=NULL,claim_token=NULL,claim_until=NULL,
                        claimed_from_seq=NULL,claimed_to_seq=NULL,updated_at=?
                    WHERE project_id=? AND target=? AND claim_owner=? AND claim_token=?''',
-                (str(error), utc_now(), claimed.project_id, claimed.target,
+                (status, str(error), utc_now(), claimed.project_id, claimed.target,
                  claimed.owner, claimed.token))
             if result.rowcount != 1:
                 raise ProjectionLeaseLost('projection failure lost CAS')
 
     def projection_ready(self, project_id, target, schema_version):
-        return projection_is_ready(self.project_watermark(project_id),
-                                   self.cursor(project_id, target), schema_version)
-
-    def delivery_state(self, project_id, target):
         cursor = self.cursor(project_id, target)
+        if (target == 'milvus'
+                and milvus_delivery_state(cursor, schema_version)
+                not in {'available', 'leased'}):
+            return False
+        return projection_is_ready(self.project_watermark(project_id),
+                                   cursor, schema_version)
+
+    def _milvus_delivery_state_locked(self, project_id, target, cursor,
+                                      schema_version, now):
+        state = milvus_delivery_state(cursor, schema_version, now)
+        if state == 'requires_rebuild' and cursor.get('status') != state:
+            if cursor.get('claim_token'):
+                frozen = dict(cursor.get('rebuild_state') or {})
+                frozen['uncertain_write'] = True
+                self._db.execute('UPDATE projection_cursors SET rebuild_state=? WHERE project_id=? AND target=?',
+                                 (_json(frozen), project_id, target))
+            self._db.execute(
+                '''UPDATE projection_cursors SET status='requires_rebuild',last_error=?,
+                       claim_owner=NULL,claim_token=NULL,claim_until=NULL,
+                       claimed_from_seq=NULL,claimed_to_seq=NULL,updated_at=?
+                   WHERE project_id=? AND target=?''',
+                ('Milvus generation is incomplete, incompatible, or has an unconfirmed write; '
+                 'rebuild this project explicitly', now, project_id, target))
+        return state
+
+    def delivery_state(self, project_id, target, schema_version=None):
+        cursor = self.cursor(project_id, target)
+        if target == 'milvus':
+            state = milvus_delivery_state(cursor, schema_version)
+            return 'empty' if state == 'available' else state
         if cursor is None:
             return 'empty'
         if not claim_is_available(
@@ -372,15 +510,52 @@ class ProjectionStore:
             return 'leased'
         return 'empty'
 
+    def search_index(self, project_id, schema_version):
+        from ..domain.search_filter_catalog import FilterCatalog
+        with self.repository.independent_read_view() as reader:
+            store = reader.projections
+            cursor = store.cursor(project_id, 'milvus')
+            state = milvus_delivery_state(cursor, schema_version)
+            if state != 'available':
+                error = RuntimeError('项目向量索引不可用: ' + state + '；请在项目页面向量化或等待同步')
+                error.state = state
+                raise error
+            watermark = store.project_watermark(project_id)
+            if not projection_is_ready(watermark, cursor, schema_version):
+                error = RuntimeError('项目向量索引正在追平，请稍后重试')
+                error.state = 'catching_up'
+                raise error
+            frozen = cursor.get('rebuild_state') or {}
+            catalog = FilterCatalog.from_dict(frozen['catalog'])
+            return {'index_version': int(frozen['index_version']), 'catalog': catalog.to_dict(),
+                    'embedding_model': frozen['embedding_model'], 'dim': int(frozen['dim']),
+                    'watermark': watermark}
+
+    def search_index_is_current(self, project_id, index_version, schema_version, watermark):
+        try:
+            selected = self.search_index(project_id, schema_version)
+        except RuntimeError:
+            return False
+        return selected['index_version'] == index_version and selected['watermark'] == watermark
+
     def claim_maintenance(self, project_id, target, schema_version, owner,
                           lease_seconds=60):
         token, expires, now = str(uuid4()), self._expiry(lease_seconds), utc_now()
         with self.repository._transaction():
-            self._ensure_cursor(project_id, target, schema_version)
-            cursor = _decode_row(self._db.execute(
+            if target != 'milvus':
+                self._ensure_cursor(project_id, target, schema_version)
+            row = self._db.execute(
                 '''SELECT * FROM projection_cursors
                    WHERE project_id=? AND target=? FOR UPDATE''',
-                (project_id, target)).fetchone())
+                (project_id, target)).fetchone()
+            cursor = None if row is None else _decode_row(row)
+            if target == 'milvus':
+                state = self._milvus_delivery_state_locked(
+                    project_id, target, cursor, schema_version, now)
+                if (state != 'available'
+                        or not projection_is_ready(
+                            self.project_watermark(project_id), cursor, schema_version)):
+                    return None
             if (not claim_is_available(cursor.get('claim_token'),
                                        cursor.get('claim_until'), now)
                     or cursor.get('status') in {
@@ -425,16 +600,26 @@ class ProjectionStore:
                        updated_at=? WHERE project_id=? AND target=? AND claim_token=?''',
                 (utc_now(), claimed.project_id, claimed.target, claimed.token))
 
-    def begin_rebuild(self, project_id, target, schema_version, owner):
-        token, expires, now = str(uuid4()), self._expiry(30), utc_now()
+    def begin_rebuild(self, project_id, target, schema_version, owner, *, lease_guard,
+                      embedding_model=None, dim=None):
+        token = str(uuid4())
         with self.repository._transaction():
+            self._db.execute('INSERT INTO project_projection_sequences(project_id,projection_seq) VALUES (?,0) ON CONFLICT(project_id) DO NOTHING', (project_id,))
             self._ensure_cursor(project_id, target, schema_version)
             existing = _decode_row(self._db.execute(
                 '''SELECT * FROM projection_cursors
                    WHERE project_id=? AND target=? FOR UPDATE''',
                 (project_id, target)).fetchone())
+            # Lock waits must not consume the lease we are about to issue.
+            now, expires = utc_now(), self._expiry(30)
             state = existing.get('rebuild_state') or {}
             unfinished = state.get('build_id') and state.get('phase') != 'ready'
+            if target == 'milvus' and ((state.get('catalog') or {}).get('fields') or
+                    state.get('uncertain_write') or state.get('requires_new_snapshot') or
+                    (embedding_model is not None and state.get('embedding_model') != embedding_model) or
+                    (dim is not None and state.get('dim') != dim) or
+                    (existing.get('claim_token') and claim_is_available(existing.get('claim_token'), existing.get('claim_until'), now))):
+                unfinished = False
             if (not unfinished and not claim_is_available(
                     existing.get('claim_token'), existing.get('claim_until'), now)):
                 raise ProjectionLeaseLost(
@@ -446,7 +631,16 @@ class ProjectionStore:
                 raise ProjectionLeaseLost('projection rebuild is already leased')
             build_id = state['build_id'] if unfinished else str(uuid4())
             if not unfinished:
+                previous_state = state
                 state = {'build_id': build_id, 'phase': 'capturing'}
+                if target == 'milvus':
+                    version = int(previous_state.get('index_version') or 0) + 1
+                    for obsolete in {previous_state.get('index_version'), previous_state.get('previous_index_version')}:
+                        if obsolete and obsolete < version:
+                            self.generation_cleanups.enqueue(project_id, obsolete)
+                    state.update(index_version=version, previous_index_version=previous_state.get('index_version'))
+                    if embedding_model is not None and dim is not None:
+                        state.update(embedding_model=embedding_model, dim=dim)
             self._db.execute(
                 '''UPDATE projection_cursors SET schema_version=?,applied_seq=?,
                        status='rebuilding',last_error=NULL,rebuild_state=?,
@@ -464,45 +658,36 @@ class ProjectionStore:
             int(state.get('applied_seq', existing['applied_seq'])), project_id, target,
             schema_version, build_id, (existing or {}).get('active_destination'),
             (existing or {}).get('previous_destination'),
-            (existing or {}).get('rollback_until'))
+            (existing or {}).get('rollback_until'), state.get('index_version'), state.get('catalog'))
         needs_capture = not unfinished or rebuild_needs_capture(state)
         try:
-            if needs_capture:
-                with self.repository.read_snapshot():
-                    snapshot_seq = self.project_watermark(project_id)
-                    records = self.repository.current_records(project_id)
-                state.update(phase='snapshot', snapshot_seq=snapshot_seq,
-                             applied_seq=snapshot_seq)
-                with self.repository._transaction():
-                    cursor = self._locked_claim(claimed)
-                    if not rebuild_matches(cursor, claimed, schema_version, utc_now()):
-                        raise ProjectionLeaseLost('projection rebuild snapshot lost CAS')
-                    self._db.execute(
-                        '''DELETE FROM projection_rebuild_snapshots
-                           WHERE project_id=? AND target=? AND build_id=?''',
-                        (project_id, target, build_id))
-                    self._db.executemany(
-                        '''INSERT INTO projection_rebuild_snapshots
-                           (project_id,target,build_id,ordinal,version_id)
-                           VALUES (?,?,?,?,?)''',
-                        [(project_id, target, build_id, index, row['version_id'])
-                         for index, row in enumerate(records)])
-                    result = self._db.execute(
-                        '''UPDATE projection_cursors SET applied_seq=?,rebuild_state=?,
-                               claimed_from_seq=?,claimed_to_seq=?,updated_at=?
-                           WHERE project_id=? AND target=? AND claim_token=?''',
-                        (snapshot_seq, _json(state), snapshot_seq + 1, snapshot_seq,
-                         utc_now(), project_id, target, token))
-                    if result.rowcount != 1:
-                        raise ProjectionLeaseLost('projection rebuild snapshot lost CAS')
-                claimed.from_seq, claimed.to_seq = snapshot_seq + 1, snapshot_seq
-            else:
-                snapshot_seq = int(state['snapshot_seq'])
-                ids = [row['version_id'] for row in self._db.execute(
-                    '''SELECT version_id FROM projection_rebuild_snapshots
-                       WHERE project_id=? AND target=? AND build_id=?
-                       ORDER BY ordinal''', (project_id, target, build_id)).fetchall()]
-                records = self.repository.records_by_version_ids(project_id, ids)
+            with lease_guard(claimed) as lease_is_current:
+                # Hydration may decode hundreds of thousands of versions. Its
+                # private, consistent snapshot leaves the writer free to renew
+                # this claim and to serve other projects while we read.
+                with self.repository.independent_read_view() as reader:
+                    if needs_capture:
+                        snapshot_seq = reader.projections.project_watermark(project_id)
+                        if target == 'milvus':
+                            from .projection_inputs import ProjectionInputs
+                            records = (value for batch in ProjectionInputs(reader).batches(project_id) for value in batch)
+                        else:
+                            records = reader.current_records(project_id)
+                        self._persist_rebuild_snapshot(
+                            claimed, state, records, snapshot_seq, lease_is_current)
+                    else:
+                        snapshot_seq = int(state['snapshot_seq'])
+                        if target != 'milvus':
+                            ids = [row['version_id'] for row in reader._db.execute(
+                                '''SELECT version_id FROM projection_rebuild_snapshots
+                                   WHERE project_id=? AND target=? AND build_id=?
+                                   ORDER BY ordinal''',
+                                (project_id, target, build_id)).fetchall()]
+                            records = reader.records_by_version_ids(project_id, ids)
+                lease_is_current()
+                if target == 'milvus':
+                    from .projection_snapshot import CapturedProjectionInputs
+                    records = CapturedProjectionInputs(self.repository, claimed)
         except Exception as exc:
             try:
                 self.mark_failed(claimed, exc, schema_version)
@@ -511,6 +696,71 @@ class ProjectionStore:
             raise
         return {'claim': claimed, 'snapshot_seq': snapshot_seq,
                 'records': records, 'state': state}
+
+    def _persist_rebuild_snapshot(self, claimed, state, records, snapshot_seq,
+                                  lease_is_current):
+        project_id, target, build_id = claimed.project_id, claimed.target, claimed.build_id
+        with self.repository._transaction():
+            self._locked_claim(claimed)
+            self._db.execute(
+                '''DELETE FROM projection_rebuild_snapshots
+                   WHERE project_id=? AND target=? AND build_id=?''',
+                (project_id, target, build_id))
+            lease_is_current()
+        # A partial receipt remains in phase capturing and is discarded on
+        # resume. Publish snapshot_seq only after every ordinal is durable.
+        iterator, offset = iter(records), 0
+        while True:
+            page = list(islice(iterator, 500))
+            if not page:
+                break
+            lease_is_current()
+            with self.repository._transaction():
+                self._locked_claim(claimed)
+                self._db.executemany(
+                    '''INSERT INTO projection_rebuild_snapshots
+                       (project_id,target,build_id,ordinal,version_id)
+                       VALUES (?,?,?,?,?)''',
+                    [(project_id, target, build_id, index, (row.record if hasattr(row, 'record') else row)['version_id'])
+                     for index, row in enumerate(page, offset)])
+                lease_is_current()
+            offset += len(page)
+        with self.repository._transaction():
+            self._locked_claim(claimed)
+            state.update(phase='snapshot', snapshot_seq=snapshot_seq,
+                         applied_seq=snapshot_seq)
+            result = self._db.execute(
+                '''UPDATE projection_cursors SET applied_seq=?,rebuild_state=?,
+                       claimed_from_seq=?,claimed_to_seq=?,updated_at=?
+                   WHERE project_id=? AND target=? AND claim_token=?''',
+                (snapshot_seq, _json(state), snapshot_seq + 1, snapshot_seq,
+                 utc_now(), project_id, target, claimed.token))
+            if result.rowcount != 1:
+                raise ProjectionLeaseLost('projection rebuild snapshot lost CAS')
+            claimed.from_seq, claimed.to_seq = snapshot_seq + 1, snapshot_seq
+            lease_is_current()
+
+    def discard_preflight_capture(self, claimed, schema_version):
+        """A rejected snapshot wrote no vectors; allow corrected PG data retry."""
+        with self.repository._transaction():
+            cursor = self._locked_claim(claimed)
+            if not rebuild_matches(cursor, claimed, schema_version, utc_now()):
+                raise ProjectionLeaseLost('project preflight capture lost CAS')
+            previous = cursor.get('rebuild_state') or {}
+            state = {key: previous[key] for key in
+                     ('build_id', 'index_version', 'previous_index_version', 'embedding_model', 'dim') if key in previous}
+            state['phase'] = 'capturing'
+            self._db.execute('UPDATE projection_cursors SET rebuild_state=? WHERE project_id=? AND target=? AND claim_token=?',
+                             (_json(state), claimed.project_id, claimed.target, claimed.token))
+
+    def freeze_milvus_event(self, claimed, event, envelope):
+        with self.repository._transaction():
+            self._locked_claim(claimed)
+            self._db.execute("""UPDATE projection_outbox SET payload=
+                (payload::jsonb || jsonb_build_object('_milvus_projection', ?::jsonb))
+                WHERE project_id=? AND seq=?""",
+                (_json(envelope), claimed.project_id, event['seq']))
+            event['payload'] = {**event['payload'], '_milvus_projection': envelope}
 
     def record_rebuild_progress(self, claimed, schema_version, state):
         with self.repository._transaction():
@@ -563,6 +813,35 @@ class ProjectionStore:
                 '''DELETE FROM projection_rebuild_snapshots
                    WHERE project_id=? AND target=? AND build_id=?''',
                 (claimed.project_id, claimed.target, claimed.build_id))
+
+    @contextmanager
+    def activation_guard(self, project_id, claimed, schema_version):
+        with self.repository._transaction():
+            row = self._db.execute('SELECT projection_seq FROM project_projection_sequences WHERE project_id=? FOR UPDATE', (project_id,)).fetchone()
+            cursor = self._locked_claim(claimed)
+            if not rebuild_matches(cursor, claimed, schema_version, utc_now()):
+                raise ProjectionLeaseLost('project index activation lease was lost')
+            yield int(row['projection_seq']) if row is not None else 0
+
+    def activate_index(self, claimed, schema_version, applied_seq, state):
+        cursor = self._locked_claim(claimed)
+        if not rebuild_matches(cursor, claimed, schema_version, utc_now()):
+            raise ProjectionLeaseLost('project index activation CAS failed')
+        if int(applied_seq) != self.project_watermark(claimed.project_id):
+            raise ProjectionGap('project index activation is stale')
+        state = {**state, 'phase': 'ready'}
+        previous = state.get('previous_index_version')
+        if previous and previous < state['index_version']:
+            self.generation_cleanups.enqueue(claimed.project_id, previous)
+        self._db.execute("""UPDATE projection_cursors SET status='ready',applied_seq=?,
+            active_destination='knowledge_vectors',previous_destination=NULL,rollback_until=NULL,
+            rollback_applied_seq=0,rebuild_state=?,last_error=NULL,
+            claim_owner=NULL,claim_token=NULL,claim_until=NULL,
+            claimed_from_seq=NULL,claimed_to_seq=NULL,updated_at=?
+            WHERE project_id=? AND target='milvus' AND claim_token=?""",
+            (applied_seq, _json(state), utc_now(), claimed.project_id, claimed.token))
+        self._db.execute('DELETE FROM projection_rebuild_snapshots WHERE project_id=? AND target=? AND build_id=?',
+                         (claimed.project_id, claimed.target, claimed.build_id))
 
     def list_incomplete_rebuilds(self, target=None):
         sql = "SELECT project_id,target FROM projection_cursors WHERE status IN ('rebuilding','validating','switching','failed') AND rebuild_state<>'{}'::jsonb"

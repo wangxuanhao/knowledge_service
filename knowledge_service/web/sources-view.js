@@ -1,230 +1,235 @@
-/* Automatic source browsing, with explicit loading/empty/error states. */
+/* List-first source browsing; original detail nodes live in an owned drawer. */
 (() => {
-  const list=$('source-list'), title=$('source-title'), body=$('source-body'), refresh=$('load-sources');
-  const summary=document.createElement('p');summary.className='source-summary subtle';summary.setAttribute('aria-live','polite');
-  $('tab-sources').querySelector('.source-layout').before(summary);
-  const layout=$('tab-sources').querySelector('.source-layout');
-  // 「原文 → 解析后映射」展示位：插在标题与正文之间，随选中文档重填。
-  const meta=document.createElement('div');meta.id='source-meta';meta.className='source-meta';
-  $('source-title').after(meta);
-  const empty=document.createElement('div');empty.className='source-empty';empty.setAttribute('aria-live','polite');empty.hidden=true;empty.innerHTML='<div class="source-empty-icon">📄</div><h3></h3><p></p>';
-  layout.append(empty);
+  const page=$('tab-sources'),list=$('source-list'),title=$('source-title'),body=$('source-body'),refresh=$('load-sources');
+  const layout=page.querySelector('.source-layout'),article=layout.querySelector('article');
+  const summary=document.createElement('p');summary.className='source-summary subtle';summary.setAttribute('aria-live','polite');layout.before(summary);
+  const meta=document.createElement('div');meta.id='source-meta';meta.className='source-meta';title.after(meta);
+  const empty=document.createElement('div');empty.className='source-empty';empty.setAttribute('aria-live','polite');empty.hidden=true;
+  empty.innerHTML='<div class="source-empty-icon" aria-hidden="true">📄</div><h3></h3><p></p>';layout.append(empty);
   refresh.textContent='刷新';refresh.classList.add('secondary');
-  let serial=0, selected=null, loadedProject=null, allDocuments=[];
-  const visible=()=>!$('tab-sources').classList.contains('hidden');
+  let serial=0,detailSerial=0,citationSerial=0,selected=null,activeTab='text',loadedProject=null,loadedScope=null,loadedState=null,allDocuments=[],currentFilter='all';
+  let inFlight=null,nextCursor=null,total=0,directoryCounts=null;
+  const textReads=new Map();
+  const loadMore=document.createElement('button');loadMore.id='source-load-more';loadMore.type='button';loadMore.className='secondary';loadMore.textContent='加载更多资料';loadMore.hidden=true;layout.after(loadMore);
+  const visible=()=>!page.classList.contains('hidden');
+  const canWrite=()=>Boolean(window.Auth?.isAdmin?.());
+  const scopeStamp=()=>{try{return JSON.stringify(scope());}catch{return null;}};
+  const drawer=window.WorkspaceDrawers.create({
+    id:'source-detail-drawer',title,description:'查看资料原文、提取知识、处理与修订记录。',content:article,onClose:clearDetail,
+  });
 
-  // 添加过滤器状态
-  let currentFilter='ready'; // 默认只显示构建成功
-
-  function message(heading,detail){empty.querySelector('h3').textContent=heading;empty.querySelector('p').textContent=detail;empty.hidden=false;layout.classList.add('is-empty');list.replaceChildren();}
+  function clearDetail(){
+    detailSerial++;selected=null;activeTab='text';title.textContent='';meta.replaceChildren();body.textContent='';
+    list.querySelectorAll('.source-item').forEach(button=>button.setAttribute('aria-current','false'));
+  }
+  function closeDetail(){drawer.close({restoreFocus:false});clearDetail();}
+  function message(heading,detail){
+    empty.querySelector('h3').textContent=heading;empty.querySelector('p').textContent=detail;
+    empty.hidden=false;layout.classList.add('is-empty');list.replaceChildren();
+  }
   const FORMAT_LABELS={pdf:'PDF',docx:'Word',doc:'Word',md:'Markdown',markdown:'Markdown',txt:'纯文本',text:'纯文本',html:'HTML',htm:'HTML'};
   const formatLabel=format=>FORMAT_LABELS[String(format||'').toLowerCase()]||String(format||'').toUpperCase()||'未知类型';
   const sizeLabel=size=>size==null?'未知大小':`${size>=1048576?(size/1048576).toFixed(1)+' MB':(size/1024).toFixed(size<10240?1:0)+' KB'}`;
-  // 一篇原文的文件信息：格式 + 文件名 + 大小 + 解析器 + 页数。
-  // 这里只做「源文件加载 + 解析正文阅读」，不再展示实体/关系等派生分析
-  // （用户原话：原文不是看实体和关系的解析，是源文件加载器 + 解析文本展示）。
-  function renderMeta(doc,state){
-    const host=$('source-meta');if(!host)return;
-    const parser=doc.metadata?.document_parser||'';
-    const parserLabel=parser==='builtin-text'?'纯文本直读':(parser==='docling'?'Docling 解析':(parser||'未知解析器'));
-    host.innerHTML=`
-      <div class="source-meta__head">
-        <span class="source-format source-format--big">${esc(formatLabel(doc.metadata?.source_format))}</span>
-        <span class="source-meta__file">${esc(doc.metadata?.source_file||doc.id)}</span>
-        <span class="source-meta__stats">${sizeLabel(doc.metadata?.source_size_bytes)} · ${parserLabel}${doc.metadata?.page_count?` · ${doc.metadata.page_count} 页`:''}</span>
-      </div>
-      <div class="source-meta__mapping">
-        <h4>解析正文</h4>
-        <p>${state.detail} 下方即解析出来的正文全文，可直接阅读或复制。</p>
-      </div>`;
-  }
-  function buildState(document){
-    const state=document.metadata?.status;
+  function buildState(doc){
+    const state=doc.metadata?.status;
     if(state==='failed')return {label:'知识构建失败',className:'failed',detail:'原文已安全保留，但实体、关系和片段没有写入知识图谱。可查看后台任务定位原因后重新提交。'};
     if(state==='processing')return {label:'等待 / 处理中',className:'processing',detail:'原文已保存，知识仍在构建中。'};
-    return {label:'构建成功',className:'ready',detail:'原文及其派生知识已完成写入。'};
+    if(state==='completed'||state==='ready'||state==='succeeded')return {label:'处理完成',className:'ready',detail:'处理任务已完成；检索与派生索引状态应分别核验。'};
+    return {label:'状态待核验',className:'ready',detail:'已保存原文；未获得完整处理或索引就绪状态。'};
   }
-
-  // 创建过滤器 UI
+  function renderMeta(doc,state){
+    const parser=doc.metadata?.document_parser||'';
+    const parserLabel=parser==='builtin-text'?'纯文本直读':parser==='docling'?'Docling 解析':parser||'未知解析器';
+    meta.innerHTML=`<div class="source-meta__head">
+      <span class="source-format source-format--big">${esc(formatLabel(doc.metadata?.source_format))}</span>
+      <span class="source-meta__file">${esc(doc.metadata?.source_file||doc.id)}</span>
+      <span class="source-meta__stats">${esc(sizeLabel(doc.metadata?.source_size_bytes))} · ${esc(parserLabel)}${doc.metadata?.page_count?` · ${esc(doc.metadata.page_count)} 页`:''}</span>
+    </div><div class="source-meta__mapping"><h4>解析正文</h4><p>${esc(state.detail)} 下方即解析出来的正文全文，可直接阅读或复制。</p></div>`;
+  }
+  function updateCounts(){
+    const counts=directoryCounts||{ready:0,processing:0,failed:0,all:allDocuments.length};
+    if(!directoryCounts)allDocuments.forEach(doc=>counts[buildState(doc).className]++);
+    for(const name of Object.keys(counts))$(name+'-count').textContent=counts[name];
+  }
   function createFilterUI(){
-    const filterBar=document.createElement('div');
-    filterBar.className='source-filter-bar';
+    const filterBar=document.createElement('div');filterBar.className='source-filter-bar';
+    filterBar.setAttribute('aria-label','资料处理状态');
     filterBar.innerHTML=`
-      <button class="source-filter-btn active" data-filter="ready">
-        <span class="filter-dot ready"></span>
-        已构建 <span class="filter-count" id="ready-count">0</span>
-      </button>
-      <button class="source-filter-btn" data-filter="processing">
-        <span class="filter-dot processing"></span>
-        处理中 <span class="filter-count" id="processing-count">0</span>
-      </button>
-      <button class="source-filter-btn" data-filter="failed">
-        <span class="filter-dot failed"></span>
-        失败 <span class="filter-count" id="failed-count">0</span>
-      </button>
-      <button class="source-filter-btn" data-filter="all">
-        全部 <span class="filter-count" id="all-count">0</span>
-      </button>
-    `;
-    $('tab-sources').querySelector('.source-layout').before(filterBar);
-
-    // 绑定点击事件
-    filterBar.querySelectorAll('.source-filter-btn').forEach(btn=>{
-      btn.addEventListener('click',()=>{
-        filterBar.querySelectorAll('.source-filter-btn').forEach(b=>b.classList.remove('active'));
-        btn.classList.add('active');
-        currentFilter=btn.dataset.filter;
-        renderDocumentList();
-      });
-    });
-  }
-
-  // 渲染文档列表
-  function renderDocumentList(){
-    if(!allDocuments.length){
-      message('当前范围暂无原文','可以切换项目、调整筛选条件，或前往"知识写入"添加文档。');
-      return;
-    }
-
-    let filteredDocs=allDocuments;
-    if(currentFilter!=='all'){
-      filteredDocs=allDocuments.filter(d=>buildState(d).className===currentFilter);
-    }
-
-    // 更新计数
-    const counts={ready:0,processing:0,failed:0};
-    allDocuments.forEach(d=>{counts[buildState(d).className]++;});
-    const readyEl=document.getElementById('ready-count');
-    const processingEl=document.getElementById('processing-count');
-    const failedEl=document.getElementById('failed-count');
-    const allEl=document.getElementById('all-count');
-    if(readyEl)readyEl.textContent=counts.ready;
-    if(processingEl)processingEl.textContent=counts.processing;
-    if(failedEl)failedEl.textContent=counts.failed;
-    if(allEl)allEl.textContent=allDocuments.length;
-
-    if(!filteredDocs.length){
-      const filterLabels={ready:'已构建成功',processing:'处理中',failed:'失败',all:'所有'};
-      message('当前筛选无结果',`没有${filterLabels[currentFilter]}的文档。`);
-      list.replaceChildren();
-      return;
-    }
-
-    // 只显示构建成功的文档（如果当前过滤器是 ready 或 all）
-    // 对于其他过滤器，显示对应状态的文档
-    layout.classList.remove('is-empty');empty.hidden=true;
-    list.innerHTML=filteredDocs.map((d,i)=>{
-      const state=buildState(d);
-      const originalIndex=allDocuments.indexOf(d);
-      return `<button data-source="${originalIndex}" class="source-item"><b>${esc(d.metadata?.title||d.metadata?.source_file||d.id)}</b><small><span class="source-state ${state.className}">${state.label}</span><span class="source-format">${esc(formatLabel(d.metadata?.source_format))}</span> · ${d.text.length} 字 · ${d.derived_count} 条派生知识</small></button>`;
-    }).join('');
-
-    const buttons=[...list.querySelectorAll('button')];
-    buttons.forEach(button=>{
+      <button type="button" class="source-filter-btn" data-filter="ready"><span class="filter-dot ready"></span>处理完成 / 待核验 <span class="filter-count" id="ready-count">0</span></button>
+      <button type="button" class="source-filter-btn" data-filter="processing"><span class="filter-dot processing"></span>处理中 <span class="filter-count" id="processing-count">0</span></button>
+      <button type="button" class="source-filter-btn" data-filter="failed"><span class="filter-dot failed"></span>失败 <span class="filter-count" id="failed-count">0</span></button>
+      <button type="button" class="source-filter-btn active" data-filter="all">全部 <span class="filter-count" id="all-count">0</span></button>`;
+    layout.before(filterBar);
+    filterBar.querySelectorAll('.source-filter-btn').forEach(button=>{
+      button.setAttribute('aria-pressed',String(button.dataset.filter===currentFilter));
       button.addEventListener('click',()=>{
-        const idx=Number(button.dataset.source);
-        const d=allDocuments[idx];
-        selected=d.id;
-        title.textContent=d.metadata?.title||d.metadata?.source_file||d.id;
-        const state=buildState(d);
-        renderMeta(d,state);
-        if(d.metadata?.source_document_version_id&&window.SourceReader){
-          const open=document.createElement('button');open.type='button';open.className='secondary';open.textContent='在原文中打开';
-          open.onclick=()=>window.SourceReader.open({projectId:current,versionId:d.metadata.source_document_version_id});
-          $('source-meta').append(open);
-        }
-        body.textContent=d.text||'旧项目未保存完整原文；可查片段与原始导入记录。';body.scrollTop=0;
-        buttons.forEach(b=>b.setAttribute('aria-current','false'));
-        button.setAttribute('aria-current','true');
+        currentFilter=button.dataset.filter;
+        syncFilterButtons();return load();
       });
     });
-
-    // 选中第一个
-    if(buttons.length>0){
-      const firstIdx=Number(buttons[0].dataset.source);
-      buttons[0].click();
+  }
+  function syncFilterButtons(){
+    page.querySelectorAll('.source-filter-btn').forEach(button=>{
+      const active=button.dataset.filter===currentFilter;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));
+    });
+  }
+  function renderDocumentList(){
+    closeDetail();updateCounts();
+    if(!allDocuments.length){
+      if(currentFilter!=='all'&&directoryCounts?.all){message('当前筛选无结果','可切换其他处理状态查看资料。');return;}
+      message('当前范围暂无原文',canWrite()?'可以切换项目、调整筛选条件，或点击“添加文件”上传资料。':'可以切换项目或调整筛选条件查看已有资料。');return;
+    }
+    const filtered=allDocuments.filter(doc=>currentFilter==='all'||buildState(doc).className===currentFilter);
+    if(!filtered.length){
+      const labels={ready:'处理完成或待核验',processing:'处理中',failed:'失败',all:'所有'};
+      message('当前筛选无结果',`没有${labels[currentFilter]}的文档。`);return;
+    }
+    layout.classList.remove('is-empty');empty.hidden=true;list.replaceChildren();
+    for(const [index,doc] of allDocuments.entries()){
+      if(currentFilter!=='all'&&buildState(doc).className!==currentFilter)continue;
+      const state=buildState(doc),button=document.createElement('button');button.type='button';button.className='source-item';
+      button.dataset.source=String(index);button.setAttribute('aria-haspopup','dialog');button.setAttribute('aria-controls','source-detail-drawer');button.setAttribute('aria-current','false');
+      button.innerHTML=`<span class="source-item__name"><b>${esc(doc.metadata?.title||doc.metadata?.source_file||doc.id)}</b><small>${esc(doc.metadata?.source_file||doc.id)}</small></span>
+        <span class="source-state ${state.className}">${state.label}</span><span class="source-item__type source-format">${esc(formatLabel(doc.metadata?.source_format))}</span>
+        <span class="source-item__counts">${doc.text_length==null?'正文按需读取':esc(doc.text_length)+' 字'} · 派生摘要 ${esc(doc.derived_count??'待核验')} 条</span><span class="source-item__open" aria-hidden="true">查看 ›</span>`;
+      button.addEventListener('click',()=>openDocument(doc,button));list.append(button);
     }
   }
-
-  async function loadOnce(){
-    const request=++serial,p=current;
-    if(!p){refresh.disabled=false;summary.textContent='尚未选择项目';message('选择项目后自动展示原文','请在左侧选择已有项目，或创建项目后通过"知识写入"添加文档。');return;}
-    let filter,stamp;
-    try{filter=scope();stamp=JSON.stringify(filter);}catch(error){message('筛选条件不正确',error.message);return;}
-    if(loadedProject!==p)selected=null;
-    summary.textContent='正在读取当前项目的原文…';message('正在加载原文','加载完成后自动打开第一篇文档，无需再点击加载。');
-    list.innerHTML='<div class="source-placeholder">正在加载文档目录…</div>';
-    refresh.disabled=true;
+  async function openDocument(doc,trigger){
+    if(loadedProject!==current||loadedScope!==scopeStamp())return;
+    const project=current,stamp=scopeStamp(),request=++detailSerial,ticket=window.WorkspaceContext?.ticket(project,'sources');
+    selected=doc.id;activeTab='text';drawer.open({trigger});
+    title.textContent=doc.metadata?.title||doc.metadata?.source_file||doc.id;body.textContent='正在读取原文…';meta.replaceChildren();
+    const accepts=()=>request===detailSerial&&drawer.dialog.open&&selected===doc.id&&sameContext(project,stamp,ticket);
     try{
-      const result=await api(endpoint('/sources'),filter);
-      if(request!==serial||p!==current||stamp!==JSON.stringify(scope()))return;
-      loadedProject=p;
-      allDocuments=result.documents;
-
-      // 创建过滤器 UI（如果还没创建）
-      if(!document.querySelector('.source-filter-bar')){
-        createFilterUI();
+      const key=JSON.stringify([project,stamp,doc.id]);
+      let read=textReads.get(key);
+      if(!read){
+        const query=['valid_at','known_at'].filter(name=>scope()[name]).map(name=>name+'='+encodeURIComponent(scope()[name])).join('&');
+        read=api('/api/projects/'+encodeURIComponent(project)+'/records/'+encodeURIComponent(doc.id)+(query?'?'+query:''),undefined,'GET');
+        textReads.set(key,read);read.finally(()=>{if(textReads.get(key)===read)textReads.delete(key);}).catch(()=>{});
       }
-
-      summary.textContent=`当前范围共 ${result.documents.length} 篇文档 · 左侧选择文档，右侧阅读原文`;
-      renderDocumentList();
-    }catch(error){if(request===serial&&p===current){summary.textContent='原文加载失败';message('暂时无法读取原文',error.message+'；请点击右上角"刷新"重试。');}}
-    finally{if(request===serial)refresh.disabled=false;}
+      const full=await read;if(!accepts())return;
+      doc={...doc,...full,metadata:{...doc.metadata,...full.metadata}};
+    }catch(error){if(accepts())body.textContent='原文读取失败：'+error.message;return;}
+    title.textContent=doc.metadata?.title||doc.metadata?.source_file||doc.id;
+    renderMeta(doc,buildState(doc));renderDetailTabs(doc,project);
+    if(doc.metadata?.source_document_version_id&&window.SourceReader){
+      const open=document.createElement('button');open.type='button';open.className='secondary';open.textContent='在原文中打开';
+      open.onclick=()=>{window.WorkspaceDrawers.close({restoreFocus:false});window.SourceReader.open({projectId:project,versionId:doc.metadata.source_document_version_id});};meta.append(open);
+    }
+    body.textContent=doc.text||'旧项目未保存完整原文；可查片段与原始导入记录。';body.scrollTop=0;
+    list.querySelectorAll('.source-item').forEach(button=>button.setAttribute('aria-current',String(button===trigger)));
   }
-  let inFlight=null;
-  async function load(){
-    if(inFlight)return inFlight;
-    inFlight=loadOnce().finally(()=>{inFlight=null;});
-    return inFlight;
+  function sameContext(project,stamp,ticket){
+    return project===current&&stamp===scopeStamp()&&(!ticket||window.WorkspaceContext.accepts(ticket,current,'sources'));
   }
-  window.SourcesView={
-    async open(){
-      window.KnowledgeTabs?.open('sources');
-      return load();
-    },
-  };
-  // Cross-menu deep link: the knowledge chat opens the exact cited source instead of a raw record dump.
+  function renderDetailTabs(doc,project){
+    const tabs=document.createElement('div');tabs.className='source-detail-tabs';tabs.setAttribute('aria-label','资料详情');
+    for(const [name,label] of [['text','原文'],['assertions','提取知识'],['runs','处理记录'],['history','修订记录']]){
+      const button=document.createElement('button');button.type='button';button.className='secondary';button.textContent=label;button.setAttribute('aria-pressed',String(name==='text'));
+      button.onclick=async()=>{
+        const request=++detailSerial,id=doc.id,stamp=scopeStamp(),ticket=window.WorkspaceContext?.ticket(project,'sources');activeTab=name;
+        tabs.querySelectorAll('button').forEach(item=>item.setAttribute('aria-pressed',String(item===button)));
+        if(name==='text'){body.textContent=doc.text||'此记录未保存完整原文';return;}
+        const accepts=()=>request===detailSerial&&drawer.dialog.open&&selected===id&&activeTab===name&&button.isConnected&&sameContext(project,stamp,ticket);
+        body.textContent='正在读取…';
+        const suffix=name==='assertions'?'/assertions?document_id='+encodeURIComponent(id):name==='runs'?'/ingest-runs?document_id='+encodeURIComponent(id):'/records/'+encodeURIComponent(id)+'/history';
+        try{
+          const result=await api('/api/projects/'+encodeURIComponent(project)+suffix,undefined,'GET');
+          if(!accepts())return;
+          if(name==='assertions')renderAssertions(result.assertions||[],project);
+          else body.textContent=JSON.stringify(name==='history'?result.versions||[]:result.runs||result.items||result,null,2);
+        }catch(error){if(accepts())body.textContent='读取失败：'+error.message;}
+      };tabs.append(button);
+    }
+    if(canWrite()){
+      const modeling=document.createElement('button');modeling.type='button';modeling.className='secondary admin-only';modeling.textContent='完善本体结构';
+      modeling.title='核对此资料的候选和来源，预览后明确加入哪份工作草案；仅复用正式术语时确认事实写入。';
+      modeling.onclick=async()=>{
+        if(!canWrite()||project!==current||selected!==doc.id||!drawer.dialog.open)return;
+        window.WorkspaceDrawers.close({restoreFocus:false});window.KnowledgeTabs.open('ontology-model');
+        try{
+          if(!window.OntologyIntake)throw Error('结构候选模块尚未就绪，请刷新页面。');
+          await window.OntologyIntake.open({projectId:project,documentId:doc.id,trigger:modeling});
+        }catch(error){window.OntologyModel?.status(error.message,true);}
+      };tabs.append(modeling);
+    }
+    meta.append(tabs);
+  }
+  function renderAssertions(rows,project){
+    body.replaceChildren();
+    if(!rows.length){body.textContent='此资料暂无提取断言；仅文档处理不会抽取实体与关系。';return;}
+    for(const row of rows){
+      const item=document.createElement('div');item.className='source-record-row';const payload=row.payload||{};
+      const label=document.createElement('strong');label.textContent=(row.kind||'断言')+' · '+(row.status||'待核验');
+      const text=document.createElement('p');text.textContent=payload.text||payload.name||[payload.subject,payload.predicate,payload.object??payload.value].filter(Boolean).join(' → ')||JSON.stringify(payload);
+      const quote=document.createElement('p');quote.className='subtle';quote.textContent=row.quote||'';item.append(label,text,quote);
+      if(row.canonical_record_id){
+        const open=document.createElement('button');open.type='button';open.className='secondary';open.textContent='查看正式知识';
+        open.onclick=async()=>{window.WorkspaceDrawers.close({restoreFocus:false});window.KnowledgeTabs.open('records');await window.openKnowledgeRecord?.({id:row.canonical_record_id,projectId:project});};item.append(open);
+      }
+      body.append(item);
+    }
+  }
+  function load({append=false,reuse=false}={}){
+    const project=current,ticket=window.WorkspaceContext?.ticket(project,'sources');
+    if(!project){refresh.disabled=false;summary.textContent='尚未选择项目';message('选择项目后自动展示原文','请在左侧选择已有项目。');return false;}
+    let filter,stamp;
+    try{filter=scope();stamp=JSON.stringify(filter);}catch(error){refresh.disabled=false;message('筛选条件不正确',error.message);return false;}
+    const state=currentFilter,cursor=append?nextCursor:null,key=JSON.stringify([project,stamp,state,cursor]);
+    if(inFlight?.key===key&&inFlight.serial===serial)return inFlight.promise;
+    if(reuse&&loadedProject===project&&loadedScope===stamp&&loadedState===state)return Promise.resolve(true);
+    const request=++serial,accepts=()=>request===serial&&sameContext(project,stamp,ticket)&&currentFilter===state;
+    closeDetail();
+    if(!append){loadedProject=null;loadedScope=null;loadedState=null;allDocuments=[];directoryCounts=null;nextCursor=null;updateCounts();
+      summary.textContent='正在读取当前项目的原文…';message('正在加载原文','加载完成后选择资料查看详情。');
+      list.innerHTML='<div class="source-placeholder">正在加载文档目录…</div>';}
+    refresh.disabled=true;loadMore.disabled=true;loadMore.hidden=!append;
+    const promise=(async()=>{try{
+      const query='?limit=50&summary_only=true&state='+encodeURIComponent(state)+(cursor?'&cursor='+encodeURIComponent(cursor):'');
+      const result=await api('/api/projects/'+encodeURIComponent(project)+'/sources'+query,filter);
+      if(!accepts())return false;
+      loadedProject=project;loadedScope=stamp;loadedState=state;
+      allDocuments=[...new Map([...(append?allDocuments:[]),...(result.documents||[])].map(doc=>[doc.id,doc])).values()];
+      nextCursor=result.next_cursor||null;total=result.total??allDocuments.length;directoryCounts=result.counts||null;
+      summary.textContent=`当前范围共 ${total} 篇文档 · 已加载 ${allDocuments.length} 篇 · 选择资料查看详情`;
+      loadMore.hidden=!nextCursor;
+      renderDocumentList();return true;
+    }catch(error){
+      if(accepts()){summary.textContent='原文加载失败';message('暂时无法读取原文',error.message+'；请点击右上角“刷新”重试。');}return false;
+    }finally{if(request===serial){refresh.disabled=false;loadMore.disabled=false;if(inFlight?.serial===request)inFlight=null;}}
+    })();
+    inFlight={key,serial:request,promise};return promise;
+  }
+  createFilterUI();
+  window.SourcesView={async open(){window.KnowledgeTabs?.open('sources');return load({reuse:true});}};
+  // Citation deep links are explicit selections, so they may open the matching drawer.
   window.selectSource=async sourceId=>{
     if(!sourceId)throw Error('该证据没有可定位的来源');
-    await load();
-    if(!allDocuments.some(item=>item.id===sourceId)){
-      currentFilter='all';
-      document.querySelectorAll('.source-filter-btn').forEach(button=>button.classList.toggle('active',button.dataset.filter==='all'));
-      renderDocumentList();
+    const citation=++citationSerial;
+    if(currentFilter!=='all'){currentFilter='all';syncFilterButtons();}
+    closeDetail();const project=current,stamp=scopeStamp(),loaded=await load({reuse:true}),request=serial,detailRequest=detailSerial;
+    const accepts=()=>citation===citationSerial&&detailRequest===detailSerial&&request===serial&&project===current&&stamp===scopeStamp();
+    if(!loaded||!accepts())throw Error('资料范围已更新，请重新选择原文');
+    let doc=allDocuments.find(item=>item.id===sourceId);
+    if(!doc){
+      const result=await api('/api/projects/'+encodeURIComponent(project)+'/sources?limit=50&summary_only=true&state=all&document_id='+encodeURIComponent(sourceId),scope());
+      if(!accepts())throw Error('资料范围已更新，请重新选择原文');
+      doc=result.documents?.find(item=>item.id===sourceId);
+      if(doc){allDocuments.push(doc);renderDocumentList();}
     }
-    const button=[...list.querySelectorAll('button')].find(item=>allDocuments[Number(item.dataset.source)]?.id===sourceId);
-    if(!button)throw Error('当前范围没有这条原文');
-    button.click();
+    if(!doc)throw Error('当前范围没有这条原文');
+    if(currentFilter!=='all'&&buildState(doc).className!==currentFilter){currentFilter='all';syncFilterButtons();renderDocumentList();}
+    const button=[...list.querySelectorAll('.source-item')].find(item=>allDocuments[Number(item.dataset.source)]?.id===sourceId);
+    if(!button)throw Error('当前范围没有这条原文');await openDocument(doc,button);
   };
-  refresh.onclick=load;
-  // 「上传源文件」＝把本地文档加载进来、解析出正文后直接可读。这里不发实体/关系分析
-  // （extract:false 只解析文本），那些派生工作去「知识写入」或「本体建模层」做。
-  const uploadPicker=$('upload-source'),uploadInput=$('source-file');
-  if(uploadPicker&&uploadInput){
-    uploadPicker.addEventListener('click',()=>uploadInput.click());
-    uploadInput.addEventListener('change',async()=>{
-      const files=[...uploadInput.files];if(!files.length)return;
-      if(!current){summary.textContent='尚未选择项目';message('选择项目后上传源文件','请先在左侧选择已有项目，或创建项目。');return;}
-      uploadPicker.disabled=true;let ok=0,failed=0;summary.textContent='正在上传并解析源文件…';
-      for(const file of files){
-        try{
-          const form=new FormData();
-          form.append('file',file,file.name);
-          // extract:false＝只解析正文，不抽取实体/关系；这正是「原文」页的定位。
-          form.append('options',JSON.stringify({title:file.name,extract:false}));
-          await api(endpoint('/documents/upload'),form);
-          ok++;
-        }catch(error){failed++;summary.textContent=`上传「${file.name}」失败：${error.message}`;}
-      }
-      uploadInput.value='';uploadPicker.disabled=false;
-      await load();
-      summary.textContent=`已上传 ${ok} 份源文件${failed?`，失败 ${failed} 份`:''}；正文已解析并载入左侧列表。`;
-    });
-  }
-  // P0（2026-10-04）：原文数据源并入「知识写入」，侧栏已无 sources 按钮——用可选链跳过绑定，
-  // 避免 null.addEventListener 崩掉本页脚本。页面"上传源文件→看解析正文"能力将在 P1 搬进「知识写入」。
-  document.querySelector('[data-tab="sources"]')?.addEventListener('click',load);
-  for(const id of ['apply-scope','reset-scope'])$(id).addEventListener('click',()=>{if(visible())load();});
-  $('project').addEventListener('change',()=>{serial++;selected=null;loadedProject=null;allDocuments=[];message('正在切换项目','进入原文数据源后会自动加载。');if(visible())load();});
+  refresh.onclick=()=>load();loadMore.onclick=()=>load({append:true});
+  // Auth resolves asynchronously; its body role classes own entry visibility.
+  const upload=$('upload-source');upload.classList.add('admin-only');
+  upload.onclick=()=>{if(!canWrite())return;if(window.LibraryWorkspace)window.LibraryWorkspace.open('upload');else window.KnowledgeTabs.open('ingest');};
+  document.querySelector('[data-tab="sources"]')?.addEventListener('click',()=>load());
+  document.addEventListener('workspace:scope-changed',event=>{if(event.detail.page==='sources'){serial++;closeDetail();if(visible())load();}});
+  $('project').addEventListener('change',()=>{serial++;closeDetail();loadedProject=null;loadedScope=null;loadedState=null;allDocuments=[];directoryCounts=null;nextCursor=null;loadMore.hidden=true;updateCounts();message('正在切换项目','进入资料库后会自动加载。');if(visible())load();});
   if(visible())load();
 })();

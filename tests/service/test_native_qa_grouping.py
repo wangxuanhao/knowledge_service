@@ -49,7 +49,7 @@ def test_repository_current_version_batch_filters_in_sql_and_preserves_order():
     repository._db = Database()
     repository._lock = RLock()
     repository.get_project = lambda _project_id: None
-    repository._record = lambda row, vectors='list': dict(row)
+    repository._record = lambda row: dict(row)
 
     rows = repository.current_records_by_version_ids(
         'project', ['v1', 'v2', 'v1'])
@@ -83,6 +83,8 @@ def native_service(monkeypatch, calls):
             }
 
     monkeypatch.setattr(service_module, 'RetrievalEngine', Engine)
+    monkeypatch.setattr('knowledge_service.repository.scoped_reads.ScopedReads.source_context',
+                        lambda *_args, **_kwargs: {'source_chunks': [], 'context_chunks': []})
     service = KnowledgeService.__new__(KnowledgeService)
     service.repository = VocabularyRepository()
     service.encoder = SimpleNamespace(identity='test', semantic=True)
@@ -100,7 +102,7 @@ def test_single_platform_search_splits_specific_common_and_unknown(monkeypatch):
 
     result = service.search('project', {
         'query': '美团直播', 'retrieval_mode': 'keyword', 'k': 20,
-        'applicability': {'platforms': ['美团']},
+        'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}},
         'k_entities': 0, 'k_relations': 0, 'k_chunks': 20,
     })
 
@@ -147,6 +149,7 @@ def test_question_context_reuses_grouped_native_results_and_excludes_unknown_evi
 
     class Service:
         encoder = SimpleNamespace(identity='test', semantic=True)
+        repository = VocabularyRepository()
 
         def search(self, *_args, **_kwargs):
             return {
@@ -185,7 +188,7 @@ def test_question_context_reuses_grouped_native_results_and_excludes_unknown_evi
     assert '禁止把不同平台证据合并' in messages[0]['content']
 
 
-def test_group_plan_is_bounded_and_per_platform_limit_is_configurable(monkeypatch):
+def test_group_plan_keeps_every_platform_and_bounds_each_group(monkeypatch):
     calls = []
     service = native_service(monkeypatch, calls)
     service.repository.distinct_applicability_values = lambda _project_id: {
@@ -195,17 +198,24 @@ def test_group_plan_is_bounded_and_per_platform_limit_is_configurable(monkeypatc
 
     result = service.search('project', {
         'query': '直播', 'retrieval_mode': 'keyword', 'k': 100,
-        'applicability': {'platforms': [f'平台{index:02d}' for index in range(30)]},
+        'applicability': {'platforms': {'mode': 'specific', 'values': [f'平台{index:02d}' for index in range(30)]}},
         'k_per_platform': 50, 'include_unknown': False,
         'k_entities': 0, 'k_relations': 0, 'k_chunks': 50,
     })
 
     specific = [call for call in calls
                 if call['platform_match'] == 'specific_only']
-    assert len(specific) == 20
+    assert len(specific) == 30
     assert all(call['k'] == 20 for call in specific)
     assert sum(call['platform_match'] == 'all_only' for call in calls) == 1
-    assert len(result['hits']) <= 100
+    groups = result['platform_groups']
+    assert len(groups) == 31
+    assert all(len(group['hits']) == 20 for group in groups)
+    assert {group['platform'] for group in groups if group['source_scope'] == 'specific'} == {
+        f'平台{index:02d}' for index in range(30)}
+    # Each platform and the common group retain their independent budget.
+    assert len(result['hits']) == 30 * 20 + 20
+    assert len({row['version_id'] for row in result['hits']}) == len(result['hits'])
 
 
 def test_flat_hits_deduplicate_versions_but_groups_keep_membership(monkeypatch):
@@ -225,6 +235,8 @@ def test_flat_hits_deduplicate_versions_but_groups_keep_membership(monkeypatch):
             }
 
     monkeypatch.setattr(service_module, 'RetrievalEngine', Engine)
+    monkeypatch.setattr('knowledge_service.repository.scoped_reads.ScopedReads.source_context',
+                        lambda *_args, **_kwargs: {'source_chunks': [], 'context_chunks': []})
     service = KnowledgeService.__new__(KnowledgeService)
     service.repository = VocabularyRepository()
     service.encoder = SimpleNamespace(identity='test', semantic=True)
@@ -235,7 +247,7 @@ def test_flat_hits_deduplicate_versions_but_groups_keep_membership(monkeypatch):
 
     result = service.search('project', {
         'query': '直播', 'retrieval_mode': 'keyword', 'include_unknown': False,
-        'applicability': {'platforms': ['美团', '京东']}})
+        'applicability': {'platforms': {'mode': 'specific', 'values': ['美团', '京东']}}})
 
     assert len(result['hits']) == 1
     assert [len(group['hits']) for group in result['platform_groups']] == [1, 1, 1]
@@ -268,6 +280,7 @@ def test_ungrouped_unknown_scope_never_enters_answer_evidence():
 
     class Service:
         encoder = SimpleNamespace(identity='test', semantic=True)
+        repository = VocabularyRepository()
 
         def search(self, *_args, **_kwargs):
             return {
@@ -323,7 +336,7 @@ def test_native_backfill_filters_current_versions_without_per_hit_get_record():
     assert [row['id'] for row in result['hits']] == ['current']
 
 
-def test_mixed_group_backend_reuses_fallback_rows_for_source_and_context(
+def test_mixed_group_backend_uses_bounded_authority_for_source_and_context(
         monkeypatch):
     authority = [
         {'id': 'entity', 'version_id': 'entity-v', 'kind': 'entity',
@@ -353,9 +366,24 @@ def test_mixed_group_backend_reuses_fallback_rows_for_source_and_context(
                     'active_mode': 'keyword', 'degraded': backend != 'milvus',
                     '_backend': backend, 'backends': {}}
 
+    source_reads = []
+
+    class Reader:
+        def __init__(self, repository):
+            assert repository is service.repository
+
+        def source_context(self, project, scope, hits):
+            source_reads.append((project, scope, hits))
+            return ({'source_chunks': [authority[1]], 'context_chunks': [authority[2]]}
+                    if hits else {'source_chunks': [], 'context_chunks': []})
+
     monkeypatch.setattr(service_module, 'RetrievalEngine', Engine)
+    monkeypatch.setattr('knowledge_service.repository.scoped_reads.ScopedReads', Reader)
     service = KnowledgeService.__new__(KnowledgeService)
     service.repository = VocabularyRepository()
+    service.repository._db = object()
+    service.repository.query = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError('source context must use bounded authority reads'))
     service.encoder = SimpleNamespace(identity='test', semantic=True)
     service.milvus_store = object()
     service.ontology_expansion = lambda *_args, **_kwargs: None
@@ -363,12 +391,28 @@ def test_mixed_group_backend_reuses_fallback_rows_for_source_and_context(
     service.scoped = lambda *_args, **_kwargs: (_ for _ in ()).throw(
         AssertionError('group fallback must reuse its authority cache'))
 
-    result = service.search('project', {
+    request = {
         'query': '直播', 'retrieval_mode': 'keyword',
-        'applicability': {'platforms': ['美团', '京东']},
-        'include_unknown': False})
+        'applicability': {'platforms': {'mode': 'specific', 'values': ['美团', '京东']}},
+        'filters': {'field': 'metadata.release', 'op': 'eq', 'value': 'stable'},
+        'known_at': '2026-10-18T00:00:00Z', 'valid_at': '2026-10-17T00:00:00Z',
+        'include_unknown': False}
+    result = service.search('project', request)
 
     assert result['_backend'] == 'mixed'
+    assert len(source_reads) == 3
+    assert [scope['_platform_match'] for _, scope, _ in source_reads] == [
+        'specific_only', 'specific_only', 'all_only']
+    assert {tuple(scope['applicability']['platforms']['values']) for _, scope, _ in source_reads[:2]} == {
+        ('美团',), ('京东',)}
+    populated = [(scope, hits) for _, scope, hits in source_reads if hits]
+    assert len(populated) == 1
+    assert populated[0][0]['applicability']['platforms'] == {'mode': 'specific', 'values': ['美团']}
+    assert [row['id'] for row in populated[0][1]] == ['entity']
+    for project, scope, _ in source_reads:
+        assert project == 'project'
+        for key in ('filters', 'known_at', 'valid_at', 'include_unknown'):
+            assert scope[key] == request[key]
     group = next(group for group in result['platform_groups']
                  if group['platform'] == '美团')
     assert [row['id'] for row in group['source_chunks']] == ['c1']
@@ -416,6 +460,7 @@ def test_grouped_mixed_question_context_does_not_rescan_scoped_rows():
 
     class Service:
         encoder = SimpleNamespace(identity='test', semantic=True)
+        repository = VocabularyRepository()
 
         def search(self, *_args, **_kwargs):
             return {
@@ -480,7 +525,7 @@ def test_group_backend_errors_are_preserved_and_exposed_to_qa(monkeypatch):
 
     result = service.search('project', {
         'query': '直播', 'retrieval_mode': 'keyword',
-        'applicability': {'platforms': ['美团', '京东']},
+        'applicability': {'platforms': {'mode': 'specific', 'values': ['美团', '京东']}},
         'include_unknown': False})
 
     groups = {group['platform']: group for group in result['platform_groups']}
@@ -499,6 +544,7 @@ def test_group_backend_errors_are_preserved_and_exposed_to_qa(monkeypatch):
 
     class ContextService:
         encoder = service.encoder
+        repository = service.repository
         search = lambda *_args, **_kwargs: result
         scoped = service.scoped
         annotate_structure_pending = service.annotate_structure_pending
@@ -556,7 +602,7 @@ def test_grouped_semantic_search_encodes_query_once_for_all_platforms(
 
     result = service.search('project', {
         'query': '直播', 'retrieval_mode': retrieval_mode,
-        'applicability': {'platforms': [f'平台{index:02d}' for index in range(20)]},
+        'applicability': {'platforms': {'mode': 'specific', 'values': [f'平台{index:02d}' for index in range(20)]}},
         'include_unknown': True})
 
     assert len(result['platform_groups']) == 21

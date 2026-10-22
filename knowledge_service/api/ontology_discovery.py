@@ -1,35 +1,64 @@
 """HTTP adapter for the governed ontology discovery workflow."""
-from fastapi import APIRouter, Request as HttpRequest
+from fastapi import APIRouter, Query, Request as HttpRequest
 from fastapi.responses import JSONResponse
 from pydantic import Field
 
-from .audit_identity import audit_actor
+from .audit_identity import audit_actor, audit_identity
 from ..models import Request
 from ..services.ontology_discovery_workflow import (
-    OntologyDiscoveryWorkflow, DiscoveryRunConflict,
+    OntologyDiscoveryWorkflow,
 )
 from ..services.discovery_vocabulary import (
     GeneratedVocabularyConflict, InvalidBaselineVocabulary,
 )
-
-class DraftRequest(Request):
-    name: str = Field(default='发现本体', min_length=1, max_length=200)
-    # 是否让模型额外推断「谁是谁的父类」。省略时保持旧 API 的推断行为；
-    # 建类型本身不需要模型（候选类型 → owl:Class/ObjectProperty 是确定性操作，秒级完成）；
-    # 新前端会显式传 false 走快路径，需要自动层级的调用方也可显式传 true。
-    infer_hierarchy: bool = True
+from ..services.ontology_intake import OntologyIntake
+from ..repository.discovery_run_store import DiscoveryRunConflict
 
 
-class DraftReview(Request):
-    excluded_candidate_ids: list[str] = Field(default_factory=list, max_length=10000)
-    excluded_terms: list[str] = Field(default_factory=list, max_length=1000)
-    term_labels: dict[str, str] = Field(default_factory=dict)
+class SelectionRequest(Request):
+    candidate_ids: list[str] = Field(min_length=1, max_length=10000)
+    expected_ontology_id: str | None
+    target_draft_id: str | None = None
+    expected_revision: int | None = Field(default=None, ge=1)
+    create_new_draft: bool = False
+    name: str = Field(default='本轮结构补充', min_length=1, max_length=200)
+    confirmed_mappings: dict[str, str] = Field(default_factory=dict)
+    infer_hierarchy: bool = False
+
+
+class ConfirmSelectionRequest(SelectionRequest):
+    preview_fingerprint: str = Field(min_length=1)
+    source_fingerprint: str = Field(min_length=1)
+    idempotency_key: str = Field(min_length=1, max_length=200)
+    selected_suggestion_fingerprints: list[str] | None = None
+
+
+
 
 
 def install(app, service):
     router = APIRouter(prefix='/api/projects/{p}/ontology-discovery')
-    governed = service.ontology_drafts(publish=True)
     workflow = OntologyDiscoveryWorkflow(service)
+    intake = OntologyIntake(service)
+
+    @router.get('/candidates')
+    def candidates(p: str, document_id: str | None = None,
+                   offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=1000)):
+        return intake.inventory(p, document_id=document_id, offset=offset, limit=limit)
+
+    @router.post('/selection-preview')
+    def selection_preview(p: str, request: SelectionRequest):
+        return intake.preview(p, request.model_dump())
+
+    @router.post('/add-selection')
+    def add_selection(p: str, request: ConfirmSelectionRequest, http_request: HttpRequest):
+        return intake.add(p, request.model_dump(), actor=audit_actor(http_request),
+                          actor_identity=audit_identity(http_request)['id'])
+
+    @router.post('/confirm-reuse')
+    def confirm_reuse(p: str, request: ConfirmSelectionRequest, http_request: HttpRequest):
+        return intake.confirm_reuse(p, request.model_dump(), actor=audit_actor(http_request),
+                                    actor_identity=audit_identity(http_request)['id'])
 
     @app.exception_handler(GeneratedVocabularyConflict)
     async def generated_vocabulary_error(_request, exc):
@@ -51,8 +80,8 @@ def install(app, service):
             'details':exc.details})
 
     @router.get('')
-    def overview(p:str, compact:bool=False):
-        return workflow.overview(p, compact=compact)
+    def overview(p:str):
+        return workflow.overview(p)
 
     @router.get('/runs')
     def list_runs(p: str):
@@ -67,23 +96,11 @@ def install(app, service):
         return workflow.audit(p)
 
     @router.get('/candidate-mindmap')
-    def candidate_mindmap(p:str,limit:int=500):
+    def candidate_mindmap(p:str,limit:int=Query(500, ge=1, le=2000)):
         return workflow.candidate_mindmap(p, limit)
 
-    @router.post('/drafts',status_code=201)
-    def create_draft(p:str,request:DraftRequest,http_request:HttpRequest):
-        return workflow.create_run(p, request, actor=audit_actor(http_request))
 
-    @router.post('/runs/{run_id}/finalize')
-    def finalize_run(p: str, run_id: str):
-        return workflow.finalize_run(p, run_id)
 
-    @router.post('/drafts/{draft_id}/publish', status_code=202)
-    def publish(p:str,draft_id:str):
-        return workflow.publish(p, draft_id)
 
-    @router.put('/drafts/{draft_id}')
-    def review_draft(p:str,draft_id:str,request:DraftReview):
-        return workflow.review_draft(p, draft_id, request)
 
     app.include_router(router)

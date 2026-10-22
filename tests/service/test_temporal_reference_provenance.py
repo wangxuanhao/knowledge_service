@@ -23,7 +23,7 @@ def temporal_provenance(tmp_path):
 def source(repo, project, suffix, **dates):
     doc = repo.put_record(project, {
         'id': 'doc:' + suffix, 'kind': 'document', 'text': '文档条款' + suffix,
-        'metadata': {'title': suffix, 'applicability': {'platforms': ['甲']},
+        'metadata': {'title': suffix, 'applicability': {'platforms': {'mode': 'specific', 'values': ['甲']}},
                      'published_at': '2020-01-01', **dates.pop('metadata', {})}, **dates})
     chunk = repo.put_record(project, {
         'id': 'chunk:' + suffix, 'kind': 'chunk', 'text': doc['text'], 'source_id': doc['id'],
@@ -97,7 +97,8 @@ def test_entity_capture_excludes_disallowed_assertion_before_freezing_text(tempo
     for doc, chunk in [(current, current_chunk), (expired, expired_chunk)]:
         assertion = repo.create_assertion(project, {
             'id': 'assertion:' + doc['id'], 'kind': 'entity', 'payload': {}, 'document_id': doc['id'],
-            'document_version_id': doc['version_id'], 'chunk_id': chunk['id'], 'quote': chunk['text']})
+            'document_version_id': doc['version_id'], 'chunk_id': chunk['id'], 'quote': chunk['text'],
+            'start_char': chunk['metadata']['start_char'], 'end_char': chunk['metadata']['end_char']})
         assertion = repo.transition_assertion(project, assertion['id'], 1, 'accepted',
                                               'approved', 'reviewer', canonical_record_id=entity['id'])
         event = repo.list_assertion_events(project, assertion['id'])[-1]
@@ -108,7 +109,34 @@ def test_entity_capture_excludes_disallowed_assertion_before_freezing_text(tempo
     trace = service.trace_answer_evidence(project, answer, 'E1')
     assert [n['details']['document_id'] for n in trace['nodes']
             if n['type'] == 'document_version'] == [current['id']]
+    assert trace['integrity']['complete'] is True
     assert all(expired_chunk['text'] not in str(n) for n in trace['nodes'])
+
+
+def test_entity_assertion_without_coordinates_never_gets_a_guessed_source_span(temporal_provenance):
+    repo, service, project = temporal_provenance
+    doc, chunk = source(repo, project, 'missing-anchor')
+    entity = repo.put_record(project, {'id': 'entity', 'kind': 'entity', 'text': '规则主体'})
+    assertion = repo.create_assertion(project, {
+        'id': 'assertion', 'kind': 'entity', 'payload': {}, 'document_id': doc['id'],
+        'document_version_id': doc['version_id'], 'chunk_id': chunk['id'], 'quote': chunk['text']})
+    repo.transition_assertion(project, assertion['id'], 1, 'accepted',
+                              'approved', 'reviewer', canonical_record_id=entity['id'])
+    event = repo.list_assertion_events(project, assertion['id'])[-1]
+    repo.add_record_version_assertion(project, entity['id'], entity['version_id'],
+                                      assertion['id'], event['id'])
+    _, answer = capture(service, project, [{
+        **entity, 'citation': 'E1', '_allowed_source_version_ids': [doc['version_id']]}])
+
+    trace = service.trace_answer_evidence(project, answer, 'E1')
+
+    assert trace['integrity']['complete'] is False
+    assert any(warning['code'] == 'source_span_invalid' for warning in trace['integrity']['warnings'])
+    assert not [node for node in trace['nodes']
+                if node['type'] in {'document_version', 'source_occurrence'}]
+    chunk_node = next(node for node in trace['nodes'] if node['type'] == 'chunk_version')
+    assert chunk_node['details']['start_char'] is None
+    assert chunk_node['details']['end_char'] is None
 
 
 @pytest.mark.parametrize('allowed_assertions', [['current'], []])

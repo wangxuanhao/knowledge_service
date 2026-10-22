@@ -20,7 +20,7 @@ def _contract(fields, optional=(), *, extensible=False):
 
 # A full projection is a versioned wire format, not a loose database dump.
 # Nullable database columns remain required because exporters always emit them.
-_FULL_ROW_CONTRACTS_V14 = {
+FULL_ROW_CONTRACTS = {
     ('project',): _contract({
         'id', 'name', 'metadata', 'created_at',
     }),
@@ -63,8 +63,8 @@ _FULL_ROW_CONTRACTS_V14 = {
     ('governance', 'ontology', 'drafts'): _contract({
         'id', 'project_id', 'base_ontology_id', 'source_kind', 'status', 'revision',
         'title', 'summary', 'source_context', 'validation_report',
-        'validation_fingerprint', 'published_ontology_id', 'legacy_artifact_id',
-        'created_at', 'updated_at',
+        'validation_fingerprint', 'validated_at', 'submitted_at',
+        'published_ontology_id', 'created_at', 'updated_at',
     }),
     ('governance', 'ontology', 'operations'): _contract({
         'id', 'project_id', 'draft_id', 'action', 'target_iri', 'risk',
@@ -91,54 +91,9 @@ _FULL_ROW_CONTRACTS_V14 = {
         'ordinal', 'payload', 'created_at',
     }),
 }
-# Migration 15 expands CHECK constraints but does not change the projection row
-# shape, so v14 and v15 snapshots deliberately share the exact wire contract.
-#
-# Migration 0004 adds the nullable `validated_at` column to ontology_drafts
-# (the "校验通过" marker). Exporters emit it, so the draft row shape changes:
-# v16 snapshots carry `validated_at`; v14/v15 do not. They need separate
-# contracts because an exact-row validator treats an extra field as "未知".
-_FULL_ROW_CONTRACTS_V16 = dict(_FULL_ROW_CONTRACTS_V14)
-_FULL_ROW_CONTRACTS_V16[('governance', 'ontology', 'drafts')] = _contract({
-    'id', 'project_id', 'base_ontology_id', 'source_kind', 'status', 'revision',
-    'title', 'summary', 'source_context', 'validation_report',
-    'validation_fingerprint', 'validated_at', 'published_ontology_id',
-    'legacy_artifact_id', 'created_at', 'updated_at',
-})
-# 迁移 0005（A3 状态 7→3）又给 ontology_drafts 加了一列 `submitted_at`（提交时刻 ——
-# 「已提交」不再是状态，改由时间戳记事实）。行形状再次变化，于是 v17 单独一套契约：
-# 与 v16 只差这一列。
-_FULL_ROW_CONTRACTS_V17 = dict(_FULL_ROW_CONTRACTS_V16)
-_FULL_ROW_CONTRACTS_V17[('governance', 'ontology', 'drafts')] = _contract({
-    'id', 'project_id', 'base_ontology_id', 'source_kind', 'status', 'revision',
-    'title', 'summary', 'source_context', 'validation_report',
-    'validation_fingerprint', 'validated_at', 'submitted_at',
-    'published_ontology_id', 'legacy_artifact_id', 'created_at', 'updated_at',
-})
-FULL_ROW_CONTRACTS = {
-    14: _FULL_ROW_CONTRACTS_V14,
-    15: _FULL_ROW_CONTRACTS_V14,
-    16: _FULL_ROW_CONTRACTS_V16,
-    17: _FULL_ROW_CONTRACTS_V17,
-}
-
-# ── 快照**线格式**版本（与数据库迁移编号无关）────────────────────────────────
-#
-# 这两个概念曾经被混为一谈：快照里的 `schema_version` 直接取
-# `SELECT MAX(version) FROM schema_migrations`。而迁移编号是**按迁移文件**的
-# （0001 → 1、0002 → 2），于是导出快照被标成 2，与这里的下限 14 矛盾 ——
-# 备份恢复整体失败。二者回答的是不同问题，必须分开：
-#   * 迁移编号：这个库的 schema 是哪一版（DB 自己的事）；
-#   * 线格式版本：这份快照的形状是哪一版（文件自己的事，决定能否被解读）。
-#
-# 本项目导出的快照标 17，并接受 14~17 的输入：14 与 15 的行形状相同（15 只收紧了 CHECK
-# 约束），16 在 ontology_drafts 里多了 validated_at（迁移 0004），17 又多了 submitted_at
-# （迁移 0005），所以 16 / 17 各有自己的一套契约（多一列＝未知字段，会被严格校验拒掉）。
-LATEST_FULL_SNAPSHOT_FORMAT = max(FULL_ROW_CONTRACTS)
-MIN_FULL_SNAPSHOT_FORMAT = min(FULL_ROW_CONTRACTS)
-
-# 兼容旧名：历史快照里 `schema_version` 与行形状版本同值，旧引用可能仍用此名。
-MIN_FULL_SCHEMA_VERSION = MIN_FULL_SNAPSHOT_FORMAT
+# 快照线格式与数据库迁移编号分别管理。18 删除草案的旧工件关联列；
+# 导出与恢复只使用这一种当前行形状。
+LATEST_FULL_SNAPSHOT_FORMAT = 18
 _RECORD_KINDS = {'document', 'entity', 'relation', 'attribute', 'chunk'}
 
 
@@ -193,11 +148,8 @@ def _validate_record_envelope(row, label):
             reject(field)
 
 
-def _validate_full_rows(snapshot, schema_version):
-    contracts = FULL_ROW_CONTRACTS.get(schema_version)
-    if contracts is None:
-        raise ValueError(f'项目备份 schema_version {schema_version} 不受支持')
-    for path, (required, allowed, extensible) in contracts.items():
+def _validate_full_rows(snapshot):
+    for path, (required, allowed, extensible) in FULL_ROW_CONTRACTS.items():
         label = '.'.join(path)
         section = _section(snapshot, path)
         if path == ('project',):
@@ -213,11 +165,10 @@ def _validate_full_rows(snapshot, schema_version):
                 _validate_record_envelope(row, row_label)
 
 
-def validate_restore_snapshot(snapshot, current_snapshot_format):
-    """Validate snapshot shape, version, ownership and artifact references.
+def validate_restore_snapshot(snapshot):
+    """Validate snapshot shape, format and project ownership.
 
-    `current_snapshot_format` 是**快照线格式**版本（`LATEST_FULL_SNAPSHOT_FORMAT`），
-    不是数据库迁移编号 —— 见该常量的说明。
+    完整与轻量备份均须明确使用当前快照线格式；它与数据库迁移编号无关。
     """
     if not isinstance(snapshot, dict):
         raise ValueError('项目备份格式无效')
@@ -231,20 +182,9 @@ def validate_restore_snapshot(snapshot, current_snapshot_format):
         raise ValueError('项目备份缺少稳定项目 ID')
 
     schema_version = snapshot.get('schema_version')
-    if history_flag:
-        if type(schema_version) is not int:
-            raise ValueError('完整治理项目备份必须包含整数 schema_version')
-        if not MIN_FULL_SNAPSHOT_FORMAT <= schema_version <= current_snapshot_format:
-            raise ValueError(
-                f'项目备份 schema_version {schema_version} 不在支持范围 '
-                f'{MIN_FULL_SNAPSHOT_FORMAT}..{current_snapshot_format}')
-    elif schema_version is not None:
-        if type(schema_version) is not int:
-            raise ValueError('项目备份 schema_version 无效')
-        if schema_version > current_snapshot_format:
-            raise ValueError(
-                f'项目备份 schema_version {schema_version} 新于当前版本 '
-                f'{current_schema_version}')
+    if type(schema_version) is not int or schema_version != LATEST_FULL_SNAPSHOT_FORMAT:
+        raise ValueError(
+            f'项目备份 schema_version 必须是当前格式 {LATEST_FULL_SNAPSHOT_FORMAT}')
 
     declared_full = history_flag
     governance = snapshot.get('governance')
@@ -288,13 +228,7 @@ def validate_restore_snapshot(snapshot, current_snapshot_format):
                     f'{label}[{index}].project_id 必须等于项目 {project_id}')
 
     if declared_full:
-        _validate_full_rows(snapshot, schema_version)
-        artifact_ids = {row['id'] for row in artifacts}
-        for draft in ontology['drafts']:
-            artifact_id = draft.get('legacy_artifact_id')
-            if artifact_id is not None and artifact_id not in artifact_ids:
-                raise ValueError(
-                    f'legacy_artifact_id {artifact_id} 未包含在完整备份 artifacts 中')
+        _validate_full_rows(snapshot)
 
     return {
         'declared_full': declared_full,

@@ -1,0 +1,91 @@
+{
+  "project_id": "463f2e99-ec8b-4ca2-9c0d-e469bc4d1411",
+  "draft_id": "75051842-dcd3-4e61-845a-20472db31dec",
+  "phase": "after",
+  "reads": [
+    {
+      "route": "canvas_draft",
+      "status": 200,
+      "seconds": 0.9048,
+      "bytes": 19404
+    },
+    {
+      "route": "draft_detail",
+      "status": 200,
+      "seconds": 0.3069,
+      "bytes": 30443
+    },
+    {
+      "route": "editing_readiness",
+      "status": 200,
+      "seconds": 0.0485,
+      "bytes": 1164
+    },
+    {
+      "route": "editing_readiness",
+      "status": 200,
+      "seconds": 0.0481,
+      "bytes": 1164
+    },
+    {
+      "route": "editing_readiness",
+      "status": 200,
+      "seconds": 0.0491,
+      "bytes": 1164
+    },
+    {
+      "route": "stage_availability",
+      "status": 200,
+      "seconds": 0.054,
+      "bytes": 772
+    }
+  ],
+  "revision": 3,
+  "classes": 30,
+  "customer_preserved": true,
+  "draft_content_sha256": "81eef830659dfb86e7b74d9d32e28e8fee11bb09d29c135fc0e62d39033e0a44",
+  "same_draft_as_before": true,
+  "editing_state": {
+    "ready": false,
+    "validation_checked": false,
+    "validation_state": "not_evaluated",
+    "requires_full_validation": false
+  },
+  "cold_full_readiness_observation": {
+    "timed_out": true,
+    "client_timeout_seconds": 30,
+    "note": "First full-validation request after restart exceeded 30-second client deadline; phase not profiled."
+  },
+  "project_create_fields": [
+    "name",
+    "metadata",
+    "use_default_ontology",
+    "ontology_mode"
+  ],
+  "ui_acceptance": {
+    "projectId": "9781542b-350b-46de-babd-2e1c7ee9741d",
+    "createdTerm": "性能验收类型",
+    "saveAndCanvasUiMs": 2255,
+    "successObserved": true,
+    "editingGatesSettled": true,
+    "scope": "one retained small test project; warm UI observation, not P95",
+    "persisted_after_reload": true
+  },
+  "regression": {
+    "node_passed": 312,
+    "postgres_api_integration_passed": 75,
+    "scoped_history_tests_passed": 6,
+    "editing_readiness_tests_passed": 10,
+    "review": "One form-reset finding corrected with a red-green regression. No backend blockers."
+  },
+  "causes": [
+    "Frontend term save awaited canvas plus full publication readiness before its success notification.",
+    "Canvas preview/readiness read project-wide audit history before selecting one draft.",
+    "Full readiness ran quality, timeline, source and instance validation even for unsubmitted drafts."
+  ],
+  "limitations": [
+    "Single observations, no P95 claim.",
+    "Complete validation cold-start phase has not been profiled; no database lock or hardware cause established.",
+    "Milvus backend and full publication integrity checks retained."
+  ]
+}

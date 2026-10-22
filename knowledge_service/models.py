@@ -133,13 +133,8 @@ class ResolutionReviewDecision(Request):
     expected_version: int = Field(ge=1)
     reason: str = Field(min_length=1,max_length=2000)
     expected_entity_versions: dict[str,int] = Field(default_factory=dict)
-
-    @model_validator(mode='before')
-    @classmethod
-    def discard_legacy_actor(cls, value):
-        return ({key: item for key, item in value.items() if key != 'actor'}
-                if isinstance(value, dict) else value)
-
+    attribute_winners: list[str] = Field(default_factory=list)
+    preview_fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
 
 class IngestSettings(Request):
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -147,8 +142,7 @@ class IngestSettings(Request):
     published_at: str | None = None
     valid_from: str | None = None
     valid_until: str | None = None
-    extract: bool = True
-    extraction_mode: Literal['ontology','discovery','documents'] | None = None
+    extraction_mode: Literal['ontology','discovery','documents'] = 'ontology'
     extract_attributes: bool = False
     relation_constraint_mode: Literal['advisory','review','strict','off'] = 'review'
     ontology_id: str | None = None
@@ -185,10 +179,6 @@ class IngestSettings(Request):
             'published_at' if self.published_at else 'unknown')
         return self
 
-    def effective_extraction_mode(self):
-        return self.extraction_mode or ('ontology' if self.extract else 'documents')
-
-
 class Ingest(IngestSettings):
     title: str = Field(min_length=1, max_length=300)
     text: str = Field(min_length=1, max_length=1_000_000)
@@ -196,11 +186,6 @@ class Ingest(IngestSettings):
 
 class UploadOptions(IngestSettings):
     title: str | None = Field(default=None, max_length=300)
-
-
-class OntologyWrite(Request):
-    turtle: str = Field(min_length=1, max_length=1_000_000)
-    expected_ontology_id: str | None = None
 
 
 class Sparql(Scope):
@@ -225,7 +210,6 @@ class IngestCapabilities(BaseModel):
 
 class IngestBatchSettings(IngestSettings):
     requested_concurrency: Literal['auto',1,2,4,8] = 'auto'
-    extraction_mode: Literal['ontology','discovery','documents'] = 'ontology'
 
 class IngestBatchCreate(Request):
     settings: IngestBatchSettings = Field(default_factory=IngestBatchSettings)

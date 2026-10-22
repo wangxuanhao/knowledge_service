@@ -693,12 +693,13 @@ class DiscoveryRunStore:
             raise KeyError(run_id)
         return json.loads(row['payload'])
 
-    def list(self, project_id):
+    def list(self, project_id, *, intake_only=False):
         self.repo.get_project(project_id)
         with self.repo._lock:
             rows = self._db.execute(
                 'SELECT payload FROM artifacts WHERE kind=? AND project_id=? '
-                'ORDER BY seq DESC', (KIND, project_id)).fetchall()
+                + ("AND payload::jsonb->>'intake_request_hash' IS NOT NULL " if intake_only else '')
+                + 'ORDER BY seq DESC', (KIND, project_id)).fetchall()
         return [json.loads(row['payload']) for row in rows]
 
     def latest(self, project_id, *, statuses=None):

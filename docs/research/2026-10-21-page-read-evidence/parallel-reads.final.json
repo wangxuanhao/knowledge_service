@@ -1,0 +1,288 @@
+{
+  "rounds": [
+    {
+      "workers": 1,
+      "total_ms": 489.4,
+      "available_mb": 5224,
+      "requests": [
+        {
+          "path": "resolution-reviews",
+          "kinds": null,
+          "limit": null,
+          "ms": 25.3,
+          "status": 200,
+          "bytes": 24
+        },
+        {
+          "path": "page",
+          "kinds": [
+            "entity"
+          ],
+          "limit": 50,
+          "ms": 78.5,
+          "status": 200,
+          "bytes": 35766
+        },
+        {
+          "path": "ontologies",
+          "kinds": null,
+          "limit": null,
+          "ms": 40.8,
+          "status": 200,
+          "bytes": 11136
+        },
+        {
+          "path": "page",
+          "kinds": [
+            "relation"
+          ],
+          "limit": 1,
+          "ms": 98.4,
+          "status": 200,
+          "bytes": 1586
+        },
+        {
+          "path": "page",
+          "kinds": [
+            "attribute"
+          ],
+          "limit": 1,
+          "ms": 51.1,
+          "status": 200,
+          "bytes": 43
+        },
+        {
+          "path": "page",
+          "kinds": [
+            "chunk"
+          ],
+          "limit": 1,
+          "ms": 70.7,
+          "status": 200,
+          "bytes": 3114
+        },
+        {
+          "path": "batch",
+          "kinds": null,
+          "limit": null,
+          "ms": 119.3,
+          "status": 200,
+          "bytes": 5322
+        }
+      ]
+    },
+    {
+      "workers": 6,
+      "total_ms": 274.1,
+      "available_mb": 5204,
+      "requests": [
+        {
+          "path": "resolution-reviews",
+          "kinds": null,
+          "limit": null,
+          "ms": 83.1,
+          "status": 200,
+          "bytes": 24
+        },
+        {
+          "path": "page",
+          "kinds": [
+            "entity"
+          ],
+          "limit": 50,
+          "ms": 239.6,
+          "status": 200,
+          "bytes": 35766
+        },
+        {
+          "path": "ontologies",
+          "kinds": null,
+          "limit": null,
+          "ms": 133.8,
+          "status": 200,
+          "bytes": 11136
+        },
+        {
+          "path": "page",
+          "kinds": [
+            "relation"
+          ],
+          "limit": 1,
+          "ms": 241.3,
+          "status": 200,
+          "bytes": 1586
+        },
+        {
+          "path": "page",
+          "kinds": [
+            "attribute"
+          ],
+          "limit": 1,
+          "ms": 220.4,
+          "status": 200,
+          "bytes": 43
+        },
+        {
+          "path": "page",
+          "kinds": [
+            "chunk"
+          ],
+          "limit": 1,
+          "ms": 212.5,
+          "status": 200,
+          "bytes": 3114
+        },
+        {
+          "path": "batch",
+          "kinds": null,
+          "limit": null,
+          "ms": 184.4,
+          "status": 200,
+          "bytes": 5322
+        }
+      ]
+    },
+    {
+      "workers": 6,
+      "total_ms": 195.6,
+      "available_mb": 5222,
+      "requests": [
+        {
+          "path": "resolution-reviews",
+          "kinds": null,
+          "limit": null,
+          "ms": 32.7,
+          "status": 200,
+          "bytes": 24
+        },
+        {
+          "path": "page",
+          "kinds": [
+            "entity"
+          ],
+          "limit": 50,
+          "ms": 149.3,
+          "status": 200,
+          "bytes": 35766
+        },
+        {
+          "path": "ontologies",
+          "kinds": null,
+          "limit": null,
+          "ms": 99.5,
+          "status": 200,
+          "bytes": 11136
+        },
+        {
+          "path": "page",
+          "kinds": [
+            "relation"
+          ],
+          "limit": 1,
+          "ms": 152.2,
+          "status": 200,
+          "bytes": 1586
+        },
+        {
+          "path": "page",
+          "kinds": [
+            "attribute"
+          ],
+          "limit": 1,
+          "ms": 164.9,
+          "status": 200,
+          "bytes": 43
+        },
+        {
+          "path": "page",
+          "kinds": [
+            "chunk"
+          ],
+          "limit": 1,
+          "ms": 161.0,
+          "status": 200,
+          "bytes": 3114
+        },
+        {
+          "path": "batch",
+          "kinds": null,
+          "limit": null,
+          "ms": 144.6,
+          "status": 200,
+          "bytes": 5322
+        }
+      ]
+    },
+    {
+      "workers": 1,
+      "total_ms": 606.2,
+      "available_mb": 5279,
+      "requests": [
+        {
+          "path": "resolution-reviews",
+          "kinds": null,
+          "limit": null,
+          "ms": 39.8,
+          "status": 200,
+          "bytes": 24
+        },
+        {
+          "path": "page",
+          "kinds": [
+            "entity"
+          ],
+          "limit": 50,
+          "ms": 79.2,
+          "status": 200,
+          "bytes": 35766
+        },
+        {
+          "path": "ontologies",
+          "kinds": null,
+          "limit": null,
+          "ms": 212.0,
+          "status": 200,
+          "bytes": 11136
+        },
+        {
+          "path": "page",
+          "kinds": [
+            "relation"
+          ],
+          "limit": 1,
+          "ms": 76.8,
+          "status": 200,
+          "bytes": 1586
+        },
+        {
+          "path": "page",
+          "kinds": [
+            "attribute"
+          ],
+          "limit": 1,
+          "ms": 59.1,
+          "status": 200,
+          "bytes": 43
+        },
+        {
+          "path": "page",
+          "kinds": [
+            "chunk"
+          ],
+          "limit": 1,
+          "ms": 76.2,
+          "status": 200,
+          "bytes": 3114
+        },
+        {
+          "path": "batch",
+          "kinds": null,
+          "limit": null,
+          "ms": 55.2,
+          "status": 200,
+          "bytes": 5322
+        }
+      ]
+    }
+  ]
+}

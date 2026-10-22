@@ -28,7 +28,7 @@ def edit_page(page):
           return payload(window.savedEdit);
         }
         const response=await original(input,options);
-        if(url.pathname.endsWith('/records/query')&&window.savedEdit){
+        if(url.pathname.endsWith('/records/page')&&window.savedEdit){
           const result=await response.json();
           result.records=result.records.map(row=>row.id==='e1'?window.savedEdit:row);
           return payload(result);

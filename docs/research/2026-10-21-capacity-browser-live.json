@@ -1,0 +1,766 @@
+{
+  "schema": "capacity-audit-v1",
+  "source": "opt-in passive product instrumentation",
+  "running": true,
+  "started_utc": "2026-10-21T03:45:13.997Z",
+  "updated_utc": "2026-10-21T04:19:28.687Z",
+  "timing_definitions": {
+    "first_visible": "begin invocation to next visible rAF after a nonempty complete draw of the current partial dataset",
+    "first_batch": "begin invocation to its original promise resolving",
+    "all_loaded": "begin invocation to loader state complete",
+    "all_drawn": "begin invocation to final draw, unique-ID audit and one GL error probe",
+    "active_frames": "visible rAF intervals inside 500 ms after trusted canvas pointer/wheel/key input",
+    "selection": "trusted pointerdown/click to next visible rAF with the selected record identity in #graph-detail; source/version follow-up requests excluded"
+  },
+  "elapsed_seconds": 2054.69,
+  "visible_seconds": 2054.69,
+  "hidden_seconds": 0,
+  "current_visibility": "visible",
+  "mode": "full",
+  "loader_state": "complete",
+  "current": {
+    "loaded_entities": 150001,
+    "loaded_relations": 300000,
+    "drawn_entities": 150001,
+    "drawn_relations": 300000,
+    "relation_layer": "complete-world-cache",
+    "cached_relations": 300000,
+    "layout": "stable-id-v1",
+    "last_pick_ms": 0.599999999627471,
+    "gpu": "WebKit WebGL",
+    "context_lost": false
+  },
+  "completed_loads": 1,
+  "loads": [
+    {
+      "number": 1,
+      "state": "complete",
+      "phase": "done",
+      "manifest": {
+        "entities": 150001,
+        "relations": 300000,
+        "project_id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f"
+      },
+      "first_batch_ms": 3992.8,
+      "first_visible_ms": 4009.6,
+      "all_loaded_ms": 320791.2,
+      "all_drawn_ms": 320881.5,
+      "complete": true,
+      "resume_calls": 1,
+      "next_calls": 1126,
+      "draw_calls": 1231,
+      "sync_calls": 1127,
+      "resume_ms": 224945.7,
+      "counts": {
+        "loaded_entities": 150001,
+        "loaded_relations": 300000,
+        "drawn_entities": 150001,
+        "drawn_relations": 300000,
+        "relation_layer": "complete-world-cache",
+        "cached_relations": 300000,
+        "layout": "stable-id-v1",
+        "last_pick_ms": 0,
+        "gpu": "WebKit WebGL",
+        "context_lost": false
+      },
+      "validation": {
+        "entities": 150001,
+        "relations": 300000,
+        "unique_entities": 150001,
+        "unique_relations": 300000,
+        "duplicate_entity_ids": 0,
+        "duplicate_relation_ids": 0,
+        "dangling_relations": 0
+      },
+      "final_audit_ms": 86.7,
+      "webgl_error": 0,
+      "webgl_error_probe": "one getError after final draw; remaining error queue not drained",
+      "counts_match": true,
+      "elapsed_ms": 320881.5
+    }
+  ],
+  "load_distribution": {
+    "first_visible": {
+      "count": 1,
+      "retained": 1,
+      "retention": "most recent samples",
+      "min_ms": 4009.6,
+      "max_ms": 4009.6,
+      "mean_ms": 4009.6,
+      "p50_ms": 4009.6,
+      "p95_ms": 4009.6,
+      "p99_ms": 4009.6
+    },
+    "first_batch": {
+      "count": 1,
+      "retained": 1,
+      "retention": "most recent samples",
+      "min_ms": 3992.8,
+      "max_ms": 3992.8,
+      "mean_ms": 3992.8,
+      "p50_ms": 3992.8,
+      "p95_ms": 3992.8,
+      "p99_ms": 3992.8
+    },
+    "all_loaded": {
+      "count": 1,
+      "retained": 1,
+      "retention": "most recent samples",
+      "min_ms": 320791.2,
+      "max_ms": 320791.2,
+      "mean_ms": 320791.2,
+      "p50_ms": 320791.2,
+      "p95_ms": 320791.2,
+      "p99_ms": 320791.2
+    },
+    "all_drawn": {
+      "count": 1,
+      "retained": 1,
+      "retention": "most recent samples",
+      "min_ms": 320881.5,
+      "max_ms": 320881.5,
+      "mean_ms": 320881.5,
+      "p50_ms": 320881.5,
+      "p95_ms": 320881.5,
+      "p99_ms": 320881.5
+    }
+  },
+  "frames": {
+    "active": {
+      "count": 1129,
+      "retained": 1129,
+      "retention": "most recent samples",
+      "min_ms": 13.1,
+      "max_ms": 50,
+      "mean_ms": 16.844,
+      "p50_ms": 16.7,
+      "p95_ms": 16.8,
+      "p99_ms": 18.1
+    },
+    "idle": {
+      "count": 120485,
+      "retained": 100000,
+      "retention": "most recent samples",
+      "min_ms": 7,
+      "max_ms": 4133.3,
+      "mean_ms": 16.896,
+      "p50_ms": 16.7,
+      "p95_ms": 16.8,
+      "p99_ms": 17
+    },
+    "trusted_input_events": {
+      "pointerdown": 30,
+      "pointermove": 80,
+      "pointerup": 30,
+      "wheel": 4,
+      "keydown": 0
+    },
+    "interaction_windows": 22,
+    "quiet_window_ms": 500
+  },
+  "renderer_calls": {
+    "scope": "CPU method wall time; GPU completion time is unavailable",
+    "draw": {
+      "count": 1231,
+      "retained": 1231,
+      "retention": "most recent samples",
+      "min_ms": 0,
+      "max_ms": 2.8,
+      "mean_ms": 0.116,
+      "p50_ms": 0.1,
+      "p95_ms": 0.2,
+      "p99_ms": 0.3
+    },
+    "sync": {
+      "count": 1127,
+      "retained": 1127,
+      "retention": "most recent samples",
+      "min_ms": 0,
+      "max_ms": 61.4,
+      "mean_ms": 17.264,
+      "p50_ms": 12,
+      "p95_ms": 44.9,
+      "p99_ms": 50.3
+    }
+  },
+  "selection": {
+    "latency": {
+      "count": 19,
+      "retained": 19,
+      "retention": "most recent samples",
+      "min_ms": 518.9,
+      "max_ms": 3803.1,
+      "mean_ms": 1426.068,
+      "p50_ms": 1124.6,
+      "p95_ms": 3803.1,
+      "p99_ms": 3803.1
+    },
+    "attempts": 20,
+    "empty_picks": 0,
+    "timeouts": 1,
+    "pending": false
+  },
+  "longtasks": {
+    "available": true,
+    "durations": {
+      "count": 60,
+      "retained": 60,
+      "retention": "most recent samples",
+      "min_ms": 50,
+      "max_ms": 183,
+      "mean_ms": 59.833,
+      "p50_ms": 51,
+      "p95_ms": 91,
+      "p99_ms": 183
+    }
+  },
+  "memory": {
+    "source": "performance.memory.usedJSHeapSize",
+    "first_js_heap_bytes": 12367417,
+    "last_js_heap_bytes": 138534183,
+    "max_js_heap_bytes": 194445949,
+    "browser_rss": "unavailable from product JavaScript",
+    "cdp_metrics": "not collected"
+  },
+  "stability": {
+    "evidence_samples": 658,
+    "complete_graph_checks": 556,
+    "count_mismatch_checks": 0,
+    "context_lost_events": 0,
+    "context_restored_events": 0,
+    "errors": []
+  },
+  "http": {
+    "available": true,
+    "scope": "same-origin /api ResourceTiming entries observed since measurement start; no headers or response bodies",
+    "count": 1204,
+    "transfer_bytes": 145783214,
+    "duration": {
+      "count": 1204,
+      "retained": 1204,
+      "retention": "most recent samples",
+      "min_ms": 38.6,
+      "max_ms": 82058.5,
+      "mean_ms": 1738.71,
+      "p50_ms": 123.1,
+      "p95_ms": 921.8,
+      "p99_ms": 75727
+    },
+    "groups": [
+      {
+        "path": "/api/projects/:project/graph-sessions",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 3237.9,
+          "max_ms": 3237.9,
+          "mean_ms": 3237.9,
+          "p50_ms": 3237.9,
+          "p95_ms": 3237.9,
+          "p99_ms": 3237.9
+        },
+        "transfer_bytes": 724,
+        "statuses": {
+          "200": 1
+        }
+      },
+      {
+        "path": "/api/projects/:project/graph-sessions/:session/page",
+        "duration": {
+          "count": 1126,
+          "retained": 128,
+          "retention": "most recent samples",
+          "min_ms": 38.6,
+          "max_ms": 2313.1,
+          "mean_ms": 172.439,
+          "p50_ms": 54.9,
+          "p95_ms": 121.1,
+          "p99_ms": 147.7
+        },
+        "transfer_bytes": 145714128,
+        "statuses": {
+          "200": 1126
+        }
+      },
+      {
+        "path": "/api/projects/:project/records/page",
+        "duration": {
+          "count": 20,
+          "retained": 20,
+          "retention": "most recent samples",
+          "min_ms": 202.9,
+          "max_ms": 55462.6,
+          "mean_ms": 3574.73,
+          "p50_ms": 662,
+          "p95_ms": 3419.3,
+          "p99_ms": 55462.6
+        },
+        "transfer_bytes": 13164,
+        "statuses": {
+          "200": 20
+        }
+      },
+      {
+        "path": "/api/projects/:project/graph-neighborhood",
+        "duration": {
+          "count": 19,
+          "retained": 19,
+          "retention": "most recent samples",
+          "min_ms": 254.2,
+          "max_ms": 1326.6,
+          "mean_ms": 554.432,
+          "p50_ms": 434.1,
+          "p95_ms": 1326.6,
+          "p99_ms": 1326.6
+        },
+        "transfer_bytes": 22423,
+        "statuses": {
+          "200": 19
+        }
+      },
+      {
+        "path": "/api/projects/:project/ontologies",
+        "duration": {
+          "count": 19,
+          "retained": 19,
+          "retention": "most recent samples",
+          "min_ms": 94.8,
+          "max_ms": 82045.5,
+          "mean_ms": 45673.289,
+          "p50_ms": 53676.7,
+          "p95_ms": 82045.5,
+          "p99_ms": 82045.5
+        },
+        "transfer_bytes": 21337,
+        "statuses": {
+          "200": 19
+        }
+      },
+      {
+        "path": "/api/projects/:project/records/e088266/evidence",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 77647.2,
+          "max_ms": 77647.2,
+          "mean_ms": 77647.2,
+          "p50_ms": 77647.2,
+          "p95_ms": 77647.2,
+          "p99_ms": 77647.2
+        },
+        "transfer_bytes": 602,
+        "statuses": {
+          "200": 1
+        }
+      },
+      {
+        "path": "/api/projects/:project/records/e011636/evidence",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 28747.6,
+          "max_ms": 28747.6,
+          "mean_ms": 28747.6,
+          "p50_ms": 28747.6,
+          "p95_ms": 28747.6,
+          "p99_ms": 28747.6
+        },
+        "transfer_bytes": 602,
+        "statuses": {
+          "200": 1
+        }
+      },
+      {
+        "path": "/api/projects/:project/records/e129372/evidence",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 3884.3,
+          "max_ms": 3884.3,
+          "mean_ms": 3884.3,
+          "p50_ms": 3884.3,
+          "p95_ms": 3884.3,
+          "p99_ms": 3884.3
+        },
+        "transfer_bytes": 602,
+        "statuses": {
+          "200": 1
+        }
+      },
+      {
+        "path": "/api/projects/:project/records/e068709/evidence",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 81578.3,
+          "max_ms": 81578.3,
+          "mean_ms": 81578.3,
+          "p50_ms": 81578.3,
+          "p95_ms": 81578.3,
+          "p99_ms": 81578.3
+        },
+        "transfer_bytes": 602,
+        "statuses": {
+          "200": 1
+        }
+      },
+      {
+        "path": "/api/projects/:project/records/e120345/evidence",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 79081.8,
+          "max_ms": 79081.8,
+          "mean_ms": 79081.8,
+          "p50_ms": 79081.8,
+          "p95_ms": 79081.8,
+          "p99_ms": 79081.8
+        },
+        "transfer_bytes": 602,
+        "statuses": {
+          "200": 1
+        }
+      },
+      {
+        "path": "/api/projects/:project/records/e138738/evidence",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 75652.9,
+          "max_ms": 75652.9,
+          "mean_ms": 75652.9,
+          "p50_ms": 75652.9,
+          "p95_ms": 75652.9,
+          "p99_ms": 75652.9
+        },
+        "transfer_bytes": 602,
+        "statuses": {
+          "200": 1
+        }
+      },
+      {
+        "path": "/api/projects/:project/records/e005465/evidence",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 72355.4,
+          "max_ms": 72355.4,
+          "mean_ms": 72355.4,
+          "p50_ms": 72355.4,
+          "p95_ms": 72355.4,
+          "p99_ms": 72355.4
+        },
+        "transfer_bytes": 602,
+        "statuses": {
+          "200": 1
+        }
+      },
+      {
+        "path": "/api/projects/:project/records/e005512/evidence",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 82058.5,
+          "max_ms": 82058.5,
+          "mean_ms": 82058.5,
+          "p50_ms": 82058.5,
+          "p95_ms": 82058.5,
+          "p99_ms": 82058.5
+        },
+        "transfer_bytes": 602,
+        "statuses": {
+          "200": 1
+        }
+      },
+      {
+        "path": "/api/projects/:project/records/e054531/evidence",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 79933.5,
+          "max_ms": 79933.5,
+          "mean_ms": 79933.5,
+          "p50_ms": 79933.5,
+          "p95_ms": 79933.5,
+          "p99_ms": 79933.5
+        },
+        "transfer_bytes": 602,
+        "statuses": {
+          "200": 1
+        }
+      },
+      {
+        "path": "/api/projects/:project/records/e069938/evidence",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 77557.6,
+          "max_ms": 77557.6,
+          "mean_ms": 77557.6,
+          "p50_ms": 77557.6,
+          "p95_ms": 77557.6,
+          "p99_ms": 77557.6
+        },
+        "transfer_bytes": 602,
+        "statuses": {
+          "200": 1
+        }
+      },
+      {
+        "path": "/api/projects/:project/records/e112651/evidence",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 75075.8,
+          "max_ms": 75075.8,
+          "mean_ms": 75075.8,
+          "p50_ms": 75075.8,
+          "p95_ms": 75075.8,
+          "p99_ms": 75075.8
+        },
+        "transfer_bytes": 602,
+        "statuses": {
+          "200": 1
+        }
+      },
+      {
+        "path": "/api/projects/:project/records/e003553/evidence",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 648.9,
+          "max_ms": 648.9,
+          "mean_ms": 648.9,
+          "p50_ms": 648.9,
+          "p95_ms": 648.9,
+          "p99_ms": 648.9
+        },
+        "transfer_bytes": 602,
+        "statuses": {
+          "200": 1
+        }
+      },
+      {
+        "path": "/api/projects/:project/records/e115411/evidence",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 581.8,
+          "max_ms": 581.8,
+          "mean_ms": 581.8,
+          "p50_ms": 581.8,
+          "p95_ms": 581.8,
+          "p99_ms": 581.8
+        },
+        "transfer_bytes": 602,
+        "statuses": {
+          "200": 1
+        }
+      },
+      {
+        "path": "/api/projects/:project/records/e066193/evidence",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 821,
+          "max_ms": 821,
+          "mean_ms": 821,
+          "p50_ms": 821,
+          "p95_ms": 821,
+          "p99_ms": 821
+        },
+        "transfer_bytes": 602,
+        "statuses": {
+          "200": 1
+        }
+      },
+      {
+        "path": "/api/projects/:project/records/e086943/evidence",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 194.5,
+          "max_ms": 194.5,
+          "mean_ms": 194.5,
+          "p50_ms": 194.5,
+          "p95_ms": 194.5,
+          "p99_ms": 194.5
+        },
+        "transfer_bytes": 602,
+        "statuses": {
+          "200": 1
+        }
+      },
+      {
+        "path": "/api/projects/:project/records/e063162/evidence",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 56153.8,
+          "max_ms": 56153.8,
+          "mean_ms": 56153.8,
+          "p50_ms": 56153.8,
+          "p95_ms": 56153.8,
+          "p99_ms": 56153.8
+        },
+        "transfer_bytes": 602,
+        "statuses": {
+          "200": 1
+        }
+      },
+      {
+        "path": "/api/projects/:project/records/e031825/evidence",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 53759.3,
+          "max_ms": 53759.3,
+          "mean_ms": 53759.3,
+          "p50_ms": 53759.3,
+          "p95_ms": 53759.3,
+          "p99_ms": 53759.3
+        },
+        "transfer_bytes": 602,
+        "statuses": {
+          "200": 1
+        }
+      },
+      {
+        "path": "/api/projects/:project/records/e148525/evidence",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 51294.8,
+          "max_ms": 51294.8,
+          "mean_ms": 51294.8,
+          "p50_ms": 51294.8,
+          "p95_ms": 51294.8,
+          "p99_ms": 51294.8
+        },
+        "transfer_bytes": 602,
+        "statuses": {
+          "200": 1
+        }
+      },
+      {
+        "path": "/api/projects/:project/records/e019389/evidence",
+        "duration": {
+          "count": 1,
+          "retained": 1,
+          "retention": "most recent samples",
+          "min_ms": 49154.4,
+          "max_ms": 49154.4,
+          "mean_ms": 49154.4,
+          "p50_ms": 49154.4,
+          "p95_ms": 49154.4,
+          "p99_ms": 49154.4
+        },
+        "transfer_bytes": 602,
+        "statuses": {
+          "200": 1
+        }
+      }
+    ],
+    "recent": [
+      {
+        "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/ontologies",
+        "duration_ms": 53676.7,
+        "transfer_bytes": 1123,
+        "encoded_bytes": 823,
+        "decoded_bytes": 823,
+        "status": 200,
+        "initiator": "fetch"
+      },
+      {
+        "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/ontologies",
+        "duration_ms": 56144.2,
+        "transfer_bytes": 1123,
+        "encoded_bytes": 823,
+        "decoded_bytes": 823,
+        "status": 200,
+        "initiator": "fetch"
+      },
+      {
+        "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/records/e063162/evidence",
+        "duration_ms": 56153.8,
+        "transfer_bytes": 602,
+        "encoded_bytes": 302,
+        "decoded_bytes": 302,
+        "status": 200,
+        "initiator": "fetch"
+      },
+      {
+        "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/records/e031825/evidence",
+        "duration_ms": 53759.3,
+        "transfer_bytes": 602,
+        "encoded_bytes": 302,
+        "decoded_bytes": 302,
+        "status": 200,
+        "initiator": "fetch"
+      },
+      {
+        "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/records/e148525/evidence",
+        "duration_ms": 51294.8,
+        "transfer_bytes": 602,
+        "encoded_bytes": 302,
+        "decoded_bytes": 302,
+        "status": 200,
+        "initiator": "fetch"
+      },
+      {
+        "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/records/e019389/evidence",
+        "duration_ms": 49154.4,
+        "transfer_bytes": 602,
+        "encoded_bytes": 302,
+        "decoded_bytes": 302,
+        "status": 200,
+        "initiator": "fetch"
+      },
+      {
+        "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/ontologies",
+        "duration_ms": 51790.8,
+        "transfer_bytes": 1123,
+        "encoded_bytes": 823,
+        "decoded_bytes": 823,
+        "status": 200,
+        "initiator": "fetch"
+      },
+      {
+        "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/ontologies",
+        "duration_ms": 49954.1,
+        "transfer_bytes": 1123,
+        "encoded_bytes": 823,
+        "decoded_bytes": 823,
+        "status": 200,
+        "initiator": "fetch"
+      }
+    ]
+  },
+  "overhead": {
+    "instrumentation_ms_observed": 20093,
+    "scope": "Opt-in wrappers; one extra visible rAF loop; 250 ms discovery; DOM JSON at most every 2 seconds; exact one-time O(entities + relations) audit per completed load; one GL error consumption per completed load. Percentiles use bounded recent samples; min/mean/max/count cover all observations. Overhead includes measured report/audit work only, not all observer overhead.",
+    "raw_numeric_sample_cap": 194248,
+    "max_retained_loads": 20
+  },
+  "stability_start_utc": "2026-10-21T03:53:25.444Z",
+  "observed_stability_seconds": 1564.815
+}

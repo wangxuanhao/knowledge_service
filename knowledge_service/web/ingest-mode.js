@@ -5,7 +5,7 @@
     supported_extensions:['.txt','.md','.pdf','.docx','.html','.htm']};
   const file=document.getElementById('doc-file'),text=document.getElementById('doc-text');
   const modes=[...document.querySelectorAll('input[name="document-input-mode"]')];
-  const rows=[];
+  const rows=[];let generation=0;
   const mode=()=>modes.find(input=>input.checked)?.value||'file';
   const key=f=>[f.name,f.size||0,f.lastModified||0].join(':');
   const size=value=>value<1000?value+' B':value<1_000_000?(value/1000).toFixed(1)+' KB':(value/1_000_000)+' MB';
@@ -22,9 +22,8 @@
   };
   const localTime=value=>value?String(value).replace('T',' '):'';
   const applicabilityOf=value=>value?.applicability||value?.metadata?.applicability||{};
-  const dimensionValues=value=>Array.isArray(value)?value:(value?.mode==='specific'?value.values||[]:[]);
+  const dimensionValues=value=>value?.mode==='specific'?value.values:[];
   const dimensionText=(label,value)=>{
-    if(Array.isArray(value))return value.length?label+'：'+value.join('、'):label+'：暂不确定';
     if(value?.mode==='all')return label+'：全部适用';
     if(value?.mode==='specific')return label+'：'+dimensionValues(value).join('、');
     return label+'：暂不确定';
@@ -73,19 +72,30 @@
       const platforms=splitList(field('query-platforms')?.value);
       const businesses=splitList(field('query-businesses')?.value);
       const audiences=splitList(field('query-audiences')?.value);
-      return platforms.length||businesses.length||audiences.length?{applicability:{platforms,businesses,audiences}}:{};
+      const dimension=values=>({mode:values.length?'specific':'unknown',values});
+      return platforms.length||businesses.length||audiences.length?{applicability:{
+        platforms:dimension(platforms),businesses:dimension(businesses),audiences:dimension(audiences)}}:{};
     },
   };
 
+  let vocabularyRequest=0;
+  const uploadVisible=()=>{
+    const page=field('tab-ingest'),library=window.LibraryWorkspace?.snapshot();
+    return !!page&&!page.classList.contains('hidden')&&(!library||(library.active&&library.mode==='upload'));
+  };
+  const vocabularyTargets={platforms:'doc-platform-options',businesses:'doc-business-options',audiences:'doc-audience-options'};
   async function loadApplicabilityVocabulary(){
+    const request=++vocabularyRequest;
+    if(!uploadVisible())return;
     const project=field('project')?.value;
-    const targets={platforms:'doc-platform-options',businesses:'doc-business-options',audiences:'doc-audience-options'};
+    const stillCurrent=()=>request===vocabularyRequest&&project===field('project')?.value&&uploadVisible();
     let values={platforms:[],businesses:[],audiences:[]};
     if(project){
       try{values=await api(endpoint('/applicability-values'),undefined,'GET');}
-      catch(error){window.uploadQueueError?.(error);}
+      catch(error){if(stillCurrent())window.uploadQueueError?.(error);}
     }
-    for(const [dimension,id] of Object.entries(targets)){
+    if(!stillCurrent())return;
+    for(const [dimension,id] of Object.entries(vocabularyTargets)){
       const list=field(id);if(!list)continue;list.replaceChildren();
       for(const value of values[dimension]||[]){const option=document.createElement('option');option.value=value;list.append(option);}
     }
@@ -133,7 +143,8 @@
       render();return queue.items();
     },
     remove(value){const at=rows.findIndex(item=>item.file===value);if(at>=0)rows.splice(at,1);render();},
-    clear(){rows.splice(0);queue.batchSession=null;if(file)file.value='';render();},
+    clear(){generation++;rows.splice(0);queue.batchSession=null;if(file)file.value='';render();},
+    get generation(){return generation;},
     setCapabilities(value){
       limits=value;
       const extensions=value.supported_extensions.map(x=>x.startsWith('.')?x:'.'+x);
@@ -230,6 +241,10 @@
   for(const name of ['platforms','businesses','audiences']){
     field('doc-'+name+'-mode')?.addEventListener('change',()=>syncDimension(name));syncDimension(name);
   }
-  field('project')?.addEventListener('change',loadApplicabilityVocabulary);
+  field('project')?.addEventListener('change',()=>{
+    ++vocabularyRequest;
+    for(const id of Object.values(vocabularyTargets))field(id)?.replaceChildren();
+    if(uploadVisible())void loadApplicabilityVocabulary();
+  });
   updateEffectiveHelp();refresh();
 })();

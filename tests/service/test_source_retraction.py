@@ -1,3 +1,4 @@
+from ontology_seed import seed_ontology
 from knowledge_service.integrations.embeddings import HashingEncoder
 from knowledge_service.services.governance import Governance
 from knowledge_service.services.ontology import Ontology
@@ -12,7 +13,7 @@ def test_fact_survives_one_source_and_retires_after_last_support(tmp_path):
     ttl = ('@prefix ex: <http://ex/> . '
            '@prefix owl: <http://www.w3.org/2002/07/owl#> . '
            'ex:Person a owl:Class . ex:knows a owl:ObjectProperty .')
-    repo.save_ontology(project_id, ttl, Ontology(ttl).summary())
+    seed_ontology(repo, project_id, ttl, Ontology(ttl).summary())
     service.write(project_id, [
         {'id': 'a', 'kind': 'entity', 'type': 'Person', 'text': '张三'},
         {'id': 'b', 'kind': 'entity', 'type': 'Person', 'text': '李四'},

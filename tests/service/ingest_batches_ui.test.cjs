@@ -30,3 +30,14 @@ test('partial upload sessions cannot silently retain a different ontology releas
   assert.doesNotThrow(()=>ui.assertSessionSettings({extraction_mode:'discovery',ontology_id:null},
     {extraction_mode:'discovery'}));
 });
+test('late batch completions cannot overwrite a new queue generation or clear its session',()=>{
+  const {queueLease}=require('../../knowledge_service/web/ingest-batches.js');
+  assert.equal(typeof queueLease,'function');
+  let project='a';const statuses=[],queue={generation:0,batchSession:null,setStatus(...args){statuses.push(args);}};
+  const old=queueLease(queue,'a',()=>project),a={project:'a',batch:{id:'a'}};
+  old.setSession(a);assert.equal(queue.batchSession,a);
+  project='b';queue.generation++;const b={project:'b',batch:{id:'b'}};queue.batchSession=b;
+  old.setSession(a);old.setStatus('file','queued');old.release(a);
+  assert.equal(queue.batchSession,b);assert.deepEqual(statuses,[]);
+  project='a';assert.equal(old.current(),false);
+});

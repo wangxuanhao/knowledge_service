@@ -12,7 +12,7 @@
         is-admin      超级管理员或管理员（能写入，CSS 据此显示 .admin-only）；
         is-viewer     只读用户。
       真正拦截在后端中间件，前端隐藏只是体验。
-   5. 服务端没启用鉴权（测试桩 / KG_AUTH_DISABLED=1，health.auth_enabled 为假）
+   5. 服务端没启用鉴权（测试桩 / KG_AUTH_DISABLED=1，policy.auth_enabled 为假）
       时直接放行，不跳登录页。
    ============================================================================ */
 (function () {
@@ -23,12 +23,11 @@
     // ── 令牌存取 ────────────────────────────────────────────────────────────
     function getToken() { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; } }
     function setToken(t) { try { localStorage.setItem(TOKEN_KEY, t); } catch (e) {} }
-    function clearToken() { try { localStorage.removeItem(TOKEN_KEY); } catch (e) {} }
+    function clearToken() { window.WorkspaceContext?.clear(); try { localStorage.removeItem(TOKEN_KEY); } catch (e) {} }
 
     var currentUser = null;
     // 服务端是否真的启用鉴权：null=还不知道，true=启用（要先登录），false=没启用。
-    // 只有**确知启用**才要求登录 —— 测试桩与 KG_AUTH_DISABLED=1 的起法没有这个字段，
-    // 若按"未知也要登录"处理，这些页面会永远被跳去登录页（没有账号可登）。
+    // Only an explicit false policy permits the auth-disabled development service.
     var authEnforced = null;
     var policyProbe = null;
 
@@ -74,7 +73,8 @@
     };
 
     // ── 角色与界面 ────────────────────────────────────────────────────────────
-    function canWrite(user) { return !!user && (user.role === 'admin' || user.role === 'superadmin'); }
+    // A confirmed auth-disabled test service permits business writes without a user identity.
+    function canWrite(user) { return authEnforced === false || (!!user && (user.role === 'admin' || user.role === 'superadmin')); }
 
     function applyRole(user) {
         currentUser = user;
@@ -191,21 +191,15 @@
     function prepareReady() {
         window.__authReady = new Promise(function (resolve) { readyResolve = resolve; });
     }
-    function resolveReady() { if (readyResolve) readyResolve(); readyResolve = null; }
+    function resolveReady() {
+        document.documentElement?.classList.remove('auth-pending');
+        if (readyResolve) readyResolve(); readyResolve = null;
+    }
     prepareReady();
 
-    // 业务模块等待登录就绪：
-    //   1. 先确保策略探针已发出（本函数可能早于 bootstrap 被调用）；
-    //   2. 只有确知服务端启用鉴权才等 __authReady，否则直接放行；
-    //   3. 调用时**现读** window.__authReady（跳转/重登不会在主页发生，但保持口径）。
+    // Business modules share the authorization gate, including an unresolved policy.
     function whenReady() {
-        loadAuthPolicy();
-        var settle = policyProbe ? policyProbe.catch(function () {}) : Promise.resolve();
-        return settle.then(function () {
-            if (authEnforced !== true) return;        // 未启用 / 读不到策略 → 放行
-            var ready = window.__authReady;
-            return (ready && typeof ready.then === 'function') ? ready : undefined;
-        });
+        return window.__authReady;
     }
 
     // ── 给其它模块用的最小接口（user-admin.js 依赖它读身份、写回新会话）─────────
@@ -224,10 +218,10 @@
         notice: notice
     };
 
-    // 读服务端认证策略（/api/health 是公开路径，无需令牌）。读不到保持"未知"。
+    // 公开策略只读进程配置，不等待健康诊断中的数据库或向量探测。读不到保持"未知"。
     function loadAuthPolicy() {
         if (policyProbe) return policyProbe;          // 幂等：只探一次
-        policyProbe = originalFetch('/api/health').then(function (resp) { return resp.json(); })
+        policyProbe = originalFetch('/api/auth/policy').then(function (resp) { return resp.ok ? resp.json() : {}; })
             .then(function (data) {
                 if (typeof data.auth_enabled === 'boolean') authEnforced = data.auth_enabled;
             }).catch(function () {});
@@ -238,7 +232,7 @@
     function bootstrap() {
         loadAuthPolicy().then(function () {
             // 服务端明确没启用鉴权：按"完全放开"渲染，与接入认证前一致。
-            if (authEnforced === false) { releaseWithoutAuth(); return; }
+            if (authEnforced === false) { domReady.then(releaseWithoutAuth); return; }
             checkSession();
         });
     }
@@ -262,8 +256,7 @@
             })
             .then(function (r) {
                 if (r.ok && r.d.user) {
-                    applyRole(r.d.user);
-                    resolveReady();
+                    domReady.then(function () { applyRole(r.d.user); resolveReady(); });
                 } else {
                     clearToken();
                     goLogin();
@@ -272,13 +265,17 @@
             .catch(function () { clearToken(); goLogin(); });
     }
 
+    var domResolve;
+    var domReady = new Promise(function (resolve) { domResolve = resolve; });
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function () {
             setupSessionDismiss();
-            bootstrap();
+            domResolve();
         });
     } else {
         setupSessionDismiss();
-        bootstrap();
+        domResolve();
     }
+    // Begin policy/session I/O before vendor scripts and DOM construction finish.
+    bootstrap();
 })();

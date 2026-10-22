@@ -12,11 +12,11 @@ import hashlib
 import math
 import threading
 from contextlib import contextmanager, nullcontext
+from copy import copy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
-import numpy as np
 
 from ..utils.assertions import ALLOWED_TRANSITIONS, ASSERTION_KINDS, ASSERTION_STATUSES
 from ..utils.diagnostics import timed, warn_scan
@@ -118,23 +118,6 @@ class FormalWriteConflict(ValueError):
         super().__init__(message)
 
 
-# ────────────────────────────────────────────────────────────────────────────
-# 向量列工具：仅供旧调用方兼容。
-#
-# 向量由 Milvus 承载；PostgreSQL 的 record_versions 没有 vector 列，`_record()`
-# 里的 `'vector' in keys` 判断因此恒为假，这两个函数在运行期不再被调用；
-# 保留是因为它们是 `repository/__init__.py` 的导出符号。
-# ────────────────────────────────────────────────────────────────────────────
-def vector_blob(vector):
-    """将数值向量打包为列中存储的小端 float32 字节。"""
-    return np.asarray(vector, dtype='<f4').tobytes()
-
-
-def vector_array(blob):
-    """把存储的字节读回为 numpy 向量（返回副本，调用方可安全写入）。"""
-    return np.frombuffer(blob, dtype='<f4').copy()
-
-
 def drain_projection_cleanups(repository, handlers, owner, limit=100):
     """Drain leased projection cleanup events through caller-owned handlers."""
     if not isinstance(handlers, dict):
@@ -187,8 +170,32 @@ class Repository:
                 'SQLite 后端已在 T03 移除；测试请用 tests/service/pg_support.target()。')
         self._db = SqliteishConnection(text)
         self._lock = threading.RLock()
+        self._transaction_state = threading.local()
+        self._is_read_view = False
         self.closed = False
         self._verify_schema()
+        self._bind_stores()
+        with self._transaction():
+            self._db.execute(
+                'INSERT INTO service_settings VALUES (?,?) ON CONFLICT (key) DO NOTHING',
+                ('storage_namespace', str(uuid4())))
+            self._db.execute(
+                '''UPDATE ingest_runs SET status='interrupted',failure=?,version=version+1,updated_at=?
+                   WHERE status IN ('queued','running') AND NOT EXISTS (
+                     SELECT 1 FROM record_versions r JOIN artifacts a
+                       ON a.id=r.payload::jsonb#>>'{metadata,durable_task_id}'
+                     WHERE r.project_id=ingest_runs.project_id
+                       AND r.id=ingest_runs.document_id AND r.superseded_at IS NULL
+                       AND a.kind='job' AND a.payload::jsonb->'payload' IS NOT NULL
+                       AND a.payload::jsonb->>'status' IN ('queued','running','retry_wait'))
+                   AND NOT EXISTS (
+                     SELECT 1 FROM ingest_batch_items i JOIN ingest_batches b ON b.id=i.batch_id
+                     WHERE i.project_id=ingest_runs.project_id AND i.document_id=ingest_runs.document_id
+                       AND i.status='running' AND b.status='running' AND i.lease_until>clock_timestamp())''',
+                (_json({'type': 'ProcessRestart', 'message': 'Ingest process restarted'}), utc_now()))
+
+    def _bind_stores(self):
+        """Bind each store to this repository's connection and transaction seam."""
         from .projection_store import ProjectionStore
         self.projections = ProjectionStore(self)
         from .assertions_store import AssertionStore
@@ -209,24 +216,29 @@ class Repository:
         self.ingest_batches = IngestBatchStore(self)
         self.ingest_checkpoints = CheckpointStore(self)
         self.source_documents = SourceStore(self)
-        with self._transaction():
-            self._db.execute(
-                'INSERT INTO service_settings VALUES (?,?) ON CONFLICT (key) DO NOTHING',
-                ('storage_namespace', str(uuid4())))
-            self._db.execute(
-                '''UPDATE ingest_runs SET status='interrupted',failure=?,version=version+1,updated_at=?
-                   WHERE status IN ('queued','running') AND NOT EXISTS (
-                     SELECT 1 FROM record_versions r JOIN artifacts a
-                       ON a.id=r.payload::jsonb#>>'{metadata,durable_task_id}'
-                     WHERE r.project_id=ingest_runs.project_id
-                       AND r.id=ingest_runs.document_id AND r.superseded_at IS NULL
-                       AND a.kind='job' AND a.payload::jsonb->'payload' IS NOT NULL
-                       AND a.payload::jsonb->>'status' IN ('queued','running','retry_wait'))
-                   AND NOT EXISTS (
-                     SELECT 1 FROM ingest_batch_items i JOIN ingest_batches b ON b.id=i.batch_id
-                     WHERE i.project_id=ingest_runs.project_id AND i.document_id=ingest_runs.document_id
-                       AND i.status='running' AND b.status='running' AND i.lease_until>clock_timestamp())''',
-                (_json({'type': 'ProcessRestart', 'message': 'Ingest process restarted'}), utc_now()))
+
+    @contextmanager
+    def independent_read_view(self):
+        """Keep a compound read on a private connection and one snapshot.
+
+        A thread already inside this repository's transaction keeps its own
+        connection, including uncommitted writes. Other threads never inspect
+        or wait for the writer connection to select their read transaction.
+        """
+        if self._is_read_view or getattr(self._transaction_state, 'depth', 0):
+            yield self
+            return
+        with self._db.independent_read_snapshot() as database:
+            reader = copy(self)
+            reader._db = database
+            reader._lock = threading.RLock()
+            reader._transaction_state = threading.local()
+            reader._is_read_view = True
+            reader._bind_stores()
+            try:
+                yield reader
+            finally:
+                reader.closed = True
 
     def _verify_schema(self):
         """确认迁移已应用到最新版本。
@@ -258,14 +270,12 @@ class Repository:
                 + '。请先执行迁移。')
 
     def export_projection(self, project_id):
-        """一致性的本地快照，包含历史记录；嵌入向量保持在本地。"""
+        """一致性的权威快照，包含完整治理、来源与记录历史。"""
         with self._transaction():
             project = self.get_project(project_id)
             namespace = self._db.execute('SELECT value FROM service_settings WHERE key=?', ('storage_namespace',)).fetchone()[0]
             rows = self._db.execute('SELECT * FROM record_versions WHERE project_id=? ORDER BY id,version', (project_id,)).fetchall()
             records = [self._record(row) for row in rows]
-            for record in records:
-                record.pop('embedding', None)
             assertions, assertion_events = self._assertions.export(project_id)
             ingest_runs = self._ingest.export(project_id)
             resolution_reviews = self._reviews.export(project_id)
@@ -307,8 +317,7 @@ class Repository:
         exist before draft references; immutable draft history must exist before
         provenance can refer to it.
         """
-        from .snapshot_validation import LATEST_FULL_SNAPSHOT_FORMAT
-        validated = validate_restore_snapshot(snapshot, LATEST_FULL_SNAPSHOT_FORMAT)
+        validated = validate_restore_snapshot(snapshot)
         governance = validated['governance']
         ontology_history = validated['ontology']
         provenance = validated['provenance']
@@ -410,10 +419,19 @@ class Repository:
         return self.get_project(project_id)
 
     @contextmanager
+    def _transaction_owner(self):
+        depth = getattr(self._transaction_state, 'depth', 0)
+        self._transaction_state.depth = depth + 1
+        try:
+            yield
+        finally:
+            self._transaction_state.depth = depth
+
+    @contextmanager
     def _transaction(self, *, repeatable_read_only=False, serializable=False):
-        with self._lock:
+        with self._lock, self._transaction_owner():
             if self._db.in_transaction:
-                if serializable:
+                if serializable and not getattr(self._transaction_state, 'serializable', False):
                     raise RuntimeError(
                         'serializable transaction must be the outer transaction')
                 savepoint='nested_'+uuid4().hex
@@ -432,12 +450,16 @@ class Repository:
                 'BEGIN ISOLATION LEVEL SERIALIZABLE'
                 if serializable else 'BEGIN')
             self._db.execute(begin)
+            previous_serializable = getattr(self._transaction_state, 'serializable', False)
+            self._transaction_state.serializable = serializable
             try:
                 yield
                 self._db.commit()
             except BaseException:
                 self._db.rollback()
                 raise
+            finally:
+                self._transaction_state.serializable = previous_serializable
 
     def unit_of_work(self, *, serializable=False):
         """Return the public service-owned transaction seam.
@@ -447,6 +469,17 @@ class Repository:
         """
         from .unit_of_work import UnitOfWork
         return UnitOfWork(self, serializable=serializable)
+
+    @contextmanager
+    def intake_transaction(self):
+        """Selected intake shares SSI conflict semantics with publication."""
+        try:
+            with self._transaction(serializable=True):
+                yield
+        except (DeadlockDetected, LockNotAvailable, SerializationFailure) as exc:
+            raise OntologyPublicationConflict(
+                'revision_conflict', '候选加入依赖发生并发变化，请重试原请求',
+                retryable=True) from exc
 
     def claim_task(self, kind, owner, *, lease_seconds=120, task_id=None):
         from .task_store import TaskStore
@@ -655,13 +688,6 @@ class Repository:
             self.closed = True
             self._db.close()
 
-    def store_embeddings(self, project_id, rows, vectors, model):
-        """向量已迁到 Milvus；保留为兼容 no-op（向量由 _sync_milvus / rebuild 写 Milvus）。
-
-        向量只走 Milvus、不存 PostgreSQL（record_versions 无 vector 列），此方法返回 0 以兼容旧调用方。
-        """
-        return 0
-
     def create_project(self, name, metadata=None):
         if not isinstance(name, str) or not name.strip():
             raise ValueError('缺少项目名称')
@@ -694,6 +720,30 @@ class Repository:
     def delete_project(self, project_id):
         with self._transaction():
             self.get_project(project_id)
+            # The whole-project cleanup may finish before an in-flight RPC.
+            # Preserve every known generation before its cursor/receipts cascade
+            # away, so the independent retirement worker can sweep late writes.
+            self._db.execute('''WITH state AS MATERIALIZED (
+                    SELECT rebuild_state FROM projection_cursors
+                    WHERE project_id=? AND target='milvus' FOR UPDATE
+                ), generations AS (
+                    SELECT CASE WHEN rebuild_state->>'index_version' ~ '^[1-9][0-9]*$'
+                           THEN (rebuild_state->>'index_version')::bigint END AS index_version FROM state
+                    UNION
+                    SELECT CASE WHEN rebuild_state->>'previous_index_version' ~ '^[1-9][0-9]*$'
+                           THEN (rebuild_state->>'previous_index_version')::bigint END FROM state
+                    UNION
+                    SELECT index_version FROM milvus_projection_receipts WHERE project_id=?
+                    UNION
+                    SELECT CASE WHEN rebuild_state->>'index_version' ~ '^[1-9][0-9]*$'
+                           THEN (rebuild_state->>'index_version')::bigint END FROM state
+                    WHERE EXISTS (SELECT 1 FROM projection_rebuild_snapshots s
+                        WHERE s.project_id=? AND s.target='milvus'
+                          AND s.build_id=state.rebuild_state->>'build_id')
+                ) INSERT INTO milvus_generation_cleanup_outbox(project_id,index_version)
+                  SELECT ?,index_version FROM generations WHERE index_version>0
+                  ON CONFLICT(project_id,index_version) DO NOTHING''',
+                (project_id, project_id, project_id, project_id))
             for target in ('milvus', 'neo4j'):
                 self._db.execute(
                     '''INSERT INTO projection_cleanup_outbox
@@ -728,13 +778,23 @@ class Repository:
                 'artifacts': artifacts_deleted, 'assertions': assertions_deleted,
                 **provenance_deleted, **ontology_governance_deleted}
 
+    def list_project_directory(self):
+        """Project picker identities without scanning knowledge inventories."""
+        with self._lock:
+            rows = self._db.execute(
+                'SELECT id,name,metadata FROM projects ORDER BY created_at,id').fetchall()
+        return [{**dict(row), 'metadata': json.loads(row['metadata'])} for row in rows]
+
     def list_projects(self):
         with self._lock:
             rows = self._db.execute('SELECT * FROM projects ORDER BY created_at,id').fetchall()
             counts_rows = self._db.execute(
-                "SELECT project_id, (payload::jsonb->>'kind') AS kind, COUNT(*) AS n "
+                "SELECT project_id, read_kind AS kind, COUNT(*) AS n "
                 "FROM record_versions WHERE superseded_at IS NULL GROUP BY project_id, kind"
             ).fetchall()
+            publication_counts = {row['project_id']: row['n'] for row in self._db.execute(
+                'SELECT project_id,COUNT(*) AS n FROM ontologies GROUP BY project_id'
+            ).fetchall()}
         counts_map = {}
         for cr in counts_rows:
             pid, kind, n = cr['project_id'], cr['kind'], cr['n']
@@ -745,6 +805,7 @@ class Repository:
             if key in counts_map[pid]:
                 counts_map[pid][key] = n
         return [{**dict(row), 'metadata': json.loads(row['metadata']),
+                 'ontology_publications': publication_counts.get(row['id'], 0),
                  'counts': counts_map.get(row['id'], {'documents': 0, 'entities': 0,
                                                        'relations': 0, 'attributes': 0,
                                                        'chunks': 0})}
@@ -801,16 +862,14 @@ class Repository:
                 'SELECT pg_advisory_xact_lock(hashtextextended(?, 0))',
                 (project_id,))
             now = normalize_time(recorded_at) if recorded_at is not None else utc_now()
-            stored_times = []
-            for row in self._db.execute(
-                    'SELECT recorded_at FROM record_versions WHERE project_id=?',
-                    (project_id,)).fetchall():
-                try:
-                    stored_times.append(normalize_time(row['recorded_at'], allow_none=False))
-                except ValueError:
-                    # 旧库时间不属于新写入合同；保留原值，不让它阻断新高水位。
-                    continue
-            stored = max(stored_times, default=None)
+            # Typed SQL ordering preserves timezone semantics without transferring
+            # every historical version. Loading MIN too retains the timestamp
+            # loader's fail-closed behavior for out-of-Python-range legacy values.
+            bounds = self._db.execute(
+                '''SELECT MIN(recorded_at) AS earliest,MAX(recorded_at) AS latest
+                   FROM record_versions WHERE project_id=?''',
+                (project_id,)).fetchone()
+            stored = bounds['latest']
             reserved = self._db.execute(
                 '''SELECT MAX(recorded_at) FROM record_operation_reservations
                    WHERE project_id=?''', (project_id,)).fetchone()[0]
@@ -896,8 +955,7 @@ class Repository:
             now = self._next_recorded_at(old_recorded_at)
         self._db.execute('UPDATE record_versions SET superseded_at=? WHERE project_id=? AND id=? AND superseded_at IS NULL', (now, project_id, record['id']))
         version_id = str(uuid4())
-        # 向量以 float32 字节存储，不放在 payload 的 JSON 里（避免反序列化出浮点对象列表）。
-        # 列清单是显式写出的，因为该表在最初的按位置 INSERT 之后新增了 `vector` 列。
+        # 向量交给投影 outbox，不写入 PostgreSQL 的记录 payload。
         embedding = record.pop('embedding', None)  # 向量只走 Milvus，不存 PostgreSQL
         native = _native_record_fields(record)
         self._db.execute('''INSERT INTO record_versions
@@ -920,10 +978,7 @@ class Repository:
                 'recorded_at': old['recorded_at'],
                 'superseded_at': now,
             }
-        projection_record = ({**saved, 'embedding': embedding}
-                             if embedding is not None else saved)
-        self.projections.enqueue_record_change(
-            project_id, old_record, projection_record)
+        self.projections.enqueue_record_change(project_id, old_record, saved)
         if embedding is not None:
             saved['embedding'] = embedding
         return saved
@@ -1068,8 +1123,7 @@ class Repository:
             return [self._put(project_id, record, expected_versions.get(record['id']),
                               operation=operation) for record in records]
 
-    def execute_formal_write(self, plan):
-        """CAS-check and mechanically execute a service-owned action plan."""
+    def _validate_formal_write_plan(self, plan):
         required = {
             'operation', 'project_id', 'actions', 'result_refs',
             'assertion_result_ids', 'review_items', 'dependencies',
@@ -1083,23 +1137,49 @@ class Repository:
             key: value for key, value in plan.items() if key != 'fingerprint'})
         if calculated != plan['fingerprint']:
             raise ValueError('正式写入计划指纹无效')
+
+    def _execute_formal_write_actions(self, plan):
+        """Execute only after an authority scope has checked its dependencies."""
         from .formal_write_executor import FormalWriteExecutor
+        operation_context = self._restore_formal_write_context(
+            plan['operation_context'])
+        if operation_context is None:
+            operation_context = self._reserve_record_operation(
+                plan['project_id'], plan['recorded_at'])
+        elif plan['recorded_at'] is not None:
+            raise ValueError('写入操作上下文不能与 recorded_at 同时指定')
+        else:
+            self._record_operation_time(
+                plan['project_id'], operation_context)
+        return FormalWriteExecutor(self).execute(
+            plan, operation_context=operation_context)
+
+    def execute_formal_write(self, plan):
+        """CAS-check and mechanically execute a detached service-owned plan."""
+        Repository._validate_formal_write_plan(self, plan)
         with self._formal_write_transaction():
             snapshot = self._formal_write_snapshot_data(plan['project_id'])
             if self._formal_write_dependencies(snapshot) != plan['dependencies']:
                 raise ValueError('版本冲突：正式写入依赖已变更')
-            operation_context = self._restore_formal_write_context(
-                plan['operation_context'])
-            if operation_context is None:
-                operation_context = self._reserve_record_operation(
-                    plan['project_id'], plan['recorded_at'])
-            elif plan['recorded_at'] is not None:
-                raise ValueError('写入操作上下文不能与 recorded_at 同时指定')
-            else:
-                self._record_operation_time(
-                    plan['project_id'], operation_context)
-            return FormalWriteExecutor(self).execute(
-                plan, operation_context=operation_context)
+            return self._execute_formal_write_actions(plan)
+
+    @contextmanager
+    def entity_text_revision(self, project_id, record_id, expected_version):
+        """Own a bounded text-revision authority scope through its actual commit."""
+        from .text_revision import EntityTextRevision
+        with self._lock:
+            # The caller of a nested transaction owns the commit and projection
+            # boundary. Keep those compound use cases on their existing path.
+            if self._db.in_transaction:
+                yield None
+                return
+            with self._formal_write_transaction():
+                session = EntityTextRevision(
+                    self, project_id, record_id, expected_version)
+                try:
+                    yield session
+                finally:
+                    session.close()
 
     def _formal_write_dependencies(self, snapshot):
         return {
@@ -1128,7 +1208,7 @@ class Repository:
             'ontology_id': ontology_id,
             'ontology': (self.get_ontology(project_id, ontology_id)
                          if ontology_id is not None else None),
-            'records': self.current_records(project_id, vectors='none'),
+            'records': self.current_records(project_id),
             'assertions': assertions,
             'assertion_events': events,
             'record_version_assertions': [dict(row) for row in self._db.execute(
@@ -1147,37 +1227,21 @@ class Repository:
         return snapshot
 
     def formal_write_snapshot(self, project_id):
-        """Return an immutable JSON snapshot for service-owned write planning."""
+        """Return freshly detached state for service-owned write planning."""
         with self._transaction(repeatable_read_only=True):
             snapshot = self._formal_write_snapshot_data(project_id)
-        return json.loads(_json(snapshot))
+        return snapshot
 
     @staticmethod
-    def _record(row, vectors='none'):
-        """从一行数据库记录重建一条记录。
-
-        `vectors` 决定存储的 float32 列如何暴露：
-
-        * ``'none'``  —— 不附带向量；payload 里残留的字段原样保留
-          （仅旧版行）。所有需要 JSON 序列化记录的地方都用它，因为
-          numpy 数组无法 JSON 序列化。
-        * ``'list'``  —— 以普通 float 列表附带，与 payload 曾经产出的字节完全一致，
-          让 `/export` 和历史查询保持现有形状。
-        * ``'array'`` —— 以 numpy float32 数组附带，供相似度排序使用；
-          这些调用方会先剔除该字段，因此它永远不会进入 JSON。
-        """
-        keys = row.keys()
-        record = {**json.loads(row['payload']), **{key: row[key] for key in ('project_id', 'version', 'version_id', 'recorded_at', 'superseded_at')}}
-        if vectors != 'none' and 'vector' in keys and row['vector'] is not None:
-            array = vector_array(row['vector'])
-            record['embedding'] = array if vectors == 'array' else array.tolist()
-        return record
+    def _record(row):
+        """从 PostgreSQL payload 与版本信封重建一条记录。"""
+        return {**json.loads(row['payload']), **{key: row[key] for key in ('project_id', 'version', 'version_id', 'recorded_at', 'superseded_at')}}
 
     def history(self, project_id, record_id):
         self.get_project(project_id)
         with self._lock:
             rows = self._db.execute('SELECT * FROM record_versions WHERE project_id=? AND id=? ORDER BY version', (project_id, record_id)).fetchall()
-        return [self._record(row, vectors='list') for row in rows]
+        return [self._record(row) for row in rows]
 
     def ontology_record_history(self, project_id, ontology_id, current_rows):
         """Aggregate record history bound to one known ontology identifier.
@@ -1220,7 +1284,7 @@ class Repository:
                 (project_id, version_id)).fetchone()
         if row is None:
             raise KeyError(version_id)
-        return self._record(row, vectors='list')
+        return self._record(row)
 
     def records_by_version_ids(self, project_id, version_ids):
         """Read only the requested immutable versions and preserve caller order."""
@@ -1236,7 +1300,7 @@ class Repository:
                 '''SELECT * FROM record_versions
                    WHERE project_id=? AND version_id = ANY(?::text[])''',
                 (project_id, unique_ids)).fetchall()
-        by_id = {row['version_id']: self._record(row, vectors='list') for row in rows}
+        by_id = {row['version_id']: self._record(row) for row in rows}
         return [by_id[item] for item in version_ids if item in by_id]
 
     def records_at_knowledge_time(self, project_id, record_ids, known_at):
@@ -1252,7 +1316,7 @@ class Repository:
                 WHERE project_id=? AND id = ANY(?::text[]) AND recorded_at<=?
                 AND (superseded_at IS NULL OR superseded_at>?)''',
                 (project_id, list(dict.fromkeys(record_ids)), known_at, known_at)).fetchall()
-        return [self._record(row, vectors='none') for row in rows]
+        return [self._record(row) for row in rows]
 
     def current_records_by_version_ids(self, project_id, version_ids):
         """Read requested versions only when they are still current.
@@ -1274,8 +1338,16 @@ class Repository:
                    WHERE project_id=? AND version_id = ANY(?::text[])
                      AND superseded_at IS NULL''',
                 (project_id, unique_ids)).fetchall()
-        by_id = {row['version_id']: self._record(row, vectors='list') for row in rows}
+        by_id = {row['version_id']: self._record(row) for row in rows}
         return [by_id[item] for item in version_ids if item in by_id]
+
+    def projection_authority_manifest(self, project_id, kinds):
+        from .projection_authority import ProjectionAuthorityReads
+        return ProjectionAuthorityReads(self).manifest(project_id, kinds)
+
+    def projection_authority_records(self, project_id, version_ids):
+        from .projection_authority import ProjectionAuthorityReads
+        return ProjectionAuthorityReads(self).records(project_id, version_ids)
 
     def distinct_applicability_values(self, project_id):
         """Return canonical values from current, non-deleted record versions."""
@@ -1298,7 +1370,7 @@ class Repository:
                 values[dimension].update(row['value'] for row in rows)
         return {dimension: sorted(items) for dimension, items in values.items()}
 
-    def current_records(self, project_id, vectors='list', kinds=None):
+    def current_records(self, project_id, kinds=None):
         """读取当前活跃版本（含已过期和未来事实）。
 
         ``kinds`` 把类型过滤下推到 SQL（payload::jsonb->>'kind'），避免调用方在 Python 侧过滤时
@@ -1309,7 +1381,7 @@ class Repository:
                 k not in {'document', 'entity', 'relation', 'attribute', 'chunk'} for k in kinds)):
             raise ValueError('无效的记录类型')
         self.get_project(project_id)
-        with timed('当前记录读取', vectors=vectors, kinds=len(kinds) if kinds else 0) as stage:
+        with timed('当前记录读取', kinds=len(kinds) if kinds else 0) as stage:
             with self._lock:
                 statement = ('SELECT project_id,id,version,version_id,recorded_at,superseded_at,payload '
                              'FROM record_versions WHERE project_id=? AND superseded_at IS NULL')
@@ -1321,7 +1393,7 @@ class Repository:
                 rows = self._db.execute(statement, tuple(params)).fetchall()
             stage['rows'] = len(rows)
             warn_scan('当前记录读取', len(rows))
-            records = [self._record(row, vectors=vectors) for row in rows]
+            records = [self._record(row) for row in rows]
         return records
 
     def timeline_events(self, project_id, limit=100):
@@ -1345,7 +1417,7 @@ class Repository:
         return {'events': events, 'total': total, 'truncated': total > len(events)}
 
     def query(self, project_id, filters=None, valid_at=None, known_at=None, kinds=None,
-              include_unknown=True, include_embeddings=True, vectors='list',
+              include_unknown=True,
               applicability=None, _reference_mode=False, _reference_limit=501,
               _reference_terms=None):
         """读取 ``known_at`` 时刻可见的每个系统版本，并在 Python 侧过滤。
@@ -1354,13 +1426,7 @@ class Repository:
         partial indexes；显式传入时使用 recorded/system-end 两组历史索引。
         业务时间、applicability 和 ``kinds`` 也在解码 payload 前下推。复杂的
         元数据 ``filters`` 仍在 Python 侧求值，因此宽泛过滤的成本取决于 SQL
-        条件先缩小后的候选集。调用方不需要向量时应保持
-        ``include_embeddings=False``，避免构造无用的 float 列表。
-
-        嵌入被包含时 ``vectors`` 决定表示形式：``'list'``（默认）保持历史
-        的 JSON 友好 float 列表；``'array'`` 返回从紧凑列读出的 numpy float32
-        数组。只有相似度排序用 ``'array'``；任何要 JSON 序列化记录的调用方
-        必须停留在 ``'list'`` 或干脆省略向量。
+        条件先缩小后的候选集。
         """
         validate_filter(filters)
         now = utc_now()
@@ -1372,13 +1438,8 @@ class Repository:
         if kinds is not None and (not isinstance(kinds, (list, tuple, set)) or any(k not in {'document', 'entity', 'relation', 'attribute', 'chunk'} for k in kinds)):
             raise ValueError('无效的记录类型')
         self.get_project(project_id)
-        with timed('存储查询', embeddings=include_embeddings,
-                   kinds=len(kinds) if kinds else 0, filtered=bool(filters)) as stage:
+        with timed('存储查询', kinds=len(kinds) if kinds else 0, filtered=bool(filters)) as stage:
             with self._lock:
-                # 读取 payload 时总是剔除嵌入向量：数值改从 float32 列取，
-                # 这样 `json.loads` 永远不会构造出 float 对象列表。
-                # 迁移 10 已把每个 payload 副本搬进该列，因此下面的读取
-                # 不会出现拿不到向量的情况。
                 statement = '''SELECT project_id,id,version,version_id,recorded_at,superseded_at,
                     payload FROM record_versions WHERE project_id=?'''
                 params = [project_id]
@@ -1440,8 +1501,8 @@ class Repository:
             warn_scan('存储查询', len(rows))
             result = []
             for row in rows:
-                record = self._record(row, vectors=vectors if include_embeddings else 'none')
-                start, end = record['valid_from'], record['valid_until']
+                record = self._record(row)
+                start, end = record.get('valid_from'), record.get('valid_until')
                 if not _reference_mode and valid_at is not None and ((not include_unknown and start is None) or (start is not None and start > valid_at) or (end is not None and end <= valid_at)):
                     continue
                 if kinds is not None and record['kind'] not in kinds:
@@ -1452,7 +1513,9 @@ class Repository:
         return result
 
     def get_record(self, project_id, record_id, valid_at=None, known_at=None):
-        records = self.query(project_id, {'field': 'id', 'op': 'eq', 'value': record_id}, valid_at, known_at)
+        from .scoped_reads import ScopedReads
+        records = ScopedReads(self).by_ids(project_id, {
+            'valid_at': valid_at, 'known_at': known_at, '_identity_read': True}, [record_id])
         if not records:
             raise KeyError(record_id)
         return records[0]
@@ -1481,8 +1544,8 @@ class Repository:
     def get_assertion(self, project_id, assertion_id):
         return self._assertions.get(project_id, assertion_id)
 
-    def list_assertions(self, project_id, status=None, canonical_record_id=None, document_id=None):
-        return self._assertions.list(project_id, status, canonical_record_id, document_id)
+    def list_assertions(self, project_id, status=None, canonical_record_id=None, document_id=None, assertion_ids=None):
+        return self._assertions.list(project_id, status, canonical_record_id, document_id, assertion_ids)
 
     def transition_assertion(self, project_id, assertion_id, expected_version, status,
                              reason, actor, canonical_record_id=None):
@@ -1546,13 +1609,6 @@ class Repository:
             project_id, activity_id=activity_id, source_ref=source_ref,
             target_ref=target_ref)
 
-    def migrate_legacy_answer_graph(
-            self, project_id, *, answer_id, retrieval_id, expected_payload,
-            answer_payload, answer_edges, retrieval_edges):
-        return self._provenance.migrate_legacy_answer_graph(
-            project_id, answer_id=answer_id, retrieval_id=retrieval_id,
-            expected_payload=expected_payload, answer_payload=answer_payload,
-            answer_edges=answer_edges, retrieval_edges=retrieval_edges)
 
     def complete_retrieval_and_begin_answer(
             self, project_id, *, retrieval_id, answer_id, retrieval_payload=None,
@@ -1720,40 +1776,7 @@ class Repository:
                 }], item['created_at'])
             return item
 
-    def save_ontology(self, project_id, turtle, summary, metadata=None):
-        """Compatibility alias; production routes migrate to bootstrap/publish wrappers."""
-        metadata = {**(metadata or {}), 'write_path': 'compatibility'}
-        with self._transaction():
-            self.get_project(project_id)
-            return self._insert_ontology_version(
-                project_id, turtle, summary, metadata)
 
-    def _publish_legacy_ontology_discovery_draft(
-            self, project_id, draft, expected_parent_id):
-        """Compatibility transaction retained until Task 7 converts legacy artifacts."""
-        if not isinstance(draft, dict) or draft.get('project_id') != project_id:
-            raise ValueError('本体发现草案不属于此项目')
-        summary = draft.get('summary')
-        metadata = draft.get('ontology_metadata', {})
-        if not isinstance(draft.get('turtle'), str) or not isinstance(summary, dict) or not isinstance(metadata, dict):
-            raise ValueError('本体发现草案不完整')
-        published = {**draft, 'status': 'published', 'revision': draft.get('revision', 1) + 1,
-                     'published_at': utc_now(),
-                     'mapped_entities': 0, 'mapped_relations': 0, 'mapped_attributes': 0,
-                     'requires_controlled_reingest': False}
-        with self._transaction():
-            self.get_project(project_id)
-            latest_id = self._latest_ontology_id(project_id)
-            if latest_id != expected_parent_id:
-                raise ValueError('版本冲突：本体已更新，请基于当前版本重新生成发现草案')
-            ontology = self._insert_ontology_version(
-                project_id, draft['turtle'], summary,
-                {**metadata, 'write_path': 'legacy_discovery'})
-            published['ontology_id'] = ontology['id']
-            self._db.execute(
-                'INSERT INTO artifacts VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',
-                (published['id'], 'ontology_discovery_draft', project_id, _json(published)))
-        return ontology, published
 
     @staticmethod
     def _ontology_source_references(context):
@@ -1772,8 +1795,33 @@ class Repository:
         return next((row for row in candidates if row.get('id') == candidate_id), None)
 
     def _recheck_ontology_publish_source(self, project_id, draft):
-        if draft['source_kind'] not in {'discovery', 'candidate'}:
+        context = draft.get('source_context') or {}
+        direct_effect = context.get('publication_effects')
+        if direct_effect and (not isinstance(direct_effect, dict)
+                              or direct_effect.get('kind') not in {'candidate'}):
+            raise OntologyPublicationConflict(
+                'stale_source', 'obsolete source effects; select candidates through current intake')
+        attached = context.get('intake_bindings') or []
+        if draft['source_kind'] not in {'discovery', 'candidate'} and not attached:
             return
+        for binding in attached:
+            run = self.get_discovery_run(project_id, binding['discovery_run_id'])
+            if (not run.get('intake_request_hash') or run['status'] != 'draft_created'
+                    or run.get('unified_draft_id') != draft['id']):
+                raise OntologyPublicationConflict('stale_source', '关联候选运行已变化')
+            references = run.get('source_documents')
+            if not isinstance(references, list):
+                raise OntologyPublicationConflict('stale_source', '关联候选缺少不可变来源快照')
+            self._recheck_ontology_publish_source(project_id, {
+                **draft, 'source_kind': 'discovery',
+                'source_context': {'documents': references}})
+            for expected in run.get('assertion_snapshots') or []:
+                try:
+                    assertion = self.get_assertion(project_id, expected['id'])
+                except KeyError as exc:
+                    raise OntologyPublicationConflict('stale_source', '关联候选断言已撤回') from exc
+                if self._publish_fingerprint(assertion) != expected['fingerprint']:
+                    raise OntologyPublicationConflict('stale_source', '关联候选断言已变化')
         for reference in self._ontology_source_references(
                 draft.get('source_context') or {}):
             document_id = reference.get('document_id') or reference.get('id')
@@ -1941,7 +1989,7 @@ class Repository:
                           'created_at': decision['created_at']}))
             draft_edges.append(self._provenance_edge(
                 draft_activity, operation_ref, 'proposed-by',
-                f"source-kind:{draft['source_kind']}", ordinal,
+                f"source-kind:{(operation.get('validation') or {}).get('source') or draft['source_kind']}", ordinal,
                 {'reason': operation.get('reason'),
                  'created_at': operation['created_at']}))
             for evidence_ordinal, evidence in enumerate(operation.get('evidence') or []):
@@ -1981,35 +2029,54 @@ class Repository:
                 for item in value]
         return ontology_id if value == '__PUBLISHED_ONTOLOGY_ID__' else value
 
-    def _update_discovery_artifact(
-            self, draft_id, ontology_id, saved, skipped, validation):
-        row = self._db.execute(
-            """SELECT payload FROM artifacts
-               WHERE id=? AND kind='ontology_discovery_draft'""",
-            (draft_id,)).fetchone()
-        if row is None:
-            return
-        artifact = json.loads(row['payload'])
-        counts = {
-            kind: sum(record['kind'] == kind for record in saved)
-            for kind in ('entity', 'relation', 'attribute')}
-        artifact.update({
-            'status': 'published', 'ontology_id': ontology_id,
-            'mapped_entities': counts['entity'],
-            'mapped_relations': counts['relation'],
-            'mapped_attributes': counts['attribute'],
-            'skipped_candidates': skipped,
-            'validation': validation,
-            'requires_candidate_review': bool(
-                skipped or artifact.get('excluded_candidate_ids')),
-            'requires_controlled_reingest': False,
-        })
-        self._db.execute(
-            """UPDATE artifacts SET payload=?
-               WHERE id=? AND kind='ontology_discovery_draft'""",
-            (_json(artifact), draft_id))
 
     def _apply_ontology_source_effects(self, prepared, draft, ontology):
+        plan = prepared.get('source_effect_plan')
+        context = draft.get('source_context') or {}
+        direct_effect = context.get('publication_effects')
+        if direct_effect and (not isinstance(direct_effect, dict)
+                              or direct_effect.get('kind') not in {'candidate'}):
+            raise OntologyPublicationConflict(
+                'stale_source', 'obsolete source effects; select candidates through current intake')
+        attached = context.get('intake_bindings') or []
+        if attached:
+            if not isinstance(plan, dict) or plan.get('kind') != 'composite':
+                raise OntologyPublicationConflict('stale_source', '复合来源发布计划缺失')
+            entries = plan.get('entries') or []
+            expected_runs = [x['discovery_run_id'] for x in attached]
+            actual_runs = [x['effects'].get('discovery_run_id') for x in entries
+                           if x['effects'].get('discovery_run_id') in expected_runs]
+            if actual_runs != expected_runs:
+                raise OntologyPublicationConflict('stale_source', '复合来源绑定集合已变化')
+            current = self.current_records(prepared['project_id'],
+                kinds=['entity', 'relation', 'attribute'])
+            current_versions = sorted((x['id'], x['version_id']) for x in current)
+            # Validate every dependency against the same pre-write snapshot.
+            for entry in entries:
+                child = entry['plan']
+                if child.get('kind') == 'discovery' and child.get('mode') == 'run':
+                    run = self.get_discovery_run(prepared['project_id'], child['run_id'])
+                    if (not run.get('intake_request_hash')
+                            or self._publish_fingerprint(run) != child['expected_run_fingerprint']
+                            or current_versions != [tuple(x) for x in child['expected_record_versions']]):
+                        raise OntologyPublicationConflict('stale_source', '复合来源依赖已变化')
+            formal = self._bind_published_ontology_id(plan['formal_write_plan'], ontology['id'])
+            from .formal_write_executor import FormalWriteExecutor
+            operation = self._reserve_record_operation(prepared['project_id'])
+            written = FormalWriteExecutor(self).execute(formal, operation_context=operation)
+            record_ids = [row['id'] for row in written['accepted_records']]
+            for entry in entries:
+                context = {**(draft.get('source_context') or {}),
+                    'publication_effects': entry['effects'], 'intake_bindings': []}
+                view = {**draft, 'source_kind': entry['source_kind'], 'source_context': context}
+                record_ids.extend(self._apply_single_ontology_source_effects(
+                    {**prepared, 'source_effect_plan': entry['plan']}, view, ontology,
+                    discovery_dependencies_verified=True))
+            return list(dict.fromkeys(record_ids))
+        return self._apply_single_ontology_source_effects(prepared, draft, ontology)
+
+    def _apply_single_ontology_source_effects(self, prepared, draft, ontology,
+                                             *, discovery_dependencies_verified=False):
         """Apply a frozen service plan after transaction-local source rechecks."""
         effects = (draft.get('source_context') or {}).get('publication_effects')
         plan = prepared.get('source_effect_plan')
@@ -2022,69 +2089,25 @@ class Repository:
             raise OntologyPublicationConflict(
                 'stale_source', 'ontology publication effect plan is missing')
         effect_kind = effects.get('kind')
-        if (effect_kind is None and draft['source_kind'] == 'discovery'
-                and effects.get('discovery_run_id')):
-            effect_kind = 'discovery'
         if effect_kind != draft['source_kind'] or plan.get('kind') != effect_kind:
             raise OntologyPublicationConflict(
                 'stale_source', 'ontology publication effect plan is invalid')
 
         project_id = prepared['project_id']
         if effect_kind == 'discovery':
-            mode = plan.get('mode')
-            if mode == 'run':
-                run_id = effects.get('discovery_run_id')
-                if run_id != plan.get('run_id'):
-                    raise OntologyPublicationConflict(
-                        'stale_source', 'discovery publication run changed')
-                try:
-                    run = self.get_discovery_run(project_id, run_id)
-                except KeyError as exc:
-                    raise OntologyPublicationConflict(
-                        'stale_source',
-                        'discovery publication run does not exist') from exc
-                if self._publish_fingerprint(run) != plan.get(
-                        'expected_run_fingerprint'):
-                    raise OntologyPublicationConflict(
-                        'stale_source',
-                        'discovery publication run changed')
-                current = self.current_records(
-                    project_id, vectors='none',
-                    kinds=['entity', 'relation', 'attribute'])
-                current_versions = sorted(
-                    (item['id'], item['version_id']) for item in current)
-                expected_versions = [
-                    tuple(item)
-                    for item in plan.get('expected_record_versions') or []]
-                if current_versions != expected_versions:
-                    raise OntologyPublicationConflict(
-                        'stale_source',
-                        'discovery materialization context changed')
-            elif mode != 'legacy':
-                raise OntologyPublicationConflict(
-                    'stale_source',
-                    'unsupported discovery publication effect plan')
-
-            records = self._bind_published_ontology_id(
-                json.loads(_json(plan.get('records') or [])), ontology['id'])
-            saved = [self._put(project_id, record, 0) for record in records]
-            if mode == 'run':
-                self.transition_discovery_run(
-                    project_id, plan['run_id'], 'draft_created', 'published',
-                    candidate_outcomes=json.loads(_json(
-                        plan.get('candidate_outcomes') or [])))
-            self._update_discovery_artifact(
-                draft['id'], ontology['id'], saved,
-                json.loads(_json(plan.get('skipped') or [])),
-                json.loads(_json(plan.get('validation') or {})))
-            return [record['id'] for record in saved]
+            if not discovery_dependencies_verified or plan.get('mode') != 'run':
+                raise OntologyPublicationConflict('stale_source', 'current intake requires a verified composite plan')
+            self.transition_discovery_run(
+                project_id, plan['run_id'], 'draft_created', 'published',
+                candidate_outcomes=json.loads(_json(plan.get('candidate_outcomes') or [])))
+            return []
 
         if effect_kind == 'candidate':
             dependencies = plan.get('record_dependencies') or []
             dependency_ids = {item.get('id') for item in dependencies}
             current_dependencies = {
                 item['id']: item for item in self.current_records(
-                    project_id, vectors='none')
+                    project_id)
                 if item['id'] in dependency_ids}
             for dependency in dependencies:
                 current = current_dependencies.get(dependency.get('id'))
@@ -2138,12 +2161,6 @@ class Repository:
                    WHERE id=? AND kind='ontology_change'""",
                 (_json(published_proposal), plan['proposal_id']))
             return [saved_document['id']]
-
-        if effect_kind == 'import':
-            records = self._bind_published_ontology_id(
-                json.loads(_json(plan.get('records') or [])), ontology['id'])
-            saved = [self._put(project_id, record, 0) for record in records]
-            return [record['id'] for record in saved]
 
         raise OntologyPublicationConflict(
             'stale_source', 'unsupported ontology publication effect kind')
@@ -2239,6 +2256,14 @@ class Repository:
                     'note': prepared.get('note') or '',
                 },
             }
+            effect_plan = prepared.get('source_effect_plan') or {}
+            if (draft.get('source_context') or {}).get('intake_bindings'):
+                formal = effect_plan.get('formal_write_plan')
+                if (not isinstance(formal, dict) or formal.get('operation') != 'adopt_discovery'
+                        or formal.get('project_id') != prepared['project_id']
+                        or self._publish_fingerprint({k:v for k,v in formal.items() if k!='fingerprint'}) != formal.get('fingerprint')
+                        or self._formal_write_dependencies(self._formal_write_snapshot_data(prepared['project_id'])) != formal.get('dependencies')):
+                    raise OntologyPublicationConflict('stale_source', 'canonical intake fact plan changed')
             ontology = self._insert_ontology_version(
                 prepared['project_id'], prepared['turtle'], prepared['summary'],
                 metadata, created_at=completed_at,
@@ -2264,35 +2289,30 @@ class Repository:
             sync_job = self._create_ontology_sync_job(
                 prepared['project_id'], draft, ontology, completed_at,
                 effect_record_ids)
+            effect_plan = prepared.get('source_effect_plan') or {}
+            outcomes = effect_plan.get('candidate_outcomes') or []
+            written_facts = sum(x.get('kind') in {'entity', 'relation', 'attribute'}
+                                for x in effect_plan.get('records') or [])
+            direct_batch = {'run_id': effect_plan.get('run_id'),
+                'selected': len(outcomes) or written_facts, 'added': written_facts,
+                'reused': max(0, len(effect_plan.get('accepted_records') or []) - written_facts),
+                'skipped': sum(x.get('status') == 'skipped' for x in outcomes),
+                'candidate_outcomes': outcomes}
+            receipt = json.loads(_json(effect_plan.get('receipt') or {
+                'facts': {**{key: direct_batch[key] for key in ('selected', 'added', 'reused', 'skipped')},
+                          'per_batch': [direct_batch] if effect_plan else []}}))
+            receipt.update({'ontology': {'id': ontology['id'], 'published': True},
+                'index': {'task_id': sync_job['id'], 'status': sync_job['status']}})
+            ontology['metadata']['publication']['receipt'] = receipt
+            self._db.execute('UPDATE ontologies SET metadata=? WHERE project_id=? AND id=?',
+                (_json(ontology['metadata']), prepared['project_id'], ontology['id']))
         return ontology
 
-    def publish_ontology_draft(self, project_id, draft, expected_parent_id=None,
-                               **request):
-        """Dispatch legacy discovery drafts or governed atomic publications."""
-        if 'expected_revision' not in request:
-            return self._publish_legacy_ontology_discovery_draft(
-                project_id, draft, expected_parent_id)
+    def publish_ontology_draft(self, project_id, draft, **request):
+        """Publish a complete, reviewed atomic publication request."""
         prepared = {'project_id': project_id, 'draft': draft, **request}
         return self._publish_governed_ontology_draft(prepared)
 
-    def commit_ontology_change(self, project_id, ontology, proposal, document, expected_document_version,
-                               expected_ontology_id):
-        """原子地发布本体版本、提案决策和候选实体复核结果。"""
-        if not all(isinstance(item, dict) for item in (ontology, proposal, document)):
-            raise ValueError('本体变更提交需要对象形式的载荷')
-        with self._transaction():
-            self.get_project(project_id)
-            latest_id = self._latest_ontology_id(project_id)
-            if latest_id is None or latest_id != expected_ontology_id:
-                raise ValueError('版本冲突：本体已更新，请重新评估草案影响')
-            self._insert_ontology_version(
-                project_id, ontology['turtle'], ontology['summary'],
-                {**ontology.get('metadata', {}), 'write_path': 'legacy_change'},
-                ontology_id=ontology['id'], created_at=ontology['created_at'])
-            saved_document = self._put(project_id, document, expected_document_version)
-            self._db.execute('INSERT INTO artifacts VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',
-                             (proposal['id'], 'ontology_change', project_id, _json(proposal)))
-        return ontology, saved_document
 
     def list_ontologies(self, project_id):
         self.get_project(project_id)
@@ -2340,6 +2360,9 @@ class Repository:
 
     def list_discovery_runs(self, project_id):
         return self._discovery_runs.list(project_id)
+
+    def list_intake_runs(self, project_id):
+        return self._discovery_runs.list(project_id, intake_only=True)
 
     def latest_discovery_run(self, project_id, *, statuses=None):
         return self._discovery_runs.latest(project_id, statuses=statuses)

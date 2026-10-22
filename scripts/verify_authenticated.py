@@ -76,7 +76,7 @@ def main():
             root = '/api/projects/' + fixture_id
             ontology = call(root + '/ontology')
             doc = call(root + '/documents', {'title': '验证原文',
-                'text': '张三与李四使用测试系统。这是验证用的原文。', 'extract': False})
+                'text': '张三与李四使用测试系统。这是验证用的原文。', 'extraction_mode': 'documents'})
             term = ontology['summary']['classes'][0]['id']
             call(root + '/records', {'records': [
                 {'id': 'fixture-a', 'kind': 'entity', 'type': term, 'text': '张三',

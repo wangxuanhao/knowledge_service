@@ -1,0 +1,49 @@
+{
+  "base_url": "http://127.0.0.1:8101",
+  "project_id": "9f4ff60e-1eef-444b-b44c-e740647e3683",
+  "page_errors": [],
+  "screens": [
+    {
+      "page": "projects",
+      "file": "manual-redesign/2026-10-19-projects.png"
+    },
+    {
+      "page": "useradmin",
+      "file": "manual-redesign/2026-10-19-people.png"
+    },
+    {
+      "page": "ontology-model",
+      "file": "manual-redesign/2026-10-19-ontology.png"
+    },
+    {
+      "page": "records",
+      "file": "manual-redesign/2026-10-19-records.png"
+    },
+    {
+      "page": "sources",
+      "file": "manual-redesign/2026-10-19-sources.png"
+    },
+    {
+      "page": "search",
+      "file": "manual-redesign/2026-10-19-search.png"
+    },
+    {
+      "page": "quality",
+      "file": "manual-redesign/2026-10-19-evaluation.png"
+    },
+    {
+      "page": "runtime",
+      "file": "manual-redesign/2026-10-19-runtime.png"
+    }
+  ],
+  "api": {
+    "records_total": 10,
+    "graph_counts": {
+      "entity_count": 5,
+      "relation_count": 1
+    },
+    "graph_page_count": 5,
+    "browser_file_batch_status": "completed",
+    "browser_entity_create": 201
+  }
+}

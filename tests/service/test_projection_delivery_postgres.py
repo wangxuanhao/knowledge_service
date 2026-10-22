@@ -4,6 +4,13 @@ from knowledge_service.repository import Repository
 def test_outbox_sequence_survives_public_row_filter_and_acknowledges_revisions(tmp_path):
     repo = Repository(tmp_path / 'delivery')
     project = repo.create_project('delivery')['id']
+    # This test exercises incremental delivery of a previously activated build.
+    with repo._transaction():
+        repo.projections._ensure_cursor(project, 'milvus', 3)
+        repo._db.execute(
+            "UPDATE projection_cursors SET status='ready',active_destination=? "
+            'WHERE project_id=? AND target=?',
+            ('delivery-generation', project, 'milvus'))
     repo.put_record(project, {'id': 'c', 'kind': 'chunk', 'text': 'first'})
 
     claim = repo.projections.claim_contiguous_batch(project, 'milvus', 3)

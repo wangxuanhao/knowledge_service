@@ -6,6 +6,8 @@
 这里全部走真实服务对象（KnowledgeService + 真实本体校验），不 mock 校验结果 ——
 C1 的价值恰恰在"遇到未知术语时到底放行还是拒绝"，mock 掉校验就等于什么都没测。
 """
+from ontology_seed import seed_project_ontology
+from ontology_seed import seed_ontology
 import pytest
 
 from knowledge_service.integrations.embeddings import HashingEncoder
@@ -24,7 +26,7 @@ def _service(tmp_path, name='structure.sqlite', ttl=TTL_V1):
     repo = Repository(tmp_path / name)
     service = KnowledgeService(repo, HashingEncoder())
     project_id = repo.create_project('甲')['id']
-    repo.save_ontology(project_id, ttl, Ontology(ttl).summary())
+    seed_ontology(repo, project_id, ttl, Ontology(ttl).summary())
     return repo, service, project_id
 
 
@@ -57,7 +59,7 @@ def test_pending_knowledge_stays_searchable_and_visible(tmp_path):
                                 'type': 'urn:knowledge:ontology:甲:包裹', 'text': '跨城包裹'}])
     rows = service.scoped(project_id, {'kinds': ['entity']})
     assert [row['id'] for row in rows] == ['pending']
-    hits = service.search(project_id, {'query': '跨城包裹', 'k': 5})
+    hits = service.search(project_id, {'query': '跨城包裹', 'retrieval_mode': 'keyword', 'k': 5})
     assert any(hit['id'] == 'pending' for hit in hits['hits']), '结构待定的知识仍然要能搜到'
 
 
@@ -113,8 +115,7 @@ def test_pending_records_are_not_inputs_to_constraint_validation(tmp_path):
             'name': '甲', 'use_default_ontology': False}).json()['id']
         ttl = ('@prefix ex: <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> . '
                'ex:Person a owl:Class .')
-        ontology = client.post(f'/api/projects/{project_id}/ontologies',
-                               json={'turtle': ttl, 'expected_ontology_id': None}).json()
+        ontology = seed_project_ontology(client, f'/api/projects/{project_id}', ttl)
         assert ontology.get('id'), ontology
         created = client.post(f'/api/projects/{project_id}/records', json={'records': [
             {'id': 'known', 'kind': 'entity', 'type': 'Person', 'text': '张三'},
@@ -155,7 +156,7 @@ def test_state_clears_automatically_once_the_concept_is_modeled(tmp_path):
     assert service.structure_pending_report(project_id)['pending_structure'] == 1
     # 概念必须建成**同一个 IRI**（记录的类型就是它）：这是"本体补上了这个概念"的真实形态
     ttl_v2 = (TTL_V1 + ' @prefix pkg: <urn:knowledge:ontology:甲:> . pkg:包裹 a owl:Class .')
-    repo.save_ontology(project_id, ttl_v2, Ontology(ttl_v2).summary())
+    seed_ontology(repo, project_id, ttl_v2, Ontology(ttl_v2).summary())
     report = service.structure_pending_report(project_id)
     assert report['pending_structure'] == 0
     assert report['pending_records'] == 0
@@ -189,7 +190,7 @@ def test_marker_alone_does_not_make_a_record_pending(tmp_path):
     """标记是事实、状态是推导：类型能解析时，光有标记也不算待定（防止两套判据）。"""
     repo, service, project_id = _service(tmp_path, 'marker.sqlite')
     service.write(project_id, [{'id': 'x', 'kind': 'entity', 'type': 'Person', 'text': '张三'}])
-    repo.save_ontology(project_id, TTL_V1, Ontology(TTL_V1).summary())
+    seed_ontology(repo, project_id, TTL_V1, Ontology(TTL_V1).summary())
     rows = service.scoped(project_id, {})
     record = rows[0]
     structure_pending.mark(record, ['某些历史术语'])

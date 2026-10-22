@@ -103,17 +103,6 @@ class OntologyDraftStore:
         if row is None:
             raise ValueError(f'{field} 不属于此项目')
 
-    def _validate_artifact_reference(self, project_id, artifact_id):
-        if artifact_id is None:
-            return
-        if not isinstance(artifact_id, str) or not artifact_id:
-            raise ValueError('legacy_artifact_id 必须是工件 ID 或 null')
-        row = self._db.execute(
-            'SELECT 1 FROM artifacts WHERE project_id=? AND id=?',
-            (project_id, artifact_id)).fetchone()
-        if row is None:
-            raise ValueError('legacy_artifact_id 不属于此项目')
-
     @staticmethod
     def _draft(row):
         item = dict(row)
@@ -218,7 +207,6 @@ class OntologyDraftStore:
             # 提交时刻留档，之后任何一次改动都会把它清空 —— 见 services/ontology_drafts.pending_phase()。
             'submitted_at': item.get('submitted_at'),
             'published_ontology_id': item.get('published_ontology_id'),
-            'legacy_artifact_id': item.get('legacy_artifact_id'),
             'created_at': item.get('created_at') or now,
             'updated_at': item.get('updated_at') or now,
         }
@@ -229,21 +217,20 @@ class OntologyDraftStore:
                 project_id, draft['base_ontology_id'], 'base_ontology_id')
             self._validate_ontology_reference(
                 project_id, draft['published_ontology_id'], 'published_ontology_id')
-            self._validate_artifact_reference(project_id, draft['legacy_artifact_id'])
             self._db.execute(
                 '''INSERT INTO ontology_drafts
                    (id,project_id,base_ontology_id,source_kind,status,revision,title,
                     summary,source_context,validation_report,validation_fingerprint,
-                    validated_at,submitted_at,published_ontology_id,legacy_artifact_id,
+                    validated_at,submitted_at,published_ontology_id,
                     created_at,updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                 (draft['id'], project_id, draft['base_ontology_id'], source_kind,
                  status, revision, title, summary, _canonical_json(source_context),
                  (_canonical_json(validation_report)
                   if validation_report is not None else None),
                  draft['validation_fingerprint'], draft['validated_at'],
                  draft['submitted_at'],
-                 draft['published_ontology_id'], draft['legacy_artifact_id'],
+                 draft['published_ontology_id'],
                  draft['created_at'], draft['updated_at']))
         return self.get(project_id, draft['id'])
 
@@ -326,7 +313,7 @@ class OntologyDraftStore:
         allowed = {
             'base_ontology_id', 'source_kind', 'status', 'title', 'summary',
             'source_context', 'validation_report', 'validation_fingerprint',
-            'published_ontology_id', 'legacy_artifact_id', 'validated_at',
+            'published_ontology_id', 'validated_at',
             'submitted_at',
         }
         unknown = set(changes) - allowed
@@ -355,9 +342,6 @@ class OntologyDraftStore:
                 if field in changes:
                     self._validate_ontology_reference(
                         project_id, changes[field], field)
-            if 'legacy_artifact_id' in changes:
-                self._validate_artifact_reference(
-                    project_id, changes['legacy_artifact_id'])
             cursor = self._db.execute(
                 f'''UPDATE ontology_drafts SET {','.join(assignments)}
                     WHERE project_id=? AND id=? AND revision=?''', values)
@@ -442,6 +426,25 @@ class OntologyDraftStore:
                    ORDER BY decision.created_at,decision.seq''',
                 (project_id, draft_id)).fetchall()
         return [self._decision(row) for row in rows]
+
+    def history(self, project_id, draft_id):
+        """Read one draft's full audit chains in their original append order.
+
+        Superseded operations and decisions remain necessary for logical ordering
+        and current-decision projection; do not replace these with effective rows.
+        """
+        self.get(project_id, draft_id)
+        with self._lock:
+            operations = self._db.execute(
+                '''SELECT * FROM ontology_operations
+                   WHERE project_id=? AND draft_id=? ORDER BY seq''',
+                (project_id, draft_id)).fetchall()
+            decisions = self._db.execute(
+                '''SELECT * FROM ontology_review_decisions
+                   WHERE project_id=? AND draft_id=? ORDER BY seq''',
+                (project_id, draft_id)).fetchall()
+        return ([self._operation(row) for row in operations],
+                [self._decision(row) for row in decisions])
 
     def export(self, project_id):
         self.repo.get_project(project_id)

@@ -1,0 +1,56 @@
+{
+  "scope": "delivered main app; retained project; read-only business data",
+  "page_errors": [],
+  "checks": {
+    "drawer_escape_backdrop": true,
+    "visible_relationship_pixels": {
+      "changed_pixels": 24269,
+      "max_green_darkening": 142,
+      "gl_error": 0
+    },
+    "manual_next_edges": 800,
+    "pause_retains_session": {
+      "nodes": 1601,
+      "edges": 1600,
+      "session": "0bbeec19-3554-44de-b0b1-c24988c41b52"
+    },
+    "real_exact_root_mindmap": "当前根实体的有界脑图 · 点击分支展开或收起 · 最多 500 个树节点",
+    "mobile_overflow": false
+  },
+  "project": {
+    "id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+    "name": "容量验收 · 15万实体 / 30万关系（保留测试）",
+    "counts": {
+      "documents": 0,
+      "entities": 150001,
+      "relations": 300000,
+      "attributes": 0,
+      "chunks": 0
+    }
+  },
+  "first_batch": {
+    "seconds": 16.648199999999257,
+    "state": "paused",
+    "session": "0bbeec19-3554-44de-b0b1-c24988c41b52",
+    "nodes": 401,
+    "edges": 400,
+    "manifest": {
+      "entities": 150001,
+      "relations": 300000
+    },
+    "gl_error": 0
+  },
+  "auto_started_at_seconds": 17.75,
+  "complete": {
+    "state": "complete",
+    "nodes": 150001,
+    "edges": 300000,
+    "node_ids": 150001,
+    "drawn_nodes": 150001,
+    "drawn_edges": 300000,
+    "all_endpoints": true,
+    "gl_error": 0,
+    "session": "0bbeec19-3554-44de-b0b1-c24988c41b52"
+  },
+  "complete_wall_seconds_including_manual_checks": 219.29699999999866
+}

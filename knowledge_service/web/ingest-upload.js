@@ -22,7 +22,7 @@
       + '知识的修改、删除、合并不在这里 —— 去「知识台账」。';
     // 插到标题区之后、解析模式槽之前，阅读顺序最顺。
     const slot = document.getElementById('ingest-mode-slot');
-    if (slot) panel.insertBefore(p, slot); else panel.append(p);
+    if (slot?.parentNode === panel) panel.insertBefore(p, slot); else panel.append(p);
   }
 
   // 切到本页时触发一次（不自动提交、不轮询，避免后台空转）。

@@ -1,0 +1,10 @@
+{
+  "verified_utc": "2026-10-21T04:18:17.377751+00:00",
+  "node_command": "node --test tests/service/capacity-diagnostics.test.cjs tests/service/full-graph-progressive.test.cjs tests/service/full-graph-renderer.test.cjs tests/service/full-graph-worker-errors.test.cjs",
+  "node_tests": 28,
+  "node_passed": 28,
+  "node_failed": 0,
+  "offline_self_test_passed": true,
+  "python_syntax_files": 4,
+  "all_exit_codes": 0
+}

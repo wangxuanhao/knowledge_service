@@ -58,7 +58,10 @@ def install(app, service):
     repository = service.data
 
     @router.get('/api/projects')
-    def projects():
+    def projects(include_counts: bool = True):
+        if not include_counts:
+            with repository.independent_read_view() as reader:
+                return {'projects': reader.list_project_directory()}
         return {'projects': repository.list_projects()}
 
     @router.post('/api/projects', status_code=201)

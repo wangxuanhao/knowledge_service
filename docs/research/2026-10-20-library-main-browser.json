@@ -1,0 +1,19 @@
+{
+  "errors": [],
+  "checks": {
+    "same_project_input_preserved": true,
+    "real_chunk_preview": true,
+    "real_upload": {
+      "batch_id": "a4341696ca9c45e3958b003bda367c29",
+      "status": "completed"
+    },
+    "list_first": true,
+    "source_detail_drawer": true,
+    "detail_tabs": 4,
+    "mobile_no_overflow": true,
+    "record_create_docked": true,
+    "structured_import_docked": true
+  },
+  "api": "real main application; worktree frontend staged by route",
+  "project_id": "f428088c-ea1d-434a-8cb4-4c843d01612e"
+}

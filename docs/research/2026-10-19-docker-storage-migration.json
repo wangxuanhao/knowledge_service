@@ -1,0 +1,112 @@
+{
+  "verified_at": "2026-10-19T06:50:26.494006+00:00",
+  "source": "stopped Windows bind directories",
+  "target": "Docker Linux named volumes",
+  "source_directories_retained": true,
+  "all_copies_verified": true,
+  "services_healthy_after_restore": true,
+  "initial_restart_counts": {
+    "postgres": 0,
+    "etcd": 0,
+    "minio": 0,
+    "milvus": 0
+  },
+  "copies": {
+    "postgres": {
+      "files": 3820,
+      "bytes": 1189037366,
+      "source_archive_sha256": "f2ebdd36fb2bf5369f7bdd096531f514ca31469a567bcd463f0d326d94108bbe",
+      "target_archive_sha256": "f2ebdd36fb2bf5369f7bdd096531f514ca31469a567bcd463f0d326d94108bbe",
+      "mtime_precision": "seconds",
+      "verification": "deterministic GNU tar hash, regular-file count and apparent bytes",
+      "verified": true
+    },
+    "etcd": {
+      "files": 10,
+      "bytes": 314694788,
+      "source_archive_sha256": "563ec50d975170b92bb350a77e33f795a19f7bcacaa554a694c1c340c16be016",
+      "target_archive_sha256": "563ec50d975170b92bb350a77e33f795a19f7bcacaa554a694c1c340c16be016",
+      "mtime_precision": "seconds",
+      "verification": "deterministic GNU tar hash, regular-file count and apparent bytes",
+      "verified": true
+    },
+    "minio": {
+      "files": 18618,
+      "bytes": 727931788,
+      "entries": 61094,
+      "verified": true,
+      "mtime_precision": "nanoseconds",
+      "source_manifest_sha256": "d5a948a3c598e3fcaf47594a0d8b6ddb85a810714bc8b5f4e6f4f765d463d575",
+      "target_manifest_sha256": "d5a948a3c598e3fcaf47594a0d8b6ddb85a810714bc8b5f4e6f4f765d463d575",
+      "fields": [
+        "path",
+        "type",
+        "size",
+        "mtime_ns",
+        "uid",
+        "gid",
+        "mode",
+        "sha256"
+      ],
+      "verification": "per-entry PAX content and specified Linux metadata manifest"
+    },
+    "milvus": {
+      "files": 72,
+      "bytes": 262308447,
+      "entries": 119,
+      "verified": true,
+      "mtime_precision": "nanoseconds",
+      "source_manifest_sha256": "bbd08d81bf87afc88b6f0cbc1f1ffcdfe657d135c37da1becf0d87c56d171b99",
+      "target_manifest_sha256": "bbd08d81bf87afc88b6f0cbc1f1ffcdfe657d135c37da1becf0d87c56d171b99",
+      "fields": [
+        "path",
+        "type",
+        "size",
+        "mtime_ns",
+        "uid",
+        "gid",
+        "mode",
+        "sha256"
+      ],
+      "verification": "per-entry PAX content and specified Linux metadata manifest"
+    }
+  },
+  "restored_baseline": {
+    "database_names_match": true,
+    "table_counts_checked": 80,
+    "all_table_counts_match": true,
+    "migration_versions_and_checksums_match": true,
+    "milvus_collection_names_checked": 27,
+    "milvus_collection_names_match": true,
+    "logical_collection_counts_checked": 27,
+    "logical_collection_counts_match": true
+  },
+  "scope_limits": [
+    "No payload records were read for the migration audit.",
+    "UID/GID/mode and content were verified; arbitrary ACL/xattr and external hardlink identity are outside this migration contract.",
+    "Original bind directories are offline rollback snapshots and do not contain later writes.",
+    "Initial native extraction directory mtime differences were corrected using a directory-only PAX archive, then the full content and nanosecond metadata manifest matched."
+  ],
+  "private_evidence_directory": "C:\\Users\\Thinkpad\\.codex\\visualizations\\2026\\10\\16\\01a14441-4f83-7963-9855-f4dcd828d74a",
+  "post_capacity_service_health": {
+    "all_four_healthy": true,
+    "restart_counts": {
+      "postgres": 0,
+      "etcd": 0,
+      "minio": 0,
+      "milvus": 0
+    },
+    "oom_killed": false,
+    "active_milvus_lease_granted_ttl_seconds": 60,
+    "active_leases_checked": 5,
+    "verified_after_complete_450k_submission_and_final_backend_benchmark": true
+  },
+  "tool_verification": {
+    "stdlib_checks_passed": 6,
+    "synthetic_docker_nested_pax_roundtrip_passed": true,
+    "intentional_content_corruption_rejected": true,
+    "writable_source_mount_rejected": true,
+    "nonempty_target_rejected": true,
+    "outputs_inside_sources_rejected_before_writing": true
+  }
+}

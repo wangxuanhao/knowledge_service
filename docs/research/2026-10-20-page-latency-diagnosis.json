@@ -1,0 +1,780 @@
+{
+  "date": "2026-10-20",
+  "environment": {
+    "python": "D:\\anaconda\\envs\\llm_model\\python.exe",
+    "server": "http://127.0.0.1:8100",
+    "server_pid": 43444,
+    "large_project_current_records": 450001,
+    "other_project_max_current_records": 67
+  },
+  "scope": "Diagnosis only. Existing service; read-only data access and browser navigation. No production source or configuration edits. Individual measurements, not P95 or idle-load speedup claims.",
+  "conclusion": "Primary bottleneck is whole-project reads, shared application RLock/single psycopg connection queueing, and frontend request amplification. Login flash is a separate confirmed startup-gate defect. PostgreSQL work and host memory pressure contribute, but observed delays are not explained by database lock waits or browser drawing alone.",
+  "http_serial": [
+    {
+      "size": "small",
+      "path": "/records/page",
+      "started_at": 1792479496.1304862,
+      "ttfb_s": 0.034,
+      "http_s": 0.035,
+      "status": 200,
+      "bytes": 43,
+      "json_ms": 0.06,
+      "response_counts": {
+        "records": 0
+      },
+      "total": 0,
+      "slow_over_2s": false
+    },
+    {
+      "size": "small",
+      "path": "/ontology",
+      "started_at": 1792479496.1692612,
+      "ttfb_s": 0.02,
+      "http_s": 0.02,
+      "status": 404,
+      "bytes": 222,
+      "json_ms": 0.04,
+      "response_counts": {},
+      "slow_over_2s": false
+    },
+    {
+      "size": "small",
+      "path": "/sources",
+      "started_at": 1792479496.193343,
+      "ttfb_s": 0.032,
+      "http_s": 0.033,
+      "status": 200,
+      "bytes": 1718,
+      "json_ms": 0.18,
+      "response_counts": {
+        "documents": 1
+      },
+      "slow_over_2s": false
+    },
+    {
+      "size": "small",
+      "path": "/ontology-discovery?compact=true",
+      "started_at": 1792479496.2303815,
+      "ttfb_s": 0.074,
+      "http_s": 0.075,
+      "status": 200,
+      "bytes": 480,
+      "json_ms": 0.06,
+      "response_counts": {},
+      "slow_over_2s": false
+    },
+    {
+      "size": "small",
+      "path": "/metadata/facets",
+      "started_at": 1792479496.3129094,
+      "ttfb_s": 0.033,
+      "http_s": 0.036,
+      "status": 200,
+      "bytes": 4882,
+      "json_ms": 0.2,
+      "response_counts": {
+        "fields": 36
+      },
+      "slow_over_2s": false
+    },
+    {
+      "size": "large",
+      "path": "/records/page",
+      "started_at": 1792479496.3530116,
+      "ttfb_s": 0.13,
+      "http_s": 0.131,
+      "status": 200,
+      "bytes": 15955,
+      "json_ms": 0.45,
+      "response_counts": {
+        "records": 50
+      },
+      "total": 150001,
+      "slow_over_2s": false
+    },
+    {
+      "size": "large",
+      "path": "/ontology",
+      "started_at": 1792479496.4884422,
+      "ttfb_s": 0.041,
+      "http_s": 0.042,
+      "status": 200,
+      "bytes": 751,
+      "json_ms": 0.11,
+      "response_counts": {},
+      "slow_over_2s": false
+    },
+    {
+      "size": "large",
+      "path": "/sources",
+      "started_at": 1792479496.5340705,
+      "ttfb_s": 15.457,
+      "http_s": 15.458,
+      "status": 404,
+      "bytes": 35,
+      "json_ms": 0.02,
+      "response_counts": {},
+      "slow_over_2s": true
+    },
+    {
+      "size": "large",
+      "path": "/ontology-discovery?compact=true",
+      "started_at": 1792479511.993706,
+      "ttfb_s": 14.593,
+      "http_s": 14.594,
+      "status": 200,
+      "bytes": 513,
+      "json_ms": 0.03,
+      "response_counts": {},
+      "slow_over_2s": true
+    },
+    {
+      "size": "large",
+      "path": "/metadata/facets",
+      "started_at": 1792479526.5899181,
+      "ttfb_s": 13.868,
+      "http_s": 13.868,
+      "status": 404,
+      "bytes": 35,
+      "json_ms": 0.04,
+      "response_counts": {},
+      "slow_over_2s": true
+    }
+  ],
+  "database_roundtrip_ms": [
+    3.12,
+    3.69,
+    2.14,
+    7.37,
+    2.94
+  ],
+  "query_plans": [
+    {
+      "label": "users_pk",
+      "execution_ms": 0.17,
+      "planning_ms": 3.218,
+      "node": "Index Scan",
+      "rows": 1.0,
+      "shared_hit": 1,
+      "shared_read": 1,
+      "temp_read": 0,
+      "temp_written": 0
+    },
+    {
+      "label": "full_current_records",
+      "execution_ms": 1089.745,
+      "planning_ms": 5.693,
+      "node": "Gather Merge",
+      "rows": 450001.0,
+      "shared_hit": 15374,
+      "shared_read": 9456,
+      "temp_read": 14494,
+      "temp_written": 14526
+    }
+  ],
+  "database_observation": {
+    "samples": 110,
+    "wait_counts": {
+      "CPU/client:": 23,
+      "IO:BuffileWrite": 2,
+      "Client:ClientWrite": 14,
+      "IPC:MessageQueueSend": 33,
+      "IPC:MessageQueueReceive": 4,
+      "IPC:ParallelFinish": 1
+    },
+    "blocking_samples": 0
+  },
+  "login": {
+    "actual_redirect_ms": 1663.1,
+    "script_requests_before_redirect": 52,
+    "shell_visible_while_policy_response_held": {
+      "url": "/",
+      "asideVisible": true,
+      "mainVisible": true,
+      "bodyVisibility": "visible",
+      "title": "知序 · Knowledge Service",
+      "policyResponseHeld": true
+    },
+    "controlled_test_note": "Holding the policy response proves shell gating behavior; actual redirect duration was measured separately with no artificial delay."
+  },
+  "browser_large": [
+    {
+      "page": "records",
+      "request_count": 56,
+      "network_critical_span_ms": 15564.0,
+      "longtask_total_ms": 0,
+      "requests": [
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/resolution-reviews",
+          "ttfb_ms": 13849.89999999851,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/records/page",
+          "ttfb_ms": 13921.400000002235,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/ontologies",
+          "ttfb_ms": 57,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/records/page",
+          "ttfb_ms": 1228.8999999985099,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/records/page",
+          "ttfb_ms": 1061.199999999255,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/records/page",
+          "ttfb_ms": 108.80000000074506,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 75.10000000149012,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 79.5,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 121,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 1174.699999999255,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 894.5,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 980.6999999992549,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 1066,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 219.20000000298023,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 152.79999999701977,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 59.69999999925494,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 50,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 72.10000000149012,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 54.19999999925494,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 50.899999998509884,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 60.20000000298023,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 43.599999997764826,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 47.399999998509884,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 39.19999999925494,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 35.19999999925494,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 35.30000000074506,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 37.400000002235174,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 38.399999998509884,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 40.30000000074506,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 39.30000000074506,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 38.70000000298023,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 37.099999997764826,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 36.70000000298023,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 34.80000000074506,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 35.5,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 36.600000001490116,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 43.80000000074506,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 28.600000001490116,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 36,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 37.100000001490116,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 37.69999999925494,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 40.5,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 42.100000001490116,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 42.69999999925494,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 42.29999999701977,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 38.19999999925494,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 34.099999997764826,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 31.199999999254942,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 33.5,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 38.399999998509884,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 35.5,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 44.70000000298023,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 42.399999998509884,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 41.899999998509884,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 39.30000000074506,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/assertions",
+          "ttfb_ms": 31,
+          "status": 200
+        }
+      ],
+      "note": "The observation window included fixed waits; network_critical_span_ms is calculated from actual request timestamps."
+    },
+    {
+      "page": "sources",
+      "request_count": 1,
+      "network_critical_span_ms": 9679.3,
+      "longtask_total_ms": 0,
+      "requests": [
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/sources",
+          "ttfb_ms": 9679.300000000745,
+          "status": 404
+        }
+      ],
+      "note": "The observation window included fixed waits; network_critical_span_ms is calculated from actual request timestamps."
+    },
+    {
+      "page": "ontology-model",
+      "request_count": 9,
+      "network_critical_span_ms": 54410.8,
+      "longtask_total_ms": 0,
+      "requests": [
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/reclassify",
+          "ttfb_ms": 11423.5,
+          "status": 404
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/ontology",
+          "ttfb_ms": 51,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/ontology-discovery",
+          "ttfb_ms": 29350.699999999255,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/ontology-drafts",
+          "ttfb_ms": 40.69999999925494,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/ontology-drafts/a6d42b3b-f768-4c99-ab09-26d369dc8a12",
+          "ttfb_ms": 127.60000000149012,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/ontologies",
+          "ttfb_ms": 44.399999998509884,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/ontology-drafts",
+          "ttfb_ms": 60.5,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/ontology-drafts/stage-availability",
+          "ttfb_ms": 147.30000000074506,
+          "status": 200
+        },
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/ontology-drafts/a6d42b3b-f768-4c99-ab09-26d369dc8a12/publish-readiness",
+          "ttfb_ms": 24856.10000000149,
+          "status": 200
+        }
+      ],
+      "note": "The observation window included fixed waits; network_critical_span_ms is calculated from actual request timestamps."
+    },
+    {
+      "page": "search",
+      "request_count": 1,
+      "network_critical_span_ms": 41.3,
+      "longtask_total_ms": 0,
+      "requests": [
+        {
+          "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/ontology",
+          "ttfb_ms": 41.29999999701977,
+          "status": 200
+        }
+      ],
+      "note": "The observation window included fixed waits; network_critical_span_ms is calculated from actual request timestamps."
+    }
+  ],
+  "concurrent_requests": [
+    {
+      "label": "baseline_health",
+      "path": "/api/health",
+      "started_at": 1792479899.9930499,
+      "http_s": 0.042,
+      "status": 200,
+      "bytes": 1425
+    },
+    {
+      "label": "slow_overview",
+      "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/ontology-discovery?compact=true",
+      "started_at": 1792479900.0461009,
+      "http_s": 27.728,
+      "status": 200,
+      "bytes": 513
+    },
+    {
+      "label": "auth_me_during_scan",
+      "path": "/api/auth/me",
+      "started_at": 1792479900.2491348,
+      "http_s": 3.596,
+      "status": 200,
+      "bytes": 126
+    },
+    {
+      "label": "public_health_during_scan",
+      "path": "/api/health",
+      "started_at": 1792479900.5532854,
+      "http_s": 3.902,
+      "status": 200,
+      "bytes": 1425
+    },
+    {
+      "label": "static_html_during_scan",
+      "path": "/",
+      "started_at": 1792479900.6553473,
+      "http_s": 3.536,
+      "status": 200,
+      "bytes": 36795
+    },
+    {
+      "label": "small_project_during_scan",
+      "path": "/api/projects/f428088c-ea1d-434a-8cb4-4c843d01612e/records/page",
+      "started_at": 1792479900.7573175,
+      "http_s": 21.209,
+      "status": 200,
+      "bytes": 1520
+    },
+    {
+      "label": "baseline_health_after",
+      "path": "/api/health",
+      "started_at": 1792479927.7753136,
+      "http_s": 0.041,
+      "status": 200,
+      "bytes": 1425
+    },
+    {
+      "label": "large_sources_failure_detail",
+      "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/sources",
+      "started_at": 1792479927.8163178,
+      "http_s": 21.239,
+      "status": 404,
+      "bytes": 35,
+      "error_detail": "未找到：valid_from"
+    }
+  ],
+  "local_graph": {
+    "scope": "Actual neighborhood and renderer, first with startup side effects then after settling; no business data writes",
+    "seed": "e000000",
+    "result": {
+      "success": true,
+      "nodes": 3,
+      "edges": 4,
+      "ms": 34278.800000000745
+    },
+    "wall_s": 34.295,
+    "responses": [
+      {
+        "status": 200,
+        "records": 7,
+        "entities": 3,
+        "relations": 4,
+        "timing_ms": null
+      },
+      {
+        "status": 200,
+        "records": 7,
+        "entities": 3,
+        "relations": 4,
+        "timing_ms": null
+      }
+    ],
+    "debug_logs": [
+      "[kg] graph-neighborhood · node=e000000 hops=1 nodes=3 edges=4 truncated=false ms=34041.1",
+      "[kg] graph-layout · nodes=3 edges=4 ms=101.8",
+      "[kg] graph-neighborhood · node=e000000 hops=1 nodes=3 edges=4 truncated=false ms=177.1",
+      "[kg] graph-layout · nodes=3 edges=4 ms=19.7"
+    ],
+    "errors": [],
+    "longtasks": [
+      {
+        "start": 37540.699999999255,
+        "ms": 121
+      },
+      {
+        "start": 37662.5,
+        "ms": 133
+      }
+    ],
+    "settled_repeat": {
+      "result": {
+        "success": true,
+        "nodes": 3,
+        "edges": 4,
+        "ms": 235.69999999925494
+      },
+      "debug_logs": [
+        "[kg] graph-neighborhood · node=e000000 hops=1 nodes=3 edges=4 truncated=false ms=177.1",
+        "[kg] graph-layout · nodes=3 edges=4 ms=19.7"
+      ]
+    }
+  },
+  "findings": [
+    {
+      "priority": 0,
+      "finding": "Repository uses one SqliteishConnection/raw psycopg connection and process-wide RLock. Readonly pagination calls get_project under the same lock. Async auth middleware synchronously calls UserStore.get_by_id on the same connection.",
+      "sources": [
+        "knowledge_service/repository/core.py:188",
+        "knowledge_service/repository/core.py:679",
+        "knowledge_service/repository/pg_engine.py:157",
+        "knowledge_service/api/security_middleware.py:171",
+        "knowledge_service/repository/users_store.py:79"
+      ],
+      "action": "Use a dedicated read connection/unit-of-work for each request and explicit consistent snapshots; preserve transaction and writer serialization rules. Move blocking auth database work off the event loop and isolate it from long scans."
+    },
+    {
+      "priority": 0,
+      "finding": "Unauthenticated app shell is visible while auth awaits DOMContentLoaded, health policy and session check; heavy vendor scripts precede auth.",
+      "sources": [
+        "knowledge_service/web/index.html:3",
+        "knowledge_service/web/index.html:92",
+        "knowledge_service/web/auth.js:238",
+        "knowledge_service/web/auth.js:276"
+      ],
+      "action": "Hide/protect shell before first paint, run a small auth bootstrap first, initialize business modules after session validation; lazily load page/vendor code."
+    },
+    {
+      "priority": 1,
+      "finding": "Project switch/startup requests reclassification while ontology page is hidden; it scans all knowledge records and blocks unrelated requests.",
+      "sources": [
+        "knowledge_service/web/ontology-model-reclassify.js:101",
+        "knowledge_service/web/ontology-model-reclassify.js:461",
+        "knowledge_service/web/ontology-model-reclassify.js:473",
+        "knowledge_service/services/reclassify.py:138"
+      ],
+      "action": "Load only when the relevant panel is visible; deduplicate in-flight loads and cancel irrelevant browser work; use bounded aggregate/read model for summary."
+    },
+    {
+      "priority": 1,
+      "finding": "Compact ontology discovery still reads all current_records. Publish readiness recomputes validation on page entry. Sources scans the whole project and returns document bodies.",
+      "sources": [
+        "knowledge_service/services/ontology_discovery_workflow.py:684",
+        "knowledge_service/services/ontology_drafts_review.py:582",
+        "knowledge_service/services/explorer.py:291"
+      ],
+      "action": "Use indexed scope-aware summaries/aggregates and document directory pagination; load source body on selection. Version readiness by authoritative project/draft revisions and perform mandatory validation at explicit validation/publish boundaries."
+    },
+    {
+      "priority": 1,
+      "finding": "A 50-row ledger view issued 56 requests: 50 separate assertion reads plus pagination/counts/ontologies/reviews.",
+      "sources": [
+        "knowledge_service/web/records-view.js:512",
+        "knowledge_service/web/records-view.js:543",
+        "knowledge_service/web/records-view.js:552"
+      ],
+      "action": "Batch visible-row lineage and endpoint summaries; obtain detailed evidence on demand; combine counts into one bounded query."
+    },
+    {
+      "priority": 2,
+      "finding": "Ontology render rebuilds hidden cards and per-card indexes; new canvas node placement repeatedly scans existing nodes. Larger ontology rendering risk is separate from observed small ontology network waits.",
+      "sources": [
+        "knowledge_service/web/ontology-model.js:392",
+        "knowledge_service/web/ontology-model-catalog.js:12",
+        "knowledge_service/web/ontology-model-catalog.js:60",
+        "knowledge_service/web/ontology-model-canvas.js:229"
+      ],
+      "action": "Cache class/property indexes by ontology revision; skip hidden views; update selection state without rebuilding cards and graph; paginate/virtualize large lists."
+    }
+  ],
+  "limitations": [
+    "Capacity fixture sources/facets/reclassify returned 404 after scanning because legacy query accesses missing valid_from; failed response timings must not be treated as successful directory load times.",
+    "Local graph was 3 nodes / 4 edges; this does not establish full-graph or large ontology rendering performance.",
+    "No controlled idle-versus-background resource experiment. Host memory was observed at 95.3 percent use; this is a contributing risk, not a proven sole cause.",
+    "PostgreSQL EXPLAIN ANALYZE excludes payload transfer and Python materialization; difference from HTTP is not a precise timing attribution.",
+    "Payload column is TEXT; do not infer JSONB payload adapter overhead from the bounded read comparison."
+  ],
+  "reproduction": {
+    "script": ".benchmarks/page_latency_probe_20261020.py",
+    "modes": [
+      "http",
+      "browser",
+      "concurrency",
+      "graph"
+    ],
+    "evidence_directory": "D:\\workspace\\knowledge_service_v2\\knowledge_service\\.benchmarks\\page-latency-20261020"
+  }
+}

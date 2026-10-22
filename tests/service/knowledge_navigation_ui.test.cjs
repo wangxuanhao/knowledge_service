@@ -156,7 +156,7 @@ test('KnowledgeTabs clicks real menu buttons once and directly opens internal pa
       toggle(value,force){force?values.add(value):values.delete(value);},
       contains:value=>values.has(value)};
   };
-  let recordClicks=0;
+  let recordClicks=0;const visits=[];
   const recordButton={dataset:{tab:'records'},classList:classes(''),click(){recordClicks++;this.onclick();}};
   const buttons=[recordButton];
   const nodes={
@@ -166,7 +166,9 @@ test('KnowledgeTabs clicks real menu buttons once and directly opens internal pa
     scope:{classList:classes('hidden')},
   };
   const context=vm.createContext({window:{},titles:{records:'知识台账',sources:'原文数据源'},
+    CustomEvent:class{constructor(type,{detail}){this.type=type;this.detail=detail;}},
     $:id=>nodes[id],document:{
+      dispatchEvent(event){if(event.type==='workspace:page-changed')visits.push(event.detail.page);},
       querySelector(selector){return selector==='[data-tab="records"]'?recordButton:null;},
       querySelectorAll(selector){return selector==='[data-tab]'?buttons:Object.values(nodes).filter(node=>node.classList);},
     }});
@@ -184,4 +186,5 @@ test('KnowledgeTabs clicks real menu buttons once and directly opens internal pa
 
   context.window.KnowledgeTabs.open('records',{trigger:false});
   assert.equal(recordClicks,1,'silent activation must not call existing loaders');
+  assert.deepEqual(visits,['records','sources','records'],'every activation must invalidate the previous view visit');
 });

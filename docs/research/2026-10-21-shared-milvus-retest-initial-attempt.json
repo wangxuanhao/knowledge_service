@@ -1,0 +1,540 @@
+{
+  "started_at": "2026-10-21T08:26:17.520772+00:00",
+  "project": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+  "control_project": "828887db-e1f3-4f5d-b2b3-4b3dc97d2040",
+  "capacity_project": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+  "scope": "ordinary project acceptance; not 150k vector certification",
+  "samples": [
+    {
+      "category": "setup_page",
+      "status": 200,
+      "ok": true,
+      "seconds": 1.1735445999984222,
+      "bytes": 56298
+    },
+    {
+      "category": "setup_page",
+      "status": 200,
+      "ok": true,
+      "seconds": 0.6302629999991041,
+      "bytes": 4553
+    },
+    {
+      "category": "unbuilt_original",
+      "status": 200,
+      "ok": true,
+      "seconds": 0.7573991999997816,
+      "bytes": 1205
+    },
+    {
+      "category": "unbuilt_parallel_read",
+      "status": 200,
+      "ok": true,
+      "seconds": 0.6785406999988481,
+      "bytes": 30935
+    },
+    {
+      "category": "unbuilt_put",
+      "status": 200,
+      "ok": true,
+      "seconds": 7.528419499998563,
+      "bytes": 901
+    },
+    {
+      "category": "unbuilt_stale_cas",
+      "status": 409,
+      "ok": false,
+      "seconds": 1.6241609999997308,
+      "bytes": 43,
+      "error": "版本冲突：记录已变更"
+    },
+    {
+      "category": "unbuilt_before_restore",
+      "status": 200,
+      "ok": true,
+      "seconds": 0.1282783999995445,
+      "bytes": 1234
+    }
+  ],
+  "builds": [],
+  "edits": [
+    {
+      "label": "unbuilt",
+      "original": {
+        "id": "discovery-4f9466e7f5c3a18893e9ca6c9451",
+        "kind": "entity",
+        "type": "urn:knowledge:ontology:828887db-e1f3-4f5d-b2b3-4b3dc97d2040:供应商",
+        "text": "天海贸易",
+        "source_id": "unified-source-b",
+        "ontology_id": "12f3a4be-e250-4f02-8141-934c9da0dbf1",
+        "valid_from": null,
+        "valid_until": null,
+        "properties": {},
+        "metadata": {
+          "discovery_candidate_id": "unified-vendor-b",
+          "discovery_candidate_ids": [
+            "unified-vendor-b"
+          ],
+          "discovery_draft_id": "7e427837-6af0-47f7-99a3-b98d575303b3",
+          "confidence": null,
+          "evidence": "天海贸易是一家供应商",
+          "chunk_id": null,
+          "applicability": {
+            "platforms": {
+              "mode": "unknown",
+              "values": []
+            },
+            "businesses": {
+              "mode": "unknown",
+              "values": []
+            },
+            "audiences": {
+              "mode": "unknown",
+              "values": []
+            }
+          }
+        },
+        "project_id": "828887db-e1f3-4f5d-b2b3-4b3dc97d2040",
+        "version": 1,
+        "version_id": "38544992-18e0-473b-b9db-0d564b7d1a0a",
+        "recorded_at": "2026-10-21T01:56:28.326841Z",
+        "superseded_at": null,
+        "class_label": "供应商",
+        "class_parents": [
+          {
+            "id": "urn:knowledge:ontology:828887db-e1f3-4f5d-b2b3-4b3dc97d2040:业务对象",
+            "label": "业务对象"
+          }
+        ],
+        "class_ancestors": [
+          {
+            "id": "urn:knowledge:ontology:828887db-e1f3-4f5d-b2b3-4b3dc97d2040:业务对象",
+            "label": "业务对象"
+          }
+        ],
+        "class_ontology_id": "12f3a4be-e250-4f02-8141-934c9da0dbf1"
+      },
+      "restored": false,
+      "edited_version": 2,
+      "stale_cas_rejected": true,
+      "restore_conflict": "Unrelated edit; refused overwrite"
+    }
+  ],
+  "observations": {
+    "before": {
+      "indexes": [],
+      "current_record_counts": {
+        "41acc04e-6d6b-47f8-bc3f-784f2acb3751": 9,
+        "434c84fc-49aa-4a63-97c6-0932b6f55e0f": 10,
+        "46249548-2189-4ad7-8f23-70ee2bcc7f6f": 450001,
+        "53264f57-4e9f-4cd5-a0f9-5a6f20181391": 67,
+        "53cb22f8-8159-42f1-89ed-db40d9d15370": 16,
+        "828887db-e1f3-4f5d-b2b3-4b3dc97d2040": 10,
+        "b243f3d7-3a80-4f65-827b-b045d9334db0": 2,
+        "eeb3a4dc-7475-4937-9966-74aa261334e6": 42,
+        "f428088c-ea1d-434a-8cb4-4c843d01612e": 2
+      },
+      "recent_control_events": [
+        [
+          "828887db-e1f3-4f5d-b2b3-4b3dc97d2040",
+          12,
+          false,
+          false
+        ],
+        [
+          "828887db-e1f3-4f5d-b2b3-4b3dc97d2040",
+          11,
+          false,
+          false
+        ],
+        [
+          "828887db-e1f3-4f5d-b2b3-4b3dc97d2040",
+          10,
+          false,
+          false
+        ],
+        [
+          "828887db-e1f3-4f5d-b2b3-4b3dc97d2040",
+          9,
+          false,
+          false
+        ]
+      ],
+      "blocked_sessions": 0,
+      "available_memory_gib": 8.76571273803711,
+      "service_rss_mib": 168.62890625,
+      "milvus_stats": {
+        "code": 0,
+        "data": {
+          "rowCount": 0
+        }
+      },
+      "fields": [
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "id": 100,
+          "name": "vector_id",
+          "nullable": false,
+          "params": [
+            {
+              "key": "max_length",
+              "value": "64"
+            }
+          ],
+          "partitionKey": false,
+          "primaryKey": true,
+          "type": "VarChar"
+        },
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "id": 101,
+          "name": "index_version",
+          "nullable": false,
+          "partitionKey": false,
+          "primaryKey": false,
+          "type": "Int64"
+        },
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "id": 102,
+          "name": "version_id",
+          "nullable": false,
+          "params": [
+            {
+              "key": "max_length",
+              "value": "800"
+            }
+          ],
+          "partitionKey": false,
+          "primaryKey": false,
+          "type": "VarChar"
+        },
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "id": 103,
+          "name": "project_id",
+          "nullable": false,
+          "params": [
+            {
+              "key": "max_length",
+              "value": "800"
+            }
+          ],
+          "partitionKey": true,
+          "primaryKey": false,
+          "type": "VarChar"
+        },
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "id": 104,
+          "name": "record_id",
+          "nullable": false,
+          "params": [
+            {
+              "key": "max_length",
+              "value": "800"
+            }
+          ],
+          "partitionKey": false,
+          "primaryKey": false,
+          "type": "VarChar"
+        },
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "id": 105,
+          "name": "kind",
+          "nullable": false,
+          "params": [
+            {
+              "key": "max_length",
+              "value": "800"
+            }
+          ],
+          "partitionKey": false,
+          "primaryKey": false,
+          "type": "VarChar"
+        },
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "id": 106,
+          "name": "type",
+          "nullable": true,
+          "params": [
+            {
+              "key": "max_length",
+              "value": "800"
+            }
+          ],
+          "partitionKey": false,
+          "primaryKey": false,
+          "type": "VarChar"
+        },
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "id": 107,
+          "name": "ontology_id",
+          "nullable": true,
+          "params": [
+            {
+              "key": "max_length",
+              "value": "800"
+            }
+          ],
+          "partitionKey": false,
+          "primaryKey": false,
+          "type": "VarChar"
+        },
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "id": 108,
+          "name": "text",
+          "nullable": false,
+          "params": [
+            {
+              "key": "max_length",
+              "value": "65535"
+            },
+            {
+              "key": "enable_analyzer",
+              "value": "true"
+            },
+            {
+              "key": "analyzer_params",
+              "value": "{\"type\":\"chinese\"}"
+            }
+          ],
+          "partitionKey": false,
+          "primaryKey": false,
+          "type": "VarChar"
+        },
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "id": 109,
+          "name": "embedding",
+          "nullable": false,
+          "params": [
+            {
+              "key": "dim",
+              "value": "1024"
+            }
+          ],
+          "partitionKey": false,
+          "primaryKey": false,
+          "type": "FloatVector"
+        },
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "id": 110,
+          "isFunctionOutput": true,
+          "name": "sparse",
+          "nullable": false,
+          "partitionKey": false,
+          "primaryKey": false,
+          "type": "SparseFloatVector"
+        },
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "id": 111,
+          "name": "platform_mode",
+          "nullable": false,
+          "params": [
+            {
+              "key": "max_length",
+              "value": "16"
+            }
+          ],
+          "partitionKey": false,
+          "primaryKey": false,
+          "type": "VarChar"
+        },
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "elementType": "VarChar",
+          "id": 112,
+          "name": "platform_values",
+          "nullable": false,
+          "params": [
+            {
+              "key": "max_length",
+              "value": "256"
+            },
+            {
+              "key": "max_capacity",
+              "value": "64"
+            }
+          ],
+          "partitionKey": false,
+          "primaryKey": false,
+          "type": "Array"
+        },
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "id": 113,
+          "name": "business_mode",
+          "nullable": false,
+          "params": [
+            {
+              "key": "max_length",
+              "value": "16"
+            }
+          ],
+          "partitionKey": false,
+          "primaryKey": false,
+          "type": "VarChar"
+        },
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "elementType": "VarChar",
+          "id": 114,
+          "name": "business_values",
+          "nullable": false,
+          "params": [
+            {
+              "key": "max_length",
+              "value": "256"
+            },
+            {
+              "key": "max_capacity",
+              "value": "64"
+            }
+          ],
+          "partitionKey": false,
+          "primaryKey": false,
+          "type": "Array"
+        },
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "id": 115,
+          "name": "audience_mode",
+          "nullable": false,
+          "params": [
+            {
+              "key": "max_length",
+              "value": "16"
+            }
+          ],
+          "partitionKey": false,
+          "primaryKey": false,
+          "type": "VarChar"
+        },
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "elementType": "VarChar",
+          "id": 116,
+          "name": "audience_values",
+          "nullable": false,
+          "params": [
+            {
+              "key": "max_length",
+              "value": "256"
+            },
+            {
+              "key": "max_capacity",
+              "value": "64"
+            }
+          ],
+          "partitionKey": false,
+          "primaryKey": false,
+          "type": "Array"
+        },
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "id": 117,
+          "name": "valid_from_us",
+          "nullable": true,
+          "partitionKey": false,
+          "primaryKey": false,
+          "type": "Int64"
+        },
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "id": 118,
+          "name": "valid_until_us",
+          "nullable": true,
+          "partitionKey": false,
+          "primaryKey": false,
+          "type": "Int64"
+        },
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "id": 119,
+          "name": "chunk_owner_id",
+          "nullable": true,
+          "params": [
+            {
+              "key": "max_length",
+              "value": "800"
+            }
+          ],
+          "partitionKey": false,
+          "primaryKey": false,
+          "type": "VarChar"
+        },
+        {
+          "autoId": false,
+          "clusteringKey": false,
+          "description": "",
+          "elementType": "VarChar",
+          "id": 120,
+          "name": "filter_present",
+          "nullable": false,
+          "params": [
+            {
+              "key": "max_length",
+              "value": "1024"
+            },
+            {
+              "key": "max_capacity",
+              "value": "256"
+            }
+          ],
+          "partitionKey": false,
+          "primaryKey": false,
+          "type": "Array"
+        }
+      ]
+    }
+  },
+  "service_pid": 48060,
+  "fatal_error": "Original writable content must be restored"
+}

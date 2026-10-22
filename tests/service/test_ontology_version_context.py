@@ -1,3 +1,4 @@
+from ontology_seed import seed_ontology
 from contextlib import contextmanager
 
 import pytest
@@ -25,7 +26,7 @@ def _system(tmp_path, name='ontology-context.sqlite'):
         'name': '本体知识上下文', 'use_default_ontology': False,
     }).json()['id']
     repository = app.state.service.repository
-    ontology = repository.save_ontology(project_id, TTL, {})
+    ontology = seed_ontology(repository, project_id, TTL, {})
     return client, app.state.service, project_id, ontology
 
 
@@ -64,7 +65,7 @@ def test_current_context_has_complete_shape_and_skips_plan(tmp_path, monkeypatch
 def test_bound_counts_kinds_after_ontology_scope_removes_dangling_facts(tmp_path):
     client, service, project_id, first = _system(tmp_path, 'bound-kinds.sqlite')
     repository = service.repository
-    second = repository.save_ontology(project_id, TTL, {})
+    second = seed_ontology(repository, project_id, TTL, {})
     rows = [
         {'id': 'a', 'kind': 'entity', 'type': 'Thing', 'text': '甲',
          'ontology_id': first['id']},
@@ -102,7 +103,7 @@ def test_bound_counts_kinds_after_ontology_scope_removes_dangling_facts(tmp_path
 def test_history_counts_revisions_records_and_records_migrated_away(tmp_path):
     client, service, project_id, first = _system(tmp_path, 'history.sqlite')
     repository = service.repository
-    second = repository.save_ontology(project_id, TTL, {})
+    second = seed_ontology(repository, project_id, TTL, {})
     repository.put_record(project_id, {
         'id': 'moving', 'kind': 'entity', 'type': 'Thing', 'text': '第一稿',
         'ontology_id': first['id'],
@@ -135,7 +136,7 @@ def test_history_counts_revisions_records_and_records_migrated_away(tmp_path):
 def test_migrated_away_uses_only_current_visible_knowledge_rows(tmp_path):
     client, service, project_id, first = _system(tmp_path, 'visible-history.sqlite')
     repository = service.repository
-    second = repository.save_ontology(project_id, TTL, {})
+    second = seed_ontology(repository, project_id, TTL, {})
     repository.put_record(project_id, {
         'id': 'deleted', 'kind': 'entity', 'type': 'Thing', 'text': '旧知识',
         'ontology_id': first['id'],
@@ -169,7 +170,7 @@ def test_migrated_away_uses_only_current_visible_knowledge_rows(tmp_path):
 
 def test_migration_counts_group_record_counts_for_only_the_target(tmp_path, monkeypatch):
     client, service, project_id, first = _system(tmp_path, 'migration-counts.sqlite')
-    second = service.repository.save_ontology(project_id, TTL, {})
+    second = seed_ontology(service.repository, project_id, TTL, {})
 
     def plan(self, requested_project_id):
         assert requested_project_id == project_id
@@ -187,7 +188,7 @@ def test_migration_counts_group_record_counts_for_only_the_target(tmp_path, monk
 
 def test_unreadable_migration_plan_does_not_hide_other_context(tmp_path, monkeypatch):
     client, service, project_id, first = _system(tmp_path, 'plan-failure.sqlite')
-    service.repository.save_ontology(project_id, TTL, {})
+    seed_ontology(service.repository, project_id, TTL, {})
     service.repository.put_record(project_id, {
         'id': 'old', 'kind': 'entity', 'type': 'Thing', 'text': '旧知识',
         'ontology_id': first['id'],
@@ -213,7 +214,7 @@ def test_context_moves_from_old_to_new_after_reclassification(tmp_path):
             'id': record_id, 'kind': 'entity', 'type': 'Thing', 'text': record_id,
             'ontology_id': first['id'],
         })
-    second = repository.save_ontology(project_id, TTL, {})
+    second = seed_ontology(repository, project_id, TTL, {})
 
     old_before = client.get(_context_path(project_id, first['id'])).json()
     new_before = client.get(_context_path(project_id, second['id'])).json()
@@ -239,7 +240,7 @@ def test_unknown_and_cross_project_ontologies_are_404_without_history_leak(tmp_p
     client, service, project_id, _ = _system(tmp_path, 'project-scope.sqlite')
     repository = service.repository
     other_project = repository.create_project('其他项目')
-    foreign = repository.save_ontology(other_project['id'], TTL, {})
+    foreign = seed_ontology(repository, other_project['id'], TTL, {})
     repository.put_record(project_id, {
         'id': 'ghost-record', 'kind': 'entity', 'type': 'Thing', 'text': '幽灵版本',
         'ontology_id': 'ghost-ontology',
@@ -261,7 +262,7 @@ def test_every_context_read_runs_inside_one_repository_snapshot(tmp_path, monkey
         'id': 'old', 'kind': 'entity', 'type': 'Thing', 'text': '旧知识',
         'ontology_id': first['id'],
     })
-    repository.save_ontology(project_id, TTL, {})
+    seed_ontology(repository, project_id, TTL, {})
     state = {'inside': False, 'entries': 0}
     scopes = []
     original_snapshot = repository.read_snapshot

@@ -1,3 +1,4 @@
+from ontology_seed import seed_ontology
 import pytest
 
 from knowledge_service.integrations.embeddings import HashingEncoder
@@ -17,13 +18,13 @@ def system(tmp_path):
     ttl = ('@prefix ex: <http://ex/> . '
            '@prefix owl: <http://www.w3.org/2002/07/owl#> . '
            'ex:Merchant a owl:Class .')
-    repo.save_ontology(project_id, ttl, Ontology(ttl).summary())
+    seed_ontology(repo, project_id, ttl, Ontology(ttl).summary())
     yield repo, service, project_id
     repo.close()
 
 
 def _scope(platform):
-    return {'applicability': {'platforms': [platform]}}
+    return {'applicability': {'platforms': {'mode': 'specific', 'values': [platform]}}}
 
 
 def test_scoped_and_search_keep_platforms_separate(system):
@@ -38,11 +39,12 @@ def test_scoped_and_search_keep_platforms_separate(system):
     ])
 
     scoped = service.scoped(project_id, {
-        'kinds': ['chunk'], 'applicability': {'platforms': ['美团']}})
+        'kinds': ['chunk'], 'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}}})
     assert [row['id'] for row in scoped] == ['meituan']
 
     result = service.search(project_id, {
-        'query': '美团直播规范', 'retrieval_mode': 'keyword', 'k': 10})
+        'query': '美团直播规范', 'retrieval_mode': 'keyword', 'k': 10,
+        'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}}})
     assert [row['id'] for row in result['hits']] == ['meituan']
 
 
@@ -66,7 +68,7 @@ def test_multi_platform_search_ranks_each_platform_and_keeps_empty_groups(system
     result = service.search(project_id, {
         'query': '直播管理', 'retrieval_mode': 'keyword', 'k': 1,
         'k_chunks': 1,
-        'applicability': {'platforms': ['美团', '京东', '淘宝']},
+        'applicability': {'platforms': {'mode': 'specific', 'values': ['美团', '京东', '淘宝']}},
     })
 
     groups = {group['platform']: group['hits'] for group in result['platform_groups']}
@@ -84,8 +86,8 @@ def test_document_scope_and_effective_time_are_inherited_by_chunks(system):
     _, service, project_id = system
     result = service.ingest(project_id, {
         'title': '美团直播规则', 'text': '第一条 直播间应如实宣传。',
-        'extract': False, 'extraction_mode': 'documents',
-        'applicability': {'platforms': ['美团'], 'businesses': ['直播']},
+        'extraction_mode': 'documents',
+        'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}, 'businesses': {'mode': 'specific', 'values': ['直播']}},
         'published_at': '2026-09-01',
     })
 
@@ -142,7 +144,7 @@ def test_governance_rejects_cross_platform_entity_merge(system):
         Governance(service).merge(project_id, 'a', 'b', {'a': 1, 'b': 1})
 
 
-def test_question_context_resolves_platform_before_graph_or_ranking(system):
+def test_question_context_uses_selected_platform_before_graph_or_ranking(system):
     _, service, project_id = system
     service.write(project_id, [
         {'id': 'mt-rule', 'kind': 'chunk', 'text': '美团直播规范：禁止虚假宣传',
@@ -154,11 +156,23 @@ def test_question_context_resolves_platform_before_graph_or_ranking(system):
     context = question_context(service, project_id, {
         'query': '美团直播规范', 'retrieval_mode': 'keyword', 'k': 10,
         'k_entities': 0, 'k_chunks': 10, 'hops': 2,
+        'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}},
     })
 
     assert [row['id'] for row in context['hits']] == ['mt-rule']
     assert context['applicability']['platforms'] == {
         'mode': 'specific', 'values': ['美团']}
+
+
+def test_question_words_do_not_override_explicit_platform_scope(system):
+    _, service, project_id = system
+    service.write(project_id, [
+        {'id':'mt','kind':'chunk','text':'美团直播规范','metadata':_scope('美团')},
+        {'id':'jd','kind':'chunk','text':'京东对美团直播规范的比较','metadata':_scope('京东')},
+    ])
+    result=service.search(project_id, {'query':'美团直播规范','retrieval_mode':'keyword',
+        'applicability':{'platforms':{'mode': 'specific', 'values': ['京东']}},'k':10})
+    assert [row['id'] for row in result['hits']] == ['jd']
 
 
 def test_extractor_cannot_override_upload_applicability(monkeypatch, system):
@@ -172,7 +186,7 @@ def test_extractor_cannot_override_upload_applicability(monkeypatch, system):
     result = service.ingest(project_id, {
         'title': '美团直播规则', 'text': '直播应当合规', 'extraction_mode': 'ontology',
         'resolve_entities': False,
-        'applicability': {'platforms': ['美团']}, 'published_at': '2026-09-01',
+        'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}}, 'published_at': '2026-09-01',
     })
 
     entity = next(row for row in result['records'] if row['kind'] == 'entity')
@@ -224,7 +238,7 @@ def test_multi_platform_question_context_keeps_evidence_groups_separate(system):
     context = question_context(service, project_id, {
         'query': '直播管理', 'retrieval_mode': 'keyword', 'k': 1,
         'k_entities': 0, 'k_chunks': 1, 'hops': 0,
-        'applicability': {'platforms': ['美团', '京东', '淘宝']},
+        'applicability': {'platforms': {'mode': 'specific', 'values': ['美团', '京东', '淘宝']}},
     })
 
     groups = {group['platform']: group for group in context['platform_groups']}

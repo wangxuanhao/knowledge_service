@@ -20,7 +20,7 @@ def main():
         path = '/api/projects/'+project['id']
         for city in ('北京','上海'):
             post(path+'/documents', {'title':city+'退款规则（演示）','text':city+'示例规则：未消费订单可申请退款。',
-                                    'extract':False, 'valid_from':'2025-01-01', 'valid_until':'2027-01-01',
+                                    'extraction_mode':'documents', 'valid_from':'2025-01-01', 'valid_until':'2027-01-01',
                                     'metadata':{'region':{'city':city}, 'tags':['退款','演示']}})
         query = {'query':'怎样退钱','valid_at':'2026-09-01',
                  'filters':{'field':'region.city','op':'eq','value':'北京'}}

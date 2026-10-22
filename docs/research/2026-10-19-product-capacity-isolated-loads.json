@@ -1,0 +1,448 @@
+{
+  "scope": "real product HTTP → PostgreSQL scoped pages → worker → WebGL",
+  "project_id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+  "page_errors": [],
+  "loads": [
+    {
+      "loaded_entities": 150001,
+      "loaded_relations": 300000,
+      "drawn_entities": 150001,
+      "drawn_relations": 300000,
+      "relation_layer": "complete-world-cache",
+      "cached_relations": 300000,
+      "layout": "stable-id-v1",
+      "last_pick_ms": 0,
+      "gpu": "WebKit WebGL",
+      "context_lost": false,
+      "project_id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+      "scope": {
+        "applicability": null,
+        "filters": null,
+        "valid_at": null,
+        "known_at": null,
+        "include_unknown": true,
+        "ontology_scope": "all",
+        "ontology_ids": null
+      },
+      "manifest_entities": 150001,
+      "manifest_relations": 300000,
+      "unique_entities": 150001,
+      "unique_relations": 300000,
+      "dangling_edges": 0,
+      "gl_error": 0,
+      "heap_bytes": 152715425,
+      "label": "fixed corpus repetition 1",
+      "first_visible_seconds": 18.301,
+      "complete_seconds": 48.187,
+      "resources": {
+        "browser_rss_bytes": 2920525824,
+        "js_heap_bytes": 152715425,
+        "server_rss_bytes": 2039033856
+      }
+    },
+    {
+      "loaded_entities": 150001,
+      "loaded_relations": 300000,
+      "drawn_entities": 150001,
+      "drawn_relations": 300000,
+      "relation_layer": "complete-world-cache",
+      "cached_relations": 300000,
+      "layout": "stable-id-v1",
+      "last_pick_ms": 0,
+      "gpu": "WebKit WebGL",
+      "context_lost": false,
+      "project_id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+      "scope": {
+        "applicability": null,
+        "filters": null,
+        "valid_at": null,
+        "known_at": null,
+        "include_unknown": true,
+        "ontology_scope": "all",
+        "ontology_ids": null
+      },
+      "manifest_entities": 150001,
+      "manifest_relations": 300000,
+      "unique_entities": 150001,
+      "unique_relations": 300000,
+      "dangling_edges": 0,
+      "gl_error": 0,
+      "heap_bytes": 204420787,
+      "label": "fixed corpus repetition 2",
+      "first_visible_seconds": 1.218,
+      "complete_seconds": 25.5,
+      "resources": {
+        "browser_rss_bytes": 3000057856,
+        "js_heap_bytes": 204420787,
+        "server_rss_bytes": 2034855936
+      }
+    },
+    {
+      "loaded_entities": 150001,
+      "loaded_relations": 300000,
+      "drawn_entities": 150001,
+      "drawn_relations": 300000,
+      "relation_layer": "complete-world-cache",
+      "cached_relations": 300000,
+      "layout": "stable-id-v1",
+      "last_pick_ms": 0,
+      "gpu": "WebKit WebGL",
+      "context_lost": false,
+      "project_id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+      "scope": {
+        "applicability": null,
+        "filters": null,
+        "valid_at": null,
+        "known_at": null,
+        "include_unknown": true,
+        "ontology_scope": "all",
+        "ontology_ids": null
+      },
+      "manifest_entities": 150001,
+      "manifest_relations": 300000,
+      "unique_entities": 150001,
+      "unique_relations": 300000,
+      "dangling_edges": 0,
+      "gl_error": 0,
+      "heap_bytes": 146842632,
+      "label": "fixed corpus repetition 3",
+      "first_visible_seconds": 0.992,
+      "complete_seconds": 26.562,
+      "resources": {
+        "browser_rss_bytes": 2926923776,
+        "js_heap_bytes": 146842632,
+        "server_rss_bytes": 2028843008
+      }
+    },
+    {
+      "loaded_entities": 150001,
+      "loaded_relations": 300000,
+      "drawn_entities": 150001,
+      "drawn_relations": 300000,
+      "relation_layer": "complete-world-cache",
+      "cached_relations": 300000,
+      "layout": "stable-id-v1",
+      "last_pick_ms": 0,
+      "gpu": "WebKit WebGL",
+      "context_lost": false,
+      "project_id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+      "scope": {
+        "applicability": null,
+        "filters": null,
+        "valid_at": null,
+        "known_at": null,
+        "include_unknown": true,
+        "ontology_scope": "all",
+        "ontology_ids": null
+      },
+      "manifest_entities": 150001,
+      "manifest_relations": 300000,
+      "unique_entities": 150001,
+      "unique_relations": 300000,
+      "dangling_edges": 0,
+      "gl_error": 0,
+      "heap_bytes": 180906550,
+      "label": "fixed corpus repetition 4",
+      "first_visible_seconds": 1.09,
+      "complete_seconds": 28.218,
+      "resources": {
+        "browser_rss_bytes": 2928898048,
+        "js_heap_bytes": 180906550,
+        "server_rss_bytes": 2028863488
+      }
+    },
+    {
+      "loaded_entities": 150001,
+      "loaded_relations": 300000,
+      "drawn_entities": 150001,
+      "drawn_relations": 300000,
+      "relation_layer": "complete-world-cache",
+      "cached_relations": 300000,
+      "layout": "stable-id-v1",
+      "last_pick_ms": 0,
+      "gpu": "WebKit WebGL",
+      "context_lost": false,
+      "project_id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+      "scope": {
+        "applicability": null,
+        "filters": null,
+        "valid_at": null,
+        "known_at": null,
+        "include_unknown": true,
+        "ontology_scope": "all",
+        "ontology_ids": null
+      },
+      "manifest_entities": 150001,
+      "manifest_relations": 300000,
+      "unique_entities": 150001,
+      "unique_relations": 300000,
+      "dangling_edges": 0,
+      "gl_error": 0,
+      "heap_bytes": 182615286,
+      "label": "fixed corpus repetition 5",
+      "first_visible_seconds": 1.044,
+      "complete_seconds": 36.422,
+      "resources": {
+        "browser_rss_bytes": 2927054848,
+        "js_heap_bytes": 182615286,
+        "server_rss_bytes": 2028032000
+      }
+    }
+  ],
+  "completed": true,
+  "targets": {
+    "complete_seconds": 30,
+    "frame_p95_ms": 33,
+    "selection_p95_ms": 200,
+    "js_heap_bytes": 1572864000,
+    "browser_rss_bytes": 3221225472,
+    "stability_seconds": 1800
+  },
+  "started_at": "2026-10-19T09:23:52.329575+00:00",
+  "http_retrieval": [
+    {
+      "temperature": "first request after startup",
+      "mode": "semantic",
+      "seconds": 13.922,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "backend": "milvus",
+      "includes_query_encoding": true
+    },
+    {
+      "temperature": "warm sequential",
+      "mode": "semantic",
+      "seconds": 0.546,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "backend": "milvus",
+      "includes_query_encoding": true
+    },
+    {
+      "temperature": "warm sequential",
+      "mode": "semantic",
+      "seconds": 0.797,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "backend": "milvus",
+      "includes_query_encoding": true
+    },
+    {
+      "temperature": "warm sequential",
+      "mode": "semantic",
+      "seconds": 0.594,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "backend": "milvus",
+      "includes_query_encoding": true
+    },
+    {
+      "temperature": "warm sequential",
+      "mode": "semantic",
+      "seconds": 0.609,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "backend": "milvus",
+      "includes_query_encoding": true
+    },
+    {
+      "temperature": "warm sequential",
+      "mode": "semantic",
+      "seconds": 0.766,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "backend": "milvus",
+      "includes_query_encoding": true
+    },
+    {
+      "temperature": "warm sequential",
+      "mode": "hybrid",
+      "seconds": 0.703,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "backend": "milvus",
+      "includes_query_encoding": true
+    },
+    {
+      "temperature": "warm sequential",
+      "mode": "hybrid",
+      "seconds": 0.703,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "backend": "milvus",
+      "includes_query_encoding": true
+    },
+    {
+      "temperature": "warm sequential",
+      "mode": "hybrid",
+      "seconds": 0.578,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "backend": "milvus",
+      "includes_query_encoding": true
+    },
+    {
+      "temperature": "warm sequential",
+      "mode": "hybrid",
+      "seconds": 0.704,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "backend": "milvus",
+      "includes_query_encoding": true
+    },
+    {
+      "temperature": "warm sequential",
+      "mode": "hybrid",
+      "seconds": 0.609,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "backend": "milvus",
+      "includes_query_encoding": true
+    },
+    {
+      "temperature": "concurrent 4",
+      "mode": "semantic",
+      "seconds": 0.719,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "backend": "milvus",
+      "includes_query_encoding": true
+    },
+    {
+      "temperature": "concurrent 4",
+      "mode": "hybrid",
+      "seconds": 1.171,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "backend": "milvus",
+      "includes_query_encoding": true
+    },
+    {
+      "temperature": "concurrent 4",
+      "mode": "semantic",
+      "seconds": 1.781,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "backend": "milvus",
+      "includes_query_encoding": true
+    },
+    {
+      "temperature": "concurrent 4",
+      "mode": "hybrid",
+      "seconds": 2.125,
+      "channel_counts": {
+        "entity": 10,
+        "relation": 10
+      },
+      "backend": "milvus",
+      "includes_query_encoding": true
+    }
+  ],
+  "http_warm_p95_seconds": {
+    "semantic": 0.797,
+    "hybrid": 0.704
+  },
+  "environment": {
+    "browser_version": "150.0.4078.65",
+    "viewport": {
+      "width": 1500,
+      "height": 1000
+    },
+    "cpu": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel",
+    "logical_cpus": 16,
+    "host_ram_bytes": 34016882688,
+    "measurement_notes": "Read-only isolated five-load measurement after the earlier governed edit plus one before-optimization profiling revision; 150001 entities and 300000 relations. No pytest or additional browser workload. Node contract tests had already exited. The separate stability report preserves all earlier stress results."
+  },
+  "gpu": {
+    "devices": [
+      {
+        "vendorId": 32902,
+        "deviceId": 42912,
+        "subSysId": 1354635178,
+        "revision": 4,
+        "vendorString": "",
+        "deviceString": "Intel(R) Iris(R) Xe Graphics",
+        "driverVendor": "Intel",
+        "driverVersion": "32.0.101.7085"
+      },
+      {
+        "vendorId": 5140,
+        "deviceId": 140,
+        "subSysId": 0,
+        "revision": 0,
+        "vendorString": "",
+        "deviceString": "Microsoft Basic Render Driver",
+        "driverVendor": "",
+        "driverVersion": "10.0.26100.9711"
+      }
+    ],
+    "feature_status": {
+      "2d_canvas": "enabled",
+      "direct_rendering_display_compositor": "disabled_off_ok",
+      "gpu_compositing": "enabled",
+      "multiple_raster_threads": "enabled_on",
+      "opengl": "enabled_on",
+      "rasterization": "enabled",
+      "raw_draw": "disabled_off_ok",
+      "skia_graphite": "disabled_off",
+      "trees_in_viz": "disabled_off",
+      "video_decode": "enabled",
+      "video_encode": "enabled",
+      "webgl": "enabled",
+      "webgpu": "enabled",
+      "webnn": "disabled_off"
+    },
+    "memory_limit": "Dedicated GPU allocation is not exposed by this browser API."
+  },
+  "read_only_loads": true,
+  "expected_counts": {
+    "entities": 150001,
+    "relations": 300000
+  },
+  "load_distribution": {
+    "samples": 5,
+    "first_visible_p50_seconds": 1.09,
+    "first_visible_p95_seconds": 18.301,
+    "complete_p50_seconds": 28.218,
+    "complete_p95_seconds": 48.187
+  },
+  "measured_targets": {
+    "load": false,
+    "js_heap": true,
+    "browser_rss": true,
+    "http_warm_retrieval": true
+  },
+  "scenario_targets_met": false,
+  "complete_spec_coverage": false,
+  "separately_measured_or_pending": [
+    "This read-only run measures full product loads and HTTP retrieval only; interaction, stability, editing and stress results remain in the separate product report."
+  ]
+}

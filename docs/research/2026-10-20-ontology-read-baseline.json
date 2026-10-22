@@ -1,0 +1,45 @@
+{
+  "project_id": "463f2e99-ec8b-4ca2-9c0d-e469bc4d1411",
+  "read_only": true,
+  "reads": [
+    {
+      "route": "published_ontology",
+      "status": 200,
+      "bytes": 26221,
+      "seconds": 0.07
+    },
+    {
+      "route": "draft_list",
+      "status": 200,
+      "bytes": 748,
+      "seconds": 0.015
+    },
+    {
+      "route": "canvas_draft",
+      "status": 200,
+      "bytes": 18380,
+      "seconds": 0.269
+    },
+    {
+      "route": "publish_readiness",
+      "status": 200,
+      "bytes": 991,
+      "seconds": 0.599
+    },
+    {
+      "route": "stage_availability",
+      "status": 200,
+      "bytes": 772,
+      "seconds": 0.096
+    },
+    {
+      "route": "discovery_compact",
+      "status": 200,
+      "bytes": 513,
+      "seconds": 0.093
+    }
+  ],
+  "published_classes": 29,
+  "draft_id": "75051842-dcd3-4e61-845a-20472db31dec",
+  "revision": 2
+}

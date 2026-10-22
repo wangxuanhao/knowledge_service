@@ -7,7 +7,7 @@
  *                             focus(iri), destroy() }
  *
  * 数据从哪来：只读消费主控 window.OntologyModel 的 S（state.graph / state.selected /
- * state.view）。节点 = 类，边 = 继承（实线）/ 关系（紫虚线）/ 待收下（黄虚线）。
+ * state.view）。节点 = 类卡片，边 = 继承（鼠尾草虚线）/ 业务关系（青绿实线）。
  * 选中、发命令的唯一入口也是主控：ctx.select(iri)（选中）、ctx.sendCommand(cmd)（编辑）。
  * 本文件不自己算门禁、不自己拼术语 IRI、不自己读后端 —— 口径只有一处出处（契约 §4）。
  *
@@ -32,7 +32,7 @@
   const NS = 'http://www.w3.org/2000/svg';
 
   // 分层带布局常量：搬 ontology-design.js 的口径（卡片尺寸/间距/每带张数只有一处出处）。
-  const NODE_W = 168, NODE_H = 42, GAP_X = 28, GAP_Y = 70, MAX_PER_ROW = 4;
+  const NODE_W = 196, NODE_H = 162, GAP_X = 48, GAP_Y = 78, MAX_PER_ROW = 4;
   const MIN_ZOOM = 0.25, MAX_ZOOM = 3;
   // 层带相对卡片区左右各外扩这么多；fit 时要连它一起算，否则"层级树"会偏（见 fitBox）。
   const BAND_PAD = 14, BAND_FIT_PAD = 24;
@@ -48,8 +48,8 @@
   // 浅青（teal）语义色：与整站 theme.css 同一套（白纸面 + 深青/靛蓝/橄榄黄）。
   // 节点默认面 = 白；青=类/继承，靛蓝=关系，teal=属性，橄榄黄=待收下，深青=选中发光。
   const C = {
-    bg: '#f3f7f8', node: '#ffffff', cyan: '#0e7c7b', purple: '#6366f1',
-    green: '#0d9488', teal: '#14b8a6', amber: '#ca8a04', ink: '#124242',
+    bg: '#fdfefc', node: '#ffffff', cyan: '#2a776b', purple: '#6d8d9d',
+    green: '#2a776b', teal: '#758d72', amber: '#a58a54', ink: '#264d3d',
   };
 
   // 模块级状态（不用 this，避免方法被解构后丢上下文）。
@@ -57,7 +57,8 @@
     ready: false, host: null, ctx: null, cy: null, stage: null, svg: null, ro: null,
     onResize: null, view: 'graph', sig: '', graph: null, selected: null,
     mode: '', linkFrom: null, pending: null, bands: [], els: {}, didFit: false,
-    layoutView: null, dragged: false,
+    layoutView: null, dragged: false, display: 'cards', suspended: false,
+    pendingFit: false, fitFrame: null,
     bandLayer: null, bandByNode: new Map(), dirtyBands: new Set(), bandFrame: null,
     bandTransform: '', bandZoom: null,
   };
@@ -104,6 +105,24 @@
     else if (typeof console !== 'undefined') console.log('[canvas]', msg);
   }
 
+  const xml = value => String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
+  const trimText = (value,max) => {const chars=Array.from(String(value??''));return chars.length>max?chars.slice(0,max-1).join('')+'…':chars.join('');};
+  function classCard(node) {
+    const attrs=node.attributes||[],rows=attrs.slice(0,4),inherited=node.inheritedAttributes||[];
+    const height=76+Math.max(1,rows.length)*21+(attrs.length>4?18:0);
+    const color=node.state==='pending'?C.amber:(node.parents||[]).length?C.teal:C.cyan;
+    const text=(x,y,value,size=11,fill='#567263',anchor='start')=>`<text x="${x}" y="${y}" font-size="${size}" fill="${fill}" text-anchor="${anchor}">${xml(value)}</text>`;
+    let svg=`<svg xmlns="${NS}" width="${NODE_W}" height="${height}" viewBox="0 0 ${NODE_W} ${height}"><rect width="${NODE_W}" height="${height}" rx="7" fill="#ffffff"/><path d="M7 1.5H${NODE_W-7}" stroke="${color}" stroke-width="3"/><g font-family="Microsoft YaHei, Segoe UI, sans-serif">`;
+    svg+=text(11,25,'◇',17,color)+text(32,24,trimText(node.label||shortIri(node.id),11),13,C.ink);
+    svg+=`<path d="M0 37H${NODE_W}" stroke="#e6ece6"/>`;
+    rows.forEach((attr,i)=>{const y=56+i*21;svg+=text(11,y,trimText(attr.label_zh||attr.label||attr.id,8)+(attr.required?' *':''));svg+=text(NODE_W-10,y,trimText(attr.datatype||attr.dtype||'未声明',12),10,'#7c9182','end');});
+    if(!rows.length)svg+=text(11,57,node.state==='pending'?'待纳入本体的候选':'尚未声明直属属性',10,'#8c9c90');
+    if(attrs.length>4)svg+=text(11,56+rows.length*21,`另有 ${attrs.length-4} 项直属属性`,10,'#8c9c90');
+    const parents=(node.parents||[]).length;
+    svg+=text(11,height-13,inherited.length?`继承 ${inherited.length} 项属性 · ${parents} 个父类`:parents?`${parents} 个父类 · 无继承属性`:'顶层类',10,'#8c9c90');
+    return {image:'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg+'</g></svg>'),height};
+  }
+
   // ---- Cytoscape 样式（浅青 teal + 白纸卡片 + 柔和投影）---------------------
   // 设计：节点是一张张「浮在浅青网格上的白纸卡」，靠投影而非粗边框表达层次；
   //   类型只染 1.5px 描边与一条隐形的「类型色」（类=青/关系=靛蓝/属性=teal）。
@@ -112,7 +131,7 @@
   function cyStyle() {
     return [
       { selector: 'node', style: {
-        'width': NODE_W, 'height': NODE_H, 'shape': 'round-rectangle',
+        'width': 'data(nodeWidth)', 'height': 'data(nodeHeight)', 'shape': 'round-rectangle',
         // 白纸卡：顶光微渐变 + 细青灰描边 + 柔和下落阴影（=卡片浮起）
         'background-fill': 'linear-gradient',
         'background-gradient-stop-colors': '#ffffff #f6fbfa',
@@ -121,14 +140,21 @@
         'background-color': '#ffffff',
         'border-width': 1.5, 'border-color': '#9fb9b8', 'border-style': 'solid',
         'label': 'data(label)', 'color': C.ink,
-        'font-size': 12, 'font-family': 'Inter, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif',
+        'font-size': 12, 'font-family': '"Microsoft YaHei", "Segoe UI", sans-serif',
         'font-weight': 600,
         'text-valign': 'center', 'text-halign': 'center',
         'text-wrap': 'ellipsis', 'text-max-width': (NODE_W - 20) + 'px',
         'text-margin-y': 0,
-        // 卡片投影（浅青环境下柔和、不发脏）
-        'shadow-blur': 14, 'shadow-color': 'rgba(13, 60, 58, .18)',
-        'shadow-opacity': 1, 'shadow-offset-x': 0, 'shadow-offset-y': 4,
+      } },
+      { selector: 'node[display="cards"]', style: {
+        'label':'', 'background-image':'data(cardImage)', 'background-fit':'contain',
+        'background-width':'100%', 'background-height':'100%', 'background-image-opacity':1,
+        'border-color':'#d1ded3', 'border-width':1,
+      } },
+      { selector: 'node[display="compact"]', style: {
+        'shape':'ellipse','background-color':'#eff5ef','background-fill':'solid',
+        'border-color':C.cyan,'label':'data(label)','font-size':12,'color':C.ink,
+        'text-valign':'bottom','text-margin-y':9,'text-max-width':'130px',
       } },
       // 类型描边区分：类=青，关系=靛蓝，属性=teal（只改描边色，纸卡不变）。
       { selector: 'node[kind="relation"]', style: { 'border-color': C.purple } },
@@ -142,29 +168,29 @@
       // 选中：青色描边加粗 + 青色辉光（那圈光晕），纸卡保持白底。
       { selector: 'node[state="selected"]', style: {
         'border-color': C.green, 'border-width': 2.5, 'color': '#0f5a57',
-        'shadow-blur': 22, 'shadow-color': 'rgba(13, 148, 136, .55)',
-        'shadow-opacity': 1, 'shadow-offset-x': 0, 'shadow-offset-y': 0,
       } },
       // 悬停：微微提亮描边，给可点的节点一个反馈（不改变布局）。
       { selector: 'node:active', style: { 'overlay-opacity': 0 } },
       { selector: 'node:selected', style: { 'overlay-opacity': 0 } },
       { selector: 'edge', style: {
         'width': 2, 'curve-style': 'bezier', 'line-color': '#5f9b98',
-        'target-arrow-color': '#5f9b98', 'target-arrow-shape': 'triangle', 'arrow-scale': 1.05,
+        'target-arrow-color': C.cyan, 'target-arrow-shape': 'data(targetArrow)',
+        'source-arrow-shape':'data(sourceArrow)', 'source-arrow-color':C.teal, 'arrow-scale': 1.05,
         'line-cap': 'round',
       } },
-      // 继承：父→子，深青实线 + 箭头（这就是「层级关系」本身）。
+      // 布局仍存父→子；空心 source 箭头朝父类表达 rdfs:subClassOf。
       { selector: 'edge[kind="inherit"]', style: {
-        'line-color': C.cyan, 'target-arrow-color': C.cyan, 'line-style': 'solid',
+        'line-color': C.teal, 'line-style': 'dashed', 'source-arrow-fill':'hollow',
+        'label':'继承','color':'#83917f','font-size':10,'text-background-color':'#fdfefc','text-background-opacity':1,'text-background-padding':3,
       } },
-      // 关系：domain→range，靛蓝虚线，带关系名标签，白底标签好读。
+      // 业务关系沿 domain→range，使用实心 target 箭头。
       { selector: 'edge[kind="relation"]', style: {
-        'line-color': C.purple, 'line-style': 'dashed', 'target-arrow-shape': 'none',
-        'label': 'data(label)', 'color': '#4f46e5', 'font-size': 11,
-        'font-family': 'Inter, "Microsoft YaHei", sans-serif', 'text-rotation': 'autorotate',
+        'line-color': C.cyan, 'line-style': 'solid', 'target-arrow-color':C.cyan,
+        'label': 'data(label)', 'color': '#607c6c', 'font-size': 11,
+        'font-family': '"Microsoft YaHei", "Segoe UI", sans-serif', 'text-rotation': 'autorotate',
         'text-background-color': '#ffffff', 'text-background-opacity': .92,
         'text-background-padding': 3, 'text-background-shape': 'roundrectangle',
-        'text-border-color': 'rgba(99,102,241,.35)', 'text-border-width': 1, 'text-border-opacity': 1,
+        'text-border-color': '#e1e9df', 'text-border-width': 0, 'text-border-opacity': 1,
       } },
       // 待收下边：橄榄黄虚线 + 箭头。
       { selector: 'edge[kind="pending"]', style: {
@@ -189,12 +215,15 @@
 
     cy.batch(() => {
       for (const n of nodes) {
+        const card=classCard(n);
         const data = {
           id: n.id, label: n.label || shortIri(n.id), state: n.state || 'published',
           kind: n.kind || 'class', dtype: n.dtype || '', iri: n.iri || n.id,
+          display:M.display,cardImage:card.image,nodeWidth:M.display==='compact'?62:NODE_W,
+          nodeHeight:M.display==='compact'?62:card.height,
         };
         const el = cy.getElementById(n.id);
-        if (el.length) el.data(data);
+        if (el.length) for(const [key,value] of Object.entries(data))el.data(key,value);
         else {
           const existing = cy.nodes();
           const right = existing.length ? Math.max(...existing.map(x => x.position('x'))) + NODE_W + GAP_X : 0;
@@ -207,9 +236,10 @@
         const data = {
           id: e.id, source: e.source, target: e.target,
           kind: e.kind || 'inherit', label: e.label || '',
+          termIri:e.termIri||'',sourceArrow:e.kind==='inherit'?'triangle':'none',targetArrow:e.kind==='inherit'?'none':'triangle',
         };
         const el = cy.getElementById(e.id);
-        if (el.length) el.data(data);
+        if (el.length) for(const [key,value] of Object.entries(data))el.data(key,value);
         else cy.add({ group: 'edges', data });
       }
     });
@@ -293,9 +323,7 @@
     // 可用宽高（左右对称；顶部让出图例带、底部让出工具条）
     const availW = cw - PAD.left - PAD.right;
     const availH = ch - PAD.top - PAD.bottom;
-    let zoom = Math.min(availW / bw, availH / bh);
-    zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
-    cy.zoom(zoom);
+    const zoom = setFitZoom(Math.min(availW / bw, availH / bh));
 
     // 可用区中心：水平方向严格居中，垂直方向位于「图例之下、工具条之上」的区间中心。
     const centerX = cw / 2;
@@ -377,6 +405,9 @@
 
   function runLayout() {
     if (!M.cy) return;
+    // A previous selection may still be centering its node. The explicit
+    // layout owns the viewport now; that animation must not restore its zoom.
+    M.cy.stop(true, false);
     M.layoutView = M.view;
     if (M.view === 'hierarchy') layoutHierarchy();
     else layoutGraph();
@@ -511,6 +542,7 @@
 
   function fitAll() {
     if (!M.cy) return;
+    M.cy.stop(true, false);
     const eles = M.cy.elements();
     if (!eles.length) return;
     try {
@@ -518,6 +550,36 @@
       else M.cy.fit(eles, 40);
     } catch (e) { /* 忽略：空图时 fit 无意义 */ }
     syncBands();
+  }
+
+  // The normal wheel limit must not crop an explicitly requested overview.
+  // Change that limit only while fitting; display changes keep pan and zoom.
+  function setFitZoom(value) {
+    const zoom = Math.max(Number.EPSILON, Math.min(MAX_ZOOM, value));
+    M.cy.minZoom(Math.min(MIN_ZOOM, zoom));
+    M.cy.zoom(zoom);
+    return zoom;
+  }
+
+  // The controller reveals the canvas after calling setView/render. A fit
+  // while term cards still hide its host measures zero pixels, so finish it
+  // on the next frame (or the resize observer when the page becomes visible).
+  function finishPendingFit() {
+    if (!M.pendingFit || !M.cy || M.suspended || !M.stage.clientWidth || !M.stage.clientHeight) return;
+    M.cy.resize();
+    updateBar();
+    fitAll();
+    M.pendingFit = false;
+    M.didFit = true;
+  }
+
+  function requestMeasuredFit() {
+    M.pendingFit = true;
+    if (M.fitFrame !== null) return;
+    M.fitFrame = window.requestAnimationFrame(() => {
+      M.fitFrame = null;
+      finishPendingFit();
+    });
   }
 
   // 把**一块矩形区域**（层带外框）缩放到容器里并居中，返回是否成功。
@@ -531,9 +593,7 @@
     const w = el.clientWidth || 0, h = el.clientHeight || 0;
     if (!w || !h) return false;     // 容器还没量到尺寸：让调用方回落到 fitAll
     const bw = Math.max(1, box.x2 - box.x1), bh = Math.max(1, box.y2 - box.y1);
-    const zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM,
-      Math.min((w - pad * 2) / bw, (h - pad * 2) / bh)));
-    cy.zoom(zoom);
+    const zoom = setFitZoom(Math.min((w - pad * 2) / bw, (h - pad * 2) / bh));
     cy.pan({ x: (w - bw * zoom) / 2 - box.x1 * zoom,
              y: (h - bh * zoom) / 2 - box.y1 * zoom });
     return true;
@@ -588,6 +648,8 @@
   // 工具条「＋ 新建类」：右栏的「新建术语」表单只在**没有选中对象**时渲染，
   // 所以这里先清空选中，再让面板把表单调出来并聚焦到名称输入框（两步都不写数据）。
   function openCreate() {
+    if(M.ctx&&typeof M.ctx.openCreate==='function'){M.ctx.openCreate({kind:'class'});return;}
+    if(M.ctx&&typeof M.ctx.setInspector==='function')M.ctx.setInspector(true);
     if (M.ctx && typeof M.ctx.select === 'function') M.ctx.select(null);
     const panel = window.OntologyPanel;
     if (panel && typeof panel.focusCreate === 'function') panel.focusCreate();
@@ -683,24 +745,13 @@
     renderConfirm(); updateBar();
   }
 
-  // 建关系为何走 /ontology/terms 而不是 create_term 命令：
-  //   create_term 要求客户端自己给出 target_iri，而术语 IRI 的命名规则只在服务端
-  //   （ontology-design.js 的 createTerm 同款做法）。这条路由接受 draft_id +
-  //   expected_revision，会把改动编译成原子变更写进当前草案（仍要审核）。
   async function createRelation(labelZh, domainIri, rangeIri) {
-    const globalApi = typeof api !== 'undefined' ? api : (window.api || null);
-    const globalEndpoint = typeof endpoint !== 'undefined' ? endpoint : (window.endpoint || null);
-    if (!globalApi || !globalEndpoint) throw new Error('缺少 API 通道（api/endpoint 未就绪）');
-    const draft = M.ctx && M.ctx.S && M.ctx.S.draft;
-    if (!draft || !draft.id) throw new Error('还没有可编辑的草案，请先发一条编辑命令');
-    await globalApi(globalEndpoint('/ontology/terms'), {
-      kind: 'relation', uri: '', label: labelZh, label_zh: labelZh,
-      parent: '', domain: domainIri, range: rangeIri,
+    if (M.ctx && M.ctx.S && M.ctx.S.preview) throw new Error('历史版本只读，请先回到最新。');
+    if (!M.ctx || typeof M.ctx.createTerm !== 'function') throw new Error('主控未就绪，无法新建关系。');
+    await M.ctx.createTerm({
+      kind: 'relation', label: labelZh, label_zh: labelZh,
       domains: [domainIri], ranges: [rangeIri],
-      expected_ontology_id: draft.base_ontology_id || '',
-      draft_id: draft.id, expected_revision: draft.revision,
     });
-    if (typeof M.ctx.refresh === 'function') await M.ctx.refresh();
   }
 
   // ---- 工具条 / 图例 / 空态 -------------------------------------------------
@@ -711,9 +762,8 @@
 
     // 「新建类」是 P1 重写时漏掉的入口：以前整页只有「改父类（连线）」，而它要求先选中
     // 一个**已存在**的类 —— 于是空本体上"想加个父类"根本无从下手（用户原话："现在父类也加不了"）。
-    const btnNew = mkButton('＋ 新建类', openCreate, '', BAR_TITLES.create);
-    const btnParent = mkButton('改父类（连线）', startParentLink, '', BAR_TITLES.parent);
-    const btnRelation = mkButton('连关系', startRelationLink, '', BAR_TITLES.relation);
+    const btnParent = mkButton('编辑继承（连线）', startParentLink, '', BAR_TITLES.parent);
+    const btnRelation = mkButton('新增关联关系', startRelationLink, '', BAR_TITLES.relation);
     const btnFit = mkButton('适应画布', fitAll, '',
       '缩放和平移以显示全部节点，保留手动摆放的位置。');
     const btnLayout = mkButton('重新布局', runLayout, '',
@@ -722,11 +772,11 @@
       '做什么：退出连线模式，不写任何改动。');
     btnCancel.hidden = true;
 
-    bar.append(stats, hint, btnNew, btnParent, btnRelation, btnFit, btnLayout, btnCancel);
+    bar.append(stats, hint, btnParent, btnRelation, btnFit, btnLayout, btnCancel);
     const help = mkEl('div', 'om-canvas-help', '点节点选中 · 拖节点调整位置 · 拖空白平移 · 滚轮缩放；布局仅在当前视图保留，不修改本体。');
     stage.appendChild(help);
     stage.appendChild(bar);
-    Object.assign(M.els, { bar, stats, hint, btnNew, btnParent, btnRelation, btnCancel });
+    Object.assign(M.els, { bar, stats, hint, btnParent, btnRelation, btnCancel });
   }
 
   function buildLegend(stage) {
@@ -741,10 +791,10 @@
 
     const body = mkEl('div', 'om-canvas-legend-body');
     const items = [
-      ['line', '深青实线 = 父子（父→子）'],
-      ['line rel', '靛蓝虚线 = 关系（domain→range）'],
+      ['line inherit', '鼠尾草虚线 / 空心箭头 = 继承（子→父）'],
+      ['line rel', '青绿实线 / 实心箭头 = 业务关系（domain→range）'],
       ['line pending', '橄榄黄虚线 = 待收下候选'],
-      ['dot', '青绿发光 = 当前选中'],
+      ['dot', '青绿边框 = 当前选中 · * = 已声明必填'],
     ];
     for (const [cls, text] of items) {
       const row = mkEl('span', 'om-canvas-legend-item');
@@ -771,7 +821,7 @@
   }
 
   function buildEmpty(stage) {
-    const empty = mkEl('div', 'om-canvas-empty', '还没有可画的类：先在左侧或右栏新增实体类。');
+    const empty = mkEl('div', 'om-canvas-empty', '还没有可画的类：使用顶部「新增定义」建立实体类型，或从「待完善结构」选择候选。');
     stage.appendChild(empty);
     M.els.empty = empty;
   }
@@ -816,10 +866,8 @@
     else if (M.mode === 'parent') hint = `连线中：点目标卡片设为「${labelOf(M.linkFrom)}」的父类`;
     else if (M.mode === 'relation') hint = M.linkFrom ? '连线中：点终点（range）卡片' : '连线中：先点起点（domain）卡片';
     e.hint.textContent = hint;
-    e.btnNew.disabled = locked;
     e.btnParent.disabled = locked || !M.selected;
     e.btnRelation.disabled = locked || !nodes.length;
-    e.btnNew.title = locked ? BAR_TITLES.locked : BAR_TITLES.create;
     e.btnParent.title = locked ? BAR_TITLES.locked : BAR_TITLES.parent;
     e.btnRelation.title = locked ? BAR_TITLES.locked : BAR_TITLES.relation;
     e.btnCancel.hidden = !(M.mode || M.pending);
@@ -833,6 +881,7 @@
     cy.on('tapstart', 'node', () => { M.dragged = false; });
     cy.on('drag', 'node', () => { M.dragged = true; });
     cy.on('tap', 'node', onNodeTap);
+    cy.on('tap', 'edge', evt => {const iri=evt.target.data('termIri');if(iri&&M.ctx&&typeof M.ctx.select==='function')M.ctx.select(iri);});
     cy.on('tap', evt => { if (evt.target === cy) onBackgroundTap(); });
     // 双击空白 = 适应画布（双击节点不触发，避免误操作）。
     cy.on('dblclick', evt => { if (evt.target === cy) fitAll(); });
@@ -896,6 +945,7 @@
         M.cy.resize();
         updateBar();
         syncBands();
+        finishPendingFit();
         if (!M.didFit && M.stage && M.stage.clientWidth > 0) {
           M.didFit = true; M.sig = ''; runLayout();
         }
@@ -913,7 +963,8 @@
     const S = state || (M.ctx && M.ctx.S) || {};
     M.graph = S.graph || { nodes: [], edges: [] };
     M.selected = S.selected || null;
-    if (S.view) M.view = S.view;
+    if (S.view && S.view!=='cards') M.view = S.view==='hierarchy'?'hierarchy':'graph';
+    if(S.nodeDisplay)M.display=S.nodeDisplay==='compact'?'compact':'cards';
 
     const cy = M.cy;
     if (!cy) { updateEmpty(); updateBar(); return; }
@@ -925,6 +976,16 @@
     updateEmpty();
     updateBar();
 
+    if (S.view === 'cards') {
+      M.suspended = true;
+      cy.stop(true, false);
+      return;
+    }
+    if (M.suspended) {
+      M.suspended = false;
+      requestMeasuredFit();
+    }
+
     const sig = signature(M.graph, M.view);
     let need = M.layoutView !== M.view || firstNodes;
     if (!M.didFit && M.stage && M.stage.clientWidth > 0) { M.didFit = true; need = true; }
@@ -935,12 +996,26 @@
 
   function setView(mode) {
     const next = mode === 'hierarchy' ? 'hierarchy' : 'graph';
-    if (M.view === next) return;
+    const resuming = M.suspended;
+    M.suspended = false;
+    if (M.view === next) {
+      if (resuming && M.ready && M.cy) requestMeasuredFit();
+      return;
+    }
     M.view = next;
     if (!M.ready || !M.cy) return;
     M.sig = signature(M.graph, M.view);   // 记下指纹，避免紧随其后的 render 再排一次
     runLayout();
+    if (resuming || !M.stage.clientWidth || !M.stage.clientHeight) requestMeasuredFit();
     updateBar();
+  }
+
+  function setDisplay(mode) {
+    M.display=mode==='compact'?'compact':'cards';
+    if(!M.cy)return;
+    applyElements(M.graph);
+    if(M.view==='hierarchy')refreshHierarchyBands();
+    syncBands();
   }
 
   function focus(iri) {
@@ -957,6 +1032,8 @@
   }
 
   function destroy() {
+    if (M.fitFrame !== null) window.cancelAnimationFrame(M.fitFrame);
+    M.fitFrame = null; M.pendingFit = false; M.suspended = false;
     clearBands();
     if (M.ro) { try { M.ro.disconnect(); } catch (e) { /* 忽略 */ } M.ro = null; }
     if (M.onResize) { window.removeEventListener('resize', M.onResize); M.onResize = null; }
@@ -966,6 +1043,7 @@
     M.bands = []; M.els = {}; M.sig = ''; M.didFit = false;
     M.layoutView = null; M.dragged = false; M.graph = null; M.selected = null; M.view = 'graph';
     M.mode = ''; M.linkFrom = null; M.pending = null;
+    M.display='cards';
   }
 
   window.OntologyCanvas = {
@@ -975,6 +1053,7 @@
     mount(host, ctx) { mount(host, ctx); this.mounted = M.ready; },
     render(state) { render(state); },
     setView(mode) { setView(mode); },
+    setDisplay(mode) { setDisplay(mode); },
     focus(iri) { focus(iri); },
     destroy() { destroy(); this.mounted = false; },
   };

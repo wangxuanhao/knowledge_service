@@ -261,7 +261,9 @@ def _probe_schema_and_state(dsn: str, project_id: str, version_ids, report):
         record = {
             'id': 'api-probe', 'kind': 'chunk', 'text': 'put',
             'metadata': {'applicability': {
-                'platforms': ['meituan'], 'businesses': [], 'audiences': []}}}
+                'platforms': {'mode': 'specific', 'values': ['meituan']},
+                'businesses': {'mode': 'unknown', 'values': []},
+                'audiences': {'mode': 'unknown', 'values': []}}}}
         first = repository.put_record(api_project_id, record)
         second = repository.put_record(
             api_project_id, dict(record, text='update'), expected_version=1)

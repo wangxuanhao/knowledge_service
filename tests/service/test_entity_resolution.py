@@ -25,7 +25,14 @@ def _repo(tmp_path):
 
 def test_entity_resolver_has_aligned_review_and_separate_bands(tmp_path):
     repo, project_id = _repo(tmp_path)
-    resolver = EntityResolver(repo, Encoder())
+    class MilvusRetrieval:
+        def search(self, project, text, **kwargs):
+            # Scores are supplied by the Milvus retrieval seam; PG has no vectors.
+            rows = repo.current_records(project, kinds=['entity'])
+            return {'hits': [{**row, 'score': .95} for row in rows
+                             if row['id'] in kwargs['scope']['_candidate_ids']]}
+
+    resolver = EntityResolver(repo, Encoder(), retrieval=MilvusRetrieval())
 
     exact = resolver.resolve(project_id, {
         'id': 'mention-1', 'kind': 'entity', 'type': 'Person', 'text': '老张'},
@@ -35,9 +42,8 @@ def test_entity_resolver_has_aligned_review_and_separate_bands(tmp_path):
     review = resolver.resolve(project_id, {
         'id': 'mention-2', 'kind': 'entity', 'type': 'Person', 'text': '张先生',
         '_auto_merge': False}, review_threshold=.70, merge_threshold=.90)
-    # 删列后本地无向量，语义相似合并（review 档）不可用，降级 separate；语义档需 Milvus 向量
-    assert review.status == 'separate'
-    assert review.candidate_id is None
+    assert review.status == 'review'
+    assert review.candidate_id == 'person-1'
 
     separate = resolver.resolve(project_id, {
         'id': 'mention-3', 'kind': 'entity', 'type': 'Company', 'text': '张先生'},

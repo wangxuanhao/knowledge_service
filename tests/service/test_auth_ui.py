@@ -76,7 +76,7 @@ window.fetch = async (input, options) => {
   if (window.__mock.force401.some(p => path.startsWith(p))) {
     return reply({detail: '登录状态已失效（口令可能已修改），请重新登录', code: 'stale_credentials'}, 401);
   }
-  if (path === '/api/health') return reply(window.__mock.health);
+  if (path === '/api/auth/policy') return reply(window.__mock.health);
   if (path === '/api/auth/login') {
     if (window.__mock.loginStatus !== 200) return reply({detail: window.__mock.loginDetail}, window.__mock.loginStatus);
     return reply({access_token: window.__mock.token, token_type: 'bearer', user: window.__mock.loginUser});
@@ -93,7 +93,7 @@ window.fetch = async (input, options) => {
 
 # 独立登录页宿主：结构对齐真实 login.html 的关键 id。
 LOGIN_SHELL = """<!doctype html><html><head><meta charset="utf-8">
-<link rel="stylesheet" href="/assets/auth.css">
+<link rel="stylesheet" href="/assets/auth.css"><link rel="stylesheet" href="/assets/user-admin.css">
 </head><body class="login-body"><main class="login-page">
 <section class="auth-card login-card">
   <div class="auth-brand">知序<small>KNOWLEDGE SERVICE</small></div>
@@ -112,20 +112,20 @@ LOGIN_SHELL = """<!doctype html><html><head><meta charset="utf-8">
 </body></html>""" % MOCK_SCRIPT
 
 # 工作台宿主：保留两个 admin-only 导航项作为"viewer 看不到写入口"的探针；
-# 另加「系统层」分组与 #tab-useradmin（用户与权限现在是**页面式 tab**，不是抽屉）。
+# 全局管理区放在业务导航外，人员管理渲染到 #tab-useradmin。
 WORKBENCH_SHELL = """<!doctype html><html><head><meta charset="utf-8">
-<link rel="stylesheet" href="/assets/auth.css">
+<link rel="stylesheet" href="/assets/auth.css"><link rel="stylesheet" href="/assets/user-admin.css">
 </head><body>
 <aside>
   <nav>
     <button data-tab="search">检索与交互图谱</button>
-    <button data-tab="ingest" class="admin-only">知识写入</button>
+    <button data-tab="sources" class="admin-only">资料库</button>
     <button data-tab="ontology-model" class="admin-only">本体建模层</button>
-    <details class="nav-group" data-layer="system" open>
-      <summary>系统层 · 管理</summary>
-      <button type="button" class="admin-only">用户与权限</button>
-    </details>
   </nav>
+  <section class="nav-group nav-management" data-layer="system">
+    <h2>管理</h2>
+    <button type="button" data-tab="useradmin" class="admin-only">人员管理</button>
+  </section>
   <div id="session" class="session-box"></div>
 </aside>
 <main><h1 id="title">检索与交互图谱</h1><p id="scope">项目</p>
@@ -134,7 +134,7 @@ WORKBENCH_SHELL = """<!doctype html><html><head><meta charset="utf-8">
 </main>
 <script>%s</script>
 <script src="/assets/auth.js"></script>
-<script src="/assets/user-admin.js"></script>
+<script src="/assets/workspace-context.js"></script><script src="/assets/user-admin.js"></script><script>window.KnowledgeTabs={open(name){document.querySelectorAll('.tab').forEach(el=>el.classList.toggle('hidden',el.id!=='tab-'+name));document.getElementById('title').textContent='人员管理';document.getElementById('scope').classList.add('hidden');}};</script>
 <script>
 // 侧栏「用户与权限」按钮：与 menu-hierarchy.js 的真实绑定一致（点它 → UserAdmin.open()）。
 document.querySelector('.nav-group[data-layer="system"] button')
@@ -349,60 +349,52 @@ def _open_users_page(browser, site, *, me=SUPER_ROW, users):
 
 
 def test_user_page_superadmin_row_is_protected(browser, site):
-    page = _open_users_page(browser, site, users=[SUPER_ROW, ALICE_ROW])
-    super_row = page.locator('#tab-useradmin tbody tr', has_text='admin')
-    # 超管行不出现降/停/删按钮，只给一句保护说明。
-    assert '超级管理员受系统保护' in super_row.inner_text()
-    assert super_row.locator('.ua-action').count() == 0
+    page = _open_users_page(browser, site, me=BOSS_ROW, users=[SUPER_ROW, ALICE_ROW])
+    row = page.locator('#tab-useradmin tbody tr', has_text='系统管理员')
+    assert '受保护账号' in row.inner_text()
+    assert row.locator('button').count() == 0
 
 
-def test_user_page_self_row_has_no_demote_disable_delete(browser, site):
-    # 用一个 admin 身份登录，清单里包含他自己（boss）。
+def test_user_page_self_row_can_edit_display_only(browser, site):
     page = _open_users_page(browser, site, me=BOSS_ROW, users=[SUPER_ROW, BOSS_ROW, ALICE_ROW])
-    self_row = page.locator('#tab-useradmin tbody tr.is-self')
-    assert self_row.count() == 1
-    assert '不能改自己' in self_row.inner_text()
-    for label in ('降为', '停用', '删除'):
-        assert self_row.locator('.ua-action', has_text=label).count() == 0
-    assert self_row.locator('.ua-action', has_text='重置口令').count() == 1
+    row = page.locator('#tab-useradmin tbody tr', has_text='老板')
+    row.locator('button').click()
+    assert page.locator('.ua-edit-form [name="role"]').is_disabled()
+    assert page.locator('.ua-edit-form [name="display_name"]').is_editable()
+    assert page.locator('.ua-edit-card [data-toggle]').count() == 0
+    assert page.locator('.ua-edit-card [data-delete]').count() == 0
+    assert page.locator('.ua-reset-form').count() == 0
+    assert '个人账号菜单' in page.locator('.ua-edit-card').inner_text()
 
 
 def test_user_page_admin_sees_no_superadmin_option(browser, site):
-    # 管理员视角：新建账号下拉与提升动作都不出现「超级管理员」。
     page = _open_users_page(browser, site, me=BOSS_ROW, users=[SUPER_ROW, BOSS_ROW, ALICE_ROW])
-    options = ''.join(page.locator('#tab-useradmin [data-ua-new-role] option').all_inner_texts())
-    assert '超级管理员' not in options, '管理员不能开超管账号'
-    # alice 是 viewer：其提升动作只到「管理员」，不到超管。
-    alice_row = page.locator('#tab-useradmin tbody tr', has_text='alice')
-    assert alice_row.locator('.ua-action', has_text='设为管理员').count() == 1
-    assert alice_row.locator('.ua-action', has_text='超级管理员').count() == 0
+    page.click('#ua-add')
+    assert '超级管理员' not in ''.join(page.locator('.ua-edit-form [name="role"] option').all_inner_texts())
 
 
 def test_user_page_superadmin_sees_superadmin_option(browser, site):
-    page = _open_users_page(browser, site, me=SUPER_ROW, users=[SUPER_ROW, BOSS_ROW, ALICE_ROW])
-    options = ''.join(page.locator('#tab-useradmin [data-ua-new-role] option').all_inner_texts())
-    assert '超级管理员' in options
-    # admin 行可被提升为超管。
-    boss_row = page.locator('#tab-useradmin tbody tr', has_text='boss')
-    assert boss_row.locator('.ua-action', has_text='设为超级管理员').count() == 1
+    page = _open_users_page(browser, site, users=[SUPER_ROW, BOSS_ROW, ALICE_ROW])
+    page.click('#ua-add')
+    assert '超级管理员' in ''.join(page.locator('.ua-edit-form [name="role"] option').all_inner_texts())
 
 
-def test_user_page_says_what_it_manages_and_normal_account_gets_delete(browser, site):
+def test_user_page_global_scope_and_normal_account_delete_drawer(browser, site):
     page = _open_users_page(browser, site, users=[SUPER_ROW, ALICE_ROW])
-    assert '不管项目里的知识与本体' in page.locator('#tab-useradmin .ua-sub').inner_text()
-    alice_row = page.locator('#tab-useradmin tbody tr', has_text='alice')
-    assert alice_row.locator('.ua-action', has_text='删除').count() == 1
+    assert '全局登录账号与系统角色' in page.locator('.ua-sub').inner_text()
+    page.locator('#tab-useradmin tbody tr',has_text='小艾').locator('button').click()
+    assert page.locator('.ua-edit-card [data-delete]').count() == 1
+    page.locator('.ua-edit-card [data-delete]').click()
+    assert '永久移除账号' in page.locator('.ua-confirm').inner_text()
 
 
-def test_user_page_form_and_table_match_the_manual(browser, site):
-    """表单字段与表头是手册第 3 章逐字描述的东西，改了这里就该同步改手册。"""
+def test_user_page_create_drawer_and_compact_table(browser, site):
     page = _open_users_page(browser, site, users=[SUPER_ROW, ALICE_ROW])
-    labels = [t.strip() for t in page.locator('#tab-useradmin .ua-create label').all_inner_texts()]
-    assert labels[:2] == ['用户名', '初始口令'], labels
-    headers = [t.strip() for t in page.locator('#tab-useradmin thead th').all_inner_texts()]
-    assert headers == ['用户名', '展示名', '角色', '状态', '创建时间', '动作']
-    assert page.locator('#tab-useradmin [data-ua-create]').inner_text().strip() == '创建账号'
-    assert '共 2 个' in page.locator('#tab-useradmin [data-ua-count]').inner_text()
+    assert page.locator('#tab-useradmin thead th').all_inner_texts() == ['人员 / 登录账号','系统角色','状态','操作']
+    page.click('#ua-add')
+    assert page.locator('.ua-edit-form label').all_inner_texts()[:2] == ['登录账号','展示名']
+    assert page.locator('.ua-edit-form [name="password"]').get_attribute('type') == 'password'
+    assert page.locator('.ua-edit-form button[type="submit"]').inner_text() == '创建登录账号'
 
 
 def test_password_dialog_validates_mismatch_before_request(browser, site):

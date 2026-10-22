@@ -89,7 +89,7 @@ def latest_ontology_id(base: str, project_id: str) -> str | None:
 
 
 def publish_current_draft(base: str, project_id: str, draft_id: str, *,
-                          actor: str, key: str) -> tuple[bool, str, dict | None]:
+                          key: str) -> tuple[bool, str, dict | None]:
     """校验 → 提交 → 一键收下 → 发布。返回 (是否成功, 说明, 发布结果)。"""
     draft_path = f'/api/projects/{project_id}/ontology-drafts/{draft_id}'
     ontology_id = latest_ontology_id(base, project_id)
@@ -116,7 +116,6 @@ def publish_current_draft(base: str, project_id: str, draft_id: str, *,
         'expected_ontology_id': ontology_id or (draft or {}).get('base_ontology_id'),
         'validation_fingerprint': (draft or {}).get('validation_fingerprint'),
         'acknowledged_warning_codes': [],
-        'actor': actor,
     })
     if status not in (200, 201):
         return False, f'一键收下失败：{explain(status, body)}', None
@@ -138,7 +137,6 @@ def publish_current_draft(base: str, project_id: str, draft_id: str, *,
         'acknowledged_warning_codes': [],
         'idempotency_key': key,
         'note': '真机验证：核对结构与标注的版本计量',
-        'actor': actor,
     })
     if status not in (200, 201):
         return False, f'发布失败：{explain(status, published)}', None
@@ -154,7 +152,6 @@ def main() -> int:
 
     stamp = datetime.now().strftime('%m%d-%H%M%S')
     project_name = f'E1标注计量复验·{stamp}'
-    actor = 'e1-verifier'
     print(f'== E1「改注释不换版本号」真机复验 · {base} · 临时项目「{project_name}」==', flush=True)
 
     status, _ = req(base, '/api/health')
@@ -185,7 +182,7 @@ def main() -> int:
             """
             _, latest = req(base, f'/api/projects/{project_id}/ontology')
             status, created = req(base, f'/api/projects/{project_id}/ontology-drafts', {
-                'title': 'E1 复验草案', 'actor': actor,
+                'title': 'E1 复验草案',
                 'base_ontology_id': (latest or {}).get('id') or base_id,
             })
             if status not in (200, 201) or not isinstance(created, dict):
@@ -207,7 +204,7 @@ def main() -> int:
             return 2
         passed, note = command(draft_id, {'action': 'create_term', 'target_iri': term, 'kind': 'class'})
         ok(passed, '①a 加一个类（结构变更）写入草案', note)
-        good, note, published = publish_current_draft(base, project_id, draft_id, actor=actor, key=f'e1-struct-1-{stamp}')
+        good, note, published = publish_current_draft(base, project_id, draft_id, key=f'e1-struct-1-{stamp}')
         ok(good, '①b 结构变更发布成功', note if not good else '')
         v_after_struct = current_version(base, project_id)
         ok(v_after_struct == start_version + 1, f'①c 结构变更后版本号 +1（v{start_version} → v{start_version + 1}）',
@@ -225,7 +222,7 @@ def main() -> int:
             'after': {'predicate': RDFS_COMMENT, 'value': '这是一条只在验证里存在的注释'},
         })
         ok(passed, '②a 改注释（纯标注变更）写入草案', note)
-        good, note, published2 = publish_current_draft(base, project_id, draft_id, actor=actor, key=f'e1-annot-1-{stamp}')
+        good, note, published2 = publish_current_draft(base, project_id, draft_id, key=f'e1-annot-1-{stamp}')
         ok(good, '②b 纯标注变更发布成功', note if not good else '')
         v_after_annot = current_version(base, project_id)
         ok(v_after_annot == v_after_struct,
@@ -248,7 +245,7 @@ def main() -> int:
             return 2
         passed, note = command(draft_id, {'action': 'create_term', 'target_iri': f'{NS}Invoice', 'kind': 'class'})
         ok(passed, '③a 再加一个类（结构变更）写入草案', note)
-        good, note, _ = publish_current_draft(base, project_id, draft_id, actor=actor, key=f'e1-struct-2-{stamp}')
+        good, note, _ = publish_current_draft(base, project_id, draft_id, key=f'e1-struct-2-{stamp}')
         ok(good, '③b 第二次结构变更发布成功', note if not good else '')
         v_final = current_version(base, project_id)
         ok(v_final == v_after_struct + 1,

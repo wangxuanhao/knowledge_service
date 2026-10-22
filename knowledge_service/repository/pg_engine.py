@@ -32,6 +32,7 @@
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 import re
 import threading
 from typing import Any, Iterable, Mapping, Sequence
@@ -149,29 +150,102 @@ class SqliteishConnection:
 
     def __init__(self, dsn: str, *, statement_timeout_ms: int = 60000,
                  lock_timeout_ms: int = 15000):
+        self._dsn = dsn
+        self._statement_timeout_ms = statement_timeout_ms
+        self._lock_timeout_ms = lock_timeout_ms
+        self._read_pool = None
+        self._read_pool_lock = threading.Lock()
+        self._closed = False
+        self._owns_connection = True
+        self._conn = psycopg.connect(dsn, autocommit=True)
+        self._configure_connection(self._conn)
+
+    def _configure_connection(self, connection):
         from .connection import _register_type_adapters
 
-        self._conn = psycopg.connect(dsn, autocommit=True)
         # 用过滤内部列的行工厂（见 _public_row_factory 的说明）
-        self._conn.row_factory = _public_row_factory
-        with self._conn.cursor() as cur:
-            cur.execute(f"SET statement_timeout = {int(statement_timeout_ms)}")
-            cur.execute(f"SET lock_timeout = {int(lock_timeout_ms)}")
-        _register_type_adapters(self._conn)
+        connection.row_factory = _public_row_factory
+        with connection.cursor() as cur:
+            cur.execute(f"SET statement_timeout = {int(self._statement_timeout_ms)}")
+            cur.execute(f"SET lock_timeout = {int(self._lock_timeout_ms)}")
+        _register_type_adapters(connection)
+
+    def _configure_read_connection(self, connection):
+        self._configure_connection(connection)
+        with connection.cursor() as cur:
+            cur.execute('SET idle_in_transaction_session_timeout = 60000')
+
+    def _independent_read_pool(self):
+        from psycopg_pool import ConnectionPool
+
+        with self._read_pool_lock:
+            if self._closed:
+                raise psycopg.InterfaceError('connection is closed')
+            if self._read_pool is None:
+                dsn = psycopg.conninfo.make_conninfo(
+                    self._dsn, application_name='knowledge-service-reader')
+                self._read_pool = ConnectionPool(
+                    conninfo=dsn, min_size=0, max_size=8, max_waiting=32,
+                    timeout=5, kwargs={'autocommit': True},
+                    configure=self._configure_read_connection, open=False,
+                    name='knowledge-service-reader')
+                self._read_pool.open()
+            return self._read_pool
+
+    @contextmanager
+    def independent_read_snapshot(self):
+        """Borrow one bounded, private read-only repeatable-read connection."""
+        if not self._owns_connection:
+            if self._closed:
+                raise psycopg.InterfaceError('connection is closed')
+            # An already-borrowed adapter belongs to its outer snapshot. A
+            # nested helper must neither open a child pool nor end that owner.
+            yield self
+            return
+        with self._independent_read_pool().connection() as connection:
+            # Copy configuration, not instance callables: tracing wrappers on
+            # the writer may close over its physical connection. Copying such
+            # a wrapper would send this reader's BEGIN to the writer instead.
+            reader = object.__new__(type(self))
+            reader._dsn = self._dsn
+            reader._statement_timeout_ms = self._statement_timeout_ms
+            reader._lock_timeout_ms = self._lock_timeout_ms
+            reader._conn = connection
+            reader._read_pool = None
+            reader._read_pool_lock = threading.Lock()
+            reader._closed = False
+            reader._owns_connection = False
+            try:
+                reader.execute('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
+                yield reader
+                reader.commit()
+            except BaseException:
+                reader.rollback()
+                raise
+            finally:
+                # The pool owns the physical connection; invalidate this
+                # borrowed adapter before returning it to another operation.
+                reader.close()
 
     # ── sqlite3 兼容面 ────────────────────────────────────────────────────
     def execute(self, sql: str, params: Sequence[Any] | Mapping[str, Any] = ()):
+        if self._closed:
+            raise psycopg.InterfaceError('connection is closed')
         cur = self._conn.cursor()
         cur.execute(translate(sql), params or ())
         return cur
 
     def executemany(self, sql: str, seq: Iterable[Sequence[Any]]):
+        if self._closed:
+            raise psycopg.InterfaceError('connection is closed')
         cur = self._conn.cursor()
         cur.executemany(translate(sql), seq)
         return cur
 
     def executescript(self, script: str):
         """按语句切分执行（PG 不支持一次多条），用于 DDL 场景。"""
+        if self._closed:
+            raise psycopg.InterfaceError('connection is closed')
         cur = self._conn.cursor()
         cur.execute(translate(script))
         return cur
@@ -187,6 +261,8 @@ class SqliteishConnection:
 
     @property
     def in_transaction(self) -> bool:
+        if self._closed:
+            raise psycopg.InterfaceError('connection is closed')
         # ACTIVE means another thread is executing a query, including an
         # autocommit SELECT. Wait for that query before deciding whether a
         # nested SAVEPOINT is legal; ACTIVE/UNKNOWN are not open transactions.
@@ -210,7 +286,13 @@ class SqliteishConnection:
         pass
 
     def close(self):
-        self._conn.close()
+        with self._read_pool_lock:
+            self._closed = True
+            pool, self._read_pool = self._read_pool, None
+        if pool is not None:
+            pool.close()
+        if self._owns_connection:
+            self._conn.close()
 
     @property
     def raw(self):

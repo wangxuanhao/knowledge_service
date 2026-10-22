@@ -17,7 +17,7 @@ def test_explicit_platform_scope_still_restricts_before_ranking(monkeypatch):
     calls = []
     service = native_service(monkeypatch, calls)
     service.search('project', {'query': '价格', 'retrieval_mode': 'keyword',
-                              'applicability': {'platforms': ['美团']}})
+                              'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}}})
     assert {call['platform_match'] for call in calls} == {'specific_only', 'all_only'}
     assert all(call['scope']['applicability']['platforms']['mode'] != 'unknown' for call in calls)
 
@@ -26,7 +26,7 @@ def test_grouping_does_not_reorder_global_relevance(monkeypatch):
     from knowledge_service.services import service as module
     service = native_service(monkeypatch, [])
     rows = [{'id': record_id, 'version_id': record_id, 'kind': 'chunk', 'text': '价格',
-             'score': score, 'metadata': {'applicability': {'platforms': [platform]}}}
+             'score': score, 'metadata': {'applicability': {'platforms': {'mode': 'specific', 'values': [platform]}}}}
             for record_id, score, platform in [('a1', .9, 'A'), ('b1', .8, 'B'), ('a2', .7, 'A')]]
     class Engine:
         def __init__(self, *args):
@@ -49,7 +49,7 @@ def test_milvus_without_time_condition_does_not_exclude_expired_or_future():
 
 def test_milvus_explicit_time_keeps_half_open_validity_filter():
     expression = MilvusStore(dim=2)._filter_expr('project', ['chunk'], scope={
-        'valid_at': '2025-01-01', 'applicability': {'platforms': ['美团']}})
+        'valid_at': '2025-01-01', 'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}}})
     assert 'valid_from_epoch_ms <= 1735689600000' in expression
     assert 'valid_until_epoch_ms > 1735689600000' in expression
     assert 'array_contains_any(platform_values, ["美团"])' in expression

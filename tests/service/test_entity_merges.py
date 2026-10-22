@@ -1,3 +1,4 @@
+from ontology_seed import seed_ontology
 from knowledge_service.integrations.embeddings import HashingEncoder
 from knowledge_service.services.governance import Governance
 from knowledge_service.services.ontology import Ontology
@@ -12,7 +13,7 @@ def test_merge_ledgers_assertion_reassignment_and_reversal(tmp_path):
     ttl = ('@prefix ex: <http://ex/> . '
            '@prefix owl: <http://www.w3.org/2002/07/owl#> . '
            'ex:Person a owl:Class .')
-    repo.save_ontology(project_id, ttl, Ontology(ttl).summary())
+    seed_ontology(repo, project_id, ttl, Ontology(ttl).summary())
     service.write(project_id, [
         {'id': 'keep', 'kind': 'entity', 'type': 'Person', 'text': '张三'},
         {'id': 'drop', 'kind': 'entity', 'type': 'Person', 'text': '张先生'},
@@ -50,7 +51,7 @@ def test_merge_consolidates_colliding_facts_and_reversal_restores_them(tmp_path)
     ttl = ('@prefix ex: <http://ex/> . '
            '@prefix owl: <http://www.w3.org/2002/07/owl#> . '
            'ex:Person a owl:Class . ex:knows a owl:ObjectProperty .')
-    repo.save_ontology(project_id, ttl, Ontology(ttl).summary())
+    seed_ontology(repo, project_id, ttl, Ontology(ttl).summary())
     service.write(project_id, [
         {'id': 'keep', 'kind': 'entity', 'type': 'Person', 'text': '张三'},
         {'id': 'drop', 'kind': 'entity', 'type': 'Person', 'text': '张先生'},
@@ -87,7 +88,7 @@ def test_duplicate_groups_only_groups_same_name_and_same_type(tmp_path):
     ttl = ('@prefix ex: <http://ex/> . '
            '@prefix owl: <http://www.w3.org/2002/07/owl#> . '
            'ex:Person a owl:Class . ex:Company a owl:Class .')
-    repo.save_ontology(project_id, ttl, Ontology(ttl).summary())
+    seed_ontology(repo, project_id, ttl, Ontology(ttl).summary())
     service.write(project_id, [
         {'id': 'a1', 'kind': 'entity', 'type': 'Person', 'text': '张三'},
         {'id': 'a2', 'kind': 'entity', 'type': 'Person', 'text': '  张三 '},

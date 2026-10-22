@@ -1,4 +1,6 @@
 from fastapi.testclient import TestClient
+from ontology_seed import seed_ontology
+from knowledge_service.services.ontology import Ontology
 from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
 from knowledge_service.core.config import load_environment
@@ -29,23 +31,29 @@ def test_linked_scope_and_ontology_and_index(tmp_path):
         assert timeline['events'][0]['changed']==4
         assert timeline['events'][0]['created']==4
         assert timeline['events'][0]['revised']==0
-        assert c.post(f'/api/projects/{p}/explore',json={**body,'semantic':True}).status_code==200  # 删列后 semantic 无向量降级 keyword
-        records=repo.current_records(p)
-        repo.store_embeddings(p,records,HashingEncoder().encode([r['text'] for r in records]),HashingEncoder.identity)
+        # HashingEncoder cannot serve semantic requests, even when explicit keyword works.
+        unavailable=c.post(f'/api/projects/{p}/explore',json={**body,'semantic':True})
+        assert unavailable.status_code==503
+        assert 'Milvus 向量索引' in unavailable.json()['detail']
         assert len(repo.history(p,'a'))==1
-        assert c.post(f'/api/projects/{p}/explore',json={**body,'semantic':True}).status_code==200
-        term={'kind':'class','uri':'urn:test:Shop','label':'门店','expected_ontology_id':o['id']}
-        saved=c.post(f'/api/projects/{p}/ontology/terms',json=term)
-        assert saved.status_code==201,saved.text
+        assert c.post(f'/api/projects/{p}/explore',json=body).json()['mode']=='keyword'
+        base=f'/api/projects/{p}'
+        created=c.post(base+'/ontology-drafts',json={'base_ontology_id':o['id'],
+            'source_kind':'manual','title':'新增门店'}).json()
+        saved=c.post(base+'/ontology-drafts/'+created['id']+'/commands',json={
+            'expected_revision':created['revision'],'command':{'action':'batch','commands':[
+                {'action':'create_term','target_iri':'urn:test:Shop','kind':'class'},
+                {'action':'add_annotation','target_iri':'urn:test:Shop',
+                 'predicate':'http://www.w3.org/2000/01/rdf-schema#label','value':'门店'}]}})
+        assert saved.status_code==200,saved.text
         draft=saved.json()
-        assert any(r['label']=='门店' for r in draft['summary']['classes'])
-        assert draft['draft_id'] and draft['deprecation']['deprecated'] is True
-        assert saved.headers['Deprecation']=='true'
+        assert any(r['label']=='门店' for r in draft['ontology']['classes'])
+        assert 'deprecation' not in draft and 'Deprecation' not in saved.headers
         assert repo.get_ontology(p)['id']==o['id']
         assert not any(r['label']=='门店' for r in repo.get_ontology(p)['summary']['classes'])
-        assert c.post(f'/api/projects/{p}/ontology/terms',json={
-            **term,'expected_ontology_id':'stale',
-        }).status_code==409
+        assert c.post(base+'/ontology-drafts',json={'base_ontology_id':'stale',
+            'source_kind':'manual','title':'过期'}).status_code==409
+
 
 
 def test_keyword_explore_matches_chinese_ontology_label(tmp_path):
@@ -53,7 +61,7 @@ def test_keyword_explore_matches_chinese_ontology_label(tmp_path):
         p=c.post('/api/projects',json={'name':'中文标签检索','use_default_ontology':False}).json()['id']
         ttl='''@prefix owl: <http://www.w3.org/2002/07/owl#> . @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
         <urn:test:Merchant> a owl:Class ; rdfs:label "Merchant"@en, "商户类型"@zh .'''
-        ontology=c.post(f'/api/projects/{p}/ontologies',json={'turtle':ttl}).json()
+        ontology=seed_ontology(c.app.state.service.repository,p,ttl,Ontology(ttl).summary())
         c.app.state.service.repository.put_record(p,{'id':'shop','kind':'entity','text':'甲店',
             'type':'urn:test:Merchant','ontology_id':ontology['id'],'metadata':{}})
         result=c.post(f'/api/projects/{p}/explore',json={'query':'商户类型'}).json()

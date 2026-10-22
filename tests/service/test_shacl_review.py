@@ -1,3 +1,4 @@
+from ontology_seed import seed_ontology
 from fastapi.testclient import TestClient
 
 from knowledge_service.api import create_app
@@ -23,7 +24,7 @@ def test_ingest_commits_knowledge_and_creates_review_for_shacl_exception(tmp_pat
     with TestClient(app) as client:
         service=app.state.service
         project=client.post('/api/projects',json={'name':'shacl-review','use_default_ontology':False}).json()['id']
-        service.repository.save_ontology(project,TTL,Ontology(TTL).summary())
+        seed_ontology(service.repository, project,TTL,Ontology(TTL).summary())
         base=f'/api/projects/{project}'
         response=client.post(base+'/documents',json={
             'title':'原文','text':'规则正文','resolve_entities':False,'relation_constraint_mode':'review'})

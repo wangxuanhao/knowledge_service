@@ -1,5 +1,7 @@
 """版本化实体治理：Semantica 建议、事务化服务写入。"""
 import json
+import hashlib
+from contextlib import contextmanager, nullcontext
 from uuid import uuid4
 
 from ..models import RecordWrite
@@ -41,10 +43,10 @@ class Governance:
     def resolve(self,p,text,scope=None,threshold=0.7):
         if not isinstance(text,str) or not text.strip() or not 0<=threshold<=1:
             raise ValueError('需要文本且阈值在 0..1 之间')
-        from semantica.deduplication import DuplicateDetector
-        # 解析按已存向量排序，因此本次读取必须携带向量；
-        # KnowledgeService.scoped 默认已不再包含向量。
-        rows=[r for r in self.service.scoped(p,{**(scope or {}),'_include_embeddings':True}) if r['kind']=='entity']
+        kinds=(scope or {}).get('kinds')
+        rows=([r for r in self.service.scoped(p,{**(scope or {}),'kinds':['entity']})
+               if r['kind']=='entity' and not (r.get('metadata') or {}).get('_deleted')]
+              if kinds is None or 'entity' in kinds else [])
         exact=[]
         for row in rows:
             names=[row['text'],*row.get('metadata',{}).get('aliases',[])]
@@ -52,31 +54,22 @@ class Governance:
                 exact.append(row)
         if len(exact)==1:
             row=exact[0]
-            return {'status':'exists' if text==row['text'] else 'alias','canonical':public(row),'candidates':[],'backend':'semantica+aliases'}
+            return {'status':'exists' if text==row['text'] else 'alias','canonical':public(row),'candidates':[],'backend':'exact+aliases'}
         if exact:
             return {'status':'exact_duplicates','canonical':None,
                 'candidates':[{**public(row),'score':1.0,'reasons':['exact_name_or_alias']} for row in exact[:12]],
-                'backend':'semantica+aliases'}
-        # 检测器仅对词法候选运行，避免对每个已有配对与外部向量做平方级比较。
-        probe={'id':'__probe__','name':text,'text':text}
-        detector=DuplicateDetector(similarity_threshold=threshold,confidence_threshold=0,use_clustering=False)
-        candidates=[]
-        for row in rows:
-            existing={'id':row['id'],'name':row['text'],'text':row['text'],'type':row['type']}
-            matches=detector.detect_duplicates([probe,existing])
-            if matches:
-                candidates.append({**public(row),'score':matches[0].similarity_score,'reasons':matches[0].reasons})
-        # 用项目实际向量补充语义候选。
-        from .retrieval import rank_candidates
-        hits=rank_candidates(rows,text,min(12,len(rows)),self.service.encoder) if rows else []
-        seen={r['id'] for r in candidates}
-        candidates += [{**r,'reasons':['local_embedding']} for r in hits if r['score']>=threshold and r['id'] not in seen]
-        return {'status':'candidates','canonical':None,'candidates':sorted(candidates,key=lambda r:r['score'],reverse=True)[:12],'backend':'semantica+project_embedding'}
+                'backend':'exact+aliases'}
+        hits=(self.service.entity_resolver().semantic_candidates(
+            p,text,rows,scope=scope,limit=12) if rows else [])
+        candidates=[{**public(row),'reasons':['milvus_embedding']} for row in hits
+                    if row['score']>=threshold]
+        return {'status':'candidates','canonical':None,'candidates':candidates,
+                'backend':'milvus' if rows else 'exact+aliases'}
 
     def _commit(self,p,before,updates,operation,backend='service',redirects=None,reversal_of=None,
-                resolution_decisions=None,assertion_decisions=None,audit_extra=None):
+                resolution_decisions=None,assertion_decisions=None,audit_extra=None,expected_dependencies=None):
         op_id=str(uuid4())
-        expected={r['id']:r['version'] for r in before}
+        expected={**(expected_dependencies or {}), **{r['id']:r['version'] for r in before}}
         for row in updates:
             row['metadata']={**row.get('metadata',{}),'_operation_id':op_id}
         audit=dict(id='audit:'+op_id,kind='document',text=f'{operation}: '+', '.join(r['id'] for r in before),
@@ -142,33 +135,92 @@ class Governance:
                 rows=[by_id[record_id] for record_id in sorted(group)]
                 conflicts.append({'predicate':predicate,'record_ids':[r['id'] for r in rows],
                     'values':[{key:r.get(key) for key in
-                               ('id','value','datatype','valid_from','valid_until')} for r in rows]})
+                               ('id','version','version_id','value','datatype','valid_from','valid_until')} for r in rows]})
         return conflicts
 
-    def merge(self,p,keep_id,drop_id,expected_versions,resolution_decision=None,
-              attribute_winners=None, actor='merge-governance'):
+    def _merge_inputs(self,p,keep_id,drop_id,expected_versions):
         if keep_id==drop_id:
             raise ValueError('请选择两个不同的实体')
+        rows=self._rows(p)
+        keep,drop=rows.get(keep_id),rows.get(drop_id)
+        if not keep or not drop:
+            raise KeyError(keep_id if not keep else drop_id)
+        if any(r['kind']!='entity' or r.get('metadata',{}).get('_deleted') for r in (keep,drop)):
+            raise ValueError('合并需要两个有效实体')
+        if expected_versions!={keep_id:keep['version'],drop_id:drop['version']}:
+            raise ValueError('版本冲突：请刷新实体版本')
+        if keep['type']!=drop['type']:
+            raise ValueError('合并要求相同的稳定类型 IRI')
+        if scope_identity((keep.get('metadata') or {}).get('applicability')) != scope_identity(
+                (drop.get('metadata') or {}).get('applicability')):
+            raise ValueError('合并要求相同的适用范围')
+        if any(keep.get(k)!=drop.get(k) for k in ('valid_from','valid_until')):
+            raise ValueError('合并要求相同的业务时间区间；请显式修正区间')
+        attributes=[r for r in rows.values() if r['kind']=='attribute' and
+                    not r.get('metadata',{}).get('_deleted') and
+                    r.get('subject_id') in {keep_id,drop_id}]
+        return rows,keep,drop,attributes,self._attribute_conflicts(p,keep,attributes)
+
+    @staticmethod
+    def _affected_relations(rows,drop_id):
+        return [r for r in rows.values() if r['kind']=='relation' and
+                not r.get('metadata',{}).get('_deleted') and
+                drop_id in (r.get('subject_id'),r.get('object_id'))]
+
+    def _merge_fingerprint(self,p,rows,keep,drop,attributes,conflicts):
+        # Freeze exact revisions, values and affected membership, including
+        # unchanged keep-side attributes and newly added attributes/relations.
+        payload={'project_id':p,'keep':public(keep),'drop':public(drop),
+                 'attributes':[public(row) for row in sorted(attributes,key=lambda r:r['id'])],
+                 'relations':[public(row) for row in sorted(
+                     self._affected_relations(rows,drop['id']),key=lambda r:r['id'])],
+                 'conflicts':sorted(conflicts,key=lambda c:(c['predicate'],c['record_ids']))}
+        encoded=json.dumps(payload,ensure_ascii=False,allow_nan=False,sort_keys=True,separators=(',',':'))
+        return hashlib.sha256(encoded.encode('utf-8')).hexdigest()
+
+    @contextmanager
+    def _merge_commit_guard(self,p,keep_id,drop_id,expected_versions,fingerprint):
+        # Despite its ingestion-era name, this seam runs every formal-write
+        # precondition after the repository takes its transaction/table locks.
+        # Compose the existing lease/source guard instead of replacing it.
+        from ..core.ingest_context import ingest_commit_guard
+        previous=ingest_commit_guard.get()
+
+        @contextmanager
+        def verify():
+            with previous() if previous else nullcontext():
+                inputs=self._merge_inputs(p,keep_id,drop_id,expected_versions)
+                if self._merge_fingerprint(p,*inputs)!=fingerprint:
+                    raise ValueError('融合预览已变化：属性、冲突或影响记录已更新，请重新预览并确认。')
+                yield
+
+        token=ingest_commit_guard.set(verify)
+        try:
+            yield
+        finally:
+            ingest_commit_guard.reset(token)
+
+    def merge_preview(self,p,keep_id,drop_id,expected_versions):
+        """Read the same compatibility and conflict rules used by the atomic merge."""
         with self.service.lock:
-            rows=self._rows(p)
-            keep,drop=rows.get(keep_id),rows.get(drop_id)
-            if not keep or not drop:
-                raise KeyError(keep_id if not keep else drop_id)
-            if any(r['kind']!='entity' or r.get('metadata',{}).get('_deleted') for r in (keep,drop)):
-                raise ValueError('合并需要两个有效实体')
-            if expected_versions!={keep_id:keep['version'],drop_id:drop['version']}:
-                raise ValueError('版本冲突：请刷新实体版本')
-            if keep['type']!=drop['type']:
-                raise ValueError('合并要求相同的稳定类型 IRI')
-            if scope_identity((keep.get('metadata') or {}).get('applicability')) != scope_identity(
-                    (drop.get('metadata') or {}).get('applicability')):
-                raise ValueError('合并要求相同的适用范围')
-            if any(keep.get(k)!=drop.get(k) for k in ('valid_from','valid_until')):
-                raise ValueError('合并要求相同的业务时间区间；请显式修正区间')
-            attributes=[r for r in rows.values() if r['kind']=='attribute' and
-                        not r.get('metadata',{}).get('_deleted') and
-                        r.get('subject_id') in {keep_id,drop_id}]
-            conflicts=self._attribute_conflicts(p,keep,attributes)
+            rows,keep,drop,attributes,conflicts=self._merge_inputs(
+                p,keep_id,drop_id,expected_versions)
+            relations=self._affected_relations(rows,drop_id)
+            return {'keep':public(keep),'drop':public(drop),
+                    'expected_versions':{keep_id:keep['version'],drop_id:drop['version']},
+                    'attribute_conflicts':conflicts,
+                    'preview_fingerprint':self._merge_fingerprint(p,rows,keep,drop,attributes,conflicts),
+                    'affected_records':{'relations':len(relations),'attributes':len(attributes)},
+                    'attributes':[public(row) for row in attributes]}
+
+    def merge(self,p,keep_id,drop_id,expected_versions,resolution_decision=None,
+              attribute_winners=None, actor='merge-governance',preview_fingerprint=None):
+        with self.service.lock:
+            rows,keep,drop,attributes,conflicts=self._merge_inputs(
+                p,keep_id,drop_id,expected_versions)
+            fingerprint=self._merge_fingerprint(p,rows,keep,drop,attributes,conflicts)
+            if preview_fingerprint is not None and preview_fingerprint!=fingerprint:
+                raise ValueError('融合预览已变化：属性、冲突或影响记录已更新，请重新预览并确认。')
             winners=list(attribute_winners or [])
             conflict_ids={record_id for conflict in conflicts
                           for record_id in conflict['record_ids']}
@@ -248,9 +300,11 @@ class Governance:
                     attribute['subject_id']=keep_id
                     updates.append(attribute)
             decisions=[resolution_decision] if resolution_decision else None
-            return self._commit(p,before,updates,'merge','semantica',redirects={drop_id:keep_id},
-                resolution_decisions=decisions,assertion_decisions=assertion_decisions,
-                audit_extra={'actor': actor})
+            with self._merge_commit_guard(p,keep_id,drop_id,expected_versions,fingerprint):
+                return self._commit(p,before,updates,'merge','semantica',redirects={drop_id:keep_id},
+                    resolution_decisions=decisions,assertion_decisions=assertion_decisions,
+                    expected_dependencies={row['id']:row['version'] for row in attributes},
+                    audit_extra={'actor': actor,'preview_fingerprint':fingerprint,'attribute_winners':winners})
 
     def delete(self,p,record_id,expected_version):
         with self.service.lock:

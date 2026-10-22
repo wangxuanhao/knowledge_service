@@ -1,3 +1,4 @@
+from ontology_seed import seed_project_ontology
 from fastapi.testclient import TestClient
 from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
@@ -37,7 +38,7 @@ def test_subgraph_attribute_modes_group_values_and_expand_only_selected_entity(t
             'name': 'attribute explorer', 'use_default_ontology': False,
         }).json()['id']
         base = f'/api/projects/{project_id}'
-        ontology = client.post(base+'/ontologies', json={'turtle': ATTRIBUTE_TTL}).json()
+        ontology = seed_project_ontology(client, base+'', ATTRIBUTE_TTL)
         service = app.state.service
         datatype = 'http://www.w3.org/2001/XMLSchema#integer'
         saved = service.write(project_id, [
@@ -211,7 +212,7 @@ def test_explorer_scope_sources_snapshot_and_evaluation(tmp_path):
     with TestClient(create_app(tmp_path/'x.sqlite',HashingEncoder())) as client:
         p=client.post('/api/projects',json={'name':'explorer'}).json()['id']
         base=f'/api/projects/{p}'
-        assert client.post(base+'/documents',json={'title':'原文','text':'退款证据','extract':False}).status_code==201
+        assert client.post(base+'/documents',json={'title':'原文','text':'退款证据','extraction_mode':'documents'}).status_code==201
         records=[dict(id='a',kind='entity',type='Merchant',text='商户',metadata={'city':'北京'}),
                  dict(id='b',kind='entity',type='Platform',text='平台',metadata={'city':'北京'}),
                  dict(id='r',kind='relation',type='onboards',text='入驻',subject_id='a',object_id='b',metadata={'city':'北京'})]
@@ -239,7 +240,7 @@ def test_document_job_and_stream(tmp_path):
     with TestClient(create_app(tmp_path/'x.sqlite',HashingEncoder())) as client:
         p=client.post('/api/projects',json={'name':'tasks'}).json()['id']
         base=f'/api/projects/{p}'
-        submitted=client.post(base+'/documents/jobs',json={'title':'job','text':'异步原文','extract':False})
+        submitted=client.post(base+'/documents/jobs',json={'title':'job','text':'异步原文','extraction_mode':'documents'})
         assert submitted.status_code==202,submitted.text
         job_id=submitted.json()['id']
         for _ in range(200):
@@ -248,32 +249,69 @@ def test_document_job_and_stream(tmp_path):
             time.sleep(.02)
         assert job['status']=='completed',job
         assert len(client.get(base+'/jobs').json()['jobs'])==1
-        response=client.post(base+'/qa/stream',json={'query':'原文','generate':False})
+        response=client.post(base+'/qa/stream',json={'query':'原文','retrieval_mode':'keyword','generate':False})
         assert response.status_code==200 and 'event: evidence' in response.text and 'event: done' in response.text
 
 
 def test_qa_stream_reads_scoped_records_once_and_returns_evidence_with_answer(tmp_path, monkeypatch):
+    from threading import local
+
     with TestClient(create_app(tmp_path/'qa-once.sqlite',HashingEncoder())) as client:
         p=client.post('/api/projects',json={'name':'qa-once'}).json()['id']
         base=f'/api/projects/{p}'
         assert client.post(base+'/documents',json={
-            'title':'退款规则','text':'退款需要原始凭证','extract':False,
+            'title':'退款规则','text':'退款需要原始凭证','extraction_mode':'documents',
         }).status_code==201
         repository=client.app.state.service.repository
         original_query=repository.query
+        driver_type=type(repository._db)
+        original_execute=driver_type.execute
+        query_context=local()
         calls=[]
+        reference_statements=[]
+        reference_rows=[]
+
+        def counted_execute(database, statement, *args, **kwargs):
+            if getattr(query_context, 'reference', False):
+                reference_statements.append(' '.join(statement.lower().split()))
+            return original_execute(database, statement, *args, **kwargs)
 
         def counted_query(*args, **kwargs):
             calls.append((args, kwargs))
-            return original_query(*args, **kwargs)
+            query_context.reference=bool(kwargs.get('_reference_mode'))
+            try:
+                rows=original_query(*args, **kwargs)
+                if query_context.reference:
+                    reference_rows.extend(rows)
+                return rows
+            finally:
+                query_context.reference=False
 
         monkeypatch.setattr(repository,'query',counted_query)
+        monkeypatch.setattr(driver_type,'execute',counted_execute)
         response=client.post(base+'/qa/stream',json={
             'query':'退款','generate':False,'retrieval_mode':'keyword',
         })
 
         assert response.status_code==200
-        assert len(calls)==1
+        primary = [(args, kwargs) for args, kwargs in calls
+                   if not kwargs.get('_reference_mode')]
+        references = [(args, kwargs) for args, kwargs in calls
+                      if kwargs.get('_reference_mode')]
+        assert len(primary) == len(references) == 1
+        assert len(calls) == 2
+        assert primary[0][0] == references[0][0] == (p,)
+        assert references[0][1]['_reference_limit'] == 501
+        assert references[0][1]['_reference_terms'] == ['退款']
+        record_reads = [statement for statement in reference_statements
+                        if ' from record_versions ' in statement]
+        assert len(record_reads) == 1
+        columns = record_reads[0].partition(' from ')[0].removeprefix('select ').split(',')
+        assert 'payload' in [column.strip() for column in columns]
+        assert all('*' not in column and 'vector' not in column and 'embedding' not in column
+                   for column in columns)
+        assert reference_rows and all('embedding' not in row for row in reference_rows)
+        assert primary[0][1]['known_at'] == references[0][1]['known_at']
         assert 'event: evidence' in response.text
         assert '退款需要原始凭证' in response.text
         assert 'event: done' in response.text
@@ -303,7 +341,12 @@ def test_qa_and_stream_preserve_ontology_scope_for_shared_context(tmp_path, monk
         stream = client.post(f'/api/projects/{p}/qa/stream', json=request)
 
         assert answer.status_code == stream.status_code == 200
-        assert len(scopes) == 2
+        assert len(scopes) == 4
+        assert [bool(scope.get('_reference_mode')) for scope in scopes] == [
+            False, True, False, True]
         for scope in scopes:
             assert scope['ontology_scope'] == 'ids'
             assert scope['ontology_ids'] == ['ontology-v1']
+        for primary, reference in (scopes[:2], scopes[2:]):
+            assert primary['known_at'] == reference['known_at']
+            assert reference['_reference_terms'] == ['退款']

@@ -1,3 +1,4 @@
+from ontology_seed import seed_ontology
 import knowledge_service.services.service as service_module
 
 from knowledge_service.api import create_app
@@ -23,8 +24,8 @@ def test_ontology_labels_are_cached_per_project_and_invalidated_by_new_version(t
     repository = service.repository
     first = repository.create_project('first')['id']
     second = repository.create_project('second')['id']
-    repository.save_ontology(first, TTL_ONE, {})
-    repository.save_ontology(second, TTL_TWO, {})
+    seed_ontology(repository, first, TTL_ONE, {})
+    seed_ontology(repository, second, TTL_TWO, {})
     original = service_module.Ontology
     parsed = []
 
@@ -39,7 +40,7 @@ def test_ontology_labels_are_cached_per_project_and_invalidated_by_new_version(t
     assert service.ontology_labels(second)['urn:test:Two'] == '二'
     assert len(parsed) == 2
 
-    repository.save_ontology(first, TTL_TWO, {})
+    seed_ontology(repository, first, TTL_TWO, {})
     labels = service.ontology_labels(first)
 
     assert labels['urn:test:One'] == '一' and labels['urn:test:Two'] == '二'

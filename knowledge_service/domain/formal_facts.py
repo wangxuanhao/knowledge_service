@@ -8,7 +8,7 @@ from .applicability import scope_identity
 
 
 FORMAL_OPERATIONS = frozenset({
-    'extract', 'manual_write', 'approve_review', 'legacy_import',
+    'extract', 'manual_write', 'approve_review',
     'adopt_discovery', 'publish_discovery_draft', 'ontology_publish',
     'ontology_remap', 'merge_rewrite', 'merge_reversal', 'retract_source',
     'restore_snapshot',

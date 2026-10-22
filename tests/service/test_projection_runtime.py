@@ -18,11 +18,14 @@ class RecordingMilvus:
         self.upserts = []
         self.deletes = []
 
-    def upsert(self, records, flush=True):
+    def check_destination(self, *, destination):
+        return self
+
+    def upsert(self, records, flush=True, *, destination, projection_seq, fence):
         self.upserts.append((list(records), flush))
         return len(records)
 
-    def delete(self, project_id, record_id=None):
+    def delete(self, project_id, record_id=None, *, destination):
         self.deletes.append((project_id, record_id))
         return 1
 
@@ -76,7 +79,7 @@ def test_milvus_adapter_repairs_authority_when_persistent_fence_is_lost_after_wr
     current = {'valid': True}
     repaired = []
 
-    def upsert_then_lose_fence(records, flush=True):
+    def upsert_then_lose_fence(records, flush=True, *, destination, projection_seq, fence):
         store.upserts.append((list(records), flush))
         current['valid'] = False
         return len(records)
@@ -118,8 +121,13 @@ def test_milvus_adapter_never_acknowledges_an_indexed_record_without_embedding()
 class FakeRepository:
     def __init__(self):
         self.cleanup_acks = []
+        self.directory_calls = 0
 
     def list_projects(self):
+        raise AssertionError('projection worker must not load full project statistics')
+
+    def list_project_directory(self):
+        self.directory_calls += 1
         return [{'id': 'p1'}, {'id': 'p2'}]
 
     def claim_projection_cleanups(self, owner, limit=100):
@@ -156,7 +164,7 @@ class FakeSync:
         return 0
 
 
-def test_projection_worker_turns_schema_mismatch_into_controlled_rebuild():
+def test_projection_worker_leaves_schema_mismatch_for_explicit_rebuild():
     class RebuildingSync(FakeSync):
         def __init__(self):
             super().__init__()
@@ -169,7 +177,7 @@ def test_projection_worker_turns_schema_mismatch_into_controlled_rebuild():
 
     sync = RebuildingSync()
     ProjectionWorker(FakeRepository(), sync, cleanup_handlers={}).drain_project('p1')
-    assert sync.rebuilt == [('p1', 'milvus')]
+    assert sync.rebuilt == []
 
 
 def test_projection_worker_never_rebuilds_while_another_worker_holds_lease():
@@ -254,11 +262,11 @@ def test_snapshot_load_chunks_milvus_upserts_at_256_records():
                 'text': 'x', 'embedding': [1], 'metadata': {}}
                for i in range(600)]
     MilvusProjectionAdapter(store).load_snapshot(
-        'p', 'generation', records, 9, fence='claim')
+        'p', 'generation', records, 9, fence='claim', lease_is_current=lambda: True)
     assert store.sizes == [256, 256, 88]
 
 
-def test_projection_worker_runs_recovery_delivery_cleanup_and_maintenance():
+def test_projection_worker_runs_delivery_cleanup_and_maintenance_without_recovery():
     repository = FakeRepository()
     sync = FakeSync()
     cleaned = []
@@ -266,12 +274,12 @@ def test_projection_worker_runs_recovery_delivery_cleanup_and_maintenance():
         repository, sync,
         cleanup_handlers={'milvus': cleaned.append}, interval_seconds=60)
 
-    worker.resume_pending()
     result = worker.run_once()
 
-    assert sync.resumed == ['milvus']
+    assert sync.resumed == []
     assert sync.drained == [('p1', 'milvus'), ('p2', 'milvus')]
     assert sync.maintained == ['milvus']
+    assert repository.directory_calls == 1
     assert cleaned == ['gone']
     assert result['cleanup'] == {'claimed': 1, 'cleaned': 1, 'failed': 0}
 

@@ -24,9 +24,8 @@ def reconcile(service,p,derived,request,receipt):
         target=next((r for r in eligible if row['text'].casefold() in
                     [n.casefold() for n in [r['text'],*r.get('metadata',{}).get('aliases',[])] if isinstance(n,str)]),None)
         if target is None and eligible:
-            from .entity_resolution import EntityResolver
             probe={**row,'_auto_merge':bool(request.get('auto_merge'))}
-            outcome=EntityResolver(service.repository,service.encoder).resolve(
+            outcome=service.entity_resolver().resolve(
                 p,probe,review_threshold=request.get('review_threshold',.72),
                 merge_threshold=request.get('merge_threshold',.88))
             if outcome.status=='aligned' and outcome.canonical_id in pool:

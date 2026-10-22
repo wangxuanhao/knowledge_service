@@ -51,7 +51,7 @@ class FakeStore:
     def project_watermark(self, project_id):
         return self.watermark
 
-    def begin_rebuild(self, project_id, target, schema_version, owner):
+    def begin_rebuild(self, project_id, target, schema_version, owner, *, lease_guard):
         if self.rebuild_state is not None:
             return self.rebuild_state
         return {
@@ -120,15 +120,19 @@ class FakeAdapter:
         return 'build-1'
 
     def load_snapshot(self, project_id, destination, records, snapshot_seq,
-                      fence=None):
+                      fence=None, *, lease_is_current):
+        lease_is_current()
         self.phases.append(('snapshot', snapshot_seq, len(records)))
 
     def reset_rebuild(self, project_id, destination, build_id, fence=None):
         self.reset.append((destination, build_id, fence))
 
-    def validate_rebuild(self, project_id, destination, fence=None):
+    def validate_rebuild(self, project_id, destination, fence=None, state=None):
         self.phases.append('validate')
         return self.validation
+
+    def seal_rebuild(self, project_id, destination, applied_seq, fence=None):
+        pass
 
     def current_destination(self, project_id):
         return self.current
@@ -230,7 +234,7 @@ def test_rollback_window_dual_writes_then_retires_previous_projection():
     assert store.cleared == ['old-live']
 
 
-def test_resume_pending_enumerates_and_resumes_incomplete_builds():
+def test_explicit_rebuild_resumes_only_the_requested_incomplete_build():
     resumed = {
         'claim': batch(build_id='build-1', token='resume-token'),
         'snapshot_seq': 0, 'records': [],
@@ -240,9 +244,10 @@ def test_resume_pending_enumerates_and_resumes_incomplete_builds():
     }
     store = FakeStore(watermark=0, rebuild=resumed)
     adapter = FakeAdapter()
-    results = ProjectionSync(
-        store, {'milvus': adapter}, schema_version=2).resume_pending('milvus')
-    assert results[0]['ready'] is True
+    sync = ProjectionSync(store, {'milvus': adapter}, schema_version=2)
+    assert not hasattr(sync, 'resume_pending')
+    result = sync.rebuild('project', 'milvus')
+    assert result['ready'] is True
 
 
 @pytest.mark.parametrize('validation', [None, {}, {'ok': False}, {'ok': 1}, 1])

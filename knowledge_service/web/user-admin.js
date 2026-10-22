@@ -1,337 +1,62 @@
-/* ============================================================================
-   user-admin.js —— 「用户与权限」页面（管理员 / 超级管理员）+「修改我的口令」浮窗
-   ----------------------------------------------------------------------------
-   用户与权限是侧栏「系统层 · 管理」里的一个页面式菜单：点击后渲染到主区
-   #tab-useradmin 并切换 tab，与其它菜单同一套交互；「修改我的口令」仍是浮窗。
-   这一页管什么、不管什么（页面上也这么写，不用猜）：
-     * 管：谁能登录（账号）、谁能写（角色）、谁被停用；以及你改自己的口令。
-     * 不管：项目里的知识、本体、版本 —— 那些在「知识台账」「本体建模层」做。
-
-   三档角色，口径以后端为准（api/users.py + security_middleware.py）：
-     · superadmin 超级管理员：能管理一切账号（含管理员），系统之根；
-     · admin      管理员：能写入、建模发布，能管理 admin/viewer，但不能碰超管；
-     · viewer     只读用户：只能检索、问答、看脑图。
-
-   前端这里只"显示真相 + 发动作"，不自己编权限：
-     · 角色 / 状态来自 GET /api/users，不在本地推算；
-     · 按**当前操作者**身份隐藏他无权做的动作（管理员不摆"超管"选项）；
-     · 超管行受保护：不摆降级 / 停用 / 删除，服务端也会拒绝（双保险）；
-     · 自己那行不摆降级 / 停用 / 删除（会当场失去权限），改自己口令用左下角。
-   ============================================================================ */
-(function () {
-    'use strict';
-
-    var ROLE_TEXT = { superadmin: '超级管理员', admin: '管理员', viewer: '只读用户' };
-    var ROLE_HINT = {
-        superadmin: '系统最高权限：可写入、建模发布，并管理所有账号（含管理员）',
-        admin: '可写入知识、建模发布，管理普通账号；不能管理超级管理员',
-        viewer: '只能检索、问答、看脑图，不能写入'
-    };
-    // 角色等级：数字越小权限越高，用于判断"提升 / 降级"。
-    var ROLE_RANK = { superadmin: 0, admin: 1, viewer: 2 };
-
-    var drawer = null;        // 抽屉宿主
-    var rowsHost = null;      // 账号清单 tbody
-    var flashHost = null;     // 一句话回执
-    var users = [];           // 最近一次读到的账号清单（渲染用）
-
-    function esc(value) {
-        return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
-            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-        });
-    }
-
-    function el(tag, cls, html) {
-        var node = document.createElement(tag);
-        if (cls) node.className = cls;
-        if (html != null) node.innerHTML = html;
-        return node;
-    }
-
-    function currentUser() { return (window.Auth && window.Auth.user()) || null; }
-    function isSuper() { return (window.Auth && window.Auth.isSuperAdmin && window.Auth.isSuperAdmin()); }
-
-    // 所有请求走 window.fetch —— auth.js 已补丁（自动带令牌，401 会跳登录页）。
-    function api(path, options) {
-        return window.fetch(path, options).then(function (resp) {
-            return resp.json().catch(function () { return {}; }).then(function (data) {
-                return { ok: resp.ok, status: resp.status, data: data };
-            });
-        });
-    }
-
-    function flash(text, tone) {
-        if (!flashHost) return;
-        flashHost.textContent = text || '';
-        flashHost.className = 'ua-flash' + (tone ? ' is-' + tone : '');
-    }
-
-    // 服务端错误文案优先用中文 detail，其次给状态码兜底。
-    function failure(result, fallback) {
-        var detail = result && result.data && result.data.detail;
-        return detail || (fallback + '（HTTP ' + (result ? result.status : '?') + '）');
-    }
-
-    // ── 页面骨架：渲染到主区 #tab-useradmin，作为页面式 tab（与其它菜单一致）──
-    function build() {
-        var host = document.getElementById('tab-useradmin');
-        if (!host) return;
-        drawer = host;
-        drawer.innerHTML =
-            '<section class="ua-page" aria-labelledby="ua-title">' +
-            '  <header class="ua-head">' +
-            '    <div>' +
-            '      <h2 id="ua-title">用户与权限</h2>' +
-            '      <p class="ua-sub">这里管<b>账号与角色</b>，不管项目里的知识与本体。' +
-            '        <b>超级管理员</b>：系统最高权限，能管理所有账号；' +
-            '        <b>管理员</b>：能写入、建模发布，管理普通账号；' +
-            '        <b>只读用户</b>：只能检索、问答、看脑图。' +
-            '        给账号改口令或停用后，他<b>已登录的会话立刻失效</b>。</p>' +
-            '    </div>' +
-            '  </header>' +
-            '  <p class="ua-flash" data-ua-flash></p>' +
-            '  <section class="ua-create">' +
-            '    <h3>新建账号</h3>' +
-            '    <div class="ua-form">' +
-            '      <label>用户名<input data-ua-new-name placeholder="登录名，统一转小写" autocomplete="off"></label>' +
-            '      <label>初始口令<input data-ua-new-pass type="password" placeholder="至少 6 位" autocomplete="new-password"></label>' +
-            '      <label>角色<select data-ua-new-role></select></label>' +
-            '      <label>展示名（选填）<input data-ua-new-display placeholder="侧栏里显示的名字" autocomplete="off"></label>' +
-            '      <button type="button" class="ua-primary" data-ua-create>创建账号</button>' +
-            '    </div>' +
-            '    <p class="ua-note">账号不提供自助注册，统一在这里开通。能开<b>超级管理员</b>的' +
-            '      只有现有超级管理员；管理员可建管理员与只读账号。</p>' +
-            '  </section>' +
-            '  <section class="ua-list">' +
-            '    <h3>账号清单 <small data-ua-count></small></h3>' +
-            '    <table class="ua-table">' +
-            '      <thead><tr><th>用户名</th><th>展示名</th><th>角色</th><th>状态</th>' +
-            '        <th>创建时间</th><th class="ua-actions-col">动作</th></tr></thead>' +
-            '      <tbody data-ua-rows></tbody>' +
-            '    </table>' +
-            '  </section>' +
-            '</section>';
-        flashHost = drawer.querySelector('[data-ua-flash]');
-        rowsHost = drawer.querySelector('[data-ua-rows]');
-        drawer.querySelector('[data-ua-create]').addEventListener('click', createUser);
-    }
-
-    // 按操作者身份填充"新建账号"角色下拉：管理员不摆"超级管理员"（后端也会拒）。
-    function fillRoleOptions() {
-        var select = drawer.querySelector('[data-ua-new-role]');
-        var options = isSuper()
-            ? [['viewer', '只读用户 —— 可检索、问答、看脑图'],
-               ['admin', '管理员 —— 可写入，并管理普通账号'],
-               ['superadmin', '超级管理员 —— 系统最高权限']]
-            : [['viewer', '只读用户 —— 可检索、问答、看脑图'],
-               ['admin', '管理员 —— 可写入，并管理普通账号']];
-        select.innerHTML = options.map(function (pair) {
-            return '<option value="' + pair[0] + '">' + pair[1] + '</option>';
-        }).join('');
-    }
-
-    // 打开用户管理页：渲染到 #tab-useradmin 并切换到该 tab。
-    function open() {
-        var host = document.getElementById('tab-useradmin');
-        if (!host) return;
-        if (!drawer || drawer !== host || !drawer.querySelector('[data-ua-new-name]')) build();
-        enterPage();
-        fillRoleOptions();
-        flash('');
-        load();
-    }
-
-    // 切换到用户管理页面：隐藏其它 tab、显示本页、更新标题与侧栏高亮。
-    function enterPage() {
-        if (!drawer) return;
-        document.querySelectorAll('.tab').forEach(function (t) { t.classList.add('hidden'); });
-        drawer.classList.remove('hidden');
-        var title = document.getElementById('title');
-        if (title) title.textContent = '用户与权限';
-        document.querySelectorAll('aside nav button').forEach(function (b) { b.classList.remove('active'); });
-        var ub = document.querySelector('aside nav .nav-group[data-layer="system"] button');
-        if (ub) ub.classList.add('active');
-        var scope = document.getElementById('scope');
-        if (scope) scope.classList.add('hidden');
-    }
-
-    // 页面式 tab 不再需要关闭；保留空实现以免外部误调。
-    function close() {}
-
-    // ── 读清单 ────────────────────────────────────────────────────────────────
-    function load() {
-        rowsHost.innerHTML = '<tr><td colspan="6" class="ua-empty">读取中…</td></tr>';
-        api('/api/users').then(function (result) {
-            if (!result.ok) {
-                rowsHost.innerHTML = '';
-                rowsHost.appendChild(el('tr', '', '<td colspan="6" class="ua-empty">'
-                    + esc(failure(result, '读不到账号清单')) + '</td>'));
-                return;
-            }
-            users = result.data.items || [];
-            render();
-        });
-    }
-
-    function formatTime(value) {
-        if (!value) return '—';
-        var date = new Date(value);
-        if (isNaN(date.getTime())) return String(value);
-        return date.toLocaleString('zh-CN', { hour12: false });
-    }
-
-    // 返回目标账号"相邻一档"的角色：超管↔管理员↔只读，用于单一按钮切换。
-    function nextRole(role) {
-        if (role === 'viewer') return 'admin';
-        if (role === 'admin') return isSuper() ? 'superadmin' : 'viewer';
-        return 'admin';   // superadmin → admin（但超管行受保护，不会真的摆降级）
-    }
-
-    function render() {
-        var me = currentUser() || {};
-        drawer.querySelector('[data-ua-count]').textContent = '共 ' + users.length + ' 个';
-        rowsHost.innerHTML = '';
-        users.forEach(function (item) {
-            var isSelf = item.id === me.id;
-            var tr = document.createElement('tr');
-            if (isSelf) tr.className = 'is-self';
-
-            tr.appendChild(el('td', 'ua-name', esc(item.username)
-                + (isSelf ? '<small class="ua-self-tag">（你）</small>' : '')));
-            tr.appendChild(el('td', '', esc(item.display_name || '—')));
-            tr.appendChild(el('td', '', '<span class="ua-role is-' + esc(item.role) + '" title="'
-                + esc(ROLE_HINT[item.role] || '') + '">' + esc(ROLE_TEXT[item.role] || item.role) + '</span>'));
-            tr.appendChild(el('td', '', item.is_active
-                ? '<span class="ua-state is-on">启用</span>'
-                : '<span class="ua-state is-off">已停用</span>'));
-            tr.appendChild(el('td', 'ua-time', esc(formatTime(item.created_at))));
-
-            tr.appendChild(el('td', 'ua-actions-col'));
-            renderActions(tr.lastChild, item, isSelf);
-            rowsHost.appendChild(tr);
-        });
-    }
-
-    // 按"目标账号 + 是不是自己 + 操作者身份"渲染动作按钮。
-    function renderActions(host, item, isSelf) {
-        // ① 超管行受系统保护：谁都不能降级 / 停用 / 删除（含他自己）。
-        if (item.role === 'superadmin') {
-            host.appendChild(el('span', 'ua-self-note',
-                '超级管理员受系统保护：不能降级、停用或删除，系统始终保留这个最高入口。'));
-            return;
-        }
-        // ② 自己那行（管理员/只读）不摆降级 / 停用 / 删除，会当场失去权限。
-        if (isSelf) {
-            host.appendChild(el('span', 'ua-self-note',
-                '不能改自己：会当场失去管理权限。改自己口令请用左下角「改口令」。'));
-            appendResetPassword(host, item);
-            return;
-        }
-        // ③ 普通账号（admin/viewer，且不是自己）：
-        //    角色切换按钮：只摆"升到相邻一档 / 降到相邻一档"。管理员不摆"升超管"。
-        var target = nextRole(item.role);
-        var promoting = ROLE_RANK[target] < ROLE_RANK[item.role];
-        // 管理员视角下，不允许把人往 superadmin 提（nextRole 已保证只有超管会返回 superadmin）。
-        host.appendChild(actionButton(
-            promoting ? '设为' + ROLE_TEXT[target] : '降为' + ROLE_TEXT[target],
-            promoting ? ROLE_HINT[target] : '降级后他将不能再写入或建项目（已登录会话立刻按新角色生效）',
-            function () {
-                if (!promoting && !window.confirm(
-                    '把「' + item.username + '」降为' + ROLE_TEXT[target] + '？\n\n'
-                    + '他立刻不能再写入或建项目。')) { return; }
-                patchUser(item, { role: target },
-                    (promoting ? '已把「' : '已把「') + item.username + (promoting ? '」设为' : '」降为') + ROLE_TEXT[target]);
-            }));
-        // 停用 / 启用
-        host.appendChild(actionButton(
-            item.is_active ? '停用' : '启用',
-            item.is_active ? '停用后他已登录的会话立刻失效，也不能再登录（账号与历史保留）' : '重新允许他登录',
-            function () {
-                if (item.is_active && !window.confirm(
-                    '停用「' + item.username + '」？\n\n他已登录的会话会立刻失效，也不能再登录。')) { return; }
-                patchUser(item, { is_active: !item.is_active }, item.is_active
-                    ? '已停用「' + item.username + '」'
-                    : '已重新启用「' + item.username + '」');
-            }));
-        appendResetPassword(host, item);
-        // 删除：物理抹除。超管不在此路径（已在上面拦截）；管理员可删普通账号。
-        host.appendChild(actionButton('删除', '物理删除该账号（不同于停用：账号与登录名一并移除）',
-            function () {
-                if (!window.confirm('删除账号「' + item.username + '」？\n\n'
-                    + '这是物理删除，登录名会被释放，且无法恢复。如只是想阻止登录，建议改用「停用」。')) { return; }
-                deleteUser(item);
-            }));
-    }
-
-    function appendResetPassword(host, item) {
-        host.appendChild(actionButton('重置口令', '给他换新口令（原口令作废，他已登录的会话立刻失效）',
-            function () {
-                var next = window.prompt('给「' + item.username + '」设置新口令（至少 6 位）：');
-                if (next == null) return;
-                if (next.length < 6) { flash('口令至少 6 位', 'error'); return; }
-                patchUser(item, { password: next },
-                    '已重置「' + item.username + '」的口令，他已登录的会话失效');
-            }));
-    }
-
-    function actionButton(label, title, handler) {
-        var button = el('button', 'ua-action', esc(label));
-        button.type = 'button';
-        button.title = title;
-        button.addEventListener('click', handler);
-        return button;
-    }
-
-    function patchUser(item, payload, successText) {
-        flash('提交中…');
-        api('/api/users/' + encodeURIComponent(item.id), {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        }).then(function (result) {
-            if (!result.ok) { flash(failure(result, '操作没成功'), 'error'); return; }
-            flash(successText, 'good');
-            load();
-        }).catch(function () { flash('网络异常，请稍后重试', 'error'); });
-    }
-
-    function deleteUser(item) {
-        flash('提交中…');
-        api('/api/users/' + encodeURIComponent(item.id), { method: 'DELETE' })
-            .then(function (result) {
-                if (!result.ok) { flash(failure(result, '删除没成功'), 'error'); return; }
-                flash('已删除账号「' + item.username + '」', 'good');
-                load();
-            }).catch(function () { flash('网络异常，请稍后重试', 'error'); });
-    }
-
-    function createUser() {
-        var username = drawer.querySelector('[data-ua-new-name]').value.trim();
-        var password = drawer.querySelector('[data-ua-new-pass]').value;
-        var role = drawer.querySelector('[data-ua-new-role]').value;
-        var displayName = drawer.querySelector('[data-ua-new-display]').value.trim();
-        if (!username) { flash('请填写用户名', 'error'); return; }
-        if (password.length < 6) { flash('口令至少 6 位', 'error'); return; }
-        var button = drawer.querySelector('[data-ua-create]');
-        button.disabled = true;
-        flash('创建中…');
-        api('/api/users', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                username: username, password: password, role: role, display_name: displayName
-            })
-        }).then(function (result) {
-            if (!result.ok) { flash(failure(result, '创建没成功'), 'error'); return; }
-            flash('已创建「' + result.data.username + '」（' + ROLE_TEXT[result.data.role] + '）', 'good');
-            drawer.querySelector('[data-ua-new-name]').value = '';
-            drawer.querySelector('[data-ua-new-pass]').value = '';
-            drawer.querySelector('[data-ua-new-display]').value = '';
-            load();
-        }).catch(function () { flash('网络异常，请稍后重试', 'error'); })
-          .finally(function () { button.disabled = false; });
-    }
-
+/* Global account administration; personal password flow is shared with the account menu. */
+(function(){
+'use strict';
+const ROLE_TEXT={viewer:'只读用户',admin:'管理员',superadmin:'超级管理员'};
+const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const el=(tag,cls,html)=>{const node=document.createElement(tag);node.className=cls||'';if(html!=null)node.innerHTML=html;return node;};
+const currentUser=()=>window.Auth?.user()||null;
+const isSuper=()=>currentUser()?.role==='superadmin';
+async function api(path,options){const response=await window.fetch(path,options);let data;try{data=await response.json();}catch{data={};}return {ok:response.ok,status:response.status,data};}
+const failure=(result,fallback)=>typeof result?.data?.detail==='string'?result.data.detail:fallback+'（HTTP '+result.status+'）';
+let drawer=null,rowsHost=null,flashHost=null,users=[],loadSerial=0;
+const flash=(message,tone='')=>{if(flashHost){flashHost.textContent=message;flashHost.className='ua-flash '+(tone?'is-'+tone:'');}};
+function open(){
+ if(!['admin','superadmin'].includes(currentUser()?.role)&&document.body.classList.contains('is-viewer'))return;
+ window.KnowledgeTabs?.open('useradmin',{trigger:false});window.WorkspaceContext?.enter('useradmin');
+ drawer=document.getElementById('tab-useradmin');if(!drawer)return;
+ drawer.innerHTML=`<section class="ua-page"><header class="ua-head"><div><h2>人员管理</h2><p class="ua-sub">全局登录账号与系统角色</p></div><button id="ua-add">添加人员</button></header><p class="ua-flash" data-ua-flash></p><div class="ua-search"><input id="ua-search" placeholder="查找展示名或登录账号" aria-label="查找人员"><select id="ua-state" aria-label="账号状态"><option value="">全部状态</option><option value="on">启用</option><option value="off">停用</option></select><button id="ua-refresh" class="secondary">刷新</button></div><div class="ua-table-wrap"><table class="ua-table"><thead><tr><th>人员 / 登录账号</th><th>系统角色</th><th>状态</th><th>操作</th></tr></thead><tbody data-ua-rows></tbody></table></div><p class="subtle">系统角色适用于整个工作空间。项目成员权限尚未提供。</p></section>`;
+ rowsHost=drawer.querySelector('[data-ua-rows]');flashHost=drawer.querySelector('[data-ua-flash]');
+ drawer.querySelector('#ua-add').onclick=()=>edit();drawer.querySelector('#ua-refresh').onclick=load;
+ drawer.querySelector('#ua-search').oninput=render;drawer.querySelector('#ua-state').onchange=render;load();
+}
+function close(){}
+async function load(){const serial=++loadSerial;rowsHost.innerHTML='<tr><td colspan="4">读取中…</td></tr>';try{const result=await api('/api/users');if(serial!==loadSerial)return;if(!result.ok)throw Error(failure(result,'无法读取人员清单'));users=result.data.items||[];render();}catch(error){if(serial===loadSerial){rowsHost.innerHTML='';flash(error.message,'error');}}}
+function render(){
+ const query=drawer.querySelector('#ua-search').value.trim().toLowerCase(),state=drawer.querySelector('#ua-state').value;
+ const found=users.filter(item=>(!query||(item.username+' '+item.display_name).toLowerCase().includes(query))&&(!state||Boolean(item.is_active)===(state==='on')));
+ rowsHost.innerHTML=found.length?found.map(item=>{const policy=window.WorkspaceContext.accountPolicy(currentUser(),item);return `<tr><td><strong>${esc(item.display_name||item.username)}</strong>${item.id===currentUser()?.id?'<span class="ua-self-tag">你</span>':''}<small class="ua-login">${esc(item.username)}</small></td><td>${esc(ROLE_TEXT[item.role]||item.role)}</td><td>${item.is_active?'启用':'已停用'}</td><td>${policy.edit?`<button class="secondary" data-edit-user="${esc(item.id)}">编辑</button>`:'<span class="subtle">受保护账号</span>'}</td></tr>`;}).join(''):'<tr><td colspan="4">没有符合条件的人员</td></tr>';
+ rowsHost.querySelectorAll('[data-edit-user]').forEach(button=>button.onclick=()=>edit(users.find(item=>item.id===button.dataset.editUser)));
+}
+function edit(item=null){
+ const policy=item?window.WorkspaceContext.accountPolicy(currentUser(),item):{role:true,status:false,password:true,delete:false};if(item&&!policy.edit)return;
+ const overlay=el('div','ua-overlay ua-management-overlay');
+ const roles=isSuper()?['viewer','admin','superadmin']:['viewer','admin'];
+ overlay.innerHTML=`<section class="ua-card ua-edit-card" role="dialog" aria-modal="true" aria-label="${item?'编辑人员':'添加人员'}"><header class="ua-head"><h2>${item?'编辑人员':'添加人员'}</h2><button type="button" class="ua-close" data-close aria-label="关闭">×</button></header><p>登录账号用于访问整个工作空间。</p><p class="ua-flash" data-edit-flash role="status"></p><form class="ua-edit-form"><label>登录账号<input name="username" autocomplete="off" ${item?'readonly':''}></label><label>展示名<input name="display_name"></label><label>系统角色<select name="role" ${policy.role?'':'disabled'}>${roles.map(role=>`<option value="${role}">${ROLE_TEXT[role]}</option>`).join('')}</select></label>${!item?'<label>初始口令<input name="password" type="password" autocomplete="new-password"></label>':''}<button type="submit">${item?'保存更改':'创建登录账号'}</button></form>${item?`<div class="ua-edit-secondary">${policy.status?`<button data-toggle class="secondary">${item.is_active?'停用账号':'启用账号'}</button>`:''}${policy.password?'<details><summary>重置口令</summary><form class="ua-reset-form"><label>新口令<input name="password" type="password" autocomplete="new-password"></label><label>确认新口令<input name="again" type="password" autocomplete="new-password"></label><button type="submit" class="secondary">确认重置口令</button></form></details>':'<p class="subtle">自己的口令请使用个人账号菜单中的「改口令」。</p>'}${policy.delete?'<hr><button data-delete class="danger">删除账号</button>':''}${item.role==='superadmin'?'<p class="subtle">超级管理员不可降级、停用或删除。</p>':''}</div>`:''}<div data-confirm class="ua-confirm" hidden></div></section>`;
+ document.body.append(overlay);const form=overlay.querySelector('.ua-edit-form');
+ const field=name=>form.elements.namedItem(name);field('username').value=item?.username||'';field('display_name').value=item?.display_name||'';field('role').value=item?.role||'viewer';
+ const previous=document.activeElement;
+ const dismiss=()=>{overlay.remove();document.removeEventListener('keydown',onKey);previous?.focus();};
+ const onKey=event=>{if(event.key==='Escape')dismiss();};document.addEventListener('keydown',onKey);overlay.querySelector('[data-close]').onclick=dismiss;overlay.onclick=event=>{if(event.target===overlay)dismiss();};
+ const localFlash=message=>{overlay.querySelector('[data-edit-flash]').textContent=message;};
+ async function submit(path,method,payload,message){
+  const buttons=[...overlay.querySelectorAll('button')];buttons.forEach(button=>button.disabled=true);localFlash('提交中…');
+  try{const result=await api(path,{method,headers:{'Content-Type':'application/json'},...(payload?{body:JSON.stringify(payload)}:{})});if(!result.ok)throw Error(failure(result,'操作失败'));flash(message,'good');dismiss();await load();}
+  catch(error){localFlash(error.message);buttons.forEach(button=>button.disabled=false);}
+ }
+ function confirm(message,action){const host=overlay.querySelector('[data-confirm]');host.hidden=false;host.innerHTML='<p></p><button data-yes class="danger">确认</button><button data-no class="secondary">取消</button>';host.querySelector('p').textContent=message;host.querySelector('[data-yes]').onclick=action;host.querySelector('[data-no]').onclick=()=>host.hidden=true;}
+ const url=item?'/api/users/'+encodeURIComponent(item.id):'/api/users';
+ form.onsubmit=event=>{
+  event.preventDefault();const payload={display_name:field('display_name').value.trim()};
+  if(policy.role)payload.role=field('role').value;
+  if(!item){payload.username=field('username').value.trim();payload.password=field('password').value;if(!payload.username){localFlash('请填写登录账号');return;}if(payload.password.length<6){localFlash('口令至少6位');return;}}
+  const action=()=>submit(url,item?'PATCH':'POST',payload,item?'人员信息已保存':'登录账号已创建');
+  if(item&&payload.role&&payload.role!==item.role)confirm('角色更改会立即影响已登录会话，确认保存？',action);else action();
+ };
+ overlay.querySelector('[data-toggle]')?.addEventListener('click',()=>confirm(item.is_active?'停用后该账号无法登录，现有会话立即失效。':'确认重新启用此账号？',()=>submit(url,'PATCH',{is_active:!item.is_active},'账号状态已更新')));
+ overlay.querySelector('[data-delete]')?.addEventListener('click',()=>confirm('删除会永久移除账号并释放登录名，无法恢复。确认删除「'+item.username+'」？',()=>submit(url,'DELETE',null,'账号已删除')));
+ const reset=overlay.querySelector('.ua-reset-form');if(reset)reset.onsubmit=event=>{event.preventDefault();const password=reset.elements.namedItem('password').value,again=reset.elements.namedItem('again').value;if(password.length<6){localFlash('口令至少6位');return;}if(password!==again){localFlash('两次输入的口令不一致');return;}submit(url,'PATCH',{password},'口令已重置，旧会话已失效');};
+ field(item?'display_name':'username').focus();
+}
     // ── 修改我的口令 ──────────────────────────────────────────────────────────
     var pwDialog = null;
 

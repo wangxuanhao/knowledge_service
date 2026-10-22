@@ -1,0 +1,18 @@
+{
+  "verified_utc": "2026-10-21T04:44:55.868679+00:00",
+  "service_pid": 49500,
+  "ordinary_service": true,
+  "passed": false,
+  "probe_id": "1ae672c2-50ff-48a9-b72f-a7daa9a51542",
+  "probe_original_content_matches": true,
+  "initial_version": 5,
+  "current_version": 15,
+  "entities": 150001,
+  "relations": 300000,
+  "health_http_status": 200,
+  "data_preservation_passed": true,
+  "search_http_status": 503,
+  "vector_ready": false,
+  "vector_backend": null,
+  "degraded": null
+}

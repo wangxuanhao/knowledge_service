@@ -1,0 +1,90 @@
+[
+  {
+    "id": "9781542b-350b-46de-babd-2e1c7ee9741d",
+    "name": "本体编辑性能验收 · 保存与刷新",
+    "versions": 0,
+    "current": 0,
+    "documents": 0,
+    "entities": 0
+  },
+  {
+    "id": "4512fc37-6f2a-4d9d-a67b-c26a654713ec",
+    "name": "提升后建的项目-c3e0",
+    "versions": 0,
+    "current": 0,
+    "documents": 0,
+    "entities": 0
+  },
+  {
+    "id": "463f2e99-ec8b-4ca2-9c0d-e469bc4d1411",
+    "name": "提升后建的项目-7767",
+    "versions": 0,
+    "current": 0,
+    "documents": 0,
+    "entities": 0
+  },
+  {
+    "id": "b243f3d7-3a80-4f65-827b-b045d9334db0",
+    "name": "手册验收-20261013",
+    "versions": 3,
+    "current": 2,
+    "documents": 1,
+    "entities": 0
+  },
+  {
+    "id": "f428088c-ea1d-434a-8cb4-4c843d01612e",
+    "name": "资料库交互验收 · 抽屉流程",
+    "versions": 4,
+    "current": 2,
+    "documents": 1,
+    "entities": 0
+  },
+  {
+    "id": "41acc04e-6d6b-47f8-bc3f-784f2acb3751",
+    "name": "10.14图片知识抽取真机验收",
+    "versions": 11,
+    "current": 9,
+    "documents": 1,
+    "entities": 5
+  },
+  {
+    "id": "434c84fc-49aa-4a63-97c6-0932b6f55e0f",
+    "name": "OAG真实链路验收-20261016（合成规则，非业务政策）",
+    "versions": 15,
+    "current": 10,
+    "documents": 5,
+    "entities": 0
+  },
+  {
+    "id": "53cb22f8-8159-42f1-89ed-db40d9d15370",
+    "name": "10.14真实OCR与人工处置验收",
+    "versions": 24,
+    "current": 16,
+    "documents": 3,
+    "entities": 0
+  },
+  {
+    "id": "eeb3a4dc-7475-4937-9966-74aa261334e6",
+    "name": "10.14真实模型批次验收",
+    "versions": 52,
+    "current": 42,
+    "documents": 5,
+    "entities": 25
+  },
+  {
+    "id": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+    "name": "test_1016_开放",
+    "versions": 137,
+    "current": 67,
+    "documents": 4,
+    "entities": 28
+  },
+  {
+    "id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+    "name": "容量验收 · 15万实体 / 30万关系（保留测试）",
+    "versions": 450005,
+    "current": 450001,
+    "documents": 0,
+    "entities": 150001
+  }
+]

@@ -10,11 +10,10 @@ from knowledge_service.services.entity_resolution import EntityResolver
 from knowledge_service.integrations.semantica_adapter import _route_open_facts
 from knowledge_service.integrations.milvus_store import MilvusStore
 from knowledge_service.services.retrieval import RetrievalEngine
-from knowledge_service.services.retrieval_context import adjacent_chunks
 
 
 def test_ingest_scope_and_publication_fallback():
-    settings = IngestSettings(applicability={'platforms': [' meituan ', '美团']}, published_at='2026-10-14')
+    settings = IngestSettings(applicability={'platforms': {'mode': 'specific', 'values': [' meituan ', '美团']}}, published_at='2026-10-14')
     assert settings.metadata['applicability']['platforms'] == {
         'mode': 'specific', 'values': ['美团']}
     assert settings.valid_from == '2026-10-14T00:00:00.000000Z'
@@ -36,7 +35,7 @@ def test_scope_normalization_matching_and_query_resolution():
         dimension_mode, dimension_values, matches_applicability,
         normalize_applicability, resolve_query_applicability, scope_identity,
     )
-    scope = normalize_applicability({'platforms': ['JD', '京东', ' 美团 ', ''], 'businesses': [' 直播 ', '直播']})
+    scope = normalize_applicability({'platforms': {'mode': 'specific', 'values': ['JD', '京东', ' 美团 ', '']}, 'businesses': {'mode': 'specific', 'values': [' 直播 ', '直播']}})
     assert scope == {
         'platforms': {'mode': 'specific', 'values': ['京东', '美团']},
         'businesses': {'mode': 'specific', 'values': ['直播']},
@@ -45,16 +44,16 @@ def test_scope_normalization_matching_and_query_resolution():
     assert dimension_values(scope, 'platforms') == ['京东', '美团']
     assert dimension_mode(scope, 'audiences') == 'unknown'
     assert scope_identity(None) == ''
-    assert scope_identity(scope) == scope_identity({'businesses': ['直播'], 'platforms': ['meituan', 'jd']})
-    assert matches_applicability({'metadata': {'applicability': scope}}, {'platforms': ['jd'], 'businesses': ['直播']})
-    assert not matches_applicability({}, {'platforms': ['jd']})
-    assert not matches_applicability({'metadata': {'applicability': scope}}, {'businesses': ['外卖']})
+    assert scope_identity(scope) == scope_identity({'businesses': {'mode': 'specific', 'values': ['直播']}, 'platforms': {'mode': 'specific', 'values': ['meituan', 'jd']}})
+    assert matches_applicability({'metadata': {'applicability': scope}}, {'platforms': {'mode': 'specific', 'values': ['jd']}, 'businesses': {'mode': 'specific', 'values': ['直播']}})
+    assert not matches_applicability({}, {'platforms': {'mode': 'specific', 'values': ['jd']}})
+    assert not matches_applicability({'metadata': {'applicability': scope}}, {'businesses': {'mode': 'specific', 'values': ['外卖']}})
     assert matches_applicability({}, None)
     assert dimension_values(
         resolve_query_applicability('比较美团与Taobao规则', None),
         'platforms') == ['淘宝', '美团']
     with pytest.raises(ValueError):
-        resolve_query_applicability('美团规则', {'platforms': ['京东']})
+        resolve_query_applicability('美团规则', {'platforms': {'mode': 'specific', 'values': ['京东']}})
     assert dimension_mode(
         resolve_query_applicability('未知商城规则', None), 'platforms') == 'unknown'
 
@@ -64,9 +63,9 @@ def test_scope_normalization_matching_and_query_resolution():
     {'platforms': {'mode': 'all', 'values': ['美团']}},
     {'platforms': {'mode': 'unknown', 'values': ['美团']}},
     {'platforms': {'mode': 'invalid', 'values': []}},
-    {'platforms': list(map(str, range(65)))},
-    {'platforms': ['x' * 129]},
-    {'platforms': ['界' * 86]},
+    {'platforms': {'mode': 'specific', 'values': list(map(str, range(65)))}},
+    {'platforms': {'mode': 'specific', 'values': ['x' * 129]}},
+    {'platforms': {'mode': 'specific', 'values': ['界' * 86]}},
 ])
 def test_scope_validation_rejects_invalid_modes_and_limits(raw):
     from knowledge_service.domain.applicability import normalize_applicability
@@ -74,13 +73,13 @@ def test_scope_validation_rejects_invalid_modes_and_limits(raw):
         normalize_applicability(raw)
 
 
-def test_applicability_model_accepts_legacy_and_native_shapes():
-    legacy = Applicability(platforms=['meituan']).model_dump()
+def test_applicability_model_rejects_lists_and_accepts_current_dimensions():
+    with pytest.raises(ValueError, match='mode/values'):
+        Applicability(platforms=['meituan'])
     native = Applicability(
         platforms={'mode': 'specific', 'values': ['美团']},
         businesses={'mode': 'all', 'values': []},
     ).model_dump()
-    assert legacy['platforms'] == {'mode': 'specific', 'values': ['美团']}
     assert native == {
         'platforms': {'mode': 'specific', 'values': ['美团']},
         'businesses': {'mode': 'all', 'values': []},
@@ -91,22 +90,22 @@ def test_applicability_model_accepts_legacy_and_native_shapes():
 def test_scope_predicate_uses_or_within_dimensions_and_and_across_them():
     from knowledge_service.domain.applicability import build_scope_predicate
     predicate = build_scope_predicate({
-        'platforms': ['美团', '京东'], 'businesses': ['直播']})
-    assert predicate.matches({'platforms': ['京东'], 'businesses': ['直播']})
+        'platforms': {'mode': 'specific', 'values': ['美团', '京东']}, 'businesses': {'mode': 'specific', 'values': ['直播']}})
+    assert predicate.matches({'platforms': {'mode': 'specific', 'values': ['京东']}, 'businesses': {'mode': 'specific', 'values': ['直播']}})
     assert predicate.matches({
         'platforms': {'mode': 'all', 'values': []},
-        'businesses': ['直播'],
+        'businesses': {'mode': 'specific', 'values': ['直播']},
     })
     assert predicate.matches({
-        'platforms': ['美团'],
+        'platforms': {'mode': 'specific', 'values': ['美团']},
         'businesses': {'mode': 'all', 'values': []},
     })
-    assert not predicate.matches({'platforms': ['淘宝'], 'businesses': ['直播']})
-    assert not predicate.matches({'platforms': ['美团'], 'businesses': ['外卖']})
-    assert not predicate.matches({'businesses': ['直播']})
-    assert build_scope_predicate({'businesses': ['直播']}).matches({
+    assert not predicate.matches({'platforms': {'mode': 'specific', 'values': ['淘宝']}, 'businesses': {'mode': 'specific', 'values': ['直播']}})
+    assert not predicate.matches({'platforms': {'mode': 'specific', 'values': ['美团']}, 'businesses': {'mode': 'specific', 'values': ['外卖']}})
+    assert not predicate.matches({'businesses': {'mode': 'specific', 'values': ['直播']}})
+    assert build_scope_predicate({'businesses': {'mode': 'specific', 'values': ['直播']}}).matches({
         'platforms': {'mode': 'unknown', 'values': []},
-        'businesses': ['直播'],
+        'businesses': {'mode': 'specific', 'values': ['直播']},
     })
 
 
@@ -124,15 +123,15 @@ def test_scope_predicate_uses_left_closed_right_open_effective_time():
     ).matches({'metadata': {}, 'valid_from': None, 'valid_until': None})
 
 
-def test_scope_identity_preserves_v1_and_uses_v2_for_all():
+def test_scope_identity_uses_one_schema_for_every_nonempty_scope():
     from knowledge_service.domain.applicability import scope_identity
-    legacy = {'platforms': ['美团'], 'businesses': [], 'audiences': []}
-    payload = json.dumps(legacy, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
-    assert scope_identity(legacy) == hashlib.sha256(payload.encode()).hexdigest()
+    current = {'platforms': {'mode': 'specific', 'values': ['美团']}, 'businesses': {'mode': 'unknown', 'values': []}, 'audiences': {'mode': 'unknown', 'values': []}}
+    payload = json.dumps({'schema_version': 2, **current}, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+    assert scope_identity(current) == hashlib.sha256(payload.encode()).hexdigest()
     assert scope_identity({
         'platforms': {'mode': 'all', 'values': []}}) not in ('', scope_identity(None))
     assert scope_identity({
-        'platforms': {'mode': 'all', 'values': []}}) != scope_identity(legacy)
+        'platforms': {'mode': 'all', 'values': []}}) != scope_identity(current)
 
 
 def test_vocabulary_finds_longest_exact_terms_in_each_dimension():
@@ -162,7 +161,7 @@ def test_vocabulary_finds_longest_exact_terms_in_each_dimension():
         'platforms') == 'unknown'
     with pytest.raises(ValueError, match='冲突'):
         resolve_query_applicability(
-            '美团直播规则', {'businesses': ['外卖']}, vocabulary)
+            '美团直播规则', {'businesses': {'mode': 'specific', 'values': ['外卖']}}, vocabulary)
 
 
 def test_project_vocabulary_is_not_limited_to_one_records_value_count():
@@ -208,7 +207,7 @@ def test_v2_scope_identity_has_stable_golden_hash():
     from knowledge_service.domain.applicability import scope_identity
     assert scope_identity({
         'platforms': {'mode': 'all', 'values': []},
-        'businesses': ['直播'],
+        'businesses': {'mode': 'specific', 'values': ['直播']},
     }) == '89ce50984c66b2e3a5c5a13939e6001ac134549faabf6d9c142113862dfbefbe'
 
 
@@ -216,17 +215,17 @@ def test_scoped_fact_keys_preserve_legacy_identity():
     record = {'type': 'p', 'subject_id': 's', 'object_id': 'o'}
     legacy = 'fact_' + hashlib.sha256(json.dumps(['p', 's', 'o', None, None], ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
     assert canonical_relation_key(record) == legacy
-    scoped = {**record, 'metadata': {'applicability': {'platforms': ['美团']}}}
+    scoped = {**record, 'metadata': {'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}}}}
     assert canonical_relation_key(scoped) != legacy
-    assert canonical_relation_key(scoped) != canonical_relation_key({**record, 'metadata': {'applicability': {'platforms': ['京东']}}})
+    assert canonical_relation_key(scoped) != canonical_relation_key({**record, 'metadata': {'applicability': {'platforms': {'mode': 'specific', 'values': ['京东']}}}})
 
 
 def test_query_scope_uses_overlap():
     from knowledge_service.domain.applicability import dimension_values, resolve_query_applicability
     assert dimension_values(resolve_query_applicability(
-        '美团规则', {'platforms': ['美团', '京东']}), 'platforms') == ['美团']
+        '美团规则', {'platforms': {'mode': 'specific', 'values': ['美团', '京东']}}), 'platforms') == ['美团']
     assert dimension_values(resolve_query_applicability(
-        '比较美团和京东', {'platforms': ['美团']}), 'platforms') == ['美团']
+        '比较美团和京东', {'platforms': {'mode': 'specific', 'values': ['美团']}}), 'platforms') == ['美团']
 
 
 def test_valid_until_without_known_start_is_allowed():
@@ -242,11 +241,11 @@ def test_open_entity_literal_conflict_is_quarantined():
 
 
 def test_entity_resolution_requires_identical_scope():
-    row = {'id': 'jd', 'kind': 'entity', 'text': '直播', 'type': 'Business', 'metadata': {'applicability': {'platforms': ['京东']}}}
+    row = {'id': 'jd', 'kind': 'entity', 'text': '直播', 'type': 'Business', 'metadata': {'applicability': {'platforms': {'mode': 'specific', 'values': ['京东']}}}}
     class Repository:
         def current_records(self, *args, **kwargs):
             return [row]
-    mention = {**row, 'id': 'mt', 'metadata': {'applicability': {'platforms': ['美团']}}}
+    mention = {**row, 'id': 'mt', 'metadata': {'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}}}}
     assert EntityResolver(Repository(), None).resolve('p', mention, review_threshold=.7, merge_threshold=.9).status == 'separate'
 
 
@@ -276,7 +275,13 @@ def test_milvus_v2_rejects_legacy_candidate_id_filters():
     assert result['candidate_count'] == 0
 
 
-def test_adjacent_context_supports_fixed_chunks_and_keeps_scope_boundary():
+def test_adjacent_context_supports_fixed_chunks_and_keeps_scope_boundary(tmp_path):
+    from knowledge_service.repository import Repository
+    from knowledge_service.repository.scoped_reads import ScopedReads
+    repo = Repository(tmp_path / 'adjacent-scope.sqlite')
+    project = repo.create_project('adjacent context scope')['id']
+    document = repo.put_record(project, {'id': 'doc', 'kind': 'document', 'text': 'source',
+        'metadata': _scope_for_test('美团')})
     rows = [
         {'id': 'a0', 'kind': 'chunk', 'source_id': 'doc', 'text': '前文',
          'metadata': {'start_char': 0, 'source_version_id': 'doc-v1', **_scope_for_test('美团')}},
@@ -287,10 +292,14 @@ def test_adjacent_context_supports_fixed_chunks_and_keeps_scope_boundary():
         {'id': 'jd', 'kind': 'chunk', 'source_id': 'doc', 'text': '京东后文',
          'metadata': {'start_char': 30, 'source_version_id': 'doc-v1', **_scope_for_test('京东')}},
     ]
-    context = adjacent_chunks(rows, [rows[1]], radius=2)
+    for row in rows:
+        row['metadata']['source_version_id'] = document['version_id']
+    rows = repo.put_batch(project, rows)
+    context = ScopedReads(repo).source_context(project, {
+        'applicability': _scope_for_test('美团')['applicability']}, [rows[1]], radius=2)['context_chunks']
     assert [row['id'] for row in context] == ['a0', 'a2']
     assert all(row['context_reason'] == 'adjacent_chunk' for row in context)
 
 
 def _scope_for_test(platform):
-    return {'applicability': {'platforms': [platform]}}
+    return {'applicability': {'platforms': {'mode': 'specific', 'values': [platform]}}}

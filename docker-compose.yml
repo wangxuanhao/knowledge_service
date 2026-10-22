@@ -1,7 +1,7 @@
 # knowledge-service 统一基础设施编排
 #
 # 组成：
-#   postgres —— 权威关系库（数据 bind 到 ./volumes/postgres，便于整体迁移）
+#   postgres —— 权威关系库（Docker Linux named volume）
 #   etcd     —— Milvus 元数据存储（独立容器，唯一写者）
 #   minio    —— Milvus 对象存储
 #   milvus   —— Milvus standalone（不使用内嵌 etcd）
@@ -16,10 +16,12 @@
 #   数据目录与端口都不存在第二个写者，竞争从结构上被消除。
 #
 # 维护约定：
-#   - 不要用 `docker compose down -v`：数据都在 bind 目录里删不到，但会连带清掉 minio 镜像声明的匿名卷，属无意义副作用
+#   - 不要用 `docker compose down -v`：会删除数据库与向量存储的 named volumes。
 #   - 严禁同时运行「内嵌 etcd 的 Milvus」：两个进程会写同一份 etcd 数据目录
 #   - 所有端口只绑 127.0.0.1，不对局域网暴露
-#   - 数据目录由 .env 的 DOCKER_VOLUME_DIRECTORY 指定，默认 ./volumes
+#   - 数据保存在 Docker Linux named volumes，避免 Windows bind 的 fsync 延迟。
+#   - 从旧 bind 目录升级须先停写复制并校验；本次迁移保留原 ./volumes 作回退。
+#   - 升级步骤与校验工具见 docs/2026-10-19-Docker-Linux-volume-migration.md。
 #   - 详细维护/迁移/故障处置见 docs/2026-10-01-Docker基础设施维护手册.md
 
 name: knowledge-service
@@ -28,10 +30,8 @@ x-milvus-image: &milvus-image milvusdb/milvus:v3.0.2
 
 services:
   # ── PostgreSQL：权威关系库 ────────────────────────────────────────────
-  # 数据直接落在宿主的 ./volumes/postgres（bind 挂载），与 etcd/minio/milvus 同级：
-  #   - 整套 stack 的数据就是一个目录，迁移/备份只需整体拷贝 ./volumes
-  #   - 不使用 Docker 命名卷，数据不会藏在 Docker 虚拟机里找不到
-  #   - `docker compose down -v` 也删不掉它，只有手工 rm 才会
+  # 数据落在 knowledge_service_postgres_data；PG18 的父目录整体保留。
+  # 旧 bind 部署升级时须先离线复制，不能直接启动空 named volume。
   postgres:
     image: postgres:18.6-bookworm
     container_name: knowledge-postgres
@@ -49,7 +49,7 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       # PG18 官方镜像的 PGDATA 是 /var/lib/postgresql/18/docker，挂父目录即可
-      - ${DOCKER_VOLUME_DIRECTORY:-./volumes}/postgres:/var/lib/postgresql
+      - postgres_data:/var/lib/postgresql
       # 初始化脚本：镜像不认 POSTGRES_APP_USER，必须靠脚本建角色。
       # 只在「空数据目录」首次初始化时自动执行；已有集群需手工跑一次（见维护手册 §4）
       - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
@@ -106,7 +106,7 @@ services:
           chown "$${uid}:$${gid}" "$${marker}"
         fi
     volumes:
-      - ${DOCKER_VOLUME_DIRECTORY:-./volumes}/milvus:/var/lib/milvus
+      - milvus_data:/var/lib/milvus
     security_opt:
       - no-new-privileges:true
 
@@ -123,7 +123,7 @@ services:
       - ETCD_QUOTA_BACKEND_BYTES=4294967296
       - ETCD_SNAPSHOT_COUNT=50000
     volumes:
-      - ${DOCKER_VOLUME_DIRECTORY:-./volumes}/etcd:/etcd
+      - etcd_data:/etcd
     command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
     ports:
       # 仅本机可连，便于运维用 etcdctl / 打快照；容器之间走 etcd:2379
@@ -153,7 +153,7 @@ services:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
     volumes:
-      - ${DOCKER_VOLUME_DIRECTORY:-./volumes}/minio:/minio_data
+      - minio_data:/minio_data
     command: minio server /minio_data --console-address ":9001"
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
@@ -176,17 +176,27 @@ services:
     container_name: milvus-standalone
     image: *milvus-image
     restart: unless-stopped
+    # 450k x 1024 float32 vectors occupy 1.72 GiB before index/copy/buffer
+    # overhead. Keep headroom for HNSW, growing segments and index builders,
+    # while leaving the 16 GiB Docker VM room for etcd/MinIO/PostgreSQL.
+    mem_limit: 10g
     command: ["milvus", "run", "standalone"]
     security_opt:
       - seccomp:unconfined
     environment:
+      # The default 15s registration lease expired during a measured bulk
+      # index run on Windows bind storage. Keep the lease across transient I/O.
+      COMMON_SESSION_TTL: "60"
+      ETCD_REQUEST_TIMEOUT: "30000"
+      ETCD_DIAL_TIMEOUT: "10000"
+      LOG_LEVEL: "warn"
       MINIO_REGION: "${MINIO_REGION:-us-east-1}"
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
       MINIO_ACCESS_KEY_ID: "${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY must be set in .env}"
       MINIO_SECRET_ACCESS_KEY: "${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be set in .env}"
     volumes:
-      - ${DOCKER_VOLUME_DIRECTORY:-./volumes}/milvus:/var/lib/milvus
+      - milvus_data:/var/lib/milvus
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
       interval: 30s
@@ -225,9 +235,14 @@ services:
     security_opt:
       - no-new-privileges:true
 
-# 不使用任何 Docker 命名卷：
-# 所有持久化数据都在 ${DOCKER_VOLUME_DIRECTORY:-./volumes} 下，一个目录搬走即可迁移。
-#   volumes/postgres  —— PostgreSQL（权威关系库）
-#   volumes/etcd      —— Milvus 元数据
-#   volumes/minio     —— Milvus 对象存储
-#   volumes/milvus    —— Milvus 本地数据
+# Runtime data lives in Linux named volumes. The old Windows bind directories
+# remain untouched as the offline migration rollback; they are no longer live.
+volumes:
+  postgres_data:
+    name: knowledge_service_postgres_data
+  etcd_data:
+    name: knowledge_service_etcd_data
+  minio_data:
+    name: knowledge_service_minio_data
+  milvus_data:
+    name: knowledge_service_milvus_data

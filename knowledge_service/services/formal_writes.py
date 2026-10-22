@@ -38,7 +38,9 @@ def _assertion_comparable(item):
 
 class _Planner:
     def __init__(self, snapshot, operation, assertions, expected, policy):
-        self.snapshot = copy.deepcopy(snapshot)
+        # Repository snapshots are detached. Treat corpus rows as read-only;
+        # changed records/assertions are copied before replacing their entries.
+        self.snapshot = snapshot
         self.operation = operation
         self.expected = expected
         self.policy = copy.deepcopy(policy)
@@ -344,13 +346,6 @@ class _Planner:
                                 self._retire_key(record['id'])
                                 self._plan_record_put(tombstone, expected_version)
                                 self._return_existing(canonical_id)
-                            elif self.operation == 'legacy_import':
-                                record['metadata'] = {
-                                    **record.get('metadata', {}), '_deleted': True,
-                                    'merged_into_fact': canonical_id,
-                                    'legacy_parallel_occurrence': True,
-                                }
-                                self._plan_record_put(record, expected_version)
                             else:
                                 self._return_existing(canonical_id)
                             if not self.policy.get('suppress_auto_assertions'):
@@ -371,7 +366,7 @@ class _Planner:
                 self.fact_redirects.append((canonical_id, canonical_id))
             if (not self.policy.get('suppress_auto_assertions')
                     and self.operation in {'extract', 'manual_write', 'approve_review',
-                                           'legacy_import', 'adopt_discovery'}
+                                           'adopt_discovery'}
                     and original['kind'] in {'entity', 'relation', 'attribute'}
                     and not record.get('metadata', {}).get('_deleted')):
                 auto.append((
@@ -634,7 +629,7 @@ class FormalFactWriter:
         }
 
     def prepare(self, operation, project_id, assertions, expected, policy,
-                recorded_at=None, operation_context=None):
+                recorded_at=None, operation_context=None, *, snapshot=None):
         if operation not in FORMAL_OPERATIONS:
             raise ValueError('不支持的正式操作')
         if not isinstance(expected, dict) or any(
@@ -643,7 +638,10 @@ class FormalFactWriter:
             raise ValueError('正式期望必须将 ID 映射到版本')
         if operation_context is not None and recorded_at is not None:
             raise ValueError('写入操作上下文不能与 recorded_at 同时指定')
-        snapshot = self.repository.formal_write_snapshot(project_id)
+        if snapshot is None:
+            snapshot = self.repository.formal_write_snapshot(project_id)
+        elif snapshot.get('project_id') != project_id:
+            raise ValueError('正式写入快照与项目不一致')
         ontology_row = snapshot.get('ontology')
         ontology = Ontology(ontology_row['turtle']) if ontology_row else None
         frozen_policy = copy.deepcopy(policy)
@@ -654,6 +652,7 @@ class FormalFactWriter:
         actions, result_refs, assertion_result_ids = planner.build()
         plan = {
             'operation': operation, 'project_id': project_id,
+            'canonical_by_input': copy.deepcopy(planner.canonical_by_input),
             'actions': actions, 'result_refs': result_refs,
             'assertion_result_ids': assertion_result_ids,
             'review_items': copy.deepcopy(
@@ -667,10 +666,11 @@ class FormalFactWriter:
         return plan
 
     def apply(self, operation, project_id, assertions, expected, policy,
-              recorded_at=None, operation_context=None):
+              recorded_at=None, operation_context=None, *, snapshot=None):
         return self.repository.execute_formal_write(self.prepare(
             operation, project_id, assertions, expected, policy,
-            recorded_at=recorded_at, operation_context=operation_context))
+            recorded_at=recorded_at, operation_context=operation_context,
+            snapshot=snapshot))
 
 
 __all__ = [

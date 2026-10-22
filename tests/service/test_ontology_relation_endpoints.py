@@ -13,6 +13,8 @@
   ④ 非关系类型的 IRI 一律 404，不要对类/属性也吐一份"两端推断"来误导人。
 """
 from fastapi.testclient import TestClient
+from ontology_seed import seed_ontology
+from knowledge_service.services.ontology import Ontology
 
 from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
@@ -36,7 +38,7 @@ def setup(tmp_path):
     client.__enter__()
     p = client.post('/api/projects',
                     json={'name': 'endpoints', 'use_default_ontology': False}).json()['id']
-    published = client.post(f'/api/projects/{p}/ontologies', json={'turtle': TTL}).json()
+    published = seed_ontology(app.state.service.repository,p,TTL,Ontology(TTL).summary())
     return client, app, p, f'/api/projects/{p}', published
 
 
@@ -54,7 +56,7 @@ def seed_knowledge(client, base):
 def open_draft(client, base, published, title='验证草案'):
     response = client.post(base + '/ontology-drafts', json={
         'base_ontology_id': published['id'], 'source_kind': 'manual',
-        'title': title, 'actor': 'test'})
+        'title': title})
     assert response.status_code == 201, response.text
     return response.json()
 
@@ -95,10 +97,11 @@ def test_relation_usage_reports_declared_endpoints_and_clears_missing(tmp_path):
     c, _app, _p, base, published = setup(tmp_path)
     try:
         draft = open_draft(c, base, published)
-        response = c.put(base + '/ontology/term', params={'uri': KNOWS}, json={
-            'label': '认识', 'domain': PERSON, 'range': ORG,
-            'expected_ontology_id': published['id'],
-            'draft_id': draft['id'], 'expected_revision': draft['revision']})
+        response = c.post(base + '/ontology-drafts/' + draft['id'] + '/commands', json={
+            'command': {'action': 'batch', 'commands': [
+                {'action': 'add_domain', 'target_iri': KNOWS, 'value': PERSON},
+                {'action': 'add_range', 'target_iri': KNOWS, 'value': ORG}]},
+            'expected_revision': draft['revision']})
         assert response.status_code == 200, response.text
 
         # 不带 draft_id = 已发布本体：还没声明（这解释了"另一个页面看起来没改"）
@@ -203,12 +206,14 @@ def test_new_class_with_parent_lands_in_the_draft_canvas_can_render(tmp_path):
     c, _app, _p, base, published = setup(tmp_path)
     try:
         draft = open_draft(c, base, published, title='新建类')
-        response = c.post(base + '/ontology/terms', json={
-            'kind': 'class', 'uri': '', 'label': 'coupon', 'label_zh': '优惠券',
-            'parent': PERSON,
-            'expected_ontology_id': published['id'],
-            'draft_id': draft['id'], 'expected_revision': draft['revision']})
-        assert response.status_code == 201, response.text
+        iri='urn:knowledge:ontology:'+_p+':优惠券'
+        response = c.post(base + '/ontology-drafts/' + draft['id'] + '/commands', json={
+            'expected_revision': draft['revision'], 'command': {'action': 'batch', 'commands': [
+                {'action': 'create_term', 'target_iri': iri, 'kind': 'class'},
+                {'action': 'add_annotation', 'target_iri': iri, 'predicate': 'http://www.w3.org/2000/01/rdf-schema#label', 'value': '优惠券', 'language': 'zh'},
+                {'action': 'add_parent', 'target_iri': iri, 'value': PERSON},
+            ]}})
+        assert response.status_code == 200, response.text
 
         after = c.get(f"{base}/ontology-drafts/{draft['id']}").json()
         created = next(x for x in after['ontology']['classes'] if x['label_zh'] == '优惠券')
@@ -221,18 +226,13 @@ def test_new_class_with_parent_lands_in_the_draft_canvas_can_render(tmp_path):
         c.__exit__(None, None, None)
 
 
-def test_terms_route_rejects_stale_expected_ontology_id(tmp_path):
-    """界面用 expected_ontology_id 做乐观锁：传的不是当前最新本体 id 就必须 409。
-
-    这条防的是"发布完接着改、改动却基于旧版本"——用户反馈里"发布了就不能再改"的另一面。
-    """
+def test_draft_commands_reject_stale_expected_revision(tmp_path):
     c, _app, _p, base, published = setup(tmp_path)
     try:
         draft = open_draft(c, base, published)
-        response = c.post(base + '/ontology/terms', json={
-            'kind': 'class', 'uri': '', 'label': 'stale', 'label_zh': '过期',
-            'expected_ontology_id': 'not-the-latest-ontology-id',
-            'draft_id': draft['id'], 'expected_revision': draft['revision']})
-        assert response.status_code in (409, 422), response.text
+        response = c.post(base + '/ontology-drafts/' + draft['id'] + '/commands', json={
+            'expected_revision': draft['revision'] + 1,
+            'command': {'action': 'create_term', 'kind': 'class', 'target_iri': 'urn:stale'}})
+        assert response.status_code == 409, response.text
     finally:
         c.__exit__(None, None, None)

@@ -1,0 +1,598 @@
+{
+  "schema_version": 1,
+  "started_at": "2026-10-21T04:07:17.044058+00:00",
+  "completed": true,
+  "mode": "read",
+  "run_id": "34c3b888885a",
+  "context": {
+    "base_url": "http://127.0.0.1:8100",
+    "project_id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+    "expected_entities": 150001,
+    "expected_relations": 300000,
+    "probe_text": "真实大库编辑验收实体",
+    "samples_per_warm_category": 3,
+    "concurrency": 4,
+    "write_pairs_requested": 5,
+    "full_graph_loads_requested": 1,
+    "read_timeout_seconds": 240.0,
+    "write_timeout_seconds": 240,
+    "graph_page_limit": 10000,
+    "neighborhood_node_budget": 500,
+    "neighborhood_edge_budget": 1000,
+    "server_pid": 45492,
+    "python": "3.12.0",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "logical_cpus": 16,
+    "background_workload_notes": "Exploratory 3 samples per deep expansion plus warmup, 500node/1000edge budget. Concurrent governed edit/restore workload and fullgraph stability. Not an isolated 20sample P95 certification; correlate observed reader and writer waits using request IDs.",
+    "resource_interval_seconds": 2,
+    "authentication": "ordinary /api/auth/login; existing dotenv values; no secrets saved",
+    "database_monitor": "not run by this HTTP-only script; use a separate observer connection",
+    "scope": "HTTP transport + application + existing PostgreSQL/Milvus; no browser timings",
+    "actual_probe_text": "真实大库编辑验收实体 · 阶段计时复验 main-write-20261020",
+    "neighborhood_seed_id": "e000000",
+    "neighborhood_seed_source": "first bounded relation-page subject"
+  },
+  "targets": {
+    "warm_http_p95_seconds": 2,
+    "complete_graph_seconds": 30,
+    "governed_edit_seconds": null,
+    "governed_edit_target_note": "No documented per-edit latency threshold; measured separately."
+  },
+  "historical_context": {
+    "source": "docs/research/2026-10-20-main-capacity-diagnosis.md",
+    "single_governed_put_seconds": 102.888,
+    "single_browser_full_graph_seconds": 77.516,
+    "comparability": "Single-run context only; no direct speedup ratio or P95 comparison."
+  },
+  "measurement_notes": [
+    "HTTP seconds use perf_counter through complete response-body download; JSON decode timed separately.",
+    "Body byte counts are decoded HTTP payload bytes; encoded Content-Length is recorded separately.",
+    "Warmups are retained but excluded from warm percentiles. Failed validations/statuses are counted separately.",
+    "Fixture vectors certify capacity and backend availability, not business semantic relevance.",
+    "Pagefile allocation is not evidence of paging. PDH page reads/writes measure host paging activity; no process attribution.",
+    "CPU/memory/paging are observed correlations; no causal hardware attribution is made.",
+    "Read mode does not modify business records; normal graph manifests are persisted graph-session artifacts.",
+    "Controlled writes append revisions; restoring content does not erase revision history."
+  ],
+  "requests": [
+    {
+      "category": "openapi",
+      "phase": "setup",
+      "method": "GET",
+      "path": "/openapi.json",
+      "request_id": "876429f1c4664fc39a06a96f13bca46d",
+      "started_at": "2026-10-21T04:07:26.225878+00:00",
+      "start_elapsed_seconds": 12.781000000000859,
+      "expected_status": 200,
+      "status_code": 200,
+      "ok": true,
+      "http_seconds": 0.00945789999968838,
+      "response_body_bytes": 136916,
+      "request_body_bytes": 0,
+      "encoded_content_length_header": "136916",
+      "content_encoding": null,
+      "response_capacity_request": "ba826337-5ff5-4357-9cde-6fe5cbfb4673",
+      "response_request_id": null,
+      "json_decode_seconds": 0.0070001999993110076,
+      "operation_seconds": 0.016512500000317232
+    },
+    {
+      "category": "probe_detail",
+      "phase": "setup",
+      "method": "GET",
+      "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/records/1ae672c2-50ff-48a9-b72f-a7daa9a51542",
+      "request_id": "b4c601e213d64e9d930b98e544cc76c9",
+      "started_at": "2026-10-21T04:07:26.307659+00:00",
+      "start_elapsed_seconds": 12.875,
+      "expected_status": 200,
+      "status_code": 200,
+      "ok": true,
+      "http_seconds": 0.21173409999937576,
+      "response_body_bytes": 750,
+      "request_body_bytes": 0,
+      "encoded_content_length_header": "750",
+      "content_encoding": null,
+      "response_capacity_request": "d17a51e9-3c85-42f0-b80f-92e99d3893bb",
+      "response_request_id": null,
+      "json_decode_seconds": 6.140000004961621e-05,
+      "validation": {
+        "id": "1ae672c2-50ff-48a9-b72f-a7daa9a51542",
+        "version": 7,
+        "ontology_id": "5c4b9f73-0496-4670-9002-40c01cdf0517"
+      },
+      "operation_seconds": 0.21184549999998126
+    },
+    {
+      "category": "records_page20_initial",
+      "phase": "setup",
+      "method": "POST",
+      "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/records/page",
+      "request_id": "cd1a0f0267e34a23b5fd73aeecbcfed8",
+      "started_at": "2026-10-21T04:07:26.538663+00:00",
+      "start_elapsed_seconds": 13.093000000000757,
+      "expected_status": 200,
+      "status_code": 200,
+      "ok": true,
+      "http_seconds": 0.4578756000009889,
+      "response_body_bytes": 6653,
+      "request_body_bytes": 53,
+      "encoded_content_length_header": "6653",
+      "content_encoding": null,
+      "response_capacity_request": "87ae4fe3-5272-42b2-ad32-54a07477faeb",
+      "response_request_id": null,
+      "json_decode_seconds": 0.00018789999921864364,
+      "validation": {
+        "records": 20,
+        "has_next": true,
+        "total": null
+      },
+      "operation_seconds": 0.4581075000005512
+    },
+    {
+      "category": "seed_relation_lookup",
+      "phase": "setup",
+      "method": "POST",
+      "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/records/page",
+      "request_id": "e9506fef918240cd8cdb2dba4d147511",
+      "started_at": "2026-10-21T04:07:27.004708+00:00",
+      "start_elapsed_seconds": 13.561999999999898,
+      "expected_status": 200,
+      "status_code": 200,
+      "ok": true,
+      "http_seconds": 0.2614517000001797,
+      "response_body_bytes": 611,
+      "request_body_bytes": 54,
+      "encoded_content_length_header": "611",
+      "content_encoding": null,
+      "response_capacity_request": "7b468a92-bce4-4fbe-9b15-efc61db7accd",
+      "response_request_id": null,
+      "json_decode_seconds": 6.740000026184134e-05,
+      "operation_seconds": 0.2615528999995149
+    },
+    {
+      "category": "neighborhood_hops3",
+      "phase": "warmup",
+      "method": "POST",
+      "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/graph-neighborhood",
+      "request_id": "b3b8437bc86a423298e41b19827a4569",
+      "started_at": "2026-10-21T04:07:27.305121+00:00",
+      "start_elapsed_seconds": 13.859000000000378,
+      "expected_status": 200,
+      "status_code": 200,
+      "ok": true,
+      "http_seconds": 1.6492307999997138,
+      "response_body_bytes": 14423,
+      "request_body_bytes": 82,
+      "encoded_content_length_header": "14423",
+      "content_encoding": null,
+      "response_capacity_request": "af62fb07-46ca-4464-a3c7-e54f389d0cf5",
+      "response_request_id": null,
+      "json_decode_seconds": 0.00036949999957869295,
+      "validation": {
+        "counts": {
+          "entity": 7,
+          "relation": 12
+        },
+        "truncated": false,
+        "node_budget": 500,
+        "edge_budget": 1000
+      },
+      "operation_seconds": 1.6497813999994833
+    },
+    {
+      "category": "neighborhood_hops3",
+      "phase": "warm",
+      "method": "POST",
+      "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/graph-neighborhood",
+      "request_id": "68edb3bb015a4e81a5f89f2a7624f329",
+      "started_at": "2026-10-21T04:07:28.963016+00:00",
+      "start_elapsed_seconds": 15.531000000000859,
+      "expected_status": 200,
+      "status_code": 200,
+      "ok": true,
+      "http_seconds": 0.7034994000005099,
+      "response_body_bytes": 14423,
+      "request_body_bytes": 82,
+      "encoded_content_length_header": "14423",
+      "content_encoding": null,
+      "response_capacity_request": "6ce3e7a0-f57b-4d25-9a47-353089cd992c",
+      "response_request_id": null,
+      "json_decode_seconds": 0.00029710000126215164,
+      "validation": {
+        "counts": {
+          "entity": 7,
+          "relation": 12
+        },
+        "truncated": false,
+        "node_budget": 500,
+        "edge_budget": 1000
+      },
+      "operation_seconds": 0.703870299999835
+    },
+    {
+      "category": "neighborhood_hops3",
+      "phase": "warm",
+      "method": "POST",
+      "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/graph-neighborhood",
+      "request_id": "45cc7cf4b780457d9585ebd90fe3d034",
+      "started_at": "2026-10-21T04:07:29.675668+00:00",
+      "start_elapsed_seconds": 16.23400000000038,
+      "expected_status": 200,
+      "status_code": 200,
+      "ok": true,
+      "http_seconds": 1.7094369000005827,
+      "response_body_bytes": 14423,
+      "request_body_bytes": 82,
+      "encoded_content_length_header": "14423",
+      "content_encoding": null,
+      "response_capacity_request": "c268244a-4e12-4bcb-a19d-55dab208fde6",
+      "response_request_id": null,
+      "json_decode_seconds": 0.00040830000034475233,
+      "validation": {
+        "counts": {
+          "entity": 7,
+          "relation": 12
+        },
+        "truncated": false,
+        "node_budget": 500,
+        "edge_budget": 1000
+      },
+      "operation_seconds": 1.7099517999995442
+    },
+    {
+      "category": "neighborhood_hops3",
+      "phase": "warm",
+      "method": "POST",
+      "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/graph-neighborhood",
+      "request_id": "890b21824c764ee38b3afbb54452e5b2",
+      "started_at": "2026-10-21T04:07:31.394117+00:00",
+      "start_elapsed_seconds": 17.95300000000134,
+      "expected_status": 200,
+      "status_code": 200,
+      "ok": true,
+      "http_seconds": 2.3729156000008516,
+      "response_body_bytes": 14423,
+      "request_body_bytes": 82,
+      "encoded_content_length_header": "14423",
+      "content_encoding": null,
+      "response_capacity_request": "70f815a5-fb2f-4089-87a2-0b6ff73077e7",
+      "response_request_id": null,
+      "json_decode_seconds": 0.00038160000076459255,
+      "validation": {
+        "counts": {
+          "entity": 7,
+          "relation": 12
+        },
+        "truncated": false,
+        "node_budget": 500,
+        "edge_budget": 1000
+      },
+      "operation_seconds": 2.373386900000696
+    },
+    {
+      "category": "neighborhood_hops10",
+      "phase": "warmup",
+      "method": "POST",
+      "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/graph-neighborhood",
+      "request_id": "09a0a010329a4f559d4b609fd489b82e",
+      "started_at": "2026-10-21T04:07:33.786756+00:00",
+      "start_elapsed_seconds": 20.343000000000757,
+      "expected_status": 200,
+      "status_code": 200,
+      "ok": true,
+      "http_seconds": 12.46597490000022,
+      "response_body_bytes": 70084,
+      "request_body_bytes": 83,
+      "encoded_content_length_header": "70084",
+      "content_encoding": null,
+      "response_capacity_request": "cfa3039d-daba-480b-94a6-aa18978f3c47",
+      "response_request_id": null,
+      "json_decode_seconds": 0.0016806000003271038,
+      "validation": {
+        "counts": {
+          "entity": 21,
+          "relation": 40
+        },
+        "truncated": false,
+        "node_budget": 500,
+        "edge_budget": 1000
+      },
+      "operation_seconds": 12.467791000000943
+    },
+    {
+      "category": "neighborhood_hops10",
+      "phase": "warm",
+      "method": "POST",
+      "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/graph-neighborhood",
+      "request_id": "2d7823db363144c595fb5b0ce2e02ebd",
+      "started_at": "2026-10-21T04:07:46.265336+00:00",
+      "start_elapsed_seconds": 32.82800000000134,
+      "expected_status": 200,
+      "status_code": 200,
+      "ok": true,
+      "http_seconds": 14.67079829999966,
+      "response_body_bytes": 70084,
+      "request_body_bytes": 83,
+      "encoded_content_length_header": "70084",
+      "content_encoding": null,
+      "response_capacity_request": "02034f8a-de48-4898-b6d0-1d730d91277a",
+      "response_request_id": null,
+      "json_decode_seconds": 0.0013877000001230044,
+      "validation": {
+        "counts": {
+          "entity": 21,
+          "relation": 40
+        },
+        "truncated": false,
+        "node_budget": 500,
+        "edge_budget": 1000
+      },
+      "operation_seconds": 14.672332000000097
+    },
+    {
+      "category": "neighborhood_hops10",
+      "phase": "warm",
+      "method": "POST",
+      "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/graph-neighborhood",
+      "request_id": "e777c4d199d54e49921d4b56e5a9a896",
+      "started_at": "2026-10-21T04:08:00.949214+00:00",
+      "start_elapsed_seconds": 47.51500000000124,
+      "expected_status": 200,
+      "status_code": 200,
+      "ok": true,
+      "http_seconds": 40.77989119999984,
+      "response_body_bytes": 70084,
+      "request_body_bytes": 83,
+      "encoded_content_length_header": "70084",
+      "content_encoding": null,
+      "response_capacity_request": "32dae9ec-b136-49aa-a106-82a43637f815",
+      "response_request_id": null,
+      "json_decode_seconds": 0.0011652000011963537,
+      "validation": {
+        "counts": {
+          "entity": 21,
+          "relation": 40
+        },
+        "truncated": false,
+        "node_budget": 500,
+        "edge_budget": 1000
+      },
+      "operation_seconds": 40.781146600000284
+    },
+    {
+      "category": "neighborhood_hops10",
+      "phase": "warm",
+      "method": "POST",
+      "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/graph-neighborhood",
+      "request_id": "f642a4ee6a1f4e7490172fb1281281ed",
+      "started_at": "2026-10-21T04:08:41.744170+00:00",
+      "start_elapsed_seconds": 88.29700000000048,
+      "expected_status": 200,
+      "status_code": 200,
+      "ok": true,
+      "http_seconds": 42.396089899999424,
+      "response_body_bytes": 70084,
+      "request_body_bytes": 83,
+      "encoded_content_length_header": "70084",
+      "content_encoding": null,
+      "response_capacity_request": "3552273d-3056-40bd-8c5c-f4033f0de1c0",
+      "response_request_id": null,
+      "json_decode_seconds": 0.001483899999584537,
+      "validation": {
+        "counts": {
+          "entity": 21,
+          "relation": 40
+        },
+        "truncated": false,
+        "node_budget": 500,
+        "edge_budget": 1000
+      },
+      "operation_seconds": 42.397790499999246
+    }
+  ],
+  "full_graph_loads": [],
+  "write_pairs": [],
+  "resource_samples": [],
+  "errors": [],
+  "elapsed_seconds": 130.75,
+  "authentication_request": {
+    "request_id": "fec0bd71e23444ff8ae1c5085ff37efd",
+    "status_code": 200,
+    "response_capacity_request": "d1e01bb0-13b2-4476-aa64-c34ab28807fc",
+    "response_request_id": null
+  },
+  "openapi_sha256": "e21531c2b0e2c393f28fb2a0f266ffbeb95d72d27ab20649aedfed768fd245bc",
+  "probe_discovery": {
+    "method": "explicit_stable_id",
+    "id": "1ae672c2-50ff-48a9-b72f-a7daa9a51542"
+  },
+  "probe": {
+    "id": "1ae672c2-50ff-48a9-b72f-a7daa9a51542",
+    "version": 7,
+    "ontology_id": "5c4b9f73-0496-4670-9002-40c01cdf0517",
+    "originalRecord": {
+      "id": "1ae672c2-50ff-48a9-b72f-a7daa9a51542",
+      "kind": "entity",
+      "text": "真实大库编辑验收实体 · 阶段计时复验 main-write-20261020",
+      "type": "https://capacity.example/CapacityThing",
+      "metadata": {},
+      "properties": {},
+      "ontology_id": "5c4b9f73-0496-4670-9002-40c01cdf0517",
+      "valid_from": null,
+      "valid_until": null
+    }
+  },
+  "summaries": {
+    "setup.openapi": {
+      "samples": 1,
+      "successful_samples": 1,
+      "failed_samples": 0,
+      "failure_rate": 0.0,
+      "status_counts": {
+        "200": 1
+      },
+      "p50_seconds": 0.00945789999968838,
+      "p95_seconds": 0.00945789999968838,
+      "max_seconds": 0.00945789999968838,
+      "all_attempts_p95_seconds": 0.00945789999968838,
+      "response_body_bytes": 136916,
+      "request_body_bytes": 0,
+      "small_sample_caution": true,
+      "percentile_method": "nearest rank, successful validated responses; failures separate"
+    },
+    "setup.probe_detail": {
+      "samples": 1,
+      "successful_samples": 1,
+      "failed_samples": 0,
+      "failure_rate": 0.0,
+      "status_counts": {
+        "200": 1
+      },
+      "p50_seconds": 0.21173409999937576,
+      "p95_seconds": 0.21173409999937576,
+      "max_seconds": 0.21173409999937576,
+      "all_attempts_p95_seconds": 0.21173409999937576,
+      "response_body_bytes": 750,
+      "request_body_bytes": 0,
+      "small_sample_caution": true,
+      "percentile_method": "nearest rank, successful validated responses; failures separate"
+    },
+    "setup.records_page20_initial": {
+      "samples": 1,
+      "successful_samples": 1,
+      "failed_samples": 0,
+      "failure_rate": 0.0,
+      "status_counts": {
+        "200": 1
+      },
+      "p50_seconds": 0.4578756000009889,
+      "p95_seconds": 0.4578756000009889,
+      "max_seconds": 0.4578756000009889,
+      "all_attempts_p95_seconds": 0.4578756000009889,
+      "response_body_bytes": 6653,
+      "request_body_bytes": 53,
+      "small_sample_caution": true,
+      "percentile_method": "nearest rank, successful validated responses; failures separate"
+    },
+    "setup.seed_relation_lookup": {
+      "samples": 1,
+      "successful_samples": 1,
+      "failed_samples": 0,
+      "failure_rate": 0.0,
+      "status_counts": {
+        "200": 1
+      },
+      "p50_seconds": 0.2614517000001797,
+      "p95_seconds": 0.2614517000001797,
+      "max_seconds": 0.2614517000001797,
+      "all_attempts_p95_seconds": 0.2614517000001797,
+      "response_body_bytes": 611,
+      "request_body_bytes": 54,
+      "small_sample_caution": true,
+      "percentile_method": "nearest rank, successful validated responses; failures separate"
+    },
+    "warmup.neighborhood_hops3": {
+      "samples": 1,
+      "successful_samples": 1,
+      "failed_samples": 0,
+      "failure_rate": 0.0,
+      "status_counts": {
+        "200": 1
+      },
+      "p50_seconds": 1.6492307999997138,
+      "p95_seconds": 1.6492307999997138,
+      "max_seconds": 1.6492307999997138,
+      "all_attempts_p95_seconds": 1.6492307999997138,
+      "response_body_bytes": 14423,
+      "request_body_bytes": 82,
+      "small_sample_caution": true,
+      "percentile_method": "nearest rank, successful validated responses; failures separate"
+    },
+    "warm.neighborhood_hops3": {
+      "samples": 3,
+      "successful_samples": 3,
+      "failed_samples": 0,
+      "failure_rate": 0.0,
+      "status_counts": {
+        "200": 3
+      },
+      "p50_seconds": 1.7094369000005827,
+      "p95_seconds": 2.3729156000008516,
+      "max_seconds": 2.3729156000008516,
+      "all_attempts_p95_seconds": 2.3729156000008516,
+      "response_body_bytes": 43269,
+      "request_body_bytes": 246,
+      "small_sample_caution": true,
+      "percentile_method": "nearest rank, successful validated responses; failures separate",
+      "warm_p95_target_seconds": 2,
+      "warm_p95_evidence_sufficient": false,
+      "warm_target_passed": false
+    },
+    "warmup.neighborhood_hops10": {
+      "samples": 1,
+      "successful_samples": 1,
+      "failed_samples": 0,
+      "failure_rate": 0.0,
+      "status_counts": {
+        "200": 1
+      },
+      "p50_seconds": 12.46597490000022,
+      "p95_seconds": 12.46597490000022,
+      "max_seconds": 12.46597490000022,
+      "all_attempts_p95_seconds": 12.46597490000022,
+      "response_body_bytes": 70084,
+      "request_body_bytes": 83,
+      "small_sample_caution": true,
+      "percentile_method": "nearest rank, successful validated responses; failures separate"
+    },
+    "warm.neighborhood_hops10": {
+      "samples": 3,
+      "successful_samples": 3,
+      "failed_samples": 0,
+      "failure_rate": 0.0,
+      "status_counts": {
+        "200": 3
+      },
+      "p50_seconds": 40.77989119999984,
+      "p95_seconds": 42.396089899999424,
+      "max_seconds": 42.396089899999424,
+      "all_attempts_p95_seconds": 42.396089899999424,
+      "response_body_bytes": 210252,
+      "request_body_bytes": 249,
+      "small_sample_caution": true,
+      "percentile_method": "nearest rank, successful validated responses; failures separate",
+      "warm_p95_target_seconds": 2,
+      "warm_p95_evidence_sufficient": false,
+      "warm_target_passed": false
+    }
+  },
+  "resource_summary": {
+    "samples": 0,
+    "host_cpu_percent_max": null,
+    "available_memory_bytes_min": null,
+    "server_rss_bytes_max": null,
+    "client_rss_bytes_max": null,
+    "windows_memory_max": {
+      "page_reads_per_second": null,
+      "page_writes_per_second": null,
+      "pages_input_per_second": null,
+      "pages_output_per_second": null,
+      "page_faults_per_second": null,
+      "committed_bytes": null,
+      "commit_limit_bytes": null
+    },
+    "pagefile_allocation_is_not_paging_evidence": true
+  },
+  "full_graph_summary": {
+    "attempted_loads": 0,
+    "successful_loads": 0,
+    "p50_seconds": null,
+    "p95_seconds": null,
+    "small_sample_caution": true,
+    "complete_load_target_seconds": 30,
+    "percentile_method": "nearest rank; complete successful loads only; failed loads separate"
+  },
+  "measured_performance_targets_passed": false,
+  "finished_at": "2026-10-21T04:09:24.171283+00:00",
+  "validation_passed": true
+}

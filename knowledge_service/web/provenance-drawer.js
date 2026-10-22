@@ -1,7 +1,6 @@
 /* Frozen answer evidence. This module loads before workbench history hydration. */
 (() => {
   'use strict';
-  const LEGACY_NOTE='该历史回答生成于溯源记录启用前';
   const validCitation=value=>typeof value==='string'&&/^[ERFU][1-9][0-9]*$/.test(value);
 
   function tokenizeCitations(text,allowed){
@@ -67,7 +66,7 @@
     return result;
   }
 
-  const pure={tokenizeCitations,sanitizeEvidenceSummary,LEGACY_NOTE};
+  const pure={tokenizeCitations,sanitizeEvidenceSummary};
   if(typeof module!=='undefined'&&module.exports)module.exports=pure;
   if(typeof window==='undefined'||typeof document==='undefined')return;
 
@@ -326,7 +325,6 @@
       }else container.appendChild(document.createTextNode(segment.text));
     }
   }
-  function renderLegacyNote(container){container.appendChild(element('p',LEGACY_NOTE,'provenance-legacy-note'));}
   ensureGuide();
-  window.ProvenanceDrawer={...pure,open,close,render,decorateAnswer,renderLegacyNote,onProjectChange};
+  window.ProvenanceDrawer={...pure,open,close,render,decorateAnswer,onProjectChange};
 })();

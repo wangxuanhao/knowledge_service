@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "started_at": "2026-10-21T03:23:41.803565+00:00",
+  "completed": false,
+  "mode": "read",
+  "run_id": "ee7e04f0442e",
+  "context": {
+    "base_url": "http://127.0.0.1:8100",
+    "project_id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+    "expected_entities": 150001,
+    "expected_relations": 300000,
+    "probe_text": "真实大库编辑验收实体",
+    "samples_per_warm_category": 20,
+    "concurrency": 4,
+    "write_pairs_requested": 5,
+    "full_graph_loads_requested": 1,
+    "read_timeout_seconds": 120,
+    "write_timeout_seconds": 240,
+    "graph_page_limit": 10000,
+    "neighborhood_node_budget": 500,
+    "neighborhood_edge_budget": 1000,
+    "server_pid": 14584,
+    "python": "3.12.0",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "logical_cpus": 16,
+    "background_workload_notes": "Unmodified normal service; retained main corpus; query encoders already warm; no browser full-graph load during sequential read phase. Resource pressure from normal desktop applications is included.",
+    "resource_interval_seconds": 2,
+    "authentication": "ordinary /api/auth/login; existing dotenv values; no secrets saved",
+    "database_monitor": "not run by this HTTP-only script; use a separate observer connection",
+    "scope": "HTTP transport + application + existing PostgreSQL/Milvus; no browser timings"
+  },
+  "targets": {
+    "warm_http_p95_seconds": 2,
+    "complete_graph_seconds": 30,
+    "governed_edit_seconds": null,
+    "governed_edit_target_note": "No documented per-edit latency threshold; measured separately."
+  },
+  "historical_context": {
+    "source": "docs/research/2026-10-20-main-capacity-diagnosis.md",
+    "single_governed_put_seconds": 102.888,
+    "single_browser_full_graph_seconds": 77.516,
+    "comparability": "Single-run context only; no direct speedup ratio or P95 comparison."
+  },
+  "measurement_notes": [
+    "HTTP seconds use perf_counter through complete response-body download; JSON decode timed separately.",
+    "Body byte counts are decoded HTTP payload bytes; encoded Content-Length is recorded separately.",
+    "Warmups are retained but excluded from warm percentiles. Failed validations/statuses are counted separately.",
+    "Fixture vectors certify capacity and backend availability, not business semantic relevance.",
+    "Pagefile allocation is not evidence of paging. PDH page reads/writes measure host paging activity; no process attribution.",
+    "CPU/memory/paging are observed correlations; no causal hardware attribution is made.",
+    "Read mode does not modify business records; graph sessions are ephemeral read manifests.",
+    "Controlled writes append revisions; restoring content does not erase revision history."
+  ],
+  "requests": [
+    {
+      "category": "openapi",
+      "phase": "setup",
+      "method": "GET",
+      "path": "/openapi.json",
+      "request_id": "54f00d27226e4182a6911a93e8776d52",
+      "started_at": "2026-10-21T03:23:44.785512+00:00",
+      "start_elapsed_seconds": 7.311999999999898,
+      "expected_status": 200,
+      "status_code": 200,
+      "ok": true,
+      "http_seconds": 0.03894159999981639,
+      "response_body_bytes": 147450,
+      "request_body_bytes": 0,
+      "encoded_content_length_header": "147450",
+      "content_encoding": null,
+      "response_capacity_request": null,
+      "response_request_id": null,
+      "json_decode_seconds": 0.013156299999536714,
+      "operation_seconds": 0.052147999998851446
+    },
+    {
+      "category": "probe_lookup",
+      "phase": "setup",
+      "method": "POST",
+      "path": "/api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/records/page",
+      "request_id": "b742dfeea0f24c98b700114fe22ad9ad",
+      "started_at": "2026-10-21T03:23:44.970593+00:00",
+      "start_elapsed_seconds": 7.5,
+      "expected_status": 200,
+      "status_code": 200,
+      "ok": true,
+      "http_seconds": 4.980788599999869,
+      "response_body_bytes": 662,
+      "request_body_bytes": 93,
+      "encoded_content_length_header": "662",
+      "content_encoding": null,
+      "response_capacity_request": null,
+      "response_request_id": null,
+      "json_decode_seconds": 7.379999988188501e-05,
+      "operation_seconds": 4.980908699999418
+    }
+  ],
+  "full_graph_loads": [],
+  "write_pairs": [],
+  "resource_samples": [],
+  "errors": [
+    "BenchmarkFailure: Named governed probe was not found exactly"
+  ],
+  "elapsed_seconds": 22.57799999999952,
+  "authentication_request": {
+    "request_id": "399ea494808346acb94c4fa473c1aa18",
+    "status_code": 200,
+    "response_capacity_request": null,
+    "response_request_id": null
+  },
+  "openapi_sha256": "3ef539fd704839abc3fce2ba1c5ea07aaf5e15495dcd0d7c942c83bc702ab73c",
+  "finished_at": "2026-10-21T03:23:59.972425+00:00",
+  "summaries": {
+    "setup.openapi": {
+      "samples": 1,
+      "successful_samples": 1,
+      "failed_samples": 0,
+      "failure_rate": 0.0,
+      "status_counts": {
+        "200": 1
+      },
+      "p50_seconds": 0.03894159999981639,
+      "p95_seconds": 0.03894159999981639,
+      "max_seconds": 0.03894159999981639,
+      "all_attempts_p95_seconds": 0.03894159999981639,
+      "response_body_bytes": 147450,
+      "request_body_bytes": 0,
+      "small_sample_caution": true,
+      "percentile_method": "nearest rank, successful validated responses; failures separate"
+    },
+    "setup.probe_lookup": {
+      "samples": 1,
+      "successful_samples": 1,
+      "failed_samples": 0,
+      "failure_rate": 0.0,
+      "status_counts": {
+        "200": 1
+      },
+      "p50_seconds": 4.980788599999869,
+      "p95_seconds": 4.980788599999869,
+      "max_seconds": 4.980788599999869,
+      "all_attempts_p95_seconds": 4.980788599999869,
+      "response_body_bytes": 662,
+      "request_body_bytes": 93,
+      "small_sample_caution": true,
+      "percentile_method": "nearest rank, successful validated responses; failures separate"
+    }
+  },
+  "resource_summary": {
+    "samples": 0,
+    "host_cpu_percent_max": null,
+    "available_memory_bytes_min": null,
+    "server_rss_bytes_max": null,
+    "client_rss_bytes_max": null,
+    "windows_memory_max": {
+      "page_reads_per_second": null,
+      "page_writes_per_second": null,
+      "pages_input_per_second": null,
+      "pages_output_per_second": null,
+      "page_faults_per_second": null,
+      "committed_bytes": null,
+      "commit_limit_bytes": null
+    },
+    "pagefile_allocation_is_not_paging_evidence": true
+  },
+  "full_graph_summary": {
+    "attempted_loads": 0,
+    "successful_loads": 0,
+    "p50_seconds": null,
+    "p95_seconds": null,
+    "small_sample_caution": true,
+    "complete_load_target_seconds": 30,
+    "percentile_method": "nearest rank; complete successful loads only; failed loads separate"
+  },
+  "measured_performance_targets_passed": null,
+  "validation_passed": false
+}

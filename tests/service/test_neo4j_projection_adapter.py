@@ -60,7 +60,7 @@ def test_snapshot_projects_native_scope_time_and_generation_properties():
     adapter = Neo4jProjectionAdapter(driver, namespace='test-ns')
 
     adapter.load_snapshot('project-1', 'generation-1', [record()], 17,
-                          fence='claim-1')
+                          fence='claim-1', lease_is_current=lambda: True)
 
     rows = [params['rows'] for query, params in driver.calls
             if 'UNWIND $rows AS row' in query and 'KSRecordV3' in query]

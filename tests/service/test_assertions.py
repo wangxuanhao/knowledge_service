@@ -47,6 +47,25 @@ def test_assertion_create_is_idempotent_but_rejects_occurrence_collision(tmp_pat
         repo.create_assertion(project_id, _assertion(quote='不同原文'))
 
 
+def test_record_lineage_includes_selected_pending_ids_without_leaking_other_projects(tmp_path):
+    repo = Repository(tmp_path / 'bounded-lineage')
+    project = repo.create_project('分页血缘')['id']
+    other = repo.create_project('其他项目')['id']
+    repo.create_assertion(project, _assertion(id='canonical'))
+    repo.transition_assertion(project, 'canonical', 1, 'accepted', '核验', 'admin', 'e1')
+    repo.create_assertion(project, _assertion(id='pending-reference'))
+    repo.create_assertion(project, _assertion(id='unrelated'))
+    repo.create_assertion(other, _assertion(id='other-project'))
+    result = repo.list_assertions(project, canonical_record_id='e1',
+        assertion_ids=['pending-reference', 'other-project'])
+    assert {item['id'] for item in result} == {'canonical', 'pending-reference'}
+    assert [item['id'] for item in repo.list_assertions(project,
+        canonical_record_id='e1', assertion_ids=['pending-reference'], status='pending')] == ['pending-reference']
+    assert repo.list_assertions(project, assertion_ids=[]) == []
+    with pytest.raises(ValueError, match='100'):
+        repo.list_assertions(project, assertion_ids=['x'] * 101)
+
+
 def test_assertion_transition_is_cas_guarded_and_audited(tmp_path):
     repo = Repository(tmp_path / 'db.sqlite')
     project_id = repo.create_project('甲')['id']

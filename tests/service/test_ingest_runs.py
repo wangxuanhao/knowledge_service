@@ -69,7 +69,7 @@ def test_late_extraction_failure_preserves_search_ready_chunks(tmp_path, monkeyp
             'chunk_size': 100, 'chunk_overlap': 0,
         })
         assert response.status_code == 503
-        records = client.post(f'/api/projects/{project_id}/records/query', json={}).json()['records']
+        records = client.post(f'/api/projects/{project_id}/records/page', json={}).json()['records']
         document = next(row for row in records if row['kind'] == 'document')
         chunks = [row for row in records if row['kind'] == 'chunk']
         assert chunks

@@ -81,6 +81,19 @@ class UserStore:
         return self._db.execute(
             'SELECT * FROM users WHERE id=?', (user_id,)).fetchone()
 
+    def get_for_authentication(self, user_id: str):
+        """Check committed account state independently of the writer connection."""
+        with self._db.independent_read_snapshot() as reader:
+            return reader.execute(
+                'SELECT * FROM users WHERE id=?', (user_id,)).fetchone()
+
+    def get_for_login(self, username: str):
+        """Read current login credentials without borrowing the writer connection."""
+        username = normalize_username(username)
+        with self._db.independent_read_snapshot() as reader:
+            return reader.execute(
+                'SELECT * FROM users WHERE username=?', (username,)).fetchone()
+
     def count(self) -> int:
         """用户总数（供装配套判断是否需要播种首个超级管理员）。"""
         return self._db.execute('SELECT count(*) FROM users').fetchone()[0]

@@ -364,7 +364,7 @@ def main() -> int:
                     report.note('「发布」按钮当前灰着', reason[:160] or '(无说明)')
 
                 # ⑩ 台账可见：发布出来的东西在"实例层·知识台账"里查得到。
-                status, records = call(base, f'/api/projects/{project_id}/records/query',
+                status, records = call(base, f'/api/projects/{project_id}/records/page',
                                        {}, 'POST')
                 report.note('台账查询', f'{status} '
                                         f'{(json.dumps(records, ensure_ascii=False)[:120] if records else "")}')

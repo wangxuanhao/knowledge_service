@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from ..core.time import utc_now
 from ..domain.applicability import normalize_applicability, scope_identity
+from ..repository.projection_store import ProjectionLeaseLost
 
 
 def encoded(value):
@@ -478,12 +479,14 @@ class Neo4jProjectionAdapter:
                 generation=destination))
 
     def load_snapshot(self, project_id, destination, records, snapshot_seq,
-                      fence=None):
+                      fence=None, *, lease_is_current):
         selected = [row for row in records
                     if row.get('kind') in self.PROJECTED_KINDS
                     and not (row.get('metadata') or {}).get('_deleted')]
         rows = [self._record_row(project_id, destination, row, snapshot_seq,
                                  fence or '') for row in selected]
+        if not lease_is_current():
+            raise ProjectionLeaseLost('Neo4j projection snapshot lease was lost')
         with self._lock, self._session() as session:
             self._ensure_schema(session)
             self._consume(session.run(
@@ -492,6 +495,8 @@ class Neo4jProjectionAdapter:
                 ns=self.namespace, pid=project_id, generation=destination,
                 seq=int(snapshot_seq), fence=fence or ''))
             for offset in range(0, len(rows), 256):
+                if not lease_is_current():
+                    raise ProjectionLeaseLost('Neo4j projection snapshot lease was lost')
                 session.execute_write(self._write_rows, self.namespace,
                                       project_id, destination,
                                       rows[offset:offset + 256])
@@ -504,6 +509,8 @@ class Neo4jProjectionAdapter:
                  'props': row['props']}
                 for row in rows if row['props']['kind'] == 'relation']
             for offset in range(0, len(relation_rows), 256):
+                if not lease_is_current():
+                    raise ProjectionLeaseLost('Neo4j projection snapshot lease was lost')
                 session.execute_write(
                     self._write_relations,
                     relation_rows[offset:offset + 256])
@@ -514,9 +521,13 @@ class Neo4jProjectionAdapter:
                  'props': row['props']}
                 for row in rows if row['props']['kind'] == 'attribute']
             for offset in range(0, len(attribute_rows), 256):
+                if not lease_is_current():
+                    raise ProjectionLeaseLost('Neo4j projection snapshot lease was lost')
                 session.execute_write(
                     self._write_attributes,
                     attribute_rows[offset:offset + 256])
+        if not lease_is_current():
+            raise ProjectionLeaseLost('Neo4j projection snapshot lease was lost')
         return len(rows)
 
     def current_destination(self, project_id):
@@ -617,6 +628,16 @@ class Neo4jProjectionAdapter:
                                        'authority-repair') for row in selected]
                 session.execute_write(self._write_rows, self.namespace,
                                       project_id, destination, rows)
+
+    def seal_rebuild(self, project_id, destination, applied_seq, fence=None):
+        if not isinstance(fence, str) or not fence:
+            raise ValueError('Neo4j rebuild sealing requires a fence token')
+        with self._lock, self._session() as session:
+            self._consume(session.run(
+                'MATCH (g:KSProjection {namespace:$ns,project_id:$pid,generation:$generation}) '
+                'SET g.projection_seq=$seq,g.fence=$fence',
+                ns=self.namespace, pid=project_id, generation=destination,
+                seq=int(applied_seq), fence=fence))
 
     def validate_rebuild(self, project_id, destination, fence=None, state=None):
         expected = dict((state or {}).get('expected_versions') or {})

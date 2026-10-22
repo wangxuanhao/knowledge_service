@@ -1,0 +1,196 @@
+{
+  "date": "2026-10-21",
+  "scope": "Unified selected knowledge intake, ontology draft integration, illustrated all-function manual",
+  "retained_project": {
+    "id": "828887db-e1f3-4f5d-b2b3-4b3dc97d2040",
+    "name": "统一知识写入验收 · 2026-10-20（合成示例）",
+    "synthetic_candidates": true,
+    "method": "Real authenticated HTTP and actual product UI"
+  },
+  "same_draft_sequence": {
+    "draft_id": "7e427837-6af0-47f7-99a3-b98d575303b3",
+    "manual_definition_revision": 2,
+    "source_a_revision": 3,
+    "source_b_revision": 4,
+    "continued_manual_revision": 8,
+    "continued_manual_edits": [
+      "two parent links",
+      "relation domain and range"
+    ],
+    "associated_candidates_preserved": 5,
+    "source_runs": 2
+  },
+  "publication": {
+    "ontology_id": "12f3a4be-e250-4f02-8141-934c9da0dbf1",
+    "receipt": {
+      "facts": {
+        "selected": 5,
+        "added": 5,
+        "reused": 0,
+        "skipped": 0,
+        "per_batch": [
+          {
+            "run_id": "intake-b313ef5d6f8ba13634190c2b6988b579de14bfdc30933b4bc41644ddafab01d1",
+            "selected": 2,
+            "added": 2,
+            "reused": 0,
+            "skipped": 0,
+            "candidate_outcomes": [
+              {
+                "candidate_id": "unified-capital",
+                "status": "materialized",
+                "reason_code": "materialized"
+              },
+              {
+                "candidate_id": "unified-supplier",
+                "status": "materialized",
+                "reason_code": "materialized"
+              }
+            ]
+          },
+          {
+            "run_id": "intake-b5d6f1c000f63b3f9111d19d8295343a087a689db91f82b099efe4b380aba476",
+            "selected": 3,
+            "added": 3,
+            "reused": 0,
+            "skipped": 0,
+            "candidate_outcomes": [
+              {
+                "candidate_id": "unified-customer",
+                "status": "materialized",
+                "reason_code": "materialized"
+              },
+              {
+                "candidate_id": "unified-purchase",
+                "status": "materialized",
+                "reason_code": "materialized"
+              },
+              {
+                "candidate_id": "unified-vendor-b",
+                "status": "materialized",
+                "reason_code": "materialized"
+              }
+            ]
+          }
+        ]
+      },
+      "ontology": {
+        "id": "12f3a4be-e250-4f02-8141-934c9da0dbf1",
+        "published": true
+      },
+      "index": {
+        "task_id": "ontology-sync:12f3a4be-e250-4f02-8141-934c9da0dbf1",
+        "status": "pending"
+      }
+    },
+    "publication_replayed": true
+  },
+  "formal_reuse": {
+    "no_new_draft": true,
+    "no_new_version": true,
+    "entity_id": "discovery-96337ff5ffda30842836bcdb0264",
+    "formal_type": "urn:knowledge:ontology:828887db-e1f3-4f5d-b2b3-4b3dc97d2040:客户",
+    "ontology_id": "12f3a4be-e250-4f02-8141-934c9da0dbf1",
+    "selected": 1,
+    "added": 1,
+    "reused": 0,
+    "skipped": 0,
+    "evidence": "Actual UI confirmation and receipt screenshot plus unchanged authoritative draft/version snapshots"
+  },
+  "safety_checks": {
+    "preview_read_only": true,
+    "stale_source_http": 409,
+    "stale_rejection_left_no_draft_or_version": true,
+    "closed_draft_id": "0aaf1c7f-a623-4fa4-8a43-09479c0dd917",
+    "closed_status": "rejected",
+    "no_fact_or_version_written_on_close": true,
+    "source_return": "Actual UI returned from unified-close-demo to unified-source-d revised source drawer",
+    "historical_view": "Actual UI displayed v1 read-only banner and disabled writes, then returned to latest"
+  },
+  "index": {
+    "ready": true,
+    "tasks": [
+      {
+        "id": "ontology-sync:intake-61fb7bb00e5610850df6381bbbaca6627729099ccb3e2bfbee66b27207e668d4",
+        "status": "completed"
+      },
+      {
+        "id": "ontology-sync:12f3a4be-e250-4f02-8141-934c9da0dbf1",
+        "status": "completed"
+      }
+    ],
+    "publication_receipt_is_creation_time_snapshot": true
+  },
+  "semantic_search": {
+    "backend": "milvus",
+    "active_mode": "semantic",
+    "degraded": false,
+    "first_hit": "云帆软件"
+  },
+  "postdeployment": {
+    "health": {
+      "status": "ok",
+      "database": "PostgreSQL",
+      "embedding_backend": "local",
+      "embedding_ready": true,
+      "dimension": 1024,
+      "vector_backend": "milvus",
+      "vector_connected": true,
+      "collection_ready": true,
+      "semantica_version": "0.7.0"
+    },
+    "preview": {
+      "can_add": true,
+      "read_only": true,
+      "selected": [
+        "unified-close-demo"
+      ]
+    }
+  },
+  "protected_existing_data": {
+    "snapshots_equal": true,
+    "snapshot": {
+      "business_drafts": [
+        {
+          "id": "75051842-dcd3-4e61-845a-20472db31dec",
+          "revision": 4,
+          "status": "pending"
+        }
+      ],
+      "capacity_project_id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+      "capacity_counts": {
+        "documents": 0,
+        "entities": 150001,
+        "relations": 300000,
+        "attributes": 0,
+        "chunks": 0
+      }
+    }
+  },
+  "checks": {
+    "service_and_docs": {
+      "passed": 196,
+      "log": "C:\\Users\\Thinkpad\\.codex\\visualizations\\2026\\10\\16\\01a14441-4f83-7963-9855-f4dcd828d74a\\intake-final-verified.log"
+    },
+    "node": {
+      "passed": 368,
+      "failed": 0,
+      "log": "C:\\Users\\Thinkpad\\.codex\\visualizations\\2026\\10\\16\\01a14441-4f83-7963-9855-f4dcd828d74a\\intake-node-final-delivery.log"
+    },
+    "reviews": {
+      "spec": "passed after aggregate and required-field fixes",
+      "quality": "passed after inactive formal mapping fix"
+    },
+    "documentation": {
+      "chapters": 29,
+      "images": 22,
+      "anchors": 286,
+      "explanatory_fields_per_chapter": 7
+    }
+  },
+  "limits": [
+    "Synthetic metadata fixtures do not certify parser, OCR or LLM extraction quality",
+    "Existing capacity project counts preserved; this is not a new 150k-node latency, memory or P95 certification",
+    "Semantic query timing is one local observation, not a capacity benchmark"
+  ]
+}

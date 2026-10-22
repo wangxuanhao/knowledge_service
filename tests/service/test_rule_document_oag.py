@@ -1,4 +1,7 @@
 import json
+from types import SimpleNamespace
+
+from fastapi.testclient import TestClient
 import pytest
 from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
@@ -127,7 +130,7 @@ def test_chinese_question_retrieves_expired_topic_reference(qa):
 def test_document_only_ingest_with_explicit_date_is_effective_evidence(qa):
     from knowledge_service.models import Ingest
     service, repo, p = qa
-    service.ingest(p, Ingest(title='退款规则', text='退款条款约定七天内办理。', extract=False,
+    service.ingest(p, Ingest(title='退款规则', text='退款条款约定七天内办理。', extraction_mode='documents',
                             valid_from='2020-01-01', metadata={'applicability': {'platforms': {'mode': 'all'}}}).model_dump())
     result = service.answer(p, request())
     assert result['evidence']
@@ -193,7 +196,7 @@ def test_occurrences_are_checked_individually_before_fact_support(invalid_reason
            'query_platform': '美团', 'metadata': app('美团')}
     result = classify(SimpleNamespace(repository=repo), 'p', row, {
         'valid_at': normalize_time(AS_OF), 'known_at': normalize_time('2026-01-01'),
-        'applicability': {'platforms': ['美团', '京东']}})
+        'applicability': {'platforms': {'mode': 'specific', 'values': ['美团', '京东']}}})
     assert result['answer_eligible']
     assert result['_allowed_assertion_ids'] == ['good']
     assert result['_allowed_chunk_version_ids'] == ['gv']
@@ -218,7 +221,7 @@ def test_invisible_direct_rows_are_absent_from_every_public_context_list(invisib
     context['platform_groups'] = [{'platform': '美团', **{key: [dict(row)] for key in array_keys}}]
     result = apply_validity(SimpleNamespace(repository=SimpleNamespace()), 'p', context, {
         'valid_at': normalize_time(AS_OF), 'known_at': normalize_time('2026-01-01'),
-        'include_references': False, 'applicability': {'platforms': ['美团', '京东']}})
+        'include_references': False, 'applicability': {'platforms': {'mode': 'specific', 'values': ['美团', '京东']}}})
     assert 'HIDDEN_ROW_TEXT' not in json.dumps(result)
     for key in array_keys:
         assert result[key] == []
@@ -272,7 +275,7 @@ def test_specific_platform_cannot_quote_unknown_platform_original(qa):
     service, repo, p = qa
     source(repo, p, 'unassigned', metadata={
         'applicability': {'platforms': {'mode': 'unknown'}}})
-    result = service.answer(p, request(applicability={'platforms': ['美团']}))
+    result = service.answer(p, request(applicability={'platforms': {'mode': 'specific', 'values': ['美团']}}))
     assert result['evidence'] == []
     assert not any(item['usage'] == 'qualified_quote'
                    for item in result['uncertain_references'])
@@ -280,13 +283,34 @@ def test_specific_platform_cannot_quote_unknown_platform_original(qa):
 
 
 
-def test_chinese_question_keeps_effective_original_during_vector_fallback(qa):
+@pytest.mark.parametrize('milvus_state', ['missing', 'unavailable'])
+def test_hybrid_question_requires_available_milvus(tmp_path, milvus_state):
+    app = create_app(tmp_path / 'hybrid-required.sqlite', encoder=HashingEncoder())
+    with TestClient(app) as client:
+        service = app.state.service
+        repo = service.repository
+        p = repo.create_project('hybrid-required')['id']
+        source(repo, p, 'effective-refund', valid_from='2020-01-01')
+        service.milvus_store = (
+            None if milvus_state == 'missing' else SimpleNamespace(available=False))
+
+        response = client.post(f'/api/projects/{p}/qa', json=request(
+            query='退款条款有哪些要求？', retrieval_mode='hybrid'))
+
+    assert response.status_code == 503, response.text
+    assert 'Milvus' in response.json()['detail']
+    assert 'evidence' not in response.json()
+
+
+def test_chinese_keyword_question_keeps_effective_original(qa):
     service, repo, p = qa
-    source(repo, p, 'effective-refund', valid_from='2020-01-01')
-    result = service.answer(p, request(query='退款条款有哪些要求？', retrieval_mode='hybrid'))
+    row = source(repo, p, 'effective-refund', valid_from='2020-01-01')
+    result = service.answer(p, request(query='退款条款有哪些要求？', retrieval_mode='keyword'))
     assert [row['id'] for row in result['evidence']] == ['effective-refund']
     assert '退款条款 effective-refund' in result['answer']
-    assert result['degraded'] is True
+    assert result['evidence'][0]['validity_status'] == 'effective'
+    assert result['evidence'][0]['version_id'] == row['version_id']
+    assert result['evidence'][0]['sources'][0]['document_id'] == 'doc-effective-refund'
 
 
 

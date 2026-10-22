@@ -4,7 +4,7 @@
 - projects.py          项目管理（列表/创建/查看/改名/删除）
 - knowledge.py         知识 CRUD + 摄取 + 检索/问答/图谱 + 本体/SPARQL
 - workspace.py         工作台 API（探索/实体选项/时间线/本体维护/索引任务）
-- parity.py            旧版兼容 API（本地项目导入/预览/快照）
+- parity.py            文档预览、批量摄取与完整快照
 - evidence.py          证据定位
 - reviews.py           知识审核
 - ontology_changes.py  本体变更草案
@@ -100,9 +100,9 @@ def _resolve_milvus_dim(encoder=None):
 
 
 def _build_milvus_store(encoder=None, diagnostics=None):
-    """按需创建 Milvus 检索索引；未显式开启或连接失败时返回 None（不再降级到本地向量）。
+    """仅连接 Milvus；集合和索引由项目页面的显式重建任务创建。
 
-    通过环境变量 KG_VECTOR_BACKEND=milvus 显式开启（默认关闭，保持向后兼容）。
+    未显式设置 KG_VECTOR_BACKEND=milvus 或连接失败时返回 None。
     """
     if os.environ.get('KG_VECTOR_BACKEND', '') != 'milvus':
         return None
@@ -112,9 +112,9 @@ def _build_milvus_store(encoder=None, diagnostics=None):
         dim = _resolve_milvus_dim(encoder)
         identity = getattr(encoder, 'identity', '') if encoder is not None else ''
         store = MilvusStore(
-            host=host, port=port, dim=dim, encoder_identity=identity)
+            host=host, port=port, dim=dim, encoder_identity=identity,
+            collection='knowledge_vectors')
         store.connect()
-        store.ensure_collection()
         return store
     except (VectorDimensionMismatch, MilvusSchemaMismatch) as exc:
         LOG.warning('Milvus collection 需要重建: %s', redact(exc))
@@ -127,7 +127,7 @@ def _build_milvus_store(encoder=None, diagnostics=None):
     except Exception as exc:
         # 维度不一致时这里会打印带"怎么修"的说明（VectorDimensionMismatch），
         # 而不是一句无法下手的内部错误。
-        LOG.warning('Milvus 不可用，降级本地检索: %s', redact(exc))
+        LOG.warning('Milvus 不可用，语义与混合检索暂停: %s', redact(exc))
         if diagnostics is not None:
             diagnostics.append(redact(exc))
         return None
@@ -258,9 +258,6 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
             if job.get('kind') == 'ingest_upload' and job.get('status') != 'completed'
             and job.get('payload', {}).get('staged', {}).get('path')]
         document_uploads.cleanup_old(protected_paths=retained_uploads)
-        # 启动后异步预热 embedding 模型（首次 encode ~141s），不阻塞启动，消除首次检索卡顿
-        import threading
-        threading.Thread(target=service.warm_up, daemon=True).start()
         ontology_sync.start()
         projection_worker.start()
         app.state.jobs.start()
@@ -369,39 +366,9 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
                 and datetime.fromisoformat(expiry.replace('Z', '+00:00'))
                 > datetime.now(timezone.utc))
 
-        def repair_authority(project_id, record_id, destination):
-            store = service.milvus_store
-            if store is None:
-                raise RuntimeError('Milvus projection store is unavailable')
-            try:
-                record = repository.get_record(project_id, record_id)
-            except KeyError:
-                return store.delete(
-                    project_id, record_id=record_id, destination=destination)
-            if ((record.get('metadata') or {}).get('_deleted')
-                    or record.get('kind') not in {'entity', 'relation', 'chunk'}):
-                return store.delete(
-                    project_id, record_id=record_id, destination=destination)
-            # version_id is the primary key, so an upsert alone cannot remove a
-            # late worker's obsolete version. Delete the whole record lineage
-            # in this destination before restoring the authoritative version.
-            store.delete(project_id, record_id=record_id,
-                         destination=destination)
-            if record.get('embedding') is None:
-                vectors = service.encoder.encode([str(record.get('text') or '')])
-                if len(vectors) != 1:
-                    raise RuntimeError('embedding output count mismatch')
-                record = dict(record, embedding=vectors[0],
-                              embedding_model=service.encoder.identity)
-            return store.upsert(
-                [dict(record, project_id=project_id)], flush=True,
-                destination=destination,
-                projection_seq=repository.projections.project_watermark(project_id),
-                fence='authority-repair')
-
         projection_adapters['milvus'] = MilvusProjectionAdapter(
             lambda: service.milvus_store, fence_is_current=fence_is_current,
-            repair_authority=repair_authority, encoder=service.encoder)
+            encoder=service.encoder)
 
         def cleanup_milvus(project_id):
             store = service.milvus_store
@@ -423,6 +390,8 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
     app.state.projection_worker = projection_worker
     from .workspace import install as install_workspace
     install_workspace(app, service)
+    from .search_indexes import install as install_search_indexes
+    install_search_indexes(app, service)
     from .evidence import install as install_evidence
     install_evidence(app, service)
     from .provenance import install as install_provenance
@@ -435,6 +404,10 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
     install_ontology_discovery(app, service)
     from .ontology_drafts import install as install_ontology_drafts
     install_ontology_drafts(app, service)
+    from .graph_sessions import install as install_graph_sessions
+    install_graph_sessions(app, service)
+    from .retrieval_experiments import install as install_retrieval_experiments
+    install_retrieval_experiments(app, service)
 
     # ── 异常处理 ──
     @app.exception_handler(KeyError)
@@ -505,7 +478,7 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
         return {'status': runtime['status'], 'version': '1.1.0',
                 'database': service.data.backend_label, 'time_model': 'bitemporal',
                 'python_executable': sys.executable,
-                'capabilities': ['legacy_import', 'interactive_graph_api', 'governance', 'semantica_merge',
+                'capabilities': ['interactive_graph_api', 'governance', 'semantica_merge',
                                  'jobs', 'snapshots', 'dual_channel_qa', 'typed_reviews',
                                  'ontology_change_proposals', 'ontology_discovery', 'unified_provenance',
                                  'semantica_document_uploads', 'docling_ocr_ready'],

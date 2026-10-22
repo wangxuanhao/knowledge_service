@@ -1,27 +1,12 @@
-"""开放模式候选聚合、Semantica 归纳与带版本发布（业务逻辑）。
-
-路由层在 api.ontology_discovery，本文件只含候选摊平、生命周期分类、
-归纳与物化校验等业务函数。
-"""
+"""Current candidate projections, lifecycle and governed fact materialization."""
 from collections import Counter,defaultdict
 from copy import deepcopy
 import hashlib
 import json
-import re
-from urllib.parse import unquote
-from uuid import uuid4
 
-from rdflib import Graph,Literal,Namespace,RDF,RDFS,URIRef
-from rdflib.namespace import OWL,XSD
+from rdflib import URIRef
 
 from ..services.ontology import Ontology, readable_iri_segment
-from ..services.discovery_vocabulary import (
-    DiscoveryVocabularyNormalizer,
-    validate_generated_term_kinds,
-)
-from ..services.ontology_shape import structurally_changed_iris
-from ..services.ontology_operations import _constraint_values, _set_constraint
-from ..core.time import utc_now
 from ..utils.attributes import primitive_datatype
 from ..utils.diagnostics import timed
 
@@ -29,28 +14,6 @@ from ..utils.diagnostics import timed
 NORMAL_CANDIDATE_KINDS={'entity','relation','attribute'}
 
 
-def _normalize_induction_candidates(candidates, baseline_turtle=None):
-    """Normalize route candidates and return only safe Semantica inputs."""
-    originals={item['id']:item for item in candidates}
-    boundary=[]
-    for item in candidates:
-        payload=deepcopy(item)
-        payload['kind']='class' if item.get('kind')=='entity' else item.get('kind')
-        payload['name']=item.get('proposed_type')
-        payload['evidence_refs']=list(item.get('evidence_refs') or [
-            item.get('assertion_id') or item['id']])
-        boundary.append(payload)
-    result=DiscoveryVocabularyNormalizer(baseline_turtle or '').normalize(boundary)
-    bindings={item['candidate_id']:item for item in result.candidate_bindings}
-    accepted=[]
-    for item in result.accepted_candidates:
-        payload=deepcopy(originals[item['id']])
-        leader_id=bindings[item['id']]['accepted_candidate_id']
-        payload['vocabulary_name']=originals[leader_id]['proposed_type']
-        if item.get('iri'):
-            payload['iri']=item['iri']
-        accepted.append(payload)
-    return accepted,result
 
 
 def _literal_language(value):
@@ -220,17 +183,12 @@ def _validated_materialization(turtle,records,skipped):
     return accepted,skipped,{'conforms':True,'accepted_count':len(accepted),'skipped_count':len(skipped)}
 
 
-def _candidates(repository,project_id,records=None):
-    """把每个当前文档的 `metadata.discovery_candidates` 摊平。
-
-    PERF：全量 `current_records` 扫描（SELECT * + 解码每个载荷的 JSON）。
-    `_candidate_lifecycle` 在同一请求中也需要这些行，因此调用方通过 `records`
-    传入已经读过的列表，避免第二次扫描。
-    """
+def _candidates(documents, assertions):
+    """Flatten current candidate document projections and their assertions."""
     result=[]
     with timed('候选发现') as record:
-        assertions={item['id']:item for item in repository.list_assertions(project_id)}
-        for document in (repository.current_records(project_id, vectors='none', kinds=['document']) if records is None else records):
+        assertions={item['id']:item for item in assertions}
+        for document in documents:
             if document['kind']!='document' or document.get('metadata',{}).get('_deleted'):continue
             for item in document.get('metadata',{}).get('discovery_candidates',[]):
                 candidate={**item,'document_id':document['id'],'document_version_id':document['version_id'],
@@ -270,41 +228,28 @@ def _summary(candidates):
         'relation_types':[{'name':name,'count':len(values),'examples':values[:3]} for name,values in sorted(relations.items())]}
 
 
-def _candidate_lifecycle(repository,project_id,candidates,drafts,records=None):
-    """对每个候选分类：pending / in draft / approved / materialized。
-
-    PERF：复用调用方已经执行过的 `current_records` 扫描（通过 `records` 传入），
-    避免为同一请求第二次读取每个载荷。
-    """
-    candidate_ids={item['id'] for item in candidates if item.get('kind') in NORMAL_CANDIDATE_KINDS}
-    materialized_ids=set()
-    with timed('候选生命周期', candidates=len(candidates), drafts=len(drafts),
-               reused_records=records is not None) as record:
-        for record_row in (repository.current_records(project_id, vectors='none') if records is None else records):
-            if record_row['kind'] not in ('entity','relation','attribute') or record_row.get('metadata',{}).get('_deleted'):continue
-            metadata=record_row.get('metadata',{})
-            if metadata.get('discovery_candidate_id'):
-                materialized_ids.add(metadata['discovery_candidate_id'])
-            materialized_ids.update(metadata.get('discovery_candidate_ids') or [])
-        record['materialized']=len(materialized_ids)
-    published_ids=set();included_ids=set()
-    for draft in drafts:
-        included=set(draft.get('candidate_ids') or [])-set(draft.get('excluded_candidate_ids') or [])
-        included-= {item.get('candidate_id') for item in draft.get('skipped_candidates') or []}
-        if draft.get('status')=='published':
-            published_ids.update(included)
-        elif draft.get('status') in {'draft','submitted'}:
+def _candidate_lifecycle(candidates, runs, records):
+    """Classify candidates from one current intake and materialization snapshot."""
+    candidate_ids = {item['id'] for item in candidates if item.get('kind') in NORMAL_CANDIDATE_KINDS}
+    materialized_ids = _materialized_candidate_ids(records) & candidate_ids
+    published_ids, included_ids = set(), set()
+    for run in runs:
+        included = set(run.get('accepted_candidate_ids') or [])
+        included -= {x['candidate_id'] for x in run.get('candidate_outcomes') or []
+                     if x.get('status') in {'skipped', 'deferred'}}
+        if run['status'] == 'draft_created':
             included_ids.update(included)
-    materialized_ids &= candidate_ids
+        elif run['status'] == 'published':
+            published_ids.update(included)
     published_ids = (published_ids & candidate_ids) - materialized_ids
     included_ids = (included_ids & candidate_ids) - published_ids - materialized_ids
     pending_ids = candidate_ids - materialized_ids - published_ids - included_ids
-    states={candidate_id:'pending' for candidate_id in pending_ids}
-    states.update({candidate_id:'included_in_draft' for candidate_id in included_ids})
-    states.update({candidate_id:'approved' for candidate_id in published_ids})
-    states.update({candidate_id:'materialized' for candidate_id in materialized_ids})
-    return states,{'pending':len(pending_ids),'included_in_draft':len(included_ids),
-        'approved':len(published_ids),'materialized':len(materialized_ids)}
+    states = {id: 'pending' for id in pending_ids}
+    states.update({id: 'included_in_draft' for id in included_ids})
+    states.update({id: 'approved' for id in published_ids})
+    states.update({id: 'materialized' for id in materialized_ids})
+    return states, {'pending': len(pending_ids), 'included_in_draft': len(included_ids),
+                    'approved': len(published_ids), 'materialized': len(materialized_ids)}
 
 
 def _candidate_source_reference(item):
@@ -457,242 +402,3 @@ def _iri(base,name):
 
 def _candidate_vocabulary_name(candidate):
     return candidate.get('vocabulary_name') or candidate.get('proposed_type')
-
-
-def _candidate_iri_bindings(candidates, kind):
-    return {
-        str(_candidate_vocabulary_name(item)).strip(): URIRef(
-            item.get('reuse_iri') or item.get('target_iri') or item['iri'])
-        for item in candidates
-        if item.get('kind') == kind
-        and (item.get('reuse_iri') or item.get('target_iri') or item.get('iri'))
-    }
-
-
-def _machine_name(prefix,value):
-    """为 Semantica 生成稳定的 ASCII 名称，而标签保留源语言。"""
-    value=str(value).strip()
-    if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]*',value):return value
-    return prefix+'_'+hashlib.sha256(value.encode('utf-8')).hexdigest()[:12]
-
-
-def _local_name(value):
-    text=unquote(str(value))
-    return text.rsplit('#',1)[-1].rsplit('/',1)[-1].rsplit(':',1)[-1]
-
-
-def _term_catalog(graph):
-    specs={'classes':OWL.Class,'relations':OWL.ObjectProperty,'attributes':OWL.DatatypeProperty}
-    result={}
-    for kind,rdf_type in specs.items():
-        terms={}
-        for subject in graph.subjects(RDF.type,rdf_type):
-            labels=[str(value) for value in graph.objects(subject,RDFS.label)]
-            terms[str(subject)]=labels[0] if labels else _local_name(subject)
-        result[kind]=terms
-    return result
-
-
-def _term_lookup(catalog,kind):
-    lookup={}
-    for iri,label in catalog[kind].items():
-        for value in (iri,label,_local_name(iri)):
-            if value:lookup[str(value).strip().casefold()]=URIRef(iri)
-    return lookup
-
-
-def _ontology_diff(before_turtle,after_turtle):
-    before=Graph()
-    if before_turtle:before.parse(data=before_turtle,format='turtle')
-    after=Graph();after.parse(data=after_turtle,format='turtle')
-    previous=_term_catalog(before);current=_term_catalog(after);result={}
-    for kind in ('classes','relations','attributes'):
-        old,new=previous[kind],current[kind]
-        item=lambda iri:{'id':iri,'label':new.get(iri,old.get(iri,_local_name(iri)))}
-        result[kind]={
-            'added':[item(iri) for iri in sorted(set(new)-set(old))],
-            'retained':[item(iri) for iri in sorted(set(new)&set(old))],
-            'removed':[item(iri) for iri in sorted(set(old)-set(new))],
-        }
-    return result
-
-
-def _induce(project_id,name,candidates,baseline_turtle=None,hierarchy_suggestions=None):
-    from semantica.ontology import OntologyGenerator
-    by_id={x['id']:x for x in candidates if x['kind']=='entity'}
-    entity_machine={source:_machine_name('EntityType',source) for source in
-        {_candidate_vocabulary_name(x) for x in candidates if x['kind']=='entity'}}
-    relation_machine={source:_machine_name('RelationType',source) for source in
-        {_candidate_vocabulary_name(x) for x in candidates if x['kind']=='relation'}}
-    sample_fields={'type','entity_type','name','text','confidence','properties'}
-    attribute_counts=Counter(str(_candidate_vocabulary_name(x)).strip()
-        for x in candidates if x['kind']=='attribute')
-    attribute_machine={}
-    for source in {_candidate_vocabulary_name(x) for x in candidates if x['kind']=='attribute'}:
-        if attribute_counts[str(source).strip()]<2:continue
-        machine=_machine_name('AttributeType',str(source).strip())
-        if machine in sample_fields:machine='AttributeType_'+hashlib.sha256(str(source).strip().encode('utf-8')).hexdigest()[:12]
-        attribute_machine[source]=machine
-    reverse_entity={value:key for key,value in entity_machine.items()}
-    reverse_relation={value:key for key,value in relation_machine.items()}
-    reverse_attribute={value:str(key).strip() for key,value in attribute_machine.items()}
-    attributes=defaultdict(dict)
-    for item in candidates:
-        source=_candidate_vocabulary_name(item)
-        if item['kind']=='attribute' and source in attribute_machine:
-            attributes[item.get('entity_id')].setdefault(
-                attribute_machine[source],item.get('value'))
-    entities=[]
-    for item in candidates:
-        if item['kind']!='entity':continue
-        properties=attributes.get(item['id'],{})
-        source=_candidate_vocabulary_name(item)
-        entities.append({'type':entity_machine[source],
-            'entity_type':entity_machine[source],
-            'name':item['text'],'text':item['text'],'confidence':item.get('confidence',1),
-            'properties':properties,**properties})
-    relationships=[]
-    for item in candidates:
-        if item['kind']!='relation':continue
-        subject=by_id.get(item.get('subject_id'),{})
-        obj=by_id.get(item.get('object_id'),{})
-        source=_candidate_vocabulary_name(item)
-        subject_type=_candidate_vocabulary_name(subject) or item.get('subject_type')
-        object_type=_candidate_vocabulary_name(obj) or item.get('object_type')
-        relationships.append({'type':relation_machine[source],
-            'relationship_type':relation_machine[source],
-            'source':item.get('subject') or subject.get('text'),'target':item.get('object') or obj.get('text'),
-            'source_type':entity_machine.get(subject_type,subject_type),
-            'target_type':entity_machine.get(object_type,object_type)})
-    base=f'urn:knowledge:ontology:{project_id}:'
-    class_bindings=_candidate_iri_bindings(candidates,'entity')
-    relation_bindings=_candidate_iri_bindings(candidates,'relation')
-    attribute_bindings=_candidate_iri_bindings(candidates,'attribute')
-    inferred=OntologyGenerator(base_uri=base,min_occurrences=1).generate_ontology(
-        {'entities':entities,'relationships':relationships},name=name,build_hierarchy=True)
-    graph=Graph()
-    if baseline_turtle:graph.parse(data=baseline_turtle,format='turtle')
-    baseline_graph=Graph()
-    for triple in graph:
-        baseline_graph.add(triple)
-    ns=Namespace(base);graph.bind('disc',ns);graph.bind('owl',OWL);graph.bind('rdfs',RDFS)
-    catalog=_term_catalog(graph)
-    inferred_classes=inferred.get('classes',[])
-    class_map={};class_lookup=_term_lookup(catalog,'classes')
-    for item in inferred_classes:
-        machine_source=str(item.get('metadata',{}).get('inferred_from') or item.get('name'))
-        source=reverse_entity.get(machine_source,machine_source)
-        uri=(class_bindings.get(str(source).strip())
-            or class_lookup.get(str(source).strip().casefold()) or _iri(base,source))
-        class_map[str(source)]=str(uri)
-        for key in (source,machine_source,item.get('name'),item.get('uri')):
-            if key:class_lookup[str(key).lower()]=uri
-        graph.add((uri,RDF.type,OWL.Class));graph.add((uri,RDFS.label,Literal(str(source),lang=_literal_language(source))))
-        graph.add((uri,RDFS.comment,Literal(_definition('class',source),lang='zh')))
-    for source in sorted({_candidate_vocabulary_name(x)
-            for x in candidates if x['kind']=='entity'}):
-        if source not in class_map:
-            uri=(class_bindings.get(str(source).strip())
-                or class_lookup.get(str(source).strip().casefold()) or _iri(base,source))
-            class_map[source]=str(uri);class_lookup[source.lower()]=uri
-            graph.add((uri,RDF.type,OWL.Class));graph.add((uri,RDFS.label,Literal(source,lang=_literal_language(source))))
-            graph.add((uri,RDFS.comment,Literal(_definition('class',source),lang='zh')))
-    # Semantica 0.6.7 emits at most one suggested parent in ``parent``.
-    # ``subClassOf`` is accepted only as a compatibility alias.  Unknown or
-    # missing parents deliberately leave the class as an independent root.
-    for item in inferred_classes:
-        machine_source=str(item.get('metadata',{}).get('inferred_from') or item.get('name'))
-        source=reverse_entity.get(machine_source,machine_source)
-        child=class_map.get(str(source))
-        parent_value=item.get('parent')
-        if parent_value is None:
-            parent_value=item.get('subClassOf')
-        if isinstance(parent_value,dict):
-            parent_value=parent_value.get('name') or parent_value.get('uri')
-        if not child or not isinstance(parent_value,str) or not parent_value.strip():
-            continue
-        parent_source=reverse_entity.get(parent_value,parent_value)
-        parent=class_map.get(str(parent_source))
-        if parent and parent!=child:
-            graph.add((URIRef(child),RDFS.subClassOf,URIRef(parent)))
-    # P0-3 LLM 层级建议：Semantica 只看类名推断，我们的机器名是哈希串，实测一条都推不出来，
-    # 所以这里补上"候选类清单 → 父子关系"的 LLM 判断（已做去环/去自环/限量，见
-    # services/hierarchy_suggestion.py）。它写进的是同一张图、走的也是同一条
-    # add_parent → 审核 → 发布 的路径，没有旁路。
-    for child_name,parent_names in (hierarchy_suggestions or {}).items():
-        child=class_map.get(str(child_name))
-        if not child:
-            continue
-        for parent_name in parent_names or ():
-            parent=class_map.get(str(parent_name))
-            if parent and parent!=child:
-                graph.add((URIRef(child),RDFS.subClassOf,URIRef(parent)))
-    relation_map={};attribute_map={}
-    relation_lookup=_term_lookup(catalog,'relations');attribute_lookup=_term_lookup(catalog,'attributes')
-    for item in inferred.get('properties',[]):
-        machine_source=str(item.get('metadata',{}).get('inferred_from') or item.get('name'))
-        is_object=item.get('type')=='object'
-        if not is_object and machine_source not in reverse_attribute:
-            continue
-        source=(reverse_relation if is_object else reverse_attribute).get(machine_source,machine_source)
-        lookup=relation_lookup if is_object else attribute_lookup
-        bindings=relation_bindings if is_object else attribute_bindings
-        uri=(bindings.get(str(source).strip())
-            or lookup.get(str(source).strip().casefold()) or _iri(base,source))
-        graph.add((uri,RDF.type,OWL.ObjectProperty if is_object else OWL.DatatypeProperty))
-        graph.add((uri,RDFS.label,Literal(source,lang=_literal_language(source))))
-        graph.add((uri,RDFS.comment,Literal(_definition('relation' if is_object else 'attribute',source),lang='zh')))
-        target=relation_map if is_object else attribute_map;target[source]=str(uri)
-        # 发现模式下，观测到的关系端点类型是证据而非约束。
-        # 数据类型属性仍需要适用的类和值数据类型。
-        if not is_object:
-            domains=item.get('domain',[]) if isinstance(item.get('domain',[]),list) else [item.get('domain')]
-            ranges=item.get('range',[]) if isinstance(item.get('range',[]),list) else [item.get('range')]
-            resolved_domains={class_lookup[str(value).lower()] for value in domains
-                              if value and str(value).lower() in class_lookup}
-            existing_domains=set(_constraint_values(graph,uri,RDFS.domain))
-            if resolved_domains-existing_domains:
-                # Governed add_domain represents an allowed class set as a
-                # union, so generation must use the same shape for its diff.
-                _set_constraint(graph,uri,RDFS.domain,existing_domains|resolved_domains)
-            for value in ranges:
-                if not value:continue
-                resolved=class_lookup.get(str(value).lower())
-                if resolved:graph.add((uri,RDFS.range,resolved))
-                elif str(value).startswith('xsd:'):graph.add((uri,RDFS.range,getattr(XSD,str(value).split(':',1)[1])))
-    for source in sorted({_candidate_vocabulary_name(x)
-            for x in candidates if x['kind']=='relation'}):
-        if source not in relation_map:
-            uri=(relation_bindings.get(str(source).strip())
-                or relation_lookup.get(str(source).strip().casefold()) or _iri(base,source));relation_map[source]=str(uri)
-            graph.add((uri,RDF.type,OWL.ObjectProperty));graph.add((uri,RDFS.label,Literal(source,lang=_literal_language(source))))
-            graph.add((uri,RDFS.comment,Literal(_definition('relation',source),lang='zh')))
-    attribute_sources={_candidate_vocabulary_name(x)
-        for x in candidates if x['kind']=='attribute'}
-    for source in sorted(attribute_sources):
-        canonical=str(source).strip()
-        if canonical in attribute_map:continue
-        existing=attribute_lookup.get(canonical.casefold())
-        if existing or attribute_counts[canonical]>=2:
-            uri=attribute_bindings.get(canonical) or existing or _iri(base,canonical);attribute_map[canonical]=str(uri)
-            graph.add((uri,RDF.type,OWL.DatatypeProperty));graph.add((uri,RDFS.label,Literal(canonical,lang=_literal_language(canonical))))
-            graph.add((uri,RDFS.comment,Literal(_definition('attribute',canonical),lang='zh')))
-    attribute_map={source:attribute_map[str(source).strip()] for source in attribute_sources
-        if str(source).strip() in attribute_map}
-    mapping_specs=(('entity',class_map),('relation',relation_map),('attribute',attribute_map))
-    for kind,mapping in mapping_specs:
-        for item in candidates:
-            if item.get('kind')!=kind:continue
-            target=_candidate_vocabulary_name(item)
-            iri=mapping.get(target) or mapping.get(str(target).strip())
-            if iri:mapping[item['proposed_type']]=iri
-    # 父发现版本可能包含旧代码推断出的端点值域。
-    # 对本开放候选集中观测到的每条关系都移除它们。显式约束属于
-    # 引导式/非开放本体工作流及其审核队列。
-    for iri in relation_map.values():
-        predicate=URIRef(iri);graph.remove((predicate,RDFS.domain,None));graph.remove((predicate,RDFS.range,None))
-    turtle=graph.serialize(format='turtle')
-    validate_generated_term_kinds(
-        turtle, changed_iris=structurally_changed_iris(baseline_graph, graph))
-    Ontology(turtle)
-    return turtle,{'entity_types':class_map,'relation_types':relation_map,'attributes':attribute_map},inferred

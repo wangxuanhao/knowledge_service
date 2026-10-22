@@ -1,0 +1,43 @@
+{
+  "checked_at": 1792546904.7137454,
+  "available_memory_mb": 3690,
+  "target_project_exists": true,
+  "database": "knowledge",
+  "select_1_ms": [
+    9.21,
+    12.98,
+    18.08,
+    8.11,
+    7.41,
+    6.28,
+    3.66,
+    6.4,
+    2.46,
+    3.17,
+    3.64,
+    4.92
+  ],
+  "activity": {
+    "blocked_connections": 0.0,
+    "active_connections": 0.0,
+    "idle_in_transaction": 0.0,
+    "oldest_idle_transaction_seconds": 0.0
+  },
+  "table_estimates": [
+    {
+      "table": "assertions",
+      "live_rows": 0,
+      "dead_rows": 0
+    },
+    {
+      "table": "projects",
+      "live_rows": 1,
+      "dead_rows": 0
+    },
+    {
+      "table": "record_versions",
+      "live_rows": 2,
+      "dead_rows": 0
+    }
+  ]
+}

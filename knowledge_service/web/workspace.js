@@ -1,11 +1,17 @@
 /* Linked graph workspace: preserve existing editing/governance controls. */
 (() => {
   // 节点拖动调整视图布局；空白拖动平移。事实修改仍走版本化编辑器。
-  const ui = {request:0, options:[], ontology:null, graph:null};
+  const ui = {request:0, options:[], pinned:new Map(),picker:{request:0,cursor:null,query:'',page:0},mindmapPicker:{request:0,cursor:null,query:'',page:0,options:[]},mindmapRootId:'',ontology:null, graph:null};
+  let ontologyLoadGeneration=0;
   const graphRequests=GraphTypeFilter.createGraphRequestGate();
   const get = id => document.getElementById(id);
   const make = (tag, html, className='') => {const e=document.createElement(tag);e.innerHTML=html;e.className=className;return e;};
   const graphExpandState={busy:false,pendingDetail:false};
+  for(const [label,html] of [
+    ['邻域方向','<select id="graph-direction" aria-label="邻域方向"><option value="both">双向</option><option value="forward">沿箭头</option><option value="backward">逆箭头</option></select>'],
+    ['实体上限','<select id="graph-max-nodes" aria-label="局部图实体上限"><option>250</option><option selected>500</option><option>1000</option><option>2000</option></select>'],
+    ['关系上限','<select id="graph-max-edges" aria-label="局部图关系上限"><option selected>1000</option><option>2000</option><option>5000</option></select>'],
+  ])get('graph-local-budget-controls').append(make('label',label+html,'graph-hop-control'));
   const platformGroupLabel=group=>group?.source_scope==='all'?'通用规则':
     group?.source_scope==='unrestricted'?'全部范围':
     group?.source_scope==='unknown'?'范围待确认（不参与确定性答案）':
@@ -27,12 +33,31 @@
   const TIME_OPS=[{v:'eq',t:'等于'},{v:'ne',t:'不等于'},{v:'gte',t:'大于等于'},{v:'lte',t:'小于等于'},{v:'interval',t:'区间'}];
   const TEXT_OPS=[{v:'eq',t:'等于'},{v:'ne',t:'不等于'},{v:'contains',t:'包含'},{v:'in',t:'属于集合'},{v:'gte',t:'大于等于'},{v:'lte',t:'小于等于'},{v:'exists',t:'字段存在'}];
   const fieldLabel=field=>window.ScopeFields.label(field);
-  const visibleFacets=()=>window.ScopeFields.visibleFacets(cb.facets,{
+  function usesPostgresFields(){
+    const page=window.WorkspaceContext?.page;
+    return window.ScopeFields.usesPostgresFilters({page,purpose:get('scope-purpose')?.value,
+      retrievalMode:get(page==='qa'?'qa-mode':'search-mode')?.value,knownAt:get('scope-known-at')?.value});
+  }
+  const visibleFacets=()=>usesPostgresFields()?window.ScopeFields.visibleFacets(cb.facets,{
     showSystem:Boolean(get('cb-show-system')?.checked),selected:cb.conditions.map(c=>c.field),
-  });
-  function fieldOptions(){
-    return [{v:'valid_from',l:'生效时间'},{v:'valid_until',l:'失效时间'},
-      ...visibleFacets().map(f=>({v:f.field,l:fieldLabel(f.field)+' · '+f.records+' 条'}))];
+  }):[];
+  function fieldOptions(selectedField){
+    const choices=[...window.ScopeFields.retrievalFields(),...visibleFacets().map(f=>({v:f.field,l:fieldLabel(f.field)+' · '+f.records+' 条'}))];
+    if(selectedField&&!choices.some(row=>row.v===selectedField))choices.push({v:selectedField,l:fieldLabel(selectedField)+'（已保留的业务字段）'});
+    return choices;
+  }
+  function refreshFilterPurpose(){
+    const postgres=usesPostgresFields(),help=get('scope-field-help'),discovery=get('metadata-discovery'),system=get('cb-system-fields');
+    if(discovery)discovery.hidden=!postgres;if(system)system.hidden=!postgres;
+    if(help)help.textContent=postgres?'可使用项目 Metadata；复杂业务条件由 PostgreSQL 判断资格，向量排名仍由 Milvus 完成。图谱与检索共用检索页的已应用条件。':
+      '当前检索支持记录 ID、种类、知识类型、片段所属文档和有效时间；平台、业务、对象使用上方专用筛选。本体使用本体范围。其他 Metadata 条件会保留，并在检索前提示。';
+    const raw=get('cb-raw-json');if(raw)raw.placeholder=postgres?'例如：{"field":"metadata.region.city","op":"eq","value":"北京"}':'例如：{"field":"type","op":"eq","value":"Merchant"}';
+    const page=window.WorkspaceContext?.page,warning=get('scope-compatibility');
+    if(warning){
+      warning.textContent='';warning.hidden=true;
+      if(page==='search'||page==='qa')try{window.ScopeFields.requireRetrievalScope({...scope(),retrieval_mode:get(page==='qa'?'qa-mode':'search-mode')?.value});}
+      catch(error){warning.textContent=error.message;warning.hidden=false;}
+    }
   }
   function addCondition(field='valid_from',op='eq',value='',from='',to=''){
     cb.conditions.push({id:cb.nextId++,field,op,value,from,to});
@@ -47,10 +72,10 @@
     else{rows.innerHTML='';for(const c of cb.conditions){
       const isTime=TIME_FIELDS.has(c.field),ops=isTime?TIME_OPS:TEXT_OPS,showInterval=c.op==='interval';
       const row=make('div','','cb-row');row.dataset.id=c.id;
-      row.innerHTML=`<select class="cb-field">${fieldOptions().map(o=>`<option value="${esc(o.v)}"${o.v===c.field?' selected':''}>${esc(o.l)}</option>`).join('')}</select><select class="cb-op">${ops.map(o=>`<option value="${o.v}"${o.v===c.op?' selected':''}>${o.t}</option>`).join('')}</select>${showInterval?`<span class="cb-date-label">从</span><input type="date" class="cb-date-from" value="${esc(c.from||'')}"><span class="cb-date-label">到</span><input type="date" class="cb-date-to" value="${esc(c.to||'')}">`:`<input type="text" class="cb-value" value="${esc(c.value||'')}" placeholder="${c.op==='exists'?'（无需填写）':'值'}"${c.op==='exists'?' disabled':''}>`}<button class="cb-remove secondary" title="删除">×</button>`;
+      row.innerHTML=`<select class="cb-field">${fieldOptions(c.field).map(o=>`<option value="${esc(o.v)}"${o.v===c.field?' selected':''}>${esc(o.l)}</option>`).join('')}</select><select class="cb-op">${ops.map(o=>`<option value="${o.v}"${o.v===c.op?' selected':''}>${o.t}</option>`).join('')}</select>${showInterval?`<span class="cb-date-label">从</span><input type="date" class="cb-date-from" value="${esc(c.from||'')}"><span class="cb-date-label">到</span><input type="date" class="cb-date-to" value="${esc(c.to||'')}">`:`<input type="text" class="cb-value" value="${esc(c.value||'')}" placeholder="${c.op==='exists'?'（无需填写）':'值'}"${c.op==='exists'?' disabled':''}>`}<button class="cb-remove secondary" title="删除">×</button>`;
       rows.appendChild(row);
     }}
-    renderChips();updateChip();
+    renderChips();updateChip();refreshFilterPurpose();
   }
   function renderChips(){
     get('cb-active-chips').innerHTML=cb.conditions.map(c=>{
@@ -114,21 +139,37 @@
   }
   get('cb-show-system')?.addEventListener('change',()=>{renderFacetChoices();renderCB();});
   async function discoverMetadata(){
-    const p=current,stamp=JSON.stringify(scope());if(!p)return;
+    const p=current,page=window.WorkspaceContext?.page,stamp=JSON.stringify(scope());
+    // A closed page-owned filter rail must not scan the project at startup.
+    if(!p||!details.open||!window.WorkspaceContext?.isContentPage(window.WorkspaceContext.page))return;
+    if(!usesPostgresFields()){cb.facets=[];renderFacetChoices();renderCB();return;}
     const result=await api(endpoint('/metadata/facets'),scope());
-    if(p!==current||stamp!==JSON.stringify(scope()))return;
+    if(p!==current||page!==window.WorkspaceContext?.page||!details.open||!usesPostgresFields()||stamp!==JSON.stringify(scope()))return;
     cb.facets=result.fields;
     renderFacetChoices(result.records);
     renderCB();
   }
+  details.addEventListener('toggle',()=>{if(details.open)discoverMetadata().catch(error=>status(error.message,true));});
+  for(const id of ['scope-purpose','scope-known-at','search-mode','qa-mode'])get(id)?.addEventListener('change',()=>{
+    renderFacetChoices();renderCB();if(details.open)discoverMetadata().catch(error=>status(error.message,true));
+  });
   document.addEventListener('keydown',e=>{if(e.key==='Escape')details.open=false;});
-  document.addEventListener('pointerdown',e=>{if(details.open&&!details.contains(e.target))details.open=false;});
+  document.addEventListener('pointerdown',e=>{if(details.open&&!details.contains(e.target)&&!get('scope-toggle')?.contains(e.target))details.open=false;});
   // Advanced JSON edits flow into the canonical #filters textarea.
   get('cb-raw-json').addEventListener('change',()=>{const v=get('cb-raw-json').value.trim();try{get('filters').value=v?JSON.stringify(JSON.parse(v),null,2):'';}catch{get('filters').value=v;}cb.custom=Boolean(v);cb.conditions=[];renderCB();});
 
   // Search and graph live in one workspace; graph changes only after an explicit selection.
   const graphTab=get('tab-search');
   const graphPanel=get('graph-stage');
+  let graphSettingsDrawer=null;
+  get('graph-settings').onclick=()=>{
+    if(!graphSettingsDrawer){
+      const content=get('graph-settings-content');content.hidden=false;
+      graphSettingsDrawer=WorkspaceDrawers.create({id:'graph-settings-drawer',title:'图谱设置',description:'选择起点，控制局部探索的方向、规模和显示类型。',content});
+    }
+    graphSettingsDrawer.open({trigger:get('graph-settings')});
+    void options().catch(error=>status(error.message,true));
+  };
   get('graph-labels').onchange=()=>{const show=get('graph-labels').checked;wb.chart?.setOption({series:[{label:{show},emphasis:{label:{show}}}]});};
 
   // ── Compact system-time change points ──
@@ -164,7 +205,7 @@
   }
   function applyTimelinePoint(value){
     if(get('known-at').value===value){renderTimelinePoints();return;}
-    get('known-at').value=value;renderTimelinePoints();
+    get('known-at').value=value;if(window.WorkspaceContext){WorkspaceContext.store.edit(current,'search',{...WorkspaceContext.read(current,'search'),known_at:value||null});WorkspaceContext.store.apply(current,'search');WorkspaceContext.restore();}renderTimelinePoints();
     window.clearGraphWorkspace({preserveSearchResults:true});
   }
   function moveTimeline(direction){
@@ -197,7 +238,7 @@
       reset.onclick=async()=>{
         wb.clearVersionContext();
         if(!current)return;
-        if(id==='graph-version-scope')await window.drawGraph(null,Number(get('graph-hops').value)||1);
+        if(id==='graph-version-scope')await window.drawGraph(null,get('graph-hops').value);
         else if(get('mindmap-root').value)await get('draw-mindmap').onclick();
       };
       host.replaceChildren(label,reset);
@@ -207,27 +248,63 @@
   // A searchable native select, not an internal record ID input.
   const select=get('mindmap-root');
   select.parentElement.before(make('label','<span>筛选名称 / 类型</span><input id="mindmap-filter" placeholder="输入名称缩小候选范围">'));
-  const oldMindmap=get('draw-mindmap').onclick;
-  get('draw-mindmap').onclick=async()=>{if(!select.value){status('当前筛选范围内没有可选实体',true);return;}await oldMindmap();wb.tree?.setOption({series:[{initialTreeDepth:1,label:{position:'right',align:'left',width:170,overflow:'truncate',fontSize:11},leaves:{label:{position:'right',align:'left',width:170,overflow:'truncate',fontSize:11}}}]});};
+  const mindmap=EntityMindmap.createController({getProject:()=>current,
+    getScope:()=>({...window.WorkspaceContext?.read(current,'search')||scope(),...ontologyScope()}),
+    ticket:()=>window.WorkspaceContext?.ticket(current,'search'),accepts:ticket=>!ticket||window.WorkspaceContext.accepts(ticket,current,'search'),api,
+    prepare:row=>{ui.pinned.set(row.id,row);ui.mindmapRootId=row.id;choices();select.value=row.id;window.KnowledgeTabs.open('mindmap');},
+    render:result=>{
+      if(!wb.tree)wb.tree=echarts.init(get('mindmap-canvas'));
+      const convert=node=>({name:node.text+(node.predicate?' · '+labelOf(node.predicate):''),id:node.id,children:(node.children||[]).map(convert)});
+      wb.tree.setOption({tooltip:{formatter:p=>esc(p.name)},series:[{type:'tree',data:[convert(result.tree)],top:'8%',left:'20%',bottom:'8%',right:'20%',symbolSize:9,roam:true,expandAndCollapse:true,initialTreeDepth:1,
+        label:{position:'right',align:'left',width:170,overflow:'truncate',fontSize:11},leaves:{label:{position:'right',align:'left',width:170,overflow:'truncate',fontSize:11}}}]},true);wb.tree.resize();
+      get('mindmap-summary').textContent=result.truncated?'当前脑图已达邻域或分支预算，仅展示部分结果；可减小深度或更换根实体。':'当前根实体的有界脑图 · 点击分支展开或收起 · 最多 500 个树节点';
+      renderDiscoveryHint().catch(()=>{});
+    }});
+  window.openEntityMindmap=row=>mindmap.open(row,get('mindmap-depth').value).catch(error=>status(error.message,true));
+  act('draw-mindmap',()=>mindmap.draw(select.value,get('mindmap-depth').value));
+  select.onchange=()=>{ui.mindmapRootId=select.value;mindmap.invalidate();};
   function choices(){
     for(const [selectId,filterId] of [['mindmap-root','mindmap-filter'],['graph-entity-choice','graph-entity-filter']]){
-      const element=get(selectId),previous=element.value, query=get(filterId).value.trim().toLocaleLowerCase();
-      let rows=ui.options.filter(r=>(r.text+' '+labelOf(r.type)+' '+term(r.type)).toLocaleLowerCase().includes(query));
-      if(selectId==='graph-entity-choice'&&selectedEntityId&&!rows.some(r=>r.id===selectedEntityId)){
-        const committed=ui.options.find(r=>r.id===selectedEntityId);
+      const element=get(selectId),previous=element.value;
+      const candidates=selectId==='graph-entity-choice'?ui.options:ui.mindmapPicker.options;
+      // The scoped server query also matches aliases; never hide its matches
+      // by applying a second, narrower client-side text filter.
+      let rows=[...candidates];
+      const committedId=selectId==='graph-entity-choice'?selectedEntityId:ui.mindmapRootId||previous;
+      if(committedId&&!rows.some(r=>r.id===committedId)){
+        const committed=ui.pinned.get(committedId)||candidates.find(r=>r.id===committedId);
         if(committed)rows=[...rows,committed];
       }
       // 同名同类型重复实体显示来源文档，方便区分（比 ID 更友好）
       const counts=new Map();
       rows.forEach(r=>{const key=r.text+'|'+labelOf(r.type);counts.set(key,(counts.get(key)||0)+1);});
-      element.innerHTML=(selectId==='graph-entity-choice'?'<option value="">选择实体</option>':'')+rows.map(r=>{const key=r.text+'|'+labelOf(r.type);const dup=(counts.get(key)||0)>1;const src=r.source?(' · '+String(r.source).replace(/\.(md|txt|docx?)$/i,'').slice(0,16)):'';return `<option value="${esc(r.id)}" title="${esc(term(r.type))}">${esc(r.text)} · ${esc(labelOf(r.type))}${dup?esc(src):''}</option>`;}).join('');
-      if(rows.some(r=>r.id===previous))element.value=previous;
+      element.innerHTML='<option value="">'+(selectId==='graph-entity-choice'?'选择实体':'选择根实体')+'</option>'+rows.map(r=>{const key=r.text+'|'+labelOf(r.type);const dup=(counts.get(key)||0)>1;const src=r.source?(' · '+String(r.source).replace(/\.(md|txt|docx?)$/i,'').slice(0,16)):'';return `<option value="${esc(r.id)}" title="${esc(term(r.type))}">${esc(r.text)} · ${esc(labelOf(r.type))}${dup?esc(src):''}</option>`;}).join('');
+      if(rows.some(r=>r.id===committedId))element.value=committedId;
+      else if(rows.some(r=>r.id===previous))element.value=previous;
       if(selectId==='graph-entity-choice'&&pendingEntityId&&element.value!==pendingEntityId)invalidatePendingDetail();
     }
   }
-  get('mindmap-filter').oninput=choices;
-  let selectedEntityId='',pendingEntityId='',detailSelectionEpoch=0;
-  const detailScope=()=>({...ontologyScope(),valid_at:scope().valid_at||null,known_at:get('known-at').value||null});
+  for(const target of ['graph','mindmap']){
+    const prefix=target==='graph'?'graph':'mindmap',choice=target==='graph'?'graph-entity-choice':'mindmap-root';
+    get(choice).after(make('div',`<div><button type="button" id="${prefix}-choice-first" class="secondary">首页</button><button type="button" id="${prefix}-choice-prev" class="secondary" disabled>上一页</button><button type="button" id="${prefix}-choice-next" class="secondary" disabled>下一页</button></div><span id="${prefix}-choice-status" class="subtle" role="status" aria-live="polite"></span>`,'entity-picker-pagination'));
+    const filter=target==='graph'?'graph-entity-filter':'mindmap-filter',state=()=>target==='graph'?ui.picker:ui.mindmapPicker;
+    get(prefix+'-choice-first').onclick=()=>loadEntityChoices(get(filter).value,null,target).catch(error=>status(error.message,true));
+    get(prefix+'-choice-prev').onclick=()=>{const picker=state();if(picker.page>1)loadEntityChoices(picker.query,picker.pages[picker.page-2],target).catch(error=>status(error.message,true));};
+    get(prefix+'-choice-next').onclick=()=>{const picker=state();if(picker.cursor)loadEntityChoices(picker.query,picker.cursor,target).catch(error=>status(error.message,true));};
+  }
+  get('graph-choice-status').after(make('button','按 ID 打开','secondary'));get('graph-choice-status').nextElementSibling.id='graph-choice-id';
+  get('graph-entity-filter').placeholder='输入实体名称或 ID 搜索当前范围…';
+  const choiceTimers={};
+  const scheduleChoices=(query,target='graph')=>{
+    const picker=target==='graph'?ui.picker:ui.mindmapPicker;picker.request++;
+    for(const action of ['first','prev','next'])get(target+'-choice-'+action).disabled=true;
+    get(target+'-choice-status').textContent='正在搜索候选实体…';
+    clearTimeout(choiceTimers[target]);choiceTimers[target]=setTimeout(()=>loadEntityChoices(query,null,target).catch(error=>status(error.message,true)),200);
+  };
+  get('mindmap-filter').oninput=()=>scheduleChoices(get('mindmap-filter').value,'mindmap');
+  get('graph-choice-id').onclick=()=>{const id=get('graph-entity-filter').value.trim();if(id)window.openKnowledgeRecord({id,kind:'entity'}).catch(error=>status(error.message,true));};
+  let selectedEntityId='',pendingEntityId='',detailSelectionEpoch=0,recordOpenEpoch=0;
+  const detailScope=()=>({...ontologyScope(),valid_at:scope().valid_at||null,known_at:scope().known_at||null});
   function restoreCommittedSelection(){
     get('graph-entity-choice').value=selectedEntityId;
     get('graph-node').value=selectedEntityId;
@@ -241,6 +318,7 @@
     return true;
   }
   function invalidatePendingDetail(){
+    recordOpenEpoch++;
     settlePendingDetail(detailSelectionEpoch);
     detailSelectionEpoch++;
   }
@@ -251,12 +329,12 @@
     syncGraphExpandDisabled();
     return token;
   }
-  get('graph-entity-filter').oninput=choices;
+  get('graph-entity-filter').oninput=()=>scheduleChoices(get('graph-entity-filter').value);
   get('graph-entity-filter').onkeydown=e=>{if(e.key==='Enter'&&get('graph-entity-choice').value)get('graph-entity-choice').onchange();};
   get('graph-entity-choice').onchange=async()=>{
     const choice=get('graph-entity-choice'),id=choice.value;
     if(!id){
-      // 用户主动选回空白项 = 清空选择、回到当前范围的全图。
+      // 用户主动选回空白项 = 清空选择，回到局部探索起点。
       // 以前这里无条件 restoreCommittedSelection()，值会被弹回上一个实体，
       // 看起来就是"点其他之后切不回空白了"（用户原话）。
       // 仍然保留 restoreCommittedSelection()：它现在只服务于"取消一次没加载完的详情"。
@@ -265,46 +343,94 @@
       invalidatePendingDetail();
       // 详情面板也跟着清空：留着上一条实体的详情会让人以为"还选着它"。
       get('graph-detail').replaceChildren();
-      status('已清空实体选择：重新绘制当前范围的全图。');
-      await window.drawGraph(null,Number(get('graph-hops').value));
+      window.clearGraphWorkspace({preserveSearchResults:true});
+      status('已清空实体选择：请选择实体后展开局部邻域。');
+      await window.drawGraph(null,get('graph-hops').value);
       return;
     }
     const local=wb.nodes.get(id);
     if(local){inspect(local);status('已选择：'+local.text+' · 点击“展开邻域”查看邻域');return;}
     const token=beginPendingDetail(id),project=current;
     try{
-      const temporal=detailScope(),stamp=JSON.stringify(temporal);
-      const isCurrent=()=>token===detailSelectionEpoch&&pendingEntityId===id&&project===current&&choice.value===id&&JSON.stringify(detailScope())===stamp;
-      const params=new URLSearchParams();
-      for(const key of ['valid_at','known_at'])if(temporal[key])params.set(key,temporal[key]);
-      const query=params.size?'?'+params.toString():'';
-      const row=await api(endpoint('/records/'+encodeURIComponent(id)+query),undefined,'GET');
-      if(!isCurrent()){settlePendingDetail(token);return;}
-      inspect(row);status('已选择：'+row.text+' · 点击“展开邻域”查看邻域');
+      const row=await window.openKnowledgeRecord({id,kind:'entity'});
+      if(!row){settlePendingDetail(token);return;}
+      status('已选择：'+row.text+' · 点击“展开邻域”查看邻域');
     }catch(error){if(settlePendingDetail(token))status(error.message,true);}
   };
   async function selectEntityDetail(id){
+    const local=wb.nodes.get(id);
+    if(local){
+      if(get('tab-search').classList.contains('hidden')){window.suppressNextAutoGraph?.();window.KnowledgeTabs.open('search');}
+      inspect(local);
+      return local;
+    }
     const choice=get('graph-entity-choice');
     if(![...choice.options].some(option=>option.value===id)){
       get('graph-entity-filter').value='';choices();
     }
     choice.value=id;
-    if(choice.value!==id)throw Error('当前范围内没有该实体');
+    if(choice.value!==id)return window.openKnowledgeRecord({id,kind:'entity'});
     await choice.onchange();
   }
   window.selectEntityDetail=selectEntityDetail;
+  // Full graph, source assertions and exact lookup share the same live inspector
+  // and its revision/permission-checked record editor, without loading an option prefix.
+  window.openKnowledgeRecord=async({id,kind,projectId=current,scope:fixedScope}={})=>{
+    if(!id)throw Error('缺少知识记录 ID');
+    if(projectId!==current)throw Error('项目已切换，请在当前项目重新打开记录');
+    const project=current,applied=window.WorkspaceContext?.read(current,'search')||scope(),openEpoch=++recordOpenEpoch;
+    const temporal=fixedScope||{...applied,...ontologyScope()},ticket=window.WorkspaceContext?.ticket(project,'search');
+    const base='/api/projects/'+encodeURIComponent(project);
+    const found=await api(base+'/records/page',{...temporal,record_ids:[id],limit:1,include_total:false});
+    const isCurrent=()=>openEpoch===recordOpenEpoch&&project===current&&(!ticket||window.WorkspaceContext.accepts(ticket,current,'search'));
+    if(!isCurrent())return null;
+    let row=found.records?.find(record=>record.id===id);
+    if(!row)throw Error('当前已应用范围内没有该知识记录');
+    if(kind&&row.kind!==kind)throw Error('记录类型已变化，请刷新图谱');
+    if(row.kind==='entity'){
+      const detail=await api(base+'/graph-neighborhood',{...temporal,seeds:[id],hops:0,direction:'both',max_nodes:1,max_edges:1});
+      if(!isCurrent())return null;
+      row=detail.records.find(record=>record.id===id&&record.kind==='entity');
+      if(!row)throw Error('实体资格已变化，请在当前范围重新选择');
+    }
+    if(!get('tab-search').classList.contains('hidden'))inspect(row);
+    else{window.suppressNextAutoGraph?.();window.KnowledgeTabs.open('search');inspect(row);}
+    return row;
+  };
+
+  async function loadEntityChoices(query='',cursor=null,target='graph'){
+    const project=current;if(!project)return null;
+    const picker=target==='graph'?ui.picker:(ui.mindmapPicker||= {request:0,options:[]}),prefix=target==='graph'?'graph':'mindmap',selectId=target==='graph'?'graph-entity-choice':'mindmap-root';
+    const request=++picker.request,applied={...window.WorkspaceContext?.read(project,'search')||scope(),...ontologyScope()},ticket=window.WorkspaceContext?.ticket(project,'search'),stamp=JSON.stringify(applied);
+    const isCurrent=()=>request===picker.request&&project===current&&(!ticket||window.WorkspaceContext.accepts(ticket,current,'search'))&&stamp===JSON.stringify({...window.WorkspaceContext?.read(project,'search')||scope(),...ontologyScope()});
+    if(picker.stamp!==stamp||picker.query!==query.trim()){cursor=null;picker.pages=[null];}
+    const pages=picker.pages||[null];let index=pages.indexOf(cursor);if(index<0){index=pages.length;pages.push(cursor);}
+    for(const id of ['first','prev','next']){const button=get(prefix+'-choice-'+id);if(button)button.disabled=true;}
+    const note=get(prefix+'-choice-status');if(note)note.textContent='正在加载候选实体…';
+    try{
+      const result=await api('/api/projects/'+encodeURIComponent(project)+'/records/page',{...applied,kinds:['entity'],query:query.trim(),cursor,limit:50,include_total:true});
+      if(!isCurrent())return null;
+      const candidates=target==='graph'?ui.options:picker.options,selected=get(selectId).value,row=candidates?.find(item=>item.id===selected);if(row)ui.pinned.set(selected,row);
+      Object.assign(picker,{cursor:result.next_cursor,query:query.trim(),total:result.total,page:index+1,pages,stamp});
+      if(target==='graph')ui.options=result.records;else picker.options=result.records;
+      choices();if(note)note.textContent=`第 ${picker.page} / ${Math.max(1,Math.ceil((result.total||0)/50))} 页 · 本页 ${result.records.length} 条 / 共 ${(result.total||0).toLocaleString()} 实体`;
+      return result;
+    }catch(error){if(!isCurrent())return null;if(note)note.textContent='候选加载失败，请重试';throw error;}
+    finally{if(isCurrent()){const first=get(prefix+'-choice-first'),prev=get(prefix+'-choice-prev'),next=get(prefix+'-choice-next');if(first)first.disabled=picker.page<=1;if(prev)prev.disabled=picker.page<=1;if(next)next.disabled=!picker.cursor;}}
+  }
 
   async function options(){
-    const p=current, stamp=JSON.stringify(scope());if(!p)return;
-    const done=kgTime('entity-options');
-    const result=await api(endpoint('/entity-options'),scope());
-    done({entities:result.entities.length,predicates:result.predicates.length});
-    if(current!==p||stamp!==JSON.stringify(scope()))return;
-    ui.options=result.entities;choices();
-    for(const [id,items,label] of [['type-scope',[...new Set(result.entities.map(r=>r.type))],'全部实体类型'],['predicate-scope',result.predicates,'全部关系类型']]){
+    const p=current,applied=window.WorkspaceContext?.read(p,'search')||scope(),ticket=window.WorkspaceContext?.ticket(p,'search');if(!p)return;
+    const result=graphSettingsDrawer?.dialog.open&&!get('tab-search').classList.contains('hidden')
+      ?await loadEntityChoices(get('graph-entity-filter').value):{records:ui.options};
+    if(!result||current!==p||(ticket&&!window.WorkspaceContext.accepts(ticket,p,'search')))return;
+    const summary=ui.ontology?.summary||{};
+    for(const [id,values,label] of [['type-scope',[...result.records.map(r=>r.type),...(summary.classes||[]).map(row=>row.id)],'全部实体类型'],['predicate-scope',(summary.relations||[]).map(row=>row.id),'全部关系类型']]){
+      const items=[...new Set([...values,get(id).value].filter(Boolean))];
       const previous=get(id).value;get(id).innerHTML=`<option value="">${label}</option>`+items.map(t=>`<option value="${esc(t)}" title="${esc(term(t))}">${esc(labelOf(t))}</option>`).join('');
       if(items.includes(previous))get(id).value=previous;
     }
+    if(ui.graph)updateGraphTypeChoices(ui.graph);
   }
   function inspect(row){
     invalidatePendingDetail();
@@ -314,8 +440,8 @@
       return;
     }
     const isEntity=row.kind==='entity';
-    if(isEntity){selectedEntityId=row.id;get('graph-node').value=row.id;get('mindmap-root').value=row.id;get('graph-entity-choice').value=row.id;}
-    window.renderEvidenceInspector(row,ui.options);
+    if(isEntity){ui.pinned.set(row.id,row);selectedEntityId=row.id;ui.mindmapRootId=row.id;choices();get('graph-node').value=row.id;get('mindmap-root').value=row.id;get('graph-entity-choice').value=row.id;}
+    window.renderEvidenceInspector(row,[...ui.options,...ui.pinned.values()]);
     GraphWorkbench.selection(row);
   }
   // 图谱悬停提示：把"这个实体是什么、它的类在本体里挂在谁下面"一次说清。
@@ -341,7 +467,14 @@
     }
     return rows.join('<br>');
   }
+  function updateGraphTypeChoices(graph){
+    for(const [id,rows,kind] of [['type-scope',graph.nodes,'entity'],['predicate-scope',graph.edges,'relation']]){
+      const select=get(id),known=new Set([...select.options].map(option=>option.value));
+      for(const row of rows){if(row.kind!==kind||!row.type||known.has(row.type))continue;const option=document.createElement('option');option.value=row.type;option.textContent=row.type_label||labelOf(row.type);select.appendChild(option);known.add(row.type);}
+    }
+  }
   function renderGraph(result, selectedType='', base=result){
+    updateGraphTypeChoices(base);
     const displayType=type=>result.type_labels?.[type]||labelOf(type);
     // 按实体类型取色，节点、图例、类型按钮颜色一致，避免同名/近名节点无法区分
     // 颜色只有一个出处：graph-palette.js 的 GraphPalette.colorFor(类型名)。
@@ -389,7 +522,7 @@
 chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:types.length>1,type:'scroll',data:types,bottom:0,textStyle:{fontSize:11}}],series:[{type:'graph',layout:'none',draggable:true,roam:'scale',scaleLimit:{min:.05,max:4},...GraphWorkbench.bounds(positioned,chart.getWidth(),chart.getHeight()),center:null,zoom:1,...viewport,label:{show:showLabels,position:'right',fontSize:11,width:110,overflow:'truncate'},edgeSymbol:['none','arrow'],edgeLabel:{show:result.nodes.length<=20,formatter:'{c}',fontSize:10},emphasis:{focus:'adjacency',label:{show:showLabels},edgeLabel:{show:true}},force:{repulsion:320,edgeLength:100,gravity:.1,initLayout:'circular',layoutAnimation:false},categories:types.map(name=>({name,itemStyle:{color:name==='属性值'?attrColor:colorFor(name)}})),data:positioned.map(n=>{const attribute=GraphTypeFilter.isAttributeNode(n),label=attribute?'属性值':(n.type_label||displayType(n.type));const index=catIndex(label);return {id:n.id,name:n.text,x:n.x,y:n.y,category:index,categoryName:label,symbol:attribute?'roundRect':'circle',symbolSize:attribute?[72,22]:(matched.has(n.id)?34:22),itemStyle:{color:attribute?attrColor:colorFor(label),...(attribute&&n.status==='contradicting'?{borderColor:'#b42318',borderWidth:2,borderType:'dashed'}:{}),...(matched.has(n.id)?{borderColor:'#df7d37',borderWidth:4}:{})}}}),links:result.edges.map(e=>{const attribute=GraphTypeFilter.isAttributeEdge(e);return {id:e.id,source:e.subject_id,target:e.object_id,name:e.type_label||displayType(e.type),value:e.type_label||displayType(e.type),rawType:term(e.type),lineStyle:attribute?{type:'dashed',opacity:.55,width:1}:undefined};}),lineStyle:{opacity:.35,curveness:.12}}]},{replaceMerge:['series']});
     const visibleEntities=GraphTypeFilter.entityNodes(result),visibleRelations=GraphTypeFilter.relationEdges(result),attributeCount=result.nodes.length-visibleEntities.length;
     GraphWorkbench.mount(chart,result,current,inspect,graphScope());
-    chart.resize();layoutDone({nodes:result.nodes.length,edges:result.edges.length});get('graph-summary').textContent=`${selectedType?'只看 '+labelOf(selectedType)+' · ':''}${visibleEntities.length} 实体 / ${visibleRelations.length} 关系${attributeCount?' · '+attributeCount+' 个属性值':''}${selectedType?' · 隐藏其他类型及跨类型连线':''}${matched.size?' · 橙色边框为检索命中':''}${result.timing_ms?' · 服务 '+result.timing_ms.total+' ms':''}`;
+    chart.resize();layoutDone({nodes:result.nodes.length,edges:result.edges.length});get('graph-summary').textContent=`${selectedType?'只看 '+labelOf(selectedType)+' · ':''}${visibleEntities.length} 实体 / ${visibleRelations.length} 关系${attributeCount?' · '+attributeCount+' 个属性值':''}${selectedType?' · 隐藏其他类型及跨类型连线':''}${matched.size?' · 橙色边框为检索命中':''}${result.timing_ms?' · 服务 '+result.timing_ms.total+' ms':''}${graphBudgetSummary(base)}`;
     // Compact, discrete history navigation; no drag/playback re-query loop.
     const tl=createTimeline();get('graph-type-buttons')?.after(tl);
     // The type and timeline rows reduce the remaining flex height after ECharts has
@@ -454,55 +587,70 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
   }
   async function runSearch(){
     if(!current)return;
-    const serial=++ui.request,p=current,started=performance.now();
-    const body={...scope(),valid_at:null,query:get('query').value,retrieval_mode:get('search-mode').value,
+    const serial=++ui.request,p=current,started=performance.now(),scopeTicket=window.WorkspaceContext?.ticket(current,'search');
+    const body={...scope(),query:get('query').value,retrieval_mode:get('search-mode').value,
       // 本体扩展（默认关闭）：勾上后检索会顺着本体的父子关系补召回 —— 查父类名也能命中子类实例。
       // 它只补召回，不放宽可见范围（权限/时态仍由 scope 决定）；关闭时读路径与旧行为一致。
       ontology_expansion:Boolean(get('ontology-expansion')?.checked),
       k_entities:5,k_chunks:5,k_relations:5};
+    try{window.ScopeFields.requireRetrievalScope(body);}
+    catch(error){get('search-summary').textContent=error.message;throw error;}
     get('search-summary').textContent=body.retrieval_mode==='keyword'?'读取所选范围…':'正在进行语义检索，首次加载模型可能需要较长时间…';
     get('hits').textContent='';
     const done=kgTime('search');
     let result;
     try{result=await api(endpoint('/search'),body);}
     catch(error){if(serial===ui.request&&p===current)get('search-summary').textContent='检索未完成：'+error.message;throw error;}
+    window.WorkspaceContext?.requireRetrievalMode(body.retrieval_mode,result);
     done({mode:result.active_mode,candidates:result.candidate_count,hits:result.hits.length});
-    if(serial!==ui.request||p!==current)return;
+    if(serial!==ui.request||p!==current||(scopeTicket&&!window.WorkspaceContext.accepts(scopeTicket,current,'search')))return;
     delete result.nodes;delete result.edges;
     renderHits(result);
     const modeLabel={hybrid:'混合',semantic:'语义',keyword:'关键词'}[result.active_mode]||result.active_mode;
     const explicitScope=body.applicability&&Object.values(body.applicability).some(value=>Array.isArray(value)?value.length:value?.mode==='specific');
     const resolvedScope=explicitScope?window.ApplicabilityUI?.describe?.(result.query_scope||result.scope||result):
       body.filters||body.valid_at||body.known_at?'按已设置的 Metadata 条件检索':'全项目 · 未设置 Metadata 限制';
-    get('search-summary').textContent=`${modeLabel}${result.degraded?' · 已降级':''} · ${result.candidate_count} 候选 · ${result.hits.length} 命中 · ${(performance.now()-started).toFixed(0)} ms${expansionSummary(result)}${resolvedScope?' · '+resolvedScope:''}`;
-    if(result.degraded){
-      const reasons=[...new Set(Object.values(result.retrieval_errors||{}))];
-      get('hits').prepend(noticeCard('部分检索通道不可用，当前使用'+modeLabel+'检索。'+(reasons.join('；')||'可在后台任务中检查索引构建状态。'),{tone:'warning'}));
-    }
+    get('search-summary').textContent=`${modeLabel} · ${result.candidate_count} 候选 · ${result.hits.length} 命中 · ${(performance.now()-started).toFixed(0)} ms${expansionSummary(result)}${resolvedScope?' · '+resolvedScope:''}`;
     updateChip();
   }
   // 图谱渲染器的唯一实现，显式挂到 window（不再依赖非严格模式下的隐式全局赋值）。
   // workbench.js 的 #graph-expand / #load-graph / 证据条目三个入口都按名字引用这个槽位，
   // 见下方 act('graph-expand') 与 workbench.js 注释。
-  const graphScope=()=>({...scope(),...ontologyScope(),valid_at:null,
+  const graphScope=()=>({...window.WorkspaceContext?.read(current,'search')||scope(),...ontologyScope(),
     entity_type:get('type-scope').value||null,
     predicate:get('predicate-scope').value||null});
+  function graphBudgetSummary(graph){
+    const value=graph.neighborhood;if(!value)return '';
+    const direction={both:'双向',forward:'沿箭头',backward:'逆箭头'}[value.direction];
+    return ` · 局部邻域 ${value.hops} 跳 / ${direction} · 上限 ${value.max_nodes} 实体 / ${value.max_edges} 关系`+
+      (value.truncated?' · 已达预算，结果已截断；可提高上限重新请求，或选择节点继续探索。':' · 当前局部结果；可选择节点继续探索。')+
+      (graph.attribute_budget?` 属性另计 ${graph.attribute_count} / ${graph.attribute_budget} 条${graph.attributes_truncated?'，属性已截断；选中实体后重新展开可读取该实体属性':''}。`:'')+
+      (graph.attribute_candidates_loaded===false?' 属性冲突候选请在实体治理中复核。':'');
+  }
   window.drawGraph=async(node=null,hops=1)=>{
-    // node 省略时渲染当前 scope 的全图（后端 node_id=null 返回全 scope，见 explorer.py:16）
-    const id=node||null;
+    if(hops===''||!Number.isInteger(Number(hops))||Number(hops)<0||Number(hops)>10)throw Error('扩展跳数请输入 0–10 的整数');
+    const id=node||get('graph-node').value||null;
+    if(!id){const empty=graphRequests.begin(current,graphScope(),null);graphRequests.release(empty);get('graph-summary').textContent='请选择实体后展开局部邻域；查看当前范围全部实体请切换“全量大图”。';return null;}
     const project=current,scopeSnapshot=graphScope();
-    const ticket=graphRequests.begin(project,scopeSnapshot,id);
-    const done=kgTime('subgraph');
+    const ticket=graphRequests.begin(project,scopeSnapshot,id),scopeTicket=window.WorkspaceContext?.ticket(project,'search');
+    const isCurrent=()=>graphRequests.isCurrent(ticket,current,graphScope(),id)&&(!scopeTicket||window.WorkspaceContext.accepts(scopeTicket,current,'search'));
+    const {entity_type,predicate,...appliedScope}=scopeSnapshot;
+    const neighborhood={seeds:[id],hops:Number(hops),direction:get('graph-direction')?.value||'both',
+      max_nodes:Number(get('graph-max-nodes')?.value)||500,max_edges:Number(get('graph-max-edges')?.value)||1000};
+    const done=kgTime('graph-neighborhood');
     try{
       let result;
-      try{result=await scopedRead('/subgraph',{...scopeSnapshot,node_id:id,hops,
-        attribute_mode:id?'expanded':'summary'});}
+      try{result=await api('/api/projects/'+encodeURIComponent(project)+'/graph-neighborhood',{...appliedScope,...neighborhood});}
       catch(error){
-        if(!graphRequests.isCurrent(ticket,current,graphScope(),id))return null;
+        if(!isCurrent())return null;
         throw error;
       }
-      if(!graphRequests.isCurrent(ticket,current,graphScope(),id))return null;
-      done({node:id||'all',hops,nodes:result.nodes.length,edges:result.edges.length,server_ms:result.timing_ms?.total??'—'});
+      if(!isCurrent())return null;
+      const nodes=(result.records||[]).filter(row=>row.kind==='entity'||GraphTypeFilter.isAttributeNode(row));
+      const visible=nodes.filter(row=>!entity_type||row.type===entity_type),ids=new Set(visible.map(row=>row.id));
+      const edges=(result.records||[]).filter(row=>(row.kind==='relation'||GraphTypeFilter.isAttributeEdge(row))&&ids.has(row.subject_id)&&ids.has(row.object_id)&&(!predicate||row.type===predicate));
+      result={...result,nodes:visible,edges,neighborhood:{...neighborhood,truncated:Boolean(result.truncated)}};
+      done({node:id,hops,nodes:result.nodes.length,edges:result.edges.length,truncated:result.truncated});
       renderGraph(result);
       // 开放本体发现的提示条要跟着图谱一起刷新：这原本只在 workbench.js 的旧 drawGraph 副本里做，
       // 收敛成单一份实现后带到这里，避免 discovery 模式下提示停留在旧状态。
@@ -515,6 +663,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
   window.clearGraphWorkspace=({preserveSearchResults=false}={})=>{
     GraphWorkbench.clear();
     graphRequests.invalidate();invalidatePendingDetail();
+    ui.pinned.clear();ui.picker.request++;ui.mindmapPicker.request++;ui.mindmapRootId='';mindmap.invalidate();
     wb.epoch++;ui.graph=null;wb.nodes.clear();wb.chart?.dispatchAction({type:'hideTip'});wb.chart?.clear();
     selectedEntityId='';get('graph-node').value='';get('graph-entity-choice').value='';get('graph-detail').replaceChildren();
     get('graph-summary').textContent='从左侧检索结果选择实体或关系';
@@ -527,26 +676,39 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
     wb.tree?.clear();
   });
   renderOntologyScopeBanners();
-  act('search',runSearch);act('draw-graph',()=>drawGraph(null,Number(get('graph-hops').value)));
+  async function refreshGraphCanvasTypes(){
+    if(!current)return;const node=get('graph-node').value,selected=ui.pinned.get(node)||wb.nodes.get(node);
+    window.clearGraphWorkspace({preserveSearchResults:true});if(selected)inspect(selected);
+    try{await window.drawGraph(node||null,get('graph-hops').value);}catch(error){status(error.message,true);}
+  }
+  for(const id of ['type-scope','predicate-scope'])get(id).addEventListener('change',refreshGraphCanvasTypes);
+  act('search',runSearch);act('draw-graph',()=>drawGraph(null,get('graph-hops').value));
   // 「展开邻域」与「绘制图谱」共用同一份渲染器：绑定从 workbench.js 移到这里，
   // 同一个按钮不再被两个文件各绑一次。没选中实体时给出明确提示，而不是等后端返回空图。
   act('graph-expand',async()=>{
     const id=get('graph-node').value;
     if(!id)throw Error('请先选择实体或点击图中的节点，再展开邻域。');
-    const hops=Number(get('graph-hops').value);
+    const hops=get('graph-hops').value;
     if(!await window.drawGraph(id,hops))return;
     status('已展开 '+hops+' 跳邻域');
   });
-  act('apply-scope',async()=>{details.open=false;window.clearGraphWorkspace({preserveSearchResults:true});window.clearKnowledgeChat?.({notify:true});await Promise.all([options(),discoverMetadata()]);if(!get('tab-mindmap').classList.contains('hidden')&&get('mindmap-root').value)await get('draw-mindmap').onclick();});
+  window.ScopeEditor={restore(value){cb.conditions=[];cb.custom=Boolean(value.filters);renderCB();updateChip();}};
+  async function refreshOwnedScope(){
+    const page=window.WorkspaceContext?.page;
+    if(page==='search'){ui.request++;window.clearGraphWorkspace();await Promise.all([options(),discoverMetadata()]);if(get('query').value.trim()&&get('scope-purpose')?.value!=='graph')await runSearch();}
+    else if(page==='records'||page==='sources')await discoverMetadata();
+  }
+  document.addEventListener('workspace:scope-changed',()=>{refreshOwnedScope().catch(error=>status(error.message,true));});
+  act('apply-scope',async()=>{window.WorkspaceContext.apply();});
   const previousAddFilter=get('add-filter')?.onclick;
-  if(previousAddFilter)get('add-filter').onclick=async()=>{await previousAddFilter();if(!get('status').classList.contains('error'))await get('apply-scope').onclick();};
-  act('reset-scope',async()=>{for(const id of ['known-at','filters','cb-raw-json','metadata-field-choice','metadata-value-choice','type-scope','predicate-scope','query-platforms','query-businesses','query-audiences'])get(id).value='';cb.conditions=[];cb.custom=false;if(get('cb-show-system'))get('cb-show-system').checked=false;renderFacetChoices();renderCB();resetTimeline();window.clearGraphWorkspace({preserveSearchResults:true});window.clearKnowledgeChat?.({notify:true});await options();});
-  act('build-index',async()=>{watch(await api(endpoint('/indexes/rebuild'),{}));status('索引任务已提交；可继续浏览图谱或使用关键词检索。');});
+  if(previousAddFilter)get('add-filter').onclick=async()=>{await previousAddFilter();};
+  act('reset-scope',async()=>{window.WorkspaceContext.reset();});
+  act('build-index',async()=>{await window.ProjectVectorIndex.open(current);});
   // 原来只 dispatch restore：返回 series 里写的 zoom:1，而 fitGraph 之后本来就是 zoom:1，
   // 于是"点了没什么作用"（用户原话）。现在＝适应画布：重新铺开节点 + 缩放到刚好占满画布。
   act('graph-reset-view',async()=>{
     const chart=wb.chart;
-    if(!chart||!ui.graph){status('图谱还没渲染：先点「重新渲染全图」，或从左侧检索结果里选一个实体/关系。');return;}
+    if(!chart||!ui.graph){status('请从左侧检索结果选择实体或关系，再展开邻域。也可在图谱设置中按名称或 ID 选择实体。');return;}
     chart.resize();fitGraph(chart);
     status('已适应画布：保留节点位置并恢复视图。需要重新排列时点“重新布局”。');
   });
@@ -568,7 +730,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
   // 免得缩到看不见或放大到只剩一个节点。
   function zoomGraph(factor){
     const chart=wb.chart;
-    if(!chart||!ui.graph)throw Error('先渲染图谱（点「重新渲染全图」或选择实体），再缩放。');
+    if(!chart||!ui.graph)throw Error('请先选择实体并展开邻域，再缩放图谱。');
     const next=GraphWorkbench.zoom(chart,factor);
     status(`图谱缩放 ${(next*100).toFixed(0)}%（滚轮也可缩放，拖动可平移）`);
   }
@@ -579,15 +741,17 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
   // Ignore out-of-order project responses, and load graph immediately on selection.
   const priorChange=get('project').onchange;
   get('project').onchange=()=>{
-    priorChange();ui.request++;ui.options=[];choices();ui.ontology=null;resetTimeline();window.clearGraphWorkspace();get('ontology-browser')?.replaceChildren();
+    const generation=++ontologyLoadGeneration;
+    priorChange();ui.request++;ui.options=[];ui.mindmapPicker.options=[];ui.mindmapPicker.request++;ui.mindmapRootId='';select.value='';get('mindmap-filter').value='';choices();ui.ontology=null;resetTimeline();window.clearGraphWorkspace();
     for(const id of ['filters','cb-raw-json','query-platforms','query-businesses','query-audiences'])get(id).value='';
     if(get('cb-show-system'))get('cb-show-system').checked=false;
     get('graph-entity-filter').value='';cb.facets=[];cb.conditions=[];cb.custom=false;renderCB();get('metadata-field-choice').innerHTML='<option value="">读取项目字段…</option>';get('metadata-value-choice').innerHTML='<option value="">先选择字段</option>';get('metadata-facet-summary').textContent='';
     get('project').title=get('project').selectedOptions[0]?.textContent||'';
     get('type-scope').value='';get('predicate-scope').value='';
     get('query').value='';get('graph-node').value='';updateChip();
-    syncGeneratedIri();
-    if(current){sessionStorage.setItem('knowledge-project',current);loadOntologyTerms().then(()=>Promise.all([options(),discoverMetadata()])).then(autoLoadGraph).catch(e=>status(e.message,true));}
+    if(current){const project=current;sessionStorage.setItem('knowledge-project',project);loadOntologyTerms().then(result=>{
+      if(project!==current||generation!==ontologyLoadGeneration)return;ui.ontology=result;return Promise.all([options(),discoverMetadata()]);
+    }).then(()=>{if(project===current&&generation===ontologyLoadGeneration)autoLoadGraph();}).catch(e=>{if(project===current&&generation===ontologyLoadGeneration)status(e.message,true);});}
   };
   // 打开「检索与交互图谱」且尚未渲染时，自动加载当前 scope 全图。
   // 挂在 click / 项目切换 / 页面恢复项目 三个时机，避免默认 active tab 不触发 click 导致空白。
@@ -602,7 +766,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
     if(suppressNextAutoGraph){suppressNextAutoGraph=false;return;}
     const graphView=!get('tab-search').classList.contains('hidden');
     if(graphView&&current&&!ui.graph&&!graphRequests.isBusy()){
-      drawGraph(null,Number(get('graph-hops').value)||1)
+      drawGraph(null,get('graph-hops').value)
         .catch(e=>status(e.message,true));
     }
   }
@@ -614,13 +778,15 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
     if(!current)return false;
     try{
       const before=ui.ontology?.id||'';
-      const latest=await window.loadOntology('');
+      const project=current,generation=ontologyLoadGeneration,latest=await loadOntologyTerms();
+      if(project!==current||generation!==ontologyLoadGeneration)return false;
+      ui.ontology=latest;
       const id=latest?.id||'';
       // First observation establishes the baseline. Boot already loaded the
       // current terms; absence of a cached editor DTO is not a new publication.
       if(!id||!before||id===before)return false;
-      await loadOntologyTerms();
       await Promise.all([options(),discoverMetadata()]);
+      if(project!==current||generation!==ontologyLoadGeneration)return false;
       resetTimeline();
       window.clearGraphWorkspace({preserveSearchResults:true});
       status(`检测到本体新版本（${id.slice(0,8)}…）：类型下拉、时间轴与图谱已按新版本刷新。`);
@@ -631,10 +797,10 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
       return false;
     }
   }
-  document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',event=>{
     const graphView=b.dataset.tab==='search';
     get('type-scope').style.display=graphView?'':'none';get('predicate-scope').style.display=graphView?'':'none';
-    if(b.dataset.tab==='mindmap'&&current)options().catch(e=>status(e.message,true));
+    if(b.dataset.tab==='mindmap'&&current)loadEntityChoices(get('mindmap-filter').value,null,'mindmap').catch(e=>status(e.message,true));
     if(['search','qa','mindmap'].includes(b.dataset.tab)){
       // 只有**用户真的点了导航**才做"进入页签时对齐本体"。程序化切换（问答/图谱里
       // "在图谱中查看"会先 showTab('search') 再显示某个实体）绝不能顺手重画全图：
@@ -651,304 +817,28 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
   // "发布完了，切回检索与交互图谱还是旧的，必须整页刷新"。事件由 ontology-model-panel.js
   // 在发布成功后派发（ontology-model:published）。
   document.addEventListener('ontology-model:published',async event=>{
-    if(!current)return;
+    if(!current||(event.detail?.projectId&&event.detail.projectId!==current))return;
+    const project=current;
+    const generation=++ontologyLoadGeneration;
     const versionId=event?.detail?.versionId||'';
     const short=versionId?versionId.slice(0,8)+'…':'';
     ui.ontology=null;ui.options=[];ui.request++;
     try{
       // 顺序有意义：先刷新本体术语缓存（labelOf/term 都依赖它），再取实体选项，
       // 最后才重画图——否则图上的类型名还是旧版本。
-      await loadOntologyTerms();
+      const latest=await loadOntologyTerms({fresh:true});if(project!==current||generation!==ontologyLoadGeneration)return;ui.ontology=latest;
       await Promise.all([options(),discoverMetadata()]);
+      if(project!==current||generation!==ontologyLoadGeneration)return;
       resetTimeline();
       // 旧图谱是按旧范围/旧本体渲染的，先清掉；检索页可见时立刻重画，不可见时
       // 由 autoLoadGraph()（tab 点击时触发）按最新状态补画。
       window.clearGraphWorkspace({preserveSearchResults:true});
-      if(!get('tab-search').classList.contains('hidden'))await window.drawGraph(null,Number(get('graph-hops').value)||1);
+      if(!get('tab-search').classList.contains('hidden'))await window.drawGraph(null,get('graph-hops').value);
       status(`本体新版本已发布${short?`（${short}）`:''}：类型下拉、时间轴与图谱已按新版本刷新。`);
     }catch(error){
       status(`新版本已发布，但这一页的检索/图谱刷新失败：${error.message}。可点「重新渲染全图」重试。`,true);
     }
   });
-  // Structured ontology browser and versioned term additions, alongside Turtle/SPARQL.
-  const ontologyPanel=get('tab-ontology').querySelector('.panel');
-  const sourceHeading=ontologyPanel.querySelector('.ontology-editor-heading');
-  const sourceDetails=make('details','','ontology-source-details');
-  sourceDetails.innerHTML='<summary>高级：本体历史版本与 Turtle 源码</summary><p class="subtle">用于查看历史版本或直接编辑本体源码。日常新增、修改和停用术语请使用上方的结构化维护工具。</p>';
-  ontologyPanel.insertBefore(sourceDetails,sourceHeading);
-  sourceHeading.querySelector('h3').textContent='Turtle 源码编辑';
-  for(const element of [sourceHeading,get('ontology-versions'),get('ontology-summary'),get('turtle'),get('save-ontology')])sourceDetails.appendChild(element);
-  const structureHeading=make('div','<h2>本体结构维护</h2><p class="subtle">这里维护实体类、关系类型和属性类型，不修改具体实体或实体之间的关系。点击术语卡片上的“维护”可修改名称、说明和类型范围。</p>','ontology-structure-heading');
-  ontologyPanel.insertBefore(structureHeading,sourceDetails);
-  ontologyPanel.insertBefore(make('div','', 'ontology-browser'),sourceDetails);
-  ontologyPanel.querySelector('.ontology-browser').id='ontology-browser';
-  const termForm=make('section','<header class="ontology-form-heading"><div><h2>新增本体术语</h2><p>创建新的实体类、关系类型或实体属性。保存后会形成新的本体版本，不会覆盖历史版本。</p></div></header><div class="columns"><label>术语种类<select id="term-kind"><option value="class">实体类</option><option value="relation">关系类型</option><option value="attribute">实体属性</option></select></label><label>英文名（选填，留空就用中文名）<input id="term-label" placeholder="例如 Merchant"></label><label>中文名称（必填）<input id="term-label-zh" maxlength="200" placeholder="例如 商户"></label></div><div class="columns"><label class="ontology-term-iri">系统生成的标识 IRI（自动生成，不用手写）<input id="term-uri" placeholder="填写名称后显示" readonly></label><p class="ontology-term-iri-note"><strong>不用手写，也不用拼写：</strong>先填名称，这一格只是预览；最终 IRI 由后端按名称统一生成并固定下来，创建后不会再变。支持中文、阿拉伯文等 Unicode 字符。</p></div><div class="columns"><label>父类（仅实体类）<select id="term-parent"></select></label><label><span id="term-domain-label">适用实体类型（domain）</span><select id="term-domain"></select><small id="term-domain-help"></small></label><label><span id="term-range-label">目标实体类型（range）</span><select id="term-range"></select><small id="term-range-help"></small></label></div><button id="add-ontology-term">新增并保存为新版本</button><p class="subtle">这里只维护本体结构。具体实体和实体关系请在“交互图谱”中点击对应节点或连线进行维护。最终 IRI 由后端生成并校验，创建后保持稳定。</p>','ontology-term-create');
-  ontologyPanel.insertBefore(termForm,sourceDetails);
-  get('term-kind').closest('label').classList.add('ontology-kind-source');
-  const kindTabs=make('div','<button type="button" data-term-kind-choice="class">新增实体类</button><button type="button" data-term-kind-choice="relation" class="secondary">新增关系类型</button><button type="button" data-term-kind-choice="attribute" class="secondary">新增实体属性</button>','ontology-kind-tabs');
-  termForm.querySelector('.ontology-form-heading').after(kindTabs);
-  get('term-uri').readOnly=true;get('term-uri').title='后端生成结果的预览，无需手写';
-  const createCopy={class:['新增实体类','定义一类事物，可选择一个父类。'],relation:['新增关系类型','定义实体之间的连接方式；起点和终点类型可以不限制或勾选多个。'],attribute:['新增实体属性','定义实体可填写的数据字段及其数据类型。']};
-  function readableIriSegment(value){return [...value.normalize('NFC').trim()].map(character=>{if(/[\p{L}\p{N}\p{M}._~-]/u.test(character))return character;if(/\s/u.test(character))return '-';return encodeURIComponent(character);}).join('').replace(/-+/g,'-');}
-  function syncGeneratedIri(){const label=get('term-label-zh').value.trim()||get('term-label').value.trim(),segment=readableIriSegment(label);get('term-uri').value=segment&&current?`urn:knowledge:ontology:${current}:${segment}`:'';}
-  function chooseTermKind(kind){get('term-kind').value=kind;kindTabs.querySelectorAll('button').forEach(button=>button.classList.toggle('secondary',button.dataset.termKindChoice!==kind));const copy=createCopy[kind];termForm.querySelector('.ontology-form-heading h2').textContent=copy[0];termForm.querySelector('.ontology-form-heading p').textContent=copy[1]+' 保存后会形成新的本体版本。';configureTermForm();}
-  kindTabs.querySelectorAll('button').forEach(button=>button.onclick=()=>chooseTermKind(button.dataset.termKindChoice));
-  get('term-label-zh').addEventListener('input',()=>{if(!get('term-label').value.trim())get('term-label').value=get('term-label-zh').value.trim();syncGeneratedIri();});
-  get('term-label').addEventListener('input',syncGeneratedIri);
-
-  // 创建悬浮框替代折叠面板
-  const modalOverlay=make('div','','ontology-modal-overlay');
-  modalOverlay.innerHTML=`
-    <div class="ontology-modal">
-      <div class="ontology-modal-header">
-        <h3 class="ontology-modal-title">修改术语</h3>
-        <button class="ontology-modal-close">×</button>
-      </div>
-      <div class="ontology-modal-body">
-        <div class="term-modal-header">
-          <div class="term-modal-icon class" id="modal-term-icon">📦</div>
-          <div class="term-modal-info">
-            <h3 id="modal-term-label"></h3>
-            <code id="modal-term-uri"></code>
-          </div>
-        </div>
-        <div class="form-row">
-          <div>
-            <label>显示名称</label>
-            <input type="text" id="edit-term-label">
-          </div>
-          <div>
-            <label>中文名称</label>
-            <input type="text" id="edit-term-label-zh" maxlength="200">
-          </div>
-        </div>
-        <div class="form-row">
-          <div>
-            <label>说明</label>
-            <input type="text" id="edit-term-description">
-          </div>
-          <div></div>
-        </div>
-        <div class="form-row">
-          <div>
-            <label>父类</label>
-            <select id="edit-term-parent"></select>
-          </div>
-          <div>
-            <label id="edit-term-domain-label">起点实体类型</label>
-            <select id="edit-term-domain"></select>
-          </div>
-        </div>
-        <div class="form-row">
-          <div>
-            <label id="edit-term-range-label">目标实体类型</label>
-            <select id="edit-term-range"></select>
-          </div>
-          <div></div>
-        </div>
-        <div id="term-impact" class="impact-summary" style="display:none">
-          <h4>变更影响</h4>
-          <div class="impact-stats">
-            <div class="impact-stat">
-              <div class="impact-stat-value" id="impact-entities">-</div>
-              <div class="impact-stat-label">受影响实体</div>
-            </div>
-            <div class="impact-stat">
-              <div class="impact-stat-value" id="impact-relations">-</div>
-              <div class="impact-stat-label">受影响关系</div>
-            </div>
-            <div class="impact-stat">
-              <div class="impact-stat-value" id="impact-attributes">-</div>
-              <div class="impact-stat-label">受影响属性</div>
-            </div>
-          </div>
-          <p class="impact-secondary" id="impact-secondary"></p>
-          <p class="impact-note" id="impact-note"></p>
-          <div id="impact-details" style="margin-top:10px"></div>
-        </div>
-        <div class="confirm-row">
-          <input type="checkbox" id="retire-term-confirm">
-          <label for="retire-term-confirm">我已查看变更影响，确认要停用此术语</label>
-        </div>
-      </div>
-      <div class="ontology-modal-footer">
-        <button class="btn secondary" id="modal-cancel">取消</button>
-        <button class="btn" id="update-ontology-term">保存修改</button>
-        <button class="btn-retire" id="retire-ontology-term" disabled>停用</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modalOverlay);
-
-  // 悬浮框关闭逻辑
-  const closeModal=()=>{modalOverlay.classList.remove('active');selectedTerm=null;};
-  modalOverlay.querySelector('.ontology-modal-close').onclick=closeModal;
-  get('modal-cancel').onclick=closeModal;
-  modalOverlay.onclick=(e)=>{if(e.target===modalOverlay)closeModal();};
-  document.addEventListener('keydown',(e)=>{if(e.key==='Escape'&&modalOverlay.classList.contains('active'))closeModal();});
-
-  // 停用按钮的启用/禁用逻辑
-  const retireConfirm=get('retire-term-confirm');
-  const retireBtn=get('retire-ontology-term');
-  retireConfirm.onchange=()=>{retireBtn.disabled=!retireConfirm.checked;};
-
-  // 这是在 app.js:58 的 loadOntology 外面包一层（先跑原版，再补本体结构面板的术语卡片），
-  // 改写成 window.loadOntology 显式挂载：原先的隐式全局赋值在非严格模式下才成立，
-  // 将来给本文件加 'use strict' / 改成模块就会静默失效（下拉换版本后面板不刷新且不报错）。
-  const priorLoad=loadOntology;
-  window.loadOntology=async(id='')=>{const p=current,result=await priorLoad(id);if(p!==current)return result;ui.ontology=result;
-    if(!result){get('ontology-browser').innerHTML='<p class="subtle">本项目尚未发布本体。开放本体发现模式请先累计候选，再到「本体建模层」生成并发布本体版本（要手工设计本体则用「本体建模层」）；仅文档检索模式不产生图谱本体。</p>';return result;}
-    const classes=result.summary.classes||[],classLabels=new Map(classes.flatMap(c=>[[c.id,ontoName(c)],[c.name,ontoName(c)]]));
-    const className=id=>classLabels.get(id)||term(id)||'未指定';
-    const datatypeName=id=>new Map(datatypes).get(id)||term(id)||'未指定';
-    const maintenance=(kind,item,detail)=>`<div class="ontology-term-card"><b>${esc(ontoName(item))}</b><span>${detail}</span><details class="ontology-technical"><summary>查看技术标识</summary><code>${esc(item.name)}</code><code>${esc(item.id)}</code></details><button class="secondary" data-maintain-kind="${kind}" data-maintain-uri="${esc(item.id)}">维护</button></div>`;
-    get('ontology-browser').innerHTML=`<div class="ontology-columns"><section><h3>实体类与继承</h3>${classes.map(c=>maintenance('class',c,(c.parents||[]).length?'父类：'+(c.parents||[]).map(className).map(esc).join('、'):'层级：根类')).join('')}</section><section><h3>关系定义</h3>${(result.summary.relations||[]).map(r=>maintenance('relation',r,`<em>起点类型</em> ${esc((r.domain||[]).map(className).join('、')||'不限')} <i>→</i> <em>终点类型</em> ${esc((r.range||[]).map(className).join('、')||'不限')}`)).join('')}</section><section><h3>实体属性定义</h3>${(result.summary.attributes||[]).map(a=>maintenance('attribute',a,`<em>适用实体</em> ${esc((a.domain||[]).map(className).join('、')||'不限')} <i>·</i> <em>数据类型</em> ${esc((a.range||[]).map(datatypeName).join('、')||'未指定')}`)).join('')||'<p class="subtle">尚未定义属性</p>'}</section></div>`;
-    configureTermForm();
-    get('ontology-browser').querySelectorAll('[data-maintain-uri]').forEach(button=>button.onclick=()=>selectTerm(button.dataset.maintainKind,button.dataset.maintainUri));
-    return result;};
-  const datatypes=[['http://www.w3.org/2000/01/rdf-schema#Literal','任意字面量'],['http://www.w3.org/2001/XMLSchema#string','字符串'],['http://www.w3.org/2001/XMLSchema#boolean','布尔值'],['http://www.w3.org/2001/XMLSchema#integer','整数'],['http://www.w3.org/2001/XMLSchema#decimal','小数'],['http://www.w3.org/2001/XMLSchema#double','浮点数'],['http://www.w3.org/2001/XMLSchema#date','日期'],['http://www.w3.org/2001/XMLSchema#dateTime','日期时间']];
-  // 空列表时不能只留一个空白下拉框——用户看到"没值的框"，分不清是坏了还是本来就空。
-  // 这里给出明确说明，并把"空值"写成一句人话：同一个空选项在父类/domain/range 里
-  // 含义完全不同，所以按用途传入不同文案，别让人猜"不指定"到底不指定什么。
-  const classOptions=(emptyLabel='不指定（不选父类＝作为顶层类）')=>{
-    const classes=ui.ontology?.summary?.classes||[];
-    if(!classes.length)return '<option value="">（本项目还没有实体类，请先在上方「新增实体类」创建）</option>';
-    return `<option value="">${emptyLabel}</option>`
-      +classes.map(c=>`<option value="${esc(c.id)}">${esc(ontoName(c))}</option>`).join('');
-  };
-  const selectedValues=select=>[...select.selectedOptions].map(option=>option.value).filter(Boolean);
-  function configureChecklist(select,selected){
-    let list=select.parentElement.querySelector(`.ontology-checklist[data-for="${select.id}"]`);
-    if(!list){list=make('div','','ontology-checklist');list.dataset.for=select.id;select.after(list);}
-    select.classList.add('ontology-checklist-source');
-    select.hidden=false;list.hidden=true;
-    list.innerHTML=[...select.options].filter(option=>option.value).map(option=>`<label><input type="checkbox" value="${esc(option.value)}"${selected.includes(option.value)?' checked':''}><span>${esc(option.textContent)}</span></label>`).join('')||'<p class="subtle">请先创建实体类。</p>';
-    list.querySelectorAll('input').forEach(input=>input.onchange=()=>{const option=[...select.options].find(item=>item.value===input.value);if(option)option.selected=input.checked;});
-    select.hidden=true;list.hidden=false;
-  }
-  function configureFields(kind,prefix,values={}){
-    const parent=get(prefix+'term-parent'),domain=get(prefix+'term-domain'),range=get(prefix+'term-range'),multiple=kind==='relation';
-    parent.innerHTML=classOptions();
-    domain.innerHTML=classOptions('不指定（不限制能用在哪类实体上）');
-    range.innerHTML=kind==='attribute'
-      ?'<option value="">不指定（不限定数据类型）</option>'+datatypes.map(([id,label])=>`<option value="${id}">${label}</option>`).join('')
-      :classOptions('不指定（不限制另一端类型）');
-    parent.disabled=kind!=='class';domain.disabled=kind==='class';range.disabled=kind==='class';
-    for(const select of [domain,range]){select.multiple=multiple;select.classList.remove('ontology-checklist-source');select.size=multiple?Math.min(6,Math.max(3,(ui.ontology?.summary?.classes||[]).length)):1;const list=select.parentElement.querySelector(`.ontology-checklist[data-for="${select.id}"]`);if(list)list.hidden=true;select.hidden=false;}
-    parent.value=values.parent||'';
-    const domains=values.domains||[values.domain].filter(Boolean),ranges=values.ranges||[values.range].filter(Boolean);
-    [...domain.options].forEach(option=>option.selected=domains.includes(option.value));
-    [...range.options].forEach(option=>option.selected=ranges.includes(option.value));
-    if(multiple){configureChecklist(domain,domains);configureChecklist(range,ranges);}
-    const rangeLabel=get(prefix+'term-range-label');if(rangeLabel)rangeLabel.textContent=kind==='attribute'?'数据类型':kind==='relation'?'允许的终点实体类型（可多选）':'目标实体类型（range）';
-    const domainLabel=get(prefix+'term-domain-label');if(domainLabel)domainLabel.textContent=kind==='attribute'?'适用实体类型':kind==='relation'?'允许的起点实体类型（可多选）':'适用实体类型（domain）';
-    // 空态/不适用态：整块字段（含标签）收起来，只留一行说明它是什么、什么时候才有用。
-    // 之前只把 <select> 设 hidden，但全局 select 样式会把它重新显示出来，
-    // 结果出现"「不适用」+ 灰掉的下拉框"，和旁边可选的「不指定」长得几乎一样，极易误读。
-    const hasClasses=(ui.ontology?.summary?.classes||[]).length>0;
-    const helpFor=(select,suffix,text)=>{let node=get(prefix+'term-'+suffix+'-help');if(!node){node=document.createElement('small');node.id=prefix+'term-'+suffix+'-help';select.after(node);}node.textContent=text;return node;};
-    const note=(select,text)=>{
-      const field=select.closest('label')||select;
-      let node=field.parentElement?.querySelector(`.ontology-field-note[data-for="${select.id}"]`);
-      if(!node){node=document.createElement('p');node.className='subtle ontology-field-note';node.dataset.for=select.id;field.after(node);}
-      node.textContent=text;node.hidden=!text;return node;
-    };
-    // 整块字段的显示/隐藏：包住标签，避免"标签还在、控件被全局样式弹回来"。
-    const showField=(select,visible)=>{const field=select.closest('label')||select;select.hidden=!visible;field.hidden=!visible;};
-    if(kind==='class'){
-      // 实体类不需要 Domain/Range：整块收起，只留一行解释，避免"这里是不是坏了"。
-      showField(domain,false);showField(range,false);
-      helpFor(domain,'domain','');helpFor(range,'range','');
-      note(domain,'实体类不适用 Domain / Range：它们只描述「关系或属性能用在哪类实体上、指向什么」，对实体类本身没有意义。新增实体类只需要填名称、选父类。');
-    }else if(!hasClasses){
-      showField(domain,false);showField(range,false);
-      helpFor(domain,'domain','');helpFor(range,'range','');
-      note(domain,'还没有实体类可以勾选：请先在上方「新增实体类」创建至少一个实体类，再回来为关系/属性限定适用范围。');
-    }else{
-      showField(domain,true);showField(range,true);
-      note(domain,'');note(range,'');
-      helpFor(domain,'domain','domain＝这条关系/属性可以挂在哪些实体类上。不选表示不限。');
-      helpFor(range,'range',kind==='attribute'?'range＝这个属性存什么类型的数据。':'range＝关系的另一端允许是哪些实体类。不选表示不限。');
-    }
-  }
-  // 本体还没读进来时也要能把表单配好（显示"还没有实体类"的空态说明），
-  // 否则抽屉一打开就是两个空白下拉框——用户分不清是坏了还是本来就空。
-  function configureTermForm(){configureFields(get('term-kind').value,'');}
-  get('term-kind').onchange=configureTermForm;
-  chooseTermKind('class');
-  act('add-ontology-term',async()=>{if(!ui.ontology)throw Error('请先加载本体');const kind=get('term-kind').value;await api(endpoint('/ontology/terms'),{kind,label:get('term-label').value,label_zh:get('term-label-zh').value,parent:kind==='class'?get('term-parent').value:'',domain:kind==='attribute'?get('term-domain').value:'',range:kind==='attribute'?get('term-range').value:'',domains:kind==='relation'?selectedValues(get('term-domain')):[],ranges:kind==='relation'?selectedValues(get('term-range')):[],expected_ontology_id:ui.ontology.id});await get('load-ontology').onclick();status('后端已生成 IRI 并保存新本体版本；已有知识保留原本体版本。');});
-  // An IRI is immutable. Editing descriptions and constraints creates a new ontology version;
-  // retiring removes it only from that new version after an explicit impact review.
-  let selectedTerm=null;
-  async function selectTerm(kind,uri){
-    const collection=ui.ontology.summary[{class:'classes',relation:'relations',attribute:'attributes'}[kind]];
-    const item=collection.find(x=>x.id===uri);if(!item)return;
-    selectedTerm={kind,uri};
-
-    // 更新悬浮框内容
-    const iconClass={class:'class',relation:'relation',attribute:'attribute'}[kind];
-    const iconEmoji={class:'📦',relation:'🔗',attribute:'🏷️'}[kind];
-    const kindLabel={class:'实体类',relation:'关系',attribute:'实体属性'}[kind];
-
-    get('modal-term-icon').className='term-modal-icon '+iconClass;
-    get('modal-term-icon').textContent=iconEmoji;
-    get('modal-term-label').textContent=ontoName(item)+' ('+kindLabel+')';
-    get('modal-term-uri').textContent=uri;
-    get('edit-term-label').value=item.label;
-    get('edit-term-label-zh').value=item.label_zh||'';
-    get('edit-term-description').value=item.description||'';
-    configureFields(kind,'edit-',{parent:item.parents?.[0],domains:item.domain||[],ranges:item.range||[]});
-
-    // 重置状态
-    get('retire-term-confirm').checked=false;
-    retireBtn.disabled=true;
-    get('term-impact').style.display='none';
-    get('term-impact').innerHTML='<h4>变更影响</h4><div class="impact-stats"><div class="impact-stat"><div class="impact-stat-value" id="impact-entities">-</div><div class="impact-stat-label">受影响实体</div></div><div class="impact-stat"><div class="impact-stat-value" id="impact-relations">-</div><div class="impact-stat-label">受影响关系</div></div><div class="impact-stat"><div class="impact-stat-value" id="impact-attributes">-</div><div class="impact-stat-label">受影响属性</div></div></div><p class="impact-secondary" id="impact-secondary"></p><p class="impact-note" id="impact-note"></p><div id="impact-details" style="margin-top:10px"></div>';
-
-    // 打开悬浮框
-    modalOverlay.classList.add('active');
-
-    // 加载影响分析
-    try{const impact=await api(endpoint('/ontology/term-impact')+'?uri='+encodeURIComponent(uri),undefined,'GET');
-      if(selectedTerm?.uri!==uri)return;selectedTerm.impact=impact;
-      get('term-impact').style.display='block';
-      // 分类计数：实体类停用时"关系"常是大头（该类型只是关系端点），必须分开看
-      const kc=impact.kind_counts||{entity:0,relation:0,attribute:0};
-      get('impact-entities').textContent=kc.entity??0;
-      get('impact-relations').textContent=kc.relation??0;
-      get('impact-attributes').textContent=kc.attribute??0;
-      get('impact-secondary').innerHTML=`约束引用 ${impact.constraint_count} 处 · 待审核映射 ${impact.pending_review_count} 个`;
-      // 停用语义必须写在界面上：只摘定义、不删历史（记录 retained，时间旅行仍可见）
-      const linked=impact.linked_relation_count||0;
-      get('impact-note').innerHTML=impact.record_count
-        ? `停用后：该类型从本体移除，上述 <b>${impact.record_count}</b> 条历史知识<b>保留可查</b>（时间旅行仍可见），不会删除任何数据；此后不能再用该类型写入新知识。`
-          + (linked?`<br>其中 <b>${linked}</b> 条关系是<b>端点连带</b>受影响（该类型是它们的端点实体类型），不是关系类型本身被停用。`:'')
-        : '当前没有知识记录使用该类型，可直接停用。';
-      const preview=impact.record_preview||[];
-      if(preview.length){
-        const label={entity:'实体',relation:'关系',attribute:'属性'};
-        const byKind={entity:[],relation:[],attribute:[]};
-        preview.forEach(x=>{(byKind[x.kind]||(byKind[x.kind]=[])).push(x)});
-        const groups=Object.entries(byKind).filter(([,v])=>v.length)
-          .map(([k,v])=>`<div class="impact-detail-group"><b>${label[k]||k}（${v.length}）</b><span>${v.map(x=>esc(x.text||x.id)+(x.via==='endpoint'?'<em class="impact-via">端点连带</em>':'')).join('、')}</span></div>`).join('');
-        get('impact-details').innerHTML=`<details><summary style="font-size:12px;color:#216952;cursor:pointer">查看受影响明细</summary>${groups}${impact.record_ids_truncated?'<p class="subtle" style="font-size:11px">…仅展示前 50 条</p>':''}<details style="margin-top:8px"><summary style="font-size:11px;color:#829087;cursor:pointer">原始记录 ID</summary><pre style="margin-top:8px;padding:10px;background:#f8faf7;border-radius:6px;font-size:11px;max-height:120px;overflow:auto">${esc((impact.record_ids||[]).join('\n'))}</pre></details></details>`;
-      }
-    }catch(error){
-      get('term-impact').style.display='block';
-      get('impact-entities').textContent='错误';
-      get('impact-relations').textContent='';
-      get('impact-attributes').textContent='';
-      get('impact-secondary').textContent='';
-      get('impact-note').textContent='';
-      get('impact-details').innerHTML='<p style="color:#dc2626;font-size:12px">影响分析失败：'+esc(error.message)+'</p>';
-    }
-  }
-  act('update-ontology-term',async()=>{if(!selectedTerm)throw Error('请先选择术语');const kind=selectedTerm.kind;
-    await api(endpoint('/ontology/term')+'?uri='+encodeURIComponent(selectedTerm.uri),{label:get('edit-term-label').value,label_zh:get('edit-term-label-zh').value,description:get('edit-term-description').value,parent:kind==='class'?get('edit-term-parent').value:'',domain:kind==='attribute'?get('edit-term-domain').value:'',range:kind==='attribute'?get('edit-term-range').value:'',domains:kind==='relation'?selectedValues(get('edit-term-domain')):[],ranges:kind==='relation'?selectedValues(get('edit-term-range')):[],expected_ontology_id:ui.ontology.id},'PUT');
-    closeModal();await get('load-ontology').onclick();status('本体修改已保存为新版本；旧知识未迁移。');});
-  act('retire-ontology-term',async()=>{if(!selectedTerm)throw Error('请先选择术语');if(!get('retire-term-confirm').checked)throw Error('请先查看影响并勾选确认');
-    const result=await api(endpoint('/ontology/term-retire')+'?uri='+encodeURIComponent(selectedTerm.uri),{expected_ontology_id:ui.ontology.id,confirm_references:true});
-    closeModal();await get('load-ontology').onclick();status(`术语已从新本体版本停用；${result.impact.record_count} 条旧知识仍保留原本体版本。`);});
   // Dashboard loads on entry and follows project / scope changes.
   async function refreshDashboard(){
     const p=current;
@@ -960,7 +850,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
   // 下面两处 get('tab-dashboard') 判断的还是同一个面板 id（面板沿用旧 id），所以口径没变。
   window.RuntimeView?.on('overview',refreshDashboard);
   get('project').addEventListener('change',()=>{dashboardRequest++;if(!get('tab-dashboard').classList.contains('hidden'))refreshDashboard();});
-  for(const id of ['apply-scope','reset-scope'])get(id).addEventListener('click',()=>{if(!get('tab-dashboard').classList.contains('hidden'))refreshDashboard();});
+
   // Boot into the linked workbench and restore the last selected existing project.
   showTab('search');
   // 等认证就绪再拉项目列表：未登录时先挂着。以前这里直接 projects()，

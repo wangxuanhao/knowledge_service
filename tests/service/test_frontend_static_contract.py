@@ -27,23 +27,22 @@ def test_project_safe_navigation_assets_and_public_view_entries():
     assert 'window.TaskReview' in reviews and 'open' in reviews
 
 
-def test_term_impact_panel_has_single_set_of_ids():
-    """影响面板的新标记必须全套存在，旧的三个 id 必须彻底消失（两处标记已统一）。"""
-    js = read('workspace.js')
-    for new_id in ('impact-entities', 'impact-relations', 'impact-attributes',
-                   'impact-secondary', 'impact-note'):
-        assert f"'{new_id}'" in js or f'id="{new_id}"' in js, f'缺少 {new_id}'
-    for old_id in ('impact-records', 'impact-constraints', 'impact-pending'):
-        assert old_id not in js, f'残留旧标记 {old_id}（会造成重复/幽灵 UI）'
+def test_term_impact_has_one_current_inspector():
+    """术语生命周期只在当前建模检查器中展示，不再维护隐藏编辑器。"""
+    panel = read('ontology-model-panel.js')
+    assert 'om-retire-impact' in panel
+    assert '/ontology/term-impact?uri=' in panel
+    assert 'om-retire-impact' not in read('workspace.js')
+    assert 'id="tab-ontology"' not in read('index.html')
 
 
-def test_term_impact_classifies_by_kind_not_just_total():
-    """前端必须展示分类计数，而不是只显示一个总数。"""
-    js = read('workspace.js')
-    assert 'kind_counts' in js
-    assert 'linked_relation_count' in js
-    # 停用语义必须写在界面上（只摘定义、不删历史）
-    assert '保留可查' in js and '不会删除任何数据' in js
+def test_current_term_impact_keeps_governance_and_history_semantics():
+    panel = read('ontology-model-panel.js')
+    for key in ('record_count', 'constraint_count', 'pending_review_count', 'linked_relation_count'):
+        assert key in panel
+    assert '历史知识与版本轨迹保留' in panel
+    assert "action: active ? 'retire_term' : 'restore_term'" in panel
+    assert 'impactReady && reason.value.trim()' in panel
 
 
 def test_project_card_shows_project_id_with_copy():
@@ -64,8 +63,8 @@ def test_assets_version_bumped_for_changed_files():
     """
     html = read('index.html')
     versioned = set(re.findall(r'/assets/([\w.-]+)\?v=([\w.-]+)', html))
-    for asset in ('workspace.js', 'workspace.css', 'ontology-details.js', 'projects.css',
-                  'ontology-modal.css', 'style.css',
+    for asset in ('workspace.js', 'workspace.css', 'ontology-model.js', 'projects.css',
+                  'ontology-model-panel.css', 'style.css',
                   'provenance-drawer.js', 'provenance-drawer.css'):
         marker = dict(versioned).get(asset)
         assert marker, f'{asset} 缺少缓存版本号（?v=…）'
@@ -89,8 +88,10 @@ def test_provenance_drawer_safe_accessible_contract():
     js = read('provenance-drawer.js')
     for marker in ('ProvenanceDrawer', 'AbortController', 'aria-labelledby', 'aria-live',
                    'Escape', 'focus()', 'onProjectChange', 'createElement', 'textContent',
-                   '证据链', 'API 数据', '该历史回答生成于溯源记录启用前'):
+                   '证据链', 'API 数据'):
         assert marker in js, marker
+    assert '缺少答案标识，无法定位已冻结的证据链' in read('workbench.js')
+    assert 'renderLegacyNote' not in js
     assert 'innerHTML' not in js
     assert 'insertAdjacentHTML' not in js
     css = read('provenance-drawer.css')
@@ -209,7 +210,7 @@ def test_document_upload_workspace_contract():
                    '@media(max-width:850px)', ':focus-visible'):
         assert marker in css, marker
     assert '/assets/workbench.css?v=rule-oag-2' in html
-    assert '/assets/ingest-mode.js?v=unified-scope-20261016-2' in html
+    assert '/assets/ingest-mode.js?v=canonical-20261021-5' in html
     assert 'max_batch_items' in js and 'max_batch_bytes' in js
     assert re.search(r'/assets/workbench\.js\?v=[\w.-]+', html)
 
@@ -246,13 +247,13 @@ def test_provenance_guide_is_outside_the_cleared_panel():
     assert '原始接口数据' in js
 
 
-def test_iri_preview_row_aligns_with_other_columns():
-    """IRI 预览必须和其它字段同一行同一套 .columns 栅格（用户："这个和其他不在一行"）。"""
-    workspace = read('workspace.js')
-    assert '<div class="columns"><label class="ontology-term-iri">' in workspace
-    assert 'ontology-term-iri-note' in workspace
-    css = read('workspace.css')
-    assert '.ontology-term-iri-note{align-self:center' in css, 'IRI 提示必须与输入同排对齐'
+def test_manual_term_creation_uses_current_model_panel():
+    """手工建模只保留当前表单和批量命令入口。"""
+    panel = read('ontology-model-panel.js')
+    assert 'om-new-term' in panel and 'M.createTerm({' in panel
+    model = read('ontology-model.js')
+    assert "sendCommand({action: 'batch', commands" in model
+    assert 'ontology-term-iri' not in read('workspace.js')
 
 
 def test_type_color_comes_from_one_palette_module():
@@ -347,70 +348,24 @@ def test_snapshot_page_has_exactly_one_restore_entry_point():
     assert 'data-snapshot-restore' in workbench, '卡片上的「恢复」必须还在（唯一入口）'
 
 
-def test_runtime_page_merges_four_flat_pages_into_one_entry():
-    """D2：项目管理 / 项目总览 / 后台任务 / 快照·评测 四个平铺菜单 → 「项目与运行」一个入口。
-
-    为什么合并：那四页回答的其实是同一个问题——"这个项目跑得怎么样"，
-    平铺成四个菜单只会让用户在页签之间来回找（用户原话："界面不要一直是平铺的"），
-    而它们又都不是日常动作（都不改知识、不改本体）。
-
-    契约钉住三件事，缺一件合并就会退回去：
-      · 侧边栏只剩 7 项，旧的四项不再作为独立页签；
-      · 四个旧页面成为四个分区，每个分区都写清"这里回答什么"；
-      · 分区数据由 RuntimeView 在**进入时**加载，且加载函数留在各自模块里（不复制第二份）。
-    """
+def test_workspace_navigation_has_fixed_management_and_real_runtime_loaders():
     html = read('index.html')
-    sidebar = html.split('</nav>', 1)[0].split('<nav>', 1)[1]
-    entries = re.findall(r'data-tab="([\w-]+)"', sidebar)
-    assert len(entries) == 7, entries
-    assert entries.count('runtime') == 1
-    for retired in ('projects', 'dashboard', 'jobs', 'evaluation'):
-        assert f'data-tab="{retired}"' not in sidebar, f'{retired} 仍是独立页签（合并被回滚了）'
-    for label in ('>项目管理</button>', '>项目总览</button>', '>后台任务</button>', '>快照 / 评测</button>'):
-        assert label not in sidebar, label
-
-    # 「做什么 / 不做什么」必须写在页面上：只给一个入口名，用户还是不知道这一页管什么。
-    hero = html.split('class="runtime-hero"', 1)[1].split('</header>', 1)[0]
-    assert '跑得怎么样' in hero
-    for elsewhere in ('知识台账', '本体建模层'):
-        assert elsewhere in hero, f'页头没写清"这件事不在这做，去{elsewhere}"'
-
-    # 四个分区，每格都要有名称 + 一句说明（只有一个名词的分区等于没写）
-    views = re.findall(r'data-runtime-view="(\w+)"', html)
-    assert views == ['project', 'overview', 'jobs', 'snapshots'], views
-    for view in views:
-        block = html.split(f'data-runtime-view="{view}"', 1)[1].split('</button>', 1)[0]
-        assert '<b>' in block and '<small>' in block, f'分区 {view} 缺少名称或说明'
-
-    # 面板沿用旧 id（既有代码靠这些 id 判断"现在在哪一屏"），但都必须挂上 runtime-panel
-    for panel in ('tab-projects', 'tab-dashboard', 'tab-jobs', 'tab-evaluation'):
-        assert f'id="{panel}" class="tab hidden runtime-panel"' in html, panel
-
-    # 加载口径只有一处：RuntimeView 的注册表；四个模块各自把加载函数交上来
-    runtime = read('runtime-view.js')
-    assert 'window.RuntimeView' in runtime and 'on(view,loader)' in runtime
-    assert "const VIEWS=['project','overview','jobs','snapshots']" in runtime
-    for name, view in (('workspace.js', 'overview'), ('task-review.js', 'jobs'),
-                       ('projects-view.js', 'project'), ('workbench.js', 'snapshots')):
-        assert f"RuntimeView?.on('{view}'" in read(name), f'{name} 没把 {view} 分区的加载函数交给 RuntimeView'
-
-    # 合并之后不该再有人按旧页签名找入口（运行时那会是读一个 null 的属性）
-    for name in ('workspace.js', 'task-review.js', 'workbench.js', 'projects-view.js'):
-        source = read(name)
-        for retired in ('projects', 'dashboard', 'jobs', 'evaluation'):
-            assert f'[data-tab="{retired}"]' not in source, f'{name} 还在引用旧页签 {retired}'
-
-    # 导航分组：旧的「项目」「运行与质量」两组并成一组
     menu = read('menu-hierarchy.js')
-    assert "['运行层 · 跑起来',['runtime']]" in menu
-    assert "['projects','dashboard']" not in menu and "['jobs','evaluation']" not in menu
-    # 只有一个入口的分组不该默认折叠（折叠了用户就找不到它在哪）
-    assert 'available.length===1' in menu
-
-    # 新增资源要引入；改动过的资源都要带缓存版本号（否则浏览器一直用旧 JS）
-    for asset in ('runtime.css', 'runtime-view.js', 'app.js', 'workspace.js', 'menu-hierarchy.js',
-                  'task-review.js', 'workbench.js', 'projects-view.js', 'storage.js'):
-        assert re.search(rf'/assets/{re.escape(asset)}\?v=[\w.-]+', html), asset
+    for label in ('使用知识', '管理资料', '运行与质量'):
+        assert label in menu
+    for tab in ('projects', 'useradmin', 'sources', 'quality', 'runtime'):
+        assert f'data-tab="{tab}"' in html
+    assert "management.className='nav-group nav-management'" in menu
+    assert 'nav.after(management)' in menu
+    assert "const VIEWS=['overview','jobs','snapshots']" in read('runtime-view.js')
+    for name, view in (('workspace.js', 'overview'), ('task-review.js', 'jobs'), ('workbench.js', 'snapshots')):
+        assert f"RuntimeView?.on('{view}'" in read(name)
+    assert 'window.ProjectsView=' in read('projects-view.js')
+    assert 'window.WorkspaceContext?.enter' in read('app.js')
+    assert "['search','qa','records','sources']" in read('app.js')
+    assert 'workspace-context-ui.js?v=' in html
+    for asset in ('runtime-view.js','app.js','workspace.js','menu-hierarchy.js','projects-view.js'):
+        assert re.search(rf'/assets/{re.escape(asset)}\?v=[\w.-]+', html)
 
 
 # ============================================================================
@@ -475,10 +430,11 @@ def test_canvas_has_a_create_entry_because_without_it_parent_cannot_be_added():
     """
     canvas = read('ontology-model-canvas.js')
     panel = read('ontology-model-panel.js')
-    assert '＋ 新建类' in canvas
+    model = read('ontology-model.js')
+    assert 'openCreate' in model
     assert "'父类（选填：不选就是顶层类）'" in panel, '新建类必须能直接带父类'
-    assert "'/ontology/terms'" in panel, '新建要走与审核台同一条路（POST /ontology/terms），不自己拼 IRI'
-    assert 'focusCreate' in canvas and 'focusCreate' in panel
+    assert 'await M.createTerm' in panel and 'await M.ctx.createTerm' in canvas
+    assert 'focusCreate' in panel and 'createTerm' in model
 
 
 def test_canvas_draws_the_draft_so_edits_are_visible_and_editable_after_publish():
@@ -510,17 +466,19 @@ def test_ontology_model_shows_discovery_guide_when_not_yet_published():
     """
     model = read('ontology-model.js')
     # 读开放发现概览，拿到「是否已发布本体 + 待纳入候选数」
-    assert "'/ontology-discovery?compact=true'" in model
+    assert "'/ontology-discovery'" in model
     # 没发布本体时走引导态，不再误报「读取失败」
     assert 'S.discovery.published === false' in model
-    # 有候选时给生成本体入口；这一步默认秒级、不调模型
-    assert "'/ontology-discovery/drafts'" in model
-    assert '生成本体</button>' in model
+    # 有候选时先明确选择与预览，读取不能偷偷建立草案。
+    assert "'/ontology-discovery/drafts'" not in model
+    assert 'id="om-generate-draft"' in model
+    assert '选择候选并预览</button>' in model
+    assert 'OntologyIntake.open' in model
     assert '约 1 秒' not in model
-    # 「模型推断父子层级」是可选的慢入口（默认不阻塞拿到本体）
-    assert 'om-infer-hierarchy' in model
-    # 这一步做什么 / 不做什么都要写清（用户核心要求：新功能一句话说明它做什么、不做什么）
-    assert '这一步做什么' in model and '不做什么' in model
+    # 层级推断仍是显式的慢入口，不能挤进只读预览。
+    assert 'id="om-discover-parents"' in model
+    assert 'async function discoverParents' in model
+    assert '打开清单与预览不会创建草案' in model
 
 
 def test_ontology_model_pending_candidates_chip_reads_real_discovery_count():
@@ -957,7 +915,7 @@ def test_session_buttons_do_not_reuse_login_form_ids():
     # 入口由 menu-hierarchy.js 生成并带 admin-only —— 这里钉住它的新位置，
     # 免得有人又把它塞回会话区（那里只该有改口令 / 退出登录）。
     hierarchy = read('menu-hierarchy.js')
-    assert "'用户与权限'" in hierarchy and 'admin-only' in hierarchy, \
+    assert "['projects','useradmin']" in hierarchy and 'admin-only' in hierarchy, \
         '「用户与权限」入口必须在侧栏系统层里且对只读用户隐藏'
     assert 'id="auth-open-users"' not in js, '会话区不该再出现用户管理入口'
     assert "'auth-password'" not in js.split('function renderSession')[1].split('function notice')[0], \
@@ -984,20 +942,17 @@ def test_readonly_sidebar_hides_groups_that_become_empty():
         'CSS 没有显式收起规则（只靠 UA 的 [hidden] 会被将来的 display 声明压住）'
 
 
-def test_user_admin_says_what_it_manages_and_what_it_does_not():
-    """「用户与权限」必须一句话说清管什么、不管什么，以及动作的后果。
-
-    用户口径：「新功能不能只给一个开关或数字，必须一句话说明它做什么、不做什么」。
-    """
+def test_user_admin_explains_system_scope_and_uses_guarded_edit_drawers():
     js = read('user-admin.js')
-    assert '不管项目里的知识与本体' in js, '没说清这一页不做什么'
-    assert '立刻失效' in js, '没说清改口令/停用会让已有登录失效'
-    assert '不能改自己' in js, '没说清为什么自己那一行不给改角色'
-    # 三档角色各能做什么（只读用户连按钮都看不到）：
-    assert '管理所有账号' in js, '没写清超级管理员能管理一切账号'
-    assert '管理普通账号' in js, '没写清管理员能管理普通账号'
-    assert '不能管理超级管理员' in js, '没写清管理员的越权边界'
-    assert '只能检索、问答、看脑图' in js, '没写清只读用户能做什么'
+    assert '全局登录账号与系统角色' in js
+    assert '项目成员权限尚未提供' in js
+    assert 'WorkspaceContext.accountPolicy' in js
+    assert '自己的口令请使用个人账号菜单' in js
+    assert '旧会话已失效' in js
+    assert "role==='superadmin'" in js
+    assert 'ua-edit-card' in js and 'ua-reset-form' in js
+    assert 'window.prompt' not in js and 'window.confirm' not in js
+
 
 def test_auth_401_only_means_session_lost_when_a_token_was_sent():
     """未登录首屏的杂散 401 不能被当成"登录状态已失效"。
@@ -1012,17 +967,13 @@ def test_auth_401_only_means_session_lost_when_a_token_was_sent():
 
 
 def test_project_loaders_wait_for_auth_when_the_server_enforces_it():
-    """拉项目列表必须先等认证就绪（只在服务端确知启用鉴权时才等）。
-
-    两条一起钉：① 调用点不能裸调 projects()/renderProjects()；
-    ② whenReady 只在 auth_enforced 为真时等 —— 否则测试桩（没这个字段）里
-    整页会永远拉不到数据（没人登录）。
-    """
+    """Project loaders share the authorization gate; only explicit auth-disabled policy releases it."""
     for name, call in (('workspace.js', 'projects()'), ('projects-view.js', 'renderProjects')):
         js = read(name)
         assert 'whenReady' in js, f'{name} 没有等认证就绪'
     js = read('auth.js')
-    assert 'authEnforced !== true' in js, 'whenReady 没有区分"服务端是否启用鉴权"'
-    assert "loadAuthPolicy();" in js, 'whenReady 没有自己触发策略探针（会早于 bootstrap 被调用）'
+    assert re.search(r'function whenReady\(\)\s*\{\s*return window\.__authReady;', js)
+    assert 'if (authEnforced === false)' in js
+    assert 'bootstrap();' in js
     assert 'function releaseWithoutAuth()' in js, '缺少"服务端没启用鉴权就直接放行"的分支'
 

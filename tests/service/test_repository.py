@@ -1,3 +1,4 @@
+from ontology_seed import seed_ontology
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -40,7 +41,9 @@ def test_atomicity_isolation_and_unknown_dates(tmp_path):
         repo.put_batch(p, [{'id': 'ok', 'kind': 'entity', 'text': 'ok'}, {'kind': 'invalid', 'text': 'bad'}])
     assert repo.query(p) == []
     repo.put_record(p, {'id': 'a', 'kind': 'entity', 'text': 'a', 'embedding': [1., 0.]})
-    assert repo.query(p, include_unknown=False) == []
+    # Business time is opt-in; include_unknown only narrows an explicit time scope.
+    assert len(repo.query(p, include_unknown=False)) == 1
+    assert repo.query(p, valid_at='2026-01-01', include_unknown=False) == []
     assert len(repo.query(p)) == 1
     assert repo.query(q) == []
     with pytest.raises(KeyError):
@@ -57,7 +60,7 @@ def test_query_uses_historical_native_applicability_and_business_time(tmp_path):
     old = repo.put_record(project, {
         'id': 'policy', 'kind': 'entity', 'text': 'old',
         'metadata': {'applicability': {
-            'platforms': ['美团'], 'businesses': [],
+            'platforms': {'mode': 'specific', 'values': ['美团']}, 'businesses': {'mode': 'unknown', 'values': []},
         }},
         'valid_from': '2025-01-01', 'valid_until': '2025-02-01',
     }, recorded_at='2026-01-01T00:00:00Z')
@@ -72,18 +75,18 @@ def test_query_uses_historical_native_applicability_and_business_time(tmp_path):
     }, expected_version=1, recorded_at='2026-02-01T00:00:00Z')
 
     assert [row['text'] for row in repo.query(
-        project, applicability={'platforms': ['美团']},
+        project, applicability={'platforms': {'mode': 'specific', 'values': ['美团']}},
         valid_at='2025-01-01', known_at=old['recorded_at'])] == ['old']
     assert repo.query(
-        project, applicability={'platforms': ['京东']},
+        project, applicability={'platforms': {'mode': 'specific', 'values': ['京东']}},
         valid_at='2025-01-01', known_at=old['recorded_at']) == []
     assert [row['text'] for row in repo.query(
-        project, applicability={'platforms': ['京东'], 'businesses': ['直播']},
+        project, applicability={'platforms': {'mode': 'specific', 'values': ['京东']}, 'businesses': {'mode': 'specific', 'values': ['直播']}},
         valid_at='2025-02-01', known_at=new['recorded_at'])] == ['new']
 
-    # 结构列不能改写不透明 payload：旧列表形状仍逐版本保留。
+    # 结构投影不能改写各版本保存的规范 payload。
     assert repo.history(project, 'policy')[0]['metadata']['applicability'] == {
-        'platforms': ['美团'], 'businesses': [],
+        'platforms': {'mode': 'specific', 'values': ['美团']}, 'businesses': {'mode': 'unknown', 'values': []},
     }
 
 
@@ -92,7 +95,7 @@ def test_query_native_scope_modes_and_half_open_unknown_time(tmp_path):
     project = repo.create_project('native applicability modes')['id']
     records = [
         {'id': 'specific', 'kind': 'entity', 'text': 'specific',
-         'metadata': {'applicability': {'platforms': ['美团']}},
+         'metadata': {'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}}},
          'valid_from': '2025-01-01', 'valid_until': '2025-02-01'},
         {'id': 'all', 'kind': 'entity', 'text': 'all',
          'metadata': {'applicability': {
@@ -100,7 +103,7 @@ def test_query_native_scope_modes_and_half_open_unknown_time(tmp_path):
          'valid_from': '2025-01-01', 'valid_until': '2025-02-01'},
         {'id': 'unknown-scope', 'kind': 'entity', 'text': 'unknown scope'},
         {'id': 'unknown-start', 'kind': 'entity', 'text': 'unknown start',
-         'metadata': {'applicability': {'platforms': ['美团']}},
+         'metadata': {'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}}},
          'valid_until': '2025-02-01'},
     ]
     repo.put_batch(project, records)
@@ -130,7 +133,7 @@ def test_query_pushes_scope_time_and_kinds_into_record_versions_sql(tmp_path,
     project = repo.create_project('native applicability sql')['id']
     repo.put_record(project, {
         'id': 'target', 'kind': 'entity', 'text': 'target',
-        'metadata': {'applicability': {'platforms': ['美团']}},
+        'metadata': {'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}}},
         'valid_from': '2025-01-01',
     })
     statements = []
@@ -142,7 +145,7 @@ def test_query_pushes_scope_time_and_kinds_into_record_versions_sql(tmp_path,
 
     monkeypatch.setattr(repo._db, 'execute', capture)
     rows = repo.query(
-        project, applicability={'platforms': ['美团']}, valid_at='2025-01-01',
+        project, applicability={'platforms': {'mode': 'specific', 'values': ['美团']}}, valid_at='2025-01-01',
         kinds=['entity'], include_unknown=False)
 
     assert [row['id'] for row in rows] == ['target']
@@ -159,7 +162,7 @@ def test_query_uses_distinct_current_and_historical_system_time_paths(tmp_path,
     project = repo.create_project('native applicability system time')['id']
     saved = repo.put_record(project, {
         'id': 'target', 'kind': 'entity', 'text': 'target',
-        'metadata': {'applicability': {'platforms': ['美团']}},
+        'metadata': {'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}}},
     })
     statements = []
     execute = repo._db.execute
@@ -170,9 +173,9 @@ def test_query_uses_distinct_current_and_historical_system_time_paths(tmp_path,
         return execute(statement, params)
 
     monkeypatch.setattr(repo._db, 'execute', capture)
-    repo.query(project, applicability={'platforms': ['美团']})
+    repo.query(project, applicability={'platforms': {'mode': 'specific', 'values': ['美团']}})
     current_sql = statements[-1]
-    repo.query(project, applicability={'platforms': ['美团']},
+    repo.query(project, applicability={'platforms': {'mode': 'specific', 'values': ['美团']}},
                known_at=saved['recorded_at'])
     historical_sql = statements[-1]
 
@@ -189,21 +192,21 @@ def test_repository_applicability_dictionary_and_ordered_version_reads(tmp_path,
     first = repo.put_record(project, {
         'id': 'first', 'kind': 'entity', 'text': 'first',
         'metadata': {'applicability': {
-            'platforms': ['meituan'], 'businesses': ['直播'],
-            'audiences': ['商家'],
+            'platforms': {'mode': 'specific', 'values': ['meituan']}, 'businesses': {'mode': 'specific', 'values': ['直播']},
+            'audiences': {'mode': 'specific', 'values': ['商家']},
         }},
     })
     obsolete = repo.put_record(project, {
         'id': 'obsolete', 'kind': 'entity', 'text': 'obsolete',
-        'metadata': {'applicability': {'platforms': ['京东']}},
+        'metadata': {'applicability': {'platforms': {'mode': 'specific', 'values': ['京东']}}},
     })
     deleted = repo.put_record(project, {
         'id': 'deleted', 'kind': 'entity', 'text': 'deleted',
-        'metadata': {'_deleted': True, 'applicability': {'platforms': ['淘宝']}},
+        'metadata': {'_deleted': True, 'applicability': {'platforms': {'mode': 'specific', 'values': ['淘宝']}}},
     })
     revised = repo.put_record(project, {
         'id': 'obsolete', 'kind': 'entity', 'text': 'revised',
-        'metadata': {'applicability': {'platforms': ['美团']}},
+        'metadata': {'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}}},
     }, expected_version=1)
 
     assert repo.distinct_applicability_values(project) == {
@@ -236,8 +239,8 @@ def test_native_applicability_migration_backfills_all_history_idempotently(tmp_p
     repo = Repository(tmp_path / 'native-applicability-migration')
     project = repo.create_project('native applicability migration')['id']
     applicability = {
-        'platforms': ['\u2003ｍｅｉｔｕａｎ\u2003', '京东'],
-        'businesses': ['\u0085直播\u0085'],
+        'platforms': {'mode': 'specific', 'values': ['\u2003ｍｅｉｔｕａｎ\u2003', '京东']},
+        'businesses': {'mode': 'specific', 'values': ['\u0085直播\u0085']},
         'audiences': {'mode': 'all', 'values': []},
     }
     saved = repo.put_record(project, {
@@ -340,10 +343,12 @@ def test_time_and_ontology(tmp_path):
         normalize_time('2020-01-01T08:00:00')
     repo = Repository(tmp_path / 'db')
     p = repo.create_project('a')['id']
-    a = repo.save_ontology(p, 'one', {'classes': ['A']})
-    b = repo.save_ontology(p, 'two', {'classes': ['B']})
+    first_turtle = '<urn:test:A> a <http://www.w3.org/2002/07/owl#Class> .'
+    second_turtle = '<urn:test:B> a <http://www.w3.org/2002/07/owl#Class> .'
+    a = seed_ontology(repo, p, first_turtle, {})
+    b = seed_ontology(repo, p, second_turtle, {})
     assert repo.get_ontology(p)['id'] == b['id']
-    assert repo.get_ontology(p, a['id'])['turtle'] == 'one'
+    assert repo.get_ontology(p, a['id'])['turtle'] == first_turtle
     assert len(repo.list_ontologies(p)) == 2
     assert repo.list_projects()[0]['id'] == p
     assert repo.get_project(p)['name'] == 'a'
@@ -353,54 +358,37 @@ def test_ontology_lineage_metadata_survives_restart(tmp_path):
     path = tmp_path / 'ontology-lineage.sqlite'
     repo = Repository(path)
     p = repo.create_project('a')['id']
-    first = repo.save_ontology(p, 'one', {'classes': ['A']})
+    first = seed_ontology(repo, p, '<urn:test:A> a <http://www.w3.org/2002/07/owl#Class> .', {})
     metadata = {
         'parent_version_id': first['id'],
         'source_draft_id': 'draft-1',
         'diff': {'classes': {'added': ['B'], 'retained': ['A'], 'removed': []}},
     }
-    second = repo.save_ontology(p, 'two', {'classes': ['A', 'B']}, metadata=metadata)
+    second = seed_ontology(repo, p, '<urn:test:B> a <http://www.w3.org/2002/07/owl#Class> .', {}, metadata=metadata)
     repo.close()
 
     reopened = Repository(path)
     assert reopened.get_ontology(p, second['id'])['metadata'] == {
         **metadata,
-        'write_path': 'compatibility',
+        'write_path': 'test_fixture',
         # E1：本体版本号只跟**图结构**走。结构变更 → 递增；纯标注变更 → 复用当前号并标
-        # version_reused。这里 save_ontology 走的是结构路径，所以从 1 递增到 2。
+        # version_reused。这里显式测试夹具写入结构版本，所以从 1 递增到 2。
         'version': 2,
         'version_reused': False,
     }
 
 
-def test_commit_ontology_change_rejects_empty_history_without_partial_writes(tmp_path):
-    repo = Repository(tmp_path / 'empty-ontology-change.sqlite')
-    project_id = repo.create_project('empty ontology history')['id']
-    ontology = {
-        'id': 'ontology-from-empty-history',
-        'turtle': '@prefix ex: <urn:ex:> .',
-        'summary': {'classes': []},
-        'metadata': {},
-        'created_at': '2026-01-01T00:00:00Z',
-    }
-    proposal = {'id': 'proposal-from-empty-history', 'status': 'approved'}
-    document = {
-        'id': 'document-from-empty-history',
-        'kind': 'document',
-        'text': 'must remain uncommitted',
-        'metadata': {},
-    }
-
-    with pytest.raises(ValueError, match='版本冲突'):
-        repo.commit_ontology_change(
-            project_id, ontology, proposal, document,
-            expected_document_version=None, expected_ontology_id=None)
-
+def test_ontology_publication_requires_complete_governed_request(tmp_path):
+    repo = Repository(tmp_path / 'governed-publication')
+    project_id = repo.create_project('governed publication')['id']
+    with pytest.raises(ValueError, match='publish request is missing'):
+        repo.publish_ontology_draft(project_id, {
+            'id': 'obsolete-discovery-draft', 'project_id': project_id,
+            'turtle': '@prefix ex: <urn:ex:> .', 'summary': {},
+        })
     assert repo.list_ontologies(project_id) == []
-    with pytest.raises(KeyError):
-        repo.get_record(project_id, document['id'])
-    with pytest.raises(KeyError):
-        repo.get_artifact('ontology_change', proposal['id'])
+    assert repo.list_artifacts('ontology_discovery_draft', project_id) == []
+    assert repo._ontology_drafts.export(project_id)['publish_requests'] == []
 
 
 def test_correction_replaces_interval_but_history_retains_original(tmp_path):
@@ -458,7 +446,8 @@ def test_current_records_ignore_business_validity_and_keep_latest(tmp_path):
     repo.put_record(p, {'id': 'old', 'kind': 'document', 'text': 'old', 'valid_until': '2000-01-01'})
     repo.put_record(p, {'id': 'old', 'kind': 'document', 'text': 'corrected', 'valid_until': '2001-01-01'})
     repo.put_record(p, {'id': 'future', 'kind': 'document', 'text': 'future', 'valid_from': '2100-01-01'})
-    assert repo.query(p) == []
+    assert {r['text'] for r in repo.query(p)} == {'corrected', 'future'}
+    assert repo.query(p, valid_at='2026-01-01') == []
     assert {r['text'] for r in repo.current_records(p)} == {'corrected', 'future'}
     assert repo.current_records(q) == []
 

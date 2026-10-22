@@ -33,6 +33,11 @@ class ApplicationData:
     def unit_of_work(self, *, serializable=False):
         return self.__repository.unit_of_work(serializable=serializable)
 
+    def assertions_batch(self, project_id, record_ids):
+        """Bounded evidence for a displayed ledger page."""
+        from ..repository.page_reads import PageReads
+        return PageReads(self.__repository).assertions_batch(project_id,record_ids)
+
     def insert_if_absent(self, project_id, record):
         return self.__repository.insert_if_absent(project_id, record)
 

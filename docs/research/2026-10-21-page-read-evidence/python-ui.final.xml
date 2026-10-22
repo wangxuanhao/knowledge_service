@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="10" time="309.695" timestamp="2026-10-21T09:56:00.977552+08:00" hostname="LAPTOP-QNO9UE9C"><testcase classname="tests.service.test_workspace_redesign_ui" name="test_page_scope_drafts_tags_and_management_exclusion" time="46.717" /><testcase classname="tests.service.test_workspace_redesign_ui" name="test_graph_settings_dock_has_close_escape_backdrop_and_numeric_hops" time="25.685" /><testcase classname="tests.service.test_workspace_redesign_ui" name="test_graph_candidate_previous_page_and_brain_exact_root_keep_applied_search_scope" time="23.613" /><testcase classname="tests.service.test_workspace_redesign_ui" name="test_sources_uses_the_existing_three_mode_upload_and_mobile_navigation" time="24.312" /><testcase classname="tests.service.test_workspace_redesign_ui" name="test_library_is_list_first_and_details_are_docked_and_closed_with_focus" time="28.128" /><testcase classname="tests.service.test_workspace_redesign_ui" name="test_upload_steps_preserve_original_inputs_but_direct_project_switch_cleans_them" time="22.865" /><testcase classname="tests.service.test_workspace_redesign_ui" name="test_first_step_retry_returns_to_confirmation_without_submitting" time="25.909" /><testcase classname="tests.service.test_workspace_redesign_ui" name="test_preview_late_response_and_direct_project_change_cannot_leave_inert_background" time="24.998" /><testcase classname="tests.service.test_workspace_redesign_ui" name="test_direct_project_switch_closes_the_independent_record_create_drawer" time="27.721" /><testcase classname="tests.service.test_workspace_redesign_ui" name="test_direct_project_switch_hides_completed_batch_cards" time="50.298"><failure message="playwright._impl._errors.TimeoutError: Locator.wait_for: Timeout 30000ms exceeded.&#10;Call log:&#10;  - waiting for locator(&quot;#ingest-batches [data-batch-id=\&quot;batch-a\&quot;]&quot;) to be visible">redesign_page = (&lt;Page url='http://127.0.0.1:58103/'&gt;, [])
+
+    def test_direct_project_switch_hides_completed_batch_cards(redesign_page):
+        page,errors=redesign_page
+        batch={'id':'batch-a','status':'completed','total_items':1,'counts':{'completed':1},'requested_concurrency':'auto','effective_concurrency':1}
+        def batches(route):
+            path=route.request.url.split('?',1)[0]
+            value={'items':[]} if path.endswith('/items') else batch if path.endswith('/batch-a') else {'batches':[batch]}
+            route.fulfill(json=value)
+        page.route('**/projects/p/ingest-batches**',batches)
+        page.evaluate('LibraryWorkspace.open("batches")')
+&gt;       card=page.locator('#ingest-batches [data-batch-id="batch-a"]');card.wait_for()
+                                                                       ^^^^^^^^^^^^^^^
+
+tests\service\test_workspace_redesign_ui.py:257:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+D:\anaconda\envs\llm_model\Lib\site-packages\playwright\sync_api\_generated.py:18080: in wait_for
+    self._sync(self._impl_obj.wait_for(timeout=timeout, state=state))
+D:\anaconda\envs\llm_model\Lib\site-packages\playwright\_impl\_locator.py:710: in wait_for
+    await self._frame.wait_for_selector(
+D:\anaconda\envs\llm_model\Lib\site-packages\playwright\_impl\_frame.py:369: in wait_for_selector
+    await self._channel.send(
+D:\anaconda\envs\llm_model\Lib\site-packages\playwright\_impl\_connection.py:69: in send
+    return await self._connection.wrap_api_call(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = &lt;playwright._impl._connection.Connection object at 0x000001D96CD8C980&gt;
+cb = &lt;function Channel.send.&lt;locals&gt;.&lt;lambda&gt; at 0x000001D96B3E6020&gt;
+is_internal = False, title = None
+
+    async def wrap_api_call(
+        self, cb: Callable[[], Any], is_internal: bool = False, title: str = None
+    ) -&gt; Any:
+        if self._api_zone.get():
+            return await cb()
+        task = asyncio.current_task(self._loop)
+        st: List[inspect.FrameInfo] = getattr(
+            task, "__pw_stack__", None
+        ) or inspect.stack(0)
+
+        parsed_st = _extract_stack_trace_information_from_stack(st, is_internal, title)
+        self._api_zone.set(parsed_st)
+        try:
+            return await cb()
+        except Exception as error:
+&gt;           raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+E           playwright._impl._errors.TimeoutError: Locator.wait_for: Timeout 30000ms exceeded.
+E           Call log:
+E             - waiting for locator("#ingest-batches [data-batch-id=\"batch-a\"]") to be visible
+
+D:\anaconda\envs\llm_model\Lib\site-packages\playwright\_impl\_connection.py:559: TimeoutError</failure></testcase></testsuite></testsuites>

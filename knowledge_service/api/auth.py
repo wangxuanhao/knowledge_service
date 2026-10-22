@@ -52,6 +52,14 @@ def install(app, *, users, jwt_secret: str, ttl_seconds: int):
 
     router = APIRouter(prefix='/api/auth')
 
+    @router.get('/policy')
+    def policy(request: Request):
+        """公开启动策略，只读取装配时已解析的鉴权配置。"""
+        return JSONResponse(
+            content={'auth_enabled': not getattr(request.app.state, 'auth_disabled', False)},
+            headers={'Cache-Control': 'no-store'},
+        )
+
     def token_for(row) -> dict:
         """根据用户行签发令牌并组装登录响应。"""
         token = create_access_token(
@@ -73,7 +81,7 @@ def install(app, *, users, jwt_secret: str, ttl_seconds: int):
     @router.post('/login')
     def login(body: Credentials):
         """校验口令并签发令牌。用户名或口令错误统一返回 401（不区分，防枚举）。"""
-        row = users.get_by_username(body.username)
+        row = users.get_for_login(body.username)
         # 用户不存在 / 被禁用 / 口令错，都回同一句，避免借此判断账号是否存在。
         if row is None or not row['is_active'] \
                 or not verify_password(body.password, row['password_hash']):

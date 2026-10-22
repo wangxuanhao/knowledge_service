@@ -108,14 +108,19 @@ def pick_project(base: str, wanted: str | None) -> tuple[str, dict]:
 
 
 def record_query(base: str, project_id: str) -> list[dict]:
-    """一次拿全（脚本只读，不走分页）：台账的四个数字与每一行都从这份数据独立重算。
-
-    注意：记录列表是 **POST /records/query**（body 是 Scope，limit/offset 在查询串上），
-    不是 GET /records —— 用 GET 会收到 405。
-    """
-    payload = post_json(base, f'/api/projects/{project_id}/records/query?limit=1000',
-                        {'kinds': ['entity', 'relation', 'attribute', 'chunk']}) or {}
-    rows = payload.get('records') or payload.get('items') or []
+    """Follow the canonical cursor until every ledger row has been read."""
+    rows, cursor, seen = [], None, set()
+    while True:
+        payload = post_json(base, f'/api/projects/{project_id}/records/page', {
+            'kinds': ['entity', 'relation', 'attribute', 'chunk'],
+            'limit': 1000, 'cursor': cursor})
+        rows.extend(payload['records'])
+        cursor = payload['next_cursor']
+        if cursor is None:
+            break
+        if cursor in seen:
+            raise Failure('记录分页游标重复')
+        seen.add(cursor)
     return [row for row in rows if row.get('kind') in VIEWS]
 
 

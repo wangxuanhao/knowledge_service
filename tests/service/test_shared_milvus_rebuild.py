@@ -40,6 +40,9 @@ def test_dimension_migration_rebuilds_only_selected_project_generation(
             self.interrupted = False
             self.switches = []
 
+        def check_destination(self, *, destination):
+            return self
+
         def ensure_collection(self, destination=None):
             if destination is None or destination == 'shared':
                 raise VectorDimensionMismatch('shared', 1, self.dim)

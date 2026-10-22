@@ -148,12 +148,13 @@ test('404, cancellation, empty and failed loads have distinct states',async()=>{
   assert.equal(doc.getElementById('provenance-drawer').dataset.state,'cancelled');
 });
 
-test('decoration only activates offered citations and legacy note remains literal',()=>{
+test('decoration only activates offered citations and exposes no historical-era fallback',()=>{
   const {drawer,doc}=setup(async()=>({ok:false,status:404}));const host=doc.createElement('p');
   drawer.decorateAnswer(host,'<img>[E1] [E2] [E1]',{projectId:'p',answerId:'a',evidence:[{citation:'E1'}]});
   assert.equal(host.textContent,'<img>[E1] [E2] [E1]');
   assert.equal(flatten(host).filter(n=>n.tagName==='BUTTON').length,2);
-  drawer.renderLegacyNote(host);assert.ok(host.textContent.includes('该历史回答生成于溯源记录启用前'));
+  assert.equal(drawer.renderLegacyNote,undefined);
+  assert.equal(drawer.LEGACY_NOTE,undefined);
 });
 
 test('narrow drawer mounts below answers and layout changes retain focus, tabs and the active request',async()=>{

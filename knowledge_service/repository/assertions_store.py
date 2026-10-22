@@ -109,14 +109,28 @@ class AssertionStore:
             raise KeyError(assertion_id)
         return self._assertion(row)
 
-    def list(self, project_id, status=None, canonical_record_id=None, document_id=None):
+    def list(self, project_id, status=None, canonical_record_id=None, document_id=None, assertion_ids=None):
         self.repo.get_project(project_id)
         if status is not None and status not in ASSERTION_STATUSES:
             raise ValueError('不支持的断言状态')
         clauses, values = ['project_id=?'], [project_id]
-        for column, value in (
-                ('status', status), ('canonical_record_id', canonical_record_id),
-                ('document_id', document_id)):
+        if assertion_ids is not None:
+            if (not isinstance(assertion_ids, (list, tuple)) or len(assertion_ids) > 100
+                    or any(not isinstance(value, str) or not value or len(value) > 256 for value in assertion_ids)):
+                raise ValueError('候选血缘需要最多 100 个有效断言 ID')
+            choices, candidates = [], []
+            if canonical_record_id is not None:
+                choices.append('canonical_record_id=?')
+                candidates.append(canonical_record_id)
+            if assertion_ids:
+                choices.append('id=ANY(?::text[])')
+                candidates.append(list(assertion_ids))
+            clauses.append('(' + ' OR '.join(choices) + ')' if choices else 'FALSE')
+            values.extend(candidates)
+        elif canonical_record_id is not None:
+            clauses.append('canonical_record_id=?')
+            values.append(canonical_record_id)
+        for column, value in (('status', status), ('document_id', document_id)):
             if value is not None:
                 clauses.append(f'{column}=?')
                 values.append(value)

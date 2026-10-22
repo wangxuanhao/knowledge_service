@@ -18,6 +18,8 @@
      得到的是**新版本**，v1/v2 原样保留；新版本的 base_ontology_id 指向 v1。
      不允许"把生产切回旧结构"这种没有发布记录的写法。
 """
+from ontology_seed import seed_project_ontology
+from ontology_seed import seed_ontology
 import json
 
 from fastapi.testclient import TestClient
@@ -41,15 +43,15 @@ def setup(tmp_path):
     p = client.post('/api/projects',
                     json={'name': '版本管理', 'use_default_ontology': False}).json()['id']
     base = f'/api/projects/{p}'
-    first = client.post(base + '/ontologies', json={'turtle': TTL})
-    assert first.status_code == 201, first.text
-    return client, app, p, base, first.json()
+    first = seed_project_ontology(client, base + '', TTL)
+    assert first['id']
+    return client, app, p, base, first
 
 
 def new_draft(client, base, ontology_id, title):
     response = client.post(base + '/ontology-drafts', json={
         'base_ontology_id': ontology_id, 'source_kind': 'manual',
-        'title': title, 'actor': 'tester'})
+        'title': title})
     assert response.status_code == 201, response.text
     return response.json()
 
@@ -74,8 +76,7 @@ def review(client, base, draft):
                                'expected_revision': current['revision'],
                                'expected_ontology_id': current.get('base_ontology_id'),
                                'validation_fingerprint': current['validation_fingerprint'],
-                               'acknowledged_warning_codes': warning_codes(current),
-                               'actor': 'reviewer'})
+                               'acknowledged_warning_codes': warning_codes(current)})
     assert approved.status_code == 200, approved.text
     body = approved.json()
     # 一键审核返回 {draft, batch}：批次统计是给界面显示"收下几条"的，
@@ -95,7 +96,6 @@ def publish(client, base, draft, note, key='vm-publish', extra_codes=()):
         'validation_fingerprint': draft['validation_fingerprint'],
         'acknowledged_warning_codes': sorted(set(warning_codes(draft)) | set(extra_codes)),
         'idempotency_key': f'{key}-{draft["id"]}',
-        'actor': 'publisher',
         'note': note})
 
 
@@ -144,7 +144,7 @@ def test_publish_without_note_is_rejected(tmp_path):
         'expected_ontology_id': draft['base_ontology_id'],
         'validation_fingerprint': draft['validation_fingerprint'],
         'acknowledged_warning_codes': warning_codes(draft),
-        'idempotency_key': 'no-note-1', 'actor': 'publisher'}
+        'idempotency_key': 'no-note-1'}
     response = client.post(base + f"/ontology-drafts/{draft['id']}/publish", json=body)
     assert response.status_code == 422, response.text
     # 缺字段被拒 = 没有产生版本，历史必须原样
@@ -159,7 +159,7 @@ def revert_draft(client, base, ontology_id, title='回到历史版本'):
     服务端只对这个来源放行"基线不是最新版"，并要求发布时勾选回退警告。"""
     response = client.post(base + '/ontology-drafts', json={
         'base_ontology_id': ontology_id, 'source_kind': 'revert',
-        'title': title, 'actor': 'tester',
+        'title': title,
         'source_context': {'revert_from': ontology_id}})
     assert response.status_code == 201, response.text
     return response.json()
@@ -192,7 +192,7 @@ def test_empty_min_length_is_rejected(tmp_path):
         'expected_ontology_id': draft['base_ontology_id'],
         'validation_fingerprint': draft['validation_fingerprint'],
         'acknowledged_warning_codes': warning_codes(draft),
-        'idempotency_key': 'empty-note-1', 'actor': 'publisher', 'note': ''})
+        'idempotency_key': 'empty-note-1', 'note': ''})
     assert response.status_code == 422, response.text
 
 
@@ -267,7 +267,7 @@ def test_version_list_uses_stable_release_order_and_authoritative_versions(tmp_p
         assert history[1]['note'] == '结构发布'
         assert history[1]['actor'] == 'architect'
 
-        next_version = repository.save_ontology(project_id, TTL, {})
+        next_version = seed_ontology(repository, project_id, TTL, {})
         assert next_version['version'] == 3, '下一次结构发布必须从权威当前版本 v2 递增'
 
 
@@ -435,14 +435,14 @@ def test_plain_draft_still_may_not_use_a_historical_base(tmp_path):
 
     stale = client.post(base + '/ontology-drafts', json={
         'base_ontology_id': first['id'], 'source_kind': 'manual',
-        'title': '拿旧基线做普通编辑', 'actor': 'tester'})
+        'title': '拿旧基线做普通编辑'})
     assert stale.status_code == 409, stale.text
     assert stale.json()['code'] == 'stale_base'
 
     # revert 但指向一个不存在的版本：也不行（回退不是"随便指一个 id"的旁路）
     ghost = client.post(base + '/ontology-drafts', json={
         'base_ontology_id': 'not-a-real-version', 'source_kind': 'revert',
-        'title': '回到不存在的版本', 'actor': 'tester'})
+        'title': '回到不存在的版本'})
     assert ghost.status_code == 409, ghost.text
     assert ghost.json()['code'] == 'stale_base'
 
@@ -458,7 +458,7 @@ def test_publish_replay_is_idempotent(tmp_path):
         'expected_ontology_id': draft['base_ontology_id'],
         'validation_fingerprint': draft['validation_fingerprint'],
         'acknowledged_warning_codes': warning_codes(draft),
-        'idempotency_key': 'replay-key-1', 'actor': 'publisher',
+        'idempotency_key': 'replay-key-1',
         'note': '幂等重放'}
     first_call = client.post(base + f"/ontology-drafts/{draft['id']}/publish", json=payload)
     assert first_call.status_code == 200, first_call.text
@@ -506,7 +506,7 @@ def test_pure_revert_publishes_the_old_structure_as_a_new_version(tmp_path):
         'expected_ontology_id': v2['id'],
         'validation_fingerprint': current['validation_fingerprint'],
         'acknowledged_warning_codes': [REVERT],
-        'idempotency_key': 'pure-revert-1', 'actor': 'publisher',
+        'idempotency_key': 'pure-revert-1',
         'note': '回退到 v1：设备域方案作废，结构回到 v1'})
     assert result.status_code == 200, result.text
 
@@ -548,7 +548,7 @@ def test_revert_accepts_the_revert_base_as_expected_ontology(tmp_path):
         'expected_ontology_id': v1['id'],          # ← 回到的那一版
         'validation_fingerprint': current['validation_fingerprint'],
         'acknowledged_warning_codes': [REVERT],
-        'idempotency_key': 'revert-base-precondition-1', 'actor': 'publisher',
+        'idempotency_key': 'revert-base-precondition-1',
         'note': '回退到 v1（前置条件写成目标版本）'})
     assert result.status_code == 200, result.text
     assert len(versions(client, base)) == 3

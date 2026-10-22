@@ -101,12 +101,7 @@ class OntologyDrafts(
                 })
 
     def _history(self, project_id, draft_id):
-        history = self.store.export(project_id)
-        operations = [row for row in history['operations']
-                      if row['draft_id'] == draft_id]
-        decisions = [row for row in history['decisions']
-                     if row['draft_id'] == draft_id]
-        return operations, decisions
+        return self.store.history(project_id, draft_id)
 
     def _effective_operations(self, project_id, draft_id):
         """Return current operations in stable logical, not append, order."""
@@ -138,10 +133,10 @@ class OntologyDrafts(
             row['supersedes_decision_id'] for row in all_decisions
             if row.get('supersedes_decision_id')}
         latest = [row for row in all_decisions if row['id'] not in superseded]
-        # A later decision for the same operation is authoritative even when an
-        # imported legacy history omitted its explicit supersession link.
         by_operation = {}
         for row in latest:
+            if row['operation_id'] in by_operation:
+                raise ValueError('审核历史缺少明确的决定替换关系')
             by_operation[row['operation_id']] = row
         return list(by_operation.values())
 
@@ -172,12 +167,21 @@ class OntologyDrafts(
             turtle, _ = self._ontology_for_draft(project_id, draft)
         except ValueError:
             turtle = self._base_turtle(project_id, draft['base_ontology_id'])
+        batches = []
+        context = draft.get('source_context') or {}
+        for binding in context.get('intake_bindings') or []:
+            candidate_ids = binding.get('selected_candidate_ids') or []
+            batches.append({'run_id': binding['discovery_run_id'],
+                'candidate_ids': candidate_ids, 'selected': len(candidate_ids)})
         return {
             **draft,
             'draft': draft,
             'operations': effective,
             'decisions': decisions,
             'turtle': turtle,
+            'associated_knowledge': {
+                'selected': len({x for batch in batches for x in batch['candidate_ids']}),
+                'per_batch': batches},
             'ontology': Ontology(turtle).summary() if turtle.strip() else {
                 'classes': [], 'relations': [], 'attributes': [], 'triples': 0},
         }
@@ -212,6 +216,17 @@ class OntologyDrafts(
 
     def _source_snapshot(self, project_id, draft, *, require_current=True):
         context = draft.get('source_context') or {}
+        if require_current and context.get('intake_bindings'):
+            from .ontology_intake import assert_intake_sources, intake_run_ids
+            assert_intake_sources(self.repository, project_id, context)
+            for run_id in intake_run_ids(context):
+                run = self.repository.get_discovery_run(project_id, run_id)
+                references = run.get('source_documents')
+                if not isinstance(references, list):
+                    raise StaleSource('关联候选缺少不可变来源快照，请重新核对绑定')
+                # Rebase may refresh draft-level refs; it cannot silently
+                # change the frozen fact scope of an immutable intake run.
+                self._source_snapshot(project_id, {'source_context': {'documents': references}})
         snapshots = []
         for reference in self._source_references(context):
             document_id = reference.get('document_id') or reference.get('id')
@@ -392,7 +407,8 @@ class OntologyDrafts(
             return None
         if draft.get('base_ontology_id') != self._latest_id(project_id):
             return 'stale_base'
-        if check_source and draft.get('source_kind') in {'discovery', 'candidate'}:
+        if check_source and (draft.get('source_kind') in {'discovery', 'candidate'}
+                             or (draft.get('source_context') or {}).get('intake_bindings')):
             try:
                 self._source_snapshot(project_id, draft)
             except StaleSource:
@@ -478,7 +494,8 @@ class OntologyDrafts(
                     'current_ontology_id': latest,
                     'draft': draft,
                 })
-        if check_source and draft['source_kind'] in {'discovery', 'candidate'}:
+        if check_source and (draft['source_kind'] in {'discovery', 'candidate'}
+                             or (draft.get('source_context') or {}).get('intake_bindings')):
             try:
                 self._source_snapshot(project_id, draft)
             except StaleSource as exc:
@@ -621,10 +638,12 @@ class OntologyDrafts(
                 'design': entry(design_allowed, design_reason),
                 'review': entry(review_allowed, review_reason),
             },
-            'next_action': self._next_action(project_id, selected, has_drafts),
+            'next_action': self._next_action(
+                project_id, selected, has_drafts,
+                derived_state={'needs_rebase': rebase_kind, 'pending_phase': phase}),
         }
 
-    def _next_action(self, project_id, draft, has_drafts):
+    def _next_action(self, project_id, draft, has_drafts, *, derived_state=None):
         """状态条上那唯一一个"下一步"。
 
         前端按 ``kind`` 挂本地处理器（新建草稿/提交/去收件箱/收下并发布/重新基线/刷新来源），
@@ -649,14 +668,16 @@ class OntologyDrafts(
             return {'kind': 'discover', 'label': '去发现新候选', 'stage': 'discover', 'enabled': True,
                     'title': (f'本轮已{fate}。等知识写入产生新候选后，在「发现」生成下一轮草案；'
                               '要直接调整当前本体结构，请去「本体建模层」。')}
-        rebase_kind = self.needs_rebase(project_id, draft)
+        rebase_kind = (self.needs_rebase(project_id, draft) if derived_state is None
+                       else derived_state['needs_rebase'])
         if rebase_kind == 'stale_base':
             return {'kind': 'rebase', 'label': '重新基线', 'stage': None, 'enabled': True,
                     'title': '把草案基线更新到项目当前本体版本，然后重新校验'}
         if rebase_kind == 'stale_source':
             return {'kind': 'reload', 'label': '刷新来源', 'stage': None, 'enabled': True,
                     'title': '重新读取来源快照；来源没变就不用动候选'}
-        phase = self.pending_phase(project_id, draft)
+        phase = (self.pending_phase(project_id, draft) if derived_state is None
+                 else derived_state['pending_phase'])
         if phase == 'settled':
             # 发布不是页面、也不是第二个按钮：它是「收下」的结果。这个入口只在收尾失败时出现（重试）。
             return {'kind': 'publish', 'label': '收下并发布', 'stage': 'review', 'enabled': True,
@@ -672,27 +693,6 @@ class OntologyDrafts(
                           '继续改与「提交并校验」都在「本体建模层」' if changes
                           else '这份草案还没有变更：去「本体建模层」补变更，或驳回它')}
 
-    def update_publication_effects(self, project_id, draft_id,
-                                   expected_revision, effects):
-        """Refresh frozen source side effects while a source draft is editable."""
-        draft = self.store.get(project_id, draft_id)
-        self._assert_revision(draft, expected_revision)
-        _status_guard(draft, EDITABLE_STATES, '改写来源副作用',
-                      '副作用只在编辑态的草案上刷新。')
-        if draft['source_kind'] not in {'discovery', 'candidate', 'import'}:
-            raise ValueError('manual drafts do not have source publication effects')
-        if not isinstance(effects, dict):
-            raise ValueError('publication effects must be an object')
-        self._check_current(project_id, draft, expected_revision)
-        context = dict(draft.get('source_context') or {})
-        context['publication_effects'] = effects
-        updated = self._cas(project_id, draft_id, expected_revision, {
-            'source_context': context,
-            'validation_report': None,
-            'validation_fingerprint': None,
-            'submitted_at': None,
-        })
-        return self._preview(project_id, updated)
 
     def create(self, project_id, base_ontology_id_or_none=None, source='manual',
                title=None, actor=None, *, source_context=None, summary='',
@@ -879,7 +879,8 @@ class OntologyDrafts(
                       'errors': []}
         prospective = {'conforms': not errors, 'errors': list(errors)}
         if not errors:
-            records = self.repository.current_records(project_id, vectors='none')
+            records = self.repository.current_records(
+                project_id, kinds=('entity', 'relation', 'attribute'))
             formal = [row for row in records
                       if row.get('kind') in {'entity', 'relation', 'attribute'}]
             historical['checked_records'] = len(formal)
@@ -1153,6 +1154,10 @@ class OntologyDrafts(
                 **({'validation_report': None, 'validation_fingerprint': None,
                     'submitted_at': None} if request_changes else {}),
             })
+            if status == 'rejected':
+                from .ontology_intake import close_intake_runs
+                close_intake_runs(self.repository, project_id,
+                                  updated.get('source_context') or {})
         return self._preview(project_id, updated)
 
     def close(self, project_id, draft_id, expected_revision, actor, reason):
@@ -1166,25 +1171,8 @@ class OntologyDrafts(
             context['closure'] = {'actor': actor, 'reason': reason}
             closed = self._cas(project_id, draft_id, expected_revision, {
                 'status': 'rejected', 'source_context': context})
-            effects = context.get('publication_effects') or {}
-            run_id = effects.get('discovery_run_id')
-            if draft.get('source_kind') == 'discovery' and run_id:
-                run = self.repository.get_discovery_run(project_id, run_id)
-                resolved_ids = {
-                    outcome['candidate_id']
-                    for outcome in run.get('candidate_outcomes') or []
-                }
-                terminal = [{
-                    'candidate_id': binding['candidate_id'],
-                    'status': 'skipped',
-                    'reason_code': 'draft_closed',
-                } for binding in run.get('candidate_bindings') or []
-                    if binding['candidate_id'] not in resolved_ids]
-                self.repository.transition_discovery_run(
-                    # 注意：这里是**发现运行**的状态（词表见 discovery_run_store.RUN_STATUSES），
-                    # 跟草案的三种状态不是一套 —— 驳回请求对运行而言就是"关闭"。
-                    project_id, run_id, 'draft_created', 'closed',
-                    candidate_outcomes=terminal)
+            from .ontology_intake import close_intake_runs
+            close_intake_runs(self.repository, project_id, context)
             return closed
 
     # ------------------------------------------------------------------ rebase
@@ -1295,8 +1283,12 @@ class OntologyDrafts(
             else:
                 rebuild_command['evidence_refs'] = self._refresh_operation_evidence(
                     draft, rebuild_draft, operation.get('evidence') or [])
+            operation_draft = rebuild_draft
+            if ((draft.get('source_context') or {}).get('intake_bindings')
+                    and old_validation.get('source') == 'discovery'):
+                operation_draft = {**rebuild_draft, 'source_kind': 'discovery'}
             rebuilt = self._rebuild_operations(
-                project_id, rebuild_draft, [{
+                project_id, operation_draft, [{
                     'action': operation['action'],
                     'target_iri': operation['target_iri'],
                     'before': self._rebase_before(ontology, operation),

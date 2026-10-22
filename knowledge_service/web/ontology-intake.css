@@ -1,0 +1,38 @@
+.ontology-intake-drawer.workspace-drawer{width:min(880px,96vw);max-width:96vw}
+.ontology-intake{--oi-ink:#214d40;--oi-line:#d4e2d8;--oi-muted:#687d70;color:var(--oi-ink);font-size:13px;line-height:1.65}
+.ontology-intake h3{font-size:15px;letter-spacing:.02em;margin:0 0 12px;color:var(--oi-ink)}
+.ontology-intake .oi-context{border-left:3px solid #2b7661;padding:8px 12px;background:#edf5ef;overflow-wrap:anywhere}
+.ontology-intake .oi-scope,.ontology-intake .oi-source{font-size:11px;color:var(--oi-muted);overflow-wrap:anywhere}
+.ontology-intake .oi-section-heading{display:flex;gap:12px;justify-content:space-between;align-items:baseline;margin-top:24px}
+.ontology-intake .oi-section-heading>span{font-size:11px;color:var(--oi-muted)}
+.ontology-intake .oi-candidate-list{display:grid;gap:10px}
+.ontology-intake .oi-candidate{border:1px solid var(--oi-line);border-radius:8px;padding:14px;background:#fff;min-width:0}
+.ontology-intake .oi-candidate.is-selected{border-color:#6da18b;background:#f5faf5;box-shadow:inset 3px 0 #4f8c72}
+.ontology-intake .oi-candidate-id{display:block;font:10px/1.7 Consolas,monospace;color:#7c8c80;overflow-wrap:anywhere;margin:5px 0}
+.ontology-intake .oi-fact-preview{margin:20px 0;border-top:1px solid var(--oi-line)}
+.ontology-intake .oi-fact-preview h4{font-size:13px;margin:16px 0 8px}
+.ontology-intake .oi-fact-row{border-top:1px dashed var(--oi-line);padding:12px 0;overflow-wrap:anywhere}
+.ontology-intake .oi-fact-row strong{font-size:13px;font-weight:600}
+.ontology-intake .oi-fact-outcome{font-size:12px;color:#426e51;margin-bottom:3px}
+.ontology-intake .oi-dependency-note{font-size:11px;color:#426e51;border-left:2px solid #8bad94;background:#eef6ed;padding:8px 10px}
+.ontology-intake .oi-candidate-select{display:flex;align-items:flex-start;gap:9px;cursor:pointer;margin:0}
+.ontology-intake .oi-candidate-select input{width:16px;height:16px;flex:0 0 16px;margin:4px 0 0;accent-color:#276f59}
+.ontology-intake .oi-candidate-select strong{flex:1;overflow-wrap:anywhere;font-size:14px}
+.ontology-intake .oi-candidate-select small{border:1px solid var(--oi-line);border-radius:4px;padding:0 6px;font-size:10px;color:var(--oi-muted)}
+.ontology-intake .oi-evidence summary,.ontology-intake .oi-diff summary{cursor:pointer;color:#396c54;font-size:12px}
+.ontology-intake .oi-diff{border:1px solid var(--oi-line);border-radius:5px;margin:8px 0;padding:10px 12px}
+.ontology-intake .oi-diff>summary{font-size:13px;font-weight:600;overflow-wrap:anywhere}
+.ontology-intake .oi-technical>summary{font-size:11px;color:var(--oi-muted);cursor:pointer}
+.ontology-intake pre.oi-change-values{font:inherit;font-size:12px;line-height:1.8}
+.ontology-intake pre{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font:11px/1.8 Consolas,monospace;background:#edf2ed;padding:12px;border-radius:5px;max-height:280px;overflow:auto;color:#426652}
+.ontology-intake select{display:block;width:100%;max-width:100%;font:inherit;font-size:12px;background:#fff;border:1px solid #bacfc1;border-radius:5px;color:var(--oi-ink);padding:9px;margin:10px 0}
+.ontology-intake .oi-target,.ontology-intake .oi-preview,.ontology-intake .oi-receipt{border-top:1px solid var(--oi-line);margin-top:24px;padding-top:20px}
+.ontology-intake .oi-receipt{border:1px solid #a8c4b4;background:#eff6ef;padding:20px;border-radius:8px}
+.ontology-intake .oi-warning,.ontology-intake .oi-error{border-left:3px solid #b69b4a;background:#faf7e9;color:#7a6524;padding:10px 12px;overflow-wrap:anywhere}
+.ontology-intake .oi-error{border-left-color:#b86958;color:#934c3f;background:#fcf0ed}
+.ontology-intake .om-btn{font:inherit;font-size:12px;color:#285a47;background:#fff;border:1px solid #afc7b7;border-radius:5px;padding:8px 12px;margin:8px 8px 0 0;cursor:pointer}
+.ontology-intake .om-btn.primary{background:#28664f;color:#fff;border-color:#28664f}
+.ontology-intake .om-btn:disabled{opacity:.5;cursor:wait}
+.ontology-intake :is(button,select,input,summary):focus-visible{outline:2px solid #2a7357;outline-offset:3px}
+.ontology-intake .subtle{color:var(--oi-muted);font-size:11px;overflow-wrap:anywhere}
+@media(max-width:600px){.ontology-intake-drawer.workspace-drawer{width:100vw;max-width:100vw}.ontology-intake .oi-section-heading{display:block}.ontology-intake .oi-candidate{padding:11px}.ontology-intake .oi-candidate-select{flex-wrap:wrap}.ontology-intake .oi-candidate-select strong{flex-basis:calc(100% - 26px)}}

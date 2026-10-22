@@ -1,0 +1,1841 @@
+{
+  "scope": "single complete graph load on main application; instrumented server+browser; not a percentile",
+  "project_id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+  "network": [
+    {
+      "kind": "manifest",
+      "timing": {
+        "startTime": 1792463093309.9612,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 261.777,
+        "responseStart": 3607.505,
+        "responseEnd": 3609.924
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463096926.688,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.46,
+        "responseStart": 1257.712,
+        "responseEnd": 1266.078
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463098309.52,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.461,
+        "responseStart": 26659.231,
+        "responseEnd": 26664.269
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463125009.4111,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.522,
+        "responseStart": 207.373,
+        "responseEnd": 232.554
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463125276.449,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.439,
+        "responseStart": 192.463,
+        "responseEnd": 212.422
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463125525.842,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.54,
+        "responseStart": 170.051,
+        "responseEnd": 175.417
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463125742.8022,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.503,
+        "responseStart": 215.573,
+        "responseEnd": 220.951
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463125992.889,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.452,
+        "responseStart": 206.034,
+        "responseEnd": 211.047
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463126242.537,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.558,
+        "responseStart": 312.939,
+        "responseEnd": 319.212
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463126592.813,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.503,
+        "responseStart": 270.991,
+        "responseEnd": 299.216
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463126936.1301,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.466,
+        "responseStart": 345.342,
+        "responseEnd": 350.416
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463127316.015,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.488,
+        "responseStart": 314.641,
+        "responseEnd": 319.261
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463127664.254,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.457,
+        "responseStart": 144.601,
+        "responseEnd": 150.445
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463127842.129,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.485,
+        "responseStart": 963.963,
+        "responseEnd": 968.689
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463128842.929,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.533,
+        "responseStart": 606.803,
+        "responseEnd": 611.944
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463129492.2148,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.432,
+        "responseStart": 230.714,
+        "responseEnd": 256.578
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463129779.8472,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 1.693,
+        "responseStart": 195.341,
+        "responseEnd": 200.797
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463130009.97,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 2.405,
+        "responseStart": 287.834,
+        "responseEnd": 305.344
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463130343.1,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.411,
+        "responseStart": 297.505,
+        "responseEnd": 303.676
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463130676.295,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.423,
+        "responseStart": 243.191,
+        "responseEnd": 270.9
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463130975.874,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.536,
+        "responseStart": 163.624,
+        "responseEnd": 168.757
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463131175.3691,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.438,
+        "responseStart": 356.518,
+        "responseEnd": 361.993
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463131575.8462,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.409,
+        "responseStart": 284.725,
+        "responseEnd": 289.473
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463131910.413,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.483,
+        "responseStart": 303.94,
+        "responseEnd": 309.385
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463132259.6738,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.392,
+        "responseStart": 218.438,
+        "responseEnd": 224.028
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463132513.726,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.4,
+        "responseStart": 185.828,
+        "responseEnd": 205.173
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463132748.365,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.427,
+        "responseStart": 171.78,
+        "responseEnd": 187.308
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463132966.145,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.428,
+        "responseStart": 200.572,
+        "responseEnd": 205.772
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463133208.887,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.414,
+        "responseStart": 181.527,
+        "responseEnd": 187.802
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463133425.893,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.499,
+        "responseStart": 202.397,
+        "responseEnd": 206.973
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463133659.7358,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.393,
+        "responseStart": 214.776,
+        "responseEnd": 219.88
+      }
+    },
+    {
+      "kind": "entities",
+      "timing": {
+        "startTime": 1792463133909.092,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.421,
+        "responseStart": 73.938,
+        "responseEnd": 75.549
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463133992.81,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.459,
+        "responseStart": 377.743,
+        "responseEnd": 402.385
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463134421.514,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.463,
+        "responseStart": 353.69,
+        "responseEnd": 373.107
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463134829.751,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.434,
+        "responseStart": 421.288,
+        "responseEnd": 426.34
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463135291.659,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.441,
+        "responseStart": 361.011,
+        "responseEnd": 366.73
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463135691.242,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.492,
+        "responseStart": 395.233,
+        "responseEnd": 422.59
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463136145.518,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.471,
+        "responseStart": 353.012,
+        "responseEnd": 356.251
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463136539.654,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.395,
+        "responseStart": 453.907,
+        "responseEnd": 458.974
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463137033.431,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.503,
+        "responseStart": 546.522,
+        "responseEnd": 552.423
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463137621.978,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.457,
+        "responseStart": 337.392,
+        "responseEnd": 345.29
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463138006.371,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.395,
+        "responseStart": 698.101,
+        "responseEnd": 703.096
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463138751.2432,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.451,
+        "responseStart": 481.386,
+        "responseEnd": 487.505
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463139282.752,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.421,
+        "responseStart": 481.587,
+        "responseEnd": 486.244
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463139809.715,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.477,
+        "responseStart": 384.249,
+        "responseEnd": 389.067
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463140246.456,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.46,
+        "responseStart": 448.214,
+        "responseEnd": 453.465
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463140762.726,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.391,
+        "responseStart": 436.677,
+        "responseEnd": 441.757
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463141247.6357,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.424,
+        "responseStart": 525.932,
+        "responseEnd": 547.237
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463141839.493,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.405,
+        "responseStart": 452.662,
+        "responseEnd": 458.166
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463142342.009,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.424,
+        "responseStart": 632.4,
+        "responseEnd": 636.417
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463143022.09,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.38,
+        "responseStart": 456.141,
+        "responseEnd": 460.935
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463143526.4458,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.472,
+        "responseStart": 473.315,
+        "responseEnd": 478.471
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463144053.2888,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.492,
+        "responseStart": 400.496,
+        "responseEnd": 405.469
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463144508.673,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.489,
+        "responseStart": 387.71,
+        "responseEnd": 392.248
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463144941.927,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.426,
+        "responseStart": 540.659,
+        "responseEnd": 551.217
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463145542.857,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.47,
+        "responseStart": 489.775,
+        "responseEnd": 504.939
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463146099.22,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.446,
+        "responseStart": 439.418,
+        "responseEnd": 453.031
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463146602.588,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.423,
+        "responseStart": 389.225,
+        "responseEnd": 394.306
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463147047.24,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.461,
+        "responseStart": 509.387,
+        "responseEnd": 515.669
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463147622.4949,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.431,
+        "responseStart": 357.131,
+        "responseEnd": 374.221
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463148044.593,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.481,
+        "responseStart": 522.227,
+        "responseEnd": 528.101
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463148624.722,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.439,
+        "responseStart": 365.831,
+        "responseEnd": 370.326
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463149043.4082,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.47,
+        "responseStart": 348.439,
+        "responseEnd": 354.801
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463149456.5708,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.405,
+        "responseStart": 379.18,
+        "responseEnd": 384.712
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463149897.795,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.379,
+        "responseStart": 411.737,
+        "responseEnd": 416.346
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463150371.997,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.483,
+        "responseStart": 471.307,
+        "responseEnd": 476.794
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463150900.4119,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.508,
+        "responseStart": 537.19,
+        "responseEnd": 541.895
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463151509.7651,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.384,
+        "responseStart": 648.278,
+        "responseEnd": 653.307
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463152225.173,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.435,
+        "responseStart": 479.395,
+        "responseEnd": 484.494
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463152791.911,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.437,
+        "responseStart": 697.613,
+        "responseEnd": 718.628
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463153575.668,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.446,
+        "responseStart": 338.901,
+        "responseEnd": 343.424
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463153985.365,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.546,
+        "responseStart": 405.299,
+        "responseEnd": 409.247
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463154470.991,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.42,
+        "responseStart": 395.776,
+        "responseEnd": 400.94
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463154944.7273,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.471,
+        "responseStart": 464.847,
+        "responseEnd": 484.037
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463155502.262,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.568,
+        "responseStart": 450.094,
+        "responseEnd": 455.523
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463156026.9458,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.422,
+        "responseStart": 401.074,
+        "responseEnd": 411.003
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463156504.768,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.533,
+        "responseStart": 377.548,
+        "responseEnd": 382.485
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463156962.734,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.434,
+        "responseStart": 362.503,
+        "responseEnd": 387.168
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463157416.964,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.424,
+        "responseStart": 494.557,
+        "responseEnd": 499.93
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463157986.829,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.487,
+        "responseStart": 734.556,
+        "responseEnd": 757.171
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463158813.302,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.456,
+        "responseStart": 923.606,
+        "responseEnd": 928.644
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463159823.829,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.416,
+        "responseStart": 960.109,
+        "responseEnd": 966.363
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463160870.2698,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.424,
+        "responseStart": 1034.617,
+        "responseEnd": 1040.146
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463161986.5088,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.426,
+        "responseStart": 3438.478,
+        "responseEnd": 3444.216
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463165513.9639,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.612,
+        "responseStart": 440.157,
+        "responseEnd": 447.006
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463166048.631,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.427,
+        "responseStart": 360.931,
+        "responseEnd": 370.394
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463166486.3892,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.445,
+        "responseStart": 566.308,
+        "responseEnd": 572.034
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463167129.5898,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.51,
+        "responseStart": 591.789,
+        "responseEnd": 611.227
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463167811.5671,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.384,
+        "responseStart": 670.573,
+        "responseEnd": 693.264
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463168577.836,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.409,
+        "responseStart": 552.88,
+        "responseEnd": 558.082
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463169208.018,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.483,
+        "responseStart": 525.994,
+        "responseEnd": 536.672
+      }
+    },
+    {
+      "kind": "relations",
+      "timing": {
+        "startTime": 1792463169814.3662,
+        "domainLookupStart": -1,
+        "domainLookupEnd": -1,
+        "connectStart": -1,
+        "secureConnectionStart": -1,
+        "connectEnd": -1,
+        "requestStart": 0.399,
+        "responseStart": 518.149,
+        "responseEnd": 522.789
+      }
+    }
+  ],
+  "errors": [],
+  "complete_seconds": 77.51599999999962,
+  "browser": {
+    "probe": {
+      "calls": {
+        "Renderer.draw": {
+          "count": 86,
+          "total_ms": 37.10000000055879,
+          "max_ms": 2.099999999627471
+        },
+        "GraphDataset.edgePositions": {
+          "count": 84,
+          "total_ms": 1759.2999999951571,
+          "max_ms": 53.700000000186265
+        },
+        "Renderer.buildEdgeCache": {
+          "count": 84,
+          "total_ms": 5.300000001676381,
+          "max_ms": 0.20000000018626451
+        },
+        "Renderer.sync": {
+          "count": 84,
+          "total_ms": 1831.3999999994412,
+          "max_ms": 55.19999999925494
+        },
+        "worker.layoutRoundtrip": {
+          "count": 31,
+          "total_ms": 179.50000000279397,
+          "max_ms": 84.40000000037253
+        },
+        "GraphDataset.addNodes": {
+          "count": 31,
+          "total_ms": 178.89999999757856,
+          "max_ms": 9.200000000186265
+        },
+        "GraphDataset.addEdges": {
+          "count": 60,
+          "total_ms": 473.5000000046566,
+          "max_ms": 22.199999999254942
+        }
+      },
+      "json": [
+        {
+          "body_decode_wait_ms": 0.6000000005587935,
+          "parse_ms": 0.19999999925494194,
+          "characters": 424
+        },
+        {
+          "body_decode_wait_ms": 20.5,
+          "parse_ms": 5.2000000001862645,
+          "characters": 924408
+        },
+        {
+          "body_decode_wait_ms": 10.600000000558794,
+          "parse_ms": 5.3999999994412065,
+          "characters": 925442
+        },
+        {
+          "body_decode_wait_ms": 36.40000000037253,
+          "parse_ms": 4.599999999627471,
+          "characters": 930442
+        },
+        {
+          "body_decode_wait_ms": 32.299999999813735,
+          "parse_ms": 3.7999999998137355,
+          "characters": 930442
+        },
+        {
+          "body_decode_wait_ms": 18.59999999962747,
+          "parse_ms": 4.7000000001862645,
+          "characters": 930442
+        },
+        {
+          "body_decode_wait_ms": 17.200000000186265,
+          "parse_ms": 4.699999999254942,
+          "characters": 930442
+        },
+        {
+          "body_decode_wait_ms": 17.399999999441206,
+          "parse_ms": 4.400000000372529,
+          "characters": 930442
+        },
+        {
+          "body_decode_wait_ms": 16.90000000037253,
+          "parse_ms": 5.5,
+          "characters": 930442
+        },
+        {
+          "body_decode_wait_ms": 38.5,
+          "parse_ms": 4.2999999998137355,
+          "characters": 930442
+        },
+        {
+          "body_decode_wait_ms": 18.299999999813735,
+          "parse_ms": 4.099999999627471,
+          "characters": 930442
+        },
+        {
+          "body_decode_wait_ms": 16.299999999813735,
+          "parse_ms": 5.099999999627471,
+          "characters": 930442
+        },
+        {
+          "body_decode_wait_ms": 15.299999999813735,
+          "parse_ms": 4.7000000001862645,
+          "characters": 930442
+        },
+        {
+          "body_decode_wait_ms": 9.900000000372529,
+          "parse_ms": 5,
+          "characters": 930442
+        },
+        {
+          "body_decode_wait_ms": 17.40000000037253,
+          "parse_ms": 5.199999999254942,
+          "characters": 930442
+        },
+        {
+          "body_decode_wait_ms": 36.700000000186265,
+          "parse_ms": 4,
+          "characters": 930442
+        },
+        {
+          "body_decode_wait_ms": 17.09999999962747,
+          "parse_ms": 4.7000000001862645,
+          "characters": 930442
+        },
+        {
+          "body_decode_wait_ms": 29,
+          "parse_ms": 4.7000000001862645,
+          "characters": 930442
+        },
+        {
+          "body_decode_wait_ms": 10.200000000186265,
+          "parse_ms": 5.699999999254942,
+          "characters": 930442
+        },
+        {
+          "body_decode_wait_ms": 38.700000000186265,
+          "parse_ms": 4.5,
+          "characters": 930442
+        },
+        {
+          "body_decode_wait_ms": 16.799999999813735,
+          "parse_ms": 4,
+          "characters": 930442
+        },
+        {
+          "body_decode_wait_ms": 18.59999999962747,
+          "parse_ms": 4.7000000001862645,
+          "characters": 935442
+        },
+        {
+          "body_decode_wait_ms": 23.299999999813735,
+          "parse_ms": 4.5,
+          "characters": 935442
+        },
+        {
+          "body_decode_wait_ms": 17.100000000558794,
+          "parse_ms": 5.2000000001862645,
+          "characters": 935442
+        },
+        {
+          "body_decode_wait_ms": 16.700000000186265,
+          "parse_ms": 5.5,
+          "characters": 935442
+        },
+        {
+          "body_decode_wait_ms": 27.100000000558794,
+          "parse_ms": 5.3999999994412065,
+          "characters": 935442
+        },
+        {
+          "body_decode_wait_ms": 27.299999999813735,
+          "parse_ms": 4.900000000372529,
+          "characters": 935442
+        },
+        {
+          "body_decode_wait_ms": 17.800000000745058,
+          "parse_ms": 3.2999999998137355,
+          "characters": 935442
+        },
+        {
+          "body_decode_wait_ms": 18,
+          "parse_ms": 4.7000000001862645,
+          "characters": 935442
+        },
+        {
+          "body_decode_wait_ms": 16.399999999441206,
+          "parse_ms": 4.400000000372529,
+          "characters": 935442
+        },
+        {
+          "body_decode_wait_ms": 9.700000000186265,
+          "parse_ms": 5.2000000001862645,
+          "characters": 935442
+        },
+        {
+          "body_decode_wait_ms": 0.599999999627471,
+          "parse_ms": 0,
+          "characters": 366
+        },
+        {
+          "body_decode_wait_ms": 31.59999999962747,
+          "parse_ms": 4.7999999998137355,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 28.700000000186265,
+          "parse_ms": 5.2999999998137355,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 18.699999999254942,
+          "parse_ms": 5.900000000372529,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 15.200000000186265,
+          "parse_ms": 5,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 37.200000000186265,
+          "parse_ms": 4.5,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 16.5,
+          "parse_ms": 5.2999999998137355,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 14.699999999254942,
+          "parse_ms": 4.7000000001862645,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 8.800000000745058,
+          "parse_ms": 5.3999999994412065,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 16.600000000558794,
+          "parse_ms": 5.599999999627471,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 15.299999999813735,
+          "parse_ms": 5.7000000001862645,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 17.700000000186265,
+          "parse_ms": 5.5,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 15.299999999813735,
+          "parse_ms": 4.7999999998137355,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 15.299999999813735,
+          "parse_ms": 5.400000000372529,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 17.199999999254942,
+          "parse_ms": 5,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 16.299999999813735,
+          "parse_ms": 4.5,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 30.600000000558794,
+          "parse_ms": 4.8999999994412065,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 10.400000000372529,
+          "parse_ms": 5,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 8.799999999813735,
+          "parse_ms": 4.6000000005587935,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 15.599999999627471,
+          "parse_ms": 4.5,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 16.59999999962747,
+          "parse_ms": 4.7000000001862645,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 15.700000000186265,
+          "parse_ms": 5,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 9.300000000745058,
+          "parse_ms": 4.199999999254942,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 19.09999999962747,
+          "parse_ms": 5.2000000001862645,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 25,
+          "parse_ms": 5.099999999627471,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 18.90000000037253,
+          "parse_ms": 5.099999999627471,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 14.700000000186265,
+          "parse_ms": 5.2999999998137355,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 18.300000000745058,
+          "parse_ms": 5.8999999994412065,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 27.199999999254942,
+          "parse_ms": 6.400000000372529,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 16.299999999813735,
+          "parse_ms": 4.900000000372529,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 8.299999999813735,
+          "parse_ms": 4.2999999998137355,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 15.700000000186265,
+          "parse_ms": 5.2000000001862645,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 15.900000000372529,
+          "parse_ms": 3.699999999254942,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 14.300000000745058,
+          "parse_ms": 5,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 14.799999999813735,
+          "parse_ms": 4.7000000001862645,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 17.5,
+          "parse_ms": 5,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 9.299999999813735,
+          "parse_ms": 5.900000000372529,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 15.099999999627471,
+          "parse_ms": 4.400000000372529,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 28.5,
+          "parse_ms": 4.3999999994412065,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 15.199999999254942,
+          "parse_ms": 4.7000000001862645,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 16.199999999254942,
+          "parse_ms": 5.800000000745058,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 16.59999999962747,
+          "parse_ms": 4.7999999998137355,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 29.90000000037253,
+          "parse_ms": 5.699999999254942,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 14.100000000558794,
+          "parse_ms": 4.599999999627471,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 19.600000000558794,
+          "parse_ms": 4.8999999994412065,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 18.40000000037253,
+          "parse_ms": 4.599999999627471,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 33,
+          "parse_ms": 5.199999999254942,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 14.600000000558794,
+          "parse_ms": 5,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 33.40000000037253,
+          "parse_ms": 5.5,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 16.40000000037253,
+          "parse_ms": 7.2000000001862645,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 16.40000000037253,
+          "parse_ms": 5.7999999998137355,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 8.5,
+          "parse_ms": 4.599999999627471,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 16.59999999962747,
+          "parse_ms": 4.900000000372529,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 16.09999999962747,
+          "parse_ms": 4.1000000005587935,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 12.400000000372529,
+          "parse_ms": 5.199999999254942,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 15.5,
+          "parse_ms": 5,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 30.5,
+          "parse_ms": 7.2999999998137355,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 31.299999999813735,
+          "parse_ms": 5.2999999998137355,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 15.300000000745058,
+          "parse_ms": 5,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 17.799999999813735,
+          "parse_ms": 3.2999999998137355,
+          "characters": 905447
+        },
+        {
+          "body_decode_wait_ms": 14.700000000186265,
+          "parse_ms": 4.5,
+          "characters": 905180
+        }
+      ],
+      "started": 2579.7000000001863,
+      "first": 5413.299999999814,
+      "done": true
+    },
+    "stats": {
+      "loaded_entities": 150001,
+      "loaded_relations": 300000,
+      "drawn_entities": 150001,
+      "drawn_relations": 300000,
+      "relation_layer": "complete-world-cache",
+      "cached_relations": 300000,
+      "layout": "stable-id-v1",
+      "last_pick_ms": 0,
+      "gpu": "WebKit WebGL",
+      "context_lost": false
+    },
+    "gl_error": 0,
+    "heap_bytes": 122339489
+  },
+  "full_scale_selection_opens_detail": true,
+  "network_totals": {
+    "manifest": {
+      "requests": 1,
+      "response_wait_ms": 3345.728,
+      "body_transfer_ms": 2.418999999999869
+    },
+    "entities": {
+      "requests": 31,
+      "response_wait_ms": 35662.894,
+      "body_transfer_ms": 300.94400000000036
+    },
+    "relations": {
+      "requests": 60,
+      "response_wait_ms": 32427.19,
+      "body_transfer_ms": 534.5129999999997
+    }
+  },
+  "notes": [
+    "Network wait includes server work and scheduling; server phase file provides nested breakdown.",
+    "Response body wait overlaps transfer; JSON.parse is separately timed.",
+    "Renderer timings measure CPU submission; do not claim completed GPU elapsed time.",
+    "Phases are nested/overlapping; do not sum inclusive phases.",
+    "One measured run does not establish P95 or target acceptance."
+  ]
+}

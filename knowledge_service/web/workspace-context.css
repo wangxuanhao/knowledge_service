@@ -1,0 +1,39 @@
+/* Page-owned content rail; applied tags remain visible when the editor is closed. */
+body main #scope{position:relative;z-index:15;padding:8px 0;margin:0 0 12px;border:0;background:transparent;box-shadow:none;overflow:visible}
+.page-scope-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}#applied-scope-chips{display:flex;gap:6px;flex:1;flex-wrap:wrap}.applied-scope-chip{font-size:12px!important;padding:5px 9px!important}
+body main #scope>#cb-details{margin:0;border:0;background:transparent;position:static}body main #scope>#cb-details>summary{display:none}body main #scope>#cb-details:not([open])>*:not(summary){display:none}body main #scope>#cb-details[open]{position:absolute;inset:auto;top:48px;left:0;width:min(320px,calc(100vw - 36px));max-height:calc(100vh - 180px);overflow:auto;background:var(--ks-surface,#fff);border:1px solid var(--ks-line,#dce4dc);border-radius:10px;box-shadow:0 16px 45px #123c3329;padding:16px}
+body main #scope>#cb-details .cb-body{position:static;display:block;width:auto;max-height:none;overflow:visible;padding:0;border:0;box-shadow:none;background:transparent}.scope-rail-heading{display:flex;align-items:center;justify-content:space-between}.scope-rail-heading h2{font-size:16px;margin:0}.scope-actions{position:sticky!important;top:auto!important;right:auto!important;bottom:-16px;background:var(--ks-surface,#fff);padding:14px 0!important;display:flex;flex-wrap:wrap}.scope-fields{display:grid!important;grid-template-columns:1fr!important}#scope-to-qa{font-size:12px}#tab-qa #scope-to-qa{display:none}.scope-history-field{font-size:12px}.quality-mode .backup-only{display:none}.quality-mode #tab-runtime{display:none}body:not(.quality-mode) #tab-evaluation .extraction-evaluation{display:none}.management-drawer{margin-left:auto!important;margin-right:0!important;height:100%;max-height:100vh!important;border-radius:12px 0 0 12px!important}.projects-modal-overlay{justify-content:flex-end!important}.project-settings-links{display:flex;gap:8px;margin:18px 0}.source-detail-tabs{display:flex;gap:7px;padding:10px 0;flex-wrap:wrap}.source-detail-tabs button[aria-pressed=true]{background:#215b49;color:#fff}.source-record-row{padding:12px 0;border-bottom:1px solid var(--ks-line,#dce4dc)}
+
+body main #scope>#cb-details{display:block}body main #scope>#cb-details>summary{display:none!important}.scope-history-field input{width:100%}body main #scope .metadata-discovery{grid-template-columns:minmax(0,1fr)}#graph-local-type-controls{padding:8px 0}#graph-local-type-controls h3{font-size:12px;margin:0 0 6px}#graph-local-type-controls .scope-fields{display:flex!important;gap:10px}#graph-local-type-controls label{flex:1;font-size:12px}#graph-local-type-controls select{width:100%}
+/* These selectors also supersede the legacy theme's grid/details navigation. */
+body aside nav{display:flex;flex-direction:column;gap:20px;align-content:start;overflow-y:auto;flex:1;min-height:100px}
+body aside .nav-group{border:0;background:transparent;overflow:visible;flex:none;border-radius:0}
+body aside .nav-group[data-layer=system]{border-left:0;border-top:1px solid #ffffff24;padding-top:14px}
+body aside .nav-group>h2{margin:0 0 6px;padding:0 10px;font-size:11px;color:#9bbeb4}
+body aside .nav-group>button{padding:9px 12px;border-radius:6px;border-left:2px solid transparent}
+body aside .nav-group>button.active{border-left-color:#8fd4b2;background:#ffffff15;animation:none}
+body aside .nav-management{flex:none;margin-top:0}
+body aside .nav-group[hidden]{display:none}
+#source-file[hidden]{display:none!important}
+body main .source-filter-bar{flex-wrap:wrap;padding:10px;gap:7px}
+body main .source-filter-btn{white-space:nowrap;flex:0 0 auto;padding:7px 10px;font-size:12px;border-radius:7px}
+body main .source-filter-btn .filter-count{padding:0 4px}
+.qa-submitted-scope{display:block;margin:6px 4px 0;font-size:11px}
+.project-card[hidden]{display:none}
+@media(max-width:580px){
+  body aside{background:#143f37;color:#edf6f0;padding:12px;gap:12px}
+  body aside .brand{margin-bottom:0}
+  body aside nav{display:flex;flex-direction:row;gap:14px;max-height:none;min-height:0;overflow-x:auto;overflow-y:visible;flex:none;padding-bottom:2px}
+  body aside nav .nav-group{min-width:118px;flex:0 0 auto}
+  body aside .nav-group>h2{font-size:11px;white-space:nowrap}
+  body aside .nav-group>button{padding:7px 9px;font-size:12px;white-space:nowrap}
+  body aside .nav-management{display:flex;align-items:center;gap:8px;padding:9px 0 0}
+  body aside .nav-management>h2{padding:0 4px;margin:0}
+  body aside .nav-management>button{width:auto;margin:0}
+  body aside .nav-management[hidden]{display:none}
+  body main #cb-details[open]{max-height:65vh}
+  body main .source-filter-bar{gap:6px}
+  body main .source-filter-btn{font-size:11px;padding:6px 8px}
+  body main .source-layout{display:block}
+  body main #source-list{max-height:230px;overflow:auto;margin-bottom:16px}
+}

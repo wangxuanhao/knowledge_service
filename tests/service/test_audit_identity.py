@@ -4,7 +4,7 @@ from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
 
 
-def test_authenticated_draft_ignores_forged_actor_and_identity(tmp_path):
+def test_authenticated_draft_rejects_client_actor_and_binds_server_identity(tmp_path):
     with TestClient(create_app(tmp_path / 'audit', encoder=HashingEncoder(),
                                auth_disabled=False)) as client:
         login = client.post('/api/auth/login', json={
@@ -13,8 +13,15 @@ def test_authenticated_draft_ignores_forged_actor_and_identity(tmp_path):
         project = client.post('/api/projects', json={'name': 'audit',
                               'use_default_ontology': False, 'ontology_mode': 'discovery'},
                               headers=headers).json()
-        response = client.post(f"/api/projects/{project['id']}/ontology-drafts",
+        draft_path = f"/api/projects/{project['id']}/ontology-drafts"
+        response = client.post(draft_path,
             headers=headers, json={'title': 'identity test', 'actor': 'forged',
+                'source_context': {'actor': 'forged',
+                                   'audit_identity': {'id': 'forged'}}})
+        assert response.status_code == 422, response.text
+        assert client.get(draft_path, headers=headers).json()['items'] == []
+        response = client.post(draft_path,
+            headers=headers, json={'title': 'identity test',
                 'source_context': {'actor': 'forged',
                                    'audit_identity': {'id': 'forged'}}})
         assert response.status_code == 201, response.text
@@ -26,9 +33,15 @@ def test_authenticated_draft_ignores_forged_actor_and_identity(tmp_path):
         assert 'forged' not in actor
         assert 'user:' + login['user']['id'] in actor
         closed = client.post(
-            f"/api/projects/{project['id']}/ontology-drafts/{draft['id']}/close",
+            draft_path + f"/{draft['id']}/close",
             headers=headers, json={'expected_revision': draft['revision'],
                                    'reason': 'close', 'actor': 'forged'})
+        assert closed.status_code == 422, closed.text
+        unchanged = client.get(draft_path + f"/{draft['id']}", headers=headers).json()
+        assert unchanged['revision'] == draft['revision']
+        assert unchanged['status'] == draft['status']
+        closed = client.post(draft_path + f"/{draft['id']}/close",
+            headers=headers, json={'expected_revision': draft['revision'], 'reason': 'close'})
         assert closed.status_code == 200, closed.text
         assert 'forged' not in closed.text
 

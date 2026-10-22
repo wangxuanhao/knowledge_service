@@ -18,7 +18,7 @@ def test_snapshot_reports_encoder_and_ready_milvus_without_secrets():
     ).snapshot()
 
     assert report['status'] == 'degraded'
-    assert report['capability_matrix']['semantic']['status'] == 'degraded'
+    assert report['capability_matrix']['semantic']['status'] == 'unavailable'
     assert report['embedding'] == {
         'backend': 'demo',
         'identity': HashingEncoder.identity,

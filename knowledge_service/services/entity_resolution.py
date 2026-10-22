@@ -2,7 +2,8 @@
 import logging
 from dataclasses import dataclass
 
-from .retrieval import has_vector, rank_candidates
+from .retrieval import RetrievalEngine
+from .entity_matching import semantic_candidates
 from ..domain.applicability import scope_identity
 
 LOG = logging.getLogger('knowledge_service.entity_resolution')
@@ -18,9 +19,14 @@ class ResolutionOutcome:
 
 
 class EntityResolver:
-    def __init__(self, repository, encoder):
+    def __init__(self, repository, encoder, milvus_store=None, *, retrieval=None):
         self.repository = repository
         self.encoder = encoder
+        self.retrieval = retrieval or RetrievalEngine(repository, encoder, milvus_store)
+
+    def semantic_candidates(self, project_id, text, rows, *, scope=None, limit=12):
+        return semantic_candidates(self.retrieval, project_id, text, rows,
+                                   scope=scope, limit=limit)
 
     def resolve(self, project_id, mention, *, review_threshold, merge_threshold, tx=None):
         if not 0 <= review_threshold < merge_threshold <= 1:
@@ -40,12 +46,9 @@ class EntityResolver:
         if len(exact) == 1:
             return ResolutionOutcome('aligned', canonical_id=exact[0]['id'], score=1.0,
                                      reason='exact_name_or_alias')
-        persisted = [row for row in eligible if has_vector(row)]
-        if not persisted:
+        if not eligible:
             return ResolutionOutcome('separate', reason='no_compatible_candidate')
-        hits = rank_candidates(persisted, mention.get('text', ''), 1, self.encoder)
-        if not hits:
-            return ResolutionOutcome('separate', reason='no_semantic_candidate')
+        hits = self.semantic_candidates(project_id, mention.get('text', ''), eligible, limit=1)
         best, score = hits[0], float(hits[0]['score'])
         if score >= merge_threshold and mention.get('_auto_merge', True):
             return ResolutionOutcome('aligned', canonical_id=best['id'], score=score,

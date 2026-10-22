@@ -45,6 +45,11 @@
   // ---- 模块状态 --------------------------------------------------------------
   let strip = null;          // 「还有 N 条挂在旧版本」提示条
   let drawer = null;         // { overlay, body, previewBox, actionsBox }
+  let requestGeneration = 0, inFlight = null, publishedVersionKey = null;
+  const visible = () => {
+    const root=document.getElementById('tab-ontology-model');
+    return (root&&!root.classList.contains('hidden'))||(drawer&&!drawer.overlay.hidden);
+  };
   const state = {
     plan: null,            // GET /reclassify 的返回；null = 读不到（不编数字）
     loading: false,
@@ -105,12 +110,14 @@
       renderStrip(); if (drawer) renderDrawer();
       return;
     }
-    if (state.loading) return;
+    if (!visible()) return;
+    if (inFlight?.project === project) return inFlight.promise;
+    const generation = ++requestGeneration;
     state.loading = true;
-    try {
+    const promise = (async () => { try {
       const res = await api(endpoint('/reclassify'), undefined, 'GET');
       // 请求返回时项目可能已经切走：过期的结果丢掉，不覆盖新项目的状态。
-      if (project !== activeProject()) return;
+      if (project !== activeProject() || generation !== requestGeneration) return;
       state.plan = (res && typeof res.stale_records === 'number') ? res : null;
       state.error = '';
       // 勾选里已经不存在的组（比如刚迁完）要清掉，否则会拿着过期 key 去预演。
@@ -118,15 +125,29 @@
         .filter(g => g.migratable).map(g => g.key));
       [...state.selected].forEach(key => { if (!alive.has(key)) state.selected.delete(key); });
     } catch (error) {
-      if (project !== activeProject()) return;
+      if (project !== activeProject() || generation !== requestGeneration) return;
       // 读不到就是读不到：不显示数字，也不假装"没有需要迁移的"。
       state.plan = null;
       state.error = (error && error.message) || '读取失败';
     } finally {
+      if (generation !== requestGeneration) return;
+      inFlight = null;
       state.loading = false;
       renderStrip();
       if (drawer) renderDrawer();
-    }
+    } })();
+    inFlight = {project, promise};
+    return promise;
+  }
+
+  function afterPublish(versionId=null) {
+    const project=activeProject(),key=versionId?JSON.stringify([project,versionId]):null;
+    if(key&&key===publishedVersionKey)return refresh();
+    publishedVersionKey=key;
+    requestGeneration++;inFlight=null;state.loading=false;
+    state.plan=null;state.selected.clear();state.preview=null;state.previewSig='';state.result=null;state.error='';
+    renderStrip();if(drawer)renderDrawer();
+    return refresh();
   }
 
   // ==========================================================================
@@ -434,22 +455,15 @@
     }
   }
 
-  /** 迁移人：跟发布/合并同一套取值（谁在用这个工作台），取不到就说"人工"。 */
-  function actorName() {
-    const M = model();
-    if (M && typeof M.actorName === 'function') {
-      const name = M.actorName();
-      if (name) return name;
-    }
-    return '人工';
-  }
-
   // ==========================================================================
   // 四、接线
   // ==========================================================================
   if (typeof document !== 'undefined') {
     // 发布成功（panel 广播 ontology-model:published）→ 立刻重读：新版本一发，可能就有知识"落后"了。
-    document.addEventListener('ontology-model:published', () => { refresh(); });
+    document.addEventListener('ontology-model:published', event => {
+      if(event.detail?.projectId&&event.detail.projectId!==activeProject())return;
+      return afterPublish(event.detail?.versionId);
+    });
 
     // 切进「本体建模层」页签时读一次：用户可能是直接点进来找迁移入口的（不经过发布）。
     const tabButton = document.querySelector('[data-tab="ontology-model"]');
@@ -459,6 +473,7 @@
     const projectSelect = document.getElementById('project');
     if (projectSelect) {
       projectSelect.addEventListener('change', () => {
+        requestGeneration++; inFlight = null; publishedVersionKey = null; state.loading = false;
         state.plan = null; state.selected.clear();
         state.preview = null; state.previewSig = ''; state.result = null; state.error = '';
         renderStrip();
@@ -480,7 +495,7 @@
   window.OntologyReclassify = {
     refresh,
     open: openDrawer,
-    /** 供面板在发布成功后直接调用（事件之外显式再来一次，防止监听时序问题）。 */
-    afterPublish: () => refresh(),
+    /** Pass the immutable published ID to share duplicate notifications for the same release. */
+    afterPublish,
   };
 })();

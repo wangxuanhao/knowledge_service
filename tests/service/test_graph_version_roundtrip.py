@@ -1,5 +1,8 @@
+from ontology_seed import seed_ontology
 import pytest
 
+from knowledge_service.core.security import hash_password
+from knowledge_service.repository.users_store import UserStore
 from test_frontend_retrieval_flow import browser, workbench  # live isolated app + Edge
 
 
@@ -14,9 +17,18 @@ ex:knows a owl:ObjectProperty .
 @pytest.mark.parametrize('record_id', ['edit-a', 'edit-rel'])
 def test_graph_edit_revision_and_ontology_match_ledger_and_history(workbench, record_id):
     page = workbench.page
-    # The shared backend fixture disables authentication; exercise the admin UI
-    # visibility needed for editing and ledger navigation in this contract.
-    page.evaluate("() => {document.body.classList.add('is-admin');document.body.classList.remove('is-viewer');}")
+    # The shared backend fixture disables authentication, but the editor still
+    # checks Auth.isAdmin(). Establish a real session instead of only changing
+    # the CSS visibility of write controls.
+    username, password = 'graph-roundtrip-editor', 'graph-roundtrip-password'
+    editor = UserStore(workbench.service.repository).create(
+        username, hash_password(password), role='admin')
+    page.evaluate('''async credentials => {
+      const session=await api('/api/auth/login',credentials);
+      window.Auth.adoptSession(session);
+    }''', {'username': username, 'password': password})
+    assert page.evaluate('window.Auth.isAdmin()')
+    assert page.evaluate('window.Auth.user().id') == editor['id']
     project = page.evaluate('''async () => {
       const created=await api('/api/projects',{name:'双版本编辑验证',use_default_ontology:false});
       await projects();return created.id;
@@ -32,7 +44,7 @@ def test_graph_edit_revision_and_ontology_match_ledger_and_history(workbench, re
           subject_id:'edit-a',object_id:'edit-b'}]});
       return first;
     }''', TTL)
-    workbench.service.repository.save_ontology(project, TTL + '\n<https://test/New> a <http://www.w3.org/2002/07/owl#Class> .', {})
+    seed_ontology(workbench.service.repository, project, TTL + '\n<https://test/New> a <http://www.w3.org/2002/07/owl#Class> .', {})
     page.evaluate('async()=>{await loadOntologyTerms();await window.drawGraph();}')
     page.evaluate('''async id => {
       const graph=await api(endpoint('/subgraph'),{});

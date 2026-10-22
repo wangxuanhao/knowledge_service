@@ -164,12 +164,12 @@ def main() -> int:
     print(f'   项目 {project_id}', flush=True)
 
     try:
-        # ① 提交文档触发抽取（extract=true + ontology 模式：既抽概念也抽实例）
+        # ① 提交文档触发抽取（ontology 模式：既抽概念也抽实例）
         payload = {
             'title': SAMPLE_TITLE,
             'text': SAMPLE_TEXT,
             'metadata': {'source': 'f1-verification'},
-            'extract': True,
+            'extraction_mode': 'ontology',
             'extraction_mode': 'ontology',
             'chunk_strategy': 'paragraph',
             'chunk_size': 800,
@@ -208,8 +208,19 @@ def main() -> int:
             return 1
 
         # ③ 硬证据：抽取出的知识必须真的落进台账 —— 不能只看任务状态就宣布成功。
-        code, ledger = req(base, f'/api/projects/{project_id}/records/query', {})
-        rows = as_list(ledger, 'records', 'items')
+        rows, cursor, seen = [], None, set()
+        while True:
+            code, ledger = req(base, f'/api/projects/{project_id}/records/page',
+                               {'limit': 1000, 'cursor': cursor})
+            if code != 200:
+                raise RuntimeError(f'记录分页读取失败：HTTP {code}')
+            rows.extend(ledger['records'])
+            cursor = ledger['next_cursor']
+            if cursor is None:
+                break
+            if cursor in seen:
+                raise RuntimeError('记录分页游标重复')
+            seen.add(cursor)
         typed = [r for r in rows if r.get('kind') in ('entity', 'relation') and r.get('type')]
         note(f'台账记录 {len(rows)} 条 · 其中带本体类型的实体/关系 {len(typed)} 条')
         for row in typed[:4]:

@@ -1,0 +1,37 @@
+/* The library keeps its width; document details appear only in the drawer. */
+#tab-sources .source-layout{display:block;min-height:300px}
+#tab-sources #source-list{max-height:none;overflow:visible;padding:0;min-width:0}
+#tab-sources .source-summary{margin:16px 0 12px}
+#tab-sources #source-list .source-item{display:grid;grid-template-columns:minmax(180px,1fr) minmax(112px,auto) 72px minmax(180px,auto) 54px;align-items:center;gap:16px;margin:0;border:0;border-bottom:1px solid var(--ks-line);border-radius:0;padding:17px 14px;min-height:76px;box-shadow:none}
+#tab-sources #source-list .source-item:first-child{border-top:1px solid var(--ks-line)}
+#tab-sources #source-list .source-item:hover{background:var(--ks-sunken)}
+#tab-sources #source-list .source-item:focus-visible{outline:2px solid #216952;outline-offset:-2px}
+#tab-sources #source-list .source-item[aria-current=true]{background:var(--ks-sunken);box-shadow:inset 3px 0 #216952}
+#tab-sources #source-list .source-item b{font-size:13px;font-weight:600;line-height:1.6}
+#tab-sources #source-list .source-item small{margin:3px 0 0;color:var(--ks-muted);font-size:11px;line-height:1.5}
+.source-item__name{min-width:0;overflow-wrap:anywhere}
+.source-item__counts,.source-item__open{font-size:11px;color:var(--ks-muted)}
+.source-item__counts{overflow-wrap:anywhere}
+.source-item__open{text-align:right;color:#216952;font-weight:600;white-space:nowrap}
+#tab-sources .source-filter-bar{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
+#tab-sources .source-filter-btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;white-space:normal}
+#tab-sources .source-empty{min-height:300px}
+#source-detail-drawer{width:min(900px,calc(100vw - 56px))}
+#source-detail-drawer article{min-width:0;padding:0;border:0;border-radius:0;background:transparent}
+#source-detail-drawer #source-title{margin:0;font-size:18px;line-height:1.5;overflow-wrap:anywhere}
+#source-detail-drawer #source-body{max-height:none;overflow:visible;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal;font-size:13px;line-height:1.95}
+#source-detail-drawer .source-meta{display:grid;gap:14px;margin:0 0 20px;padding:16px;background:var(--ks-sunken);border:1px solid var(--ks-line);border-radius:8px}
+#source-detail-drawer .source-meta__head{display:flex;flex-wrap:wrap;align-items:center;gap:10px;min-width:0}
+#source-detail-drawer .source-meta__file{font-size:13px;font-weight:600;overflow-wrap:anywhere;min-width:0}
+#source-detail-drawer .source-meta__stats{font-size:11px;color:var(--ks-muted);overflow-wrap:anywhere}
+#source-detail-drawer .source-meta__mapping h4{margin:0 0 5px;font-size:12px}
+#source-detail-drawer .source-meta__mapping p{margin:0;color:var(--ks-muted);font-size:12px;line-height:1.8}
+#source-detail-drawer .source-format{display:inline-block;padding:3px 10px;border-radius:5px;background:#216952;color:#fff;font-size:11px;font-weight:600}
+#source-detail-drawer .source-detail-tabs{display:flex;flex-wrap:wrap;gap:8px}
+#source-detail-drawer .source-detail-tabs button{margin:0;min-height:34px}
+#source-detail-drawer .source-detail-tabs button[aria-pressed=true]{color:#fff;background:#216952;border-color:#216952}
+#source-detail-drawer .source-record-row{padding:16px 0;border-bottom:1px solid var(--ks-line);white-space:normal}
+#source-detail-drawer .source-record-row:first-child{padding-top:0}
+#source-detail-drawer .source-record-row p{white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:1100px){#tab-sources #source-list .source-item{grid-template-columns:minmax(160px,1fr) minmax(108px,auto) 64px;gap:8px 14px}#tab-sources .source-item__counts{grid-column:1/3}#tab-sources .source-item__open{grid-column:3}}
+@media(max-width:700px){#tab-sources>.panel{padding:16px}#tab-sources #source-list .source-item{grid-template-columns:minmax(0,1fr) auto;padding:14px 8px;gap:8px 12px}#tab-sources .source-item__name{grid-column:1/-1}#tab-sources .source-item__type{justify-self:end}#tab-sources .source-item__counts{grid-column:1}#tab-sources .source-item__open{grid-column:2}#tab-sources .source-filter-bar{gap:6px}#tab-sources .source-filter-btn{font-size:11px;padding:7px 9px}#source-detail-drawer{width:100vw;max-width:100vw}#source-detail-drawer .source-meta{padding:12px}}

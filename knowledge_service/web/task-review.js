@@ -1,7 +1,7 @@
 /* Project-scoped task summaries and explicit ontology relation review. */
 (() => {
   const states={queued:'排队中',running:'处理中',completed:'已完成',failed:'失败',interrupted:'已中断',cancelled:'已取消'};
-  const kinds={ingest:'文档解析',neo4j_sync:'Neo4j 同步',legacy_import:'旧项目导入',ontology_publish:'本体发布',semantic_index:'语义索引'};
+  const kinds={ingest:'文档解析',neo4j_sync:'Neo4j 同步',ontology_publish:'本体发布',semantic_index:'语义索引'};
   const beijingTime=value=>{
     if(!value)return '—';
     const date=new Date(value);
@@ -129,8 +129,14 @@
   let jobsGeneration=0;
   jobList=async()=>{
     const serial=++jobsGeneration,p=current;
-    const [result,scoped]=await Promise.all([api('/api/jobs',undefined,'GET'),p?api('/api/projects/'+encodeURIComponent(p)+'/jobs',undefined,'GET'):Promise.resolve({jobs:[]})]);
+    const watching=typeof wb!=='undefined'&&wb.jobs.size>0;
+    const visible=!$('tab-jobs').classList.contains('hidden')&&!$('tab-runtime').classList.contains('hidden');
+    const [result,scoped]=await Promise.all([
+      watching?api('/api/jobs',undefined,'GET'):Promise.resolve({jobs:[]}),
+      visible&&p?api('/api/projects/'+encodeURIComponent(p)+'/jobs',undefined,'GET'):Promise.resolve({jobs:[]}),
+    ]);
     if(serial!==jobsGeneration||p!==current)return result.jobs;
+    if(!visible||$('tab-jobs').classList.contains('hidden')||$('tab-runtime').classList.contains('hidden'))return result.jobs;
     const open=new Set([...$('tasks').querySelectorAll('details[open]')].map(d=>d.dataset.key));
     // Preserve each open log panel's scroll position across the full re-render; follow the
     // newest line only when the reader was already at the bottom.

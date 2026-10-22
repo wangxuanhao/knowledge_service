@@ -43,6 +43,9 @@ class ClaimDatabase:
             return self.Cursor()
         if normalized.startswith('SELECT * FROM projection_cursors'):
             return self.Cursor(dict(self.cursor))
+        if normalized.startswith("UPDATE projection_cursors SET status='requires_rebuild'"):
+            self.cursor.update(status='requires_rebuild', last_error=params[0])
+            return self.Cursor()
         raise AssertionError(f'claim must stop before cursor mutation: {normalized}')
 
 
@@ -104,7 +107,7 @@ def test_claim_lease_blocks_every_concurrent_claim_including_same_owner():
     assert claim_is_available(None, None, now)
 
 
-def test_schema_mismatch_requires_rebuild_before_claiming_or_reading_outbox():
+def test_schema_mismatch_persists_rebuild_state_before_claiming_or_reading_outbox():
     cursor = {
         'schema_version': 1, 'applied_seq': 8, 'status': 'ready',
         'claim_owner': None, 'claim_token': None, 'claim_until': None,
@@ -112,14 +115,11 @@ def test_schema_mismatch_requires_rebuild_before_claiming_or_reading_outbox():
     }
     repository = ClaimRepository(cursor)
 
-    with pytest.raises(ProjectionRebuildRequired) as raised:
-        ProjectionStore(repository).claim_contiguous_batch(
-            'project', 'milvus', schema_version=2, owner='worker')
+    claimed = ProjectionStore(repository).claim_contiguous_batch(
+        'project', 'milvus', schema_version=2, owner='worker')
 
-    assert raised.value.requires_rebuild is True
-    assert raised.value.current_schema == 1
-    assert raised.value.required_schema == 2
-    assert cursor['status'] == 'ready'
+    assert claimed is None
+    assert cursor['status'] == 'requires_rebuild'
     assert cursor['claim_token'] is None
     assert len(repository._db.statements) == 2
 
@@ -136,7 +136,7 @@ def test_failed_rebuild_cannot_be_claimed_by_ordinary_drain():
         'project', 'milvus', schema_version=2, owner='worker')
 
     assert claimed is None
-    assert cursor['status'] == 'failed'
+    assert cursor['status'] == 'requires_rebuild'
     assert cursor['claim_token'] is None
     assert len(repository._db.statements) == 2
 

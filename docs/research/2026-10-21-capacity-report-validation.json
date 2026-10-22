@@ -1,0 +1,8 @@
+{
+  "verified_utc": "2026-10-21T04:56:26.783704+00:00",
+  "checks_passed": true,
+  "local_resource_links_verified": 18,
+  "tables": 4,
+  "source_sha256_verified": 15,
+  "visual_browser_preview": "Not performed: browser policy rejected file protocol; no alternate browser or HTTP workaround used."
+}

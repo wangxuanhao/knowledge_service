@@ -1,0 +1,46 @@
+{
+  "errors": [],
+  "checks": {
+    "ontology_desktop": {
+      "nodes": 29,
+      "edges": 52,
+      "card_images": 29,
+      "display": "cards",
+      "background": "rgb(255, 255, 255)",
+      "term_grid_hidden": true,
+      "view": "types"
+    },
+    "hierarchy_rows": 29,
+    "graph_view_all_bounds": {
+      "fits": true,
+      "nodes": 29,
+      "edges": 52
+    },
+    "legend_toggle_drift_px": 0,
+    "ontology_mobile": {
+      "overflow": false,
+      "inspector_width": 366.59375,
+      "inspector_open": "true"
+    },
+    "search_desktop": {
+      "query_above_workspace": true,
+      "empty_inspector_hidden": true,
+      "canvas_width": 946
+    },
+    "search_mobile_overflow": false,
+    "retained_card_counts": [
+      "0文档",
+      "150001实体",
+      "300000关系",
+      "0片段"
+    ]
+  },
+  "capacity_project_visible": true,
+  "capacity_counts": {
+    "documents": 0,
+    "entities": 150001,
+    "relations": 300000,
+    "attributes": 0,
+    "chunks": 0
+  }
+}

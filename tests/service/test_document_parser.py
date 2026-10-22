@@ -10,7 +10,7 @@ from knowledge_service.models import UploadOptions
 
 
 def test_upload_options_are_strict_and_title_is_optional():
-    options = UploadOptions.model_validate({'title': ' ', 'extract': False})
+    options = UploadOptions.model_validate({'title': ' ', 'extraction_mode': 'documents'})
     assert options.title == ' '
     with pytest.raises(ValueError):
         UploadOptions.model_validate({'unknown': True})

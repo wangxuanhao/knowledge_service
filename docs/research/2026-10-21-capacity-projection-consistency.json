@@ -1,0 +1,236 @@
+{
+  "recorded_utc": "2026-10-21T04:51:18.327777+00:00",
+  "project_id": "46249548-2189-4ad7-8f23-70ee2bcc7f6f",
+  "scope": "Read-only PostgreSQL and Milvus metadata observations. No app/encoder construction, data writes, alias changes, index creation, repair requests, or further polling.",
+  "certification_result": "NOT_PASSED: semantic and hybrid availability failed during unfinished projection maintenance; preserve early baseline separately from current construction state.",
+  "source_evidence": [
+    "docs/research/2026-10-21-capacity-current-search-error.json",
+    "docs/research/2026-10-21-capacity-source-normal-start.json",
+    "docs/research/2026-10-21-capacity-audited-writes.json",
+    "private/capacity-server-trace.jsonl"
+  ],
+  "postgres": {
+    "initial_observed_utc": "2026-10-21T04:44:25.282538+00:00",
+    "authority_watermark": 29,
+    "cursor": {
+      "target": "milvus",
+      "schema_version": 3,
+      "applied_seq": 23,
+      "status": "rebuilding",
+      "active_destination": "knowledge_records__p_37458c99da40d3eb__g_retained_20261020",
+      "previous_destination": null,
+      "rollback_applied_seq": 0,
+      "rebuild_state": {
+        "phase": "snapshot",
+        "build_id": "c126537c-a0a6-48da-bf8a-16c920e228ef",
+        "snapshot_seq": 23,
+        "applied_seq": 23
+      },
+      "last_error_present": false
+    },
+    "lease_observations": [
+      {
+        "observed_utc": "2026-10-21T04:44:25.282538+00:00",
+        "updated_at_utc": "2026-10-21T04:41:52.925820+00:00",
+        "claim_until_utc": "2026-10-21T04:42:22.925820+00:00",
+        "lease_live": false
+      },
+      {
+        "observed_utc": "2026-10-21T04:48:45.613414+00:00",
+        "updated_at_utc": "2026-10-21T04:48:31.528475+00:00",
+        "claim_until_utc": "2026-10-21T04:49:01.528475+00:00",
+        "lease_live": true,
+        "claimed_from_seq": 24,
+        "claimed_to_seq": 23
+      }
+    ],
+    "lease_interpretation": "The same unfinished build had a valid fenced claim at the last 04:48 observation. Earlier expiry does not establish permanent abandonment. Do not enqueue a duplicate. Owner/token/fence values are intentionally omitted; the owner cannot be tied to an OS PID from these samples alone.",
+    "persisted_snapshot": {
+      "build_id": "c126537c-a0a6-48da-bf8a-16c920e228ef",
+      "rows": 450001,
+      "first_ordinal": 0,
+      "last_ordinal": 450000,
+      "contents": "version identifiers only; not an embedding cache"
+    },
+    "outbox": {
+      "rows": 29,
+      "min_seq": 1,
+      "max_seq": 29,
+      "upsert_rows": 15,
+      "tombstone_rows": 14,
+      "cleanup_rows": 0
+    },
+    "project_job_artifacts_observed_utc": "2026-10-21T04:48:45.613414+00:00",
+    "project_job_artifacts": [],
+    "service_pg_sample": {
+      "backend_pid": 13332,
+      "application_name": "knowledge_service",
+      "state": "idle",
+      "wait_event_type": "Client",
+      "wait_event": "ClientRead",
+      "blocking_pids": []
+    },
+    "applied_sequence_semantics": "In rebuilding state, begin_rebuild writes applied_seq=snapshot_seq after capturing the authoritative snapshot and persisting version IDs, before external snapshot load and alias switch. Therefore cursor applied_seq=23 does not certify that the active retained Milvus destination has applied through 23. Ordinary ready state also requires exact authority equality."
+  },
+  "milvus": {
+    "observed_utc": "2026-10-21T04:45:26.360197+00:00",
+    "alias": "knowledge_records__p_37458c99da40d3eb",
+    "active_destination": "knowledge_records__p_37458c99da40d3eb__g_retained_20261020",
+    "physical_row_count": 450001,
+    "load_state": "Loaded",
+    "load_state_value": 3,
+    "index_count": 17,
+    "all_indexes_finished": true,
+    "all_indexes_pending_rows": 0,
+    "dense_index": {
+      "type": "HNSW",
+      "metric": "COSINE",
+      "indexed_rows": 450001,
+      "total_rows": 450001,
+      "state": "Finished"
+    },
+    "sparse_index": {
+      "type": "SPARSE_INVERTED_INDEX",
+      "metric": "BM25",
+      "indexed_rows": 450001,
+      "total_rows": 450001,
+      "state": "Finished"
+    },
+    "control_collection": "knowledge_records__p_37458c99da40d3eb__g_retained_20261020__control",
+    "control_rows_returned": 9,
+    "max_projection_marker_seq": 13,
+    "project_shadow_collections_observed": [],
+    "interpretation": "The retained physical collection and indexes exist, but marker 13 is not authority 29. No current full row/version equivalence audit was performed. Do not relabel marker 13 as 29 or treat the old alias as the latest projection."
+  },
+  "readiness": {
+    "required_schema_version": 3,
+    "predicate": "cursor exists AND status='ready' AND schema_version=3 AND applied_seq=authority watermark",
+    "evaluated_from_observations": {
+      "cursor_exists": true,
+      "status_ready": false,
+      "schema_matches": true,
+      "applied_matches_authority": false
+    },
+    "result": false,
+    "retrieval_behavior": "Current semantic/hybrid path rejects unready projection with the reported HTTP 503; the readiness rejection itself does not demonstrate lost PostgreSQL records or absent Milvus indexes.",
+    "source_locations": [
+      "knowledge_service/repository/projection_store.py:69",
+      "knowledge_service/services/retrieval.py:372",
+      "knowledge_service/services/retrieval.py:387"
+    ]
+  },
+  "pre_restart_projection_failures": {
+    "count": 10,
+    "events": [
+      {
+        "completed_utc": "2026-10-21T04:09:57.107332+00:00",
+        "duration_seconds": 48.43433879999975,
+        "request_id": null,
+        "error_type": "ProjectionLeaseLost"
+      },
+      {
+        "completed_utc": "2026-10-21T04:10:42.317714+00:00",
+        "duration_seconds": 45.24072349999915,
+        "request_id": "9c6ba3c8-adf7-4522-b87e-ce5f1e7b205f",
+        "error_type": "ProjectionLeaseLost"
+      },
+      {
+        "completed_utc": "2026-10-21T04:14:49.259380+00:00",
+        "duration_seconds": 66.40495689999989,
+        "request_id": "dd874ede-f2c4-4b5c-99fb-e804f71b494b",
+        "error_type": "ProjectionLeaseLost"
+      },
+      {
+        "completed_utc": "2026-10-21T04:18:25.369109+00:00",
+        "duration_seconds": 50.11171050000121,
+        "request_id": "0be82e26-f617-4147-bf7e-89bba0ab1cf6",
+        "error_type": "ProjectionLeaseLost"
+      },
+      {
+        "completed_utc": "2026-10-21T04:21:05.155561+00:00",
+        "duration_seconds": 39.712585999999646,
+        "request_id": "0fda32a8-fbb7-4516-b94a-89ec4fe35d0a",
+        "error_type": "ProjectionLeaseLost"
+      },
+      {
+        "completed_utc": "2026-10-21T04:25:41.435597+00:00",
+        "duration_seconds": 153.26763570000003,
+        "request_id": "2a2e2f5e-959e-4a21-aef5-033508712b6d",
+        "error_type": "ProjectionLeaseLost"
+      },
+      {
+        "completed_utc": "2026-10-21T04:28:32.131644+00:00",
+        "duration_seconds": 124.40180680000049,
+        "request_id": null,
+        "error_type": "ProjectionLeaseLost"
+      },
+      {
+        "completed_utc": "2026-10-21T04:29:20.522754+00:00",
+        "duration_seconds": 55.26595070000076,
+        "request_id": "2c75b968-aaa4-4aeb-94ae-2381d79a1ff1",
+        "error_type": "ProjectionLeaseLost"
+      },
+      {
+        "completed_utc": "2026-10-21T04:32:17.754926+00:00",
+        "duration_seconds": 66.7627866999992,
+        "request_id": "f6d3bef1-53bb-49ef-8151-ef9bce99fda4",
+        "error_type": "ProjectionLeaseLost"
+      },
+      {
+        "completed_utc": "2026-10-21T04:35:36.714569+00:00",
+        "duration_seconds": 68.93282340000042,
+        "request_id": "f08b92cf-6057-4906-81d3-f11bd413f39a",
+        "error_type": "ProjectionLeaseLost"
+      }
+    ],
+    "interpretation": "ProjectionLeaseLost rebuild failures already occurred in the diagnostic process before the normal restart. Do not attribute the first projection failure exclusively to the restart."
+  },
+  "data_preservation": {
+    "observed_utc": "2026-10-21T04:49:08.574790+00:00",
+    "source": "Independent read-only PostgreSQL connection",
+    "current_entities": 150001,
+    "current_relations": 300000,
+    "probe_id": "1ae672c2-50ff-48a9-b72f-a7daa9a51542",
+    "probe_current_revision": 15,
+    "probe_version_id": "516d9036-27dc-4967-b537-f9bc8b9ee073",
+    "writable_fields_equal_originalRecord": true,
+    "differing_field_names": [],
+    "normalization": "Project payloads onto RecordWrite.model_fields, validate RecordWrite, model_dump(exclude_none=True), then compare canonical JSON. Excludes storage-only embedding_model/version metadata.",
+    "original_writable_sha256": "39b1e5ea97eff36431e5000074e18aca51eed3773c681ef79f2a3461123b3765",
+    "current_writable_sha256": "39b1e5ea97eff36431e5000074e18aca51eed3773c681ef79f2a3461123b3765"
+  },
+  "source_consistency": {
+    "normal_process_pid": 49500,
+    "process_created_utc": "2026-10-21T04:36:22+00:00",
+    "first_health_200_utc": "2026-10-21T04:38:17+00:00",
+    "projection_runtime_before_start_sha256": "6224451584d2bb1c2d4ee5bf7c42a942d19fbbbd9a517e647f877211177f1d01",
+    "projection_runtime_later_sha256": "267dda2ddc31ab5f7793abf94573e9062644e29cb7e01427d291c89ad146e215",
+    "projection_runtime_mtime_utc": "2026-10-21T04:36:36.564673+00:00",
+    "projection_store_mtime_utc": "2026-10-21T04:36:36.546563+00:00",
+    "core_later_mtime_utc": "2026-10-21T04:37:24.071557+00:00",
+    "interpretation": "Files changed after process creation during startup. Actual import times and in-memory module hashes were not inspected; a single frozen normal-process source version cannot be established from filesystem hashes alone. This is a provenance limitation, not proof of data loss or sole causation."
+  },
+  "recovery_recommendation_not_executed": {
+    "immediate_action": "Do not enqueue another rebuild or mutate readiness while the observed build has a legal lease. Coordinate with its current owner and freeze source provenance before a fresh certification run.",
+    "current_normal_api": "POST /api/projects/46249548-2189-4ad7-8f23-70ee2bcc7f6f/indexes/rebuild",
+    "api_precondition": "Only after the existing runner is stopped/failed and no valid lease remains; no such action was performed in this audit.",
+    "api_behavior": "Enqueues semantic_index job; handler calls projection_sync.rebuild. begin_rebuild preserves the unfinished build_id and persisted snapshot instead of forcing ready. Existing job retry/resume can be used if a corresponding durable job exists; none was observed for this project.",
+    "embedding_and_shadow_reuse": "No shadow generation was observed. The persisted PostgreSQL snapshot stores version IDs, and repository writes remove embedding from record payloads. Standard load_snapshot prepares all indexed snapshot rows and encodes each row missing embedding in batches of 64; it does not import vectors from the existing alias as a cache. A retry may therefore perform a full 450001-row encoding/load and cannot be advertised as a cheap six-event catch-up. Exact missing-embedding count was not separately queried.",
+    "lease_failure_evidence": "Diagnostic trace contains repeated ProjectionLeaseLost. The inspected store uses 30-second rebuild/delivery leases; full snapshot fetch/materialization precedes later lease renewal, and resume reads all captured versions before the next sync renewal. This explains an exposed lease-expiry seam, but the precise failing statement for every prior exception was not logged.",
+    "safety_invariants": [
+      "Never force status=ready or applied_seq=29",
+      "Never rewrite Milvus marker 13 to 29",
+      "Do not switch the old alias as if current",
+      "Complete validation/catch-up/alias switch through the coordinator before accepting semantic readiness"
+    ],
+    "source_locations": [
+      "knowledge_service/api/workspace.py:86",
+      "knowledge_service/api/workspace.py:102",
+      "knowledge_service/services/job_handlers.py:53",
+      "knowledge_service/services/projection_sync.py:178",
+      "knowledge_service/repository/projection_store.py:428",
+      "knowledge_service/repository/projection_store.py:490",
+      "knowledge_service/services/projection_runtime.py:191"
+    ]
+  }
+}

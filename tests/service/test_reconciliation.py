@@ -10,9 +10,9 @@ def test_incremental_exact_fusion_retains_occurrence_and_source(monkeypatch,tmp_
     with TestClient(create_app(tmp_path/'fusion.sqlite',HashingEncoder())) as client:
         p=client.post('/api/projects',json={'name':'fusion'}).json()['id'];base='/api/projects/'+p
         for index in range(2):
-            response=client.post(base+'/documents',json={'title':str(index),'text':'同一个商户的规则','extract':True})
+            response=client.post(base+'/documents',json={'title':str(index),'text':'同一个商户的规则','extraction_mode':'ontology'})
             assert response.status_code==201,response.text
-        rows=client.post(base+'/records/query',json={}).json()['records']
+        rows=client.post(base+'/records/page',json={}).json()['records']
         entities=[r for r in rows if r['kind']=='entity']
         assert len(entities)==1
         assert len(entities[0]['metadata']['merged_sources'])==1

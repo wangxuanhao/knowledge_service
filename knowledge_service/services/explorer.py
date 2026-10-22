@@ -288,53 +288,45 @@ class Explorer:
             'unknown_validity':sum(r.get('valid_from') is None for r in rows)
         }
 
-    def sources(self,p,scope):
-        # PERF：与 /dashboard 相同的共享扫描。响应很大是因为每个文档携带完整文本，
-        # 但延迟来自扫描本身，而不是载荷。
-        # 「原文 → 解析后映射」：按 source_id 归组一次（O(n)），给每篇文档补上
-        # 派生切片/实体/关系的计数与有界样例，前端据此展示「原文件类型 + 解析后的映射」。
-        rows=self.service.scoped(p,scope)
-        by_source=defaultdict(list)
-        for row in rows:
-            source_id=row.get('source_id')
-            if source_id:
-                by_source[source_id].append(row)
-        documents=[]
-        for r in rows:
-            if r['kind']!='document':
-                continue
-            derived=by_source.get(r['id'],[])
-            entities=[x for x in derived if x['kind']=='entity']
-            relations=[x for x in derived if x['kind']=='relation']
-            chunks=[x for x in derived if x['kind']=='chunk']
-            documents.append({
-                **public(r),
-                'derived_count':len(derived),
-                'derived_breakdown':{
-                    'entity':len(entities),'relation':len(relations),'chunk':len(chunks)},
-                'derived_entities':[{'text':x.get('text'),'type':x.get('type')} for x in entities[:20]],
-                'derived_relations':[{'text':x.get('text'),'type':x.get('type')} for x in relations[:20]],
-                'derived_chunks':[{'id':x['id'],'text':(x.get('text') or '')[:200]} for x in chunks[:10]],
-            })
-        return {'documents':documents}
+    def sources(self,p,scope,*,limit=50,cursor=None,summary_only=False,state='all',document_id=None):
+        from ..repository.page_reads import PageReads
+        return PageReads(self.repo).sources(p,scope,limit=limit,cursor=cursor,
+            summary_only=summary_only,state=state,document_id=document_id)
 
     def mindmap(self,p,scope,root_id,depth=3):
-        graph=self.graph(p,scope,root_id,depth,attribute_mode='none')
-        nodes={r['id']:r for r in graph['nodes']};adj=defaultdict(list)
-        for edge in graph['edges']:
-            adj[edge['subject_id']].append((edge['object_id'],edge['type']))
-            adj[edge['object_id']].append((edge['subject_id'],edge['type']))
-        visited=set();count=[0]
+        from ..repository.scoped_reads import ScopedReads
+        if type(depth) is not int or not 0<=depth<=5:
+            raise ValueError('脑图深度必须是 0 到 5 之间的整数')
+        scope={key:value for key,value in (scope or {}).items() if key not in {'root_id','depth'}}
+        result=ScopedReads(self.repo).neighbors(p,scope,[root_id],hops=depth,
+                                               direction='both',max_nodes=500,max_edges=1000)
+        nodes={r['id']:r for r in result['records'] if r['kind']=='entity'}
+        if root_id not in nodes:
+            raise ValueError('脑图根实体不存在或不在当前范围内')
+        adj=defaultdict(list)
+        for edge in result['records']:
+            if edge['kind']!='relation':continue
+            adj[edge['subject_id']].append((edge['object_id'],edge.get('type') or edge['text']))
+            adj[edge['object_id']].append((edge['subject_id'],edge.get('type') or edge['text']))
+        count=[0];tree_truncated=[False]
         def branch(node,level,path):
             count[0]+=1
-            item={'id':node,'text':nodes[node]['text'],'type':nodes[node]['type'],'children':[]}
-            if level==0 or node in path or count[0]>=500:return item
-            for target,predicate in adj[node][:40]:
-                if count[0]>=500:break
-                if target not in path|{node}:
-                    child=branch(target,level-1,path|{node});child['predicate']=predicate;item['children'].append(child)
+            item={'id':node,'text':nodes[node]['text'],'type':nodes[node].get('type'),'children':[]}
+            if level==0 or node in path:return item
+            children=[(target,predicate) for target,predicate in adj[node] if target not in path|{node}]
+            if len(children)>40:tree_truncated[0]=True
+            for target,predicate in children[:40]:
+                if count[0]>=500:
+                    tree_truncated[0]=True
+                    break
+                child=branch(target,level-1,path|{node});child['predicate']=predicate;item['children'].append(child)
             return item
-        return {'tree':branch(root_id,min(depth,5),set()),'bounded':True}
+        tree=branch(root_id,depth,set())
+        return {'tree':tree,'bounded':True,
+                'truncated':result['truncated'] or tree_truncated[0],
+                'neighborhood_truncated':result['truncated'],'tree_truncated':tree_truncated[0],
+                'continuation':result['continuation'],
+                'budgets':{'max_nodes':500,'max_edges':1000,'max_tree_nodes':500,'max_children':40}}
 
     def snapshot(self,p,name,kind='manual'):
         with self.service.lock:
@@ -378,7 +370,6 @@ class Explorer:
         from .ontology import Ontology
         start = perf_counter()
         requested_mode = request.get('retrieval_mode') or ('semantic' if request.get('semantic') else 'keyword')
-        request = {**request, '_include_embeddings': requested_mode != 'keyword'}
         rows = self.service.scoped(p, request)
         types = {request['entity_type']} if request.get('entity_type') else set()
         if types and request.get('include_subclasses', True):

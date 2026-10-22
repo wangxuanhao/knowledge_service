@@ -16,36 +16,40 @@ def test_workbench_has_all_control_targets_and_no_native_dialogs():
         assert not re.search(r'\b(?:prompt|confirm|alert)\s*\(',js)
         refs=re.findall(r"\$\('([^']+)'\)|bind\('([^']+)'",js)
         assert {a or b for a,b in refs}.issubset(declared_ids),{a or b for a,b in refs}-declared_ids
-    for tab in ('dashboard','sources','mindmap','jobs','evaluation','records','ontology','search','qa','ingest'):
+    for tab in ('dashboard','sources','mindmap','jobs','evaluation','records','ontology-model','search','qa','ingest'):
         assert f'tab-{tab}' in ids
     workspace=(ROOT/'workspace.js').read_text(encoding='utf-8')
     workspace_css=(ROOT/'workspace.css').read_text(encoding='utf-8')
     assert "page.id='tab-discovery'" not in workspace
     assert "mode.id='extraction-mode'" in workspace
-    details=(ROOT/'ontology-details.js').read_text(encoding='utf-8')
-    assert 'ontology-details.js' in html
-    assert all(label in details for label in ('审核草案并查看技术详情','版本差异','本体定义','名称与技术标识（可编辑）'))
-    assert all(help_text in details for help_text in ('新增、保留或删除','Turtle 标准格式','不是乱码'))
+    assert 'ontology-details.js' not in html and 'ontology-modal.css' not in html
+    assert 'ontology-model-panel.js' in html and 'ontology-intake.js' in html
     assert '受控重解析原文' not in workspace
     assert 'button:disabled{cursor:not-allowed}' in workspace_css
     assert 'contain:layout paint' in workspace_css and 'requestAnimationFrame(()=>{if(ui.graph===result||ui.graph===base)chart.resize();})' in workspace
     assert all(text in workspace for text in ('知识时间','当前状态','上一个已知变更节点','仅在切换节点时刷新','/timeline?limit=100'))
     assert 'tl-density' not in workspace and 'startPlayback' not in workspace
-    assert all(text in workspace for text in ('本体结构维护','新增本体术语','高级：本体历史版本与 Turtle 源码','可多选'))
-    # 表单文案：IRI 是"系统生成、不用手写"，勾选靠 checklist（不再是"已保存的类型会自动勾选"）。
-    assert all(text in workspace for text in ('新增实体类', '新增关系类型', '新增实体属性',
-                                              '系统生成的标识 IRI（自动生成，不用手写）',
-                                              # 措辞可以润色，语义必须保留：IRI 由后端统一生成、前端不拼。
-                                              '最终 IRI 由后端', '统一生成',
-                                              '允许的起点实体类型（可多选）',
-                                              '允许的终点实体类型（可多选）'))
-    assert 'readableIriSegment' in workspace and 'encodeURIComponent(label)' not in workspace
-    assert "kind,uri:get('term-uri').value" not in workspace
-    assert 'data-term-kind-choice' in workspace and 'ontology-checklist' in workspace and 'ontology-kind-source' in workspace
-    assert 'ontology-checklist-source' in workspace and '.ontology-checklist-source{display:none!important}' in workspace_css
+    assert 'ontology-term-create' not in workspace and "endpoint('/ontology/terms')" not in workspace
+    model=(ROOT/'ontology-model.js').read_text(encoding='utf-8')
+    panel=(ROOT/'ontology-model-panel.js').read_text(encoding='utf-8')
+    assert 'async function createTerm' in model and "action: 'batch'" in model
+    assert 'await M.createTerm' in panel and '新建并写入草案' in panel
     evidence=(ROOT/'evidence-inspector.js').read_text(encoding='utf-8')
-    assert all(text in evidence for text in ('编辑这条关系','删除这条关系','删除实体及其关联关系','再次点击确认删除','新增关系','保存并添加到图谱','interactive_graph'))
-    assert 'evidence-danger' in evidence and "endpoint('/records')" in evidence
+    creator=(ROOT/'record-create.js').read_text(encoding='utf-8')
+    assert all(text in evidence for text in ('编辑这条关系','删除这条关系','删除实体及其关联关系','再次点击确认删除','新增关系'))
+    assert 'evidence-danger' in evidence
+    # The inspector delegates creation with the selected entity as its subject;
+    # the shared form owns the published types, endpoints and formal write.
+    assert "window.RecordCreate?.open('relation',{subject:row})" in evidence
+    assert "window.RecordCreate?.open('attribute',{subject:row})" in evidence
+    assert html.index('/assets/record-create.js') < html.index('/assets/evidence-inspector.js')
+    assert all(text in creator for text in ('创建正式记录','起点实体','终点实体','只有管理员可以创建知识记录'))
+    assert 'selected:subject' in creator and 'catalog(publication)[kind]' in creator
+    assert 'await session.submit(record)' in creator
+    assert "return read('/records',{records:[record]})" in creator
+    assert "new CustomEvent('records:created'" in creator
+    for js in (evidence,creator):
+        assert not re.search(r'\b(?:prompt|confirm|alert)\s*\(',js)
     record_dialog=(ROOT/'record-dialog.js').read_text(encoding='utf-8')
     assert all(text in record_dialog for text in ('维护具体实体','维护实体关系','保存实体修改为新修订','保存关系修改为新修订','高级：编辑完整记录 JSON'))
     assert "get('draw-graph')" not in record_dialog
@@ -57,16 +61,11 @@ def test_workbench_has_all_control_targets_and_no_native_dialogs():
     assert all(text in candidate_map for text in ('开放解析完成后先在这里检查','进入本体建模层','查看正式脑图'))
     assert '正式重解析' not in candidate_map
     assert 'knowledge-flow' not in candidate_map and 'knowledge-flow' not in workspace
-    # P0 侧栏重构：3 组 10 入口 → 4 组 7 入口；分组维度改为
-    # TBox（本体结构）/ ABox（实例知识）/ 消费 / 运行 —— 本体层与实例层是两个维度，
-    # 不再混在旧「建模与治理」一组里。
-    assert all(group in menu for group in ('本体层 · 结构', '实例层 · 知识',
-                                           '消费层 · 用起来', '运行层 · 跑起来'))
-    assert "['本体层 · 结构',['ontology-model']]" in menu
-    assert "['实例层 · 知识',['ingest','records']]" in menu
-    assert "['消费层 · 用起来',['search','qa','mindmap']]" in menu
-    # D2：四个运行页并成一个入口（项目管理 / 项目总览 / 后台任务 / 快照·评测 → 运行层）
-    assert "['运行层 · 跑起来',['runtime']]" in menu
+    assert all(group in menu for group in ('使用知识', '管理资料', '运行与质量'))
+    assert "['使用知识',['qa','search']]" in menu
+    assert "['管理资料',['sources','records','ontology-model']]" in menu
+    assert "['运行与质量',['runtime','quality']]" in menu
+    assert "['projects','useradmin']" in menu
     assert all(asset in html for asset in ('candidate-mindmap.js','menu-hierarchy.js','candidate-mindmap.css','menu-hierarchy.css'))
     assert '/assets/workbench.css' in html and '/assets/workbench.js' in html
 
@@ -82,17 +81,35 @@ def test_search_and_graph_share_one_workspace_with_single_mode_and_hop_controls(
     assert 'data-tab="search"' in html
     assert 'data-tab="qa"' in html
     assert 'data-tab="graph"' not in html
-    assert '>检索与交互图谱<' in html
+    assert '>检索与图谱<' in html
     assert '>知识问答<' in html
     assert '>知识检索<' not in html
     assert '>证据问答<' not in html
-    assert "['消费层 · 用起来',['search','qa','mindmap']]" in menu
+    assert "['使用知识',['qa','search']]" in menu
     assert 'search-graph-workspace' in html
     assert all(region in html for region in ('search-results-pane','graph-stage','inspector-rail'))
     assert '从左侧检索结果选择实体或关系' in html
     assert all(control in html for control in ('graph-entity-filter','graph-entity-choice','graph-reset-view'))
     assert "endpoint('/search')" in workspace
-    assert "scopedRead('/subgraph'" in workspace
+    local_graph=workspace[workspace.index('window.drawGraph=async('):workspace.index('window.clearGraphWorkspace=')]
+    assert re.search(r'if\(!id\)\{[^}]*return null;\}',local_graph)
+    assert local_graph.index('if(!id)') < local_graph.index("'/graph-neighborhood'")
+    assert 'seeds:[id]' in local_graph and 'hops:Number(hops)' in local_graph
+    assert 'Number(hops)>10' in local_graph and 'Number.isInteger(Number(hops))' in local_graph
+    assert all(control in local_graph for control in ('graph-direction','graph-max-nodes','graph-max-edges'))
+    assert 'max_nodes:' in local_graph and 'max_edges:' in local_graph
+    assert "'/graph-neighborhood',{...appliedScope,...neighborhood}" in local_graph
+    assert 'truncated:Boolean(result.truncated)' in local_graph
+    # Complete enumeration has its own explicit mode and session cursor loop.
+    full_view=(ROOT/'full-graph-view.js').read_text(encoding='utf-8')
+    full_graph=(ROOT/'full-graph.js').read_text(encoding='utf-8')
+    assert html.index('/assets/full-graph.js') < html.index('/assets/full-graph-view.js')
+    assert 'data-fg-mode="full"' in full_view and "mode='local'" in full_view
+    assert 'new window.FullGraph.SessionLoader' in full_view and 'loader.begin(selected,fixed)' in full_view
+    assert "'/graph-sessions'" in full_graph and "kind==='connected'" in full_graph
+    assert 'this.cursor=page.next_cursor' in full_graph and 'this.resume()' in full_graph
+    assert all(action in full_view for action in ('data-fg="next"','data-fg="auto"','data-fg="pause"','data-fg="restart"'))
+    assert '/graph-neighborhood' not in full_graph and '/graph-sessions' not in local_graph
     assert '/explore' not in workspace
     assert 'await linkedSearch()' not in workspace
     assert "get('query').oninput" not in workspace
@@ -104,10 +121,11 @@ def test_combined_workspace_has_responsive_breakpoints_and_isolated_clearing_con
     workspace=(ROOT/'workspace.js').read_text(encoding='utf-8')
     styles=(ROOT/'workspace.css').read_text(encoding='utf-8')
 
-    assert 'grid-template-columns:minmax(260px,300px) minmax(0,1fr) minmax(240px,280px)' in styles
+    assert 'grid-template-columns:minmax(240px,280px) minmax(0,1fr)' in styles
+    assert '.inspector-rail' in styles
     assert '@media(max-width:1100px)' in styles
     assert '@media(max-width:700px)' in styles
-    assert 'min-height:55vh' in styles
+    assert 'height:clamp(520px,calc(100dvh - 228px),1000px)' in styles
     assert 'overflow-x:hidden' in styles
     assert 'detail-drawer-close' in workspace
     assert 'clearGraphWorkspace' in workspace
@@ -175,8 +193,21 @@ def test_knowledge_history_excludes_document_receipts_and_sources_show_build_sta
     workspace=(ROOT/'workspace.js').read_text(encoding='utf-8')
     styles=(ROOT/'workspace.css').read_text(encoding='utf-8')
     sources=(ROOT/'sources-view.js').read_text(encoding='utf-8')
-    # 台账的查询范围＝台账的四个视角；属性（attribute）以前被这里滤掉了，界面上根本看不到它
-    assert "kinds:['entity','relation','attribute','chunk']" in records
+    # All four views remain reachable, including attributes, while each request
+    # reads only the selected kind through the server cursor pager.
+    views=re.search(r'const VIEW_ORDER=\[([^]]+)\]',records)
+    assert views and re.findall(r"'([^']+)'",views.group(1)) == ['entity','relation','attribute','chunk']
+    assert 'if(!VIEW_ORDER.includes(key))return;' in records
+    assert 'view=key;syncKindSelect();renderTabs();return loadPage();' in records
+    criteria=records[records.index('const readCriteria='):records.index('function guard(')]
+    assert '...scope(),...versionFields(),kinds:[view]' in criteria
+    assert "query:$('record-search').value.trim()" in criteria
+    assert "window.RecordCreate.createPager(body=>api('/api/projects/'+encodeURIComponent(current)+'/records/page',body))" in records
+    assert "direction==='next'?pager.next():direction==='previous'?pager.previous():pager.load(criteria)" in records
+    assert 'rows=result.records;total=result.total;page=result.page' in records
+    creator=(ROOT/'record-create.js').read_text(encoding='utf-8')
+    assert 'cursor:cursors[index],limit:50' in creator
+    assert 'criteria=clone(next);cursors=[null]' in creator
     assert "ontology_scope:'all',ontology_ids:null" in records
     assert "document:'文档'" not in records
     assert "record-library-section" in records and "record-governance" in records
@@ -191,7 +222,7 @@ def test_knowledge_history_excludes_document_receipts_and_sources_show_build_sta
     assert '.governance-technical-id{display:none}' in styles
     assert '.governance-merge-preview' in styles and '.governance-selection' in styles
     assert "知识构建失败" in sources
-    assert "构建成功" in sources
+    assert "处理完成 / 待核验" in sources
 
 
 def test_knowledge_ledger_is_the_instance_layer_home():

@@ -97,7 +97,9 @@ def test_batch_card_paginates_and_uses_selected_retry_mode(tmp_path):
         page.add_script_tag(path=str(WEB / 'ingest-batches.js'))
         page.evaluate("IngestBatches.monitor('p',{id:'b'})")
         page.get_by_text('模型超时', exact=False).wait_for()
-        assert '实际并发 4' in page.locator('.ingest-batch-card').inner_text()
+        concurrency = page.locator('.ingest-batch-card').inner_text()
+        assert '并发设置：8' in concurrency
+        assert '当前并发 4' in concurrency
         assert page.locator('.batch-item img').count() == 0
         page.get_by_role('button', name='下一页').click()
         page.get_by_role('button', name='回到首页').wait_for()

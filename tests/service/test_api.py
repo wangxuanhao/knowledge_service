@@ -1,3 +1,5 @@
+from ontology_seed import seed_project_ontology
+from ontology_seed import seed_ontology
 from fastapi.testclient import TestClient
 import pytest
 
@@ -24,12 +26,12 @@ def project(client, *, use_default_ontology=True):
 def test_project_applicability_values_endpoint_returns_current_dictionary(client):
     p = project(client, use_default_ontology=False)
     for title, applicability in [
-        ('美团规则', {'platforms': ['美团'], 'businesses': ['外卖']}),
+        ('美团规则', {'platforms': {'mode': 'specific', 'values': ['美团']}, 'businesses': {'mode': 'specific', 'values': ['外卖']}}),
         ('京东规则', {'platforms': {'mode': 'specific', 'values': ['京东']},
                   'audiences': {'mode': 'specific', 'values': ['商户']}}),
     ]:
         response = client.post(f'/api/projects/{p}/documents', json={
-            'title': title, 'text': title, 'extract': False,
+            'title': title, 'text': title, 'extraction_mode': 'documents',
             'applicability': applicability,
         })
         assert response.status_code == 201, response.text
@@ -43,6 +45,15 @@ def test_project_applicability_values_endpoint_returns_current_dictionary(client
     }
 
 
+def test_project_cards_report_real_ontology_publications(client):
+    empty = project(client, use_default_ontology=False)
+    published = project(client)
+    cards = {row['id']: row for row in client.get('/api/projects').json()['projects']}
+    assert cards[empty]['ontology_publications'] == 0
+    assert cards[published]['ontology_publications'] == 1
+    assert cards[empty]['counts']['entities'] == 0
+
+
 def test_ontology_scope_accepts_each_legal_combination(client):
     p = project(client, use_default_ontology=False)
 
@@ -51,7 +62,7 @@ def test_ontology_scope_accepts_each_legal_combination(client):
         {'ontology_scope': 'ids', 'ontology_ids': ['ontology-v1']},
         {'ontology_scope': 'unknown', 'ontology_ids': None},
     ]:
-        response = client.post(f'/api/projects/{p}/records/query', json=scope)
+        response = client.post(f'/api/projects/{p}/records/page', json=scope)
         assert response.status_code == 200, (scope, response.text)
 
 
@@ -68,7 +79,7 @@ def test_ontology_scope_rejects_each_illegal_combination(client):
         {'ontology_scope': 'ids', 'ontology_ids': ['   ']},
         {'ontology_scope': 'ids', 'ontology_ids': ['\t']},
     ]:
-        response = client.post(f'/api/projects/{p}/records/query', json=scope)
+        response = client.post(f'/api/projects/{p}/records/page', json=scope)
         assert response.status_code == 422, (scope, response.text)
 
 
@@ -93,10 +104,10 @@ def test_filtered_ingestion_search_and_restart(client):
     p = project(client)
     for city in ['北京','上海']:
         result = client.post(f'/api/projects/{p}/documents', json={
-            'title': city+'规则', 'text': '商户必须提供退款。', 'extract':False,
+            'title': city+'规则', 'text': '商户必须提供退款。', 'extraction_mode':'documents',
             'metadata':{'region':{'city':city}, 'tags':['规则']}, 'valid_from':'2025-01-01'})
         assert result.status_code == 201, result.text
-    scope = {'query':'退款', 'k':1, 'filters':{'field':'region.city','op':'eq','value':'北京'}}
+    scope = {'query':'退款', 'retrieval_mode':'keyword', 'k':1, 'filters':{'field':'region.city','op':'eq','value':'北京'}}
     result = client.post(f'/api/projects/{p}/search', json=scope).json()
     assert len(result['hits']) == 1
     assert result['hits'][0]['metadata']['region']['city'] == '北京'
@@ -112,7 +123,7 @@ def test_ingest_coalesces_receipt_and_completion_into_one_timeline_point(client)
         p, {'id': 'future', 'kind': 'document', 'text': 'future'},
         recorded_at='2030-01-01T00:00:00Z')
     response = client.post(f'/api/projects/{p}/documents', json={
-        'title': '一次摄取', 'text': '商户必须提供退款凭证。', 'extract': False})
+        'title': '一次摄取', 'text': '商户必须提供退款凭证。', 'extraction_mode': 'documents'})
     assert response.status_code == 201, response.text
 
     document = response.json()['document']
@@ -138,7 +149,7 @@ def test_background_ingestion_has_stage_logs(client):
     import time
     p=project(client)
     response=client.post(f'/api/projects/{p}/documents/jobs',json={
-        'title':'日志测试','text':'中文片段。'*100,'extract':False,
+        'title':'日志测试','text':'中文片段。'*100,'extraction_mode':'documents',
         'chunk_size':180,'chunk_overlap':20})
     assert response.status_code==202
     job_id=response.json()['id']
@@ -162,13 +173,13 @@ def test_revision_and_half_open_time(client):
     old = client.post(path,json={'records':[record]})
     assert old.status_code == 201, old.text
     old = old.json()['records'][0]
-    assert client.post(f'/api/projects/{p}/search',json={'query':'条款','valid_at':'2022-01-01'}).json()['hits'] == []
+    assert client.post(f'/api/projects/{p}/search',json={'query':'条款','retrieval_mode':'keyword','valid_at':'2022-01-01'}).json()['hits'] == []
     record.update(text='修正条款',metadata={'version':'corrected'})
     new = client.put(path+'/rule',json={'record':record,'expected_version':1})
     assert new.status_code == 200, new.text
     assert client.put(path+'/rule',json={'record':record,'expected_version':1}).status_code == 409
     historical = client.post(f'/api/projects/{p}/search',json={
-        'query':'条款','valid_at':'2021-01-01','known_at':old['recorded_at']}).json()['hits']
+        'query':'条款','retrieval_mode':'keyword','valid_at':'2021-01-01','known_at':old['recorded_at']}).json()['hits']
     assert historical[0]['text'] == '旧条款'
     assert len(client.get(path+'/rule/history').json()['versions']) == 2
 
@@ -207,13 +218,13 @@ def test_invalid_writes_roll_back_but_unknown_concepts_are_kept(client):
     record = created.json()['records'][0]
     assert record['structure_pending']['state'] == 'pending'
     assert record['structure_pending']['terms'] == ['Unknown']
-    assert client.post(path+'/records/query',json={}).json()['total'] == 1
+    assert client.post(path+'/records/page',json={}).json()['total'] == 1
     broken = client.post(path+'/records',json={'records':[
         {'kind':'relation','type':'Unknown','text':'坏关系','subject_id':'nope','object_id':'nope'}]})
     assert broken.status_code == 422, broken.text
-    assert client.post(path+'/records/query',json={}).json()['total'] == 1, '失败的写入不能留下半条记录'
-    assert client.post(path+'/search',json={'query':'x','filters':{'field':'x','op':'arbitrary','value':1}}).status_code == 422
-    assert client.post(path+'/ontologies',json={'turtle':'invalid'}).status_code == 422
+    assert client.post(path+'/records/page',json={}).json()['total'] == 1, '失败的写入不能留下半条记录'
+    assert client.post(path+'/search',json={'query':'x','retrieval_mode':'keyword','filters':{'field':'x','op':'arbitrary','value':1}}).status_code == 422
+    assert client.post(path+'/ontologies',json={'turtle':'invalid'}).status_code == 405
 
 
 def test_relationships_cannot_leak_filtered_or_inactive_endpoints(client):
@@ -228,7 +239,7 @@ def test_relationships_cannot_leak_filtered_or_inactive_endpoints(client):
     graph = client.post(path+'/graph',json=scope).json()
     assert [n['id'] for n in graph['nodes']] == ['b']
     assert graph['edges'] == []
-    result = client.post(path+'/search',json={**scope,'query':'商户'}).json()
+    result = client.post(path+'/search',json={**scope,'query':'商户','retrieval_mode':'keyword'}).json()
     assert {r['id'] for r in result['hits']} == {'b'}
 
 
@@ -241,9 +252,9 @@ def test_ontology_scope_filters_versions_unknown_rows_and_dangling_facts(client)
         '@prefix owl: <http://www.w3.org/2002/07/owl#> . '
         'ex:Thing a owl:Class .'
     )
-    first = repository.save_ontology(p, turtle, {})
-    second = repository.save_ontology(p, turtle, {})
-    foreign = repository.save_ontology(foreign_project, turtle, {})
+    first = seed_ontology(repository, p, turtle, {})
+    second = seed_ontology(repository, p, turtle, {})
+    foreign = seed_ontology(repository, foreign_project, turtle, {})
 
     records = [
         {'id': 'first-a', 'kind': 'entity', 'type': 'Thing', 'text': 'first a',
@@ -274,13 +285,13 @@ def test_ontology_scope_filters_versions_unknown_rows_and_dangling_facts(client)
         repository.put_record(p, record)
 
     def scoped_ids(body):
-        response = client.post(f'/api/projects/{p}/records/query', json=body)
+        response = client.post(f'/api/projects/{p}/records/page', json=body)
         assert response.status_code == 200, response.text
         return {row['id'] for row in response.json()['records']}
 
-    default_response = client.post(f'/api/projects/{p}/records/query', json={})
+    default_response = client.post(f'/api/projects/{p}/records/page', json={})
     explicit_all = client.post(
-        f'/api/projects/{p}/records/query', json={'ontology_scope': 'all'})
+        f'/api/projects/{p}/records/page', json={'ontology_scope': 'all'})
     assert default_response.status_code == explicit_all.status_code == 200
     assert default_response.json() == explicit_all.json()
 
@@ -303,9 +314,9 @@ def test_failed_extraction_keeps_receipt_without_partial_records(client, monkeyp
     monkeypatch.delenv('KG_LLM_API_KEY', raising=False)
     p = project(client)
     path = f'/api/projects/{p}'
-    response = client.post(path+'/documents', json={'title':'失败回执','text':'退款规则','extract':True})
+    response = client.post(path+'/documents', json={'title':'失败回执','text':'退款规则','extraction_mode':'ontology'})
     assert response.status_code == 503
-    rows = client.post(path+'/records/query', json={}).json()['records']
+    rows = client.post(path+'/records/page', json={}).json()['records']
     assert len(rows) == 1 and rows[0]['kind'] == 'document'
     assert rows[0]['metadata']['status'] == 'failed'
     assert len(client.get(path+'/records/'+rows[0]['id']+'/history').json()['versions']) == 2
@@ -316,9 +327,9 @@ def test_api_persists_across_restart(tmp_path):
     with TestClient(create_app(database, HashingEncoder())) as first:
         p = project(first)
         assert first.post(f'/api/projects/{p}/documents', json={
-            'title':'持久化','text':'重启后的退款证据','extract':False}).status_code == 201
+            'title':'持久化','text':'重启后的退款证据','extraction_mode':'documents'}).status_code == 201
     with TestClient(create_app(database, HashingEncoder())) as second:
-        result = second.post(f'/api/projects/{p}/search', json={'query':'退款'}).json()
+        result = second.post(f'/api/projects/{p}/search', json={'query':'退款','retrieval_mode':'keyword'}).json()
         assert result['candidate_count'] == 1
         assert '重启后的退款证据' in result['hits'][0]['text']
 
@@ -329,7 +340,9 @@ def test_malformed_llm_response_is_service_unavailable(client, monkeypatch):
         monkeypatch.setenv(key, 'configured')
     p = project(client)
     client.post(f'/api/projects/{p}/documents', json={
-        'title':'证据','text':'退款规则','extract':False,
+        'title':'证据','text':'退款规则','extraction_mode':'documents',
+        'published_at':'2020-01-01',
+        'valid_from':'2020-01-01',
         'applicability': {
             'platforms': {'mode': 'all', 'values': []},
             'businesses': {'mode': 'all', 'values': []},
@@ -339,7 +352,7 @@ def test_malformed_llm_response_is_service_unavailable(client, monkeypatch):
     monkeypatch.setattr(httpx.Client, 'post', lambda *a, **k: httpx.Response(
         200, json={'choices':[]}, request=httpx.Request('POST','https://example.invalid')))
     # TestClient inherits httpx.Client, so invoke the ASGI transport through request.
-    response = client.request('POST', f'/api/projects/{p}/qa', json={'query':'退款','generate':True})
+    response = client.request('POST', f'/api/projects/{p}/qa', json={'query':'退款','retrieval_mode':'keyword','generate':True})
     assert response.status_code == 503
 
 
@@ -355,7 +368,7 @@ def test_ingest_failure_does_not_overwrite_concurrent_revision(client, monkeypat
         raise RuntimeError('simulated embedding failure')
     monkeypatch.setattr(service.encoder, 'encode', edit_then_fail)
     response = client.post(f'/api/projects/{p}/documents', json={
-        'title':'并发文档','text':'ORIGINAL','extract':False})
+        'title':'并发文档','text':'ORIGINAL','extraction_mode':'documents'})
     assert response.status_code == 503
     current = service.repository.current_records(p)
     assert len(current) == 1
@@ -371,7 +384,7 @@ def test_ingest_prefers_relation_extracted_validity_over_request(client, monkeyp
     p = project(client, use_default_ontology=False)
     base = f'/api/projects/{p}'
     ttl='@prefix : <https://test/> . @prefix owl: <http://www.w3.org/2002/07/owl#> . :Person a owl:Class . :Company a owl:Class . :worksAt a owl:ObjectProperty .'
-    client.post(base+'/ontologies', json={'turtle': ttl})
+    seed_project_ontology(client, base+'', ttl)
     def fake_extract(self, text, ontology):
         return [
             {'id':'e1','kind':'entity','text':'张三','type':'Person','metadata':{}},

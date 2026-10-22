@@ -16,6 +16,9 @@ class MilvusDestination:
         self.markers = []
         self.fail_once = None
 
+    def check_destination(self, *, destination):
+        return self
+
     def upsert(self, records, *, destination=None, projection_seq=None,
                fence=None, flush=True):
         if projection_seq == self.fail_once:
@@ -40,9 +43,15 @@ def event(seq):
     }}
 
 
-def test_partial_batch_retry_with_new_lease_acknowledges_watermark(tmp_path):
+def test_partial_batch_failure_requires_explicit_rebuild_without_retry(tmp_path):
     repo = Repository(tmp_path / 'projection-replay')
     project = repo.create_project('projection replay')['id']
+    with repo._transaction():
+        repo.projections._ensure_cursor(project, 'milvus', 3)
+        repo._db.execute(
+            "UPDATE projection_cursors SET status='ready',active_destination=? "
+            'WHERE project_id=? AND target=?',
+            ('active', project, 'milvus'))
     for record_id in ('first', 'second'):
         repo.put_record(project, {
             'id': record_id, 'kind': 'chunk', 'text': record_id,
@@ -64,17 +73,16 @@ def test_partial_batch_retry_with_new_lease_acknowledges_watermark(tmp_path):
 
     adapter = MilvusProjectionAdapter(milvus, fence_is_current=current)
     sync = ProjectionSync(repo.projections, {'milvus': adapter}, schema_version=3)
-    assert int(sync.drain_once(project, 'milvus')) == 0
+    assert sync.drain_once(project, 'milvus').status == 'requires_rebuild'
     assert repo.projections.cursor(project, 'milvus')['applied_seq'] == 0
-    old_token = milvus.writes[0][2]
 
-    assert int(sync.drain_once(project, 'milvus')) == 2
+    assert sync.drain_once(project, 'milvus').status == 'requires_rebuild'
     cursor = repo.projections.cursor(project, 'milvus')
-    assert cursor['applied_seq'] == repo.projections.project_watermark(project) == 2
-    assert repo.projection_ready(project, 'milvus', 3)
-    assert [seq for _, seq, _ in milvus.writes] == [1, 2]
-    assert milvus.writes[-1][2] != old_token
-    assert {row['id'] for row in milvus.rows.values()} == {'first', 'second'}
+    assert cursor['applied_seq'] == 0
+    assert cursor['status'] == 'requires_rebuild'
+    assert not repo.projection_ready(project, 'milvus', 3)
+    assert [seq for _, seq, _ in milvus.writes] == [1]
+    assert {row['id'] for row in milvus.rows.values()} == {'first'}
 
 
 @pytest.mark.parametrize('seq', [1, 2, 3])

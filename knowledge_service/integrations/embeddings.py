@@ -126,6 +126,7 @@ class LocalEncoder:
         self.path = str(Path(path).resolve())
         self.identity = identity or f'sentence-transformers:{self.path}:normalized-v1'
         self._model = None
+        self.runtime_ready = False
         self._lock = threading.RLock()
         self.dimension, self.dimension_source = _local_model_dimension_info(self.path)
 
@@ -134,36 +135,45 @@ class LocalEncoder:
 
     def encode(self, texts):
         with self._lock:
-            if self._model is None:
+            try:
+                output = self._encode_locked(texts)
+            except Exception:
+                self.runtime_ready = False
+                raise
+            self.runtime_ready = bool(output) and self.dimension is not None
+            return output
+
+    def _encode_locked(self, texts):
+        if self._model is None:
+            try:
+                from sentence_transformers import SentenceTransformer
+                self._model = SentenceTransformer(self.path, local_files_only=True)
+            except Exception as exc:
+                raise RuntimeError(f'本地 embedding 模型不可用：{redact(exc)}') from exc
+        reported = None
+        get_dimension = getattr(self._model, 'get_sentence_embedding_dimension', None)
+        if callable(get_dimension):
+            reported = _positive_dimension(get_dimension())
+        if self.dimension is not None and reported is not None and reported != self.dimension:
+            raise EmbeddingDimensionMismatch(
+                f'embedding 配置声明 {self.dimension} 维（{self.dimension_source}），'
+                f'实际模型 {reported} 维；拒绝继续，以免写入错误维度的 Milvus collection。')
+        batch_size=int(os.environ.get('KG_EMBEDDING_BATCH_SIZE','4'))
+        if not 1<=batch_size<=64: raise ValueError('KG_EMBEDDING_BATCH_SIZE 必须在 1..64 之间')
+        encoded = self._model.encode(
+            texts, normalize_embeddings=True, batch_size=batch_size)
+        output = encoded.tolist() if hasattr(encoded, 'tolist') else list(encoded)
+        if self.dimension is not None:
+            for vector in output:
                 try:
-                    from sentence_transformers import SentenceTransformer
-                    self._model = SentenceTransformer(self.path, local_files_only=True)
-                except Exception as exc:
-                    raise RuntimeError(f'本地 embedding 模型不可用：{redact(exc)}') from exc
-                reported = None
-                get_dimension = getattr(self._model, 'get_sentence_embedding_dimension', None)
-                if callable(get_dimension):
-                    reported = _positive_dimension(get_dimension())
-                if self.dimension is not None and reported is not None and reported != self.dimension:
+                    actual = len(vector)
+                except TypeError as exc:
+                    raise RuntimeError('本地 embedding 模型返回了无效向量') from exc
+                if actual != self.dimension:
                     raise EmbeddingDimensionMismatch(
                         f'embedding 配置声明 {self.dimension} 维（{self.dimension_source}），'
-                        f'实际模型 {reported} 维；拒绝继续，以免写入错误维度的 Milvus collection。')
-            batch_size=int(os.environ.get('KG_EMBEDDING_BATCH_SIZE','4'))
-            if not 1<=batch_size<=64: raise ValueError('KG_EMBEDDING_BATCH_SIZE 必须在 1..64 之间')
-            encoded = self._model.encode(
-                texts, normalize_embeddings=True, batch_size=batch_size)
-            output = encoded.tolist() if hasattr(encoded, 'tolist') else list(encoded)
-            if self.dimension is not None:
-                for vector in output:
-                    try:
-                        actual = len(vector)
-                    except TypeError as exc:
-                        raise RuntimeError('本地 embedding 模型返回了无效向量') from exc
-                    if actual != self.dimension:
-                        raise EmbeddingDimensionMismatch(
-                            f'embedding 配置声明 {self.dimension} 维（{self.dimension_source}），'
-                            f'实际向量 {actual} 维；拒绝继续，以免写入错误维度的 Milvus collection。')
-            return output
+                        f'实际向量 {actual} 维；拒绝继续，以免写入错误维度的 Milvus collection。')
+        return output
 
 
 class RemoteEncoder:
@@ -174,6 +184,7 @@ class RemoteEncoder:
         self.model = os.environ.get('KG_EMBEDDING_MODEL', '')
         self.key = os.environ.get('KG_EMBEDDING_API_KEY', '')
         self.identity = f'openai:{self.url}:{self.model}'
+        self.runtime_ready = False
         # 远端模型的维度无法在建 Milvus collection 前探测，必须显式声明。
         declared = os.environ.get('KG_EMBEDDING_DIMENSION', '').strip()
         if declared:
@@ -187,6 +198,15 @@ class RemoteEncoder:
             self.dimension_source = 'unavailable'
 
     def encode(self, texts):
+        try:
+            output = self._encode_request(texts)
+        except Exception:
+            self.runtime_ready = False
+            raise
+        self.runtime_ready = bool(output) and self.dimension is not None
+        return output
+
+    def _encode_request(self, texts):
         if not all([self.url, self.model, self.key]):
             raise RuntimeError('请配置 KG_EMBEDDING_BASE_URL、KG_EMBEDDING_MODEL、KG_EMBEDDING_API_KEY')
         try:
@@ -197,7 +217,13 @@ class RemoteEncoder:
                 data = sorted(response.json()['data'], key=lambda row: row['index'])
                 if len(data) != len(texts):
                     raise RuntimeError('embedding 提供商返回的向量数量不正确')
-                return [row['embedding'] for row in data]
+                output = [row['embedding'] for row in data]
+                if self.dimension is not None:
+                    for vector in output:
+                        if len(vector) != self.dimension:
+                            raise EmbeddingDimensionMismatch(
+                                f'embedding 配置声明 {self.dimension} 维，实际向量 {len(vector)} 维；拒绝继续。')
+                return output
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
             # 保留底层原因（经 redact 脱敏）：只报异常类型会让「模型名不存在」
             # 这类可自愈的配置错误看起来和网络故障一样，无法自查。

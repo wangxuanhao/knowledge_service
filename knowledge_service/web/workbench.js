@@ -1,7 +1,7 @@
 /* Rich exploration on the new service. No native browser prompt/confirm APIs. */
 const wb={epoch:0,chart:null,tree:null,nodes:new Map(),records:new Map(),jobs:new Map()};
 const baseScope=scope;
-scope=()=>({...baseScope(),...(window.ApplicabilityUI?.readQueryScope?.()||{})});
+scope=()=>window.WorkspaceContext?baseScope():({...baseScope(),...(window.ApplicabilityUI?.readQueryScope?.()||{})});
 const emptyVersionContext=()=>({
   ontologyScope:'all',ontologyIds:null,ontologyVersion:null,source:null,
 });
@@ -23,17 +23,36 @@ const platformGroupLabel=group=>group?.source_scope==='all'?'通用规则':
 function showTab(name){document.querySelector(`[data-tab="${name}"]`).click();}
 // 打开「项目与运行」里的某个分区。合并后 后台任务 / 快照·评测 不再是独立页签，
 // 但仍需要一个把用户送到那儿的入口（例如文档提交成功 → 直接看任务日志）。
-// 代价说明：从别的分区跳过来时，可能多发一次只读请求（先按旧分区刷新、再切到目标分区）。
-function showRuntimeView(view){showTab('runtime');if(window.RuntimeView?.current!==view)window.RuntimeView?.show(view);}
+function showRuntimeView(view){window.RuntimeView?.show(view,{load:false});showTab('runtime');}
 function controlsProject(){if(!current)throw Error('请先选择项目');return current;}
-async function scopedRead(path,extra={}){const p=controlsProject(),epoch=wb.epoch;const result=await api('/api/projects/'+encodeURIComponent(p)+path,{...scope(),...extra});if(p!==current||epoch!==wb.epoch)throw Error('项目已切换，旧响应已忽略');return result;}
+async function scopedRead(path,extra={}){const p=controlsProject(),epoch=wb.epoch,page=window.WorkspaceContext?.page,ticket=window.WorkspaceContext?.ticket(p);const result=await api('/api/projects/'+encodeURIComponent(p)+path,{...scope(),...extra});if(p!==current||epoch!==wb.epoch||(ticket&&!window.WorkspaceContext.accepts(ticket,current,page)))throw Error('项目已切换，旧响应已忽略');return result;}
 function discoveryHintHost(canvasId){const canvas=$(canvasId);if(!canvas||!canvas.parentNode)return null;let host=$(canvasId+'-discovery-hint');if(!host){host=document.createElement('div');host.id=canvasId+'-discovery-hint';host.className='discovery-hint';host.hidden=true;canvas.parentNode.insertBefore(host,canvas.parentNode.firstChild);}return host;}
-async function renderDiscoveryHint(){const p=current,mode=$('project').selectedOptions?.[0]?.dataset?.ontologyMode,hosts=['graph-canvas','mindmap-canvas'].map(discoveryHintHost);if(!p||mode!=='discovery'){hosts.forEach(h=>{if(h)h.hidden=true;});return;}let data;try{data=await api(endpoint('/ontology-discovery'),undefined,'GET');}catch(e){hosts.forEach(h=>{if(h)h.hidden=true;});return;}if(p!==current)return;const pending=data.unpublished_candidate_count||0;hosts.forEach(host=>{if(!host)return;if(pending>0){host.hidden=false;host.innerHTML=`<span>开放本体发现：还有 <b>${pending}</b> 条候选待审核或未通过校验。它们仍保留在候选区，不需要重新上传原文。</span><button data-goto-discovery>前往本体建模层 ↗</button>`;host.querySelector('[data-goto-discovery]').onclick=()=>showTab('ontology-model');}else host.hidden=true;});}
-for(const tab of ['graph','mindmap'])document.querySelector(`[data-tab="${tab}"]`)?.addEventListener('click',()=>renderDiscoveryHint().catch(()=>{}));
+let discoveryHintRequest=0;
+async function renderDiscoveryHint(){
+  const request=++discoveryHintRequest,p=current,epoch=wb.epoch;
+  const visible=id=>{const page=document.getElementById(id);return !!page&&!page.classList.contains('hidden');};
+  const canvases=[];
+  if(visible('tab-search')||visible('tab-graph'))canvases.push('graph-canvas');
+  if(visible('tab-mindmap'))canvases.push('mindmap-canvas');
+  const mode=$('project').selectedOptions?.[0]?.dataset?.ontologyMode;
+  if(!p||mode!=='discovery'||!canvases.length){
+    for(const id of ['graph-canvas','mindmap-canvas']){const host=$(id+'-discovery-hint');if(host)host.hidden=true;}
+    return;
+  }
+  const hosts=canvases.map(discoveryHintHost);
+  const stillCurrent=()=>request===discoveryHintRequest&&p===current&&epoch===wb.epoch&&canvases.some(id=>visible(id==='graph-canvas'?'tab-search':'tab-mindmap')||(id==='graph-canvas'&&visible('tab-graph')));
+  let data;
+  try{data=await api(endpoint('/ontology-discovery'),undefined,'GET');}
+  catch(error){if(stillCurrent())hosts.forEach(host=>{if(host)host.hidden=true;});return;}
+  if(!stillCurrent())return;
+  const pending=data.unpublished_candidate_count||0;
+  hosts.forEach(host=>{if(!host)return;if(pending>0){host.hidden=false;host.innerHTML=`<span>开放本体发现：还有 <b>${pending}</b> 条候选待审核或未通过校验。它们仍保留在候选区，不需要重新上传原文。</span><button data-goto-discovery>前往本体建模层 ↗</button>`;host.querySelector('[data-goto-discovery]').onclick=()=>showTab('ontology-model');}else host.hidden=true;});
+}
+for(const tab of ['graph','search','mindmap'])document.querySelector(`[data-tab="${tab}"]`)?.addEventListener('click',()=>renderDiscoveryHint().catch(()=>{}));
 const oldChange=$('project').onchange;
 $('project').onchange=()=>{wb.clearVersionContext();oldChange();wb.records.clear();for(const id of ['dashboard','source-list','source-body','resolve-result','tasks','operations','evaluation-result'])$(id).textContent='';const preferred=$('project').selectedOptions?.[0]?.dataset?.ontologyMode,mode=document.getElementById('extraction-mode');if(preferred&&mode){mode.value=preferred;mode.onchange?.();}wb.tree?.clear();renderDiscoveryHint().catch(()=>{});};
 let dashboardRequest=0;
-async function dashboard(){const request=++dashboardRequest,p=current,stamp=JSON.stringify(scope());const r=await scopedRead('/dashboard');if(request!==dashboardRequest||p!==current||stamp!==JSON.stringify(scope()))return;
+async function dashboard(){const request=++dashboardRequest,p=current;controlsProject();const r=await api(endpoint('/dashboard'),{});if(request!==dashboardRequest||p!==current)return;
 
   // 计算成功解析率
   const totalDocs=r.counts.total_documents||r.counts.document;
@@ -101,7 +120,7 @@ bind('load-graph',async()=>{showTab('search');await window.drawGraph();});
 bind('resolve-entity',async()=>{const r=await scopedRead('/resolve',{text:$('resolve-text').value,threshold:Number($('resolve-threshold').value)});const rows=r.canonical?[r.canonical]:r.candidates;$('resolve-result').innerHTML=`<p>${esc(r.status)} · ${esc(r.backend)}</p>`+rows.map(x=>`<div class="candidate"><strong>${esc(x.text)}</strong> ${typeHint(x.type)} ${x.score!==undefined?'· '+x.score.toFixed(3):''}<small>${esc(x.id)} · v${x.version}</small><button data-keep="${esc(x.id)}">设为保留实体</button> <button data-drop="${esc(x.id)}" class="secondary">设为合并实体</button></div>`).join('');for(const row of rows)wb.records.set(row.id,row);$('resolve-result').querySelectorAll('[data-keep]').forEach(b=>b.onclick=()=>{$('keep-id').value=b.dataset.keep;});$('resolve-result').querySelectorAll('[data-drop]').forEach(b=>b.onclick=()=>{$('drop-id').value=b.dataset.drop;});});
 async function latest(id){const p=current;const r=await api(endpoint('/records/'+encodeURIComponent(id)+'/history'),undefined,'GET');if(p!==current)throw Error('项目已切换');return r.versions[r.versions.length-1];}
 bind('add-alias',async()=>{const id=$('keep-id').value;const row=await latest(id);await api(endpoint('/aliases'),{entity_id:id,alias:$('alias-name').value,expected_version:row.version});status('别名已保存，消歧可直接命中规范实体。');});
-bind('merge-entities',async()=>{if(!$('merge-confirm').checked)throw Error('请先勾选合并确认');const keep=$('keep-id').value,drop=$('drop-id').value;const a=await latest(keep),b=await latest(drop);const r=await api(endpoint('/merge'),{keep_id:keep,drop_id:drop,expected_versions:{[keep]:a.version,[drop]:b.version}});$('merge-confirm').checked=false;status('Semantica 融合完成，操作 '+r.operation_id+'；可在「知识台账 → 可撤销的操作」撤销。');await operations();});
+bind('merge-entities',async()=>{if(!$('merge-confirm').checked)throw Error('请先勾选合并确认');const keep=$('keep-id').value,drop=$('drop-id').value;if(!window.EntityGovernance)throw Error('实体治理组件未就绪，请刷新后重试');const selection=await window.EntityGovernance.prepareMerge(keep,drop);if(selection===null)return;const r=await api(endpoint('/merge'),{keep_id:keep,drop_id:drop,expected_versions:selection.expected_versions,attribute_winners:selection.attribute_winners,preview_fingerprint:selection.preview_fingerprint});$('merge-confirm').checked=false;status('Semantica 融合完成，操作 '+r.operation_id+'；可在「知识台账 → 可撤销的操作」撤销。');await operations();});
 bind('soft-delete',async()=>{if(!$('delete-confirm').checked)throw Error('请勾选软删除确认');const id=$('revision-id').value;const r=await api(endpoint('/delete'),{record_id:id,expected_version:Number($('revision-version').value)});$('delete-confirm').checked=false;status(`已软删除 ${r.deleted} 条记录（含关联关系）；可在「知识台账 → 可撤销的操作」撤销。`);await operations();});
 bind('restore-version',async()=>{const r=await api(endpoint('/restore'),{record_id:$('revision-id').value,version:Number($('restore-number').value),expected_version:Number($('revision-version').value)});$('revision-version').value=r.version;status('历史内容已恢复为新版本 '+r.version);});
 async function operations(){const p=current,r=await api(endpoint('/operations'),undefined,'GET');if(p!==current)return;$('operations').innerHTML=r.operations.map(x=>`<div class="candidate"><b>${esc(x.metadata.operation)}</b> · ${esc(x.recorded_at)}<small>${esc(x.metadata.operation_id)}</small><button data-undo="${esc(x.metadata.operation_id)}">撤销该操作</button></div>`).join('')||'<p>暂无治理操作。</p>';$('operations').querySelectorAll('[data-undo]').forEach(b=>b.onclick=async()=>{try{const r=await api(endpoint('/operations/'+b.dataset.undo+'/undo'),{});status('已恢复 '+r.restored+' 条记录。');await operations();}catch(e){status(e.message,true);}});}
@@ -365,6 +384,7 @@ $('chunk-preview').addEventListener('click',event=>{if(event.target===$('chunk-p
 document.addEventListener('keydown',trapChunkPreviewFocus);
 bind('preview-chunks',async()=>{
   const p=controlsProject(),settings=readParseSettings();
+  const previewTicket=window.LibraryWorkspace?.ticket();
   const documents=await readDocumentBatch(true),doc=documents[0];
   let result;
   if(doc.file){
@@ -372,22 +392,26 @@ bind('preview-chunks',async()=>{
     form.append('options',JSON.stringify({title:doc.title,...documentUploadOptions(doc),...settings}));
     result=await api('/api/projects/'+encodeURIComponent(p)+'/documents/upload/preview',form);
   }else result=await api('/api/projects/'+encodeURIComponent(p)+'/documents/preview',{title:doc.title,text:doc.text,...documentUploadOptions(doc),...settings});
-  if(p!==current)return;
+  if(p!==current||(previewTicket&&!window.LibraryWorkspace.accepts(previewTicket,p)))return;
   renderChunkPreview(result,doc.title);
   openChunkPreview();
   status('切片预览完成，未调用模型或写入知识');
 });
 bind('ingest',async()=>{
-  const project=controlsProject(),mode=document.getElementById('extraction-mode').value,extract=mode!=='documents',settings=readParseSettings();
+  const project=controlsProject(),mode=document.getElementById('extraction-mode').value,settings=readParseSettings();
   Object.assign(settings,window.IngestOntology.settings(project,mode));
   const ontologyRelease=mode==='ontology'?{...window.IngestOntology.state().release}:null;
   const documents=await readDocumentBatch(),results=$('doc-submit-results');
   results.textContent='';let accepted=0,failed=0;
   if(documents.every(doc=>doc.file)&&window.IngestBatches){
+    const uiTicket=window.LibraryWorkspace?.ticket();
+    const queueGeneration=window.DocumentUploadQueue?.generation;
     const requested=$('ingest-concurrency')?.value||'auto';
-    const batch=await window.IngestBatches.submit(project,documents,{...settings,...documentUploadOptions(documents[0]),extract,extraction_mode:mode,
+    const batch=await window.IngestBatches.submit(project,documents,{...settings,...documentUploadOptions(documents[0]),extraction_mode:mode,
       requested_concurrency:requested==='auto'?'auto':Number(requested)});
-    results.textContent='文件上传完成，批次已开始。可在下方查看进度、暂停或处理失败文件。';
+    if(project!==current||queueGeneration!==window.DocumentUploadQueue?.generation)return;
+    results.textContent='文件上传完成，批次已开始。可在“处理批次”查看进度、暂停或处理失败文件。';
+    window.LibraryWorkspace?.showBatch({projectId:project,batchId:batch.id,ticket:uiTicket});
     status('批次已开始 · '+batch.id);return;
   }
   for(const document of documents){
@@ -398,10 +422,10 @@ bind('ingest',async()=>{
       if(document.file){
         window.DocumentUploadQueue.setStatus(document.file,'uploading');
         const form=new FormData();form.append('file',document.file,document.file.name);
-        form.append('options',JSON.stringify({title:document.title,...documentUploadOptions(document),extract,extraction_mode:mode,...settings}));
+        form.append('options',JSON.stringify({title:document.title,...documentUploadOptions(document),extraction_mode:mode,...settings}));
         job=await api('/api/projects/'+encodeURIComponent(project)+'/documents/upload/jobs',form);
         window.DocumentUploadQueue.setStatus(document.file,'queued',job.id);
-      }else job=await api('/api/projects/'+encodeURIComponent(project)+'/documents/jobs',{title:document.title,text:document.text,...documentUploadOptions(document),extract,extraction_mode:mode,...settings});
+      }else job=await api('/api/projects/'+encodeURIComponent(project)+'/documents/jobs',{title:document.title,text:document.text,...documentUploadOptions(document),extraction_mode:mode,...settings});
       wb.jobs.set(job.id,job);accepted++;entry.textContent=document.title+' · 已加入解析队列 · '+job.id;
       // 提交后在右侧工作区实时看进度（SSE）与抽取结果，不跳后台任务页
       window.IngestResults?.watch(job.id,document.title,{projectId:project,mode,ontologyRelease});
@@ -414,7 +438,7 @@ bind('ingest',async()=>{
     view.innerHTML='';
     const link=window.document.createElement('button');
     link.type='button';link.className='secondary';link.textContent='查看后台任务进度 ↗';
-    link.onclick=()=>{showRuntimeView('jobs');jobList().catch(()=>{});};
+    link.onclick=()=>{showRuntimeView('jobs');};
     view.append('已提交 '+accepted+' 个文档进入解析队列。想看实时日志可点：');
     view.append(link);
     results.append(view);
@@ -426,7 +450,7 @@ async function snapshots(){const p=current,r=await api(endpoint('/snapshots'),un
 // （原来要先点一下「刷新」才看得到——合并后的规则是「进这一屏，就把这一屏该给的数据给出来」）。
 window.RuntimeView?.on('snapshots',()=>snapshots().catch(e=>status(e.message,true)));
 bind('load-snapshots',snapshots);bind('save-snapshot',async()=>{await api(endpoint('/snapshots'),{name:$('snapshot-name').value||'手动快照'});$('snapshot-name').value='';await snapshots();status('项目快照已保存。');});
-bind('run-evaluation',async()=>{const input=$('gold-json').value.trim();if(!input)throw Error('请输入标准答案 JSON');let parsed;try{parsed=JSON.parse(input);}catch(e){throw Error('JSON 格式错误：'+e.message);}if(!parsed.entities||!Array.isArray(parsed.entities))throw Error('JSON 缺少 entities 数组');if(!parsed.relations||!Array.isArray(parsed.relations))throw Error('JSON 缺少 relations 数组');$('gold-json-error').textContent='';const r=await scopedRead('/evaluate',json('gold-json'));$('evaluation-result').innerHTML=renderEvalResult(r);});
+bind('run-evaluation',async()=>{const input=$('gold-json').value.trim();if(!input)throw Error('请输入标准答案 JSON');let parsed;try{parsed=JSON.parse(input);}catch(e){throw Error('JSON 格式错误：'+e.message);}if(!parsed.entities||!Array.isArray(parsed.entities))throw Error('JSON 缺少 entities 数组');if(!parsed.relations||!Array.isArray(parsed.relations))throw Error('JSON 缺少 relations 数组');$('gold-json-error').textContent='';const r=await scopedRead('/evaluate',{...json('gold-json'),known_at:null,valid_at:null,filters:null,applicability:null});$('evaluation-result').innerHTML=renderEvalResult(r);});
 bind('export-project',async()=>{status('正在导出…');const r=await api(endpoint('/export'),undefined,'GET');const blob=new Blob([JSON.stringify(r,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=(current||'knowledge-project')+'.json';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);status('项目 JSON 已导出为文件。');});
 $('eval-load-example').onclick=()=>{$('gold-json').value=JSON.stringify({entities:["商户","平台","监管部门"],relations:[["商户","onboards","平台"],["商户","complies_with","监管部门"],["平台","oversees","商户"]]},null,2);$('gold-json-error').textContent='';status('已载入示例标准答案。');};
 function renderEvalResult(r){function metricCard(title,data){const p=typeof data.precision==='number'?data.precision:0;const rl=typeof data.recall==='number'?data.recall:0;const f1=typeof data.f1==='number'?data.f1:0;const pp=Math.round(p*100),rp=Math.round(rl*100),fp=Math.round(f1*100);const cls=v=>v>=80?'':v>=50?' mid':' low';const formatItem=item=>{if(Array.isArray(item))return esc(item.join(' → '));return esc(String(item));};let html='<div class="eval-metric-group"><h3>'+esc(title)+'</h3>';html+='<div class="eval-metric-row">';html+='<div class="eval-metric"><div class="eval-metric-value'+cls(pp)+'">'+pp+'%</div><div class="eval-metric-label">Precision</div><div class="eval-metric-sub">'+(data.predicted||0)+' 中 '+data.true_positive+' 准确</div></div>';html+='<div class="eval-metric"><div class="eval-metric-value'+cls(rp)+'">'+rp+'%</div><div class="eval-metric-label">Recall</div><div class="eval-metric-sub">'+(data.gold||0)+' 中 '+data.true_positive+' 命中</div></div>';html+='<div class="eval-metric"><div class="eval-metric-value'+cls(fp)+'">'+fp+'%</div><div class="eval-metric-label">F1</div></div>';html+='</div>';html+='<div class="eval-progress"><div class="eval-progress-fill'+cls(fp)+'" style="width:'+fp+'%"></div></div>';if(data.missing&&data.missing.length){html+='<div class="eval-list-section"><div class="eval-list-label">漏项 ('+data.missing.length+')</div><div class="eval-list">'+data.missing.map(i=>'<div class="eval-list-item">'+formatItem(i)+'</div>').join('')+'</div></div>';}else{html+='<div class="eval-list-section"><div class="eval-list-label">漏项</div><div class="eval-list-empty">无</div></div>';}if(data.extra&&data.extra.length){html+='<div class="eval-list-section"><div class="eval-list-label">多余 ('+data.extra.length+')</div><div class="eval-list">'+data.extra.map(i=>'<div class="eval-list-item">'+formatItem(i)+'</div>').join('')+'</div></div>';}else{html+='<div class="eval-list-section"><div class="eval-list-label">多余</div><div class="eval-list-empty">无</div></div>';}html+='</div>';return html;}let html='<div class="eval-metrics">'+metricCard('实体',r.entities||{})+metricCard('关系',r.relations||{})+'</div>';html+='<details class="eval-raw-json"><summary>原始 JSON</summary><pre>'+esc(JSON.stringify(r,null,2))+'</pre></details>';return html;}
@@ -516,7 +540,14 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     return link;
   }
 
+  function markUnresolvedProvenance(turn){
+    const note=document.createElement('p');note.className='qa-provenance-unresolved subtle';note.setAttribute('role','status');
+    note.textContent='这条回答缺少答案标识，无法定位已冻结的证据链。请重新提问以生成可溯源的回答。';
+    turn.append(note);
+  }
+
   const atEnd=()=>{const box=$c('qa-scroll');if(box)box.scrollTop=box.scrollHeight;};
+  function addScopeNote(turn,value){const note=document.createElement('small');note.className='qa-submitted-scope subtle';const label=window.ApplicabilityUI?.describe?.(value)||'全项目';note.textContent='提交范围：'+label+(value?.filters?' · 更多字段条件':'')+(value?.known_at?' · 系统时点 '+value.known_at:'')+(value?.valid_at?' · 业务时点 '+value.valid_at:'');turn.append(note);}
   function addTurn(kind,text){
     const turn=document.createElement('li');
     turn.className='qa-turn qa-turn-'+kind;turn.dataset.role=kind;
@@ -528,7 +559,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     try{const v=JSON.parse(localStorage.getItem(historyKey()));qaHistory=Array.isArray(v)?v:[];}catch{qaHistory=[];}
     transcript.replaceChildren();
     qaHistory.forEach(item=>{
-      const turn=addTurn(item.kind,item.kind==='user'?item.text:'');
+      const turn=addTurn(item.kind,item.kind==='user'?item.text:'');if(item.kind==='user'&&item.scope)addScopeNote(turn,item.scope);
       if(item.kind==='assistant'){
         const answer=turn.querySelector('.qa-answer');
         turn.dataset.state=item.error?'error':'done';
@@ -538,7 +569,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
           addEvidence(turn,{...item,evidence});
         }else{
           if(answer)answer.textContent=item.text||'';
-          provenance.renderLegacyNote(turn);
+          markUnresolvedProvenance(turn);
         }
         window.QaPresentation?.annotate(turn,item);
         if(item.error){
@@ -747,6 +778,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     block.append(toggle,panel);turn.append(block);atEnd();
   }
   function addFailure(turn,message,replay){
+    if(/Milvus|语义|索引|维度/.test(message)){const notice=$c('qa-notice'),text=$c('qa-notice-text');if(notice&&text){text.textContent=message;notice.hidden=false;}}
     turn.dataset.state='error';
     const box=document.createElement('div');box.className='qa-error';box.setAttribute('role','alert');
     const text=document.createElement('span');text.className='qa-error-text';text.textContent='回答失败：'+message;
@@ -756,11 +788,13 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
   }
   async function stream(body,turn,historyIndex=qaHistory.length){
     if(busy)return;
+    try{window.ScopeFields.requireRetrievalScope(body);}
+    catch(error){summary.textContent=error.message;progress.textContent='';return;}
     // Chat owns its cancellation generation. A graph repaint is not a change
     // to the chat scope; project/scope controls explicitly reset chat serial.
-    const project=current,mine=++serial;
+    const project=current,mine=++serial,scopeTicket=window.WorkspaceContext?.ticket(current,'qa');
     if(turn)provenance.close(false);
-    const record={kind:'assistant',text:''};
+    const record={kind:'assistant',text:'',scope:JSON.parse(JSON.stringify(body)),project_id:project};
     // Reserve the retry slot in memory; only terminal answers belong in saved history.
     qaHistory[historyIndex]=record;
     const capture=payload=>{
@@ -786,6 +820,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       if(item.event==='malformed')throw Error('服务返回了无法解析的流数据');
       if(item.event==='error')throw Error(item.data?.detail||'回答失败');
       if(item.event==='evidence'){
+        window.WorkspaceContext?.requireRetrievalMode(body.retrieval_mode,item.data);
         capture(item.data);record.evidence=evidenceSummary(item.data?.evidence);
         for(const [key] of referenceKinds)if(Array.isArray(item.data?.[key]))record[key]=evidenceSummary(item.data[key]);
         for(const key of ['as_of','known_at'])if(typeof item.data?.[key]==='string')record[key]=item.data[key];
@@ -824,7 +859,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       const reader=response.body.getReader(),decoder=new TextDecoder();
       while(true){
         const {done,value}=await reader.read();
-        if(mine!==serial||project!==current){await reader.cancel();throw Error('范围已变化，已停止显示旧回答');}
+        if(mine!==serial||project!==current||(scopeTicket&&!window.WorkspaceContext.accepts(scopeTicket,current,'qa'))){await reader.cancel();throw Error('范围已变化，已停止显示旧回答');}
         if(done)break;
         buffer+=decoder.decode(value,{stream:true});
         const step=chat.splitSseBuffer(buffer);buffer=step.rest;
@@ -839,6 +874,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       target.querySelector('.qa-draft-status')?.remove();
       record.text=text;
       provenance.decorateAnswer(answer,text,{...answerContext(record),projectId:project});
+      if(!record.answer_id)markUnresolvedProvenance(target);
       window.QaPresentation?.annotate(target,record);
       persist();
     }catch(error){
@@ -855,10 +891,13 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
   function submit(){
     if(busy)return;
     const query=input.value.trim();if(!query)return;
-    addTurn('user',query);qaHistory.push({kind:'user',text:query});persist();input.value='';
     const asOf=$c('qa-as-of')?.value;
-    stream({...scope(),valid_at:asOf?new Date(asOf).toISOString():null,include_references:$c('qa-include-references')?.checked??true,
-      query,generate:$c('generate').checked,retrieval_mode:$c('qa-mode')?.value||'hybrid',k_entities:5,k_chunks:5});
+    const body={...scope(),valid_at:asOf?new Date(asOf).toISOString():(scope().valid_at||null),include_references:$c('qa-include-references')?.checked??true,
+      query,generate:$c('generate').checked,retrieval_mode:$c('qa-mode')?.value||'hybrid',k_entities:5,k_chunks:5};
+    try{window.ScopeFields.requireRetrievalScope(body);}
+    catch(error){summary.textContent=error.message;progress.textContent='';return;}
+    addScopeNote(addTurn('user',query),scope());qaHistory.push({kind:'user',text:query,scope:scope(),project_id:current});persist();input.value='';
+    stream(body);
   }
   window.clearKnowledgeChat=({notify=false,clearPersist=false}={})=>{
     const had=transcript.childElementCount>0;
@@ -870,9 +909,10 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     send.disabled=false;
     if(notify&&had)summary.textContent='范围已变化，已清空当前会话。';
   };
+  document.addEventListener('workspace:scope-changed',event=>{if(event.detail.page!=='qa')return;serial++;controller?.abort();controller=null;busy=false;send.disabled=false;progress.textContent='';summary.textContent='筛选已更新，仅影响下一次提问；已有回答保留提交时范围。';});
   $c('qa-composer').addEventListener('submit',event=>{event.preventDefault();submit();});
   $c('qa-clear')?.addEventListener('click',()=>window.clearKnowledgeChat({clearPersist:true,notify:true}));
-  // 无向量提示：语义索引未构建时，降级关键词 + 引导一键构建
+  // Milvus failure is explicit; keyword remains a user-selected independent mode.
   function showRetrievalNotice(payload){
     const notice=$c('qa-notice'),text=$c('qa-notice-text');
     if(!notice||!text)return;
@@ -880,10 +920,10 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     const semanticErrors=Object.entries(errors).filter(([key])=>key==='semantic'||key.endsWith(':semantic')).map(([,value])=>String(value)).join('；');
     const noVector=/语义索引尚未就绪|Embedding model differs|嵌入模型|嵌入维度/.test(semanticErrors);
     if(noVector){
-      text.textContent='语义索引未构建，已降级关键词检索。可点右侧按钮构建索引后重新提问。';
+      text.textContent='Milvus 语义索引尚未就绪，本次检索未完成。请构建或修复索引后重新提问。';
       notice.hidden=false;
     }else if(payload?.degraded){
-      text.textContent='部分检索通道不可用，已降级（'+(payload.active_modes||[]).join('+')+'）。';
+      text.textContent='Milvus 检索未完成。请在「构建与任务」核验连接、模型与索引。';
       notice.hidden=false;
     }else{
       notice.hidden=true;
@@ -894,11 +934,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     if(!btn)return;
     btn.disabled=true;
     try{
-      if(text)text.textContent='正在提交索引构建任务…';
-      const r=await fetch(endpoint('/indexes/rebuild'),{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-      if(!r.ok)throw Error('HTTP '+r.status);
-      if(text)text.textContent='索引构建任务已提交，完成后可切回语义检索重新提问。';
-      setTimeout(()=>{const n=$c('qa-notice');if(n)n.hidden=true;},4000);
+      await window.ProjectVectorIndex.open(current);
     }catch(e){
       if(text)text.textContent='构建失败：'+(e.message||e);
     }finally{
@@ -966,14 +1002,16 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
   function fit(){
     const page=$c('qa-page');if(!page)return;
     const viewport=window.visualViewport,height=viewport?viewport.height:window.innerHeight,offsetTop=viewport?viewport.offsetTop:0;
-    page.style.setProperty('--qa-fit',Math.max(320,Math.round(height+offsetTop-page.getBoundingClientRect().top-10))+'px');
+    page.style.setProperty('--qa-fit',Math.max(0,Math.floor(height+offsetTop-page.getBoundingClientRect().top-10))+'px');
     page.style.setProperty('--qa-keyboard-inset',Math.max(0,Math.round(window.innerHeight-height-offsetTop))+'px');
   }
   window.addEventListener('resize',fit);
   window.visualViewport?.addEventListener('resize',fit);
   window.visualViewport?.addEventListener('scroll',fit);
   document.querySelector('[data-tab="qa"]')?.addEventListener('click',()=>setTimeout(fit,0));
-  if(window.ResizeObserver){const observer=new ResizeObserver(fit);for(const host of [$c('scope'),$c('status')])if(host)observer.observe(host);}
+  // On mobile the sidebar is above QA; account/navigation updates can move the
+  // page without resizing the viewport or the content filter toolbar.
+  if(window.ResizeObserver){const observer=new ResizeObserver(fit);for(const host of [$c('scope'),$c('status'),document.querySelector('body>aside'),document.querySelector('main>header')])if(host)observer.observe(host);}
   fit();
 })();
 window.addEventListener('resize',()=>{wb.chart?.resize();wb.tree?.resize();});

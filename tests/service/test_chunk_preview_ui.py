@@ -1,4 +1,5 @@
 """Real-browser contract for the knowledge-write chunk preview drawer."""
+from ontology_seed import seed_ontology
 import json
 import re
 import socket
@@ -39,7 +40,7 @@ def _project(repository, name):
     project_id = repository.create_project(name, {'ontology_mode': 'ontology'})['id']
     turtle = (Path(__file__).resolve().parents[2] / 'knowledge_service' /
               'resources' / 'default_ontology.ttl').read_text(encoding='utf-8')
-    repository.save_ontology(project_id, turtle, Ontology(turtle).summary())
+    seed_ontology(repository, project_id, turtle, Ontology(turtle).summary())
     return project_id
 
 
@@ -101,10 +102,12 @@ def workbench(browser, tmp_path):
         page.set_default_timeout(5000)
         page.goto(f'http://127.0.0.1:{port}/', wait_until='load')
         page.wait_for_function("() => document.querySelectorAll('#project option').length > 1")
-        with page.expect_response(lambda response: response.url.endswith('/entity-options')):
+        with page.expect_response(lambda response: response.request.method == 'POST'
+                                  and response.url.endswith(f'/projects/{project_id}/records/page')):
             page.select_option('#project', project_id)
-        page.locator('.nav-group:has([data-tab="ingest"]) summary').click()
-        page.click('[data-tab="ingest"]')
+        page.click('[data-tab="sources"]')
+        page.locator('#tab-sources').wait_for(state='visible')
+        page.click('#upload-source')
         page.locator('#tab-ingest').wait_for(state='visible')
         # 2026-10-05：写入页改回「纯文件上传」并取消折叠 —— 文件上传面板直接可见，
         # 不再需要展开 <details>。结构变了，活文档跟着改。

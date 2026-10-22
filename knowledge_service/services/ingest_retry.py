@@ -28,6 +28,8 @@ _ERRORS = {
     'checkpoint_pending': ('失败切片已重试；其余未完成切片请从检查点继续', False, 'extraction'),
     'ontology_version_changed': ('本体版本已变化，请选择整份文档重跑', False, 'extraction'),
     'commit_failed': ('写入暂时失败，保留检查点后重试', True, 'committing'),
+    'entity_resolution_unavailable': ('实体语义解析暂不可用，请恢复 Milvus 连接或等待索引同步后重试；也可人工复核', True, 'extraction'),
+    'entity_resolution_configuration': ('实体语义解析配置不匹配，请修复 Milvus 模型、维度或索引后重试；也可人工复核', False, 'extraction'),
     'ingest_failed': ('文档处理失败，请检查配置后重试', False, 'extraction'),
 }
 _ALIASES = {

@@ -1,0 +1,1254 @@
+{
+  "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+  "read_only": true,
+  "operations": [
+    {
+      "name": "discovery_compact",
+      "ms": 545.8,
+      "sql_ms": 404.37,
+      "sql_calls": 14,
+      "queries": [
+        {
+          "sql": "SELECT * FROM projects WHERE id=?",
+          "ms": 5.82,
+          "parameter_count": 1
+        },
+        {
+          "sql": "SELECT project_id,id,version,version_id,\n            recorded_at,superseded_at,\n            jsonb_build_object('id',id,'kind','document',\n                'valid_from',payload::jsonb->'valid_from',\n                'valid_until',payload::jsonb->'valid_until',\n                'metadata',jsonb_build_object('title',COALESCE(payload::jsonb#>>'{metadata,title}',id),\n                    'discovery_candidates',payload::jsonb#>'{metadata,discovery_candidates}'))::text AS payload\n            FROM record_versions WHERE project_id=? AND superseded_at IS NULL\n              AND read_kind='document' AND read_visible\n              AND jsonb_typeof(payload::jsonb#>'{metadata,discovery_candidates}')='array'\n            ORDER BY id",
+          "ms": 101.79,
+          "parameter_count": 1
+        },
+        {
+          "sql": "SELECT * FROM assertions WHERE project_id=? AND id=ANY(?::text[])",
+          "ms": 24.67,
+          "parameter_count": 2
+        },
+        {
+          "sql": "SELECT read_kind AS kind,\n                jsonb_build_object('discovery_candidate_id',payload::jsonb#>'{metadata,discovery_candidate_id}',\n                    'discovery_candidate_ids',payload::jsonb#>'{metadata,discovery_candidate_ids}')::text AS metadata\n            FROM record_versions WHERE project_id=? AND superseded_at IS NULL\n              AND read_visible AND read_kind IN ('entity','relation','attribute')\n              AND (payload::jsonb#>>'{metadata,discovery_candidate_id}'=ANY(?::text[])\n                OR (payload::jsonb#>'{metadata,discovery_candidate_ids}' IS NOT NULL\n                    AND (payload::jsonb#>'{metadata,discovery_candidate_ids}') @> ANY(?::jsonb[])))",
+          "ms": 37.36,
+          "parameter_count": 3
+        },
+        {
+          "sql": "SELECT payload FROM artifacts WHERE kind=? AND project_id=? ORDER BY seq DESC",
+          "ms": 15.32,
+          "parameter_count": 2
+        },
+        {
+          "sql": "SELECT payload FROM artifacts WHERE id=? AND kind=? AND project_id=?",
+          "ms": 109.25,
+          "parameter_count": 3
+        },
+        {
+          "sql": "SELECT payload FROM artifacts WHERE id=? AND kind=? AND project_id=?",
+          "ms": 14.04,
+          "parameter_count": 3
+        },
+        {
+          "sql": "SELECT payload FROM artifacts WHERE id=? AND kind=? AND project_id=?",
+          "ms": 7.57,
+          "parameter_count": 3
+        },
+        {
+          "sql": "SELECT * FROM projects WHERE id=?",
+          "ms": 3.76,
+          "parameter_count": 1
+        },
+        {
+          "sql": "SELECT id,project_id,turtle,summary,created_at,metadata\n               FROM ontologies WHERE project_id=? ORDER BY created_at,id",
+          "ms": 9.1,
+          "parameter_count": 1
+        },
+        {
+          "sql": "SELECT * FROM projects WHERE id=?",
+          "ms": 2.82,
+          "parameter_count": 1
+        },
+        {
+          "sql": "SELECT payload FROM artifacts WHERE kind=? AND project_id=? ORDER BY seq DESC",
+          "ms": 42.63,
+          "parameter_count": 2
+        },
+        {
+          "sql": "SELECT * FROM projects WHERE id=?",
+          "ms": 3.43,
+          "parameter_count": 1
+        },
+        {
+          "sql": "SELECT payload FROM artifacts WHERE kind=? AND project_id=? ORDER BY seq DESC",
+          "ms": 26.82,
+          "parameter_count": 2
+        }
+      ],
+      "profile": [
+        {
+          "file": ".\\.benchmarks\\page_design_profile_20261020.py",
+          "line": 43,
+          "function": "<lambda>",
+          "calls": 1,
+          "self_ms": 0.01,
+          "total_ms": 545.71
+        },
+        {
+          "file": ".\\knowledge_service\\services\\ontology_discovery_workflow.py",
+          "line": 678,
+          "function": "overview",
+          "calls": 1,
+          "self_ms": 2.87,
+          "total_ms": 545.64
+        },
+        {
+          "file": ".\\knowledge_service\\services\\ontology_discovery_workflow.py",
+          "line": 684,
+          "function": "_overview_from",
+          "calls": 1,
+          "self_ms": 0.48,
+          "total_ms": 542.73
+        },
+        {
+          "file": ".\\.benchmarks\\page_design_profile_20261020.py",
+          "line": 35,
+          "function": "execute",
+          "calls": 14,
+          "self_ms": 0.21,
+          "total_ms": 404.54
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\pg_engine.py",
+          "line": 231,
+          "function": "execute",
+          "calls": 14,
+          "self_ms": 0.21,
+          "total_ms": 404.29
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\cursor.py",
+          "line": 100,
+          "function": "execute",
+          "calls": 14,
+          "self_ms": 0.13,
+          "total_ms": 398.9
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\connection.py",
+          "line": 476,
+          "function": "wait",
+          "calls": 14,
+          "self_ms": 0.13,
+          "total_ms": 398.75
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\waiting.py",
+          "line": 254,
+          "function": "wait_select",
+          "calls": 14,
+          "self_ms": 1.41,
+          "total_ms": 398.62
+        },
+        {
+          "file": "~",
+          "line": 0,
+          "function": "<built-in method select.select>",
+          "calls": 131,
+          "self_ms": 354.5,
+          "total_ms": 354.5
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\scoped_reads.py",
+          "line": 42,
+          "function": "read",
+          "calls": 1,
+          "self_ms": 0.04,
+          "total_ms": 258.98
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\page_reads.py",
+          "line": 82,
+          "function": "discovery_inputs",
+          "calls": 1,
+          "self_ms": 2.98,
+          "total_ms": 258.91
+        },
+        {
+          "file": ".\\knowledge_service\\services\\ontology_discovery_workflow.py",
+          "line": 186,
+          "function": "_hydrate_legacy_draft",
+          "calls": 3,
+          "self_ms": 0.13,
+          "total_ms": 142.18
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\core.py",
+          "line": 2473,
+          "function": "get_discovery_run",
+          "calls": 3,
+          "self_ms": 0.04,
+          "total_ms": 142.0
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\discovery_run_store.py",
+          "line": 687,
+          "function": "get",
+          "calls": 3,
+          "self_ms": 0.13,
+          "total_ms": 141.96
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\discovery_run_store.py",
+          "line": 696,
+          "function": "list",
+          "calls": 2,
+          "self_ms": 0.15,
+          "total_ms": 95.56
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\json\\__init__.py",
+          "line": 299,
+          "function": "loads",
+          "calls": 477,
+          "self_ms": 1.55,
+          "total_ms": 69.31
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\json\\decoder.py",
+          "line": 332,
+          "function": "decode",
+          "calls": 477,
+          "self_ms": 7.21,
+          "total_ms": 66.9
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\core.py",
+          "line": 2479,
+          "function": "latest_discovery_run",
+          "calls": 1,
+          "self_ms": 0.01,
+          "total_ms": 56.18
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\discovery_run_store.py",
+          "line": 704,
+          "function": "latest",
+          "calls": 1,
+          "self_ms": 0.24,
+          "total_ms": 56.17
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\json\\decoder.py",
+          "line": 343,
+          "function": "raw_decode",
+          "calls": 477,
+          "self_ms": 56.07,
+          "total_ms": 56.07
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\assertions_store.py",
+          "line": 23,
+          "function": "_assertion",
+          "calls": 398,
+          "self_ms": 8.17,
+          "total_ms": 43.56
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\_cursor_base.py",
+          "line": 195,
+          "function": "_execute_gen",
+          "calls": 145,
+          "self_ms": 0.4,
+          "total_ms": 42.05
+        }
+      ]
+    },
+    {
+      "name": "reclassify",
+      "ms": 86.34,
+      "sql_ms": 39.89,
+      "sql_calls": 6,
+      "queries": [
+        {
+          "sql": "SELECT * FROM projects WHERE id=?",
+          "ms": 4.83,
+          "parameter_count": 1
+        },
+        {
+          "sql": "SELECT id,project_id,turtle,summary,created_at,metadata\n               FROM ontologies WHERE project_id=? ORDER BY created_at,id",
+          "ms": 3.63,
+          "parameter_count": 1
+        },
+        {
+          "sql": "SELECT * FROM projects WHERE id=?",
+          "ms": 6.74,
+          "parameter_count": 1
+        },
+        {
+          "sql": "SELECT id,project_id,turtle,summary,created_at,metadata\n               FROM ontologies WHERE project_id=? ORDER BY created_at,id",
+          "ms": 3.7,
+          "parameter_count": 1
+        },
+        {
+          "sql": "SELECT * FROM projects WHERE id=?",
+          "ms": 5.78,
+          "parameter_count": 1
+        },
+        {
+          "sql": "WITH qualified AS (\n            SELECT r.id,r.version,r.version_id,r.read_kind AS kind,\n                    r.read_type AS type,NULLIF(r.read_type,'') AS group_type,\n                    NULLIF(r.payload::jsonb->>'ontology_id','') AS ontology_id\n                FROM record_versions r WHERE r.project_id=? AND r.superseded_at IS NULL AND r.read_visible AND TRUE AND r.read_kind = ? UNION ALL SELECT r.id,r.version,r.version_id,r.read_kind AS kind,\n                    r.read_type AS type,NULLIF(r.read_type,'') AS group_type,\n                    NULLIF(r.payload::jsonb->>'ontology_id','') AS ontology_id\n                FROM record_versions r WHERE r.project_id=? AND r.superseded_at IS NULL AND r.read_visible AND TRUE AND r.read_kind = ? AND EXISTS (SELECT 1 FROM record_versions s WHERE s.id=r.read_subject_id AND s.read_kind='entity' AND s.project_id=? AND s.superseded_at IS NULL AND s.read_visible AND TRUE) AND EXISTS (SELECT 1 FROM record_versions t WHERE t.id=r.read_object_id AND t.read_kind='entity' AND t.project_id=? AND t.superseded_at IS NULL AND t.read_visible AND TRUE) UNION ALL SELECT r.id,r.version,r.version_id,r.read_kind AS kind,\n                    r.read_type AS type,NULLIF(r.read_type,'') AS group_type,\n                    NULLIF(r.payload::jsonb->>'ontology_id','') AS ontology_id\n                FROM record_versions r WHERE r.project_id=? AND r.superseded_at IS NULL AND r.read_visible AND TRUE AND r.read_kind = ? AND EXISTS (SELECT 1 FROM record_versions s WHERE s.id=r.read_subject_id AND s.read_kind='entity' AND s.project_id=? AND s.superseded_at IS NULL AND s.read_visible AND TRUE)\n        ), ranked AS (\n            SELECT q.*,row_number() OVER (\n                PARTITION BY ontology_id,kind,group_type ORDER BY id,version) AS position\n            FROM qualified q\n        ) SELECT ontology_id,kind,\n            max(type) FILTER (WHERE position=1) AS type,count(*) AS record_count,\n            array_agg(version_id ORDER BY id,version) FILTER (\n                WHERE ontology_id IS DISTINCT FROM ? AND position<=?) AS sample_version_ids\n          FROM ranked GROUP BY ontology_id,kind,group_type\n          ORDER BY ontology_id NULLS FIRST,kind,group_type NULLS FIRST",
+          "ms": 15.2,
+          "parameter_count": 11
+        }
+      ],
+      "profile": [
+        {
+          "file": ".\\.benchmarks\\page_design_profile_20261020.py",
+          "line": 44,
+          "function": "<lambda>",
+          "calls": 1,
+          "self_ms": 0.01,
+          "total_ms": 86.16
+        },
+        {
+          "file": ".\\knowledge_service\\services\\reclassify.py",
+          "line": 133,
+          "function": "plan",
+          "calls": 1,
+          "self_ms": 0.04,
+          "total_ms": 86.14
+        },
+        {
+          "file": ".\\knowledge_service\\services\\reclassify.py",
+          "line": 143,
+          "function": "_plan",
+          "calls": 1,
+          "self_ms": 0.09,
+          "total_ms": 86.04
+        },
+        {
+          "file": ".\\knowledge_service\\services\\service.py",
+          "line": 119,
+          "function": "structure_pending_ontology",
+          "calls": 1,
+          "self_ms": 0.04,
+          "total_ms": 52.55
+        },
+        {
+          "file": ".\\knowledge_service\\services\\ontology.py",
+          "line": 160,
+          "function": "__init__",
+          "calls": 1,
+          "self_ms": 0.04,
+          "total_ms": 41.52
+        },
+        {
+          "file": ".\\.benchmarks\\page_design_profile_20261020.py",
+          "line": 35,
+          "function": "execute",
+          "calls": 6,
+          "self_ms": 0.07,
+          "total_ms": 39.94
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\pg_engine.py",
+          "line": 231,
+          "function": "execute",
+          "calls": 6,
+          "self_ms": 0.07,
+          "total_ms": 39.85
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\cursor.py",
+          "line": 100,
+          "function": "execute",
+          "calls": 6,
+          "self_ms": 0.05,
+          "total_ms": 35.11
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\connection.py",
+          "line": 476,
+          "function": "wait",
+          "calls": 6,
+          "self_ms": 0.04,
+          "total_ms": 35.05
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\waiting.py",
+          "line": 254,
+          "function": "wait_select",
+          "calls": 6,
+          "self_ms": 0.14,
+          "total_ms": 35.01
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\rdflib\\graph.py",
+          "line": 1527,
+          "function": "parse",
+          "calls": 1,
+          "self_ms": 0.03,
+          "total_ms": 34.27
+        },
+        {
+          "file": "~",
+          "line": 0,
+          "function": "<built-in method select.select>",
+          "calls": 7,
+          "self_ms": 30.43,
+          "total_ms": 30.43
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\scoped_reads.py",
+          "line": 42,
+          "function": "read",
+          "calls": 1,
+          "self_ms": 0.04,
+          "total_ms": 22.23
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\page_reads.py",
+          "line": 15,
+          "function": "reclassify_inputs",
+          "calls": 1,
+          "self_ms": 0.19,
+          "total_ms": 22.16
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\rdflib\\plugin.py",
+          "line": 126,
+          "function": "get",
+          "calls": 2,
+          "self_ms": 0.01,
+          "total_ms": 21.71
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\rdflib\\plugin.py",
+          "line": 97,
+          "function": "getClass",
+          "calls": 2,
+          "self_ms": 0.02,
+          "total_ms": 21.7
+        },
+        {
+          "file": "~",
+          "line": 0,
+          "function": "<built-in method builtins.__import__>",
+          "calls": 3,
+          "self_ms": 0.03,
+          "total_ms": 21.66
+        },
+        {
+          "file": "<frozen importlib._bootstrap>",
+          "line": 1343,
+          "function": "_find_and_load",
+          "calls": 3,
+          "self_ms": 0.07,
+          "total_ms": 21.65
+        },
+        {
+          "file": "<frozen importlib._bootstrap>",
+          "line": 1298,
+          "function": "_find_and_load_unlocked",
+          "calls": 3,
+          "self_ms": 0.06,
+          "total_ms": 21.4
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\core.py",
+          "line": 2432,
+          "function": "list_ontologies",
+          "calls": 2,
+          "self_ms": 0.03,
+          "total_ms": 20.13
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\core.py",
+          "line": 729,
+          "function": "get_project",
+          "calls": 3,
+          "self_ms": 0.14,
+          "total_ms": 17.98
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\rdflib\\plugins\\parsers\\notation3.py",
+          "line": 2014,
+          "function": "parse",
+          "calls": 1,
+          "self_ms": 0.05,
+          "total_ms": 16.77
+        }
+      ]
+    },
+    {
+      "name": "sources_summary",
+      "ms": 238.17,
+      "sql_ms": 235.57,
+      "sql_calls": 8,
+      "queries": [
+        {
+          "sql": "SELECT * FROM projects WHERE id=?",
+          "ms": 5.57,
+          "parameter_count": 1
+        },
+        {
+          "sql": "SELECT CASE r.payload::jsonb#>>'{metadata,status}'\n                WHEN 'failed' THEN 'failed' WHEN 'processing' THEN 'processing' ELSE 'ready' END AS state,\n                count(*) AS count FROM record_versions r WHERE r.project_id=? AND r.superseded_at IS NULL AND r.read_visible AND TRUE AND r.read_kind = ? GROUP BY 1",
+          "ms": 18.72,
+          "parameter_count": 2
+        },
+        {
+          "sql": "SELECT * FROM projects WHERE id=?",
+          "ms": 6.13,
+          "parameter_count": 1
+        },
+        {
+          "sql": "SELECT * FROM projects WHERE id=?",
+          "ms": 3.83,
+          "parameter_count": 1
+        },
+        {
+          "sql": "SELECT count(*) FROM record_versions r WHERE r.project_id=? AND r.superseded_at IS NULL AND r.read_visible AND TRUE AND r.read_kind = ?",
+          "ms": 3.41,
+          "parameter_count": 2
+        },
+        {
+          "sql": "SELECT r.id,r.version,r.version_id,r.read_kind AS kind,r.read_type AS type,r.read_text AS text,r.read_subject_id AS subject_id,r.read_object_id AS object_id FROM record_versions r WHERE r.project_id=? AND r.superseded_at IS NULL AND r.read_visible AND TRUE AND r.read_kind = ? ORDER BY r.id,r.version LIMIT ?",
+          "ms": 5.72,
+          "parameter_count": 3
+        },
+        {
+          "sql": "SELECT r.project_id,r.id,r.version,r.version_id,\n            r.recorded_at,r.superseded_at,jsonb_build_object('id',r.id,'kind','document',\n                'valid_from',r.payload::jsonb->'valid_from','valid_until',r.payload::jsonb->'valid_until',\n                'metadata',jsonb_strip_nulls(jsonb_build_object('title',r.payload::jsonb#>'{metadata,title}','source_file',r.payload::jsonb#>'{metadata,source_file}','source_format',r.payload::jsonb#>'{metadata,source_format}','source_size_bytes',r.payload::jsonb#>'{metadata,source_size_bytes}','document_parser',r.payload::jsonb#>'{metadata,document_parser}','page_count',r.payload::jsonb#>'{metadata,page_count}','source_document_version_id',r.payload::jsonb#>'{metadata,source_document_version_id}','status',r.payload::jsonb#>'{metadata,status}')))::text AS payload\n            FROM record_versions r WHERE r.project_id=? AND r.version_id=ANY(?::text[])",
+          "ms": 165.79,
+          "parameter_count": 2
+        },
+        {
+          "sql": "WITH associations AS (SELECT a.document_id,a.canonical_record_id FROM assertions a\n                WHERE a.project_id=? AND a.document_id=ANY(?::text[])\n                  AND a.status='accepted' AND a.canonical_record_id IS NOT NULL), linked AS MATERIALIZED (\n            SELECT a.document_id,r.id,r.version FROM associations a\n              JOIN record_versions r ON r.project_id=? AND r.id=a.canonical_record_id\n            UNION\n            SELECT payload::jsonb->>'source_id',id,version FROM record_versions\n            WHERE project_id=? AND payload::jsonb->>'source_id'=ANY(?::text[])\n        ), matches AS (\n            SELECT l.document_id,r.read_kind AS kind,r.id,r.read_type AS type,r.read_text AS text,\n                count(*) OVER (PARTITION BY l.document_id,r.read_kind) AS total,\n                row_number() OVER (PARTITION BY l.document_id,r.read_kind ORDER BY r.id,r.version) AS position\n            FROM linked l JOIN record_versions r ON r.id=l.id AND r.version=l.version\n            WHERE r.project_id=? AND r.superseded_at IS NULL AND r.read_visible AND TRUE AND r.read_kind = ANY(?::text[]) AND (r.read_kind NOT IN ('relation','attribute') OR (EXISTS (SELECT 1 FROM record_versions s WHERE s.id=r.read_subject_id AND s.read_kind='entity' AND s.project_id=? AND s.superseded_at IS NULL AND s.read_visible AND TRUE OFFSET 0) AND (r.read_kind='attribute' OR EXISTS (SELECT 1 FROM record_versions t WHERE t.id=r.read_object_id AND t.read_kind='entity' AND t.project_id=? AND t.superseded_at IS NULL AND t.read_visible AND TRUE OFFSET 0))))\n        ) SELECT document_id,kind,id,type,text,total FROM matches\n          WHERE position<=CASE kind WHEN 'chunk' THEN 10 WHEN 'attribute' THEN 1 ELSE 20 END\n          ORDER BY document_id,kind,position",
+          "ms": 26.4,
+          "parameter_count": 9
+        }
+      ],
+      "profile": [
+        {
+          "file": ".\\.benchmarks\\page_design_profile_20261020.py",
+          "line": 45,
+          "function": "<lambda>",
+          "calls": 1,
+          "self_ms": 0.02,
+          "total_ms": 238.04
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\scoped_reads.py",
+          "line": 42,
+          "function": "read",
+          "calls": 3,
+          "self_ms": 0.07,
+          "total_ms": 238.03
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\page_reads.py",
+          "line": 133,
+          "function": "sources",
+          "calls": 1,
+          "self_ms": 0.1,
+          "total_ms": 237.95
+        },
+        {
+          "file": ".\\.benchmarks\\page_design_profile_20261020.py",
+          "line": 35,
+          "function": "execute",
+          "calls": 8,
+          "self_ms": 0.1,
+          "total_ms": 235.64
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\pg_engine.py",
+          "line": 231,
+          "function": "execute",
+          "calls": 8,
+          "self_ms": 0.09,
+          "total_ms": 235.51
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\cursor.py",
+          "line": 100,
+          "function": "execute",
+          "calls": 8,
+          "self_ms": 0.17,
+          "total_ms": 228.62
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\connection.py",
+          "line": 476,
+          "function": "wait",
+          "calls": 8,
+          "self_ms": 0.07,
+          "total_ms": 228.43
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\waiting.py",
+          "line": 254,
+          "function": "wait_select",
+          "calls": 8,
+          "self_ms": 0.19,
+          "total_ms": 228.36
+        },
+        {
+          "file": "~",
+          "line": 0,
+          "function": "<built-in method select.select>",
+          "calls": 9,
+          "self_ms": 221.82,
+          "total_ms": 221.82
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\page_reads.py",
+          "line": 169,
+          "function": "_source_metadata_page",
+          "calls": 1,
+          "self_ms": 0.05,
+          "total_ms": 186.46
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\page_reads.py",
+          "line": 189,
+          "function": "_source_derivatives",
+          "calls": 1,
+          "self_ms": 0.09,
+          "total_ms": 26.75
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\scoped_reads.py",
+          "line": 260,
+          "function": "page",
+          "calls": 1,
+          "self_ms": 0.1,
+          "total_ms": 20.13
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\core.py",
+          "line": 729,
+          "function": "get_project",
+          "calls": 3,
+          "self_ms": 0.13,
+          "total_ms": 16.18
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\scoped_reads.py",
+          "line": 208,
+          "function": "count",
+          "calls": 1,
+          "self_ms": 0.04,
+          "total_ms": 7.62
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\pg_engine.py",
+          "line": 116,
+          "function": "translate",
+          "calls": 8,
+          "self_ms": 0.23,
+          "total_ms": 6.46
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\_cursor_base.py",
+          "line": 195,
+          "function": "_execute_gen",
+          "calls": 17,
+          "self_ms": 0.12,
+          "total_ms": 6.25
+        },
+        {
+          "file": "~",
+          "line": 0,
+          "function": "<built-in method builtins.next>",
+          "calls": 17,
+          "self_ms": 0.04,
+          "total_ms": 4.23
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\_cursor_base.py",
+          "line": 275,
+          "function": "_maybe_prepare_gen",
+          "calls": 17,
+          "self_ms": 0.72,
+          "total_ms": 4.16
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\pg_engine.py",
+          "line": 71,
+          "function": "_replace_placeholders",
+          "calls": 8,
+          "self_ms": 2.13,
+          "total_ms": 3.4
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\pg_engine.py",
+          "line": 122,
+          "function": "<genexpr>",
+          "calls": 152,
+          "self_ms": 0.16,
+          "total_ms": 2.81
+        },
+        {
+          "file": "~",
+          "line": 0,
+          "function": "<method 'search' of 're.Pattern' objects>",
+          "calls": 160,
+          "self_ms": 2.7,
+          "total_ms": 2.7
+        },
+        {
+          "file": "~",
+          "line": 0,
+          "function": "<method 'send' of 'generator' objects>",
+          "calls": 9,
+          "self_ms": 0.07,
+          "total_ms": 2.14
+        }
+      ]
+    },
+    {
+      "name": "entity_page",
+      "ms": 64.49,
+      "sql_ms": 61.16,
+      "sql_calls": 4,
+      "queries": [
+        {
+          "sql": "SELECT * FROM projects WHERE id=?",
+          "ms": 11.29,
+          "parameter_count": 1
+        },
+        {
+          "sql": "SELECT * FROM projects WHERE id=?",
+          "ms": 8.12,
+          "parameter_count": 1
+        },
+        {
+          "sql": "SELECT count(*) FROM record_versions r WHERE r.project_id=? AND r.superseded_at IS NULL AND r.read_visible AND TRUE AND r.read_kind = ?",
+          "ms": 19.0,
+          "parameter_count": 2
+        },
+        {
+          "sql": "SELECT r.project_id,r.id,r.version,r.version_id,r.recorded_at,r.superseded_at,r.payload FROM record_versions r WHERE r.project_id=? AND r.superseded_at IS NULL AND r.read_visible AND TRUE AND r.read_kind = ? ORDER BY r.id,r.version LIMIT ?",
+          "ms": 22.76,
+          "parameter_count": 3
+        }
+      ],
+      "profile": [
+        {
+          "file": ".\\.benchmarks\\page_design_profile_20261020.py",
+          "line": 46,
+          "function": "<lambda>",
+          "calls": 1,
+          "self_ms": 0.02,
+          "total_ms": 64.35
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\scoped_reads.py",
+          "line": 42,
+          "function": "read",
+          "calls": 2,
+          "self_ms": 0.06,
+          "total_ms": 64.34
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\scoped_reads.py",
+          "line": 260,
+          "function": "page",
+          "calls": 1,
+          "self_ms": 0.14,
+          "total_ms": 64.24
+        },
+        {
+          "file": ".\\.benchmarks\\page_design_profile_20261020.py",
+          "line": 35,
+          "function": "execute",
+          "calls": 4,
+          "self_ms": 0.05,
+          "total_ms": 61.19
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\pg_engine.py",
+          "line": 231,
+          "function": "execute",
+          "calls": 4,
+          "self_ms": 0.04,
+          "total_ms": 61.14
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\cursor.py",
+          "line": 100,
+          "function": "execute",
+          "calls": 4,
+          "self_ms": 0.04,
+          "total_ms": 59.91
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\connection.py",
+          "line": 476,
+          "function": "wait",
+          "calls": 4,
+          "self_ms": 0.03,
+          "total_ms": 59.87
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\waiting.py",
+          "line": 254,
+          "function": "wait_select",
+          "calls": 4,
+          "self_ms": 0.1,
+          "total_ms": 59.84
+        },
+        {
+          "file": "~",
+          "line": 0,
+          "function": "<built-in method select.select>",
+          "calls": 5,
+          "self_ms": 56.74,
+          "total_ms": 56.74
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\scoped_reads.py",
+          "line": 208,
+          "function": "count",
+          "calls": 1,
+          "self_ms": 0.04,
+          "total_ms": 27.49
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\core.py",
+          "line": 729,
+          "function": "get_project",
+          "calls": 2,
+          "self_ms": 0.09,
+          "total_ms": 19.86
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\_cursor_base.py",
+          "line": 195,
+          "function": "_execute_gen",
+          "calls": 9,
+          "self_ms": 0.05,
+          "total_ms": 2.94
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\_cursor_base.py",
+          "line": 275,
+          "function": "_maybe_prepare_gen",
+          "calls": 9,
+          "self_ms": 0.43,
+          "total_ms": 2.42
+        },
+        {
+          "file": "~",
+          "line": 0,
+          "function": "<built-in method builtins.next>",
+          "calls": 10,
+          "self_ms": 0.03,
+          "total_ms": 1.86
+        },
+        {
+          "file": "~",
+          "line": 0,
+          "function": "<method 'send' of 'generator' objects>",
+          "calls": 5,
+          "self_ms": 0.04,
+          "total_ms": 1.15
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\core.py",
+          "line": 1209,
+          "function": "_record",
+          "calls": 28,
+          "self_ms": 0.14,
+          "total_ms": 1.05
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\cursor.py",
+          "line": 274,
+          "function": "fetchall",
+          "calls": 1,
+          "self_ms": 0.15,
+          "total_ms": 1.04
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\pg_engine.py",
+          "line": 116,
+          "function": "translate",
+          "calls": 4,
+          "self_ms": 0.06,
+          "total_ms": 1.01
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\connection.py",
+          "line": 230,
+          "function": "load",
+          "calls": 30,
+          "self_ms": 0.07,
+          "total_ms": 0.96
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\json\\__init__.py",
+          "line": 299,
+          "function": "loads",
+          "calls": 30,
+          "self_ms": 0.06,
+          "total_ms": 0.83
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\json\\decoder.py",
+          "line": 332,
+          "function": "decode",
+          "calls": 30,
+          "self_ms": 0.09,
+          "total_ms": 0.74
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\_cursor_base.py",
+          "line": 531,
+          "function": "_set_results",
+          "calls": 4,
+          "self_ms": 0.02,
+          "total_ms": 0.71
+        }
+      ]
+    },
+    {
+      "name": "project_list_with_counts",
+      "ms": 112.11,
+      "sql_ms": 110.49,
+      "sql_calls": 3,
+      "queries": [
+        {
+          "sql": "SELECT * FROM projects ORDER BY created_at,id",
+          "ms": 10.68,
+          "parameter_count": 0
+        },
+        {
+          "sql": "SELECT project_id, read_kind AS kind, COUNT(*) AS n FROM record_versions WHERE superseded_at IS NULL GROUP BY project_id, kind",
+          "ms": 90.25,
+          "parameter_count": 0
+        },
+        {
+          "sql": "SELECT project_id,COUNT(*) AS n FROM ontologies GROUP BY project_id",
+          "ms": 9.56,
+          "parameter_count": 0
+        }
+      ],
+      "profile": [
+        {
+          "file": ".\\.benchmarks\\page_design_profile_20261020.py",
+          "line": 47,
+          "function": "<lambda>",
+          "calls": 1,
+          "self_ms": 0.03,
+          "total_ms": 111.83
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\core.py",
+          "line": 781,
+          "function": "list_projects",
+          "calls": 1,
+          "self_ms": 0.29,
+          "total_ms": 111.8
+        },
+        {
+          "file": ".\\.benchmarks\\page_design_profile_20261020.py",
+          "line": 35,
+          "function": "execute",
+          "calls": 3,
+          "self_ms": 0.05,
+          "total_ms": 110.53
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\pg_engine.py",
+          "line": 231,
+          "function": "execute",
+          "calls": 3,
+          "self_ms": 0.04,
+          "total_ms": 110.47
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\cursor.py",
+          "line": 100,
+          "function": "execute",
+          "calls": 3,
+          "self_ms": 0.04,
+          "total_ms": 109.61
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\connection.py",
+          "line": 476,
+          "function": "wait",
+          "calls": 3,
+          "self_ms": 0.03,
+          "total_ms": 109.56
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\waiting.py",
+          "line": 254,
+          "function": "wait_select",
+          "calls": 3,
+          "self_ms": 0.09,
+          "total_ms": 109.54
+        },
+        {
+          "file": "~",
+          "line": 0,
+          "function": "<built-in method select.select>",
+          "calls": 3,
+          "self_ms": 107.23,
+          "total_ms": 107.23
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\_cursor_base.py",
+          "line": 195,
+          "function": "_execute_gen",
+          "calls": 6,
+          "self_ms": 0.05,
+          "total_ms": 2.19
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\_cursor_base.py",
+          "line": 275,
+          "function": "_maybe_prepare_gen",
+          "calls": 6,
+          "self_ms": 0.31,
+          "total_ms": 1.69
+        },
+        {
+          "file": "~",
+          "line": 0,
+          "function": "<built-in method builtins.next>",
+          "calls": 3,
+          "self_ms": 0.01,
+          "total_ms": 1.36
+        },
+        {
+          "file": "~",
+          "line": 0,
+          "function": "<method 'send' of 'generator' objects>",
+          "calls": 3,
+          "self_ms": 0.02,
+          "total_ms": 0.86
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\_cursor_base.py",
+          "line": 416,
+          "function": "_execute_send",
+          "calls": 3,
+          "self_ms": 0.74,
+          "total_ms": 0.74
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\pg_engine.py",
+          "line": 116,
+          "function": "translate",
+          "calls": 3,
+          "self_ms": 0.05,
+          "total_ms": 0.67
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\cursor.py",
+          "line": 274,
+          "function": "fetchall",
+          "calls": 3,
+          "self_ms": 0.11,
+          "total_ms": 0.67
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\_cursor_base.py",
+          "line": 531,
+          "function": "_set_results",
+          "calls": 3,
+          "self_ms": 0.02,
+          "total_ms": 0.51
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\_cursor_base.py",
+          "line": 504,
+          "function": "_select_current_result",
+          "calls": 3,
+          "self_ms": 0.09,
+          "total_ms": 0.49
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\connection.py",
+          "line": 230,
+          "function": "load",
+          "calls": 11,
+          "self_ms": 0.03,
+          "total_ms": 0.4
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\_cursor_base.py",
+          "line": 461,
+          "function": "_convert_query",
+          "calls": 3,
+          "self_ms": 0.02,
+          "total_ms": 0.39
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\_queries.py",
+          "line": 59,
+          "function": "convert",
+          "calls": 3,
+          "self_ms": 0.04,
+          "total_ms": 0.37
+        },
+        {
+          "file": "D:\\anaconda\\envs\\llm_model\\Lib\\site-packages\\psycopg\\cursor.py",
+          "line": 78,
+          "function": "_make_row_maker",
+          "calls": 3,
+          "self_ms": 0.01,
+          "total_ms": 0.35
+        },
+        {
+          "file": ".\\knowledge_service\\repository\\pg_engine.py",
+          "line": 71,
+          "function": "_replace_placeholders",
+          "calls": 3,
+          "self_ms": 0.22,
+          "total_ms": 0.34
+        }
+      ]
+    }
+  ],
+  "plans": [
+    {
+      "query": "889a0b566a38",
+      "sql": "SELECT r.project_id,r.id,r.version,r.version_id,\n            r.recorded_at,r.superseded_at,jsonb_build_object('id',r.id,'kind','document',\n                'valid_from',r.payload::jsonb->'valid_from','valid_until',r.payload::jsonb->'valid_until',\n                'metadata',jsonb_strip_nulls(jsonb_build_object('title',r.payload::jsonb#>'{metadata,title}','source_file',r.payload::jsonb#>'{metadata,source_file}','source_format',r.payload::jsonb#>'{metadata,source_format}','source_size_bytes',r.payload::jsonb#>'{metadata,source_size_bytes}','document_parser',r.payload::jsonb#>'{metadata,document_parser}','page_count',r.payload::jsonb#>'{metadata,page_count}','source_document_version_id',r.payload::jsonb#>'{metadata,source_document_version_id}','status',r.payload::jsonb#>'{metadata,status}')))::text AS payload\n            FROM record_versions r WHERE r.project_id=? AND r.version_id=ANY(?::text[])",
+      "execution_ms": 167.121,
+      "nodes": [
+        {
+          "Node Type": "Index Scan",
+          "Relation Name": "record_versions",
+          "Index Name": "record_versions_version_id_key",
+          "Actual Rows": 4.0,
+          "Actual Loops": 1,
+          "Actual Total Time": 167.014,
+          "Rows Removed by Filter": 0,
+          "Shared Read Blocks": 0,
+          "Shared Hit Blocks": 170
+        }
+      ]
+    },
+    {
+      "query": "1392b93a470c",
+      "sql": "SELECT payload FROM artifacts WHERE id=? AND kind=? AND project_id=?",
+      "execution_ms": 0.059,
+      "nodes": [
+        {
+          "Node Type": "Index Scan",
+          "Relation Name": "artifacts",
+          "Index Name": "artifacts_project_seq",
+          "Actual Rows": 1.0,
+          "Actual Loops": 1,
+          "Actual Total Time": 0.033,
+          "Rows Removed by Filter": 8,
+          "Shared Read Blocks": 0,
+          "Shared Hit Blocks": 4
+        }
+      ]
+    },
+    {
+      "query": "3db8a637cd57",
+      "sql": "SELECT project_id,id,version,version_id,\n            recorded_at,superseded_at,\n            jsonb_build_object('id',id,'kind','document',\n                'valid_from',payload::jsonb->'valid_from',\n                'valid_until',payload::jsonb->'valid_until',\n                'metadata',jsonb_build_object('title',COALESCE(payload::jsonb#>>'{metadata,title}',id),\n                    'discovery_candidates',payload::jsonb#>'{metadata,discovery_candidates}'))::text AS payload\n            FROM record_versions WHERE project_id=? AND superseded_at IS NULL\n              AND read_kind='document' AND read_visible\n              AND jsonb_typeof(payload::jsonb#>'{metadata,discovery_candidates}')='array'\n            ORDER BY id",
+      "execution_ms": 85.845,
+      "nodes": [
+        {
+          "Node Type": "Index Scan",
+          "Relation Name": "record_versions",
+          "Index Name": "versions_visible_graph_keyset",
+          "Actual Rows": 3.0,
+          "Actual Loops": 1,
+          "Actual Total Time": 85.792,
+          "Rows Removed by Filter": 1,
+          "Shared Read Blocks": 0,
+          "Shared Hit Blocks": 79
+        }
+      ]
+    },
+    {
+      "query": "8fe16ab3fa56",
+      "sql": "SELECT project_id, read_kind AS kind, COUNT(*) AS n FROM record_versions WHERE superseded_at IS NULL GROUP BY project_id, kind",
+      "execution_ms": 117.949,
+      "nodes": [
+        {
+          "Node Type": "Aggregate",
+          "Relation Name": null,
+          "Index Name": null,
+          "Actual Rows": 22.0,
+          "Actual Loops": 1,
+          "Actual Total Time": 117.81,
+          "Rows Removed by Filter": null,
+          "Shared Read Blocks": 0,
+          "Shared Hit Blocks": 405
+        },
+        {
+          "Node Type": "Gather Merge",
+          "Relation Name": null,
+          "Index Name": null,
+          "Actual Rows": 24.0,
+          "Actual Loops": 1,
+          "Actual Total Time": 117.778,
+          "Rows Removed by Filter": null,
+          "Shared Read Blocks": 0,
+          "Shared Hit Blocks": 405
+        },
+        {
+          "Node Type": "Aggregate",
+          "Relation Name": null,
+          "Index Name": null,
+          "Actual Rows": 8.0,
+          "Actual Loops": 3,
+          "Actual Total Time": 60.347,
+          "Rows Removed by Filter": null,
+          "Shared Read Blocks": 0,
+          "Shared Hit Blocks": 405
+        },
+        {
+          "Node Type": "Index Only Scan",
+          "Relation Name": "record_versions",
+          "Index Name": "versions_current_kind_counts",
+          "Actual Rows": 150049.67,
+          "Actual Loops": 3,
+          "Actual Total Time": 27.053,
+          "Rows Removed by Filter": null,
+          "Shared Read Blocks": 0,
+          "Shared Hit Blocks": 405
+        }
+      ]
+    },
+    {
+      "query": "8a99e0c77bde",
+      "sql": "SELECT payload FROM artifacts WHERE kind=? AND project_id=? ORDER BY seq DESC",
+      "execution_ms": 0.049,
+      "nodes": [
+        {
+          "Node Type": "Index Scan",
+          "Relation Name": "artifacts",
+          "Index Name": "artifacts_project_seq",
+          "Actual Rows": 3.0,
+          "Actual Loops": 1,
+          "Actual Total Time": 0.026,
+          "Rows Removed by Filter": 6,
+          "Shared Read Blocks": 0,
+          "Shared Hit Blocks": 4
+        }
+      ]
+    },
+    {
+      "query": "4b48b9a41043",
+      "sql": "SELECT read_kind AS kind,\n                jsonb_build_object('discovery_candidate_id',payload::jsonb#>'{metadata,discovery_candidate_id}',\n                    'discovery_candidate_ids',payload::jsonb#>'{metadata,discovery_candidate_ids}')::text AS metadata\n            FROM record_versions WHERE project_id=? AND superseded_at IS NULL\n              AND read_visible AND read_kind IN ('entity','relation','attribute')\n              AND (payload::jsonb#>>'{metadata,discovery_candidate_id}'=ANY(?::text[])\n                OR (payload::jsonb#>'{metadata,discovery_candidate_ids}' IS NOT NULL\n                    AND (payload::jsonb#>'{metadata,discovery_candidate_ids}') @> ANY(?::jsonb[])))",
+      "execution_ms": 3.034,
+      "nodes": [
+        {
+          "Node Type": "Index Scan",
+          "Relation Name": "record_versions",
+          "Index Name": "versions_current_audience_mode",
+          "Actual Rows": 58.0,
+          "Actual Loops": 1,
+          "Actual Total Time": 2.968,
+          "Rows Removed by Filter": 9,
+          "Shared Read Blocks": 0,
+          "Shared Hit Blocks": 33
+        }
+      ]
+    }
+  ]
+}

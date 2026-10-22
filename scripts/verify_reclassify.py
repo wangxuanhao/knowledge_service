@@ -98,7 +98,7 @@ def publish_v2(base: str, project: str, base_ontology_id: str) -> str:
     """
     status, draft = request(base, f'/api/projects/{project}/ontology-drafts', {
         'base_ontology_id': base_ontology_id, 'source_kind': 'manual',
-        'title': 'C2 真机复验：停用「包」并指定替代类', 'actor': 'verify:reclassify'})
+        'title': 'C2 真机复验：停用「包」并指定替代类'})
     if status != 201:
         raise Failure(f'创建草案失败：HTTP {status} {draft}')
     status, draft = request(
@@ -128,7 +128,6 @@ def publish_v2(base: str, project: str, base_ontology_id: str) -> str:
             'expected_ontology_id': base_ontology_id,
             'validation_fingerprint': submitted['validation_fingerprint'],
             'acknowledged_warning_codes': warnings,
-            'actor': 'verify:reviewer',
             'decisions': [{'operation_id': operation['id'],
                            'operation_fingerprint': operation['fingerprint'],
                            'action': 'approve', 'reason': '复验：同意停用与替代'}]})
@@ -141,8 +140,7 @@ def publish_v2(base: str, project: str, base_ontology_id: str) -> str:
             'validation_fingerprint': reviewed['validation_fingerprint'],
             'acknowledged_warning_codes': warnings,
             'idempotency_key': f'verify-reclassify-{reviewed["id"]}',
-            'note': '真机验证：发布替代类映射用于受控重分类',
-            'actor': 'verify:publisher'})
+            'note': '真机验证：发布替代类映射用于受控重分类'})
     if status != 200:
         raise Failure(f'发布失败：HTTP {status} {version}')
     return version['id']
@@ -163,10 +161,13 @@ def run(base: str, project: str | None, keep_project: bool) -> int:
         if status != 201:
             raise Failure(f'建项目失败：HTTP {status} {body}')
         project, created = body['id'], True
-        status, v1 = request(base, f'/api/projects/{project}/ontologies',
-                             {'turtle': TURTLE_V1, 'expected_ontology_id': None})
-        if status != 201:
-            raise Failure(f'写入 v1 本体失败：HTTP {status} {v1}')
+        from ontology_validation_helpers import publish_validation_ontology
+        def governed_call(method, path, payload):
+            code, result = request(base, path, payload, method)
+            if code >= 400:
+                raise Failure(f'本体工作流请求失败：HTTP {code}')
+            return result
+        v1 = publish_validation_ontology(governed_call, f'/api/projects/{project}', TURTLE_V1)
         print(f'  项目 {project} · 本体 v1 {v1["id"]}')
     else:
         status, versions = request(base, f'/api/projects/{project}/ontologies')
@@ -235,7 +236,7 @@ def run(base: str, project: str | None, keep_project: bool) -> int:
         step('6. 真迁：整批一条操作')
         status, applied = request(
             base, f'/api/projects/{project}/reclassify',
-            {'groups': keys, 'actor': 'verify:reclassify'})
+            {'groups': keys})
         check(problems, status == 200, f'迁移成功（HTTP {status}）')
         check(problems, applied['migrated'] == 2,
               f'迁了 2 条（实际 {applied["migrated"]}）')

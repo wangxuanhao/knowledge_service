@@ -40,8 +40,11 @@
 """
 from __future__ import annotations
 
+from copy import copy
+
 from rdflib.namespace import DCTERMS
 
+from ..repository.page_reads import PageReads
 from .governance import Governance, writable
 from .ontology import Ontology
 from .ontology_vocabulary import local_name
@@ -129,15 +132,25 @@ class Reclassify:
     # ---------------------------------------------------------------- 只读：计划
     def plan(self, project_id):
         """把「还挂在旧版本上的知识」按旧类型分组，逐组给出处置。**只读**。"""
+        with self.service.independent_read_view() as service:
+            planner = self
+            if service is not self.service:
+                planner = copy(self)
+                planner.service = service
+                planner.repo = service.repository
+            return planner._plan(project_id)
+
+    def _plan(self, project_id):
         versions = self.repo.list_ontologies(project_id)
         if not versions:
             raise ReclassifyError('这个项目还没有本体：先在本体建模层建一份并发布')
         version_label = self._version_labels(versions)
         current = versions[-1]
         current_ontology = self.service.structure_pending_ontology(project_id)
-        rows = self.service.scoped(
-            project_id, {'kinds': list(structure_pending.KNOWLEDGE_KINDS)})
-        stale = [row for row in rows if (row.get('ontology_id') or None) != current['id']]
+        inputs = PageReads(self.repo).reclassify_inputs(
+            project_id, {'kinds': list(structure_pending.KNOWLEDGE_KINDS)},
+            current['id'], sample_limit=_SAMPLE_LIMIT)
+        stale = [group for group in inputs['groups'] if group['ontology_id'] != current['id']]
 
         labels_current = _label_map(current_ontology)
         ctx = self._context(project_id, versions, current_ontology, labels_current)
@@ -150,13 +163,9 @@ class Reclassify:
             group = groups.get(key)
             if group is None:
                 group = groups[key] = self._group(row, ctx, labels_old[version])
-            group['records'].append({
-                'id': row['id'], 'version': row.get('version'),
-                'text': _truncate(row.get('text'))})
-            group['record_count'] += 1
-
-        for group in groups.values():
-            group['records'] = group['records'][:_SAMPLE_LIMIT]
+            group['records'] = [{**sample, 'text': _truncate(sample.get('text'))}
+                                for sample in row['records']]
+            group['record_count'] = row['record_count']
         ordered = sorted(groups.values(),
                          key=lambda item: (item['action'], -item['record_count'], item['key']))
         migratable = [group for group in ordered if group['migratable']]
@@ -164,8 +173,8 @@ class Reclassify:
             'project_id': project_id,
             'current_ontology_id': current['id'],
             'current_version': version_label[current['id']],
-            'total_records': len(rows),
-            'stale_records': len(stale),
+            'total_records': inputs['total_records'],
+            'stale_records': sum(group['record_count'] for group in stale),
             'groups': ordered,
             'migratable_groups': len(migratable),
             'unmapped_groups': len(ordered) - len(migratable),

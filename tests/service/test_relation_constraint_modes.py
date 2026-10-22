@@ -1,3 +1,4 @@
+from ontology_seed import seed_project_ontology
 import pytest
 from fastapi.testclient import TestClient
 from knowledge_service.api import create_app
@@ -69,7 +70,7 @@ def test_ingestion_policy_isolated_per_document(tmp_path,extraction,mode,status,
     app=create_app(tmp_path/(mode+'.sqlite'),HashingEncoder())
     with TestClient(app) as client:
         p=client.post('/api/projects',json={'name':mode,'use_default_ontology':False}).json()['id'];base='/api/projects/'+p
-        client.post(base+'/ontologies',json={'turtle':TTL})
+        seed_project_ontology(client, base+'', TTL)
         response=client.post(base+'/documents',json={'title':'冲突示例','text':'张三与商品','resolve_entities':False,'relation_constraint_mode':mode})
         assert response.status_code==status,response.text
         rows=app.state.service.repository.current_records(p);relations=[r for r in rows if r['kind']=='relation']
@@ -81,7 +82,7 @@ def test_ingestion_policy_isolated_per_document(tmp_path,extraction,mode,status,
 def test_structured_write_remains_strict(tmp_path):
     with TestClient(create_app(tmp_path/'structured.sqlite',HashingEncoder())) as client:
         p=client.post('/api/projects',json={'name':'strict-api','use_default_ontology':False}).json()['id'];base='/api/projects/'+p
-        client.post(base+'/ontologies',json={'turtle':TTL})
+        seed_project_ontology(client, base+'', TTL)
         response=client.post(base+'/records',json={'records':[
             {'id':'p','kind':'entity','text':'张三','type':'Person'}, {'id':'x','kind':'entity','text':'商品','type':'Product'},
             {'id':'r','kind':'relation','text':'错误组合','type':'worksAt','subject_id':'p','object_id':'x'}]})

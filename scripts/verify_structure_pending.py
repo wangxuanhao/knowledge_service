@@ -55,6 +55,21 @@ def call(base: str, path: str, body=None, method: str | None = None, raw: bool =
     return payload if raw else json.loads(payload)
 
 
+
+def record_pages(base, project_id, scope):
+    rows, cursor, seen = [], None, set()
+    while True:
+        payload = call(base, f'/api/projects/{project_id}/records/page',
+                       {**scope, 'limit': 1000, 'cursor': cursor})
+        rows.extend(payload['records'])
+        cursor = payload['next_cursor']
+        if cursor is None:
+            return {'records': rows}
+        if cursor in seen:
+            raise RuntimeError('记录分页游标重复')
+        seen.add(cursor)
+
+
 def sse_events(payload: str) -> list[tuple[str, dict]]:
     """把 `event: x\\ndata: {...}` 的 SSE 文本拆成 [(事件名, 数据)]。"""
     events, name = [], None
@@ -113,7 +128,8 @@ def main() -> int:
 def run(base: str, p: str, stamp: str, args) -> None:
     ttl_v1 = ('@prefix ex: <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> . '
               'ex:文件 a owl:Class . ex:提到 a owl:ObjectProperty .')
-    ontology = call(base, f'/api/projects/{p}/ontologies', {'turtle': ttl_v1, 'expected_ontology_id': None})
+    from ontology_validation_helpers import publish_validation_ontology
+    ontology = publish_validation_ontology(lambda method,path,body: call(base,path,body,method), f'/api/projects/{p}', ttl_v1)
     check('建立项目本体（1 个类）', bool(ontology.get('id')), f"ontology_id={ontology.get('id')}")
 
     unknown_type = f'urn:knowledge:ontology:{p}:包裹'
@@ -148,7 +164,7 @@ def run(base: str, p: str, stamp: str, args) -> None:
           str(grouped.get(unknown_type, {}).get('record_count')))
     check('每组都给出"该去哪儿做什么"', '本体建模层' in str(grouped.get(unknown_type, {}).get('suggested_action')))
 
-    scoped = call(base, f'/api/projects/{p}/records/query?limit=100', {'kinds': ['entity', 'relation', 'chunk']})
+    scoped = record_pages(base, p, {'kinds': ['entity', 'relation', 'chunk']})
     ids = [row['id'] for row in scoped['records']]
     check('结构待定的知识仍然可检索（在范围读取里）', 'pkg-1' in ids and 'rel-1' in ids, str(ids))
     hit = call(base, f'/api/projects/{p}/search', {'query': '跨城包裹', 'k': 5})
@@ -205,9 +221,12 @@ def run(base: str, p: str, stamp: str, args) -> None:
     # 这条链不能抄近路：只在数据库里塞一条本体，验不出"发布之后页面才解除"这件事。
     ttl_v2 = (ttl_v1 + f' @prefix pkg: <urn:knowledge:ontology:{p}:> . '
                        'pkg:包裹 a owl:Class . pkg:寄件人 a owl:Class .')
-    draft = call(base, f'/api/projects/{p}/ontologies',
-                 {'turtle': ttl_v2, 'expected_ontology_id': ontology.get('id')})
-    draft_id = draft.get('id') or (draft.get('draft') or {}).get('id')
+    draft = call(base, f'/api/projects/{p}/ontology-drafts', {
+        'base_ontology_id': ontology['id'], 'source_kind': 'turtle', 'title': 'C1 补齐缺失概念'})
+    draft_id = draft['id']
+    draft = call(base, f'/api/projects/{p}/ontology-drafts/{draft_id}/commands', {
+        'expected_revision': draft['revision'],
+        'command': {'action': 'diff_turtle', 'edited_turtle': ttl_v2, 'reason': 'C1 补齐缺失概念'}})
     if not draft_id:
         skip('发布新版本体 → 标记自动解除', f'没拿到草案 id：{list(draft)[:6]}')
         return
@@ -232,7 +251,6 @@ def run(base: str, p: str, stamp: str, args) -> None:
                 'expected_ontology_id': ontology.get('id'),
                 'validation_fingerprint': submitted['validation_fingerprint'],
                 'acknowledged_warning_codes': warnings,
-                'actor': 'script:verify_structure_pending',
                 'decisions': [{'operation_id': operation['id'],
                                'operation_fingerprint': operation['fingerprint'],
                                'action': 'approve', 'reason': 'C1 复验：把缺的概念建出来'}]})
@@ -242,15 +260,14 @@ def run(base: str, p: str, stamp: str, args) -> None:
             'validation_fingerprint': submitted['validation_fingerprint'],
             'acknowledged_warning_codes': warnings,
             'idempotency_key': f'c1-verify-{uuid.uuid4()}',
-            'note': '真机验证：补齐缺失概念后核查结构待定解除',
-            'actor': 'script:verify_structure_pending'})
+            'note': '真机验证：补齐缺失概念后核查结构待定解除'})
     except RuntimeError as error:
         skip('发布新版本体 → 标记自动解除', f'发布链路没走通：{error}')
         return
     after = call(base, f'/api/projects/{p}/structure-pending')
     check('概念进本体（发布新版）后，待建模数字归零', after.get('pending_structure') == 0,
           str(after.get('pending_structure')))
-    cleared = call(base, f'/api/projects/{p}/records/query?limit=100', {'kinds': ['entity']})
+    cleared = record_pages(base, p, {'kinds': ['entity']})
     state = next((row.get('structure_pending') for row in cleared['records']
                   if row['id'] == 'pkg-1'), None) or {}
     check('记录状态自动变「已解除」，标记仍留在记录上作历史',

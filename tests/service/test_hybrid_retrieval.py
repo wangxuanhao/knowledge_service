@@ -44,7 +44,8 @@ def test_fts_tracks_current_rows_and_can_be_rebuilt(tmp_path):
     assert [row['id'] for row in repo.keyword_candidates(project_id, 'XYZ-009')] == ['entity-1']
 
 
-def test_hybrid_retrieval_prefilters_and_degrades_per_backend(tmp_path):
+def test_hybrid_requires_milvus_and_explicit_keyword_prefilters(tmp_path):
+    import pytest
     repo = Repository(tmp_path / 'hybrid.sqlite')
     project_id = repo.create_project('甲')['id']
     repo.put_record(project_id, {
@@ -59,25 +60,28 @@ def test_hybrid_retrieval_prefilters_and_degrades_per_backend(tmp_path):
     })
     engine = RetrievalEngine(repo, Encoder())
 
+    with pytest.raises(RuntimeError, match='Milvus'):
+        engine.search(project_id, '退款', retrieval_mode='hybrid',
+            scope={'filters': {'field': 'region', 'op': 'eq', 'value': '北京'}},
+            content_channels=['chunk'], k=5)
     result = engine.search(
-        project_id, '退款', retrieval_mode='hybrid',
+        project_id, '退款', retrieval_mode='keyword',
         scope={'filters': {'field': 'region', 'op': 'eq', 'value': '北京'}},
         content_channels=['chunk'], k=5)
 
     assert [row['id'] for row in result['hits']] == ['keyword-hit']
-    assert result['requested_mode'] == 'hybrid'
-    # 删列后本地无向量，semantic 通道不可用，hybrid 降级 keyword
+    assert result['requested_mode'] == 'keyword'
     assert result['active_mode'] == 'keyword'
-    assert result['degraded'] is True
+    assert result['degraded'] is False
     assert result['filter_stage'] == 'before_ranking'
 
     repo.put_record(project_id, {'id': 'no-vector', 'kind': 'chunk', 'text': '精确标识 Z-42'})
-    degraded = engine.search(
-        project_id, 'Z-42', retrieval_mode='hybrid', scope={},
+    keyword = engine.search(
+        project_id, 'Z-42', retrieval_mode='keyword', scope={},
         content_channels=['chunk'], k=5)
-    assert degraded['active_mode'] == 'keyword'
-    assert degraded['degraded'] is True
-    assert degraded['hits'][0]['id'] == 'no-vector'
+    assert keyword['active_mode'] == 'keyword'
+    assert keyword['degraded'] is False
+    assert keyword['hits'][0]['id'] == 'no-vector'
 
 
 def test_historical_keyword_search_scans_historical_versions(tmp_path):
@@ -159,9 +163,15 @@ def test_semantic_search_applies_quotas_before_channels_can_crowd_each_other(tmp
          'subject_id': 'a', 'object_id': 'b', 'metadata': {},
          'embedding': [1.0, 0.0], 'embedding_model': 'test-v1'},
     ]
-    repo.put_batch(project_id, records)
+    saved = repo.put_batch(project_id, records)
+    class NativeStore:
+        available = True
+        def search_dense(self, project, vector, *, kinds, k, scope):
+            return [{'version_id': row['version_id'], 'score': 1.}
+                    for row in saved if row['kind'] in kinds][:k]
 
-    result = RetrievalEngine(repo, Encoder()).search(
+    result = RetrievalEngine(repo, Encoder(), NativeStore(),
+        projection_readiness=lambda *args: True).search(
         project_id, '退款', retrieval_mode='semantic',
         content_channels=['entity', 'chunk', 'relation'], k=10,
         content_k={'entity': 1, 'chunk': 1, 'relation': 1})

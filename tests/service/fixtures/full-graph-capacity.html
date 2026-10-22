@@ -1,0 +1,17 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>全量实体图谱容量验证</title>
+<link rel="stylesheet" href="/knowledge_service/web/full-graph.css">
+<style>body{font:14px 'Microsoft YaHei',sans-serif;margin:16px;background:#f6f8f6;color:#193631}#host{width:1240px;height:760px;max-width:96vw}.status{white-space:pre-wrap}</style>
+<h1>完整图数据集容量校验</h1><p>隔离的确定性实体/关系夹具；这页验证绘图层，不代替 PostgreSQL / Milvus 集成验收。</p><div id="host" class="full-graph-host"></div><pre class="status" id="status"></pre>
+<script src="/knowledge_service/web/full-graph.js"></script>
+<script>
+window.buildCapacityFixture=async function(count,edgeCount){
+  window.capacityRenderer?.destroy();const started=performance.now();
+  const dataset=new FullGraph.GraphDataset();
+  dataset.addNodes(Array.from({length:count},(_,i)=>({id:'entity-'+i,kind:'entity',text:'实体 '+i+' · '+(i%50===0?'长标签用于验证名称缩放显示与完整ID可达性':'节点'),type:'Type'+(i%17),version:1,version_id:'version-'+i})));
+  for(let offset=0;offset<edgeCount;offset+=5000){dataset.addEdges(Array.from({length:Math.min(5000,edgeCount-offset)},(_,j)=>{const i=offset+j;return {id:'relation-'+i,kind:'relation',type:'related',subject_id:'entity-'+(i%count),object_id:'entity-'+((i%13===0?0:i+1+Math.floor(i/count))%count)};}));await new Promise(resolve=>setTimeout(resolve,0));}
+  const renderer=new FullGraph.Renderer(document.getElementById('host'),{onError:message=>{document.getElementById('status').textContent=message;}});window.capacityRenderer=renderer;renderer.setDataset(dataset);
+  await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+  const result={...renderer.stats(),fixture_build_ms:performance.now()-started,gl_error:renderer.gl.getError(),heap:performance.memory?.usedJSHeapSize||null};document.getElementById('status').textContent=JSON.stringify(result,null,2);return result;
+};
+window.measureCapacityInteraction=async function(durationMs=10000){const r=window.capacityRenderer,frames=[],picks=[];let last=performance.now(),start=last;while(performance.now()-start<durationMs){await new Promise(resolve=>requestAnimationFrame(resolve));const now=performance.now();frames.push(now-last);last=now;r.camera.x=Math.sin(now/2000)*.03;r.camera.y=Math.cos(now/2400)*.03;r.camera.scale=1+Math.sin(now/4000)*.08;r.draw();if(frames.length%30===0){const record=r.dataset.records[(frames.length*997)%r.dataset.nodeCount],i=r.dataset.nodeIndex.get(record.id),[x,y]=r.camera.worldToScreen(r.dataset.positions[i*2],r.dataset.positions[i*2+1],r.width,r.height);r.pick(x,y);picks.push(r.lastPickMs);}}const p95=values=>values.length?[...values].sort((a,b)=>a-b)[Math.min(values.length-1,Math.floor(values.length*.95))]:null;return {frame_count:frames.length,frame_p95_ms:p95(frames),pick_p95_ms:p95(picks),heap:performance.memory?.usedJSHeapSize||null,...r.stats()};};
+</script></html>

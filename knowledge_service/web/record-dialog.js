@@ -19,13 +19,18 @@
   $('revision').setAttribute('aria-label','记录内容 JSON');
   const message=document.createElement('p');message.id='record-dialog-message';message.setAttribute('role','status');
   dialog.querySelector('.record-dialog-heading').after(message);
-  let request=0,activeRow=null,activeOntologies=null;
-  function close(){request++;dialog.close();}
+  const conflictView=document.createElement('section');conflictView.id='record-conflict-view';conflictView.hidden=true;dialog.appendChild(conflictView);
+  let request=0,activeRow=null,activeOntologies=null,entityPickers=[],activeScope=null;
+  function captureScope(){const context=window.WorkspaceContext,page=context?.page||'records',p=current,ticket=context?.ticket(p,page),stamp=JSON.stringify(typeof scope==='function'?scope():{});
+    return ()=>p===current&&stamp===JSON.stringify(typeof scope==='function'?scope():{})&&(!ticket||context.accepts(ticket,p,page));}
+  function assertEditable(){if(!window.Auth?.isAdmin?.())throw Error('只有管理员可以保存知识修订');if(!activeScope?.())throw Error('查询范围已变化，请重新打开编辑器');}
+  function close(){request++;entityPickers.forEach(picker=>picker.invalidate());entityPickers=[];dialog.close();}
   $('close-record-dialog').onclick=close;
   dialog.addEventListener('cancel',()=>{request++;});
   function open(mode,title){
     $('record-dialog-title').textContent=title;
     $('record-dialog-message').textContent='';
+    conflictView.replaceChildren();conflictView.hidden=true;
     structured.hidden=mode!=='edit';advancedEdit.hidden=mode!=='edit';advancedEdit.open=false;
     $('record-history-view').hidden=mode!=='history';
     raw.hidden=mode!=='history';raw.open=false;
@@ -60,9 +65,10 @@
     return window.renderEvidenceInspector?.(displayed,[...wb.nodes.values()]);
   }
   async function saveRevision(record,expectedVersion){
+    assertEditable();
     const serial=request,p=current;
     const saved=await api(endpoint('/records/'+encodeURIComponent(record.id)),{record,expected_version:expectedVersion},'PUT');
-    if(serial!==request||p!==current||!dialog.open)return;
+    if(serial!==request||p!==current||!dialog.open||!activeScope?.())return;
     activeRow=saved;populateRaw(saved);wb.records.set(saved.id,saved);editContext();
     // Update the open card before announcing success; closing the modal cannot
     // cancel an already-committed revision's immediate presentation.
@@ -75,6 +81,19 @@
     $('record-dialog-message').textContent=message+(refreshFailed?' 部分视图刷新失败，请刷新图谱或台账。':'');
     await syncInspector(saved);
     if(serial===request&&p===current&&dialog.open&&activeRow?.version_id===saved.version_id)return saved;
+  }
+  async function compareConflict(local,serial,p){
+    try{
+      const latest=await api('/api/projects/'+encodeURIComponent(p)+'/records/'+encodeURIComponent(local.id),undefined,'GET');
+      if(serial!==request||p!==current||!dialog.open||!latest)return;
+      conflictView.replaceChildren();conflictView.hidden=false;
+      const heading=document.createElement('h3');heading.textContent=`服务端最新修订 r${latest.version} · 请比较后重新编辑`;
+      const explanation=document.createElement('p');explanation.textContent='你的未保存字段保留在上方。载入最新修订会替换表单，需重新核对后保存。';
+      const before=document.createElement('pre');before.textContent='你的提交：\n'+JSON.stringify(local,null,2);
+      const after=document.createElement('pre');after.textContent='服务端最新内容：\n'+JSON.stringify(latest,null,2);
+      const reload=document.createElement('button');reload.type='button';reload.className='secondary admin-only';reload.textContent='载入最新修订重新编辑';reload.onclick=()=>editRecord(latest);
+      conflictView.append(heading,explanation,before,after,reload);
+    }catch{/* The original conflict remains visible if the comparison read fails. */}
   }
   async function renderStructured(row){
     const serial=request,p=current;structured.innerHTML='<p class="subtle">正在加载可选类型和实体…</p>';
@@ -89,25 +108,21 @@
         structured.innerHTML='<p class="subtle">文档与原文片段可在下方高级 JSON 中查看。文档内容请修改源文件后重新解析。</p>';return;
       }
       const entityScope=typeof scope==='function'?scope():{},scopeStamp=JSON.stringify(entityScope);
-      const [ontology,records]=await Promise.all([
-        api(endpoint('/ontology')+'?ontology_id='+encodeURIComponent(row.ontology_id),undefined,'GET'),
-        api(endpoint('/records/query?limit=1000'),{...entityScope,kinds:['entity']})
-      ]);
+      const context=window.WorkspaceContext,contextPage=context?.page||'records',scopeTicket=context?.ticket(p,contextPage);
+      const stableScope=()=>scopeStamp===JSON.stringify(typeof scope==='function'?scope():{})&&(!scopeTicket||context.accepts(scopeTicket,p,contextPage));
+      const ontology=await api(endpoint('/ontology')+'?ontology_id='+encodeURIComponent(row.ontology_id),undefined,'GET');
       if(serial!==request||p!==current||activeRow?.id!==row.id||activeRow?.version_id!==row.version_id)return;
-      if(scopeStamp!==JSON.stringify(typeof scope==='function'?scope():{}))throw Error('查询范围已变化，请重新打开编辑器');
+      if(!stableScope())throw Error('查询范围已变化，请重新打开编辑器');
       if(ontology.id!==row.ontology_id)throw Error('读取的本体与记录归属不一致');
       const collection=row.kind==='entity'?ontology.summary.classes:row.kind==='attribute'?ontology.summary.attributes:ontology.summary.relations;
       if(!Array.isArray(collection))throw Error('绑定本体缺少对应类型目录');
       const labels=new Map(collection.map(item=>[item.id,item.label_zh||item.label||item.name]));
       if(row.type&&!labels.has(row.type))labels.set(row.type,labelOf(row.type));
-      const entities=records.records||[];const entityLabels=new Map(entities.map(item=>[item.id,item.text]));
-      for(const id of [row.subject_id,row.object_id])if(id&&!entityLabels.has(id))entityLabels.set(id,id+'（原所属实体，未在当前选项内）');
       const typeOptions=[...labels].map(([id,label])=>option(id,label,row.type)).join('');
       if(row.kind==='entity'){
         structured.innerHTML=`<div class="record-structured-heading"><h3>维护具体实体</h3><p>这里修改的是图谱中的一个实体，不会修改本体类定义。</p></div><label>实体名称<input id="structured-record-text" value="${esc(row.text)}"></label><label>实体类型<select id="structured-record-type">${typeOptions}</select></label><div class="record-time-fields"><label>业务生效时间<input id="structured-valid-from" value="${esc(row.valid_from||'')}" placeholder="可留空"></label><label>业务失效时间<input id="structured-valid-until" value="${esc(row.valid_until||'')}" placeholder="可留空"></label></div><button id="save-structured-record">保存实体修改为新修订</button>`;
       }else if(row.kind==='relation'){
-        const entityOptions=selected=>[...entityLabels].map(([id,label])=>option(id,label,selected)).join('');
-        structured.innerHTML=`<div class="record-structured-heading"><h3>维护实体关系</h3><p>可修改关系类型、起点实体或终点实体；这不会修改本体中的关系类型定义。</p></div><label>关系显示文本<input id="structured-record-text" value="${esc(row.text)}"></label><label>关系类型<select id="structured-record-type">${typeOptions}</select></label><div class="record-endpoints"><label>起点实体<select id="structured-subject">${entityOptions(row.subject_id)}</select></label><span>→</span><label>终点实体<select id="structured-object">${entityOptions(row.object_id)}</select></label></div><div class="record-time-fields"><label>业务生效时间<input id="structured-valid-from" value="${esc(row.valid_from||'')}" placeholder="可留空"></label><label>业务失效时间<input id="structured-valid-until" value="${esc(row.valid_until||'')}" placeholder="可留空"></label></div><button id="save-structured-record">保存关系修改为新修订</button>`;
+        structured.innerHTML=`<div class="record-structured-heading"><h3>维护实体关系</h3><p>可修改关系类型、起点实体或终点实体；这不会修改本体中的关系类型定义。</p></div><label>关系显示文本<input id="structured-record-text" value="${esc(row.text)}"></label><label>关系类型<select id="structured-record-type">${typeOptions}</select></label><div class="record-endpoints"><input type="hidden" id="structured-subject" value="${esc(row.subject_id||'')}"><div id="structured-subject-picker"></div><span>→</span><input type="hidden" id="structured-object" value="${esc(row.object_id||'')}"><div id="structured-object-picker"></div></div><div class="record-time-fields"><label>业务生效时间<input id="structured-valid-from" value="${esc(row.valid_from||'')}" placeholder="可留空"></label><label>业务失效时间<input id="structured-valid-until" value="${esc(row.valid_until||'')}" placeholder="可留空"></label></div><button id="save-structured-record">保存关系修改为新修订</button>`;
       }else if(row.kind==='attribute'){
         if(!window.RecordAttributeEditor)throw Error('属性编辑器资源未加载，请刷新页面');
         const xsd='http://www.w3.org/2001/XMLSchema#';
@@ -115,8 +130,7 @@
         const mode=row.datatype?.startsWith(xsd)?row.datatype.slice(xsd.length):'';
         const knownMode=modes.some(([value])=>value===mode);
         if(!knownMode)modes.unshift([row.datatype||'unknown','原数据类型（请先选择受支持类型）']);
-        const entityOptions=[option('','请选择所属实体',row.subject_id),...[...entityLabels].map(([id,label])=>option(id,label,row.subject_id))].join('');
-        structured.innerHTML=`<div class="record-structured-heading"><h3>维护实体属性</h3><p>修改具体实体的属性值；类型取自该记录绑定的本体发布。</p></div><label>属性显示文本<input id="structured-record-text" value="${esc(row.text)}"></label><label>属性类型<select id="structured-record-type">${typeOptions}</select></label><label>所属实体<select id="structured-subject">${entityOptions}</select></label><label>数据类型<select id="structured-datatype">${modes.map(([id,label])=>option(id,label,knownMode?mode:row.datatype||'unknown')).join('')}</select></label><p class="subtle">实体选项来自当前查询范围，最多 1000 条；未加载的原所属实体会保留。日期与 JSON 按字符串保存，数值按原生整数或浮点数保存。</p><label>属性值<input id="structured-value" value="${esc(String(row.value??''))}"></label><div class="record-time-fields"><label>业务生效时间<input id="structured-valid-from" value="${esc(row.valid_from||'')}" placeholder="YYYY-MM-DD 或带时区 ISO 时间"></label><label>业务失效时间<input id="structured-valid-until" value="${esc(row.valid_until||'')}" placeholder="可留空"></label></div><button id="save-structured-record">保存属性修改为新修订</button>`;
+        structured.innerHTML=`<div class="record-structured-heading"><h3>维护实体属性</h3><p>修改具体实体的属性值；类型取自该记录绑定的本体发布。</p></div><label>属性显示文本<input id="structured-record-text" value="${esc(row.text)}"></label><label>属性类型<select id="structured-record-type">${typeOptions}</select></label><input type="hidden" id="structured-subject" value="${esc(row.subject_id||'')}"><div id="structured-subject-picker"></div><label>数据类型<select id="structured-datatype">${modes.map(([id,label])=>option(id,label,knownMode?mode:row.datatype||'unknown')).join('')}</select></label><p class="subtle">实体可按名称或 ID 在服务端查询并翻页；原所属实体会保留。日期与 JSON 按字符串保存，数值按原生整数或浮点数保存。</p><label>属性值<input id="structured-value" value="${esc(String(row.value??''))}"></label><div class="record-time-fields"><label>业务生效时间<input id="structured-valid-from" value="${esc(row.valid_from||'')}" placeholder="YYYY-MM-DD 或带时区 ISO 时间"></label><label>业务失效时间<input id="structured-valid-until" value="${esc(row.valid_until||'')}" placeholder="可留空"></label></div><button id="save-structured-record">保存属性修改为新修订</button>`;
       }else{
         const kindLabel=row.kind==='document'?'文档收据':'原文片段';
         const reason=row.kind==='document'
@@ -128,35 +142,52 @@
         structured.innerHTML=`<div class="record-structured-heading"><h3>${kindLabel}</h3><p>${reason}</p><p>${advice}</p><p class="subtle">下方「高级：编辑完整记录 JSON」保存后会创建 rN+1 新修订，旧修订保留可恢复。</p></div>`;
         return;
       }
+      entityPickers.forEach(picker=>picker.invalidate());entityPickers=[];
+      if(row.kind!=='entity'){
+        if(!window.RecordCreate)throw Error('实体分页选择器未加载，请刷新页面');
+        const session=RecordCreate.createSession({project:p,scope:entityScope,request:(...args)=>api(...args),canWrite:()=>!!window.Auth?.isAdmin?.(),
+          accepts:()=>serial===request&&p===current&&dialog.open&&stableScope()});
+        for(const [key,title] of [['subject',row.kind==='attribute'?'所属实体':'起点实体'],...(row.kind==='relation'?[['object','终点实体']]:[])]){
+          const id=row[key+'_id'],cached=wb.records.get(id)||wb.nodes.get(id);
+          const picker=RecordCreate.entityPicker($('structured-'+key+'-picker'),{session,title,selected:id?{id,text:cached?.text||'原实体（保留现有端点）'}:null,
+            onChange:selected=>{$('structured-'+key).value=selected?.id||'';}});entityPickers.push(picker);
+        }
+      }
+      $('save-structured-record').classList.add('admin-only');
       $('save-structured-record').onclick=async()=>{
         const button=$('save-structured-record');if(button.disabled)return;
         if(serial!==request||p!==current||!dialog.open)return;
-        button.disabled=true;
+        button.disabled=true;let submittedRecord=null;
         try{
-          if(scopeStamp!==JSON.stringify(typeof scope==='function'?scope():{}))throw Error('查询范围已变化，请重新打开编辑器');
+          if(!window.Auth?.isAdmin?.())throw Error('只有管理员可以保存知识修订');
+          if(!stableScope())throw Error('查询范围已变化，请重新打开编辑器');
           if(activeRow.kind==='attribute'){
             const record=RecordAttributeEditor.buildRecord(activeRow,{
               text:$('structured-record-text').value,type:$('structured-record-type').value,
               subject_id:$('structured-subject').value,mode:$('structured-datatype').value,value:$('structured-value').value,
               valid_from:$('structured-valid-from').value,valid_until:$('structured-valid-until').value,
             });
-            await saveRevision(record,activeRow.version);return;
+            submittedRecord=record;await saveRevision(record,activeRow.version);return;
           }
           const fields=['id','kind','metadata','properties','source_id','subject_id','object_id','ontology_id','valid_from','valid_until'];
           const record=Object.fromEntries(fields.filter(key=>activeRow[key]!==undefined).map(key=>[key,activeRow[key]]));
           record.text=$('structured-record-text').value.trim();record.type=$('structured-record-type').value;
           record.valid_from=$('structured-valid-from').value.trim()||null;record.valid_until=$('structured-valid-until').value.trim()||null;
           if(activeRow.kind==='relation'){record.subject_id=$('structured-subject').value;record.object_id=$('structured-object').value;}
-          await saveRevision(record,activeRow.version);
-        }catch(error){if(serial===request&&p===current){$('record-dialog-message').textContent=error.message;$('record-dialog-message').classList.add('error');}}
+          submittedRecord=record;await saveRevision(record,activeRow.version);
+        }catch(error){if(serial===request&&p===current){$('record-dialog-message').textContent=error.message;$('record-dialog-message').classList.add('error');
+          if(submittedRecord&&/版本冲突|version conflict/i.test(error.message))await compareConflict(submittedRecord,serial,p);
+        }}
         finally{button.disabled=false;}
       };
     }catch(error){if(serial===request&&p===current&&activeRow?.id===row.id&&activeRow?.version_id===row.version_id)structured.innerHTML=`<p class="error">结构化编辑加载失败：${esc(error.message)}。仍可使用下方高级 JSON 编辑器。</p>`;}
   }
   editRecord=row=>{
     request++;
+    entityPickers.forEach(picker=>picker.invalidate());entityPickers=[];
+    if(!window.Auth?.isAdmin?.()){status('只有管理员可以编辑知识记录',true);return;}
     if(!row){status('记录已刷新，请重新查询后选择',true);return;}
-    activeRow=row;activeOntologies=null;populateRaw(row);
+    activeRow=row;activeOntologies=null;activeScope=captureScope();populateRaw(row);
     open('edit','编辑记录 · '+(row.text||row.id).slice(0,70));
     $('delete-confirm').checked=false;
     renderStructured(row);
@@ -259,23 +290,26 @@
   const change=$('project').onchange;
   $('project').onchange=()=>{if(dialog.open)close();change();};
   $('revise').onclick=async()=>{
-    const serial=request,p=current,button=$('revise');button.disabled=true;
+    const serial=request,p=current,button=$('revise');button.disabled=true;let submittedRecord=null;
     try{
+      assertEditable();
       const record=JSON.parse($('revision').value);
       if(record.id&&record.id!==$('revision-id').value)throw Error('路径与记录 ID 不一致');
       record.id=$('revision-id').value;
-      const saved=await saveRevision(record,Number($('revision-version').value));
+      submittedRecord=record;const saved=await saveRevision(record,Number($('revision-version').value));
       if(saved&&serial===request&&p===current)await renderStructured(saved);
-    }catch(error){if(serial===request&&p===current){$('record-dialog-message').textContent=error.message;$('record-dialog-message').classList.add('error');}}
+    }catch(error){if(serial===request&&p===current){$('record-dialog-message').textContent=error.message;$('record-dialog-message').classList.add('error');if(submittedRecord&&/版本冲突|version conflict/i.test(error.message))await compareConflict(submittedRecord,serial,p);}}
     finally{button.disabled=false;}
   };
   for(const id of ['restore-version','soft-delete']){
     const run=$(id).onclick;
     $(id).onclick=async()=>{
+      const serial=request,p=current;
       $('record-dialog-message').textContent='处理中…';
-      try{await run();$('record-dialog-message').textContent=$('status').textContent;$('record-dialog-message').classList.toggle('error',$('status').classList.contains('error'));
+      try{assertEditable();await run();if(serial!==request||p!==current||!activeScope?.())return;
+        $('record-dialog-message').textContent=$('status').textContent;$('record-dialog-message').classList.toggle('error',$('status').classList.contains('error'));
         if(!$('status').classList.contains('error'))await refreshViews();
-      }catch(e){$('record-dialog-message').textContent=e.message;$('record-dialog-message').classList.add('error');}
+      }catch(e){if(serial===request&&p===current){$('record-dialog-message').textContent=e.message;$('record-dialog-message').classList.add('error');}}
     };
   }
 })();

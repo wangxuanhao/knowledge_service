@@ -1,3 +1,4 @@
+from ontology_seed import seed_ontology
 import pytest
 from fastapi.testclient import TestClient
 from knowledge_service.api import create_app
@@ -22,7 +23,7 @@ def review(tmp_path, monkeypatch):
     with TestClient(app) as client:
         service=app.state.service
         p=client.post('/api/projects',json={'name':'review','use_default_ontology':False}).json()['id']
-        service.repository.save_ontology(p,TTL,Ontology(TTL).summary())
+        seed_ontology(service.repository, p,TTL,Ontology(TTL).summary())
         base='/api/projects/'+p
         result=client.post(base+'/documents',json={'title':'原文','text':'甲属于乙', 'resolve_entities':False,
             'valid_from':'2025-01-01T00:00:00Z','valid_until':'2027-01-01T00:00:00Z'})
@@ -72,7 +73,7 @@ def test_validation_failure_keeps_pending(review):
 def test_new_ontology_allows_candidate_but_does_not_migrate_entities(review):
     client,service,p,base,c=review
     turtle=TTL+'\n:isSubordinateTo a owl:ObjectProperty .'
-    new=service.repository.save_ontology(p,turtle,Ontology(turtle).summary())
+    new=seed_ontology(service.repository, p,turtle,Ontology(turtle).summary())
     assert decide(review,expected_ontology_id=c['ontology_id']).status_code==409
     result=decide(review,target_type='isSubordinateTo',expected_ontology_id=new['id'])
     assert result.status_code==200,result.text

@@ -1,0 +1,5 @@
+{
+  "checked_utc": "2026-10-21T04:41:47.376102+00:00",
+  "status_code": 503,
+  "detail_redacted": "RuntimeError: \"Milvus 投影未就绪或落后于权威版本，请完成索引构建或修复后重试\""
+}

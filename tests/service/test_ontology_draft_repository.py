@@ -1,3 +1,4 @@
+from ontology_seed import seed_ontology
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -106,13 +107,10 @@ def _governed_snapshot(tmp_path, name):
         'id': f'{name}-artifact',
         'project_id': project_id,
         'kind': 'ontology_change',
-        'summary': 'legacy governed artifact',
+        'summary': 'governed source artifact',
     }
     source.save_artifact('ontology_change', artifact)
-    source._ontology_drafts.create(project_id, {
-        **_draft(project_id),
-        'legacy_artifact_id': artifact['id'],
-    })
+    source._ontology_drafts.create(project_id, _draft(project_id))
     source._ontology_drafts.append_operations(
         project_id, 'draft-1', [_operation('op-valid')])
     source._ontology_drafts.append_decisions(project_id, 'draft-1', [
@@ -438,7 +436,7 @@ _FULL_ROW_SHAPES = {
     ('governance', 'ontology', 'drafts'): {
         'id', 'project_id', 'base_ontology_id', 'source_kind', 'status', 'revision',
         'title', 'summary', 'source_context', 'validation_report',
-        'validation_fingerprint', 'published_ontology_id', 'legacy_artifact_id',
+        'validation_fingerprint', 'validated_at', 'submitted_at', 'published_ontology_id',
         'created_at', 'updated_at',
     },
     ('governance', 'ontology', 'operations'): {
@@ -522,8 +520,8 @@ def test_restore_requires_literal_boolean_governance_history_flag(tmp_path, flag
         target.get_project(snapshot['project']['id'])
 
 
-@pytest.mark.parametrize('version', ['missing', None, True, '14', 13, 999],
-                         ids=['missing', 'null', 'bool', 'string', 'too-old', 'future'])
+@pytest.mark.parametrize('version', ['missing', None, True, '18', 13, 14, 15, 16, 17, 999],
+                         ids=['missing', 'null', 'bool', 'string', 'too-old', 'v14', 'v15', 'v16', 'v17', 'future'])
 def test_full_restore_requires_supported_integer_schema_version(tmp_path, version):
     snapshot, _ = _governed_snapshot(tmp_path, f'version-{version}')
     if version == 'missing':
@@ -538,13 +536,14 @@ def test_full_restore_requires_supported_integer_schema_version(tmp_path, versio
         target.get_project(snapshot['project']['id'])
 
 
-def test_explicit_light_legacy_restore_keeps_permissive_section_contract(tmp_path):
-    project_id = 'legacy-light-project'
+def test_current_light_restore_keeps_its_section_contract(tmp_path):
+    project_id = 'current-light-project'
     snapshot = {
+        'schema_version': 18,
         'governance_history_included': False,
         'project': {
             'id': project_id,
-            'name': 'legacy light',
+            'name': 'current light',
             'metadata': {},
             'created_at': '2026-01-01T00:00:00.000000Z',
         },
@@ -552,7 +551,7 @@ def test_explicit_light_legacy_restore_keeps_permissive_section_contract(tmp_pat
         'ontologies': [],
     }
 
-    target = Repository(tmp_path / 'legacy-light-target.sqlite')
+    target = Repository(tmp_path / 'current-light-target.sqlite')
     assert target.restore_projection(snapshot)['id'] == project_id
 
 
@@ -625,7 +624,7 @@ def test_full_record_row_contract_rejects_malformed_reserved_fields_before_mutat
         target.get_project(project_id)
 
 
-def test_full_export_restores_artifacts_before_legacy_draft_references(tmp_path):
+def test_full_export_restores_artifacts_and_current_draft_history(tmp_path):
     snapshot, artifact = _governed_snapshot(tmp_path, 'artifact-history')
     assert snapshot['artifacts'] == [{
         'id': artifact['id'],
@@ -637,13 +636,8 @@ def test_full_export_restores_artifacts_before_legacy_draft_references(tmp_path)
     target = Repository(tmp_path / 'artifact-history-target.sqlite')
     target.restore_projection(snapshot)
     assert target.get_artifact('ontology_change', artifact['id']) == artifact
-    assert target._ontology_drafts.get(
-        artifact['project_id'], 'draft-1')['legacy_artifact_id'] == artifact['id']
-
-    missing = json.loads(json.dumps(snapshot))
-    missing['artifacts'] = []
-    with pytest.raises(ValueError, match='legacy_artifact_id'):
-        Repository(tmp_path / 'artifact-missing-target.sqlite').restore_projection(missing)
+    assert target._ontology_drafts.get(artifact['project_id'], 'draft-1')['id'] == 'draft-1'
+    assert 'legacy_artifact_id' not in snapshot['governance']['ontology']['drafts'][0]
 
 
 def test_store_crud_supersession_json_and_export_are_project_scoped(tmp_path):
@@ -710,7 +704,7 @@ def test_store_rejects_cross_project_ontology_references_and_invalid_cas(tmp_pat
     repo = Repository(tmp_path / 'ownership.sqlite')
     first = repo.create_project('first')['id']
     second = repo.create_project('second')['id']
-    other_ontology = repo.save_ontology(second, '', {})
+    other_ontology = seed_ontology(repo, second, '', {})
     with pytest.raises((ValueError, IntegrityError)):
         repo._ontology_drafts.create(
             first, _draft(first, base_ontology_id=other_ontology['id']))
@@ -758,7 +752,7 @@ def test_two_repository_instances_allow_only_one_revision_cas(tmp_path):
 def test_full_export_restore_preserves_governance_ids_and_references(tmp_path):
     source = Repository(tmp_path / 'source.sqlite')
     project_id = source.create_project('source')['id']
-    base = source.save_ontology(project_id, '@prefix ex: <urn:ex:> .', {'classes': []})
+    base = seed_ontology(source, project_id, '@prefix ex: <urn:ex:> .', {'classes': []})
     draft = source._ontology_drafts.create(
         project_id, _draft(project_id, base_ontology_id=base['id']))
     source._ontology_drafts.append_operations(

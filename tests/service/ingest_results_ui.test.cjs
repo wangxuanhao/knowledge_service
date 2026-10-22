@@ -10,7 +10,7 @@ const source=fs.readFileSync(
 );
 
 function fixture({event='completed',assertions=[],assertionError=null}={}){
-  const apiCalls=[],navigationCalls=[],statusCalls=[];
+  const apiCalls=[],navigationCalls=[],statusCalls=[],intakeCalls=[];
 
   function element(tag='div'){
     const listeners={};
@@ -47,6 +47,7 @@ function fixture({event='completed',assertions=[],assertionError=null}={}){
         return {events:[{event:event==='completed'?'completed':'failed',data}],rest:''};
       }},
       KnowledgeNavigation:{async open(target,options){navigationCalls.push([target,options]);}},
+      OntologyIntake:{async open(options){intakeCalls.push(options);}},
     },
     document:{body,createElement:element,getElementById:id=>id==='open-ingest-results'?openButton:null},
     fetch:async()=>({ok:true,status:200,body:{getReader(){let sent=false;return {async read(){
@@ -80,7 +81,7 @@ function fixture({event='completed',assertions=[],assertionError=null}={}){
   const settle=async()=>{
     for(let i=0;i<8;i++)await new Promise(resolve=>setImmediate(resolve));
   };
-  return {context,apiCalls,navigationCalls,statusCalls,list,text,buttons,settle};
+  return {context,apiCalls,navigationCalls,statusCalls,intakeCalls,list,text,buttons,settle};
 }
 
 test('watch keeps the submitting project and mode when loading assertions',async()=>{
@@ -145,7 +146,7 @@ test('result cards offer only the next actions supported by their result',async(
 
   for(const [mode,label,target] of [
     ['ontology','去知识审核','reviews'],
-    ['discovery','去本体画布处理候选','ontology-model'],
+    ['discovery','核对候选与完善结构','ontology-model'],
   ]){
     const pending=fixture({assertions:[{kind:'entity',status:'pending',payload:{text:'商户',proposed_type:'Merchant'}}]});
     pending.context.window.IngestResults.watch('job-'+mode,'a.md',{projectId:'p-'+mode,mode});
@@ -163,6 +164,16 @@ test('result cards offer only the next actions supported by their result',async(
   assert.deepEqual(JSON.parse(JSON.stringify(documents.navigationCalls)),[
     ['sources',{projectId:'pd'}],
   ]);
+});
+
+test('discovery follow-up pins its document and pending candidate identities',async()=>{
+  const f=fixture({assertions:[{id:'selected-candidate',kind:'entity',status:'pending',payload:{text:'客户',proposed_type:'Customer'}},{id:'already-accepted',kind:'entity',status:'accepted',payload:{text:'旧客户',type:'Customer'}}]});
+  f.context.window.IngestResults.watch('job-discovery','资料.md',{projectId:'owned-project',mode:'discovery'});
+  await f.settle();
+  f.buttons().find(button=>button.textContent==='核对候选与完善结构').click();await f.settle();
+  assert.equal(f.intakeCalls.length,1);assert.equal(f.intakeCalls[0].projectId,'owned-project');
+  assert.equal(f.intakeCalls[0].documentId,'doc-1');
+  assert.deepEqual(Array.from(f.intakeCalls[0].candidateIds),['selected-candidate']);
 });
 
 test('failed tasks and assertion read failures link to the task log',async()=>{

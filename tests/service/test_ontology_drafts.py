@@ -1,4 +1,6 @@
+from ontology_seed import seed_ontology
 from threading import Barrier, Thread
+import json
 
 import pytest
 from rdflib import RDFS, URIRef
@@ -30,7 +32,7 @@ ex:rel a owl:ObjectProperty ; rdfs:domain ex:Root ; rdfs:range ex:Child .
 def setup_service(tmp_path, *, publisher=None, with_base=True):
     repo = Repository(tmp_path / 'drafts.sqlite')
     project_id = repo.create_project('draft lifecycle')['id']
-    base = repo.save_ontology(project_id, BASE, {}) if with_base else None
+    base = seed_ontology(repo, project_id, BASE, {}) if with_base else None
     return repo, OntologyDrafts(repo, publisher=publisher), project_id, base
 
 
@@ -78,7 +80,7 @@ def test_create_with_command_invalid_diff_rolls_back_draft_and_operations(tmp_pa
 
 def test_create_with_command_stale_base_leaves_no_partial_state(tmp_path):
     repo, service, project_id, base = setup_service(tmp_path)
-    latest = repo.save_ontology(project_id, BASE + '\n# latest', {})
+    latest = seed_ontology(repo, project_id, BASE + '\n# latest', {})
     assert latest['id'] != base['id']
 
     with pytest.raises(StaleBase):
@@ -172,7 +174,7 @@ def test_restore_freezes_explicit_same_project_source_template(tmp_path):
     retired_turtle = BASE.replace(
         'ex:Child a owl:Class ;',
         'ex:Child a owl:Class ; owl:deprecated true ;')
-    retired = repo.save_ontology(project_id, retired_turtle, {})
+    retired = seed_ontology(repo, project_id, retired_turtle, {})
     draft = service.create(project_id, retired['id'], 'manual', 'restore', 'a')
 
     with pytest.raises(ValueError, match='source_ontology_id'):
@@ -193,7 +195,7 @@ def test_restore_freezes_explicit_same_project_source_template(tmp_path):
     assert operation['after']['template']['parents'] == ['https://example.test/Root']
 
     other = repo.create_project('other')['id']
-    foreign = repo.save_ontology(other, BASE, {})
+    foreign = seed_ontology(repo, other, BASE, {})
     another = service.create(project_id, retired['id'], 'manual', 'bad restore', 'a')
     with pytest.raises(ValueError, match='不属于此项目'):
         service.command(project_id, another['id'], 1, {
@@ -317,7 +319,7 @@ def test_low_risk_batch_succeeds_and_requests_are_capped_at_100(tmp_path):
 
 def test_request_changes_requires_reason_and_medium_approval_does_not(tmp_path):
     repo, service, project_id, _ = setup_service(tmp_path)
-    current = repo.save_ontology(
+    current = seed_ontology(repo,
         project_id, BASE + '\n<https://example.test/Other> a '
         '<http://www.w3.org/2002/07/owl#Class> .\n', {})
     draft = service.create(project_id, current['id'], 'manual', 'medium', 'author')
@@ -407,7 +409,7 @@ def test_validation_fingerprint_binds_the_rule_version(tmp_path):
 def test_stale_base_and_source_are_derived_not_persisted(tmp_path):
     repo, service, project_id, base = setup_service(tmp_path)
     draft = service.create(project_id, base['id'], 'manual', 'stale', 'a')
-    repo.save_ontology(project_id, BASE + '\n# next\n', {})
+    seed_ontology(repo, project_id, BASE + '\n# next\n', {})
     with pytest.raises(StaleBase):
         service.submit(project_id, draft['id'], 1)
     # A3：过期**不落状态**（旧代码会把 status 改成 stale_base）—— 状态还是「待处理」，
@@ -613,7 +615,7 @@ def test_rebase_latest_classifies_noop_and_invalidates_changed_decision(tmp_path
             'action': 'approve'}], [], 'reviewer')
     new_turtle = BASE + '''\n<https://example.test/Child>
       <http://www.w3.org/2000/01/rdf-schema#label> "Already there"@en .\n'''
-    latest = repo.save_ontology(project_id, new_turtle, {})
+    latest = seed_ontology(repo, project_id, new_turtle, {})
     with pytest.raises(StaleBase):
         service.validate(project_id, draft['id'], reviewed['revision'])
     stale = repo._ontology_drafts.get(project_id, draft['id'])
@@ -636,7 +638,7 @@ def test_clean_rebase_retains_decision_and_resubmit_completes_review(tmp_path):
             'operation_id': operation['id'],
             'operation_fingerprint': operation['fingerprint'],
             'action': 'approve'}], [], 'reviewer')
-    latest = repo.save_ontology(
+    latest = seed_ontology(repo,
         project_id, BASE + '\n<https://example.test/Root> <https://example.test/note> "x" .', {})
     with pytest.raises(StaleBase):
         service.validate(project_id, draft['id'], reviewed['revision'])
@@ -652,14 +654,14 @@ def test_clean_rebase_retains_decision_and_resubmit_completes_review(tmp_path):
 
 def test_rebase_classifies_cycle_against_latest_as_conflict(tmp_path):
     repo, service, project_id, _ = setup_service(tmp_path)
-    starting = repo.save_ontology(
+    starting = seed_ontology(repo,
         project_id, BASE + '\n<https://example.test/Other> a '
         '<http://www.w3.org/2002/07/owl#Class> .\n', {})
     draft = service.create(project_id, starting['id'], 'manual', 'conflict', 'author')
     preview = service.command(project_id, draft['id'], draft['revision'], {
         'action': 'add_parent', 'target_iri': 'https://example.test/Other',
         'parent_iri': 'https://example.test/Child'})
-    latest = repo.save_ontology(
+    latest = seed_ontology(repo,
         project_id, BASE + '''
 <https://example.test/Other> a <http://www.w3.org/2002/07/owl#Class> .
 <https://example.test/Child> <http://www.w3.org/2000/01/rdf-schema#subClassOf>
@@ -691,7 +693,7 @@ def test_rebase_recomputes_retirement_dependencies_on_latest_base(tmp_path):
         'ex:Child a owl:Class ; rdfs:label "Child" .').replace(
             'ex:rel a owl:ObjectProperty ; rdfs:domain ex:Root ; rdfs:range ex:Child .',
             'ex:rel a owl:ObjectProperty ; rdfs:domain ex:Child ; rdfs:range ex:Child .')
-    latest = repo.save_ontology(project_id, independent, {})
+    latest = seed_ontology(repo, project_id, independent, {})
     rebased = service.rebase(
         project_id, draft['id'], blocked['revision'], latest['id'])
 
@@ -741,6 +743,42 @@ def test_publish_preflight_delegates_without_partial_service_commit(tmp_path):
     assert calls[0]['idempotency_key'] == 'once'
     # A3：发布失败/被拦之后草案还是「待处理」（旧断言是 reviewed）—— 可以修好后重发。
     assert repo._ontology_drafts.get(project_id, draft['id'])['status'] == 'pending'
+
+
+@pytest.mark.parametrize('effects', [
+    {'kind': 'discovery', 'records': []},
+    {'kind': 'discovery', 'discovery_run_id': 'obsolete-run'},
+    {'discovery_run_id': 'obsolete-run'},
+])
+def test_obsolete_singular_effects_are_rejected_before_publication(tmp_path, effects):
+    repo, service, project_id, base = setup_service(tmp_path)
+    draft = service.create(project_id, base['id'], 'manual', 'source check', 'author')
+    submitted = service.submit(
+        project_id, draft['id'], add_label(service, project_id, draft)['revision'])
+    operation = submitted['operations'][0]
+    reviewed = service.decide(
+        project_id, draft['id'], submitted['revision'], base['id'],
+        submitted['validation_fingerprint'], [{
+            'operation_id': operation['id'], 'operation_fingerprint': operation['fingerprint'],
+            'action': 'approve'}], [], 'reviewer')
+    prepared = service.publish_preflight(
+        project_id, draft['id'], reviewed['revision'], base['id'],
+        reviewed['validation_fingerprint'], [], 'obsolete-source', 'publisher', '来源协议检查')
+    # Simulate a stored draft from the removed protocol, including one restored
+    # between preflight and publication. The repository must recheck it in its
+    # own transaction before creating an ontology or a publish request.
+    with repo.unit_of_work():
+        repo._db.execute('UPDATE ontology_drafts SET source_context=? WHERE project_id=? AND id=?',
+            (json.dumps({'publication_effects': effects}), project_id, draft['id']))
+    with pytest.raises(OntologyPublicationConflict) as caught:
+        repo.publish_ontology_draft(**prepared)
+    assert caught.value.code == 'stale_source'
+    assert [x['id'] for x in repo.list_ontologies(project_id)] == [base['id']]
+    assert repo.current_records(project_id) == []
+    assert repo._ontology_drafts.get(project_id, draft['id'])['status'] == 'pending'
+    assert repo._ontology_drafts.export(project_id)['publish_requests'] == []
+    assert repo.list_artifacts('ontology_sync_job', project_id) == []
+    assert repo.list_provenance_activities(project_id, kind='ontology_publish') == []
 
 
 def test_atomic_publish_rolls_back_is_idempotent_and_records_provenance(
@@ -1052,7 +1090,7 @@ def test_server_computes_leaf_and_large_descendant_risk(tmp_path):
         '<http://www.w3.org/2000/01/rdf-schema#subClassOf> '
         '<https://example.test/Root> .'
         for i in range(51))
-    large = repo.save_ontology(project_id, BASE + descendants, {})
+    large = seed_ontology(repo, project_id, BASE + descendants, {})
     large_draft = service.create(
         project_id, large['id'], 'manual', 'large impact', 'author')
     changed = service.command(project_id, large_draft['id'], large_draft['revision'], {
@@ -1199,7 +1237,7 @@ def test_validation_rescans_final_overlay_dependency_warnings(tmp_path):
     active_old = BASE.replace(
         'ex:Legacy a owl:Class ; owl:deprecated true .',
         'ex:Legacy a owl:Class .')
-    current = repo.save_ontology(project_id, active_old, {})
+    current = seed_ontology(repo, project_id, active_old, {})
     draft = service.create(project_id, current['id'], 'manual', 'overlay', 'author')
     annotated = service.command(project_id, draft['id'], draft['revision'], {
         'action': 'add_annotation', 'target_iri': 'https://example.test/Child',
@@ -1312,7 +1350,7 @@ def test_restore_splits_activation_from_selected_definition_operations(tmp_path)
     retired_turtle = BASE.replace(
         'ex:Child a owl:Class ; rdfs:subClassOf ex:Root ; rdfs:label "Child" .',
         'ex:Child a owl:Class ; owl:deprecated true .')
-    retired = repo.save_ontology(project_id, retired_turtle, {})
+    retired = seed_ontology(repo, project_id, retired_turtle, {})
     draft = service.create(project_id, retired['id'], 'manual', 'restore split', 'author')
 
     preview = service.command(project_id, draft['id'], draft['revision'], {
@@ -1333,7 +1371,7 @@ def test_restore_definition_edges_can_be_rejected_independently(tmp_path):
     retired_turtle = BASE.replace(
         'ex:Child a owl:Class ; rdfs:subClassOf ex:Root ; rdfs:label "Child" .',
         'ex:Child a owl:Class ; owl:deprecated true .')
-    retired = repo.save_ontology(project_id, retired_turtle, {})
+    retired = seed_ontology(repo, project_id, retired_turtle, {})
     draft = service.create(project_id, retired['id'], 'manual', 'selective', 'author')
     preview = service.command(project_id, draft['id'], draft['revision'], {
         'action': 'restore_term', 'target_iri': 'https://example.test/Child',
@@ -1440,7 +1478,7 @@ def test_hierarchy_paginates_nodes_before_building_expensive_items(
     many = BASE + '\n'.join(
         f'<urn:test:Root{index:03}> a <http://www.w3.org/2002/07/owl#Class> .'
         for index in range(50))
-    ontology = repo.save_ontology(project_id, many, {})
+    ontology = seed_ontology(repo, project_id, many, {})
     calls = []
     original = service._class_item
 
@@ -1465,7 +1503,7 @@ def test_matrix_pages_nodes_before_projection_without_full_summary(
         '<http://www.w3.org/2000/01/rdf-schema#range> '
         '<https://example.test/Child> .'
         for index in range(25))
-    ontology = repo.save_ontology(project_id, many, {})
+    ontology = seed_ontology(repo, project_id, many, {})
     calls = []
     original = service._term_item
 
@@ -1491,7 +1529,7 @@ def test_neighborhood_caps_relation_projection_without_full_summary(
         '<http://www.w3.org/2000/01/rdf-schema#range> '
         '<https://example.test/Child> .'
         for index in range(25))
-    ontology = repo.save_ontology(project_id, many, {})
+    ontology = seed_ontology(repo, project_id, many, {})
 
     def forbidden_summary(*args, **kwargs):
         raise AssertionError('neighborhood must not materialize the full summary')
@@ -1512,7 +1550,7 @@ def test_search_matches_every_rdfs_label_language(tmp_path):
   <http://www.w3.org/2000/01/rdf-schema#label> "Bonjour"@fr,
                                                      "Guten Tag"@de .
 '''
-    ontology = repo.save_ontology(project_id, multilingual, {})
+    ontology = seed_ontology(repo, project_id, multilingual, {})
     assert service.search(
         project_id, 'bonjour', ontology_id=ontology['id'])['items'][0]['iri'] == (
             'https://example.test/Child')

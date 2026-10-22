@@ -60,19 +60,23 @@ SHELL = """<!doctype html><html><head><meta charset="utf-8"></head><body>
     <button id="load-ontology">载入本体</button><div id="ontology-summary"></div>
     <textarea id="turtle"></textarea><select id="ontology-versions"></select>
   </section>
+  <section id="tab-ontology-model" class="tab hidden"><h2>本体建模层</h2></section>
   <select id="project"><option value="p1" selected>测试项目</option></select>
+  <button id="apply-scope" hidden></button><button id="reset-scope" hidden></button>
   <div id="health"></div>
   <script>
-  window.wb={records:new Map(),nodes:new Map()};
+  window.wb={records:new Map(),nodes:new Map(),versionContext:{
+    ontologyScope:'all',ontologyIds:null,ontologyVersion:null,source:null}};
   window.current='p1';
+  window.Auth={isAdmin:()=>true};
   window.$=id=>document.getElementById(id);
-  window.esc=value=>String(value===undefined||value===null?'':value);
-  window.typeHint=value=>value?'关系类型':'';
+  // Real app esc/typeHint are loaded below; these fixture URNs resolve by name.
+  window.term=value=>value?String(value).split(':').pop():'';
   window.labelOf=value=>value?String(value).split(':').pop():'';
   function status(message,isError){window.__status={message,isError:Boolean(isError)};}
   window.editRecord=row=>{};
   window.historyFor=row=>{};
-  window.scope=()=>({metadata:{}});
+  window.scope=()=>window.WorkspaceContext.read(current,'records');
   window.endpoint=suffix=>'/api/projects/p1'+suffix;
   window.api=async(url,body,method)=>{
     const options={method:method||(body===undefined?'GET':'POST'),headers:{'Content-Type':'application/json'}};
@@ -104,15 +108,28 @@ MOCKS = r"""() => {
       {structure_pending:{state:'cleared',terms:[],marked:['urn:ontology:人员']}}),
     entity('e3','李四','urn:ontology:人员',{}),
   ];
+  window.__recordPageBodies=[];window.__pendingRequests=[];window.__unexpectedRequests=[];
   window.fetch = async (input,options={}) => {
     const url = typeof input === 'string' ? input : input.url;
     const parsed = new URL(url,'http://localhost');
+    const method=options.method||'GET',body=options.body?JSON.parse(options.body):null;
     const payload = (body) => new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}});
-    if(parsed.pathname.endsWith('/records/query')) return payload({total:records.length,records});
-    if(parsed.pathname.endsWith('/ontologies')) return payload({versions:[{id:'o1',created_at:'2026-01-01T00:00:00Z'}]});
+    if(parsed.pathname.endsWith('/records/page')){
+      window.__recordPageBodies.push(body);
+      let filtered=records.filter(row=>!body.kinds?.length||body.kinds.includes(row.kind));
+      if(body.record_ids)filtered=filtered.filter(row=>body.record_ids.includes(row.id));
+      if(body.ontology_scope==='ids')filtered=filtered.filter(row=>body.ontology_ids.includes(row.ontology_id));
+      if(body.ontology_scope==='unknown')filtered=filtered.filter(row=>!row.ontology_id);
+      if(body.query)filtered=filtered.filter(row=>(row.id+' '+row.text).includes(body.query));
+      const offset=Number(body.cursor||0),limit=body.limit||50;
+      return payload({total:filtered.length,records:filtered.slice(offset,offset+limit),
+        next_cursor:offset+limit<filtered.length?String(offset+limit):null});
+    }
+    if(parsed.pathname.endsWith('/ontologies')) return payload({versions:[{id:'o1',version:1,created_at:'2026-01-01T00:00:00Z'}]});
     if(parsed.pathname.endsWith('/assertions')) return payload({total:0,assertions:[]});
     if(parsed.pathname.endsWith('/duplicate-groups')) return payload({groups:[]});
     if(parsed.pathname.endsWith('/structure-pending')){
+      window.__pendingRequests.push({method,path:parsed.pathname,body});
       if(window.mockPendingFail) return new Response('{"detail":"boom"}',{status:500,headers:{'Content-Type':'application/json'}});
       if(window.mockPendingEmpty) return payload({pending_structure:0,pending_records:0,terms:[]});
       return payload({pending_structure:2,pending_records:3,terms:[
@@ -125,7 +142,8 @@ MOCKS = r"""() => {
         note:'「结构待定」= 抽出来的概念还没进本体。'});
     }
     if(parsed.pathname.endsWith('/operations')) return payload({operations:[]});
-    return payload({});
+    window.__unexpectedRequests.push(method+' '+parsed.pathname);
+    throw Error('未模拟的请求：'+method+' '+parsed.pathname);
   };
 }"""
 
@@ -144,17 +162,42 @@ def browser():
 
 def _open(browser, tmp_path, before=None):
     page = browser.new_page()
+    errors = []
+    page.on('pageerror', lambda error: errors.append(str(error)))
     page.on('dialog', lambda dialog: dialog.accept())
     shell = tmp_path / 'structure-ui.html'
     shell.write_text(SHELL, encoding='utf-8')
     page.goto(shell.as_uri())
-    page.add_script_tag(path=str(WEB / 'record-version-context.js'))
-    page.add_script_tag(path=str(WEB / 'records-view.js'))
+    page.evaluate(MOCKS)
     if before:
         page.evaluate(before)
-    page.evaluate(MOCKS)
+    helpers = [line for line in (WEB / 'app.js').read_text(encoding='utf-8').splitlines()
+               if line.startswith(('const esc =', 'const typeHint='))]
+    assert len(helpers) == 2
+    page.add_script_tag(content='\n'.join(helpers))
+    for stylesheet in ('style.css', 'workspace.css', 'records-view.css'):
+        page.add_style_tag(path=str(WEB / stylesheet))
+    for script in ('workspace-context.js', 'record-version-context.js',
+                   'record-attribute-editor.js', 'record-create.js', 'records-view.js'):
+        page.add_script_tag(path=str(WEB / script))
+    page.evaluate("() => window.WorkspaceContext.enter('records')")
     page.click('#load-records')
     page.wait_for_selector('#records table', timeout=5000)
+    page.wait_for_function("document.getElementById('records').getAttribute('aria-busy')==='false'")
+    first_page = page.evaluate('window.__recordPageBodies[0]')
+    assert first_page['kinds'] == ['entity']
+    assert first_page['limit'] == 50 and first_page['cursor'] is None
+    assert first_page['ontology_scope'] == 'all'
+    # Counts are read explicitly, independently of the row-level server badges.
+    tile = page.locator('[data-ledger-kpi="pending"]')
+    assert tile.locator('b').inner_text().strip() == '未读取'
+    assert page.evaluate('window.__pendingRequests') == []
+    tile.click()
+    page.wait_for_function("""() => (
+      document.querySelector('[data-ledger-kpi="pending"] b').textContent!=='未读取' ||
+      window.__status?.message.includes('治理信息读取失败'))""")
+    assert page.evaluate('window.__unexpectedRequests') == []
+    assert errors == []
     return page
 
 
@@ -207,10 +250,14 @@ def test_row_badges_use_server_state_only(browser, tmp_path):
     page.close()
 
 
-def test_ledger_static_contract_keeps_the_boundary_copy():
+def test_ledger_static_contract_keeps_the_boundary_copy(browser, tmp_path):
     """静态契约：文案与出处不许回退（前端不得自己判断"类型在不在本体里"）。"""
+    page = _open(browser, tmp_path)
+    assert page.evaluate('window.__pendingRequests') == [{
+        'method': 'GET', 'path': '/api/projects/p1/structure-pending', 'body': None,
+    }], '待定统计只能从服务器按需只读获取，不能由前端推算或写入'
+    page.close()
     view = (WEB / 'records-view.js').read_text(encoding='utf-8')
-    assert "/structure-pending" in view
     assert '个概念待定' in view
     assert '结构待定已解除' in view
     # 前端不许自己解析本体/判断术语是否存在：只消费服务端给的 structure_pending。

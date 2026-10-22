@@ -6,6 +6,7 @@
     迟早漂移——漂移时界面会显示"可批准"而服务端拒绝。
     本文件把「谁可以批量批准、为什么被拦、发布还差什么」钉在服务端。
 """
+from ontology_seed import seed_ontology
 import pytest
 
 from knowledge_service.repository import Repository
@@ -29,7 +30,7 @@ def setup_service(tmp_path):
     """建一个项目 + 基线本体，返回 (repo, 服务, 项目, 基线版本)。"""
     repo = Repository(tmp_path / 'review_plan.sqlite')
     project_id = repo.create_project('review plan')['id']
-    base = repo.save_ontology(project_id, BASE, {})
+    base = seed_ontology(repo, project_id, BASE, {})
     return repo, OntologyDrafts(repo), project_id, base
 
 
@@ -275,7 +276,7 @@ def test_publish_readiness_reports_base_drift_as_error(tmp_path):
     decide_all(service, project_id, draft, base, submitted)
 
     # 项目当前本体前进：草案基线随即落后
-    new_base = repo.save_ontology(project_id, BASE + '\n# 新版本', {})
+    new_base = seed_ontology(repo, project_id, BASE + '\n# 新版本', {})
     assert new_base['id'] != base['id']
 
     readiness = service.publish_readiness(project_id, draft['id'])

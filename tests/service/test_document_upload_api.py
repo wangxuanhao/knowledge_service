@@ -30,7 +30,7 @@ def test_multipart_preview_parses_without_writing(client):
     response = client.post(
         f'/api/projects/{project}/documents/upload/preview',
         files={'file': ('rules.md', '# 标题\n规则正文'.encode())},
-        data={'options': json.dumps({'extract': False, 'chunk_size': 100, 'chunk_overlap': 10})},
+        data={'options': json.dumps({'extraction_mode': 'documents', 'chunk_size': 100, 'chunk_overlap': 10})},
     )
 
     assert response.status_code == 200, response.text
@@ -38,7 +38,7 @@ def test_multipart_preview_parses_without_writing(client):
     assert body['parsed']['source_format'] == 'md'
     assert body['total'] == 1
     assert body['chunks'][0]['text'] == '# 标题\n规则正文'
-    assert client.post(f'/api/projects/{project}/records/query', json={}).json()['records'] == []
+    assert client.post(f'/api/projects/{project}/records/page', json={}).json()['records'] == []
 
 
 def test_multipart_job_ingests_and_removes_staged_file(client):
@@ -46,7 +46,7 @@ def test_multipart_job_ingests_and_removes_staged_file(client):
     response = client.post(
         f'/api/projects/{project}/documents/upload/jobs',
         files={'file': ('rules.txt', '退款规则'.encode())},
-        data={'options': json.dumps({'extract': False, 'metadata': {'source_file': 'spoofed.txt'}})},
+        data={'options': json.dumps({'extraction_mode': 'documents', 'metadata': {'source_file': 'spoofed.txt'}})},
     )
     assert response.status_code == 202, response.text
     job_id = response.json()['id']
@@ -58,7 +58,7 @@ def test_multipart_job_ingests_and_removes_staged_file(client):
             break
         time.sleep(.02)
     assert job['status'] == 'completed', job
-    records = client.post(f'/api/projects/{project}/records/query', json={}).json()['records']
+    records = client.post(f'/api/projects/{project}/records/page', json={}).json()['records']
     document = next(row for row in records if row['kind'] == 'document')
     assert document['metadata']['source_file'] == 'rules.txt'
     assert document['metadata']['document_parser'] == 'builtin-text'
@@ -76,7 +76,7 @@ def test_failed_background_parse_retains_file_and_can_resume(client, monkeypatch
     response = client.post(
         f'/api/projects/{project}/documents/upload/jobs',
         files={'file': ('broken.txt', b'original source')},
-        data={'options': json.dumps({'extract': False})},
+        data={'options': json.dumps({'extraction_mode': 'documents'})},
     )
     job_id = response.json()['id']
     deadline = time.monotonic() + 5
@@ -140,7 +140,7 @@ def test_docling_upload_uses_adapter_and_preserves_file_title(client, monkeypatc
     response = client.post(
         f'/api/projects/{project}/documents/upload',
         files={'file': ('manual.pdf', b'%PDF')},
-        data={'options': json.dumps({'extract': False, 'title': ''})},
+        data={'options': json.dumps({'extraction_mode': 'documents', 'title': ''})},
     )
     assert response.status_code == 201, response.text
     assert response.json()['document']['text'] == 'parsed PDF'

@@ -47,6 +47,7 @@ function setup(){
     fetch,endpoint:s=>'/api/projects/'+context.current+s,scope:()=>({known_at:null}),setTimeout,
     esc:String,labelOf:x=>x,showTab(){throw Error('citation must not navigate');},status(){}};
   vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(web,'scope-fields.js'),'utf8'),context);
   vm.runInContext(fs.readFileSync(path.join(web,'provenance-drawer.js'),'utf8'),context);
   const source=fs.readFileSync(path.join(web,'workbench.js'),'utf8');
   vm.runInContext(source.slice(source.indexOf('/* Knowledge chat:'),source.lastIndexOf("window.addEventListener('resize',()=>{wb.chart")),context);
@@ -85,9 +86,12 @@ test('running evidence opens once; safe done decorations and bounded history res
   // C1：结构待定的单列数据（structure_pending）要跟着历史一起存/取 ——
   // 不然切一次标签回来，那几条"不算证据的知识"就从证据面板上消失了（用户会以为系统把它们丢了）。
   // 这条流没有结构待定项，所以是 null；有值时的渲染由 test_structure_pending_ui.py 覆盖。
-  assert.deepEqual(env.history(),[{kind:'user',text:'question'},{kind:'assistant',text:literal,answer_id:'a',retrieval_run_id:'run-a',
+  assert.deepEqual(env.history().map(({scope,project_id,...row})=>row),[{kind:'user',text:'question'},{kind:'assistant',text:literal,answer_id:'a',retrieval_run_id:'run-a',
     evidence:[{citation:'E1',text_preview:'x'.repeat(240),kind:'chunk',version:2,provenance_ref:'answer:a#E1'}],
     structure_pending:null}]);
+  assert.deepEqual(env.history()[0].scope,{known_at:null});
+  assert.equal(env.history()[0].project_id,'p');
+  assert.deepEqual(env.history()[1].scope,env.requests[0]);
   env.window.clearKnowledgeChat();
   assert.equal(env.get('qa-transcript').querySelector('.qa-answer').querySelectorAll('button').length,1);
   assert.ok(env.get('qa-transcript').querySelector('.qa-evidence-panel').querySelector('.provenance-citation'));
@@ -137,19 +141,21 @@ test('interrupted streams restore only the submitted question, never a blank com
     if(phase!=='submit')env.emit('evidence',evidence('pending'));
     if(phase==='partial')env.emit('delta',{text:'unfinished answer [E1]'});
     await settle();
-    assert.deepEqual(env.history(),[{kind:'user',text:'question'}],phase+' must not persist a pending assistant');
+    assert.deepEqual(env.history().map(({scope,project_id,...row})=>row),[{kind:'user',text:'question'}],phase+' must not persist a pending assistant');
     env.window.clearKnowledgeChat();
     assert.equal(env.get('qa-transcript').querySelectorAll('.qa-turn-user').length,1);
     assert.equal(env.get('qa-transcript').querySelectorAll('.qa-turn-assistant').length,0);
     env.streams.at(-1).close();await settle();
-    assert.deepEqual(env.history(),[{kind:'user',text:'question'}],'interrupted reader must not persist a terminal state');
+    assert.deepEqual(env.history().map(({scope,project_id,...row})=>row),[{kind:'user',text:'question'}],'interrupted reader must not persist a terminal state');
   }
 });
 
-test('legacy text stays inert and clearing/project change cancels requests without stale persistence',async()=>{
+test('answers missing an identity stay inert and report unresolved provenance without assuming their age',async()=>{
   const env=setup();env.storage.set('kg_qa_v1_p',JSON.stringify([{kind:'assistant',text:'legacy [E1]'}]));env.window.clearKnowledgeChat();
   assert.equal(env.get('qa-transcript').querySelector('.qa-answer').querySelectorAll('button').length,0);
-  assert.ok(env.get('qa-transcript').textContent.includes(env.window.ProvenanceDrawer.LEGACY_NOTE));
+  const unresolved=env.get('qa-transcript').querySelector('.qa-provenance-unresolved');
+  assert.ok(unresolved);assert.match(unresolved.textContent,/缺少答案标识.*无法定位.*证据链/);
+  assert.doesNotMatch(env.get('qa-transcript').textContent,/溯源记录启用前/);
   env.window.clearKnowledgeChat({clearPersist:true});env.submit();env.emit('evidence',evidence('a'));await settle();
   env.get('qa-transcript').querySelector('.provenance-citation').dispatch('click');
   env.context.current='other';env.context.wb.epoch++;env.window.clearKnowledgeChat();
@@ -158,4 +164,13 @@ test('legacy text stays inert and clearing/project change cancels requests witho
   env.streams.at(-1).close();await settle();
   assert.equal(env.get('provenance-drawer').hidden,true);assert.equal(env.get('qa-transcript').children.length,0);
   assert.equal(env.storage.has('kg_qa_v1_other'),false);
+});
+
+test('a completed response missing its answer identity visibly reports an unresolved evidence chain',async()=>{
+  const env=setup();env.submit();env.emit('delta',{text:'answer [E1]'});env.emit('done',{});
+  env.streams.at(-1).close();await settle();await settle();
+  const turn=env.get('qa-transcript').querySelector('.qa-turn-assistant');
+  assert.match(turn.querySelector('.qa-provenance-unresolved')?.textContent||'',/缺少答案标识.*无法定位.*证据链/);
+  assert.equal(turn.querySelectorAll('.provenance-citation').length,0);
+  assert.equal(env.provenance.length,0);
 });

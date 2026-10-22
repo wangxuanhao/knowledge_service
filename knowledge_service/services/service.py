@@ -8,8 +8,8 @@ import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
-from contextlib import nullcontext
-from copy import deepcopy
+from contextlib import contextmanager, nullcontext
+from copy import copy, deepcopy
 
 from ..core.net import external_client
 
@@ -20,7 +20,6 @@ from ..domain.applicability import (
 )
 from .ontology import Ontology, UnknownOntologyTerm, match_query_expansion
 from .retrieval import RetrievalEngine
-from .retrieval_context import adjacent_chunks
 from . import structure_pending
 from ..utils.ingest_runs import readiness
 from ..core.time import normalize_time, utc_now
@@ -56,15 +55,33 @@ class KnowledgeService:
         self.projection_drain = projection_drain
         self.vector_connector = None
         self.lock = threading.RLock()
+        self._ontology_cache_lock = threading.RLock()
         self._ontology_label_cache = {}
         self._ontology_expansion_cache = {}
         self._ontology_family_cache = {}
         self._structure_pending_cache = {}
 
+    @contextmanager
+    def independent_read_view(self):
+        """Keep bounded data and ontology presentation on one read snapshot."""
+        with self.repository.independent_read_view() as repository:
+            if repository is self.repository:
+                yield self
+                return
+            reader = copy(self)
+            reader.repository = repository
+            reader.data = ApplicationData(repository)
+            yield reader
+
     def semantica_snapshot(self, rows, valid_at):
         """Return the Semantica projection without exposing the adapter to HTTP."""
         from ..integrations.semantica_adapter import snapshot
         return snapshot(rows, valid_at)
+
+    def entity_resolver(self):
+        """Use the current Milvus connection for every entity matching request."""
+        from .entity_resolution import EntityResolver
+        return EntityResolver(self.repository, self.encoder, self.milvus_store)
 
     def ontology_drafts(self, *, publish=False):
         """Construct the governed ontology workflow inside the service layer."""
@@ -107,12 +124,12 @@ class KnowledgeService:
         """
         versions = self.repository.list_ontologies(project_id)
         signature = tuple(version['id'] for version in versions)
-        with self.lock:
+        with self._ontology_cache_lock:
             cached = self._structure_pending_cache.get(project_id)
             if cached and cached[0] == signature:
                 return cached[1]
         ontology = Ontology(versions[-1]['turtle']) if versions else Ontology('')
-        with self.lock:
+        with self._ontology_cache_lock:
             self._structure_pending_cache[project_id] = (signature, ontology)
         return ontology
 
@@ -158,7 +175,8 @@ class KnowledgeService:
                         for k in ('subject_id', 'object_id')}
         endpoint_ids |= {r.get('subject_id') for r in relevant if r['kind'] == 'attribute'}
         relevant_ids = {r['id'] for r in relevant}
-        relevant += [r for r in prospective.values() if r['id'] in endpoint_ids - relevant_ids]
+        missing_endpoints = endpoint_ids - relevant_ids
+        relevant += [r for r in prospective.values() if r['id'] in missing_endpoints]
         # C1「结构待定」：类型在本体里查不到的记录，**收下并打标**，不整批拒绝。
         # 只放行"缺术语"这一种失败；约束/端点/datatype 仍然照旧抛错 —— 标错了会盖住真问题。
         own_unknown = {row['id']: structure_pending.unknown_terms(ontology, row)
@@ -188,8 +206,22 @@ class KnowledgeService:
         with self.lock:
             event('校验知识结构、来源与关系端点 · 开始')
             self.repository.get_project(project_id)
+            from .text_revision import try_entity_text_revision
+            scoped = try_entity_text_revision(
+                self, project_id, records, expected_version=expected_version,
+                revision=revision, completion=completion, expected_versions=expected_versions,
+                operation=operation, assertions=assertions, pending_assertions=pending_assertions,
+                assertion_decisions=assertion_decisions, resolution_reviews=resolution_reviews,
+                ledger=ledger, resolution_decisions=resolution_decisions,
+                suppress_auto_assertions=suppress_auto_assertions, recorded_at=recorded_at,
+                operation_context=operation_context, relation_constraint_mode=relation_constraint_mode,
+                shacl_mode=shacl_mode, shacl_review_out=shacl_review_out,
+                defer_milvus_sync=defer_milvus_sync)
+            if scoped is not None:
+                return scoped
             prepared = []
-            current = {r['id']: r for r in self._latest(project_id)}
+            planning_snapshot = self.repository.formal_write_snapshot(project_id)
+            current = {r['id']: r for r in planning_snapshot['records']}
             ids = set()
             for raw in records:
                 row = RecordWrite.model_validate(raw).model_dump(exclude_none=True)
@@ -235,8 +267,13 @@ class KnowledgeService:
                             raise ValueError('版本冲突：请使用修订接口处理已有记录')
                         ids.add(attribute['id'])
                         prepared.append(attribute)
-            prospective = {**current, **{r['id']: r for r in prepared}}
-            prospective = {k:r for k,r in prospective.items() if not r.get('metadata',{}).get('_deleted')}
+            prospective = {key: row for key, row in current.items()
+                           if not row.get('metadata', {}).get('_deleted')}
+            for row in prepared:
+                if row.get('metadata', {}).get('_deleted'):
+                    prospective.pop(row['id'], None)
+                else:
+                    prospective[row['id']] = row
             for row in prepared:
                 if row.get('metadata',{}).get('_deleted'):
                     continue
@@ -244,8 +281,8 @@ class KnowledgeService:
                 if row.get('source_id') and (not source or source['kind'] != 'document'):
                     raise ValueError('source_id 必须引用本项目中的文档')
                 if source:
-                    source_metadata = {k:v for k,v in source.get('metadata', {}).items()
-                                       if k not in ('review_candidates','discovery_candidates')}
+                    source_metadata = deepcopy({k:v for k,v in source.get('metadata', {}).items()
+                                                if k not in ('review_candidates','discovery_candidates')})
                     row['metadata'] = {**source_metadata, **row['metadata']}
                     row['metadata']['source_version_id'] = source.get('version_id')
             for row in prospective.values():
@@ -308,13 +345,7 @@ class KnowledgeService:
                 if shacl_review_out is not None:
                     shacl_review_out.extend(shacl_reviews)
             event('知识与本体校验 · 完成',90)
-            LOG.info('本体校验完成，开始向量化 %d 条记录', len(prepared))
-            with stage(f'向量化 · {len(prepared)} 条记录',92):
-                vectors = self.encoder.encode([r['text'] for r in prepared])
-            if len(vectors) != len(prepared):
-                raise RuntimeError('embedding 输出数量不匹配')
-            for row, vector in zip(prepared, vectors):
-                row.update(embedding=vector, embedding_model=self.encoder.identity)
+            LOG.info('本体校验完成，准备原子落库 %d 条记录', len(prepared))
             event(f'{self.repository.backend_label} 原子落库 · 开始',97)
             formal_expected = dict(expected_versions or {})
             if revision:
@@ -331,7 +362,7 @@ class KnowledgeService:
                  'assertion_decisions': assertion_decisions or [],
                  'resolution_decisions':resolution_decisions or [],
                  'suppress_auto_assertions': suppress_auto_assertions}, recorded_at=recorded_at,
-                operation_context=operation_context)
+                operation_context=operation_context, snapshot=planning_snapshot)
             accepted = result['accepted_records']
             # C1：写回执直接带上「结构待定」推导态，调用方（页面/脚本）当场就知道
             # "这一条是收下了、但不是正式知识"，不必再查一次或自己猜。
@@ -356,34 +387,20 @@ class KnowledgeService:
         except Exception as exc:
             LOG.warning('外部投影队列即时投递失败，后台任务将重试: %s', exc)
 
-    def warm_up(self):
-        """预热 embedding 模型：首次 encode 触发模型加载（实测 ~141s），消除首次检索卡顿。
-
-        服务启动后异步调用（见 api.lifespan），不阻塞启动；失败仅降级为首次检索变慢。
-        """
-        try:
-            LOG.info('开始预热 embedding 模型（首次 encode 较慢，请稍候）…')
-            self.encoder.encode(['预热'])
-            self.encoder.runtime_ready = True
-            self.encoder.runtime_error = None
-            LOG.info('embedding 模型预热完成，检索已可用')
-        except Exception as exc:
-            self.encoder.runtime_ready = False
-            self.encoder.runtime_error = str(exc)
-            LOG.warning('embedding 模型预热失败（首次检索会较慢）: %s', exc)
-
     def scoped(self, project_id, scope):
         """解析请求可见的记录集；这是共享的成本中心。
 
         PERF：对 ``Repository.query`` 的返回结果做三次全量遍历，外加扫描本身。
-        ``_include_embeddings`` 默认为 False，因此从不按相似度排序的调用方
-        （图谱、选项列表、仪表盘、来源、记录）完全不为向量付费。
-        当调用方确实选择加载时，它收到的是从紧凑列读取的 numpy float32 数组，
-        这正是相似度排序所需的，也绝不会出现在任何 JSON 响应中。
+        PostgreSQL 读取记录真值；向量检索由 Milvus 承担。
         计时行报告漏斗各阶段，使主导遍历一目了然。
         """
         params = {k: scope.get(k) for k in ('filters', 'valid_at', 'known_at')}
         params['include_unknown'] = scope.get('include_unknown', True)
+        params['applicability'] = scope.get('applicability')
+        requested_kinds = scope.get('kinds')
+        if requested_kinds is not None:
+            params['kinds'] = list(dict.fromkeys([
+                *requested_kinds, *(['entity'] if set(requested_kinds) & {'relation', 'attribute'} else [])]))
         if scope.get('_reference_mode'):
             params.update(_reference_mode=True, _reference_limit=501,
                           kinds=scope.get('kinds'), applicability=scope.get('applicability'))
@@ -424,7 +441,7 @@ class KnowledgeService:
         """在保留的各本体版本间，将稳定类型 IRI 解析为业务标签。"""
         versions = self.repository.list_ontologies(project_id)
         signature = tuple(version['id'] for version in versions)
-        with self.lock:
+        with self._ontology_cache_lock:
             cached = self._ontology_label_cache.get(project_id)
             if cached and cached[0] == signature:
                 return dict(cached[1])
@@ -435,7 +452,7 @@ class KnowledgeService:
                 label=item.get('label_zh') or (item.get('label') if item.get('label')!=item.get('name') else '') or item.get('label_en') or {'name':'名称'}.get(item.get('name')) or item.get('name')
                 labels[item['id']]=label
                 labels[item['name']]=label
-        with self.lock:
+        with self._ontology_cache_lock:
             self._ontology_label_cache[project_id] = (signature, dict(labels))
         return labels
 
@@ -459,7 +476,7 @@ class KnowledgeService:
         """
         cache_key = (project_id, ontology_id)
         if ontology_id is not None:
-            with self.lock:
+            with self._ontology_cache_lock:
                 cached = self._ontology_family_cache.get(cache_key)
                 if cached:
                     return dict(cached[1])
@@ -469,7 +486,7 @@ class KnowledgeService:
         if ontology_id is not None and selected is None:
             raise KeyError(ontology_id)
         signature = selected['id'] if selected else None
-        with self.lock:
+        with self._ontology_cache_lock:
             cached = self._ontology_family_cache.get(cache_key)
             if cached and cached[0] == signature:
                 return dict(cached[1])
@@ -484,7 +501,7 @@ class KnowledgeService:
                        for parent in direct.get(class_id, [])]
             family[class_id] = {'label': labels.get(class_id, class_id),
                                 'parents': parents, 'ancestors': self._class_chain(class_id, direct, labels)}
-        with self.lock:
+        with self._ontology_cache_lock:
             self._ontology_family_cache[cache_key] = (signature, dict(family))
         return family
 
@@ -520,13 +537,13 @@ class KnowledgeService:
             return None
         versions = self.repository.list_ontologies(project_id)
         signature = tuple(version['id'] for version in versions)
-        with self.lock:
+        with self._ontology_cache_lock:
             cached = self._ontology_expansion_cache.get(project_id)
             index = cached[1] if cached and cached[0] == signature else None
         if index is None:
             index = (Ontology(versions[-1]['turtle']).expansion_index()
                      if versions else {'surfaces': [], 'labels': {}, 'ancestors': {}})
-            with self.lock:
+            with self._ontology_cache_lock:
                 self._ontology_expansion_cache[project_id] = (signature, index)
         return match_query_expansion(index, query)
 
@@ -554,16 +571,8 @@ class KnowledgeService:
         platforms = (dimension_values(applicability, 'platforms')
                      if explicit_platform
                      else [])
-        platforms = list(dict.fromkeys(platforms))[:20]
+        platforms = list(dict.fromkeys(platforms))
         per_platform_k = max(1, min(20, request.get('k_per_platform', 5)))
-        fallback_cache = {
-            'applicability': applicability,
-            'lock': threading.Lock(),
-        }
-        if (scope.get('ontology_scope') or 'all') != 'all':
-            # V2 projections do not carry ontology release IDs. Apply the
-            # authority scope before ranking and before adding source neighbors.
-            fallback_cache['rows'] = self.scoped(project_id, scope)
         query_vector_cache = {'lock': threading.Lock()}
 
         def retrieve(group_scope, platform_match=None, query_platform=None,
@@ -573,10 +582,9 @@ class KnowledgeService:
                 project_id, request['query'],
                 retrieval_mode=request.get('retrieval_mode', 'hybrid'),
                 scope=group_scope, content_channels=scope['kinds'], k=limit,
-                content_k={kind: min(quotas[kind], limit)
+                content_k={kind: (quotas[kind] if group_k is None else min(quotas[kind], group_k))
                            for kind in scope['kinds'] if kind in quotas},
                 platform_match=platform_match,
-                fallback_cache=fallback_cache,
                 query_vector_cache=query_vector_cache)
             if source_scope:
                 result['hits'] = [{**row, 'query_platform': query_platform,
@@ -630,6 +638,8 @@ class KnowledgeService:
             'candidate_count': grouped.get('candidate_count', 0),
             'active_mode': grouped.get('active_mode'),
             '_backend': grouped.get('_backend'),
+            'complete': grouped.get('complete', True),
+            'incomplete_reason': grouped.get('incomplete_reason'),
             'backends': grouped.get('backends', {}),
             'degraded': grouped.get('degraded', False),
             'retrieval_errors': {
@@ -646,10 +656,6 @@ class KnowledgeService:
                     continue
                 seen_versions.add(identity)
                 flattened.append(row)
-                if len(flattened) >= 100:
-                    break
-            if len(flattened) >= 100:
-                break
         if unrestricted is not None:
             tagged = {(row.get('version_id') or ('record', row.get('id'))): row
                       for group in groups for row in group['hits']}
@@ -659,8 +665,6 @@ class KnowledgeService:
                 if identity not in seen_versions:
                     seen_versions.add(identity)
                     flattened.append(tagged.get(identity, row))
-                if len(flattened) >= 100:
-                    break
         backends = {
             item[2].get('_backend') or 'postgres_local'
             for item in group_results
@@ -686,13 +690,22 @@ class KnowledgeService:
                             for item in group_results),
             'backends': aggregate_backends,
             'retrieval_errors': grouped_errors,
+            'complete': all(group['complete'] for group in groups),
         }
-        native = (result.get('_backend') == 'milvus')
-        rows = [] if native else list(fallback_cache.get('rows') or ())
+        partial = [{'platform': group['platform'], 'source_scope': group['source_scope'],
+                    'reason': group.get('incomplete_reason') or 'authority_refill_budget'}
+                   for group in groups if not group['complete']]
+        if partial:
+            result['incomplete_groups'] = partial
+            reasons = {group['reason'] for group in partial}
+            result['incomplete_reason'] = next(iter(reasons)) if len(reasons) == 1 else 'multiple_scope_limits'
+        else:
+            result.pop('incomplete_reason', None)
         LOG.debug('检索完成排名：query=%r backend=%s hits=%d',
                   request.get('query'), result.get('_backend'),
                   len(result.get('hits', ())))
-        labels=self.ontology_labels(project_id)
+        labels=(self.ontology_labels(project_id)
+                if request.get('ontology_context', True) is not False else {})
         result['hits']=[{**row,'type_label':labels.get(row.get('type',''),row.get('type',''))}
                         for row in result['hits']]
         if result.get('platform_groups'):
@@ -702,51 +715,10 @@ class KnowledgeService:
                 group['hits'] = [by_id.get(
                     (row['id'], row.get('query_platform'), row.get('source_scope')), row)
                     for row in group['hits']]
-        # 溯源（检索结果挂来源原文）：命中的实体/关系只带自己的短 text（如「商户」），
-        # 用户搜到实体却看不到它来自哪段原文。这里把 metadata.chunk_id 指向的原文片段
-        # 一起带回——chunk 已在 scoped 的 rows 里（kinds 默认含 chunk），零额外查询。
-        # 前端「原文片段」通道据此同时展示「命中知识的来源原文」和「原文全文匹配」两块。
-        _chunk_text = {row['id']: row['text'] for row in rows if row['kind'] == 'chunk'}
-        _source = {}
-        for row in result['hits']:
-            chunk_id = (row.get('metadata') or {}).get('chunk_id')
-            if row['kind'] in ('entity', 'relation') and chunk_id and chunk_id in _chunk_text:
-                row['source_chunk_id'] = chunk_id
-                _source[chunk_id] = _chunk_text[chunk_id]
-        if result.get('platform_groups'):
-            source_chunks = []
-            for group in result['platform_groups']:
-                grouped_source = {}
-                for row in group['hits']:
-                    chunk_id = (row.get('metadata') or {}).get('chunk_id')
-                    if (row.get('kind') in ('entity', 'relation') and chunk_id
-                            and chunk_id in _chunk_text):
-                        row['source_chunk_id'] = chunk_id
-                        grouped_source[chunk_id] = _chunk_text[chunk_id]
-                group['source_chunks'] = [
-                    {'id': chunk_id, 'text': text, 'kind': 'chunk',
-                     'query_platform': group.get('platform'),
-                     'source_scope': group.get('source_scope')}
-                    for chunk_id, text in grouped_source.items()]
-                source_chunks.extend(group['source_chunks'])
-            if source_chunks:
-                result['source_chunks'] = source_chunks
-        elif _source:
-            result['source_chunks'] = [
-                {'id': chunk_id, 'text': text, 'kind': 'chunk'}
-                for chunk_id, text in _source.items()]
-        context_chunks = adjacent_chunks(rows, result['hits'])
-        if result.get('platform_groups'):
-            context_chunks = []
-            for group in result['platform_groups']:
-                grouped_context = [
-                    {**row, 'query_platform': group.get('platform'),
-                     'source_scope': group.get('source_scope')}
-                    for row in adjacent_chunks(rows, group['hits'])]
-                group['context_chunks'] = grouped_context
-                context_chunks.extend(grouped_context)
-        if context_chunks:
-            result['context_chunks'] = context_chunks
+        # Both native and degraded retrieval backfill exact authority sources.
+        # The reader batches only hit anchors and same-source-version neighbors.
+        from .retrieval_context import enrich_source_context
+        enrich_source_context(self.repository, project_id, scope, result)
         # 扩展兜底：勾了「本体扩展」但没命中类（或本体没有父子层级）时，给前端一个
         # 明确诊断，而不是静默——否则用户勾了开关、命中数没变化，还看不出哪里扩了。
         if request.get('ontology_expansion'):
@@ -756,13 +728,13 @@ class KnowledgeService:
             # 复用 ontology_expansion 的缓存，判断本体到底有没有父子层级（ancestors 非空）。
             versions = self.repository.list_ontologies(project_id)
             signature = tuple(v['id'] for v in versions)
-            with self.lock:
+            with self._ontology_cache_lock:
                 cached = self._ontology_expansion_cache.get(project_id)
                 index = cached[1] if cached and cached[0] == signature else None
             if index is None:
                 index = (Ontology(versions[-1]['turtle']).expansion_index()
                          if versions else {'surfaces': [], 'labels': {}, 'ancestors': {}})
-                with self.lock:
+                with self._ontology_cache_lock:
                     self._ontology_expansion_cache[project_id] = (signature, index)
             _exp['has_hierarchy'] = bool(index.get('ancestors'))
             _exp['matched'] = bool(_exp.get('terms'))
@@ -824,7 +796,7 @@ class KnowledgeService:
         request.update(settings)
         if previous_source in {'explicit', 'published_at', 'unknown'}:
             request['metadata']['effective_time_source'] = previous_source
-        extraction_mode=request.get('extraction_mode') or ('ontology' if request.get('extract',True) else 'documents')
+        extraction_mode=request['extraction_mode']
         event(f"文档开始 · {request['title']} · {len(request['text'])} 字符 · 项目 {project_id} · 模式 {extraction_mode}",5)
         self.repository.get_project(project_id)
         checkpoint_context=request.get('_checkpoint_context')
@@ -1228,11 +1200,11 @@ class KnowledgeService:
     def answer(self, project_id, request):
         from time import perf_counter
         from .answers import prepare_answer, final_answer, answer_messages, finish_timings, generation_state
-        from .answer_validity import freeze_request
+        from .answer_validity import freeze_qa_request
         from .provenance import ProvenanceService
         from .qa_policy import model_evidence
         started = perf_counter()
-        request = freeze_request(request)
+        request = freeze_qa_request(self, project_id, request)
         provenance = ProvenanceService(self.repository)
         run_id = provenance.begin_retrieval(project_id, request)
         answer_id = None

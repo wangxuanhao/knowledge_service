@@ -72,6 +72,17 @@ class DraftReviewPublishMixin:
         })
 
     def _publication_effect_plan(self, project_id, draft, turtle, approved):
+        context = draft.get('source_context') or {}
+        direct_effect = context.get('publication_effects')
+        if direct_effect and (not isinstance(direct_effect, dict)
+                              or direct_effect.get('kind') not in {'candidate'}):
+            raise StaleSource('obsolete source effects; select candidates through current intake')
+        if context.get('intake_bindings'):
+            from .ontology_intake_publication import composite_plan
+            return composite_plan(self, project_id, draft, turtle, approved)
+        return self._single_publication_effect_plan(project_id, draft, turtle, approved)
+
+    def _single_publication_effect_plan(self, project_id, draft, turtle, approved):
         """Freeze service-owned source effects for the repository transaction.
 
         The repository rechecks the supplied source snapshots before applying this
@@ -82,9 +93,6 @@ class DraftReviewPublishMixin:
         if not effects:
             return None
         effect_kind = effects.get('kind')
-        if (effect_kind is None and draft.get('source_kind') == 'discovery'
-                and effects.get('discovery_run_id')):
-            effect_kind = 'discovery'
         if effect_kind != draft.get('source_kind'):
             raise StaleSource('ontology draft publication effects are invalid')
 
@@ -93,56 +101,49 @@ class DraftReviewPublishMixin:
                 _materialize_candidates,
                 _materialized_candidate_ids,
                 _reuse_materialized_records,
-                _validated_materialization,
             )
 
             run_id = effects.get('discovery_run_id')
             if not run_id:
-                proposed = json.loads(_canonical_json(effects.get('records') or []))
-                for record in proposed:
-                    record['ontology_id'] = '__PUBLISHED_ONTOLOGY_ID__'
-                    metadata = dict(record.get('metadata') or {})
-                    metadata['discovery_draft_id'] = draft['id']
-                    record['metadata'] = metadata
-                accepted, skipped, validation = _validated_materialization(
-                    turtle, proposed,
-                    json.loads(_canonical_json(
-                        effects.get('skipped_candidates') or [])))
-                return {
-                    'kind': 'discovery', 'mode': 'legacy',
-                    'records': accepted, 'skipped': skipped,
-                    'validation': validation,
-                }
+                raise StaleSource('current intake publication requires a run id')
 
             try:
                 run = self.repository.get_discovery_run(project_id, run_id)
             except KeyError as exc:
                 raise StaleSource('discovery publication run does not exist') from exc
-            if (run.get('status') != 'draft_created'
+            if (not run.get('intake_request_hash')
+                    or run.get('status') != 'draft_created'
                     or run.get('unified_draft_id') != draft['id']):
                 raise StaleSource('discovery publication run is not current')
 
-            approved_ids = {operation['id'] for operation in approved}
+            active_operations = self._active_operations(project_id, draft['id'])
+            operation_history = self._history(project_id, draft['id'])[0]
             effective_ids = {
                 operation['id']
-                for operation in self._active_operations(project_id, draft['id'])}
+                for operation in active_operations}
             history_ids = {
                 operation['id']
-                for operation in self._history(project_id, draft['id'])[0]}
+                for operation in operation_history}
+            from .ontology_intake_publication import ApprovedDependencies
+            dependencies = ApprovedDependencies(operation_history, active_operations, approved, turtle)
             initial_ids = {
                 outcome['candidate_id']
                 for outcome in run.get('initial_candidate_outcomes') or []}
             required_outcomes = []
+            inactive_candidates = set()
             for binding in run.get('candidate_bindings') or []:
                 if binding['candidate_id'] in initial_ids:
                     continue
-                missing = [
-                    operation_id
-                    for operation_id in binding.get('required_operation_ids') or []
-                    if operation_id not in approved_ids]
-                if not missing:
+                missing = dependencies.missing(binding)
+                inactive = not dependencies.ontology.is_active_term(binding['target_iri'])
+                # Existing published mappings have no creation operation IDs.
+                # Their final term can still be retired by an approved change.
+                if not missing and not inactive:
                     continue
-                if any(operation_id in effective_ids for operation_id in missing):
+                if inactive:
+                    inactive_candidates.add(binding['candidate_id'])
+                    reason_code = 'ontology_validation_failed'
+                elif any(operation_id in effective_ids for operation_id in missing):
                     reason_code = 'required_operation_rejected'
                 elif any(operation_id in history_ids for operation_id in missing):
                     reason_code = 'required_operation_superseded'
@@ -160,10 +161,12 @@ class DraftReviewPublishMixin:
                 '__PUBLISHED_ONTOLOGY_ID__',
                 [*(run.get('candidate_outcomes') or []), *required_outcomes],
                 repository=self.repository)
+            for outcome in skipped:
+                if outcome['candidate_id'] in inactive_candidates:
+                    outcome['reason'] = '最终获批本体中的映射术语已停用或不存在，关联事实不写入'
             previous_ids = set(run.get('materialized_candidate_ids') or [])
-            existing_records = self.repository.current_records(
-                project_id, vectors='none',
-                kinds=['entity', 'relation', 'attribute'])
+            from .ontology_intake import materialized_records
+            existing_records = materialized_records(self.repository, project_id)
             processed_ids = _materialized_candidate_ids(existing_records)
             if (not previous_ids <= processed_ids
                     or (set(run.get('accepted_candidate_ids') or [])
@@ -171,8 +174,12 @@ class DraftReviewPublishMixin:
                 raise StaleSource('discovery materialization context changed')
             proposed = _reuse_materialized_records(
                 proposed, existing_records, previous_ids)
-            accepted, skipped, validation = _validated_materialization(
-                turtle, proposed, skipped)
+            # All intake runs share one final dataset gate in composite_plan.
+            # Preserve complete selections: a required attribute can be supplied
+            # by this run or another explicitly attached run.
+            accepted = proposed
+            validation = {'conforms': True, 'accepted_count': len(accepted),
+                          'skipped_count': len(skipped)}
             existing_record_ids = {
                 item['id'] for item in existing_records
                 if _materialized_candidate_ids([item]) & previous_ids}
@@ -229,7 +236,7 @@ class DraftReviewPublishMixin:
                     'project_id', 'version', 'version_id', 'recorded_at',
                     'superseded_at',
                 }}))
-            records = self.repository.current_records(project_id, vectors='none')
+            records = self.repository.current_records(project_id)
             records_by_id = {record['id']: record for record in records}
             consulted_ids = revalidation_record_ids(candidate)
             dependencies = []
@@ -260,14 +267,6 @@ class DraftReviewPublishMixin:
                 'document': revised, 'proposal': proposal,
                 'revalidation': result,
             }
-
-        if effect_kind == 'import':
-            proposed = json.loads(_canonical_json(effects.get('records') or []))
-            report = Ontology(turtle).validate_timeline(proposed)
-            if not report['conforms']:
-                raise ValidationFailed(
-                    'imported records do not conform', details={'report': report})
-            return {'kind': 'import', 'records': proposed}
 
         raise StaleSource('unsupported ontology publication effect kind')
 
@@ -499,12 +498,15 @@ class DraftReviewPublishMixin:
             },
         }
 
-    def publish_readiness(self, project_id, draft_id):
+    def publish_readiness(self, project_id, draft_id, *, editing=False):
         """只读发布清单：逐条给出未满足条件、严重级别与修复建议。
 
         检查项与 ``publish_preflight`` 对齐，但**不修改任何状态**，
         因此发布按钮可以随时重新读取并把全部未满足条件展示出来
         （不允许只把按钮置灰而不解释原因）。
+
+        ``editing`` 只投影当前编辑与审核门禁，不计算完整校验或遍历来源；
+        它始终不能授权发布，只有轻量门禁全部满足后才要求读取完整清单。
         """
         draft = self.store.get(project_id, draft_id)
         items = []
@@ -542,7 +544,8 @@ class DraftReviewPublishMixin:
         elif draft['base_ontology_id'] != latest:
             add('base_outdated', '草案基线已不是项目当前本体版本',
                 remediation='重新基线（rebase）并重新校验')
-        if draft['source_kind'] in {'discovery', 'candidate', 'import'}:
+        if not editing and (draft['source_kind'] in {'discovery', 'candidate'}
+                            or (draft.get('source_context') or {}).get('intake_bindings')):
             try:
                 self._source_snapshot(project_id, draft)
             except StaleSource as exc:
@@ -577,12 +580,23 @@ class DraftReviewPublishMixin:
             add('no_approval', '没有任何变更被收下',
                 remediation='至少收下一条变更，或关闭草案')
         fingerprint = draft.get('validation_fingerprint')
-        try:
-            report, fingerprint, _ = self._compute_validation(project_id, draft)
-        except Exception as exc:  # 防御性边界：校验本身不可用时也不能抛给前端
-            report = None
-            add('validation_unavailable', '无法计算校验快照：%s' % exc,
-                remediation='修复本体/数据问题后重试')
+        report = None
+        if editing:
+            operation_errors, _, _ = self._operation_issues(operations)
+            for issue in operation_errors:
+                add(issue.get('code') or 'validation_error',
+                    issue.get('message') or '变更校验未通过',
+                    operation_ids=issue.get('operation_ids'),
+                    remediation='修复或不收相关变更')
+            add('validation_not_evaluated',
+                '编辑状态尚未检查完整校验和来源快照；审核条件满足后会重新检查发布条件。',
+                severity='info', remediation='完成变更审核后读取完整发布清单')
+        else:
+            try:
+                report, fingerprint, _ = self._compute_validation(project_id, draft)
+            except Exception as exc:  # 防御性边界：校验本身不可用时也不能抛给前端
+                add('validation_unavailable', '无法计算校验快照：%s' % exc,
+                    remediation='修复本体/数据问题后重试')
         if report is not None:
             if draft.get('validation_fingerprint') != fingerprint:
                 add('validation_changed', '校验快照已过期',
@@ -608,10 +622,14 @@ class DraftReviewPublishMixin:
                     remediation='不收或退回相关变更后重新校验')
         severities = {item['severity'] for item in items}
         return {
-            'ready': 'error' not in severities,
+            'ready': not editing and 'error' not in severities,
             'draft_id': draft_id, 'status': draft['status'],
             'revision': draft['revision'],
             'validation_fingerprint': fingerprint,
+            'validation_checked': report is not None,
+            'validation_state': ('not_evaluated' if editing else
+                                 'evaluated' if report is not None else 'unavailable'),
+            'requires_full_validation': bool(editing and 'error' not in severities),
             'counts': {
                 'error': sum(1 for item in items if item['severity'] == 'error'),
                 'warning': sum(1 for item in items

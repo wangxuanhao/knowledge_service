@@ -17,6 +17,28 @@ def freeze_request(request):
             'known_at': normalize_time(request.get('known_at')) or now}
 
 
+def freeze_qa_request(service, project, request):
+    """Pin the current index before freezing an implicit QA knowledge time.
+
+    An explicitly requested history view does not depend on the current index.
+    A default view pins its ready generation/watermark first, so a concurrent
+    publication cannot replace the frozen version with an apparently empty hit.
+    Repeated calls in the shared JSON/SSE preparation preserve the same pin.
+    """
+    explicit = request.get('_explicit_known_at', request.get('known_at') is not None)
+    if explicit or request.get('_qa_index_snapshot') is not None:
+        return freeze_request(request)
+    from .retrieval import PROJECTION_SCHEMA_VERSIONS
+    index = service.repository.projections.search_index(
+        project, PROJECTION_SCHEMA_VERSIONS['milvus'])
+    snapshot = {'project_id': project, 'index_version': index['index_version'],
+                'watermark': index['watermark']}
+    # A previously normalized implicit request must be frozen after this pin,
+    # rather than retaining a time from before its generation was selected.
+    frozen = freeze_request({**request, 'known_at': None, '_explicit_known_at': False})
+    return {**frozen, '_qa_index_snapshot': snapshot}
+
+
 def temporal(row, as_of):
     start = normalize_time(row.get('valid_from'))
     end = normalize_time(row.get('valid_until'))
@@ -63,6 +85,8 @@ def classify(service, project, row, request):
     request = row_scope(row, request)
     if not visible(row, request):
         return None
+    from ..domain.evidence_scope import source_scope
+    source_request = source_scope(request, row)
     status, basis = temporal(row, request['valid_at'])
     repo = service.repository
     source_cache = request.setdefault('_source_read_cache', {})
@@ -79,14 +103,14 @@ def classify(service, project, row, request):
             doc = source_cache[('version', version)]
         except KeyError:
             return None
-        if not doc or doc.get('kind') != 'document' or doc['id'] != document_id or not visible(doc, request, source_artifact=True):
+        if not doc or doc.get('kind') != 'document' or doc['id'] != document_id or not visible(doc, source_request, source_artifact=True):
             return None
         # Source text remains the original immutable version. Business validity
         # follows the document authority version visible at knowledge time.
         if ('history', document_id) not in source_cache:
             source_cache[('history', document_id)] = repo.history(project, document_id)
         history = [item for item in source_cache[('history', document_id)]
-                   if item.get('kind') == 'document' and visible(item, request)]
+                   if item.get('kind') == 'document' and visible(item, source_request)]
         if not history:
             return None
         authority = max(history, key=lambda item: item['version'])
@@ -126,7 +150,7 @@ def classify(service, project, row, request):
                       if chunk.get('kind') == 'chunk' and
                       (chunk.get('metadata') or {}).get('source_version_id') == version
                       and chunk.get('source_id') == doc['id']
-                      and visible(chunk, request, source_artifact=True)] if assertion.get('chunk_id') else []
+                       and visible(chunk, source_request, source_artifact=True)] if assertion.get('chunk_id') else []
             if len(chunks) != 1:
                 continue
             states = {temporal(item, request['valid_at'])[0] for item in (governance[version], chunks[0])}
@@ -169,9 +193,10 @@ def reference_candidates(service, project, request):
     for phrase in re.findall(r'[\u4e00-\u9fff]+', query):
         terms.add(phrase)
         terms.update(phrase[index:index + 2] for index in range(len(phrase) - 1))
-    scope = {**request, '_reference_mode': True, '_include_embeddings': False,
+    scope = {**request, '_reference_mode': True,
              '_reference_terms': sorted(terms),
-             'kinds': ['chunk', 'entity'], 'include_unknown': True}
+             'kinds': (['chunk'] if request.get('kinds') == ['chunk'] else ['chunk', 'entity']),
+             'include_unknown': True}
     rows = service.scoped(project, scope)
     service.annotate_structure_pending(project, rows)
     # A stable bounded read is deliberately not advertised as exhaustive history.
@@ -217,17 +242,50 @@ def _prefetch_chunk_sources(repository, project, rows, request):
 
 def apply_validity(service, project, context, request):
     request = {**request, '_source_read_cache': {}}
+    from ..domain.evidence_scope import source_scope
+    anchors = {}
+    for container in [context, *context.get('platform_groups', [])]:
+        for row in container.get('hits', []):
+            if container is not context:
+                platform, mode = container.get('platform'), container.get('source_scope')
+                if (row.get('query_platform'), row.get('source_scope')) != (platform, mode):
+                    continue
+                if mode in {'all', 'specific', 'unknown'} and dimension_mode(
+                        (row.get('metadata') or {}).get('applicability'), 'platforms') != mode:
+                    continue
+            if visible(row, row_scope(row, request)):
+                anchors[(row.get('id'), row.get('version_id'), row.get('query_platform'), row.get('source_scope'))] = row
+    authorizations = context.get('_source_context_authorizations') or {}
+
+    def qualification_request(row):
+        token = row.get('_source_context_authorization')
+        if token is None:
+            return row_scope(row, request)
+        proof = authorizations.get(token)
+        if not isinstance(proof, dict) or (
+                row.get('id'), row.get('version_id'), row.get('query_platform'), row.get('source_scope')) != (
+                proof.get('artifact_id'), proof.get('artifact_version_id'),
+                proof.get('query_platform'), proof.get('source_scope')):
+            return None
+        anchor = anchors.get((proof.get('anchor_id'), proof.get('anchor_version_id'),
+                              proof.get('query_platform'), proof.get('source_scope')))
+        if anchor is None:
+            return None
+        # Never execute a residual AST supplied by material. Recompute it from
+        # this request and the independently qualified exact direct hit.
+        return source_scope(row_scope(row, request), anchor)
     # Scope/snapshot failures are not business-validity conflicts. Remove their
     # text from every public projection, including raw native retrieval arrays.
-    public_row_arrays = ('hits', 'context_chunks', 'evidence_rows',
+    public_row_arrays = ('hits', 'source_chunks', 'context_chunks', 'evidence_rows',
                          'structure_pending_rows', 'unknown_scope_rows')
     for container in [context, *context.get('platform_groups', [])]:
         for key in public_row_arrays:
             if key in container:
                 container[key] = [row for row in container[key]
-                                  if visible(row, row_scope(row, request))]
+                                  if (selected := qualification_request(row)) is not None and visible(row, selected)]
     context.update(as_of=request['valid_at'], valid_at=request['valid_at'], known_at=request['known_at'])
-    warnings = ['上下文仅补充已检索到的相邻片段，条件或例外可能不完整。']
+    warnings = [*context.get('coverage_warnings', []),
+                '上下文仅补充已检索到的相邻片段，条件或例外可能不完整。']
     direct = list(context.get('evidence_rows', []))
     # Preserve retrieval's unknown-scope partition. Only the qualification
     # layer may use original chunks for a question without a platform scope.
@@ -249,7 +307,8 @@ def apply_validity(service, project, context, request):
         if key in seen:
             continue
         seen.add(key)
-        item = classify(service, project, row, request)
+        selected = qualification_request(row)
+        item = classify(service, project, row, selected) if selected is not None else None
         if item is None:
             continue
         classified.append(item)
@@ -279,34 +338,58 @@ def apply_validity(service, project, context, request):
     selected_platforms = dimension_values(request.get('applicability'), 'platforms')
     if len(selected_platforms) > 20:
         warnings.append('本次检索预算仅覆盖前 20 个所选平台，其余平台尚未检索，不能推断其规则。')
-    allowed_edges = {row['id'] for row in context['evidence_rows'] if row.get('kind') == 'relation'}
+    def occurrence(item, record_id):
+        return (record_id, item.get('query_platform'), item.get('source_scope'))
+    effective_nodes = {occurrence(row, row['id']): row for row in context['evidence_rows']
+                       if row.get('kind') == 'entity'}
+    edges = {occurrence(row, row['id']): row for row in context['evidence_rows']
+             if row.get('kind') == 'relation'}
+    # Every relation and endpoint must qualify in this very platform occurrence.
+    # An equally named/id node returned for a different platform cannot complete
+    # a path whose own endpoint was rejected by source or temporal governance.
     context['reasoning_paths'] = [path for path in context.get('reasoning_paths', [])
-                                  if all(step['relation_id'] in allowed_edges for step in path['steps'])]
-    effective_nodes = {row['id']: row for row in context['evidence_rows'] if row.get('kind') == 'entity'}
-    edges = {row['id']: row for row in context['evidence_rows'] if row.get('kind') == 'relation'}
-    context['reasoning_paths'] = [path for path in context['reasoning_paths']
-                                  if all(step['from'] in effective_nodes and step['to'] in effective_nodes
-                                         for step in path['steps'])][:200]
+        if path.get('steps') and all(
+            occurrence(path, step['relation_id']) in edges
+            and occurrence(path, step['from']) in effective_nodes
+            and occurrence(path, step['to']) in effective_nodes
+            and {step['from'], step['to']} == {
+                edges[occurrence(path, step['relation_id'])].get('subject_id'),
+                edges[occurrence(path, step['relation_id'])].get('object_id')}
+            for step in path['steps'])][:200]
     for path in context['reasoning_paths']:
         for step in path['steps']:
-            edge = edges[step['relation_id']]
-            step.update(direction='forward', subject_id=edge['subject_id'], object_id=edge['object_id'],
+            edge = edges[occurrence(path, step['relation_id'])]
+            step.update(direction='forward' if step['from'] == edge['subject_id'] else 'backward',
+                        subject_id=edge['subject_id'], object_id=edge['object_id'],
                         relation_version_id=edge.get('version_id'),
-                        from_version_id=effective_nodes[step['from']].get('version_id'),
-                        to_version_id=effective_nodes[step['to']].get('version_id'),
+                        from_version_id=effective_nodes[occurrence(path, step['from'])].get('version_id'),
+                        to_version_id=effective_nodes[occurrence(path, step['to'])].get('version_id'),
                         source_version_ids=edge.get('_allowed_source_version_ids', []),
                         validity_status='effective')
     context['reasoning_path_status'] = 'available' if context['reasoning_paths'] else 'no_qualified_path'
+    if 'channels' in context:
+        context['channels']['graph_evidence'] = sum(row.get('kind') == 'relation'
+                                                   for row in context['evidence_rows'])
     for group in context.get('platform_groups', []):
         group['evidence_rows'] = [row for row in context['evidence_rows']
                                   if row.get('query_platform') == group.get('platform')
                                   and ('source_scope' not in group or
                                        row.get('source_scope') == group['source_scope'])]
+        group['reasoning_paths'] = [path for path in context['reasoning_paths']
+            if path.get('query_platform') == group.get('platform')
+            and path.get('source_scope') == group.get('source_scope')]
         if not group['evidence_rows']:
             warnings.append(str(group.get('platform')) + '：未检索到该时点确认有效的依据，不能据此断言不存在规则。')
+    if context.get('graph_truncated'):
+        warnings.append('图关系上下文达到节点或关系预算，当前路径仅覆盖已读取邻域，不能据此断言全库没有路径。')
     context['coverage_warnings'] = warnings
     context['eligibility_summary'] = {key: len(context[key]) for key in (
         'evidence_rows', 'historical_references', 'future_references', 'uncertain_references')}
+    context.pop('_source_context_authorizations', None)
+    for container in [context, *context.get('platform_groups', [])]:
+        for key in (*public_row_arrays, 'historical_references', 'future_references', 'uncertain_references'):
+            for row in container.get(key, []):
+                row.pop('_source_context_authorization', None)
     return context
 
 

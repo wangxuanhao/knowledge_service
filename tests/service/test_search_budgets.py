@@ -60,7 +60,6 @@ def test_keyword_query_uses_embedding_free_projection(tmp_path):
         'embedding': [1.0] * 256, 'embedding_model': HashingEncoder.identity,
     })
 
-    rows = repository.query(project_id, include_embeddings=False)
+    rows = repository.query(project_id)
 
     assert 'embedding' not in rows[0]
-    assert 'embedding' not in repository.query(project_id)[0]  # 删列后向量不存 SQLite

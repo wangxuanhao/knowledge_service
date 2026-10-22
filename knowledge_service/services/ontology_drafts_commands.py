@@ -244,6 +244,23 @@ class DraftCommandMixin:
         if not isinstance(command, dict):
             raise ValueError('command must be an object')
         action = command.get('action')
+        if action == 'batch':
+            commands = command.get('commands')
+            if not isinstance(commands, list) or not 1 <= len(commands) <= 100:
+                raise ValueError('batch requires 1..100 commands')
+            compiled, working = [], ontology
+            for child in commands:
+                if (not isinstance(child, dict) or child.get('action') in {'batch', 'withdraw_operation'}
+                        or any(key in child for key in ('supersedes_operation_id', 'operation_id'))):
+                    raise ValueError('batch children must be independent atomic commands')
+                operations = self._compile_command(
+                    project_id, draft, {**child, 'reason': child.get('reason', command.get('reason'))}, working)
+                # Validate every child against its predecessors before persisting
+                # any operations or advancing the draft revision.
+                working = Ontology(apply_operations(
+                    working.graph.serialize(format='turtle'), operations))
+                compiled.extend(operations)
+            return compiled
         if action in {'turtle', 'replace_turtle', 'diff_turtle'}:
             edited = command.get('edited_turtle', command.get('turtle'))
             if not isinstance(edited, str):
@@ -303,7 +320,7 @@ class DraftCommandMixin:
                     descendants.add(child)
                     pending_nodes.append(child)
         references = term_impact(self, project_id, target_iri, ontology)
-        records = self.repository.current_records(project_id, vectors='none')
+        records = self.repository.current_records(project_id)
         direct = [
             row for row in records
             if row.get('type') == target_iri

@@ -1,0 +1,139 @@
+{
+  "desktop": {
+    "bounds": {
+      "x": 243,
+      "y": 60,
+      "width": 1178,
+      "height": 62
+    },
+    "items": [
+      {
+        "tag": "SPAN",
+        "text": "◆ 本体建模层",
+        "x": 257,
+        "y": 80,
+        "width": 94.015625,
+        "height": 21,
+        "margin": "0px",
+        "padding": "0px",
+        "display": "block",
+        "border": "0px none rgb(38, 77, 61)",
+        "background": "rgba(0, 0, 0, 0)",
+        "lineHeight": "normal"
+      },
+      {
+        "tag": "SPAN",
+        "text": "读取当前本体失败",
+        "x": 361.015625,
+        "y": 81.15625,
+        "width": 88,
+        "height": 18.6875,
+        "margin": "0px",
+        "padding": "0px",
+        "display": "block",
+        "border": "0px none rgb(117, 135, 121)",
+        "background": "rgba(0, 0, 0, 0)",
+        "lineHeight": "18.7px"
+      },
+      {
+        "tag": "DIV",
+        "text": "类型卡片\n            继承层级\n            术语卡片",
+        "x": 1032,
+        "y": 75.5,
+        "width": 212,
+        "height": 30,
+        "margin": "0px 0px 0px 492.984px",
+        "padding": "2px",
+        "display": "flex",
+        "border": "0px none rgb(18, 66, 66)",
+        "background": "rgb(237, 242, 236)",
+        "lineHeight": "normal"
+      },
+      {
+        "tag": "BUTTON",
+        "text": "类型卡片",
+        "x": 1034,
+        "y": 77.5,
+        "width": 68,
+        "height": 26,
+        "margin": "0px",
+        "padding": "5px 10px",
+        "display": "block",
+        "border": "0px none rgb(42, 119, 107)",
+        "background": "rgb(255, 255, 255)",
+        "lineHeight": "normal"
+      },
+      {
+        "tag": "BUTTON",
+        "text": "继承层级",
+        "x": 1104,
+        "y": 77.5,
+        "width": 68,
+        "height": 26,
+        "margin": "0px",
+        "padding": "5px 10px",
+        "display": "block",
+        "border": "0px none rgb(117, 135, 121)",
+        "background": "rgba(0, 0, 0, 0)",
+        "lineHeight": "normal"
+      },
+      {
+        "tag": "BUTTON",
+        "text": "术语卡片",
+        "x": 1174,
+        "y": 77.5,
+        "width": 68,
+        "height": 26,
+        "margin": "0px",
+        "padding": "5px 10px",
+        "display": "block",
+        "border": "0px none rgb(117, 135, 121)",
+        "background": "rgba(0, 0, 0, 0)",
+        "lineHeight": "normal"
+      },
+      {
+        "tag": "LABEL",
+        "text": "节点 属性卡片紧凑节点",
+        "x": 1254,
+        "y": 72,
+        "width": 73,
+        "height": 29,
+        "margin": "0px 0px 8px",
+        "padding": "0px",
+        "display": "flex",
+        "border": "0px none rgb(117, 135, 121)",
+        "background": "rgba(0, 0, 0, 0)",
+        "lineHeight": "normal"
+      },
+      {
+        "tag": "SELECT",
+        "text": "属性卡片紧凑节点",
+        "x": 1279,
+        "y": 76,
+        "width": 48,
+        "height": 25,
+        "margin": "4px 0px 0px",
+        "padding": "5px 2px",
+        "display": "block",
+        "border": "0px none rgb(38, 77, 61)",
+        "background": "rgba(0, 0, 0, 0)",
+        "lineHeight": "normal"
+      },
+      {
+        "tag": "BUTTON",
+        "text": "版本管理",
+        "x": 1337,
+        "y": 75.5,
+        "width": 70,
+        "height": 30,
+        "margin": "0px",
+        "padding": "6px 10px",
+        "display": "block",
+        "border": "1px solid rgba(0, 0, 0, 0)",
+        "background": "rgba(0, 0, 0, 0)",
+        "lineHeight": "normal"
+      }
+    ]
+  },
+  "errors": []
+}

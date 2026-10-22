@@ -3,15 +3,12 @@
 业务逻辑与请求模型在 services.ontology_changes；本文件只负责挂载路由
 /api/projects/{p}/ontology-change-proposals 并调用业务函数。
 """
-import copy
 from uuid import uuid4
 
 from fastapi import APIRouter
 
 from ..core.time import utc_now
 from ..services.ontology import Ontology, generated_term_iri, absolute_iri
-from ..services.ontology_adapters import DEPRECATION
-from ..services.ontology_drafts import OntologyDrafts
 from ..services.ontology_changes import (
     ProposalCreate, ProposalDecision, apply, impact, revalidation,
     document_and_candidate,
@@ -65,7 +62,6 @@ def install(app, service):
                 f"候选本体变更：{proposal['label_zh'] or proposal['label']}",
                 'api:ontology-change',
                 source_context={
-                    'legacy_route': 'POST /ontology-change-proposals',
                     'documents': [{
                         'document_id': document['id'],
                         'expected_document_version': document['version'],
@@ -89,8 +85,7 @@ def install(app, service):
                 'reason': proposal['rationale'],
             })
             proposal.update(
-                draft_id=created['id'], draft_revision=preview['revision'],
-                deprecation=DEPRECATION)
+                draft_id=created['id'], draft_revision=preview['revision'])
             service.data.save_artifact('ontology_change', proposal)
             return proposal
 
@@ -121,8 +116,7 @@ def install(app, service):
                     'api:ontology-change', request.note)
                 proposal['draft_revision'] = closed['revision']
                 service.data.save_artifact('ontology_change', proposal)
-                return {'proposal': proposal, 'ontology': None, 'draft': closed,
-                        'deprecation': DEPRECATION}
+                return {'proposal': proposal, 'ontology': None, 'draft': closed}
             latest = service.data.get_ontology(p)
             if latest['id'] != request.expected_ontology_id or latest['id'] != proposal['expected_ontology_id']:
                 raise ValueError('版本冲突：本体已更新，请重新评估草案影响')
@@ -132,9 +126,9 @@ def install(app, service):
             submitted = governed.submit(
                 p, proposal['draft_id'], current['revision'])
             proposal.update(status='submitted', draft_revision=submitted['revision'],
-                            submitted_at=utc_now(), deprecation=DEPRECATION)
+                            submitted_at=utc_now())
             service.data.save_artifact('ontology_change', proposal)
             return {'proposal': proposal, 'ontology': None, 'draft': submitted,
-                    'revalidation': None, 'deprecation': DEPRECATION}
+                    'revalidation': None}
 
     app.include_router(router)

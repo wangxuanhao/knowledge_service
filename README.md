@@ -82,7 +82,7 @@ knowledge_service/
 │   ├── projects.py             #   项目管理（列表/创建/查看/改名/删除）
 │   ├── knowledge.py            #   知识 CRUD + 摄取 + 检索/问答/图谱 + 本体/SPARQL
 │   ├── workspace.py            #   工作台 API（探索/实体选项/时间线/本体维护/索引任务）
-│   ├── parity.py               #   旧版兼容 API + /vendor 静态路由（本地项目导入/预览/快照）
+│   ├── parity.py               #   文档预览、批量摄取与知识快照
 │   ├── evidence.py             #   证据定位
 │   ├── provenance.py           #   统一溯源（断言↔记录血缘）
 │   ├── reviews.py              #   知识审核（候选决定：批准/拒绝/替换）
@@ -91,7 +91,7 @@ knowledge_service/
 │   └── ontology_drafts.py      #   本体治理草案（命令/校验/审核/发布/版本）
 ├── services/                   # 🧠 业务服务层（无路由装饰器，纯业务逻辑）
 │   ├── service.py              #   KnowledgeService 核心门面（写入/ingest/检索/问答）
-│   ├── retrieval.py            #   检索引擎（Milvus 快路径 + 本地降级）
+│   ├── retrieval.py            #   检索引擎（Milvus 语义/混合 + 显式关键词策略）
 │   ├── answers.py              #   证据问答（SSE 流式 + 一次性 JSON）
 │   ├── ontology.py             #   本体引擎（RDF/OWL/SHACL 解释）+ 术语工具
 │   ├── ontology_drafts.py      #   本体草案主入口（+ core/commands/review/evidence/readmodels 四个 mixin）
@@ -115,7 +115,6 @@ knowledge_service/
 │   ├── review_validation.py    #   审核属性校验
 │   ├── provenance.py           #   溯源（业务）
 │   ├── document_uploads.py     #   文档上传（临时目录/清理）
-│   ├── legacy_import.py        #   旧项目导入
 │   ├── chunking.py             #   切片
 │   ├── attribute_extraction.py #   属性抽取
 │   ├── entity_resolution.py    #   实体消歧
@@ -197,8 +196,8 @@ python -m knowledge_service.repository.migrate    # 应用待执行迁移（幂�
 - `--demo` 使用非语义哈希向量，仅用于流程验证，不代表真实语义检索，也不会自动关闭 LLM 抽取。
 - 权威存储是 PostgreSQL（容器 `knowledge-postgres`，端口 5432）：项目、原文、知识版本、任务收据等都在库里；schema 由编号迁移管理（`repository/migrations/`），应用启动只校验版本、不建表。
 - 应用以**应用角色** `knowledge_app` 连库（无 DDL 权限）；建表/建索引必须用迁移器 `python -m knowledge_service.repository.migrate`，它使用 owner 凭据。应用进程读不到超级用户口令（最小权限）。
-- 向量检索必须显式 `KG_VECTOR_BACKEND=milvus` 才开启（Docker 容器 `milvus-standalone`，端口 19530）。向量已不再存于关系库的本地列；未开启 Milvus 时**没有**语义通道，检索自动降级为关键词（PostgreSQL `pg_trgm` + 全文）。
-- 基础设施用仓库根目录 `docker-compose.yml` 一条命令拉起：`docker compose up -d --wait`。包含 PostgreSQL、独立 etcd、minio、Milvus standalone 与 Attu（<http://127.0.0.1:30001>）五个容器，全部端口只绑 `127.0.0.1`，持久化数据统一落在 `./volumes`。
+- 向量检索配置 `KG_VECTOR_BACKEND=milvus`（Docker 容器 `milvus-standalone`，端口 19530）。模型生成 embedding，Milvus 是唯一向量存储、索引和召回后端；未配置、不可用或模型/投影身份不一致时，semantic / hybrid 明确失败，不自动改关键词，也不使用本地向量。keyword 是用户显式选择的独立策略。
+- 基础设施用仓库根目录 `docker-compose.yml` 一条命令拉起：`docker compose up -d --wait`。包含 PostgreSQL、独立 etcd、minio、Milvus standalone 与 Attu（<http://127.0.0.1:30001>）五个容器，全部端口只绑 `127.0.0.1`。四个存储服务使用 Linux 命名卷；已有 Windows bind 数据先按 [迁移指南](docs/2026-10-19-Docker-Linux-volume-migration.md) 停机复制与核验，旧目录作为离线副本保留。
 - Milvus **不使用内嵌 etcd**：元数据由独立的 `milvus-etcd` 承担，避免 Milvus 与 etcd 争抢同一数据目录与 2379 端口。维护与迁移见 `docs/2026-10-01-Docker基础设施维护手册.md`，一键验证 `bash scripts/verify-compose-stack.sh`。
 - Neo4j 是可重建的图谱投影副本。完成连接配置后，projection worker 会自动消费项目 outbox 并追平水位；手动入口用于显式重建或故障恢复。多个项目可共用一个 database，并以项目和 generation 隔离。
 - 配置只从 `.env` 加载（全部 `KG_` 前缀键）；`.env.example` 仅是参考模板，不作为配置源。shell 环境变量优先级最高，已设置的键不会被 `.env` 覆盖。
@@ -233,7 +232,7 @@ python -m knowledge_service.repository.migrate    # 应用待执行迁移（幂�
 
 ### 原生范围投影的发布与验收
 
-每个服务进程都会启动 projection worker。默认每 2 秒扫描、每项目每目标最多连续投递 10 个 batch，并每 60 秒做一次权威审计；多个实例依靠 PostgreSQL lease/fence 协调。Milvus 或 Neo4j 不可用时，worker 记录失败并重试，在线读取只在 cursor schema 正确、状态 `ready` 且 `applied_seq` 追平项目 watermark 时使用投影，否则走 PostgreSQL 范围下推降级路径。
+每个服务进程都会启动 projection worker。默认每 2 秒扫描、每项目每目标最多连续投递 10 个 batch，并每 60 秒做一次权威审计；多个实例依靠 PostgreSQL lease/fence 协调。不可用时 worker 记录失败并重试；在线投影必须满足 schema、ready 与项目水位条件。Milvus 语义/混合检索未就绪时明确失败；可选 Neo4j 图投影未就绪时由 PostgreSQL 在同一权威范围内构造图。
 
 0013–0015 需要按以下顺序滚动发布，不能把 0013–0015 当成一个无停顿步骤：
 
@@ -243,7 +242,7 @@ python -m knowledge_service.repository.migrate    # 应用待执行迁移（幂�
 4. 逐实例部署包含 projection worker 的新版本。观察 `projection_cursors`，等待 Milvus/Neo4j 均为 `ready` 且水位追平后再结束发布。
 5. schema mismatch 会触发 rebuild；切 alias 后旧 destination 保留 7 天。回滚窗口内继续双写，过期 destination 由 maintenance 清理。
 
-0018 为配置的应用角色补齐五张投影表的 SELECT / INSERT / UPDATE / DELETE 权限，不授予 DDL；已有数据库也必须执行。显式选择本体发布或未知本体归属时，当前 Milvus 结构无法表达该过滤，检索先在 PostgreSQL 权威范围中过滤再排名，来源及相邻片段复用同一范围。
+0018 为配置的应用角色补齐五张投影表的 SELECT / INSERT / UPDATE / DELETE 权限，不授予 DDL；已有数据库也必须执行。复杂本体/Metadata 范围先在 PostgreSQL 判断资格，再以分批准确 ID 交给 Milvus 原生 dense/BM25 召回并归并排名；来源及相邻片段复用同一范围。新增 0020/0021 支持范围分页和邻接读取，应用需使用完整迁移后的 schema。
 
 先生成不会连接服务的验收计划：
 
@@ -295,7 +294,7 @@ python scripts/rehearse_migration_0013.py --execute --allow-disposable-database 
 
 **不做什么（明确边界）**：项目级 ACL（只读用户能看全部项目）、登录失败锁定、口令强度策略、找回口令、操作审计界面都尚未接入；**超级管理员忘记口令没有自助找回**，只能由另一个超管重置（一个超管都没有时只能由 DBA 用 owner 凭据改 `users.password_hash`）。删除账号是物理删除（登录名会被释放、不可恢复），应用角色对 `users` 有 DELETE 权限（0001 的 `ALTER DEFAULT PRIVILEGES`），界面上「删除」按钮直接可用；更稳妥的做法是先「停用」观察。
 
-> 面向使用者的操作手册（含真机截图）：[docs/2026-10-07-用户手册（登录·账号·权限）.md](docs/2026-10-07-用户手册（登录·账号·权限）.md)。
+> 面向使用者的操作手册（含真机截图）：[新版完整手册：账号与人员管理](docs/2026-10-20-知识平台完整操作手册.md#chapter-02)。
 > 设计与取舍：[docs/2026-10-05-用户登录与权限.md](docs/2026-10-05-用户登录与权限.md)。真机权限矩阵复验：`python scripts/verify_auth_rbac.py --url http://127.0.0.1:8100`（当前 41/41 通过）。
 
 ---
@@ -326,29 +325,29 @@ python scripts/rehearse_migration_0013.py --execute --allow-disposable-database 
 D:\anaconda\envs\llm_model\python.exe -m pip install -e ".[semantica-runtime]"
 ```
 
-当前锁定 Semantica `>=0.7,<0.8` 与 Docling `>=2.130,<3`。Docling 首次解析某些 PDF 时可能需要本机已有的模型缓存；模型权重由部署者本地安装和管理。`KG_DOCUMENT_OCR_MODE=auto`（默认）为扫描 PDF 保留 OCR 路径，设为 `disabled` 可关闭。批次上传将原文件和附件固化到 `KG_SOURCE_OBJECT_ROOT`（默认 `data/sources`），通过项目授权的原文阅读器读取固定版本。Markdown + 相对附件 ZIP 可展开为多份文档，本地图片经独立 `KG_IMAGE_OCR_*` 的 RapidOCR 识别和质量门后再抽取；OCR 权重放在 `data/model/ocr/pp-ocr-v6-small`，请求不下载权重。批次并发、断点恢复和人工忽略操作见 [运维说明](docs/2026-10-14-批量知识写入与断点续跑运维说明.md)。旧上传接口继续兼容其暂存和任务行为。
+当前锁定 Semantica `>=0.7,<0.8` 与 Docling `>=2.130,<3`。Docling 首次解析某些 PDF 时可能需要本机已有的模型缓存；模型权重由部署者本地安装和管理。`KG_DOCUMENT_OCR_MODE=auto`（默认）为扫描 PDF 保留 OCR 路径，设为 `disabled` 可关闭。批次上传将原文件和附件固化到 `KG_SOURCE_OBJECT_ROOT`（默认 `data/sources`），通过项目授权的原文阅读器读取固定版本。Markdown + 相对附件 ZIP 可展开为多份文档，本地图片经独立 `KG_IMAGE_OCR_*` 的 RapidOCR 识别和质量门后再抽取；OCR 权重放在 `data/model/ocr/pp-ocr-v6-small`，请求不下载权重。批次并发、断点恢复和人工忽略操作见 [运维说明](docs/2026-10-14-批量知识写入与断点续跑运维说明.md)。批次任务统一保存原文并提供重试与进度。
 
-文件预览使用 `POST /api/projects/{project_id}/documents/upload/preview`，后台解析使用 `POST /api/projects/{project_id}/documents/upload/jobs`，均为 `multipart/form-data`，包含 `file` 与 JSON 字符串 `options`。原有 JSON `/documents/preview`、`/documents/jobs` 和同步 `/documents/upload` 保持兼容。
+文件预览使用 `POST /api/projects/{project_id}/documents/upload/preview`，后台解析使用 `POST /api/projects/{project_id}/documents/upload/jobs`，均为 `multipart/form-data`，包含 `file` 与 JSON 字符串 `options`。文本 JSON 预览与任务分别使用 `/documents/preview`、`/documents/jobs`；同步文件提交使用 `/documents/upload`。
 
 ### 实际处理链路
 
 - **受控入图（项目本体）**：原文收据 → 切片 → 逐片实体／关系抽取 → 项目内消歧融合 → 本体与关系校验 → 向量化 → 原子落库。
-- **开放发现**：原文收据 → 切片 → Semantica 开放实体／关系候选（可选业务属性候选）→ 多批次候选累计 → 基于当前本体版本归纳差异草案 → 人工核对并发布本体版本 → 使用该版本受控重解析原文 → 实体消歧／关系校验后进入正式图谱。开放候选始终与正式知识隔离，不参加图谱检索。
+- **开放发现**：原文收据 → 切片 → Semantica 开放实体／关系候选（可选业务属性候选）→ 多批次候选累计 → 显式选择候选并预览映射 → 仅复用正式术语时确认事实；需要新结构时加入指定草案 → 校验、审核后原子发布本体与本批正式事实。未确认候选不参加图谱检索。
 - **仅文档检索**：原文收据 → 切片 → 向量化 → 原子落库；不调用图谱抽取模型。
 
 “候选脑图”用于在发布前观察开放候选的结构：同类型且同名称的实体候选聚合为一个预览节点，重复三元组聚合为候选边，并展示生命周期、出现次数、属性和来源证据。该聚合不创建正式实体 ID，也不参与正式检索；“正式脑图”继续只展示已按本体解析和融合的知识。侧栏按「本体层·结构 / 实例层·知识 / 消费层·用起来 / 运行层·跑起来 / 系统层·管理」五组组织为层级菜单。
 
-受控入图模式会把类的稳定名称、中文标签、定义和父类作为独立的本体指导交给模型；关系抽取同样接收关系定义和 domain/range。指导信息与原文分字段传递，不会作为证据写入图谱。开放发现模式不使用项目白名单：实体类型和关系名称要求采用原文语言及领域词汇，再由 Semantica `OntologyGenerator` 归纳草案。每个 chunk 单独交给模型，不会在最后拼成整篇再做一次联合抽取。抽取失败会保留原文收据，派生知识不会部分提交。
+受控入图模式会把类的稳定名称、中文标签、定义和父类作为独立的本体指导交给模型；关系抽取同样接收关系定义和 domain/range。指导信息与原文分字段传递，不会作为证据写入图谱。开放发现模式不使用项目白名单：实体类型和关系名称要求采用原文语言及领域词汇，随后在候选清单中确认当前术语映射或提出结构命令。每个 chunk 单独交给模型，不会在最后拼成整篇再做一次联合抽取。抽取失败会保留原文收据，派生知识不会部分提交。
 
-两种流程的边界如下：约束模式适合本体较稳定的生产写入，无法映射或违反约束的结果进入知识审核；开放模式适合未知领域探索，所有结果先作为候选持续聚合，草案页面按实体类、关系和属性展示名称、定义、实例及相对父版本的差异。人工确认只发布本体契约，不直接发布候选实例。IRI 作为跨版本稳定内部标识，界面默认显示业务标签和局部技术名称。
+两种流程的边界如下：约束模式适合本体较稳定的生产写入，无法映射或违反约束的结果进入知识审核；开放模式适合未知领域探索，所有结果先作为候选持续聚合，草案页面按实体类、关系和属性展示名称、定义、实例及相对父版本的差异。草案发布按明确绑定的候选范围写入正式事实，并接受对应来源断言。IRI 作为跨版本稳定内部标识，界面默认显示业务标签和局部技术名称。
 
-“发布本体”和“构建实例图谱”是两个阶段：开放候选保留来源文档、片段位置和候选 ID；发布草案时系统只创建带父版本、候选快照和术语差异的新本体版本，不把候选直接写成正式实体或关系。随后用明确选择的本体版本重解析原文，经过实体消歧、关系约束和审核后才写入正式图谱。已经使用旧本体写入的知识继续绑定旧版本，不自动迁移；如需迁移，应另建可审计的迁移任务，不能静默改写历史。
+开放候选保留来源文档、片段位置和候选 ID。选批发布使用同一事务保存本体版本、关联正式事实和来源断言；仅复用已发布术语时直接确认所选事实。向量及图数据库作为派生投影异步推进，发布回执分别记录事实新增、复用和投影状态。已有事实的本体归属与历史版本不被新发布改写，后续调整经受控重分类处理。
 
 ### 可选解析设置
 
 | 选项 | 当前行为 |
 |---|---|
-| 固定长度＋重叠 | 默认最大 1800 字符、重叠 200；兼容原流程 |
+| 固定长度＋重叠 | 默认最大 1800 字符、重叠 200 |
 | 段落／句子边界 | 长度窗口内优先寻找段落或句子边界；不是完整递归拆分与合并 |
 | 标题／中文条款 | 即使全文未超长也按结构拆分；识别 Markdown 标题、“第一条”“一、”等；有中文上层条款时，数字子清单保留在条款内 |
 | 超长条款 | 条款内按最大长度续片并重叠；独立条款之间不重叠 |
@@ -423,7 +422,7 @@ JSON `/api/projects/{p}/qa` 与 SSE `/api/projects/{p}/qa/stream` 共用证据�
 
 证据摘要对 E/R/F/U 一次批量读取冻结活动、边和不可变版本；有效期核对批量读取原文版本及所选系统知识时点的文档治理版本。读取缓存仅在当前调用内使用，规则修订后下次请求重新核对。
 
-Milvus 关键词模式只执行 BM25，不加载或调用查询向量编码器；语义和混合模式才计算向量，并继续在同次多平台检索间共享查询向量。因此关键词查询不会再承担一次无用的 embedding 冷启动，但语义模式仍需关注模型预热。
+显式关键词模式不生成查询向量；语义和混合模式才计算向量，并在同次多平台检索间共享查询向量。语义模式仍需关注模型预热，Milvus 或编码器不可用时明确失败，不自动改成关键词。
 
 JSON 回答和 SSE 的 `done` 事件新增 `timings_ms`：`retrieval` 检索、`eligibility` 有效期/来源核对、`freeze` 冻结提交、`summaries` 证据摘要、`complete` 答案核验与保存、`total` 请求总计；调用模型时还有 `llm`。SSE 的 `llm_first_content` 是模型调用开始到首个正文片段的等待，包含在 `llm` 内，不能重复相加。JSON 无法测模型首字，证据模式不伪造模型耗时。日志也记录这些数值，不记录提示词或密钥。`total` 不包含客户端网络传输和页面渲染；SSE 还可能受客户端读取速度影响。
 
@@ -469,11 +468,13 @@ JSON 回答和 SSE 的 `done` 事件新增 `timings_ms`：`retrieval` 检索、`
 - 第三行是判断「慢在哪」的关键：返回 3 个节点、读了 2401 行，说明耗时全在扫描而不是图谱计算。
 - 分不清服务端还是浏览器时：`POST /subgraph` 的响应带 `timing_ms.total`，图谱摘要会显示「服务 N ms」；浏览器侧用 `localStorage.kgDebug='1'` 或访问 `?debug=1` 打开 `[kg]` 前缀的前端计时（默认静默），可看到 `subgraph`／`graph-layout`／`fit-graph` 各占多少毫秒。
 
-日志里能直接看到的已知读放大：
+当前页面读取协议（2026-10-21）：
 
-- `repository.query` 只按系统时间下推，`kinds`、业务有效期和 metadata 都在 Python 侧过滤，成本与项目全量版本历史成正比。`/subgraph`、`/entity-options`、`/dashboard`、`/sources`、`/records/query` 共用这条路径。
-- 候选脑图与 `/ontology-discovery` 每次请求把「当前记录」扫两遍（`_candidates` 一次、`_candidate_lifecycle` 一次）。
-- `repository.list_artifacts` 先解码所有项目的草案、再按项目过滤；草案里嵌了完整候选快照，所以这一步的解码量远大于返回值（日志的 `decoded=` 与 `kept=` 对比可见）。
+- 知识台账用 `/records/page` 游标分页；资料库用来源摘要投影并按需读取正文；正式来源由 assertions 的多对多关联裁决。
+- 候选脑图与 `/ontology-discovery` 共用当前候选窄投影，不再扫描全项目事实或读取旧 discovery 草案副本。
+- 开放发现统一经候选选择、只读预览、确认复用或加入指定工作草案；结构发布统一经过草案命令、校验、审核和原子发布。
+- 旧全量 `/records/query`、旧发现自动生成/收尾、本体直写和旧项目迁入接口已移除。旧数据格式不触发读取时迁移。
+- 适用范围维度统一使用 `{mode, values}` 对象；快照只导出和接受当前线格式 18，旧格式明确拒绝。
 
 详见 [解析日志定位](docs/解析日志定位.md)。数据契约与更多 API 说明见 [服务使用说明](docs/KNOWLEDGE_SERVICE.md)；其中早期 `.venv-service` 安装记录供参考，当前环境与配置以上述 conda 说明为准。
 
@@ -499,9 +500,9 @@ JSON 回答和 SSE 的 `done` 事件新增 `timings_ms`：`retrieval` 检索、`
 
 本体变更草案绑定来源文档、知识候选、文档版本和本体基准版本。批准前展示现有知识引用、约束引用和关联候选数量；调整被引用的术语属于高影响变更，必须额外确认。批准发布本体版本、草案决定和候选重校验结果采用同一个 PostgreSQL 事务。本体或候选已变化时返回版本冲突，要求重新评估，不会覆盖新版。
 
-批准后重新检索/加载图谱查看，时间及 metadata 筛选仍然生效；配置 Neo4j 后，projection worker 会自动投递审核产生的新版本，手动重建仅用于恢复异常投影。当前是本机服务的审核留痕，不包含审核员身份认证、角色权限、多级审批或批量批准。拒绝/批准没有专用撤销按钮；已入图关系可通过现有知识治理功能处理。
+批准后重新检索/加载图谱查看，时间及 metadata 筛选仍然生效；配置 Neo4j 后，projection worker 会自动投递审核产生的新版本，手动重建仅用于恢复异常投影。审核身份来自当前认证会话，写接口按角色授权；客户端不能自行指定审核身份。拒绝/批准没有专用撤销按钮；已入图关系可通过现有知识治理功能处理。
 
-知识审核接口：`GET /api/projects/{p}/reviews`，`POST /api/projects/{p}/reviews/{document_id}/{candidate_id}`。本体草案接口：`GET/POST /api/projects/{p}/ontology-change-proposals`，`GET /api/projects/{p}/ontology-change-proposals/{id}`，`POST /api/projects/{p}/ontology-change-proposals/{id}/decision`。候选 `kind` 为 entity/relation/attribute；旧版无 kind 的候选按 relation 兼容。属性批准后的实体版本使用审核时本体，其他知识不自动迁移。
+知识审核接口：`GET /api/projects/{p}/reviews`，`POST /api/projects/{p}/reviews/{document_id}/{candidate_id}`。本体草案接口：`GET/POST /api/projects/{p}/ontology-change-proposals`，`GET /api/projects/{p}/ontology-change-proposals/{id}`，`POST /api/projects/{p}/ontology-change-proposals/{id}/decision`。候选 `kind` 为 entity/relation/attribute。属性批准后的实体版本使用审核时本体，其他知识不自动迁移。
 
 升级前失败的任务未保存模型关系响应，不能从日志恢复审核候选。需要人工核对后重新上传解析，可能再次产生模型费用；服务不会自动重跑。
 
@@ -601,13 +602,15 @@ python -u -m knowledge_service --port 8100
 
 | 文档 | 内容 |
 |---|---|
+| [知识平台完整操作手册（网页阅读版）](docs/知识平台完整操作手册.html) · [Markdown 源文](docs/2026-10-20-知识平台完整操作手册.md) | 当前工作区的完整操作说明：资料、持续建模、事实治理、检索问答、全量图、消融、项目与人员管理；包含真实界面截图及失败恢复路径 |
+| [当前交付能力台账](docs/research/2026-10-19-full-capability-ui-parity.md) · [改造验收记录](docs/research/2026-10-19-redesign-acceptance.md) | 逐项入口、API/守卫和已有行为证据；区分已实现、待验证与独立后续阶段，15 万实体的绘图证据不替代完整产品容量验收 |
 | `docs/KNOWLEDGE_SERVICE.md` | 数据契约、API 与更多服务说明 |
 | `docs/2026-09-09-能力对标与修正.md` | 新版服务能力对标记录 |
 | `docs/2026-09-09-同屏工作台与加载优化.md` | 工作台性能优化记录 |
 | `docs/2026-09-10-Semantica抽取与本体约束机制.md` | 抽取与本体约束机制 |
 | `docs/milvus-向量化改造设计.md` | Milvus 向量检索设计 |
 | `docs/2026-10-01-Docker基础设施维护手册.md` | PostgreSQL / Milvus / etcd / minio / Attu 容器的启动、迁移与故障处置 |
-| `docs/2026-10-01-本体工作台操作手册.md` | ⚠️ 已过时：三页已合并为「本体建模层」单画布，五阶段门禁改为草案三态。历史参考：三页怎么操作、画布两步连线、一键批准口径、证据怎么读 |
+| [本体建模与三条写入路径](docs/2026-10-20-知识平台完整操作手册.md#chapter-04) | 统一操作：按已有本体补知识、开放发现后复用或加入明确草案、手动维护结构；源码、约束、审核与发布见第 11–14 章 |
 | `docs/2026-10-01-本体工作台优化方案.md` | 工作台改造的设计依据与实施顺序 |
 | `docs/2026-10-01-本体治理模块拆分设计.md` | ⚠️ 已过时：三页已合并为单画布。历史参考：审核台 / 设计台 / 档案 拆分设计的职责边界与验收标准 |
 | `docs/2026-10-01-规划与代码差距核对报告.md` | 规划 vs 代码的实测差距清单 |

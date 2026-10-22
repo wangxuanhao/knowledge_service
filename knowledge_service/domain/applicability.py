@@ -54,18 +54,15 @@ def _normalized_values(values, dimension):
 
 
 def normalize_dimension(value, name):
-    """Normalize one legacy list or native mode/value dimension."""
+    """Normalize the current mode/values dimension contract."""
     if name not in DIMENSIONS:
         raise ValueError('未知适用范围维度')
     if hasattr(value, 'model_dump'):
         value = value.model_dump()
     if value is None:
         return {'mode': 'unknown', 'values': []}
-    if isinstance(value, (list, tuple)):
-        values = _normalized_values(value, name)
-        return {'mode': 'specific' if values else 'unknown', 'values': values}
     if not isinstance(value, dict):
-        raise ValueError('适用范围维度必须为数组或 mode/values 对象')
+        raise ValueError('适用范围维度必须为 mode/values 对象')
     if set(value) - {'mode', 'values'}:
         raise ValueError('适用范围维度包含未知字段')
     mode = value.get('mode')
@@ -106,13 +103,7 @@ def scope_identity(applicability):
     normalized = normalize_applicability(applicability)
     if all(item['mode'] == 'unknown' for item in normalized.values()):
         return ''
-    if any(item['mode'] == 'all' for item in normalized.values()):
-        identity = {'schema_version': 2, **normalized}
-    else:
-        identity = {
-            dimension: normalized[dimension]['values']
-            for dimension in DIMENSIONS
-        }
+    identity = {'schema_version': 2, **normalized}
     payload = json.dumps(
         identity, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
     return hashlib.sha256(payload.encode('utf-8')).hexdigest()

@@ -1,0 +1,2272 @@
+{
+  "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+  "steps": [
+    {
+      "action": "project_select",
+      "observed_s": 2.462,
+      "requests": [
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology-discovery",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-search",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "project_select",
+          "start": 3373.7000000001863,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at renderDiscoveryHint (http://127.0.0.1:8100/assets/workbench.js?v=library-drawers-20261020-1:31:278)",
+            "    at $.onchange (http://127.0.0.1:8100/assets/workbench.js?v=library-drawers-20261020-1:34:419)",
+            "    at get.onchange (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:714:5)",
+            "    at $.onchange (http://127.0.0.1:8100/assets/record-dialog.js?v=redesign-20261019-2:291:53)",
+            "    at $.onchange (http://127.0.0.1:8100/assets/evidence-inspector.js?v=progressive-graph-20261020-1:148:89)",
+            "    at $.onchange (http://127.0.0.1:8100/assets/task-review.js?v=public-open-1:128:66)",
+            "    at projectControl.onchange (http://127.0.0.1:8100/assets/full-graph-view.js?v=progressive-graph-20261020-1:87:80)"
+          ],
+          "headers": 4976.5,
+          "status": 200,
+          "bytes": 653372
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-search",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "project_select",
+          "start": 3381.399999999907,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at loadOntologyTerms (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:24:17)",
+            "    at get.onchange (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:722:91)",
+            "    at $.onchange (http://127.0.0.1:8100/assets/record-dialog.js?v=redesign-20261019-2:291:53)",
+            "    at $.onchange (http://127.0.0.1:8100/assets/evidence-inspector.js?v=progressive-graph-20261020-1:148:89)",
+            "    at $.onchange (http://127.0.0.1:8100/assets/task-review.js?v=public-open-1:128:66)",
+            "    at projectControl.onchange (http://127.0.0.1:8100/assets/full-graph-view.js?v=progressive-graph-20261020-1:87:80)"
+          ],
+          "headers": 3571.899999999907,
+          "status": 200,
+          "bytes": 10960
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/applicability-values",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-search",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "project_select",
+          "start": 3383.100000000093,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at HTMLSelectElement.loadApplicabilityVocabulary (http://127.0.0.1:8100/assets/ingest-mode.js?v=library-drawers-20261020-1:85:24)"
+          ],
+          "headers": 3764.7000000001863,
+          "status": 200,
+          "bytes": 55
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology-drafts",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-search",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "project_select",
+          "start": 3396.2999999998137,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at loadDrafts (http://127.0.0.1:8100/assets/ontology-model-catalog.js?v=unified-intake-20261020-1:116:24)",
+            "    at render (http://127.0.0.1:8100/assets/ontology-model-catalog.js?v=unified-intake-20261020-1:203:63)",
+            "    at Object.mount (http://127.0.0.1:8100/assets/ontology-model-catalog.js?v=unified-intake-20261020-1:191:5)",
+            "    at buildSkeleton (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:562:54)",
+            "    at render (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:443:19)",
+            "    at HTMLSelectElement.<anonymous> (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:815:22)"
+          ],
+          "headers": 3850.2999999998137,
+          "status": 200,
+          "bytes": 109619
+        }
+      ],
+      "visible": "tab-search",
+      "longtasks": [
+        {
+          "start": 3367.399999999907,
+          "ms": 84,
+          "action": "project_select"
+        }
+      ]
+    },
+    {
+      "action": "open_sources",
+      "observed_s": 1.817,
+      "requests": [
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/sources",
+          "queryKeys": [
+            "limit",
+            "summary_only",
+            "state"
+          ],
+          "query": "?limit=50&summary_only=true&state=all",
+          "method": "POST",
+          "body": {
+            "known_at": null,
+            "valid_at": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown"
+          ],
+          "page": "tab-sources",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_sources",
+          "start": 5909.299999999814,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/sources-view.js?v=unified-intake-20261020-1:191:26",
+            "    at load (http://127.0.0.1:8100/assets/sources-view.js?v=unified-intake-20261020-1:202:7)",
+            "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/sources-view.js?v=unified-intake-20261020-1:231:80)"
+          ],
+          "headers": 6370.399999999907,
+          "status": 200,
+          "bytes": 4959
+        }
+      ],
+      "visible": "tab-sources",
+      "longtasks": [
+        {
+          "start": 5904.799999999814,
+          "ms": 146,
+          "action": "open_sources"
+        }
+      ]
+    },
+    {
+      "action": "open_records",
+      "observed_s": 2.034,
+      "requests": [
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/resolution-reviews",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_records",
+          "start": 7818,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at refresh (http://127.0.0.1:8100/assets/entity-governance.js?v=redesign-20261019-2:116:24)",
+            "    at Object.mount (http://127.0.0.1:8100/assets/entity-governance.js?v=redesign-20261019-2:150:77)",
+            "    at HTMLButtonElement.load (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:579:95)"
+          ],
+          "headers": 7975.200000000186,
+          "status": 200,
+          "bytes": 24
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "kinds": [
+              "entity"
+            ],
+            "limit": 50,
+            "cursor": null,
+            "known_at": null,
+            "valid_at": null,
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown",
+            "ontology_scope",
+            "ontology_ids",
+            "kinds",
+            "query",
+            "cursor",
+            "limit"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_records",
+          "start": 7821.600000000093,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:550:51",
+            "    at fetchPage (http://127.0.0.1:8100/assets/record-create.js?v=library-drawers-20261020-1:93:26)",
+            "    at Object.load (http://127.0.0.1:8100/assets/record-create.js?v=library-drawers-20261020-1:98:112)",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:554:105)",
+            "    at HTMLButtonElement.load (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:580:104)"
+          ],
+          "headers": 7975.700000000186,
+          "status": 200,
+          "bytes": 35766
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontologies",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_records",
+          "start": 8070.399999999907,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:561:39)"
+          ],
+          "headers": 8248.200000000186,
+          "status": 200,
+          "bytes": 11136
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "kinds": [
+              "relation"
+            ],
+            "limit": 1,
+            "cursor": null,
+            "known_at": null,
+            "valid_at": null,
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown",
+            "ontology_scope",
+            "ontology_ids",
+            "kinds",
+            "query",
+            "cursor",
+            "limit"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_records",
+          "start": 8071.299999999814,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:563:31",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:562:106)"
+          ],
+          "headers": 8598.5,
+          "status": 200,
+          "bytes": 1586
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "kinds": [
+              "attribute"
+            ],
+            "limit": 1,
+            "cursor": null,
+            "known_at": null,
+            "valid_at": null,
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown",
+            "ontology_scope",
+            "ontology_ids",
+            "kinds",
+            "query",
+            "cursor",
+            "limit"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_records",
+          "start": 8072.600000000093,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:563:31",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:562:106)"
+          ],
+          "headers": 8417.899999999907,
+          "status": 200,
+          "bytes": 43
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "kinds": [
+              "chunk"
+            ],
+            "limit": 1,
+            "cursor": null,
+            "known_at": null,
+            "valid_at": null,
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown",
+            "ontology_scope",
+            "ontology_ids",
+            "kinds",
+            "query",
+            "cursor",
+            "limit"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_records",
+          "start": 8074.5,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:563:31",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:562:106)"
+          ],
+          "headers": 8330.600000000093,
+          "status": 200,
+          "bytes": 3114
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/assertions/batch",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "record_ids_count": 28
+          },
+          "bodyKeys": [
+            "record_ids"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_records",
+          "start": 8076,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at pageAssertions (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:521:28)",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:565:85)"
+          ],
+          "headers": 8437.5,
+          "status": 200,
+          "bytes": 5322
+        }
+      ],
+      "visible": "tab-records",
+      "longtasks": [
+        {
+          "start": 7810.100000000093,
+          "ms": 161,
+          "action": "open_records"
+        },
+        {
+          "start": 8017.100000000093,
+          "ms": 60,
+          "action": "open_records"
+        },
+        {
+          "start": 8078.100000000093,
+          "ms": 81,
+          "action": "open_records"
+        }
+      ]
+    },
+    {
+      "action": "open_search",
+      "observed_s": 1.592,
+      "requests": [
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-search",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_search",
+          "start": 9968.700000000186,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at loadOntologyTerms (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:24:17)",
+            "    at catchUpOntology (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:751:76)",
+            "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:782:7)"
+          ],
+          "headers": 10519,
+          "status": 200,
+          "bytes": 10960
+        }
+      ],
+      "visible": "tab-search",
+      "longtasks": []
+    },
+    {
+      "action": "open_qa",
+      "observed_s": 2.683,
+      "requests": [
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-qa",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_qa",
+          "start": 11990.399999999907,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at loadOntologyTerms (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:24:17)",
+            "    at catchUpOntology (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:751:76)",
+            "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:782:7)"
+          ],
+          "headers": 12891.600000000093,
+          "status": 200,
+          "bytes": 10960
+        }
+      ],
+      "visible": "tab-qa",
+      "longtasks": [
+        {
+          "start": 11981.899999999907,
+          "ms": 531,
+          "action": "open_qa"
+        },
+        {
+          "start": 12513.399999999907,
+          "ms": 95,
+          "action": "open_qa"
+        },
+        {
+          "start": 12754.200000000186,
+          "ms": 63,
+          "action": "open_qa"
+        }
+      ]
+    },
+    {
+      "action": "open_ontology-model",
+      "observed_s": 3.68,
+      "requests": [
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/reclassify",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-ontology-model",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_ontology-model",
+          "start": 14990.299999999814,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/ontology-model-reclassify.js?v=page-latency-20261020-2:118:25",
+            "    at refresh (http://127.0.0.1:8100/assets/ontology-model-reclassify.js?v=page-latency-20261020-2:138:9)",
+            "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/ontology-model-reclassify.js?v=page-latency-20261020-2:480:64)"
+          ],
+          "headers": 15866.299999999814,
+          "status": 200,
+          "bytes": 832
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-ontology-model",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_ontology-model",
+          "start": 15113.200000000186,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at refresh (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:147:7)",
+            "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:803:57)"
+          ],
+          "headers": 15468.299999999814,
+          "status": 200,
+          "bytes": 10960
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology-discovery",
+          "queryKeys": [
+            "compact"
+          ],
+          "query": "?compact=true",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-ontology-model",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_ontology-model",
+          "start": 15114.399999999907,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at loadDiscovery (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:237:20)",
+            "    at refresh (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:148:7)",
+            "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:803:57)"
+          ],
+          "headers": 17689,
+          "status": 200,
+          "bytes": 15525
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology-drafts",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-ontology-model",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_ontology-model",
+          "start": 17690.200000000186,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at refresh (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:183:28)"
+          ],
+          "headers": 17859.5,
+          "status": 200,
+          "bytes": 109619
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontologies",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-ontology-model",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_ontology-model",
+          "start": 18045.5,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/ontology-model-panel.js?v=unified-intake-20261020-1:1503:27",
+            "    at ensureVersions (http://127.0.0.1:8100/assets/ontology-model-panel.js?v=unified-intake-20261020-1:1518:7)",
+            "    at renderActions (http://127.0.0.1:8100/assets/ontology-model-panel.js?v=unified-intake-20261020-1:1207:5)",
+            "    at renderPanel (http://127.0.0.1:8100/assets/ontology-model-panel.js?v=unified-intake-20261020-1:1789:5)",
+            "    at Object.render (http://127.0.0.1:8100/assets/ontology-model-panel.js?v=unified-intake-20261020-1:1818:21)",
+            "    at render (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:461:52)",
+            "    at refresh (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:226:5)"
+          ],
+          "headers": 18267.299999999814,
+          "status": 200,
+          "bytes": 11136
+        }
+      ],
+      "visible": "tab-ontology-model",
+      "longtasks": [
+        {
+          "start": 14988,
+          "ms": 132,
+          "action": "open_ontology-model"
+        },
+        {
+          "start": 17863.100000000093,
+          "ms": 185,
+          "action": "open_ontology-model"
+        },
+        {
+          "start": 18048.899999999907,
+          "ms": 111,
+          "action": "open_ontology-model"
+        }
+      ]
+    },
+    {
+      "action": "open_runtime",
+      "observed_s": 4.745,
+      "requests": [
+        {
+          "path": "/api/storage/neo4j/check",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-runtime",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_runtime",
+          "start": 18721.700000000186,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at inspectStorage (http://127.0.0.1:8100/assets/storage.js?v=runtime-1:14:21)",
+            "    at run (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:42:27)",
+            "    at show (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:61:13)",
+            "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:77:36)"
+          ],
+          "headers": 18801.200000000186,
+          "status": 503,
+          "bytes": 91
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/storage/neo4j",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-runtime",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_runtime",
+          "start": 18723.899999999907,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at inspectStorage (http://127.0.0.1:8100/assets/storage.js?v=runtime-1:15:32)",
+            "    at run (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:42:27)",
+            "    at show (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:61:13)",
+            "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:77:36)"
+          ],
+          "headers": 22712,
+          "status": 200,
+          "bytes": 408
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/dashboard",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-runtime",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_runtime",
+          "start": 18725.600000000093,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at dashboard (http://127.0.0.1:8100/assets/workbench.js?v=library-drawers-20261020-1:36:103)",
+            "    at refreshDashboard (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:1096:15)",
+            "    at run (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:42:27)",
+            "    at show (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:61:13)",
+            "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:77:36)"
+          ],
+          "headers": 23095.5,
+          "status": 200,
+          "bytes": 1391
+        }
+      ],
+      "visible": "tab-runtime",
+      "longtasks": []
+    },
+    {
+      "action": "open_quality",
+      "observed_s": 1.612,
+      "requests": [
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/snapshots",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-quality",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_quality",
+          "start": 23539.5,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at snapshots (http://127.0.0.1:8100/assets/workbench.js?v=library-drawers-20261020-1:429:52)",
+            "    at http://127.0.0.1:8100/assets/workbench.js?v=library-drawers-20261020-1:432:40",
+            "    at run (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:42:27)",
+            "    at Object.show (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:61:13)",
+            "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/menu-hierarchy.js?v=redesign-20261019-2:28:76)"
+          ],
+          "headers": 23758.299999999814,
+          "status": 200,
+          "bytes": 16
+        }
+      ],
+      "visible": "tab-quality",
+      "longtasks": []
+    },
+    {
+      "action": "open_projects",
+      "observed_s": 1.604,
+      "requests": [
+        {
+          "path": "/api/projects",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-projects",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_projects",
+          "start": 25241.100000000093,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at Object.renderProjects [as refresh] (http://127.0.0.1:8100/assets/projects-view.js?v=redesign-20261019-3:227:28)",
+            "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/menu-hierarchy.js?v=redesign-20261019-2:27:78)"
+          ],
+          "headers": 25461,
+          "status": 200,
+          "bytes": 3861
+        }
+      ],
+      "visible": "tab-projects",
+      "longtasks": []
+    },
+    {
+      "action": "open_useradmin",
+      "observed_s": 1.699,
+      "requests": [
+        {
+          "path": "/api/users",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-useradmin",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "open_useradmin",
+          "start": 26954,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/user-admin.js?v=redesign-20261019-2:9:62)",
+            "    at load (http://127.0.0.1:8100/assets/user-admin.js?v=redesign-20261019-2:23:128)",
+            "    at Object.open (http://127.0.0.1:8100/assets/user-admin.js?v=redesign-20261019-2:20:102)",
+            "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/menu-hierarchy.js?v=redesign-20261019-2:26:76)"
+          ],
+          "headers": 27041.700000000186,
+          "status": 200,
+          "bytes": 436
+        }
+      ],
+      "visible": "tab-useradmin",
+      "longtasks": [
+        {
+          "start": 26950.200000000186,
+          "ms": 74,
+          "action": "open_useradmin"
+        }
+      ]
+    },
+    {
+      "action": "revisit_sources",
+      "observed_s": 1.631,
+      "requests": [
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/sources",
+          "queryKeys": [
+            "limit",
+            "summary_only",
+            "state"
+          ],
+          "query": "?limit=50&summary_only=true&state=all",
+          "method": "POST",
+          "body": {
+            "known_at": null,
+            "valid_at": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown"
+          ],
+          "page": "tab-sources",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "revisit_sources",
+          "start": 28717.700000000186,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/sources-view.js?v=unified-intake-20261020-1:191:26",
+            "    at load (http://127.0.0.1:8100/assets/sources-view.js?v=unified-intake-20261020-1:202:7)",
+            "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/sources-view.js?v=unified-intake-20261020-1:231:80)"
+          ],
+          "headers": 29187.899999999907,
+          "status": 200,
+          "bytes": 4959
+        }
+      ],
+      "visible": "tab-sources",
+      "longtasks": []
+    },
+    {
+      "action": "idle_sources_6s",
+      "observed_s": 6.33,
+      "requests": [],
+      "visible": "tab-sources",
+      "longtasks": []
+    },
+    {
+      "action": "revisit_records",
+      "observed_s": 1.604,
+      "requests": [
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/resolution-reviews",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "revisit_records",
+          "start": 36824.5,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at refresh (http://127.0.0.1:8100/assets/entity-governance.js?v=redesign-20261019-2:116:24)",
+            "    at Object.mount (http://127.0.0.1:8100/assets/entity-governance.js?v=redesign-20261019-2:150:77)",
+            "    at HTMLButtonElement.load (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:579:95)"
+          ],
+          "headers": 37374.299999999814,
+          "status": 200,
+          "bytes": 24
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "kinds": [
+              "entity"
+            ],
+            "limit": 50,
+            "cursor": null,
+            "known_at": null,
+            "valid_at": null,
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown",
+            "ontology_scope",
+            "ontology_ids",
+            "kinds",
+            "query",
+            "cursor",
+            "limit"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "revisit_records",
+          "start": 36826.200000000186,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:550:51",
+            "    at fetchPage (http://127.0.0.1:8100/assets/record-create.js?v=library-drawers-20261020-1:93:26)",
+            "    at Object.load (http://127.0.0.1:8100/assets/record-create.js?v=library-drawers-20261020-1:98:112)",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:554:105)",
+            "    at HTMLButtonElement.load (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:580:104)"
+          ],
+          "headers": 37458.89999999991,
+          "status": 200,
+          "bytes": 35766
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontologies",
+          "queryKeys": [],
+          "query": "",
+          "method": "GET",
+          "body": {},
+          "bodyKeys": [],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "revisit_records",
+          "start": 37464.799999999814,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:561:39)"
+          ],
+          "headers": 37755.299999999814,
+          "status": 200,
+          "bytes": 11136
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "kinds": [
+              "relation"
+            ],
+            "limit": 1,
+            "cursor": null,
+            "known_at": null,
+            "valid_at": null,
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown",
+            "ontology_scope",
+            "ontology_ids",
+            "kinds",
+            "query",
+            "cursor",
+            "limit"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "revisit_records",
+          "start": 37465.39999999991,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:563:31",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:562:106)"
+          ],
+          "headers": 37722,
+          "status": 200,
+          "bytes": 1586
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "kinds": [
+              "attribute"
+            ],
+            "limit": 1,
+            "cursor": null,
+            "known_at": null,
+            "valid_at": null,
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown",
+            "ontology_scope",
+            "ontology_ids",
+            "kinds",
+            "query",
+            "cursor",
+            "limit"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "revisit_records",
+          "start": 37466.60000000009,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:563:31",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:562:106)"
+          ],
+          "headers": 37651.89999999991,
+          "status": 200,
+          "bytes": 43
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "kinds": [
+              "chunk"
+            ],
+            "limit": 1,
+            "cursor": null,
+            "known_at": null,
+            "valid_at": null,
+            "ontology_scope": "all",
+            "ontology_ids": null,
+            "include_unknown": true,
+            "filters": null
+          },
+          "bodyKeys": [
+            "known_at",
+            "valid_at",
+            "filters",
+            "include_unknown",
+            "ontology_scope",
+            "ontology_ids",
+            "kinds",
+            "query",
+            "cursor",
+            "limit"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "revisit_records",
+          "start": 37467.799999999814,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:563:31",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:562:106)"
+          ],
+          "headers": 37667.5,
+          "status": 200,
+          "bytes": 3114
+        },
+        {
+          "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/assertions/batch",
+          "queryKeys": [],
+          "query": "",
+          "method": "POST",
+          "body": {
+            "record_ids_count": 28
+          },
+          "bodyKeys": [
+            "record_ids"
+          ],
+          "page": "tab-records",
+          "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+          "action": "revisit_records",
+          "start": 37469.700000000186,
+          "stack": [
+            "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+            "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+            "    at pageAssertions (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:521:28)",
+            "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:565:85)"
+          ],
+          "headers": 37687.5,
+          "status": 200,
+          "bytes": 5322
+        }
+      ],
+      "visible": "tab-records",
+      "longtasks": []
+    },
+    {
+      "action": "idle_records_6s",
+      "observed_s": 6.31,
+      "requests": [],
+      "visible": "tab-records",
+      "longtasks": []
+    }
+  ],
+  "errors": [],
+  "startup": [
+    {
+      "path": "/api/auth/policy",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": null,
+      "project": null,
+      "action": "startup",
+      "start": 404.89999999990687,
+      "stack": [
+        "    at loadAuthPolicy (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:224:23)",
+        "    at bootstrap (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:233:9)",
+        "    at http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:280:5",
+        "    at http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:281:3"
+      ],
+      "headers": 823,
+      "status": 401,
+      "bytes": 79
+    },
+    {
+      "path": "/api/auth/me",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-search",
+      "project": "",
+      "action": "startup",
+      "start": 825.1000000000931,
+      "stack": [
+        "    at checkSession (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:252:9)",
+        "    at http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:236:13"
+      ],
+      "headers": 1315.7999999998137,
+      "status": 200,
+      "bytes": 126
+    },
+    {
+      "path": "/api/projects",
+      "queryKeys": [
+        "include_counts"
+      ],
+      "query": "?include_counts=false",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-search",
+      "project": "",
+      "action": "startup",
+      "start": 1444.6000000000931,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at projects (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:87:46)",
+        "    at http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:1108:14"
+      ],
+      "headers": 1700.7999999998137,
+      "status": 200,
+      "bytes": 3861
+    },
+    {
+      "path": "/api/projects/463f2e99-ec8b-4ca2-9c0d-e469bc4d1411/ontology",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-search",
+      "project": "463f2e99-ec8b-4ca2-9c0d-e469bc4d1411",
+      "action": "startup",
+      "start": 1709.6000000000931,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at loadOntologyTerms (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:24:17)",
+        "    at get.onchange (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:722:91)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/record-dialog.js?v=redesign-20261019-2:291:53)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/evidence-inspector.js?v=progressive-graph-20261020-1:148:89)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/task-review.js?v=public-open-1:128:66)",
+        "    at projectControl.onchange (http://127.0.0.1:8100/assets/full-graph-view.js?v=progressive-graph-20261020-1:87:80)",
+        "    at http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:1108:292"
+      ],
+      "headers": 1872.7999999998137,
+      "status": 200,
+      "bytes": 26221
+    }
+  ],
+  "all_requests": [
+    {
+      "path": "/api/auth/policy",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": null,
+      "project": null,
+      "action": "startup",
+      "start": 404.89999999990687,
+      "stack": [
+        "    at loadAuthPolicy (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:224:23)",
+        "    at bootstrap (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:233:9)",
+        "    at http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:280:5",
+        "    at http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:281:3"
+      ],
+      "headers": 823,
+      "status": 401,
+      "bytes": 79
+    },
+    {
+      "path": "/api/auth/me",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-search",
+      "project": "",
+      "action": "startup",
+      "start": 825.1000000000931,
+      "stack": [
+        "    at checkSession (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:252:9)",
+        "    at http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:236:13"
+      ],
+      "headers": 1315.7999999998137,
+      "status": 200,
+      "bytes": 126
+    },
+    {
+      "path": "/api/projects",
+      "queryKeys": [
+        "include_counts"
+      ],
+      "query": "?include_counts=false",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-search",
+      "project": "",
+      "action": "startup",
+      "start": 1444.6000000000931,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at projects (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:87:46)",
+        "    at http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:1108:14"
+      ],
+      "headers": 1700.7999999998137,
+      "status": 200,
+      "bytes": 3861
+    },
+    {
+      "path": "/api/projects/463f2e99-ec8b-4ca2-9c0d-e469bc4d1411/ontology",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-search",
+      "project": "463f2e99-ec8b-4ca2-9c0d-e469bc4d1411",
+      "action": "startup",
+      "start": 1709.6000000000931,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at loadOntologyTerms (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:24:17)",
+        "    at get.onchange (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:722:91)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/record-dialog.js?v=redesign-20261019-2:291:53)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/evidence-inspector.js?v=progressive-graph-20261020-1:148:89)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/task-review.js?v=public-open-1:128:66)",
+        "    at projectControl.onchange (http://127.0.0.1:8100/assets/full-graph-view.js?v=progressive-graph-20261020-1:87:80)",
+        "    at http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:1108:292"
+      ],
+      "headers": 1872.7999999998137,
+      "status": 200,
+      "bytes": 26221
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology-discovery",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-search",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "project_select",
+      "start": 3373.7000000001863,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at renderDiscoveryHint (http://127.0.0.1:8100/assets/workbench.js?v=library-drawers-20261020-1:31:278)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/workbench.js?v=library-drawers-20261020-1:34:419)",
+        "    at get.onchange (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:714:5)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/record-dialog.js?v=redesign-20261019-2:291:53)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/evidence-inspector.js?v=progressive-graph-20261020-1:148:89)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/task-review.js?v=public-open-1:128:66)",
+        "    at projectControl.onchange (http://127.0.0.1:8100/assets/full-graph-view.js?v=progressive-graph-20261020-1:87:80)"
+      ],
+      "headers": 4976.5,
+      "status": 200,
+      "bytes": 653372
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-search",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "project_select",
+      "start": 3381.399999999907,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at loadOntologyTerms (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:24:17)",
+        "    at get.onchange (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:722:91)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/record-dialog.js?v=redesign-20261019-2:291:53)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/evidence-inspector.js?v=progressive-graph-20261020-1:148:89)",
+        "    at $.onchange (http://127.0.0.1:8100/assets/task-review.js?v=public-open-1:128:66)",
+        "    at projectControl.onchange (http://127.0.0.1:8100/assets/full-graph-view.js?v=progressive-graph-20261020-1:87:80)"
+      ],
+      "headers": 3571.899999999907,
+      "status": 200,
+      "bytes": 10960
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/applicability-values",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-search",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "project_select",
+      "start": 3383.100000000093,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at HTMLSelectElement.loadApplicabilityVocabulary (http://127.0.0.1:8100/assets/ingest-mode.js?v=library-drawers-20261020-1:85:24)"
+      ],
+      "headers": 3764.7000000001863,
+      "status": 200,
+      "bytes": 55
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology-drafts",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-search",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "project_select",
+      "start": 3396.2999999998137,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at loadDrafts (http://127.0.0.1:8100/assets/ontology-model-catalog.js?v=unified-intake-20261020-1:116:24)",
+        "    at render (http://127.0.0.1:8100/assets/ontology-model-catalog.js?v=unified-intake-20261020-1:203:63)",
+        "    at Object.mount (http://127.0.0.1:8100/assets/ontology-model-catalog.js?v=unified-intake-20261020-1:191:5)",
+        "    at buildSkeleton (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:562:54)",
+        "    at render (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:443:19)",
+        "    at HTMLSelectElement.<anonymous> (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:815:22)"
+      ],
+      "headers": 3850.2999999998137,
+      "status": 200,
+      "bytes": 109619
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/sources",
+      "queryKeys": [
+        "limit",
+        "summary_only",
+        "state"
+      ],
+      "query": "?limit=50&summary_only=true&state=all",
+      "method": "POST",
+      "body": {
+        "known_at": null,
+        "valid_at": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown"
+      ],
+      "page": "tab-sources",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_sources",
+      "start": 5909.299999999814,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/sources-view.js?v=unified-intake-20261020-1:191:26",
+        "    at load (http://127.0.0.1:8100/assets/sources-view.js?v=unified-intake-20261020-1:202:7)",
+        "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/sources-view.js?v=unified-intake-20261020-1:231:80)"
+      ],
+      "headers": 6370.399999999907,
+      "status": 200,
+      "bytes": 4959
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/resolution-reviews",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_records",
+      "start": 7818,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at refresh (http://127.0.0.1:8100/assets/entity-governance.js?v=redesign-20261019-2:116:24)",
+        "    at Object.mount (http://127.0.0.1:8100/assets/entity-governance.js?v=redesign-20261019-2:150:77)",
+        "    at HTMLButtonElement.load (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:579:95)"
+      ],
+      "headers": 7975.200000000186,
+      "status": 200,
+      "bytes": 24
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "kinds": [
+          "entity"
+        ],
+        "limit": 50,
+        "cursor": null,
+        "known_at": null,
+        "valid_at": null,
+        "ontology_scope": "all",
+        "ontology_ids": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown",
+        "ontology_scope",
+        "ontology_ids",
+        "kinds",
+        "query",
+        "cursor",
+        "limit"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_records",
+      "start": 7821.600000000093,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:550:51",
+        "    at fetchPage (http://127.0.0.1:8100/assets/record-create.js?v=library-drawers-20261020-1:93:26)",
+        "    at Object.load (http://127.0.0.1:8100/assets/record-create.js?v=library-drawers-20261020-1:98:112)",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:554:105)",
+        "    at HTMLButtonElement.load (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:580:104)"
+      ],
+      "headers": 7975.700000000186,
+      "status": 200,
+      "bytes": 35766
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontologies",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_records",
+      "start": 8070.399999999907,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:561:39)"
+      ],
+      "headers": 8248.200000000186,
+      "status": 200,
+      "bytes": 11136
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "kinds": [
+          "relation"
+        ],
+        "limit": 1,
+        "cursor": null,
+        "known_at": null,
+        "valid_at": null,
+        "ontology_scope": "all",
+        "ontology_ids": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown",
+        "ontology_scope",
+        "ontology_ids",
+        "kinds",
+        "query",
+        "cursor",
+        "limit"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_records",
+      "start": 8071.299999999814,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:563:31",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:562:106)"
+      ],
+      "headers": 8598.5,
+      "status": 200,
+      "bytes": 1586
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "kinds": [
+          "attribute"
+        ],
+        "limit": 1,
+        "cursor": null,
+        "known_at": null,
+        "valid_at": null,
+        "ontology_scope": "all",
+        "ontology_ids": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown",
+        "ontology_scope",
+        "ontology_ids",
+        "kinds",
+        "query",
+        "cursor",
+        "limit"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_records",
+      "start": 8072.600000000093,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:563:31",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:562:106)"
+      ],
+      "headers": 8417.899999999907,
+      "status": 200,
+      "bytes": 43
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "kinds": [
+          "chunk"
+        ],
+        "limit": 1,
+        "cursor": null,
+        "known_at": null,
+        "valid_at": null,
+        "ontology_scope": "all",
+        "ontology_ids": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown",
+        "ontology_scope",
+        "ontology_ids",
+        "kinds",
+        "query",
+        "cursor",
+        "limit"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_records",
+      "start": 8074.5,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:563:31",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:562:106)"
+      ],
+      "headers": 8330.600000000093,
+      "status": 200,
+      "bytes": 3114
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/assertions/batch",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "record_ids_count": 28
+      },
+      "bodyKeys": [
+        "record_ids"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_records",
+      "start": 8076,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at pageAssertions (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:521:28)",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:565:85)"
+      ],
+      "headers": 8437.5,
+      "status": 200,
+      "bytes": 5322
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-search",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_search",
+      "start": 9968.700000000186,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at loadOntologyTerms (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:24:17)",
+        "    at catchUpOntology (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:751:76)",
+        "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:782:7)"
+      ],
+      "headers": 10519,
+      "status": 200,
+      "bytes": 10960
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-qa",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_qa",
+      "start": 11990.399999999907,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at loadOntologyTerms (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:24:17)",
+        "    at catchUpOntology (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:751:76)",
+        "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:782:7)"
+      ],
+      "headers": 12891.600000000093,
+      "status": 200,
+      "bytes": 10960
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/reclassify",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-ontology-model",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_ontology-model",
+      "start": 14990.299999999814,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/ontology-model-reclassify.js?v=page-latency-20261020-2:118:25",
+        "    at refresh (http://127.0.0.1:8100/assets/ontology-model-reclassify.js?v=page-latency-20261020-2:138:9)",
+        "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/ontology-model-reclassify.js?v=page-latency-20261020-2:480:64)"
+      ],
+      "headers": 15866.299999999814,
+      "status": 200,
+      "bytes": 832
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-ontology-model",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_ontology-model",
+      "start": 15113.200000000186,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at refresh (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:147:7)",
+        "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:803:57)"
+      ],
+      "headers": 15468.299999999814,
+      "status": 200,
+      "bytes": 10960
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology-discovery",
+      "queryKeys": [
+        "compact"
+      ],
+      "query": "?compact=true",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-ontology-model",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_ontology-model",
+      "start": 15114.399999999907,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at loadDiscovery (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:237:20)",
+        "    at refresh (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:148:7)",
+        "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:803:57)"
+      ],
+      "headers": 17689,
+      "status": 200,
+      "bytes": 15525
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontology-drafts",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-ontology-model",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_ontology-model",
+      "start": 17690.200000000186,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at refresh (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:183:28)"
+      ],
+      "headers": 17859.5,
+      "status": 200,
+      "bytes": 109619
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontologies",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-ontology-model",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_ontology-model",
+      "start": 18045.5,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/ontology-model-panel.js?v=unified-intake-20261020-1:1503:27",
+        "    at ensureVersions (http://127.0.0.1:8100/assets/ontology-model-panel.js?v=unified-intake-20261020-1:1518:7)",
+        "    at renderActions (http://127.0.0.1:8100/assets/ontology-model-panel.js?v=unified-intake-20261020-1:1207:5)",
+        "    at renderPanel (http://127.0.0.1:8100/assets/ontology-model-panel.js?v=unified-intake-20261020-1:1789:5)",
+        "    at Object.render (http://127.0.0.1:8100/assets/ontology-model-panel.js?v=unified-intake-20261020-1:1818:21)",
+        "    at render (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:461:52)",
+        "    at refresh (http://127.0.0.1:8100/assets/ontology-model.js?v=unified-intake-20261020-1:226:5)"
+      ],
+      "headers": 18267.299999999814,
+      "status": 200,
+      "bytes": 11136
+    },
+    {
+      "path": "/api/storage/neo4j/check",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-runtime",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_runtime",
+      "start": 18721.700000000186,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at inspectStorage (http://127.0.0.1:8100/assets/storage.js?v=runtime-1:14:21)",
+        "    at run (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:42:27)",
+        "    at show (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:61:13)",
+        "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:77:36)"
+      ],
+      "headers": 18801.200000000186,
+      "status": 503,
+      "bytes": 91
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/storage/neo4j",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-runtime",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_runtime",
+      "start": 18723.899999999907,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at inspectStorage (http://127.0.0.1:8100/assets/storage.js?v=runtime-1:15:32)",
+        "    at run (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:42:27)",
+        "    at show (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:61:13)",
+        "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:77:36)"
+      ],
+      "headers": 22712,
+      "status": 200,
+      "bytes": 408
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/dashboard",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-runtime",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_runtime",
+      "start": 18725.600000000093,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at dashboard (http://127.0.0.1:8100/assets/workbench.js?v=library-drawers-20261020-1:36:103)",
+        "    at refreshDashboard (http://127.0.0.1:8100/assets/workspace.js?v=page-latency-20261020-2:1096:15)",
+        "    at run (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:42:27)",
+        "    at show (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:61:13)",
+        "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:77:36)"
+      ],
+      "headers": 23095.5,
+      "status": 200,
+      "bytes": 1391
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/snapshots",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-quality",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_quality",
+      "start": 23539.5,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at snapshots (http://127.0.0.1:8100/assets/workbench.js?v=library-drawers-20261020-1:429:52)",
+        "    at http://127.0.0.1:8100/assets/workbench.js?v=library-drawers-20261020-1:432:40",
+        "    at run (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:42:27)",
+        "    at Object.show (http://127.0.0.1:8100/assets/runtime-view.js?v=redesign-20261019-2:61:13)",
+        "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/menu-hierarchy.js?v=redesign-20261019-2:28:76)"
+      ],
+      "headers": 23758.299999999814,
+      "status": 200,
+      "bytes": 16
+    },
+    {
+      "path": "/api/projects",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-projects",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_projects",
+      "start": 25241.100000000093,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at Object.renderProjects [as refresh] (http://127.0.0.1:8100/assets/projects-view.js?v=redesign-20261019-3:227:28)",
+        "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/menu-hierarchy.js?v=redesign-20261019-2:27:78)"
+      ],
+      "headers": 25461,
+      "status": 200,
+      "bytes": 3861
+    },
+    {
+      "path": "/api/users",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-useradmin",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "open_useradmin",
+      "start": 26954,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/user-admin.js?v=redesign-20261019-2:9:62)",
+        "    at load (http://127.0.0.1:8100/assets/user-admin.js?v=redesign-20261019-2:23:128)",
+        "    at Object.open (http://127.0.0.1:8100/assets/user-admin.js?v=redesign-20261019-2:20:102)",
+        "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/menu-hierarchy.js?v=redesign-20261019-2:26:76)"
+      ],
+      "headers": 27041.700000000186,
+      "status": 200,
+      "bytes": 436
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/sources",
+      "queryKeys": [
+        "limit",
+        "summary_only",
+        "state"
+      ],
+      "query": "?limit=50&summary_only=true&state=all",
+      "method": "POST",
+      "body": {
+        "known_at": null,
+        "valid_at": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown"
+      ],
+      "page": "tab-sources",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "revisit_sources",
+      "start": 28717.700000000186,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/sources-view.js?v=unified-intake-20261020-1:191:26",
+        "    at load (http://127.0.0.1:8100/assets/sources-view.js?v=unified-intake-20261020-1:202:7)",
+        "    at HTMLButtonElement.<anonymous> (http://127.0.0.1:8100/assets/sources-view.js?v=unified-intake-20261020-1:231:80)"
+      ],
+      "headers": 29187.899999999907,
+      "status": 200,
+      "bytes": 4959
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/resolution-reviews",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "revisit_records",
+      "start": 36824.5,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at refresh (http://127.0.0.1:8100/assets/entity-governance.js?v=redesign-20261019-2:116:24)",
+        "    at Object.mount (http://127.0.0.1:8100/assets/entity-governance.js?v=redesign-20261019-2:150:77)",
+        "    at HTMLButtonElement.load (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:579:95)"
+      ],
+      "headers": 37374.299999999814,
+      "status": 200,
+      "bytes": 24
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "kinds": [
+          "entity"
+        ],
+        "limit": 50,
+        "cursor": null,
+        "known_at": null,
+        "valid_at": null,
+        "ontology_scope": "all",
+        "ontology_ids": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown",
+        "ontology_scope",
+        "ontology_ids",
+        "kinds",
+        "query",
+        "cursor",
+        "limit"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "revisit_records",
+      "start": 36826.200000000186,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:550:51",
+        "    at fetchPage (http://127.0.0.1:8100/assets/record-create.js?v=library-drawers-20261020-1:93:26)",
+        "    at Object.load (http://127.0.0.1:8100/assets/record-create.js?v=library-drawers-20261020-1:98:112)",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:554:105)",
+        "    at HTMLButtonElement.load (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:580:104)"
+      ],
+      "headers": 37458.89999999991,
+      "status": 200,
+      "bytes": 35766
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/ontologies",
+      "queryKeys": [],
+      "query": "",
+      "method": "GET",
+      "body": {},
+      "bodyKeys": [],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "revisit_records",
+      "start": 37464.799999999814,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:561:39)"
+      ],
+      "headers": 37755.299999999814,
+      "status": 200,
+      "bytes": 11136
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "kinds": [
+          "relation"
+        ],
+        "limit": 1,
+        "cursor": null,
+        "known_at": null,
+        "valid_at": null,
+        "ontology_scope": "all",
+        "ontology_ids": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown",
+        "ontology_scope",
+        "ontology_ids",
+        "kinds",
+        "query",
+        "cursor",
+        "limit"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "revisit_records",
+      "start": 37465.39999999991,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:563:31",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:562:106)"
+      ],
+      "headers": 37722,
+      "status": 200,
+      "bytes": 1586
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "kinds": [
+          "attribute"
+        ],
+        "limit": 1,
+        "cursor": null,
+        "known_at": null,
+        "valid_at": null,
+        "ontology_scope": "all",
+        "ontology_ids": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown",
+        "ontology_scope",
+        "ontology_ids",
+        "kinds",
+        "query",
+        "cursor",
+        "limit"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "revisit_records",
+      "start": 37466.60000000009,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:563:31",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:562:106)"
+      ],
+      "headers": 37651.89999999991,
+      "status": 200,
+      "bytes": 43
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/records/page",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "kinds": [
+          "chunk"
+        ],
+        "limit": 1,
+        "cursor": null,
+        "known_at": null,
+        "valid_at": null,
+        "ontology_scope": "all",
+        "ontology_ids": null,
+        "include_unknown": true,
+        "filters": null
+      },
+      "bodyKeys": [
+        "known_at",
+        "valid_at",
+        "filters",
+        "include_unknown",
+        "ontology_scope",
+        "ontology_ids",
+        "kinds",
+        "query",
+        "cursor",
+        "limit"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "revisit_records",
+      "start": 37467.799999999814,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:563:31",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:562:106)"
+      ],
+      "headers": 37667.5,
+      "status": 200,
+      "bytes": 3114
+    },
+    {
+      "path": "/api/projects/53264f57-4e9f-4cd5-a0f9-5a6f20181391/assertions/batch",
+      "queryKeys": [],
+      "query": "",
+      "method": "POST",
+      "body": {
+        "record_ids_count": 28
+      },
+      "bodyKeys": [
+        "record_ids"
+      ],
+      "page": "tab-records",
+      "project": "53264f57-4e9f-4cd5-a0f9-5a6f20181391",
+      "action": "revisit_records",
+      "start": 37469.700000000186,
+      "stack": [
+        "    at window.fetch (http://127.0.0.1:8100/assets/auth.js?v=page-latency-20261020-1:64:16)",
+        "    at api (http://127.0.0.1:8100/assets/app.js?v=page-latency-20261020-2:72:22)",
+        "    at pageAssertions (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:521:28)",
+        "    at loadPage (http://127.0.0.1:8100/assets/records-view.js?v=unified-intake-20261020-1:565:85)"
+      ],
+      "headers": 37687.5,
+      "status": 200,
+      "bytes": 5322
+    }
+  ]
+}

@@ -4,7 +4,7 @@ import pytest
 from knowledge_service.domain.applicability import normalize_applicability
 from knowledge_service.services.ontology_discovery import _materialize_candidates
 
-SCOPE = normalize_applicability({'platforms': ['美团'], 'businesses': ['外卖']})
+SCOPE = normalize_applicability({'platforms': {'mode': 'specific', 'values': ['美团']}, 'businesses': {'mode': 'specific', 'values': ['外卖']}})
 
 class Sources:
     def get_record_version(self, project_id, version_id):
@@ -31,9 +31,9 @@ def test_materialization_inherits_frozen_scope_without_changing_candidates_or_da
 
 def test_inheritance_preserves_explicit_scope_and_rejects_wrong_document():
     from knowledge_service.services.source_scope import inherit_source_scope
-    row = {'metadata': {'applicability': {'platforms': ['京东']}}}
+    row = {'metadata': {'applicability': {'platforms': {'mode': 'specific', 'values': ['京东']}}}}
     inherit_source_scope(row, {'document_id':'doc', 'document_version_id':'frozen'}, Sources(), 'p')
-    assert row['metadata']['applicability']['platforms'] == ['京东']
+    assert row['metadata']['applicability']['platforms'] == {'mode': 'specific', 'values': ['京东']}
     with pytest.raises(ValueError, match='source document'):
         inherit_source_scope({'metadata': {}}, {'document_id':'other', 'document_version_id':'frozen'}, Sources(), 'p')
 
@@ -67,7 +67,7 @@ def test_repair_does_not_union_conflicting_or_unproven_sources():
             return [first, {**first,'id':'second','document_version_id':'different'}]
         def get_record_version(self, project_id, version_id):
             if version_id == 'different':
-                return {'id':'doc','kind':'document','metadata':{'applicability':{'platforms':['京东']}}}
+                return {'id':'doc','kind':'document','metadata':{'applicability':{'platforms':{'mode': 'specific', 'values': ['京东']}}}}
             return super().get_record_version(project_id, version_id)
     plan = build_scope_repair(Conflicting(), 'p')
     assert plan['repairs'] == []
@@ -118,7 +118,7 @@ def test_unknown_source_and_explicit_target_are_never_repaired():
     class Explicit(RepairSources):
         def current_records(self, project_id, **kwargs):
             row = super().current_records(project_id)[0]
-            row['metadata']['applicability'] = {'platforms':['京东']}
+            row['metadata']['applicability'] = {'platforms':{'mode': 'specific', 'values': ['京东']}}
             return [row]
     assert build_scope_repair(Explicit(), 'p')['preserved'] == ['fact']
 
@@ -126,17 +126,18 @@ def test_governed_draft_publication_inherits_frozen_source_scope():
     from knowledge_service.services.ontology_drafts_review import DraftReviewPublishMixin
     class Repo(Sources):
         def get_discovery_run(self, project_id, run_id):
-            return {'status':'draft_created','unified_draft_id':'draft','candidate_snapshot':[
+            return {'intake_request_hash':'current', 'status':'draft_created','unified_draft_id':'draft','candidate_snapshot':[
                 {'id':'a','kind':'entity','text':'A','proposed_type':'Thing', 'document_id':'doc','document_version_id':'frozen'}],
                 'mappings':{'entity_types':{'Thing':'urn:Thing'}}, 'accepted_candidate_ids':['a']}
         def current_records(self, project_id, **kwargs):
             return []
+        def list_assertions(self, project_id):return []
     class Drafts(DraftReviewPublishMixin):
         repository = Repo()
         def _active_operations(self, *args):return []
         def _history(self, *args):return [], []
     draft = {'id':'draft','source_kind':'discovery','source_context':{'publication_effects':{'kind':'discovery','discovery_run_id':'run'}}}
-    effects = Drafts()._publication_effect_plan('p', draft,
+    effects = Drafts()._single_publication_effect_plan('p', draft,
         '<urn:Thing> a <http://www.w3.org/2002/07/owl#Class> .', [])
     assert len(effects['records']) == 1
     assert effects['records'][0]['metadata']['applicability'] == SCOPE

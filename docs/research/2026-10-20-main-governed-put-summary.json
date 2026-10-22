@@ -1,0 +1,407 @@
+{
+  "schema": "measured-governed-put-analysis-v1",
+  "date": "2026-10-20",
+  "sources": [
+    {
+      "file": "2026-10-20-main-governed-put-phases.json",
+      "sha256": "b55c1fdcac5514e9e940c5c1608f0298f7b43a04e4bf5b81fb20631554878742"
+    },
+    {
+      "file": "2026-10-20-main-governed-put-client.json",
+      "sha256": "2e5ac28aec79e3aeaafbf7e1cdc322d3f8cfa9119342db5f07b110de18a3b92e"
+    }
+  ],
+  "result": {
+    "app_pid": 34548,
+    "postgres_target_pid": 4292,
+    "client_seconds": 102.88829,
+    "server_seconds": 102.8871437,
+    "http_status": 200,
+    "revision_before": 4,
+    "revision_after": 5,
+    "encoder_runtime_ready": true
+  },
+  "中文结论": [
+    "主要耗时是两次项目全量快照34.291976s+29.886739s=64.178715s，占服务端HTTP时间62.38%；全历史时间戳预留另13.089560s。",
+    "已预热模型编码0.289296s，本体时间校验2.498627s，计划准备1.546130s；不能归为模型推理慢。",
+    "SQL execute合计6.013126s；fetchall行解码物化合计32.226105s。execute包含驱动等待、PG和结果传输，不能视为纯数据库执行时间。",
+    "JSON loads13.139761s+dumps8.042642s=21.182403s，是JSON函数直接计时；不能称全部102.89s都在JSON，也不能与已包含JSON的快照/指纹inclusive时长相加。",
+    "首次服务锁获取10.8微秒，持有97.058339s；主要是持锁完成全库工作。仓储锁34次获取共0.197378s，首次0.058477s。",
+    "投影推进12.210743s、请求线程CPU仅0.078125s；内部RPC、重试、投递等待没有进一步边界，不能指定为某一个远端调用。",
+    "路由入口前5.824133s没有细分到鉴权、中间件、依赖或线程调度；保留未归因区间。",
+    "主机CPU和内存压力具备放大耗时的条件，但没有受控硬件对照，不能证明硬件或具体Milvus进程是原因。"
+  ],
+  "nonoverlap_http_partition": [
+    {
+      "label": "路由入口前，未细分",
+      "seconds": 5.8241332,
+      "percent_http": 5.660700638149799
+    },
+    {
+      "label": "修订历史读取",
+      "phase": "repo.revision_history",
+      "seconds": 0.0865559,
+      "percent_http": 0.08412703170415645
+    },
+    {
+      "label": "规划全量快照",
+      "phase": "repo.planning_snapshot",
+      "seconds": 34.291976,
+      "percent_http": 33.32969967558736
+    },
+    {
+      "label": "时间线本体校验",
+      "phase": "service.timeline_check",
+      "seconds": 2.4986271,
+      "percent_http": 2.428512455633464
+    },
+    {
+      "label": "预热模型编码",
+      "phase": "encoder.encode",
+      "seconds": 0.2892958,
+      "percent_http": 0.2811777930618167
+    },
+    {
+      "label": "正式计划准备",
+      "phase": "formal.prepare",
+      "seconds": 1.5461296,
+      "percent_http": 1.5027432431288303
+    },
+    {
+      "label": "正式执行，含再次快照",
+      "phase": "repo.execute_formal_write",
+      "seconds": 44.4371625,
+      "percent_http": 43.190199379594596
+    },
+    {
+      "label": "结果标注",
+      "phase": "service.annotate_result",
+      "seconds": 0.0399873,
+      "percent_http": 0.038865205663202805
+    },
+    {
+      "label": "提交后即时投影推进",
+      "phase": "service.projection_nudge",
+      "seconds": 12.2107431,
+      "percent_http": 11.868094166948868
+    },
+    {
+      "label": "其余路由内逻辑与仪器开销",
+      "seconds": 1.6580254000000139,
+      "percent_http": 1.6114991051112384
+    },
+    {
+      "label": "路由返回后响应尾段",
+      "seconds": 0.0045077999999989515,
+      "percent_http": 0.004381305416683417
+    }
+  ],
+  "nested_execution_partition_do_not_add_again": [
+    {
+      "label": "事务内全量快照",
+      "seconds": 29.8867385
+    },
+    {
+      "label": "全历史时间戳预留",
+      "seconds": 13.0895598
+    },
+    {
+      "label": "依赖比较",
+      "seconds": 0.3688452
+    },
+    {
+      "label": "计划指纹复核",
+      "seconds": 0.5185759
+    },
+    {
+      "label": "机械执行变更动作",
+      "seconds": 0.1024485
+    },
+    {
+      "label": "其余事务边界、锁获取及清理",
+      "seconds": 0.4709945999999974
+    }
+  ],
+  "snapshot_details": {
+    "planning": {
+      "phase": "repo.planning_snapshot",
+      "parent": "lock.service.recursive.hold",
+      "calls": 1,
+      "rows": 0,
+      "inclusive_wall_seconds": 34.291976,
+      "exclusive_wall_seconds": 5.71e-05,
+      "inclusive_thread_cpu_seconds": 29.46875,
+      "first_start_seconds": 5.9139414,
+      "last_end_seconds": 40.2059174
+    },
+    "execution": {
+      "phase": "repo.snapshot.execution",
+      "parent": "lock.repository.subsequent.hold",
+      "calls": 1,
+      "rows": 0,
+      "inclusive_wall_seconds": 29.8867385,
+      "exclusive_wall_seconds": 0.0018805,
+      "inclusive_thread_cpu_seconds": 26.359375,
+      "first_start_seconds": 46.4295028,
+      "last_end_seconds": 76.3162413
+    },
+    "planning_fingerprint": {
+      "phase": "repo.canonical_fingerprint",
+      "parent": "repo.snapshot.planning",
+      "calls": 1,
+      "rows": 0,
+      "inclusive_wall_seconds": 4.3619168,
+      "exclusive_wall_seconds": 0.4191315,
+      "inclusive_thread_cpu_seconds": 3.890625,
+      "first_start_seconds": 35.8405635,
+      "last_end_seconds": 40.2024803
+    },
+    "execution_fingerprint": {
+      "phase": "repo.canonical_fingerprint",
+      "parent": "repo.snapshot.execution",
+      "calls": 1,
+      "rows": 0,
+      "inclusive_wall_seconds": 3.7106016,
+      "exclusive_wall_seconds": 0.4943821,
+      "inclusive_thread_cpu_seconds": 3.578125,
+      "first_start_seconds": 72.6055668,
+      "last_end_seconds": 76.3161684
+    },
+    "two_current_record_reads": {
+      "wall_seconds": 55.8895825,
+      "sql_execute": {
+        "phase": "sql.execute.select.record_versions",
+        "parent": "lock.repository.recursive.hold",
+        "calls": 2,
+        "rows": 0,
+        "inclusive_wall_seconds": 5.03494,
+        "exclusive_wall_seconds": 5.03494,
+        "inclusive_thread_cpu_seconds": 1.03125,
+        "first_start_seconds": 5.9464846,
+        "last_end_seconds": 48.7676229
+      },
+      "fetchall": {
+        "phase": "sql.fetchall.select.record_versions",
+        "parent": "lock.repository.recursive.hold",
+        "calls": 2,
+        "rows": 900002,
+        "inclusive_wall_seconds": 22.4974876,
+        "exclusive_wall_seconds": 22.4974876,
+        "inclusive_thread_cpu_seconds": 21.109375,
+        "first_start_seconds": 8.6769829,
+        "last_end_seconds": 59.0062173
+      },
+      "json_loads": {
+        "phase": "json.loads",
+        "parent": "repo.current_records",
+        "calls": 900004,
+        "rows": 0,
+        "inclusive_wall_seconds": 13.1372342,
+        "exclusive_wall_seconds": 13.1372342,
+        "inclusive_thread_cpu_seconds": 11.796875,
+        "first_start_seconds": 5.9463394,
+        "last_end_seconds": 72.4245404
+      },
+      "other_python_construction_and_instrumentation_seconds": 15.219920700000005,
+      "note": "相同阶段和父节点跨两次快照聚合，无法再把SQL与JSON准确分配到各次快照。"
+    }
+  },
+  "aggregate_nested_views": {
+    "sql_execute_seconds": 6.0131258,
+    "sql_execute_calls": 102,
+    "sql_fetchall_inclusive_seconds": 32.2261047,
+    "sql_fetchall_exclusive_excluding_json_seconds": 32.2249638,
+    "sql_fetchall_rows": 1350052,
+    "json_loads_seconds": 13.1397611,
+    "json_loads_calls": 900058,
+    "json_dumps_seconds": 8.0426419,
+    "fingerprints_inclusive_seconds": 9.135971,
+    "fingerprints_exclusive_excluding_json_seconds": 1.0978704,
+    "historical_reservation": {
+      "phase": "repo.reserve_operation",
+      "parent": "lock.repository.subsequent.hold",
+      "calls": 1,
+      "rows": 0,
+      "inclusive_wall_seconds": 13.0895598,
+      "exclusive_wall_seconds": 0.0112537,
+      "inclusive_thread_cpu_seconds": 12.125,
+      "first_start_seconds": 76.8841222,
+      "last_end_seconds": 89.973682
+    },
+    "historical_execute": {
+      "phase": "sql.execute.all_record_historical_timestamps",
+      "parent": "lock.repository.recursive.hold",
+      "calls": 1,
+      "rows": 0,
+      "inclusive_wall_seconds": 0.5661583,
+      "exclusive_wall_seconds": 0.5661583,
+      "inclusive_thread_cpu_seconds": 0.25,
+      "first_start_seconds": 76.8917471,
+      "last_end_seconds": 77.4579054
+    },
+    "historical_fetchall": {
+      "phase": "sql.fetchall.all_record_historical_timestamps",
+      "parent": "lock.repository.recursive.hold",
+      "calls": 1,
+      "rows": 450004,
+      "inclusive_wall_seconds": 9.7233974,
+      "exclusive_wall_seconds": 9.7233974,
+      "inclusive_thread_cpu_seconds": 9.171875,
+      "first_start_seconds": 77.4580545,
+      "last_end_seconds": 87.1814519
+    },
+    "note": "这些是嵌套视图，禁止将SQL/JSON/指纹再加到HTTP阶段分解。"
+  },
+  "locks_and_postgres": {
+    "service_first_wait_seconds": 1.08e-05,
+    "service_first_hold_seconds": 97.0583392,
+    "repository_wait_calls": 34,
+    "repository_wait_sum_seconds": 0.19737760000000001,
+    "repository_first_wait_seconds": 0.058477,
+    "planning_repository_outer_hold_seconds": 34.2918549,
+    "serializable_repository_outer_hold_seconds": 43.662557,
+    "global_table_lock_acquire": {
+      "phase": "repo.global_table_lock_acquire",
+      "parent": "lock.repository.subsequent.hold",
+      "calls": 1,
+      "rows": 0,
+      "inclusive_wall_seconds": 0.0042024,
+      "exclusive_wall_seconds": 0.0001198,
+      "inclusive_thread_cpu_seconds": 0.015625,
+      "first_start_seconds": 46.4220217,
+      "last_end_seconds": 46.4262241
+    },
+    "global_table_lock_sql": {
+      "phase": "sql.execute.table_lock_share_row_exclusive",
+      "parent": "repo.global_table_lock_acquire",
+      "calls": 1,
+      "rows": 0,
+      "inclusive_wall_seconds": 0.0040826,
+      "exclusive_wall_seconds": 0.0040826,
+      "inclusive_thread_cpu_seconds": 0.015625,
+      "first_start_seconds": 46.4220434,
+      "last_end_seconds": 46.426126
+    },
+    "advisory_lock_sql": {
+      "phase": "sql.execute.advisory_xact_lock",
+      "parent": "lock.repository.recursive.hold",
+      "calls": 1,
+      "rows": 0,
+      "inclusive_wall_seconds": 0.002065,
+      "exclusive_wall_seconds": 0.002065,
+      "inclusive_thread_cpu_seconds": 0.0,
+      "first_start_seconds": 76.8895404,
+      "last_end_seconds": 76.8916054
+    },
+    "projection_for_update_sql": {
+      "phase": "sql.execute.projection_sequence_for_update",
+      "parent": "projection.enqueue",
+      "calls": 2,
+      "rows": 0,
+      "inclusive_wall_seconds": 0.0045131,
+      "exclusive_wall_seconds": 0.0045131,
+      "inclusive_thread_cpu_seconds": 0.0,
+      "first_start_seconds": 90.020177,
+      "last_end_seconds": 90.0315466
+    },
+    "target_backend_pids": [
+      4292
+    ],
+    "lock_wait_event_samples": 0,
+    "blocking_pids_observations": 0,
+    "ungranted_lock_observations": 0,
+    "wait_samples": [
+      {
+        "state": "idle in transaction",
+        "wait_event_type": "Client",
+        "wait_event": "ClientRead",
+        "observations": 102
+      },
+      {
+        "state": "active",
+        "wait_event_type": null,
+        "wait_event": null,
+        "observations": 4
+      },
+      {
+        "state": "active",
+        "wait_event_type": "Client",
+        "wait_event": "ClientWrite",
+        "observations": 5
+      },
+      {
+        "state": "idle",
+        "wait_event_type": "Client",
+        "wait_event": "ClientRead",
+        "observations": 28
+      },
+      {
+        "state": "active",
+        "wait_event_type": "IO",
+        "wait_event": "BuffileWrite",
+        "observations": 1
+      },
+      {
+        "state": "idle",
+        "wait_event_type": null,
+        "wait_event": null,
+        "observations": 1
+      }
+    ],
+    "share_row_exclusive_by_table": {
+      "assertion_events": 60,
+      "assertions": 60,
+      "fact_keys": 60,
+      "merge_operations": 60,
+      "ontologies": 60,
+      "projects": 60,
+      "record_version_assertions": 60,
+      "record_versions": 60,
+      "resolution_reviews": 60
+    },
+    "caveat": "141样本未见PG Lock等待、blocking_pids或未授予锁；结合锁SQL数毫秒直接计时，支持本次主要不在这些锁的获取。采样不能证明绝无任何PG锁等待；ClientRead/ClientWrite并非锁等待。"
+  },
+  "resources": {
+    "route_request_thread_cpu_seconds": 74.625,
+    "http_process_cpu_seconds": 82.328125,
+    "peak_sampled_app_rss_bytes": 5510881280,
+    "peak_sampled_app_rss_gib": 5.132408142089844,
+    "min_sampled_host_available_bytes": 2071678976,
+    "min_sampled_host_available_gib": 1.9294013977050781,
+    "host_memory_percent_max": 93.9,
+    "host_memory_percent_median": 91.3,
+    "host_cpu_percent_max": 99.4,
+    "host_cpu_percent_median": 66.4,
+    "host_cpu_percent_max_excluding_first": 99.2,
+    "psutil_swap_used_bytes_range": [
+      13625700352,
+      14410145792
+    ],
+    "caveat": "主机资源不代表逐进程归因；Windows swap/页文件用量不证明磁盘换页。首个CPU平均区间可能始于请求之前。"
+  },
+  "integrity": {
+    "phase_groups": 190,
+    "phase_errors": 0,
+    "exclusive_phase_seconds_sum": 97.0585027,
+    "route_seconds": 97.0585027,
+    "exclusive_accounting_closes": true,
+    "observer_samples": 141,
+    "observer_errors": {},
+    "observer_truncated": false,
+    "observer_thread_still_running": false,
+    "max_samples": 3600,
+    "max_seconds": 1800,
+    "nominal_sample_interval_seconds": 0.5,
+    "actual_sample_gap_median_seconds": 0.6306314999999998,
+    "actual_sample_gap_max_seconds": 6.360796000000001,
+    "max_observer_poll_seconds": 5.847632,
+    "meaningful_boundaries_present": true
+  },
+  "limits": [
+    "样本开始时刻、阶段栈和PG结果完成时刻并非同一瞬间；首次observer poll5.848s、最大采样间隙6.361s，不能按次数换算精确等待秒数。",
+    "未细分路由前各层、投影RPC内部、锁持有者线程、逐行仪器开销。",
+    "CPU计时有Windows分辨率量化，小区间0并非严格无CPU。",
+    "单次带仪器测量，不是P95；旧125.454s来自不同条件，不能声称提速。",
+    "高水位MAX优化尚未实施，需时间规范化与范围合同测试后另行验证。"
+  ]
+}

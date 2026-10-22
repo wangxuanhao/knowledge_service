@@ -1,3 +1,4 @@
+from ontology_seed import seed_ontology
 import pytest
 from fastapi.testclient import TestClient
 
@@ -22,14 +23,14 @@ def test_plain_revision_preserves_binding_and_all_views_agree(tmp_path, record_i
             'name': 'revision', 'use_default_ontology': False}).json()['id']
         base = f'/api/projects/{project}'
         repo = app.state.service.repository
-        first = repo.save_ontology(project, TTL, {})
+        first = seed_ontology(repo, project, TTL, {})
         app.state.service.write(project, [
             {'id': 'a', 'kind': 'entity', 'type': 'https://test/Person', 'text': 'A'},
             {'id': 'b', 'kind': 'entity', 'type': 'https://test/Person', 'text': 'B'},
             {'id': 'rel', 'kind': 'relation', 'type': 'https://test/knows', 'text': 'A knows B',
              'subject_id': 'a', 'object_id': 'b'},
         ])
-        second = repo.save_ontology(project, TTL, {})
+        second = seed_ontology(repo, project, TTL, {})
         row = repo.history(project, record_id)[-1]
         record = {key: row[key] for key in ('id', 'kind', 'type', 'text', 'metadata')}
         if row['kind'] == 'relation':
@@ -45,7 +46,7 @@ def test_plain_revision_preserves_binding_and_all_views_agree(tmp_path, record_i
         assert response.json()['version_id'] != row['version_id']
         history = client.get(base + '/records/' + record_id + '/history').json()['versions']
         assert [item['ontology_id'] for item in history] == [first['id'], first['id']]
-        ledger = client.post(base + '/records/query', json={}).json()['records']
+        ledger = client.post(base + '/records/page', json={}).json()['records']
         graph = client.post(base + '/subgraph', json={}).json()
         for rows in (ledger, graph['nodes'] + graph['edges']):
             visible = next(item for item in rows if item['id'] == record_id)

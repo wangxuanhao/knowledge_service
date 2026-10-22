@@ -1,0 +1,191 @@
+{
+  "viewports": {
+    "1440": {
+      "overflow": false,
+      "toolbarOverflow": false,
+      "controls": [
+        {
+          "id": "om-seg",
+          "x": 915,
+          "y": 72,
+          "width": 228,
+          "height": 36,
+          "margin": "0px 0px 0px 371.984px",
+          "border": "1px solid rgb(220, 230, 220)",
+          "background": "rgb(237, 242, 236)"
+        },
+        {
+          "id": "om-display-control",
+          "x": 1153,
+          "y": 72,
+          "width": 148,
+          "height": 36,
+          "margin": "0px",
+          "border": "0px none rgb(117, 135, 121)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "id": "om-node-display",
+          "x": 1185,
+          "y": 72,
+          "width": 116,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(189, 206, 194)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "id": "om-history",
+          "x": 1311,
+          "y": 72,
+          "width": 96,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(148, 181, 166)",
+          "background": "rgb(237, 246, 242)"
+        }
+      ]
+    },
+    "1024": {
+      "overflow": false,
+      "toolbarOverflow": false,
+      "controls": [
+        {
+          "id": "om-seg",
+          "x": 613,
+          "y": 70,
+          "width": 228,
+          "height": 36,
+          "margin": "0px 0px 0px 77.9844px",
+          "border": "1px solid rgb(220, 230, 220)",
+          "background": "rgb(237, 242, 236)"
+        },
+        {
+          "id": "om-display-control",
+          "x": 851,
+          "y": 70,
+          "width": 148,
+          "height": 36,
+          "margin": "0px",
+          "border": "0px none rgb(117, 135, 121)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "id": "om-node-display",
+          "x": 883,
+          "y": 70,
+          "width": 116,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(189, 206, 194)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "id": "om-history",
+          "x": 333,
+          "y": 116,
+          "width": 96,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(148, 181, 166)",
+          "background": "rgb(237, 246, 242)"
+        }
+      ]
+    },
+    "768": {
+      "overflow": false,
+      "toolbarOverflow": false,
+      "controls": [
+        {
+          "id": "om-seg",
+          "x": 490.015625,
+          "y": 70,
+          "width": 228,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(220, 230, 220)",
+          "background": "rgb(237, 242, 236)"
+        },
+        {
+          "id": "om-display-control",
+          "x": 213,
+          "y": 113,
+          "width": 148,
+          "height": 36,
+          "margin": "0px",
+          "border": "0px none rgb(117, 135, 121)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "id": "om-node-display",
+          "x": 245,
+          "y": 113,
+          "width": 116,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(189, 206, 194)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "id": "om-history",
+          "x": 449,
+          "y": 113,
+          "width": 96,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(148, 181, 166)",
+          "background": "rgb(237, 246, 242)"
+        }
+      ]
+    },
+    "390": {
+      "overflow": false,
+      "toolbarOverflow": false,
+      "controls": [
+        {
+          "id": "om-seg",
+          "x": 21,
+          "y": 439,
+          "width": 228,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(220, 230, 220)",
+          "background": "rgb(237, 242, 236)"
+        },
+        {
+          "id": "om-display-control",
+          "x": 21,
+          "y": 482,
+          "width": 148,
+          "height": 36,
+          "margin": "0px",
+          "border": "0px none rgb(117, 135, 121)",
+          "background": "rgba(0, 0, 0, 0)"
+        },
+        {
+          "id": "om-node-display",
+          "x": 53,
+          "y": 482,
+          "width": 116,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(189, 206, 194)",
+          "background": "rgb(255, 255, 255)"
+        },
+        {
+          "id": "om-history",
+          "x": 257,
+          "y": 482,
+          "width": 96,
+          "height": 36,
+          "margin": "0px",
+          "border": "1px solid rgb(148, 181, 166)",
+          "background": "rgb(237, 246, 242)"
+        }
+      ]
+    }
+  },
+  "errors": [],
+  "history_opens": true,
+  "switching_preserved": true
+}
