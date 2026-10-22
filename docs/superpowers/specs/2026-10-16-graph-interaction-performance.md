@@ -45,11 +45,13 @@
 复现命令（仓库根目录）：
 
 ```powershell
-D:/anaconda/envs/llm_model/python.exe scripts/benchmark_graph_interaction.py --nodes 500 --repeats 5 --output ../.tmp_doc_review/graph-performance-after.json --check --verify
+D:/anaconda/envs/llm_model/python.exe scripts/benchmark_graph_interaction.py --nodes 500 --repeats 5 --output .benchmarks/graph-performance-after.json --check --verify
 node --test tests/service/*.test.cjs
 ```
 
 仍保留节点释放时的一次坐标提交；此轮没有更换渲染引擎或减少知识数据。
+
+旧临时目录清理前已归档 [历史测量文件](../../research/2026-10-16-graph-performance-after.json)，原始字节未改。该文件包含上文已指出的旧视口断言与 0.6 ms 缩放测量，不能作为当前版本可见缩放或性能通过的证据。
 
 ## 本体编辑画布：层带同步
 

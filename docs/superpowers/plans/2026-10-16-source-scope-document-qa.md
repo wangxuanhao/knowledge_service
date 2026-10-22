@@ -18,4 +18,4 @@
 - Live production service search: both Meituan price queries returned 10 hits, _backend=milvus, degraded=false.
 - Explicit Meituan scope returns relevant hits; Jingdong scope returns zero.
 - Model cold initialization is substantial; warm complete retrieval measured approximately 0.6-1.4 seconds.
-- Evidence: ../.tmp_doc_review/meituan-milvus-backend.json and meituan-milvus-verified.json.
+- Historical evidence: [Milvus backend observations](../../research/2026-10-16-meituan-milvus-backend.json) and [query observations](../../research/2026-10-16-meituan-milvus-verified.json). These are the original 2026-10-16 measurements, not current-version performance certification.

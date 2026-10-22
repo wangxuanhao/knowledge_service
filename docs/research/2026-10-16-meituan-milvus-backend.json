@@ -1,0 +1,16 @@
+[
+  {
+    "query": "美团价格",
+    "backend": "milvus",
+    "hits": 10,
+    "seconds": 125.377,
+    "degraded": false
+  },
+  {
+    "query": "美团的价格有哪些",
+    "backend": "milvus",
+    "hits": 10,
+    "seconds": 1.402,
+    "degraded": false
+  }
+]

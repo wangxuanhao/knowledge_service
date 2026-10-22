@@ -1,0 +1,14 @@
+........................................................................ [ 28%]
+........................................................................ [ 56%]
+........................................................................ [ 84%]
+.......................................                                  [100%]
+============================= slowest 8 durations =============================
+3.39s call     tests/service/test_shared_milvus_pipeline.py::test_pg_preflight_failure_rechecks_fixed_business_data_without_encoding_invalid_rows
+2.21s setup    tests/service/test_production_generation_cleanup.py::test_failed_generation_delete_remains_durable_and_retries_only_its_scope
+1.61s call     tests/service/test_shared_milvus_pipeline.py::test_pg_explicit_build_incremental_and_late_old_rpc_are_project_isolated
+1.58s call     tests/service/test_shared_milvus_rebuild.py::test_model_change_rebuilds_only_selected_project_generation[True-True]
+1.50s call     tests/service/test_production_generation_cleanup.py::test_failed_generation_delete_remains_durable_and_retries_only_its_scope
+1.26s call     tests/service/test_shared_milvus_rebuild.py::test_model_change_rebuilds_only_selected_project_generation[False-True]
+1.19s call     tests/service/test_shared_milvus_rebuild.py::test_model_change_rebuilds_only_selected_project_generation[False-False]
+1.07s call     tests/service/test_shared_milvus_rebuild.py::test_dimension_conflict_cannot_recreate_shared_index_or_change_either_project
+255 passed in 61.95s (0:01:01)

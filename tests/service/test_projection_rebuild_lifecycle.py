@@ -15,7 +15,7 @@ from knowledge_service.repository.projection_store import ProjectionLeaseLost
 from knowledge_service.services.projection_sync import ProjectionSync
 from knowledge_service.services.projection_runtime import MilvusProjectionAdapter
 from knowledge_service.domain.search_filter_catalog import default_catalog
-from knowledge_service.domain.search_projection import ProjectionInput, build_projection, projection_fingerprint
+from knowledge_service.domain.search_projection import ProjectionInput, build_projection
 from knowledge_service.integrations.milvus_store import COLLECTION
 
 
@@ -29,8 +29,6 @@ class SharedBuildStore(fakes['FakeStore']):
 
     def __init__(self, *, rebuild=None):
         super().__init__(watermark=3, rebuild=rebuild)
-        self.active_index_version = 0
-        self.activated_tokens = []
 
     def begin_rebuild(self, project_id, target, schema_version, owner, *, lease_guard,
                       embedding_model=None, dim=None):
@@ -39,35 +37,10 @@ class SharedBuildStore(fakes['FakeStore']):
                 'claim': fakes['batch'](build_id='build-1', token='build-token'),
                 'snapshot_seq': 3, 'records': [snapshot_record()],
                 'state': {'build_id': 'build-1', 'phase': 'snapshot',
-                          'snapshot_seq': 3, 'index_version': 1}}
-        claimed, state = self.rebuild_state['claim'], self.rebuild_state['state']
-        claimed.project_id, claimed.target = project_id, target
-        claimed.schema_version = schema_version
-        state.update(embedding_model=embedding_model, dim=dim)
-        claimed.index_version = state['index_version']
-        return self.rebuild_state
-
-    def record_rebuild_progress(self, claimed, schema_version, state):
-        super().record_rebuild_progress(claimed, schema_version, state)
-        self.rebuild_state['state'] = dict(state)
-
-    @contextmanager
-    def activation_guard(self, project_id, claimed, schema_version):
-        if claimed.token != self.rebuild_state['claim'].token:
-            raise ProjectionLeaseLost('activation requires the current owner')
-        self.guard_active = True
-        try:
-            yield self.watermark
-        finally:
-            self.guard_active = False
-
-    def activate_index(self, claimed, schema_version, applied_seq, state):
-        assert self.guard_active
-        assert claimed.token == self.rebuild_state['claim'].token
-        assert state['validation']['ok']
-        self.active_index_version = state['index_version']
-        self.activated_tokens.append(claimed.token)
-        self.finished.append({'claim': claimed, 'state': dict(state), 'applied_seq': applied_seq})
+                          'snapshot_seq': 3, 'applied_seq': 3, 'index_version': 1}}
+        return super().begin_rebuild(project_id, target, schema_version, owner,
+                                     lease_guard=lease_guard,
+                                     embedding_model=embedding_model, dim=dim)
 
 
 class ExpiringStore(SharedBuildStore):
@@ -95,43 +68,19 @@ class ExpiringStore(SharedBuildStore):
             yield watermark
 
 
-class External:
-    dim = 1
-
-    def __init__(self):
-        self.rows, self.writes = {}, []
-
-    def ensure_collection(self, *, project_id, index_version, catalog):
-        assert len(catalog.column_defs()) == 21
-        assert not catalog.fields
-        return self
-
-    def check_collection(self, *, catalog):
-        return self
-
-    def delete_records(self, record_ids, *, project_id, index_version, catalog):
-        self.rows = {key: row for key, row in self.rows.items()
-                     if key[:2] != (project_id, index_version) or
-                     (record_ids is not None and key[2] not in record_ids)}
-
-    def upsert_rows(self, rows, *, project_id, index_version, catalog):
-        self.writes.extend(rows)
-        for row in rows:
-            assert row['project_id'] == project_id
-            assert row['index_version'] == index_version
-            self.rows[project_id, index_version, row['record_id']] = dict(row)
-
-    def validate_projection(self, expected, *, project_id, index_version, catalog):
-        actual = {key[2]: {'version_id': row['version_id'], 'fingerprint': projection_fingerprint(row)}
-                  for key, row in self.rows.items() if key[:2] == (project_id, index_version)}
-        return {'ok': actual == expected}
+class External(fakes['MemoryMilvus']):
+    """Shared collection rows validated against the PG ReceiptManifest."""
 
 
 class Encoder:
     identity = 'test'
     dimension = 1
 
+    def __init__(self):
+        self.encoded = []
+
     def encode(self, texts):
+        self.encoded.extend(texts)
         return [[1.0] for _ in texts]
 
 
@@ -212,44 +161,66 @@ class RebuildLeaseTests(unittest.TestCase):
         self.assertEqual(store.active_index_version, 1)
         self.assertEqual(store.activated_tokens, ['build-token'])
         self.assertGreater(len(store.renewals), 5)
+        self.assertEqual(result['indexed'], 1)
+        self.assertEqual(store.receipts.count('project', 1), 1)
+        self.assertEqual(store.receipts.pages_written, [('build-token', 1)])
+        self.assertTrue(all('expected_projection' not in state for state in store.progress))
 
     def test_resumed_index_activates_with_the_new_owned_fence(self):
         claimed = fakes['batch'](build_id='build-1', token='new-owner')
         store = SharedBuildStore(rebuild={
-            'claim': claimed, 'snapshot_seq': 3, 'records': [],
+            'claim': claimed, 'snapshot_seq': 3, 'records': [snapshot_record()],
             'state': {'build_id': 'build-1', 'phase': 'validating',
                 'destination': COLLECTION, 'snapshot_seq': 3, 'applied_seq': 3,
                 'index_version': 1, 'catalog': default_catalog().to_dict(),
-                'embedding_model': 'test', 'dim': 1, 'expected_projection': {}}})
-        adapter = MilvusProjectionAdapter(External(), encoder=Encoder())
+                'embedding_model': 'test', 'dim': 1}})
+        external, encoder = External(), Encoder()
+        row = build_projection(snapshot_record(), default_catalog(), index_version=1)
+        store.receipts.seed('project', 1, [row])
+        external.upsert_rows([dict(row, embedding=[1.0])], project_id='project',
+                             index_version=1, catalog=default_catalog())
+        adapter = MilvusProjectionAdapter(external, encoder=encoder)
         result = ProjectionSync(store, {'milvus': adapter}, schema_version=2).rebuild(
             'project', 'milvus')
         self.assertTrue(result['ready'])
         self.assertEqual(store.activated_tokens, ['new-owner'])
         self.assertEqual(store.active_index_version, 1)
+        self.assertEqual(result['indexed'], 1)
+        self.assertEqual(encoder.encoded, [])
+        self.assertEqual(external.deletes, [])
+        self.assertEqual(store.receipts.resets, [])
+        self.assertEqual(store.receipts.pages_written, [])
 
     def test_lost_ownership_during_a_slow_load_never_seals_or_switches(self):
-        store, adapter = ExpiringStore(), SlowAdapter()
+        entered, lost = threading.Event(), threading.Event()
+        class BlockedAdapter(MilvusProjectionAdapter):
+            def load_rows(self, *args, **kwargs):
+                entered.set()
+                if not lost.wait(1):
+                    raise AssertionError('heartbeat did not observe the blocked load')
+                return super().load_rows(*args, **kwargs)
+        store = ExpiringStore()
+        adapter = BlockedAdapter(External(), encoder=Encoder())
         original = store.renew_claim
-        lost = threading.Event()
-        timer = threading.Timer(.04, lost.set)
         def renew(*args, **kwargs):
-            if lost.is_set():
+            if entered.is_set():
+                lost.set()
                 raise ProjectionLeaseLost('another worker owns the claim')
             return original(*args, **kwargs)
         store.renew_claim = renew
         adapter.validate = lambda *args, **kwargs: self.fail('lost worker validated the index')
         sync = ProjectionSync(store, {'milvus': adapter}, schema_version=2)
         sync.REBUILD_HEARTBEAT_SECONDS = .01
-        timer.start()
-        try:
-            with self.assertRaises(ProjectionLeaseLost):
-                sync.rebuild('project', 'milvus')
-        finally:
-            timer.cancel()
+        with self.assertRaises(ProjectionLeaseLost):
+            sync.rebuild('project', 'milvus')
+        self.assertTrue(entered.is_set())
+        self.assertTrue(lost.is_set())
         self.assertEqual(store.active_index_version, 0)
         self.assertEqual(store.finished, [])
         self.assertEqual(adapter._store().writes, [])
+        self.assertEqual(store.receipts.count('project', 1), 0)
+        self.assertEqual(store.receipts.pages_written, [])
+        self.assertEqual(store.activated_tokens, [])
 
     def test_worker_directory_never_loads_project_statistics(self):
         runtime = runpy.run_path(str(ROOT / 'tests/service/test_projection_runtime.py'))
@@ -268,30 +239,35 @@ class RebuildLeaseTests(unittest.TestCase):
             'state': {'build_id': 'build-1', 'phase': 'snapshot_loading',
                       'destination': COLLECTION, 'snapshot_seq': 3, 'index_version': 1}}
         external = External()
+        entered, lost = threading.Event(), threading.Event()
         class ColdEncoder(Encoder):
             def encode(self, texts):
-                time.sleep(.25)
+                entered.set()
+                if not lost.wait(1):
+                    raise AssertionError('heartbeat did not observe the cold encoder')
                 return super().encode(texts)
-        lost = threading.Event()
         original = store.renew_claim
         def renew(*args, **kwargs):
-            if lost.is_set():
+            if entered.is_set():
+                lost.set()
                 raise ProjectionLeaseLost('another worker owns the claim')
             return original(*args, **kwargs)
         store.renew_claim = renew
-        adapter = MilvusProjectionAdapter(external, encoder=ColdEncoder())
+        encoder = ColdEncoder()
+        adapter = MilvusProjectionAdapter(external, encoder=encoder)
         sync = ProjectionSync(store, {'milvus': adapter}, schema_version=2)
         sync.REBUILD_HEARTBEAT_SECONDS = .01
-        timer = threading.Timer(.04, lost.set)
-        timer.start()
-        try:
-            with self.assertRaises(ProjectionLeaseLost):
-                sync.rebuild('project', 'milvus')
-        finally:
-            timer.cancel()
+        with self.assertRaises(ProjectionLeaseLost):
+            sync.rebuild('project', 'milvus')
+        self.assertTrue(entered.is_set())
+        self.assertTrue(lost.is_set())
+        self.assertEqual(encoder.encoded, ['x'])
         self.assertEqual(external.writes, [])
         self.assertEqual(store.active_index_version, 0)
         self.assertEqual(store.finished, [])
+        self.assertEqual(store.receipts.count('project', 1), 0)
+        self.assertEqual(store.receipts.pages_written, [])
+        self.assertEqual(store.activated_tokens, [])
 
 
 if __name__ == '__main__':

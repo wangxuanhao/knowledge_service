@@ -12,6 +12,9 @@ from test_frontend_retrieval_flow import (
 )
 
 
+SCREENSHOT_ROOT = Path(__file__).resolve().parents[2] / '.benchmarks' / 'unified-scope-path-browser'
+
+
 def _open_scope(page):
     if not page.locator('#cb-details').evaluate('(element) => element.open'):
         with page.expect_response(lambda response: response.url.endswith('/metadata/facets')):
@@ -20,9 +23,16 @@ def _open_scope(page):
 
 
 def _capture(page, name):
-    destination = Path(__file__).resolve().parents[3] / '.tmp_doc_review' / name
+    destination = SCREENSHOT_ROOT / name
     destination.parent.mkdir(parents=True, exist_ok=True)
     page.screenshot(path=str(destination), full_page=True)
+
+
+def _open_graph_settings(page):
+    # Candidate pages load only when their drawer is visible.
+    with page.expect_response(lambda response: response.url.endswith('/records/page')) as response:
+        page.click('#graph-settings')
+    return response.value.request.post_data_json
 
 
 def test_scope_contains_all_business_and_graph_constraints(workbench):
@@ -71,9 +81,10 @@ def test_three_dimensional_scope_reaches_graph_and_excludes_other_business(workb
     bodies = []
     page.on('request', lambda request: bodies.append(request.post_data_json)
             if _is_graph_exchange(request) else None)
-    with page.expect_response(lambda response: response.url.endswith('/records/page')):
-        page.click('#apply-scope')
+    page.click('#apply-scope')
     assert page.evaluate('scope().applicability') == expected_scope
+    choices_request = _open_graph_settings(page)
+    assert choices_request['applicability'] == expected_scope
     page.wait_for_function("[...document.querySelector('#graph-entity-choice').options].some(row=>row.value==='match-a')")
     page.select_option('#graph-entity-choice', 'match-a')
     page.wait_for_function("document.querySelector('#graph-node').value === 'match-a'")
@@ -82,9 +93,9 @@ def test_three_dimensional_scope_reaches_graph_and_excludes_other_business(workb
     assert bodies[-1]['applicability'] == expected_scope
     assert _graph_node_ids(page) == ['match-a', 'match-b']
     assert _graph_edge_ids(page) == ['match-r']
+    page.click('#graph-settings-drawer .workspace-drawer-close')
     _open_scope(page)
-    with page.expect_response(lambda response: response.url.endswith('/records/page')):
-        page.click('#reset-scope')
+    page.click('#reset-scope')
     assert not page.evaluate('scope().applicability || null')
     assert all(page.locator('#query-' + dimension).input_value() == '' for dimension in scope)
     assert not workbench.errors
@@ -99,8 +110,7 @@ def test_metadata_picker_hides_system_fields_and_keeps_business_fields(workbench
                      'applicability': {'platforms': {'mode': 'all'}}},
     }])
     _open_scope(page)
-    with page.expect_response(lambda response: response.url.endswith('/records/page')):
-        page.click('#apply-scope')
+    page.click('#apply-scope')
     choices = page.locator('#metadata-field-choice option').evaluate_all(
         '(options) => options.map(option => option.value)')
     assert 'metadata.business_segment' in choices
@@ -119,8 +129,7 @@ def test_metadata_picker_hides_system_fields_and_keeps_business_fields(workbench
     page.select_option('#metadata-field-choice', 'metadata.business_segment')
     page.select_option('#metadata-value-choice', '0')
     assert page.evaluate('scope().filters') is None
-    with page.expect_response(lambda response: response.url.endswith('/records/page')):
-        page.click('#apply-scope')
+    page.click('#apply-scope')
     assert page.evaluate('scope().filters') == {
         'and': [{'field': 'metadata.business_segment', 'op': 'eq', 'value': '餐饮'}]}
     assert not workbench.errors
@@ -152,13 +161,11 @@ def test_advanced_json_scope_summary_and_reset_remain_consistent(workbench):
     page.fill('#cb-raw-json', json.dumps(filters, ensure_ascii=False))
     page.locator('#cb-raw-json').dispatch_event('change')
     assert page.evaluate('scope().filters') is None
-    with page.expect_response(lambda response: response.url.endswith('/records/page')):
-        page.click('#apply-scope')
+    page.click('#apply-scope')
     assert page.evaluate('scope().filters') == filters
     assert '更多字段' in page.locator('#applied-scope-chips').inner_text()
     _open_scope(page)
-    with page.expect_response(lambda response: response.url.endswith('/records/page')):
-        page.click('#reset-scope')
+    page.click('#reset-scope')
     assert page.locator('#filters').input_value() == ''
     assert page.locator('#cb-raw-json').input_value() == ''
     assert page.locator('#applied-scope-chips').inner_text() == ''
@@ -184,7 +191,7 @@ def test_graph_path_remains_visible_on_narrow_screen_without_selected_detail(wor
           return {open: element.open, parents,
             expanded: document.querySelector('#graph-path-toggle').getAttribute('aria-expanded')};
         }''')
-        screenshot = Path(__file__).resolve().parents[3] / '.tmp_doc_review' / 'unified-path-760-failure.png'
+        screenshot = SCREENSHOT_ROOT / 'unified-path-760-failure.png'
         screenshot.parent.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(screenshot), full_page=True)
         assert tools.is_visible(), diagnostics
@@ -208,8 +215,7 @@ def test_deep_page_entity_keeps_edit_local_graph_and_mindmap_actions(workbench):
          'subject_id': 'zz-deep-target', 'object_id': 'zz-deep-neighbor', 'metadata': metadata},
     ]
     workbench.service.repository.put_batch(workbench.project, records)
-    with page.expect_response(lambda response: response.url.endswith('/records/page')):
-        page.click('#graph-choice-first')
+    _open_graph_settings(page)
     page.select_option('#graph-entity-choice', 'a')
     page.wait_for_function("document.querySelector('#graph-node').value === 'a'")
     with page.expect_response(lambda response: response.url.endswith('/records/page')):
@@ -219,6 +225,7 @@ def test_deep_page_entity_keeps_edit_local_graph_and_mindmap_actions(workbench):
     assert page.locator('#graph-entity-choice').input_value() == 'a'
     page.select_option('#graph-entity-choice', 'zz-deep-target')
     page.wait_for_function("document.querySelector('#graph-detail').textContent.includes('深页目标')")
+    page.click('#graph-settings-drawer .workspace-drawer-close')
     page.locator('#graph-detail [data-action="edit"]').click()
     assert page.locator('#record-dialog').is_visible()
     assert page.locator('#revision-id').input_value() == 'zz-deep-target'

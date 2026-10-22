@@ -1,0 +1,39 @@
+{
+  "nodes": 500,
+  "edges": 1500,
+  "repeats": 5,
+  "metrics": {
+    "pan": {
+      "work_ms": 2.7,
+      "settled_ms": 33.4,
+      "dispatches": 1,
+      "updates": 0
+    },
+    "mount": {
+      "work_ms": 13.9,
+      "settled_ms": 60.4,
+      "dispatches": 0,
+      "updates": 0
+    },
+    "zoom": {
+      "work_ms": 0.6,
+      "settled_ms": 33.4,
+      "dispatches": 12,
+      "updates": 0
+    },
+    "relayout": {
+      "work_ms": 162.6,
+      "settled_ms": 183.1,
+      "dispatches": 0,
+      "updates": 1
+    }
+  },
+  "interaction_checks": {
+    "outer_node_drag_stable": true,
+    "pan_moves_viewport_only": true,
+    "zoom_changes_viewport": true,
+    "path_clears_highlight": true,
+    "resize_refits_after_external_resize": true,
+    "facts_unchanged": true
+  }
+}

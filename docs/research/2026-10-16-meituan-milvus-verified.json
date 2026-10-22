@@ -1,0 +1,84 @@
+[
+  {
+    "query": "美团价格",
+    "mode": "keyword",
+    "backend": null,
+    "hits": 5,
+    "seconds": 2.576,
+    "kinds": [
+      "chunk",
+      "entity",
+      "relation"
+    ]
+  },
+  {
+    "query": "美团价格",
+    "mode": "semantic",
+    "backend": null,
+    "hits": 10,
+    "seconds": 156.419,
+    "kinds": [
+      "chunk",
+      "entity",
+      "relation"
+    ]
+  },
+  {
+    "query": "美团价格",
+    "mode": "hybrid",
+    "backend": null,
+    "hits": 10,
+    "seconds": 0.624,
+    "kinds": [
+      "chunk",
+      "entity",
+      "relation"
+    ]
+  },
+  {
+    "query": "美团的价格有哪些",
+    "mode": "keyword",
+    "backend": null,
+    "hits": 5,
+    "seconds": 0.168,
+    "kinds": [
+      "chunk",
+      "entity",
+      "relation"
+    ]
+  },
+  {
+    "query": "美团的价格有哪些",
+    "mode": "semantic",
+    "backend": null,
+    "hits": 10,
+    "seconds": 0.963,
+    "kinds": [
+      "chunk",
+      "entity",
+      "relation"
+    ]
+  },
+  {
+    "query": "美团的价格有哪些",
+    "mode": "hybrid",
+    "backend": null,
+    "hits": 10,
+    "seconds": 0.912,
+    "kinds": [
+      "chunk",
+      "entity",
+      "relation"
+    ]
+  },
+  {
+    "platform": "美团",
+    "backend": null,
+    "hits": 5
+  },
+  {
+    "platform": "京东",
+    "backend": null,
+    "hits": 0
+  }
+]

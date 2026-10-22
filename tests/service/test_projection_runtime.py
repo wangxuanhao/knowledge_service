@@ -1,6 +1,12 @@
 import pytest
 import threading
+from types import SimpleNamespace
 
+from knowledge_service.domain.search_filter_catalog import default_catalog
+from knowledge_service.domain.search_projection import ProjectionInput, build_projection
+from knowledge_service.integrations.milvus_store import (
+    MilvusSchemaMismatch, MilvusStore, VectorDimensionMismatch,
+)
 from knowledge_service.services.projection_runtime import (
     LeaseHeartbeat,
     MilvusProjectionAdapter,
@@ -8,114 +14,185 @@ from knowledge_service.services.projection_runtime import (
 )
 from knowledge_service.services.service import KnowledgeService
 from knowledge_service.services.projection_sync import DrainResult
-from knowledge_service.repository.projection_store import ProjectionRebuildRequired
+from knowledge_service.repository.projection_store import (
+    ProjectionLeaseLost, ProjectionRebuildRequired,
+)
+
+
+CATALOG = default_catalog()
+
+
+class RecordingEncoder:
+    identity = 'test'
+
+    def __init__(self):
+        self.encoded = []
+
+    def encode(self, texts):
+        self.encoded.append(list(texts))
+        return [[1.0] for _ in texts]
 
 
 class RecordingMilvus:
-    collection_name = 'knowledge_records'
+    collection_name = 'knowledge_vectors'
 
     def __init__(self):
         self.upserts = []
         self.deletes = []
+        self.rows = {}
 
-    def check_destination(self, *, destination):
+    def check_collection(self, *, catalog):
+        assert catalog == CATALOG
         return self
 
-    def upsert(self, records, flush=True, *, destination, projection_seq, fence):
-        self.upserts.append((list(records), flush))
+    def upsert_rows(self, records, *, project_id, index_version, catalog):
+        self.upserts.append((list(records), project_id, index_version, catalog.fingerprint))
+        for row in records:
+            self.rows[(project_id, index_version, row['record_id'])] = row
         return len(records)
 
-    def delete(self, project_id, record_id=None, *, destination):
-        self.deletes.append((project_id, record_id))
-        return 1
+    def delete_records(self, record_ids, *, project_id, index_version, catalog):
+        self.deletes.append((list(record_ids), project_id, index_version, catalog.fingerprint))
+        for record_id in record_ids:
+            self.rows.pop((project_id, index_version, record_id), None)
+        return len(record_ids)
 
 
-def event(seq, operation='upsert', record_id='record'):
+def event(seq, operation='upsert', record_id='record', *, project='project', index_version=1):
     payload = {
-        'id': record_id, 'version_id': f'version-{seq}', 'kind': 'chunk',
-        'text': 'text', 'embedding': [1.0], 'embedding_model': 'test',
+        'project_id': project, 'id': record_id, 'version_id': f'version-{seq}', 'kind': 'chunk',
+        'text': 'text',
         'metadata': {},
     }
+    envelope = {'index_version': index_version,
+                'catalog_fingerprint': CATALOG.fingerprint, 'embedding_model': 'test'}
     if operation == 'tombstone':
         payload = {'record_id': record_id, 'version_id': f'version-{seq}'}
+        envelope['record_id'] = record_id
+    else:
+        envelope['row'] = build_projection(ProjectionInput(payload), CATALOG,
+                                           index_version=index_version)
+    payload['_milvus_projection'] = envelope
     return {'seq': seq, 'operation': operation,
             'version_id': f'version-{seq}', 'payload': payload}
 
 
-def test_milvus_adapter_applies_events_idempotently_and_rejects_late_sequences():
+def test_milvus_adapter_replays_frozen_rows_and_rejects_stale_pg_claims():
     store = RecordingMilvus()
-    adapter = MilvusProjectionAdapter(store)
+    claim = {'seq': 2, 'token': 'lease-new'}
+    adapter = MilvusProjectionAdapter(store, encoder=RecordingEncoder(),
+        fence_is_current=lambda project, seq, fence: (
+            project == 'project' and seq == claim['seq'] and fence == claim['token']))
 
-    assert adapter.apply('project', event(2), fence='lease-new') is True
-    assert adapter.apply('project', event(2), fence='lease-retry') is False
-    assert adapter.apply('project', event(1), fence='lease-old') is False
+    kwargs = {'index_version': 1, 'catalog': CATALOG}
+    assert adapter.apply('project', event(2), fence='lease-new', **kwargs) is True
+    assert adapter.apply('project', event(2), fence='lease-new', **kwargs) is True
+    assert len(store.rows) == 1
+    for stale_event, token in ((event(2), 'lease-retry'), (event(1), 'lease-old')):
+        with pytest.raises(ProjectionLeaseLost):
+            adapter.apply('project', stale_event, fence=token, **kwargs)
+    assert len(store.upserts) == 2
+    expected = dict(event(2)['payload']['_milvus_projection']['row'], embedding=[1.0])
+    assert store.rows == {('project', 1, 'record'): expected}
+    claim.update(seq=3, token='lease-next')
     assert adapter.apply(
-        'project', event(3, 'tombstone'), fence='lease-next') is True
+        'project', event(3, 'tombstone'), fence='lease-next', **kwargs) is True
+    assert store.rows == {}
+    assert store.deletes == [(['record'], 'project', 1, CATALOG.fingerprint)]
 
-    assert store.upserts == [([{
-        **event(2)['payload'], 'project_id': 'project',
-    }], True)]
-    assert store.deletes == [('project', 'record')]
+
+@pytest.mark.parametrize('mismatch', ['project', 'row_generation', 'envelope_generation', 'catalog'])
+def test_milvus_adapter_rejects_envelopes_outside_the_frozen_project_build(mismatch):
+    store, encoder = RecordingMilvus(), RecordingEncoder()
+    value = event(2)
+    envelope = value['payload']['_milvus_projection']
+    if mismatch == 'project':
+        envelope['row']['project_id'] = 'other'
+    elif mismatch == 'row_generation':
+        envelope['row']['index_version'] = 2
+    elif mismatch == 'envelope_generation':
+        envelope['index_version'] = 2
+    else:
+        envelope['catalog_fingerprint'] = 'another-catalog'
+    with pytest.raises(ValueError):
+        MilvusProjectionAdapter(store, encoder=encoder).apply(
+            'project', value, fence='claim', index_version=1, catalog=CATALOG)
+    assert encoder.encoded == []
+    assert store.upserts == store.deletes == []
 
 
 def test_milvus_adapter_resolves_a_store_reconnected_after_startup():
     current = {'store': None}
-    adapter = MilvusProjectionAdapter(lambda: current['store'])
+    encoder = RecordingEncoder()
+    adapter = MilvusProjectionAdapter(lambda: current['store'], encoder=encoder)
 
-    try:
-        adapter.apply('project', event(1), fence='lease-one')
-    except RuntimeError as exc:
-        assert 'unavailable' in str(exc)
-    else:
-        raise AssertionError('an unavailable store must leave the outbox unacked')
+    with pytest.raises(RuntimeError, match='unavailable'):
+        adapter.apply('project', event(1), fence='lease-one', index_version=1, catalog=CATALOG)
+    assert encoder.encoded == []
 
     current['store'] = RecordingMilvus()
-    assert adapter.apply('project', event(1), fence='lease-two') is True
+    assert adapter.apply('project', event(1), fence='lease-two',
+                         index_version=1, catalog=CATALOG) is True
     assert len(current['store'].upserts) == 1
+    assert encoder.encoded == [['text']]
 
 
-def test_milvus_adapter_repairs_authority_when_persistent_fence_is_lost_after_write():
+def test_milvus_adapter_lost_fence_after_write_refuses_ack_and_further_writes():
     store = RecordingMilvus()
     current = {'valid': True}
-    repaired = []
+    upsert = store.upsert_rows
 
-    def upsert_then_lose_fence(records, flush=True, *, destination, projection_seq, fence):
-        store.upserts.append((list(records), flush))
+    def upsert_then_lose_fence(records, **kwargs):
+        result = upsert(records, **kwargs)
         current['valid'] = False
-        return len(records)
+        return result
 
-    store.upsert = upsert_then_lose_fence
+    store.upsert_rows = upsert_then_lose_fence
+    encoder = RecordingEncoder()
     adapter = MilvusProjectionAdapter(
-        store,
-        fence_is_current=lambda project, seq, fence: current['valid'],
-        repair_authority=lambda project, record, destination: repaired.append(
-            (project, record, destination)))
+        store, encoder=encoder,
+        fence_is_current=lambda project, seq, fence: current['valid'])
 
-    assert adapter.apply('project', event(4), fence='expired-lease') is False
-    assert repaired == [('project', 'record', 'knowledge_records')]
-
-
-def test_tombstone_writes_persistent_fence_marker():
-    class MarkedMilvus(RecordingMilvus):
-        def __init__(self):
-            super().__init__()
-            self.markers = []
-        def write_fence_marker(self, project, destination, seq, fence):
-            self.markers.append((project, destination, seq, fence))
-
-    store = MarkedMilvus()
-    assert MilvusProjectionAdapter(store).apply(
-        'project', event(8, 'tombstone'), fence='claim-8')
-    assert store.markers == [
-        ('project', 'knowledge_records', 8, 'claim-8')]
+    with pytest.raises(ProjectionLeaseLost):
+        adapter.apply('project', event(4), fence='expired-lease', index_version=1, catalog=CATALOG)
+    with pytest.raises(ProjectionLeaseLost):
+        adapter.apply('project', event(5), fence='expired-lease', index_version=1, catalog=CATALOG)
+    assert len(store.upserts) == 1
+    assert encoder.encoded == [['text']]
+    assert store.deletes == []
 
 
-def test_milvus_adapter_never_acknowledges_an_indexed_record_without_embedding():
-    adapter = MilvusProjectionAdapter(RecordingMilvus())
-    missing = event(5)
-    missing['payload'].pop('embedding')
-    with pytest.raises(RuntimeError, match='no embedding'):
-        adapter.apply('project', missing, fence='claim')
+def test_tombstone_deletes_only_the_claimed_project_and_generation():
+    store = RecordingMilvus()
+    for project, generation in (('project', 1), ('project', 2), ('other', 1)):
+        store.rows[(project, generation, 'record')] = {'version_id': 'keep'}
+    encoder = RecordingEncoder()
+    adapter = MilvusProjectionAdapter(store, encoder=encoder)
+    for _ in range(2):
+        assert adapter.apply('project', event(8, 'tombstone'), fence='claim-8',
+                             index_version=1, catalog=CATALOG) is True
+    assert store.rows == {('project', 2, 'record'): {'version_id': 'keep'},
+                          ('other', 1, 'record'): {'version_id': 'keep'}}
+    assert store.deletes == [(['record'], 'project', 1, CATALOG.fingerprint)] * 2
+    assert encoder.encoded == []
+
+
+@pytest.mark.parametrize('vectors, error', [
+    (None, MilvusSchemaMismatch), ([], RuntimeError),
+    ([[]], VectorDimensionMismatch), ([[0.0]], ValueError),
+])
+def test_milvus_adapter_never_acknowledges_an_indexed_record_without_valid_embedding(vectors, error):
+    writes = []
+    store = MilvusStore(dim=1, encoder_identity='test')
+    store.check_collection = lambda **kwargs: store
+    store._client = SimpleNamespace(upsert=lambda *args, **kwargs: writes.append(args))
+    encoder = None if vectors is None else SimpleNamespace(identity='test', encode=lambda texts: vectors)
+    adapter = MilvusProjectionAdapter(store, encoder=encoder)
+    value = event(5)
+    assert 'embedding' not in value['payload']['_milvus_projection']['row']
+    with pytest.raises(error):
+        adapter.apply('project', value, fence='claim', index_version=1, catalog=CATALOG)
+    assert writes == []
 
 
 class FakeRepository:
@@ -150,6 +227,7 @@ class FakeSync:
         self.resumed = []
         self.drained = []
         self.maintained = []
+        self.generation_maintenance = []
 
     def resume_pending(self, target=None):
         self.resumed.append(target)
@@ -162,6 +240,10 @@ class FakeSync:
     def maintain_rollbacks(self, target=None):
         self.maintained.append(target)
         return 0
+
+    def maintain_generations(self):
+        self.generation_maintenance.append(True)
+        return {'claimed': 0, 'cleaned': 0, 'failed': 0}
 
 
 def test_projection_worker_leaves_schema_mismatch_for_explicit_rebuild():
@@ -197,27 +279,48 @@ def test_projection_worker_never_rebuilds_while_another_worker_holds_lease():
     assert sync.rebuilt == []
 
 
-def test_authority_audit_lost_lease_stops_before_encoding_or_writes():
-    class AuditStore:
-        def current_destination(self, project): return 'generation'
-        def authority_repair_ids(self, project, destination, expected,
-                                 heartbeat=None):
-            assert heartbeat()
-            return {'r'}
-        def apply_authority_repairs(self, *args, **kwargs):
-            raise AssertionError('lost audit must not mutate Milvus')
-    class Encoder:
-        identity = 'test'
-        def encode(self, texts):
-            raise AssertionError('lost audit must not encode')
+def test_build_lost_lease_stops_before_loading_encoding_writing_or_receipts():
+    store, encoder, receipts = RecordingMilvus(), RecordingEncoder(), []
 
-    checks = iter([True, False])
-    result = MilvusProjectionAdapter(
-        AuditStore(), encoder=Encoder()).audit_authority(
-            'p', [{'id': 'r', 'version_id': 'v', 'kind': 'chunk',
-                   'text': 'x', 'metadata': {}}], 1,
-            lambda: next(checks))
-    assert result == {'aborted': True, 'repaired': 0}
+    def unread_rows():
+        raise AssertionError('lost build must not hydrate captured versions')
+        yield
+
+    with pytest.raises(ProjectionLeaseLost):
+        MilvusProjectionAdapter(store, encoder=encoder).load_rows(
+            'project', unread_rows(), {'index_version': 1}, CATALOG,
+            lease_is_current=lambda: False, receipt_page=receipts.append)
+    assert encoder.encoded == []
+    assert store.upserts == store.deletes == receipts == []
+
+
+@pytest.mark.parametrize('loss_phase', ['encoding', 'write'])
+def test_build_lost_lease_never_confirms_rows_or_starts_the_next_batch(loss_phase):
+    store, receipts = RecordingMilvus(), []
+    current = {'valid': True}
+    upsert = store.upsert_rows
+
+    def encode(texts):
+        if loss_phase == 'encoding':
+            current['valid'] = False
+        return [[1.0] for _ in texts]
+
+    def write(records, **kwargs):
+        result = upsert(records, **kwargs)
+        current['valid'] = False
+        return result
+
+    store.upsert_rows = write
+    encoder = SimpleNamespace(identity='test', encode=encode)
+    records = [event(i, record_id=f'r{i}')['payload']['_milvus_projection']['row']
+               for i in range(65)]
+    with pytest.raises(ProjectionLeaseLost):
+        MilvusProjectionAdapter(store, encoder=encoder).load_rows(
+            'project', records, {'index_version': 1}, CATALOG,
+            lease_is_current=lambda: current['valid'],
+            receipt_page=receipts.append)
+    assert receipts == []
+    assert [len(call[0]) for call in store.upserts] == ([] if loss_phase == 'encoding' else [64])
 
 
 def test_lease_heartbeat_renews_while_external_call_is_blocked_and_marks_loss():
@@ -252,36 +355,81 @@ def test_lease_heartbeat_renews_while_external_call_is_blocked_and_marks_loss():
         assert heartbeat.check() is False
 
 
-def test_snapshot_load_chunks_milvus_upserts_at_256_records():
-    class ChunkStore:
-        def __init__(self): self.sizes = []; self.markers = []
-        def upsert(self, records, **kwargs): self.sizes.append(len(records))
-        def write_fence_marker(self, *args): self.markers.append(args)
-    store = ChunkStore()
-    records = [{'id': f'r{i}', 'version_id': f'v{i}', 'kind': 'chunk',
-                'text': 'x', 'embedding': [1], 'metadata': {}}
+def test_snapshot_load_bounds_encoding_writes_and_confirmed_receipt_pages_at_64_rows():
+    store, encoder, receipts = RecordingMilvus(), RecordingEncoder(), []
+    records = [event(i, record_id=f'r{i}')['payload']['_milvus_projection']['row']
                for i in range(600)]
-    MilvusProjectionAdapter(store).load_snapshot(
-        'p', 'generation', records, 9, fence='claim', lease_is_current=lambda: True)
-    assert store.sizes == [256, 256, 88]
+
+    def confirm(page):
+        assert len(store.upserts) == len(receipts) + 1
+        assert [row['version_id'] for row in store.upserts[-1][0]] == [row['version_id'] for row in page]
+        assert all('embedding' not in row for row in page)
+        receipts.append(list(page))
+
+    indexed = MilvusProjectionAdapter(store, encoder=encoder).load_rows(
+        'project', records, {'index_version': 1}, CATALOG,
+        lease_is_current=lambda: True, receipt_page=confirm)
+    assert indexed == 600
+    expected_sizes = [64] * 9 + [24]
+    assert [len(page) for page in encoder.encoded] == expected_sizes
+    assert [len(call[0]) for call in store.upserts] == expected_sizes
+    assert [len(page) for page in receipts] == expected_sizes
+    assert [row for page in receipts for row in page] == records
+    assert all(call[1:] == ('project', 1, CATALOG.fingerprint) for call in store.upserts)
 
 
-def test_projection_worker_runs_delivery_cleanup_and_maintenance_without_recovery():
+def test_projection_worker_runs_delivery_cleanup_generation_and_other_target_maintenance():
     repository = FakeRepository()
     sync = FakeSync()
+    sync.adapters['neo4j'] = object()
     cleaned = []
+    reconnects = []
     worker = ProjectionWorker(
         repository, sync,
-        cleanup_handlers={'milvus': cleaned.append}, interval_seconds=60)
+        cleanup_handlers={'milvus': cleaned.append}, interval_seconds=60,
+        reconnect=lambda: reconnects.append(True))
 
     result = worker.run_once()
 
     assert sync.resumed == []
-    assert sync.drained == [('p1', 'milvus'), ('p2', 'milvus')]
-    assert sync.maintained == ['milvus']
+    assert sync.drained == [('p1', 'milvus'), ('p1', 'neo4j'),
+                            ('p2', 'milvus'), ('p2', 'neo4j')]
+    assert sync.maintained == ['neo4j']
+    assert sync.generation_maintenance == [True]
+    assert reconnects == [True]
     assert repository.directory_calls == 1
     assert cleaned == ['gone']
     assert result['cleanup'] == {'claimed': 1, 'cleaned': 1, 'failed': 0}
+
+
+def test_projection_worker_bounds_delivery_per_project_and_keeps_cleanup_running():
+    repository, sync = FakeRepository(), FakeSync()
+
+    def always_has_work(project, target):
+        sync.drained.append((project, target))
+        return DrainResult('applied', 1)
+
+    sync.drain_once = always_has_work
+    worker = ProjectionWorker(repository, sync, cleanup_handlers={'milvus': lambda project: None},
+                              max_batches_per_project=2)
+    result = worker.run_once()
+    assert sync.drained == [('p1', 'milvus')] * 2 + [('p2', 'milvus')] * 2
+    assert result == {'delivered': 4, 'cleanup': {'claimed': 1, 'cleaned': 1, 'failed': 0}}
+    assert sync.generation_maintenance == [True]
+
+
+def test_projection_worker_requests_forced_reconnect_when_delivery_fails():
+    sync, reconnects = FakeSync(), []
+
+    def failed_delivery(project, target):
+        raise RuntimeError('store disconnected')
+
+    sync.drain_once = failed_delivery
+    worker = ProjectionWorker(FakeRepository(), sync, cleanup_handlers={},
+                              reconnect=lambda **kwargs: reconnects.append(kwargs))
+    with pytest.raises(RuntimeError, match='store disconnected'):
+        worker.drain_project('p1')
+    assert reconnects == [{'force': True}]
 
 
 def test_projection_worker_start_and_close_are_idempotent_and_join_thread():
