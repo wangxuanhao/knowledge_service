@@ -15,7 +15,7 @@ FastAPI + PostgreSQL 的知识图谱服务：双时态版本、本体/SHACL 治�
 | Python | **3.12**，conda env **`llm_model`**（**唯一**环境，**绝不要建 `.venv`**） |
 | 解释器 | `D:/anaconda/envs/llm_model/python.exe` |
 | 存储 | **PostgreSQL 是唯一权威存储**（SQLite 后端已移除；遗留 `KG_DATABASE` 被明确拒绝） |
-| 向量 | 可选 Milvus（`integrations/milvus_store.py`） |
+| 检索 | 当前关键词/语义/混合使用项目显式构建的 Milvus 索引（`integrations/milvus_store.py`），不可用时明确失败 |
 | 前端 | 原生 JS/CSS，**无构建工具、无 `node_modules`、无 `package.json`**；`web/` 挂载为 HTTP 路径 `/assets/` |
 | Node | v26，仅用于跑前端契约测试（`node:test`） |
 
@@ -26,15 +26,15 @@ FastAPI + PostgreSQL 的知识图谱服务：双时态版本、本体/SHACL 治�
 | 路径 | 职责 |
 |---|---|
 | `knowledge_service/api/` | FastAPI 路由层（**只做参数校验与编排，无业务逻辑**）。前缀统一 `/api/`，健康检查 `GET /api/health` |
-| `knowledge_service/services/` | 🧠 业务服务层（**无路由装饰器**，28 个模块）。`service.py` 是主门面，`answers.py` 是证据问答，`retrieval.py` 是混合检索，`ontology_*.py` 是本体系列，`chunking.py` 是切片 |
+| `knowledge_service/services/` | 🧠 业务服务层（**无路由装饰器**）。`service.py` 是主门面，`answers.py` 是证据问答，`retrieval.py` 是检索，`ontology_*.py` 是本体系列 |
 | `knowledge_service/repository/` | PostgreSQL 访问层。`connection.py` 的 `resolve_dsn()` 是唯一取连接入口；`core.py` 是主仓储；`migrations/` 是编号 SQL 迁移 |
 | `knowledge_service/integrations/` | 外部系统适配：`semantica_adapter.py`（LLM 抽取）、`embeddings.py`、`milvus_store.py`、`neo4j_store.py`、`document_parser.py` |
 | `knowledge_service/core/` | 配置（`config.py` 的 `load_environment`）、日志、HTTP 客户端（`net.py` 的 `external_client`）、时间 |
 | `knowledge_service/utils/` | 工具：`diagnostics.py`、`filters.py`、`attributes.py` |
 | `knowledge_service/models.py` | 全局 pydantic 模型（**想了解数据结构先读这里**） |
 | `knowledge_service/web/` | 前端：`index.html` + 各功能 `*.js`/`*.css` 成对存在（如 `workspace.js`/`workspace.css`） |
-| `tests/service/` | 全部测试（含 `pg_support.py` 与 `.cjs` 前端契约测试） |
-| `scripts/` | 冒烟与验证脚本（`smoke_service.py`、`verify_*.py`） |
+| `tests/` | Python/Node 回归、浏览器检查和支持夹具；`tests/scripts/` 有运维安全回归。选择运行入口先读 `tests/README.md` |
+| `scripts/` | 手动运维和专项验收；选择工具先读 `scripts/README.md`，其中明确区分当前入口、待适配专项和历史迁移演练 |
 | `docs/` | 规划与手册（**读之前先按文件名筛，别整目录读**） |
 | `data/rule_txt/` | ⚠️ 357 个业务规则 md——**这是测试数据，不是项目文档，不要读** |
 
@@ -75,22 +75,11 @@ node --test tests/service/*.test.cjs
 8. **前端 404 找不到资源时**：`web/` 映射到 `/assets/`，`web/vendor/` 映射到 `/vendor/`。
 9. **派生知识的来源在 `assertions` 表，不在记录顶层 `source_id`**：一条实体/关系/属性可能被多个文档提到（多对多），`FormalFactWriter._canonical_record()` 落库前会主动 `pop('source_id')`，所以读到 `source_id=None` 是设计、不是丢数据。查「某文档抽出哪些知识」要用 `GET /projects/{p}/assertions?document_id=...`（带 kind/status/payload/quote），**不要靠记录 ID 前缀猜**。待确认（pending）断言的 `payload` 字段与 accepted 规范记录不同：pending 实体用 `proposed_type`、pending 关系用 `subject/predicate/object` 名字、pending 属性用 `subject/proposed_type/value`，前端渲染要分支处理，否则会显示"—"。相关坑：NER 可能误把标量值（金额/状态/时长）建成 `DataEntity` 实体；`semantica_adapter` 把属性改判关系必须三条全满足（值唯一命中实体 + 谓词是本体**对象属性** + 命中实体非 `DataEntity`），否则标量属性会被错误卷进关系组。
 
-## 巨型文件：读之前先规划
+## 代码定位
 
-以下文件单文件就足以占满相当比例的上下文窗口，**不要无条件整读**（用 `read_file` 的 `offset`/`limit` 分段，或先用 `search_files` 定位）：
-
-| 文件 | 行数 | 约 token |
-|---|---|---|
-| `web/ontology-workbench.js` | 2752 | ~62k |
-| `tests/service/test_ontology_discovery.py` | 2757 | ~40k |
-| `services/ontology_drafts.py` | 2438 | ~35k |
-| `tests/service/test_ontology_workbench_ui.py` | 1907 | ~30k |
-| `repository/core.py` | 1776 | ~27k |
-| `web/ontology-design.js` | 1453 | ~25k |
-
-> 💡 **省 token 的杠杆是"文件粒度"，不是语言。** 改一个巨型文件的成本不是读一次，而是**读入后每轮对话都要重新携带**。需要在大文件里做探索性查找时，优先交给子代理（隔离上下文，只回摘要）。
+优先用 codebase-memory 的 `search_graph`、`trace_path` 和 `get_code_snippet` 定位定义与调用关系，复杂关系用 `query_graph`。索引不足或陈旧时回退磁盘源码；文档、配置和字符串用 `rg`。读取大文件先定位符号再按范围读取，当前路径以实际目录为准。
 
 ## 修改前请确认
 
 - 前端契约测试（`tests/service/*.test.cjs`）是 UI 的**活文档**：改了 UI 文案/结构/资源版本号，就要同步更新对应 `.cjs` 断言，否则它们会失败。
-- 本仓库前端文案统一用「本体审核台」（不是「本体工作台」），改名时注意测试与 UI 同步。
+- 前端文案以现行导航和完整操作手册为准；历史设计中的已退役页面名称不反向覆盖当前界面。

@@ -180,13 +180,10 @@ def test_static_validator_detects_lost_illustrated_chapter_coverage():
     assert 'Chapter 06: missing current UI screenshot coverage' in errors
 
 
-def test_legacy_builder_only_renders_the_current_canonical_manual():
+def test_manual_builder_renders_the_current_canonical_manual():
     path = ROOT / 'scripts/build_knowledge_service_manual.py'
-    spec = importlib.util.spec_from_file_location('manual_compatibility_entrypoint', path)
+    spec = importlib.util.spec_from_file_location('manual_build_entrypoint', path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert module.OUTPUT == HTML_MANUAL
     assert module.render_manual() == HTML_MANUAL.read_text(encoding='utf-8')
-    retired_capture = (ROOT / 'scripts/capture_knowledge_service_manual.py').read_text(encoding='utf-8')
-    assert '已停用' in retired_capture
-    assert 'requests' not in retired_capture and 'playwright' not in retired_capture

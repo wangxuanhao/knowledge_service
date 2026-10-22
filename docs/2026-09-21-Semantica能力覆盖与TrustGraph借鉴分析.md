@@ -21,7 +21,7 @@
 
 本机 `D:\anaconda\envs\llm_model` 实测安装 Semantica `0.6.8`。该版本于 2026-09-05 发布，新增了签名发布、跨多种向量库的枚举/迁移、更多 LLM provider、确定性的本体质量门等能力。[Semantica 0.6.8 发布说明](https://github.com/semantica-agi/semantica/releases/tag/v0.6.8)
 
-当前项目以 SQLite 为双时态真相源，Milvus 和 Neo4j 是可重建派生索引/投影；服务还自带 OWL/SHACL、本体版本和审核工作台。这一权威边界在 [README](../README.md#L49-L58) 中已有明确约定。项目的 `semantica-runtime` extra 只列出了当前调用路径所需的一组传递依赖，没有声明 `semantica` 包本身，`uv.lock` 也没有锁定 Semantica；同时安装文档仍写 `semantica==0.6.7`，而当前实测环境为 0.6.8。这是部署复现性缺口，不是“最小依赖”优化，见 [pyproject.toml](../pyproject.toml#L16-L21)、[uv.lock](../uv.lock) 和 [KNOWLEDGE_SERVICE.md](KNOWLEDGE_SERVICE.md#L21-L22)。
+当前项目以 SQLite 为双时态真相源，Milvus 和 Neo4j 是可重建派生索引/投影；服务还自带 OWL/SHACL、本体版本和审核工作台。这一权威边界在 [README](../README.md#L49-L58) 中已有明确约定。项目的 `semantica-runtime` extra 只列出了当前调用路径所需的一组传递依赖，没有声明 `semantica` 包本身，`uv.lock` 也没有锁定 Semantica；同时安装文档仍写 `semantica==0.6.7`，而当前实测环境为 0.6.8。这是部署复现性缺口，不是“最小依赖”优化，见 [pyproject.toml](../pyproject.toml#L16-L21)、[uv.lock](../uv.lock) 和当时的 `KNOWLEDGE_SERVICE.md`（已退役，原文可从 Git 历史恢复）。本段保留 2026-09-21 的观察，不代表现行 PostgreSQL 与依赖状态。
 
 生产代码对 Semantica 的直接调用为：
 

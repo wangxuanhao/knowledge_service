@@ -41,4 +41,4 @@ knowledge_service = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests/service"]
+testpaths = ["tests/service", "tests/scripts"]
