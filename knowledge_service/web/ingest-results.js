@@ -297,6 +297,13 @@
   // 三类知识分组：可折叠 details + 胶囊超量截断；入图/待确认计数写在标题
   function renderAsserts(asserts, task) {
     const box = el('div', 'ingest-result');
+    const entityNames = new Map();
+    for (const a of asserts) {
+      if (a.kind !== 'entity' || a.status !== 'accepted' || !a.payload?.text) continue;
+      for (const id of [a.canonical_record_id, a.payload.id]) {
+        if (id) entityNames.set(id, a.payload.text);
+      }
+    }
     box.append(el('p', 'ingest-result__scope-note', '下方为文档当前知识状态；重新处理后可能变化，不代表本次任务的结果快照。'));
     // 实体默认展开；关系、有大量待确认时默认收起，按需点开
     const groups = [
@@ -322,7 +329,7 @@
       // 胶囊容器：先放前 N 条，超出的折叠到“展开全部”按钮后
       const wrap = el('div', 'ingest-result__chips');
       const visible = rows.slice(0, CHIP_PREVIEW_LIMIT);
-      for (const a of visible) wrap.append(assertChip(a, kind));
+      for (const a of visible) wrap.append(assertChip(a, kind, entityNames));
       if (rows.length > CHIP_PREVIEW_LIMIT) {
         const moreBtn = el('button', 'ingest-result__more',
           '展开其余 ' + (rows.length - CHIP_PREVIEW_LIMIT) + ' 个');
@@ -330,7 +337,7 @@
         moreBtn.addEventListener('click', () => {
           // 补齐剩余胶囊后移除按钮；只在首次展开时操作，不重复追加
           for (const a of rows.slice(CHIP_PREVIEW_LIMIT)) {
-            wrap.insertBefore(assertChip(a, kind), moreBtn);
+            wrap.insertBefore(assertChip(a, kind, entityNames), moreBtn);
           }
           moreBtn.remove();
         });
@@ -349,7 +356,7 @@
   }
 
   // 单个胶囊：pending 候选与 accepted 规范记录字段结构不同，分开渲染。
-  function assertChip(a, kind) {
+  function assertChip(a, kind, entityNames) {
     const p = a.payload || {};
     const cls = 'ingest-result__chip is-' + kind + (a.status === 'pending' ? ' is-pending' : '');
     let text, tip;
@@ -371,12 +378,14 @@
         tip = safe(p.reason, '待人工确认');
       }
     } else {
-      // 已入图规范记录：type 是 IRI、关系两端是记录 ID
+      // accepted 可能保留发现候选的原始 payload；不能假定它已变成规范记录形态。
       if (kind === 'entity') {
-        text = safe(p.text) + ' · ' + shortIri(p.type);
+        text = safe(p.text) + ' · ' + (p.type ? shortIri(p.type) : safe(p.proposed_type));
       } else if (kind === 'relation') {
-        text = safe(p.text) ||
-          (shortRef(p.subject_id) + ' —' + shortIri(p.type) + '→ ' + shortRef(p.object_id));
+        text = safe(p.text, '').trim() ||
+          (safe(p.subject, entityNames.get(p.subject_id) || shortRef(p.subject_id))
+            + ' —' + (p.type ? shortIri(p.type) : safe(p.predicate || p.proposed_type)) + '→ '
+            + safe(p.object, entityNames.get(p.object_id) || shortRef(p.object_id)));
       } else {
         const v = p.value === undefined ? '' : (typeof p.value === 'string' ? p.value : JSON.stringify(p.value));
         text = shortRef(p.subject_id) + ' · ' + shortIri(p.type) + ' = ' + safe(v);

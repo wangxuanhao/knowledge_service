@@ -97,6 +97,66 @@ test('watch keeps the submitting project and mode when loading assertions',async
   assert.match(f.text(),/使用项目本体 · 正式入图/);
 });
 
+test('accepted relations without display text show their predicate and endpoints instead of a dash',async()=>{
+  const f=fixture({assertions:[{kind:'relation',status:'accepted',payload:{
+    subject_id:'urn:entity:平台',type:'https://example.test/kg#提供',object_id:'urn:entity:未成年人模式',
+  }}]});
+  f.context.window.IngestResults.watch('relation-job','规则.md',{projectId:'p',mode:'ontology'});
+  await f.settle();
+  assert.match(f.text(),/平台 —提供→ 未成年人模式/);
+});
+
+test('published discovery assertions retain readable relation names and endpoint names',async()=>{
+  const f=fixture({assertions:[
+    {kind:'entity',status:'accepted',canonical_record_id:'formal-platform',payload:{id:'candidate-platform',text:'平台',proposed_type:'服务平台'}},
+    {kind:'relation',status:'accepted',payload:{subject_id:'formal-platform',subject:'平台',
+      object_id:'formal-mode',object:'未成年人模式',proposed_type:'提供'}},
+  ]});
+  f.context.window.IngestResults.watch('published-job','规则.md',{projectId:'p',mode:'discovery'});
+  await f.settle();
+  assert.match(f.text(),/平台 —提供→ 未成年人模式/);
+  assert.match(f.text(),/平台 · 服务平台/);
+  assert.match(f.text(),/入图 1/);
+  assert.doesNotMatch(f.text(),/待确认 1/);
+});
+
+test('published discovery labels preserve punctuation in original type and predicate names',async()=>{
+  const f=fixture({assertions:[
+    {kind:'entity',status:'accepted',payload:{text:'规则',proposed_type:'通知/说明'}},
+    {kind:'relation',status:'accepted',payload:{subject:'平台',object:'个人信息',proposed_type:'收集/使用'}},
+  ]});
+  f.context.window.IngestResults.watch('punctuation-job','规则.md',{projectId:'p',mode:'discovery'});
+  await f.settle();
+  assert.match(f.text(),/规则 · 通知\/说明/);
+  assert.match(f.text(),/平台 —收集\/使用→ 个人信息/);
+});
+
+test('accepted relation labels resolve entity references after expanding the remaining rows',async()=>{
+  const f=fixture({assertions:[
+    {kind:'entity',status:'accepted',canonical_record_id:'formal-a',payload:{id:'candidate-a',text:'平台',type:'Platform'}},
+    {kind:'entity',status:'accepted',payload:{id:'b',text:'未成年人模式',type:'Mode'}},
+    ...Array.from({length:13},(_,i)=>({kind:'relation',status:'accepted',payload:{
+      text:i===0?'已保存的关系描述':i===12?'   ':null,subject_id:'formal-a',type:'urn:term:提供',object_id:'b',
+    }})),
+  ]});
+  f.context.window.IngestResults.watch('many-relations','规则.md',{projectId:'p',mode:'ontology'});
+  await f.settle();
+  assert.match(f.text(),/已保存的关系描述/);
+  f.buttons().find(button=>button.textContent==='展开其余 1 个').click();
+  assert.equal((f.text().match(/平台 —提供→ 未成年人模式/g)||[]).length,12);
+});
+
+test('pending relation names still use candidate fields without being labelled as accepted',async()=>{
+  const f=fixture({assertions:[{kind:'relation',status:'pending',payload:{
+    subject:'平台',predicate:'提供',object:'未成年人模式',reason:'需核对定义',
+  }}]});
+  f.context.window.IngestResults.watch('pending-relation','规则.md',{projectId:'p',mode:'discovery'});
+  await f.settle();
+  assert.match(f.text(),/平台 提供 未成年人模式/);
+  assert.match(f.text(),/待确认 1/);
+  assert.doesNotMatch(f.text(),/入图 1/);
+});
+
 test('repeated watch does not overwrite the original task ownership',async()=>{
   const f=fixture();
   f.context.window.IngestResults.watch('job-1','规则.md',{
