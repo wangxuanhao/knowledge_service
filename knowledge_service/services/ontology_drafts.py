@@ -1009,6 +1009,15 @@ class OntologyDrafts(
     def decide(self, project_id, draft_id, expected_revision,
                expected_ontology_id, validation_fingerprint, decisions,
                acknowledged_warning_codes, actor, *, assisted_batch=False):
+        return self._decide(
+            project_id, draft_id, expected_revision, expected_ontology_id,
+            validation_fingerprint, decisions, acknowledged_warning_codes,
+            actor, assisted_batch=assisted_batch)
+
+    def _decide(self, project_id, draft_id, expected_revision,
+                expected_ontology_id, validation_fingerprint, decisions,
+                acknowledged_warning_codes, actor, *, assisted_batch=False,
+                trusted_definition=False):
         draft = self.store.get(project_id, draft_id)
         self._assert_revision(draft, expected_revision)
         _status_guard(draft, REVIEW_STATES, '做审核决定')
@@ -1020,9 +1029,10 @@ class OntologyDrafts(
             expected_ontology_id=expected_ontology_id)
         actor = _text(actor, 'actor')
         proposed = _as_list(decisions, 'decisions')
-        # The 100-item cap bounds caller-supplied decisions. Assisted batches
-        # come from the server's review plan and stay in one atomic transaction.
-        if not proposed or (not assisted_batch and len(proposed) > 100):
+        # The cap bounds caller-supplied lists. Both larger server-selected
+        # paths remain atomic and retain every individual decision guard.
+        if not proposed or (not assisted_batch and not trusted_definition
+                            and len(proposed) > 100):
             raise BatchNotAllowed('a decision request must contain 1..100 decisions')
         report, _, turtle = self._require_validation(
             project_id, draft, validation_fingerprint,
@@ -1049,7 +1059,7 @@ class OntologyDrafts(
             not (issue.get('operation_ids') or [])
             for issue in report.get('errors') or [])
         warning_codes = self._warning_codes(report)
-        if len(proposed) > 1:
+        if len(proposed) > 1 and not trusted_definition:
             # 批量决定有两条通道，判据都在服务端：
             # ① 默认（严格）：只允许「服务端判定低风险 + 草案无警告」的批准；
             # ② assisted_batch=True（工作台「一键批准」）：允许「可批准且不需要写理由」的

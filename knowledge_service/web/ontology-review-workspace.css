@@ -1,0 +1,38 @@
+#tab-ontology-model .om-definition-review{width:min(1120px,calc(100vw - 40px));height:min(820px,calc(100dvh - 48px));max-height:calc(100dvh - 48px);padding:0;border:1px solid #b6cec6;border-radius:16px;background:#fff;color:#173e38;box-shadow:0 28px 100px #123c3955;overflow:hidden;box-sizing:border-box}
+#tab-ontology-model .om-definition-review[open]{display:flex;flex-direction:column}
+.om-definition-review::backdrop{background:#12332f88;backdrop-filter:blur(3px)}
+.om-definition-review *{box-sizing:border-box}
+.odr-header{display:flex;align-items:center;justify-content:space-between;padding:18px 24px 8px;gap:12px}
+.odr-header small,.odr-kicker{color:#57756e;font-size:12px;letter-spacing:.06em}
+.odr-header h2{font-size:22px;margin:3px 0 0}
+.odr-summary{font-size:13px;color:#57756e;margin:4px 24px 12px;line-height:1.6}
+.odr-toolbar{display:flex;gap:10px;padding:0 24px 12px;align-items:center;flex-wrap:wrap}
+.odr-toolbar select{width:auto;max-width:100%;margin:0;min-height:34px;border:1px solid #c8d9d3;border-radius:7px;padding:5px 10px;background:#fff;color:#173e38}
+.odr-feedback{flex:none;margin:0;padding:9px 24px;border-top:1px solid #deebe5;border-bottom:1px solid #deebe5;background:#f1f7f4;font-size:13px;line-height:1.6}
+.odr-feedback.is-error,.odr-error{color:#a12d3b}
+.om-definition-review[aria-busy=true] .odr-feedback::before{content:"";display:inline-block;width:12px;height:12px;margin-right:8px;border:2px solid #b6d3c5;border-top-color:#287c60;border-radius:50%;vertical-align:-2px;animation:odr-spin .8s linear infinite}
+@keyframes odr-spin{to{transform:rotate(360deg)}}
+.odr-body{display:grid;grid-template-columns:252px minmax(0,1fr);min-height:0;flex:1;overflow:hidden}
+.odr-list{overflow:auto;background:#f7faf8;border-right:1px solid #deebe5;padding:10px;display:flex;flex-direction:column;gap:6px}
+.odr-list .odr-row{display:flex;flex-direction:column;align-items:flex-start;text-align:left;width:100%;flex:none;border:1px solid transparent;border-radius:8px;background:transparent;color:#173e38;padding:11px 13px;gap:4px;cursor:pointer;overflow-wrap:anywhere;white-space:normal}
+.odr-row strong{font-size:14px}.odr-row small,.odr-row span{font-size:12px;color:#627970}
+.odr-list .odr-row:hover{background:#eaf2ed}.odr-list .odr-row[aria-current=true]{background:#e3f1eb;border-color:#8ab9a5;box-shadow:inset 3px 0 #287c60}
+.odr-detail{min-width:0;overflow:auto;padding:22px 26px;overflow-wrap:anywhere;scrollbar-gutter:stable}
+.odr-detail h3{font-size:22px;margin:6px 0 8px}.odr-description{font-size:13px;color:#627970;line-height:1.7;margin:0 0 20px}
+.odr-warning{display:flex;gap:8px;align-items:flex-start;background:#fff8e9;border:1px solid #e8d8b1;padding:10px;border-radius:7px;margin:8px 0;font-size:13px;line-height:1.6}
+.odr-warning input{width:auto;flex:none;margin:4px 0}
+.odr-change{border-bottom:1px solid #e4ece7;padding:12px 0;position:relative}.odr-change:first-child{padding-top:0}
+.odr-change h4{font-size:14px;margin:0 0 9px;padding-right:72px}.odr-change-state{position:absolute;right:0;top:12px;color:#627970;font-size:12px}.odr-change:first-child .odr-change-state{top:0}
+.odr-values{display:grid;grid-template-columns:56px minmax(0,1fr);gap:6px 12px;font-size:13px;line-height:1.7;margin:0}
+.odr-values dt{color:#73877d}.odr-values dd{margin:0;white-space:pre-wrap}
+.odr-reason-label{display:block;font-size:13px;font-weight:600;margin:18px 0 7px}
+.odr-detail textarea{display:block;width:100%;min-height:72px;max-height:160px;resize:vertical;border:1px solid #b9cfc4;border-radius:8px;padding:10px;color:#173e38;background:white;font:inherit;font-size:13px}
+.odr-technical{font-size:12px;margin-top:18px;color:#627970}.odr-technical summary{cursor:pointer}.odr-technical pre{max-height:240px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:#f6f9f7;padding:12px}
+.odr-footer{flex:none;border-top:1px solid #dce8e1;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;background:white}
+.odr-navigation,.odr-decisions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.odr-position{font-size:12px;color:#627970;min-width:45px;text-align:center}
+.odr-empty{padding:36px 10px;color:#627970;line-height:1.8}
+.odr-risk-reasons{font-size:13px;line-height:1.7;color:#775e2a;background:#fbf7ec;border-left:3px solid #d7bc78;padding:10px 12px}
+.odr-impact{font-size:12px;line-height:1.7;color:#627970}.odr-evidence{font-size:12px;line-height:1.7;margin:8px 0;padding:8px 12px;border-left:2px solid #9cc4b1;background:#f3f8f5;color:#57756e}
+.om-definition-review button:focus-visible,.om-definition-review select:focus-visible,.om-definition-review textarea:focus-visible{outline:2px solid #268164;outline-offset:3px}
+@media(max-width:700px){#tab-ontology-model .om-definition-review{width:calc(100vw - 16px);height:calc(100dvh - 16px);max-height:calc(100dvh - 16px);border-radius:10px}.odr-header{padding:14px 16px 6px}.odr-summary{margin:4px 16px 10px}.odr-toolbar{padding:0 16px 10px;gap:6px}.odr-feedback{padding:8px 16px}.odr-body{grid-template-columns:1fr;grid-template-rows:105px minmax(0,1fr)}.odr-list{flex-direction:row;border-right:0;border-bottom:1px solid #deebe5}.odr-list .odr-row{width:165px;min-width:165px;padding:9px}.odr-detail{padding:16px}.odr-detail h3{font-size:19px}.odr-footer{padding:10px 12px;flex-wrap:wrap;gap:8px}.odr-navigation{width:100%;justify-content:space-between}.odr-decisions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.odr-decisions .om-btn{font-size:12px;padding:6px 8px;width:100%;min-width:0}}
+@media(prefers-reduced-motion:reduce){.om-definition-review *{scroll-behavior:auto}.om-definition-review[aria-busy=true] .odr-feedback::before{animation:none}}

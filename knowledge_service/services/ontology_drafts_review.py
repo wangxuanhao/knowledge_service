@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from .ontology_drafts_core import (
-    IRREVERSIBLE_ACTIONS, PENDING_STATES, FINAL_STATES, REVERT_WARNING, StaleSource, ValidationChanged, ValidationFailed, _status_guard, _require_submitted, _canonical_json, _fingerprint, _semantic_operation, is_annotation_only, _text,
+    IRREVERSIBLE_ACTIONS, PENDING_STATES, REVIEW_STATES, FINAL_STATES, REVERT_WARNING, StaleSource, ValidationChanged, ValidationFailed, _status_guard, _require_submitted, _canonical_json, _fingerprint, _semantic_operation, is_annotation_only, _text,
 )
 from .ontology import Ontology
 from .ontology_operations import apply_operations
@@ -648,6 +648,67 @@ class DraftReviewPublishMixin:
         }
 
     # --------------------------------------------------- 一键审核 / 证据人话化
+    def decide_by_definition(
+            self, project_id, draft_id, expected_revision,
+            expected_ontology_id, validation_fingerprint, target_iri, action,
+            reason, acknowledged_warning_codes, actor):
+        """Decide every undecided operation with this exact target atomically.
+
+        This is an explicit human decision about one definition. Only the
+        unattended batch policy and caller-list cap are bypassed; fingerprints,
+        reasons, blockers, warnings and lifecycle guards still belong to
+        ``_decide``. The caller cannot supply the operation set.
+
+        While the draft is reviewable, a known target with no undecided current
+        operations returns ``already_decided=True`` without advancing revision.
+        Stale requests and final drafts still fail the normal review guards.
+        """
+        target_iri = _text(target_iri, 'target_iri')
+        actor = _text(actor, 'actor')
+        if action not in {'approve', 'reject'}:
+            raise ValueError('unsupported definition decision action')
+        with self.repository.unit_of_work():
+            draft = self.store.get(project_id, draft_id)
+            self._assert_revision(draft, expected_revision)
+            _status_guard(draft, REVIEW_STATES, '做审核决定')
+            _require_submitted(draft, '做审核决定')
+            self._check_current(
+                project_id, draft, expected_revision,
+                expected_ontology_id=expected_ontology_id)
+            self._require_validation(
+                project_id, draft, validation_fingerprint,
+                acknowledged_warning_codes, allow_errors=True)
+            operations = [
+                operation for operation in self._active_operations(project_id, draft_id)
+                if operation.get('target_iri') == target_iri]
+            if not operations:
+                raise ValueError('definition target has no current operations')
+            _, rows = self._history(project_id, draft_id)
+            current_decisions = {
+                row['operation_id']: row for row in self._effective_decisions(rows)}
+            pending = [operation for operation in operations
+                       if not ((decision := current_decisions.get(operation['id']))
+                               and decision.get('action') in {'approve', 'reject'}
+                               and decision.get('operation_fingerprint')
+                               == operation['fingerprint'])]
+            if pending:
+                decisions = [{
+                    'operation_id': operation['id'],
+                    'operation_fingerprint': operation['fingerprint'],
+                    'action': action, 'reason': reason,
+                } for operation in pending]
+                updated = self._decide(
+                    project_id, draft_id, expected_revision, expected_ontology_id,
+                    validation_fingerprint, decisions, acknowledged_warning_codes,
+                    actor, trusted_definition=True)
+            else:
+                updated = self._preview(project_id, draft)
+            return {'draft': updated, 'definition': {
+                'target_iri': target_iri, 'action': action,
+                'decided': len(pending), 'already_decided': not pending,
+                'operation_ids': [operation['id'] for operation in pending],
+            }}
+
     def batch_approve(self, project_id, draft_id, expected_revision,
                       expected_ontology_id, validation_fingerprint,
                       acknowledged_warning_codes, actor):

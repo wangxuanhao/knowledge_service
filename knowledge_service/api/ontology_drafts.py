@@ -7,7 +7,7 @@ owner of draft state transitions and DAG projections.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -53,6 +53,12 @@ class BatchApproveRequest(RevisionRequest):
     expected_ontology_id: str | None
     validation_fingerprint: str
     acknowledged_warning_codes: list[str] = Field(default_factory=list)
+
+
+class DefinitionDecisionRequest(BatchApproveRequest):
+    target_iri: str = Field(min_length=1)
+    action: Literal['approve', 'reject']
+    reason: str | None = None
 
 
 class CloseRequest(RevisionRequest):
@@ -143,6 +149,16 @@ def install(app, service):
             request.expected_ontology_id, request.validation_fingerprint,
             request.decisions, request.acknowledged_warning_codes,
             audit_actor(http_request))
+
+    @router.post('/{draft_id}/decisions/by-definition')
+    def definition_decision(
+            p: str, draft_id: str, request: DefinitionDecisionRequest,
+            http_request: Request):
+        return drafts.decide_by_definition(
+            p, draft_id, request.expected_revision,
+            request.expected_ontology_id, request.validation_fingerprint,
+            request.target_iri, request.action, request.reason,
+            request.acknowledged_warning_codes, audit_actor(http_request))
 
     @router.post('/{draft_id}/rebase')
     def rebase(p: str, draft_id: str, request: RebaseRequest):

@@ -758,8 +758,11 @@ def _confirm_selected_reuse(client, path, body, key):
     return preview, frozen, client.post(path + '/confirm-reuse', json=frozen)
 
 
-def test_reuse_max_count_conflict_preserves_existing_facts_runs_and_outbox(tmp_path):
+def test_reuse_max_count_conflict_preserves_existing_facts_runs_and_outbox(tmp_path, monkeypatch):
     app, repo, p, path = _attribute_candidates_setup(tmp_path)
+    # Assert transaction effects independently of the asynchronous consumer,
+    # which can legitimately update the first reuse's existing outbox job.
+    monkeypatch.setattr(app.state.ontology_sync, 'start', lambda: None)
     published = seed_ontology(repo, p, _attribute_ontology(), {})
     body = _request(create_new_draft=False, expected_ontology_id=published['id'],
         candidate_ids=['candidate-1', 'code-one'],

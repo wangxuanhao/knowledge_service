@@ -12,8 +12,8 @@
  *   · 右栏详情 / 底栏动作 / 版本管理 → ontology-model-panel.js（window.OntologyPanel）
  *   三者只通过本文件的事件总线 on/emit 与 S 通信，互不直接依赖。
  *
- * 后端一行不改（设计文档 §5.3）：编辑走 ontology-drafts 命令通道，
- * 「校验并审核」= validate + submit + batch-approve，「发布」= publish。
+ * 编辑走 ontology-drafts 命令通道；首次审核校验并提交，已提交草案直接继续批量审核。
+ * 按定义审核走服务端 decisions/by-definition 原子命令；发布走 publish。
  * 依赖全局（app.js 已注入）：api(path,body,method)、endpoint(suffix)、current、$、esc、status。
  * ========================================================================== */
 (() => {
@@ -51,6 +51,10 @@
     readiness: null,          // GET /publish-readiness（发布清单）
     gatesLoading: false,
     gateLoadError: null,
+    reviewGateLoading: false,
+    reviewPlan: null,
+    reviewPlanLoading: false,
+    reviewLoadError: null,
     candidates: [],           // 待收下候选（画布上的虚线节点）
     discovery: null,          // GET /ontology-discovery：开放发现候选（published、待纳入候选数等）
     error: null,
@@ -254,8 +258,10 @@
 
   async function refreshDraftState() {
     const epoch = ++gateEpoch;
-    if (!S.draft || !S.draft.id) { S.stageAvailability = null; S.readiness = null; S.gatesLoading = false; S.gateLoadError=null; return; }
+    if (!S.draft || !S.draft.id) { S.stageAvailability = null; S.readiness = null; S.gatesLoading = false; S.gateLoadError=null; S.reviewGateLoading=false; S.reviewPlan=null; S.reviewPlanLoading=false; S.reviewLoadError=null; return; }
     S.gatesLoading = true;
+    S.reviewGateLoading=true; S.reviewPlan=null; S.reviewLoadError=null;
+    S.reviewPlanLoading=!!S.draft.submitted_at;
     S.gateLoadError=null;
     emit('stage:changed', { stageAvailability: S.stageAvailability, readiness: S.readiness });
     const project = current, draftId = S.draft.id, revision = S.draft.revision;
@@ -263,8 +269,20 @@
     // stage-availability 是**项目级**路由，草案用 draft_id 查询参数指定；
     // 写成 /{draft_id}/stage-availability 会 404，还会被 catch 吞掉 —— 门禁永远为空、按钮永远禁用。
     const isCurrent=()=>epoch===gateEpoch&&current===project&&S.draft?.id===draftId&&S.draft?.revision===revision;
-    const [stage, editingReadiness] = await Promise.all([
-      readGate(`/ontology-drafts/stage-availability?draft_id=${encodeURIComponent(draftId)}`).catch(() => null),
+    const stageTask=readGate(`/ontology-drafts/stage-availability?draft_id=${encodeURIComponent(draftId)}`).catch(()=>null).then(stage=>{
+      if(!isCurrent())return;
+      S.stageAvailability=stage;S.reviewGateLoading=false;
+      if(!stage)S.reviewLoadError='审核条件读取失败，请重试。';
+      emit('stage:changed',{stageAvailability:stage,readiness:S.readiness});
+    });
+    const planTask=S.draft.submitted_at?readGate(base+'/review-plan').catch(()=>null).then(plan=>{
+      if(!isCurrent())return;
+      S.reviewPlan=plan?.revision===revision?plan:null;S.reviewPlanLoading=false;
+      if(!S.reviewPlan)S.reviewLoadError='审核计划读取失败或修订已变化，请重新读取。';
+      emit('stage:changed',{stageAvailability:S.stageAvailability,readiness:S.readiness});
+    }):Promise.resolve();
+    const [, , editingReadiness] = await Promise.all([
+      stageTask,planTask,
       readGate(base + '/publish-readiness?view=editing').catch(() => null),
     ]);
     if(!isCurrent())return;
@@ -275,9 +293,9 @@
       readiness=await readGate(base+'/publish-readiness').catch(()=>null);
       if(!isCurrent())return;
     }
-    S.stageAvailability = stage; S.readiness = readiness;
+    S.readiness = readiness;
     S.gatesLoading = false;
-    S.gateLoadError=stage&&readiness?null:'未能在限定时间内读取完整审核条件，请重试；草案内容已保留。';
+    S.gateLoadError=S.stageAvailability&&readiness&&!S.reviewLoadError?null:'未能在限定时间内读取完整审核条件，请重试；草案内容已保留。';
     emit('stage:changed', { stageAvailability: S.stageAvailability, readiness: S.readiness });
   }
 

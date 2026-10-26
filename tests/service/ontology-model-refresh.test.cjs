@@ -14,6 +14,8 @@ function fixture(options = {}) {
   if(options.canvas)window.OntologyCanvas=options.canvas;
   const api = async (url, body, method = 'POST') => {
     calls.push({ url, method, body });
+    if(url.includes('/stage-availability')){if(options.waitForStage)await options.waitForStage;return options.stageAvailability||{stages:{review:{allowed:true}}};}
+    if(url.endsWith('/review-plan')){if(options.waitForPlan)await options.waitForPlan;if(options.failPlan)throw Error('unavailable');return options.reviewPlan||{revision:2,items:[]};}
     if (options.manualDraft && method === 'POST' && url === '/p/ontology-drafts') return {id:'manual',status:'pending',revision:1};
     if (url === '/p/ontology-drafts/manual') return {id:'manual',status:'pending',revision:1,ontology:summary('manual')};
     if (options.waitForDraftList && url.endsWith('/ontology-drafts') && method === 'GET') await options.waitForDraftList;
@@ -57,6 +59,32 @@ function fixture(options = {}) {
   return { model: window.OntologyModel, calls, notices, root, sidebar, rootClasses,
     switchProject: value => { context.current = value; } };
 }
+
+test('review eligibility is available while publication readiness is still loading',async()=>{
+  let release;const f=fixture({waitForReadiness:new Promise(done=>release=done),reviewPlan:{revision:2,items:[{auto_approvable:true}]}});
+  f.model.S.draft={id:'new',revision:2,submitted_at:'now'};
+  const reading=f.model.refreshDraftState();
+  try{
+    for(let i=0;i<30;i++)await Promise.resolve();
+    assert.equal(f.model.S.reviewGateLoading,false);
+    assert.equal(f.model.S.stageAvailability.stages.review.allowed,true);
+    assert.equal(f.model.S.reviewPlan.items.length,1);
+    assert.equal(f.model.S.gatesLoading,true);
+  }finally{release();await reading;}
+});
+
+test('late review stage and plan cannot replace a newly selected project',async()=>{
+  let release;const wait=new Promise(done=>release=done),f=fixture({waitForStage:wait,waitForPlan:wait});
+  f.model.S.draft={id:'new',revision:2,submitted_at:'now'};const reading=f.model.refreshDraftState();
+  f.switchProject('next');f.model.S.draft={id:'next',revision:2};release();await reading;
+  assert.equal(f.model.S.stageAvailability,null);assert.equal(f.model.S.reviewPlan,null);
+});
+
+test('review plan failure remains retryable without losing a valid review stage',async()=>{
+  const f=fixture({failPlan:true});f.model.S.draft={id:'new',revision:2,submitted_at:'now'};
+  await f.model.refreshDraftState();assert.equal(f.model.S.stageAvailability.stages.review.allowed,true);
+  assert.equal(f.model.S.reviewPlan,null);assert.equal(f.model.S.reviewPlanLoading,false);assert.match(f.model.S.reviewLoadError,/失败/);
+});
 
 test('multiple pending drafts require an explicit workspace selection before any write',async()=>{
   const f=fixture({olderPending:true});await f.model.refresh();

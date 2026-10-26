@@ -140,6 +140,7 @@ function actionFixture(options={}){
     draft:{id:'draft',status:'pending',revision:2,base_ontology_id:'release',operations:[{action:'create_term',target_iri:'urn:Customer',after:{kind:'class'}}],
       associated_knowledge:{selected:3,per_batch:[{run_id:'source-run',candidate_ids:['a','b','c'],selected:3}]},...options.draft},
     stageAvailability:{stages:{review:{allowed:true}}},readiness:options.readiness||{ready:true,approval_counts:{approved:1},items:[]},preview:null};
+  Object.assign(state,options.state||{});
   const model={S:state,status:(message,error)=>messages.push({message,error}),uid:()=> 'publish-key',refresh:async()=>{}};
   const context={window:{OntologyModel:model},current:'p',console,CustomEvent:function(type,init){this.type=type;this.detail=init.detail;},
     document:{createElement:element,dispatchEvent(){}},endpoint:suffix=>'/api/projects/'+context.current+suffix,
@@ -152,6 +153,16 @@ function actionFixture(options={}){
   return {actions,state,calls,messages,timers,context,panel:context.window.OntologyPanel,find:text=>all(actions).find(node=>node.textContent===text)};
 }
 
+test('submitted review resumes server eligible bulk approval without validation or resubmission',async()=>{
+  const f=actionFixture({draft:{submitted_at:'now',validation_fingerprint:'frozen'},state:{gatesLoading:true,reviewGateLoading:false,
+    reviewPlan:{revision:2,items:Array.from({length:188},()=>({auto_approvable:true}))}}});
+  const button=f.find('批量批准（188 项变更）');assert.ok(button);assert.equal(button.disabled,false);
+  await button.listeners.click();
+  assert.ok(!f.calls.some(c=>/\/(validate|submit)$/.test(c.url)));
+  const call=f.calls.find(c=>c.url.endsWith('/decisions/batch-approve'));
+  assert.equal(call.body.expected_revision,2);assert.equal(call.body.validation_fingerprint,'frozen');
+});
+
 test('draft footer distinguishes definitions and facts and exposes every server blocker with the real next step',()=>{
   const f=actionFixture({readiness:{ready:false,approval_counts:{approved:0},items:[
     {code:'not_submitted',severity:'error',message:'这份请求还没有提交过审核'},
@@ -162,7 +173,7 @@ test('draft footer distinguishes definitions and facts and exposes every server 
   assert.ok(all(f.actions).some(node=>String(node.textContent).includes('进入候选核对页查看')));
   for(const message of ['这份请求还没有提交过审核','188 条变更尚未形成最终决定'])assert.ok(f.find(message),message);
   assert.ok(all(f.actions).some(node=>String(node.textContent).includes('下一步：')&&String(node.textContent).includes('校验并审核')));
-  assert.ok(all(f.actions).some(node=>String(node.textContent).includes('逐条审核')));
+  assert.ok(all(f.actions).some(node=>String(node.textContent).includes('按定义审核')));
 });
 
 test('validation shows immediate local progress, rejects duplicate clicks and reports a long request',async()=>{
