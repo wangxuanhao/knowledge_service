@@ -13,6 +13,82 @@ class PageReads:
         self.repo = repository
 
     @_snapshot_read
+    def dashboard(self, project, scope):
+        """Aggregate qualified counts without loading or annotating record bodies."""
+        self.repo.get_project(project)
+        scope = scope or {}
+        reads = ScopedReads(self.repo)
+        selected = scope.get('kinds')
+        # Validate even an empty kind selection before returning an empty result.
+        reads._qualified(project, scope, kinds=selected)
+        kinds = [kind for kind in ('document', 'entity', 'relation', 'attribute', 'chunk')
+                 if selected is None or kind in selected]
+        result = {'counts': {'document': 0, 'total_documents': 0, 'chunk': 0,
+                             'entity': 0, 'relation': 0},
+                  'types': {}, 'predicates': {}, 'unknown_validity': 0}
+        if not kinds:
+            return result
+        branches, params, prefix = [], [], ''
+        entity_source = None
+        if set(kinds) & {'relation', 'attribute'}:
+            entity_source = 'dashboard_entities'
+            entities, params = reads._base(project, scope)
+            prefix = "WITH dashboard_entities AS MATERIALIZED (SELECT r.id FROM record_versions r WHERE r.read_kind='entity' AND " + entities + ') '
+        for kind in kinds:
+            qualified, values = reads._qualified(project, scope, kinds=[kind], entity_source=entity_source)
+            typed = kind in ('entity', 'relation')
+            group = "COALESCE(r.read_type,'')" if typed else 'NULL::text'
+            branches.append(f"""SELECT '{kind}' AS kind,{group} AS type,
+                count(*) AS total,count(*) FILTER (WHERE NOT r.valid_from_known) AS unknown
+                FROM record_versions r WHERE {qualified}""" + (' GROUP BY 2' if typed else ''))
+            params.extend(values)
+        rows = self.repo._db.execute(prefix + ' UNION ALL '.join(branches), params).fetchall()
+        for row in rows:
+            kind, total = row['kind'], row['total']
+            key = 'total_documents' if kind == 'document' else kind
+            if key in result['counts']:
+                result['counts'][key] += total
+            if kind in ('entity', 'relation'):
+                result['types' if kind == 'entity' else 'predicates'][row['type']] = total
+            result['unknown_validity'] += row['unknown']
+        if result['counts']['total_documents']:
+            result['counts']['document'] = self._parsed_document_count(project, scope, kinds)
+        return result
+
+    def _parsed_document_count(self, project, scope, kinds):
+        """Match visible documents to chunks or accepted assertion provenance."""
+        reads = ScopedReads(self.repo)
+        documents, params = reads._base(project, scope, 'd')
+        proofs = []
+        if 'chunk' in kinds:
+            chunks, values = reads._base(project, scope, 'c')
+            proofs.append("""EXISTS (SELECT 1 FROM record_versions c
+                WHERE c.read_kind='chunk' AND c.payload::jsonb->>'source_id'=d.id AND """ + chunks + ')')
+            params.extend(values)
+        facts = [kind for kind in ('entity', 'relation', 'attribute') if kind in kinds]
+        if facts:
+            qualified, values = reads._qualified(project, scope, kinds=facts)
+            known = normalize_time(scope.get('known_at'))
+            if known is None:
+                join, state, canonical = '', 'a.status', 'a.canonical_record_id'
+            else:
+                join = '''CROSS JOIN LATERAL (
+                    SELECT e.to_status,e.canonical_record_id FROM assertion_events e
+                    WHERE e.project_id=a.project_id AND e.assertion_id=a.id AND e.created_at<=?
+                    ORDER BY e.decision_version DESC LIMIT 1) event'''
+                state, canonical = 'event.to_status', 'event.canonical_record_id'
+                params.append(known)
+            proofs.append(f"""EXISTS (SELECT 1 FROM assertions a {join}
+                WHERE a.project_id=? AND a.document_id=d.id AND {state}='accepted'
+                  AND EXISTS (SELECT 1 FROM record_versions r
+                    WHERE r.id={canonical} AND {qualified}))""")
+            params.extend([project, *values])
+        if not proofs:
+            return 0
+        return self.repo._db.execute("SELECT count(*) FROM record_versions d WHERE d.read_kind='document' AND "
+            + documents + ' AND (' + ' OR '.join(proofs) + ')', params).fetchone()[0]
+
+    @_snapshot_read
     def reclassify_inputs(self, project, scope, current_ontology_id, *, sample_limit=20):
         """Count every qualified knowledge group and transfer bounded samples.
 

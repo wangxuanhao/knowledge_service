@@ -25,6 +25,76 @@ def assertion(repo, project, id, record_id, document_id):
                                      canonical_record_id=record_id)
 
 
+def test_dashboard_aggregates_without_materializing_project_records(tmp_path, monkeypatch):
+    repo=Repository(tmp_path/'dashboard');p=repo.create_project('dashboard')['id']
+    record(repo,p,'doc')
+    record(repo,p,'chunk','chunk',source_id='doc')
+    record(repo,p,'a','entity',type='Person')
+    record(repo,p,'b','entity',type='Person')
+    record(repo,p,'r','relation',type='knows',subject_id='a',object_id='b')
+    record(repo,p,'attr','attribute',type='age',subject_id='a',value=18,datatype='http://www.w3.org/2001/XMLSchema#integer')
+    service=KnowledgeService(repo,HashingEncoder())
+    monkeypatch.setattr(service,'scoped',lambda *a,**k:pytest.fail('dashboard materialized the entire project'))
+    result=Explorer(service).dashboard(p,{})
+    assert result=={'counts':{'document':1,'total_documents':1,'chunk':1,'entity':2,'relation':1},
+        'types':{'Person':2},'predicates':{'knows':1},'unknown_validity':6}
+
+
+def test_dashboard_counts_accepted_source_assertions_without_top_level_source_id(tmp_path):
+    repo=Repository(tmp_path/'dashboard-provenance');p=repo.create_project('p')['id']
+    record(repo,p,'doc-a');record(repo,p,'doc-b');record(repo,p,'empty')
+    record(repo,p,'shared','entity',type='Person')
+    assertion(repo,p,'a','shared','doc-a');assertion(repo,p,'b','shared','doc-b')
+    result=Explorer(KnowledgeService(repo,HashingEncoder())).dashboard(p,{})
+    assert result['counts']=={'document':2,'total_documents':3,'chunk':0,'entity':1,'relation':0}
+
+
+@pytest.mark.parametrize('scope',[
+    {},{'filters':{'field':'metadata.region','op':'eq','value':'east'}},
+    {'valid_at':'2030-01-01','include_unknown':False},
+    {'kinds':['entity']},{'kinds':['relation']},{'kinds':['attribute']},{'kinds':[]},
+    {'applicability':{'platforms':{'mode':'specific','values':['one']}}},
+    {'ontology_scope':'ids','ontology_ids':['version-one']},
+    {'kinds':['relation'],'_type_iris':['knows']},
+])
+def test_dashboard_aggregate_preserves_qualified_scope(tmp_path,scope):
+    from collections import Counter
+    repo=Repository(tmp_path/'dashboard-scope');p=repo.create_project('p')['id']
+    for id,region,platform in [('a','east','one'),('b','west','two')]:
+        record(repo,p,id,'entity',type='Person',ontology_id='version-one',valid_from='2020-01-01',
+            metadata={'region':region,'applicability':{'platforms':{'mode':'specific','values':[platform]}}})
+    record(repo,p,'r','relation',type='knows',subject_id='a',object_id='b',metadata={'region':'east'})
+    record(repo,p,'attr','attribute',type='age',subject_id='a',value=18,
+        datatype='http://www.w3.org/2001/XMLSchema#integer',metadata={'region':'east'})
+    record(repo,p,'audit','entity',metadata={'_audit':True})
+    record(repo,p,'deleted','entity',metadata={'_deleted':True})
+    service=KnowledgeService(repo,HashingEncoder())
+    rows=service.scoped(p,scope)
+    actual=Explorer(service).dashboard(p,scope)
+    assert actual['counts']=={'document':0,'total_documents':0,
+        **{kind:sum(r['kind']==kind for r in rows) for kind in ('entity','relation','chunk')}}
+    assert actual['types']==dict(Counter(r.get('type','') for r in rows if r['kind']=='entity'))
+    assert actual['predicates']==dict(Counter(r.get('type','') for r in rows if r['kind']=='relation'))
+    assert actual['unknown_validity']==sum(r.get('valid_from') is None for r in rows)
+
+
+def test_dashboard_historical_assertion_decisions_and_record_revisions(tmp_path):
+    repo=Repository(tmp_path/'dashboard-history');p=repo.create_project('p')['id']
+    record(repo,p,'doc');record(repo,p,'e','entity',type='Original')
+    candidate=repo.create_assertion(p,{'id':'candidate','kind':'entity','document_id':'doc','payload':{},'actor':'test'})
+    before=candidate['created_at']
+    accepted=repo.transition_assertion(p,'candidate',1,'accepted','confirmed','test',canonical_record_id='e')
+    after=accepted['decided_at']
+    repo.put_record(p,{'id':'e','kind':'entity','text':'revised','type':'Revised',
+        'valid_from':None,'valid_until':None,'metadata':{}},expected_version=1)
+    explorer=Explorer(KnowledgeService(repo,HashingEncoder()))
+    assert explorer.dashboard(p,{'known_at':before})['counts']['document']==0
+    historic=explorer.dashboard(p,{'known_at':after})
+    assert historic['counts']['document']==1
+    assert historic['types']=={'Original':1}
+    assert explorer.dashboard(p,{})['types']=={'Revised':1}
+
+
 def test_source_directory_pages_metadata_and_counts_all_states(tmp_path, monkeypatch):
     repo = Repository(tmp_path/'sources')
     p = repo.create_project('sources')['id']

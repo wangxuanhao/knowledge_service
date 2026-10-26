@@ -260,33 +260,8 @@ class Explorer:
                     'timing_ms':{'total':round((perf_counter()-started)*1000,1)}}
 
     def dashboard(self,p,scope):
-        # PERF：该端点的全部成本来自下面共享的 `service.scoped` 读取（见其打印的计时行）；
-        # 之后的计数开销很小。
-        rows=self.service.scoped(p,scope)
-
-        # 计算每个文档的派生知识数量
-        derived_counts=Counter(r.get('source_id') for r in rows if r['kind'] in ('entity','relation','chunk'))
-
-        # 只统计成功解析的文档（有派生知识的文档）
-        documents=[r for r in rows if r['kind']=='document']
-        successful_docs=[d for d in documents if derived_counts.get(d['id'],0)>0]
-
-        # 统计成功解析的实体和关系（排除 chunk）
-        entity_rows=[r for r in rows if r['kind']=='entity']
-        relation_rows=[r for r in rows if r['kind']=='relation']
-
-        return {
-            'counts':{
-                'document':len(successful_docs),
-                'total_documents':len(documents),
-                'chunk':sum(1 for r in rows if r['kind']=='chunk'),
-                'entity':len(entity_rows),
-                'relation':len(relation_rows)
-            },
-            'types':dict(Counter(r.get('type','') for r in entity_rows)),
-            'predicates':dict(Counter(r.get('type','') for r in relation_rows)),
-            'unknown_validity':sum(r.get('valid_from') is None for r in rows)
-        }
+        from ..repository.page_reads import PageReads
+        return PageReads(self.repo).dashboard(p,scope)
 
     def sources(self,p,scope,*,limit=50,cursor=None,summary_only=False,state='all',document_id=None):
         from ..repository.page_reads import PageReads

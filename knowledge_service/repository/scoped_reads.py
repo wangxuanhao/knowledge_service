@@ -159,7 +159,7 @@ class ScopedReads:
         params.extend(filter_params)
         return ' AND '.join(clauses), params
 
-    def _qualified(self, project, scope, *, kinds=None, query='', keyset=False):
+    def _qualified(self, project, scope, *, kinds=None, query='', keyset=False, entity_source=None):
         kinds = scope.get('kinds') if kinds is None else kinds
         if kinds is not None and (not isinstance(kinds, (list, tuple, set)) or any(kind not in KINDS for kind in kinds)):
             raise ValueError('无效的记录类型')
@@ -185,6 +185,12 @@ class ScopedReads:
             only_kind = next(iter(kinds)) if kinds is not None and len(kinds) == 1 else None
             columns = [('s', 'subject_id')] if only_kind == 'attribute' else [('s', 'subject_id'), ('t', 'object_id')]
             for alias, field in columns:
+                if entity_source is not None:
+                    # Full aggregations share a scope-qualified entity-ID CTE.
+                    # It has no per-row index lookup, allowing hash semi-joins
+                    # for both endpoints instead of hundreds of thousands of probes.
+                    endpoints.append(f'EXISTS (SELECT 1 FROM {entity_source} {alias} WHERE {alias}.id=r.read_{field})')
+                    continue
                 eligible, values = self._base(project, scope, alias)
                 # A page must stop on its ordered outer keyset. Flattening an
                 # endpoint EXISTS into a semi-join can scan/sort the entire
