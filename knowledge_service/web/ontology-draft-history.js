@@ -26,7 +26,8 @@
   }
   function technical(title, value) {
     const node = el('details', 'om-dh-technical');
-    node.append(el('summary', null, title), el('pre', null, JSON.stringify(value, null, 2)));
+    node.append(el('summary', null, title));let built=false;
+    node.addEventListener('toggle',()=>{if(node.open&&!built){built=true;node.append(el('pre',null,JSON.stringify(value,null,2)));}});
     return node;
   }
   function reset() {
@@ -249,7 +250,8 @@
     if (!ctx.project) { root.append(el('p', 'om-dh-empty', '请先选择项目。')); return; }
     root.append(el('p', 'om-dh-empty', '正在读取历史草案…'));
     try {
-      const draft = await api(ctx.base + '/' + encodeURIComponent(draftId), undefined, 'GET');
+      const read=window.OntologyDraftData?.request||api;
+      const draft = await read(ctx.base + '/' + encodeURIComponent(draftId), undefined, 'GET');
       if (!requestActive(ctx)) return;
       if (!draft || draft.id !== draftId) throw new Error('Draft identity does not match');
       const body = shell(ctx, draft.title || '未命名草案', true);

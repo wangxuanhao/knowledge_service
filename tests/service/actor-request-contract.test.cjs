@@ -26,5 +26,5 @@ test('manual ontology review leaves the audit actor to the server',async()=>{
 
 test('ontology panel cache version includes the canonical actor contract',()=>{
   const html=fs.readFileSync(path.join(web,'index.html'),'utf8');
-  assert.ok(html.includes('/assets/ontology-model-panel.js?v=definition-review-20261026-2'));
+  assert.ok(html.includes('/assets/ontology-model-panel.js?v=publication-delivery-20261026-2'));
 });

@@ -51,8 +51,14 @@ def review_browser_check(width, output=None):
           window.fixturePlan={revision:5,validation_fingerprint:'fp',warnings:[],items:operations.map(op=>({operation_id:op.id,target_iri:op.target_iri,action:op.action,approvable:true,auto_approvable:true}))};
           fixturePlan.items[0].reason_codes=['medium_risk'];fixturePlan.items[0].impact={affected_records:6};
           window.fixtureCalls=[];window.delayReadiness=true;window.delayWrite=false;window.failWrite=false;window.fixtureGate={allowed:true};
+          window.compactDraft=draft=>{
+            const copy=structuredClone(draft),sets={};
+            copy.operations=copy.operations.map(operation=>{const refs=operation.evidence||[],id=JSON.stringify(refs);sets[id]=refs;
+              delete operation.evidence;return {...operation,evidence_set_id:id,evidence_count:refs.length};});
+            return {...copy,evidence_sets:sets};
+          };
           window.api=async(url,body,method='GET')=>{
-            fixtureCalls.push({url,body,method});
+            fixtureCalls.push({url,body,method});const reviewView=url.includes('view=review');url=url.replace('?view=review','').replace('&view=review','');
             if(url.endsWith('/ontologies'))return {versions:[]};
             if(url.includes('/stage-availability'))return {stages:{review:fixtureGate}};
             if(url.endsWith('/review-plan'))return structuredClone(fixturePlan);
@@ -67,16 +73,16 @@ def review_browser_check(width, output=None):
               fixturePlan={...fixturePlan,revision:fixtureDraft.revision,items:fixturePlan.items.map(item=>
                 !item.decision&&(body.target_iri===item.target_iri||url.endsWith('/batch-approve')&&item.auto_approvable)
                   ?{...item,decision:{action:body.action||'approve',reason:body.reason}}:item)};
-              return {draft:structuredClone(fixtureDraft),batch:{approved:188,skipped:0}};
+              return {draft:reviewView?compactDraft(fixtureDraft):structuredClone(fixtureDraft),batch:{approved:188,skipped:0}};
             }
-            if(url.endsWith('/ontology-drafts/working'))return structuredClone(fixtureDraft);
+            if(url.endsWith('/ontology-drafts/working'))return reviewView?compactDraft(fixtureDraft):structuredClone(fixtureDraft);
             if(url.endsWith('/ontology-drafts'))return {items:[fixtureDraft]};
             if(url.endsWith('/ontology'))return {id:'release',summary:fixtureSummary};
             if(url.endsWith('/ontology-discovery'))return {published:true};
             throw Error('Unexpected offline route: '+url);
           };
         }''')
-        for name in ['ontology-model-catalog.js', 'ontology-draft-history.js', 'ontology-model-workspace.js',
+        for name in ['ontology-draft-data.js', 'ontology-model-catalog.js', 'ontology-draft-history.js', 'ontology-model-workspace.js',
                      'ontology-model.js', 'ontology-review-workspace.js', 'ontology-model-panel.js']:
             page.add_script_tag(content=(WEB / name).read_text(encoding='utf-8'))
         page.evaluate('''() => {

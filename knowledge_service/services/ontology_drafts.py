@@ -504,6 +504,48 @@ class OntologyDrafts(
         return latest
 
     # --------------------------------------------------------------- lifecycle
+    @staticmethod
+    def review_projection(preview):
+        """Share complete evidence lists while retaining all review metadata.
+
+        This is a wire projection only: neither stored operations nor the
+        supplied full preview are changed. Evidence is opaque here, including
+        unresolved references, duplicate entries and legacy object references.
+        """
+        result = {key: value for key, value in preview.items()
+                  if key not in {'draft', 'turtle'}}
+        evidence_sets = {}
+        set_ids = {}
+        operations = []
+        for operation in preview.get('operations', []):
+            evidence = operation.get('evidence', [])
+            key = _canonical_json(evidence)
+            if key not in set_ids:
+                set_id = f'evidence-{len(evidence_sets) + 1}'
+                set_ids[key] = set_id
+                evidence_sets[set_id] = evidence
+            operations.append({
+                **{name: value for name, value in operation.items()
+                   if name != 'evidence'},
+                'evidence_set_id': set_ids[key],
+                'evidence_count': len(evidence),
+            })
+        result['operations'] = operations
+        result['evidence_sets'] = evidence_sets
+        return result
+
+    def project_response(self, result, *, view='full', envelope=False):
+        """Project an explicitly flat preview or a mutation receipt's draft.
+
+        Full previews also contain a raw ``draft`` member, so the caller must
+        identify receipt envelopes rather than inferring their shape here.
+        """
+        if view != 'review':
+            return result
+        if envelope:
+            return {**result, 'draft': self.review_projection(result['draft'])}
+        return self.review_projection(result)
+
     def get(self, project_id, draft_id, *, canvas=False):
         """Return a draft with its current operations, decisions and preview."""
         result = self._preview(project_id, self.store.get(project_id, draft_id))

@@ -55,6 +55,7 @@
     reviewPlan: null,
     reviewPlanLoading: false,
     reviewLoadError: null,
+    publication: null,
     candidates: [],           // 待收下候选（画布上的虚线节点）
     discovery: null,          // GET /ontology-discovery：开放发现候选（published、待纳入候选数等）
     error: null,
@@ -129,6 +130,44 @@
   let refreshEpoch = 0;
   let gateEpoch = 0;
   let projectEpoch = 0;
+  const draftApi=(...args)=>window.OntologyDraftData?window.OntologyDraftData.request(...args):api(...args);
+  function acceptPublication(version,expected){
+    if(current!==expected.projectId||S.draft?.id!==expected.draftId||S.draft.revision!==expected.revision||S.preview)return null;
+    if(!version?.id)throw Error('发布回执缺少版本身份，请先核对发布结果。');
+    ++refreshEpoch;++gateEpoch;
+    const publication=version.metadata?.publication||{},receipt=publication.receipt||{};
+    S.publication={projectId:current,versionId:version.id,version:version.version??version.metadata?.version,
+      createdAt:version.created_at||null,note:publication.note||version.note||'',facts:receipt.facts||{},refreshState:'pending',refreshError:'',promise:null};
+    S.draft=null;S.draftChoices=S.draftChoices.filter(item=>item.id!==expected.draftId);S.showingDraft=false;S.discovery=null;
+    S.ontologyId=version.id;S.ontologyVersion=S.publication.version??null;S.summary=version.summary||null;S.selected=null;
+    S.stageAvailability=null;S.readiness=null;S.reviewPlan=null;S.gatesLoading=false;S.reviewGateLoading=false;S.reviewPlanLoading=false;
+    S.gateLoadError=null;S.reviewLoadError=null;S.loading=false;S.error=null;inspectorOpen=false;
+    window.OntologyWorkspace?.close({focus:false});compileGraph();render();return S.publication;
+  }
+  async function refreshPublished(receipt){
+    if(!receipt||S.publication!==receipt||current!==receipt.projectId)return;
+    if(receipt.promise)return receipt.promise;
+    receipt.refreshState='loading';receipt.refreshError='';renderPublicationFeedback();
+    const base=endpoint(''),isCurrent=()=>S.publication===receipt&&current===receipt.projectId;
+    receipt.promise=(async()=>{
+      try{
+        const [published,directory,discovery]=await Promise.all([api(base+'/ontology',undefined,'GET'),api(base+'/ontology-drafts',undefined,'GET'),api(base+'/ontology-discovery?compact=true',undefined,'GET')]);
+        if(!isCurrent())return;
+        if(!published?.id||!published.summary||!Array.isArray(directory.items))throw Error('页面同步响应不完整');
+        receipt.refreshState='complete';
+        // A new draft or history preview belongs to the user, not this read completion.
+        if(!S.draft&&!S.preview&&S.ontologyId===receipt.versionId){
+          S.draftChoices=directory.items.filter(d=>OPEN_STATES.includes(d.status));S.discovery=discovery;
+          const changed=S.ontologyId!==published.id||JSON.stringify(S.summary)!==JSON.stringify(published.summary);
+          S.ontologyId=published.id;S.ontologyVersion=published.version??published.metadata?.version??S.ontologyVersion;
+          S.summary=published.summary;compileGraph();
+          if(changed){window.OntologyCanvas?.render(S);window.OntologyCatalog?.render(S);renderVersionContext();}
+          renderSidebar();emit('stage:changed',{});
+        }
+      }catch(error){if(isCurrent()){receipt.refreshState='error';receipt.refreshError=error.message||String(error);}}
+      finally{receipt.promise=null;if(isCurrent())renderPublicationFeedback();}
+    })();return receipt.promise;
+  }
   async function refresh() {
     const epoch = ++refreshEpoch;
     ++gateEpoch;
@@ -350,7 +389,7 @@
       baseOntologyId = null;
     }
     assertProject();
-    const draft = await api(projectBase + '/ontology-drafts', {
+    const draft = await draftApi(projectBase + '/ontology-drafts', {
       base_ontology_id: baseOntologyId, source_kind: 'manual',
       title: '画布编辑', summary: '在本体建模层画布上编辑',
     }, 'POST');
@@ -369,7 +408,7 @@
     const draft = await ensureDraft();
     if (current !== project) throw new Error('项目已切换，已停止原项目编辑。');
     if (S.preview) throw new Error('历史版本只读：已停止编辑。');
-    const updated = await api(endpoint(`/ontology-drafts/${draft.id}/commands`), {
+    const updated = await draftApi(endpoint(`/ontology-drafts/${draft.id}/commands`), {
       expected_revision: draft.revision, command,
     }, 'POST');
     if (current !== project) throw new Error('项目已切换，请重新读取当前项目。');
@@ -384,7 +423,7 @@
   async function selectDraft(id) {
     if (S.preview) throw new Error('历史版本只读，请先回到最新。');
     const project=current,base=endpoint('');
-    const draft=await api(base+'/ontology-drafts/'+encodeURIComponent(id),undefined,'GET');
+    const draft=await draftApi(base+'/ontology-drafts/'+encodeURIComponent(id),undefined,'GET');
     if(current!==project)throw new Error('项目已切换，已停止选择草案。');
     if(!OPEN_STATES.includes(draft.status))throw new Error('这份草案已结束，请选择待处理草案。');
     S.draft=draft;S.selected=null;await refresh();return S.draft;
@@ -425,7 +464,7 @@
     const project=current,base=endpoint('');
     const published=await api(base+'/ontology',undefined,'GET').catch(error=>{if(error.status===404&&error.code==='ontology_not_published')return null;throw error;});
     if(current!==project)throw new Error('项目已切换，已停止新建草案。');
-    const draft=await api(base+'/ontology-drafts',{base_ontology_id:published?.id||null,
+    const draft=await draftApi(base+'/ontology-drafts',{base_ontology_id:published?.id||null,
       source_kind:'manual',title:'手工建模草案',summary:'在本体目录中显式创建'},'POST');
     if(current!==project)throw new Error('项目已切换，请回原项目查看新草案。');
     S.draft=draft;S.selected=null;await refresh();return S.draft;
@@ -437,7 +476,7 @@
     const reason=window.prompt('关闭当前草案的原因（变更和审计保留）');
     if(reason===null)return;
     if(!reason.trim())throw new Error('关闭草案必须填写原因。');
-    await api(base+'/ontology-drafts/'+encodeURIComponent(draft.id)+'/close',{
+    await draftApi(base+'/ontology-drafts/'+encodeURIComponent(draft.id)+'/close',{
       expected_revision:draft.revision,reason:reason.trim()},'POST');
     if(current!==project)return;
     if(S.draft?.id!==draft.id){status(`原草案 ${draft.id} 已关闭；当前工作草案选择保留。`);return;}
@@ -497,6 +536,7 @@
     }
     renderSidebar();
     renderVersionContext();
+    renderPublicationFeedback();
     const canvas=document.getElementById('om-canvas-host'),cards=document.getElementById('om-cards-host');
     if(canvas)canvas.hidden=S.view==='cards';if(cards)cards.hidden=S.view!=='cards';
     // 子模块可能尚未加载（脚本顺序 / 测试 mock shell）——用可选链，缺谁都不崩
@@ -513,6 +553,21 @@
   function openWorkspace(tab) {
     if(typeof current==='undefined'||!current){status('请先选择项目。',true);return;}
     render();window.OntologyWorkspace?.open(tab);
+  }
+  function renderPublicationFeedback(){
+    const host=document.getElementById('om-publication-feedback');if(!host)return;
+    const receipt=S.publication;host.replaceChildren();host.hidden=!receipt||receipt.dismissed||receipt.projectId!==current;if(host.hidden)return;
+    host.setAttribute('role','status');host.setAttribute('aria-live','polite');
+    const heading=document.createElement('strong');heading.textContent=`已发布${receipt.version!=null?'为 v'+receipt.version:''} · 正式版本已生效`;
+    const text=document.createElement('p'),facts=receipt.facts;
+    const time=receipt.createdAt?new Date(receipt.createdAt).toLocaleString('zh-CN',{hour12:false}):'服务端未提供发布时间';
+    text.textContent=`发布时间：${time}`+(facts.selected!=null?` · 本次新增 ${facts.added??'待核对'} / 复用 ${facts.reused??'待核对'} / 跳过 ${facts.skipped??'待核对'} 条知识`:'');
+    const state=document.createElement('p');state.textContent=receipt.refreshState==='error'?'版本已发布，页面同步失败，可单独重试。':receipt.refreshState==='complete'?'页面已同步。':'页面正在同步，你可以继续操作。';
+    host.append(heading,text,state);
+    function button(label,action){const item=document.createElement('button');item.className='om-btn';item.type='button';item.textContent=label;item.addEventListener('click',action);host.append(item);}
+    if(receipt.refreshState==='error')button('重试页面同步',()=>{void refreshPublished(receipt);});
+    button('查看发布记录',()=>{if(S.publication===receipt&&current===receipt.projectId)window.OntologyPanel?.openHistory(receipt.versionId);});
+    button('收起',()=>{if(S.publication===receipt){receipt.dismissed=true;renderPublicationFeedback();}});
   }
   function openDraftHistory(id) {
     if(typeof current==='undefined'||!current){status('请先选择项目。',true);return;}
@@ -570,6 +625,7 @@
           <button type="button" class="om-btn ghost" id="om-preview-exit">回到最新</button>
         </div>
         <div class="om-version-context" id="om-version-context" aria-live="polite"></div>
+        <div class="om-publication-feedback" id="om-publication-feedback" hidden></div>
         <div class="om-body">
           <!-- 用 div 不用 aside：全站 style.css 有一条给应用侧栏的全局规则
                aside{position:fixed;inset:0 auto 0 0;width:206px}，任何 aside 都会被固定到
@@ -778,7 +834,7 @@
     try {
       const draft = await ensureDraft();
       if (current !== project || S.preview) return;
-      const result = await api(endpoint(`/ontology-drafts/${encodeURIComponent(draft.id)}/discover-parents`),
+      const result = await draftApi(endpoint(`/ontology-drafts/${encodeURIComponent(draft.id)}/discover-parents`),
         { expected_revision: draft.revision }, 'POST');
       if (current !== project || S.preview || !S.draft || S.draft.id !== draft.id) return;
       S.draft = result.draft;
@@ -801,6 +857,7 @@
       ++refreshEpoch; ++gateEpoch; ++projectEpoch;
       S.discoveringParents = false;
       S.discovery = null; S.loading = false; S.gatesLoading = false;
+      S.publication=null;
       S.summary = null; S.ontologyId = null; S.ontologyVersion = null;
       S.graph = null; S.selected = null; S.draft = null;
       S.draftChoices=[];S.draftLoadError=null;window.OntologyIntake?.projectChanged();
@@ -868,7 +925,7 @@
       throw new Error('还有一份待处理的草案（没发布、也没驳回）。先把那份处理掉，再回到历史版本 —— '
         + '否则两份草案各自基于不同基线，没人说得清最后发布的是什么。');
     }
-    const draft = await api(projectBase+'/ontology-drafts', {
+    const draft = await draftApi(projectBase+'/ontology-drafts', {
       // source_kind='revert' 是**显式意图**：服务端只对它放行"基线不是最新版"，
       // 并且发布时会要求勾选那条回退警告。普通草案仍必须基于当前版本 ——
       // 那条保护防的是"在旧基线上做普通编辑会静默丢掉别人的改动"，是另一件事。
@@ -889,7 +946,7 @@
   }
 
   window.OntologyModel = {
-    S, on, emit, render, refresh, refreshDraftState, ensureDraft, sendCommand, createTerm, select, compileGraph,
+    S, on, emit, render, refresh, refreshDraftState, ensureDraft, sendCommand, createTerm, select, compileGraph,acceptPublication,refreshPublished,
     selectDraft, createDraft, closeDraft, openCreate,openIntake,openWorkspace,openDraftHistory,
     uid, previewVersion, clearPreview, forkFrom, discoverParents,setInspector,
     status: (m, e) => (typeof status === 'function' ? status(m, e) : console.log(m)),

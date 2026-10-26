@@ -135,7 +135,7 @@ test('normal draft action bar reports its exact linked knowledge scope',()=>{
 });
 
 function actionFixture(options={}){
-  const actions=element('actions'),calls=[],messages=[],timers=[];
+  const actions=element('actions'),calls=[],messages=[],timers=[],events=[];
   const state={summary:{classes:[{id:'urn:Customer',label_zh:'客户'}],relations:[],attributes:[]},ontologyId:'release',
     draft:{id:'draft',status:'pending',revision:2,base_ontology_id:'release',operations:[{action:'create_term',target_iri:'urn:Customer',after:{kind:'class'}}],
       associated_knowledge:{selected:3,per_batch:[{run_id:'source-run',candidate_ids:['a','b','c'],selected:3}]},...options.draft},
@@ -143,14 +143,14 @@ function actionFixture(options={}){
   Object.assign(state,options.state||{});
   const model={S:state,status:(message,error)=>messages.push({message,error}),uid:()=> 'publish-key',refresh:async()=>{}};
   const context={window:{OntologyModel:model},current:'p',console,CustomEvent:function(type,init){this.type=type;this.detail=init.detail;},
-    document:{createElement:element,dispatchEvent(){}},endpoint:suffix=>'/api/projects/'+context.current+suffix,
+    document:{createElement:element,dispatchEvent(event){events.push(event);}},endpoint:suffix=>'/api/projects/'+context.current+suffix,
     setTimeout(fn){timers.push(fn);return timers.length;},clearTimeout(){},
     api:async(url,body,method='GET')=>{calls.push({url,body,method});if(url.endsWith('/ontologies'))return {versions:[]};
       if(options.request)return options.request(url,body,method);
       return url.endsWith('/decisions/batch-approve')?{draft:state.draft,batch:{approved:1}}:state.draft;}};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../knowledge_service/web/ontology-model-panel.js'),'utf8'),context);
   context.window.OntologyPanel.mount(null,actions,model);
-  return {actions,state,calls,messages,timers,context,panel:context.window.OntologyPanel,find:text=>all(actions).find(node=>node.textContent===text)};
+  return {actions,state,calls,messages,timers,events,context,panel:context.window.OntologyPanel,find:text=>all(actions).find(node=>node.textContent===text)};
 }
 
 test('submitted review resumes server eligible bulk approval without validation or resubmission',async()=>{
@@ -200,7 +200,7 @@ test('publication locks locally before its first read and preserves the fingerpr
   }});
   const input=all(f.actions).find(node=>node.className==='om-pub-note');input.value='补充客户定义';input.listeners.input();
   const publish=all(f.actions).find(node=>node.tag==='button'&&/^发布/.test(node.textContent)),pending=publish.listeners.click();
-  const loading=all(f.actions).find(node=>node.tag==='button'&&node.textContent==='正在确认发布门禁…');assert.ok(loading);assert.equal(loading.disabled,true);
+  const loading=all(f.actions).find(node=>node.tag==='button'&&node.textContent==='正在确认发布条件…');assert.ok(loading);assert.equal(loading.disabled,true);
   await publish.listeners.click();assert.equal(f.calls.filter(call=>call.url.endsWith('/publish-readiness')).length,1);
   finish({ready:true,revision:2,validation_fingerprint:'fp'});await pending;
   const write=f.calls.find(call=>call.url.endsWith('/publish'));assert.equal(write.body.expected_revision,2);assert.equal(write.body.validation_fingerprint,'fp');
@@ -235,4 +235,45 @@ test('publication warnings remain explicit and frozen while a guarded request is
   const pending=publish.listeners.click();assert.equal(all(f.actions).find(node=>node.type==='checkbox').disabled,true);
   finish({ready:false,items:[{code:'validation_changed',severity:'error',message:'需要重新校验'}]});await pending;
   assert.ok(!f.calls.some(call=>call.url.endsWith('/publish')));assert.equal(f.actions['aria-busy'],'false');
+});
+
+test('publication no longer rereads the full draft and releases busy state before page refresh',async()=>{
+  let releaseRefresh;const f=actionFixture({draft:{submitted_at:'now',validation_fingerprint:'fp'},request:async url=>
+    url.endsWith('/publish-readiness')?{ready:true,revision:2,validation_fingerprint:'fp'}:url.endsWith('/publish')?{id:'saved',metadata:{version:1}}:f.state.draft});
+  f.context.window.OntologyModel.refresh=()=>new Promise(done=>releaseRefresh=done);
+  const input=all(f.actions).find(n=>n.className==='om-pub-note');input.value='publish note';input.listeners.input();
+  const saving=all(f.actions).find(n=>n.tag==='button'&&/^发布/.test(n.textContent)).listeners.click();
+  for(let i=0;i<60;i++)await Promise.resolve();
+  try{
+    assert.equal(f.calls.filter(call=>call.url.endsWith('/ontology-drafts/draft')).length,0);
+    assert.equal(f.actions['aria-busy'],'false');assert.ok(f.messages.some(m=>m.message.includes('已发布')));
+  }finally{releaseRefresh?.();await saving;}
+});
+
+test('uncertain publication preserves the original body and key even when the note changes before retry',async()=>{
+  let posts=0;const f=actionFixture({draft:{submitted_at:'now',validation_fingerprint:'fp'},request:async(url,body,method)=>{
+    if(url.endsWith('/publish-readiness'))return {ready:true,revision:2,validation_fingerprint:'fp'};
+    if(url.endsWith('/publish')){posts++;if(posts===1)throw Error('response lost');return {id:'saved',metadata:{version:1}};}
+    return f.state.draft;
+  }});
+  const input=all(f.actions).find(n=>n.className==='om-pub-note');input.value='original note';input.listeners.input();
+  await all(f.actions).find(n=>n.tag==='button'&&/^发布/.test(n.textContent)).listeners.click();
+  const first=f.calls.find(c=>c.url.endsWith('/publish')).body;
+  const edited=all(f.actions).find(n=>n.className==='om-pub-note');edited.value='different note';edited.listeners.input();
+  assert.equal(all(f.actions).find(n=>n.tag==='button'&&/^发布/.test(n.textContent)).disabled,true);
+  await f.find('核对发布结果').listeners.click();assert.equal(posts,1);
+  await f.find('重试原发布请求').listeners.click();assert.equal(posts,2);
+  const bodies=f.calls.filter(c=>c.url.endsWith('/publish')).map(c=>c.body);assert.equal(bodies[1],first);assert.equal(bodies[1].note,'original note');
+});
+
+test('confirmed publication still invalidates dependent caches after another draft is selected',async()=>{
+  let finish;const f=actionFixture({draft:{submitted_at:'now',validation_fingerprint:'fp'},request:async url=>
+    url.endsWith('/publish-readiness')?{ready:true,revision:2,validation_fingerprint:'fp'}:url.endsWith('/publish')?new Promise(done=>finish=done):f.state.draft});
+  const input=all(f.actions).find(n=>n.className==='om-pub-note');input.value='original publication';input.listeners.input();
+  const saving=all(f.actions).find(n=>n.tag==='button'&&/^发布/.test(n.textContent)).listeners.click();
+  for(let i=0;i<30;i++)await Promise.resolve();f.state.draft={id:'another',revision:1,status:'pending'};
+  finish({id:'saved',metadata:{version:1}});await saving;
+  assert.equal(f.state.draft.id,'another');assert.equal(f.state.draft.status,'pending');
+  assert.equal(f.events.filter(event=>event.type==='ontology-model:published').length,1);
+  assert.equal(f.events[0].detail.draftId,'draft');
 });

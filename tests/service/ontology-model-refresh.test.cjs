@@ -31,6 +31,7 @@ function fixture(options = {}) {
     if (url === '/p/ontology-drafts/manual') return {id:'manual',status:'pending',revision:1,ontology:summary('manual')};
     if (url.endsWith('/discover-parents')) return { added_count: 0, draft: { id: 'new', status: 'pending', revision: 1 } };
     if (options.waitForOntology && url === '/p/ontology') await options.waitForOntology;
+    if(options.ontologyReadFailure&&url==='/p/ontology')throw Error('formal read failed');
     if (url === '/p/ontology-discovery/drafts') return options.mappingOnly
       ? { result_kind: 'mapping_only', run: { id: 'mapped', status: 'ready_to_finalize', result_kind: 'mapping_only' } }
       : { id: 'new', unified_draft_id: 'new', result_kind: 'draft' };
@@ -51,7 +52,8 @@ function fixture(options = {}) {
     window, current: 'p', api, endpoint: suffix => '/p' + suffix,
     document: { getElementById: id => options.withRoot && id === 'tab-ontology-model' ? root
       : options.withSidebar && id === 'om-side' ? sidebar : id==='om-node-display'?options.displayControl||null
-        :id==='om-canvas-host'?options.canvasHost||null:null, addEventListener() {} },
+        :id==='om-canvas-host'?options.canvasHost||null:id==='om-publication-feedback'?options.feedbackHost||null:null, addEventListener() {},
+      createElement:tag=>({tag,children:[],listeners:{},append(...items){this.children.push(...items);},addEventListener(name,fn){this.listeners[name]=fn;}}) },
     status: (message, error) => notices.push({ message, error }), console,
     ...(options.gateTimers || {}),
   };
@@ -71,6 +73,52 @@ test('review eligibility is available while publication readiness is still loadi
     assert.equal(f.model.S.reviewPlan.items.length,1);
     assert.equal(f.model.S.gatesLoading,true);
   }finally{release();await reading;}
+});
+
+test('confirmed publication adopts its official snapshot without waiting or blanking during reconciliation',async()=>{
+  let release;const f=fixture({waitForOntology:new Promise(done=>release=done)});
+  f.model.S.draft={id:'new',revision:2,status:'pending'};f.model.S.showingDraft=true;
+  const version={id:'published',created_at:'2026-10-26T04:00:00Z',summary:{classes:[{id:'saved'}]},metadata:{version:1,publication:{note:'approved',receipt:{facts:{added:118}}}}};
+  const receipt=f.model.acceptPublication(version,{projectId:'p',draftId:'new',revision:2});
+  assert.ok(receipt);assert.equal(f.model.S.draft,null);assert.equal(f.model.S.summary.classes[0].id,'saved');
+  assert.equal(f.model.S.publication.createdAt,version.created_at);assert.equal(f.calls.length,0);
+  const syncing=f.model.refreshPublished(receipt);assert.equal(f.model.S.loading,false);assert.equal(f.model.S.summary.classes[0].id,'saved');
+  release();await syncing;assert.equal(f.model.S.publication.refreshState,'complete');
+});
+
+test('failed post-publication reads preserve success and retry only reads',async()=>{
+  const f=fixture({ontologyReadFailure:true});f.model.S.draft={id:'new',revision:2,status:'pending'};
+  const receipt=f.model.acceptPublication({id:'published',summary:{classes:[{id:'saved'}]},metadata:{version:1}}, {projectId:'p',draftId:'new',revision:2});
+  await f.model.refreshPublished(receipt);assert.equal(receipt.refreshState,'error');assert.equal(f.model.S.ontologyId,'published');
+  await f.model.refreshPublished(receipt);assert.ok(f.calls.every(call=>call.method==='GET'));assert.equal(f.model.S.draft,null);
+});
+
+test('publication reconciliation cannot replace a new draft or historical preview opened while reads run',async()=>{
+  for(const preview of [false,true]){
+    let release;const f=fixture({waitForOntology:new Promise(done=>release=done)});f.model.S.draft={id:'new',revision:2,status:'pending'};
+    const receipt=f.model.acceptPublication({id:'published',summary:{classes:[{id:'saved'}]},metadata:{version:1}},{projectId:'p',draftId:'new',revision:2});
+    const syncing=f.model.refreshPublished(receipt);f.model.S.summary={classes:[{id:'keep'}]};
+    if(preview)f.model.S.preview={id:'historic'};else f.model.S.draft={id:'next',revision:3,status:'pending'};
+    release();await syncing;assert.equal(f.model.S.summary.classes[0].id,'keep');
+    if(!preview)assert.equal(f.model.S.draft.id,'next');
+  }
+});
+
+test('publication reconciliation replaces pre-publication candidate counts without stale waiting prompts',async()=>{
+  const f=fixture({discovery:{published:true,candidate_status_counts:{included_in_draft:0,pending:0}}});
+  f.model.S.draft={id:'new',revision:2,status:'pending'};f.model.S.discovery={candidate_status_counts:{included_in_draft:118}};
+  const receipt=f.model.acceptPublication({id:'published',summary:{classes:[]},metadata:{version:1}},{projectId:'p',draftId:'new',revision:2});
+  assert.equal(f.model.S.discovery,null);await f.model.refreshPublished(receipt);
+  assert.equal(f.model.S.discovery.candidate_status_counts.included_in_draft,0);
+});
+
+test('dismissing the saved receipt does not cancel its independent page synchronization',async()=>{
+  let release;const host={children:[],replaceChildren(){this.children=[];},append(...items){this.children.push(...items);},setAttribute(){}};
+  const f=fixture({feedbackHost:host,waitForOntology:new Promise(done=>release=done),discovery:{published:true,candidate_status_counts:{pending:0}}});
+  f.model.S.draft={id:'new',revision:2,status:'pending'};
+  const receipt=f.model.acceptPublication({id:'published',summary:{classes:[]},metadata:{version:1}},{projectId:'p',draftId:'new',revision:2});
+  const syncing=f.model.refreshPublished(receipt);host.children.find(item=>item.textContent==='收起').listeners.click();
+  release();await syncing;assert.equal(receipt.refreshState,'complete');assert.equal(f.model.S.discovery.candidate_status_counts.pending,0);assert.equal(host.hidden,true);
 });
 
 test('late review stage and plan cannot replace a newly selected project',async()=>{

@@ -6,6 +6,21 @@
  * ========================================================================== */
 
 /* ---------- 右栏详情 ---------- */
+#tab-ontology-model.ontology-model .om-publication-feedback{flex:none;margin:8px 14px 12px;padding:14px 16px;border:1px solid #abd0bc;border-radius:10px;background:#eef8f1;color:#255b43;overflow-wrap:anywhere}
+#tab-ontology-model.ontology-model .om-publication-feedback[hidden]{display:none}
+#tab-ontology-model.ontology-model .om-publication-feedback strong{display:block;font-size:15px}
+#tab-ontology-model.ontology-model .om-publication-feedback p{font-size:12px;line-height:1.6;margin:6px 0}
+#tab-ontology-model.ontology-model .om-publication-feedback .om-btn{margin:4px 8px 0 0}
+#tab-ontology-model.ontology-model .om-publication-recovery{margin:10px 0;padding:12px;border:1px solid #d8bf88;background:#fff8e9;border-radius:8px;font-size:13px;overflow-wrap:anywhere}
+#tab-ontology-model.ontology-model .om-publication-recovery .om-btn{margin-right:8px}
+#tab-ontology-model.ontology-model .om-history-actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+#tab-ontology-model.ontology-model .om-history-source-draft{display:flex;align-items:center;gap:10px;font-size:12px;color:#71877a;margin:8px 0}
+#tab-ontology-model.ontology-model .om-history-technical,#tab-ontology-model.ontology-model .om-history-knowledge,#tab-ontology-model.ontology-model .om-publication-batch{border-top:1px solid #deebe2;padding:10px 0;font-size:12px;line-height:1.65;overflow-wrap:anywhere}
+#tab-ontology-model.ontology-model .om-history-technical summary,#tab-ontology-model.ontology-model .om-history-knowledge summary,#tab-ontology-model.ontology-model .om-publication-batch summary{cursor:pointer;color:#547261}
+#tab-ontology-model.ontology-model .om-history-technical .om-history-fact{display:grid;grid-template-columns:84px minmax(0,1fr);gap:10px;margin:8px 0}
+#tab-ontology-model.ontology-model .om-publication-outcomes{max-height:280px;overflow:auto;overscroll-behavior:contain;padding:0 6px}
+#tab-ontology-model.ontology-model .om-publication-outcome{padding:7px 0;border-bottom:1px solid #e5eee7;font-size:12px;overflow-wrap:anywhere}
+#tab-ontology-model.ontology-model .om-history-row{flex-wrap:wrap}
 #tab-ontology-model.ontology-model .om-review-dialog{width:min(760px,calc(100vw - 40px));max-height:85vh;box-sizing:border-box;overflow:auto;border:1px solid #8fbcb2;border-radius:14px;padding:22px;background:#f5faf8;color:#173e38;box-shadow:0 20px 70px #123c3966}
 #tab-ontology-model.ontology-model .om-review-dialog::backdrop{background:#0a2529aa}
 #tab-ontology-model.ontology-model .om-review-header,#tab-ontology-model.ontology-model .om-review-buttons{display:flex;align-items:center;justify-content:space-between;gap:12px}
@@ -74,7 +89,7 @@
 #tab-ontology-model.ontology-model .om-history-backdrop{position:absolute;inset:0;background:rgba(35,75,59,.26)}
 #tab-ontology-model.ontology-model .om-history-panel{position:relative;width:480px;max-width:92vw;height:100%;background:#ffffff;border-left:1px solid #dce6dc;display:flex;flex-direction:column;box-shadow:-18px 0 44px rgba(37,69,48,.14)}
 #tab-ontology-model.ontology-model .om-history-head{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid #dce6dc;background:#ffffff}
-#tab-ontology-model.ontology-model .om-history-head b{font-size:14px;color:#264d3d}
+#tab-ontology-model.ontology-model .om-history-head b{font-size:14px;color:#264d3d;white-space:nowrap;flex:none}
 #tab-ontology-model.ontology-model .om-history-sub{font-size:11px;color:#879783}
 #tab-ontology-model.ontology-model .om-history-head .om-btn{margin-left:auto}
 #tab-ontology-model.ontology-model .om-history-body{flex:1 1 auto;overflow:auto;padding:12px 16px}

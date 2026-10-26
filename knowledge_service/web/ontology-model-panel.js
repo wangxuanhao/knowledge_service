@@ -1144,7 +1144,7 @@
       const warnOk = !warnItems.length
         || warnItems.every(item => ackWarnings.codes.has(item.code));
       noteInput.disabled = previewing || busy;
-      btnPub.disabled = previewing || busy || !(pubGate.enabled && hasNote && warnOk);
+      btnPub.disabled = previewing || busy || !!pendingPublication() || !(pubGate.enabled && hasNote && warnOk);
       btnPub.title = previewing ? previewLock
         : !pubGate.enabled ? pubGate.reason
           : !hasNote
@@ -1214,6 +1214,18 @@
     manualReview.title = '按类型、关系或属性集中核对，支持批准并查看下一项；先提交当前草案。';
     manualReview.addEventListener('click', openManualReview);
     opRow.append(btnReview, manualReview, noteInput, btnPub);
+    const attempt=pendingPublication();
+    if(attempt&&attempt.phase!=='sending'){
+      const recovery=el('div','om-publication-recovery');
+      recovery.append(el('p',null,'发布结果尚未确认。原发布说明：'+attempt.body.note));
+      const check=el('button','om-btn','核对发布结果');check.type='button';check.disabled=busy||previewing;
+      check.addEventListener('click',()=>reconcilePublication(attempt));recovery.append(check);
+      if(attempt.phase==='retryable'){
+        const retry=el('button','om-btn','重试原发布请求');retry.type='button';retry.disabled=busy||previewing;
+        retry.addEventListener('click',()=>retryPublication(attempt));recovery.append(retry);
+      }
+      bar.append(recovery);
+    }
     actions.append(opRow);
     bar.append(actions);
 
@@ -1283,7 +1295,7 @@
     const base = `/ontology-drafts/${encodeURIComponent(id)}`;
     try {
       status(isSource ? '正在刷新来源快照…' : '正在把草案基线对齐到项目当前本体（保留你已做的变更）…');
-      const result = await api(endpoint(base + '/rebase'), {
+      const result = await draftApi(endpoint(base + '/rebase'), {
         expected_revision: M.S.draft.revision,
         expected_ontology_id: ontologyId,
       }, 'POST');
@@ -1312,7 +1324,7 @@
     window.OntologyReview.open({
       host:document.getElementById('tab-ontology-model')||document.body,
       getContext:()=>({projectId:activeProject(),draftId:M.S.draft?.id,revision:M.S.draft?.revision,preview:!!M.S.preview}),
-      request:(route,body,method)=>api(route==='/stage-availability'?stageRoute:base+route,body,method),
+      request:(route,body,method)=>(route===''||route.startsWith('/decisions/')?draftApi:api)(route==='/stage-availability'?stageRoute:base+route,body,method),
       onSaved:draft=>{
         if(activeProject()!==project||M.S.draft?.id!==id||M.S.preview)return;
         const changed=M.S.draft.revision!==draft.revision;M.S.draft=draft;
@@ -1340,15 +1352,15 @@
     try {
       if(!draft.submitted_at||!draft.validation_fingerprint){
         actionPhase(task,'正在校验草案…');
-        draft = await api(projectBase+base+'/validate', { expected_revision: draft.revision }, 'POST');assertCurrent();
+        draft = await draftApi(projectBase+base+'/validate', { expected_revision: draft.revision }, 'POST');assertCurrent();
         actionPhase(task,'正在提交审核…');
-        draft = await api(projectBase+base+'/submit', { expected_revision: draft.revision }, 'POST');assertCurrent();
+        draft = await draftApi(projectBase+base+'/submit', { expected_revision: draft.revision }, 'POST');assertCurrent();
       }
       actionPhase(task,'正在批量批准变更…');
       // 一键批准的集合由服务端 review_plan 决定，前端只表达意图（契约 §3.2）。
       // expected_ontology_id = 项目当前最新本体 id（主控从 GET /ontology 的 id 取到 S.ontologyId），
       // 服务端 _check_current 会拿它与 draft.base_ontology_id 比对，不一致即 StaleBase。别自己编。
-      const result = await api(projectBase+base+'/decisions/batch-approve', {
+      const result = await draftApi(projectBase+base+'/decisions/batch-approve', {
         expected_revision: draft.revision,
         expected_ontology_id: (M.S && M.S.ontologyId) || draft.base_ontology_id,
         validation_fingerprint: draft.validation_fingerprint,
@@ -1373,89 +1385,97 @@
   }
 
   /* ---- 「发布」：POST /{draft_id}/publish（要指纹 + 幂等键 + 说明） --------- */
-  async function publishDraft() {
-    const M = model();
-    if (!M || !M.S || !M.S.draft || !M.S.draft.id) { status('还没有可发布的草案。', true); return; }
-    // 发布说明必填：服务端也一样（PublishRequest.note min_length=1）。
-    // 在界面这一层先拦一道，用户不用等一次 422 才知道自己漏写了。
-    const note = String(publishNote || '').trim();
-    if (!note) {
-      status('先写发布说明再发布：版本记录要能回答"这一版改了什么、为什么发"。', true);
-      return;
+  const publicationAttempts=new Map();
+  const draftApi=(...args)=>window.OntologyDraftData?window.OntologyDraftData.request(...args):api(...args);
+  function pendingPublication(){return publicationAttempts.get(actionKey(activeProject(),S().draft?.id));}
+  function publicationSummary(version){
+    const meta=version.metadata||{},facts=meta.publication?.receipt?.facts;
+    return `已发布为 ${versionLabel(version.version??meta.version)}。发布时间：${fmtTime(version.created_at)}。`
+      +(facts?`知识新增 ${facts.added??'待核对'} / 复用 ${facts.reused??'待核对'} / 跳过 ${facts.skipped??'待核对'}。`:'')
+      +'正式版本已生效，页面同步单独进行。';
+  }
+  function completePublication(attempt,version,M){
+    if(!version?.id)throw Error('发布响应缺少版本身份，请先核对结果。');
+    attempt.phase='confirmed';publicationAttempts.delete(attempt.key);
+    if(publishKey.key===attempt.body.idempotency_key)publishKey={sig:'',key:''};
+    if(activeProject()!==attempt.project)return;
+    const meta=version.metadata||{};
+    const listed={...version,version:version.version??meta.version,version_reused:version.version_reused??meta.version_reused,
+      note:version.note??meta.publication?.note??attempt.body.note,actor:version.actor??meta.publication?.actor};
+    if(versions.key===attempt.project){const index=versions.list.findIndex(item=>item.id===version.id);if(index<0)versions.list.push(listed);else versions.list[index]=listed;}
+    const matches=M.S.draft?.id===attempt.draftId&&M.S.draft?.revision===attempt.revision&&!M.S.preview;
+    const broadcast=()=>document.dispatchEvent(new CustomEvent('ontology-model:published',{detail:{versionId:version.id,projectId:attempt.project,draftId:attempt.draftId}}));
+    if(!matches){broadcast();return;}
+    publishNote='';
+    if(typeof M.acceptPublication==='function'){
+      const receipt=M.acceptPublication(version,{projectId:attempt.project,draftId:attempt.draftId,revision:attempt.revision});
+      if(receipt)void M.refreshPublished(receipt);
+    }else{
+      M.S.draft={...M.S.draft,status:'accepted',published_ontology_id:version.id};
+      if(typeof M.refresh==='function')void M.refresh().catch(error=>{
+        if(activeProject()===attempt.project)status('版本已发布，页面同步失败，可重新读取：'+error.message,true);
+      });
     }
-    if(M.S.preview)return;
-    const task=beginAction('publish',M.S.draft,'正在确认发布门禁…');if(!task)return;
-    const id = M.S.draft.id;
-    const project=activeProject(),revision=M.S.draft.revision,projectBase=endpoint('');
-    const stillCurrent=()=>activeProject()===project&&M.S.draft?.id===id&&M.S.draft.revision===revision&&!M.S.preview;
-    const base = `/ontology-drafts/${encodeURIComponent(id)}`;
-    try {
-      actionPhase(task,'正在确认发布门禁…');
-      const readiness = await api(projectBase+base+'/publish-readiness', undefined, 'GET');
-      if(!stillCurrent())throw new Error('项目、草案或修订已变化，请重新核对发布。');
-      if (readiness.ready !== true) {
-        M.S.readiness=readiness;
-        const first = (readiness.items || []).find(item => item.severity === 'error');
-        status('还不能发布：' + (first ? (first.message || first.code) : '服务端判定未就绪'), true);
-        return;
-      }
-      // expected_revision / validation_fingerprint 从 draft 详情与 publish-readiness 取；
-      // expected_ontology_id 用主控暴露的「项目当前最新本体 id」（S.ontologyId，refresh 时取自 GET /ontology），
-      // 读不到才退回草案基线。三者都是服务端真值，前端不编。
-      let fresh = M.S.draft;
-      try { fresh = await api(projectBase+base, undefined, 'GET'); } catch (readError) { /* 退回本地 */ }
-      if(!stillCurrent()||fresh.revision!==revision)throw new Error('草案修订已变化，请重新核对审核与发布。');
-      const expectedRevision = (fresh && fresh.revision != null) ? fresh.revision : readiness.revision;
-      const fingerprint = (fresh && fresh.validation_fingerprint) || readiness.validation_fingerprint;
-      const ontologyId = (M.S && M.S.ontologyId) || (fresh && fresh.base_ontology_id)
-        || M.S.draft.base_ontology_id;
-      // 服务端要求"有人确认过才算数"：把草案校验里的警告码与用户刚逐条勾过的
-      // 发布警告码并起来（回退那条 revert_drops_later_versions 只来自勾选 —— 它
-      // 不属于 SHACL 校验报告，是发布门禁自己的警告）。
-      const warnings = [...new Set([
-        ...(((fresh.validation_report && fresh.validation_report.warnings) || [])
-          .map(w => w && w.code).filter(Boolean)),
-        ...ackWarnings.codes,
-      ])];
-      const key = nextIdempotencyKey(`${id}@${fingerprint || expectedRevision}@${note}`);
-      actionPhase(task,'正在发布新版本…');
-      const version = await api(projectBase+base+'/publish', {
-        expected_revision: expectedRevision,
-        expected_ontology_id: ontologyId,
-        validation_fingerprint: fingerprint,
-        acknowledged_warning_codes: warnings,
-        idempotency_key: key,
-        note,
-      }, 'POST');
-      if(activeProject()!==project)return;
-      if(publishKey.key===key)publishKey = { sig: '', key: '' };
-      if(actionVisible(task))publishNote = ''; // 不清空用户在另一份草案新写的说明。
-      // 本地状态跟上：这份草案已成为终态，新版本成为项目当前版本。
-      if (M.S.draft?.id===id) { M.S.draft.status = 'accepted'; M.S.draft.published_ontology_id = version && version.id; }
-      await ensureVersions(true);
-      // 通知检索/问答/图谱等页面刷新（本体建模层发布成功后统一广播）。
-      document.dispatchEvent(new CustomEvent('ontology-model:published', {
-        detail: { versionId: version && version.id, projectId: project, draftId: id },
-      }));
-      if(!actionVisible(task))return;
-      // 发布结果要报**真实**版本号（"仅标注"时它会等于上一版），不能只说"已发布"
-      const meta = (version && version.metadata) || {};
-      const label = meta.version ? `v${meta.version}` : '';
-      const reused = meta.version_reused ? '（仅标注变更，沿用上一版本号）' : '';
-      const receipt=meta.publication?.receipt;
-      const factsReceipt=receipt ? window.OntologyIntake?.receiptText(receipt)||JSON.stringify(receipt) : '关联知识与索引结果请在发布回执中核对。';
-      status(`已发布为不可变版本${label ? ' ' + label : ''}${reused}`
-        + `。${factsReceipt}`
-        + '发布说明已写进版本记录，在「版本管理」里可以查。');
-    } catch (error) {
-      if(actionVisible(task))status(error && error.message ? error.message : '发布失败', true);
-    } finally {
-      try{if(actionVisible(task)&&typeof M.refresh==='function')await M.refresh();}
-      catch(error){if(actionVisible(task))status('发布结果刷新失败，请重新读取版本记录核对：'+error.message,true);}
-      finally{finishAction(task);}
+    status(publicationSummary(version));
+    broadcast();
+  }
+  async function sendPublication(attempt,M,task){
+    attempt.phase='sending';actionPhase(task,'正在校验并保存正式版本…');
+    try{
+      const version=await api(attempt.base+'/publish',attempt.body,'POST');
+      completePublication(attempt,version,M);
+    }catch(error){
+      const definite=error.status>=400&&error.status<500&&error.status!==408;
+      if(definite)publicationAttempts.delete(attempt.key);else attempt.phase='uncertain';
+      if(actionVisible(task))status(definite?(error.message||'发布请求被拒绝'):
+        '发布结果尚未确认：'+(error.message||error)+'。请先核对发布结果，勿重复提交。',true);
     }
   }
-
+  async function reconcilePublication(attempt){
+    const M=model();if(!M||activeProject()!==attempt.project||S().draft?.id!==attempt.draftId||S().preview)return;
+    const task=beginAction('publish',S().draft,'正在核对发布结果…');if(!task)return;
+    try{
+      const fresh=await api(attempt.base+'?view=canvas',undefined,'GET');
+      if(!actionVisible(task)||S().preview)return;
+      if(fresh.status==='accepted'&&fresh.published_ontology_id){
+        const version=await api(attempt.projectBase+'/ontology?ontology_id='+encodeURIComponent(fresh.published_ontology_id),undefined,'GET');
+        if(!actionVisible(task)||S().preview)return;
+        completePublication(attempt,version,M);
+      }else if(fresh.status!=='pending'||fresh.revision!==attempt.revision){
+        publicationAttempts.delete(attempt.key);
+        status('草案状态或修订已变化，原发布请求已失效。请刷新草案并重新核对。',true);
+      }else{attempt.phase='retryable';status('尚未查到已完成的发布记录；可重试原发布请求，使用原说明和同一请求身份。');}
+    }catch(error){attempt.phase='uncertain';if(actionVisible(task))status('无法核对发布结果，请稍后重试读取：'+error.message,true);}
+    finally{finishAction(task);}
+  }
+  async function retryPublication(attempt){
+    const M=model();if(!M||attempt.phase!=='retryable'||activeProject()!==attempt.project||S().draft?.id!==attempt.draftId||S().preview)return;
+    const task=beginAction('publish',S().draft,'正在重试原发布请求…');if(!task)return;
+    try{await sendPublication(attempt,M,task);}finally{finishAction(task);}
+  }
+  async function publishDraft() {
+    const M=model(),draft=M?.S.draft;if(!draft?.id){status('还没有可发布的草案。',true);return;}
+    const note=String(publishNote||'').trim();if(!note){status('先写发布说明再发布：版本记录要能回答这一版改了什么、为什么发。',true);return;}
+    if(M.S.preview||pendingPublication())return;
+    const task=beginAction('publish',draft,'正在确认发布条件…');if(!task)return;
+    const project=activeProject(),id=draft.id,revision=draft.revision,projectBase=endpoint(''),base=projectBase+`/ontology-drafts/${encodeURIComponent(id)}`;
+    const stillCurrent=()=>activeProject()===project&&M.S.draft?.id===id&&M.S.draft.revision===revision&&!M.S.preview;
+    try{
+      const readiness=await api(base+'/publish-readiness',undefined,'GET');
+      if(!stillCurrent())throw Error('项目、草案或修订已变化，请重新核对发布。');
+      if(readiness.ready!==true){M.S.readiness=readiness;const blocker=(readiness.items||[]).find(item=>item.severity==='error');throw Error('还不能发布：'+(blocker?.message||blocker?.code||'服务端判定未就绪'));}
+      if(readiness.revision!=null&&readiness.revision!==revision)throw Error('草案修订已变化，请重新核对审核与发布。');
+      if(readiness.validation_fingerprint&&draft.validation_fingerprint&&readiness.validation_fingerprint!==draft.validation_fingerprint)throw Error('校验快照已变化，请重新校验并核对。');
+      const fingerprint=readiness.validation_fingerprint||draft.validation_fingerprint;
+      const key=nextIdempotencyKey(`${id}@${fingerprint||revision}@${note}`);
+      const attempt={key:actionKey(project,id),project,projectBase,base,draftId:id,revision,phase:'sending',body:{
+        expected_revision:revision,expected_ontology_id:M.S.ontologyId||draft.base_ontology_id,
+        validation_fingerprint:fingerprint,acknowledged_warning_codes:[...new Set([
+          ...(draft.validation_report?.warnings||[]).map(w=>w.code).filter(Boolean),...ackWarnings.codes])],idempotency_key:key,note}};
+      publicationAttempts.set(attempt.key,attempt);await sendPublication(attempt,M,task);
+    }catch(error){if(actionVisible(task))status(error.message||'无法核对发布条件',true);}
+    finally{finishAction(task);}
+  }
   /* ==========================================================================
    * 版本管理（B6）：/ontologies 版本列表 + 发布记录 + 查看/回到某一版
    * ======================================================================== */
@@ -1580,12 +1600,12 @@
     put(body, list);
   }
 
-  function loadKnowledgeContext(host, v) {
+  function loadKnowledgeContext(host, v, isCurrent=()=>true) {
     host.dataset.state = 'loading';
     put(host, el('p', 'om-history-note', '正在读取关联知识…'));
     api(endpoint(`/ontologies/${encodeURIComponent(v.id)}/knowledge-context`), undefined, 'GET')
       .then(data => {
-        if (!host.isConnected) return;
+        if (!host.isConnected||!isCurrent()) return;
         host.dataset.state = 'ready';
         const heading = el('div', 'om-knowledge-context-head');
         heading.append(el('b', null, '关联知识'));
@@ -1625,12 +1645,14 @@
         put(host, heading, grid, ledger);
       })
       .catch(() => {
-        if (!host.isConnected) return;
+        if (!host.isConnected||!isCurrent()) return;
         host.dataset.state = 'error';
         const title = el('b', null, '读不到关联知识');
         const empty = el('p', 'om-history-note',
           '当前关联 — · 待迁移 — · 迁移阻塞 — · 历史修订 —');
-        put(host, title, empty);
+        const retry=el('button','om-btn','重试读取关联知识');retry.type='button';
+        retry.addEventListener('click',()=>{if(isCurrent())loadKnowledgeContext(host,v,isCurrent);});
+        put(host, title, empty,retry);
       });
   }
 
@@ -1639,6 +1661,8 @@
     const project = activeProject(), opened = drawer, opening = historyOpening, controller = model();
     const sum = v.summary || {};
     const pub = (v.metadata && v.metadata.publication) || {};
+    const stillCurrent=()=>activeProject()===project&&drawer===opened&&historyOpening===opening&&ui.historyOpen&&ui.selectedVersion===v.id&&box.isConnected;
+    const technical=el('details','om-history-technical');technical.append(el('summary',null,'版本身份与技术信息'));
     const facts = el('div', 'om-history-facts');
     const fact = (k, value) => {
       const f = el('div', 'om-history-fact');
@@ -1648,14 +1672,14 @@
     };
     facts.append(fact('版本', versionLabel(v.version)
       + (v.version_reused ? ' · 标注修订' : '')));
-    facts.append(fact('版本 ID', shortId(v.id)));
+    technical.append(fact('版本 ID', shortId(v.id)));
     facts.append(fact('发布时间', fmtTime(v.created_at)));
     const writePath = pub.write_path || (v.metadata && v.metadata.write_path);
-    if (writePath) facts.append(fact('写入路径', writePath));
+    if (writePath) technical.append(fact('写入路径', writePath));
     const actor = v.actor || pub.actor;
     if (actor) facts.append(fact('发布人', actor));
-    if (pub.source_kind) facts.append(fact('来源', pub.source_kind));
-    facts.append(fact('规模', `${sum.triples || 0} 三元组`));
+    if (pub.source_kind) technical.append(fact('来源', pub.source_kind));
+    technical.append(fact('规模', `${sum.triples || 0} 三元组`));
     box.append(facts);
 
     const source = el('div', 'om-history-source-draft');
@@ -1674,7 +1698,7 @@
         closeHistory();
         return controller.openDraftHistory(pub.draft_id);
       });
-      source.append(sourceFact, sourceBtn);
+      technical.append(sourceFact);source.append(el('span',null,'来源草案'),sourceBtn);
     } else source.append(el('p', 'om-history-note', '未记录来源草案'));
     box.append(source);
 
@@ -1684,6 +1708,7 @@
     note.append(el('b', null, '发布说明：'));
     note.append(el('span', null, v.note || '（这一版发布于发布说明功能上线之前，没有留下说明）'));
     box.append(note);
+    const primaryActions=el('div','om-history-actions');box.append(primaryActions);
 
     if(pub.receipt){
       const receipt=pub.receipt,scope=el('section','om-publication-receipt');
@@ -1693,39 +1718,46 @@
       const reasonLabels={materialized:'已写入正式知识',ontology_validation_failed:'未通过最终结构校验',
         required_operation_rejected:'依赖的结构操作未获批',required_operation_superseded:'依赖的结构操作已被替换',
         required_operation_missing:'依赖的结构操作已缺失',required_operation_withdrawn:'依赖的结构操作已撤销',draft_closed:'草案已关闭'};
-      for(const batch of actual.per_batch||[]){
-        const section=el('details','om-publication-batch');section.open=true;
-        section.append(el('summary',null,`来源运行 ${batch.run_id||batch.kind||'未记录身份'} · 选中 ${value(batch.selected)} 条`),
-          el('p',null,`实际新增 ${value(batch.added)} / 复用 ${value(batch.reused)} / 跳过 ${value(batch.skipped)}`));
-        for(const outcome of batch.candidate_outcomes||[]){
+      for(const [batchNumber,batch] of (actual.per_batch||[]).entries()){
+        const section=el('details','om-publication-batch');let rendered=false;
+        section.append(el('summary',null,`来源批次 ${batchNumber+1} · 选中 ${value(batch.selected)} 条 · 新增 ${value(batch.added)} / 复用 ${value(batch.reused)} / 跳过 ${value(batch.skipped)}`));
+        section.addEventListener('toggle',()=>{
+          if(!section.open||rendered||!stillCurrent())return;rendered=true;
+          const outcomes=el('div','om-publication-outcomes');
+          outcomes.append(el('p','om-history-note','来源运行：'+(batch.run_id||batch.kind||'未记录身份')));
+          for(const outcome of batch.candidate_outcomes||[]){
           const status={materialized:'已处理',skipped:'已跳过',deferred:'暂缓'}[outcome.status]||outcome.status||'未记录状态';
           const reason=outcome.message||outcome.reason||reasonLabels[outcome.reason_code]||'未提供诊断说明';
-          section.append(el('p','om-publication-outcome',`${outcome.candidate_id} · ${status} · ${reason}${outcome.reason_code?' ['+outcome.reason_code+']':''}`));
-        }
-        if(!(batch.candidate_outcomes||[]).length&&batch.selected) section.append(el('p','om-history-note','这份回执未提供逐条候选诊断。'));
+            outcomes.append(el('p','om-publication-outcome',`${outcome.candidate_id} · ${status} · ${reason}${outcome.reason_code?' ['+outcome.reason_code+']':''}`));
+          }
+          if(!(batch.candidate_outcomes||[]).length&&batch.selected)outcomes.append(el('p','om-history-note','这份回执未提供逐条候选诊断。'));
+          section.append(outcomes);
+        });
         scope.append(section);
       }
       if(actual.selected===0)scope.append(el('p','om-history-note','本次仅处理结构，没有关联候选事实。'));
       const index=receipt.index||{};
-      scope.append(el('p','om-history-note',`发布回执记录的索引状态：${index.status||'未记录'}${index.task_id?' · '+index.task_id:''}。这是发布时的快照，当前进度请在构建与任务中核对。`));
+      technical.append(el('p','om-history-note',`发布回执记录的索引状态：${index.status||'未记录'}${index.task_id?' · '+index.task_id:''}。这是发布时的快照，当前进度请在构建与任务中核对。`));
       box.append(scope);
     }
 
     const top = (sum.classes || []).slice(0, 8)
       .map(c => c.label_zh || c.label || c.name || c.id);
-    if (top.length) box.append(el('p', 'om-history-note', `实体类（前 ${top.length} 个）：${top.join('、')}`));
+    if (top.length) technical.append(el('p', 'om-history-note', `实体类（前 ${top.length} 个）：${top.join('、')}`));
 
     const knowledge = el('div', 'om-knowledge-context');
     knowledge.setAttribute('role', 'region');
     knowledge.setAttribute('aria-label', '关联知识');
-    box.append(knowledge);
-    loadKnowledgeContext(knowledge, v);
+    const knowledgeDetails=el('details','om-history-knowledge');knowledgeDetails.append(el('summary',null,'当前关联知识与迁移状态'),knowledge);box.append(knowledgeDetails,technical);
+    knowledgeDetails.addEventListener('toggle',()=>{
+      if(knowledgeDetails.open&&!knowledge.dataset.state&&stillCurrent())loadKnowledgeContext(knowledge,v,stillCurrent);
+    });
 
     // 两个动作，语义必须分清（这是版本管理唯一容易出事的地方）：
     //   查看这一版 = 只读预览，不写任何数据；
     //   回到这一版 = 以它为基线开一份**新草案** → 审核 → 发布成新版本。历史不改写。
     const st = S();
-    const actions = el('div', 'om-history-actions');
+    const actions = primaryActions;
     const viewBtn = el('button', 'om-btn', '查看这一版（只读）');
     viewBtn.type = 'button';
     viewBtn.title = '做什么：把画布切到这一版看结构，不写任何数据、不影响当前版本。不做什么：不会切换生产版本，也不能在这一版上直接编辑。';
@@ -1758,9 +1790,8 @@
       }
     });
     actions.append(viewBtn, backBtn);
-    box.append(actions);
 
-    box.append(el('p', 'om-history-note',
+    technical.append(el('p', 'om-history-note',
       '做什么：查看任意已发布版本；把某一版作为基础开一份新草案。'
       + '不做什么：不改写历史——「回到这一版」不是删掉后面的版本，而是发布一条以它为基础的新版本，'
       + '所以每一次结构变化在版本列表里都留得住。'));

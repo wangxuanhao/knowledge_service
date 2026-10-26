@@ -63,7 +63,10 @@ test('historical publication retains each source outcome and its skip reason',as
     {run_id:'source-run-2',selected:3,added:1,reused:0,skipped:2,candidate_outcomes:[{candidate_id:'candidate-b',status:'skipped',reason_code:'required_operation_rejected'}]},
   ]},index:{status:'pending',task_id:'projection-1'}}}}}]});await opening;
   const nodes=f.all(f.root);assert.ok(nodes.some(node=>node.textContent==='本次发布实际处理的关联知识'));
-  assert.ok(nodes.some(node=>String(node.textContent).includes('source-run-2')));
-  assert.ok(nodes.some(node=>String(node.textContent).includes('candidate-b')));
-  assert.ok(nodes.some(node=>String(node.textContent).includes('required_operation_rejected')));
+  assert.equal(nodes.filter(node=>node.className==='om-publication-outcome').length,0);
+  const batch=nodes.filter(node=>node.className==='om-publication-batch')[1];assert.ok(!batch.open);
+  batch.open=true;batch.listeners.toggle();
+  assert.ok(f.all(f.root).some(node=>String(node.textContent).includes('source-run-2')));
+  assert.ok(f.all(f.root).some(node=>String(node.textContent).includes('candidate-b')));
+  assert.ok(f.all(f.root).some(node=>String(node.textContent).includes('required_operation_rejected')));
 });

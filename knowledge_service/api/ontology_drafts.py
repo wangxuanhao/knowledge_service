@@ -17,6 +17,9 @@ from .audit_identity import audit_actor, audit_identity
 from ..services.ontology_drafts import OntologyDrafts
 
 
+DraftResponseView = Literal['full', 'review']
+
+
 class _Request(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -82,13 +85,15 @@ def install(app, service):
     router = APIRouter(prefix='/api/projects/{p}/ontology-drafts')
 
     @router.post('', status_code=201)
-    def create(p: str, request: DraftCreate, http_request: Request):
-        return drafts.create(
+    def create(p: str, request: DraftCreate, http_request: Request,
+               view: DraftResponseView = Query('full')):
+        result = drafts.create(
             p, request.base_ontology_id, request.source_kind,
             request.title, audit_actor(http_request),
             source_context={**request.source_context,
                             'audit_identity': audit_identity(http_request)},
             summary=request.summary)
+        return drafts.project_response(result, view=view)
 
     @router.get('')
     def listing(p: str, status: str | None = None):
@@ -117,60 +122,77 @@ def install(app, service):
         return drafts.stage_state(p, draft_id)
 
     @router.get('/{draft_id}')
-    def get(p: str, draft_id: str, view: str = Query('full', pattern='^(full|canvas)$')):
-        return drafts.get(p, draft_id, canvas=view == 'canvas')
+    def get(p: str, draft_id: str,
+            view: Literal['full', 'canvas', 'review'] = Query('full')):
+        return drafts.project_response(
+            drafts.get(p, draft_id, canvas=view == 'canvas'), view=view)
 
     @router.post('/{draft_id}/commands')
-    def command(p: str, draft_id: str, request: CommandRequest):
-        return drafts.command(
+    def command(p: str, draft_id: str, request: CommandRequest,
+                view: DraftResponseView = Query('full')):
+        result = drafts.command(
             p, draft_id, request.expected_revision, request.command)
+        return drafts.project_response(result, view=view)
 
     @router.post('/{draft_id}/discover-parents')
-    def discover_parents(p: str, draft_id: str, request: RevisionRequest):
+    def discover_parents(p: str, draft_id: str, request: RevisionRequest,
+                         view: DraftResponseView = Query('full')):
         from fastapi import HTTPException
         from ..services.hierarchy_suggestion import HierarchySuggestionsUnavailable
         try:
-            return drafts.discover_parents(p, draft_id, request.expected_revision)
+            result = drafts.discover_parents(p, draft_id, request.expected_revision)
+            return drafts.project_response(result, view=view, envelope=True)
         except HierarchySuggestionsUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @router.post('/{draft_id}/validate')
-    def validate(p: str, draft_id: str, request: RevisionRequest):
-        return drafts.validate(p, draft_id, request.expected_revision)
+    def validate(p: str, draft_id: str, request: RevisionRequest,
+                 view: DraftResponseView = Query('full')):
+        result = drafts.validate(p, draft_id, request.expected_revision)
+        return drafts.project_response(result, view=view)
 
     @router.post('/{draft_id}/submit')
-    def submit(p: str, draft_id: str, request: RevisionRequest):
-        return drafts.submit(p, draft_id, request.expected_revision)
+    def submit(p: str, draft_id: str, request: RevisionRequest,
+               view: DraftResponseView = Query('full')):
+        result = drafts.submit(p, draft_id, request.expected_revision)
+        return drafts.project_response(result, view=view)
 
     @router.post('/{draft_id}/decisions')
-    def decisions(p: str, draft_id: str, request: DecisionsRequest, http_request: Request):
-        return drafts.decide(
+    def decisions(p: str, draft_id: str, request: DecisionsRequest, http_request: Request,
+                  view: DraftResponseView = Query('full')):
+        result = drafts.decide(
             p, draft_id, request.expected_revision,
             request.expected_ontology_id, request.validation_fingerprint,
             request.decisions, request.acknowledged_warning_codes,
             audit_actor(http_request))
+        return drafts.project_response(result, view=view)
 
     @router.post('/{draft_id}/decisions/by-definition')
     def definition_decision(
             p: str, draft_id: str, request: DefinitionDecisionRequest,
-            http_request: Request):
-        return drafts.decide_by_definition(
+            http_request: Request, view: DraftResponseView = Query('full')):
+        result = drafts.decide_by_definition(
             p, draft_id, request.expected_revision,
             request.expected_ontology_id, request.validation_fingerprint,
             request.target_iri, request.action, request.reason,
             request.acknowledged_warning_codes, audit_actor(http_request))
+        return drafts.project_response(result, view=view, envelope=True)
 
     @router.post('/{draft_id}/rebase')
-    def rebase(p: str, draft_id: str, request: RebaseRequest):
-        return drafts.rebase(
+    def rebase(p: str, draft_id: str, request: RebaseRequest,
+               view: DraftResponseView = Query('full')):
+        result = drafts.rebase(
             p, draft_id, request.expected_revision,
             request.expected_ontology_id)
+        return drafts.project_response(result, view=view)
 
     @router.post('/{draft_id}/close')
-    def close(p: str, draft_id: str, request: CloseRequest, http_request: Request):
-        return drafts.close(
+    def close(p: str, draft_id: str, request: CloseRequest, http_request: Request,
+              view: DraftResponseView = Query('full')):
+        result = drafts.close(
             p, draft_id, request.expected_revision,
             audit_actor(http_request), request.reason)
+        return drafts.project_response(result, view=view)
 
     @router.get('/{draft_id}/review-plan')
     def review_plan(p: str, draft_id: str):
@@ -189,16 +211,18 @@ def install(app, service):
         return drafts.evidence_index(p, draft_id)
 
     @router.post('/{draft_id}/decisions/batch-approve')
-    def batch_approve(p: str, draft_id: str, request: BatchApproveRequest, http_request: Request):
+    def batch_approve(p: str, draft_id: str, request: BatchApproveRequest, http_request: Request,
+                      view: DraftResponseView = Query('full')):
         """一键审核：服务端挑出「可批准且无需理由」的变更并整批批准。
 
         集合由服务端 review_plan 决定；阻断项、高风险项、需要写理由的变更
         永远不在其中，前端只表达意图、不参与挑选。
         """
-        return drafts.batch_approve(
+        result = drafts.batch_approve(
             p, draft_id, request.expected_revision,
             request.expected_ontology_id, request.validation_fingerprint,
             request.acknowledged_warning_codes, audit_actor(http_request))
+        return drafts.project_response(result, view=view, envelope=True)
 
     @router.post('/{draft_id}/publish')
     def publish(p: str, draft_id: str, request: PublishRequest, http_request: Request):
