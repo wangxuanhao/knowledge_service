@@ -10,6 +10,28 @@ test('closing and reopening preserves the same-project upload step; old completi
   ui.close();assert.equal(ui.accepts(ticket,'p'),false);ui.open('upload','p');
   assert.equal(ui.snapshot().step,2);assert.equal(ui.accepts(ticket,'p'),false);
 });
+
+test('reopening resumes the last form after closing or checking processing batches',()=>{
+  let clears=0;const ui=state({canWrite:()=>true,clear:()=>clears++});
+  ui.open('upload','p');ui.step(1);ui.open('structured','p');
+  const ticket=ui.ticket();ui.close();
+  assert.equal(ui.open(undefined,'p').mode,'structured');
+  assert.equal(ui.accepts(ticket,'p'),false);
+  ui.open('batches','p');ui.close();
+  assert.equal(ui.open(undefined,'p').mode,'structured');
+  ui.open('upload','p');ui.close();
+  assert.equal(ui.open(undefined,'p').mode,'upload');
+  assert.equal(ui.snapshot().step,1);assert.equal(clears,0);
+});
+
+test('resuming in another project resets the view and draft instead of importing the old form',()=>{
+  let clears=0;const ui=state({canWrite:()=>true,clear:()=>clears++});
+  ui.open('structured','p');ui.step(2);ui.close();
+  assert.equal(ui.open(undefined,'q').mode,'upload');
+  assert.equal(ui.snapshot().step,0);assert.equal(clears,1);
+  ui.open('structured','q');ui.projectChanged('r');
+  assert.equal(ui.open(undefined,'r').mode,'upload');assert.equal(clears,2);
+});
 test('a late project action cannot replace the new project notice or re-enable its pending button',async()=>{
   const source=fs.readFileSync(path.resolve(__dirname,'../../knowledge_service/web/app.js'),'utf8');
   const block=source.slice(source.indexOf('function bind('),source.indexOf('async function projects('));

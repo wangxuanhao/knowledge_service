@@ -6,7 +6,7 @@
 .ontology-intake .oi-section-heading{display:flex;gap:12px;justify-content:space-between;align-items:baseline;margin-top:24px}
 .ontology-intake .oi-section-heading>span{font-size:11px;color:var(--oi-muted)}
 .ontology-intake .oi-candidate-list{display:grid;gap:10px}
-.ontology-intake .oi-candidate{border:1px solid var(--oi-line);border-radius:8px;padding:14px;background:#fff;min-width:0}
+.ontology-intake .oi-candidate{display:grid;grid-template-columns:20px minmax(0,1fr) auto;align-items:center;gap:2px 9px;border-bottom:1px solid #e5ece6;padding:10px 12px;background:#fff;min-width:0}
 .ontology-intake .oi-candidate.is-selected{border-color:#6da18b;background:#f5faf5;box-shadow:inset 3px 0 #4f8c72}
 .ontology-intake .oi-candidate-id{display:block;font:10px/1.7 Consolas,monospace;color:#7c8c80;overflow-wrap:anywhere;margin:5px 0}
 .ontology-intake .oi-fact-preview{margin:20px 0;border-top:1px solid var(--oi-line)}
@@ -15,7 +15,7 @@
 .ontology-intake .oi-fact-row strong{font-size:13px;font-weight:600}
 .ontology-intake .oi-fact-outcome{font-size:12px;color:#426e51;margin-bottom:3px}
 .ontology-intake .oi-dependency-note{font-size:11px;color:#426e51;border-left:2px solid #8bad94;background:#eef6ed;padding:8px 10px}
-.ontology-intake .oi-candidate-select{display:flex;align-items:flex-start;gap:9px;cursor:pointer;margin:0}
+.ontology-intake .oi-candidate-select{display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;grid-row:1/3;align-self:stretch}
 .ontology-intake .oi-candidate-select input{width:16px;height:16px;flex:0 0 16px;margin:4px 0 0;accent-color:#276f59}
 .ontology-intake .oi-candidate-select strong{flex:1;overflow-wrap:anywhere;font-size:14px}
 .ontology-intake .oi-candidate-select small{border:1px solid var(--oi-line);border-radius:4px;padding:0 6px;font-size:10px;color:var(--oi-muted)}
@@ -26,7 +26,7 @@
 .ontology-intake pre.oi-change-values{font:inherit;font-size:12px;line-height:1.8}
 .ontology-intake pre{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font:11px/1.8 Consolas,monospace;background:#edf2ed;padding:12px;border-radius:5px;max-height:280px;overflow:auto;color:#426652}
 .ontology-intake select{display:block;width:100%;max-width:100%;font:inherit;font-size:12px;background:#fff;border:1px solid #bacfc1;border-radius:5px;color:var(--oi-ink);padding:9px;margin:10px 0}
-.ontology-intake .oi-target,.ontology-intake .oi-preview,.ontology-intake .oi-receipt{border-top:1px solid var(--oi-line);margin-top:24px;padding-top:20px}
+.ontology-intake .oi-target,.ontology-intake .oi-preview,.ontology-intake .oi-receipt{border-top:1px solid var(--oi-line);margin-top:20px;padding-top:18px}
 .ontology-intake .oi-receipt{border:1px solid #a8c4b4;background:#eff6ef;padding:20px;border-radius:8px}
 .ontology-intake .oi-warning,.ontology-intake .oi-error{border-left:3px solid #b69b4a;background:#faf7e9;color:#7a6524;padding:10px 12px;overflow-wrap:anywhere}
 .ontology-intake .oi-error{border-left-color:#b86958;color:#934c3f;background:#fcf0ed}
@@ -35,4 +35,59 @@
 .ontology-intake .om-btn:disabled{opacity:.5;cursor:wait}
 .ontology-intake :is(button,select,input,summary):focus-visible{outline:2px solid #2a7357;outline-offset:3px}
 .ontology-intake .subtle{color:var(--oi-muted);font-size:11px;overflow-wrap:anywhere}
-@media(max-width:600px){.ontology-intake-drawer.workspace-drawer{width:100vw;max-width:100vw}.ontology-intake .oi-section-heading{display:block}.ontology-intake .oi-candidate{padding:11px}.ontology-intake .oi-candidate-select{flex-wrap:wrap}.ontology-intake .oi-candidate-select strong{flex-basis:calc(100% - 26px)}}
+.ontology-intake-drawer.oi-workspace.workspace-drawer{inset:16px 20px;margin:0;width:calc(100vw - 40px);max-width:none;height:calc(100dvh - 32px);max-height:none;border:1px solid var(--oi-line,#d4e2d8);border-radius:12px;box-shadow:0 12px 70px #173b2930}
+.ontology-intake-drawer .workspace-drawer-heading{padding:18px 24px 14px}
+.ontology-intake-drawer .workspace-drawer-body{padding:18px 24px 24px;scrollbar-gutter:stable}
+.ontology-intake .oi-context{margin:0 0 7px;font-weight:600}
+.ontology-intake .oi-scope{margin:0 0 16px;line-height:1.7}
+.ontology-intake .oi-goals{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ontology-intake .oi-goal{display:flex;align-items:flex-start;gap:9px;padding:12px;border:1px solid var(--oi-line);border-radius:7px;margin:0;background:#fbfcfa;cursor:pointer;min-width:0}
+.ontology-intake .oi-goal.is-active{border-color:#6d9e88;background:#f0f7ef;box-shadow:inset 0 2px #4d836b}
+.ontology-intake .oi-goal input{flex:0 0 16px;width:16px;height:16px;margin:3px 0 0;accent-color:#28664f}
+.ontology-intake .oi-goal span{min-width:0}.ontology-intake .oi-goal strong{display:block;font-size:13px;font-weight:650;line-height:1.6}
+.ontology-intake .oi-goal small{display:block;margin-top:5px;font-size:11px;color:var(--oi-muted);font-weight:400;line-height:1.8}
+.ontology-intake .oi-draft-choice{display:flex;align-items:center;gap:14px;font-size:12px;margin:12px 0 0}.ontology-intake .oi-draft-choice select{flex:1;min-width:0;width:auto;margin:0}
+.ontology-intake .oi-filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.ontology-intake .oi-filters label{margin:0;font-size:11px;color:var(--oi-muted)}.ontology-intake .oi-filters select{margin:5px 0 0;padding:8px}
+.ontology-intake .oi-filter-note{margin:8px 0 0;color:var(--oi-muted);font-size:11px}
+.ontology-intake .oi-bulk-tools{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}.ontology-intake .oi-bulk-tools .om-btn{margin:0;padding:7px 9px;font-size:11px}
+.ontology-intake .oi-work-layout{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);align-items:stretch;border:1px solid var(--oi-line);border-radius:8px;overflow:hidden;background:#fff}
+.ontology-intake .oi-list-pane{max-height:450px;min-height:210px;overflow:auto;scrollbar-width:thin;overscroll-behavior:contain}
+.ontology-intake .oi-source-heading{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:8px;padding:8px 11px;background:#f3f7f0;border-bottom:1px solid var(--oi-line);min-width:0}
+.ontology-intake .oi-source-heading strong{font-size:11px;flex:1;min-width:0;overflow-wrap:anywhere;font-weight:600}.ontology-intake .oi-source-heading small{font-size:10px;color:var(--oi-muted);white-space:nowrap}
+.ontology-intake .oi-source-heading .om-btn{font-size:10px;padding:4px 6px;margin:0;white-space:nowrap;background:transparent;border:0}
+.ontology-intake .oi-open-detail{font:inherit;font-size:12px;font-weight:550;line-height:1.65;text-align:left;color:var(--oi-ink);background:none;border:0;padding:2px 0;margin:0;cursor:pointer;overflow-wrap:anywhere;min-width:0}
+.ontology-intake .oi-open-detail:hover,.ontology-intake .oi-open-detail[aria-pressed=true]{color:#17614a;text-decoration:underline;text-underline-offset:3px}
+.ontology-intake .oi-kind{font-size:10px;border:1px solid var(--oi-line);border-radius:4px;padding:0 5px;color:var(--oi-muted);white-space:nowrap}
+.ontology-intake .oi-row-status{grid-column:2/4;font-size:10px;color:var(--oi-muted)}
+.ontology-intake .oi-detail{min-width:0;border-left:1px solid var(--oi-line);background:#fafcf8;padding:15px 17px;max-height:450px;overflow:auto;scrollbar-width:thin}
+.ontology-intake .oi-detail h4{font-size:11px;font-weight:500;color:var(--oi-muted);margin:0 0 9px}.ontology-intake .oi-detail-name{display:block;font-size:14px;line-height:1.7;overflow-wrap:anywhere}
+.ontology-intake .oi-detail .oi-source{margin:7px 0}.ontology-intake .oi-detail .oi-evidence{margin:14px 0;border-top:1px solid var(--oi-line);padding-top:10px}
+.ontology-intake .oi-evidence>summary,.ontology-intake .oi-technical>summary{margin:0}.ontology-intake .oi-evidence pre{font-family:inherit;font-size:12px;margin:8px 0;max-height:170px;padding:10px;background:#eff4ec}
+.ontology-intake .oi-technical{margin:12px 0 0}.ontology-intake .oi-mapping-label{margin-top:14px;font-size:11px}
+.ontology-intake .oi-actions{position:sticky;bottom:-25px;z-index:3;display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;padding:12px 0;border-top:1px solid var(--oi-line);background:#fff;margin-top:16px;box-shadow:0 -6px 12px #fff}
+.ontology-intake .oi-actions strong{font-size:13px}.ontology-intake .oi-actions>span{font-size:11px;color:var(--oi-muted);flex:1}.ontology-intake .oi-actions .om-btn{margin:0}
+.ontology-intake .oi-preview{scroll-margin-top:12px}.ontology-intake .oi-fact-preview>summary{margin:0;font-size:12px;font-weight:600;cursor:pointer}
+.ontology-intake .oi-preview{border:0;margin-top:6px;padding-top:8px}
+.ontology-intake .oi-preview-definition-summary,.ontology-intake .oi-preview-fact-summary{margin:9px 0;padding:10px 12px;border-left:3px solid #6d9e88;background:#f2f7ef;font-size:13px;font-weight:600}
+.ontology-intake .oi-preview-fact-summary{border-left-color:#7395a1;background:#f1f6f7}
+.ontology-intake .oi-preview-details,.ontology-intake .oi-fact-preview{border:1px solid var(--oi-line);border-radius:7px;padding:11px 13px;margin:12px 0}
+.ontology-intake .oi-preview-details>summary{cursor:pointer;margin:0;font-size:12px;font-weight:600;color:var(--oi-ink)}
+.ontology-intake .oi-preview-details[open],.ontology-intake .oi-fact-preview[open]{max-height:300px;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.ontology-intake .oi-preview-details[open]>summary,.ontology-intake .oi-fact-preview[open]>summary{position:sticky;top:-11px;z-index:1;background:#fff;padding:8px 0}
+.ontology-intake .oi-confirmbar{display:flex;align-items:center;flex-wrap:wrap;gap:10px;position:sticky;bottom:-25px;z-index:4;padding:13px 0;background:#fff;border-top:1px solid var(--oi-line);box-shadow:0 -7px 15px #fff;margin-top:20px}
+.ontology-intake .oi-confirmbar>span{flex:1;font-size:11px;color:var(--oi-muted)}.ontology-intake .oi-confirmbar .om-btn{margin:0}
+.ontology-intake .oi-outcome-summary{font-size:12px;margin:12px 0;color:#3f6d54}
+.ontology-intake .oi-progress{min-height:240px;padding:30px 16px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:13px}
+.ontology-intake .oi-progress h3{font-size:17px;margin:0}.ontology-intake .oi-progress p{font-size:12px;line-height:1.8;color:var(--oi-muted);max-width:440px;margin:0}
+.ontology-intake .oi-spinner{width:28px;height:28px;display:block;flex:0 0 28px;border:3px solid #dce8df;border-top-color:#2c735a;border-radius:50%;animation:oi-loading 1s linear infinite}
+@keyframes oi-loading{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.ontology-intake .oi-spinner{animation:none}}
+.ontology-intake-drawer.oi-result-dialog.workspace-drawer{inset:50% auto auto 50%;transform:translate(-50%,-50%);width:min(680px,calc(100vw - 32px));height:auto;max-height:calc(100dvh - 40px);margin:0;border:1px solid #d4e2d8;border-radius:12px;box-shadow:0 14px 65px #173b292b}
+.ontology-intake .oi-receipt{border:0;border-radius:0;background:transparent;margin:0;padding:14px 0 4px}
+.ontology-intake .oi-receipt h3{display:flex;align-items:center;gap:9px;font-size:18px;line-height:1.7}.ontology-intake .oi-result-icon{display:inline-block;flex:0 0 29px;background:#e8f4e9;color:#28664f;border-radius:50%;width:29px;height:29px;text-align:center;font-size:17px}
+.ontology-intake .oi-receipt>p{font-size:12px;line-height:1.8}.ontology-intake .oi-receipt-counts{padding:12px;background:#f1f6ee;border-radius:6px;font-weight:600}.ontology-intake .oi-next-step{padding:10px 0;border-top:1px solid var(--oi-line);color:#446c58}
+@media(min-width:1300px){.ontology-intake-drawer.oi-workspace .ontology-intake{max-width:1440px;margin:auto}.ontology-intake-drawer.oi-workspace .oi-work-layout{grid-template-columns:minmax(0,1.8fr) minmax(0,1fr)}}
+@media(max-width:700px){.ontology-intake-drawer.oi-workspace.workspace-drawer{inset:0;width:100vw;height:100dvh;border-radius:0;border:0}.ontology-intake-drawer .workspace-drawer-body{padding:15px 16px 24px}.ontology-intake .oi-work-layout{grid-template-columns:1fr}.ontology-intake .oi-list-pane{max-height:330px}.ontology-intake .oi-detail{border-left:0;border-top:1px solid var(--oi-line);max-height:none}.ontology-intake .oi-goals{grid-template-columns:1fr}.ontology-intake .oi-filters{grid-template-columns:1fr 1fr}.ontology-intake .oi-draft-choice{display:block}.ontology-intake .oi-draft-choice select{width:100%;margin-top:5px}.ontology-intake .oi-actions>span{flex-basis:calc(100% - 90px)}.ontology-intake .oi-actions .om-btn{width:100%}}
+@media(max-width:600px){.ontology-intake-drawer.workspace-drawer{width:100vw;max-width:100vw}.ontology-intake .oi-section-heading{display:block}.ontology-intake .oi-candidate{padding:9px}.ontology-intake .oi-candidate-select input{margin:0}.ontology-intake-drawer .workspace-drawer-heading{padding:17px 16px 13px}}
+@media(max-width:600px){.ontology-intake .oi-confirmbar>span{flex-basis:100%;order:-1}.ontology-intake .oi-confirmbar .primary{flex:1}.ontology-intake-drawer.oi-result-dialog.workspace-drawer{width:calc(100vw - 24px);max-height:calc(100dvh - 24px)}.ontology-intake .oi-preview-details[open],.ontology-intake .oi-fact-preview[open]{max-height:260px}}

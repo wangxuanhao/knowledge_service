@@ -74,6 +74,27 @@ test('catalog render consumes model choices and errors; explicit reload belongs 
   descendants(work).find(node=>node.textContent==='重读草案列表').click();await settle();assert.equal(refreshes,1);
 });
 
+test('draft changes group readable definitions behind a collapsed bounded detail list',()=>{
+  const side=element(),cards=element(),work=element(),iri='https://example.test/ontology/very-long-definition-id';
+  const context={window:{},current:'p',document:{createElement:element,getElementById:id=>id==='om-work-changes-host'?work:null}};
+  vm.runInNewContext(source('ontology-model-catalog.js'),context);
+  const state={summary:{classes:[{id:iri,label_zh:'客户'}],relations:[],attributes:[{id:'urn:amount',label:'urn:amount'}]},draftChoices:[],draft:{
+    id:'large-internal-draft-uuid',status:'pending',revision:3,operations:[
+      {id:'op-1',action:'create_term',target_iri:iri,after:{kind:'class'}},
+      {id:'op-2',action:'add_annotation',target_iri:iri,after:{predicate:'http://www.w3.org/2000/01/rdf-schema#label',value:'客户',language:'zh'}},
+      {id:'op-3',action:'create_term',target_iri:'urn:amount',after:{kind:'attribute'}},
+    ]}};
+  context.window.OntologyCatalog.mount(side,cards,{S:state,status(){}});
+  const nodes=descendants(work),details=nodes.find(node=>node.className==='om-work-definition-list');
+  assert.ok(details,'definition changes belong to a single collapsible list');assert.notEqual(details.open,true);
+  const groups=nodes.filter(node=>node.className==='om-work-definition');assert.equal(groups.length,2);
+  const headings=groups.map(group=>group.children[0].textContent).join(' ');
+  assert.match(headings,/客户/);assert.match(headings,/实体类型/);assert.match(headings,/属性/);
+  assert.doesNotMatch(headings,/create_term|https:|urn:amount|large-internal-draft-uuid/);
+  assert.ok(nodes.some(node=>node.tagName==='pre'&&String(node.textContent).includes(iri)),'raw identities remain inspectable');
+  assert.match(source('ontology-model.css'),/\.om-work-definition-scroll\{[^}]*max-height:/);
+});
+
 function runtimeFixture(){
   const tab=element(),page=element(),loads=[];page.querySelectorAll=()=>[];
   const nodes=new Map([['tab-runtime',page],['title',element()]]);

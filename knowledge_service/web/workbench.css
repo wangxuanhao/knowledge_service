@@ -50,9 +50,10 @@ html.chunk-preview-open,body.chunk-preview-open{overflow:hidden}
 .chunk-preview-summary>span,.chunk-preview-summary .chunk-preview-chip{display:inline-flex;align-items:center;min-height:26px;padding:4px 9px;border:1px solid #cfe0d5;border-radius:999px;background:#fff;color:#355848;font-weight:700}
 .chunk-preview-layout{min-width:0;min-height:0;display:grid;grid-template-columns:220px minmax(0,1fr);overflow:hidden}
 .chunk-preview-list{box-sizing:border-box;min-width:0;min-height:0;display:flex;flex-direction:column;gap:8px;padding:18px;overflow:auto;border-right:1px solid #e1e9e3;background:#f4f8f5}
-.chunk-preview-list button{width:100%;min-width:0;padding:11px 12px;border:1px solid #d5e2d9;background:#fff;color:#355848;text-align:left;overflow-wrap:anywhere}
-.chunk-preview-list button:hover{border-color:#8fb5a1;background:#eef6f0}
-.chunk-preview-list button.selected,.chunk-preview-list button[aria-current="true"]{border-color:#23795c;background:#285244;color:#fff;box-shadow:0 5px 14px rgba(35,121,92,.2)}
+/* Keep list states above the generic dialog button theme, including on hover. */
+#chunk-preview-list button{width:100%;min-width:0;padding:11px 12px;border:1px solid #d5e2d9;background:#fff;color:#355848;text-align:left;overflow-wrap:anywhere}
+#chunk-preview-list button:hover{border-color:#8fb5a1;background:#eef6f0;color:#355848}
+#chunk-preview-list button.selected,#chunk-preview-list button[aria-current="true"]{border-color:#23795c;background:#285244;color:#fff;box-shadow:0 5px 14px rgba(35,121,92,.2)}
 .chunk-preview-content{box-sizing:border-box;min-width:0;min-height:0;margin:0;padding:24px 28px;overflow:auto;overscroll-behavior:contain;color:#293e34;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;scrollbar-gutter:stable}
 .chunk-preview-content:focus-visible{outline:3px solid #79ad95;outline-offset:-4px}
 .chunk-preview-current{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid #e2eae4;color:#355848}
@@ -68,7 +69,7 @@ html.chunk-preview-open,body.chunk-preview-open{overflow:hidden}
   .chunk-preview-summary{padding:10px 22px}
   .chunk-preview-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
   .chunk-preview-list{flex-direction:row;align-items:stretch;gap:8px;padding:12px 18px;overflow-x:auto;overflow-y:hidden;border-right:0;border-bottom:1px solid #e1e9e3}
-  .chunk-preview-list button{flex:0 0 auto;width:auto;max-width:240px;white-space:normal}
+  #chunk-preview-list button{flex:0 0 auto;width:auto;max-width:240px;white-space:normal}
   .chunk-preview-content{padding:22px}
 }
 @media(max-width:520px){
@@ -81,11 +82,11 @@ html.chunk-preview-open,body.chunk-preview-open{overflow:hidden}
   #chunk-preview-close{width:44px;height:44px}
   .chunk-preview-summary{padding:9px 16px}
   .chunk-preview-list{padding:10px 14px}
-  .chunk-preview-list button{max-width:190px;padding:9px 11px}
+  #chunk-preview-list button{max-width:190px;padding:9px 11px}
   .chunk-preview-content{padding:18px 16px}
 }
 @media(prefers-reduced-motion:reduce){
-  #chunk-preview.chunk-preview-overlay,.chunk-preview-drawer,.chunk-preview-list button{animation:none;transition:none}
+  #chunk-preview.chunk-preview-overlay,.chunk-preview-drawer,#chunk-preview-list button{animation:none;transition:none}
 }
 .qa-temporal-controls{display:flex;align-items:center;gap:10px 18px;flex-wrap:wrap;margin:0 0 10px;font-size:13px}
 .qa-temporal-controls>label:first-child{display:flex;align-items:center;gap:8px}

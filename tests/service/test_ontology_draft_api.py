@@ -1,8 +1,10 @@
 from fastapi.testclient import TestClient
 import pytest
+from types import SimpleNamespace
 
 from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
+from knowledge_service.services.ontology import Ontology
 
 
 BASE = '''
@@ -449,6 +451,85 @@ def submit(client, project_id, draft):
         json={'expected_revision': draft['revision']})
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def large_review_draft(workbench, count):
+    client, project_id, ontology = workbench
+    draft = create_draft(client, project_id, ontology, title='大批量审核')
+    drafts = client.app.state.ontology_drafts
+    # Isolate batch cardinality from the optional external quality analyzer.
+    # Structural validation, fingerprints, storage and API guards remain real.
+    drafts.quality_engine = SimpleNamespace(check=lambda payload: {
+        'engine': 'semantica', 'passed': True, 'issues': []})
+    # Prepare independent real operations together; the regression concerns the
+    # review boundary, so avoid repeatedly projecting a growing draft via HTTP.
+    operations = []
+    baseline = Ontology(BASE)
+    with drafts.repository.unit_of_work():
+        for i in range(count):
+            operations.extend(drafts._compile_command(project_id, draft, {
+                'action': 'add_annotation', 'target_iri': 'https://example.test/ns#Child',
+                'predicate': 'http://www.w3.org/2000/01/rdf-schema#comment',
+                'value': f'Review item {i}', 'language': 'en'}, baseline))
+        saved = drafts.store.append_operations(project_id, draft['id'], operations)
+        draft = drafts._cas(project_id, draft['id'], draft['revision'], {})
+    assert len(saved) == count
+    return submit(client, project_id, draft)
+
+
+@pytest.mark.parametrize('count', [100, 101, 188])
+def test_one_click_review_accepts_large_server_selected_batches(workbench, count):
+    client, project_id, ontology = workbench
+    submitted = large_review_draft(workbench, count)
+    path = f"/api/projects/{project_id}/ontology-drafts/{submitted['id']}"
+    response = client.post(path + '/decisions/batch-approve', json={
+        'expected_revision': submitted['revision'],
+        'expected_ontology_id': ontology['id'],
+        'validation_fingerprint': submitted['validation_fingerprint'],
+        'acknowledged_warning_codes': [],
+    })
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result['batch']['approved'] == count
+    assert result['batch']['skipped'] == 0
+    assert len(result['draft']['decisions']) == count
+    assert {row['operation_id'] for row in result['draft']['decisions']} == {
+        operation['id'] for operation in submitted['operations']}
+    assert result['draft']['revision'] == submitted['revision'] + 1
+    assert all(row['action'] == 'approve' for row in result['draft']['decisions'])
+    repeated = client.post(path + '/decisions/batch-approve', json={
+        'expected_revision': result['draft']['revision'],
+        'expected_ontology_id': ontology['id'],
+        'validation_fingerprint': result['draft']['validation_fingerprint'],
+        'acknowledged_warning_codes': [],
+    })
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json()['batch']['approved'] == 0
+    assert repeated.json()['draft']['revision'] == result['draft']['revision']
+    assert len(repeated.json()['draft']['decisions']) == count
+
+
+def test_large_one_click_review_rolls_back_all_decisions_on_failure(workbench, monkeypatch):
+    client, project_id, ontology = workbench
+    submitted = large_review_draft(workbench, 188)
+    path = f"/api/projects/{project_id}/ontology-drafts/{submitted['id']}"
+    drafts = client.app.state.ontology_drafts
+
+    def fail_after_decisions(*args, **kwargs):
+        raise RuntimeError('simulated revision write failure')
+
+    monkeypatch.setattr(drafts, '_cas', fail_after_decisions)
+    response = client.post(path + '/decisions/batch-approve', json={
+        'expected_revision': submitted['revision'],
+        'expected_ontology_id': ontology['id'],
+        'validation_fingerprint': submitted['validation_fingerprint'],
+        'acknowledged_warning_codes': [],
+    })
+    assert response.status_code == 503, response.text
+    assert response.json()['detail'] == 'simulated revision write failure'
+    after = client.get(path).json()
+    assert after['decisions'] == []
+    assert after['revision'] == submitted['revision']
 
 
 def test_one_click_review_approves_only_auto_approvable_and_reports_the_rest(

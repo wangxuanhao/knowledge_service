@@ -135,6 +135,22 @@ test('returning from term cards fits the graph after its hidden container become
     'returning to the same graph retains its node positions');
 });
 
+test('the first graph layout waits for a visible viewport after loading data in term cards',t=>{
+  const graph={nodes:Array.from({length:12},(_,i)=>({id:`class-${i}`,label:`Class ${i}`})),edges:[]};
+  const f=fixture('cards',graph,{styleEnabled:true,measuredViewport:true});
+  t.after(()=>f.canvas.destroy());
+  const stage=f.host.children[0];stage.clientWidth=0;stage.clientHeight=0;
+  f.canvas.setView('types');f.canvas.render({graph,view:'types'});
+  stage.clientWidth=950;stage.clientHeight=740;f.flush();
+  const nodes=f.cy.nodes();
+  for(let i=0;i<nodes.length;i++)for(let j=i+1;j<nodes.length;j++){
+    const a=nodes[i].boundingBox(),b=nodes[j].boundingBox();
+    assert.ok(Math.min(a.x2,b.x2)-Math.max(a.x1,b.x1)<=0||Math.min(a.y2,b.y2)-Math.max(a.y1,b.y1)<=0,
+      'first visible type cards must not overlap');
+  }
+  assertWholeGraphVisible(f);
+});
+
 test('explicit fitting includes a deep hierarchy below the normal minimum zoom', t => {
   const graph = {
     nodes: Array.from({ length: 30 }, (_, i) => ({ id: `class-${i}` })),
@@ -163,6 +179,26 @@ test('first asynchronous graph load lays out classes after an empty loading rend
   const before = f.cy.nodes().map(n => ({ ...n.position() }));
   f.render();
   assert.deepEqual(f.cy.nodes().map(n => ({ ...n.position() })), before, 'repeated renders preserve the layout');
+});
+
+test('unchanged graph renders do not invalidate Cytoscape data and card images',t=>{
+  const f=fixture();t.after(()=>f.canvas.destroy());
+  let updates=0;f.cy.on('data',()=>updates++);
+  f.render();f.render();
+  assert.equal(updates,0,'unchanged nodes and edges must not trigger renderer updates');
+  f.graph.nodes[0].label='Updated';f.render();
+  assert.equal(f.cy.$id('a').data('label'),'Updated');
+  assert.ok(updates>0,'a real definition change still reaches the canvas');
+});
+
+test('term-card rendering postpones hidden graph updates until the canvas is shown',t=>{
+  const f=fixture();t.after(()=>f.canvas.destroy());
+  let updates=0;f.cy.on('data',()=>updates++);
+  f.graph.nodes[0].label='Updated while hidden';
+  f.canvas.render({graph:f.graph,view:'cards'});
+  assert.equal(updates,0,'the hidden canvas does not rebuild nodes for the term list');
+  f.canvas.setView('types');f.canvas.render({graph:f.graph,view:'types'});f.flush();
+  assert.equal(f.cy.$id('a').data('label'),'Updated while hidden');
 });
 
 test('drag cannot select a node or advance the two-click relation workflow', t => {

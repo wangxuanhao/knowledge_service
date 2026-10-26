@@ -58,7 +58,7 @@
     onResize: null, view: 'graph', sig: '', graph: null, selected: null,
     mode: '', linkFrom: null, pending: null, bands: [], els: {}, didFit: false,
     layoutView: null, dragged: false, display: 'cards', suspended: false,
-    pendingFit: false, fitFrame: null,
+    pendingFit: false, pendingLayout: false, fitFrame: null,
     bandLayer: null, bandByNode: new Map(), dirtyBands: new Set(), bandFrame: null,
     bandTransform: '', bandZoom: null,
   };
@@ -207,6 +207,9 @@
     const edges = (graph && graph.edges) || [];
     const wantN = new Set(nodes.map(n => n.id));
     const wantE = new Set(edges.map(e => e.id));
+    const update=(element,data)=>{
+      for(const [key,value] of Object.entries(data))if(element.data(key)!==value)element.data(key,value);
+    };
 
     cy.batch(() => {
       cy.nodes().forEach(n => { if (!wantN.has(n.id())) n.remove(); });
@@ -223,7 +226,7 @@
           nodeHeight:M.display==='compact'?62:card.height,
         };
         const el = cy.getElementById(n.id);
-        if (el.length) for(const [key,value] of Object.entries(data))el.data(key,value);
+        if (el.length) update(el,data);
         else {
           const existing = cy.nodes();
           const right = existing.length ? Math.max(...existing.map(x => x.position('x'))) + NODE_W + GAP_X : 0;
@@ -239,7 +242,7 @@
           termIri:e.termIri||'',sourceArrow:e.kind==='inherit'?'triangle':'none',targetArrow:e.kind==='inherit'?'none':'triangle',
         };
         const el = cy.getElementById(e.id);
-        if (el.length) for(const [key,value] of Object.entries(data))el.data(key,value);
+        if (el.length) update(el,data);
         else cy.add({ group: 'edges', data });
       }
     });
@@ -405,6 +408,13 @@
 
   function runLayout() {
     if (!M.cy) return;
+    // Grid layout collapses every node when Cytoscape measures a hidden host.
+    // Keep the request pending; fitting those coordinates later cannot repair it.
+    if(M.suspended||!M.stage.clientWidth||!M.stage.clientHeight){
+      M.pendingLayout=true;requestMeasuredFit();return;
+    }
+    M.cy.resize();
+    M.pendingLayout=false;M.didFit=true;
     // A previous selection may still be centering its node. The explicit
     // layout owns the viewport now; that animation must not restore its zoom.
     M.cy.stop(true, false);
@@ -568,7 +578,8 @@
     if (!M.pendingFit || !M.cy || M.suspended || !M.stage.clientWidth || !M.stage.clientHeight) return;
     M.cy.resize();
     updateBar();
-    fitAll();
+    if(M.pendingLayout||M.layoutView!==M.view)runLayout();
+    else fitAll();
     M.pendingFit = false;
     M.didFit = true;
   }
@@ -966,6 +977,12 @@
     if (S.view && S.view!=='cards') M.view = S.view==='hierarchy'?'hierarchy':'graph';
     if(S.nodeDisplay)M.display=S.nodeDisplay==='compact'?'compact':'cards';
 
+    if (S.view === 'cards') {
+      M.suspended = true;
+      M.cy?.stop(true, false);
+      return;
+    }
+
     const cy = M.cy;
     if (!cy) { updateEmpty(); updateBar(); return; }
 
@@ -976,18 +993,13 @@
     updateEmpty();
     updateBar();
 
-    if (S.view === 'cards') {
-      M.suspended = true;
-      cy.stop(true, false);
-      return;
-    }
     if (M.suspended) {
       M.suspended = false;
       requestMeasuredFit();
     }
 
     const sig = signature(M.graph, M.view);
-    let need = M.layoutView !== M.view || firstNodes;
+    let need = M.pendingLayout || M.layoutView !== M.view || firstNodes;
     if (!M.didFit && M.stage && M.stage.clientWidth > 0) { M.didFit = true; need = true; }
     if (need) runLayout();
     else if (M.view === 'hierarchy' && sig !== M.sig) refreshHierarchyBands();
@@ -1033,7 +1045,7 @@
 
   function destroy() {
     if (M.fitFrame !== null) window.cancelAnimationFrame(M.fitFrame);
-    M.fitFrame = null; M.pendingFit = false; M.suspended = false;
+    M.fitFrame = null; M.pendingFit = false; M.pendingLayout = false; M.suspended = false;
     clearBands();
     if (M.ro) { try { M.ro.disconnect(); } catch (e) { /* 忽略 */ } M.ro = null; }
     if (M.onResize) { window.removeEventListener('resize', M.onResize); M.onResize = null; }

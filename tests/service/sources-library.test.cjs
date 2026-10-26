@@ -14,6 +14,57 @@ test('library loads a list without selecting a document and moves original detai
   assert.ok(env.rows().every(row=>row.getAttribute('aria-current')!=='true'));
 });
 
+test('missing file metadata is explained without presenting a record ID as a filename',async()=>{
+  const id='66c306e60c224984866f0448ae5f6154',env=setup({documents:[{id,text:'已保存的正文',metadata:{title:'业务规则',status:'ready'}}]});
+  await settle();await env.rows()[0].click();
+  const head=env.document.querySelector('.source-meta__head');
+  assert.doesNotMatch(head.textContent,/未知类型|未知大小|未知解析器/);
+  assert.doesNotMatch(head.textContent,new RegExp(id));
+  assert.match(head.textContent,/业务规则/);
+  assert.match(env.get('source-meta').textContent,/未记录原始文件信息/);
+});
+
+test('processing records summarize execution and keep the exact raw payload lazy',async()=>{
+  const env=setup();await settle();await env.rows()[0].click();
+  const pending=env.tab('处理记录').click();
+  const run={id:'run-2',attempt:2,status:'failed',active_stage:'extraction',created_at:'2026-10-22T03:00:00Z',
+    counts:{chunks_total:10,chunks_failed:2,records_accepted:8,assertions_pending:3},
+    readiness:{document_ready:true,keyword_ready:true,semantic_ready:false,graph_ready:false},
+    failure:{code:'timeout',message:'服务连接超时',retryable:true},debug:{large:'RAW_PROCESSING_SENTINEL'.repeat(1000)}};
+  env.requests.at(-1).resolve({runs:[run]});await pending;
+  assert.match(env.body.textContent,/处理记录|执行记录/);assert.match(env.body.textContent,/服务连接超时/);
+  assert.match(env.body.textContent,/切片总数/);assert.match(env.body.textContent,/知识抽取/);
+  assert.doesNotMatch(env.body.textContent,/RAW_PROCESSING_SENTINEL/);
+  const raw=env.body.querySelector('.source-raw-data');assert.equal(raw.open,false);
+  raw.open=true;await raw.dispatch('toggle');
+  assert.deepEqual(JSON.parse(raw.querySelector('pre').textContent),run);
+});
+
+test('processing record candidate action keeps its exact ingest run and document context',async()=>{
+  const env=setup(),opened=[];env.context.OntologyIntake={open:async args=>opened.push(args)};
+  await settle();await env.rows()[0].click();const reading=env.tab('处理记录').click();
+  env.requests.at(-1).resolve({runs:[{id:'specific-run',status:'completed',counts:{assertions_pending:3}}]});await reading;
+  const action=env.body.querySelectorAll('button').find(button=>button.textContent==='核对本次处理的候选');
+  assert.ok(action);await action.click();assert.equal(opened[0].runId,'specific-run');assert.equal(opened[0].documentId,'one');
+});
+
+test('record history distinguishes status updates from text changes without repeating full snapshots',async()=>{
+  const env=setup();await settle();await env.rows()[0].click();
+  const fullText='FULL_TEXT_SENTINEL'.repeat(1000),pending=env.tab('修订记录').click();
+  const versions=[
+    {id:'one',version:1,version_id:'v1',recorded_at:'2026-10-22T03:00:00Z',text:fullText,metadata:{title:'业务规则',status:'processing'}},
+    {id:'one',version:2,version_id:'v2',recorded_at:'2026-10-22T03:01:00Z',text:fullText,metadata:{title:'业务规则',status:'ready'}},
+    {id:'one',version:3,version_id:'v3',recorded_at:'2026-10-22T03:02:00Z',text:fullText+'新规则',metadata:{title:'业务规则',status:'ready'}}];
+  env.requests.at(-1).resolve({versions});await pending;
+  const revisions=env.body.querySelectorAll('.source-revision');
+  assert.equal(revisions.length,3);assert.equal(revisions[0].dataset.versionId,'v3');
+  assert.match(revisions[0].textContent,/正文.*变化|正文.*更新/);
+  assert.match(revisions[1].textContent,/处理状态/);assert.match(revisions[1].textContent,/正文未变化/);
+  assert.match(revisions[2].textContent,/首次保存/);assert.doesNotMatch(env.body.textContent,/FULL_TEXT_SENTINEL/);
+  const raw=revisions[0].querySelector('.source-raw-data');raw.open=true;await raw.dispatch('toggle');
+  assert.deepEqual(JSON.parse(raw.querySelector('pre').textContent),versions[2]);
+});
+
 test('only explicit row selection opens details; closing, refreshing and filtering never reopen them',async()=>{
   const env=setup();await settle();let row=env.rows()[1];await row.click();
   const drawer=env.drawers[0];assert.equal(drawer.dialog.open,true);assert.equal(env.title.textContent,'资料 two');assert.equal(env.body.textContent,'原文 two');
@@ -30,11 +81,11 @@ test('detail responses respect the latest document, tab and request even when re
   const env=setup();await settle();await env.rows()[0].click();
   const assertions=env.tab('提取知识').click(),old=env.requests.at(-1),runs=env.tab('处理记录').click(),latest=env.requests.at(-1);
   latest.resolve({runs:[{id:'latest-run'}]});await runs;old.resolve({assertions:[{kind:'old-assertion',payload:{text:'obsolete'}}]});await assertions;
-  assert.match(env.body.textContent,/latest-run/);assert.doesNotMatch(env.body.textContent,/obsolete/);
+  assert.equal(env.body.querySelector('.source-processing-run').dataset.runId,'latest-run');assert.doesNotMatch(env.body.textContent,/obsolete/);
   const history=env.tab('修订记录').click(),pending=env.requests.at(-1);await env.tab('原文').click();pending.resolve({versions:[{id:'obsolete-history'}]});await history;
   assert.equal(env.body.textContent,'原文 one');
   const first=env.tab('处理记录').click(),firstRequest=env.requests.at(-1),second=env.tab('处理记录').click(),secondRequest=env.requests.at(-1);
-  secondRequest.resolve({runs:[{id:'newest'}]});await second;firstRequest.resolve({runs:[{id:'older'}]});await first;assert.match(env.body.textContent,/newest/);
+  secondRequest.resolve({runs:[{id:'newest'}]});await second;firstRequest.resolve({runs:[{id:'older'}]});await first;assert.equal(env.body.querySelector('.source-processing-run').dataset.runId,'newest');
   const oldDocument=env.tab('修订记录').click(),oldDocumentRequest=env.requests.at(-1);await env.rows()[1].click();oldDocumentRequest.resolve({versions:[{id:'wrong-document'}]});await oldDocument;
   assert.equal(env.body.textContent,'原文 two');
 });
@@ -74,7 +125,7 @@ test('empty reload resets every status count and clears previous detail content'
 test('viewer can read all tabs without upload or modeling write entry points',async()=>{
   const env=setup({writer:false});await settle();assert.equal(env.upload.classList.contains('admin-only'),true);await env.upload.click();assert.equal(env.navigation.length,0);
   await env.rows()[0].click();assert.equal(env.tab('完善本体结构'),undefined);
-  const pending=env.tab('修订记录').click();env.requests.at(-1).resolve({versions:[{id:'revision'}]});await pending;assert.match(env.body.textContent,/revision/);
+  const pending=env.tab('修订记录').click();env.requests.at(-1).resolve({versions:[{id:'revision'}]});await pending;assert.equal(env.body.querySelector('.source-revision').dataset.versionId,'revision');
 });
 
 test('structure intake receives the exact source and closes its old drawer first',async()=>{

@@ -1020,7 +1020,9 @@ class OntologyDrafts(
             expected_ontology_id=expected_ontology_id)
         actor = _text(actor, 'actor')
         proposed = _as_list(decisions, 'decisions')
-        if not proposed or len(proposed) > 100:
+        # The 100-item cap bounds caller-supplied decisions. Assisted batches
+        # come from the server's review plan and stay in one atomic transaction.
+        if not proposed or (not assisted_batch and len(proposed) > 100):
             raise BatchNotAllowed('a decision request must contain 1..100 decisions')
         report, _, turtle = self._require_validation(
             project_id, draft, validation_fingerprint,

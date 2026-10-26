@@ -10,7 +10,8 @@ function fixture(options={}){
   let writes=0;
   const controller=intake.createController({getContext:()=>({...context}),uid:()=> 'request-1',canWrite:options.canWrite,storage:options.storage,getActor:options.getActor,requireDurable:options.requireDurable,
     request:async(path,body,method)=>{calls.push({path,body,method});
-      if(path.startsWith('/candidates'))return {items:options.pages?(path.includes('offset=0')?[{id:'a',kind:'entity',proposed_type:'客户'}]:[{id:'b',kind:'entity'}]):[{id:'a',kind:'entity',proposed_type:'客户'},{id:'b',kind:'entity'}],total:2,expected_ontology_id:'release',published_terms:[{iri:'urn:Customer',label:'客户',kind:'class'}]};
+      if(path.startsWith('/candidates')&&options.readCandidates)return options.readCandidates(path);
+      if(path.startsWith('/candidates'))return {items:options.items||(options.pages?(path.includes('offset=0')?[{id:'a',kind:'entity',proposed_type:'客户'}]:[{id:'b',kind:'entity'}]):[{id:'a',kind:'entity',proposed_type:'客户'},{id:'b',kind:'entity'}]),total:options.items?.length??2,expected_ontology_id:'release',scope_note:/[&?](batch_id|run_id)=/.test(path)?'来源范围已核对':null,published_terms:options.terms||[{iri:'urn:Customer',label:'客户',kind:'class'}]};
       if(path==='/selection-preview')return {candidate_ids:body.candidate_ids,preview_fingerprint:'preview',source_fingerprint:'source',can_add:true,can_confirm_reuse:true,suggestions:[],associated_fact_scope:body.candidate_ids};
       writes++;if(options.failFirst&&writes===1)throw Error('无法连接');
       if(options.secondStatus&&writes===2){const error=Error('登录状态已过期');error.status=options.secondStatus;throw error;}
@@ -65,15 +66,17 @@ test('receipt reports actual independent fact and index outcomes',()=>{
 
 function uiFixture(options={}){
   const vm=require('node:vm'),rootNode=element('body'),drawers=[],calls=[];
-  function element(tag){return {tag,children:[],value:'',classList:{add(){}},setAttribute(){},append(...nodes){this.children.push(...nodes);},replaceChildren(...nodes){this.children=nodes;},focus(){}};}
+  function element(tag){return {tag,children:[],value:'',classList:{add(){},toggle(){}},setAttribute(){},append(...nodes){this.children.push(...nodes);},replaceChildren(...nodes){this.children=nodes;},focus(){}};}
   const state={ontologyId:'release',draft:{id:'draft',status:'pending',revision:2}};
   const candidates=options.candidates||[{id:'a',text:'张三',kind:'entity',proposed_type:'客户',document_id:'doc',document_version_id:'version',evidence:'原文证据'}];
-  const window={document:{createElement:element,body:rootNode,getElementById:()=>null},Auth:{isAdmin:()=>true},
+  const values=new Map();
+  const window={document:{createElement:element,body:rootNode,getElementById:()=>null,dispatchEvent(){}},sessionStorage:{getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)},Auth:{isAdmin:()=>true},
     OntologyModel:{S:state,uid:()=> 'ui-key',refresh:options.refresh||(async()=>{})},WorkspaceDrawers:{create(config){const drawer={dialog:element('dialog'),open(){this.isOpen=true;},close(){this.isOpen=false;config.onClose();},...config};drawers.push(drawer);return drawer;}}};
-  const context={window,current:'p',setTimeout,clearTimeout,console,api:async(url,body,method)=>{calls.push({url,body,method});
+  const context={window,current:'p',setTimeout,clearTimeout,console,CustomEvent:class{constructor(type,options){this.type=type;this.detail=options.detail;}},api:async(url,body,method)=>{calls.push({url,body,method});
     if(url.endsWith('/ontology-drafts'))return {items:[{id:'draft',status:'pending',revision:2,title:'手工草案'}]};
-    if(url.includes('/candidates'))return {items:candidates,total:candidates.length,expected_ontology_id:'release',published_terms:[]};
-    if(url.endsWith('/selection-preview'))return {can_add:true,suggestions:[],associated_fact_scope:candidates.filter(item=>body.candidate_ids.includes(item.id)),fact_outcomes:candidates.map(item=>({candidate_id:item.id,outcome:'pending',message:'依赖本轮结构审核通过'})),preview_fingerprint:'fp',source_fingerprint:'src',...options.previewResponse};
+    if(url.includes('/candidates'))return {items:candidates,total:candidates.length,expected_ontology_id:options.noOntology?null:'release',published_terms:options.terms||[]};
+    if(url.endsWith('/selection-preview')){if(options.previewRead)await options.previewRead();return {can_add:true,suggestions:[],associated_fact_scope:candidates.filter(item=>body.candidate_ids.includes(item.id)),fact_outcomes:candidates.map(item=>({candidate_id:item.id,outcome:'pending',message:'依赖本轮结构审核通过'})),preview_fingerprint:'fp',source_fingerprint:'src',...options.previewResponse};}
+    if(url.endsWith('/add-selection')&&options.confirmRead)return options.confirmRead(body);
     return {};
   }};
   vm.runInNewContext(fs.readFileSync(file,'utf8'),context);
@@ -86,7 +89,7 @@ test('drawer previews real selected candidate identities and explicit target wit
   await f.find('预览选中内容（只读）').onclick();
   const preview=f.calls.find(call=>call.url.endsWith('/selection-preview'));
   assert.deepEqual(JSON.parse(JSON.stringify(preview.body.candidate_ids)),['a']);assert.equal(preview.body.target_draft_id,'draft');
-  assert.ok(f.find('加入本轮修改'));assert.ok(!f.calls.some(call=>call.method==='POST'&&call.url.endsWith('/ontology-drafts')));
+  assert.ok(f.find('确认加入草案，等待发布'));assert.ok(!f.calls.some(call=>call.method==='POST'&&call.url.endsWith('/ontology-drafts')));
 });
 test('closing during preparation cannot reopen or populate a stale drawer',async()=>{
   let resolve;const f=uiFixture({refresh:()=>new Promise(done=>{resolve=done;})});const opening=f.ui.open({projectId:'p'});
@@ -155,7 +158,7 @@ test('structure preview names candidate kinds and operations in Chinese while re
 test('a response missing per-fact outcomes cannot enable confirmation',async()=>{
   const f=uiFixture({previewResponse:{fact_outcomes:[]}});await f.ui.open({projectId:'p'});
   const checkbox=f.all(f.drawers[0].content).find(item=>item.type==='checkbox');checkbox.checked=true;await checkbox.onchange();await f.find('预览选中内容（只读）').onclick();
-  assert.equal(f.find('加入本轮修改').disabled,true);
+  assert.equal(f.find('确认加入草案，等待发布').disabled,true);
 });
 test('recovery persistence failure prevents a write before it can become uncertain',async()=>{
   const {controller:c,calls}=fixture({requireDurable:true,storage:{getItem:()=>null,setItem(){throw Error('quota');}}});
@@ -175,4 +178,167 @@ test('an exact pending-fact scope retains its materialized owner as an explicit 
   assert.deepEqual(JSON.parse(JSON.stringify(f.ui.state.selected)),['amount']);
   assert.ok(f.find('已写入正式知识 · 本次可明确选择为依赖并复用，仍需确认准确正式术语映射。'));
   assert.ok(f.all(f.drawers[0].content).some(item=>String(item.textContent||'').includes('张三 · 金额 = 42')));
+});
+
+test('bulk selection is bounded to loaded identities and invalidates preview once selection changes',async()=>{
+  const {controller:c,calls}=fixture();await c.open();c.selectMany(['a','b'],true);c.target('draft');await c.preview();
+  assert.deepEqual(c.state.selected,['a','b']);
+  assert.throws(()=>c.selectMany(['a','unread'],true),/已读|当前/);
+  assert.deepEqual(c.state.selected,['a','b'],'invalid bulk input cannot partially change selection');
+  c.mapping('a','urn:Customer');c.selectMany(['a'],false);
+  assert.deepEqual(c.state.selected,['b']);assert.deepEqual(c.state.mappings,{});
+  assert.equal(c.state.preview,null);await assert.rejects(c.apply('add'),/预览/);
+  assert.ok(!calls.some(call=>call.path==='/add-selection'));
+});
+
+test('bulk suggestions confirm only compatible unique published suggestions and preserve manual mappings',async()=>{
+  const items=[{id:'a',kind:'entity',suggested_mapping:{target_iri:'urn:Customer'}},
+    {id:'b',kind:'entity',suggested_mapping:{target_iri:'urn:Customer'}},
+    {id:'r',kind:'relation',suggested_mapping:{target_iri:'urn:Customer'}},
+    {id:'x',kind:'entity',suggested_mapping:{target_iri:'urn:Missing'}},
+    {id:'unselected',kind:'entity',suggested_mapping:{target_iri:'urn:Customer'}}];
+  const {controller:c,calls}=fixture({items,terms:[{iri:'urn:Customer',kind:'class'}, {iri:'urn:Other',kind:'class'}]});
+  await c.open();c.selectMany(['a','b','r','x'],true);c.mapping('a','urn:Other');
+  c.useSuggestedMappings(['a','b','r','x','unselected']);
+  assert.deepEqual(c.state.mappings,{a:'urn:Other',b:'urn:Customer'});
+  assert.throws(()=>c.mapping('r','urn:Customer'),/种类|类型/);
+  assert.equal(calls.length,1,'batch mapping never previews or confirms automatically');
+});
+
+test('reopening the same source refreshes candidates and restores selection without restoring an old preview',async()=>{
+  const {controller:c,calls}=fixture();await c.open({documentId:'doc'});c.selectMany(['a','b'],true);c.mapping('a','urn:Customer');c.target('draft');await c.preview();c.close();
+  await c.open({documentId:'other'});assert.deepEqual(c.state.selected,[]);c.close();
+  await c.open({documentId:'doc'});assert.deepEqual(c.state.selected,['a','b']);assert.equal(c.state.mappings.a,'urn:Customer');assert.equal(c.state.preview,null);
+  assert.equal(calls.filter(call=>call.path.startsWith('/candidates')).length,3);
+});
+
+test('candidate inventory request carries actual batch and task filters',async()=>{
+  const {controller:c,calls}=fixture();await c.open({documentId:'doc',batchId:'batch/a',runId:'run?1'});
+  assert.ok(calls[0].path.includes('&batch_id=batch%2Fa'));assert.ok(calls[0].path.includes('&run_id=run%3F1'));
+});
+
+test('goals explain direct knowledge confirmation versus draft publication in business terms',async()=>{
+  const f=uiFixture();await f.ui.open({projectId:'p'});
+  assert.ok(f.find('已有类型可用，直接确认知识'));
+  assert.ok(f.find('需要补充定义，先加入草案'));
+  assert.ok(f.all(f.drawers[0].content).some(item=>String(item.textContent||'').includes('审核发布后')));
+  assert.equal(f.drawers[0].dismissOnBackdrop,false);
+});
+
+test('visible-list batch selection stays explicit and never submits automatically',async()=>{
+  const f=uiFixture({candidates:[{id:'a',kind:'entity',text:'张三',document_id:'one',proposed_type:'客户'},
+    {id:'b',kind:'entity',text:'李四',document_id:'two',proposed_type:'客户'}]});
+  await f.ui.open({projectId:'p'});await f.find('选择当前列表（2 条）').onclick();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.ui.state.selected)),['a','b']);
+  assert.ok(!f.calls.some(call=>call.method==='POST'));
+  await f.find('清空全部选择').onclick();assert.equal(f.ui.state.selected.length,0);
+});
+
+test('candidates already awaiting draft publication cannot be selected or previewed again',async()=>{
+  const linked={id:'b',kind:'entity',linked_drafts:[{draft_id:'draft',status:'draft_created'}]};
+  const {controller:c,calls}=fixture({items:[{id:'a',kind:'entity'},linked]});
+  await c.open({candidateIds:['a','b']});assert.deepEqual(c.state.selected,['a']);
+  c.selectMany(['a'],false);
+  assert.throws(()=>c.selectMany(['a','b'],true),/已加入草案/);
+  assert.deepEqual(c.state.selected,[],'a rejected batch must not partially select');
+  c.state.selected=['b'];c.target('draft');await assert.rejects(c.preview(),/已加入草案/);
+  assert.ok(!calls.some(call=>call.method==='POST'));
+});
+
+test('reopening candidates drops selections and mappings that another session added to a draft',async()=>{
+  const item={id:'a',kind:'entity'};
+  const {controller:c}=fixture({items:[item]});await c.open();c.select('a',true);c.mapping('a','urn:Customer');c.close();
+  item.linked_drafts=[{draft_id:'draft',status:'draft_created'}];await c.open();
+  assert.deepEqual(c.state.selected,[]);assert.deepEqual(c.state.mappings,{});
+});
+
+test('draft-linked candidates are hidden by default and read-only when viewing all statuses',async()=>{
+  const f=uiFixture({candidates:[{id:'a',kind:'entity',text:'待核对客户',document_id:'one'},
+    {id:'b',kind:'entity',text:'已加入客户',document_id:'one',linked_drafts:[{draft_id:'draft',status:'draft_created'}]}]});
+  await f.ui.open({projectId:'p'});
+  assert.ok(f.find('待核对客户 · 类型待核对'));assert.equal(f.find('已加入客户 · 类型待核对'),undefined);
+  const status=f.all(f.drawers[0].content).find(item=>item.id==='oi-filter-status');
+  assert.ok(status,'processing status must be filterable');status.value='all';await status.onchange();
+  await f.find('选择当前列表（1 条）').onclick();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.ui.state.selected)),['a']);
+  const linkedRow=f.all(f.drawers[0].content).find(item=>item.className==='oi-open-detail'&&item.textContent==='已加入客户 · 类型待核对');
+  await linkedRow.onclick();
+  const checkboxes=f.all(f.drawers[0].content).filter(item=>item.type==='checkbox');
+  assert.equal(checkboxes[1].disabled,true);assert.equal(checkboxes[1].checked,false);
+  let opened=null;f.context.window.OntologyModel.selectDraft=async id=>{opened=id;};
+  await f.find('查看关联草案').onclick();assert.equal(opened,'draft');assert.equal(f.drawers[0].isOpen,false);
+  assert.ok(!f.calls.some(call=>call.method==='POST'));
+});
+
+test('closed previews and late page completions cannot unlock a reopened loading session',async()=>{
+  let read=0,finishMore,finishOpen;const data={items:[{id:'a',kind:'entity'}],total:2,expected_ontology_id:'release',published_terms:[]};
+  const {controller:c}=fixture({readCandidates:()=>++read===1?data:read===2?new Promise(resolve=>finishMore=resolve):new Promise(resolve=>finishOpen=resolve)});
+  await c.open();c.select('a',true);c.target('draft');await c.preview();const more=c.more();c.close();
+  assert.equal(c.state.preview,null);await assert.rejects(c.apply('add'),/关闭|预览/);
+  const reopen=c.open();finishMore(data);await more;assert.equal(c.state.busy,true,'an older read cannot finish the new loading state');
+  finishOpen(data);await reopen;assert.deepEqual(c.state.selected,['a']);
+});
+
+test('closing during session restoration cannot erase the previous selection',async()=>{
+  let count=0,finish;const data={items:[{id:'a',kind:'entity'}],total:1,expected_ontology_id:'release',published_terms:[]};
+  const {controller:c}=fixture({readCandidates:()=>++count===2?new Promise(resolve=>finish=resolve):data});
+  await c.open({documentId:'doc'});c.select('a',true);c.close();const restoring=c.open({documentId:'doc'});c.close();
+  await c.open({documentId:'doc'});finish(data);await restoring;assert.deepEqual(c.state.selected,['a']);
+});
+
+test('an older server that ignores task scope cannot populate a widened list',async()=>{
+  const {controller:c}=fixture({readCandidates:()=>({items:[{id:'other-task',kind:'entity'}],total:1})});
+  await assert.rejects(c.open({runId:'requested-run'}),/范围|服务/);assert.deepEqual(c.state.items,[]);
+});
+
+test('an old project rejection cannot clear the active project unknown write identity',async()=>{
+  let project='p',rejectP,rejectQ;const writes=[];
+  const c=intake.createController({getContext:()=>({project,ontologyId:'release'}),uid:()=> 'key-'+project,
+    request:async(path,body)=>{
+      if(path.startsWith('/candidates'))return {items:[{id:'a',kind:'entity'}],total:1,expected_ontology_id:'release'};
+      if(path==='/selection-preview')return {can_add:true,preview_fingerprint:'fp',source_fingerprint:'src'};
+      writes.push(body);return new Promise((_,reject)=>{if(project==='p')rejectP=reject;else rejectQ=reject;});
+    }});
+  await c.open();c.select('a',true);c.target('new');await c.preview();const p=c.apply('add');const resultP=assert.rejects(p);c.close();
+  project='q';await c.open();c.select('a',true);c.target('new');await c.preview();const q=c.apply('add');const resultQ=assert.rejects(q);
+  const old=Error('source changed');old.status=409;rejectP(old);await resultP;
+  assert.equal(c.state.pending.body.idempotency_key,'key-q');rejectQ(Error('network'));await resultQ;
+  assert.equal(c.state.pending.body.idempotency_key,'key-q');await assert.rejects(c.preview(),/原请求|尚未确认/);
+  assert.equal(writes.length,2);
+});
+
+test('large previews become a bounded confirmation step rather than extending the candidate selection page',async()=>{
+  const suggestions=Array.from({length:188},(_,i)=>({action:i%3?'add_annotation':'create_term',target_iri:'urn:Type'+Math.floor(i/3),after:{kind:'class'}}));
+  const f=uiFixture({previewResponse:{suggestions}});await f.ui.open({projectId:'p'});
+  const checkbox=f.all(f.drawers[0].content).find(item=>item.type==='checkbox');checkbox.checked=true;await checkbox.onchange();await f.find('预览选中内容（只读）').onclick();
+  assert.equal(f.find('02 批量选择候选'),undefined,'selection page is replaced by the confirmation step');
+  assert.ok(f.find('返回调整选择'));assert.ok(f.find('确认加入草案，等待发布'));
+  const detail=f.all(f.drawers[0].content).find(item=>item.className==='oi-preview-details');
+  assert.ok(detail);assert.equal(detail.open,false);
+  await f.find('返回调整选择').onclick();assert.deepEqual(Array.from(f.ui.state.selected),['a']);assert.equal(f.ui.state.preview,null);
+});
+
+test('preview requests immediately show accessible loading feedback',async()=>{
+  let finish;const f=uiFixture({previewRead:()=>new Promise(resolve=>finish=resolve)});await f.ui.open({projectId:'p'});
+  const checkbox=f.all(f.drawers[0].content).find(item=>item.type==='checkbox');checkbox.checked=true;await checkbox.onchange();const preview=f.find('预览选中内容（只读）').onclick();
+  for(let i=0;i<8;i++)await Promise.resolve();assert.ok(f.find('正在核对所选候选'));
+  finish();await preview;
+});
+
+test('draft confirmation shows immediate progress and a compact unpublished result with factual counts',async()=>{
+  let finish;const f=uiFixture({confirmRead:()=>new Promise(resolve=>finish=resolve)});await f.ui.open({projectId:'p'});
+  const checkbox=f.all(f.drawers[0].content).find(item=>item.type==='checkbox');checkbox.checked=true;await checkbox.onchange();await f.find('预览选中内容（只读）').onclick();
+  const request=f.find('确认加入草案，等待发布').onclick();for(let i=0;i<8;i++)await Promise.resolve();
+  assert.ok(f.find('正在加入工作草案'));assert.equal(f.find('确认加入草案，等待发布'),undefined);
+  finish({receipt:{draft_id:'draft',revision:3,structure:{added:180},facts:{selected:1}}});await request;
+  assert.ok(f.find('已加入草案，等待审核发布'));assert.ok(f.find('实体 1 条 · 关系 0 条 · 属性 0 条'));
+  assert.ok(f.all(f.drawers[0].content).some(item=>String(item.textContent||'').includes('尚未正式入库')));
+});
+
+test('preview counts definitions, operations and factual candidates independently',()=>{
+  const suggestions=Array.from({length:60},(_,i)=>[{action:'create_term',target_iri:'urn:'+i,after:{kind:i<34?'class':'relation'}},
+    {action:'add_annotation',target_iri:'urn:'+i},{action:'add_annotation',target_iri:'urn:'+i}]).flat();
+  suggestions.push(...Array.from({length:8},(_,i)=>({action:'add_parent',target_iri:'urn:'+i})));
+  const associated_fact_scope=Array.from({length:118},(_,i)=>({id:'fact-'+i,kind:i<73?'entity':'relation'}));
+  assert.deepEqual(intake.previewSummary({suggestions,associated_fact_scope}),{selected:118,entities:73,relations:45,attributes:0,newClasses:34,newRelations:26,newAttributes:0,definitions:60,operations:188});
 });

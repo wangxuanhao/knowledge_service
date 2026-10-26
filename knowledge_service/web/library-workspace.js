@@ -5,20 +5,22 @@
   else root.LibraryWorkspace=api.init();
 })(typeof window==='object'?window:globalThis,root=>{
   function createState({canWrite=()=>false,clear=()=>{}}={}){
-    let owner=null,active=false,mode='upload',step=0,generation=0;
+    let owner=null,active=false,mode='upload',draftMode='upload',step=0,generation=0;
     const snapshot=()=>({project:owner,active,mode,step,generation});
     return {
       snapshot,
       open(next,project){
+        if(next===undefined)next=owner===project?draftMode:'upload';
         if(!['upload','batches','structured'].includes(next))throw Error('未知资料操作');
         if(!project)throw Error('请先选择项目');
         if(next!=='batches'&&!canWrite())throw Error('只有管理员可以添加资料或导入记录');
-        if(owner&&owner!==project){clear();step=0;}
+        if(owner&&owner!==project){clear();step=0;draftMode='upload';}
+        if(next!=='batches')draftMode=next;
         owner=project;active=true;mode=next;generation++;return snapshot();
       },
       step(value){step=Math.max(0,Math.min(2,Number(value)||0));return snapshot();},
       close(){active=false;generation++;},
-      projectChanged(project){active=false;generation++;if(owner&&owner!==project){clear();step=0;}owner=project||null;},
+      projectChanged(project){active=false;generation++;if(owner&&owner!==project){clear();step=0;draftMode='upload';}owner=project||null;},
       ticket(){return {project:owner,generation};},
       accepts(ticket,project){return Boolean(active&&ticket&&ticket.project===project&&owner===project&&ticket.generation===generation);},
     };
@@ -38,7 +40,7 @@
     }});
     const initialBatch=get('batch').value;
     const shell=root.WorkspaceDrawers.create({id:'library-workspace-drawer',title:'添加文件',
-      description:'核对当前项目后操作；关闭抽屉不会取消已提交的处理批次。',content:host,
+      description:'关闭后保留本页未提交内容；已提交的处理批次继续运行。',content:host,dismissOnBackdrop:false,
       onClose(){if(typeof closeChunkPreview==='function')closeChunkPreview();state.close();host.classList.add('hidden');root.IngestBatches?.visibilityChanged();notice.textContent='';}});
     const title=get('library-workspace-drawer-title');
     const nav=node('nav','library-workspace-nav');nav.setAttribute('aria-label','资料操作');
@@ -93,9 +95,10 @@
       next.textContent=currentState.step===0?'下一步：资料与处理方式':'下一步：确认处理';
       if(currentState.step===2)updateSummary();shell.body.scrollTop=0;
     }
-    function open(mode='upload',{trigger}={}){
+    function open(mode,{trigger}={}){
       try{
         const view=state.open(mode,project());
+        mode=view.mode;
         sections.upload.hidden=mode!=='upload';sections.batches.hidden=mode!=='batches';sections.structured.hidden=mode!=='structured';
         for(const [key,b] of Object.entries(tabs))b.setAttribute('aria-pressed',String(key===mode));
         title.textContent={upload:'添加文件',batches:'处理批次',structured:'结构化记录导入'}[mode];
@@ -108,9 +111,8 @@
     }
     const controls=get('tab-sources').querySelector('.panel > .row');
     const batchesButton=button('处理批次',()=>open('batches'));
-    const more=node('details','library-more'),menu=node('summary',null,'更多');more.append(menu,button('结构化记录导入',()=>{more.open=false;open('structured');},'secondary admin-only'));
-    controls.append(batchesButton,more);
-    get('upload-source').onclick=()=>open('upload',{trigger:get('upload-source')});
+    controls.append(batchesButton);
+    get('upload-source').onclick=()=>open(undefined,{trigger:get('upload-source')});
     if(root.MutationObserver)new root.MutationObserver(()=>{
       if(!shell.dialog.open)return;notice.textContent=get('status').textContent;
       notice.classList.toggle('error',get('status').classList.contains('error'));

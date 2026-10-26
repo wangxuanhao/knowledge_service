@@ -113,6 +113,51 @@ class PageReads:
             for x in assertions if x['status']=='accepted' and x.get('canonical_record_id') in visible]
         return {'documents':documents,'assertions':assertions,'materialized':materialized}
 
+    @_snapshot_read
+    def discovery_candidate_ids(self, project, candidate_ids, *, batch_id=None, run_id=None):
+        """Verify current candidates against immutable extraction anchors in one query.
+
+        Assertions pin the ingestion receipt and a chunk identity, not a chunk
+        version. As in provenance tracing, only a unique historical chunk for
+        that receipt proves the originating run. Neither a current chunk nor
+        the final document version can substitute for this source chain.
+        """
+        self.repo.get_project(project)
+        if not candidate_ids:
+            return set()
+        rows = self.repo._db.execute('''WITH anchored AS MATERIALIZED (
+            SELECT a.id,a.document_id,a.document_version_id,
+                c.payload::jsonb AS chunk,
+                count(*) OVER (PARTITION BY a.id) AS chunk_versions
+            FROM assertions a JOIN record_versions c
+              ON c.project_id=a.project_id AND c.id=a.chunk_id AND c.read_kind='chunk'
+             AND c.payload::jsonb#>>'{metadata,source_version_id}'=a.document_version_id
+            WHERE a.project_id=? AND a.id=ANY(?::text[])
+        ) SELECT a.id FROM anchored a
+          JOIN ingest_runs r ON r.project_id=? AND r.id=a.chunk#>>'{metadata,run_id}'
+            AND r.document_id=a.document_id AND r.document_version_id=a.document_version_id
+          JOIN record_versions receipt ON receipt.project_id=r.project_id
+            AND receipt.id=r.document_id AND receipt.version_id=r.document_version_id
+            AND receipt.read_kind='document'
+          JOIN record_versions current_doc ON current_doc.project_id=r.project_id
+            AND current_doc.id=r.document_id AND current_doc.superseded_at IS NULL
+            AND current_doc.read_kind='document' AND current_doc.read_visible
+            AND current_doc.payload::jsonb#>>'{metadata,run_id}'=r.id
+          WHERE a.chunk_versions=1 AND a.chunk->>'source_id'=a.document_id
+            AND (?::text IS NULL OR r.id=?)
+            AND (?::text IS NULL OR EXISTS (
+                SELECT 1 FROM ingest_batch_items i JOIN ingest_batches b
+                  ON b.project_id=i.project_id AND b.id=i.batch_id
+                WHERE i.project_id=r.project_id AND i.document_id=r.document_id
+                  AND i.batch_id=? AND i.status='succeeded'
+                  AND receipt.payload::jsonb#>>'{metadata,batch_id}'=i.batch_id
+                  AND receipt.payload::jsonb#>>'{metadata,batch_item_id}'=i.id
+                  AND COALESCE(NULLIF(i.result->>'run_id',''),
+                      i.result#>>'{document,metadata,run_id}')=r.id
+            ))''', (project, list(dict.fromkeys(candidate_ids)), project,
+                    run_id, run_id, batch_id, batch_id)).fetchall()
+        return {row['id'] for row in rows}
+
     @staticmethod
     def _state_scope(scope, state):
         if state not in {'all','ready','processing','failed'}:

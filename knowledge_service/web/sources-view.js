@@ -28,8 +28,9 @@
     empty.hidden=false;layout.classList.add('is-empty');list.replaceChildren();
   }
   const FORMAT_LABELS={pdf:'PDF',docx:'Word',doc:'Word',md:'Markdown',markdown:'Markdown',txt:'纯文本',text:'纯文本',html:'HTML',htm:'HTML'};
-  const formatLabel=format=>FORMAT_LABELS[String(format||'').toLowerCase()]||String(format||'').toUpperCase()||'未知类型';
-  const sizeLabel=size=>size==null?'未知大小':`${size>=1048576?(size/1048576).toFixed(1)+' MB':(size/1024).toFixed(size<10240?1:0)+' KB'}`;
+  const formatLabel=format=>FORMAT_LABELS[String(format||'').toLowerCase()]||String(format||'').toUpperCase()||'资料正文';
+  const sizeLabel=size=>typeof size!=='number'||!Number.isFinite(size)||size<0?'':size<1024?size+' B':size>=1048576?(size/1048576).toFixed(1)+' MB':(size/1024).toFixed(1)+' KB';
+  const documentTitle=doc=>doc.metadata?.title||doc.metadata?.source_file||'资料 #'+String(doc.id).slice(0,8);
   function buildState(doc){
     const state=doc.metadata?.status;
     if(state==='failed')return {label:'知识构建失败',className:'failed',detail:'原文已安全保留，但实体、关系和片段没有写入知识图谱。可查看后台任务定位原因后重新提交。'};
@@ -38,13 +39,17 @@
     return {label:'状态待核验',className:'ready',detail:'已保存原文；未获得完整处理或索引就绪状态。'};
   }
   function renderMeta(doc,state){
-    const parser=doc.metadata?.document_parser||'';
-    const parserLabel=parser==='builtin-text'?'纯文本直读':parser==='docling'?'Docling 解析':parser||'未知解析器';
+    const metadata=doc.metadata||{},parser=metadata.document_parser||'';
+    const parserLabel=parser==='builtin-text'?'纯文本读取':['docling','semantica-docling'].includes(parser)?'文档转换解析':parser;
+    const stats=[sizeLabel(metadata.source_size_bytes),parserLabel,metadata.page_count?metadata.page_count+' 页':''].filter(Boolean);
+    const missing=!metadata.source_file&&!metadata.source_format&&!stats.length;
     meta.innerHTML=`<div class="source-meta__head">
-      <span class="source-format source-format--big">${esc(formatLabel(doc.metadata?.source_format))}</span>
-      <span class="source-meta__file">${esc(doc.metadata?.source_file||doc.id)}</span>
-      <span class="source-meta__stats">${esc(sizeLabel(doc.metadata?.source_size_bytes))} · ${esc(parserLabel)}${doc.metadata?.page_count?` · ${esc(doc.metadata.page_count)} 页`:''}</span>
-    </div><div class="source-meta__mapping"><h4>解析正文</h4><p>${esc(state.detail)} 下方即解析出来的正文全文，可直接阅读或复制。</p></div>`;
+      <span class="source-format source-format--big">${esc(formatLabel(metadata.source_format))}</span>
+      <span class="source-meta__file">${esc(metadata.source_file||metadata.title||'已保存的资料正文')}</span>
+      ${stats.length?`<span class="source-meta__stats">${esc(stats.join(' · '))}</span>`:''}
+    </div>${missing?'<p class="source-meta__missing">未记录原始文件信息；可以阅读已保存正文，资料编号见下方来源信息。</p>':''}
+    <div class="source-meta__mapping"><h4>资料状态</h4><p>${esc(state.detail)}</p></div>
+    <details class="source-technical"><summary>资料标识与来源信息</summary><dl><dt>资料编号</dt><dd>${esc(doc.id)}</dd>${metadata.source_document_version_id?`<dt>原始文件版本编号</dt><dd>${esc(metadata.source_document_version_id)}</dd>`:''}${parser?`<dt>解析器</dt><dd>${esc(parser)}</dd>`:''}</dl></details>`;
   }
   function updateCounts(){
     const counts=directoryCounts||{ready:0,processing:0,failed:0,all:allDocuments.length};
@@ -89,7 +94,7 @@
       if(currentFilter!=='all'&&buildState(doc).className!==currentFilter)continue;
       const state=buildState(doc),button=document.createElement('button');button.type='button';button.className='source-item';
       button.dataset.source=String(index);button.setAttribute('aria-haspopup','dialog');button.setAttribute('aria-controls','source-detail-drawer');button.setAttribute('aria-current','false');
-      button.innerHTML=`<span class="source-item__name"><b>${esc(doc.metadata?.title||doc.metadata?.source_file||doc.id)}</b><small>${esc(doc.metadata?.source_file||doc.id)}</small></span>
+      button.innerHTML=`<span class="source-item__name"><b>${esc(documentTitle(doc))}</b><small>${esc(doc.metadata?.source_file||'已保存正文 · 原始文件名未记录')}</small></span>
         <span class="source-state ${state.className}">${state.label}</span><span class="source-item__type source-format">${esc(formatLabel(doc.metadata?.source_format))}</span>
         <span class="source-item__counts">${doc.text_length==null?'正文按需读取':esc(doc.text_length)+' 字'} · 派生摘要 ${esc(doc.derived_count??'待核验')} 条</span><span class="source-item__open" aria-hidden="true">查看 ›</span>`;
       button.addEventListener('click',()=>openDocument(doc,button));list.append(button);
@@ -99,7 +104,7 @@
     if(loadedProject!==current||loadedScope!==scopeStamp())return;
     const project=current,stamp=scopeStamp(),request=++detailSerial,ticket=window.WorkspaceContext?.ticket(project,'sources');
     selected=doc.id;activeTab='text';drawer.open({trigger});
-    title.textContent=doc.metadata?.title||doc.metadata?.source_file||doc.id;body.textContent='正在读取原文…';meta.replaceChildren();
+    title.textContent=documentTitle(doc);body.classList.remove('source-structured');body.textContent='正在读取原文…';meta.replaceChildren();
     const accepts=()=>request===detailSerial&&drawer.dialog.open&&selected===doc.id&&sameContext(project,stamp,ticket);
     try{
       const key=JSON.stringify([project,stamp,doc.id]);
@@ -112,7 +117,7 @@
       const full=await read;if(!accepts())return;
       doc={...doc,...full,metadata:{...doc.metadata,...full.metadata}};
     }catch(error){if(accepts())body.textContent='原文读取失败：'+error.message;return;}
-    title.textContent=doc.metadata?.title||doc.metadata?.source_file||doc.id;
+    title.textContent=documentTitle(doc);
     renderMeta(doc,buildState(doc));renderDetailTabs(doc,project);
     if(doc.metadata?.source_document_version_id&&window.SourceReader){
       const open=document.createElement('button');open.type='button';open.className='secondary';open.textContent='在原文中打开';
@@ -131,6 +136,7 @@
       button.onclick=async()=>{
         const request=++detailSerial,id=doc.id,stamp=scopeStamp(),ticket=window.WorkspaceContext?.ticket(project,'sources');activeTab=name;
         tabs.querySelectorAll('button').forEach(item=>item.setAttribute('aria-pressed',String(item===button)));
+        body.classList.toggle('source-structured',name!=='text');
         if(name==='text'){body.textContent=doc.text||'此记录未保存完整原文';return;}
         const accepts=()=>request===detailSerial&&drawer.dialog.open&&selected===id&&activeTab===name&&button.isConnected&&sameContext(project,stamp,ticket);
         body.textContent='正在读取…';
@@ -139,7 +145,8 @@
           const result=await api('/api/projects/'+encodeURIComponent(project)+suffix,undefined,'GET');
           if(!accepts())return;
           if(name==='assertions')renderAssertions(result.assertions||[],project);
-          else body.textContent=JSON.stringify(name==='history'?result.versions||[]:result.runs||result.items||result,null,2);
+          else if(name==='runs')renderRuns(result.runs||result.items||[],doc,project);
+          else renderHistory(result.versions||[]);
         }catch(error){if(accepts())body.textContent='读取失败：'+error.message;}
       };tabs.append(button);
     }
@@ -151,11 +158,102 @@
         window.WorkspaceDrawers.close({restoreFocus:false});window.KnowledgeTabs.open('ontology-model');
         try{
           if(!window.OntologyIntake)throw Error('结构候选模块尚未就绪，请刷新页面。');
-          await window.OntologyIntake.open({projectId:project,documentId:doc.id,trigger:modeling});
+          await window.OntologyIntake.open({projectId:project,documentId:doc.id,documentTitle:documentTitle(doc),trigger:modeling});
         }catch(error){window.OntologyModel?.status(error.message,true);}
       };tabs.append(modeling);
     }
     meta.append(tabs);
+  }
+  const detailNode=(tag,text,css='')=>{const element=document.createElement(tag);if(text!==undefined)element.textContent=text;if(css)element.className=css;return element;};
+  const detailStates={queued:'等待处理',running:'处理中',processing:'处理中',completed:'处理结束',ready:'处理完成',failed:'处理失败',interrupted:'已中断'};
+  const detailStages={document:'保存原文',parse:'文档解析',parsing:'文档解析',ocr:'图片文字识别',chunking:'切片',keyword:'关键词索引',semantic:'语义索引',extraction:'知识抽取',extracting:'知识抽取',discovery:'开放发现',merging:'知识融合',validating:'知识校验',committing:'保存结果',completed:'流程结束',failed:'处理失败'};
+  const readinessLabels={document_ready:'原文',keyword_ready:'关键词检索',semantic_ready:'语义检索',candidate_ready:'候选生成',graph_ready:'正式图谱'};
+  const displayTime=value=>{const date=value?new Date(value):null;return date&&Number.isFinite(date.getTime())?date.toLocaleString('zh-CN',{hour12:false}):'时间未记录';};
+  function rawData(value,label){
+    const details=detailNode('details',undefined,'source-raw-data');details.open=false;
+    details.append(detailNode('summary',label+'（原始 JSON）'));let loaded=false;
+    details.addEventListener('toggle',()=>{if(details.open&&!loaded){details.append(detailNode('pre',JSON.stringify(value,null,2)));loaded=true;}});
+    return details;
+  }
+  function activityHeading(item,label,state){
+    const heading=detailNode('div',undefined,'source-activity-heading');heading.append(detailNode('h4',label));
+    if(state){const badge=detailNode('span',detailStates[state]||state,'source-activity-state');badge.dataset.status=state;heading.append(badge);}
+    item.append(heading);
+  }
+  function renderRuns(rows,doc,project){
+    body.replaceChildren(detailNode('p','处理记录说明每次解析、切片和抽取的执行情况。重试属于新的尝试；流程结束不代表所有检索或图谱能力都已就绪。','source-detail-intro'));
+    if(!Array.isArray(rows)||!rows.length){body.append(detailNode('p','暂无独立处理记录。结构化导入的正文或旧资料可能没有解析运行记录。','source-detail-empty'));return;}
+    for(const run of [...rows].reverse()){
+      const item=detailNode('article',undefined,'source-activity source-processing-run');item.dataset.runId=run.id;
+      activityHeading(item,'处理记录 · '+displayTime(run.created_at),run.status);
+      const facts=[run.attempt?'同一原文版本第 '+run.attempt+' 次尝试':'',run.active_stage?'阶段：'+(detailStages[run.active_stage]||run.active_stage):'阶段未记录'];
+      item.append(detailNode('p',facts.filter(Boolean).join(' · '),'source-activity-meta'));
+      const metrics=detailNode('dl',undefined,'source-run-metrics');
+      for(const [key,label] of [['chunks_total','切片总数'],['chunks_failed','失败切片'],['records_accepted','写入记录'],['assertions_pending','待审核计数']]){
+        if(run.counts?.[key]==null)continue;const cell=detailNode('div');cell.append(detailNode('dt',label),detailNode('dd',run.counts[key]));metrics.append(cell);
+      }
+      if(metrics.children.length)item.append(metrics);
+      const readiness=detailNode('div',undefined,'source-readiness');
+      for(const [key,label] of Object.entries(readinessLabels)){
+        if(typeof run.readiness?.[key]!=='boolean')continue;
+        const chip=detailNode('span',label+'：'+(run.readiness[key]?'就绪':'尚未就绪'));chip.dataset.ready=String(run.readiness[key]);readiness.append(chip);
+      }
+      if(readiness.children.length)item.append(readiness);
+      if(run.failure){const failure=typeof run.failure==='string'?run.failure:run.failure.message||'本次处理未成功，详见原始数据。';item.append(detailNode('p',failure,'source-activity-error'));}
+      if(canWrite()&&run.id&&(run.counts?.assertions_pending>0||run.readiness?.candidate_ready)){
+        const review=detailNode('button','核对本次处理的候选','secondary admin-only');review.type='button';
+        review.onclick=async()=>{
+          if(!canWrite()||project!==current||selected!==doc.id||!drawer.dialog.open)return;
+          try{
+            if(!window.OntologyIntake)throw Error('候选核对模块尚未就绪，请刷新页面。');
+            window.WorkspaceDrawers.close({restoreFocus:false});window.KnowledgeTabs.open('ontology-model');
+            await window.OntologyIntake.open({projectId:project,documentId:doc.id,documentTitle:documentTitle(doc),runId:run.id,trigger:review});
+          }catch(error){window.OntologyModel?.status(error.message,true);}
+        };item.append(review);
+      }
+      item.append(rawData(run,'查看本次处理数据'));body.append(item);
+    }
+  }
+  function sameValue(left,right){
+    if(left===right)return true;
+    if(!left||!right||typeof left!=='object'||typeof right!=='object'||Array.isArray(left)!==Array.isArray(right))return false;
+    const keys=Object.keys(left);return keys.length===Object.keys(right).length&&keys.every(key=>Object.prototype.hasOwnProperty.call(right,key)&&sameValue(left[key],right[key]));
+  }
+  const shortValue=value=>value==null?'未设置':Array.isArray(value)?value.length+' 项':typeof value==='object'?'已更新':String(value).slice(0,80);
+  function revisionChanges(row,previous){
+    const text=String(row.text??''),before=String(previous?.text??'');
+    if(!previous)return ['首次保存资料 · 正文 '+text.length+' 字'];
+    const changes=[text===before?'正文未变化':'正文已变化：'+before.length+' 字 → '+text.length+' 字'];
+    const labels={title:'标题',status:'处理状态',active_stage:'处理阶段',published_at:'发布时间',extraction_mode:'处理方式',applicability:'适用范围',uploaded_at:'上传时间',extracted_at:'处理完成时间',review_candidates:'待审核候选',discovery_candidates:'开放发现候选',readiness:'就绪状态',source_file:'文件名',source_format:'文件格式',source_size_bytes:'文件大小',document_parser:'解析方式',valid_from:'生效时间',valid_until:'失效时间'};
+    const internal=new Set(['run_id','batch_id','batch_item_id','file_sha256','document_generation']);let internalChanges=0;
+    const metadata=row.metadata||{},oldMetadata=previous.metadata||{};
+    for(const key of new Set([...Object.keys(oldMetadata),...Object.keys(metadata)])){
+      if(sameValue(metadata[key],oldMetadata[key]))continue;
+      if(internal.has(key)){internalChanges++;continue;}
+      const label=labels[key]||key;
+      if(key==='status')changes.push(label+'：'+(detailStates[oldMetadata[key]]||shortValue(oldMetadata[key]))+' → '+(detailStates[metadata[key]]||shortValue(metadata[key])));
+      else if(key==='active_stage')changes.push(label+'：'+(detailStages[oldMetadata[key]]||shortValue(oldMetadata[key]))+' → '+(detailStages[metadata[key]]||shortValue(metadata[key])));
+      else if(key==='source_document_version_id')changes.push('原始文件版本已更新');
+      else if(key==='review_candidates'||key==='discovery_candidates')changes.push(label+'已更新（'+(Array.isArray(metadata[key])?metadata[key].length+' 条':'未记录')+'）');
+      else if(typeof metadata[key]==='object'&&metadata[key]!==null||typeof oldMetadata[key]==='object'&&oldMetadata[key]!==null)changes.push(label+'已更新');
+      else changes.push(label+'：'+shortValue(oldMetadata[key])+' → '+shortValue(metadata[key]));
+    }
+    for(const key of ['valid_from','valid_until','type','kind'])if(!sameValue(row[key],previous[key]))changes.push((labels[key]||key)+'：'+shortValue(previous[key])+' → '+shortValue(row[key]));
+    if(internalChanges)changes.push('处理关联信息已更新（'+internalChanges+' 项）');
+    return changes;
+  }
+  function renderHistory(rows){
+    body.replaceChildren(detailNode('p','修订记录是资料记录的保存版本。正文、资料字段或系统处理状态变化都可能产生修订，不等于人工修改次数。每版保存完整快照，这里只展示变化摘要。','source-detail-intro'));
+    if(!Array.isArray(rows)||!rows.length){body.append(detailNode('p','没有可用的修订记录。','source-detail-empty'));return;}
+    for(let index=rows.length-1;index>=0;index--){
+      const row=rows[index],item=detailNode('article',undefined,'source-activity source-revision');item.dataset.versionId=row.version_id||row.id;
+      activityHeading(item,'修订 r'+(row.version||index+1)+(index===rows.length-1&&!row.superseded_at?' · 当前记录':''));
+      item.append(detailNode('p','保存于 '+displayTime(row.recorded_at),'source-activity-meta'));
+      const changes=revisionChanges(row,rows[index-1]),list=detailNode('ul',undefined,'source-change-list');
+      for(const change of changes.slice(0,8))list.append(detailNode('li',change));
+      if(changes.length>8)list.append(detailNode('li','另有 '+(changes.length-8)+' 项字段变化，可展开本版原始数据核对。'));
+      item.append(list,rawData(row,'查看本版完整快照'));body.append(item);
+    }
   }
   function renderAssertions(rows,project){
     body.replaceChildren();

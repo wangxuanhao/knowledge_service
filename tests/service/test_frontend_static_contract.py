@@ -209,7 +209,7 @@ def test_document_upload_workspace_contract():
     for marker in ('.document-upload-workspace', '.document-dropzone', '.document-queue-row',
                    '@media(max-width:850px)', ':focus-visible'):
         assert marker in css, marker
-    assert '/assets/workbench.css?v=rule-oag-2' in html
+    assert '/assets/workbench.css?v=chunk-preview-hover-20261022-1' in html
     assert '/assets/ingest-mode.js?v=canonical-20261021-5' in html
     assert 'max_batch_items' in js and 'max_batch_bytes' in js
     assert re.search(r'/assets/workbench\.js\?v=[\w.-]+', html)
@@ -554,12 +554,10 @@ def test_ontology_model_assets_are_versioned_after_this_round():
 # 浏览器不会报错，用户只会看到少了按钮 —— 靠服务端契约测试查不出来。
 # ══════════════════════════════════════════════════════════════════════════════
 
-def test_release_button_is_now_version_management():
-    """顶栏入口从「版本历史」升级为「版本管理」，且带上预览横幅与退出按钮。"""
+def test_version_history_entry_preserves_preview_controls():
+    """顶栏用「版本历史」访问版本抽屉，保留预览横幅与退出按钮。"""
     js = read('ontology-model.js')
-    # 按钮上的**可见文案**必须是「版本管理」：叫「版本历史」用户会以为还是只读列表
-    assert '版本管理</button>' in js, '顶栏入口文案不是「版本管理」'
-    assert '版本历史' not in js, '旧文案「版本历史」残留（含注释，会误导下一个改这里的人）'
+    assert '版本历史</button>' in js, '顶栏缺少「版本历史」入口'
     assert 'om-preview-banner' in js and 'om-preview-exit' in js
 
 

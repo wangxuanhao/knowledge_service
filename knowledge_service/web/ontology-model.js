@@ -304,8 +304,9 @@
       const pending=(list.items||[]).filter(d=>OPEN_STATES.includes(d.status));
       S.draftChoices=pending;
       if(pending.length>1){
+        openWorkspace('definitions');
         const management=document.getElementById('om-work-changes');if(management)management.open=true;
-        throw new Error('项目有多份工作草案，请先在「本轮修改 → 草案管理」选择目标；当前表单已保留。');
+        throw new Error('项目有多份工作草案，请先在「草案变更 → 草案管理」选择目标；当前表单已保留。');
       }
       const open = pending[0];
       if (open) {
@@ -454,6 +455,7 @@
   const collapsedBranches=new Set();
   let inspectorOpen=false;
   function setInspector(open,focus=false) {
+    if(open)window.OntologyWorkspace?.close({focus:false});
     inspectorOpen=!!open;root()?.classList?.toggle('om-inspector-open',inspectorOpen);
     const toggle=document.getElementById('om-inspector-toggle');
     toggle?.setAttribute('aria-expanded',String(inspectorOpen));
@@ -477,12 +479,26 @@
     }
     renderSidebar();
     renderVersionContext();
-    // 子模块可能尚未加载（脚本顺序 / 测试 mock shell）——用可选链，缺谁都不崩
-    if (window.OntologyCanvas) window.OntologyCanvas.render(S);
-    if (window.OntologyPanel) window.OntologyPanel.render(S);
     const canvas=document.getElementById('om-canvas-host'),cards=document.getElementById('om-cards-host');
     if(canvas)canvas.hidden=S.view==='cards';if(cards)cards.hidden=S.view!=='cards';
+    // 子模块可能尚未加载（脚本顺序 / 测试 mock shell）——用可选链，缺谁都不崩
+    if (window.OntologyCanvas) {
+      // Let loading and term-list views paint without creating an unused renderer.
+      if(S.view!=='cards'&&!S.loading)window.OntologyCanvas.mount?.(canvas,window.OntologyModel);
+      window.OntologyCanvas.render(S);
+    }
+    if (window.OntologyPanel) window.OntologyPanel.render(S);
     if(window.OntologyCatalog)window.OntologyCatalog.render(S);
+    window.OntologyWorkspace?.render(S);
+  }
+
+  function openWorkspace(tab) {
+    if(typeof current==='undefined'||!current){status('请先选择项目。',true);return;}
+    render();window.OntologyWorkspace?.open(tab);
+  }
+  function openDraftHistory(id) {
+    if(typeof current==='undefined'||!current){status('请先选择项目。',true);return;}
+    render();window.OntologyWorkspace?.openDraft(id);
   }
 
   function renderVersionContext() {
@@ -494,9 +510,9 @@
     if (S.preview) viewedLabel = `正在查看：v${S.preview.version ?? '?'}（历史·只读）`;
     else if (S.showingDraft) {
       const base=S.draft.base_ontology_id;
-      viewedLabel=`本轮修改 ${S.draft.id} · 修订 r${S.draft.revision??'?'} · 基于 ${!base?'空基线':base===S.ontologyId&&S.ontologyVersion!=null?'v'+S.ontologyVersion:base} · 未发布`;
+      viewedLabel=`${!base?'初始草案':'工作草案'} · ${S.draft.title||'本轮建模变更'}${base?' · 基于 '+(base===S.ontologyId&&S.ontologyVersion!=null?'v'+S.ontologyVersion:'历史发布版本'):''} · 尚未发布`;
       if(base&&base!==S.ontologyId)viewedLabel+=' · 基线变化';
-    } else viewedLabel=S.draftLoadError||(S.draftChoices.length>1?'有多份工作草案，请在本轮修改中明确选择。':'当前没有未发布的结构修改；保存第一项结构调整时自动建立。');
+    } else viewedLabel=S.draftLoadError||(S.draftChoices.length>1?'有多份工作草案，请在「草案变更」中选择。':'当前没有未发布的结构修改。');
     host.replaceChildren();
     const currentPart = document.createElement('span');
     currentPart.className = 'om-version-context-current';
@@ -515,10 +531,12 @@
       <div class="om-page">
         <div class="om-topbar">
           <span class="om-brand">◆ 本体建模层</span>
-          <span class="om-ctx" id="om-version">当前本体 v?</span>
+          <span class="om-ctx" id="om-version" hidden>当前本体 v?</span>
+          <button type="button" class="om-btn ghost" id="om-history" title="查看发布版本、来源草案与恢复记录">版本历史</button>
+          <button type="button" class="om-btn om-workspace-toggle" id="om-workspace-toggle" aria-controls="om-workspace-shell" aria-expanded="false">草案变更</button>
           <details class="om-definition-menu admin-only" id="om-definition-menu"><summary class="om-btn primary">新增定义 ▾</summary><div role="group" aria-label="新增定义种类"><button type="button" data-om-create="class">实体类型</button><button type="button" data-om-create="relation">关系类型</button><button type="button" data-om-create="attribute">属性字段</button></div></details>
-          <button type="button" class="om-btn ghost admin-only" id="om-pending-intake">待完善结构</button>
-          <button type="button" class="om-btn ghost" id="om-discover-parents" title="根据当前草案或本体重新发现父类（调用模型）；只补充新建议到草案，保留已有关系，审核发布后生效">发现父类</button>
+        </div>
+        <div class="om-worktools">
           <div class="om-seg" role="group" aria-label="视图切换">
             <button type="button" data-om-view="types" class="on" title="连接的实体类卡片，显示直属属性、数据类型与继承摘要">类型卡片</button>
             <button type="button" data-om-view="hierarchy" title="按继承深度排列；左侧层级树可展开和折叠，多父类保留引用">继承层级</button>
@@ -526,14 +544,14 @@
           </div>
           <label class="om-display-control">节点 <select id="om-node-display" aria-label="节点显示方式"><option value="cards">属性卡片</option><option value="compact">紧凑节点</option></select></label>
           <button type="button" class="om-btn ghost om-inspector-toggle" id="om-inspector-toggle" aria-controls="om-inspector-shell" aria-expanded="false">定义详情</button>
-          <button type="button" class="om-btn ghost" id="om-history" title="版本管理：看每一版是谁、什么时候、为什么发的；可以查看任意一版，也可以以某一版为基础开一份新草案（历史不改写）">版本管理</button>
+          <button type="button" class="om-btn ghost admin-only" id="om-pending-intake">待完善结构</button>
+          <button type="button" class="om-btn ghost" id="om-discover-parents" title="根据当前草案或本体发现父类，只补充建议，审核发布后生效">发现父类</button>
         </div>
         <div class="om-preview-banner" id="om-preview-banner" hidden>
           <span id="om-preview-text"></span>
           <button type="button" class="om-btn ghost" id="om-preview-exit">回到最新</button>
         </div>
         <div class="om-version-context" id="om-version-context" aria-live="polite"></div>
-        <details class="om-work-changes" id="om-work-changes"><summary>本轮修改 · 草案管理与变更</summary><div id="om-work-changes-host"></div></details>
         <div class="om-body">
           <!-- 用 div 不用 aside：全站 style.css 有一条给应用侧栏的全局规则
                aside{position:fixed;inset:0 auto 0 0;width:206px}，任何 aside 都会被固定到
@@ -545,8 +563,26 @@
           <div class="om-stage"><div class="om-cards-host" id="om-cards-host"></div><div class="om-canvas-host" id="om-canvas-host" hidden></div></div>
           <button type="button" class="om-inspector-backdrop" id="om-inspector-backdrop" aria-label="关闭定义详情"></button>
           <div class="om-inspector-shell" id="om-inspector-shell" role="complementary" aria-label="定义详情"><div class="om-inspector-heading"><strong>定义详情</strong><button type="button" class="om-btn ghost" id="om-inspector-close" aria-label="关闭定义详情">×</button></div><div class="om-detail" id="om-detail-host" aria-label="节点详情"></div></div>
+          <button type="button" class="om-workspace-backdrop" id="om-workspace-backdrop" aria-label="关闭草案变更" hidden></button>
+          <section class="om-workspace-shell" id="om-workspace-shell" role="complementary" aria-label="草案变更工作区" hidden>
+            <div class="om-workspace-heading"><strong id="om-workspace-heading">草案变更</strong><div><button type="button" class="om-btn ghost" id="om-workspace-expand" aria-pressed="false">展开完整审核</button><button type="button" class="om-btn ghost" id="om-workspace-close" aria-label="关闭草案变更">×</button></div></div>
+            <div class="om-workspace-scroll">
+              <div class="om-workspace-summary" id="om-workspace-summary"></div>
+              <div class="om-workspace-tabs" role="group" aria-label="草案内容">
+                <button type="button" id="om-workspace-tab-definitions" data-workspace-tab="definitions" aria-pressed="true">定义变更</button>
+                <button type="button" id="om-workspace-tab-facts" data-workspace-tab="facts" aria-pressed="false">关联知识</button>
+                <button type="button" data-workspace-tab="sources" aria-pressed="false">来源记录</button>
+                <button type="button" data-workspace-tab="archive" aria-pressed="false">历史草案</button>
+              </div>
+              <section id="om-workspace-definitions"><details class="om-work-changes" id="om-work-changes" open><summary>草案管理与定义明细</summary><div id="om-work-changes-host"></div></details></section>
+              <section id="om-workspace-facts" hidden></section>
+              <section id="om-workspace-sources" hidden></section>
+              <section id="om-workspace-archive" hidden></section>
+              <div class="om-actionbar" id="om-actions-host" aria-label="校验与发布清单"></div>
+            </div>
+            <div class="om-workspace-footer" id="om-workspace-footer"><div id="om-workspace-controls"></div></div>
+          </section>
         </div>
-        <div class="om-actionbar" id="om-actions-host" aria-label="校验与发布"></div>
       </div>`;
     // 视图切换：只改 S.view 并发事件，布局由画布模块负责
     const parentButton = document.getElementById('om-discover-parents');
@@ -564,7 +600,6 @@
       S.view = btn.dataset.omView;
       el.querySelectorAll('[data-om-view]').forEach(b => b.classList.toggle('on', b === btn));
       emit('view:changed', { view: S.view });
-      if (S.view!=='cards'&&window.OntologyCanvas) window.OntologyCanvas.setView(S.view);
       if(S.view==='hierarchy'){const directory=el.querySelector?.('.om-hierarchy-directory');if(directory)directory.open=true;}
       if(display)display.disabled=S.view==='cards';
       render();
@@ -581,9 +616,9 @@
     // 装配子模块（各挂自己那一块 DOM）
     const ctx = window.OntologyModel;
     if(window.OntologyCatalog)window.OntologyCatalog.mount(document.getElementById('om-catalog-host'),document.getElementById('om-cards-host'),ctx);
-    if (window.OntologyCanvas) window.OntologyCanvas.mount(document.getElementById('om-canvas-host'), ctx);
     if (window.OntologyPanel) window.OntologyPanel.mount(
       document.getElementById('om-detail-host'), document.getElementById('om-actions-host'), ctx);
+    window.OntologyWorkspace?.mount(ctx);
   }
 
   // 左栏三维清单（类 / 关系 / 属性）。点谁 = 选中谁（唯一入口 select）。
@@ -751,6 +786,7 @@
       S.summary = null; S.ontologyId = null; S.ontologyVersion = null;
       S.graph = null; S.selected = null; S.draft = null;
       S.draftChoices=[];S.draftLoadError=null;window.OntologyIntake?.projectChanged();
+      window.OntologyWorkspace?.reset();
       S.showingDraft = false; S.preview = null;
       S.stageAvailability = null; S.readiness = null; S.candidates = [];
       collapsedBranches.clear();inspectorOpen=false;
@@ -807,12 +843,14 @@
 
   // 回到某一版 = 以它为基线开一份**新草案**（历史不改写，仍要审核 → 发布）
   async function forkFrom(ontologyId) {
+    const openedProject=current,openedEpoch=projectEpoch,projectBase=endpoint('');
+    const assertRestoreContext=()=>{if(current!==openedProject||projectEpoch!==openedEpoch)throw new Error('项目已切换；恢复草案保留在原项目，请返回原项目查看。');};
     const open = (S.draft && S.draft.id && OPEN_STATES.includes(S.draft.status)) ? S.draft : null;
     if (open) {
       throw new Error('还有一份待处理的草案（没发布、也没驳回）。先把那份处理掉，再回到历史版本 —— '
         + '否则两份草案各自基于不同基线，没人说得清最后发布的是什么。');
     }
-    const draft = await api(endpoint('/ontology-drafts'), {
+    const draft = await api(projectBase+'/ontology-drafts', {
       // source_kind='revert' 是**显式意图**：服务端只对它放行"基线不是最新版"，
       // 并且发布时会要求勾选那条回退警告。普通草案仍必须基于当前版本 ——
       // 那条保护防的是"在旧基线上做普通编辑会静默丢掉别人的改动"，是另一件事。
@@ -821,18 +859,20 @@
       summary: '以某一已发布版本为基础开的新草案（回退不改写历史，发布后成为新版本）',
       source_context: { revert_from: ontologyId },
     }, 'POST');
+    assertRestoreContext();
     S.preview = null;
     wb.clearVersionContext();
     S.draft = draft;
     emit('preview:changed', { preview: null });
     emit('draft:changed', { draft });
     await refresh();
+    assertRestoreContext();
     return draft;
   }
 
   window.OntologyModel = {
     S, on, emit, render, refresh, refreshDraftState, ensureDraft, sendCommand, createTerm, select, compileGraph,
-    selectDraft, createDraft, closeDraft, openCreate,openIntake,
+    selectDraft, createDraft, closeDraft, openCreate,openIntake,openWorkspace,openDraftHistory,
     uid, previewVersion, clearPreview, forkFrom, discoverParents,setInspector,
     status: (m, e) => (typeof status === 'function' ? status(m, e) : console.log(m)),
     helpers: { label, shortIri, dtypeOf, esc: escHtml },

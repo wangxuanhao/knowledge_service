@@ -11,6 +11,7 @@ function fixture({delayed=false}={}){
     setAttribute(k,v){this[k]=v;}addEventListener(k,fn){this.events[k]=fn;}
     remove(){if(this.parent)this.parent.children=this.parent.children.filter(n=>n!==this);this.parent=null;}
     showModal(){this.open=true;}close(){this.open=false;if(delayed)pending.push(()=>this.events.close?.());else this.events.close?.();}
+    getBoundingClientRect(){return {left:100,right:500,top:0,bottom:800};}
     focus(){document.activeElement=this;}
   }
   const document={createElement:tag=>new Node(tag),body:new Node('body'),activeElement:null};
@@ -32,6 +33,27 @@ test('queued native close events do not invalidate a drawer reopened in the same
   const drawer=manager.create({id:'same',title:'Same',content:new Node('div'),onClose:()=>closed++});
   drawer.open();drawer.close();drawer.open();flush();
   assert.equal(drawer.dialog.open,true);assert.equal(manager.active,drawer);assert.equal(closed,1);
+});
+
+test('editable drawers can ignore backdrop clicks while explicit close and Escape remain available',()=>{
+  const {manager,Node}=fixture();let closed=0;
+  const drawer=manager.create({id:'draft',title:'Draft',content:new Node('input'),
+    dismissOnBackdrop:false,onClose:()=>closed++});
+  drawer.open();
+  drawer.dialog.events.click({target:drawer.dialog,clientX:20,clientY:100});
+  assert.equal(drawer.dialog.open,true);assert.equal(closed,0);
+  drawer.dialog.events.cancel({preventDefault(){}});
+  assert.equal(drawer.dialog.open,false);assert.equal(closed,1);
+  drawer.open();drawer.dialog.children[0].children[1].onclick();
+  assert.equal(drawer.dialog.open,false);assert.equal(closed,2);
+});
+
+test('read-only drawers keep their existing backdrop dismissal by default',()=>{
+  const {manager,Node}=fixture();
+  const drawer=manager.create({id:'read',title:'Read',content:new Node('div')});
+  drawer.open();
+  drawer.dialog.events.click({target:drawer.dialog,clientX:20,clientY:100});
+  assert.equal(drawer.dialog.open,false);
 });
 test('opening another drawer invalidates the prior one exactly once and keeps new drawer focus',()=>{
   const {manager,document,Node}=fixture();let closed=0;

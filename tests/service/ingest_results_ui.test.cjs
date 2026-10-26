@@ -9,7 +9,7 @@ const source=fs.readFileSync(
   'utf8',
 );
 
-function fixture({event='completed',assertions=[],assertionError=null}={}){
+function fixture({event='completed',assertions=[],assertionError=null,jobResult={document:{id:'doc-1'},run_id:'ingest-run-1'}}={}){
   const apiCalls=[],navigationCalls=[],statusCalls=[],intakeCalls=[];
 
   function element(tag='div'){
@@ -35,6 +35,7 @@ function fixture({event='completed',assertions=[],assertionError=null}={}){
   let emitted=false;
   const context=vm.createContext({
     window:{
+      IngestResultSummary:require('../../knowledge_service/web/ingest-result-summary.js'),
       IngestOntology:{...require('../../knowledge_service/web/ingest-ontology.js'),
         resolveResult:(project,assertions,pinned)=>require('../../knowledge_service/web/ingest-ontology.js')
           .resultRelease(project,assertions,pinned,async()=>({versions:[
@@ -55,7 +56,7 @@ function fixture({event='completed',assertions=[],assertionError=null}={}){
     }};}}}),
     api:async url=>{
       apiCalls.push(url);
-      if(url.startsWith('/api/jobs/'))return {result:{document:{id:'doc-1'}}};
+      if(url.startsWith('/api/jobs/'))return {result:jobResult};
       if(url.includes('/assertions?')){
         if(assertionError)throw assertionError;
         return {assertions};
@@ -174,6 +175,40 @@ test('discovery follow-up pins its document and pending candidate identities',as
   assert.equal(f.intakeCalls.length,1);assert.equal(f.intakeCalls[0].projectId,'owned-project');
   assert.equal(f.intakeCalls[0].documentId,'doc-1');
   assert.deepEqual(Array.from(f.intakeCalls[0].candidateIds),['selected-candidate']);
+  assert.equal(f.intakeCalls[0].runId,'ingest-run-1');
+});
+
+test('discovery task without an exact run never widens its follow-up to current document candidates',async()=>{
+  const f=fixture({jobResult:{document:{id:'doc-1'}},assertions:[{id:'pending',kind:'entity',status:'pending',payload:{text:'张三'}}]});
+  f.context.window.IngestResults.watch('old-job','旧任务',{projectId:'p',mode:'discovery'});await f.settle();
+  f.buttons().find(button=>button.textContent==='核对候选与完善结构').click();await f.settle();
+  assert.equal(f.intakeCalls.length,0);assert.match(f.statusCalls.at(-1)[0],/本次处理|运行标识/);
+});
+
+test('result drawer surfaces saved task counts independently of current document assertion reads',async()=>{
+  const f=fixture({jobResult:{run_id:'run-1',document:{id:'doc-1',metadata:{discovery_candidates:[{id:'a',kind:'entity'},{id:'b',kind:'relation'},{id:'c',kind:'attribute'}]}},records:[],discovery_candidates:3,pending_reviews:0},assertions:[]});
+  f.context.window.IngestResults.watch('counted-job','资料.md',{projectId:'p',mode:'discovery'});await f.settle();
+  assert.match(f.text(),/开放发现候选 3 条.*实体 1.*关系 1.*属性 1/);
+});
+
+test('reprocessed document details are explicitly distinguished from the old task and batch snapshot',async()=>{
+  for(const entry of ['task','batch']){
+    const result={run_id:'old-run',document:{id:'doc-1',metadata:{discovery_candidates:[{id:'original-candidate',kind:'entity'}]}},discovery_candidates:1};
+    const f=fixture({jobResult:result,assertions:[{id:'replacement-candidate',kind:'entity',status:'pending',payload:{text:'NEW RUN ONLY',proposed_type:'NewType'}}]});
+    if(entry==='task'){
+      f.context.window.IngestResults.watch('old-job','旧处理.md',{projectId:'p',mode:'discovery'});await f.settle();
+    }else await f.context.window.IngestResults.showBatchItem({id:'old-item',original_name:'旧处理.md',document_id:'doc-1',result},{projectId:'p',mode:'discovery'});
+    assert.match(f.text(),/开放发现候选 1 条/);
+    assert.match(f.text(),/文档当前知识状态.*不代表本次任务的结果快照/);
+    assert.match(f.text(),/NEW RUN ONLY/);
+    assert.ok(f.text().indexOf('文档当前知识状态')<f.text().indexOf('NEW RUN ONLY'),'the scope label precedes current-document details');
+  }
+});
+
+test('saved formal knowledge cannot be contradicted by an empty current-document detail read',async()=>{
+  const f=fixture({jobResult:{document:{id:'doc-1'},records:[{id:'formal-a',kind:'entity'}],pending_reviews:0,discovery_candidates:0},assertions:[]});
+  f.context.window.IngestResults.watch('formal-count','资料.md',{projectId:'p',mode:'ontology'});await f.settle();
+  assert.match(f.text(),/本次写入知识 1 条/);assert.doesNotMatch(f.text(),/没有识别出知识/);
 });
 
 test('failed tasks and assertion read failures link to the task log',async()=>{

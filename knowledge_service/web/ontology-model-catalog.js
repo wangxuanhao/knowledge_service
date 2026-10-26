@@ -64,6 +64,23 @@
     if(typeof query!=='string'||!query.trim()||query.length>10000)throw new Error('请填写不超过 10000 字符的 SPARQL 查询。');
     return {query:query.trim(),ontology_id:snapshot.ontologyId||null,include_unknown:true};
   }
+  function draftDefinitionGroups(draft,summary) {
+    const groups=new Map(),index=summaryIndex(draft?.ontology?.summary||draft?.ontology||summary);
+    for(const operation of draft?.operations||[]){
+      const target=operation.target_iri||operation.target||operation.id;
+      if(!groups.has(target))groups.set(target,{target,operations:[]});
+      groups.get(target).operations.push(operation);
+    }
+    return [...groups.values()].map(group=>{
+      const term=index.byId.get(group.target),created=group.operations.find(operation=>operation.action==='create_term');
+      const labels=group.operations.filter(operation=>operation.action==='add_annotation'
+        &&operation.after?.predicate==='http://www.w3.org/2000/01/rdf-schema#label');
+      const annotation=labels.find(operation=>operation.after.language==='zh')||labels[0];
+      const kind=created?.after?.kind||created?.kind||term?.kind;
+      const name=annotation?.after?.value||term&&(term.label_zh||term.label||term.name);
+      return {...group,kind,label:name&&name!==group.target?name:'未命名定义',created:!!created};
+    });
+  }
   const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
   let side=null,cards=null,ctx=null,list=null,search=null,kind=null,active=null,summaryLine=null,drafts=null,work=null,changes=null,draftError=null;
   let projectKey='';
@@ -75,6 +92,7 @@
     const entries=catalogEntries(state.summary,{query:search.value,kind:kind.value,activeOnly:active.checked});
     summaryLine.textContent=state.loading?'正在读取本体与草案…':`${entries.length} 个术语 · ${state.preview?'历史只读':state.showingDraft?'草案未发布':'已发布'}`;
     list.replaceChildren();cards.replaceChildren();
+    const changes=state.view==='cards'?new Map(draftDefinitionGroups(state.draft,state.summary).map(group=>[group.target,group])):new Map();
     for(const entry of entries){
       const pick=button(label(entry),()=>ctx.select(entry.id),'om-catalog-item'+(state.selected===entry.id?' is-selected':''));
       pick.append(el('small',null,`${KINDS[entry.kind]}${entry.active===false?' · 已停用':''}`));
@@ -82,28 +100,29 @@
       if(state.view!=='cards')continue;
       const model=typeCard(entry,state.summary),card=el('article','om-type-card om-type-'+entry.kind+(state.selected===entry.id?' is-selected':''));
       const title=button(label(entry),()=>ctx.select(entry.id),'om-type-card-title');
-      card.append(el('small','om-type-kind',`${KINDS[entry.kind]}${entry.active===false?' · 已停用':''}`),title,el('code','om-type-iri',entry.id));
-      if(entry.description)card.append(el('p','om-type-description',entry.description));
+      title.setAttribute('aria-pressed',String(state.selected===entry.id));
+      const heading=el('h3','om-type-heading');heading.append(title);
+      const meta=el('div','om-type-card-meta'),change=changes.get(entry.id);
+      meta.append(el('small','om-type-kind',`${{class:'实体类型',relation:'关系类型',attribute:'属性'}[entry.kind]}${entry.active===false?' · 已停用':''}`),
+        el('span','om-type-state',state.preview?'历史只读':change?(change.created?'本轮新增':'本轮调整'):state.showingDraft?'草案视图':'已发布'));
+      card.append(meta,heading);
+      if(entry.description){const description=el('p','om-type-description',entry.description);description.title=entry.description;card.append(description);}
       if(entry.kind==='class'){
-        const parents=el('div','om-type-members');
-        if(!model.parents.length)parents.append(el('small',null,'顶层类 · 未声明父类'));
-        for(const id of model.parents)parents.append(button('↑ '+label(summaryIndex(state.summary).byId.get(id)||{id}),()=>ctx.select(id),'om-type-link'));
+        const parents=el('div','om-type-members om-type-parents');
+        parents.append(el('small','om-type-section-label','上级类型'));
+        if(!model.parents.length)parents.append(el('span','om-type-empty','无（顶层类型）'));
+        for(const id of model.parents)parents.append(button(label(summaryIndex(state.summary).byId.get(id)||{id}),()=>ctx.select(id),'om-type-link'));
         card.append(parents);
-        const members=el('div','om-type-members');
-        for(const attr of model.attributes)members.append(button(`${label(attr)}${attr.required?' *':''} · ${attr.datatype}`,()=>ctx.select(attr.id),'om-type-link'));
-        if(model.inheritedAttributes.length)members.append(el('small',null,`继承 ${model.inheritedAttributes.length} 项属性 · ${model.parents.length} 个父类`));
-        for(const rel of model.relations)members.append(button('关系 · '+label(rel),()=>ctx.select(rel.id),'om-type-link'));
-        if(!model.attributes.length&&!model.relations.length)members.append(el('small',null,'尚未声明属性或业务关系'));
-        card.append(members);
-      }else card.append(el('p','om-type-endpoints',model.endpointText));
-      const actions=el('div','om-type-card-actions');
-      actions.append(button('检查定义',()=>ctx.select(entry.id)));
-      if(!state.preview&&entry.kind==='class'){
-        actions.append(button('＋ 子类',()=>ctx.openCreate({kind:'class',parent:entry.id})),
-          button('＋ 属性',()=>ctx.openCreate({kind:'attribute',domain:entry.id})),
-          button('＋ 关系',()=>ctx.openCreate({kind:'relation',domain:entry.id})));
+      }else{
+        const endpoints=el('div','om-type-members');
+        endpoints.append(el('small','om-type-section-label',entry.kind==='relation'?'主体类型 → 客体类型':'适用类型 → 值类型'),el('p','om-type-endpoints',model.endpointText));
+        card.append(endpoints);
       }
-      card.append(actions);cards.append(card);
+      const footer=el('div','om-type-card-footer');
+      const actions=el('div','om-type-card-actions');
+      if(entry.kind==='class')actions.append(el('small','om-type-counts',`属性 ${model.attributes.length}${model.inheritedAttributes.length?` · 继承 ${model.inheritedAttributes.length}`:''} · 关系 ${model.relations.length}`));
+      actions.append(button('查看定义 →',()=>ctx.select(entry.id)));
+      footer.append(actions);card.append(footer);cards.append(card);
     }
     if(!entries.length){list.append(el('p','om-catalog-empty',state.loading?'正在读取本体与草案…':'没有匹配的术语。'));if(state.view==='cards')cards.append(el('p','om-catalog-empty',state.loading?'正在读取本体…':'没有匹配的术语，可调整搜索或插入新术语。'));}
   }
@@ -112,7 +131,7 @@
     drafts.replaceChildren();
     const placeholder=el('option',null,'选择待处理草案');placeholder.value='';drafts.append(placeholder);
     for(const draft of (state.draftChoices||[]).filter(item=>item.status==='pending')){
-      const option=el('option',null,`${draft.title||'未命名草案'} · r${draft.revision||'?'} · ${draft.id.slice(0,8)}`);
+      const option=el('option',null,`${draft.title||'未命名草案'} · 修订 ${draft.revision||'?'}`);
       option.value=draft.id;drafts.append(option);
     }
     drafts.value=state.draft?.id||'';
@@ -191,13 +210,25 @@
     side.querySelectorAll('[data-ontology-write]').forEach(node=>node.disabled=!!state.preview);
     work?.querySelectorAll('[data-ontology-write]').forEach(node=>node.disabled=!!state.preview);
     if(changes){changes.replaceChildren();const draft=state.draft?.status==='pending'?state.draft:null;
-      changes.append(el('p',null,draft?`本轮修改 ${draft.id} · r${draft.revision??'?'} · ${draft.operations?.length??0} 项变更`:'尚未明确选择工作草案。'));
-      for(const operation of draft?.operations||[]){const row=el('details','om-work-operation');
-        row.append(el('summary',null,`${operation.action} · ${operation.target_iri||operation.target||operation.id} · ${operation.status||'未发布'}`),el('pre',null,JSON.stringify(operation,null,2)));changes.append(row);}
+      const groups=draftDefinitionGroups(draft,state.preview?null:state.summary);
+      changes.append(el('p','om-work-summary',draft?`${draft.title||'本轮草案'} · 修订 ${draft.revision??'?'} · 涉及 ${groups.length} 个定义 · 未发布`:'尚未明确选择工作草案。'));
+      if(draft){
+        const details=el('details','om-work-definition-list');details.open=false;
+        details.append(el('summary',null,`查看定义变更（${groups.length} 个）`));
+        const scroll=el('div','om-work-definition-scroll');
+        for(const group of groups){const row=el('details','om-work-definition');row.open=false;
+          row.append(el('summary',null,`${group.created?'新增':'调整'}${{class:'实体类型',relation:'关系类型',attribute:'属性'}[group.kind]||'定义'} · ${group.label}`),
+            el('p','om-work-operation-note',`包含 ${group.operations.length} 项底层操作；一个定义可包含创建、名称说明和继承等多项操作。`));
+          const technical=el('details','om-work-operation');technical.open=false;
+          technical.append(el('summary',null,'技术信息与原始操作'),el('pre',null,JSON.stringify({draft_id:draft.id,target_iri:group.target,operations:group.operations},null,2)));
+          row.append(technical);scroll.append(row);
+        }
+        details.append(scroll);changes.append(details);
+      }
     }
     drafts.disabled=!!state.preview;renderEntries(state);renderDrafts(state);
   }
-  const apiObject={catalogEntries,typeCard,hierarchyRows,sourceWriteAllowed,sparqlRequest,mount,render};
+  const apiObject={catalogEntries,typeCard,hierarchyRows,sourceWriteAllowed,sparqlRequest,draftDefinitionGroups,mount,render};
   if(typeof module!=='undefined'&&module.exports)module.exports=apiObject;
   if(typeof window!=='undefined')window.OntologyCatalog=apiObject;
 })();

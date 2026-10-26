@@ -65,6 +65,182 @@ def _record_payload(record):
         'project_id', 'version', 'version_id', 'recorded_at', 'superseded_at'}}
 
 
+def _scoped_source(repo, project, document_id, candidates, *, batch_item=None):
+    """Persist the same receipt -> run -> chunk -> assertion chain as ingestion."""
+    try:
+        previous = repo.get_record(project, document_id)
+    except KeyError:
+        previous = None
+    metadata = {'title': document_id, 'status': 'processing'}
+    if batch_item:
+        metadata.update(batch_id=batch_item['batch_id'], batch_item_id=batch_item['id'],
+                        document_generation=batch_item['document_generation'])
+    receipt = repo.put_record(project, {
+        'id': document_id, 'kind': 'document', 'text': 'source text', 'metadata': metadata},
+        expected_version=previous['version'] if previous else 0)
+    run = repo.create_ingest_run(project, document_id, receipt['version_id'])
+    chunk_id = document_id + ':chunk:0'
+    try:
+        chunk = repo.get_record(project, chunk_id)
+    except KeyError:
+        chunk = None
+    repo.put_record(project, {'id': chunk_id, 'kind': 'chunk', 'source_id': document_id,
+        'text': 'source text', 'metadata': {'source_version_id': receipt['version_id'],
+            'run_id': run['id'], 'start_char': 0, 'end_char': 11}},
+        expected_version=chunk['version'] if chunk else 0)
+    candidates = [{**candidate, 'chunk_id': chunk_id} for candidate in candidates]
+    for candidate in candidates:
+        repo.create_assertion(project, {'id': candidate['id'], 'kind': candidate['kind'],
+            'document_id': document_id, 'document_version_id': receipt['version_id'],
+            'chunk_id': chunk_id, 'payload': candidate, 'quote': 'source text'})
+    completed = repo.put_record(project, {**_record_payload(receipt), 'metadata': {
+        **metadata, 'status': 'ready', 'run_id': run['id'], 'discovery_candidates': candidates}},
+        expected_version=receipt['version'])
+    run = repo.update_ingest_run(project, run['id'], run['version'], status='completed')
+    return run, completed
+
+
+def _scope_entity(candidate_id):
+    return {'id': candidate_id, 'kind': 'entity', 'text': candidate_id, 'proposed_type': '企业客户'}
+
+
+def _scope_batch(repo, project, candidate_id, *, replayed=False):
+    store = repo.ingest_batches
+    batch = store.create_batch(project, {'extraction_mode': 'discovery'})
+    item = store.add_item(project, batch['id'], candidate_id + '.txt', b'source text',
+        candidate_id, candidate_id, 10, 10000)
+    run, document = _scoped_source(repo, project, item['document_id'],
+        [_scope_entity(candidate_id)], batch_item=item)
+    store.transition(project, batch['id'], 'start')
+    claimed = store.claim(batch['id'], 'scope-test', 120)
+    result = {'document': document, 'records': [], **(
+        {'replayed': True} if replayed else {'run_id': run['id']})}
+    assert store.finish(item['id'], 'scope-test', claimed['lease_token'], 'succeeded', result=result)
+    return batch, run, document
+
+
+def test_inventory_run_scope_uses_frozen_assertion_chunk_chain(tmp_path, monkeypatch):
+    app, repo, p, path = _setup(tmp_path)
+    first, _ = _scoped_source(repo, p, 'scoped-a', [_scope_entity('scope-a')])
+    second, _ = _scoped_source(repo, p, 'scoped-b', [_scope_entity('scope-b')])
+    monkeypatch.setattr(type(app.state.service.repository), 'history',
+        lambda *_args: pytest.fail('scope must read provenance in bulk'))
+    with TestClient(app) as client:
+        result = client.get(path + '/candidates', params={'run_id': first['id']}).json()
+        assert [x['id'] for x in result['items']] == ['scope-a']
+        assert result['total'] == 1
+        # Ingest binds the pre-extraction receipt, not the final document version.
+        assert result['items'][0]['assertion_document_version_id'] == first['document_version_id']
+        assert result['items'][0]['document_version_id'] != first['document_version_id']
+        empty = client.get(path + '/candidates', params={
+            'run_id': second['id'], 'document_id': 'scoped-a'}).json()
+        assert empty['items'] == [] and empty['scope_note']
+        assert {x['id'] for x in client.get(path + '/candidates').json()['items']} == {
+            'candidate-1', 'candidate-2', 'scope-a', 'scope-b'}
+
+
+def test_inventory_old_run_does_not_show_reprocessed_document_candidates(tmp_path):
+    app, repo, p, path = _setup(tmp_path)
+    old, _ = _scoped_source(repo, p, 'scoped-a', [_scope_entity('old-scope')])
+    current, _ = _scoped_source(repo, p, 'scoped-a', [_scope_entity('new-scope')])
+    with TestClient(app) as client:
+        stale = client.get(path + '/candidates', params={'run_id': old['id']}).json()
+        assert stale['items'] == [] and stale['total'] == 0 and stale['scope_note']
+        assert [x['id'] for x in client.get(path + '/candidates',
+            params={'run_id': current['id']}).json()['items']] == ['new-scope']
+        assert [x['id'] for x in client.get(path + '/candidates',
+            params={'document_id': 'scoped-a'}).json()['items']] == ['new-scope']
+
+
+def test_inventory_run_scope_rejects_candidate_identity_copied_into_another_document(tmp_path):
+    app, repo, p, path = _setup(tmp_path)
+    run, document = _scoped_source(repo, p, 'scoped-a', [_scope_entity('scope-a')])
+    repo.put_record(p, {'id': 'copied-document', 'kind': 'document', 'text': 'another source',
+        'metadata': {'run_id': run['id'],
+            'discovery_candidates': document['metadata']['discovery_candidates']}})
+    with TestClient(app) as client:
+        result = client.get(path + '/candidates', params={'run_id': run['id']}).json()
+        assert [(x['document_id'], x['id']) for x in result['items']] == [('scoped-a', 'scope-a')]
+
+
+@pytest.mark.parametrize('broken', ['missing_chunk', 'ambiguous_chunk', 'wrong_chunk_run', 'wrong_document_run'])
+def test_inventory_run_scope_fails_closed_when_provenance_is_unverifiable(tmp_path, broken):
+    app, repo, p, path = _setup(tmp_path)
+    run, document = _scoped_source(repo, p, 'scoped-a', [_scope_entity('scope-a')])
+    chunk = repo.get_record(p, 'scoped-a:chunk:0')
+    if broken == 'missing_chunk':
+        storage = app.state.service.repository
+        with storage._transaction():
+            storage._db.execute('DELETE FROM record_versions WHERE project_id=? AND id=?',
+                                (p, chunk['id']))
+    elif broken == 'wrong_document_run':
+        payload = _record_payload(document)
+        payload['metadata']['run_id'] = 'another-run'
+        repo.put_record(p, payload, expected_version=document['version'])
+    else:
+        payload = _record_payload(chunk)
+        payload['metadata']['run_id'] = 'another-run' if broken == 'wrong_chunk_run' else run['id']
+        repo.put_record(p, payload, expected_version=chunk['version'])
+    with TestClient(app) as client:
+        result = client.get(path + '/candidates', params={'run_id': run['id']}).json()
+        assert result['items'] == [] and result['scope_note']
+
+
+def test_inventory_batch_scope_checks_result_run_and_combines_filters(tmp_path):
+    app, repo, p, path = _setup(tmp_path)
+    first, first_run, document = _scope_batch(repo, p, 'batch-a', replayed=True)
+    second, second_run, _ = _scope_batch(repo, p, 'batch-b')
+    with TestClient(app) as client:
+        result = client.get(path + '/candidates', params={'batch_id': first['id']}).json()
+        assert [x['id'] for x in result['items']] == ['batch-a']
+        assert [x['id'] for x in client.get(path + '/candidates', params={
+            'batch_id': first['id'], 'document_id': document['id'],
+            'run_id': first_run['id']}).json()['items']] == ['batch-a']
+        for filters in ({'batch_id': first['id'], 'run_id': second_run['id']},
+                        {'batch_id': 'missing-batch'}, {'run_id': 'missing-run'}):
+            empty = client.get(path + '/candidates', params=filters).json()
+            assert empty['items'] == [] and empty['scope_note']
+        # A frozen batch result must not identify a later run of the same document.
+        _scoped_source(repo, p, document['id'], [_scope_entity('replacement')])
+        empty = client.get(path + '/candidates', params={'batch_id': first['id']}).json()
+        assert empty['items'] == [] and empty['scope_note']
+
+
+def test_inventory_scoped_materialized_dependencies_do_not_include_other_runs(tmp_path):
+    app, repo, p, path = _setup(tmp_path)
+    run, _ = _scoped_source(repo, p, 'scoped-a', [_scope_entity('scope-entity'), {
+        'id': 'scope-code', 'kind': 'attribute', 'entity_id': 'scope-entity',
+        'proposed_type': '编号', 'value': 'one'}])
+    other_run, _ = _scoped_source(repo, p, 'scoped-b', [{
+        'id': 'other-code', 'kind': 'attribute', 'entity_id': 'scope-entity',
+        'proposed_type': '编号', 'value': 'two'}])
+    published = seed_ontology(repo, p, '''@prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        <urn:test:C> a owl:Class ; rdfs:label "企业客户"@zh .''', {})
+    with TestClient(app) as client:
+        body = _request('scope-entity', create_new_draft=False, expected_ontology_id=published['id'],
+            confirmed_mappings={'scope-entity': 'urn:test:C'})
+        preview = _preview(client, path, body)
+        response = client.post(path + '/confirm-reuse', json={**body,
+            'source_fingerprint': preview['source_fingerprint'],
+            'preview_fingerprint': preview['preview_fingerprint'], 'idempotency_key': 'scoped-dependency'})
+        assert response.status_code == 200, response.text
+        result = client.get(path + '/candidates', params={'run_id': run['id']}).json()
+        assert {x['id'] for x in result['items']} == {'scope-entity', 'scope-code'}
+        entity = next(x for x in result['items'] if x['id'] == 'scope-entity')
+        assert entity['materialized'] and entity['dependency_candidate']
+        assert entity['required_by'] == ['scope-code']
+        assert [x['id'] for x in client.get(path + '/candidates', params={
+            'run_id': other_run['id']}).json()['items']] == ['other-code']
+
+
+@pytest.mark.parametrize('field', ['run_id', 'batch_id'])
+def test_inventory_explicit_empty_source_scope_is_invalid(tmp_path, field):
+    app, repo, p, path = _setup(tmp_path)
+    with TestClient(app) as client:
+        assert client.get(path + '/candidates', params={field: ''}).status_code == 422
+
+
 def _preview(client, path, body):
     repo = client.app.state.service.repository
     p = path.split('/')[3]

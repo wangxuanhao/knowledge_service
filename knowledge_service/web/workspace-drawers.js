@@ -6,7 +6,7 @@
 })(typeof window==='object'?window:globalThis,()=>{
   function createManager(document){
     let active=null;
-    function create({id,title,description='',content,onClose=()=>{}}){
+    function create({id,title,description='',content,onClose=()=>{},dismissOnBackdrop=true}){
       const node=(tag,css,text)=>{const e=document.createElement(tag);if(css)e.className=css;if(text!==undefined)e.textContent=text;return e;};
       const dialog=node('dialog','workspace-drawer'),heading=node('header','workspace-drawer-heading');
       dialog.id=id;const titleNode=typeof title==='string'?node('h2',null,title):title;
@@ -34,7 +34,7 @@
       dialog.addEventListener('cancel',event=>{event.preventDefault();instance.close();});
       dialog.addEventListener('close',()=>{if(!dialog.open)finished();});
       dialog.addEventListener('click',event=>{
-        if(event.target!==dialog)return;const box=dialog.getBoundingClientRect();
+        if(!dismissOnBackdrop||event.target!==dialog)return;const box=dialog.getBoundingClientRect();
         if(event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom)instance.close();
       });
       return instance;

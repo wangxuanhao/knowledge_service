@@ -178,6 +178,8 @@
       const docId = job?.result?.document?.id || job?.result?.document_id;
       if (!docId) throw Error('任务结果里没有文档 ID');
       d.documentId = docId;
+      d.runId=job.result?.run_id||job.result?.document?.metadata?.run_id||null;
+      d.resultSummary=window.IngestResultSummary?.text(job.result)||'';d.hasSavedKnowledge=!!window.IngestResultSummary?.hasKnowledge(job.result);
       const assertionsUrl = '/api/projects/' + encodeURIComponent(d.projectId)
         + '/assertions?document_id=' + encodeURIComponent(docId);
       const r = await api(assertionsUrl, undefined, 'GET');
@@ -230,6 +232,7 @@
     barWrap.append(bar, el('span', 'ingest-job__pct', Math.round(d.progress) + '%'));
     card.append(barWrap);
     card.append(el('p', 'ingest-job__stage', d.stage || ''));
+    if(d.resultSummary)card.append(el('p','ingest-job__result-summary',d.resultSummary));
 
     if (d.status === 'failed' && d.error) {
       card.append(el('p', 'ingest-job__error', '原文收据已保留，可改后重新上传：' + d.error));
@@ -274,8 +277,9 @@
           close();
           if(target==='ontology-model'&&d.mode==='discovery'){
             if(!d.documentId)throw Error('任务结果缺少准确文档身份，请重新读取结果。');
+            if(!d.runId)throw Error('任务结果缺少本次处理的运行标识，无法核对此次候选；可从资料库查看当前文档候选。');
             if(!window.OntologyIntake)throw Error('结构候选模块尚未就绪，请刷新页面。');
-            await window.OntologyIntake.open({projectId:d.projectId,documentId:d.documentId,
+            await window.OntologyIntake.open({projectId:d.projectId,documentId:d.documentId,documentTitle:d.title,runId:d.runId,batchId:d.batchId,
               candidateIds:(d.asserts||[]).filter(item=>item.status==='pending'&&item.id).map(item=>item.id),trigger:button});
           }
         } catch (e) {
@@ -293,6 +297,7 @@
   // 三类知识分组：可折叠 details + 胶囊超量截断；入图/待确认计数写在标题
   function renderAsserts(asserts, task) {
     const box = el('div', 'ingest-result');
+    box.append(el('p', 'ingest-result__scope-note', '下方为文档当前知识状态；重新处理后可能变化，不代表本次任务的结果快照。'));
     // 实体默认展开；关系、有大量待确认时默认收起，按需点开
     const groups = [
       ['实体', 'entity', true], ['关系', 'relation', false], ['属性', 'attribute', false],
@@ -337,7 +342,7 @@
     if (!anyShown) {
       const message = task.mode === 'documents'
         ? '本次主动未执行图谱知识抽取；原文和切片已保存，可前往原文数据源查看。'
-        : '本次已执行抽取但没有识别出知识；可检查原文内容、抽取模式和解析设置后重试。';
+        : task.hasSavedKnowledge?'当前资料未返回可展开的结果明细；本次处理数量见上方保存结果。':'本次已执行抽取但没有识别出知识；可检查原文内容、抽取模式和解析设置后重试。';
       box.append(el('p', 'ingest-result__empty', message));
     }
     return box;
@@ -410,6 +415,8 @@
       const documentId = item.document_id || item.result?.document?.id || item.result?.document_id;
       if (!d.projectId || !documentId) throw Error('批次结果缺少项目或文档 ID');
       d.documentId = documentId;
+      d.runId=item.result?.run_id||item.result?.document?.metadata?.run_id||null;d.batchId=item.batch_id||null;
+      d.resultSummary=window.IngestResultSummary?.text(item.result)||'';d.hasSavedKnowledge=!!window.IngestResultSummary?.hasKnowledge(item.result);
       const result = await api('/api/projects/' + encodeURIComponent(d.projectId)
         + '/assertions?document_id=' + encodeURIComponent(documentId), undefined, 'GET');
       d.asserts = Array.isArray(result.assertions) ? result.assertions : [];

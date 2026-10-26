@@ -11,6 +11,7 @@ function fixture(options = {}) {
   const sidebar = { innerHTML: '', querySelectorAll: () => [] };
   const summary = id => ({ classes: [{ id, label: id }, ...(options.twoClasses ? [{ id: 'other', label: 'Other' }] : [])], relations: [], attributes: [] });
   const window = options.catalog ? {OntologyCatalog:require('../../knowledge_service/web/ontology-model-catalog.js')} : {};
+  if(options.canvas)window.OntologyCanvas=options.canvas;
   const api = async (url, body, method = 'POST') => {
     calls.push({ url, method, body });
     if (options.manualDraft && method === 'POST' && url === '/p/ontology-drafts') return {id:'manual',status:'pending',revision:1};
@@ -47,7 +48,8 @@ function fixture(options = {}) {
   const context = {
     window, current: 'p', api, endpoint: suffix => '/p' + suffix,
     document: { getElementById: id => options.withRoot && id === 'tab-ontology-model' ? root
-      : options.withSidebar && id === 'om-side' ? sidebar : id==='om-node-display'?options.displayControl||null:null, addEventListener() {} },
+      : options.withSidebar && id === 'om-side' ? sidebar : id==='om-node-display'?options.displayControl||null
+        :id==='om-canvas-host'?options.canvasHost||null:null, addEventListener() {} },
     status: (message, error) => notices.push({ message, error }), console,
     ...(options.gateTimers || {}),
   };
@@ -61,6 +63,17 @@ test('multiple pending drafts require an explicit workspace selection before any
   assert.equal(f.model.S.draft,null);
   await assert.rejects(f.model.ensureDraft(),/多份.*选择/);
   assert.ok(!f.calls.some(call=>call.method==='POST'));
+});
+
+test('initial loading paints the shell before starting the graph renderer in its visible host',async()=>{
+  let complete;const pending=new Promise(resolve=>complete=resolve),host={hidden:true},mounts=[];
+  const canvas={render(){},mount(target){mounts.push({target,hidden:target?.hidden});}};
+  const f=fixture({withRoot:true,canvas,canvasHost:host,waitForOntology:pending});
+  const refresh=f.model.refresh();
+  assert.ok(f.root.innerHTML.includes('om-canvas-host'),'loading shell is available immediately');
+  assert.equal(mounts.length,0,'network loading must not synchronously initialize the graph renderer');
+  complete();await refresh;
+  assert.equal(mounts.length,1);assert.equal(mounts[0].target,host);assert.equal(mounts[0].hidden,false);
 });
 test('a failed draft list read cannot prepare an accidental new draft',async()=>{
   const f=fixture({draftListError:true});

@@ -43,8 +43,11 @@ def install(app, service):
 
     @router.get('/candidates')
     def candidates(p: str, document_id: str | None = None,
+                   batch_id: str | None = Query(None, min_length=1, max_length=1000),
+                   run_id: str | None = Query(None, min_length=1, max_length=1000),
                    offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=1000)):
-        return intake.inventory(p, document_id=document_id, offset=offset, limit=limit)
+        return intake.inventory(p, document_id=document_id, batch_id=batch_id,
+                                run_id=run_id, offset=offset, limit=limit)
 
     @router.post('/selection-preview')
     def selection_preview(p: str, request: SelectionRequest):

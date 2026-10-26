@@ -20,7 +20,7 @@ function fixture(reviewRows=[],options={}){
     created_at:'2026-09-10T10:00:00Z',heartbeat_at:'2026-09-10T10:00:04Z',...options.job};
   // window 是浏览器里一定存在的东西：各模块在**加载时**就会向 window.RuntimeView 注册
   // 「项目与运行」的分区加载函数，沙箱少了它这些模块会直接抛 ReferenceError。
-  const context=vm.createContext({window:{},current:'a',$:get,readParseSettings:()=>({chunk_size:1800}),showTab(){},
+  const context=vm.createContext({window:{IngestResultSummary:require('../../knowledge_service/web/ingest-result-summary.js')},current:'a',$:get,readParseSettings:()=>({chunk_size:1800}),showTab(){},
     document:{createElement(){const e=element();created.push(e);return e;},querySelector:get,querySelectorAll:()=>[]},
     esc:v=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'),
     status(){},jobList(){throw Error('old list must not be used');},bind:(id,fn)=>get(id).onclick=fn,
@@ -72,6 +72,11 @@ test('durable task cards offer state-appropriate controls without reviving legac
   const {get}=fixture();
   await get('load-jobs').onclick();
   assert.doesNotMatch(get('tasks').innerHTML,/data-job-action/);
+});
+
+test('completed discovery task surfaces saved candidate counts without opening full logs',async()=>{
+  const {get}=fixture([],{job:{status:'completed',result:{records:[],pending_reviews:0,discovery_candidates:118}}});await get('load-jobs').onclick();
+  const summary=get('tasks').innerHTML.split('<details')[0];assert.match(summary,/开放发现候选 118 条/);assert.match(summary,/尚未正式入库/);
 });
 
 test('review menu is independent and does not own ingestion settings',async()=>{

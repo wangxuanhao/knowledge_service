@@ -89,13 +89,23 @@ test('hidden batch module readiness, refresh and project changes issue no reads'
   assert.equal(env.calls.length,0);assert.equal(env.timers.size,0);
 });
 
+test('batch candidate action keeps the selected batch scope instead of opening a project pool',async()=>{
+  const env=batches(),opened=[];env.batch.settings={extraction_mode:'discovery'};env.batch.counts={completed:1};env.batch.status='completed';
+  env.context.window.Auth={isAdmin:()=>true};env.context.window.KnowledgeNavigation={open:async()=>{}};env.context.window.OntologyIntake={open:async scope=>opened.push(scope)};
+  env.drawer();await env.api.ready;await env.api.loadRecent();
+  const all=()=>env.descendants(env.get('ingest-batches'));
+  await all().find(node=>node.textContent==='查看批次详情').onclick();await settle();
+  const action=all().find(node=>node.textContent==='核对本批次候选');assert.ok(action);await action.onclick();await settle();
+  assert.equal(opened[0].batchId,'b');assert.equal(opened[0].documentId,undefined);
+});
+
 test('real runtime section changes invalidate a prior jobs visit before reopening',async()=>{
   const env=batches({realRuntime:true}),old=deferred(),fresh=deferred();let reads=0;
   env.respond(()=>++reads===1?old.promise:fresh.promise);
   env.context.window.RuntimeView.show('jobs');
   env.context.window.RuntimeView.show('overview');const aborted=env.calls[0].options.signal.aborted;
   env.context.window.RuntimeView.show('jobs');const reopenedReads=env.calls.length;
-  fresh.resolve({items:[{...env.batch,status:'completed'}]});await settle();
+  fresh.resolve({items:[{...env.batch,status:'completed',counts:{completed:1}}]});await settle();
   old.resolve({items:[env.batch]});await settle();
   assert.equal(aborted,true,'leaving the jobs section must abort its pending list');
   assert.equal(reopenedReads,2,'reopening jobs must read a fresh list');
@@ -125,6 +135,53 @@ test('selecting a summary in an open drawer reads details without reloading the 
   await view.onclick();await settle();
   assert.equal(env.calls.filter(call=>call.url.endsWith('?limit=20')).length,1);
   assert.equal(env.calls.filter(call=>call.url.includes('/items?')).length,1);
+});
+
+test('expanding and reloading a batch keeps its files inside a single batch card',async()=>{
+  const env=batches();env.drawer();await env.api.loadRecent();
+  const cards=()=>env.descendants(env.get('ingest-batches')).filter(node=>node.className.split(' ').includes('ingest-batch-card'));
+  const original=cards()[0],view=env.descendants(original).find(node=>node.textContent==='查看批次详情');
+  await view.onclick();await settle();
+  assert.equal(cards().length,1,'detail must expand within the existing summary, not create a second card');
+  assert.equal(cards()[0],original);
+  await env.api.loadRecent();
+  assert.equal(cards().length,1,'a list refresh must not duplicate an expanded batch');
+  assert.equal(cards()[0],original);
+});
+
+test('collapsing a batch stops polling and reopening the drawer leaves it collapsed',async()=>{
+  const env=batches();env.drawer();await env.api.loadRecent();
+  const view=env.descendants(env.get('ingest-batches')).find(node=>node.textContent==='查看批次详情');
+  await view.onclick();await settle();assert.equal(env.timers.size,1);
+  assert.equal(view['aria-expanded'],'true');assert.equal(view.textContent,'收起文件');
+  await view.onclick();await settle();
+  assert.equal(view['aria-expanded'],'false');assert.equal(env.timers.size,0);
+  const reads=env.calls.length;env.drawer(false);env.drawer();await settle();
+  assert.equal(env.calls.length,reads,'a collapsed batch must not start hidden detail requests');
+  await view.onclick();await settle();assert.equal(env.timers.size,1);
+});
+
+test('opening another batch collapses the old files and keeps only the selected poller',async()=>{
+  const env=batches(),second={...env.batch,id:'c'};env.drawer();
+  env.respond(async url=>url.endsWith('?limit=20')?{items:[env.batch,second]}:
+    url.includes('/items?')?{items:[]}:url.endsWith('/c')?second:env.batch);
+  await env.api.loadRecent();
+  const views=env.descendants(env.get('ingest-batches')).filter(node=>node.textContent==='查看批次详情');
+  await views[0].onclick();await settle();
+  await views[1].onclick();await settle();
+  assert.equal(views[0]['aria-expanded'],'false');assert.equal(views[1]['aria-expanded'],'true');
+  assert.equal(env.timers.size,1);
+});
+
+test('collapsing an in-flight batch ignores its response without hiding the overview',async()=>{
+  const env=batches(),pending=deferred();env.drawer();await env.api.loadRecent();
+  const view=env.descendants(env.get('ingest-batches')).find(node=>node.textContent==='查看批次详情');
+  env.respond(()=>pending.promise);await view.onclick();
+  const request=env.calls.at(-1);await view.onclick();
+  assert.equal(request.options.signal.aborted,true);
+  pending.resolve({...env.batch,status:'completed'});await settle();
+  assert.equal(env.calls.filter(call=>call.url.includes('/items?')).length,0);
+  assert.equal(view['aria-expanded'],'false');assert.equal(env.details()[0].hidden,false);
 });
 
 test('only explicit visible detail loading starts its current items page and polling',async()=>{

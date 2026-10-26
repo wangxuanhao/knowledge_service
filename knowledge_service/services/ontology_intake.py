@@ -188,7 +188,7 @@ class OntologyIntake:
         self.repository = service.data
         self.drafts = service.ontology_drafts(publish=True)
 
-    def inventory(self, p, *, document_id=None, offset=0, limit=100):
+    def inventory(self, p, *, document_id=None, batch_id=None, run_id=None, offset=0, limit=100):
         with self.repository.read_snapshot():
             versions = self.repository.list_ontologies(p)
             parent = versions[-1] if versions else None
@@ -197,6 +197,19 @@ class OntologyIntake:
             inputs = PageReads(self.repository).discovery_inputs(p)
             processed = _materialized_candidate_ids(inputs['materialized'])
             candidates = [x for x in _candidates(inputs['documents'], inputs['assertions']) if x.get('kind') in KINDS]
+            scope_note = None
+            if batch_id is not None or run_id is not None:
+                # Scope precedes dependency expansion: an unrelated run cannot
+                # keep a materialized entity selectable through its endpoints.
+                candidates = [x for x in candidates
+                    if x.get('document_id') == x.get('assertion_document_id')
+                    and (document_id is None or x.get('document_id') == document_id)]
+                verified = PageReads(self.repository).discovery_candidate_ids(p,
+                    [x['id'] for x in candidates], batch_id=batch_id, run_id=run_id)
+                candidates = [x for x in candidates if x['id'] in verified]
+                scope_note = ('仅展示来源可核实的当前候选；缺少完整来源记录的候选未展示。'
+                    if candidates else
+                    '此范围没有可核实的当前候选；原处理结果可能已被重新处理替换，或缺少完整来源记录。')
             required_by = {}
             for candidate in candidates:
                 if candidate['id'] in processed:
@@ -235,7 +248,8 @@ class OntologyIntake:
             items.sort(key=lambda x: (x.get('document_id') or '', x['id']))
             return {'items': items[offset:offset + limit], 'total': len(items),
                     'offset': offset, 'limit': limit, 'published_terms': terms,
-                    'expected_ontology_id': parent['id'] if parent else None}
+                    'expected_ontology_id': parent['id'] if parent else None,
+                    'scope_note': scope_note}
 
     def _plan(self, p, request):
         self.repository.get_project(p)
