@@ -3,7 +3,7 @@
   const nav=document.querySelector('aside nav');if(!nav)return;
   const buttons=new Map([...nav.querySelectorAll('button[data-tab]')].map(button=>[button.dataset.tab,button]));
   nav.replaceChildren();
-  const groups=[['使用知识',['qa','search']],['管理资料',['sources','records','ontology-model']],['运行与质量',['runtime','quality']]];
+  const groups=[['使用知识',['qa','search','mindmap']],['管理资料',['sources','records','ontology-model']],['运行与质量',['runtime','quality']]];
   for(const [label,names] of groups){
     const group=document.createElement('section');group.className='nav-group';
     const title=document.createElement('h2');title.textContent=label;group.append(title);
@@ -16,7 +16,7 @@
   nav.after(management);
   // Internal destinations stay registered so their original loaders and deep links remain usable.
   const internal=document.createElement('div');internal.hidden=true;
-  for(const name of ['ingest','mindmap'])if(buttons.get(name))internal.append(buttons.get(name));
+  for(const name of ['ingest'])if(buttons.get(name))internal.append(buttons.get(name));
   nav.append(internal);
   const syncRoles=()=>{
     const viewer=document.body.classList.contains('is-viewer');

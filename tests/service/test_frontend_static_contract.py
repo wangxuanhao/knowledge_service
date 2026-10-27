@@ -257,22 +257,21 @@ def test_manual_term_creation_uses_current_model_panel():
 
 
 def test_type_color_comes_from_one_palette_module():
-    """类型颜色只有一个出处：graph-palette.js（用户反馈"节点底下类型颜色和实体类型颜色都不统一"）。
+    """筛选圆点、节点与图例共享 GraphAppearance，以规范类型 ID 保持颜色一致。
 
-    真因：颜色以前是"在数组里的下标"决定的（palette[index % n]），而筛选条那排圆点用按钮下标取色，
-    第 0 项还是「全部类型」——每个类型的圆点整体错位一格，和图里节点颜色正好差一位。
-    另一个坑：同一处传原始 type、另一处传显示名 label，哈希出来是两个颜色，必须统一用 label。
+    显示名只用于文案，不能因翻译或改名改变颜色；行为由 graph-appearance.test.cjs 验证。
     """
     palette = read('graph-palette.js')
     assert 'function colorFor(' in palette and 'function colorMap(' in palette
     assert 'window.GraphPalette' in palette, '必须挂在 window 上供其它脚本用'
     workspace = read('workspace.js')
     assert 'catColor' not in workspace, '不能再按数组下标取色'
-    # 圆点与节点/图例同 key：都用页面上显示的类型名
-    assert "${dot(type?displayType(type):'')}" in workspace, '圆点必须用显示名取色'
-    assert 'color:attribute?attrColor:colorFor(label)' in workspace, '节点必须用显示名取色'
-    assert 'colorMap(scopeLabels)' in workspace, '同屏撞色要自动挪位'
-    assert 'GraphPalette.colorFor' in workspace and 'GraphPalette.colorMap' in workspace
+    assert '${dot(type)}' in workspace, '圆点必须保留规范类型 ID'
+    assert 'background:${nodeColor({type})}' in workspace, '圆点复用节点的取色入口'
+    assert 'color:attribute?attrColor:nodeColor(n)' in workspace, '节点复用同一取色入口'
+    assert 'nodeColor({type:name.slice(7)})' in workspace, '图例复用相同的规范类型 ID'
+    assert 'GraphAppearance.colorFor(n)' in workspace
+    assert 'GraphPalette.colorFor(n.type)' in workspace, '降级入口也必须使用规范类型 ID'
 
 
 def test_same_type_same_color_across_pages_palette_is_deterministic():

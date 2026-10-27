@@ -78,7 +78,7 @@ test('UI keeps explicit graph purpose and bumps each changed runtime resource',(
   assert.ok(html.includes('id="scope-compatibility"'),'scope incompatibility remains visible');
   assert.ok(html.includes('#scope [hidden]{display:none!important}'),'page-owned filter controls stay hidden despite existing grid/flex CSS');
   for(const file of ['scope-fields.js','workspace-context-ui.js'])assert.ok(html.includes('/assets/'+file+'?v=authority-retrieval-20261021-2'),file+' version');
-  assert.ok(html.includes('/assets/workspace.js?v=relation-label-toggle-20261027-2'),'workspace.js version');
+  assert.ok(html.includes('/assets/workspace.js?v=mindmap-cards-20261027-4'),'workspace.js version');
   assert.ok(html.includes('/assets/workbench.js?v=ontology-sections-20261027-2'),'workbench.js version');
 });
 

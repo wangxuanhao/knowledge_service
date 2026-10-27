@@ -1,78 +1,69 @@
-/* Mindmap Controls Styles */
-#tab-mindmap .row {
-    display: flex;
-    align-items: flex-end;
-    gap: 10px;
-    flex-wrap: wrap;
+/* Entity mindmap: compact controls and a readable card tree. */
+body main #tab-mindmap>.mindmap-panel{padding:0;overflow:hidden;border:1px solid #d8e6e4;border-radius:14px;background:#fff;box-shadow:0 5px 24px #184c4405}
+#tab-mindmap .mindmap-heading{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:20px 24px 15px}
+#tab-mindmap .mindmap-heading h2{margin:0;font-size:18px;font-weight:650;letter-spacing:.02em}
+#tab-mindmap .mindmap-heading p{margin:5px 0 0;color:#7b908c;font-size:12px}
+#tab-mindmap .mindmap-heading-mark{display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;background:#edf5f3;color:#28796c}
+#tab-mindmap .mindmap-heading-mark svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.4}
+body main #tab-mindmap .mindmap-controls{display:grid;grid-template-columns:minmax(160px,1fr) minmax(220px,1.6fr) 82px auto;gap:12px;align-items:end;margin:0;padding:0 24px 15px}
+body main #tab-mindmap .mindmap-controls label{display:flex;flex-direction:column;gap:7px;width:auto;min-width:0;margin:0;font-size:12px;color:#53716b}
+body main #tab-mindmap .mindmap-controls label>span{font-size:12px;font-weight:600;color:#53716b}
+body main #tab-mindmap .mindmap-controls input,body main #tab-mindmap .mindmap-controls select{width:100%;height:40px;min-height:40px;max-width:none;margin:0;border:1px solid #d8e5e1;border-radius:8px;background-color:#fbfdfc;font-size:13px;box-shadow:none}
+body main #tab-mindmap #mindmap-root{width:100%;max-width:none}
+body main #tab-mindmap .mindmap-controls input:focus,body main #tab-mindmap .mindmap-controls select:focus{outline:2px solid #78b2a950;outline-offset:1px;border-color:#78a99f;background-color:#fff}
+body main #tab-mindmap #draw-mindmap{display:flex;align-items:center;justify-content:center;gap:8px;height:40px;margin:0;padding:0 18px;border-radius:8px;font-size:13px;box-shadow:none;white-space:nowrap}
+#draw-mindmap svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7}
+#tab-mindmap .mindmap-config-footer{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 24px;padding:11px 0 13px;border-top:1px solid #edf2ef}
+body main #tab-mindmap .entity-picker-pagination{display:flex;align-items:center;flex-direction:row-reverse;justify-content:flex-end;flex-wrap:wrap;gap:12px;margin:0;min-width:0}
+body main #tab-mindmap .entity-picker-pagination>div{display:flex;gap:4px}
+body main #tab-mindmap .entity-picker-pagination button{min-height:26px;height:26px;margin:0;padding:2px 9px;border-radius:5px;border:1px solid #e2ebe7;background:#fff;color:#58786f;font-size:11px;box-shadow:none}
+body main #tab-mindmap .entity-picker-pagination button:disabled{opacity:.4}
+body main #tab-mindmap .entity-picker-pagination [role=status]{font-size:11px;color:#7c918b;line-height:1.5}
+body main #tab-mindmap #mindmap-version-scope{display:flex;align-items:center;gap:8px;flex-shrink:0;min-height:0;margin:0;padding:4px 9px;border:0;border-radius:5px;background:#edf5f1;color:#52796d;font-size:11px}
+body main #tab-mindmap #mindmap-version-scope button{min-height:24px;margin:0;padding:2px 6px;font-size:11px}
+#tab-mindmap .mindmap-stage{border-top:1px solid #dfeae6;background:#f8fbfa}
+#tab-mindmap .mindmap-stage-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:52px;padding:9px 18px;border-bottom:1px solid #e9f0ec;background:#ffffffb8}
+#tab-mindmap .mindmap-stage-title{display:flex;align-items:center;flex-wrap:wrap;gap:10px;min-width:0}
+#tab-mindmap .mindmap-stage-title strong{display:flex;align-items:center;gap:7px;color:#3c675c;font-size:12px;font-weight:600;white-space:nowrap}
+#tab-mindmap .mindmap-stage-title strong::before{content:"";width:6px;height:6px;border-radius:50%;background:#69a58e}
+body main #tab-mindmap #mindmap-summary{margin:0;color:#81958e;font-size:11px;line-height:1.6}
+#tab-mindmap .mindmap-view-tools{display:flex;align-items:center;gap:3px;flex-shrink:0}
+body main #tab-mindmap .mindmap-view-tools button{display:flex;align-items:center;justify-content:center;min-width:29px;min-height:29px;height:29px;margin:0;padding:0 8px;border:1px solid #dfe9e4;border-radius:6px;background:#fff;color:#4d7265;font-size:12px;box-shadow:none}
+body main #tab-mindmap .mindmap-view-tools button:hover:not(:disabled){border-color:#9ec4b5;background:#eef6f1}
+body main #tab-mindmap .mindmap-view-tools button:disabled{opacity:.35;cursor:default}
+#tab-mindmap #mindmap-zoom-level{min-width:42px;color:#738c81;font-size:11px;text-align:center;font-variant-numeric:tabular-nums}
+#tab-mindmap .mindmap-viewport{position:relative;background-image:radial-gradient(#b8cfc450 .8px,transparent .8px);background-size:20px 20px}
+body main #mindmap-canvas{height:clamp(420px,calc(100dvh - 355px),760px);min-height:420px;margin:0;padding:0;border:0;border-radius:0;background:transparent;overflow:hidden;touch-action:none}
+#tab-mindmap .mindmap-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;text-align:center;pointer-events:none}
+#tab-mindmap .mindmap-empty[hidden]{display:none}
+#tab-mindmap .mindmap-empty svg{width:160px;height:94px;margin-bottom:10px;fill:#fff;stroke:#b9d3c7;stroke-width:1.3}
+#tab-mindmap .mindmap-empty h3{margin:0;font-size:16px;font-weight:600;color:#547b6b}
+#tab-mindmap .mindmap-empty p{margin:0;color:#90a499;font-size:12px}
+#tab-mindmap .mindmap-canvas-note{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 20px;border-top:1px solid #e7efea;color:#8ca094;background:#fbfdfb;font-size:11px}
+#tab-mindmap .mindmap-canvas-note span:last-child{color:#a0afa5}
+@media(max-width:1100px){
+ body main #tab-mindmap .mindmap-controls{grid-template-columns:minmax(145px,1fr) minmax(180px,1.3fr) 68px auto;gap:9px;padding-right:18px;padding-left:18px}
+ #tab-mindmap .mindmap-heading{padding-right:18px;padding-left:18px}
+ #tab-mindmap .mindmap-config-footer{margin-right:18px;margin-left:18px}
 }
-
-#tab-mindmap .row label {
-    display: flex;
-    flex-direction: column;
-    margin: 0;
-    width: auto;
+@media(max-width:850px){
+ body main #tab-mindmap .mindmap-controls{grid-template-columns:minmax(0,1fr) 80px auto}
+ #tab-mindmap .mindmap-filter-control{grid-column:1/-1}
+ #tab-mindmap .mindmap-config-footer{align-items:flex-start;flex-wrap:wrap;gap:8px}
+ #tab-mindmap .mindmap-stage-toolbar{align-items:flex-start}
+ #tab-mindmap .mindmap-stage-title{display:grid;gap:3px}
 }
-
-#tab-mindmap .row label span,
-#tab-mindmap .row label::before {
-    font-size: 11px;
-    color: #6b7f75;
-    margin-bottom: 4px;
-}
-
-/* 筛选名称 / 类型 */
-#tab-mindmap .row label:first-child {
-    width: 200px;
-}
-
-/* 根实体 ID */
-#tab-mindmap .row label:nth-child(2) {
-    width: 280px;
-}
-
-/* 深度 */
-#tab-mindmap .row label:nth-child(3) {
-    width: 90px;
-}
-
-#tab-mindmap .row input {
-    margin: 0;
-    height: 38px;
-}
-
-#tab-mindmap .row select {
-    margin: 0;
-    height: 38px;
-}
-
-#tab-mindmap .row button {
-    height: 38px;
-    padding: 0 20px;
-    white-space: nowrap;
-    flex-shrink: 0;
-}
-
-/* Mindmap Canvas */
-#mindmap-canvas {
-    height: calc(100dvh - 290px);
-    min-height: 350px;
-    border: 1px solid #e5ebe5;
-    border-radius: 8px;
-    background: #fafcfa;
-}
-
-/* Responsive */
-@media (max-width: 640px) {
-    #tab-mindmap .row {
-        flex-direction: column;
-        align-items: stretch;
-    }
-
-    #tab-mindmap .row label {
-        width: 100% !important;
-    }
-
-    #tab-mindmap .row button {
-        width: 100%;
-    }
+@media(max-width:520px){
+ #tab-mindmap .mindmap-heading{padding:16px 14px 14px}
+ #tab-mindmap .mindmap-heading h2{font-size:17px}
+ #tab-mindmap .mindmap-heading p{max-width:220px;line-height:1.6}
+ #tab-mindmap .mindmap-heading-mark{display:none}
+ body main #tab-mindmap .mindmap-controls{grid-template-columns:72px minmax(0,1fr);gap:12px;padding:0 14px 14px}
+ #tab-mindmap .mindmap-filter-control,#tab-mindmap .mindmap-root-control{grid-column:1/-1}
+ #tab-mindmap .mindmap-config-footer{margin:0 14px;padding:10px 0}
+ body main #tab-mindmap .entity-picker-pagination{gap:8px}
+ #tab-mindmap .mindmap-stage-toolbar{flex-wrap:wrap;padding:10px 12px;gap:8px}
+ #tab-mindmap .mindmap-view-tools{margin-left:auto}
+ #tab-mindmap .mindmap-canvas-note{align-items:flex-start;flex-direction:column;gap:4px;padding:10px 14px}
+ body main #mindmap-canvas{height:480px;min-height:480px}
 }

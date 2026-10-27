@@ -33,7 +33,7 @@ const descendants=node=>node.children.flatMap(child=>[child,...descendants(child
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
 const documentRow=(id,status='completed')=>({id,text:'原文 '+id,derived_count:3,metadata:{title:'资料 '+id,source_file:id+'.txt',source_format:'txt',source_size_bytes:120,status,source_document_version_id:'version-'+id}});
 
-function setup({documents=[documentRow('one'),documentRow('two','failed')],writer=true}={}){
+function setup({documents=[documentRow('one'),documentRow('two','failed')],writer=true,acceptedAssertions=[],acceptedReadError=null}={}){
   const document={createElement(tag){return new Element(tag,this);},getElementById(id){return descendants(this.body).find(node=>node.id===id)||null;},querySelector(selector){return this.body.querySelector(selector);},querySelectorAll(selector){return this.body.querySelectorAll(selector);},addEventListener(name,fn){(this.listeners[name]??=[]).push(fn);},listeners:{},async dispatch(name,event){await Promise.all((this.listeners[name]||[]).map(fn=>fn(event)));}};
   document.body=document.createElement('body');document.activeElement=document.body;
   const make=(tag,id,parent=document.body)=>{const node=document.createElement(tag);node.id=id;parent.append(node);return node;};
@@ -47,6 +47,9 @@ function setup({documents=[documentRow('one'),documentRow('two','failed')],write
     $:id=>document.getElementById(id),esc:value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char])),scope:()=>scopeValue,endpoint:suffix=>'/api/projects/'+context.current+suffix,
     KnowledgeTabs:{open:name=>navigation.push(name)},LibraryWorkspace:{open:name=>navigation.push(name)},SourceReader:{open:args=>external.push({type:'reader',args,drawerOpen:Boolean(WorkspaceDrawers.active)})},openKnowledgeRecord:async args=>external.push({type:'record',args,drawerOpen:Boolean(WorkspaceDrawers.active)}),
     api:(url,body,method)=>{
+      if(url.includes('/assertions?')&&new URL(url,'http://test').searchParams.get('status')==='accepted'){
+        return acceptedReadError?Promise.reject(acceptedReadError):Promise.resolve({assertions:acceptedAssertions});
+      }
       if(url.includes('/sources')){
         const query=new URL(url,'http://test').searchParams,state=query.get('state')||'all',id=query.get('document_id');
         const status=doc=>doc.metadata?.status==='failed'?'failed':doc.metadata?.status==='processing'?'processing':'ready';

@@ -77,8 +77,81 @@ def redesign_page():
         yield page,errors
 
 
+@pytest.mark.parametrize('viewer', [False, True])
+def test_mindmap_standalone_navigation_opens_and_generates(redesign_page, viewer):
+    page,errors=redesign_page
+    root={'id':'mindmap-entry-root','kind':'entity','type':'Thing','text':'脑图入口实体'}
+    page.route('**/records/page',lambda route:route.fulfill(json={'records':[root],'total':1,'next_cursor':None}))
+    requests=[]
+    def mindmap(route):
+        requests.append(route.request.post_data_json)
+        route.fulfill(json={'tree':{**root,'children':[]},'bounded':True,'truncated':False})
+    page.route('**/mindmap',mindmap)
+    page.evaluate('(viewer)=>document.body.classList.toggle("is-viewer",viewer)',viewer)
+    entry=page.locator('aside nav .nav-group [data-tab="mindmap"]')
+    assert entry.is_visible(), '实体脑图必须保留独立可见的导航入口'
+    assert entry.locator('..').locator('h2').inner_text()=='使用知识'
+    entry.click()
+    assert page.locator('#tab-mindmap').is_visible()
+    page.wait_for_selector('#mindmap-root option[value="mindmap-entry-root"]',state='attached')
+    page.select_option('#mindmap-root',root['id'])
+    page.click('#draw-mindmap')
+    page.wait_for_function('() => !!window.echarts.getInstanceByDom(document.getElementById("mindmap-canvas"))?.getOption()?.series?.length')
+    assert requests[-1]['root_id']==root['id']
+    assert requests[-1]['depth']==3
+    assert errors==[]
 
 
+def test_mindmap_cards_keep_text_inside_and_support_pointer_folding(redesign_page):
+    page,errors=redesign_page
+    tree={'id':'law','text':'《中华人民共和国民法典》','type':'法律法规','children':[
+        {'id':'chapter','text':'侵权责任编','type':'法律条款','predicate':'包含条款','children':[
+            {'id':'joint','text':'共同侵权的责任认定与承担','type':'法律条款','predicate':'规定','children':[]}]},
+        {'id':'platform','text':'美团侵权投诉处理规则','type':'平台规则','predicate':'依据','children':[]}]}
+    page.route('**/records/page',lambda route:route.fulfill(json={'records':[{**tree,'kind':'entity'}],'total':1,'next_cursor':None}))
+    page.route('**/mindmap',lambda route:route.fulfill(json={'tree':tree,'bounded':True,'truncated':False}))
+    page.click('[data-tab="mindmap"]')
+    page.wait_for_selector('#mindmap-root option[value="law"]',state='attached')
+    page.select_option('#mindmap-root','law');page.click('#draw-mindmap')
+    page.wait_for_function('() => document.getElementById("mindmap-summary").textContent.includes("4 / 4")')
+    page.wait_for_function('() => wb.tree.getZr().animation.isFinished()')
+    cards=page.evaluate('''()=>{
+      const data=wb.tree.getModel().getSeriesByIndex(0).getData(),cards=[];
+      const bounds=el=>{const box=el.getBoundingRect().clone();box.applyTransform(el.getComputedTransform());return {x:box.x,y:box.y,width:box.width,height:box.height};};
+      data.each(i=>{const symbol=data.getItemGraphicEl(i)?.childAt(0),text=symbol?.getTextContent();
+        if(symbol&&text)cards.push({id:data.getId(i),symbol:bounds(symbol),text:bounds(text)});
+      });return cards;
+    }''')
+    assert len(cards)==4
+    for card in cards:
+        box,text=card['symbol'],card['text']
+        assert text['x']>=box['x']-1 and text['y']>=box['y']-1,card
+        assert text['x']+text['width']<=box['x']+box['width']+1,card
+        assert text['y']+text['height']<=box['y']+box['height']+1,card
+    def click_branch():
+        center=page.evaluate('''()=>{
+          const data=wb.tree.getModel().getSeriesByIndex(0).getData();let index;
+          data.each(i=>{if(data.getId(i)==='mindmap-root.0')index=i;});
+          const symbol=data.getItemGraphicEl(index).childAt(0),box=symbol.getBoundingRect().clone();
+          box.applyTransform(symbol.getComputedTransform());return {x:box.x+box.width/2,y:box.y+box.height/2};
+        }''')
+        canvas=page.locator('#mindmap-canvas').bounding_box()
+        page.mouse.click(canvas['x']+center['x'],canvas['y']+center['y'])
+    click_branch()
+    page.wait_for_function('() => document.getElementById("mindmap-summary").textContent.includes("3 / 4")')
+    page.wait_for_function('() => wb.tree.getZr().animation.isFinished()')
+    click_branch()
+    page.wait_for_function('() => document.getElementById("mindmap-summary").textContent.includes("4 / 4")')
+    assert page.evaluate('''()=>{
+      const data=wb.tree.getModel().getSeriesByIndex(0).getData();let root;
+      data.each(i=>{if(data.getId(i)==='mindmap-root')root=data.getItemGraphicEl(i).childAt(0);});
+      return !root.currentStates.includes('blur');
+    }'''), '悬停分支时根实体仍须清晰可读'
+    page.click('#mindmap-zoom-in')
+    assert page.locator('#mindmap-zoom-level').inner_text()=='120%'
+    page.click('#mindmap-reset-view')
+    assert page.locator('#mindmap-zoom-level').inner_text()=='100%'
+    assert errors==[]
 
 
 def test_page_scope_drafts_tags_and_management_exclusion(redesign_page):

@@ -505,6 +505,7 @@
     compileGraph();
     emit('select', { iri: S.selected });
     render();
+    if (iri && S.view !== 'cards') window.OntologyCanvas?.focus?.(iri);
   }
 
   // ---- 渲染：骨架构建一次，其余只更新可变部分 --------------------------------

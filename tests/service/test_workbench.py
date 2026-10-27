@@ -62,7 +62,7 @@ def test_workbench_has_all_control_targets_and_no_native_dialogs():
     assert '正式重解析' not in candidate_map
     assert 'knowledge-flow' not in candidate_map and 'knowledge-flow' not in workspace
     assert all(group in menu for group in ('使用知识', '管理资料', '运行与质量'))
-    assert "['使用知识',['qa','search']]" in menu
+    assert "['使用知识',['qa','search','mindmap']]" in menu
     assert "['管理资料',['sources','records','ontology-model']]" in menu
     assert "['运行与质量',['runtime','quality']]" in menu
     assert "['projects','useradmin']" in menu
@@ -85,7 +85,7 @@ def test_search_and_graph_share_one_workspace_with_single_mode_and_hop_controls(
     assert '>知识问答<' in html
     assert '>知识检索<' not in html
     assert '>证据问答<' not in html
-    assert "['使用知识',['qa','search']]" in menu
+    assert "['使用知识',['qa','search','mindmap']]" in menu
     assert 'search-graph-workspace' in html
     assert all(region in html for region in ('search-results-pane','graph-stage','inspector-rail'))
     assert '从左侧检索结果选择实体或关系' in html
@@ -146,7 +146,11 @@ def test_knowledge_chat_shell_is_a_focused_one_shot_conversation():
                                          'qa-composer-toolbar','id="qa-progress"','id="qa-live"',
                                          'id="qa-summary"','id="graph-heading"'))
     assert html.count('class="qa-example"') == 3
-    assert html.index('id="generate"') < html.index('id="qa"')
+    composer=re.search(r'<form\b[^>]*\bid="qa-composer"[^>]*>(.*?)</form>',html,re.S)
+    assert composer, '提问和发送按钮必须由同一提交表单承载'
+    assert re.search(r'<textarea\b[^>]*\bid="qa-query"',composer[1])
+    assert re.search(r'<button\b(?=[^>]*\bid="qa")(?=[^>]*\btype="submit")[^>]*>',composer[1])
+    assert re.search(r'<input\b(?=[^>]*\bid="generate")(?=[^>]*\btype="checkbox")[^>]*>',composer[1])
     # The chat must never borrow the search workspace controls or the legacy /explore wrapper.
     chat=workbench[workbench.index('const chat=window.KnowledgeChat'):]
     assert 'search-mode' not in chat and 'graph-hops' not in chat

@@ -48,6 +48,57 @@ test('processing record candidate action keeps its exact ingest run and document
   assert.ok(action);await action.click();assert.equal(opened[0].runId,'specific-run');assert.equal(opened[0].documentId,'one');
 });
 
+test('later confirmed source facts do not leave a discovery run looking like the current graph is unavailable',async()=>{
+  const env=setup({acceptedAssertions:[
+    {document_id:'one',kind:'entity',status:'accepted',canonical_record_id:'entity-one'},
+    {document_id:'one',kind:'entity',status:'accepted',canonical_record_id:'entity-one'},
+    {document_id:'one',kind:'relation',status:'accepted',canonical_record_id:'relation-one'},
+    {document_id:'one',kind:'attribute',status:'pending',canonical_record_id:'pending'},
+    {document_id:'one',kind:'entity',status:'accepted',canonical_record_id:null},
+    {document_id:'two',kind:'entity',status:'accepted',canonical_record_id:'other-document'},
+  ]});
+  await settle();await env.rows()[0].click();const reading=env.tab('处理记录').click();
+  const run={id:'discovery-run',status:'completed',counts:{records_accepted:1,assertions_pending:0},
+    readiness:{document_ready:true,candidate_ready:true,graph_ready:false}};
+  env.requests.at(-1).resolve({runs:[run]});await reading;
+  assert.match(env.body.textContent,/已确认入图事实：2 条/);
+  assert.match(env.body.querySelector('.source-detail-intro').textContent,/当次|各次/);
+  assert.match(env.body.querySelector('.source-processing-run').textContent,/当次入图：未直接入图/);
+  assert.doesNotMatch(env.body.textContent,/正式图谱：尚未就绪/);
+  assert.equal(run.readiness.graph_ready,false,'later confirmation must not rewrite the historical run');
+  const raw=env.body.querySelector('.source-raw-data');raw.open=true;await raw.dispatch('toggle');
+  assert.deepEqual(JSON.parse(raw.querySelector('pre').textContent),run);
+});
+
+test('an ontology publication alone cannot stand in for confirmed facts from this source',async()=>{
+  const env=setup();await settle();await env.rows()[0].click();const reading=env.tab('处理记录').click();
+  env.requests.at(-1).resolve({runs:[{id:'discovery-run',status:'completed',readiness:{graph_ready:false}}]});await reading;
+  assert.match(env.body.querySelector('.source-graph-status').textContent,/尚无已确认入图事实/);
+  assert.match(env.body.textContent,/本体版本发布.*事实入图/);
+});
+
+test('failed current fact reads leave historical processing results visible without reporting an empty graph',async()=>{
+  const env=setup({acceptedReadError:Error('offline')});await settle();await env.rows()[0].click();
+  const reading=env.tab('处理记录').click();env.requests.at(-1).resolve({runs:[{id:'history-run',status:'completed'}]});await reading;
+  assert.equal(env.body.querySelector('.source-processing-run').dataset.runId,'history-run');
+  assert.match(env.body.querySelector('.source-graph-status').textContent,/暂未核验/);
+  assert.doesNotMatch(env.body.textContent,/尚无已确认入图事实/);
+});
+
+test('late fact confirmation cannot replace a newer tab and is reread on the next visit',async()=>{
+  const env=setup(),original=env.context.api,confirmations=[];
+  env.context.api=(url,...args)=>url.includes('status=accepted')?new Promise(resolve=>confirmations.push({url,resolve})):original(url,...args);
+  await settle();await env.rows()[0].click();const first=env.tab('处理记录').click();
+  env.requests.at(-1).resolve({runs:[{id:'run',status:'completed'}]});await settle();
+  assert.match(confirmations[0].url,/document_id=one&status=accepted/);
+  await env.tab('原文').click();confirmations[0].resolve({assertions:[]});await first;
+  assert.equal(env.body.textContent,'原文 one');
+  const second=env.tab('处理记录').click();env.requests.at(-1).resolve({runs:[]});
+  confirmations[1].resolve({assertions:[{document_id:'one',kind:'entity',status:'accepted',canonical_record_id:'later-fact'}]});await second;
+  assert.match(env.body.querySelector('.source-graph-status').textContent,/已确认入图事实：1 条/);
+  assert.match(env.body.textContent,/暂无独立处理记录/);
+});
+
 test('record history distinguishes status updates from text changes without repeating full snapshots',async()=>{
   const env=setup();await settle();await env.rows()[0].click();
   const fullText='FULL_TEXT_SENTINEL'.repeat(1000),pending=env.tab('修订记录').click();

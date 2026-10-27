@@ -34,6 +34,45 @@
     return host;
   };
 
+  let helpId = 0;
+  function detailTitle(text, explanation) {
+    const heading = el('h5', 'om-detail-title', text);
+    if (!explanation) return heading;
+    const wrap = el('span', 'om-help-wrap');
+    const button = el('button', 'om-help-button', '?');
+    button.type = 'button';button.setAttribute('aria-label', text + '说明');
+    const popup = el('span', 'om-help-popover', explanation);
+    popup.id = 'om-help-' + (++helpId);popup.hidden = true;
+    popup.setAttribute('role', 'tooltip');popup.setAttribute('popover', 'manual');
+    button.setAttribute('aria-describedby', popup.id);
+    let timer;
+    const hide = () => {
+      clearTimeout(timer);
+      if (popup.hidePopover) { try { popup.hidePopover(); } catch (_) { /* fallback DOM */ } }
+      popup.hidden = true;
+    };
+    const show = () => {
+      clearTimeout(timer);popup.hidden = false;
+      if (!popup.showPopover) return;
+      popup.showPopover();
+      const anchor = button.getBoundingClientRect(), bounds = popup.getBoundingClientRect();
+      popup.style.left = Math.max(12, Math.min(anchor.left, window.innerWidth - bounds.width - 12)) + 'px';
+      popup.style.top = Math.max(8, anchor.bottom + bounds.height + 10 < window.innerHeight
+        ? anchor.bottom + 8 : anchor.top - bounds.height - 8) + 'px';
+    };
+    wrap.addEventListener('mouseenter', show);
+    wrap.addEventListener('mouseleave', () => { timer = setTimeout(hide, 120); });
+    popup.addEventListener('mouseenter', () => clearTimeout(timer));
+    popup.addEventListener('mouseleave', hide);
+    button.addEventListener('focus', show);button.addEventListener('blur', hide);
+    button.addEventListener('click', event => { event.stopPropagation();show(); });
+    button.addEventListener('keydown', event => {
+      if (event.key === 'Escape') { event.preventDefault();event.stopPropagation();hide(); }
+    });
+    wrap.append(button, popup);heading.append(wrap);
+    return heading;
+  }
+
   // 数据类型的中文说法：summary 里 range 存的是 xsd 本地名，直接摆给用户看等于没说。
   const DATATYPE_ZH = {
     string: '文本', integer: '整数', int: '整数', long: '整数', decimal: '小数',
@@ -189,8 +228,8 @@
    * ======================================================================== */
   function endpointsSection(rel, summary) {
     if (S().preview) return el('p', 'om-detail-note', '历史版本只读，端点以本版定义为准。');
-    const sec = el('div', 'om-detail-sec om-endpoints');
-    sec.append(el('h5', 'om-detail-title', '两端（domain / range）能不能补上'));
+    const sec = el('details', 'om-detail-sec om-endpoints');
+    sec.append(el('summary', null, '根据实际用法补全类型'));
     const host = el('div', 'om-endpoints-body');
     host.append(el('p', 'om-detail-note', '正在读取这条关系的实际用法…'));
     sec.append(host);
@@ -214,51 +253,69 @@
 
   function endpointBody(rel, summary, usage, repaint) {
     const nodes = [];
-    const declared = (usage && usage.declared) || { domain: [], range: [] };
     const inferred = (usage && usage.inferred) || { domain: [], range: [] };
-    const used = (usage && usage.used) || 0;
+    const used = Number.isFinite(usage?.used) && usage.used >= 0 ? usage.used : null;
     const missing = (usage && usage.missing) || { domain: false, range: false };
-    const names = list => (list || []).map(x => labelOfIri(x, summary)).join('、') || '未声明';
-
-    // 说清这份读数来自哪里：画布可能正在看草案（改了立刻看得见），也可能在看已发布版本。
-    const where = (usage && usage.source === 'draft') ? '草案里已声明' : '已发布本体里已声明';
-    nodes.push(el('p', 'om-detail-line', `${where}：${names(declared.domain)} → ${names(declared.range)}`));
-
-    if (!used) {
-      nodes.push(el('p', 'om-detail-note',
-        '还没有任何知识用到这条关系 —— 没有可回填的依据。等知识写入抽出用到它的知识，再回来看这里。'));
+    const head = el('div', 'om-usage-head');
+    head.append(el('strong', null, '推荐依据'),
+      el('span', 'om-usage-count', used === null ? '使用次数未知' : `${used} 条知识`));
+    nodes.push(head, el('p', 'om-usage-context', usage?.source === 'draft' ? '对照草案定义' : '对照已发布定义'));
+    if (used === null || used === 0) {
+      nodes.push(el('p', 'om-usage-empty', used === 0
+        ? '暂无使用记录，暂不提供类型推荐。' : '尚未获取使用次数，暂不提供类型推荐。'));
       return nodes;
     }
-    nodes.push(el('p', 'om-detail-line', `实际用法：${used} 条知识用到它。反推出来的两端（按出现次数排序）：`));
-
-    const ul = el('ul', 'om-detail-rows');
-    (inferred.domain || []).forEach(item => ul.append(
-      termRow('cls', `${labelOfIri(item.iri, summary)}（作主体 ${item.count} 次）`, '', item.iri)));
-    (inferred.range || []).forEach(item => ul.append(
-      termRow('cls', `${labelOfIri(item.iri, summary)}（作客体 ${item.count} 次）`, '', item.iri)));
-    nodes.push(ul);
+    const sides = el('div', 'om-usage-sides');
+    for (const [key, title] of [['domain', '主体类型'], ['range', '客体类型']]) {
+      const side = el('section', 'om-usage-side');
+      side.append(el('h6', 'om-usage-side-title', title));
+      const items = inferred[key] || [];
+      if (items.length) {
+        const list = el('ul', 'om-usage-types');
+        items.forEach(item => {
+          const row = termRow('cls', item.label || labelOfIri(item.iri, summary),
+            item.count == null ? '次数未知' : `${item.count} 次`, item.iri);
+          row.classList.add('om-usage-type');list.append(row);
+        });
+        side.append(list);
+      } else side.append(el('p', 'om-usage-note', '暂未识别类型'));
+      sides.append(side);
+    }
+    nodes.push(sides, el('p', 'om-usage-note', '根据已有关系的两端类型汇总，请核对后再采用。'));
 
     const samples = (usage && usage.samples) || [];
     if (samples.length) {
-      nodes.push(el('p', 'om-detail-line', '核对样例（推断对不对，看这几条就够）：'));
-      const sm = el('ul', 'om-detail-rows');
-      samples.slice(0, 3).forEach(s => sm.append(el('li', 'om-detail-row',
-        `${s.subject || '（无主体）'} · ${s.subject_type || '类型未知'} → ${s.object || '（无客体）'} · ${s.object_type || '类型未知'}`)));
-      nodes.push(sm);
+      const evidence = el('details', 'om-usage-samples');
+      evidence.append(el('summary', null, `核对样例（${Math.min(3, samples.length)} 条）`));
+      const list = el('ol', 'om-usage-sample-list');
+      samples.slice(0, 3).forEach(sample => {
+        const card = el('li', 'om-usage-sample');
+        for (const [key, title] of [['subject', '主体'], ['object', '客体']]) {
+          if (key === 'object') {
+            const arrow = el('span', 'om-usage-sample-arrow', '↓');arrow.setAttribute('aria-hidden', 'true');card.append(arrow);
+          }
+          const endpoint = el('div', 'om-usage-sample-endpoint');
+          endpoint.append(el('small', null, `${title} · ${sample[key + '_type'] || '类型未知'}`),
+            el('p', null, sample[key] || `（无${title}）`));
+          card.append(endpoint);
+        }
+        list.append(card);
+      });
+      evidence.append(list);nodes.push(evidence);
     }
 
     const canDom = !!(inferred.domain || []).length;
     const canRng = !!(inferred.range || []).length;
     if (!missing.domain && !missing.range) {
-      nodes.push(el('p', 'om-detail-note', '两端都已声明，无需回填。画布上这条关系应该已经画出线了。'));
+      nodes.push(el('p', 'om-usage-status', '两端已声明，无需补全。'));
       return nodes;
     }
-    const btn = el('button', 'om-btn primary', '按实际用法写入草案');
+    const btn = el('button', 'om-btn primary om-usage-apply', '将推荐写入草案');
     btn.type = 'button';
     btn.disabled = !(canDom && canRng);
     btn.title = (canDom && canRng)
-      ? '做什么：把上面反推出来的两端写进草案（主体类/客体类各一条命令，可逐条审）。不做什么：不直接改生效本体——仍要审核并发布。'
-      : '实际用法里两端还不齐（只有一端出现过），依据不足，先不写入。';
+      ? '将上方推荐类型加入草案，审核发布后生效。'
+      : '两端依据尚不完整，宁可不补，也不猜。';
     btn.addEventListener('click', async () => {
       btn.disabled = true;
       try {
@@ -270,15 +327,13 @@
         btn.disabled = false;
       }
     });
-    const cell = el('div', 'om-detail-actions');
+    const cell = el('div', 'om-usage-actions');
     cell.append(btn);
     nodes.push(cell);
     if (!(canDom && canRng)) {
-      nodes.push(el('p', 'om-detail-note',
-        '实际用法里两端还不齐：只有一端出现过，依据不足，所以不给回填按钮（宁可不补，也不猜）。'));
+      nodes.push(el('p', 'om-usage-note', '两端依据尚不完整，暂不能写入草案。'));
     }
-    nodes.push(el('p', 'om-detail-note',
-      '做什么：从已入库的实例关系反推这条关系实际连接了哪些类，补齐后画布就能画出关系线。不做什么：不在前端自己统计（口径在服务端一处），不直接改生效本体。'));
+    nodes.push(el('p', 'om-usage-note', '写入草案后，仍需审核发布。'));
     return nodes;
   }
 
@@ -514,7 +569,7 @@
   }
   function section(title, count, rows, note) {
     const sec = el('div', 'om-detail-sec');
-    sec.append(el('h5', 'om-detail-title', `${title}（${count}）`));
+    sec.append(detailTitle(`${title}（${count}）`, note));
     if (rows && rows.length) {
       const ul = el('ul', 'om-detail-rows');
       rows.forEach(row => ul.append(row));
@@ -522,19 +577,15 @@
     } else {
       sec.append(el('p', 'om-detail-inline-empty', '（无）'));
     }
-    if (note) sec.append(el('p', 'om-detail-note', note));
     return sec;
   }
   // 「适用规则」：本层没有按术语的规则数据，所以如实说明来源，不自己推一套判定。
   function rulesSection(term) {
     const sec = el('div', 'om-detail-sec');
-    sec.append(el('h5', 'om-detail-title', '适用规则'));
+    sec.append(detailTitle('状态', '草案中的修改经审核、发布后才生效。停用的术语仍保留历史知识。发布条件以服务端校验为准。'));
     const active = term.active !== false;
     sec.append(el('p', 'om-detail-line',
-      S().showingDraft ? `当前状态：草案中${active?'启用':'停用'}，尚未发布；正式抽取继续使用已发布定义。` : active ? '当前状态：已发布并启用，可用于正式抽取。'
-             : '当前状态：已停用（owl:deprecated）——历史知识仍保留、可查，只是不再作为新写入的类型。'));
-    sec.append(el('p', 'om-detail-note',
-      '做什么：说明这个术语当前是否生效。不做什么：本页不自行推断校验规则——能不能发布只认服务端「发布清单」，读不到就按未判定处理。'));
+      S().showingDraft ? `草案中${active?'启用':'停用'} · 尚未发布` : active ? '已发布并启用' : '已停用 · 历史知识保留'));
     return sec;
   }
 
@@ -554,8 +605,8 @@
     const active = term.active !== false;
     const iri = term.id;
     const project = activeProject();
-    const sec = el('div', 'om-detail-sec om-retire');
-    sec.append(el('h5', 'om-detail-title', active ? '停用这个术语' : '恢复这个术语'));
+    const sec = el('details', 'om-detail-sec om-retire');
+    sec.append(el('summary', 'om-detail-title', active ? '停用这个术语' : '恢复这个术语'));
     sec.append(el('p', 'om-detail-line', active
       ? '停用后不再用于新写入；历史知识与版本轨迹保留。先核对影响，再加入草案审核。'
       : '选择同项目的来源发布及要恢复的定义字段；恢复激活与字段变更仍需逐项审核。'));
@@ -682,10 +733,42 @@
     // 折叠区标题按对象类型动态显示——类没有 domain/range，别把四类约束都列上去造成误解。
     const CE_TITLE = {
       class: '编辑继承（父类）',
-      relation: '编辑 domain / range（两端类）',
+      relation: '选择关系两端类型',
       attribute: '编辑所属类 / 数据类型',
     };
     const summary2 = el('summary', null, CE_TITLE[kind] || '编辑约束');
+    const parentPreview = kind === 'class' ? el('span', 'om-parent-summary') : null;
+    function showParents(iris) {
+      if (!parentPreview) return;
+      parentPreview.replaceChildren(...(iris.length
+        ? iris.map(iri => el('span', 'om-ce-chip', labelOfIri(iri, summary)))
+        : [el('span', 'om-ce-empty', '暂无父类')]));
+    }
+    if (parentPreview) {
+      sec.classList.add('om-parent-edit');
+      parentPreview.setAttribute('aria-label', '当前父类');
+      showParents(term.parents || []);
+      summary2.append(parentPreview);
+    }
+    const endpointPreviews = new Map();
+    function showEndpoint(action, iris) {
+      const preview = endpointPreviews.get(action);
+      if (!preview) return;
+      preview.replaceChildren(...(iris.length
+        ? iris.map(iri => el('span', 'om-ce-chip', labelOfIri(iri, summary)))
+        : [el('span', 'om-ce-empty', '未限定')]));
+    }
+    if (kind === 'relation') {
+      sec.classList.add('om-endpoint-edit');
+      const preview = el('span', 'om-endpoint-summary');
+      for (const [field, action, title] of [['domain', 'add_domain', '主体'], ['range', 'add_range', '客体']]) {
+        const row = el('span', 'om-endpoint-summary-row'), values = el('span', 'om-endpoint-summary-values');
+        values.setAttribute('aria-label', '当前' + title + '类型');endpointPreviews.set(action, values);
+        row.append(el('span', 'om-endpoint-summary-label', title), values);preview.append(row);
+        showEndpoint(action, term[field] || []);
+      }
+      summary2.append(preview);
+    }
     const body = el('div', 'om-constraint-body');
     sec.append(summary2, body);
 
@@ -697,39 +780,70 @@
         status('正在把改动写进草案…');
         await M.sendCommand(cmd);
         status('已写进草案：底栏「校验并审核」、发布后才生效。');
+        return true;
       } catch (error) { status((error && error.message) || '编辑失败', true); }
     }
 
-    // 「当前值（可移除）＋ 下拉新增」的一行约束编辑
+    // Keep edits local until Apply so a multi-type change is one atomic draft command.
     function linkRow(labelText, currentIris, addAction, removeAction) {
       const row = el('div', 'om-ce-row');
-      row.append(el('span', 'om-ce-label', labelText));
-      const curHost = el('div', 'om-ce-current');
-      const cur = currentIris || [];
-      if (!cur.length) curHost.append(el('span', 'om-ce-empty', '未限定'));
-      cur.forEach(iri => {
-        const chip = el('span', 'om-ce-chip');
-        chip.append(el('span', null, labelOfIri(iri, summary)));
-        const x = el('button', 'om-ce-x');
-        x.type = 'button'; x.textContent = '×'; x.title = '移除这个约束（写进草案）';
-        x.addEventListener('click', () => { void runCmd({ action: removeAction, target_iri: term.id, value: iri }); });
-        chip.append(x); curHost.append(chip);
+      row.append(detailTitle(labelText, kind === 'class'
+        ? '可搜索并勾选多个父类。点击「应用选择」保存到草案；未声明父类时为顶层类。'
+        : '可搜索并勾选多个实体类型。点击「应用选择」保存到草案；清空后表示未限定。'));
+      const picker = el('details', 'om-type-picker'), caption = el('summary');
+      const search = el('input', 'om-type-search');search.type = 'search';search.placeholder = '搜索实体类型';
+      search.setAttribute('aria-label', '搜索' + labelText);
+      const list = el('div', 'om-type-options');list.setAttribute('role', 'group');list.setAttribute('aria-label', labelText);
+      const empty = el('p', 'om-detail-inline-empty', '没有匹配的实体类型');empty.hidden = true;
+      let baseline = new Set(currentIris || []), chosen = new Set(baseline), busy = false;
+      const choices = [...options];
+      // Unknown or retired declarations remain selected until explicitly unchecked.
+      for (const iri of baseline) if (!choices.some(option => option.id === iri))
+        choices.push({id:iri,text:labelOfIri(iri,summary)});
+      const controls = [], apply = el('button', 'om-btn primary', '应用选择');apply.type = 'button';
+      const reset = el('button', 'om-btn ghost', '重置');reset.type = 'button';
+      const clear = el('button', 'om-btn ghost', '清空选择');clear.type = 'button';
+      const message = el('p', 'om-type-message');message.hidden = true;message.setAttribute('role','alert');
+      function sync() {
+        const changed = chosen.size !== baseline.size || [...chosen].some(iri => !baseline.has(iri));
+        caption.textContent = chosen.size ? `已选 ${chosen.size} 项 · ` + [...chosen].slice(0,2).map(iri=>labelOfIri(iri,summary)).join('、')
+          : kind === 'class' ? '暂无父类 · 选择父类' : '未限定 · 选择类型';
+        apply.disabled = busy || !changed;reset.disabled = busy || !changed;clear.disabled = busy || !chosen.size;
+        search.disabled = busy;controls.forEach(({input})=>{input.disabled=busy;input.checked=chosen.has(input.value);});
+        picker.setAttribute('aria-busy',String(busy));
+      }
+      choices.forEach(option => {
+        const label = el('label', 'om-type-option'), input = el('input');
+        input.type = 'checkbox';input.value = option.id;input.checked = chosen.has(option.id);
+        input.addEventListener('change', () => {
+          input.checked ? chosen.add(option.id) : chosen.delete(option.id);message.hidden=true;sync();
+        });
+        label.append(input,el('span',null,option.text));list.append(label);controls.push({input,label,text:option.text+' '+option.id});
       });
-      // 下拉新增：已声明的类不再列出（避免重复添加）
-      const addHost = el('div', 'om-ce-add');
-      const sel = el('select', 'om-ce-select');
-      const blank = el('option', null, '选一个类…'); blank.value = ''; sel.append(blank);
-      options.filter(o => !cur.includes(o.id)).forEach(o => {
-        const opt = el('option', null, o.text); opt.value = o.id; sel.append(opt);
+      search.addEventListener('input', () => {
+        const query = search.value.trim().toLocaleLowerCase();let visible=0;
+        controls.forEach(item=>{item.label.hidden=!item.text.toLocaleLowerCase().includes(query);if(!item.label.hidden)visible++;});
+        empty.hidden=visible>0;
       });
-      const addBtn = el('button', 'om-btn secondary', '添加');
-      addBtn.type = 'button'; addBtn.disabled = true;
-      sel.addEventListener('change', () => { addBtn.disabled = !sel.value; });
-      addBtn.addEventListener('click', () => {
-        if (sel.value) void runCmd({ action: addAction, target_iri: term.id, value: sel.value });
+      clear.addEventListener('click',()=>{chosen.clear();sync();});
+      reset.addEventListener('click',()=>{chosen=new Set(baseline);message.hidden=true;sync();});
+      const project = activeProject();
+      apply.addEventListener('click', async () => {
+        if (apply.disabled || busy) return;
+        if (activeProject()!==project || S().preview || S().selected!==term.id) return;
+        const commands = [...baseline].filter(iri=>!chosen.has(iri)).map(value=>({action:removeAction,target_iri:term.id,value}));
+        for (const value of chosen) if (!baseline.has(value)) commands.push({action:addAction,target_iri:term.id,value});
+        if (!commands.length) return;
+        busy=true;message.hidden=true;sync();
+        try {
+          await model().sendCommand({action:'batch',commands});
+          baseline=new Set(chosen);showParents([...baseline]);showEndpoint(addAction,[...baseline]);status('类型选择已写入草案，审核发布后生效。');
+        } catch(error) {
+          message.textContent=error?.message||'保存失败，请重试';message.hidden=false;
+        } finally {busy=false;sync();}
       });
-      addHost.append(sel, addBtn);
-      row.append(curHost, addHost);
+      const actions = el('div','om-type-actions');actions.append(clear,reset,apply);
+      picker.append(caption,search,list,empty,actions,message);row.append(picker);sync();
       return row;
     }
 
@@ -760,11 +874,11 @@
 
     if (kind === 'relation') {
       body.append(
-        linkRow('domain 主体类', term.domain, 'add_domain', 'remove_domain'),
-        linkRow('range 客体类', term.range, 'add_range', 'remove_range'));
+        linkRow('主体类型', term.domain, 'add_domain', 'remove_domain'),
+        linkRow('客体类型', term.range, 'add_range', 'remove_range'));
     } else if (kind === 'attribute') {
       body.append(
-        linkRow('所属类 domain', term.domain, 'add_domain', 'remove_domain'),
+        linkRow('所属类型', term.domain, 'add_domain', 'remove_domain'),
         datatypeRow());
     } else {
       body.append(linkRow('父类（继承）', term.parents, 'add_parent', 'remove_parent'));
@@ -779,14 +893,14 @@
     if (cls.description) box.append(el('p', 'om-detail-desc', cls.description));
 
     const own = attributes.filter(a => (a.domain || []).includes(cls.id));
-    box.append(section('属性（带数据类型）', own.length,
+    box.append(section('属性', own.length,
       own.map(a => termRow('attr', help().label(a), dtypeLabel(a), a.id)),
-      '做什么：列出以这个类为 domain 的实体属性及数据类型。不做什么：这里只读，改属性请回画布（走草案命令）。'));
+      '此类直接声明的属性及数据类型。点击属性名称可查看或编辑。'));
 
     const rels = relations.filter(r => (r.domain || []).includes(cls.id));
-    box.append(section('允许的关系类型（domain → range）', rels.length,
+    box.append(section('允许的关系', rels.length,
       rels.map(r => termRow('rel', help().label(r), endpointText(r, summary), r.id)),
-      '做什么：列出这个类可以作为 domain 的关系类型及其 range。不做什么：不判断实例是否合法，校验由服务端做。'));
+      '当前类型作为主体的关系。点击关系名称，可选择主体和客体的类型限制。实例合法性由服务端校验。'));
 
     box.append(rulesSection(cls));
     // 内联编辑父类（继承）；已发布本体下自动开草案
@@ -795,7 +909,7 @@
     const parents = cls.parents || [];
     const children = classes.filter(c => (c.parents || []).includes(cls.id)).map(c => c.id);
     const related = el('div', 'om-detail-sec');
-    related.append(el('h5', 'om-detail-title', `相关对象（${parents.length + children.length}）`));
+    related.append(detailTitle(`上下位类型（${parents.length + children.length}）`, '当前类型的直接父类与子类。点击名称可定位到对应节点。'));
     if (parents.length || children.length) {
       const ul = el('ul', 'om-detail-rows');
       parents.forEach(p => ul.append(termRow('cls', '父类：' + labelOfIri(p, summary), null, p)));
@@ -804,8 +918,6 @@
     } else {
       related.append(el('p', 'om-detail-inline-empty', '（没有父类和子类）'));
     }
-    related.append(el('p', 'om-detail-note',
-      '做什么：给出与本类直接相连的上下位对象（来自当前本体结构）。不做什么：这里不是实例数据，不列出属于这个类的具体知识条目。'));
     box.append(related);
 
     box.append(retireSection(cls));
@@ -817,21 +929,19 @@
     box.append(detailHead('关系类型', 'rel', rel, rel.id));
     if (rel.description) box.append(el('p', 'om-detail-desc', rel.description));
 
-    const dom = rel.domain || [];
-    box.append(section('domain（主体类）', dom.length,
-      dom.map(d => termRow('cls', labelOfIri(d, summary), null, d)),
-      '做什么：这个关系允许的主语类型。不做什么：不展开继承——子类能否使用由服务端推理决定。'));
-
-    const rng = rel.range || [];
-    box.append(section('range（客体类）', rng.length,
-      rng.map(g => termRow('cls', labelOfIri(g, summary), null, g)),
-      '做什么：这个关系允许的宾语类型。不做什么：不校验实例两端是否匹配。'));
+    if (S().preview) {
+      const dom = rel.domain || [], rng = rel.range || [];
+      box.append(section('主体类型', dom.length,
+        dom.map(d => termRow('cls', labelOfIri(d, summary), null, d)),
+        '关系起点的类型（domain）。继承与实例匹配由服务端推理校验。'));
+      box.append(section('客体类型', rng.length,
+        rng.map(g => termRow('cls', labelOfIri(g, summary), null, g)),
+        '关系终点的类型（range）。历史版本保持本版定义。'));
+    } else box.append(constraintEditSection(rel, 'relation', summary));
 
     // 两端为空 = 画布上画不出这条关系线。这里给出"为什么没有"和"怎么补"，
     // 而不是让用户对着一条空关系猜（这正是"关系没办法显示"的直接解法）。
     box.append(endpointsSection(rel, summary));
-    // 内联增删 domain / range（约束编辑）
-    box.append(constraintEditSection(rel, 'relation', summary));
 
     box.append(rulesSection(rel));
     box.append(retireSection(rel));
@@ -844,13 +954,13 @@
     if (attr.description) box.append(el('p', 'om-detail-desc', attr.description));
 
     const dom = attr.domain || [];
-    box.append(section('domain（所属类）', dom.length,
+    box.append(section('所属类型', dom.length,
       dom.map(d => termRow('cls', labelOfIri(d, summary), null, d)),
-      '做什么：这个属性挂在哪类实体上。'));
+      '此属性所属的实体类型（domain）。'));
 
-    box.append(section('数据类型（datatype）', 1,
+    box.append(section('数据类型', 1,
       [termRow('attr', dtypeLabel(attr), help().dtypeOf(attr) || '未限定')],
-      '做什么：这个属性填的数据类型。不做什么：不做取值校验，也不改类型（改类型走下面的约束编辑 set_datatype）。'));
+      '属性值的数据类型，例如文本、整数或日期。在下方选择器中修改，发布后生效。'));
 
     // 内联改所属类 + 数据类型（约束编辑）
     box.append(constraintEditSection(attr, 'attribute', summary));

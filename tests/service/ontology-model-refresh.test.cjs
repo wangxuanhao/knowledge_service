@@ -62,6 +62,15 @@ function fixture(options = {}) {
     switchProject: value => { context.current = value; } };
 }
 
+test('selecting from any model entry point focuses the canvas after rendering, but term cards do not move it',()=>{
+  const events=[],f=fixture({withRoot:true,canvas:{mount(){},render(){events.push('render');},focus(iri){events.push(iri);}}});
+  f.model.S.summary={classes:[{id:'urn:A'}],relations:[],attributes:[]};
+  f.model.S.view='types';f.model.select('urn:A');
+  assert.deepEqual(events.slice(-2),['render','urn:A']);
+  events.length=0;f.model.S.view='cards';f.model.select('urn:A');
+  assert.deepEqual(events,['render']);
+});
+
 test('review eligibility is available while publication readiness is still loading',async()=>{
   let release;const f=fixture({waitForReadiness:new Promise(done=>release=done),reviewPlan:{revision:2,items:[{auto_approvable:true}]}});
   f.model.S.draft={id:'new',revision:2,submitted_at:'now'};

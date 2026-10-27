@@ -142,10 +142,20 @@
         body.textContent='正在读取…';
         const suffix=name==='assertions'?'/assertions?document_id='+encodeURIComponent(id):name==='runs'?'/ingest-runs?document_id='+encodeURIComponent(id):'/records/'+encodeURIComponent(id)+'/history';
         try{
+          // A run describes ingestion; later review/publication updates source assertions.
+          const confirmation=name==='runs'?api('/api/projects/'+encodeURIComponent(project)+'/assertions?document_id='+encodeURIComponent(id)+'&status=accepted',undefined,'GET').catch(()=>null):null;
           const result=await api('/api/projects/'+encodeURIComponent(project)+suffix,undefined,'GET');
           if(!accepts())return;
           if(name==='assertions')renderAssertions(result.assertions||[],project);
-          else if(name==='runs')renderRuns(result.runs||result.items||[],doc,project);
+          else if(name==='runs'){
+            const status=renderRuns(result.runs||result.items||[],doc,project),facts=await confirmation;
+            if(!accepts())return;
+            if(!Array.isArray(facts?.assertions))status.textContent='该资料事实入图状态暂未核验，请到「提取知识」重试查看。';
+            else{
+              const confirmed=new Set(facts.assertions.filter(row=>row.document_id===id&&row.status==='accepted'&&['entity','relation','attribute'].includes(row.kind)&&row.canonical_record_id).map(row=>row.canonical_record_id));
+              status.textContent=confirmed.size?'该资料已确认入图事实：'+confirmed.size+' 条（按当前来源断言核验）。不代表全部候选已入图或派生索引已同步。':'该资料尚无已确认入图事实。本体版本发布与资料事实入图需分别核验。';
+            }
+          }
           else renderHistory(result.versions||[]);
         }catch(error){if(accepts())body.textContent='读取失败：'+error.message;}
       };tabs.append(button);
@@ -167,7 +177,7 @@
   const detailNode=(tag,text,css='')=>{const element=document.createElement(tag);if(text!==undefined)element.textContent=text;if(css)element.className=css;return element;};
   const detailStates={queued:'等待处理',running:'处理中',processing:'处理中',completed:'处理结束',ready:'处理完成',failed:'处理失败',interrupted:'已中断'};
   const detailStages={document:'保存原文',parse:'文档解析',parsing:'文档解析',ocr:'图片文字识别',chunking:'切片',keyword:'关键词索引',semantic:'语义索引',extraction:'知识抽取',extracting:'知识抽取',discovery:'开放发现',merging:'知识融合',validating:'知识校验',committing:'保存结果',completed:'流程结束',failed:'处理失败'};
-  const readinessLabels={document_ready:'原文',keyword_ready:'关键词检索',semantic_ready:'语义检索',candidate_ready:'候选生成',graph_ready:'正式图谱'};
+  const readinessLabels={document_ready:'原文',keyword_ready:'关键词检索',semantic_ready:'语义检索',candidate_ready:'候选生成',graph_ready:'当次入图'};
   const displayTime=value=>{const date=value?new Date(value):null;return date&&Number.isFinite(date.getTime())?date.toLocaleString('zh-CN',{hour12:false}):'时间未记录';};
   function rawData(value,label){
     const details=detailNode('details',undefined,'source-raw-data');details.open=false;
@@ -181,22 +191,24 @@
     item.append(heading);
   }
   function renderRuns(rows,doc,project){
-    body.replaceChildren(detailNode('p','处理记录说明每次解析、切片和抽取的执行情况。重试属于新的尝试；流程结束不代表所有检索或图谱能力都已就绪。','source-detail-intro'));
-    if(!Array.isArray(rows)||!rows.length){body.append(detailNode('p','暂无独立处理记录。结构化导入的正文或旧资料可能没有解析运行记录。','source-detail-empty'));return;}
+    body.replaceChildren(detailNode('p','下方记录各次解析、切片和抽取的当次结果；后续本体发布或事实确认不会改写这些历史状态。重试属于新的尝试，流程结束不代表派生索引已同步。','source-detail-intro'));
+    const status=detailNode('p','正在核验该资料已确认入图的事实…','source-detail-intro source-graph-status');status.setAttribute('aria-live','polite');body.append(status);
+    if(!Array.isArray(rows)||!rows.length){body.append(detailNode('p','暂无独立处理记录。结构化导入的正文或旧资料可能没有解析运行记录。','source-detail-empty'));return status;}
     for(const run of [...rows].reverse()){
       const item=detailNode('article',undefined,'source-activity source-processing-run');item.dataset.runId=run.id;
       activityHeading(item,'处理记录 · '+displayTime(run.created_at),run.status);
       const facts=[run.attempt?'同一原文版本第 '+run.attempt+' 次尝试':'',run.active_stage?'阶段：'+(detailStages[run.active_stage]||run.active_stage):'阶段未记录'];
       item.append(detailNode('p',facts.filter(Boolean).join(' · '),'source-activity-meta'));
       const metrics=detailNode('dl',undefined,'source-run-metrics');
-      for(const [key,label] of [['chunks_total','切片总数'],['chunks_failed','失败切片'],['records_accepted','写入记录'],['assertions_pending','待审核计数']]){
+      for(const [key,label] of [['chunks_total','切片总数'],['chunks_failed','失败切片'],['records_accepted','当次写入记录'],['assertions_pending','当次待审核计数']]){
         if(run.counts?.[key]==null)continue;const cell=detailNode('div');cell.append(detailNode('dt',label),detailNode('dd',run.counts[key]));metrics.append(cell);
       }
       if(metrics.children.length)item.append(metrics);
-      const readiness=detailNode('div',undefined,'source-readiness');
+      const readiness=detailNode('div',undefined,'source-readiness');readiness.setAttribute('aria-label','当次处理结果');
       for(const [key,label] of Object.entries(readinessLabels)){
         if(typeof run.readiness?.[key]!=='boolean')continue;
-        const chip=detailNode('span',label+'：'+(run.readiness[key]?'就绪':'尚未就绪'));chip.dataset.ready=String(run.readiness[key]);readiness.append(chip);
+        const value=key==='graph_ready'?(run.readiness[key]?'已完成':'未直接入图'):(run.readiness[key]?'就绪':'尚未就绪');
+        const chip=detailNode('span',label+'：'+value);chip.dataset.ready=String(run.readiness[key]);readiness.append(chip);
       }
       if(readiness.children.length)item.append(readiness);
       if(run.failure){const failure=typeof run.failure==='string'?run.failure:run.failure.message||'本次处理未成功，详见原始数据。';item.append(detailNode('p',failure,'source-activity-error'));}
@@ -213,6 +225,7 @@
       }
       item.append(rawData(run,'查看本次处理数据'));body.append(item);
     }
+    return status;
   }
   function sameValue(left,right){
     if(left===right)return true;

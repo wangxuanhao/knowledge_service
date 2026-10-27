@@ -258,17 +258,22 @@
 
   // A searchable native select, not an internal record ID input.
   const select=get('mindmap-root');
-  select.parentElement.before(make('label','<span>筛选名称 / 类型</span><input id="mindmap-filter" placeholder="输入名称缩小候选范围">'));
+  select.parentElement.before(make('label','<span>搜索实体</span><input id="mindmap-filter" placeholder="搜索实体名称、别名或类型">','mindmap-filter-control'));
+  let mindmapView=null;
+  get('mindmap-zoom-in').onclick=()=>mindmapView?.zoom(1.2);
+  get('mindmap-zoom-out').onclick=()=>mindmapView?.zoom(1/1.2);
+  get('mindmap-reset-view').onclick=()=>mindmapView?.reset();
   const mindmap=EntityMindmap.createController({getProject:()=>current,
     getScope:()=>({...window.WorkspaceContext?.read(current,'search')||scope(),...ontologyScope()}),
     ticket:()=>window.WorkspaceContext?.ticket(current,'search'),accepts:ticket=>!ticket||window.WorkspaceContext.accepts(ticket,current,'search'),api,
     prepare:row=>{ui.pinned.set(row.id,row);ui.mindmapRootId=row.id;choices();select.value=row.id;window.KnowledgeTabs.open('mindmap');},
     render:result=>{
       if(!wb.tree)wb.tree=echarts.init(get('mindmap-canvas'));
-      const convert=node=>({name:node.text+(node.predicate?' · '+labelOf(node.predicate):''),id:node.id,children:(node.children||[]).map(convert)});
-      wb.tree.setOption({tooltip:{formatter:p=>esc(p.name)},series:[{type:'tree',data:[convert(result.tree)],top:'8%',left:'20%',bottom:'8%',right:'20%',symbolSize:9,roam:true,expandAndCollapse:true,initialTreeDepth:1,
-        label:{position:'right',align:'left',width:170,overflow:'truncate',fontSize:11},leaves:{label:{position:'right',align:'left',width:170,overflow:'truncate',fontSize:11}}}]},true);wb.tree.resize();
-      get('mindmap-summary').textContent=result.truncated?'当前脑图已达邻域或分支预算，仅展示部分结果；可减小深度或更换根实体。':'当前根实体的有界脑图 · 点击分支展开或收起 · 最多 500 个树节点';
+      if(!mindmapView)mindmapView=EntityMindmapView.create({chart:wb.tree,host:get('mindmap-canvas'),
+        summary:get('mindmap-summary'),empty:get('mindmap-empty'),zoomLabel:get('mindmap-zoom-level'),
+        buttons:{in:get('mindmap-zoom-in'),out:get('mindmap-zoom-out'),reset:get('mindmap-reset-view')},
+        labelOf,colorFor:type=>GraphPalette.colorFor(type)});
+      mindmapView.render(result);
       renderDiscoveryHint().catch(()=>{});
     }});
   window.openEntityMindmap=row=>mindmap.open(row,get('mindmap-depth').value).catch(error=>status(error.message,true));
@@ -297,7 +302,8 @@
   }
   for(const target of ['graph','mindmap']){
     const prefix=target==='graph'?'graph':'mindmap',choice=target==='graph'?'graph-entity-choice':'mindmap-root';
-    get(choice).after(make('div',`<div><button type="button" id="${prefix}-choice-first" class="secondary">首页</button><button type="button" id="${prefix}-choice-prev" class="secondary" disabled>上一页</button><button type="button" id="${prefix}-choice-next" class="secondary" disabled>下一页</button></div><span id="${prefix}-choice-status" class="subtle" role="status" aria-live="polite"></span>`,'entity-picker-pagination'));
+    const pagination=make('div',`<div><button type="button" id="${prefix}-choice-first" class="secondary">首页</button><button type="button" id="${prefix}-choice-prev" class="secondary" disabled>上一页</button><button type="button" id="${prefix}-choice-next" class="secondary" disabled>下一页</button></div><span id="${prefix}-choice-status" class="subtle" role="status" aria-live="polite"></span>`,'entity-picker-pagination');
+    if(target==='mindmap')get('mindmap-picker-footer').append(pagination);else get(choice).after(pagination);
     const filter=target==='graph'?'graph-entity-filter':'mindmap-filter',state=()=>target==='graph'?ui.picker:ui.mindmapPicker;
     get(prefix+'-choice-first').onclick=()=>loadEntityChoices(get(filter).value,null,target).catch(error=>status(error.message,true));
     get(prefix+'-choice-prev').onclick=()=>{const picker=state();if(picker.page>1)loadEntityChoices(picker.query,picker.pages[picker.page-2],target).catch(error=>status(error.message,true));};
@@ -703,7 +709,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
   window.clearGraphWorkspace=({preserveSearchResults=false}={})=>{
     GraphWorkbench.clear();
     graphRequests.invalidate();invalidatePendingDetail();
-    ui.pinned.clear();ui.picker.request++;ui.mindmapPicker.request++;ui.mindmapRootId='';mindmap.invalidate();
+    ui.pinned.clear();ui.picker.request++;ui.mindmapPicker.request++;ui.mindmapRootId='';mindmap.invalidate();mindmapView?.clear();
     wb.epoch++;ui.graph=null;wb.nodes.clear();wb.chart?.dispatchAction({type:'hideTip'});wb.chart?.clear();
     selectedEntityId='';get('graph-node').value='';get('graph-entity-choice').value='';get('graph-detail').replaceChildren();
     get('graph-summary').textContent='从左侧检索结果选择实体或关系';

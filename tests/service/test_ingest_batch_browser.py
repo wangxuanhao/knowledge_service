@@ -92,7 +92,7 @@ def test_batch_card_paginates_and_uses_selected_retry_mode(tmp_path):
                 route.fulfill(content_type='text/html', body='<select id="project"><option value="p">p</option></select><select id="ingest-concurrency"></select><div id="ingest-batches"></div>')
         page.route('http://browser.test/**', respond)
         page.goto('http://browser.test/')
-        page.evaluate('window.status=()=>{}')
+        page.evaluate('window.status=()=>{}; window.Auth={isAdmin:()=>true}')
         page.add_style_tag(path=str(WEB / 'ingest-batches.css'))
         page.add_script_tag(path=str(WEB / 'ingest-batches.js'))
         page.evaluate("IngestBatches.monitor('p',{id:'b'})")
@@ -104,8 +104,8 @@ def test_batch_card_paginates_and_uses_selected_retry_mode(tmp_path):
         page.get_by_role('button', name='下一页').click()
         page.get_by_role('button', name='回到首页').wait_for()
         assert any('cursor=next' in path for path, _ in calls)
-        page.get_by_role('button', name='只重试失败切片', exact=True).click()
-        page.wait_for_timeout(100)
-        assert any('/items/i/retry' in path and json.loads(body)['mode'] == 'retry_failed_chunks' for path, body in calls if body)
+        with page.expect_request(lambda request: '/items/i/retry' in request.url) as retry_request:
+            page.get_by_role('button', name='只重试失败切片', exact=True).click()
+        assert retry_request.value.post_data_json['mode'] == 'retry_failed_chunks'
         page.screenshot(path=str(tmp_path / 'ingest-batches.png'))
         browser.close()

@@ -145,6 +145,7 @@
         'text-valign': 'center', 'text-halign': 'center',
         'text-wrap': 'ellipsis', 'text-max-width': (NODE_W - 20) + 'px',
         'text-margin-y': 0,
+        'z-index-compare': 'manual', 'z-index': 6,
       } },
       { selector: 'node[display="cards"]', style: {
         'label':'', 'background-image':'data(cardImage)', 'background-fit':'contain',
@@ -177,11 +178,14 @@
         'target-arrow-color': C.cyan, 'target-arrow-shape': 'data(targetArrow)',
         'source-arrow-shape':'data(sourceArrow)', 'source-arrow-color':C.teal, 'arrow-scale': 1.05,
         'line-cap': 'round',
+        'z-index-compare': 'manual', 'z-index': 4,
       } },
       // 布局仍存父→子；空心 source 箭头朝父类表达 rdfs:subClassOf。
       { selector: 'edge[kind="inherit"]', style: {
-        'line-color': C.teal, 'line-style': 'dashed', 'source-arrow-fill':'hollow',
-        'label':'继承','color':'#83917f','font-size':10,'text-background-color':'#fdfefc','text-background-opacity':1,'text-background-padding':3,
+        'line-color': '#6c8770', 'line-style': 'dashed', 'source-arrow-fill':'hollow',
+        'width': 2.2, 'curve-style': 'taxi', 'taxi-direction': 'downward',
+        'taxi-turn': '45%', 'taxi-turn-min-distance': 24,
+        'label':'继承','color':'#637c65','font-size':11,'text-background-color':'#fdfefc','text-background-opacity':1,'text-background-padding':3,
       } },
       // 业务关系沿 domain→range，使用实心 target 箭头。
       { selector: 'edge[kind="relation"]', style: {
@@ -197,6 +201,14 @@
         'line-color': C.amber, 'line-style': 'dashed', 'target-arrow-color': C.amber,
       } },
       { selector: 'edge:selected', style: { 'overlay-opacity': 0 } },
+      { selector: '.is-muted', style: { 'opacity': .16 } },
+      { selector: 'node.is-neighbor', style: { 'border-color': '#8cae98', 'border-width': 2, 'z-index': 10 } },
+      { selector: 'edge.is-traced', style: {
+        'opacity': 1, 'width': 3, 'line-color': C.cyan,
+        'source-arrow-color': C.cyan, 'target-arrow-color': C.cyan,
+        'color': C.ink, 'font-size': 12, 'z-index': 12,
+      } },
+      { selector: 'node.is-focus', style: { 'opacity': 1, 'border-color': C.cyan, 'border-width': 3, 'z-index': 14 } },
     ];
   }
 
@@ -270,12 +282,23 @@
       const cw = (el && el.clientWidth) || 950, ch = (el && el.clientHeight) || 740;
       // 节点宽高比约 4:1；要让网格外接框比例 ≈ 容器比例 r，则 cols/rows ≈ r·(NODE_H/NODE_W)。
       const cols = Math.max(2, Math.round(Math.sqrt(Math.max(1, n) * (cw / ch) * (NODE_H / NODE_W))));
-      cy.layout({
+      const grid = {
         name: 'grid', fit: true, padding: 46, cols: cols, condense: false,
         avoidOverlap: true, avoidOverlapPadding: 14,
         // 按名字排序，与左栏清单同序，用户好对照。
         sort: (a, b) => String(a.data('label') || '').localeCompare(String(b.data('label') || '')),
-      }).run();
+      };
+      const inheritance = cy.edges().filter(edge => edge.data('kind') === 'inherit');
+      if (inheritance.length) {
+        cy.nodes().union(inheritance).layout({
+          name: 'breadthfirst', directed: true, fit: false, padding: 46,
+          spacingFactor: 1.35, avoidOverlap: true, animate: false,
+        }).run();
+        // Many independent roots (or a broad sibling level) must wrap, rather
+        // than shrinking every card into one horizontal strip to fit the view.
+        const bounds = cy.nodes().boundingBox();
+        if (bounds.w / Math.max(1, bounds.h) > (cw / ch) * 2.5) cy.layout(grid).run();
+      } else cy.layout(grid).run();
       done = true;
     } catch (e) { done = false; }
     if (!done) {
@@ -418,6 +441,7 @@
     // A previous selection may still be centering its node. The explicit
     // layout owns the viewport now; that animation must not restore its zoom.
     M.cy.stop(true, false);
+    traceSelection(null);
     M.layoutView = M.view;
     if (M.view === 'hierarchy') layoutHierarchy();
     else layoutGraph();
@@ -553,6 +577,7 @@
   function fitAll() {
     if (!M.cy) return;
     M.cy.stop(true, false);
+    traceSelection(null);
     const eles = M.cy.elements();
     if (!eles.length) return;
     try {
@@ -653,6 +678,8 @@
     if (M.mode || M.pending) {
       cancelLink();
       status('已退出连线模式，没有改动草案。');
+    } else if (M.ctx && typeof M.ctx.select === 'function') {
+      M.ctx.select(null);
     }
   }
 
@@ -784,7 +811,7 @@
     btnCancel.hidden = true;
 
     bar.append(stats, hint, btnParent, btnRelation, btnFit, btnLayout, btnCancel);
-    const help = mkEl('div', 'om-canvas-help', '点节点选中 · 拖节点调整位置 · 拖空白平移 · 滚轮缩放；布局仅在当前视图保留，不修改本体。');
+    const help = mkEl('div', 'om-canvas-help', '点击聚焦并追踪直接关系 · 拖动调整位置 · 滚轮缩放 · 点击空白取消聚焦');
     stage.appendChild(help);
     stage.appendChild(bar);
     Object.assign(M.els, { bar, stats, hint, btnParent, btnRelation, btnCancel });
@@ -990,6 +1017,7 @@
     // 否则增量插入的默认坐标会把所有类堆成一条横线。
     const firstNodes = cy.nodes().length === 0 && M.graph.nodes.length > 0;
     applyElements(M.graph);
+    traceSelection(M.selected);
     updateEmpty();
     updateBar();
 
@@ -1026,20 +1054,56 @@
     M.display=mode==='compact'?'compact':'cards';
     if(!M.cy)return;
     applyElements(M.graph);
+    traceSelection(M.selected);
     if(M.view==='hierarchy')refreshHierarchyBands();
     syncBands();
   }
 
+  // Selection styling follows authored adjacency only; refreshing data must not move the camera.
+  function traceSelection(iri) {
+    const cy = M.cy;
+    if (!cy) return null;
+    const node = iri ? cy.getElementById(iri).filter('node') : cy.collection();
+    let edges = iri ? cy.edges().filter(edge => edge.data('termIri') === iri) : cy.collection();
+    let anchors = node;
+    if (node.length) edges = node.connectedEdges();
+    if (!node.length && !edges.length && iri) {
+      const attr = M.ctx?.S?.summary?.attributes?.find(term => term.id === iri);
+      anchors = cy.nodes().filter(item => (attr?.domain || []).includes(item.id()));
+    }
+    if (!anchors.length && edges.length) anchors = edges.connectedNodes();
+    const neighbors = edges.connectedNodes().difference(anchors);
+    const visible = anchors.union(neighbors).union(edges);
+    cy.batch(() => {
+      cy.elements().removeClass('is-focus is-neighbor is-traced is-muted');
+      if (!visible.length) return;
+      cy.elements().difference(visible).addClass('is-muted');
+      anchors.addClass('is-focus');neighbors.addClass('is-neighbor');edges.addClass('is-traced');
+    });
+    return anchors;
+  }
+
   function focus(iri) {
     const cy = M.cy;
-    if (!cy || !iri) return;
-    const node = cy.getElementById(iri);
-    if (!node || !node.length) return;
-    try {
-      cy.animate({ center: { eles: node }, zoom: Math.max(cy.zoom(), 1.1), duration: 300 });
-    } catch (e) {
-      try { cy.center(node); } catch (e2) { /* 忽略 */ }
-    }
+    if (!cy || !iri || M.suspended) return;
+    const anchors = traceSelection(iri);
+    if (!anchors?.length) return;
+    cy.stop(true, false);
+    cy.resize();
+    const box = anchors.boundingBox(), stage = M.stage;
+    let width = stage.clientWidth || 950;
+    const height = stage.clientHeight || 740;
+    // A narrow-screen inspector overlays the graph. Center in the part still visible.
+    const panel = document.getElementById?.('om-inspector-shell');
+    const panelBox = panel?.getBoundingClientRect?.(), stageBox = stage.getBoundingClientRect?.();
+    if (panelBox?.width && stageBox && panelBox.left - stageBox.left >= NODE_W + 64 && panelBox.left < stageBox.right)
+      width = panelBox.left - stageBox.left;
+    const zoom = Math.max(Number.EPSILON, Math.min(1.15, (width - 64) / Math.max(1, box.w), (height - 150) / Math.max(1, box.h)));
+    cy.minZoom(Math.min(MIN_ZOOM, zoom));
+    const pan = { x: width / 2 - (box.x1 + box.w / 2) * zoom,
+      y: (height - Math.max(60, M.els.bar?.offsetHeight || 0)) / 2 - (box.y1 + box.h / 2) * zoom };
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { cy.zoom(zoom);cy.pan(pan); }
+    else cy.animate({ pan, zoom }, { duration: 260, queue: false });
     syncBands();
   }
 

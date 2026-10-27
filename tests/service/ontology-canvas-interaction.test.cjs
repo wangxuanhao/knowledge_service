@@ -77,6 +77,70 @@ test('canvas retains contextual connections with one generic creation menu elsew
   assert.ok(f.button('新增关联关系'));
 });
 
+test('focus traces only direct connections and clears when the selection is removed',t=>{
+  const graph={nodes:['a','b','c','d'].map(id=>({id,label:id})),edges:[
+    {id:'ab',source:'a',target:'b',kind:'inherit'},
+    {id:'bc',source:'b',target:'c',kind:'relation',termIri:'urn:rel'},
+  ]};
+  const f=fixture('graph',graph,{styleEnabled:true,measuredViewport:true});t.after(()=>f.canvas.destroy());
+  f.canvas.focus('a');
+  assert.ok(f.cy.$id('a').hasClass('is-focus'));
+  assert.ok(f.cy.$id('ab').hasClass('is-traced'));
+  assert.ok(f.cy.$id('b').hasClass('is-neighbor'));
+  assert.ok(f.cy.$id('c').hasClass('is-muted'));
+  assert.ok(Number(f.cy.$id('ab').style('z-index'))>Number(f.cy.$id('c').style('z-index')),
+    'the active inheritance line must stay visible above unrelated cards');
+  f.canvas.focus('urn:rel');
+  assert.ok(f.cy.$id('bc').hasClass('is-traced'));
+  assert.ok(f.cy.$id('a').hasClass('is-muted'));
+  f.canvas.render({graph,view:'graph',selected:null});
+  assert.equal(f.cy.elements('.is-muted, .is-focus, .is-traced, .is-neighbor').length,0);
+});
+
+test('rapid focus changes center the latest node and fit cancels focus without moving cards',async t=>{
+  const f=fixture('graph',undefined,{styleEnabled:true,measuredViewport:true});t.after(()=>f.canvas.destroy());
+  f.cy.$id('a').position({x:-800,y:300});f.cy.$id('b').position({x:900,y:700});
+  f.canvas.focus('a');f.canvas.focus('b');
+  await new Promise(resolve=>setTimeout(resolve,380));
+  const point=f.cy.$id('b').renderedPosition(),stage=f.host.children[0];
+  assert.ok(Math.abs(point.x-stage.clientWidth/2)<2);
+  assert.ok(Math.abs(point.y-stage.clientHeight/2)<60);
+  const before=f.cy.nodes().map(n=>({...n.position()}));
+  f.button('适应画布').listeners.click();
+  assert.equal(f.cy.elements('.is-muted').length,0);
+  assert.deepEqual(f.cy.nodes().map(n=>({...n.position()})),before);
+});
+
+test('focusing distant relationship endpoints fits both anchors below the normal wheel zoom limit',async t=>{
+  const graph={nodes:[{id:'a'},{id:'b'}],edges:[{id:'ab',source:'a',target:'b',kind:'relation',termIri:'r'}]};
+  const f=fixture('graph',graph,{styleEnabled:true,measuredViewport:true});t.after(()=>f.canvas.destroy());
+  f.cy.$id('a').position({x:10000,y:400});f.cy.$id('b').position({x:20000,y:400});
+  f.canvas.focus('r');await new Promise(resolve=>setTimeout(resolve,340));
+  assert.ok(f.cy.zoom()<.25);
+  for(const node of f.cy.nodes()){
+    const box=node.renderedBoundingBox();
+    assert.ok(box.x1>=0&&box.x2<=950,'both declared endpoints remain visible');
+  }
+});
+
+test('one inheritance edge cannot collapse many independent classes into an unreadable strip',t=>{
+  const graph={nodes:Array.from({length:42},(_,i)=>({id:`n${i}`,label:`类型 ${i}`})),
+    edges:[{id:'inherit',source:'n0',target:'n1',kind:'inherit'}]};
+  const f=fixture('graph',graph,{styleEnabled:true,measuredViewport:true});t.after(()=>f.canvas.destroy());
+  assert.ok(f.cy.zoom()>.35,'a partially modeled ontology retains readable card sizes');
+  assert.ok(new Set(f.cy.nodes().map(node=>node.position('y'))).size>2,'independent roots wrap into rows');
+});
+
+test('an inspector covering almost the entire graph keeps focus centered for when it closes',async t=>{
+  const measuredElement=tag=>({...element(tag),getBoundingClientRect(){return {left:0,right:950,width:950};}});
+  const f=fixture('graph',undefined,{styleEnabled:true,measuredViewport:true,globals:{document:{
+    createElement:measuredElement,createElementNS:(_,tag)=>measuredElement(tag),
+    getElementById:()=>({getBoundingClientRect:()=>({left:20,width:930})}),
+  }}});t.after(()=>f.canvas.destroy());
+  f.canvas.focus('a');await new Promise(resolve=>setTimeout(resolve,340));
+  assert.ok(Math.abs(f.cy.$id('a').renderedPosition('x')-475)<2);
+});
+
 test('incremental additions and repeated view selection preserve dragged positions and viewport', t => {
   const f = fixture(); t.after(() => f.canvas.destroy());
   f.cy.$id('a').position({ x: 421, y: 319 });
