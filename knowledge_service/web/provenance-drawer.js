@@ -30,6 +30,7 @@
       if(own(key)&&typeof item[key]==='string')result[key]=item[key].slice(0,500);
     }
     if(typeof item.answer_eligible==='boolean')result.answer_eligible=item.answer_eligible;
+    if(typeof item.document_quote_allowed==='boolean')result.document_quote_allowed=item.document_quote_allowed;
     if(Array.isArray(item.exclusion_reasons))result.exclusion_reasons=item.exclusion_reasons.filter(value=>typeof value==='string').slice(0,20).map(value=>value.slice(0,500));
     if(Array.isArray(item.source_eligibility))result.source_eligibility=item.source_eligibility.slice(0,20).flatMap(source=>{
       if(!source||typeof source!=='object')return [];

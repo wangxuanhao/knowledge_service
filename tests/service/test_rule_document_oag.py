@@ -4,15 +4,45 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 import pytest
 from knowledge_service.api import create_app
+from knowledge_service.domain.search_filter_catalog import default_catalog
 from knowledge_service.integrations.embeddings import HashingEncoder
 from knowledge_service.models import Question
+from knowledge_service.repository.scoped_reads import ScopedReads
 from knowledge_service.services.answers import answer_messages
 
 AS_OF = '2025-01-01T00:00:00Z'
 
+
+def _ready_keyword_index(service, monkeypatch):
+    """Replace the external index with a synchronously updated fixture index.
+
+    QA still pins a current generation and runs real PostgreSQL authority,
+    temporal eligibility, and provenance reads. Only native keyword ranking
+    uses the local SQL implementation instead of requiring a Milvus server.
+    """
+    repo = service.repository
+
+    def selected_index(project, _schema):
+        return {'index_version': 1, 'watermark': repo.projections.project_watermark(project),
+                'catalog': default_catalog().to_dict(), 'dim': service.encoder.dimension,
+                'embedding_model': service.encoder.identity}
+
+    def search(project, query, *, kinds, k, scope, platform_match=None, **options):
+        assert options['retrieval_mode'] == 'keyword'
+        rows = ScopedReads(repo).ranked_keyword(
+            project, {**scope, '_platform_match': platform_match}, query,
+            kinds=kinds, limit=min(k, 100))
+        return [{'record_id': row['id'], 'version_id': row['version_id'], 'score': row['score']}
+                for row in rows]
+
+    monkeypatch.setattr(repo.projections, 'search_index', selected_index)
+    monkeypatch.setattr(service, 'milvus_store', SimpleNamespace(available=True, search=search))
+
+
 @pytest.fixture
-def qa(tmp_path):
+def qa(tmp_path, monkeypatch):
     service = create_app(tmp_path / 'rules.sqlite', encoder=HashingEncoder()).state.service
+    _ready_keyword_index(service, monkeypatch)
     repo = service.repository
     return service, repo, repo.create_project('rule-documents')['id']
 
@@ -284,8 +314,9 @@ def test_specific_platform_cannot_quote_unknown_platform_original(qa):
 
 
 @pytest.mark.parametrize('milvus_state', ['missing', 'unavailable'])
-def test_hybrid_question_requires_available_milvus(tmp_path, milvus_state):
+def test_hybrid_question_requires_available_milvus(tmp_path, monkeypatch, milvus_state):
     app = create_app(tmp_path / 'hybrid-required.sqlite', encoder=HashingEncoder())
+    _ready_keyword_index(app.state.service, monkeypatch)
     with TestClient(app) as client:
         service = app.state.service
         repo = service.repository

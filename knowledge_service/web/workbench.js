@@ -490,10 +490,15 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
   const transcript=$c('qa-transcript'),hero=$c('qa-hero'),input=$c('qa-query'),send=$c('qa');
   const progress=$c('qa-progress'),summary=$c('qa-summary'),live=$c('qa-live');
   let serial=0,busy=false,composing=false,controller=null,evidenceSerial=0;
-  // ── 会话记录持久化：localStorage 按项目隔离，刷新后恢复，清空按钮删除 ──
+  let sessionManager=null,preparing=false;
+  // Server conversations own production history; isolated legacy fixtures use local storage.
   const historyKey=()=>'kg_qa_v1_'+current;
   let qaHistory=(()=>{try{const v=JSON.parse(localStorage.getItem(historyKey()));return Array.isArray(v)?v:[];}catch{return [];}})();
-  const persist=()=>{try{localStorage.setItem(historyKey(),JSON.stringify(qaHistory));}catch{}};
+  const persist=()=>{
+    const project=current,ticket=serial;
+    if(sessionManager){sessionManager.save(qaHistory).catch(error=>{if(project===current&&ticket===serial)summary.textContent='会话尚未保存：'+error.message;});return;}
+    try{localStorage.setItem(historyKey(),JSON.stringify(qaHistory));}catch{}
+  };
   const evidenceSummary=rows=>(Array.isArray(rows)?rows:[]).map(row=>
     provenance.sanitizeEvidenceSummary({...row,text_preview:row?.text_preview??row?.text}));
   const answerContext=item=>({projectId:current,answerId:item.answer_id,evidence:['evidence','uncertain_references','historical_references','future_references'].flatMap(key=>item[key]||[])});
@@ -513,6 +518,19 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       +(row.metadata?.published_at?' · 发布：'+row.metadata.published_at:'')
       +(row.validity_basis?' · 判定依据：'+(basisLabels[row.validity_basis]||row.validity_basis):'')
       +(row.metadata?.effective_time_source?' · 时间来源：'+(basisLabels[row.metadata.effective_time_source]||row.metadata.effective_time_source):'');
+  };
+  const exclusionText=row=>{
+    const labels={source_validity:'来源文档有效期未通过核对',unknown:'有效性待核对',
+      missing_valid_from:'未维护生效时间',missing_exact_source:'缺少可核对的原文版本',
+      published_at:'仅有发布日期，尚未确认生效时间',invalid_interval:'生效时间不早于失效时间',
+      expired:'已失效',valid_until:'已到失效时间',not_yet_effective:'尚未生效',
+      valid_from:'尚未到生效时间',conflict:'有效性信息存在冲突'};
+    if(row.validity_status==='unknown'&&(row.source_eligibility||[]).some(source=>!source.valid_from)){
+      labels.source_validity='来源文档未维护生效时间';
+    }
+    const reasons=[...new Set((row.exclusion_reasons||[]).map(reason=>labels[reason]||reason))];
+    return '未作为已确认有效规则依据的原因：'+reasons.join('；')
+      +(row.usage==='qualified_quote'||row.document_quote_allowed===true?'；可用于文档说明。':'');
   };
   function addSourceEligibility(article,row){
     for(const source of row.source_eligibility||[]){
@@ -555,8 +573,9 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     else{const answer=document.createElement('div');answer.className='qa-answer';answer.dataset.answer='';turn.append(answer);}
     transcript.append(turn);hero.hidden=true;atEnd();return turn;
   }
-  function loadHistory(){
-    try{const v=JSON.parse(localStorage.getItem(historyKey()));qaHistory=Array.isArray(v)?v:[];}catch{qaHistory=[];}
+  function loadHistory(messages){
+    if(Array.isArray(messages))qaHistory=messages;
+    else if(!sessionManager){try{const v=JSON.parse(localStorage.getItem(historyKey()));qaHistory=Array.isArray(v)?v:[];}catch{qaHistory=[];}}
     transcript.replaceChildren();
     qaHistory.forEach(item=>{
       const turn=addTurn(item.kind,item.kind==='user'?item.text:'');if(item.kind==='user'&&item.scope)addScopeNote(turn,item.scope);
@@ -585,27 +604,44 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     if(qaHistory.length)atEnd();
   }
   function addEvidence(turn,payload){
-    const rows=Array.isArray(payload?.evidence)?payload.evidence:[];
+    let rows=Array.isArray(payload?.evidence)?payload.evidence:[];
     const pendingCount=payload?.structure_pending?.count||0;
     const platformGroups=Array.isArray(payload?.platform_groups)?payload.platform_groups:[];
     // 以前"没有证据"就整块不渲染；现在还要看有没有结构待定的知识 —— 有就得说出来，
     // 否则用户看到的就是"问答没反应"，而真相是"有知识、但概念还没建模"。
-    const references=referenceKinds.map(([key,title])=>({key,title,items:Array.isArray(payload?.[key])?payload[key]:[]}));
+    let references=referenceKinds.map(([key,title])=>({key,title,items:Array.isArray(payload?.[key])?payload[key]:[]}));
     const warnings=Array.isArray(payload?.coverage_warnings)?payload.coverage_warnings:[];
+    const presentation=window.QaPresentation,expansion=payload?.ontology_expansion;
+    const offered=[...rows,...references.flatMap(group=>group.items)];
+    const expansionEnabled=!!(expansion&&typeof expansion==='object'&&!Array.isArray(expansion))
+      ||offered.some(row=>presentation?.isExpansionRow?.(row));
+    let supplementalRows=[],supplementalReferences=[];
+    if(expansionEnabled){
+      const partition=presentation.partitionExpansion(offered);
+      const direct=new Set(partition.direct),supplemental=new Set(partition.supplemental),seen=new Set();
+      const take=(items,selected)=>items.filter(row=>{
+        if(!selected.has(row)||seen.has(row))return false;
+        seen.add(row);return true;
+      });
+      supplementalRows=take(rows,supplemental);rows=take(rows,direct);
+      supplementalReferences=references.map(group=>({...group,items:take(group.items,supplemental)}));
+      references=references.map(group=>({...group,items:take(group.items,direct)}));
+    }
     const referenceCount=references.reduce((sum,group)=>sum+group.items.length,0);
-    if(!rows.length&&!pendingCount&&!platformGroups.length&&!referenceCount&&!warnings.length&&!payload?.as_of)return;
+    if(!rows.length&&!pendingCount&&!platformGroups.length&&!referenceCount&&!warnings.length&&!payload?.as_of&&!expansionEnabled)return;
     const panelId='qa-evidence-'+(++evidenceSerial),block=document.createElement('div');block.className='qa-evidence-block';
     const toggle=document.createElement('button');
     toggle.type='button';toggle.className='qa-evidence-toggle secondary';
     toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-controls',panelId);
     const counts=rows.length+' 条回答依据'+(referenceCount?' · '+referenceCount+' 条独立参考':'')+(pendingCount?' · '+pendingCount+' 条结构待定':'');
-    toggle.textContent='查看 '+counts;
+    toggle.textContent=(expansionEnabled?'直接命中 · ':'查看 ')+counts;
     const panel=document.createElement('div');panel.className='qa-evidence-panel';panel.id=panelId;panel.hidden=true;
+    if(expansionEnabled)panel.dataset.expansionGroup='direct';
     // 这块面板用户反馈"看不懂 E1/E2 是什么、下面这些为什么要展示"。它其实是
     // 模型回答的输入清单，所以先给一段说明，再列条目。
     const note=document.createElement('div');note.className='qa-evidence-note';
     for(const line of [
-      '[E1] [E2] … 是这条答案里的引用编号：证据从 E1 开始按检索顺序编号，答案正文里的 [E1] 就指下面第 1 条。点编号可以看它的完整溯源链（原文 → 记录版本 → 断言 → 审核决定）。',
+      expansionEnabled?'[E1] [E2] … 是这条答案里的引用编号：分组展示沿用答案生成时的编号，不会重新编号。点编号可以看它的完整溯源链（原文 → 记录版本 → 断言 → 审核决定）。':'[E1] [E2] … 是这条答案里的引用编号：证据从 E1 开始按检索顺序编号，答案正文里的 [E1] 就指下面第 1 条。点编号可以看它的完整溯源链（原文 → 记录版本 → 断言 → 审核决定）。',
       'E 为本次时点的回答依据；历史 R、未来 F、有效性待核对 U 在下方单列，不计入已确认有效的依据。缺少属性不影响合格原文查询。',
       '规则判断使用 E 依据；文档说明可以引用带状态标识的原文，不代表当前有效规则。点引用查看回答生成时冻结的原文与记录版本。',
     ]){const p=document.createElement('p');p.textContent=line;note.append(p);}
@@ -650,82 +686,109 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       panel.append(reasonBlock);
     }
     const projectId=current,answerId=payload.answer_id;
-    for(const [rowIndex,row] of rows.entries()){
-      const article=document.createElement('article');article.className='qa-evidence-item';
-      article.hidden=rowIndex>=3;
-      const citation=provenance.sanitizeEvidenceSummary(row).citation;
-      const link=document.createElement(answerId&&citation?'button':'b');
-      link.className='qa-citation';link.textContent='['+(row.citation||'')+']';
-      if(answerId&&citation){
-        link.type='button';link.className+=' secondary provenance-citation';
-        link.setAttribute('aria-label','查看引用 '+citation+' 的证据溯源');
-        link.onclick=()=>provenance.open({projectId,answerId,citation,trigger:link});
+    let supplement=null;
+    if(expansionEnabled){
+      supplement=document.createElement('section');supplement.className='qa-ontology-supplement';supplement.dataset.expansionGroup='supplemental';
+      const heading=document.createElement('h4');heading.className='ontology-result-heading';heading.textContent='本体扩展补充';supplement.append(heading);
+      const pathSummary=presentation.expansionSummary(expansion);
+      if(pathSummary){const line=document.createElement('p');line.className='ontology-result-summary';line.textContent=pathSummary;supplement.append(line);}
+      const used=Number.isSafeInteger(expansion?.used_hits)&&expansion.used_hits>=0?expansion.used_hits:null;
+      const supplementalReferenceCount=supplementalReferences.reduce((sum,group)=>sum+group.items.length,0);
+      const offeredCount=document.createElement('p');offeredCount.className='ontology-result-summary';
+      offeredCount.textContent=(used===null?'检索补入数未记录':'检索补入 '+used+' 条')+' · 本回答展示 '+supplementalRows.length+' 条回答依据 · '+supplementalReferenceCount+' 条独立参考';
+      supplement.append(offeredCount);
+      if(!supplementalRows.length&&!supplementalReferenceCount){
+        const empty=document.createElement('p');empty.className='ontology-result-empty';
+        empty.textContent=used>0?'检索补入 '+used+' 条，本回答没有可展示的扩展依据或参考；补入结果未进入本次回答的依据与独立参考清单。'
+          :expansion?.matched===false?'未匹配到可扩展的实体或已发布类名，本次没有扩展依据或参考。'
+          :used===0?(expansion?.type_hits>0?'已有类型候选，本次检索未补入新的结果；本回答没有可展示的扩展依据或参考。':'未检索到可补入的类型结果，本回答没有可展示的扩展依据或参考。')
+          :'本回答没有可展示的扩展依据或参考；这条记录未保存检索补入数量。';
+        supplement.append(empty);
       }
-      const excerpt=document.createElement('p');excerpt.textContent=row.text_preview??row.text??'';
-      const meta=document.createElement('p');meta.className='qa-evidence-meta subtle';
-      const applicability=window.ApplicabilityUI?.describe?.(row);
-      meta.textContent=(row.kind||'')+' · '+(labelOf(row.type)||'—')+' · 版本 '+(row.version??'—')+(applicability?' · '+applicability:'');
-      article.append(link,excerpt,meta);
-      if(row.validity_status){const validity=document.createElement('p');validity.className='qa-validity subtle';validity.textContent=validityText(row);article.append(validity);}
-      addSourceEligibility(article,row);
-      const sources=Array.isArray(row.sources)?row.sources:[];
-      if(sources.length){
-        const sourceBox=document.createElement('div');sourceBox.className='qa-source-list';
-        sources.forEach((source,sourceIndex)=>{
-          const sourceItem=document.createElement('section');sourceItem.className='qa-source-item';sourceItem.hidden=sourceIndex>0;
-          const title=document.createElement('b');title.textContent=source.title||source.document_id||'历史原文';
-          const quote=document.createElement('p');quote.textContent=(source.quote||'').slice(0,240);
-          const sourceMeta=document.createElement('p');sourceMeta.className='qa-evidence-meta subtle';
-          const sourceApplicability=window.ApplicabilityUI?.describe?.(source);
-          sourceMeta.textContent='文档版本 '+(source.version??'—')+' · '+(source.channel||row.retrieval_channel||'冻结来源')+(sourceApplicability?' · '+sourceApplicability:'');
-          sourceItem.append(title,quote,sourceMeta);sourceBox.append(sourceItem);
-        });
-        if(sources.length>1){
-          const more=document.createElement('button');more.type='button';more.className='qa-source-more secondary';
-          more.textContent='另有 '+(sources.length-1)+' 个来源';more.setAttribute('aria-expanded','false');
-          more.onclick=()=>{const open=more.getAttribute('aria-expanded')==='true';[...sourceBox.querySelectorAll('.qa-source-item')].slice(1).forEach(node=>node.hidden=open);more.setAttribute('aria-expanded',String(!open));more.textContent=open?'另有 '+(sources.length-1)+' 个来源':'收起其他来源';};
-          sourceBox.append(more);
+    }
+    const evidenceGroups=[{target:panel,items:rows},...(supplement?[{target:supplement,items:supplementalRows}]:[])];
+    for(const evidenceGroup of evidenceGroups){
+      const target=evidenceGroup.target,evidenceRows=evidenceGroup.items;
+      for(const [rowIndex,row] of evidenceRows.entries()){
+        const article=document.createElement('article');article.className='qa-evidence-item';
+        article.hidden=rowIndex>=3;
+        const citation=provenance.sanitizeEvidenceSummary(row).citation;
+        const link=document.createElement(answerId&&citation?'button':'b');
+        link.className='qa-citation';link.textContent='['+(row.citation||'')+']';
+        if(answerId&&citation){
+          link.type='button';link.className+=' secondary provenance-citation';
+          link.setAttribute('aria-label','查看引用 '+citation+' 的证据溯源');
+          link.onclick=()=>provenance.open({projectId,answerId,citation,trigger:link});
         }
-        article.append(sourceBox);
-      }else{
-        const missing=document.createElement('p');missing.className='qa-source-missing subtle';
-        missing.textContent='原文状态：'+(row.source_reason||'手工录入或历史来源缺失')+'（未使用当前版本补写）';article.append(missing);
-      }
-      const seed=row.kind==='entity'?row.id:(row.kind==='relation'?row.subject_id:'');
-      const actions=document.createElement('div');actions.className='row';
-      if(seed){const button=document.createElement('button');button.type='button';button.dataset.evidenceNode=seed;button.textContent='在图谱中查看';actions.append(button);}
-      if(row.provenance_ref&&answerId){const button=frozenCitation(row,projectId,answerId);button.textContent='查看冻结原文';actions.append(button);}
-      if(actions.childElementCount)article.append(actions);
-      panel.append(article);
-    }
-    if(rows.length>3){
-      const more=document.createElement('button');more.type='button';more.className='qa-evidence-more secondary';
-      more.textContent='再看 '+(rows.length-3)+' 条依据';more.setAttribute('aria-expanded','false');
-      more.onclick=()=>{const open=more.getAttribute('aria-expanded')==='true';[...panel.querySelectorAll('.qa-evidence-item')].slice(3).forEach(node=>node.hidden=open);more.setAttribute('aria-expanded',String(!open));more.textContent=open?'再看 '+(rows.length-3)+' 条依据':'收起其余依据';};
-      panel.append(more);
-    }
-    for(const group of references){
-      if(!group.items.length)continue;
-      const section=document.createElement('section');section.className='qa-reference-section';section.dataset.referenceKind=group.key;
-      const heading=document.createElement('h4');heading.textContent=group.title+' · '+group.items.length+' 条';section.append(heading);
-      for(const row of group.items){
-        const article=document.createElement('article');article.className='qa-reference-item';
         const excerpt=document.createElement('p');excerpt.textContent=row.text_preview??row.text??'';
-        const use=document.createElement('p');use.className='qa-reference-usage';
-        use.textContent=row.usage==='qualified_quote'?'仅用于文档说明，未作为已确认有效规则依据':'未参与本次回答';
         const meta=document.createElement('p');meta.className='qa-evidence-meta subtle';
-        meta.textContent=platformText(row)+' · '+validityText(row)+' · 记录版本：'+(row.version_id||row.version||'—');
-        article.append(frozenCitation(row,projectId,answerId),excerpt,use,meta);
+        const applicability=window.ApplicabilityUI?.describe?.(row);
+        meta.textContent=(row.kind||'')+' · '+(labelOf(row.type)||'—')+' · 版本 '+(row.version??'—')+(applicability?' · '+applicability:'')+(presentation?.isExpansionRow?.(row)?' · 类型扩展':'');
+        article.append(link,excerpt,meta);
+        if(row.validity_status){const validity=document.createElement('p');validity.className='qa-validity subtle';validity.textContent=validityText(row);article.append(validity);}
         addSourceEligibility(article,row);
-        if(row.exclusion_reasons?.length){const reasons=document.createElement('p');reasons.className='qa-reference-exclusions subtle';reasons.textContent='排除原因：'+row.exclusion_reasons.join('、');article.append(reasons);}
-        for(const source of row.sources||[]){
-          const sourceLine=document.createElement('p');sourceLine.className='qa-source-item subtle';
-          sourceLine.textContent=(source.title||source.document_id||'冻结原文')+' · 文档版本：'+(source.document_version_id||source.record_version_id||source.version||'—')+' · '+(source.quote||'');article.append(sourceLine);
+        const sources=Array.isArray(row.sources)?row.sources:[];
+        if(sources.length){
+          const sourceBox=document.createElement('div');sourceBox.className='qa-source-list';
+          sources.forEach((source,sourceIndex)=>{
+            const sourceItem=document.createElement('section');sourceItem.className='qa-source-item';sourceItem.hidden=sourceIndex>0;
+            const title=document.createElement('b');title.textContent=source.title||source.document_id||'历史原文';
+            const quote=document.createElement('p');quote.textContent=(source.quote||'').slice(0,240);
+            const sourceMeta=document.createElement('p');sourceMeta.className='qa-evidence-meta subtle';
+            const sourceApplicability=window.ApplicabilityUI?.describe?.(source);
+            sourceMeta.textContent='文档版本 '+(source.version??'—')+' · '+(source.channel||row.retrieval_channel||'冻结来源')+(sourceApplicability?' · '+sourceApplicability:'');
+            sourceItem.append(title,quote,sourceMeta);sourceBox.append(sourceItem);
+          });
+          if(sources.length>1){
+            const more=document.createElement('button');more.type='button';more.className='qa-source-more secondary';
+            more.textContent='另有 '+(sources.length-1)+' 个来源';more.setAttribute('aria-expanded','false');
+            more.onclick=()=>{const open=more.getAttribute('aria-expanded')==='true';[...sourceBox.querySelectorAll('.qa-source-item')].slice(1).forEach(node=>node.hidden=open);more.setAttribute('aria-expanded',String(!open));more.textContent=open?'另有 '+(sources.length-1)+' 个来源':'收起其他来源';};
+            sourceBox.append(more);
+          }
+          article.append(sourceBox);
+        }else{
+          const missing=document.createElement('p');missing.className='qa-source-missing subtle';
+          missing.textContent='原文状态：'+(row.source_reason||'手工录入或历史来源缺失')+'（未使用当前版本补写）';article.append(missing);
         }
-        if(!row.provenance_ref||!answerId){const missing=document.createElement('p');missing.className='qa-source-missing subtle';missing.textContent='冻结来源不可用，无法打开历史原文（未使用当前版本补写）';article.append(missing);}
-        section.append(article);
+        const seed=row.kind==='entity'?row.id:(row.kind==='relation'?row.subject_id:'');
+        const actions=document.createElement('div');actions.className='row';
+        if(seed){const button=document.createElement('button');button.type='button';button.dataset.evidenceNode=seed;button.textContent='在图谱中查看';actions.append(button);}
+        if(row.provenance_ref&&answerId){const button=frozenCitation(row,projectId,answerId);button.textContent='查看冻结原文';actions.append(button);}
+        if(actions.childElementCount)article.append(actions);
+        target.append(article);
       }
-      panel.append(section);
+      if(evidenceRows.length>3){
+        const more=document.createElement('button');more.type='button';more.className='qa-evidence-more secondary';
+        more.textContent='再看 '+(evidenceRows.length-3)+' 条依据';more.setAttribute('aria-expanded','false');
+        more.onclick=()=>{const open=more.getAttribute('aria-expanded')==='true';[...target.querySelectorAll('.qa-evidence-item')].slice(3).forEach(node=>node.hidden=open);more.setAttribute('aria-expanded',String(!open));more.textContent=open?'再看 '+(evidenceRows.length-3)+' 条依据':'收起其余依据';};
+        target.append(more);
+      }
+    }
+    const referenceGroups=[{target:panel,groups:references},...(supplement?[{target:supplement,groups:supplementalReferences}]:[])];
+    for(const referenceGroup of referenceGroups){
+      for(const group of referenceGroup.groups){
+        if(!group.items.length)continue;
+        const section=document.createElement('section');section.className='qa-reference-section';section.dataset.referenceKind=group.key;
+        const heading=document.createElement('h4');heading.textContent=group.title+' · '+group.items.length+' 条';section.append(heading);
+        for(const row of group.items){
+          const article=document.createElement('article');article.className='qa-reference-item';
+          const excerpt=document.createElement('p');excerpt.textContent=row.text_preview??row.text??'';
+          const use=document.createElement('p');use.className='qa-reference-usage';
+          use.textContent=row.usage==='qualified_quote'||row.document_quote_allowed===true?'仅用于文档说明，未作为已确认有效规则依据':'未参与本次回答';
+          const meta=document.createElement('p');meta.className='qa-evidence-meta subtle';
+          meta.textContent=platformText(row)+' · '+validityText(row)+' · 记录版本：'+(row.version_id||row.version||'—')+(presentation?.isExpansionRow?.(row)?' · 类型扩展':'');
+          article.append(frozenCitation(row,projectId,answerId),excerpt,use,meta);
+          addSourceEligibility(article,row);
+          if(row.exclusion_reasons?.length){const reasons=document.createElement('p');reasons.className='qa-reference-exclusions subtle';reasons.textContent=exclusionText(row);article.append(reasons);}
+          for(const source of row.sources||[]){
+            const sourceLine=document.createElement('p');sourceLine.className='qa-source-item subtle';
+            sourceLine.textContent=(source.title||source.document_id||'冻结原文')+' · 文档版本：'+(source.document_version_id||source.record_version_id||source.version||'—')+' · '+(source.quote||'');article.append(sourceLine);
+          }
+          if(!row.provenance_ref||!answerId){const missing=document.createElement('p');missing.className='qa-source-missing subtle';missing.textContent='冻结来源不可用，无法打开历史原文（未使用当前版本补写）';article.append(missing);}
+          section.append(article);
+        }
+        referenceGroup.target.append(section);
+      }
     }
     /* C1「结构待定」：这些知识**不是证据**（它们的类型还没进本体），但也不能让它们凭空消失 ——
        用户问的东西可能正好落在它们身上，那就必须显式说出来，并说清"为什么不算、去哪儿补"。
@@ -754,11 +817,12 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
         }
         block.append(article);
       }
-      if(!rows.length)toggle.textContent='查看 '+pending.count+' 条结构待定的知识';
+      if(!expansionEnabled&&!rows.length)toggle.textContent='查看 '+pending.count+' 条结构待定的知识';
       panel.append(block);
     }
     toggle.onclick=()=>{const open=toggle.getAttribute('aria-expanded')==='true';toggle.setAttribute('aria-expanded',String(!open));panel.hidden=open;toggle.textContent=(open?'查看 ':'收起 ')+counts;};
-    panel.querySelectorAll('[data-evidence-node]').forEach(node=>{node.onclick=async()=>{
+    block.append(toggle,panel);if(supplement)block.append(supplement);
+    block.querySelectorAll('[data-evidence-node]').forEach(node=>{node.onclick=async()=>{
       // 这次跳转由我们指定"看这个实体"，别让进入检索页的自动补画再抢一次画布：
       // 那条路径会先清空图谱再发全图请求，把刚选中的实体冲掉（契约用例抓到过）。
       window.suppressNextAutoGraph?.();
@@ -766,7 +830,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       try{await window.selectEntityDetail(node.dataset.evidenceNode);}catch(error){status(error.message,true);}
       $c('graph-heading')?.focus();
     };});
-    panel.querySelectorAll('[data-evidence-source]').forEach(node=>{node.onclick=async()=>{
+    block.querySelectorAll('[data-evidence-source]').forEach(node=>{node.onclick=async()=>{
       // P0（2026-10-04）：原文数据源并入「知识写入」，侧栏独立入口已移除；溯源落点待 P1 接入
       // 「知识写入」页的"看解析正文"区。期间点来源按钮不再跳 sources（会 null.click 崩），
       // 改为明确提示，避免静默失效。
@@ -775,7 +839,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       sourceTab.click();
       try{await window.selectSource?.(node.dataset.evidenceSource);}catch(error){status(error.message,true);}
         };});
-    block.append(toggle,panel);turn.append(block);atEnd();
+    turn.append(block);atEnd();
   }
   function addFailure(turn,message,replay){
     if(/Milvus|语义|索引|维度/.test(message)){const notice=$c('qa-notice'),text=$c('qa-notice-text');if(notice&&text){text.textContent=message;notice.hidden=false;}}
@@ -787,7 +851,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     box.append(text,retry);turn.append(box);retry.focus();atEnd();
   }
   async function stream(body,turn,historyIndex=qaHistory.length){
-    if(busy)return;
+    if(busy||preparing||sessionManager?.loading||sessionManager?.state.conflict)return;
     try{window.ScopeFields.requireRetrievalScope(body);}
     catch(error){summary.textContent=error.message;progress.textContent='';return;}
     // Chat owns its cancellation generation. A graph repaint is not a change
@@ -822,6 +886,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       if(item.event==='evidence'){
         window.WorkspaceContext?.requireRetrievalMode(body.retrieval_mode,item.data);
         capture(item.data);record.evidence=evidenceSummary(item.data?.evidence);
+        if(item.data?.ontology_expansion)record.ontology_expansion=JSON.parse(JSON.stringify(item.data.ontology_expansion));
         for(const [key] of referenceKinds)if(Array.isArray(item.data?.[key]))record[key]=evidenceSummary(item.data[key]);
         for(const key of ['as_of','known_at'])if(typeof item.data?.[key]==='string')record[key]=item.data[key];
         if(Array.isArray(item.data?.coverage_warnings))record.coverage_warnings=item.data.coverage_warnings.slice(0,100);
@@ -832,9 +897,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
         }));
         // C1：结构待定的知识单列，不进证据清单 —— 但历史重绘时要原样恢复（否则切一次标签就"消失"）。
         record.structure_pending=item.data?.structure_pending||null;
-        const channels=item.data?.channels||{};
-        summary.textContent='实体证据 '+(channels.entity??0)+' · 原文证据 '+(channels.chunk??0)+' · 图关系证据 '+(channels.graph_evidence??0)
-          +(item.data?.structure_pending?.count?' · 结构待定 '+(item.data.structure_pending.count)+' 条（不算证据）':'');
+        summary.textContent=item.data?.structure_pending?.count?'另有 '+item.data.structure_pending.count+' 条资料待确认，未用于回答。':'';
         addEvidence(target,{...item.data,answer_id:record.answer_id});
         progress.textContent=body.generate&&record.evidence.length?'模型正在组织答案…':'正在整理检索结果…';
         showRetrievalNotice(item.data);
@@ -885,31 +948,46 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       record.text=text;record.error=emsg;persist();
       addFailure(target,emsg,()=>stream(body,target,historyIndex));
     }finally{
-      if(mine===serial){busy=false;controller=null;send.disabled=false;if(!failed&&project===current)input.focus();}
+      if(mine===serial){busy=false;controller=null;send.disabled=!!(sessionManager?.loading||sessionManager?.state.conflict);if(!failed&&project===current)input.focus();}
     }
   }
-  function submit(){
-    if(busy)return;
+  async function submit(){
+    if(busy||preparing||sessionManager?.loading||sessionManager?.state.conflict)return;
     const query=input.value.trim();if(!query)return;
     const asOf=$c('qa-as-of')?.value;
     const body={...scope(),valid_at:asOf?new Date(asOf).toISOString():(scope().valid_at||null),include_references:$c('qa-include-references')?.checked??true,
-      query,generate:$c('generate').checked,retrieval_mode:$c('qa-mode')?.value||'hybrid',k_entities:5,k_chunks:5};
+      query,generate:$c('generate').checked,retrieval_mode:$c('qa-mode')?.value||'hybrid',
+      ontology_expansion:$c('qa-ontology-expansion')?.checked??false,k_entities:5,k_chunks:5};
     try{window.ScopeFields.requireRetrievalScope(body);}
     catch(error){summary.textContent=error.message;progress.textContent='';return;}
-    addScopeNote(addTurn('user',query),scope());qaHistory.push({kind:'user',text:query,scope:scope(),project_id:current});persist();input.value='';
+    const project=current,ticket=serial;preparing=true;send.disabled=true;
+    try{
+      if(sessionManager)await sessionManager.ensureActive();
+      if(project!==current||ticket!==serial)return;
+      addScopeNote(addTurn('user',query),scope());qaHistory.push({kind:'user',text:query,scope:scope(),project_id:current});input.value='';
+      // A failed save must not race a stream401 that would navigate away from a draft.
+      if(sessionManager)await sessionManager.save(qaHistory);else persist();
+      if(project!==current||ticket!==serial)return;
+    }catch(error){if(project===current&&ticket===serial)summary.textContent='会话尚未保存：'+error.message;return;}
+    finally{if(project===current&&ticket===serial){preparing=false;send.disabled=busy||!!(sessionManager?.loading||sessionManager?.state.conflict);}}
     stream(body);
   }
   window.clearKnowledgeChat=({notify=false,clearPersist=false}={})=>{
+    if(sessionManager&&clearPersist){sessionManager.requestClear().catch(()=>{});return;} // The controller reports errors in the active conversation.
     const had=transcript.childElementCount>0;
     provenance.onProjectChange(current);
-    serial++;busy=false;controller?.abort();controller=null;
+    serial++;busy=false;preparing=false;controller?.abort();controller=null;
     transcript.replaceChildren();live.textContent='';progress.textContent='';summary.textContent='';
+    if(sessionManager){
+      sessionManager.setProject(current).catch(error=>{summary.textContent=error.message;});
+      return;
+    }
     if(clearPersist){try{localStorage.removeItem(historyKey());}catch{}}
     loadHistory();
     send.disabled=false;
     if(notify&&had)summary.textContent='范围已变化，已清空当前会话。';
   };
-  document.addEventListener('workspace:scope-changed',event=>{if(event.detail.page!=='qa')return;serial++;controller?.abort();controller=null;busy=false;send.disabled=false;progress.textContent='';summary.textContent='筛选已更新，仅影响下一次提问；已有回答保留提交时范围。';});
+  document.addEventListener('workspace:scope-changed',event=>{if(event.detail.page!=='qa')return;serial++;controller?.abort();controller=null;busy=false;preparing=false;send.disabled=!!(sessionManager?.loading||sessionManager?.state.conflict);progress.textContent='';summary.textContent='筛选已更新，仅影响下一次提问；已有回答保留提交时范围。';});
   $c('qa-composer').addEventListener('submit',event=>{event.preventDefault();submit();});
   $c('qa-clear')?.addEventListener('click',()=>window.clearKnowledgeChat({clearPersist:true,notify:true}));
   // Milvus failure is explicit; keyword remains a user-selected independent mode.
@@ -941,13 +1019,27 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       btn.disabled=false;
     }
   });
-  loadHistory();
+  if(window.QaConversations){
+    sessionManager=window.QaConversations.mount({
+      getProject:()=>current,getActor:()=>window.Auth?.user()?.id||'auth-disabled',getMessages:()=>qaHistory,
+      onBeforeChange:()=>{
+        serial++;busy=false;controller?.abort();controller=null;preparing=false;provenance.close(false);
+        transcript.replaceChildren();live.textContent='';progress.textContent='';summary.textContent='';
+      },
+      onActivate:messages=>loadHistory(messages),
+      onState:state=>{send.disabled=busy||preparing||state.loading||state.conflict;},
+      onError:message=>{summary.textContent=message;}
+    });
+    if(sessionManager)sessionManager.setProject(current).catch(error=>{summary.textContent=error.message;});
+    else loadHistory();
+  }else loadHistory();
   // ── 自定义下拉：原生 select 的展开面板无法用 CSS 美化，这里用 div 组件替换视觉层 ──
   // 原生 select 保留在 DOM 里（hidden 仅隐藏视觉），submit 仍读 $c('qa-mode').value；
   // 选中后同步 select.value 并派发 change，保持与既有 value 读取/事件契约一致。
   enhanceSelect($c('qa-mode'));
   function enhanceSelect(select){
     if(!select||select.dataset.enhanced)return;
+    if(select.closest?.('#qa-settings'))return;
     select.dataset.enhanced='1';
     const wrap=document.createElement('div');wrap.className='ks-select';
     const trigger=document.createElement('button');trigger.type='button';trigger.className='ks-select-trigger';
@@ -998,11 +1090,19 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     if(composing||event.isComposing||event.keyCode===229)return;
     event.preventDefault();submit();
   });
-  // Keep the composer inside the viewport on narrow screens and above a soft keyboard.
+  $c('qa-app-menu-toggle')?.addEventListener('click',event=>{
+    const button=event.currentTarget,expanded=button.getAttribute('aria-expanded')!=='true';
+    button.setAttribute('aria-expanded',String(expanded));
+    button.closest('aside')?.classList.toggle('qa-nav-open',expanded);
+    fit();
+  });
+  // Keep the composer inside the viewport at every width and above a soft keyboard.
   function fit(){
     const page=$c('qa-page');if(!page)return;
     const viewport=window.visualViewport,height=viewport?viewport.height:window.innerHeight,offsetTop=viewport?viewport.offsetTop:0;
-    page.style.setProperty('--qa-fit',Math.max(0,Math.floor(height+offsetTop-page.getBoundingClientRect().top-10))+'px');
+    const main=document.querySelector('body>main'),bottomPadding=main?parseFloat(getComputedStyle(main).paddingBottom)||0:0;
+    page.style.setProperty('--qa-fit',Math.max(0,Math.floor(height+offsetTop-page.getBoundingClientRect().top-Math.max(10,bottomPadding)))+'px');
+    $c('qa-workspace')?.style.setProperty('--qa-fit',page.style.getPropertyValue('--qa-fit'));
     page.style.setProperty('--qa-keyboard-inset',Math.max(0,Math.round(window.innerHeight-height-offsetTop))+'px');
   }
   window.addEventListener('resize',fit);

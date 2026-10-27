@@ -57,7 +57,8 @@ class AnswerEvidence:
             **purpose,
             'citation': citation,
             'record_version_id': row.get('version_id'),
-            'retrieval_channel': retrieval.get('requested_mode'),
+            'retrieval_channel': (row['retrieval_channel'] if row.get('retrieval_channel') in {'ontology_entity_type', 'ontology_type'}
+                                  else retrieval.get('requested_mode')),
             'ranker_version': retrieval.get('ranker_version'),
             'evidence_text': row.get('text_preview') or row.get('text') or '',
             'applicability': (row.get('metadata') or {}).get('applicability'),

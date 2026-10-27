@@ -79,13 +79,39 @@ def cached_query_vector(encoder, query, cache=None):
         return encoder.encode([query])[0]
     lock = cache.get('lock')
     if lock is None:
-        if 'vector' not in cache:
-            cache['vector'] = encoder.encode([query])[0]
-        return cache['vector']
+        vectors = cache.setdefault('vectors', {})
+        if query not in vectors:
+            vectors[query] = encoder.encode([query])[0]
+        return vectors[query]
     with lock:
-        if 'vector' not in cache:
-            cache['vector'] = encoder.encode([query])[0]
-        return cache['vector']
+        vectors = cache.setdefault('vectors', {})
+        if query not in vectors:
+            vectors[query] = encoder.encode([query])[0]
+        return vectors[query]
+
+
+def merge_entity_expansion(direct, related, limit, anchor_ids=()):
+    """Reserve most slots for the original query and protect mentioned entities."""
+    if not limit:
+        return []
+    def identity(row):
+        return row.get('version_id') or row['id']
+    by_version = {identity(row) for row in direct}
+    additions, seen = [], set(by_version)
+    for row in related:
+        key = identity(row)
+        if key not in seen:
+            seen.add(key); additions.append(row)
+    if not additions:
+        return direct[:limit]
+    anchors = [row for row in direct if row['id'] in anchor_ids]
+    original = [*anchors, *[row for row in direct if row['id'] not in anchor_ids]]
+    extra_budget = max(1, limit // 3) if limit > 1 else 0
+    # Empty/short original rankings can use all remaining capacity.
+    extra_budget = max(extra_budget, limit - len(original))
+    extra_budget = min(extra_budget, max(0, limit - len(anchors)), len(additions))
+    return [*original[:limit - extra_budget],
+            *[{**row, 'retrieval_channel': 'ontology_entity_type'} for row in additions[:extra_budget]]]
 
 
 def rrf_fuse(rankings, limit, constant=60):
@@ -251,9 +277,10 @@ class RetrievalEngine:
         page_scope = {key: value for key, value in raw.items() if key in self.PAGE_SCOPE}
         validate_filter(page_scope.get('filters'))
         expansion = raw.get('_ontology_expansion')
+        entity_guided = bool((expansion or {}).get('entity_matches'))
         terms = [term for term in (expansion or {}).get('labels', [])
                  if term and term.casefold() not in query.casefold()]
-        expanded_query = ' '.join([query, *terms])
+        expanded_query = query if entity_guided else ' '.join([query, *terms])
         batches = [([kind], quotas[kind]) for kind in channels] if quotas is not None else [(channels, k)]
         qualified_batches = False
         if page_scope.get('known_at') is not None and not current_qa:
@@ -302,6 +329,37 @@ class RetrievalEngine:
                     project_id, index['index_version'], self.schema_version, index['watermark']):
                 raise RuntimeError('检索期间项目索引已变化，请稍后重试')
             backend = 'milvus'
+        direct_hits = list(hits)
+        original_hits = direct_hits
+        related_hits = []
+        compare_original = bool(expansion and expanded_query != query)
+        if (entity_guided and terms) or compare_original:
+            related_query = ' '.join([query, *terms]) if entity_guided else query
+            related_vector = (cached_query_vector(self.encoder, related_query, query_vector_cache)
+                              if backend == 'milvus' and retrieval_mode != 'keyword' else None)
+            secondary_hits = []
+            for kinds, target in batches:
+                if not target:
+                    continue
+                if backend == 'milvus':
+                    rank = rank_qualified if qualified_batches else RetrievalEngine._rank_current
+                    rows, checked, finished = rank(self, project_id, related_query,
+                        retrieval_mode, kinds, target, native_scope, pg_scope, platform_match,
+                        index, catalog, related_vector)
+                else:
+                    rows = ScopedReads(self.repository).ranked_keyword(project_id,
+                        {**page_scope, '_platform_match': platform_match}, related_query,
+                        kinds=kinds, limit=target)
+                    checked, finished = len(rows), True
+                secondary_hits.extend(rows)
+                if entity_guided:
+                    candidates += checked; complete = complete and finished
+            if entity_guided:
+                related_hits = secondary_hits
+            else:
+                # This bounded authority ranking is only a membership check.
+                # The legacy expanded-query ranking and recall metrics stay intact.
+                original_hits = secondary_hits
         type_hits = []
         type_iris = (expansion or {}).get('type_iris') or []
         entity_budget = quotas.get('entity', 0) if quotas is not None else k
@@ -309,7 +367,7 @@ class RetrievalEngine:
             type_hits = ontology_type_rows(self.repository, project_id, page_scope,
                 type_iris, min(1000, max(50, entity_budget * 5)), platform_match)
             candidates += len(type_hits)
-            if type_hits:
+            if type_hits and not entity_guided:
                 if quotas is None:
                     hits = rrf_fuse({'retrieval': hits, 'ontology': type_hits}, k)
                 else:
@@ -317,9 +375,29 @@ class RetrievalEngine:
                                             'ontology': type_hits}, entity_budget)
                     hits = [row for kind in channels for row in
                             (entity_hits if kind == 'entity' else [row for row in hits if row['kind'] == kind])]
-            if backend == 'milvus' and not self.repository.projections.search_index_is_current(
-                    project_id, index['index_version'], self.schema_version, index['watermark']):
-                raise RuntimeError('本体补召回期间项目索引已变化，请稍后重试')
+        if entity_guided:
+            anchors = {item['id'] for item in expansion['entity_matches']}
+            if quotas is None:
+                related = rrf_fuse({'query': related_hits, 'ontology': type_hits}, max(1, k * 3))
+                hits = merge_entity_expansion(direct_hits, related, k, anchors)
+            else:
+                hits = []
+                for kind in channels:
+                    budget = quotas[kind]
+                    if not budget:
+                        continue
+                    related = rrf_fuse({'query': [row for row in related_hits if row['kind'] == kind],
+                        'ontology': type_hits if kind == 'entity' else []}, max(1, budget * 3))
+                    hits.extend(merge_entity_expansion(
+                        [row for row in direct_hits if row['kind'] == kind], related, budget, anchors))
+        elif expansion:
+            original_versions = {row.get('version_id') or row['id'] for row in original_hits}
+            hits = [{**row, 'retrieval_channel': 'ontology_type'}
+                    if (row.get('version_id') or row['id']) not in original_versions else row
+                    for row in hits]
+        if (type_iris or entity_guided or compare_original) and backend == 'milvus' and not self.repository.projections.search_index_is_current(
+                project_id, index['index_version'], self.schema_version, index['watermark']):
+            raise RuntimeError('本体补召回期间项目索引已变化，请稍后重试')
         result = {'hits': hits, 'candidate_count': candidates,
             'filter_stage': 'before_ranking', 'requested_mode': retrieval_mode,
             'active_mode': retrieval_mode, 'degraded': False, '_backend': backend,
@@ -333,11 +411,18 @@ class RetrievalEngine:
         if not complete:
             result['incomplete_reason'] = 'authority_refill_budget'
         if expansion:
-            result['backends']['ontology'] = {'active': bool(type_hits), 'hits': len(type_hits)}
+            result['backends']['ontology'] = {'active': bool(type_hits or related_hits), 'hits': len(type_hits) + len(related_hits)}
             result['ontology_expansion'] = {
                 'terms': list(expansion.get('terms') or []),
                 'subclasses': list(expansion.get('subclasses') or []),
                 'type_iris': list(expansion.get('type_iris') or []),
                 'keyword_terms': terms, 'type_hits': len(type_hits),
+                'used_hits': sum(row.get('retrieval_channel') in {'ontology_entity_type', 'ontology_type'}
+                                 for row in hits),
                 'strategy': 'ontology_type_channel_and_expanded_query'}
+            if entity_guided:
+                result['ontology_expansion']['strategy'] = 'entity_types_with_protected_direct_recall'
+            for key in ('entity_matches', 'literal_terms', 'entity_terms'):
+                if key in expansion:
+                    result['ontology_expansion'][key] = expansion[key]
         return result

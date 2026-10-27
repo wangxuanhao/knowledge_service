@@ -150,9 +150,13 @@ def test_viewer_put_is_forbidden(tmp_path):
                           headers=_h(token)).status_code == 403
 
 
-def test_viewer_readonly_post_allowed(tmp_path):
+def test_viewer_readonly_post_allowed(tmp_path, monkeypatch):
     """viewer 调只读 POST（检索）应通过授权（不是 401/403）。"""
+    from test_rule_document_oag import _ready_keyword_index
+
     with _client(tmp_path) as client:
+        # Isolate Milvus while retaining the real search and authorization path.
+        _ready_keyword_index(client.app.state.service, monkeypatch)
         super_ = _super(client)
         _make_user(client, super_, 'alice', 'viewer')
         viewer = _login(client, 'alice', 'pass123').json()['access_token']

@@ -23,12 +23,37 @@ test('search rejects incompatible applied conditions before fetching or clearing
 
 test('QA stream validates replay bodies before reserving turns or making requests',async()=>{
   let requests=0;const summary={textContent:''},body={retrieval_mode:'hybrid',filters:unsupported},before=JSON.stringify(body);
-  const environment={busy:false,current:'p',serial:0,summary,progress:{textContent:''},live:{textContent:''},send:{disabled:false},window:{ScopeFields:fields},qaHistory:[],provenance:{close(){}},AbortController,document:{createElement:()=>({dataset:{}})},markDraft(){},persist(){},addFailure(){},endpoint:value=>value,fetch:async()=>{requests++;throw Error('request reached server');},Error};
+  const environment={busy:false,preparing:false,sessionManager:null,current:'p',serial:0,summary,progress:{textContent:''},live:{textContent:''},send:{disabled:false},window:{ScopeFields:fields},qaHistory:[],provenance:{close(){}},AbortController,document:{createElement:()=>({dataset:{}})},markDraft(){},persist(){},addFailure(){},endpoint:value=>value,fetch:async()=>{requests++;throw Error('request reached server');},Error};
   vm.createContext(environment);vm.runInContext(declaration(read('workbench.js'),'stream')+';this.replay=stream;',environment);
   await environment.replay(body,{dataset:{state:'error'},replaceChildren(){},append(){}});
   assert.equal(requests,0);assert.equal(environment.qaHistory.length,0);
   assert.match(summary.textContent,/NOT/);assert.match(summary.textContent,/保留/);
   assert.equal(JSON.stringify(body),before);
+});
+
+function submissionFixture(save){
+  const controls={'qa-as-of':{value:''},generate:{checked:false},'qa-mode':{value:'hybrid'}};
+  const environment={busy:false,preparing:false,current:'p',serial:0,input:{value:'问题 A'},send:{disabled:false},summary:{textContent:''},progress:{textContent:''},qaHistory:[],scope:()=>({}),$c:id=>controls[id],window:{ScopeFields:fields},sessionManager:{loading:false,state:{conflict:false},ensureActive:async()=>{},save},addScopeNote(){},addTurn(){return {};},persist(){},stream(){environment.streams++;},streams:0,Date};
+  vm.createContext(environment);vm.runInContext(declaration(read('workbench.js'),'submit')+';this.submit=submit;',environment);return environment;
+}
+test('an unsaved question remains in history and never starts a stream on authentication failure',async()=>{
+  const environment=submissionFixture(async()=>{throw Object.assign(new Error('登录已失效'),{status:401});});
+  await environment.submit();assert.equal(environment.streams,0);assert.equal(environment.qaHistory[0].text,'问题 A');assert.match(environment.summary.textContent,/未保存/);assert.equal(environment.preparing,false);
+});
+test('an older failed turn cannot retry while a new question is waiting for its save',async()=>{
+  const environment={busy:false,preparing:true,qaHistory:[],sessionManager:{loading:false,state:{conflict:false}}};
+  vm.createContext(environment);vm.runInContext(declaration(read('workbench.js'),'stream')+';this.retry=stream;',environment);
+  await environment.retry({});assert.equal(environment.preparing,true);
+});
+test('a late save from an old selection cannot release or overwrite a newer pending submission',async()=>{
+  const pending=[];const environment=submissionFixture(()=>new Promise((resolve,reject)=>pending.push({resolve,reject})));
+  const first=environment.submit();await new Promise(setImmediate);assert.equal(environment.streams,0);
+  // The conversation-change hook cancels A and activates B before its submission.
+  environment.serial++;environment.preparing=false;environment.qaHistory=[];environment.input.value='问题 B';
+  const second=environment.submit();await new Promise(setImmediate);
+  pending[0].reject(new Error('旧会话保存失败'));await first;
+  assert.equal(environment.preparing,true);assert.equal(environment.send.disabled,true);assert.equal(environment.summary.textContent,'');assert.equal(environment.streams,0);
+  pending[1].resolve();await second;assert.equal(environment.preparing,false);assert.equal(environment.streams,1);assert.equal(environment.qaHistory[0].text,'问题 B');
 });
 
 test('opened content filter rail discovers business metadata for current retrieval and graph',async()=>{
@@ -52,7 +77,9 @@ test('UI keeps explicit graph purpose and bumps each changed runtime resource',(
   assert.ok(html.includes('id="scope-purpose"'),'scope purpose selector exists');assert.ok(html.includes('<option value="graph">图谱'),'PG graph purpose exists');
   assert.ok(html.includes('id="scope-compatibility"'),'scope incompatibility remains visible');
   assert.ok(html.includes('#scope [hidden]{display:none!important}'),'page-owned filter controls stay hidden despite existing grid/flex CSS');
-  for(const file of ['scope-fields.js','workspace.js','workspace-context-ui.js','workbench.js'])assert.ok(html.includes('/assets/'+file+'?v=authority-retrieval-20261021-2'),file+' version');
+  for(const file of ['scope-fields.js','workspace-context-ui.js'])assert.ok(html.includes('/assets/'+file+'?v=authority-retrieval-20261021-2'),file+' version');
+  assert.ok(html.includes('/assets/workspace.js?v=graph-visual-ontology-sections-20261027-2'),'workspace.js version');
+  assert.ok(html.includes('/assets/workbench.js?v=ontology-sections-20261027-2'),'workbench.js version');
 });
 
 test('applying the shared editor preserves dedicated ontology/kind scope and original metadata AST',()=>{

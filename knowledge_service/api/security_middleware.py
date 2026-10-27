@@ -5,17 +5,18 @@
   * requires_write_access 该「方法 + 路径」是否**需要管理员（admin 或 superadmin）**。
 
 三档角色（``users_store.ROLES``）在中间件这一层的边界：
-  * viewer     只读：GET/HEAD/OPTIONS 与「只读 POST 白名单」可访问，其余拒绝；
+  * viewer     可读知识并管理本人私有问答会话：只读方法、只读 POST 白名单
+               与精确的私有会话路径可访问，其余知识写入拒绝；
   * admin      可写入，可进入用户管理面；但**对超级管理员账号的操作**由
                ``api/users.py`` 路由层再拦一道（中间件不逐字段判角色）；
   * superadmin 全部放行。
 
 授权策略是 **fail-closed（默认拒绝）**，原因是安全：
   * GET/HEAD/OPTIONS 一律视为只读（例外见 ``_MANAGER_ONLY_PATTERNS``）；
-  * PUT/PATCH/DELETE 一律视为写入；
+  * PUT/PATCH/DELETE 默认视为写入；精确的私有问答会话路径例外；
   * POST 不默认放行 —— 本项目大量只读操作（检索/问答/脑图/SPARQL/各类预览）以及
     自助动作（改自己的口令）都是 POST，所以这些必须在 ``_READ_ONLY_POST_PATTERNS``
-    里**精确列出**；任何没列出来的 POST 都按写入处理（需要管理员）。这样将来新增的
+    里**精确列出**；私有会话新建另有精确路径例外，其余 POST 都按写入处理（需要管理员）。这样将来新增的
     写端点，即使忘了加保护，默认也不会被只读用户访问到。
 
 模式匹配的是**实际请求路径**（路由里的 ``{p}`` / ``{draft_id}`` 此时已是真实值），
@@ -83,6 +84,11 @@ _READ_ONLY_POST_PATTERNS = (
 )
 _READ_ONLY_POST = tuple(re.compile(p) for p in _READ_ONLY_POST_PATTERNS)
 
+# Authenticated viewers may edit only their private QA snapshots. The router
+# derives owner_id from the verified identity and every store query scopes it.
+_PRIVATE_QA_COLLECTION = re.compile(r'^/api/projects/[^/]+/qa/conversations$')
+_PRIVATE_QA_ITEM = re.compile(r'^/api/projects/[^/]+/qa/conversations/[^/]+$')
+
 # 例外：这几个路径即使方法是 GET 也**需要管理员（admin/superadmin）**。
 # 理由：它不是"读知识"，而是"读账号"——属于管理面。GET 默认放行那条规则
 # 是为"只读用户能检索/问答/看脑图"服务的，不该顺带把用户清单也开放出去。
@@ -116,6 +122,10 @@ def requires_write_access(method: str, path: str) -> bool:
     if any(pattern.match(path) for pattern in _MANAGER_ONLY):
         return True
     if method in ('GET', 'HEAD', 'OPTIONS'):
+        return False
+    if method == 'POST' and _PRIVATE_QA_COLLECTION.fullmatch(path):
+        return False
+    if method in ('PUT', 'PATCH', 'DELETE') and _PRIVATE_QA_ITEM.fullmatch(path):
         return False
     if method in ('PUT', 'PATCH', 'DELETE'):
         return True

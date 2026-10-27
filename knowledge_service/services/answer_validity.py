@@ -317,12 +317,21 @@ def apply_validity(service, project, context, request):
             classified[-1].update(answer_eligible=False, usage='reference')
     context['evidence_rows'] = [row for row in classified if row['answer_eligible'] and
                               (row.get('version_id') or row['id'], row.get('query_platform')) in direct_keys]
+    from .qa_policy import DOCUMENT
+    reference_rows = classified
+    if request.get('answer_purpose') == DOCUMENT:
+        # Entity hits precede source chunks in hybrid retrieval. Reserve the
+        # bounded reference slots for traceable originals before derived facts,
+        # or a full entity quota can silently leave document QA no model input.
+        reference_rows = sorted(classified, key=lambda row: not (
+            row.get('kind') == 'chunk' and row.get('_allowed_source_version_ids')
+            and row.get('version_id') in row.get('_allowed_chunk_version_ids', [])))
     budget = max(1, min(request.get('reference_k', 5), 20))
     for key, status in (('historical_references', 'expired'),
                         ('future_references', 'not_yet_effective'),
                         ('uncertain_references', 'unknown')):
         counts, chosen = {}, []
-        for row in classified:
+        for row in reference_rows:
             group = (row.get('query_platform'), row.get('source_scope'))
             if row['validity_status'] == status and counts.get(group, 0) < budget:
                 chosen.append(row)

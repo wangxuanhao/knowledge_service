@@ -28,18 +28,17 @@ before(async()=>{
 });
 after(async()=>{await browser?.close();});
 
-async function fixture(){
-  const page=await browser.newPage({viewport:{width:390,height:844}});
+async function fixture(viewport={width:390,height:844}){
+  const page=await browser.newPage({viewport});
   await page.route('**/*',route=>route.abort());
   await page.setContent(html,{waitUntil:'load'});
   await page.addScriptTag({content:fs.readFileSync(path.join(web,'menu-hierarchy.js'),'utf8')});
   await page.evaluate(()=>{
+    document.documentElement.classList.remove('auth-pending');
     document.querySelectorAll('main>.tab').forEach(tab=>tab.classList.toggle('hidden',tab.id!=='tab-qa'));
     document.getElementById('tab-qa').prepend(document.getElementById('scope'));
     document.getElementById('cb-details').open=false;
     document.getElementById('qa-hero').hidden=true;
-    const select=document.getElementById('qa-mode');select.hidden=true;
-    select.insertAdjacentHTML('afterend','<div class="ks-select"><button class="ks-select-trigger" type="button">关键词</button></div>');
     document.getElementById('qa-progress').textContent='回答完成';
     document.getElementById('qa-transcript').innerHTML=Array.from({length:2},()=>
       '<li class="qa-turn qa-turn-user"><p class="qa-bubble">退款</p></li>'+
@@ -59,9 +58,11 @@ async function geometry(page){
   return page.evaluate(()=>{
     const page=document.getElementById('qa-page'),composer=document.getElementById('qa-composer');
     const scroll=document.getElementById('qa-scroll'),rect=composer.getBoundingClientRect();
+    const main=document.querySelector('body>main');
     return {top:rect.top,bottom:rect.bottom,innerHeight:window.innerHeight,
       pageTop:page.getBoundingClientRect().top,fit:page.style.getPropertyValue('--qa-fit'),
       minHeight:getComputedStyle(page).minHeight,
+      outerScrollRange:main.scrollHeight-main.clientHeight,outerScrollTop:main.scrollTop,
       scrollsInternally:scroll.scrollHeight>scroll.clientHeight,
       overflow:document.documentElement.scrollWidth-window.innerWidth};
   });
@@ -83,7 +84,7 @@ test('late sidebar content recomputes QA space without a viewport resize',async(
     const before=await geometry(page);
     await page.evaluate(()=>{
       const status=document.createElement('p');status.textContent='管理员会话已载入';
-      document.getElementById('session').append(status);
+      document.getElementById('project').closest('label').append(status);
     });
     await settle(page);
     const after=await geometry(page);
@@ -92,3 +93,37 @@ test('late sidebar content recomputes QA space without a viewport resize',async(
     assertReachable(after);
   }finally{await page.close();}
 });
+
+for(const viewport of [{width:1440,height:900},{width:1440,height:600},{width:768,height:850}]){
+  test(`QA at ${viewport.width}x${viewport.height} scrolls only the conversation above the composer`,async()=>{
+    const page=await fixture(viewport);
+    try{
+      const before=await geometry(page);
+      const screenshots=path.resolve(__dirname,'../../.benchmarks/qa-scroll');
+      fs.mkdirSync(screenshots,{recursive:true});
+      await page.screenshot({path:path.join(screenshots,`${viewport.width}x${viewport.height}-${before.outerScrollRange>1?'before':'after'}.png`)});
+      assertReachable(before);
+      assert.ok(before.outerScrollRange<=1,'the workspace must not scroll below the input: '+JSON.stringify(before));
+      await page.locator('#qa-settings>summary').click();
+      await page.locator('.qa-temporal-options summary').click();
+      await settle(page);
+      assertReachable(await geometry(page));
+      await page.locator('#qa-settings>summary').click();
+      await page.evaluate(()=>{
+        const status=document.getElementById('status');
+        status.textContent='检索范围已更新。\n请核对本次问题所使用的资料与平台范围。';
+      });
+      await settle(page);
+      const expanded=await geometry(page);
+      assertReachable(expanded);
+      assert.ok(expanded.outerScrollRange<=1,'scope/status changes must not create another workspace scrollbar');
+      await page.locator('#qa-scroll').hover();
+      await page.mouse.wheel(0,2000);
+      await settle(page);
+      const after=await geometry(page);
+      assert.equal(after.outerScrollTop,0,'scrolling a conversation must not move the outer workspace');
+      assert.equal(after.top,expanded.top,'the composer must remain in the same viewport position');
+      assertReachable(after);
+    }finally{await page.close();}
+  });
+}

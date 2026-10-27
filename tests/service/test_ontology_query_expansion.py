@@ -7,9 +7,13 @@
 2. **默认关、关时逐字节等价**：`ontology_expansion` 不开时，检索路径一行都不执行，
    响应与改动前逐字段相同（不然这个开关等于一次无声的检索行为变更）。
 """
+from types import SimpleNamespace
+
 import pytest
 
+from knowledge_service.domain.search_filter_catalog import default_catalog
 from knowledge_service.repository import Repository
+from knowledge_service.repository.scoped_reads import ScopedReads
 from knowledge_service.services.ontology import Ontology, match_query_expansion
 from knowledge_service.services.retrieval import RetrievalEngine
 from knowledge_service.services.service import KnowledgeService
@@ -41,9 +45,33 @@ EMPTY = {'terms': [], 'labels': [], 'subclasses': [], 'type_iris': []}
 class Encoder:
     identity = 'test-v1'
     semantic = True
+    dimension = 2
 
     def encode(self, texts):
         return [[1.0, 0.0] for _ in texts]
+
+
+def _ready_keyword_index(repo, encoder, monkeypatch):
+    """Supply a current external-index fixture with real PG authority reads.
+
+    Only external keyword ranking is simulated. Current-generation validation,
+    exact version hydration, and the ontology type channel remain unchanged.
+    """
+    def selected_index(project, _schema):
+        return {'index_version': 1, 'watermark': repo.projections.project_watermark(project),
+                'catalog': default_catalog().to_dict(), 'dim': encoder.dimension,
+                'embedding_model': encoder.identity}
+
+    def search(project, query, *, kinds, k, scope, platform_match=None, **options):
+        assert options['retrieval_mode'] == 'keyword'
+        rows = ScopedReads(repo).ranked_keyword(
+            project, {**scope, '_platform_match': platform_match}, query,
+            kinds=kinds, limit=min(k, 100))
+        return [{'record_id': row['id'], 'version_id': row['version_id'], 'score': row['score']}
+                for row in rows]
+
+    monkeypatch.setattr(repo.projections, 'search_index', selected_index)
+    return SimpleNamespace(available=True, search=search)
 
 
 def _index():
@@ -100,10 +128,11 @@ def _project_with_subclass_entities(tmp_path):
     return repo, project
 
 
-def test_subclass_entities_are_recalled_only_when_expansion_is_on(tmp_path):
+def test_subclass_entities_are_recalled_only_when_expansion_is_on(tmp_path, monkeypatch):
     """引擎层：扩展打开才召回子类实例，关闭时结果和没有这个功能一样。"""
     repo, project = _project_with_subclass_entities(tmp_path)
-    engine = RetrievalEngine(repo, Encoder())
+    encoder = Encoder()
+    engine = RetrievalEngine(repo, encoder, _ready_keyword_index(repo, encoder, monkeypatch))
     expansion = {'terms': [PARTNER], 'labels': ['合作方', '签约主播'],
                  'subclasses': [STREAMER], 'type_iris': [PARTNER, STREAMER]}
 
@@ -127,11 +156,12 @@ def test_subclass_entities_are_recalled_only_when_expansion_is_on(tmp_path):
     assert on['degraded'] == off['degraded'] == False  # noqa: E712
 
 
-def test_expansion_switch_off_keeps_the_response_byte_identical(tmp_path):
+def test_expansion_switch_off_keeps_the_response_byte_identical(tmp_path, monkeypatch):
     """服务层：不开开关与完全不传字段，响应逐字段相同（回归基线）。"""
     repo, project = _project_with_subclass_entities(tmp_path)
     repo.bootstrap_ontology(project, ONTOLOGY_TURTLE, {})
-    service = KnowledgeService(repo, Encoder())
+    encoder = Encoder()
+    service = KnowledgeService(repo, encoder, _ready_keyword_index(repo, encoder, monkeypatch))
     request = {'query': '合作方', 'retrieval_mode': 'keyword', 'k': 5}
 
     baseline = service.search(project, dict(request))
@@ -143,11 +173,12 @@ def test_expansion_switch_off_keeps_the_response_byte_identical(tmp_path):
     assert service.ontology_expansion(project, '合作方') is None
 
 
-def test_service_expansion_uses_the_published_ontology_and_recalls_subclasses(tmp_path):
+def test_service_expansion_uses_the_published_ontology_and_recalls_subclasses(tmp_path, monkeypatch):
     """服务层：开启后从已发布本体算出扩展，并把子类实例召回。"""
     repo, project = _project_with_subclass_entities(tmp_path)
     repo.bootstrap_ontology(project, ONTOLOGY_TURTLE, {})
-    service = KnowledgeService(repo, Encoder())
+    encoder = Encoder()
+    service = KnowledgeService(repo, encoder, _ready_keyword_index(repo, encoder, monkeypatch))
 
     expansion = service.ontology_expansion(project, '合作方', True)
     assert expansion['terms'] == [PARTNER]
@@ -164,11 +195,12 @@ def test_service_expansion_uses_the_published_ontology_and_recalls_subclasses(tm
     assert service._ontology_expansion_cache[project][1] is service._ontology_expansion_cache[project][1]
 
 
-def test_service_expansion_without_any_ontology_is_empty_not_an_error(tmp_path):
+def test_service_expansion_without_any_ontology_is_empty_not_an_error(tmp_path, monkeypatch):
     """没有本体的项目：开启开关也只是"没扩展到东西"，不能抛异常。"""
     repo = Repository(tmp_path / 'no-ontology.sqlite')
     project = repo.create_project('无本体')['id']
-    service = KnowledgeService(repo, Encoder())
+    encoder = Encoder()
+    service = KnowledgeService(repo, encoder, _ready_keyword_index(repo, encoder, monkeypatch))
 
     assert service.ontology_expansion(project, '合作方', True) == EMPTY
     plain = service.search(project, {'query': '合作方', 'retrieval_mode': 'keyword', 'k': 5})
@@ -189,7 +221,7 @@ def test_deprecated_classes_do_not_expand_queries():
     assert deprecated.query_expansion('合作方') == EMPTY
 
 
-def test_search_endpoint_plumbs_the_expansion_flag_through_http(tmp_path):
+def test_search_endpoint_plumbs_the_expansion_flag_through_http(tmp_path, monkeypatch):
     """HTTP 层整链路：请求体字段 → 服务 → 响应台账（这条覆盖 pydantic 字段接线）。"""
     from fastapi.testclient import TestClient
 
@@ -206,6 +238,9 @@ def test_search_endpoint_plumbs_the_expansion_flag_through_http(tmp_path):
             'id': 'entity-streamer', 'kind': 'entity', 'type': STREAMER,
             'text': '主播小美的合同', 'metadata': {},
         })
+        service = app.state.service
+        monkeypatch.setattr(service, 'milvus_store',
+                            _ready_keyword_index(repository, service.encoder, monkeypatch))
         url = f"/api/projects/{project['id']}/search"
         body = {'query': '合作方', 'retrieval_mode': 'keyword', 'k': 5}
 

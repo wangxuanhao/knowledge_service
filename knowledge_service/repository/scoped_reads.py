@@ -230,6 +230,64 @@ class ScopedReads:
             return self.repo._db.execute('SELECT count(*) FROM record_versions r WHERE ' + sql, params).fetchone()[0]
 
     @_snapshot_read
+    def mentioned_entities(self, project, scope, query, *, limit=8):
+        """Find full entity names/aliases inside a question before bounded decode.
+
+        Reverse containment is separate from ordinary record search: a question
+        must contain the name, rather than be contained in an entity's text.
+        ASCII word edges prevent ``Acme`` from matching ``AcmeCorp``. Chinese
+        names retain substring matching, with deterministic longest preference.
+        """
+        if not isinstance(query, str):
+            raise ValueError('实体命中查询必须是字符串')
+        if type(limit) is not int or not 1 <= limit <= 8:
+            raise ValueError('实体命中上限必须在1到8之间')
+        needle = query.strip().lower()
+        if not needle:
+            return []
+        self.repo.get_project(project)
+        sql, params = self._qualified(project, scope or {}, kinds=['entity'])
+        fields = ','.join('r.' + field for field in FIELDS.split(','))
+        statement = f"""WITH question AS (SELECT ?::text AS text), candidates AS (
+            SELECT r.id,r.version,r.version_id,names.matched_name,names.match_kind,pos AS start_pos
+            FROM record_versions r CROSS JOIN question q
+            CROSS JOIN LATERAL (
+              SELECT btrim(COALESCE(r.payload::jsonb->>'text','')) AS matched_name, 'name' AS match_kind
+              UNION ALL
+              SELECT btrim(alias.value#>>'{{}}'), 'alias'
+              FROM jsonb_array_elements(CASE
+                  WHEN jsonb_typeof(r.payload::jsonb#>'{{metadata,aliases}}')='array'
+                  THEN r.payload::jsonb#>'{{metadata,aliases}}' ELSE '[]'::jsonb END) alias(value)
+              WHERE jsonb_typeof(alias.value)='string'
+            ) names
+            CROSS JOIN LATERAL generate_series(1,char_length(q.text)-char_length(names.matched_name)+1) pos
+            WHERE {sql} AND char_length(names.matched_name)>=2
+              AND strpos(q.text,lower(names.matched_name))>0
+              AND substr(q.text,pos,char_length(names.matched_name))=lower(names.matched_name)
+              AND (left(names.matched_name,1) !~ '[A-Za-z0-9_]'
+                   OR pos=1 OR substr(q.text,pos-1,1) !~ '[A-Za-z0-9_]')
+              AND (right(names.matched_name,1) !~ '[A-Za-z0-9_]'
+                   OR substr(q.text,pos+char_length(names.matched_name),1) !~ '[A-Za-z0-9_]')
+          ), mentions AS (
+            SELECT DISTINCT ON (m.version_id) m.* FROM candidates m
+            WHERE NOT EXISTS (
+              SELECT 1 FROM candidates longer
+              WHERE char_length(longer.matched_name)>char_length(m.matched_name)
+                AND longer.start_pos<=m.start_pos
+                AND longer.start_pos+char_length(longer.matched_name)>=m.start_pos+char_length(m.matched_name))
+            ORDER BY m.version_id,char_length(m.matched_name) DESC,m.matched_name,
+                     (m.match_kind='name') DESC,m.start_pos
+          ), selected AS (
+            SELECT * FROM mentions ORDER BY char_length(matched_name) DESC,matched_name,id,version LIMIT ?
+          ) SELECT {fields},s.matched_name,s.match_kind FROM selected s
+          JOIN record_versions r ON r.project_id=? AND r.version_id=s.version_id
+          ORDER BY char_length(s.matched_name) DESC,s.matched_name,s.id,s.version"""
+        with self.repo._lock:
+            rows = self.repo._db.execute(statement, [needle, *params, limit, project]).fetchall()
+        return [{**self.repo._record(row), 'matched_name': row['matched_name'],
+                 'match_kind': row['match_kind']} for row in rows]
+
+    @_snapshot_read
     def version_manifest(self, project, scope):
         """Compact identities of fixed inputs, without decoding corpus payloads."""
         self.repo.get_project(project)

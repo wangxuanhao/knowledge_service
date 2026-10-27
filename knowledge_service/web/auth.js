@@ -23,9 +23,10 @@
     // ── 令牌存取 ────────────────────────────────────────────────────────────
     function getToken() { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; } }
     function setToken(t) { try { localStorage.setItem(TOKEN_KEY, t); } catch (e) {} }
-    function clearToken() { window.WorkspaceContext?.clear(); try { localStorage.removeItem(TOKEN_KEY); } catch (e) {} }
+    function clearToken() { verifiedSessionToken = ''; verifiedSessionOwner = ''; window.WorkspaceContext?.clear(); try { localStorage.removeItem(TOKEN_KEY); } catch (e) {} }
 
     var currentUser = null;
+    var verifiedSessionToken = '', verifiedSessionOwner = '';
     // 服务端是否真的启用鉴权：null=还不知道，true=启用（要先登录），false=没启用。
     // Only an explicit false policy permits the auth-disabled development service.
     var authEnforced = null;
@@ -40,6 +41,7 @@
 
     // ── 补丁全局 fetch：自动注入鉴权头 + 集中处理 401 ────────────────────────
     var originalFetch = window.fetch.bind(window);
+    var conversationReauthRequired = false;
     function isApiRequest(url) {
         // 既认相对路径（'/api/...'），也认同源绝对地址（'http://host/api/...'）。
         if (!url) return false;
@@ -71,6 +73,56 @@
             return response;
         });
     };
+
+    // Only personal QA history can keep a draft on this page after expiry. It still
+    // sends the normal bearer token and receives the normal server authorization.
+    async function fetchConversation(input, init) {
+        var url = typeof input === 'string' ? input : (input && input.url) || '';
+        var parsed = new URL(url, window.location.href);
+        if (parsed.origin !== window.location.origin || !/^\/api\/projects\/[^/]+\/qa\/conversations(?:\/[^/]+)?$/.test(parsed.pathname)) {
+            throw new Error('此接口仅用于个人问答会话');
+        }
+        var token = getToken(), owner = currentUser && String(currentUser.id);
+        var needsAuth = authEnforced !== false;
+        function assertSameSession() {
+            if (needsAuth && (getToken() !== token || !currentUser || String(currentUser.id) !== owner)) {
+                throw Object.assign(new Error('登录状态已变化，请使用原账号重新登录后重试，本页未保存内容已保留'), {status: 401});
+            }
+        }
+        if (needsAuth && (!token || !owner)) throw Object.assign(new Error('登录已失效，请在新标签页重新登录原账号后重试'), {status: 401});
+        if (needsAuth && (conversationReauthRequired || token !== verifiedSessionToken || owner !== verifiedSessionOwner)) {
+            var identity = await originalFetch('/api/auth/me', {headers: {Authorization: 'Bearer ' + token}});
+            var data = await identity.json().catch(function () { return {}; });
+            assertSameSession();
+            if (!identity.ok || String(data.user && data.user.id) !== owner) {
+                throw Object.assign(new Error('请使用原账号重新登录后重试，本页未保存内容已保留'), {status: 401});
+            }
+            verifiedSessionToken = token; verifiedSessionOwner = owner;
+            conversationReauthRequired = false;
+        }
+        init = Object.assign({}, init);
+        var headers = new Headers(init.headers || (typeof input !== 'string' ? input.headers : undefined));
+        if (token) headers.set('Authorization', 'Bearer ' + token);
+        init.headers = headers;
+        var response = await originalFetch(input, init);
+        if (response.status === 401) {
+            conversationReauthRequired = true;
+            // Do not clear the workspace or navigate: that would destroy memory drafts.
+            // A late response must not remove a newer login from another browser tab.
+            if (getToken() === token) { try { localStorage.removeItem(TOKEN_KEY); } catch (e) {} }
+            return response;
+        }
+        assertSameSession();
+        // Headers can arrive before a large history body. Fence the consumed JSON
+        // as well, so an intervening account switch cannot activate stale history.
+        if (needsAuth && response.ok && response.status !== 204) {
+            var readJson = response.json.bind(response);
+            response.json = async function () {
+                var body = await readJson(); assertSameSession(); return body;
+            };
+        }
+        return response;
+    }
 
     // ── 角色与界面 ────────────────────────────────────────────────────────────
     // A confirmed auth-disabled test service permits business writes without a user identity.
@@ -204,6 +256,7 @@
 
     // ── 给其它模块用的最小接口（user-admin.js 依赖它读身份、写回新会话）─────────
     window.Auth = {
+        fetchConversation: fetchConversation,
         whenReady: whenReady,
         user: function () { return currentUser; },
         isAdmin: function () { return canWrite(currentUser); },
@@ -214,6 +267,8 @@
             if (!data || !data.access_token) return;
             setToken(data.access_token);
             applyRole(data.user);
+            verifiedSessionToken = data.access_token; verifiedSessionOwner = currentUser && String(currentUser.id);
+            conversationReauthRequired = false;
         },
         notice: notice
     };
@@ -256,7 +311,11 @@
             })
             .then(function (r) {
                 if (r.ok && r.d.user) {
-                    domReady.then(function () { applyRole(r.d.user); resolveReady(); });
+                    domReady.then(function () {
+                        if (getToken() !== token) { checkSession(); return; }
+                        applyRole(r.d.user); verifiedSessionToken = token; verifiedSessionOwner = String(r.d.user.id);
+                        resolveReady();
+                    });
                 } else {
                     clearToken();
                     goLogin();

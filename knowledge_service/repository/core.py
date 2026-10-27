@@ -216,6 +216,8 @@ class Repository:
         self.ingest_batches = IngestBatchStore(self)
         self.ingest_checkpoints = CheckpointStore(self)
         self.source_documents = SourceStore(self)
+        from .qa_conversations_store import QaConversationsStore
+        self.qa_conversations = QaConversationsStore(self)
 
     @contextmanager
     def independent_read_view(self):

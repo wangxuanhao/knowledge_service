@@ -1,75 +1,97 @@
 """Independent channel budgets and bounded authority context contracts."""
 from types import SimpleNamespace
+from unittest.mock import Mock
 
+import pytest
+
+from knowledge_service.domain.search_filter_catalog import default_catalog
+from knowledge_service.repository.scoped_reads import ScopedReads
 from knowledge_service.services.retrieval import RetrievalEngine
+from test_rule_document_oag import _ready_keyword_index
 
 
 class Encoder:
     identity = 'test-v1'
     semantic = True
+    dimension = 2
 
     def encode(self, texts):
         return [[1., 0.] for _ in texts]
 
 
-def test_native_explicit_channel_budgets_are_independent_of_total_k():
+def _ready_repository(*, embedding_model=Encoder.identity):
+    index = {'index_version': 1, 'watermark': 9, 'dim': 2,
+             'embedding_model': embedding_model, 'catalog': default_catalog().to_dict()}
+    return SimpleNamespace(projections=SimpleNamespace(
+        search_index=lambda *_: dict(index),
+        search_index_is_current=lambda _project, version, _schema, watermark:
+            (version, watermark) == (index['index_version'], index['watermark'])))
+
+
+def _forbid_pg_ranking(*_args, **_kwargs):
+    raise AssertionError('current retrieval must not fall back to PostgreSQL ranking')
+
+
+def _unbuilt_index(*_args):
+    raise RuntimeError('项目向量索引不可用: not_built')
+
+
+def test_native_explicit_channel_budgets_are_independent_of_total_k(monkeypatch):
     rows = [{'id': f'{kind}-{i}', 'version_id': f'{kind}-{i}-v1',
              'kind': kind, 'text': '退款', 'metadata': {}}
             for kind in ('entity', 'relation', 'chunk') for i in range(4)]
     calls = []
 
-    def search(project, query, *, kinds, k, scope):
+    def search(project, query, *, kinds, k, **options):
+        assert options['retrieval_mode'] == 'keyword'
+        assert options['index_version'] == 1
         calls.append((tuple(kinds), k))
-        return [{'version_id': row['version_id'], 'score': 10-i}
+        return [{'record_id': row['id'], 'version_id': row['version_id'], 'score': 10-i}
                 for i, row in enumerate(rows) if row['kind'] in kinds][:k]
 
-    repository = SimpleNamespace(current_records_by_version_ids=lambda p, ids: [
-        row for row in rows if row['version_id'] in ids])
-    store = SimpleNamespace(available=True, search_bm25=search)
-    result = RetrievalEngine(repository, Encoder(), store,
-        projection_readiness=lambda *args: True).search(
+    monkeypatch.setattr(ScopedReads, 'by_ids', lambda _self, _p, _scope, ids, *, kinds=None: [
+        row for row in rows if row['id'] in ids and row['kind'] in kinds])
+    store = SimpleNamespace(available=True, search=search)
+    result = RetrievalEngine(_ready_repository(), Encoder(), store).search(
             'p', '退款', retrieval_mode='keyword', k=1,
             content_k={'entity': 2, 'relation': 1, 'chunk': 2})
 
     assert {kind: sum(row['kind'] == kind for row in result['hits'])
             for kind in ('entity', 'relation', 'chunk')} == {
                 'entity': 2, 'relation': 1, 'chunk': 2}
-    assert calls == [(('entity',), 2), (('relation',), 1), (('chunk',), 2)]
+    assert result['channel_quotas'] == {'entity': 2, 'relation': 1, 'chunk': 2}
+    assert [kinds for kinds, _ in calls] == [('entity',), ('relation',), ('chunk',)]
+    assert all(1 < k <= RetrievalEngine.MAX_NATIVE_LIMIT for _, k in calls)
+    assert result['_backend'] == 'milvus' and result['complete'] is True
 
 
-def test_native_failure_reports_the_real_fallback_reason():
-    class Repository:
-        def query(self, *args, **kwargs):
-            return [{'id': 'c', 'version_id': 'cv1', 'kind': 'chunk',
-                     'text': '退款', 'metadata': {}}]
-
-        def keyword_candidates(self, *args, **kwargs):
-            return []
-
+def test_native_failure_preserves_the_real_error_without_postgres_fallback(monkeypatch):
+    repository = _ready_repository()
+    repository.query = repository.keyword_candidates = _forbid_pg_ranking
+    monkeypatch.setattr(ScopedReads, 'ranked_keyword', _forbid_pg_ranking)
+    calls = []
     def unavailable(*args, **kwargs):
+        calls.append(kwargs)
         raise RuntimeError('native unavailable')
 
-    result = RetrievalEngine(Repository(), Encoder(), SimpleNamespace(
-        available=True, search_bm25=unavailable),
-        projection_readiness=lambda *args: True).search(
+    with pytest.raises(RuntimeError, match='native unavailable'):
+        RetrievalEngine(repository, Encoder(), SimpleNamespace(
+            available=True, search=unavailable)).search(
             'p', '退款', retrieval_mode='keyword', content_channels=['chunk'])
-    assert result['_backend'] == 'postgres_local'
-    assert result['degraded'] is True
-    assert result['degraded_reason'] == 'milvus_query_failed'
-    assert result['backends']['milvus']['active'] is False
+    assert len(calls) == 1
+    assert calls[0]['retrieval_mode'] == 'keyword'
 
 
 def test_vector_modes_fail_closed_without_milvus_and_never_query_local_vectors():
-    import pytest
-    class Repository:
-        def query(self, *args, **kwargs):
-            raise AssertionError('vector modes must not fall back to PostgreSQL ranking')
+    repository = _ready_repository()
+    repository.query = _forbid_pg_ranking
     for mode in ('semantic', 'hybrid'):
         with pytest.raises(RuntimeError, match='Milvus'):
-            RetrievalEngine(Repository(), Encoder()).search('p', '退款', retrieval_mode=mode)
-        with pytest.raises(RuntimeError, match='Milvus'):
-            RetrievalEngine(Repository(), Encoder(), SimpleNamespace(available=True),
-                projection_readiness=lambda *args: False).search('p', '退款', retrieval_mode=mode)
+            RetrievalEngine(repository, Encoder()).search('p', '退款', retrieval_mode=mode)
+        repository.projections.search_index = _unbuilt_index
+        with pytest.raises(RuntimeError, match='not_built'):
+            RetrievalEngine(repository, Encoder(), SimpleNamespace(
+                available=True, search=_forbid_pg_ranking)).search('p', '退款', retrieval_mode=mode)
 
 
 def test_typed_filters_compile_as_parameterized_sql():
@@ -188,7 +210,8 @@ def test_scoped_cursor_is_bound_to_the_project_and_scope(tmp_path):
         reads.page(project, {'kinds': ['chunk']}, after=cursor)
 
 
-def test_native_and_stale_projection_reads_get_the_same_versioned_source_context(tmp_path, monkeypatch):
+def test_native_and_historical_reads_get_the_same_versioned_source_context(tmp_path, monkeypatch):
+    from knowledge_service.core.time import utc_now
     from knowledge_service.repository import Repository
     from knowledge_service.services.service import KnowledgeService
     repo = Repository(tmp_path / 'source-context.sqlite')
@@ -211,25 +234,25 @@ def test_native_and_stale_projection_reads_get_the_same_versioned_source_context
         'approved', 'reviewer', canonical_record_id=fact['id'])
     event = repo.list_assertion_events(project, assertion['id'])[-1]
     repo.add_record_version_assertion(project, fact['id'], fact['version_id'], assertion['id'], event['id'])
-    def bm25(p, query, *, kinds, **kwargs):
-        return [{'version_id': row['version_id'], 'score': 1.}
-                for row in rows if row['id'] in {'entity', 'anchor'} and row['kind'] in kinds]
-    store = SimpleNamespace(available=True, search_bm25=bm25)
-    service = KnowledgeService(repo, Encoder(), store)
-    ready = [True]
-    monkeypatch.setattr(repo, 'projection_ready', lambda *args: ready[0])
+    service = KnowledgeService(repo, Encoder())
+    _ready_keyword_index(service, monkeypatch)
+    known_at = utc_now()
     request = {'query': '退款', 'retrieval_mode': 'keyword', 'k_entities': 1, 'k_chunks': 0,
                'k_relations': 0, 'kinds': ['entity']}
     native = service.search(project, request)
-    ready[0] = False
-    fallback = service.search(project, request)
-    for result in (native, fallback):
+    monkeypatch.setattr(repo.projections, 'search_index', _unbuilt_index)
+    with pytest.raises(RuntimeError, match='not_built'):
+        service.search(project, request)
+    historical = service.search(project, {**request, 'known_at': known_at})
+    assert native['_backend'] == 'milvus'
+    assert historical['_backend'] == 'postgres_history'
+    for result in (native, historical):
         assert result['source_chunks'][0]['version_id'] == rows[0]['version_id']
         assert [row['id'] for row in result['context_chunks']] == ['adjacent']
         assert result['context_chunks'][0]['metadata']['source_version_id'] == document['version_id']
 
 
-def test_grouped_qa_contains_bounded_real_graph_endpoints_and_paths(tmp_path):
+def test_grouped_qa_contains_bounded_real_graph_endpoints_and_paths(tmp_path, monkeypatch):
     from knowledge_service.repository import Repository
     from knowledge_service.services.service import KnowledgeService
     from knowledge_service.services.answers import question_context
@@ -264,7 +287,9 @@ def test_grouped_qa_contains_bounded_real_graph_endpoints_and_paths(tmp_path):
             'approved', 'reviewer', canonical_record_id=fact['id'])
         event = repo.list_assertion_events(project, assertion['id'])[-1]
         repo.add_record_version_assertion(project, fact['id'], fact['version_id'], assertion['id'], event['id'])
-    context = question_context(KnowledgeService(repo, Encoder()), project, {
+    service = KnowledgeService(repo, Encoder())
+    _ready_keyword_index(service, monkeypatch)
+    context = question_context(service, project, {
         'query': '退款', 'retrieval_mode': 'keyword', 'valid_at': '2026-01-01',
         'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}}, 'include_references': False,
         'k_entities': 1, 'k_chunks': 0, 'hops': 2})
@@ -289,14 +314,17 @@ def test_advanced_vector_scope_streams_all_candidates_before_global_ranking(monk
         AssertionError('advanced vector scope must not preload payload pages')))
     monkeypatch.setattr(ScopedReads, 'by_ids', lambda self, p, s, ids, **kwargs: [
         row for row in all_rows.values() if row['id'] in ids])
-    def dense(p, vector, *, kinds, k, scope):
-        versions = scope['_version_ids']
+    def search(p, query, *, kinds, k, scope, eligible_version_ids, **options):
+        assert options['retrieval_mode'] == 'semantic'
+        assert options['query_vector'] == [1., 0.]
+        assert options['index_version'] == 1
+        assert scope.get('filters') is None
+        versions = eligible_version_ids
         calls.append(list(versions))
-        return [{'version_id': id, 'score': float(id[1:])}
+        return [{'record_id': all_rows[id]['id'], 'version_id': id, 'score': float(id[1:])}
                 for id in sorted(versions, key=lambda id: int(id[1:]), reverse=True)[:k]]
-    repository = SimpleNamespace(_db=object(), current_records_by_version_ids=lambda p, ids: [all_rows[id] for id in ids])
-    result = RetrievalEngine(repository, Encoder(), SimpleNamespace(available=True, search_dense=dense),
-        projection_readiness=lambda *args: True).search('p', '退款', retrieval_mode='semantic',
+    result = RetrievalEngine(_ready_repository(), Encoder(), SimpleNamespace(available=True, search=search)).search(
+        'p', '退款', retrieval_mode='semantic',
         scope={'filters': {'field': 'region', 'op': 'eq', 'value': '华东'}},
         content_channels=['chunk'], content_k={'chunk': 2})
     assert [row['id'] for row in result['hits']] == ['r5001', 'r5000']
@@ -309,14 +337,18 @@ def test_native_hybrid_uses_rrf_by_default():
     captured = {}
     store = MilvusStore(dim=2)
     store._client = SimpleNamespace(hybrid_search=object())
-    store._search_destination = lambda project: 'generation'
-    store._load_if_needed = lambda destination: destination
+    store._load_if_needed = lambda **_kwargs: None
     def rpc(*args, **kwargs):
         captured.update(kwargs)
         return [[]]
     store._search_rpc = rpc
-    store.search_hybrid('p', '退款', [1., 0.], kinds=['chunk'])
+    store.search('p', '退款', retrieval_mode='hybrid', query_vector=[1., 0.],
+                 kinds=['chunk'], index_version=7, catalog=default_catalog())
     assert type(captured['ranker']).__name__ == 'RRFRanker'
+    assert len(captured['reqs']) == 2
+    for request in captured['reqs']:
+        assert 'project_id ==' in request.expr and 'index_version ==' in request.expr
+        assert 'p' in request.expr_params.values() and 7 in request.expr_params.values()
 
 
 def test_large_bounded_neighbors_batch_exact_endpoint_reads(monkeypatch):
@@ -359,30 +391,38 @@ def test_exact_identity_read_preserves_tombstones_and_orphaned_relation(tmp_path
     assert ScopedReads(repo).by_ids(project, {}, ['a', 'ab']) == []
 
 
-def test_vector_search_rejects_a_different_encoder_before_ranking():
-    import pytest
-    store = SimpleNamespace(available=True, encoder_identity='different-model')
+def test_vector_search_rejects_a_different_encoder_before_ranking(monkeypatch):
+    encoder = Encoder()
+    monkeypatch.setattr(encoder, 'encode', Mock(side_effect=AssertionError('model mismatch must precede encoding')))
+    search = Mock(side_effect=AssertionError('model mismatch must precede ranking'))
+    store = SimpleNamespace(available=True, search=search)
     with pytest.raises(RuntimeError, match='编码器|模型'):
-        RetrievalEngine(SimpleNamespace(), Encoder(), store,
-            projection_readiness=lambda *args: True).search('p', '退款', retrieval_mode='semantic')
+        RetrievalEngine(_ready_repository(embedding_model='different-model'), encoder, store).search(
+            'p', '退款', retrieval_mode='semantic')
+    encoder.encode.assert_not_called()
+    search.assert_not_called()
 
 
-def test_native_dense_rejects_mixed_model_rows_before_search():
-    import pytest
-    from knowledge_service.integrations.milvus_store import MilvusStore
-    calls = []
-    store = MilvusStore(dim=2, encoder_identity='model-v2')
-    def query(**kwargs):
-        calls.append(kwargs)
-        return [{'version_id': 'old-vector'}]
-    store._client = SimpleNamespace(query=query,
-        search=lambda **kwargs: (_ for _ in ()).throw(AssertionError('must reject before vector ranking')))
-    store._search_destination = lambda project: 'generation'
-    store._load_if_needed = lambda destination: destination
-    with pytest.raises(ValueError, match='模型|编码器'):
-        store.search_dense('p', [1., 0.], kinds=['chunk'])
-    assert calls[0]['limit'] == 1
-    assert 'embedding_model != "model-v2"' in calls[0]['filter']
+def test_projection_delivery_rejects_mixed_model_rows_before_encoding_or_io():
+    from knowledge_service.domain.search_projection import ProjectionInput, build_projection
+    from knowledge_service.integrations.milvus_store import MilvusSchemaMismatch
+    from knowledge_service.services.projection_runtime import MilvusProjectionAdapter
+    # The shared native schema has no per-row model field. A frozen project
+    # generation identifies its model, and delivery rejects a different encoder
+    # before an old-model row can enter that generation.
+    catalog = default_catalog()
+    row = build_projection(ProjectionInput({'project_id': 'p', 'id': 'chunk',
+        'version_id': 'old-vector', 'kind': 'chunk', 'text': '退款'}), catalog, index_version=1)
+    event = {'seq': 1, 'operation': 'upsert', 'payload': {'_milvus_projection': {
+        'index_version': 1, 'catalog_fingerprint': catalog.fingerprint,
+        'embedding_model': 'model-v1', 'row': row}}}
+    encoder = SimpleNamespace(identity='model-v2', encode=Mock())
+    store = Mock()
+    with pytest.raises(MilvusSchemaMismatch, match='模型|编码器'):
+        MilvusProjectionAdapter(lambda: store, encoder=encoder).apply(
+            'p', event, fence='claim', index_version=1, catalog=catalog)
+    encoder.encode.assert_not_called()
+    assert store.mock_calls == []
 
 
 def test_fact_source_context_stays_on_asserted_source_revision_after_chunk_replacement(tmp_path):
@@ -458,6 +498,7 @@ def test_ablation_flags_skip_assistance_and_keep_structure_governance(tmp_path, 
         {'id': 'pending', 'kind': 'entity', 'type': 'MissingType', 'text': '退款待建模',
             'valid_from': '2020-01-01', 'metadata': doc['metadata']}])
     service = KnowledgeService(repo, Encoder())
+    _ready_keyword_index(service, monkeypatch)
     monkeypatch.setattr(service, 'ontology_labels', lambda *args: (_ for _ in ()).throw(
         AssertionError('no ontology context must skip labels')))
     monkeypatch.setattr(ScopedReads, 'neighbors', lambda *args, **kwargs: (_ for _ in ()).throw(

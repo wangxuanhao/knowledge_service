@@ -1,6 +1,6 @@
 /* QA uses the workspace theme; keep these rules scoped away from graph views. */
 body main:has(>#tab-qa:not(.hidden))>header{display:none}
-#tab-qa .qa-page{max-width:1040px;grid-template-rows:auto minmax(0,1fr) auto;gap:14px;min-width:0;min-height:420px}
+#tab-qa .qa-page{max-width:1040px;height:var(--qa-fit,calc(100dvh - 80px));grid-template-rows:auto minmax(0,1fr) auto;gap:14px;min-width:0;min-height:0}
 #tab-qa .qa-page-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px 2px 14px;border-bottom:1px solid var(--ui-line);margin:0}
 #tab-qa .qa-page-heading h2{margin:0;font-size:20px;color:var(--ui-ink)}
 #tab-qa .qa-page-heading p{margin:4px 0 0;color:var(--ui-ink-2);font-size:12px}
@@ -47,7 +47,7 @@ body main #tab-qa .qa-example{padding:10px 14px;border:1px solid var(--ui-line);
 #tab-qa .qa-progress{font-size:11px;max-width:220px;overflow-wrap:anywhere}
 #tab-qa .qa-summary:empty{display:none}
 @media(max-width:700px){
-  #tab-qa .qa-page{gap:10px;height:var(--qa-fit,75dvh);min-height:0;grid-template-rows:auto minmax(0,1fr) auto}
+  #tab-qa .qa-page{gap:10px}
   #tab-qa .qa-page-heading>span{display:none}
   body main #tab-qa .qa-hero{padding:10px 4px;margin:14px auto}
   body main #tab-qa .qa-hero h2{font-size:22px}

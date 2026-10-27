@@ -535,7 +535,13 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
   function renderHits(result){
     const sourceChunks=result.source_chunks||[];
     const contextChunks=result.context_chunks||[];
-    const chunkHits=result.hits.filter(r=>r.kind==='chunk');
+    const hits=result.hits||[];
+    const presentation=window.QaPresentation;
+    const isExpansion=presentation?.isExpansionRow||((row)=>['ontology_entity_type','ontology_type'].includes(row?.retrieval_channel));
+    const expansion=result.ontology_expansion;
+    const hasLedger=Boolean(expansion&&typeof expansion==='object'&&!Array.isArray(expansion));
+    const hasExpansion=hasLedger||hits.some(isExpansion);
+    const chunkHits=hits.filter(r=>r.kind==='chunk');
     // 单条命中条目：isSource 区分「命中知识的来源原文」与「原文全文匹配」。
     // 实体/关系给「在图谱中查看」，原文片段给「查看原文」。
     const entry=(r,kind,isSource=false)=>{
@@ -545,10 +551,11 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
         ?`<button data-graph-node="${esc(kind==='entity'?r.id:r.subject_id)}">在图谱中查看</button>`
         :(kind==='chunk'&&r.source_id?`<button data-source-record="${esc(r.source_id)}" class="secondary">查看原文</button>`:'');
       const applicability=window.ApplicabilityUI?.describe?.(r);
-      return `<article class="hit-entry${isSource?' hit-source':''}"><b>${esc((r.text||'').slice(0,80))}</b><span>${esc(tag)} · ${score}${applicability?' · '+esc(applicability):''}</span><p>${esc((r.text||'').slice(0,180))}</p>${btn?`<div class="row">${btn}</div>`:''}</article>`;
+      const expansionLabel=isExpansion(r)?' · 类型扩展':'';
+      return `<article class="hit-entry${isSource?' hit-source':''}"><b>${esc((r.text||'').slice(0,80))}</b><span>${esc(tag)} · ${score}${applicability?' · '+esc(applicability):''}${expansionLabel}</span><p>${esc((r.text||'').slice(0,180))}</p>${btn?`<div class="row">${btn}</div>`:''}</article>`;
     };
-    const entities=result.hits.filter(r=>r.kind==='entity');
-    const relations=result.hits.filter(r=>r.kind==='relation');
+    const entities=hits.filter(r=>r.kind==='entity');
+    const relations=hits.filter(r=>r.kind==='relation');
     // 「原文片段」组 = 命中实体/关系的来源原文 + chunk 全文命中，两部分分块展示。
     // 这是检索溯源的落点：搜「商家」命中「商户」时，来源原文里其实没有「商家」这个词，
     // 但它支撑了命中的实体，必须一并展示，否则用户只看到实体、看不到它来自哪段原文。
@@ -561,35 +568,57 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
     const platformSummary=(result.platform_groups||[]).length
       ?`<section><h3 class="hit-kind">按适用范围分组</h3>${result.platform_groups.map(group=>
         `<p class="subtle">${esc(platformGroupLabel(group))} · ${group.hits?.length||0} 条命中${group.hits?.length?'':'（当前范围无资料）'}</p>`).join('')}</section>`:'';
-    get('hits').innerHTML=[
+    let content=[
       platformSummary,
       `<section><h3 class="hit-kind">匹配实体 <small>${entities.length} / ${result.channel_quotas?.entity??5}</small></h3>${entities.map(r=>entry(r,'entity')).join('')||'<p class="subtle">暂无命中</p>'}</section>`,
       chunkSection,
       `<section><h3 class="hit-kind">关系链路 <small>${relations.length} / ${result.channel_quotas?.relation??5}</small></h3>${relations.map(r=>entry(r,'relation')).join('')||'<p class="subtle">暂无命中</p>'}</section>`,
     ].join('');
+    if(hasExpansion){
+      const split=presentation?.partitionExpansion?.(hits)||{direct:hits.filter(row=>!isExpansion(row)),supplemental:hits.filter(isExpansion)};
+      const key=row=>row.version_id||row.id?`${row.kind||'chunk'}:${row.version_id||row.id}`:null;
+      const seen=new Set();
+      const unique=rows=>rows.filter(row=>{const identity=key(row);if(identity&&seen.has(identity))return false;if(identity)seen.add(identity);return true;});
+      // A record already in direct retrieval remains direct even if a duplicate candidate carries an expansion marker.
+      const direct=unique(split.direct),supplemental=unique(split.supplemental);
+      const sources=unique(sourceChunks),neighbors=unique(contextChunks);
+      const channels=rows=>`<div class="ontology-result-grid">`+[
+        ['entity','匹配实体'],['chunk','原文片段'],['relation','关系链路'],
+      ].map(([kind,label])=>{const items=rows.filter(row=>row.kind===kind);
+        if(!items.length)return '';
+        return `<section><h4 class="hit-kind">${label} <small>${items.length} 条</small></h4>${items.map(row=>entry(row,kind)).join('')||'<p class="subtle">暂无命中</p>'}</section>`;
+      }).join('')+`</div>`;
+      const summary=hasLedger?presentation?.expansionSummary?.({...expansion,used_hits:supplemental.length})||'':
+        `补充相关类型内容，实际补入 ${supplemental.length} 条。`;
+      const empty=expansion?.matched===false?'未匹配到可扩展的实体或已发布类名，本次没有新增补充结果。':
+        Number.isSafeInteger(expansion?.type_hits)&&expansion.type_hits>0?'已找到类型候选，本次未补入新结果。':
+        '当前范围内没有召回类型内容，本次没有新增补充结果。';
+      const resultSection=(group,label,rows,description,emptyText)=>
+        `<section class="ontology-result-section" data-expansion-group="${group}"><h3 class="ontology-result-heading">${label} <small>${rows.length} 条</small></h3>`+
+        (description?`<p class="ontology-result-summary">${esc(description)}</p>`:'')+
+        (rows.length?channels(rows):`<p class="ontology-result-empty">${esc(emptyText)}</p>`)+`</section>`;
+      const contextTotal=sources.length+neighbors.length;
+      const provenance=contextTotal?`<section class="ontology-result-section ontology-result-context"><h3 class="ontology-result-heading">来源与上下文 <small>${contextTotal} 条</small></h3>`+
+        `<p class="ontology-result-summary">以下内容用于溯源，不参与排名和命中计数。</p><div class="ontology-result-grid">`+
+        (sources.length?`<section><h4 class="hit-kind">命中知识的来源原文</h4>${sources.map(row=>entry(row,'chunk',true)).join('')}</section>`:'')+
+        (neighbors.length?`<section><h4 class="hit-kind">命中条款的前后文（不参与排名）</h4>${neighbors.map(row=>entry(row,'chunk',true)).join('')}</section>`:'')+`</div></section>`:'';
+      content=platformSummary+resultSection('direct','直接命中',direct,'','本次检索没有直接命中。')+
+        resultSection('supplemental','本体扩展补充',supplemental,summary,empty)+provenance;
+    }
+    get('hits').innerHTML=content;
     get('hits').querySelectorAll('[data-graph-node]').forEach(b=>b.onclick=async()=>{try{await selectEntityDetail(b.dataset.graphNode);}catch(error){status(error.message,true);}});
     get('hits').querySelectorAll('[data-source-record]').forEach(b=>b.onclick=()=>historyFor({id:b.dataset.sourceRecord}));
   }
-  // 本体扩展的结果说明：告诉用户"这次是靠本体层级补到的"——命中了哪些类、带出了多少子类。
-  // 没有这个说明，勾了开关也只是多几条结果，用户无法判断它到底做了什么。
+  // 检索和问答共用实体 → 类型路径及补召回计数，避免把同类内容误认为实体自身事实。
   function expansionSummary(result){
-    const expansion=result&&result.ontology_expansion;if(!expansion)return '';
-    const terms=(expansion.terms||[]).join('、')||'';
-    const subclasses=(expansion.subclasses||[]).length;
-    if(!terms){
-      // 勾了扩展却没命中任何类：明确说清原因，而不是静默（区分「本体没有父子层级」
-      // 和「查询词没命中本体的类」——前者是数据问题，后者是词没对上）。
-      return expansion.has_hierarchy===false
-        ?' · 本体扩展：本体里没有父子层级，无子类可扩展'
-        :' · 本体扩展：查询词未命中本体的类';
-    }
-    return ` · 本体扩展：命中 ${terms}${subclasses?`，带出 ${subclasses} 个子类`:'，该类无子类'}`;
+    const expansion=window.QaPresentation.expansionSummary(result&&result.ontology_expansion);
+    return expansion?' · '+expansion:'';
   }
   async function runSearch(){
     if(!current)return;
     const serial=++ui.request,p=current,started=performance.now(),scopeTicket=window.WorkspaceContext?.ticket(current,'search');
     const body={...scope(),query:get('query').value,retrieval_mode:get('search-mode').value,
-      // 本体扩展（默认关闭）：勾上后检索会顺着本体的父子关系补召回 —— 查父类名也能命中子类实例。
+      // 默认关闭；命中实体名、别名或类名后，沿所属类型及子类补充相关内容。
       // 它只补召回，不放宽可见范围（权限/时态仍由 scope 决定）；关闭时读路径与旧行为一致。
       ontology_expansion:Boolean(get('ontology-expansion')?.checked),
       k_entities:5,k_chunks:5,k_relations:5};

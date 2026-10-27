@@ -236,6 +236,8 @@ def _retrieved_question_context(service, p, request):
                 'incomplete_groups': result.get('incomplete_groups', []),
                 'coverage_warnings': ([] if result.get('complete', True) else [
                     '检索结果不完整：资格补读达到预算，未返回的内容不能视为不存在。'])}
+    if 'ontology_expansion' in result:
+        coverage['ontology_expansion'] = result['ontology_expansion']
     direct = list(result.get('hits', ()))
     native = result.get('_backend') == 'milvus'
     scope = {key: request.get(key) for key in (
@@ -286,6 +288,13 @@ def _retrieved_question_context(service, p, request):
             (unknown if is_unknown else evidence).append(row)
         return evidence, unknown
 
+    def preserve_retrieval_metadata(items, retrieved):
+        fields = ('retrieval_channel', 'score', 'keyword_score', 'rrf_score', 'backend_ranks')
+        metadata = {(row['id'], row['version_id']): {key: row[key] for key in fields if key in row}
+                    for row in retrieved if row.get('id') and row.get('version_id')}
+        # Context keeps authority fields; only exact ranked record versions regain rank/channel.
+        return [{**row, **metadata.get((row.get('id'), row.get('version_id')), {})} for row in items]
+
     if groups:
         grouped_context = []
         formal_evidence = []
@@ -302,6 +311,7 @@ def _retrieved_question_context(service, p, request):
             group_rows = list({(row.get('version_id') or row['id']): row for row in [
                 *group.get('hits', ()), *group.get('source_chunks', ()),
                 *group.get('context_chunks', ()), *graph['records']]}.values())
+            group_rows = preserve_retrieval_metadata(group_rows, group.get('hits', ()))
             service.annotate_structure_pending(p, group_rows)
             formal, pending = structure_pending.split(group_rows)
             formal, unknown_formal = split_unknown_scope(formal)
@@ -389,8 +399,9 @@ def _retrieved_question_context(service, p, request):
     unique.update({row['id']: row for row in context_chunks})
     unique.update({row['id']: row for row in rows if row.get('kind') == 'entity'})
     unique.update(found)
-    service.annotate_structure_pending(p, list(unique.values()))
-    formal, pending = structure_pending.split(list(unique.values()))
+    merged_rows = preserve_retrieval_metadata(list(unique.values()), direct)
+    service.annotate_structure_pending(p, merged_rows)
+    formal, pending = structure_pending.split(merged_rows)
     formal, unknown_formal = split_unknown_scope(formal)
     pending, unknown_pending = split_unknown_scope(pending)
     return {

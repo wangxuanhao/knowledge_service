@@ -100,6 +100,17 @@ test('QA controls submit a historical business time and explicit reference visib
   assert.equal(env.requests[0].include_references,false);assert.equal(env.requests[0].known_at,null);
 });
 
+test('QA independently requests ontology expansion and retains its result in history',async()=>{
+  const env=setup(),toggle=env.doc.createElement('input');
+  toggle.id='qa-ontology-expansion';toggle.checked=true;env.doc.body.append(toggle);
+  env.submit();await settle();
+  assert.equal(env.requests[0].ontology_expansion,true);
+  const expansion={matched:false,has_hierarchy:true,type_hits:0};
+  env.emit('evidence',{answer_id:'expanded',evidence:[],ontology_expansion:expansion});
+  env.emit('done',{answer:'文档说明'});env.streams.at(-1).close();await settle();
+  assert.deepEqual(env.history()[1].ontology_expansion,expansion);
+});
+
 test('reference-only response remains visible and never invents a source opener',async()=>{
   const env=setup();env.submit();await settle();
   env.emit('evidence',{answer_id:'missing',evidence:[],historical_references:[{citation:'R1',text:'旧条款',source_id:'latest-doc',validity_status:'expired'}]});
@@ -121,11 +132,11 @@ test('U citations remain offered after finalization and history preserves only a
 
 test('changed QA assets and accessible temporal controls have current cache versions',()=>{
   const html=fs.readFileSync(path.join(web,'index.html'),'utf8');
-  assert.ok(html.includes('/assets/workbench.js?v=authority-retrieval-20261021-2'));
+  assert.ok(html.includes('/assets/workbench.js?v=ontology-sections-20261027-2'));
   assert.ok(html.includes('/assets/workbench.css?v=chunk-preview-hover-20261022-1'));
-  assert.ok(html.includes('/assets/qa-presentation.js?v=source-scope-document-qa-20261016'));
-  assert.ok(html.includes('/assets/provenance-drawer.js?v=canonical-20261021-4'));
-  assert.ok(html.includes('/assets/qa-page.css?v=redesign-20261019-final'));
+  assert.ok(html.includes('/assets/qa-presentation.js?v=ontology-sections-20261027-2'));
+  assert.ok(html.includes('/assets/provenance-drawer.js?v=document-qa-history-20261026-1'));
+  assert.ok(html.includes('/assets/qa-page.css?v=qa-viewport-scroll-20261026-1'));
   assert.match(html,/id="qa-include-references"[^>]*checked/);
   assert.match(html,/id="qa-as-of"[^>]*type="datetime-local"/);
 });
@@ -154,4 +165,37 @@ test('zero effective platform evidence describes the gap and governance dates su
   assert.equal(governance.document_version_id,'original-v1');assert.equal(governance.governance_version_id,'governed-v3');assert.equal(governance.secret,undefined);
   env.window.clearKnowledgeChat();assert.match(env.get('qa-transcript').textContent,/governed-v3/);
 });
+
+test('unknown source validity explains the missing dates in business language',async()=>{
+  const env=setup();env.submit();await settle();
+  env.emit('evidence',{answer_id:'undated',evidence:[],uncertain_references:[{
+    citation:'U1',kind:'chunk',text:'未成年人模式每日22时至次日6时限制直播。',
+    usage:'qualified_quote',validity_status:'unknown',validity_basis:'source_validity',
+    exclusion_reasons:['source_validity','unknown'],
+    source_eligibility:[{document_version_id:'original-v1',governance_version_id:'governed-v3',
+      validity_status:'unknown',valid_from:null,valid_until:null}]
+  }]});await settle();
+  const panel=env.get('qa-transcript').querySelector('.qa-evidence-panel');
+  const reason=panel.querySelector('.qa-reference-exclusions').textContent;
+  assert.match(reason,/来源文档/);
+  assert.match(reason,/未维护生效时间/);
+  assert.match(reason,/可用于文档说明/);
+  assert.doesNotMatch(reason,/source_validity|unknown/);
+});
+
+for(const [key,citation,status] of [['historical_references','R1','expired'],['future_references','F1','not_yet_effective']]){
+  test(status+' document explanation keeps its usage after history reload',async()=>{
+    const env=setup();env.submit();await settle();
+    env.emit('evidence',{answer_id:'document',evidence:[],[key]:[{
+      citation,kind:'chunk',text:'冻结文档说明',usage:'reference',validity_status:status,
+      document_quote_allowed:true,exclusion_reasons:[status]
+    }]});
+    env.emit('done',{answer:'按文档说明 ['+citation+']'});env.streams.at(-1).close();await settle();
+    assert.equal(env.history()[1][key][0].document_quote_allowed,true);
+    env.window.clearKnowledgeChat();
+    const item=env.get('qa-transcript').querySelector('.qa-reference-item');
+    assert.match(item.querySelector('.qa-reference-usage').textContent,/仅用于文档说明/);
+    assert.match(item.querySelector('.qa-reference-exclusions').textContent,/可用于文档说明/);
+  });
+}
 

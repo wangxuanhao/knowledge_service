@@ -17,6 +17,7 @@ node --test tests/service/*.test.cjs
 | 运维脚本安全回归 | `tests/scripts/test_*.py` | 已纳入 pytest 默认 `testpaths`，含迁移/停止写入/归档安全检查 |
 | Node 前端契约 | `tests/service/*.test.cjs` | Node 自动展开该 glob；pytest 不收集，也不要用 Node 目录形式运行 |
 | 独立浏览器布局 | `tests/service/qa-viewport-layout.browser.cjs` | 单独运行；需要 Node 可加载 `playwright`、系统浏览器或 `KG_BROWSER_EXECUTABLE` |
+| 会话浏览器交互 | `tests/service/qa-conversations.browser.cjs` | 完整工作台 + HTTP 夹具；验证跨浏览器恢复、失败重试、导入、手机菜单与输入框边界，不调用模型 |
 | 共享夹具 | `pg_support.py`、`ontology_seed.py`、`fixtures/*` | 被其他测试导入，不能因自己没有 test 函数而删除 |
 
 独立浏览器布局入口：

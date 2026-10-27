@@ -320,6 +320,8 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
     install_projects(app, service)
     from .knowledge import install as install_knowledge
     install_knowledge(app, service)
+    from .qa_conversations import install as install_qa_conversations
+    install_qa_conversations(app, service)
     from .source_documents import install as install_source_documents
     install_source_documents(app, service)
     from .parity import install

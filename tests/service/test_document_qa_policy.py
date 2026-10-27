@@ -109,6 +109,54 @@ def test_document_without_material_does_not_call_model(qa, monkeypatch):
         assert item['generation']['skip_reason'] == 'no_evidence'
 
 
+@pytest.mark.parametrize('dates,prefix', [({}, 'U'), ({'valid_until': '2020-01-01'}, 'R'),
+                                         ({'valid_from': '2099-01-01'}, 'F')])
+@pytest.mark.parametrize('budget', [1, 5])
+def test_document_reference_budget_keeps_original_after_entity_hits(qa, monkeypatch, dates, prefix, budget):
+    from copy import deepcopy
+    from knowledge_service.services import answers
+    from knowledge_service.services.qa_policy import model_evidence
+    service, repo, project = qa
+    text = '未成年人模式下，每日22时至次日6时无法使用直播服务。'
+    meta = {'applicability': {'platforms': {'mode': 'all'}}}
+    doc = repo.put_record(project, {'id': 'livestream-doc', 'kind': 'document',
+                                    'text': text, 'metadata': meta, **dates})
+    chunk = repo.put_record(project, {
+        'id': 'livestream-chunk', 'kind': 'chunk', 'source_id': doc['id'], 'text': text,
+        'metadata': {**meta, 'source_version_id': doc['version_id'],
+                     'start_char': 0, 'end_char': len(text)}, **dates})
+    entities = [repo.put_record(project, {
+        'id': f'entity-{index}', 'kind': 'entity', 'text': f'直播限制时段 {index}',
+        'metadata': {'applicability': {'platforms': {'mode': 'all'}}}, **dates})
+        for index in range(5)]
+    # Retrieval ranks entity hits before the original chunks. Both feed the
+    # same temporal reference budget, as in the reported hybrid-search result.
+    context = {'hits': [*entities, chunk], 'evidence_rows': [*entities, chunk],
+               'reasoning_paths': [], 'candidate_count': 6}
+    def retrieved(_service, _project, request):
+        assert request['_explicit_known_at'] is False
+        assert request['_qa_index_snapshot']['project_id'] == project
+        return deepcopy(context)
+
+    monkeypatch.setattr(answers, '_retrieved_question_context', retrieved)
+    body = {'query': '直播限制时段是什么时间', 'retrieval_mode': 'keyword',
+            'hops': 0, 'reference_k': budget}
+    result = service.answer(project, body)
+    material = model_evidence(result['evidence'], result)
+    assert [row['id'] for row in material] == [chunk['id']]
+    assert material[0]['citation'] == prefix + '1'
+    assert material[0]['document_quote_allowed'] is True
+    assert text in result['answer']
+    assert result['evidence'] == []
+    generation = answers.generation_state({**body, 'generate': True}, result['evidence'], result)
+    assert generation['skip_reason'] is None
+    events = {event.split('\n', 1)[0]: json.loads(event.split('\ndata: ', 1)[1])
+              for event in answers.stream_events(service, project, body)}
+    streamed = events['event: evidence']
+    assert [row['id'] for row in model_evidence(streamed['evidence'], streamed)] == [chunk['id']]
+    assert events['event: done']['answer'] == result['answer']
+
+
 def test_unauthorized_document_citation_discards_model_answer():
     from knowledge_service.services.answers import final_answer
     context = {'answer_purpose': 'document_explanation', '_document_quote_citations': ['U1'],

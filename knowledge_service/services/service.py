@@ -523,8 +523,8 @@ class KnowledgeService:
             pending.extend(parent for parent in direct.get(current, []) if parent not in seen)
         return chain
 
-    def ontology_expansion(self, project_id, query, enabled=False):
-        """按需计算"本体感知的查询扩展"（P0-1，默认关）。
+    def ontology_expansion(self, project_id, query, enabled=False, *, scope=None):
+        """按需计算本体查询扩展；已授权 scope 下也解析实体名与别名。
 
         * 关的时候直接返回 ``None``：不读本体、不碰缓存，调用方拼出的 scope 与改动前
           完全一样（"关时逐字节等价"是硬约束，不是尽力而为）；
@@ -545,7 +545,16 @@ class KnowledgeService:
                      if versions else {'surfaces': [], 'labels': {}, 'ancestors': {}})
             with self._ontology_cache_lock:
                 self._ontology_expansion_cache[project_id] = (signature, index)
-        return match_query_expansion(index, query)
+        # Ontology-only callers retain the literal class helper contract. Search
+        # supplies its full authorized scope before entity records may be read.
+        if scope is None:
+            return match_query_expansion(index, query)
+        from ..repository.scoped_reads import ScopedReads
+        from .entity_ontology_expansion import expand_entity_query
+        seed_scope = {**scope, 'valid_at': scope.get('valid_at') or utc_now()}
+        entities = (ScopedReads(self.repository).mentioned_entities(project_id, seed_scope, query)
+                    if index.get('labels') else [])
+        return expand_entity_query(index, query, entities)
 
     def search(self, project_id, request):
         scope = dict(request)
@@ -558,7 +567,7 @@ class KnowledgeService:
             scope['kinds'] = ['entity', 'relation', 'chunk']
         expansion = self.ontology_expansion(
             project_id, request.get('query', ''),
-            request.get('ontology_expansion', False))
+            request.get('ontology_expansion', False), scope=scope)
         if expansion:
             scope['_ontology_expansion'] = expansion
         quotas = {
@@ -648,13 +657,20 @@ class KnowledgeService:
                 if info.get('error')},
         } for platform, source_scope, grouped in group_results]
         flattened = []
-        seen_versions = set()
+        version_positions = {}
+        supplemental_channels = {'ontology_entity_type', 'ontology_type'}
         for group in groups:
             for row in group['hits']:
                 identity = row.get('version_id') or ('record', row.get('id'))
-                if identity in seen_versions:
+                if identity in version_positions:
+                    position = version_positions[identity]
+                    if (explicit_platform
+                            and flattened[position].get('retrieval_channel') in supplemental_channels
+                            and row.get('retrieval_channel') not in supplemental_channels):
+                        # Any direct group membership wins at the original version position.
+                        flattened[position] = row
                     continue
-                seen_versions.add(identity)
+                version_positions[identity] = len(flattened)
                 flattened.append(row)
         if unrestricted is not None:
             tagged = {(row.get('version_id') or ('record', row.get('id'))): row
@@ -719,25 +735,18 @@ class KnowledgeService:
         # The reader batches only hit anchors and same-source-version neighbors.
         from .retrieval_context import enrich_source_context
         enrich_source_context(self.repository, project_id, scope, result)
-        # 扩展兜底：勾了「本体扩展」但没命中类（或本体没有父子层级）时，给前端一个
-        # 明确诊断，而不是静默——否则用户勾了开关、命中数没变化，还看不出哪里扩了。
+        # The same published index and scoped seeds explain every delivery path.
         if request.get('ontology_expansion'):
-            if 'ontology_expansion' not in result:
-                result['ontology_expansion'] = {}
-            _exp = result['ontology_expansion']
-            # 复用 ontology_expansion 的缓存，判断本体到底有没有父子层级（ancestors 非空）。
-            versions = self.repository.list_ontologies(project_id)
-            signature = tuple(v['id'] for v in versions)
-            with self._ontology_cache_lock:
-                cached = self._ontology_expansion_cache.get(project_id)
-                index = cached[1] if cached and cached[0] == signature else None
-            if index is None:
-                index = (Ontology(versions[-1]['turtle']).expansion_index()
-                         if versions else {'surfaces': [], 'labels': {}, 'ancestors': {}})
-                with self._ontology_cache_lock:
-                    self._ontology_expansion_cache[project_id] = (signature, index)
-            _exp['has_hierarchy'] = bool(index.get('ancestors'))
-            _exp['matched'] = bool(_exp.get('terms'))
+            diagnostic = result.setdefault('ontology_expansion', {})
+            for key in ('terms', 'subclasses', 'type_iris', 'literal_terms', 'entity_terms', 'entity_matches'):
+                diagnostic.setdefault(key, expansion.get(key, []))
+            diagnostic['has_hierarchy'] = expansion['has_hierarchy']
+            diagnostic['matched'] = expansion['matched']
+            diagnostic['used_hits'] = sum(row.get('retrieval_channel') in {'ontology_entity_type', 'ontology_type'}
+                                          for row in result['hits'])
+            diagnostic['type_hits'] = (unrestricted.get('ontology_expansion', {}).get('type_hits', 0)
+                if unrestricted is not None else sum(
+                    item[2].get('ontology_expansion', {}).get('type_hits', 0) for item in group_results))
         result.update(embedding_model=self.encoder.identity, semantic=self.encoder.semantic)
         result['applicability'] = applicability
         LOG.info('检索完成：mode=%s 命中=%d 后端=%s', result.get('requested_mode', ''),
