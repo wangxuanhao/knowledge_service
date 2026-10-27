@@ -97,7 +97,7 @@ function drawingHarness(){
     bound:null,pixels:[0,0,0,0],cached:[0,0,0,0],color:[0,0,0,0],draws:[],uploads:[],sizes:[],
     bindFramebuffer(type,value){this.bound=value;},viewport(){},clearColor(...v){this.clearValue=v;},
     clear(){if(this.bound)this.cached=[...this.clearValue];else this.pixels=[...this.clearValue];},
-    useProgram(){},enableVertexAttribArray(){},bindBuffer(type,value){this.buffer=value;},bufferData(type,value){this.uploads.push({buffer:this.buffer,length:value.length});},vertexAttribPointer(){},uniform2f(){},uniform1i(){},uniform1f(location,value){this.sizes.push(value);},activeTexture(){},bindTexture(){},generateMipmap(){},
+    useProgram(){},enableVertexAttribArray(){},disableVertexAttribArray(){},vertexAttrib3f(){},bindBuffer(type,value){this.buffer=value;},bufferData(type,value){this.uploads.push({buffer:this.buffer,length:value.length});},vertexAttribPointer(){},uniform2f(){},uniform1i(){},uniform1f(location,value){if(location==='size')this.sizes.push(value);},activeTexture(){},bindTexture(){},generateMipmap(){},
     uniform4f(location,...v){this.color=v;},blendFunc(s,d){this.blend=[s,d,s,d];},blendFuncSeparate(...v){this.blend=v;},
     drawArrays(mode,first,count){this.draws.push({mode,first,count});if(!count||mode===this.POINTS)return;
       const src=mode===this.LINES?this.color:this.cached,dst=this.bound?this.cached:this.pixels;
@@ -106,17 +106,17 @@ function drawingHarness(){
       if(this.bound)this.cached=result;else this.pixels=result;
     }};
   const data=new GraphDataset();data.addNodes([{id:'a'},{id:'b'}]);data.addEdges([{id:'r1',subject_id:'a',object_id:'b'}]);
-  const renderer=Object.assign(Object.create(Renderer.prototype),{gl,dataset:data,locations:{},cacheLocations:{},cacheFramebuffer:{},cacheSize:2048,
-    program:{},cacheProgram:{},nodeBuffer:'nodes',edgeBuffer:'edges',width:800,height:600,canvas:{width:800,height:600},camera:new Camera(),showEdges:true,dpr:1,selected:-1,durations:[],drawLabels(){},requestDraw(){}});
-  return {gl,renderer};
+  const renderer=Object.assign(Object.create(Renderer.prototype),{gl,dataset:data,locations:{position:0,size:'size'},pointLocations:{position:0,size:'size'},cacheLocations:{position:0},cacheFramebuffer:{},cacheSize:2048,
+    program:{},pointProgram:{},cacheProgram:{},nodeBuffer:'nodes',groupedNodeBuffer:'grouped-nodes',edgeBuffer:'edges',width:800,height:600,canvas:{width:800,height:600},camera:new Camera(),showEdges:true,dpr:1,selected:-1,durations:[],drawLabels(){},requestDraw(){}});
+  return {gl,renderer,background:[248/255,250/255,251/255,1]};
 }
 
 test('cached sparse relationship pixels darken the background instead of becoming white',()=>{
-  const {gl,renderer}=drawingHarness();renderer.buildEdgeCache();renderer.draw();
+  const {gl,renderer,background}=drawingHarness();renderer.sync();renderer.draw();
   assert.ok(gl.cached[3]>.3,'a sparse relationship must retain useful alpha in the cache');
-  assert.ok(gl.pixels[1]<.979-.1,'a visible relationship must darken green by at least 0.1');
-  assert.ok(gl.pixels.every((value,i)=>i===3||value<[.967,.979,.971][i]));
-  renderer.showEdges=false;renderer.draw();assert.deepEqual(gl.pixels,[.967,.979,.971,1]);
+  assert.ok(gl.pixels[1]<background[1]-.1,'a visible relationship must darken green by at least 0.1');
+  assert.ok(gl.pixels.every((value,i)=>i===3||value<background[i]));
+  renderer.showEdges=false;renderer.draw();assert.deepEqual(gl.pixels,background);
 });
 
 test('progressive cache appends new relations within an opacity bucket',()=>{
@@ -127,14 +127,16 @@ test('progressive cache appends new relations within an opacity bucket',()=>{
 
 test('isolated entity sweep keeps the completed relationship layer without reuploading it',()=>{
   const {gl,renderer}=drawingHarness();renderer.sync();const drawCount=gl.draws.length;
-  renderer.sync();assert.equal(gl.uploads.length,2);assert.equal(gl.draws.length,drawCount);
+  assert.deepEqual(gl.uploads,[{buffer:'nodes',length:4},{buffer:'grouped-nodes',length:4},{buffer:'edges',length:4}]);
+  renderer.sync();assert.equal(gl.uploads.length,3);assert.equal(gl.draws.length,drawCount);
   renderer.dataset.addNodes([{id:'isolated'}]);renderer.sync();
-  assert.equal(gl.uploads.length,3);assert.equal(gl.uploads.at(-1).buffer,'nodes');
+  assert.deepEqual(gl.uploads.slice(3),[{buffer:'nodes',length:6},{buffer:'grouped-nodes',length:6}]);
+  assert.equal(gl.uploads.filter(value=>value.buffer==='edges').length,1,'isolated nodes do not rebuild or upload complete relations');
   assert.equal(gl.draws.length,drawCount);
 });
 
-test('small partial graphs use readable five-pixel nodes while dense normal graphs retain two-pixel nodes',()=>{
-  const {gl,renderer}=drawingHarness();renderer.draw();assert.equal(gl.sizes.at(-1),5);
-  renderer.dataset.addNodes(Array.from({length:800},(_,i)=>({id:'extra'+i})));renderer.draw();
+test('small partial graphs pad five-pixel node discs while dense normal graphs retain two-pixel nodes',()=>{
+  const {gl,renderer}=drawingHarness();renderer.sync();renderer.draw();assert.equal(gl.sizes.at(-1),5+2,'sparse five-pixel discs reserve a physical pixel on each side for coverage');
+  renderer.dataset.addNodes(Array.from({length:800},(_,i)=>({id:'extra'+i})));renderer.sync();renderer.draw();
   assert.equal(gl.sizes.at(-1),2);
 });

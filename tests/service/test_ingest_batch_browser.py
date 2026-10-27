@@ -44,11 +44,11 @@ def test_source_reader_browser_contract(tmp_path):
         page.add_script_tag(path=str(WEB / 'source-reader.js'))
         page.locator('#open').focus()
         page.evaluate("SourceReader.open({projectId:'p',versionId:'v',location:{block_id:'block-1'}})")
-        page.locator('[data-block-id="block-1"].source-highlight').wait_for()
+        page.locator('[data-block-id="block-1"].source-context').wait_for()
         page.evaluate("SourceReader.open({projectId:'p',versionId:'v',location:{spans:[{block_id:'table-1',payload:{table_start_row:1,table_end_row:2}}]}})")
-        page.locator('tbody tr.source-highlight').wait_for()
-        assert page.locator('tbody tr.source-highlight').count() == 1
-        assert page.locator('tbody tr.source-highlight').inner_text() == '200 元'
+        page.locator('tbody tr.source-context').wait_for()
+        assert page.locator('tbody tr.source-context').count() == 1
+        assert page.locator('tbody tr.source-context').inner_text() == '200 元'
         page.get_by_role('button', name='原始视图').click()
         page.get_by_text('原始正文', exact=False).wait_for()
         assert page.evaluate('window.injected') is None

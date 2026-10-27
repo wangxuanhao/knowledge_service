@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from .audit_identity import audit_actor
-from ..services.source_documents import SourceDocumentService, SourceOCRError
+from ..services.source_documents import SourceDocumentService, SourceDocumentUnavailable, SourceOCRError
 
 
 class IgnoreImage(BaseModel):
@@ -19,6 +19,13 @@ def install(app, service):
         sources = SourceDocumentService.for_service(service)
         app.state.source_documents = sources
     router = APIRouter(prefix='/api/projects/{project_id}/source-documents')
+
+    def read_source(project_id: str, version_id: str):
+        try:
+            return sources.source(project_id, version_id)
+        except SourceDocumentUnavailable as exc:
+            raise HTTPException(status_code=503, detail={
+                'code': 'source_object_unavailable', 'message': str(exc)}) from exc
 
     @router.get('/{version_id}')
     def metadata(project_id: str, version_id: str):
@@ -34,14 +41,14 @@ def install(app, service):
 
     @router.get('/{version_id}/source')
     def source(project_id: str, version_id: str):
-        result = sources.source(project_id, version_id)
+        result = read_source(project_id, version_id)
         return Response(result['data'], media_type=result['mime_type'], headers={
             'Content-Disposition': "attachment; filename*=UTF-8''" + quote(result['original_name'], safe=''),
             'X-Content-Type-Options': 'nosniff'})
 
     @router.get('/{version_id}/package')
     def package(project_id: str, version_id: str):
-        result = sources.source(project_id, version_id)
+        result = read_source(project_id, version_id)
         if not result.get('package_data'):
             raise HTTPException(status_code=404, detail='该来源没有 ZIP 知识包')
         return Response(result['package_data'], media_type='application/zip', headers={

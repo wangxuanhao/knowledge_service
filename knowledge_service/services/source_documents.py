@@ -2,6 +2,8 @@
 import mimetypes
 import os
 import html
+import hashlib
+import logging
 import re
 from uuid import uuid4
 from urllib.parse import quote
@@ -11,6 +13,13 @@ from ..integrations.source_object_store import SourceObjectStore
 from ..integrations.image_ocr import OCRError as SourceOCRError
 from ..repository.source_store import SourceStore
 from .image_ocr import ImageOCRService
+
+
+LOG = logging.getLogger(__name__)
+
+
+class SourceDocumentUnavailable(RuntimeError):
+    """Frozen source bytes are missing and cannot be reconstructed exactly."""
 
 
 class SourceDocumentService:
@@ -76,7 +85,22 @@ class SourceDocumentService:
         return dict(document_version_id=version_id,html=rendered,blocks=version['blocks'],assets=version['assets'])
     def source(self,project_id,version_id):
         version=self.get(project_id,version_id)
-        original=self.object_store.read(version['storage_key'])
+        try:
+            original=self.object_store.read(version['storage_key'])
+        except FileNotFoundError as exc:
+            # The database retains frozen Markdown text. Serve it only when its
+            # bytes reproduce the original object's checksum, including a BOM.
+            original=None
+            if version['format']=='markdown':
+                for encoding in ('utf-8','utf-8-sig'):
+                    candidate=version['source_text'].encode(encoding)
+                    if hashlib.sha256(candidate).hexdigest()==version['sha256']:
+                        original=candidate
+                        break
+            if original is None:
+                LOG.warning('Frozen source object is missing and cannot be reconstructed: version=%s sha256=%s',version_id,version['sha256'])
+                raise SourceDocumentUnavailable('来源原始文件缺失，请恢复来源存储后重试') from exc
+            LOG.warning('Serving checksum-verified frozen Markdown because source object is missing: version=%s sha256=%s',version_id,version['sha256'])
         if version['format']=='markdown' and original.startswith(b'PK\x03\x04'):
             # Raw reading and source download represent the selected Markdown, not binary ZIP.
             return dict(text=version['source_text'],original_name=version['original_name'],mime_type='text/markdown; charset=utf-8',data=version['source_text'].encode('utf-8'),package_data=original,package_mime_type='application/zip')

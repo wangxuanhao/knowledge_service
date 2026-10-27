@@ -98,9 +98,36 @@ def _source_location(repository, project_id, document, chunk):
         return {'code': 'source_mapping_unavailable'}
     from ..repository.source_store import SourceStore
     try:
-        return SourceStore(repository).locate(project_id, version_id, chunk_version_id=chunk_version_id)
+        result = SourceStore(repository).locate(project_id, version_id, chunk_version_id=chunk_version_id)
+        return {**result, 'precision': 'chunk'}
     except KeyError:
         return {'code': 'source_mapping_unavailable'}
+
+
+def _clip_source_location(resolution):
+    """Project verified assertion coordinates through the immutable chunk spans."""
+    location = resolution['location']
+    source = resolution['source_location']
+    if location['mode'] != 'exact' or source.get('status') != 'available':
+        return
+    chunk_start = resolution['chunk']['start_char']
+    start, end = location['start_char'] - chunk_start, location['end_char'] - chunk_start
+    spans = []
+    for span in source.get('spans', []):
+        a, b = span.get('chunk_start_char'), span.get('chunk_end_char')
+        block_start, block_end = span.get('block_start_char'), span.get('block_end_char')
+        if not all(type(value) is int for value in (a, b, block_start, block_end)):
+            continue
+        left, right = max(start, a), min(end, b)
+        if left >= right or b - a != block_end - block_start:
+            continue
+        spans.append({**span, 'chunk_start_char': left, 'chunk_end_char': right,
+                      'block_start_char': block_start + left - a,
+                      'block_end_char': block_start + right - a})
+    resolution['source_location'] = {
+        **source, 'spans': spans or source.get('spans', []), 'precision': 'evidence' if spans else 'chunk',
+        'block_id': next((span['block_id'] for span in spans if span.get('block_id')), source.get('block_id')),
+    }
 
 
 def _apply_hash_integrity(resolution, document, chunk_complete):
@@ -222,6 +249,7 @@ def _resolve_assertion_evidence(repository, project_id, assertion):
             assertion_start - start, assertion_end - start)
     else:
         resolution['location'] = _chunk_location()
+    _clip_source_location(resolution)
     return resolution
 
 

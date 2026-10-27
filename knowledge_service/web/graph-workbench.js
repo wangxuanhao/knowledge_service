@@ -1,7 +1,7 @@
 /* Interactive layout and local path exploration; never changes stored knowledge. */
 (() => {
   const session=GraphInteraction.createSession();
-  let state=null,path=null,host=null,toggle=null,scopeStamp='',generation=0,closeBound=false;
+  let state=null,path=null,host=null,toggle=null,scopeStamp='',generation=0,closeBound=false,revealFrame=0,cullFrame=0,cullTimer=0,textMeasure=null;
   const $=id=>document.getElementById(id);
   function roam(chart,type,payload){
     const series=chart.getModel().getSeriesByIndex(0);
@@ -31,7 +31,7 @@
     });
   }
   function viewport(project,scope,nodes){
-    if(!state||state.project!==project||JSON.stringify(scope)!==state.scope)return {};
+    if(!state||state.hiddenLayout||state.project!==project||JSON.stringify(scope)!==state.scope)return {};
     return nodes.length?preserveTransform(nodes,state.chart):{};
   }
   function bounds(nodes,width,height){
@@ -40,6 +40,25 @@
     const scale=Math.min(Math.max(1,width-120)/spanX,Math.max(1,height-100)/spanY);
     const w=spanX*scale,h=spanY*scale;
     return {left:(width-w)/2,top:(height-h)/2,width:w,height:h,right:null,bottom:null};
+  }
+  function cullNames(){
+    if(!state?.labelsEnabled||!window.GraphAppearance?.avoidLabelOverlap)return;
+    const chart=state.chart,element=chart.getDom(),width=element.clientWidth,height=element.clientHeight;
+    const series=chart.getModel().getSeriesByIndex(0);if(!width||!height||!series?.coordinateSystem?.dataToPoint)return;
+    const data=series.option.data||[],candidates=path?GraphAppearance.labelsFor(state.styles.data,path.nodes):state.candidates;
+    textMeasure||=document.createElement('canvas').getContext('2d');textMeasure.font='12px sans-serif';
+    const factor=((series.get('zoom')||1)-1)*(series.get('nodeScaleRatio')??.6)+1;
+    const visible=GraphAppearance.avoidLabelOverlap(data,candidates,{project:node=>series.coordinateSystem.dataToPoint([node.x,node.y]),
+      measure:text=>textMeasure.measureText(text).width,width,height,size:node=>{const size=node.symbolSize||20;return (Array.isArray(size)?size:[size,size]).map(n=>n*factor);}});
+    if(path)for(const id of path.nodes)if(candidates.has(id))visible.add(id);
+    if(data.some(node=>node.label?.show!==visible.has(node.id)))chart.setOption({series:[{data:data.map(node=>({...node,label:{...node.label,show:visible.has(node.id)}}))}]});
+  }
+  function queueCull(delay=0){
+    if(cullFrame)cancelAnimationFrame(cullFrame);cullFrame=0;
+    if(cullTimer)clearTimeout(cullTimer);cullTimer=0;
+    const current=state,serial=generation;if(!current)return;
+    const schedule=()=>{cullTimer=0;cullFrame=requestAnimationFrame(()=>{cullFrame=0;if(state===current&&serial===generation)cullNames();});};
+    if(delay)cullTimer=setTimeout(schedule,delay);else schedule();
   }
   function preserveTransform(nodes,chart){
     const transform=chart.getModel().getSeriesByIndex(0).coordinateSystem.transform;
@@ -62,9 +81,11 @@
       return point?{...node,x:point[0],y:point[1]}:node;
     });
     state.chart.setOption({series:[{...preserveTransform(nodes,state.chart),data:nodes}]});
+    queueCull();
   }
   function fit(chart){
     capture();
+    queueCull();
     const data=chart.getModel()?.getSeriesByIndex(0)?.getData();if(!data)return;
     const current=chart.getModel().getSeriesByIndex(0).option;
     // Keep raw coordinates and disable simulation; ECharts fits their bounding box.
@@ -79,15 +100,18 @@
     if(!path&&!state.highlighted)return;
     capture();
     const selected=new Set(path?.nodes||[]),edges=new Set(path?.steps.map(s=>s.edge.id)||[]);
+    const labelIds=path&&state.labelsEnabled?(window.GraphAppearance?
+      GraphAppearance.labelsFor(state.styles.data,[...selected]):new Set([...selected,...state.styles.data.filter(n=>n.label?.show!==false).map(n=>n.id)].slice(0,50))):new Set();
     const data=state.styles.data.map(node=>{
       const point=session.position(state.project,node.id);
-      return {...node,...(point?{x:point[0],y:point[1]}:{}),itemStyle:{...node.itemStyle,
+      return {...node,...(point?{x:point[0],y:point[1]}:{}),label:path?{...node.label,show:labelIds.has(node.id)}:node.label,itemStyle:{...node.itemStyle,
         ...(path?{opacity:selected.has(node.id)?1:.25,...(selected.has(node.id)?{borderColor:'#167d79',borderWidth:3}:{})}:{})}};
     });
     const links=state.styles.links.map(edge=>({...edge,lineStyle:{...edge.lineStyle,
       ...(path?{opacity:edges.has(edge.id)?1:.12,...(edges.has(edge.id)?{color:'#167d79',width:3}:{})}:{})}}));
     state.chart.setOption({series:[{data,links,emphasis:{focus:path?'none':'adjacency'}}]});
     state.highlighted=Boolean(path);
+    queueCull();
   }
   function clearPath(message='已清除路径高亮。'){
     path=null;highlight();if($('graph-path-result'))$('graph-path-result').textContent=message;
@@ -125,12 +149,12 @@
     host.innerHTML='<summary>路径循迹 · 当前已加载图谱</summary><p class="subtle">选择两个实体寻找关联链；只搜索当前画布显示的事实，可点路径上的关系查看证据。</p><div class="graph-path-controls"><label>起点<select id="graph-path-from" aria-label="路径起点"></select></label><label>终点<select id="graph-path-to" aria-label="路径终点"></select></label><label>方向<select id="graph-path-direction"><option value="directed">按关系箭头</option><option value="any">忽略方向</option></select></label><label>最大跳数<select id="graph-path-hops"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option><option>10</option></select></label></div><div class="graph-path-actions"></div><div id="graph-path-result" role="status" aria-live="polite"></div>';
     host.querySelector('.graph-path-actions').append(button('寻找路径',search),button('清除路径',()=>clearPath()));
     for(const id of ['graph-path-from','graph-path-to','graph-path-direction','graph-path-hops'])host.querySelector('#'+id).onchange=()=>clearPath('条件已改变，请重新寻找路径。');
-    const rail=document.querySelector('.search-graph-workspace .inspector-rail');
-    rail.prepend(host);
+    $('graph-detail').before(host);
     host.addEventListener('toggle',syncTools);
     toggle=button('路径循迹',()=>{host.open=!host.open;syncTools();if(host.open)host.scrollIntoView({block:'nearest'});});
+    toggle.classList.add('graph-tool-button');
     toggle.id='graph-path-toggle';toggle.setAttribute('aria-controls','graph-path-tools');toggle.setAttribute('aria-expanded','false');
-    document.querySelector('.graph-toolbar').append(toggle);
+    document.querySelector('.graph-tool-actions').prepend(toggle);
     const close=$('detail-drawer-close');
     if(close&&!closeBound){close.addEventListener('click',()=>{if(host){host.open=false;syncTools();}});closeBound=true;}
     const relayout=button('重新布局',()=>{
@@ -142,13 +166,17 @@
         ...bounds(data,state.chart.getWidth(),state.chart.getHeight()),center:null,zoom:1,
         emphasis:{focus:'adjacency'}}]});
       state.highlighted=false;capture();clearPath('已重新布局，知识内容未修改。');
+      queueCull();
     });
     relayout.id='graph-relayout';relayout.title='重新排列节点；只改变本次浏览布局';$('graph-reset-view').after(relayout);
   }
   function mount(chart,graph,project,inspect,scope){
     chart.__maintenanceResetGesture?.();
     const option=chart.getModel().getSeriesByIndex(0).option;
-    ensureTools();state={chart,graph,project,inspect,scope:JSON.stringify(scope),
+    const scopeKey=JSON.stringify(scope),preserved=state?.chart===chart&&state.project===project&&state.scope===scopeKey&&!state.hiddenLayout;
+    ensureTools();state={chart,graph,project,inspect,scope:scopeKey,labelsEnabled:option.label?.show!==false,
+      hiddenLayout:(!chart.getDom().clientWidth||!chart.getDom().clientHeight)&&!preserved,
+      candidates:new Set(option.data.filter(node=>node.label?.show!==false).map(node=>node.id)),
       styles:{data:option.data,links:option.links},highlighted:false};generation++;
     const stamp=JSON.stringify([project,scope,
       graph.nodes.map(n=>[n.id,n.version_id,n.version,n.type,n.text]),
@@ -170,6 +198,7 @@
     if(!chart.__maintenanceGestures){
       chart.__maintenanceGestures=true;
       const zr=chart.getZr();
+      chart.on('graphroam',()=>{if(state?.chart===chart)queueCull(120);});
       let pan=null;
       const queued=GraphInteraction.createPanQueue({apply:(dx,dy)=>{
         if(state?.chart===chart)roam(chart,'pan',{dx,dy});
@@ -197,18 +226,24 @@
         let size=element.clientWidth+':'+element.clientHeight;
         chart.__maintenanceResizeObserver=new ResizeObserver(()=>{
           if(state?.chart!==chart)return;
-          const element=chart.getDom(),next=element.clientWidth+':'+element.clientHeight;
+          const element=chart.getDom();
+          // A hidden graph is not a one-pixel viewport. Keep its last valid
+          // bounds and label layout until it is visible again.
+          if(!element.clientWidth||!element.clientHeight)return;
+          const next=element.clientWidth+':'+element.clientHeight;
           if(next===size)return;size=next;
           capture();
-          if(chart.getWidth()!==element.clientWidth||chart.getHeight()!==element.clientHeight)chart.resize();
+          if(chart.getWidth()!==element.clientWidth||chart.getHeight()!==element.clientHeight)chart.resize({width:'auto',height:'auto'});
           const data=chart.getModel().getSeriesByIndex(0)?.option.data||[];
           if(data.length)chart.setOption({series:[bounds(data,chart.getWidth(),chart.getHeight())]});
+          queueCull();
         });
         chart.__maintenanceResizeObserver.observe(chart.getDom());
       }
     }
     // Commit coordinates in session after layout; generation prevents stale work.
     const serial=generation;requestAnimationFrame(()=>{if(serial===generation)capture();});
+    queueCull();
   }
   function selection(row){
     const actions=$('graph-detail')?.querySelector('.evidence-actions');
@@ -227,6 +262,37 @@
       originX:chart.getWidth()/2,originY:chart.getHeight()/2});
     return next;
   }
-  function clear(){generation++;state?.chart.__maintenanceResetGesture?.();state=null;path=null;scopeStamp='';session.clear();if(host){host.open=false;syncTools();host.remove();host=null;}toggle?.remove();toggle=null;$('graph-relayout')?.remove();}
-  window.GraphWorkbench={positions,viewport,bounds,mount,fit,zoom,selection,canClick:()=>session.canClick(),clear};
+  function setLabels(show){
+    if(!state)return;
+    state.labelsEnabled=Boolean(show);
+    const data=state.chart.getModel().getSeriesByIndex(0).option.data.map(node=>({...node,label:{...node.label,
+      show:state.labelsEnabled&&state.candidates.has(node.id)?undefined:false}}));
+    state.chart.setOption({series:[{data,label:{show:state.labelsEnabled},emphasis:{label:{show:state.labelsEnabled}},select:{label:{show:state.labelsEnabled}}}]});
+    if(path)highlight();
+    queueCull();
+  }
+  function reveal(){
+    if(!state)return;
+    if(revealFrame)cancelAnimationFrame(revealFrame);
+    const current=state,serial=generation;
+    current.chart.resize({width:'auto',height:'auto'});
+    revealFrame=requestAnimationFrame(()=>{
+      revealFrame=0;
+      if(state!==current||serial!==generation)return;
+      const chart=current.chart,element=chart.getDom(),width=element.clientWidth,height=element.clientHeight;
+      if(!width||!height)return;
+      // Numeric dimensions persist in ZRender and make later resize() calls
+      // ignore the responsive DOM size. Reset both axes to automatic sizing.
+      chart.resize({width:'auto',height:'auto'});
+      if(current.hiddenLayout){
+        const data=chart.getModel().getSeriesByIndex(0)?.option.data||[];
+        if(data.length)chart.setOption({series:[{...bounds(data,width,height),center:null,zoom:1}]});
+        current.hiddenLayout=false;
+      }
+      setLabels($('graph-labels')?.checked??current.labelsEnabled);
+      chart.getZr().refreshImmediately?.();
+    });
+  }
+  function clear(){generation++;if(revealFrame)cancelAnimationFrame(revealFrame);revealFrame=0;if(cullFrame)cancelAnimationFrame(cullFrame);cullFrame=0;if(cullTimer)clearTimeout(cullTimer);cullTimer=0;state?.chart.__maintenanceResetGesture?.();state=null;path=null;scopeStamp='';session.clear();if(host){host.open=false;syncTools();host.remove();host=null;}toggle?.remove();toggle=null;$('graph-relayout')?.remove();}
+  window.GraphWorkbench={positions,viewport,bounds,mount,fit,zoom,setLabels,reveal,selection,canClick:()=>session.canClick(),clear};
 })();

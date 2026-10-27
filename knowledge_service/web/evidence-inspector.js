@@ -40,10 +40,10 @@
   sourceDialog.innerHTML='<header><h2 id="source-evidence-title"></h2><button id="close-source-evidence" class="secondary">关闭 ×</button></header><p id="source-evidence-note"></p><pre id="source-evidence-text"></pre>';
   document.body.appendChild(sourceDialog);
   $('close-source-evidence').onclick=()=>sourceDialog.close();
-  function openSource(doc){
+  function openSource(doc,focusText=null){
     const location=doc.source_location;
     if(location?.document_version_id&&window.SourceReader){
-      window.SourceReader.open({projectId:current,versionId:location.document_version_id,location});return;
+      window.SourceReader.open({projectId:current,versionId:location.document_version_id,location,focusText});return;
     }
     $('source-evidence-title').textContent=doc.title;
     $('source-evidence-note').textContent=`来源版本 ${doc.version} · ${doc.reason}${doc.source_content==='segments_only'?' · 仅保存原文片段，未提供完整正文':''}`;
@@ -139,7 +139,7 @@
       const result=await api(endpoint('/records/'+encodeURIComponent(row.id)+'/evidence'),scope());
       if(ticket!==serial||current!==p||stamp!==JSON.stringify(scope())||!$('inspector-source-list'))return;
       $('inspector-source-list').innerHTML=result.documents.length?result.documents.map((doc,i)=>`<article class="source-evidence-card"><strong>${esc(doc.title)}</strong><small>来源修订 r${doc.version} · ${esc({exact:'精确证据位置',recovered_in_chunk:'历史切片内恢复定位',chunk:'仅保存切片级位置',offset:'记录偏移定位',passage:'证据文本匹配',text:'名称 / 内容匹配',unlocated:'历史来源无法定位'}[doc.mode])}</small><blockquote>${esc(doc.preview||'原文内容未保存')}</blockquote><button data-source-evidence="${i}">${doc.source_location?.document_version_id?'在原文中打开 ↗':doc.highlight?'查看原文并定位 ↗':'查看来源文档 ↗'}</button></article>`).join(''):`<p class="evidence-empty">${esc(result.message)}</p>`;
-      host.querySelectorAll('[data-source-evidence]').forEach(b=>b.onclick=()=>openSource(result.documents[Number(b.dataset.sourceEvidence)]));
+      host.querySelectorAll('[data-source-evidence]').forEach(b=>b.onclick=()=>openSource(result.documents[Number(b.dataset.sourceEvidence)],row.kind==='entity'?row.text:null));
     }catch(e){if(ticket===serial&&current===p&&$('inspector-source-list'))$('inspector-source-list').textContent='来源读取失败：'+e.message;}
   };
   const change=$('project').onchange;

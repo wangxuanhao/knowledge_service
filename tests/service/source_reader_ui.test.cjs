@@ -15,3 +15,12 @@ test('table spans refer to data rows without including the header',()=>{
   assert.equal(ui.tableRowRange({table_start_row:-1,table_end_row:7},10),null);
   assert.equal(ui.tableRowRange({table_start_row:3,table_end_row:11},10),null);
 });
+
+test('stored code-point offsets select the entity after an emoji in DOM UTF-16',()=>{
+  const text='开头😀《电子商务法》';
+  const range=ui.characterRange(text,3,10);
+  assert.deepEqual(range,[4,11]);
+  assert.equal(text.slice(...range),'《电子商务法》');
+  assert.equal(ui.characterRange(text,-1,3),null);
+  assert.equal(ui.characterRange(text,0,11),null);
+});

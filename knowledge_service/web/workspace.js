@@ -170,7 +170,18 @@
     graphSettingsDrawer.open({trigger:get('graph-settings')});
     void options().catch(error=>status(error.message,true));
   };
-  get('graph-labels').onchange=()=>{const show=get('graph-labels').checked;wb.chart?.setOption({series:[{label:{show},emphasis:{label:{show}}}]});};
+  get('graph-labels').onchange=()=>{const show=get('graph-labels').checked;if(window.GraphWorkbench?.setLabels)GraphWorkbench.setLabels(show);else wb.chart?.setOption({series:[{label:{show},emphasis:{label:{show}},select:{label:{show}}}]});};
+  get('graph-edge-labels').onchange=()=>{
+    if(!ui.graph||!wb.chart)return;
+    const show=get('graph-edge-labels').checked;
+    wb.chart.setOption({series:[{edgeLabel:{show:show&&ui.graph.nodes.length<=20},emphasis:{edgeLabel:{show}},select:{edgeLabel:{show}}}]});
+    if(!show){
+      // ECharts keeps cached emphasis/select text states when all labels turn
+      // off. Drop that text so hovering cannot revive it; enabling recreates it.
+      const edges=wb.chart.getModel().getSeriesByIndex(0).getEdgeData();
+      for(let i=0;i<edges.count();i++)edges.getItemGraphicEl(i)?.removeTextContent();
+    }
+  };
 
   // ── Compact system-time change points ──
   const uiTimeline={events:[],project:null,loading:false,truncated:false};
@@ -476,32 +487,25 @@
   function renderGraph(result, selectedType='', base=result){
     updateGraphTypeChoices(base);
     const displayType=type=>result.type_labels?.[type]||labelOf(type);
-    // 按实体类型取色，节点、图例、类型按钮颜色一致，避免同名/近名节点无法区分
-    // 颜色只有一个出处：graph-palette.js 的 GraphPalette.colorFor(类型名)。
-    // 以前这里是"按数组下标取色"，于是同一个类型换个顺序就换色，且和"按实体类型查看"
-    // 那排圆点错位一格（圆点用的是按钮下标，第 0 项还是「全部类型」）。
-    // 关键：取色的 key 必须是"页面上显示的那个类型名"（label），
-    // 不能有的地方传原始 type、有的地方传 label —— 那样同一个类型会算出两种颜色。
+    // Color identity uses canonical type IDs; translated labels remain presentation text.
     result=GraphTypeFilter.selectType(base,selectedType);
     let bar=get('graph-type-buttons');
     if(!bar){bar=make('section','','graph-type-buttons');bar.id='graph-type-buttons';get('graph-canvas').after(bar);}
     const baseEntities=GraphTypeFilter.entityNodes(base);
     const groups=[...new Set(baseEntities.map(n=>n.type))];
-    // 颜色只有一个出处：graph-palette.js。本轮视图里出现过的类型先统一排序取色，
-    // 撞色时自动挪位，保证同屏不重色；类型名相同则在任何页面都是同一个颜色。
-    const scopeLabels=[...new Set(baseEntities.map(n=>n.type_label||displayType(n.type)))].filter(Boolean);
-    const colorMap=window.GraphPalette?GraphPalette.colorMap(scopeLabels):null;
-    const colorFor=label=>(colorMap&&colorMap.get(label))||(window.GraphPalette?GraphPalette.colorFor(label):'#5470c6');
+    const nodeColor=n=>window.GraphAppearance?GraphAppearance.colorFor(n):(window.GraphPalette?GraphPalette.colorFor(n.type):'#5470c6');
+    const typeLabels=new Map(baseEntities.map(n=>[n.type,n.type_label||displayType(n.type)]));
+    const typeLabel=type=>typeLabels.get(type)||displayType(type);
     const attrColor=window.GraphPalette?GraphPalette.attribute:'#8c7b68';
-    // 「全部类型」不是某个类型，不画色点（以前它会占用 palette[0]，把整排颜色挤错一位）。
-    // 圆点跟节点用同一个 label 取色（以前这里传的是原始 type，和节点的 label 不是同一个 key）
-    const dot=label=>label?`<i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${colorFor(label)};margin-right:5px;vertical-align:middle"></i>`:'';
-    bar.innerHTML='<small>按实体类型查看 · 只显示所选类型，不展开邻居</small><div>'+['',...groups].map((type,i)=>`<button class="secondary" data-type-index="${i}" aria-pressed="${type===selectedType}" title="${esc(type?term(type):'恢复当前检索范围全部类型')}">${dot(type?displayType(type):'')}${esc(type?displayType(type):'全部类型')} <b>${type?baseEntities.filter(n=>n.type===type).length:baseEntities.length}</b></button>`).join('')+'</div>';
+    const dot=type=>type?`<i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${nodeColor({type})};margin-right:5px;vertical-align:middle"></i>`:'';
+    bar.innerHTML='<small>按实体类型查看 · 只显示所选类型，不展开邻居</small><div>'+['',...groups].map((type,i)=>`<button class="secondary" data-type-index="${i}" aria-pressed="${type===selectedType}" title="${esc(type?term(type):'恢复当前检索范围全部类型')}">${dot(type)}${esc(type?typeLabel(type):'全部类型')} <b>${type?baseEntities.filter(n=>n.type===type).length:baseEntities.length}</b></button>`).join('')+'</div>';
     bar.querySelectorAll('button').forEach(button=>button.onclick=()=>renderGraph(base,['',...groups][Number(button.dataset.typeIndex)],base));
     const positioned=GraphWorkbench.positions(result,current);
     const viewport=GraphWorkbench.viewport(current,graphScope(),positioned);
     ui.graph=result;wb.nodes=new Map(result.nodes.map(n=>[n.id,n]));
-    const chart=initChart(), types=[...new Set(result.nodes.map(n=>GraphTypeFilter.isAttributeNode(n)?'属性值':(n.type_label||displayType(n.type))))], matched=new Set(result.matched_ids||[]);
+    const categoryKey=n=>window.GraphAppearance?GraphAppearance.categoryKey(n):(GraphTypeFilter.isAttributeNode(n)?'attribute:':'entity:'+String(n.type||''));
+    const chart=initChart(), types=[...new Set(result.nodes.map(categoryKey))], matched=new Set(result.matched_ids||[]);
+    const categoryLabel=key=>key==='attribute:'?'属性值':typeLabel(key.slice(7));
     chart.resize();
     bindPanAffordances();   // 双击空白＝适应画布（幂等）
     chart.off('click');chart.on('click',p=>{
@@ -515,11 +519,18 @@
     });
     chart.dispatchAction({type:'hideTip'});
     const showLabels=get('graph-labels').checked;
+    const showEdgeLabels=get('graph-edge-labels').checked;
     // The force layout plus the fit pass below are the client half of "the graph feels
     // slow"; the server half is the `subgraph` line logged by drawGraph.
     const layoutDone=kgTime('graph-layout');
     const catIndex=label=>Math.max(0,types.indexOf(label));
-chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:types.length>1,type:'scroll',data:types,bottom:0,textStyle:{fontSize:11}}],series:[{type:'graph',layout:'none',draggable:true,roam:'scale',scaleLimit:{min:.05,max:4},...GraphWorkbench.bounds(positioned,chart.getWidth(),chart.getHeight()),center:null,zoom:1,...viewport,label:{show:showLabels,position:'right',fontSize:11,width:110,overflow:'truncate'},edgeSymbol:['none','arrow'],edgeLabel:{show:result.nodes.length<=20,formatter:'{c}',fontSize:10},emphasis:{focus:'adjacency',label:{show:showLabels},edgeLabel:{show:true}},force:{repulsion:320,edgeLength:100,gravity:.1,initLayout:'circular',layoutAnimation:false},categories:types.map(name=>({name,itemStyle:{color:name==='属性值'?attrColor:colorFor(name)}})),data:positioned.map(n=>{const attribute=GraphTypeFilter.isAttributeNode(n),label=attribute?'属性值':(n.type_label||displayType(n.type));const index=catIndex(label);return {id:n.id,name:n.text,x:n.x,y:n.y,category:index,categoryName:label,symbol:attribute?'roundRect':'circle',symbolSize:attribute?[72,22]:(matched.has(n.id)?34:22),itemStyle:{color:attribute?attrColor:colorFor(label),...(attribute&&n.status==='contradicting'?{borderColor:'#b42318',borderWidth:2,borderType:'dashed'}:{}),...(matched.has(n.id)?{borderColor:'#df7d37',borderWidth:4}:{})}}}),links:result.edges.map(e=>{const attribute=GraphTypeFilter.isAttributeEdge(e);return {id:e.id,source:e.subject_id,target:e.object_id,name:e.type_label||displayType(e.type),value:e.type_label||displayType(e.type),rawType:term(e.type),lineStyle:attribute?{type:'dashed',opacity:.55,width:1}:undefined};}),lineStyle:{opacity:.35,curveness:.12}}]},{replaceMerge:['series']});
+    const nodeSize=result.nodes.length>300?10:result.nodes.length>100?14:20;
+    const preferredLabels=[get('graph-node').value,...matched];
+    const labelIds=window.GraphAppearance?GraphAppearance.labelsFor(positioned,preferredLabels):new Set([...new Set([...preferredLabels,...positioned.map(n=>n.id)])].slice(0,50));
+    // ECharts 5's series-wide label manager detaches graph edge text and applies
+    // its inverse graph scale a second time. GraphWorkbench culls node names; let
+    // native graph edge labels retain their own screen-space transform.
+chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:types.length>1,type:'scroll',data:types,formatter:categoryLabel,bottom:0,textStyle:{fontSize:12,color:'#627b82'}}],series:[{type:'graph',layout:'none',draggable:true,roam:'scale',scaleLimit:{min:.05,max:4},...GraphWorkbench.bounds(positioned,chart.getWidth(),chart.getHeight()),center:null,zoom:1,...viewport,selectedMode:'single',select:{itemStyle:{borderColor:'#cf8737',borderWidth:3},lineStyle:{color:'#cf8737',width:2,opacity:1},label:{show:showLabels,fontWeight:600},edgeLabel:{show:showEdgeLabels}},labelLayout:null,label:{show:showLabels,position:'right',fontSize:12,color:'#28444a',distance:6,width:128,overflow:'truncate',backgroundColor:null,padding:0,borderRadius:0},edgeSymbol:['none','arrow'],edgeLabel:{show:showEdgeLabels&&result.nodes.length<=20,formatter:'{c}',fontSize:11,color:'#627b82'},emphasis:{focus:'adjacency',label:{show:showLabels},edgeLabel:{show:showEdgeLabels}},force:{repulsion:320,edgeLength:100,gravity:.1,initLayout:'circular',layoutAnimation:false},categories:types.map(name=>({name,itemStyle:{color:name==='attribute:'?attrColor:nodeColor({type:name.slice(7)})}})),data:positioned.map(n=>{const attribute=GraphTypeFilter.isAttributeNode(n),label=attribute?'属性值':(n.type_label||displayType(n.type));const index=catIndex(categoryKey(n));return {id:n.id,name:n.text,x:n.x,y:n.y,category:index,categoryName:label,symbol:attribute?'roundRect':'circle',symbolSize:attribute?[72,22]:(matched.has(n.id)?Math.max(18,nodeSize+6):nodeSize),label:{show:labelIds.has(n.id)?undefined:false},itemStyle:{color:attribute?attrColor:nodeColor(n),borderColor:'#fff',borderWidth:result.nodes.length>100?0:1.5,...(attribute&&n.status==='contradicting'?{borderColor:'#b42318',borderWidth:2,borderType:'dashed'}:{}),...(matched.has(n.id)?{borderColor:'#cf8737',borderWidth:3}:{})}}}),links:result.edges.map(e=>{const attribute=GraphTypeFilter.isAttributeEdge(e);return {id:e.id,source:e.subject_id,target:e.object_id,name:e.type_label||displayType(e.type),value:e.type_label||displayType(e.type),rawType:term(e.type),lineStyle:attribute?{type:'dashed',opacity:.55,width:1}:undefined};}),lineStyle:{color:'#849ba5',opacity:.4,width:1,curveness:.1}}]},{replaceMerge:['series']});
     const visibleEntities=GraphTypeFilter.entityNodes(result),visibleRelations=GraphTypeFilter.relationEdges(result),attributeCount=result.nodes.length-visibleEntities.length;
     GraphWorkbench.mount(chart,result,current,inspect,graphScope());
     chart.resize();layoutDone({nodes:result.nodes.length,edges:result.edges.length});get('graph-summary').textContent=`${selectedType?'只看 '+labelOf(selectedType)+' · ':''}${visibleEntities.length} 实体 / ${visibleRelations.length} 关系${attributeCount?' · '+attributeCount+' 个属性值':''}${selectedType?' · 隐藏其他类型及跨类型连线':''}${matched.size?' · 橙色边框为检索命中':''}${result.timing_ms?' · 服务 '+result.timing_ms.total+' ms':''}${graphBudgetSummary(base)}`;
