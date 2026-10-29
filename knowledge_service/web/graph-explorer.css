@@ -1,0 +1,30 @@
+/* An optional panel occupies the canvas, never a new layout track. */
+body main #tab-search #graph-stage{position:relative}
+body main #tab-search #graph-neighbors{flex:0 0 auto;white-space:nowrap}
+body main #tab-search #graph-stage.graph-explorer-compact{--graph-toolbar-height:72px}
+body main #tab-search #graph-stage.graph-explorer-narrow{--graph-toolbar-height:108px}
+body main #tab-search #graph-stage.graph-explorer-compact :is(.graph-toolbar,.full-graph-toolbar){height:var(--graph-toolbar-height);flex-wrap:wrap;align-content:flex-start;gap:5px}
+body main #tab-search #graph-stage.graph-explorer-compact :is(.graph-toolbar,.full-graph-toolbar) button{flex-shrink:0;white-space:nowrap}
+body main #tab-search #graph-stage.graph-explorer-compact .graph-toolbar :is(.graph-view-tools,.graph-tool-actions){display:contents}
+body main #tab-search #graph-stage.graph-explorer-compact .full-graph-locate{order:3;flex-basis:100%;margin-left:0}
+body main #tab-search #graph-neighbors.is-active{border-color:#3278b8;background:#edf5ff;color:#245d91}
+body main #tab-search .graph-explorer{position:absolute;z-index:12;top:calc(64px + var(--graph-toolbar-height));right:14px;width:306px;max-width:calc(100% - 28px);max-height:var(--graph-canvas-height);display:flex;flex-direction:column;gap:9px;padding:14px;border:1px solid #dbe4ef;border-radius:10px;background:#fff;box-shadow:0 8px 24px #2338511c;color:#334155;box-sizing:border-box;overflow:auto}
+body main #tab-search .graph-explorer[hidden]{display:none}
+body main #tab-search .graph-explorer header{display:flex;align-items:center;justify-content:space-between;gap:10px}
+body main #tab-search .graph-explorer h3{margin:0;font-size:13px;font-weight:600;color:#26384f}
+body main #tab-search .graph-explorer button{height:29px;margin:0;padding:4px 9px;border:1px solid #dce4ed;border-radius:6px;background:#fff;color:#4b6078;font-size:12px;line-height:18px;box-shadow:none}
+body main #tab-search .graph-explorer button:disabled{opacity:.45;cursor:default}
+body main #tab-search .graph-explorer button[aria-pressed="true"]{color:#205d99;background:#eaf4ff;border-color:#6b9fcc}
+body main #tab-search .graph-explorer-anchor{font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+body main #tab-search .graph-explorer-scope,body main #tab-search .graph-explorer [role="status"]{margin:0;font-size:11px;line-height:1.6;color:#718299}
+body main #tab-search .graph-explorer-options{display:flex;align-items:flex-end;gap:7px;flex-wrap:wrap}
+body main #tab-search .graph-explorer-options label{display:flex;flex-direction:column;gap:3px;font-size:11px;color:#687d94}
+body main #tab-search .graph-explorer-options select{width:auto;height:29px;margin:0;padding:3px 6px;border-color:#dce4ed;font-size:12px}
+body main #tab-search .graph-explorer-branches,body main #tab-search .graph-explorer footer{display:flex;gap:7px;flex-wrap:wrap}
+body main #tab-search .graph-neighbor-list{display:flex;flex-direction:column;gap:5px;max-height:260px;overflow:auto;min-height:0}
+body main #tab-search .graph-neighbor-list .graph-neighbor-row{display:flex;flex-direction:column;gap:3px;text-align:left;height:auto;padding:8px 9px;flex:0 0 auto}
+body main #tab-search .graph-neighbor-row strong{font-size:12px;line-height:1.5;font-weight:500;overflow-wrap:anywhere}
+body main #tab-search .graph-neighbor-row span{font-size:11px;line-height:1.5;color:#8191a5;overflow-wrap:anywhere}
+body main #tab-search .graph-explorer footer{justify-content:flex-end;margin-top:auto}
+body main #tab-search #graph-stage.is-graph-fullscreen .graph-explorer{max-height:calc(100dvh - 300px)}
+@media(max-width:700px){body main #tab-search .graph-explorer{right:12px;max-width:calc(100% - 24px)}}

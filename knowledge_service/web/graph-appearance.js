@@ -1,7 +1,7 @@
 /* Shared presentation only: canonical type identity is independent of labels and pages. */
 (function(root){
   'use strict';
-  const tokens=Object.freeze({background:'#f8fafb',edge:'#849ba5',text:'#28444a',outline:'#ffffff',selected:'#cf8737'});
+  const tokens=Object.freeze({background:'#ffffff',edge:'#a8c9e2',text:'#888995',outline:'#ffffff',selected:'#1689e9'});
   const rgbCache=new Map();
   const attribute=record=>record?.kind==='attribute_value'||record?.virtual===true&&record?.type==='KS_ATTRIBUTE_VALUE';
   function categoryKey(record){return attribute(record)?'attribute:':'entity:'+String(record?.type||'');}
@@ -15,6 +15,13 @@
     const hex=colorFor(record);
     if(!rgbCache.has(hex))rgbCache.set(hex,new Uint8Array([1,3,5].map(i=>parseInt(hex.slice(i,i+2),16))));
     return rgbCache.get(hex);
+  }
+  function sizesFor(nodes,edges){
+    if(nodes.length>200||edges.length>400)return null;
+    const degrees=new Map(nodes.map(node=>[node.id,0]));
+    for(const edge of edges){if(edge.subject_id===edge.object_id||!degrees.has(edge.subject_id)||!degrees.has(edge.object_id))continue;
+      degrees.set(edge.subject_id,degrees.get(edge.subject_id)+1);degrees.set(edge.object_id,degrees.get(edge.object_id)+1);}
+    return new Map(Array.from(degrees,([id,degree])=>[id,5+Math.min(degree*.3,5)]));
   }
   function labelsFor(nodes,preferred=[],limit=50){
     const present=new Set(nodes.map(node=>node.id)),ordered=new Set();
@@ -41,5 +48,5 @@
     if(!visible.size)for(const id of candidates){const p=points.get(id);if(p&&p[0]>=0&&p[0]<width&&p[1]>=0&&p[1]<height){visible.add(id);break;}}
     return visible;
   }
-  root.GraphAppearance=Object.freeze({tokens,colorFor,rgbFor,categoryKey,labelsFor,avoidLabelOverlap});
+  root.GraphAppearance=Object.freeze({tokens,colorFor,rgbFor,sizesFor,categoryKey,labelsFor,avoidLabelOverlap});
 })(typeof window!=='undefined'?window:globalThis);

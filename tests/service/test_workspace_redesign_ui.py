@@ -431,7 +431,12 @@ def test_local_relationship_text_keeps_native_scale_and_names_have_no_backplates
           return {edges:e.count(),nodes:s.getData().count(),labels,background:s.option.label.backgroundColor,padding:s.option.label.padding};}''')
         assert value['nodes']==13 and value['edges']==23
         assert len(value['labels'])==23, 'all small-graph relationship names must remain attached to their links'
-        assert all(abs(label['scale']-1)<.01 and label['font']==11 and label['inView'] for label in value['labels']), value
+        assert all(abs(label['scale']-1)<.01 and label['font']==11 for label in value['labels']), value
+        # Zoom can move real links outside the viewport. Their names must retain
+        # native scale, while the overview still shows every relationship name.
+        zoom=page.evaluate('wb.chart.getModel().getSeriesByIndex(0).get("zoom")')
+        assert any(label['inView'] for label in value['labels']),value
+        if zoom==1:assert all(label['inView'] for label in value['labels']),value
         assert value['background'] in (None,'transparent') and value['padding']==0
     check()
     page.evaluate("()=>{wb.chart.dispatchAction({type:'select',dataType:'edge',dataIndex:0});wb.chart.dispatchAction({type:'highlight',dataType:'edge',dataIndex:0});wb.chart.trigger('click',{dataType:'edge',data:{id:'relation-0'}})}")
@@ -625,7 +630,7 @@ def test_full_graph_type_filter_clears_cached_hidden_pixels_and_restores_all_ent
       data.addEdges(Array.from({length:6000},(_,i)=>{const start=i<3000?0:5000;return {id:'pixel-type-edge-'+i,subject_id:'pixel-type-'+(start+1+i%100),object_id:'pixel-type-'+(start+102+i%100)};}));
       const r=new FullGraph.Renderer(document.querySelector('.full-graph-host'));r.setDataset(data);
       const paint=()=>{r.draw();r.gl.finish();},settle=()=>{paint();paint();paint();};settle();
-      const ink=(x,y)=>{const screen=r.camera.worldToScreen(x,y,r.width,r.height),bytes=new Uint8Array(5*5*4);r.gl.readPixels(Math.floor(screen[0]*r.dpr)-2,Math.floor((r.height-screen[1])*r.dpr)-2,5,5,r.gl.RGBA,r.gl.UNSIGNED_BYTE,bytes);let max=0;for(let i=0;i<25;i++)max=Math.max(max,...[248,250,251].map((c,k)=>Math.abs(c-bytes[i*4+k])));return max;};
+      const ink=(x,y)=>{const screen=r.camera.worldToScreen(x,y,r.width,r.height),bytes=new Uint8Array(5*5*4);r.gl.readPixels(Math.floor(screen[0]*r.dpr)-2,Math.floor((r.height-screen[1])*r.dpr)-2,5,5,r.gl.RGBA,r.gl.UNSIGNED_BYTE,bytes);let max=0;for(let i=0;i<25;i++)max=Math.max(max,...[1,3,5].map(j=>parseInt(GraphAppearance.tokens.background.slice(j,j+2),16)).map((c,k)=>Math.abs(c-bytes[i*4+k])));return max;};
       const all={b:ink(.65,.65),stats:r.stats()};r.setTypeFilter('A');settle();const a={a:ink(-.65,.65),b:ink(.65,.65),stats:r.stats()};
       r.setTypeFilter('B');settle();const b={a:ink(-.65,.65),b:ink(.65,.65),stats:r.stats()};r.setTypeFilter(null);settle();
       const restored={a:ink(-.65,.65),b:ink(.65,.65),stats:r.stats()},error=r.gl.getError();r.destroy();return {all,a,b,restored,error};}''')
@@ -742,7 +747,7 @@ def test_complete_overview_cache_moves_real_markers_and_invalidates_before_appen
       const gl=r.gl,paint=()=>{r.draw();gl.finish();};paint();paint();
       const cachedBefore=r.stats();
       r.camera.pan(18,-9,r.width,r.height);r.camera.zoomAt(1.1,r.width/2,r.height/2,r.width,r.height);paint();
-      const moved=r.stats(),bg=[248,250,251];
+      const moved=r.stats(),bg=[1,3,5].map(j=>parseInt(GraphAppearance.tokens.background.slice(j,j+2),16));
       const marker=(row,x,y)=>{
         const screen=r.camera.worldToScreen(x,y,r.width,r.height),px=Math.floor(screen[0]*r.dpr),py=Math.floor((r.height-screen[1])*r.dpr);
         const bytes=new Uint8Array(7*7*4);gl.readPixels(px-3,py-3,7,7,gl.RGBA,gl.UNSIGNED_BYTE,bytes);

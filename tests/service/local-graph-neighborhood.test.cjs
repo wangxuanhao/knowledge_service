@@ -35,6 +35,13 @@ test('local graph sends a seed and explicit budgets with the applied search Scop
 test('local graph accepts zero and user-entered hops above three without clamping',async()=>{
   for(const hops of [0,4,10]){const subject=workspace();await subject.draw('a',hops);assert.equal(subject.requests[0].body.hops,hops);}
 });
+test('existing expand control starts a new base for a chosen entity outside the current canvas',async()=>{
+  const subject=workspace(),model=require('../../knowledge_service/web/graph-exploration.js');
+  subject.context.window.GraphExploration=model;subject.context.GraphExploration=model;
+  const graph=await subject.draw('a',1);subject.context.ui={graph};
+  await subject.draw('outside',1,{expand:true});
+  assert.equal(subject.requests.length,2);assert.equal(subject.requests[1].body.seeds[0],'outside');
+});
 
 test('invalid hop input is rejected before any neighborhood request',async()=>{
   for(const hops of [-1,11,2.5,'',NaN]){const subject=workspace();await assert.rejects(()=>subject.draw('a',hops),/0.*10.*整数/);assert.equal(subject.requests.length,0);}
