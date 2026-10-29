@@ -100,11 +100,9 @@ test('workspace gates graph rendering and invalidates requests when clearing',()
   assert.ok(workspace.includes('graphRequests.release(ticket)'));
   assert.ok(workspace.includes('!graphRequests.isBusy()'));
   assert.ok(!workspace.includes('ui.busy'));
-  const invalidations=workspace.match(/graphRequests\.invalidate\(\)/g)||[];
-  assert.equal(invalidations.length,1);
-  const resetStart=workspace.indexOf('graphRequests.invalidate()');
+  const resetStart=workspace.indexOf('window.clearGraphWorkspace=');
   const clear=workspace.slice(resetStart,workspace.indexOf("act('search'",resetStart));
-  assert.ok(clear.includes('graphRequests.invalidate()'));
+  assert.equal((clear.match(/graphRequests\.invalidate\(\)/g)||[]).length,1);
   assert.ok(clear.includes('ui.graph=null'));
   assert.ok(clear.includes('wb.nodes.clear()'));
 });

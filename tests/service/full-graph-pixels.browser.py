@@ -29,10 +29,14 @@ PROBE = r"""() => {
   r.camera.x=-.37/r.camera.unit(r.width,r.height);r.camera.y=.23/r.camera.unit(r.width,r.height);
   const center=r.camera.worldToScreen(r.renderPositions[0],r.renderPositions[1],r.width,r.height).map(v=>v*r.dpr);
   function circle(chooseRing){
-    r.selected=chooseRing?0:-1;const pixels=read(),radius=(chooseRing?12:8)*r.dpr,solid=chooseRing?selected:outline;
+    r.selected=chooseRing?0:-1;const pixels=read(),radius=(r.nodeScreenSize(0)+(chooseRing?8:0))/2*r.dpr;
+    // White outlines disappear against the white canvas. Inspect the whole
+    // node footprint against its composited centre color, so missing nodes or
+    // hard-edged discs cannot pass as antialiased colored boundaries.
+    const solid=chooseRing?selected:color(pixels,Math.floor(center[0]),Math.floor(center[1]));
     let partial=0,painted=0;
     for(let y=Math.floor(center[1]-radius-2);y<=Math.ceil(center[1]+radius+2);y++)for(let x=Math.floor(center[0]-radius-2);x<=Math.ceil(center[0]+radius+2);x++){
-      const distance=Math.hypot(x+.5-center[0],y+.5-center[1]);if(Math.abs(distance-radius)>1.1)continue;
+      const distance=Math.hypot(x+.5-center[0],y+.5-center[1]);if(chooseRing&&Math.abs(distance-radius)>1.1)continue;
       const actual=color(pixels,x,y);if(different(actual,bg,1))painted++;
       if(different(actual,bg,1)&&different(actual,solid,1))partial++;
     }

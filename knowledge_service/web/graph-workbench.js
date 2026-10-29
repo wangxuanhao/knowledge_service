@@ -24,10 +24,18 @@
   }
   function positions(graph,project,reset=false){
     if(!reset)capture();
+    // Use the same bounded topology layout as the full renderer. Remembered
+    // manual positions still win; large neighborhoods keep the linear seed path.
+    const element=$('graph-canvas'),width=element?.clientWidth||1000,height=element?.clientHeight||600;
+    const remembered=graph.nodes.map(node=>session.position(project,node.id));
+    const layout=remembered.some(point=>!point)&&graph.nodes.length<=200&&graph.edges.length<=400&&window.FullGraph?.relationshipPositions
+      ?window.FullGraph.relationshipPositions({records:graph.nodes,edges:graph.edges,nodeCount:graph.nodes.length,
+        nodeIndex:new Map(graph.nodes.map((node,index)=>[node.id,index]))},width,height):null;
+    const unit=Math.min(width,height)/2;
     return graph.nodes.map((node,index)=>{
-      const point=session.position(project,node.id);
+      const point=remembered[index];
       const angle=index*2.399963229728653,radius=100*Math.sqrt(index);
-      return {...node,x:point?.[0]??Math.cos(angle)*radius,y:point?.[1]??Math.sin(angle)*radius};
+      return {...node,x:point?.[0]??(layout?layout[index*2]*unit:Math.cos(angle)*radius),y:point?.[1]??(layout?-layout[index*2+1]*unit:Math.sin(angle)*radius)};
     });
   }
   function viewport(project,scope,nodes){
@@ -97,20 +105,22 @@
   }
   function highlight(){
     if(!state)return;
-    if(!path&&!state.highlighted)return;
+    if(!path&&!state.focus&&!state.highlighted)return;
     capture();
     const selected=new Set(path?.nodes||[]),edges=new Set(path?.steps.map(s=>s.edge.id)||[]);
     const labelIds=path&&state.labelsEnabled?(window.GraphAppearance?
       GraphAppearance.labelsFor(state.styles.data,[...selected]):new Set([...selected,...state.styles.data.filter(n=>n.label?.show!==false).map(n=>n.id)].slice(0,50))):new Set();
     const data=state.styles.data.map(node=>{
       const point=session.position(state.project,node.id);
-      return {...node,...(point?{x:point[0],y:point[1]}:{}),label:path?{...node.label,show:labelIds.has(node.id)}:node.label,itemStyle:{...node.itemStyle,
-        ...(path?{opacity:selected.has(node.id)?1:.25,...(selected.has(node.id)?{borderColor:'#167d79',borderWidth:3}:{})}:{})}};
+      return {...node,...(point?{x:point[0],y:point[1]}:{}),label:!state.labelsEnabled?{...node.label,show:false}:path?{...node.label,show:labelIds.has(node.id)}:node.label,itemStyle:{...node.itemStyle,
+        ...(state.focus?{opacity:state.focus.nodeIds.has(node.id)?1:.12}:{}),
+        ...(path?{opacity:selected.has(node.id)?1:state.focus?.nodeIds.has(node.id)?1:.25,...(selected.has(node.id)?{borderColor:'#167d79',borderWidth:3}:{})}:{})}};
     });
     const links=state.styles.links.map(edge=>({...edge,lineStyle:{...edge.lineStyle,
+      ...(state.focus?{opacity:state.focus.edgeIds.has(edge.id)?.85:.06,...(state.focus.edgeIds.has(edge.id)?{color:'#1689e9',width:1.5}:{})}:{}),
       ...(path?{opacity:edges.has(edge.id)?1:.12,...(edges.has(edge.id)?{color:'#167d79',width:3}:{})}:{})}}));
     state.chart.setOption({series:[{data,links,emphasis:{focus:path?'none':'adjacency'}}]});
-    state.highlighted=Boolean(path);
+    state.highlighted=Boolean(path||state.focus);
     queueCull();
   }
   function clearPath(message='已清除路径高亮。'){
@@ -170,7 +180,7 @@
     });
     relayout.id='graph-relayout';relayout.title='重新排列节点；只改变本次浏览布局';$('graph-reset-view').after(relayout);
   }
-  function mount(chart,graph,project,inspect,scope){
+  function mount(chart,graph,project,inspect,scope,options={}){
     chart.__maintenanceResetGesture?.();
     const option=chart.getModel().getSeriesByIndex(0).option;
     const scopeKey=JSON.stringify(scope),preserved=state?.chart===chart&&state.project===project&&state.scope===scopeKey&&!state.hiddenLayout;
@@ -181,7 +191,10 @@
     const stamp=JSON.stringify([project,scope,
       graph.nodes.map(n=>[n.id,n.version_id,n.version,n.type,n.text]),
       graph.edges.map(e=>[e.id,e.version_id,e.version,e.subject_id,e.object_id,e.type,e.text])]);
-    if(stamp!==scopeStamp){clearPath('图谱或范围已变化，请重新选择路径。');scopeStamp=stamp;}
+    if(stamp!==scopeStamp){
+      const valid=options.preservePath&&preserved&&path&&path.nodes.every(id=>graph.nodes.some(node=>node.id===id))&&path.steps.every(step=>graph.edges.some(edge=>edge.id===step.edge.id));
+      if(!valid)clearPath('图谱或范围已变化，请重新选择路径。');scopeStamp=stamp;
+    }
     const nodes=graph.nodes.filter(n=>!n.virtual&&n.kind!=='attribute_value');
     const labelCounts=new Map();for(const node of nodes)labelCounts.set(node.text,(labelCounts.get(node.text)||0)+1);
     for(const id of ['graph-path-from','graph-path-to']){
@@ -246,8 +259,10 @@
     queueCull();
   }
   function selection(row){
+    const onCanvas=Boolean(state&&row.kind==='entity'&&state.graph.nodes.some(n=>n.id===row.id));
+    if($('graph-stage')?.dataset.graphMode!=='full')window.GraphExplorer?.select(onCanvas?row:null);
     const actions=$('graph-detail')?.querySelector('.evidence-actions');
-    if(!state||!actions||row.kind!=='entity'||!state.graph.nodes.some(n=>n.id===row.id))return;
+    if(!onCanvas||!actions)return;
     for(const [id,label] of [['graph-path-from','设为路径起点'],['graph-path-to','设为路径终点']]){
       actions.append(button(label,()=>{
         openTools();$(id).value=row.id;clearPath('已设置'+(id.endsWith('from')?'起点':'终点')+'，选择另一端后寻找路径。');
@@ -268,7 +283,7 @@
     const data=state.chart.getModel().getSeriesByIndex(0).option.data.map(node=>({...node,label:{...node.label,
       show:state.labelsEnabled&&state.candidates.has(node.id)?undefined:false}}));
     state.chart.setOption({series:[{data,label:{show:state.labelsEnabled},emphasis:{label:{show:state.labelsEnabled}},select:{label:{show:state.labelsEnabled}}}]});
-    if(path)highlight();
+    if(path||state.focus)highlight();
     queueCull();
   }
   function reveal(){
@@ -293,6 +308,12 @@
       chart.getZr().refreshImmediately?.();
     });
   }
-  function clear(){generation++;if(revealFrame)cancelAnimationFrame(revealFrame);revealFrame=0;if(cullFrame)cancelAnimationFrame(cullFrame);cullFrame=0;if(cullTimer)clearTimeout(cullTimer);cullTimer=0;state?.chart.__maintenanceResetGesture?.();state=null;path=null;scopeStamp='';session.clear();if(host){host.open=false;syncTools();host.remove();host=null;}toggle?.remove();toggle=null;$('graph-relayout')?.remove();}
-  window.GraphWorkbench={positions,viewport,bounds,mount,fit,zoom,setLabels,reveal,selection,canClick:()=>session.canClick(),clear};
+  function setFocus(value){if(!state)return;state.focus=value;highlight();}
+  function locate(id){
+    if(!state)return false;const series=state.chart.getModel().getSeriesByIndex(0),node=series.option.data.find(row=>row.id===id);
+    if(!node)return false;const [x,y]=series.coordinateSystem.dataToPoint([node.x,node.y]);
+    roam(state.chart,'pan',{dx:state.chart.getWidth()/2-x,dy:state.chart.getHeight()/2-y});queueCull();return true;
+  }
+  function clear(){window.GraphExplorer?.clear();generation++;if(revealFrame)cancelAnimationFrame(revealFrame);revealFrame=0;if(cullFrame)cancelAnimationFrame(cullFrame);cullFrame=0;if(cullTimer)clearTimeout(cullTimer);cullTimer=0;state?.chart.__maintenanceResetGesture?.();state=null;path=null;scopeStamp='';session.clear();if(host){host.open=false;syncTools();host.remove();host=null;}toggle?.remove();toggle=null;$('graph-relayout')?.remove();}
+  window.GraphWorkbench={positions,viewport,bounds,mount,fit,zoom,setLabels,setFocus,locate,reveal,selection,canClick:()=>session.canClick(),clear};
 })();
