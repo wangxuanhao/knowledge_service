@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import tempfile
 import time
-from uuid import uuid4
+from uuid import uuid4,uuid5,NAMESPACE_URL
 
 from pydantic import ValidationError
 
@@ -74,6 +74,39 @@ class DocumentUploads:
         data.update(title=title, text=parsed.text,
                     metadata={**options.metadata, **parsed.metadata})
         return data, parsed
+
+    def ingest(self,service,project_id,staged,options,*,task_id=None,sources=None):
+        """All committed file uploads publish originals, media and mapped spans."""
+        from .source_documents import SourceDocumentService
+        from .source_ingest import prepare_source_ingest
+        sources=sources or SourceDocumentService.for_service(service)
+        document_id=str(uuid5(NAMESPACE_URL,f'upload:{project_id}:{task_id}')) if task_id else str(uuid4())
+        try:prior=service.repository.get_record(project_id,document_id)
+        except KeyError:prior=None
+        if prior and prior.get('metadata',{}).get('status')=='ready':
+            return dict(document=prior,records=[],replayed=True)
+        source_id=(prior or {}).get('metadata',{}).get('source_document_version_id')
+        if source_id:
+            source=sources.get(project_id,source_id)
+            data=options.model_dump(exclude={'title'})
+            data.update(title=(options.title or '').strip() or staged.original_name)
+        else:
+            data,parsed=self.payload(staged,options)
+            source=sources.persist(project_id,document_id,staged.path.read_bytes(),staged.original_name,
+                text=parsed.text,assets=parsed.assets,metadata=parsed.metadata,provenance=parsed.provenance)
+        metadata={**data.get('metadata',{}),**{k:v for k,v in source.get('parser_metadata',{}).items() if k!='provenance'},
+                  'source_document_version_id':source['id'],**({'durable_task_id':task_id} if task_id else {})}
+        # Publish a reading receipt before OCR so a strict failure remains inspectable
+        # and a durable retry reuses its immutable source instead of refetching media.
+        service.repository.put_record(project_id,dict(id=document_id,kind='document',text=source['source_text'],
+            metadata={**metadata,'title':data['title'],'status':'processing','active_stage':'ocr'}),expected_version=prior['version'] if prior else 0)
+        chunks,text,warnings=prepare_source_ingest(sources,project_id,source,data)
+        def map_chunks(saved):
+            for row,chunk in zip(saved,chunks):
+                if chunk.get('source_spans'):sources.store.add_spans(project_id,source['id'],row['version_id'],chunk['source_spans'])
+        data.update(text=text,metadata={**metadata,'warnings':warnings},_document_id=document_id,
+                    _prepared_chunks=chunks,_source_span_mapper=map_chunks)
+        return service.ingest(project_id,data)
 
     def discard(self, staged: StagedUpload):
         staged.path.unlink(missing_ok=True)

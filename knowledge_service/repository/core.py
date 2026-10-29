@@ -151,7 +151,7 @@ class Repository:
     # 「数据进了 A、日志却说 B」这种误导性输出。
     backend_label = 'PostgreSQL'
 
-    def __init__(self, dsn):
+    def __init__(self, dsn, *, bootstrap=True):
         """按 PostgreSQL DSN 打开存储。
 
         schema 由编号迁移（`migrate.py` + `migrations/*.sql`）负责，这里**不建表**：
@@ -159,6 +159,9 @@ class Repository:
 
         传入非 PostgreSQL DSN 会立即报错，不做静默回退 —— 静默回退到本地文件
         会让人以为数据写进了 PG，实际写到了别处。
+
+        维护工具用 bootstrap=False 只连接、校验 schema 和绑定仓储；不初始化
+        service_settings，也不把其他进程的摄取运行标记为 interrupted。
         """
         from .pg_engine import SqliteishConnection
 
@@ -175,6 +178,8 @@ class Repository:
         self.closed = False
         self._verify_schema()
         self._bind_stores()
+        if not bootstrap:
+            return
         with self._transaction():
             self._db.execute(
                 'INSERT INTO service_settings VALUES (?,?) ON CONFLICT (key) DO NOTHING',

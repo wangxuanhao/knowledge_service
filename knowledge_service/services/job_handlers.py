@@ -8,6 +8,15 @@ from .document_uploads import StagedUpload
 
 
 def job_handlers(service, uploads):
+    def classified_failure(exc):
+        from .ingest_retry import classify_error
+        error=classify_error(exc)
+        failure=RuntimeError(error.message)
+        failure.code=error.code
+        failure.retryable=error.retryable
+        failure.stage=error.stage
+        return failure
+
     def ingest(payload, project_id, progress, task_id):
         existing = [r for r in service.data.current_records(project_id)
                     if r['kind'] == 'document'
@@ -25,13 +34,7 @@ def job_handlers(service, uploads):
             try:
                 return service.ingest(project_id, Ingest.model_validate(data).model_dump())
             except Exception as exc:
-                from .ingest_retry import classify_error
-                error=classify_error(exc)
-                failure=RuntimeError(error.message)
-                failure.code=error.code
-                failure.retryable=error.retryable
-                failure.stage=error.stage
-                raise failure from exc
+                raise classified_failure(exc) from exc
 
     def upload(payload, project_id, progress, task_id):
         if any(r['kind'] == 'document'
@@ -45,8 +48,12 @@ def job_handlers(service, uploads):
         staged = StagedUpload(path, payload['staged']['original_name'],
                               payload['staged']['size'], payload['staged']['digest'])
         progress('正在解析上传文档', 10)
-        data, _ = uploads.payload(staged, UploadOptions.model_validate(payload['options']))
-        result = ingest(data, project_id, progress, task_id)
+        with reporting(progress):
+            try:result = uploads.ingest(service,project_id,staged,UploadOptions.model_validate(payload['options']),task_id=task_id)
+            except Exception as exc:
+                from ..integrations.document_parser import DocumentParseError
+                if isinstance(exc,DocumentParseError):raise
+                raise classified_failure(exc) from exc
         uploads.discard(staged)
         return result
 

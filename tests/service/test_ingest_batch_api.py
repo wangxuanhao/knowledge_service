@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 from knowledge_service.api import create_app
+from source_test_images import png
 
 def test_capabilities_and_batch_file_contract(tmp_path):
     from knowledge_service.integrations.embeddings import HashingEncoder
@@ -38,7 +39,7 @@ def test_zip_documents_ocr_spans_and_package_are_fixed(tmp_path):
     with zipfile.ZipFile(buffer,'w') as archive:
         archive.writestr('a.md','# First\n\n![rule](x.png)')
         archive.writestr('b.md','# Second\n\nText rules.')
-        archive.writestr('x.png',b'image')
+        archive.writestr('x.png',png())
     raw=buffer.getvalue()
     with TestClient(app) as client:
         project=client.post('/api/projects',json={'name':'zip','ontology_mode':'documents'}).json()['id']
@@ -66,7 +67,7 @@ def test_zip_documents_ocr_spans_and_package_are_fixed(tmp_path):
         assert client.get(f'/api/projects/{project}/source-documents/{source_id}/package').content==raw
 
 
-def test_missing_image_receipt_can_be_ignored_then_resumed(tmp_path):
+def test_missing_image_does_not_block_reading_and_can_be_ignored(tmp_path):
     import time
     from knowledge_service.integrations.embeddings import HashingEncoder
     app=create_app(tmp_path/'missing.sqlite',encoder=HashingEncoder())
@@ -78,21 +79,17 @@ def test_missing_image_receipt_can_be_ignored_then_resumed(tmp_path):
         client.post(base+'/start')
         for _ in range(100):
             item=client.get(base+'/items').json()['items'][0]
-            if item['status']=='needs_attention':break
+            if item['status'] in ('completed','needs_attention'):break
             time.sleep(.1)
-        assert item['error_code']=='source_asset_missing' and item['source_version_id']
+        assert item['status']=='completed' and item['source_version_id']
         document=app.state.service.data.get_record(project,item['document_id'])
-        assert document['metadata']['status']=='failed'
+        assert document['metadata']['status']=='ready'
+        assert document['metadata']['warnings'][0]['code']=='source_asset_missing'
         source_id=item['source_version_id']
         asset=client.get(f'/api/projects/{project}/source-documents/{source_id}').json()['assets'][0]
         ignored=client.post(f'/api/projects/{project}/source-documents/{source_id}/assets/{asset["id"]}/ocr/ignore',json={'reason':'No knowledge text'})
         assert ignored.status_code==200,ignored.text
-        assert client.post(base+f'/items/{item["id"]}/retry',json={'mode':'resume_checkpoint'}).status_code==202
-        for _ in range(100):
-            item=client.get(base+'/items').json()['items'][0]
-            if item['status'] in ('completed','needs_attention'):break
-            time.sleep(.1)
-        assert item['status']=='completed',item
+        assert ignored.json()['status']=='ignored'
 
 
 def test_zip_preflight_happens_before_any_source_publication(tmp_path,monkeypatch):

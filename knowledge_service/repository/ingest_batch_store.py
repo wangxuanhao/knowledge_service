@@ -20,7 +20,7 @@ def _row(row):
         value['settings'] = value['settings_json']
     if 'options_json' in value:
         value['options'] = value['options_json']
-    if 'content' in value:
+    if value.get('content') is not None:
         value['content'] = bytes(value['content'])
     return value
 
@@ -66,18 +66,32 @@ class IngestBatchStore:
             raise ValueError('invalid pagination')
         return min(int(limit),1000), int(offset)
 
-    def add_item(self, project_id, batch_id, filename, content, content_hash, idempotency_key, max_items, max_bytes, options=None, accounted_size=None):
-        content = bytes(content)
-        size=len(content) if accounted_size is None else int(accounted_size)
+    def add_item(self, project_id, batch_id, filename, content, content_hash, idempotency_key, max_items, max_bytes, options=None, accounted_size=None, upload_object_id=None):
+        content = bytes(content) if content is not None else None
+        if content is None and upload_object_id is None:
+            raise ValueError('Upload content or object reference required')
+        size=(len(content) if content is not None else 0) if accounted_size is None else int(accounted_size)
         if size<0:raise ValueError('invalid accounted size')
         options = dict(options or {})
         with self.repo._transaction():
+            if upload_object_id is not None:
+                self.db.execute('SELECT pg_advisory_xact_lock(hashtextextended(?,0))', ('source-object-gc',))
+                obj = self.db.execute('SELECT * FROM source_objects WHERE id=?', (upload_object_id,)).fetchone()
+                if obj is None or obj['sha256'] != content_hash:
+                    raise ValueError('Upload object does not match content checksum')
+                if accounted_size is None:
+                    size = obj['size_bytes']
             batch = self.db.execute('SELECT * FROM ingest_batches WHERE project_id=? AND id=? FOR UPDATE', (project_id,batch_id)).fetchone()
             if batch is None:
                 raise KeyError(batch_id)
             old = self.db.execute('SELECT * FROM ingest_batch_items WHERE batch_id=? AND idempotency_key=?', (batch_id,idempotency_key)).fetchone()
             if old:
-                if old['file_sha256'] != content_hash or old['original_name'] != filename or bytes(old['content']) != content or _json(_row(old)['options']) != _json(options):
+                same_content = (bytes(old['content']) == content if old['content'] is not None and content is not None
+                    else old['upload_object_id'] == upload_object_id if old['upload_object_id'] and upload_object_id
+                    else hashlib.sha256(content).hexdigest() == old['file_sha256'] if content is not None
+                    else hashlib.sha256(bytes(old['content'])).hexdigest() == content_hash
+                        or options.get('metadata',{}).get('package_sha256') == content_hash)
+                if old['file_sha256'] != content_hash or old['original_name'] != filename or not same_content or _json(_row(old)['options']) != _json(options):
                     raise ValueError('idempotency key conflicts with existing file')
                 return _row(old)
             if batch['status'] != 'draft':
@@ -86,8 +100,8 @@ class IngestBatchStore:
             if totals[0] >= max_items or totals[1]+size > max_bytes:
                 raise ValueError('batch item or byte limit exceeded')
             return _row(self.db.execute('''INSERT INTO ingest_batch_items
-                (id,batch_id,project_id,document_id,original_name,content,size_bytes,file_sha256,idempotency_key,options_json)
-                VALUES (?,?,?,?,?,?,?,?,?,?::jsonb) RETURNING *''', (uuid4().hex,batch_id,project_id,uuid4().hex,filename,content,size,content_hash,idempotency_key,_json(options))).fetchone())
+                (id,batch_id,project_id,document_id,original_name,content,size_bytes,file_sha256,idempotency_key,options_json,upload_object_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?::jsonb,?) RETURNING *''', (uuid4().hex,batch_id,project_id,uuid4().hex,filename,content,size,content_hash,idempotency_key,_json(options),upload_object_id)).fetchone())
 
     def set_source(self, project_id, batch_id, item_id, version_id):
         with self.repo._transaction():

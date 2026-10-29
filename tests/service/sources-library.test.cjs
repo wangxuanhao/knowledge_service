@@ -1,6 +1,48 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {setup,documentRow,settle}=require('./fixtures/sources-ui.cjs');
+test('a versioned document defaults to rich fixed content with an explicit saved-text toggle and download',async()=>{
+  const env=setup({rendered:async()=>({ok:true,text:async()=>'<h2 data-block-id="heading">排版正文</h2><p>图片前</p><table><tbody><tr><td>金额</td></tr></tbody></table><p>图片后</p>'})});
+  await settle();await env.rows()[0].click();
+  assert.equal(env.body.querySelector('h2')?.dataset.blockId,'heading');assert.ok(env.body.querySelector('table'));
+  assert.ok(env.body.classList.contains('source-rich-content'));
+  assert.match(env.fetches[0].url,/project-one\/source-documents\/version-one\/rendered$/);
+  assert.equal(env.fetches.length,1,'library rendering needs no extra version metadata or chunk read');
+  const controls=env.get('source-meta').querySelector('.source-reading-controls');
+  const plain=controls.querySelectorAll('button').find(button=>button.textContent==='已保存正文');await plain.click();
+  assert.equal(env.body.textContent,'原文 one');assert.equal(env.body.classList.contains('source-rich-content'),false);
+  const rich=controls.querySelectorAll('button').find(button=>button.textContent==='图文阅读');await rich.click();assert.ok(env.body.querySelector('h2'));
+  assert.match(env.get('source-meta').querySelector('.source-downloads').querySelector('a').href,/version-one\/source$/);
+});
+
+test('missing fixed rendering clearly falls back to saved text and legacy documents avoid the rich endpoint',async()=>{
+  for(const response of [{ok:false,status:404},{ok:true,text:async()=>'   '}]){
+    const env=setup({rendered:async()=>response});await settle();await env.rows()[0].click();
+    assert.equal(env.body.textContent,'原文 one');assert.match(env.get('source-meta').textContent,/图文原文暂不可用.*已保存正文/);
+  }
+  const old=documentRow('legacy');delete old.metadata.source_document_version_id;
+  const legacy=setup({documents:[old]});await settle();await legacy.rows()[0].click();assert.equal(legacy.body.textContent,'原文 legacy');assert.equal(legacy.fetches.length,0);
+});
+
+test('legacy saved text is explained even when original filename metadata is present',async()=>{
+  const doc=documentRow('legacy');delete doc.metadata.source_document_version_id;
+  const env=setup({documents:[doc]});await settle();await env.rows()[0].click();
+  assert.equal(env.body.textContent,'原文 legacy');assert.match(env.get('source-meta').textContent,/旧资料仅保留已保存正文，未关联固定来源版本/);
+  assert.match(env.get('source-meta').querySelector('.source-meta__head').textContent,/legacy.txt/);
+  assert.equal(env.fetches.length,0);
+});
+
+test('closing, switching tabs and changing project abort rich reads and late responses never repaint',async()=>{
+  for(const action of ['close','tab','project']){
+    let finish;const env=setup({rendered:async()=>new Promise(resolve=>{finish=resolve;})});await settle();const open=env.rows()[0].click();await settle();
+    assert.equal(env.fetches.length,1);const signal=env.fetches[0].signal;
+    if(action==='close')env.drawers[0].close();
+    if(action==='tab'){const load=env.tab('修订记录').click();env.requests.at(-1).resolve({versions:[]});await load;}
+    if(action==='project'){env.context.current='other';await env.project.dispatch('change');await settle();}
+    assert.equal(signal.aborted,true,action);const expected=env.body.textContent;
+    finish({ok:true,text:async()=>'<p>过期资料</p>'});await open;assert.equal(env.body.textContent,expected,action);
+  }
+});
 test('library loads a list without selecting a document and moves original details to one drawer',async()=>{
   const env=setup();await settle();
   assert.equal(env.rows().length,2);

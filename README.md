@@ -16,7 +16,7 @@
 | PostgreSQL | 唯一业务权威：记录、修订、本体发布、断言、来源、任务和审计 |
 | Milvus | 共享 `knowledge_vectors` 的 dense/BM25 检索投影，按项目与构建代际隔离，可显式重建 |
 | Neo4j | 可选图谱投影；不替代 PostgreSQL 正式写事务与版本权威 |
-| etcd / MinIO | Milvus 元数据和持久对象，不是第二份业务真相源 |
+| etcd / MinIO | etcd 保存 Milvus 元数据；MinIO 分 bucket 保存 Milvus 文件与业务原件/图片，业务版本与引用以 PostgreSQL 为准 |
 
 当前关键词、语义和混合检索都要求项目 Milvus 索引就绪；失败时明确报错，不自动切模式或本地向量降级。Metadata 资格由 PostgreSQL 完整判定，再由 Milvus 排名。主动指定系统历史时点时，仅支持 PostgreSQL 历史关键词查询。
 

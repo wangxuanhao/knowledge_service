@@ -27,25 +27,19 @@
   header.append(title,close);
   const note=make('p','','source-reader-note'),tabs=make('nav','','source-reader-tabs'),body=make('article','','source-reader-body');tabs.setAttribute('aria-label','来源视图');body.tabIndex=0;
   dialog.append(header,note,tabs,body);document.body.append(dialog);
-  let controller=null,serial=0,returnFocus=null,selectedTab='reading';
-  const objectUrls=new Set();
-  function clearObjectUrls(){for(const url of objectUrls)URL.revokeObjectURL(url);objectUrls.clear();}
-  dialog.addEventListener('close',()=>{controller?.abort();serial++;clearObjectUrls();returnFocus?.focus?.();});
+  let controller=null,serial=0,viewSerial=0,returnFocus=null,selectedTab='reading',content=null,restoreFocus=true;
+  function clearContent(){content?.dispose();content=null;}
+  dialog.addEventListener('close',()=>{controller?.abort();serial++;viewSerial++;clearContent();if(restoreFocus&&returnFocus?.isConnected)returnFocus.focus();restoreFocus=true;});
+  function invalidate(){restoreFocus=false;if(dialog.open)dialog.close();else{controller?.abort();clearContent();serial++;viewSerial++;}}
+  document.getElementById('project')?.addEventListener('change',invalidate);
+  document.addEventListener('workspace:scope-changed',invalidate);
   const tabButtons={};
   for(const [id,label] of [['reading','阅读视图'],['parsed','解析视图'],['raw','原始视图']]){
     const b=make('button',label,'secondary');b.type='button';tabs.append(b);tabButtons[id]=b;
   }
   async function get(url,signal,raw=false){const response=await fetch(url,{signal});if(!response.ok)throw Error('来源读取失败（HTTP '+response.status+'）');return raw?response.text():response.json();}
-  async function hydrateImages(signal,token,tab){
-    for(const img of body.querySelectorAll('img[data-asset-url]')){
-      const response=await fetch(img.dataset.assetUrl,{signal});
-      if(!response.ok){img.alt='原图读取失败（HTTP '+response.status+'）';continue;}
-      const blob=await response.blob();if(token!==serial||selectedTab!==tab)return;
-      const url=URL.createObjectURL(blob);objectUrls.add(url);img.src=url;
-    }
-  }
   function overlay(asset,boxes,project,version){
-    const figure=make('figure','','source-reader-image'),canvas=make('div','','source-image-canvas'),img=make('img');img.alt=asset.alt_text||asset.original_path||'原图';img.dataset.assetUrl=sourceUrl(project,version,'assets/'+encodeURIComponent(asset.id));canvas.append(img);
+    const figure=make('figure','','source-reader-image'),canvas=make('div','','source-image-canvas'),img=make('img');img.alt=asset.alt_text||asset.original_path||'原图';img.dataset.assetId=asset.id;img.dataset.assetUrl=sourceUrl(project,version,'assets/'+encodeURIComponent(asset.id));if(asset.width>0&&asset.height>0){img.width=asset.width;img.height=asset.height;}canvas.append(img);
     for(const box of boxes){const style=boxStyle(box);if(!style)continue;const mark=make('span','','source-ocr-box');Object.assign(mark.style,style);mark.title=box.text||'OCR 文字区域';canvas.append(mark);}
     figure.append(canvas,make('figcaption',asset.alt_text||'图片 OCR 来源'));return figure;
   }
@@ -78,8 +72,8 @@
     return marks[0]||null;
   }
   async function open({projectId,versionId,location=null,assertionId=null,chunkVersionId=null,focusText=null}){
-    controller?.abort();clearObjectUrls();controller=new AbortController();const {signal}=controller,token=++serial;
-    returnFocus=document.activeElement;body.textContent='正在加载固定版本原文…';note.textContent='';
+    controller?.abort();clearContent();controller=new AbortController();const {signal}=controller,token=++serial;
+    if(!dialog.open)returnFocus=document.activeElement;restoreFocus=true;body.textContent='正在加载固定版本原文…';note.textContent='';
     if(!dialog.open)dialog.showModal();
     try{
       let doc=await get(sourceUrl(projectId,versionId),signal);if(token!==serial)return;
@@ -88,30 +82,31 @@
         const query=new URLSearchParams();if(assertionId)query.set('assertion_id',assertionId);if(chunkVersionId)query.set('chunk_version_id',chunkVersionId);
         location=await get(sourceUrl(projectId,versionId,'locate')+'?'+query,signal);
       }
+      if(token!==serial||!dialog.open)return;
+      const documentSignal=signal;
       let parsed=doc.blocks||null,rendered=null,raw=null;
       async function show(tab){
-        selectedTab=tab;clearObjectUrls();body.textContent='正在加载…';note.textContent=versionNote;for(const [k,b] of Object.entries(tabButtons))b.setAttribute('aria-pressed',String(k===tab));
+        if(token!==serial||!dialog.open)return;
+        selectedTab=tab;clearContent();const display=++viewSerial;
+        const accepts=()=>token===serial&&display===viewSerial&&selectedTab===tab&&dialog.open;
+        const view=window.SourceContent.createSession({host:body,projectId,versionId,signal:documentSignal,isCurrent:accepts});content=view;
+        const signal=view.signal;
+        body.textContent='正在加载…';note.textContent=versionNote;for(const [k,b] of Object.entries(tabButtons))b.setAttribute('aria-pressed',String(k===tab));
         try{
           if(tab==='raw'){
-            if(raw===null){raw=/\.(pdf|docx)$/i.test(doc.original_name||'')?doc.source_text||'该格式请下载原文件查看。':await get(sourceUrl(projectId,versionId,'source'),signal,true);}
-            if(token!==serial||selectedTab!==tab)return;
-            const download=make('a','下载固定版本原文件');download.href=sourceUrl(projectId,versionId,'source');download.download=doc.original_name||'source';
-            download.onclick=async event=>{event.preventDefault();try{
-              const response=await fetch(download.href,{signal});if(!response.ok)throw Error('下载失败（HTTP '+response.status+'）');
-              const blob=await response.blob();if(token!==serial)return;
-              const url=URL.createObjectURL(blob),link=make('a');link.href=url;link.download=download.download;link.click();
-              setTimeout(()=>URL.revokeObjectURL(url),1000);
-            }catch(e){if(e.name!=='AbortError')status(e.message,true);}};
-            const pre=make('pre',raw);body.replaceChildren(download,pre);
+            const binary=/\.(pdf|docx?|odt|pptx?)$/i.test(doc.original_name||'');
+            if(raw===null){raw=binary?doc.source_text||'该格式请下载原文件查看。':await get(sourceUrl(projectId,versionId,'source'),signal,true);}
+            if(!accepts())return;
+            const downloads=make('div','','source-downloads'),downloadItems=window.SourceContent.downloadOptions(doc);
+            for(const option of downloadItems)downloads.append(view.downloadLink(option));
+            const explanation=make('p',binary?'下方是解析后的正文；原始二进制文件请通过下载入口查看。':downloadItems.length>1?'下方是当前 Markdown 源文件；原始 ZIP 知识包保留在独立下载入口。':'下方是当前固定版本的 Markdown / 文本源文件。','source-reader-note');
+            body.replaceChildren(downloads,explanation,make('pre',raw));
           }else if(tab==='reading'){
-            rendered??=await get(sourceUrl(projectId,versionId,'rendered'),signal,true);if(token!==serial||selectedTab!==tab)return;
-            // The server renders tokens with raw HTML disabled and sanitizes this response.
-            const template=document.createElement('template');template.innerHTML=rendered;
-            for(const img of template.content.querySelectorAll('img')){img.dataset.assetUrl=img.getAttribute('src');img.removeAttribute('src');}
-            body.replaceChildren(template.content.cloneNode(true));
+            rendered??=await get(sourceUrl(projectId,versionId,'rendered'),signal,true);if(!accepts())return;
+            view.mount(rendered);
           }else{
             doc=await get(sourceUrl(projectId,versionId),signal);parsed=doc.blocks||[];
-            if(token!==serial||selectedTab!==tab)return;body.replaceChildren();
+            if(!accepts())return;body.replaceChildren();
             for(const chunk of doc.chunks||[]){
               const part=make('details','','source-parsed-block');
               part.dataset.chunkVersionId=chunk.version_id;
@@ -134,7 +129,7 @@
               }
               if(asset.kind==='external'){section.append(make('p','外部图片，未固化'));body.append(section);continue;}
               const result=await get(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/ocr'),signal);
-              if(token!==serial||selectedTab!==tab)return;
+              if(!accepts())return;
               const pinnedRunId=location?.ocr_run_id||location?.boxes?.[0]?.ocr_run_id;
               let run=(result.runs||[]).find(r=>r.id===pinnedRunId)||result.run||result;
               if(asset.status==='ignored')run={...run,status:'ignored',error_code:null,public_error:null};
@@ -148,7 +143,7 @@
               body.append(section);
             }
           }
-          if(token!==serial||selectedTab!==tab)return;
+          if(!accepts())return;
           if(['source_mapping_unavailable','mapping_unavailable'].includes(location?.code)||location?.status==='mapping_unavailable')note.textContent+=' · 历史数据没有原文映射';
           const targets=location?.spans||location?.locations||[location].filter(Boolean);
           let firstFocus=null,precise=false;
@@ -187,19 +182,19 @@
               const existing=[...body.querySelectorAll('img[data-asset-id]')].find(n=>n.dataset.assetId===asset.id);
               if(existing)existing.replaceWith(figure);else body.append(figure);
               const result=await get(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/ocr'),signal);
-              if(token!==serial||selectedTab!==tab)return;
+              if(!accepts())return;
               const runId=location.ocr_run_id||boxes[0]?.ocr_run_id;
               const run=(result.runs||[]).find(r=>r.id===runId)||result.run||{};
               figure.append(make('p',(run.engine||'图片 OCR')+' '+(run.engine_version||'')+' · 平均置信度 '+(run.average_confidence??'未知')),make('pre',boxes.map(b=>b.text||b.normalized_text||'').join('\n')));
               figure.scrollIntoView({block:'center'});
             }
           }
-          await hydrateImages(signal,token,tab);
-        }catch(e){if(e.name!=='AbortError'&&token===serial)body.textContent=e.message;}
+          view.hydrateImages();
+        }catch(e){if(e.name!=='AbortError'&&accepts()){view.dispose();body.textContent=e.message;}}
       }
       for(const [id,b] of Object.entries(tabButtons))b.onclick=()=>show(id);
       await show(location?.tab==='parsed'?'parsed':'reading');
     }catch(e){if(e.name!=='AbortError'&&token===serial)body.textContent=e.message;}
   }
-  window.SourceReader={open,boxStyle,sourceUrl,tableRowRange};
+  window.SourceReader={open,dispose:invalidate,boxStyle,sourceUrl,tableRowRange,characterRange};
 })();

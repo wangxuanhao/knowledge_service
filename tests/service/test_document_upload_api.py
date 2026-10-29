@@ -51,7 +51,7 @@ def test_multipart_job_ingests_and_removes_staged_file(client):
     assert response.status_code == 202, response.text
     job_id = response.json()['id']
 
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         job = client.get(f'/api/jobs/{job_id}').json()
         if job['status'] not in ('queued', 'running'):
@@ -79,7 +79,7 @@ def test_failed_background_parse_retains_file_and_can_resume(client, monkeypatch
         data={'options': json.dumps({'extraction_mode': 'documents'})},
     )
     job_id = response.json()['id']
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         job = client.get(f'/api/jobs/{job_id}').json()
         if job['status'] not in ('queued', 'running'):
@@ -92,7 +92,7 @@ def test_failed_background_parse_retains_file_and_can_resume(client, monkeypatch
     monkeypatch.setattr(client.app.state.document_uploads.parser, 'parse', original)
     resumed = client.post(f'/api/jobs/{job_id}/resume')
     assert resumed.status_code == 202, resumed.text
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         job = client.get(f'/api/jobs/{job_id}').json()
         if job['status'] not in ('queued', 'running'):

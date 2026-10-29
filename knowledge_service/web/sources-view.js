@@ -9,6 +9,7 @@
   refresh.textContent='刷新';refresh.classList.add('secondary');
   let serial=0,detailSerial=0,citationSerial=0,selected=null,activeTab='text',loadedProject=null,loadedScope=null,loadedState=null,allDocuments=[],currentFilter='all';
   let inFlight=null,nextCursor=null,total=0,directoryCounts=null;
+  let richContent=null,detailContent=null,readingControls=null,readingMode='rich',readingNote=null;
   const textReads=new Map();
   const loadMore=document.createElement('button');loadMore.id='source-load-more';loadMore.type='button';loadMore.className='secondary';loadMore.textContent='加载更多资料';loadMore.hidden=true;layout.after(loadMore);
   const visible=()=>!page.classList.contains('hidden');
@@ -19,9 +20,11 @@
   });
 
   function clearDetail(){
+    clearReading();detailContent?.dispose();detailContent=null;readingControls=null;readingNote=null;
     detailSerial++;selected=null;activeTab='text';title.textContent='';meta.replaceChildren();body.textContent='';
     list.querySelectorAll('.source-item').forEach(button=>button.setAttribute('aria-current','false'));
   }
+  function clearReading(){richContent?.dispose();richContent=null;body.classList.remove('source-rich-content');}
   function closeDetail(){drawer.close({restoreFocus:false});clearDetail();}
   function message(heading,detail){
     empty.querySelector('h3').textContent=heading;empty.querySelector('p').textContent=detail;
@@ -102,6 +105,7 @@
   }
   async function openDocument(doc,trigger){
     if(loadedProject!==current||loadedScope!==scopeStamp())return;
+    clearReading();detailContent?.dispose();detailContent=null;readingMode='rich';
     const project=current,stamp=scopeStamp(),request=++detailSerial,ticket=window.WorkspaceContext?.ticket(project,'sources');
     selected=doc.id;activeTab='text';drawer.open({trigger});
     title.textContent=documentTitle(doc);body.classList.remove('source-structured');body.textContent='正在读取原文…';meta.replaceChildren();
@@ -123,11 +127,39 @@
       const open=document.createElement('button');open.type='button';open.className='secondary';open.textContent='在原文中打开';
       open.onclick=()=>{window.WorkspaceDrawers.close({restoreFocus:false});window.SourceReader.open({projectId:project,versionId:doc.metadata.source_document_version_id});};meta.append(open);
     }
-    body.textContent=doc.text||'旧项目未保存完整原文；可查片段与原始导入记录。';body.scrollTop=0;
+    renderReadingControls(doc,project,stamp,ticket);
+    await showText(doc,project,accepts);if(!accepts())return;body.scrollTop=0;
     list.querySelectorAll('.source-item').forEach(button=>button.setAttribute('aria-current',String(button===trigger)));
   }
   function sameContext(project,stamp,ticket){
     return project===current&&stamp===scopeStamp()&&(!ticket||window.WorkspaceContext.accepts(ticket,current,'sources'));
+  }
+  function renderReadingControls(doc,project,stamp,ticket){
+    const version=doc.metadata?.source_document_version_id;
+    readingControls=null;readingNote=detailNode('p','','source-reading-note');readingNote.setAttribute('role','status');
+    if(!version||!window.SourceContent){meta.append(readingNote);return;}
+    const accepts=()=>drawer.dialog.open&&selected===doc.id&&sameContext(project,stamp,ticket);
+    detailContent=window.SourceContent.createSession({host:meta,projectId:project,versionId:version,isCurrent:accepts});
+    readingControls=detailNode('div',undefined,'source-reading-controls');readingControls.setAttribute('aria-label','原文显示方式');
+    for(const [mode,label] of [['rich','图文阅读'],['plain','已保存正文']]){
+      const button=detailNode('button',label,'secondary');button.type='button';button.dataset.readingMode=mode;button.setAttribute('aria-pressed',String(mode===readingMode));
+      button.onclick=()=>{if(!accepts()||activeTab!=='text')return;readingMode=mode;const request=++detailSerial;
+        return showText(doc,project,()=>accepts()&&request===detailSerial&&activeTab==='text');};readingControls.append(button);
+    }
+    readingControls.append(readingNote);meta.append(readingControls);
+    const downloads=detailNode('div',undefined,'source-downloads');
+    for(const option of window.SourceContent.downloadOptions(doc.metadata))downloads.append(detailContent.downloadLink(option));meta.append(downloads);
+  }
+  async function showText(doc,project,accepts){
+    clearReading();body.classList.remove('source-structured');
+    readingControls?.querySelectorAll('button').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.readingMode===readingMode)));
+    const plain=()=>{body.textContent=doc.text||'旧项目未保存完整原文；可查片段与原始导入记录。';};
+    const version=doc.metadata?.source_document_version_id;
+    if(readingMode==='plain'||!version||!window.SourceContent){plain();if(readingNote)readingNote.textContent=!version?'旧资料仅保留已保存正文，未关联固定来源版本':readingMode==='plain'?'已保存正文 · 解析后用于知识处理的文本':'图文阅读模块暂不可用，当前显示已保存正文。';return;}
+    body.textContent='正在读取图文原文…';if(readingNote)readingNote.textContent='固定版本图文原文';
+    const content=window.SourceContent.createSession({host:body,projectId:project,versionId:version,isCurrent:()=>accepts()&&activeTab==='text'});richContent=content;
+    try{await content.render();}
+    catch(error){if(error.name!=='AbortError'&&accepts()&&richContent===content){clearReading();plain();readingNote.textContent='图文原文暂不可用，当前显示已保存正文。可重试图文阅读或下载原文件。';}}
   }
   function renderDetailTabs(doc,project){
     const tabs=document.createElement('div');tabs.className='source-detail-tabs';tabs.setAttribute('aria-label','资料详情');
@@ -135,10 +167,11 @@
       const button=document.createElement('button');button.type='button';button.className='secondary';button.textContent=label;button.setAttribute('aria-pressed',String(name==='text'));
       button.onclick=async()=>{
         const request=++detailSerial,id=doc.id,stamp=scopeStamp(),ticket=window.WorkspaceContext?.ticket(project,'sources');activeTab=name;
+        clearReading();if(readingControls)readingControls.hidden=name!=='text';
         tabs.querySelectorAll('button').forEach(item=>item.setAttribute('aria-pressed',String(item===button)));
         body.classList.toggle('source-structured',name!=='text');
-        if(name==='text'){body.textContent=doc.text||'此记录未保存完整原文';return;}
         const accepts=()=>request===detailSerial&&drawer.dialog.open&&selected===id&&activeTab===name&&button.isConnected&&sameContext(project,stamp,ticket);
+        if(name==='text')return showText(doc,project,accepts);
         body.textContent='正在读取…';
         const suffix=name==='assertions'?'/assertions?document_id='+encodeURIComponent(id):name==='runs'?'/ingest-runs?document_id='+encodeURIComponent(id):'/records/'+encodeURIComponent(id)+'/history';
         try{

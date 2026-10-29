@@ -860,7 +860,7 @@ class KnowledgeService:
             # 重叠段落保留来源偏移，并继承文档元数据/有效性。
             from .chunking import split_document
             with stage(f"切片 · 策略 {request.get('chunk_strategy','fixed')} · 长度 {request.get('chunk_size',1800)} · 重叠 {request.get('chunk_overlap',200)}",10):
-                chunks=request.get('_prepared_chunks') or split_document(request['text'], request)
+                chunks=request['_prepared_chunks'] if '_prepared_chunks' in request else split_document(request['text'], request)
             event(f'切片完成 · 共 {len(chunks)} 片',12)
             run=self.repository.update_ingest_run(project_id,run['id'],run['version'],active_stage='extraction',
                 counts_patch={'chunks_total':len(chunks),'chunks_succeeded':len(chunks)})
@@ -899,6 +899,7 @@ class KnowledgeService:
                     project_id, chunk_records, expected_versions=existing_chunks if prior else None, operation='extract',
                     operation_context=operation_context)
                 if checkpoint_context:checkpoint_context.map_chunks(project_id,indexed)
+                if request.get('_source_span_mapper'):request['_source_span_mapper'](indexed)
             saved_chunks=indexed
             run=self.repository.update_ingest_run(project_id,run['id'],run['version'],active_stage='extraction',
                 readiness_patch={'keyword_ready':True,'semantic_ready':True})

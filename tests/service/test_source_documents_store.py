@@ -1,5 +1,6 @@
 """Fixed source versions preserve bytes, ownership and source spans."""
 import pytest
+from source_test_images import png
 from knowledge_service.repository import Repository
 from knowledge_service.repository.source_store import SourceStore
 from knowledge_service.integrations.source_object_store import SourceObjectStore
@@ -12,14 +13,14 @@ def test_source_versions_assets_and_project_isolation(tmp_path):
     project=repo.create_project('Sources')
     other=repo.create_project('Other')
     service=SourceDocumentService(repo,SourceObjectStore(tmp_path/'objects'))
-    version=service.persist(project['id'],'document',b'# Rule\n\n![asset](image.png)','rules.md',assets=[dict(kind='local',status='available',original_path='image.png',alt='asset',data=b'bytes',source_start_line=3)])
+    version=service.persist(project['id'],'document',b'# Rule\n\n![asset](image.png)','rules.md',assets=[dict(kind='local',status='available',original_path='image.png',alt='asset',data=png(),source_start_line=3)])
     assert version['version']==1
     assert service.source(project['id'],version['id'])['data']==b'# Rule\n\n![asset](image.png)'
     rendered=service.rendered(project['id'],version['id'])['html']
     assert 'data-block-id=' in rendered
     assert f'/source-documents/{version["id"]}/assets/' in rendered
     asset=version['assets'][0]
-    assert service.asset(project['id'],version['id'],asset['id'])['data']==b'bytes'
+    assert service.asset(project['id'],version['id'],asset['id'])['data']==png()
     with pytest.raises(KeyError): service.asset(other['id'],version['id'],asset['id'])
     newer=service.persist(project['id'],'document',b'# Changed','rules.md')
     assert newer['version']==2
@@ -56,7 +57,7 @@ def test_ocr_receipt_reuse_failure_and_ignore(tmp_path):
     project=repo.create_project('OCR')
     adapter=Adapter()
     service=SourceDocumentService(repo,SourceObjectStore(tmp_path/'objects'),adapter)
-    version=service.persist(project['id'],'doc',b'![x](x.png)','a.md',assets=[dict(kind='local',status='available',original_path='x.png',alt='x',data=b'image')])
+    version=service.persist(project['id'],'doc',b'![x](x.png)','a.md',assets=[dict(kind='local',status='available',original_path='x.png',alt='x',data=png())])
     asset=version['assets'][0]
     one=service.image_ocr.process_asset(project['id'],version['id'],asset['id'])
     two=service.image_ocr.process_asset(project['id'],version['id'],asset['id'])

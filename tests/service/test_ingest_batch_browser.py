@@ -41,6 +41,7 @@ def test_source_reader_browser_contract(tmp_path):
         page.goto('http://browser.test/')
         page.evaluate("""() => {const original=window.fetch.bind(window);window.fetch=(url,options={})=>original(url,{...options,headers:{...options.headers,Authorization:'Bearer browser-test-token'}});} """)
         page.add_style_tag(path=str(WEB / 'source-reader.css'))
+        page.add_script_tag(path=str(WEB / 'source-content.js'))
         page.add_script_tag(path=str(WEB / 'source-reader.js'))
         page.locator('#open').focus()
         page.evaluate("SourceReader.open({projectId:'p',versionId:'v',location:{block_id:'block-1'}})")

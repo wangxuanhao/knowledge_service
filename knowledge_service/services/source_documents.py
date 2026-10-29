@@ -5,11 +5,13 @@ import html
 import hashlib
 import logging
 import re
+import time
 from uuid import uuid4
+from collections import defaultdict,deque
 from urllib.parse import quote
 from ..integrations.markdown_parser import parse_markdown
 from ..integrations.markdown_package import MarkdownPackageReader
-from ..integrations.source_object_store import SourceObjectStore
+from ..integrations.source_object_store import source_object_store_from_environment
 from ..integrations.image_ocr import OCRError as SourceOCRError
 from ..repository.source_store import SourceStore
 from .image_ocr import ImageOCRService
@@ -25,38 +27,104 @@ class SourceDocumentUnavailable(RuntimeError):
 class SourceDocumentService:
     @classmethod
     def for_service(cls, service):
-        return cls(service.repository, SourceObjectStore(os.getenv('KG_SOURCE_OBJECT_ROOT', 'data/sources')))
+        return cls(service.repository, source_object_store_from_environment())
 
-    def __init__(self, repo, object_store, ocr_adapter=None):
+    def __init__(self, repo, object_store, ocr_adapter=None, remote_image_importer=None):
         self.store=SourceStore(repo)
         self.object_store=object_store
         self.image_ocr=ImageOCRService(self.store,object_store,ocr_adapter)
+        self.remote_image_importer=remote_image_importer
 
-    def persist(self,project_id,document_id,data,original_name,text=None,assets=None):
-        # GC and source publication share a DB lock, including byte publication.
-        with self.store.publication_guard():
-            return self._persist(project_id,document_id,data,original_name,text,assets)
+    def persist(self,project_id,document_id,data,original_name,text=None,assets=None,metadata=None,provenance=None):
+        prepared=self.prepare(data,original_name,text,assets,metadata,provenance)
+        return self.publish(project_id,document_id,prepared)
 
-    def _persist(self,project_id,document_id,data,original_name,text=None,assets=None):
+    def prepare(self,data,original_name,text=None,assets=None,metadata=None,provenance=None):
+        """Parse and fetch before opening any publication transaction."""
         version_id=str(uuid4())
         text=data.decode('utf-8-sig') if text is None else text
         parsed=parse_markdown(text,version_id)
         parsed['document_version_id']=version_id
-        refs=assets if assets is not None else parsed['images']
+        parsed['metadata']={**(metadata or {}),'provenance':provenance or {}}
+        parsed['metadata']['warnings']=list(parsed['metadata'].get('warnings',[]))
+        supplied=list(assets or [])
+        refs=[];used=set()
+        by_path=defaultdict(deque);first_by_path={}
+        for index,asset in enumerate(supplied):
+            for key in {asset.get('original_path'),asset.get('path'),asset.get('url')} - {None}:
+                by_path[key].append(index);first_by_path.setdefault(key,index)
+        # Merge payload bytes into parsed occurrences so line mapping and duplicate
+        # image references retain article order, including two images on one line.
+        for ref in parsed['images']:
+            key=ref.get('path',ref['url']);queue=by_path[key]
+            while queue and queue[0] in used:queue.popleft()
+            index=queue.popleft() if queue else first_by_path.get(key)
+            if index is not None:
+                asset=supplied[index];used.add(index);refs.append({**ref,**asset,'alt':ref.get('alt') or asset.get('alt',''),'source_start_line':ref['source_start_line'],'source_end_line':ref['source_end_line']})
+            else:refs.append(ref)
+        refs.extend(a for i,a in enumerate(supplied) if i not in used)
         prepared=[]
-        for ref in refs:
+        remote_cache={};total_image_bytes=0;remote_deadline=time.monotonic()+15
+        for ordinal,ref in enumerate(refs):
             asset=dict(ref,id=str(uuid4()))
+            asset['provenance']={**asset.get('provenance',{}),'source_image_ordinal':ordinal}
+            if ordinal>=200:
+                asset.pop('data',None)
+                if asset['kind']!='unsafe':asset['status']='missing'
+                parsed['metadata']['warnings'].append('图片数量超过文档上限：'+asset.get('original_path',asset.get('url',''))[:300])
+                prepared.append(asset)
+                continue
+            if asset['kind']=='external':
+                url=asset.get('url',asset.get('original_path',''))
+                asset['provenance']={**asset.get('provenance',{}),'original_url':url}
+                enabled=os.getenv('KG_SOURCE_REMOTE_IMAGES_ENABLED','true').lower() in {'1','true','yes'}
+                if enabled or self.remote_image_importer is not None:
+                    from ..integrations.remote_images import RemoteImageImporter, RemoteImageError
+                    if url not in remote_cache:
+                        try:
+                            remaining=remote_deadline-time.monotonic()
+                            if len(remote_cache)>=20 or remaining<=0:raise RemoteImageError('Document remote image import limit exceeded')
+                            remote_cache[url]=(self.remote_image_importer or RemoteImageImporter(timeout=min(5,remaining))).fetch(url)
+                        except RemoteImageError:remote_cache[url]=None
+                    imported=remote_cache[url]
+                    if imported:
+                        asset.update(imported,kind='local',status='available',original_path=url,
+                            provenance={**asset['provenance'],**imported.get('provenance',{})})
+                    else:
+                        asset['status']='missing'
+                        parsed['metadata']['warnings'].append('远程图片导入失败：'+url[:300])
+                else:parsed['metadata']['warnings'].append('远程图片导入已关闭：'+url[:300])
             if 'data' in asset:
                 mime=asset.get('mime_type') or mimetypes.guess_type(asset.get('original_path',asset.get('path','')))[0] or 'application/octet-stream'
-                if mime not in {'image/png','image/jpeg','image/webp','image/gif','image/bmp','image/tiff','application/octet-stream'}:
-                    raise ValueError('Unsupported source image MIME type')
-                asset['object']=self.object_store.put(asset.pop('data'),mime)
+                from ..integrations.document_media import inspect_image
+                try:
+                    details=inspect_image(asset['data'],None if mime=='application/octet-stream' else mime)
+                    total_image_bytes+=len(asset['data'])
+                    if total_image_bytes>100*1024*1024:raise ValueError('Document image limit exceeded')
+                    asset.update(details)
+                except ImportError as exc:
+                    from ..integrations.document_parser import DocumentParseError
+                    raise DocumentParseError('model_unavailable','未安装文档图片解析能力，请安装文档解析依赖',503) from exc
+                except (ValueError,OSError):
+                    asset.pop('data',None);asset['status']='missing'
+                    parsed['metadata']['warnings'].append('图片不可用或超过限制：'+asset.get('original_path',asset.get('url',''))[:300])
             elif asset['kind']=='local': asset['status']='missing'
             prepared.append(asset)
+        parsed['metadata']['warnings']=parsed['metadata']['warnings'][:100]
         markdown_name=original_name.lower().endswith(('.md','.markdown'))
         mime='application/zip' if markdown_name and data.startswith(b'PK\x03\x04') else mimetypes.guess_type(original_name)[0] or 'application/octet-stream'
-        obj=self.object_store.put(data,mime)
-        return self.store.create_version(project_id,document_id,obj,original_name,parsed,prepared)
+        return dict(data=data,original_name=original_name,mime_type=mime,parsed=parsed,assets=prepared)
+
+    def publish(self,project_id,document_id,prepared):
+        # GC and byte publication share this lock; network/image decoding never do.
+        with self.store.publication_guard():
+            assets=[]
+            for ref in prepared['assets']:
+                asset=dict(ref)
+                if 'data' in asset:asset['object']=self.object_store.put(asset.pop('data'),asset['mime_type'])
+                assets.append(asset)
+            obj=self.object_store.put(prepared['data'],prepared['mime_type'])
+            return self.store.create_version(project_id,document_id,obj,prepared['original_name'],prepared['parsed'],assets)
 
     def persist_package(self,project_id,data,original_name,document_id_factory=None):
         package=MarkdownPackageReader().read(data,original_name)
@@ -66,7 +134,7 @@ class SourceDocumentService:
     def get(self,project_id,version_id): return self.store.get_version(project_id,version_id)
     def rendered(self,project_id,version_id):
         version=self.get(project_id,version_id)
-        assets=sorted(version['assets'],key=lambda a:(a.get('source_start_line') or 0,a['id']))
+        assets=sorted(version['assets'],key=lambda a:(a.get('provenance',{}).get('source_image_ordinal',1_000_000),a.get('source_start_line') or 0,a['id']))
         # Keep same source order for multiple images on a line via stored parsed image URL.
         ordered=[]
         for block in version['blocks']:
@@ -79,7 +147,9 @@ class SourceDocumentService:
             asset=ordered[index]
             if asset.get('source_object_id'):
                 url=f'/api/projects/{quote(project_id,safe="")}/source-documents/{quote(version_id,safe="")}/assets/{quote(asset["id"],safe="")}'
-                return '<img data-asset-id="'+html.escape(asset['id'],quote=True)+'" src="'+html.escape(url,quote=True)+'" alt="'+html.escape(asset['alt_text'],quote=True)+'">'
+                width,height=asset.get('width'),asset.get('height')
+                dimensions=f' width="{width}" height="{height}"' if all(type(value) is int and 0<value<=1_000_000 for value in (width,height)) else ''
+                return '<img data-asset-id="'+html.escape(asset['id'],quote=True)+'" src="'+html.escape(url,quote=True)+'" alt="'+html.escape(asset['alt_text'],quote=True)+'"'+dimensions+'>'
             return '<span data-asset-id="'+html.escape(asset['id'],quote=True)+'">'+('外部图片，未固化' if asset['kind']=='external' else '图片缺失')+'</span>'
         rendered=re.sub(r'<span class="source-image" data-image-index="(\d+)">.*?</span>',replace,version['rendered_html'],flags=re.S)
         return dict(document_version_id=version_id,html=rendered,blocks=version['blocks'],assets=version['assets'])

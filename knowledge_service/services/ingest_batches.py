@@ -33,7 +33,7 @@ def _ocr_available():
     return RapidOCRAdapter().available()
 
 def public_item(row):
-    row={k:v for k,v in row.items() if k not in ('content','lease_owner','lease_token','lease_until')}
+    row={k:v for k,v in row.items() if k not in ('content','upload_object_id','storage_key','upload_storage_key','lease_owner','lease_token','lease_until')}
     row['status']={'pending':'queued','succeeded':'completed','failed':'needs_attention'}.get(row['status'],row['status'])
     return row
 
@@ -83,22 +83,31 @@ class IngestBatches:
                         'original_zip_name':name,'package_sha256':digest,'package_entry_path':entry['path']}}
                 UploadOptions.model_validate(item_options)
                 prepared.append((entry,encoded,item_options))
+            # Remote imports and image decoding must not hold a database UOW;
+            # the publication guard below protects only object writes/references.
+            prepared_sources={entry['path']:self.sources.prepare(bytes(data),entry['path'],
+                text=entry['text'],assets=entry['assets']) for entry,_,_ in prepared}
             result=[]
-            with self.service.repository.unit_of_work():
+            with self.sources.store.publication_guard():
+                obj=self.sources.store.register_object(self.sources.object_store.put(bytes(data),'application/zip',digest))
                 for index,(entry,encoded,item_options) in enumerate(prepared):
-                    row=self.store.add_item(project_id,batch_id,entry['path'],encoded,
+                    row=self.store.add_item(project_id,batch_id,entry['path'],None,
                         digest,(key or digest)+':'+entry['path'],
                         self.limits.max_batch_items,self.limits.max_batch_bytes,
                         options=item_options,
-                        accounted_size=len(data) if index==0 else 0)
+                        accounted_size=len(data) if index==0 else 0,upload_object_id=obj['id'])
                     if not row.get('source_version_id'):
-                        source=self.sources.persist(project_id,row['document_id'],bytes(data),entry['path'],
-                            text=entry['text'],assets=entry['assets'])
+                        source=self.sources.publish(project_id,row['document_id'],prepared_sources[entry['path']])
                         self.store.set_source(project_id,batch_id,row['id'],source['id'])
                         row['source_version_id']=source['id']
                     result.append(public_item(row))
             return {'items':result,'total':len(result),'id':result[0]['id'] if result else None}
-        row=self.store.add_item(project_id,batch_id,name,bytes(data),digest,key or digest,self.limits.max_batch_items,self.limits.max_batch_bytes,options=options)
+        import mimetypes
+        with self.sources.store.publication_guard():
+            obj=self.sources.store.register_object(self.sources.object_store.put(bytes(data),
+                mimetypes.guess_type(name)[0] or 'application/octet-stream',digest))
+            row=self.store.add_item(project_id,batch_id,name,None,digest,key or digest,
+                self.limits.max_batch_items,self.limits.max_batch_bytes,options=options,upload_object_id=obj['id'])
         return public_item(row)
     def control(self,project_id,batch_id,action):
         batch=self.get(project_id,batch_id)

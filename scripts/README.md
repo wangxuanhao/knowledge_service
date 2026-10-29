@@ -1,6 +1,6 @@
 # 脚本使用索引
 
-这里是**手动工具**，不等于默认测试。日常回归入口见 [tests/README.md](../tests/README.md)。整理后保留 52 个脚本：32 个用途与现行协议基本一致、17 个专项需要适配或复核、3 个保留独有迁移安全验证。此分类来自静态核对，不能当作这些脚本本轮全部执行通过。
+这里是**手动工具**，不等于默认测试。日常回归入口见 [tests/README.md](../tests/README.md)。下文区分当前入口、需要适配或复核的专项，以及迁移安全工具；静态分类不能当作所有脚本本轮全部执行通过。
 
 ## 常用入口
 
@@ -17,13 +17,28 @@
 
 ## 运维与模型工具
 
-保留以下 8 个，执行前先读对应参数和运维说明；文件复制、来源修复与服务启动不是只读操作：
+执行前先读对应参数和运维说明；文件复制、模型准备、来源修复与服务启动不是只读操作：
 
 - [archive_windows_docker_bind.py](archive_windows_docker_bind.py)、[copy_stopped_docker_volume.sh](copy_stopped_docker_volume.sh)、[migrate_docker_storage.py](migrate_docker_storage.py)：停止写入后的归档、复制与校验，配合 [迁移指南](../docs/2026-10-19-Docker-Linux-volume-migration.md)。
 - [install_ocr_models.py](install_ocr_models.py)、[prepare_model_layout.py](prepare_model_layout.py)：本地模型安装和布局。
+- [prepare_document_models.py](prepare_document_models.py)：部署前准备 Docling 的布局、表格和 RapidOCR 权重。默认写入 `data/model/document-parser/docling`，`--output-dir` 可指定目录，`--check` 仅校验已有文件。运行服务配置 `KG_DOCUMENT_ARTIFACTS_PATH`；PDF 请求只使用本地模型，缺失时明确返回不可用，DOCX/TXT 不依赖 PDF 模型。
 - [production_storage_checkpoint.py](production_storage_checkpoint.py)：部署读取检查点。
 - [repair_source_scope.py](repair_source_scope.py)：来源范围修复计划及显式应用。
+- [migrate_source_objects.py](migrate_source_objects.py)：本地来源对象与历史队列 BYTEA 迁往显式配置的 S3/MinIO，默认只读盘点；完整校验原始大小和 SHA256 后，`--apply` 才上传并将队列改为对象引用。
 - [start-service.ps1](start-service.ps1)：正常服务启动。
+
+### 来源对象迁移
+
+先备份数据库及 `data/sources`，执行普通 schema 迁移至 `0029`，安装 `s3` extra 并预建独立来源 bucket。安排暂停上传、来源 GC 与批次 worker 的维护窗口；把本次命令进程的 `KG_SOURCE_OBJECT_BACKEND=s3` 及 `KG_SOURCE_S3_*` 指向目标。命令经 `resolve_dsn()` 使用应用角色做 DML，不需要数据库管理员凭据。
+
+```powershell
+python scripts/migrate_source_objects.py --source-root data/sources --output .benchmarks/source-migration-dry-run.json
+python scripts/migrate_source_objects.py --source-root data/sources --apply --output .benchmarks/source-migration-applied.json
+```
+
+默认盘点已登记的原文件/图片及全部队列，验证源和已有目标；不上传、不改数据。显式 `--apply` 保留相同对象键，目标完整回读的大小和 SHA256 均通过后才登记引用、清除对应队列 BYTEA。ZIP 的旧成员 Markdown 不能代替原始 ZIP；只能跟随 SHA256 一致的已冻结原始包。缺失或损坏对象只尝试校验和完全匹配的冻结 Markdown（含 UTF-8 BOM）、历史原始 BYTEA 或已经验证的目标；不能恢复的逐项报错，退出码 2，保留未验证的原始字节。失败项可以修复后重跑，已完成项幂等。
+
+脚本不创建 bucket、不删除或修复本地文件、不修改 `.env`、不自动切换运行服务配置。核对报告零错误后，由运维显式切换应用对象后端并重启；保留旧文件用于回滚。S3 超时与重试有界，内存暂存上限 8 MiB，总对象上限 1 GB（大对象需维护窗口内另行处理）。
 
 ## 容量、基准与诊断
 

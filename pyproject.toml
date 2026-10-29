@@ -16,6 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+s3 = ["boto3>=1.35,<2"]
 ocr = ["rapidocr>=3.9.2,<4", "onnxruntime>=1.20.1,<2", "Pillow>=10,<13", "packaging>=24,<27"]
 neo4j = ["neo4j>=6,<7"]
 milvus = ["pymilvus>=3.0,<4"]

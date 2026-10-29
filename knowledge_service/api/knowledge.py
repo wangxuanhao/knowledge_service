@@ -146,8 +146,7 @@ def install(app, service):
         parsed_options = uploads.parse_options(options)
         staged = uploads.stage(file)
         try:
-            payload, _ = uploads.payload(staged, parsed_options)
-            return service.ingest(project_id, Ingest.model_validate(payload).model_dump())
+            return uploads.ingest(service,project_id,staged,parsed_options,sources=app.state.source_documents)
         finally:
             uploads.discard(staged)
 

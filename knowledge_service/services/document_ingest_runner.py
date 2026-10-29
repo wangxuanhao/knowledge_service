@@ -133,29 +133,10 @@ class DocumentIngestRunner:
         if (existing and existing.get('metadata',{}).get('status')=='ready'
                 and existing.get('metadata',{}).get('document_generation',0)==item.get('document_generation',0)):
             return {'document':existing,'records':[],'replayed':True}
-        chunks, text = split_source_blocks(source['blocks'], options, return_text=True)
-        # The searchable receipt is parsed text. Fixed raw Markdown remains separately immutable.
-        # Windows honor ingest settings and retain intersections with fixed source blocks.
-        for asset in source['assets']:
-            if asset['kind'] not in ('local','base64') or asset['status'] == 'ignored':
-                continue
-            self.store.update_progress(item['id'], owner, item['lease_token'], stage='ocr', progress=8)
-            from contextlib import nullcontext
-            with self.ocr_semaphore if self.ocr_semaphore is not None else nullcontext():
-                run = self.sources.image_ocr.process_asset(item['project_id'], source['id'], asset['id'])
-            # Build one mapped OCR stream first; the common splitter owns window settings.
-            ocr_length=sum(len(block['normalized_text'])+1 for block in run.get('blocks',[]))
-            ocr_chunks, ocr_text = split_mapped_chunks(self.sources.image_ocr.chunks(run, max(1,ocr_length)), options, return_text=True)
-            ocr_offset = len(text) + 2 if text else 0
-            for chunk in ocr_chunks:
-                chunk['start_char'] += ocr_offset
-                chunk['end_char'] += ocr_offset
-                chunks.append(chunk)
-            if ocr_text:
-                text = text + '\n\n' + ocr_text if text else ocr_text
-        if not chunks:
-            raise ValueError('document contains no text')
-        metadata = {**options.pop('metadata', {}), 'source_document_version_id':source['id'],
+        from .source_ingest import prepare_source_ingest
+        chunks,text,warnings=prepare_source_ingest(self.sources,item['project_id'],source,options,
+            ocr_semaphore=self.ocr_semaphore,progress=lambda:self.store.update_progress(item['id'],owner,item['lease_token'],stage='ocr',progress=8))
+        metadata = {**options.pop('metadata', {}),**{k:v for k,v in source.get('parser_metadata',{}).items() if k!='provenance'},'warnings':warnings,'source_document_version_id':source['id'],
                     'batch_id':item['batch_id'], 'batch_item_id':item['id'], 'file_sha256':item['file_sha256'],
                     'document_generation':item.get('document_generation',0)}
         payload = Ingest.model_validate(dict(options, title=title, text=text, metadata=metadata)).model_dump()
@@ -192,12 +173,24 @@ class DocumentIngestRunner:
                 entry=next(row for row in package['documents'] if row['path']==item['original_name'])
                 return self.sources.persist(item['project_id'],item['document_id'],previous['package_data'],
                     item['original_name'],text=entry['text'],assets=entry['assets'])
+        data=item.get('content')
+        if data is None:
+            obj=self.sources.store.get_upload_object(item['project_id'],item['id'])
+            data=self.sources.object_store.read(obj['storage_key'])
+            if len(data)!=obj['size_bytes'] or hashlib.sha256(data).hexdigest()!=obj['sha256']:
+                raise ValueError('Upload object checksum or size mismatch')
+            if (item.get('options') or {}).get('metadata',{}).get('package_entry_path'):
+                from ..integrations.markdown_package import MarkdownPackageReader
+                package=MarkdownPackageReader().read(data)
+                entry=next(row for row in package['documents'] if row['path']==item['original_name'])
+                return self.sources.persist(item['project_id'],item['document_id'],data,
+                    item['original_name'],text=entry['text'],assets=entry['assets'])
         with tempfile.TemporaryDirectory(prefix='knowledge-batch-') as directory:
             path=Path(directory)/('document'+Path(item['original_name']).suffix)
-            path.write_bytes(item['content'])
+            path.write_bytes(data)
             parsed=DocumentParser(max_upload_bytes=self.file_limit).parse(path,item['original_name'])
-        return self.sources.persist(item['project_id'],item['document_id'],item['content'],
-            item['original_name'],text=parsed.text)
+        return self.sources.persist(item['project_id'],item['document_id'],data,
+            item['original_name'],text=parsed.text,assets=parsed.assets,metadata=parsed.metadata,provenance=parsed.provenance)
 
     def mark_failure(self,item,owner,error):
         from ..core.ingest_context import ingest_commit_guard

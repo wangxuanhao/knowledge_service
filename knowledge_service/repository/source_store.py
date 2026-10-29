@@ -25,6 +25,23 @@ class SourceStore:
         marks = ','.join('?' for _ in value)
         self.repo._db.execute(f'INSERT INTO {table} ({fields}) VALUES ({marks}) {conflict}', tuple(value.values()))
 
+    def register_object(self, obj):
+        """Register already durable bytes using application DML under the GC lock."""
+        with self.publication_guard():
+            self._insert('source_objects', dict(obj, created_at=utc_now()), 'ON CONFLICT(sha256) DO NOTHING')
+            row = self.repo._db.execute('SELECT * FROM source_objects WHERE sha256=?', (obj['sha256'],)).fetchone()
+            if row['storage_key'] != obj['storage_key'] or row['size_bytes'] != obj['size_bytes']:
+                raise ValueError('Source object metadata conflict')
+            return dict(row)
+
+    def get_upload_object(self, project_id, item_id):
+        with self.repo._lock:
+            row = self.repo._db.execute('''SELECT o.* FROM source_objects o JOIN ingest_batch_items i
+                ON i.upload_object_id=o.id WHERE i.project_id=? AND i.id=?''', (project_id,item_id)).fetchone()
+            if row is None:
+                raise KeyError('Upload object not found')
+            return dict(row)
+
     def create_version(self, project_id, document_id, obj, original_name, parsed, assets=()):
         with self.repo.unit_of_work():
             self.repo._db.execute('SELECT pg_advisory_xact_lock(hashtextextended(?,0))',('source-object-gc',))
@@ -34,14 +51,14 @@ class SourceStore:
             version_id = parsed['document_version_id']
             extension=PurePosixPath(original_name.replace('\\','/')).suffix.lower().lstrip('.')
             source_format='markdown' if extension in {'md','markdown'} else extension or 'text'
-            self._insert('source_document_versions', dict(id=version_id,project_id=project_id,document_id=document_id,version=n,source_object_id=obj['id'],original_name=original_name,format=source_format,parser_name=parsed['parser_name'],parser_version=parsed['parser_version'],parse_status='incomplete' if any(a['status']=='missing' for a in assets) else 'completed',source_text=parsed['text'],rendered_html=parsed['rendered_html'],created_at=utc_now()))
+            self._insert('source_document_versions', dict(id=version_id,project_id=project_id,document_id=document_id,version=n,source_object_id=obj['id'],original_name=original_name,format=source_format,parser_name=parsed['parser_name'],parser_version=parsed['parser_version'],parse_status='incomplete' if any(a['status'] in {'missing','blocked','external_unfrozen'} for a in assets) else 'completed',source_text=parsed['text'],rendered_html=parsed['rendered_html'],parser_metadata=encode(parsed.get('metadata',{})),created_at=utc_now()))
             for block in parsed['blocks']:
                 self._insert('parsed_blocks',dict(block,project_id=project_id,heading_path=encode(block['heading_path']),payload=encode(block['payload'])))
             for asset in assets:
                 value=dict(asset)
                 asset_obj=value.pop('object',None)
                 if asset_obj: self._insert('source_objects',dict(asset_obj,created_at=utc_now()),'ON CONFLICT(sha256) DO NOTHING')
-                self._insert('source_assets',dict(id=value['id'],project_id=project_id,document_version_id=version_id,source_object_id=asset_obj['id'] if asset_obj else None,original_path=value.get('original_path',value.get('url','')),resolved_path=value.get('resolved_path',''),alt_text=value.get('alt',''),width=value.get('width'),height=value.get('height'),status=value['status'],kind=value['kind'],source_start_line=value.get('source_start_line'),source_end_line=value.get('source_end_line')))
+                self._insert('source_assets',dict(id=value['id'],project_id=project_id,document_version_id=version_id,source_object_id=asset_obj['id'] if asset_obj else None,original_path=value.get('original_path',value.get('url','')),resolved_path=value.get('resolved_path',''),alt_text=value.get('alt',''),width=value.get('width'),height=value.get('height'),status=value['status'],kind=value['kind'],source_start_line=value.get('source_start_line'),source_end_line=value.get('source_end_line'),provenance=encode(value.get('provenance',{}))))
         return self.get_version(project_id, version_id)
 
     def get_version(self, project_id, version_id):
@@ -49,8 +66,10 @@ class SourceStore:
             row=self.repo._db.execute('SELECT v.*,o.storage_key,o.mime_type,o.sha256 FROM source_document_versions v JOIN source_objects o ON o.id=v.source_object_id WHERE v.project_id=? AND v.id=?',(project_id,version_id)).fetchone()
             if row is None: raise KeyError('Source version not found')
             result=dict(row)
+            result['parser_metadata']=json.loads(result['parser_metadata'])
             result['blocks']=self._list('parsed_blocks',project_id,version_id,'ordinal')
             result['assets']=self._list('source_assets',project_id,version_id,'id')
+            result['assets'].sort(key=lambda a:(a.get('provenance',{}).get('source_image_ordinal',1_000_000),a.get('source_start_line') or 0,a['id']))
             result['chunks']=self._version_chunks(project_id,version_id)
             return result
 
@@ -78,7 +97,7 @@ class SourceStore:
         result=[]
         for row in rows:
             item=dict(row)
-            for key in ('payload','heading_path'):
+            for key in ('payload','heading_path','provenance'):
                 if key in item: item[key]=json.loads(item[key])
             result.append(item)
         return result
@@ -87,7 +106,9 @@ class SourceStore:
         with self.repo._lock:
             row=self.repo._db.execute('SELECT a.*,o.storage_key,o.mime_type,o.sha256 FROM source_assets a LEFT JOIN source_objects o ON o.id=a.source_object_id WHERE a.project_id=? AND a.document_version_id=? AND a.id=?',(project_id,version_id,asset_id)).fetchone()
             if row is None: raise KeyError('Source asset not found')
-            return dict(row)
+            result=dict(row)
+            result['provenance']=json.loads(result['provenance'])
+            return result
 
     def add_spans(self, project_id, version_id, chunk_version_id, spans):
         self.get_version(project_id,version_id)
@@ -167,7 +188,7 @@ class SourceStore:
         removed=[]
         with self.repo.unit_of_work():
             self.repo._db.execute('SELECT pg_advisory_xact_lock(hashtextextended(?,0))',('source-object-gc',))
-            rows=self.repo._db.execute('SELECT o.id,o.storage_key FROM source_objects o WHERE NOT EXISTS(SELECT 1 FROM source_document_versions v WHERE v.source_object_id=o.id) AND NOT EXISTS(SELECT 1 FROM source_assets a WHERE a.source_object_id=o.id) FOR UPDATE').fetchall()
+            rows=self.repo._db.execute('SELECT o.id,o.storage_key FROM source_objects o WHERE NOT EXISTS(SELECT 1 FROM source_document_versions v WHERE v.source_object_id=o.id) AND NOT EXISTS(SELECT 1 FROM source_assets a WHERE a.source_object_id=o.id) AND NOT EXISTS(SELECT 1 FROM ingest_batch_items i WHERE i.upload_object_id=o.id) FOR UPDATE').fetchall()
             for row in rows:
                 object_store.delete_unreferenced(row['storage_key'],lambda key:False)
                 self.repo._db.execute('DELETE FROM source_objects WHERE id=?',(row['id'],))

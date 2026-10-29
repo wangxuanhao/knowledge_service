@@ -55,6 +55,18 @@ def _postgres_session():
 
 
 @pytest.fixture(autouse=True)
+def isolated_source_objects(monkeypatch, tmp_path):
+    """Tests publish into their own local object root; explicit test overrides win."""
+    monkeypatch.setenv('KG_SOURCE_OBJECT_BACKEND', 'local')
+    monkeypatch.setenv('KG_SOURCE_OBJECT_ROOT', str(tmp_path / 'source-objects'))
+    # Network import tests inject a transport; unrelated source tests stay offline.
+    monkeypatch.setenv('KG_SOURCE_REMOTE_IMAGES_ENABLED', 'false')
+    for key in tuple(os.environ):
+        if key.startswith('KG_SOURCE_S3_'):
+            monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def postgres_backend(monkeypatch):
     """把测试里的 `Repository(路径)` 接到隔离的 PostgreSQL 槽位。
 

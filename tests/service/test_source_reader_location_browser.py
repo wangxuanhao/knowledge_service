@@ -45,6 +45,7 @@ def test_reader_locates_entity_without_painting_whole_blocks(tmp_path):
         page.route('http://reader.test/**', respond)
         page.goto('http://reader.test/')
         page.add_style_tag(path=str(WEB / 'source-reader.css'))
+        page.add_script_tag(path=str(WEB / 'source-content.js'))
         page.add_script_tag(path=str(WEB / 'source-reader.js'))
         page.evaluate('(options)=>SourceReader.open(options)', dict(projectId='p', versionId='v',
                       focusText='《电子商务法》', location=dict(document_version_id='v', status='available',
