@@ -22,6 +22,19 @@ from .ontology_vocabulary import (
 DATA = Namespace("urn:knowledge:")
 
 
+def editable_attribute_version(version):
+    """Project editable text for old summaries without rewriting immutable versions."""
+    summary = version.get('summary') or {}
+    attributes = summary.get('attributes') or []
+    if all(isinstance(item.get('annotations'), list) for item in attributes):
+        return version
+    ontology = Ontology(version['turtle'])
+    projected = [item if isinstance(item.get('annotations'), list) else {
+        **item, **ontology.attribute_text_details(URIRef(item['id']))}
+        for item in attributes]
+    return {**version, 'summary': {**summary, 'attributes': projected}}
+
+
 class UnknownOntologyTerm(ValueError):
     """本体里查不到这个术语（或存在歧义）。
 
@@ -210,6 +223,32 @@ class Ontology:
                 return False
         return True
 
+    def attribute_text_details(self, uri):
+        """Expose exact editable literals; text edits must retain language/datatype."""
+        annotations = []
+        for predicate in (RDFS.label, RDFS.comment):
+            for value in self.graph.objects(uri, predicate):
+                if not isinstance(value, Literal):
+                    continue
+                spec = {'predicate': str(predicate), 'value': str(value)}
+                if value.language:
+                    spec['language'] = value.language
+                if value.datatype:
+                    spec['datatype'] = str(value.datatype)
+                annotations.append(spec)
+
+        def order(spec):
+            lang = spec.get('language', '').lower()
+            rank = 0 if lang.startswith('zh') else 1 if not lang else 2 if lang.startswith('en') else 3
+            return rank, spec.get('language', ''), spec['value']
+
+        annotations.sort(key=order)
+        comments = [a for a in annotations if a['predicate'] == str(RDFS.comment)]
+        labels = [a for a in annotations if a['predicate'] == str(RDFS.label)
+                  and a.get('language', '').lower().startswith('zh')]
+        return {'annotations': annotations, 'description': comments[0]['value'] if comments else '',
+                'label_zh': labels[0]['value'] if labels else ''}
+
     def summary(self, active_only=False):
         self._refresh_vocabulary()
 
@@ -238,7 +277,7 @@ class Ontology:
                 "relations": [{**item(p), "domain": [str(v) for v in self.constraint_types(p,RDFS.domain)],
                                "range": [str(v) for v in self.constraint_types(p,RDFS.range)]}
                               for p in sorted(visible(self.relations))],
-                "attributes": [{**item(p), "domain": [str(v) for v in self.constraint_types(p,RDFS.domain)],
+                "attributes": [{**item(p), **self.attribute_text_details(p), "domain": [str(v) for v in self.constraint_types(p,RDFS.domain)],
                                 "range": [str(v) for v in self.graph.objects(p, RDFS.range)]}
                                for p in sorted(visible(self.attributes))], "triples": len(self.graph)}
 
