@@ -371,6 +371,7 @@
     { value: 'attribute', text: '实体属性', hint: '挂在某个类上的一个字段。数据类型暂时不限定也可以，之后按需要补。' },
   ];
   let createPreset = {};
+  let createOpening=0,createTask=null;
   let createOpen = false,createProject=null;
   let createValues={};
   let createInput = null;   // 「中文名」输入框：画布「＋ 新建类」按钮要聚焦它
@@ -397,6 +398,9 @@
   function newTermSection(state) {
     if ((state || S()).preview) return el('p', 'om-detail-note', '历史版本只读。回到最新或从版本管理创建新草案后继续建模。');
     const summary = (state && state.summary) || {};
+    const opening=createOpening,openedProject=activeProject(),openedState=state||S();
+    const openedTarget=JSON.stringify([openedState.draft?.id,openedState.draft?.revision,openedState.ontologyId]);
+    const stillEditing=()=>createOpen&&createOpening===opening&&activeProject()===openedProject;
     const classes = (summary.classes || []).filter(c => c.active !== false);
     const classOptions = classes.map(c => ({ id: c.id, text: labelOfIri(c.id, summary) }));
 
@@ -418,10 +422,11 @@
     en.value=createValues.en||'';en.addEventListener('input',()=>{createValues.en=en.value;});
     const slot = el('div', 'om-new-slot');
 
-    let parentSel = null, domainSel = null, rangeSel = null;
+    let parentSel = null, domainSel = null, rangeSel = null, datatypeSel = null, descriptionInput = null;
     function syncOwnership(kind) {
+      zh.placeholder=kind==='attribute'?'中文名（必填），例如：生效日期':'中文名（必填），例如：优惠券';
       slot.replaceChildren();
-      parentSel = domainSel = rangeSel = null;
+      parentSel = domainSel = rangeSel = datatypeSel = descriptionInput = null;
       if (kind === 'class') {
         parentSel = newSelect(classOptions, '父类（选填：不选就是顶层类）');
         slot.append(newField('父类', parentSel));
@@ -430,8 +435,19 @@
         rangeSel = newSelect(classOptions, '客体类 range（选填）');
         slot.append(newField('主体类 domain', domainSel), newField('客体类 range', rangeSel));
       } else {
+        zh.placeholder='中文名（必填），例如：生效日期';
         domainSel = newSelect(classOptions, '所属类（选填）');
         slot.append(newField('所属类', domainSel));
+        const datatype=createValues.datatype??XSD_BASE+'string';
+        datatypeSel=window.OntologyAttributes?.datatypeSelect(datatype)||newSelect(
+          DATATYPE_OPTIONS.map(([code,text])=>({id:XSD_BASE+code,text})), '暂不限定');
+        datatypeSel.value=datatype;datatypeSel.setAttribute('aria-label','属性数据类型');
+        datatypeSel.addEventListener('change',()=>{createValues.datatype=datatypeSel.value;});
+        descriptionInput=el('textarea','om-new-input');descriptionInput.rows=3;
+        descriptionInput.value=createValues.description||'';descriptionInput.placeholder='选填：属性的业务含义';
+        descriptionInput.setAttribute('aria-label','新属性说明');
+        descriptionInput.addEventListener('input',()=>{createValues.description=descriptionInput.value;});
+        slot.append(newField('数据类型',datatypeSel),newField('说明',descriptionInput));
       }
     }
     kindSel.value=createValues.kind||createPreset.kind||'class';
@@ -452,7 +468,12 @@
     const submit = el('button', 'om-btn primary', '新建并写入草案');
     submit.type = 'button';
     submit.disabled = !zh.value.trim();
-    const syncButton = () => { submit.disabled = !zh.value.trim(); };
+    const syncButton = () => {
+      const busy=createTask?.project===openedProject&&createTask?.opening===opening;
+      submit.disabled=!zh.value.trim()||busy;
+      for(const control of [zh,en,kindSel,parentSel,domainSel,rangeSel,datatypeSel,descriptionInput])if(control)control.disabled=busy;
+    };
+    syncButton();
     zh.addEventListener('input', syncButton);
 
     submit.addEventListener('click', async () => {
@@ -460,10 +481,14 @@
       const text = zh.value.trim();
       if (!text) { status('请先填写中文名。', true); return; }
       if (!M || typeof M.createTerm !== 'function') { status('主控未就绪，暂时无法新建。', true); return; }
-      const project=current,kind=kindSel.value;
+      if(!stillEditing()||S().preview||openedTarget!==JSON.stringify([S().draft?.id,S().draft?.revision,S().ontologyId])){
+        status('项目、草案或版本已变化，请重新打开新增定义。',true);return;
+      }
+      if(createTask?.project===openedProject&&createTask?.opening===opening)return;
+      const project=current,kind=kindSel.value,owner=kind==='attribute'?domainSel?.value:'';
       const kindText=(NEW_KINDS.find(x=>x.value===kind)||NEW_KINDS[0]).text;
       let saved=false;
-      submit.disabled = true;
+      const task={project,opening};createTask=task;syncButton();
       try {
         status('正在写入草案…');
         await M.createTerm({
@@ -473,17 +498,24 @@
           domain: (kind === 'attribute' && domainSel && domainSel.value) ? domainSel.value : '',
           domains: (kind === 'relation' && domainSel && domainSel.value) ? [domainSel.value] : [],
           ranges: (kind === 'relation' && rangeSel && rangeSel.value) ? [rangeSel.value] : [],
+          datatype: kind === 'attribute' ? datatypeSel?.value||'' : '',
+          description: kind === 'attribute' ? descriptionInput?.value.trim()||'' : '',
         });
         saved=true;
         if(current!==project)return;
+        if(!stillEditing()){status(`已新建${kindText}「${text}」并写入原草案。`);return;}
         createPreset={};createValues={};createOpen=false;
         zh.value = ''; en.value = '';
         syncButton();
+        if(owner&&typeof M.select==='function')M.select(owner);
+        else renderDetail();
         status(`已新建${kindText}「${text}」：写进了草案，底栏「校验并审核」后发布生效。`);
       } catch (error) {
         if(current!==project)return;
         status(saved?`已保存到草案，但画布刷新失败：${error.message||error}。请刷新读取，避免重复新增。`:`新建失败：${error.message||error}`, true);
         syncButton();
+      } finally {
+        if(createTask===task){createTask=null;if(stillEditing())renderDetail();}
       }
     });
 
@@ -512,7 +544,7 @@
   function renderDetail(state) {
     if (!detailHost) return;
     const st = state || S();
-    if(createProject!==activeProject()){createProject=activeProject();createOpen=false;createValues={};createPreset={};}
+    if(createProject!==activeProject()){createProject=activeProject();createOpen=false;createValues={};createPreset={};++createOpening;}
     const selected = st.selected;
     if (!selected) {
       // 没选中对象时，右栏就是「新建术语」的入口（不再只是一句提示）。
@@ -852,20 +884,16 @@
       const row = el('div', 'om-ce-row');
       row.append(el('span', 'om-ce-label', '数据类型'));
       const addHost = el('div', 'om-ce-add');
-      const sel = el('select', 'om-ce-select');
-      const blank = el('option', null, '不限定 / 选择…'); blank.value = ''; sel.append(blank);
-      const currentLocal = help().dtypeOf(term);
-      DATATYPE_OPTIONS.forEach(([local, text]) => {
-        const opt = el('option', null, text); opt.value = XSD_BASE + local;
-        if (local === currentLocal) opt.selected = true;
-        sel.append(opt);
-      });
+      const currentDatatype=(term.range||[])[0]||'';
+      const sel=window.OntologyAttributes?.datatypeSelect(currentDatatype)||newSelect(
+        DATATYPE_OPTIONS.map(([local,text])=>({id:XSD_BASE+local,text})), '暂不限定');
+      sel.className='om-ce-select';sel.value=currentDatatype;
       const applyBtn = el('button', 'om-btn secondary', '应用类型');
       applyBtn.type = 'button';
-      applyBtn.disabled = !sel.value;
-      sel.addEventListener('change', () => { applyBtn.disabled = !sel.value; });
+      applyBtn.disabled = true;
+      sel.addEventListener('change', () => { applyBtn.disabled = sel.value===currentDatatype; });
       applyBtn.addEventListener('click', () => {
-        if (sel.value) void runCmd({ action: 'set_datatype', target_iri: term.id, datatype: sel.value });
+        if(sel.value!==currentDatatype)return runCmd({ action: 'set_datatype', target_iri: term.id, datatype: sel.value||null });
       });
       addHost.append(sel, applyBtn);
       row.append(addHost);
@@ -892,10 +920,13 @@
     box.append(detailHead('实体类', 'cls', cls, cls.id));
     if (cls.description) box.append(el('p', 'om-detail-desc', cls.description));
 
-    const own = attributes.filter(a => (a.domain || []).includes(cls.id));
-    box.append(section('属性', own.length,
-      own.map(a => termRow('attr', help().label(a), dtypeLabel(a), a.id)),
-      '此类直接声明的属性及数据类型。点击属性名称可查看或编辑。'));
+    if(window.OntologyAttributes)box.append(window.OntologyAttributes.classSection(cls,summary,
+      {model:model(),project:activeProject,title:detailTitle}));
+    else {
+      const own=attributes.filter(a=>(a.domain||[]).includes(cls.id));
+      box.append(section('属性',own.length,own.map(a=>termRow('attr',help().label(a),dtypeLabel(a),a.id)),
+        '此类直接声明的属性及数据类型。点击属性名称可查看或编辑。'));
+    }
 
     const rels = relations.filter(r => (r.domain || []).includes(cls.id));
     box.append(section('允许的关系', rels.length,
@@ -952,6 +983,8 @@
     const box = el('div', 'om-detail-card');
     box.append(detailHead('实体属性', 'attr', attr, attr.id));
     if (attr.description) box.append(el('p', 'om-detail-desc', attr.description));
+    const metadata=window.OntologyAttributes?.metadataEditor(attr,{model:model(),project:activeProject,title:detailTitle});
+    if(metadata)box.append(metadata);
 
     const dom = attr.domain || [];
     box.append(section('所属类型', dom.length,
@@ -1983,6 +2016,7 @@
     openCreate(preset={}) {
       if(S().preview)return;
       createProject=activeProject();createOpen=true;createValues={};
+      ++createOpening;
       createPreset={...preset};
       const M=model();if(M&&typeof M.select==='function')M.select(null);
       else renderDetail();

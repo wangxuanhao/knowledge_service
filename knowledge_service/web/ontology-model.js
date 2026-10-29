@@ -447,10 +447,12 @@
       {action: 'add_annotation', target_iri: iri, predicate: 'http://www.w3.org/2000/01/rdf-schema#label', value: label}];
     if (labelZh) commands.push({action: 'add_annotation', target_iri: iri,
       predicate: 'http://www.w3.org/2000/01/rdf-schema#label', value: labelZh, language: 'zh'});
+    if(String(spec.description||'').trim())commands.push({action:'add_annotation',target_iri:iri,
+      predicate:'http://www.w3.org/2000/01/rdf-schema#comment',value:String(spec.description).trim()});
     if (kind === 'class' && spec.parent)
       commands.push({action: 'add_parent', target_iri: iri, value: spec.parent});
     if (kind !== 'class') {
-      for (const value of new Set(spec.domains || (spec.domain ? [spec.domain] : [])))
+      for (const value of new Set(spec.domains?.length ? spec.domains : (spec.domain ? [spec.domain] : [])))
         commands.push({action: 'add_domain', target_iri: iri, value});
       if (kind === 'relation') for (const value of new Set(spec.ranges || (spec.range ? [spec.range] : [])))
         commands.push({action: 'add_range', target_iri: iri, value});

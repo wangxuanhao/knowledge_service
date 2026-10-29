@@ -61,6 +61,22 @@ test('historical term creation cannot write a draft', async () => {
   assert.equal(f.calls.length, 0);
 });
 
+test('attribute creation includes its description in the same governed batch', async () => {
+  const f=fixture();
+  await f.model.createTerm({kind:'attribute',label:'stock',domain:'urn:test:Owner',
+    datatype:'http://www.w3.org/2001/XMLSchema#integer',description:'当前可用库存'});
+  const commands=f.calls.find(call=>call.url.endsWith('/commands')).body.command.commands;
+  assert.ok(Array.from(commands).some(command=>command.action==='add_annotation'
+    &&command.predicate==='http://www.w3.org/2000/01/rdf-schema#comment'&&command.value==='当前可用库存'));
+});
+
+test('an empty relation endpoint array does not discard the attribute owner',async()=>{
+  const f=fixture();
+  await f.model.createTerm({kind:'attribute',label:'stock',domain:'urn:test:Owner',domains:[],ranges:[]});
+  const commands=f.calls.find(call=>call.url.endsWith('/commands')).body.command.commands;
+  assert.ok(Array.from(commands).some(command=>command.action==='add_domain'&&command.value==='urn:test:Owner'));
+});
+
 test('the retired direct-save editor and its write handlers are absent', () => {
   const web = path.join(__dirname, '../../knowledge_service/web');
   assert.doesNotMatch(fs.readFileSync(path.join(web, 'index.html'), 'utf8'), /id="tab-ontology"|id="save-ontology"/);

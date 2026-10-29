@@ -98,9 +98,17 @@ class DocumentUploads:
                   'source_document_version_id':source['id'],**({'durable_task_id':task_id} if task_id else {})}
         # Publish a reading receipt before OCR so a strict failure remains inspectable
         # and a durable retry reuses its immutable source instead of refetching media.
-        service.repository.put_record(project_id,dict(id=document_id,kind='document',text=source['source_text'],
+        receipt=service.repository.put_record(project_id,dict(id=document_id,kind='document',text=source['source_text'],
             metadata={**metadata,'title':data['title'],'status':'processing','active_stage':'ocr'}),expected_version=prior['version'] if prior else 0)
-        chunks,text,warnings=prepare_source_ingest(sources,project_id,source,data)
+        try:
+            chunks,text,warnings=prepare_source_ingest(sources,project_id,source,data)
+        except Exception as exc:
+            from .ingest_retry import classify_error
+            failure=classify_error(exc)
+            service.repository.put_record(project_id,dict(id=document_id,kind='document',text=receipt['text'],
+                metadata={**receipt['metadata'],'status':'failed','active_stage':failure.stage,
+                    'error_code':failure.code,'public_error':failure.message}),expected_version=receipt['version'])
+            raise
         def map_chunks(saved):
             for row,chunk in zip(saved,chunks):
                 if chunk.get('source_spans'):sources.store.add_spans(project_id,source['id'],row['version_id'],chunk['source_spans'])

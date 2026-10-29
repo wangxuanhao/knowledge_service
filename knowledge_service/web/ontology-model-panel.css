@@ -358,3 +358,25 @@
 #tab-ontology-model.ontology-model .om-usage-status{margin:0;padding:8px 10px;background:#edf5ee;border-radius:5px;color:#50785c;font-size:11px;line-height:1.6}
 #tab-ontology-model.ontology-model .om-usage-actions{display:flex;min-width:0}
 #tab-ontology-model.ontology-model .om-usage-apply{width:100%;justify-content:center;white-space:normal;line-height:1.6}
+
+/* Properties belong to types; inherited definitions retain their source. */
+#tab-ontology-model.ontology-model .om-attribute-list{list-style:none;margin:0;padding:0;display:grid;gap:6px;min-width:0}
+#tab-ontology-model.ontology-model .om-attribute-item{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:3px 10px;padding:9px 10px;border:1px solid #dde7df;border-radius:6px;background:#fff;min-width:0}
+#tab-ontology-model.ontology-model .om-attribute-item .om-detail-link{min-width:0;overflow-wrap:anywhere;text-align:left;white-space:normal;padding:0;border:0;border-radius:0;background:none;box-shadow:none;color:#2a776b;font:inherit;cursor:pointer}
+#tab-ontology-model.ontology-model .om-attribute-datatype{display:block;color:#7a8f80;font-size:10px;line-height:1.7;overflow-wrap:anywhere}
+#tab-ontology-model.ontology-model .om-attribute-actions{display:flex;gap:6px;margin:9px 0}
+#tab-ontology-model.ontology-model .om-attribute-actions .om-btn{padding:6px 10px;font-size:12px}
+#tab-ontology-model.ontology-model .om-attributes .om-attribute-picker{margin-top:8px}
+#tab-ontology-model.ontology-model .om-attribute-source{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:4px;color:#8b9b8e;font-size:10px}
+#tab-ontology-model.ontology-model .om-attribute-parent{padding:0;border:0;background:none;color:#648571;font-size:10px;text-decoration:underline;text-underline-offset:3px;cursor:pointer;overflow-wrap:anywhere}
+#tab-ontology-model.ontology-model .om-inherited-attributes{margin-top:16px;padding-top:12px;border-top:1px dashed #d4dfd6}
+#tab-ontology-model.ontology-model .om-inherited-attributes .om-attribute-item{background:#f5f8f4;border-color:transparent}
+#tab-ontology-model.ontology-model .om-attribute-editor{padding:0;margin:12px 0;border:1px solid #d3dfd4;border-radius:7px;background:#f7faf7;min-width:0}
+#tab-ontology-model.ontology-model .om-attribute-editor>summary{margin:0;padding:10px 11px;color:#2a776b;font-size:12px;font-weight:600;cursor:pointer}
+#tab-ontology-model.ontology-model .om-attribute-editor[open]>summary{border-bottom:1px solid #d3dfd4}
+#tab-ontology-model.ontology-model .om-attribute-editor-body{display:grid;gap:10px;padding:12px 11px;min-width:0}
+#tab-ontology-model.ontology-model .om-attribute-field{display:grid;gap:5px;margin:0;font-size:11px;color:#748979;min-width:0}
+#tab-ontology-model.ontology-model .om-attribute-field .om-new-input{margin:0;width:100%;min-width:0;box-sizing:border-box;resize:vertical}
+#tab-ontology-model.ontology-model .om-attribute-message{margin:0;padding:0 10px 9px;color:#597763;font-size:11px;line-height:1.7;overflow-wrap:anywhere}
+#tab-ontology-model.ontology-model .om-attribute-message:empty{display:none}
+#tab-ontology-model.ontology-model .om-attribute-editor-body>.om-attribute-message{padding:0}

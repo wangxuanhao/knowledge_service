@@ -112,6 +112,32 @@ def test_single_upload_maps_indexed_chunks_even_when_extraction_fails(tmp_path,m
     assert sources.get(project,version)['chunks']
 
 
+@pytest.mark.parametrize('task_id',[None,'durable-task'])
+@pytest.mark.parametrize('mode',['discovery','ontology'])
+def test_strict_ocr_failure_marks_retained_upload_failed(tmp_path,task_id,mode):
+    from knowledge_service.repository import Repository
+    from knowledge_service.services.service import KnowledgeService
+    from knowledge_service.services.document_uploads import DocumentUploads,StagedUpload
+    from knowledge_service.integrations.document_parser import ParsedDocument
+    from knowledge_service.models import UploadOptions
+    from hashlib import sha256
+    class Parser:
+        def parse(self,*a,**k):return ParsedDocument('Article\n\n![](missing.png)',{},[dict(kind='local',status='missing',original_path='missing.png')])
+    repo=Repository(tmp_path/'failed-ocr.sqlite');project=repo.create_project('failed OCR')['id']
+    service=KnowledgeService(repo,HashingEncoder());sources=SourceDocumentService(repo,SourceObjectStore(tmp_path/'objects'))
+    path=tmp_path/'a.md';path.write_bytes(b'Article')
+    uploads=DocumentUploads(tmp_path,Parser())
+    with pytest.raises(OCRError):
+        uploads.ingest(service,project,StagedUpload(path,'a.md',7,sha256(b'Article').hexdigest()),
+            UploadOptions(extraction_mode=mode),task_id=task_id,sources=sources)
+    document=repo.current_records(project,kinds=['document'])[0]
+    assert document['metadata']['status']=='failed'
+    assert document['metadata']['active_stage']=='parse'
+    assert document['metadata']['error_code']=='source_asset_missing'
+    assert document['metadata']['public_error']
+    assert sources.get(project,document['metadata']['source_document_version_id'])['source_text']
+
+
 def test_durable_upload_retry_reuses_source_and_ready_replay_needs_no_staged_file(tmp_path):
     from knowledge_service.repository import Repository
     from knowledge_service.services.service import KnowledgeService

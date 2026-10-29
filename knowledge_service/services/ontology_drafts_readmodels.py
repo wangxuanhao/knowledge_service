@@ -104,6 +104,7 @@ class DraftReadModelsMixin:
             item['range'] = [
                 str(value) for value in ontology.constraint_types(node, RDFS.range)]
         elif node in ontology.attributes:
+            item.update(ontology.attribute_text_details(node))
             item['domain'] = [
                 str(value) for value in ontology.constraint_types(node, RDFS.domain)]
             item['range'] = [

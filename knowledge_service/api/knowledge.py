@@ -12,7 +12,7 @@ from ..models import (
     Ingest, Question, RecordBatch, ResolutionReviewDecision,
     Revision, Scope, Search, Sparql,
 )
-from ..services.ontology import Ontology
+from ..services.ontology import Ontology, editable_attribute_version
 from ..services.service import public
 from ..services.version_context import OntologyVersionContext
 from ..services import structure_pending
@@ -181,7 +181,8 @@ def install(app, service):
         # 发布说明与发布人取自版本 metadata.publication（发布时必填，见 PublishRequest.note）。
         versions = repository.list_ontologies(project_id)
         history = []
-        for item in versions:
+        for stored in versions:
+            item = editable_attribute_version(stored)
             publication = (item.get('metadata') or {}).get('publication') or {}
             history.append({
                 **item,
@@ -198,7 +199,7 @@ def install(app, service):
     @router.get('/api/projects/{project_id}/ontology')
     def ontology(project_id: str, ontology_id: str | None = None):
         item = repository.get_ontology(project_id, ontology_id)
-        return item
+        return editable_attribute_version(item)
 
     @router.get('/api/projects/{project_id}/ontologies/{ontology_id}/knowledge-context')
     def ontology_knowledge_context(project_id: str, ontology_id: str):
