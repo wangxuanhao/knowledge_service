@@ -482,7 +482,8 @@
     if(ancestors.length>parents.length){
       rows.push(`完整继承链：${esc([node.class_label,...ancestors].filter(Boolean).join(' → '))}`);
     }
-    return rows.join('<br>');
+    const links=(ui.graph?.edges||[]).filter(edge=>edge.subject_id===node.id||edge.object_id===node.id).length;
+    return '<div class="fg-hover-meta"><span class="fg-hover-kind">实体</span><span>'+links+' 条关系</span></div>'+rows.join('<br>')+'<div class="fg-hover-id">'+esc(node.id||point.data.id)+'</div>';
   }
   function updateGraphTypeChoices(graph){
     for(const [id,rows,kind] of [['type-scope',graph.nodes,'entity'],['predicate-scope',graph.edges,'relation']]){
@@ -490,7 +491,7 @@
       for(const row of rows){if(row.kind!==kind||!row.type||known.has(row.type))continue;const option=document.createElement('option');option.value=row.type;option.textContent=row.type_label||labelOf(row.type);select.appendChild(option);known.add(row.type);}
     }
   }
-  function renderGraph(result, selectedType='', base=result){
+  function renderGraph(result, selectedType='', base=result, options={}){
     updateGraphTypeChoices(base);
     const displayType=type=>result.type_labels?.[type]||labelOf(type);
     // Color identity uses canonical type IDs; translated labels remain presentation text.
@@ -524,22 +525,25 @@
       inspect(row);
     });
     chart.dispatchAction({type:'hideTip'});
+    const appearance=window.GraphAppearance?.tokens||{text:'#888995',edge:'#a8c9e2',outline:'#ffffff',selected:'#1689e9'};
     const showLabels=get('graph-labels').checked;
     const showEdgeLabels=get('graph-edge-labels').checked;
     // The force layout plus the fit pass below are the client half of "the graph feels
     // slow"; the server half is the `subgraph` line logged by drawGraph.
     const layoutDone=kgTime('graph-layout');
     const catIndex=label=>Math.max(0,types.indexOf(label));
-    const nodeSize=result.nodes.length>300?10:result.nodes.length>100?14:20;
+    const nodeSize=result.nodes.length>300?10:result.nodes.length>200?14:16;
+    const nodeSizes=window.GraphAppearance?.sizesFor?.(result.nodes,result.edges);
     const preferredLabels=[get('graph-node').value,...matched];
-    const labelIds=window.GraphAppearance?GraphAppearance.labelsFor(positioned,preferredLabels):new Set([...new Set([...preferredLabels,...positioned.map(n=>n.id)])].slice(0,50));
+    const labelIds=window.GraphAppearance?GraphAppearance.labelsFor(positioned,preferredLabels,result.nodes.length<=20?50:20):new Set([...new Set([...preferredLabels,...positioned.map(n=>n.id)])].slice(0,50));
     // ECharts 5's series-wide label manager detaches graph edge text and applies
     // its inverse graph scale a second time. GraphWorkbench culls node names; let
     // native graph edge labels retain their own screen-space transform.
-chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:types.length>1,type:'scroll',data:types,formatter:categoryLabel,bottom:0,textStyle:{fontSize:12,color:'#627b82'}}],series:[{type:'graph',layout:'none',draggable:true,roam:'scale',scaleLimit:{min:.05,max:4},...GraphWorkbench.bounds(positioned,chart.getWidth(),chart.getHeight()),center:null,zoom:1,...viewport,selectedMode:'single',select:{itemStyle:{borderColor:'#cf8737',borderWidth:3},lineStyle:{color:'#cf8737',width:2,opacity:1},label:{show:showLabels,fontWeight:600},edgeLabel:{show:showEdgeLabels}},labelLayout:null,label:{show:showLabels,position:'right',fontSize:12,color:'#28444a',distance:6,width:128,overflow:'truncate',backgroundColor:null,padding:0,borderRadius:0},edgeSymbol:['none','arrow'],edgeLabel:{show:showEdgeLabels&&result.nodes.length<=20,formatter:'{c}',fontSize:11,color:'#627b82'},emphasis:{focus:'adjacency',label:{show:showLabels},edgeLabel:{show:showEdgeLabels}},force:{repulsion:320,edgeLength:100,gravity:.1,initLayout:'circular',layoutAnimation:false},categories:types.map(name=>({name,itemStyle:{color:name==='attribute:'?attrColor:nodeColor({type:name.slice(7)})}})),data:positioned.map(n=>{const attribute=GraphTypeFilter.isAttributeNode(n),label=attribute?'属性值':(n.type_label||displayType(n.type));const index=catIndex(categoryKey(n));return {id:n.id,name:n.text,x:n.x,y:n.y,category:index,categoryName:label,symbol:attribute?'roundRect':'circle',symbolSize:attribute?[72,22]:(matched.has(n.id)?Math.max(18,nodeSize+6):nodeSize),label:{show:labelIds.has(n.id)?undefined:false},itemStyle:{color:attribute?attrColor:nodeColor(n),borderColor:'#fff',borderWidth:result.nodes.length>100?0:1.5,...(attribute&&n.status==='contradicting'?{borderColor:'#b42318',borderWidth:2,borderType:'dashed'}:{}),...(matched.has(n.id)?{borderColor:'#cf8737',borderWidth:3}:{})}}}),links:result.edges.map(e=>{const attribute=GraphTypeFilter.isAttributeEdge(e);return {id:e.id,source:e.subject_id,target:e.object_id,name:e.type_label||displayType(e.type),value:e.type_label||displayType(e.type),rawType:term(e.type),lineStyle:attribute?{type:'dashed',opacity:.55,width:1}:undefined};}),lineStyle:{color:'#849ba5',opacity:.4,width:1,curveness:.1}}]},{replaceMerge:['series']});
+chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor:'#ffffff',borderColor:'#e1e2e8',textStyle:{color:'#27272a'},padding:16,extraCssText:'border-radius:10px;box-shadow:0 8px 24px #10182824;max-width:310px'},legend:[{show:false,type:'scroll',data:types,formatter:categoryLabel,bottom:0,textStyle:{fontSize:12,color:'#627b82'}}],series:[{type:'graph',layout:'none',draggable:true,roam:'scale',scaleLimit:{min:.05,max:4},...GraphWorkbench.bounds(positioned,chart.getWidth(),chart.getHeight()),center:null,zoom:1,...viewport,selectedMode:'single',select:{itemStyle:{borderColor:appearance.selected,borderWidth:3},lineStyle:{color:appearance.selected,width:2,opacity:1},label:{show:showLabels,fontWeight:600},edgeLabel:{show:showEdgeLabels}},labelLayout:null,label:{show:showLabels,position:'right',fontSize:12,color:appearance.text,distance:6,width:128,overflow:'truncate',backgroundColor:null,padding:0,borderRadius:0},edgeSymbol:['none','arrow'],edgeLabel:{show:showEdgeLabels&&result.nodes.length<=20,formatter:'{c}',fontSize:11,color:'#92939f'},emphasis:{focus:'adjacency',lineStyle:{color:appearance.selected,width:1.5,opacity:.7},label:{show:showLabels,color:'#3f3f46'},edgeLabel:{show:showEdgeLabels}},force:{repulsion:320,edgeLength:100,gravity:.1,initLayout:'circular',layoutAnimation:false},categories:types.map(name=>({name,itemStyle:{color:name==='attribute:'?attrColor:nodeColor({type:name.slice(7)})}})),data:positioned.map(n=>{const attribute=GraphTypeFilter.isAttributeNode(n),label=attribute?'属性值':(n.type_label||displayType(n.type));const index=catIndex(categoryKey(n)),size=nodeSizes?.get(n.id)||nodeSize;return {id:n.id,name:n.text,x:n.x,y:n.y,category:index,categoryName:label,symbol:attribute?'roundRect':'circle',symbolSize:attribute?[72,22]:(matched.has(n.id)?Math.max(18,size+6):size),label:{show:labelIds.has(n.id)?undefined:false},itemStyle:{color:attribute?attrColor:nodeColor(n),borderColor:appearance.outline,borderWidth:result.nodes.length>100?0:1.2,...(attribute&&n.status==='contradicting'?{borderColor:'#b42318',borderWidth:2,borderType:'dashed'}:{}),...(matched.has(n.id)?{borderColor:appearance.selected,borderWidth:3}:{})}}}),links:result.edges.map(e=>{const attribute=GraphTypeFilter.isAttributeEdge(e);return {id:e.id,source:e.subject_id,target:e.object_id,name:e.type_label||displayType(e.type),value:e.type_label||displayType(e.type),rawType:term(e.type),lineStyle:attribute?{type:'dashed',opacity:.55,width:1}:undefined};}),lineStyle:{color:appearance.edge,opacity:.35,width:1,curveness:.1}}]},{replaceMerge:['series']});
     const visibleEntities=GraphTypeFilter.entityNodes(result),visibleRelations=GraphTypeFilter.relationEdges(result),attributeCount=result.nodes.length-visibleEntities.length;
-    GraphWorkbench.mount(chart,result,current,inspect,graphScope());
-    chart.resize();layoutDone({nodes:result.nodes.length,edges:result.edges.length});get('graph-summary').textContent=`${selectedType?'只看 '+labelOf(selectedType)+' · ':''}${visibleEntities.length} 实体 / ${visibleRelations.length} 关系${attributeCount?' · '+attributeCount+' 个属性值':''}${selectedType?' · 隐藏其他类型及跨类型连线':''}${matched.size?' · 橙色边框为检索命中':''}${result.timing_ms?' · 服务 '+result.timing_ms.total+' ms':''}${graphBudgetSummary(base)}`;
+    GraphWorkbench.mount(chart,result,current,inspect,graphScope(),options);
+    bindLocalExploration(result,selectedType);
+    chart.resize();layoutDone({nodes:result.nodes.length,edges:result.edges.length});get('graph-summary').textContent=`${selectedType?'只看 '+labelOf(selectedType)+' · ':''}${visibleEntities.length} 实体 / ${visibleRelations.length} 关系${attributeCount?' · '+attributeCount+' 个属性值':''}${selectedType?' · 隐藏其他类型及跨类型连线':''}${matched.size?' · 蓝色边框为检索命中':''}${result.timing_ms?' · 服务 '+result.timing_ms.total+' ms':''}${graphBudgetSummary(base)}`;
     // Compact, discrete history navigation; no drag/playback re-query loop.
     const tl=createTimeline();get('graph-type-buttons')?.after(tl);
     // The type and timeline rows reduce the remaining flex height after ECharts has
@@ -671,13 +675,33 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
     return ` · 局部邻域 ${value.hops} 跳 / ${direction} · 上限 ${value.max_nodes} 实体 / ${value.max_edges} 关系`+
       (value.truncated?' · 已达预算，结果已截断；可提高上限重新请求，或选择节点继续探索。':' · 当前局部结果；可选择节点继续探索。')+
       (graph.attribute_budget?` 属性另计 ${graph.attribute_count} / ${graph.attribute_budget} 条${graph.attributes_truncated?'，属性已截断；选中实体后重新展开可读取该实体属性':''}。`:'')+
-      (graph.attribute_candidates_loaded===false?' 属性冲突候选请在实体治理中复核。':'');
+      (graph.attribute_candidates_loaded===false?' 属性冲突候选请在实体治理中复核。':'')+
+      (graph.exploration_truncated?' · 分支已达局部总预算，可收起分支后继续。':'');
   }
-  window.drawGraph=async(node=null,hops=1)=>{
+  let localBranches=null,localBranchScope='',localGraphRevision=0,localSelectedType='';
+  function bindLocalExploration(graph,selectedType=''){
+    if(!window.GraphExplorer||!window.GraphExploration||get('graph-stage')?.dataset.graphMode==='full')return;
+    localSelectedType=selectedType;
+    const source={nodes:graph.nodes,edges:graph.edges};let index=null;
+    const getIndex=()=>index||(index=new GraphExploration.NeighborIndex(source));
+    GraphExplorer.setContext({mode:'local',key:JSON.stringify([current,graphScope()]),revision:++localGraphRevision,
+      selected:wb.nodes.get(get('graph-node').value)||null,adapter:{
+        neighbors:(id,options)=>getIndex().page(id,options),focus:(id,options)=>getIndex().focus(id,options),
+        setFocus:value=>GraphWorkbench.setFocus(value),select:row=>{GraphWorkbench.locate(row.id);inspect(row);},
+        expand:id=>window.expandGraphBranch(id,get('graph-hops').value),canCollapse:id=>Boolean(localBranches?.canCollapse(id)),
+        collapse:id=>{if(!localBranches)return;graphRequests.invalidate();localBranches.collapse(id);const result=localBranches.graph();renderGraph(result,localSelectedType,result,{preservePath:true});}
+      }});
+  }
+  window.refreshLocalGraphExplorer=()=>{if(ui.graph)bindLocalExploration(ui.graph,localSelectedType);else window.GraphExplorer?.clear({mode:'local'});};
+  window.suspendLocalGraphExplorer=()=>{graphRequests.invalidate();localBranches?.invalidatePending();};
+  window.drawGraph=async(node=null,hops=1,options={})=>{
     if(hops===''||!Number.isInteger(Number(hops))||Number(hops)<0||Number(hops)>10)throw Error('扩展跳数请输入 0–10 的整数');
     const id=node||get('graph-node').value||null;
     if(!id){const empty=graphRequests.begin(current,graphScope(),null);graphRequests.release(empty);get('graph-summary').textContent='请选择实体后展开局部邻域；查看当前范围全部实体请切换“全量大图”。';return null;}
     const project=current,scopeSnapshot=graphScope();
+    const branchKey=JSON.stringify([project,scopeSnapshot]),expanding=options.expand&&localBranches&&localBranchScope===branchKey&&ui.graph?.nodes.some(row=>row.id===id);
+    const branchTicket=expanding?localBranches.begin(id,branchKey):null;
+    if(expanding&&!branchTicket)return null;
     const ticket=graphRequests.begin(project,scopeSnapshot,id),scopeTicket=window.WorkspaceContext?.ticket(project,'search');
     const isCurrent=()=>graphRequests.isCurrent(ticket,current,graphScope(),id)&&(!scopeTicket||window.WorkspaceContext.accepts(scopeTicket,current,'search'));
     const {entity_type,predicate,...appliedScope}=scopeSnapshot;
@@ -697,7 +721,11 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
       const edges=(result.records||[]).filter(row=>(row.kind==='relation'||GraphTypeFilter.isAttributeEdge(row))&&ids.has(row.subject_id)&&ids.has(row.object_id)&&(!predicate||row.type===predicate));
       result={...result,nodes:visible,edges,neighborhood:{...neighborhood,truncated:Boolean(result.truncated)}};
       done({node:id,hops,nodes:result.nodes.length,edges:result.edges.length,truncated:result.truncated});
-      renderGraph(result);
+      if(window.GraphExploration){
+        if(expanding){if(!localBranches.accept(branchTicket,result))return null;result=localBranches.graph();}
+        else{localBranches=new GraphExploration.BranchSession({maxNodes:neighborhood.max_nodes,maxEdges:neighborhood.max_edges,maxAttributes:result.attribute_budget||200});localBranchScope=branchKey;localBranches.reset(result,id,branchKey);localSelectedType='';}
+      }
+      renderGraph(result,localSelectedType,result,{preservePath:Boolean(expanding)});
       // 开放本体发现的提示条要跟着图谱一起刷新：这原本只在 workbench.js 的旧 drawGraph 副本里做，
       // 收敛成单一份实现后带到这里，避免 discovery 模式下提示停留在旧状态。
       renderDiscoveryHint().catch(()=>{});
@@ -707,6 +735,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
     }
   };
   window.clearGraphWorkspace=({preserveSearchResults=false}={})=>{
+    localBranches?.clear();localBranches=null;localBranchScope='';localSelectedType='';
     GraphWorkbench.clear();
     graphRequests.invalidate();invalidatePendingDetail();
     ui.pinned.clear();ui.picker.request++;ui.mindmapPicker.request++;ui.mindmapRootId='';mindmap.invalidate();mindmapView?.clear();
@@ -735,9 +764,10 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip},legend:[{show:
     const id=get('graph-node').value;
     if(!id)throw Error('请先选择实体或点击图中的节点，再展开邻域。');
     const hops=get('graph-hops').value;
-    if(!await window.drawGraph(id,hops))return;
+    if(!await window.drawGraph(id,hops,{expand:true}))return;
     status('已展开 '+hops+' 跳邻域');
   });
+  window.expandGraphBranch=(id,hops=1)=>window.drawGraph(id,hops,{expand:true});
   window.ScopeEditor={restore(value){cb.conditions=[];cb.custom=Boolean(value.filters);renderCB();updateChip();}};
   async function refreshOwnedScope(){
     const page=window.WorkspaceContext?.page;

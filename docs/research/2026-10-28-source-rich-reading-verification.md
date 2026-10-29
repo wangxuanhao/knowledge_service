@@ -68,6 +68,7 @@ $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
 - 重启加载状态修正后，真实异步严格模式缺图任务的 job 与资料均为 failed，公开错误为 source_asset_missing，固定版本原件下载 SHA-256 一致，避免资料永久显示处理中。
 - 正式页面再次在 1440/768/390 宽度通过图片、放大、下载、纯文本、缺图和关闭检查，浏览器外部图片请求和页面 JavaScript 异常均为 0。全部来源对象的 MinIO 复核通过，两个工作目录均未生成 data/sources。
 - 证据保存到主工作区忽略目录 `.benchmarks/source-rich-reading/merge-validation/`；本轮未将模型、凭据、旧来源备份或无关未提交改动纳入功能提交。
+- 随后集成验证期间更新的 `master` 图谱探索提交 `20878e3`。该次新增集成没有修改后端 Python；入口资源冲突按双方意图合并。最终 Node 全量 804 passed，正式页面三个宽度再次通过，独立差异核查相对最新 master 仍为 54 个来源功能文件。
 
 - 页面展示固定版本的解析结果；原 PDF/Word 提供下载，没有内嵌 Office/PDF 原版排版预览。
 - Markdown 无法凭空恢复缺失图片。相对图片须随 ZIP 提供，Base64 可固化，公开外链在导入时抓取；私网、需登录或已失效的链接保留缺图提示。阅读时不再访问外链。

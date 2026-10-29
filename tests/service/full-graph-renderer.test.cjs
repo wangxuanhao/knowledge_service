@@ -225,10 +225,24 @@ function smallRelationshipScene(){
   renderer.setSessionManifest?.({id:'small-session',entity_count:73,relation_count:45});renderer.sync();return scene;
 }
 
+test('small full-graph names leave the underlying relationships visible',()=>{
+  const {renderer}=smallRelationshipScene();let plates=0,names=0;
+  renderer.labelContext={setTransform(){},clearRect(){},measureText:text=>({width:text.length*6}),
+    fillRect(){plates++;},fillText(){names++;}};
+  load().Renderer.prototype.drawLabels.call(renderer);
+  assert.ok(names>0);assert.equal(plates,0,'entity names must not erase relationship lines with opaque backplates');
+});
+
+test('selecting a small-graph entity emphasizes its own relationships only',()=>{
+  const {renderer,draws}=smallRelationshipScene();renderer.selected=0;renderer.draw();
+  const highlighted=draws.filter(row=>row.program===renderer.strokeProgram&&row.uniforms.get('u_width')===2);
+  assert.equal(highlighted.length,24,'only the selected hub’s 24 relationships receive the focus stroke');
+});
+
 test('known small full graphs show readable nodes and nearby related entities at overview scale',()=>{
   const {renderer,draws}=smallRelationshipScene();renderer.draw();
   const sizes=draws.filter(row=>row.mode===renderer.gl.POINTS).map(row=>row.uniforms.get('u_size'));
-  assert.ok(sizes.length&&sizes.every(size=>size>=14),'73-entity overview nodes must be readable circles, not 5px dots');
+  assert.ok(sizes.length&&sizes.every(size=>size>=7&&size<=12),'small constellation points stay within 5–10px plus antialias margins');
   const positions=renderer.renderPositions||renderer.dataset.positions,unit=renderer.camera.unit(renderer.width,renderer.height);
   const lengths=renderer.dataset.edges.map(edge=>{const a=renderer.dataset.nodeIndex.get(edge.subject_id)*2,b=renderer.dataset.nodeIndex.get(edge.object_id)*2;return Math.hypot(positions[a]-positions[b],positions[a+1]-positions[b+1])*unit;});
   assert.ok(lengths.reduce((sum,value)=>sum+value,0)/lengths.length<130,'relationship layout must replace the long hash-scattered edges');
@@ -241,8 +255,8 @@ test('sparse node and selected ring sprites reserve one physical pixel outside e
   for(const dpr of [1,1.25,2]){
     const {renderer,draws}=smallRelationshipScene();renderer.dpr=dpr;renderer.selected=0;renderer.draw();
     const points=draws.filter(row=>row.mode===renderer.gl.POINTS),normal=points[0],ring=points.at(-1);
-    assert.equal(normal.uniforms.get('u_size'),16*dpr+2,'node antialias coverage must fit inside its sprite at DPR '+dpr);
-    assert.equal(ring.uniforms.get('u_size'),24*dpr+2,'the selected ring needs the same unclipped physical-pixel margin');
+    assert.equal(normal.uniforms.get('u_size'),renderer.nodeRanges[0].size*dpr+2,'node antialias coverage must fit inside its sprite at DPR '+dpr);
+    assert.equal(ring.uniforms.get('u_size'),(renderer.nodeScreenSize(0)+8)*dpr+2,'the selected ring needs the same unclipped physical-pixel margin');
   }
 });
 
@@ -289,7 +303,7 @@ test('small overview labels use the relationship positions and keep useful names
   const {renderer}=smallRelationshipScene(),drawn=[];
   renderer.labelContext={setTransform(){},clearRect(){},measureText:text=>({width:text.length*6}),fillText(text,x,y){drawn.push({text,x,y,width:text.length*6});}};
   renderer.drawLabels=load().Renderer.prototype.drawLabels;renderer.selected=72;renderer.drawLabels();
-  assert.equal(drawn[0].text,'Entity 72');assert.ok(drawn.length>=40,'known small sessions should show most of their names: '+drawn.length);
+  assert.equal(drawn[0].text,'Entity 72');assert.ok(drawn.length>=8&&drawn.length<=20,'a constellation overview keeps a limited set of readable names: '+drawn.length);
   assertSeparatedLabels(drawn,renderer.width,renderer.height);
   drawn.length=0;renderer.showLabels=false;renderer.drawLabels();assert.equal(drawn.length,0);
 });
@@ -397,7 +411,7 @@ for(const edgeCount of [3,5001])test('relation picking highlights only its exist
   assert.equal(lines.length,edgeCount>4000?1:2);assert.equal(overlay.first,2);assert.equal(overlay.count,2);
   assert.equal(overlay.attributes.get(renderer.locations.position).buffer,renderer.edgeBuffer);
   assert.equal(overlay.attributes.size,1);
-  assert.deepEqual(overlay.color,[207/255,135/255,55/255,1]);
+  assert.deepEqual(overlay.color,[22/255,137/255,233/255,1]);
   assert.ok(draws.indexOf(overlay)<draws.findIndex(row=>row.mode===renderer.gl.POINTS),'nodes render above the relation overlay');
   draws.length=0;renderer.showEdges=false;renderer.draw();assert.equal(draws.filter(row=>row.mode===renderer.gl.LINES).length,0);
   renderer.showEdges=true;assert.equal(pick(-.8,0),nodes[0]);assert.equal(renderer.selectedEdge,-1);
@@ -455,11 +469,24 @@ test('opaque overview copies use a compatible RGB destination format',()=>{
   assert.equal(renderer.stats().view_cache_error,0);renderer.draw();assert.equal(renderer.stats().node_layer,'complete-view-cache');
 });
 
+test('wide high-DPI overview caches preserve physical pixels within the same area budget',()=>{
+  for(const [width,height] of [[2560,960],[2808,1340]]){
+    const scene=overviewScene(),{renderer,copies}=scene;
+    renderer.viewMaxSize=4096;renderer.width=width/2;renderer.height=height/2;
+    renderer.canvas.width=width;renderer.canvas.height=height;renderer.dpr=2;
+    warmOverview(scene);assert.equal(copies.length,1,'a wide viewport within 16MiB must retain the complete cache');
+    assert.equal(copies[0].width,width);assert.equal(copies[0].height,height,'capture at original physical resolution');
+  }
+  const scene=overviewScene();scene.renderer.viewMaxSize=4096;
+  scene.renderer.canvas.width=3000;scene.renderer.canvas.height=1600;
+  warmOverview(scene);assert.equal(scene.copies.length,0,'the unchanged 16MiB area budget still limits allocation');
+});
+
 test('a cropped node, deep zoom, or oversized canvas always keeps exact live groups',()=>{
   for(const kind of ['cropped','deep','size','unsupported']){
     const scene=overviewScene({outlier:kind==='cropped'}),{renderer,gl,draws,copies}=scene;
     if(kind==='deep')renderer.camera.scale=10;
-    if(kind==='size')renderer.canvas.width=2049;
+    if(kind==='size')renderer.canvas.width=4097;
     if(kind==='unsupported')gl.copyTexImage2D=undefined;
     renderer.draw();renderer.draw();draws.length=0;renderer.draw();
     assert.equal(copies.length,0,kind+' must not capture an incomplete or unsupported scene');
@@ -508,4 +535,16 @@ test('destroy releases the bounded overview texture',()=>{
   const scene=overviewScene(),{renderer,deletedTextures}=scene;warmOverview(scene);const texture=renderer.viewTexture;
   assert.ok(texture);renderer.abort={abort(){}};renderer.observer={disconnect(){}};renderer.host={};renderer.pendingFrame=0;renderer.destroy();
   assert.ok(deletedTextures.includes(texture));
+});
+
+test('bounded exploration overlay preserves the real complete-view cache and clearing restores its canvas',()=>{
+  const scene=overviewScene(),{renderer,draws,copies}=scene;renderer.selected=0;warmOverview(scene);
+  assert.ok(renderer.viewSnapshot);renderer.canvas.style={opacity:''};const geometry=[];
+  renderer.labelContext={setTransform(){},clearRect(){},save(){},restore(){},beginPath(){},moveTo(){},lineTo(){geometry.push('edge');},arc(){},stroke(){},fill(){geometry.push('node');}};
+  renderer.drawLabels=load().Renderer.prototype.drawLabels;renderer.showLabels=false;
+  const nodes=['overview0','overview4999'],edge=renderer.dataset.edges[0];
+  renderer.setExplorationFocus({nodeIds:new Set(nodes),edgeIds:new Set([edge.id]),edgeRecords:[edge]});renderer.draw();
+  assert.deepEqual(geometry,['edge','node','node']);assert.equal(draws.length,1);assert.equal(draws[0].program,renderer.viewProgram);
+  assert.equal(renderer.stats().node_layer,'complete-view-cache');assert.equal(renderer.stats().drawn_entities,5000);assert.equal(renderer.stats().drawn_relations,1);assert.equal(copies.length,1);
+  assert.equal(renderer.canvas.style.opacity,'0.18');renderer.setExplorationFocus(null);assert.equal(renderer.canvas.style.opacity,'');
 });

@@ -24,6 +24,25 @@ test('canonical entity types retain the same color with translated names and par
   assert.equal(subject.colorFor({...local,type_label:'经营主体'}),subject.colorFor(full));
 });
 
+test('focused content and blue focus strokes remain legible on a white constellation canvas',()=>{
+  const {subject}=appearance();
+  const luminance=hex=>[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255)
+    .map(value=>value<=.04045?value/12.92:((value+.055)/1.055)**2.4)
+    .reduce((sum,value,i)=>sum+value*[.2126,.7152,.0722][i],0);
+  const contrast=hex=>{const a=luminance(hex),b=luminance(subject.tokens.background);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);};
+  assert.ok(contrast('#18181b')>=7,'the hover card and focused name require high contrast');
+  assert.ok(contrast(subject.tokens.selected)>=3,'focus rings and selected relationships must be visible');
+});
+
+test('only bounded small graphs add degree-based node hierarchy',()=>{
+  const {subject}=appearance(),nodes=Array.from({length:8},(_,i)=>({id:'n'+i}));
+  const edges=nodes.slice(1).map(node=>({subject_id:'n0',object_id:node.id}));
+  const sizes=subject.sizesFor(nodes,edges);
+  assert.ok(sizes.get('n0')>sizes.get('n1'),'the central entity stands out');
+  assert.ok([...sizes.values()].every(size=>size>=5&&size<=10),'use the reference small-dot size range');
+  assert.equal(subject.sizesFor(Array.from({length:201},(_,i)=>({id:i})),[]),null,'large progressive graphs skip degree decoration');
+});
+
 test('attribute projections and unknown types remain distinguishable from real entity types',()=>{
   const {subject,palette}=appearance();
   assert.equal(subject.colorFor({kind:'attribute_value',virtual:true,type:'KS_ATTRIBUTE_VALUE'}),palette.attribute);

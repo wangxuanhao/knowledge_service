@@ -1,0 +1,125 @@
+/* Both renderers occupy the same tracks. Loading and type counts never size the canvas. */
+body main #tab-search .search-graph-workspace,
+body main #tab-search .search-graph-workspace:has(>#graph-stage[data-graph-mode="full"]){height:auto;min-height:0;grid-template-rows:auto;align-items:stretch}
+body main #tab-search .search-graph-workspace>.search-results-pane{height:auto;min-height:0;max-height:none;align-self:stretch;contain:size}
+body main #tab-search #graph-stage,
+body main #tab-search #graph-stage[data-graph-mode="full"]{
+ --graph-canvas-height:clamp(280px,calc(100dvh - 550px),680px);
+ --graph-toolbar-height:36px;--graph-footer-height:36px;
+ display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:38px var(--graph-toolbar-height) var(--graph-canvas-height) 64px 22px var(--graph-footer-height) 18px;
+ gap:6px;height:auto;min-height:0;padding:14px;align-content:start;
+}
+body main #tab-search .graph-stage-heading{grid-row:1;display:flex;gap:12px;min-width:0;height:38px;margin:0}
+body main #tab-search .graph-stage-heading h2{flex:0 0 auto;font-size:14px}
+body main #tab-search .graph-stage-heading #graph-version-scope{flex:1;min-width:0;max-height:30px;margin:0;padding:0;border:0;border-radius:0;background:none;color:#789096;font-size:11px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body main #tab-search .full-graph-mode{flex:0 0 auto}
+body main #tab-search .graph-presentation-actions{display:flex;align-items:center;flex:0 0 auto;gap:6px;margin-left:auto}
+body main #tab-search #graph-fullscreen{height:32px;flex:0 0 auto;margin:0;padding:5px 9px;border:1px solid #d5e1e5;border-radius:6px;background:#fff;color:#3d5e63;font-size:12px;white-space:nowrap}
+body main #tab-search .graph-toolbar,
+body main #tab-search .full-graph-toolbar{grid-row:2;display:flex;flex-wrap:nowrap;gap:6px;min-width:0;height:36px;margin:0;padding:0;border:0;align-items:center}
+body main #tab-search .graph-toolbar .graph-hop-control{flex:0 0 auto}
+body main #tab-search .graph-toolbar .graph-hop-control input{width:46px;height:32px;padding:4px 5px}
+body main #tab-search .graph-toolbar .graph-tool-actions{margin-left:auto}
+body main #tab-search .full-graph-locate{flex:0 1 270px;min-width:100px;margin-left:auto}
+body main #tab-search #graph-stage .full-graph-section{display:contents}
+body main #tab-search #graph-stage .full-graph-section[hidden]{display:none}
+body main #tab-search .full-graph-options:not([open]) .full-graph-settings-panel{display:none}
+body main #tab-search #graph-canvas,
+body main #tab-search #graph-stage[data-graph-mode="full"] .full-graph-host{
+ grid-row:3;width:100%;height:var(--graph-canvas-height);min-height:0;box-sizing:border-box;
+ margin:0;border:1px solid #dbe5e8;border-radius:8px;background:#ffffff;overflow:hidden;
+}
+body main #tab-search #graph-type-buttons,
+body main #tab-search .full-graph-types{grid-row:4;min-width:0;min-height:0;height:64px;box-sizing:border-box;margin:0;padding:7px 0 0;border:0;overflow:hidden;background:transparent}
+body main #tab-search #graph-type-buttons>small,
+body main #tab-search .full-graph-type-heading{margin:0 0 5px;font-size:11px;line-height:15px}
+body main #tab-search #graph-type-buttons>div,
+body main #tab-search .full-graph-type-controls{display:flex;flex-wrap:nowrap;gap:5px;max-height:40px;min-width:0;padding:1px 0 3px;overflow:auto;scrollbar-width:thin}
+body main #tab-search #graph-type-buttons button{flex:0 0 auto;height:27px;margin:0;padding:4px 8px;border:1px solid #d5e1e5;border-radius:6px;background:#fff;color:#3d5e63;font-size:11px;white-space:nowrap}
+body main #tab-search #graph-type-buttons button[aria-pressed="true"]{background:#216952;color:#fff;border-color:#216952}
+body main #tab-search .full-graph-type-row{align-items:center}
+body main #tab-search .full-graph-type-pagination{position:absolute;right:14px;margin-top:-57px;background:#fff}
+body main #tab-search .full-graph-type-heading{padding-right:0;white-space:nowrap;overflow:hidden}
+body main #tab-search .full-graph-types:has(.full-graph-type-pagination:not([hidden])) .full-graph-type-heading{padding-right:145px}
+body main #tab-search .full-graph-type-summary{overflow:hidden;text-overflow:ellipsis}
+body main #tab-search #graph-summary,
+body main #tab-search .full-graph-progress{grid-row:5;min-width:0;height:22px;box-sizing:border-box;margin:0;padding:1px 0;color:#6b828a;font-size:11px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body main #tab-search #graph-timeline,
+body main #tab-search .full-graph-footer{grid-row:6;display:flex;align-items:center;flex-wrap:nowrap;gap:6px;min-width:0;height:36px;box-sizing:border-box;margin:0;padding:3px 0;border:0;background:transparent;overflow-x:auto}
+body main #tab-search #graph-timeline>*{flex-shrink:0}
+body main #tab-search #graph-timeline .tl-points{flex:1 1 100px;min-width:70px}
+body main #tab-search .full-graph-batches{flex-wrap:nowrap;gap:5px;margin:0}
+body main #tab-search .full-graph-batches button{height:28px;padding:4px 8px;font-size:11px}
+body main #tab-search #graph-pan-hint,
+body main #tab-search .full-graph-section .fg-scope-note{grid-row:7;min-width:0;margin:0;color:#8a9ca2;font-size:11px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body:has(#graph-stage.is-graph-fullscreen){overflow:hidden}
+body main #tab-search #graph-stage.is-graph-fullscreen{position:fixed;inset:0;z-index:100;width:100vw;height:100dvh;max-height:none;padding:18px;border:0;border-radius:0;background:#fff;grid-template-rows:38px var(--graph-toolbar-height) minmax(0,1fr) 64px 22px var(--graph-footer-height) 18px}
+body main #tab-search #graph-stage.is-graph-fullscreen :is(#graph-canvas,.full-graph-host){height:100%;min-height:0;max-height:none}
+body main #tab-search #graph-stage.is-graph-fullscreen .full-graph-settings-panel{z-index:110}
+body main #tab-search .search-graph-workspace.is-graph-fullscreen-workspace:has(>#graph-stage){position:fixed;inset:0;z-index:100;width:100vw;height:100dvh;min-height:0;margin:0;gap:0;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);background:#fff}
+body main #tab-search .is-graph-fullscreen-workspace>.search-results-pane{display:none}
+body main #tab-search .is-graph-fullscreen-workspace>#graph-stage.is-graph-fullscreen{position:relative;inset:auto;grid-column:1;grid-row:1;width:auto;height:100%;max-height:100dvh}
+body main #tab-search .search-graph-workspace.is-graph-fullscreen-workspace:has(#graph-detail:not(:empty),.inspector-rail.is-path-open){grid-template-columns:minmax(0,1fr) 340px;grid-template-rows:minmax(0,1fr)}
+body main #tab-search .search-graph-workspace.is-graph-fullscreen-workspace:has(>#graph-stage.is-graph-fullscreen)>.inspector-rail{position:relative;inset:auto;grid-column:2;grid-row:1;width:auto;height:100%;max-height:100%;min-height:0;border-radius:0;z-index:auto}
+@media(max-width:1000px){
+ body main #tab-search .search-graph-workspace.is-graph-fullscreen-workspace:has(#graph-detail:not(:empty),.inspector-rail.is-path-open){grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) minmax(150px,30dvh)}
+ body main #tab-search .search-graph-workspace.is-graph-fullscreen-workspace:has(>#graph-stage.is-graph-fullscreen)>.inspector-rail{grid-column:1;grid-row:2;height:100%;max-height:100%;position:relative;inset:auto}
+}
+@media(min-width:701px) and (max-width:1400px){
+ body main #tab-search .search-graph-workspace:has(#graph-detail:not(:empty),.inspector-rail.is-path-open){grid-template-columns:minmax(210px,245px) minmax(0,1fr);grid-template-rows:auto auto}
+ body main #tab-search .search-graph-workspace:has(#graph-detail:not(:empty),.inspector-rail.is-path-open)>.inspector-rail{grid-column:2;grid-row:2;height:auto;max-height:min(720px,85dvh)}
+}
+@media(max-width:1100px){
+ body main #tab-search #graph-stage,body main #tab-search #graph-stage[data-graph-mode="full"]{--graph-toolbar-height:72px}
+ body main #tab-search .graph-toolbar,body main #tab-search .full-graph-toolbar{height:72px;flex-wrap:wrap;align-content:flex-start;overflow:visible}
+ body main #tab-search .graph-toolbar .graph-tool-actions,body main #tab-search .graph-toolbar .graph-view-tools{display:contents}
+ body main #tab-search .graph-toolbar>*{flex-shrink:0}
+ body main #tab-search .graph-toolbar button{flex-shrink:0}
+ body main #tab-search .full-graph-locate{order:3;flex-basis:100%;margin-left:0}
+ body main #tab-search .full-graph-options{margin-left:auto}
+ body main #tab-search .full-graph-settings-panel{position:fixed;top:auto;bottom:16px;right:16px;z-index:30}
+}
+@media(max-width:900px){
+ body main #tab-search .search-graph-workspace:not(.is-graph-fullscreen-workspace):has(>#graph-stage){grid-template-columns:minmax(0,1fr);grid-template-rows:auto}
+ body main #tab-search .search-graph-workspace:not(.is-graph-fullscreen-workspace):has(>#graph-stage)>.search-results-pane{height:200px;min-height:130px;max-height:340px;contain:none}
+ body main #tab-search .search-graph-workspace:not(.is-graph-fullscreen-workspace):has(#graph-detail:not(:empty),.inspector-rail.is-path-open)>.inspector-rail{grid-column:1;grid-row:auto;position:relative;inset:auto;height:auto;max-height:75dvh}
+ body main #tab-search #graph-stage,body main #tab-search #graph-stage[data-graph-mode="full"]{--graph-footer-height:72px}
+ body main #tab-search #graph-timeline,body main #tab-search .full-graph-footer{height:72px;align-content:flex-start;align-items:flex-start;flex-wrap:wrap;overflow:visible}
+ body main #tab-search .full-graph-batches{flex-wrap:wrap}
+}
+@media(max-width:700px){
+ body main #tab-search .search-graph-workspace>.search-results-pane{height:200px;min-height:130px;max-height:340px;contain:none}
+ body main #tab-search #graph-stage,body main #tab-search #graph-stage[data-graph-mode="full"]{padding:12px}
+ body main #tab-search .graph-stage-heading{gap:6px}
+ body main #tab-search .graph-stage-heading #graph-version-scope{display:none}
+ body main #tab-search .graph-stage-heading .full-graph-mode{margin-left:auto}
+ body main #tab-search .graph-toolbar>*{flex-shrink:0}
+ body main #tab-search .full-graph-locate{order:initial;flex:1 0 100px;margin-left:auto}
+ body main #tab-search .full-graph-options{margin-left:0}
+ body main #tab-search .full-graph-settings-panel{position:fixed;top:auto;bottom:16px;right:16px}
+ body main #tab-search .full-graph-type-pagination{right:12px}
+}
+@media(max-width:370px){
+ body main #tab-search #graph-stage,body main #tab-search #graph-stage[data-graph-mode="full"]{--graph-toolbar-height:108px}
+ body main #tab-search .graph-toolbar,body main #tab-search .full-graph-toolbar{height:108px}
+}
+
+/* Light constellation presentation; reference: Hindsight Constellation v1.1.0. */
+body main #tab-search #graph-canvas,
+body main #tab-search #graph-stage[data-graph-mode="full"] .full-graph-host{background:#fff;box-shadow:none;border-color:#e5e7eb}
+body main #tab-search .graph-stage-heading h2{font-family:"Microsoft YaHei",sans-serif;font-size:14px;color:#27364b}
+body main #tab-search .graph-stage-heading #graph-version-scope{color:#92939f}
+body main #tab-search .graph-toolbar button,
+body main #tab-search .full-graph-toolbar button,
+body main #tab-search #graph-fullscreen,
+body main #tab-search .full-graph-options summary{background:#fff;border-color:#e3e5eb;color:#687080;box-shadow:none;font-weight:400}
+body main #tab-search .full-graph-mode .full-graph-controls{background:#f6f7fa;border-color:#e4e7ed}
+body main #tab-search .full-graph-mode button[aria-pressed="true"]{background:#396d9e;border-color:#396d9e;color:#fff;box-shadow:none}
+body main #tab-search .full-graph-type-heading strong{color:#596171}
+body main #tab-search .full-graph-progress{color:#7c8493}
+.fg-hover-card{position:absolute;z-index:8;box-sizing:border-box;width:294px;max-width:calc(100% - 24px);padding:16px;border:1px solid #e2e4e9;border-radius:10px;background:#fff;box-shadow:0 8px 24px #1018282e;pointer-events:none;color:#27272a;text-align:left;font-family:"Microsoft YaHei",sans-serif}
+.fg-hover-card[hidden]{display:none}
+.fg-hover-meta{display:flex;gap:12px;align-items:center;margin-bottom:8px;font-size:10px;color:#888995}
+.fg-hover-kind{font-size:10px;font-weight:600;letter-spacing:.04em;color:#df758b}
+.fg-hover-name{margin:0;font-size:12px;line-height:1.7;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.fg-hover-id{margin:10px 0 0;padding-top:10px;border-top:1px solid #ececf0;color:#9696a1;font:9px/1.5 Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

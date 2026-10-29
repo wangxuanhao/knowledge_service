@@ -108,7 +108,9 @@ function drawingHarness(){
   const data=new GraphDataset();data.addNodes([{id:'a'},{id:'b'}]);data.addEdges([{id:'r1',subject_id:'a',object_id:'b'}]);
   const renderer=Object.assign(Object.create(Renderer.prototype),{gl,dataset:data,locations:{position:0,size:'size'},pointLocations:{position:0,size:'size'},cacheLocations:{position:0},cacheFramebuffer:{},cacheSize:2048,
     program:{},pointProgram:{},cacheProgram:{},nodeBuffer:'nodes',groupedNodeBuffer:'grouped-nodes',edgeBuffer:'edges',width:800,height:600,canvas:{width:800,height:600},camera:new Camera(),showEdges:true,dpr:1,selected:-1,durations:[],drawLabels(){},requestDraw(){}});
-  return {gl,renderer,background:[248/255,250/255,251/255,1]};
+  // This isolated harness does not load GraphAppearance; the renderer's
+  // documented fallback canvas is white, matching the live light theme.
+  return {gl,renderer,background:[1,1,1,1]};
 }
 
 test('cached sparse relationship pixels darken the background instead of becoming white',()=>{

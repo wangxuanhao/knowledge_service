@@ -82,3 +82,11 @@
 - [x] Audit all 32 local files separately, including 18 unregistered files. Preserve the complete directory at `.benchmarks/source-rich-reading/local-sources-backup-20261029/`.
 - [x] Move `data/sources` out of runtime data after checking exact absolute paths. Verify original downloads, new imports and real authenticated rich reading while the old path is absent; confirm it is not recreated.
 - [x] Document removal conditions and distinguish the removable local directory from the required MinIO bucket and Docker volumes.
+
+### Local master integration (2026-10-29 user follow-up)
+
+- [x] User no longer needs the old local files; remove the 32-file backup from its original path using the Windows recycle bin after permanent deletion was blocked.
+- [x] Isolate the 54-file source feature from unrelated dirty work; regenerate an S3-only lock and verify 89 backend tests plus 722 Node contracts in the independent checkout.
+- [x] Integrate ontology editing and graph exploration already landed on master; preserve both sides of the shared entry-page resources. Verify 72 reading/ontology tests and the final 804 Node contracts.
+- [x] Reproduce and repair upload preparation failure receipts; verify 27 related regressions and a real failed job with retained original.
+- [x] Run a fresh authenticated 8-file / 9-document import through MinIO, original/image hash and version/location checks, then actual 1440/768/390 reading screens. Final inventory: 29 verified objects, 35 object-referenced queue items, 0 legacy BYTEA, no data/sources directory.
