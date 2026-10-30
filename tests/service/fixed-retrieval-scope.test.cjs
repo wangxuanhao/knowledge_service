@@ -32,7 +32,7 @@ test('QA stream validates replay bodies before reserving turns or making request
 });
 
 function submissionFixture(save){
-  const controls={'qa-as-of':{value:''},generate:{checked:false},'qa-mode':{value:'hybrid'}};
+  const controls={generate:{checked:false},'qa-mode':{value:'hybrid'}};
   const environment={busy:false,preparing:false,current:'p',serial:0,input:{value:'问题 A'},send:{disabled:false},summary:{textContent:''},progress:{textContent:''},qaHistory:[],scope:()=>({}),$c:id=>controls[id],window:{ScopeFields:fields},sessionManager:{loading:false,state:{conflict:false},ensureActive:async()=>{},save},addScopeNote(){},addTurn(){return {};},persist(){},stream(){environment.streams++;},streams:0,Date};
   vm.createContext(environment);vm.runInContext(declaration(read('workbench.js'),'submit')+';this.submit=submit;',environment);return environment;
 }
@@ -77,15 +77,15 @@ test('UI keeps explicit graph purpose and bumps each changed runtime resource',(
   assert.ok(html.includes('id="scope-purpose"'),'scope purpose selector exists');assert.ok(html.includes('<option value="graph">图谱'),'PG graph purpose exists');
   assert.ok(html.includes('id="scope-compatibility"'),'scope incompatibility remains visible');
   assert.ok(html.includes('#scope [hidden]{display:none!important}'),'page-owned filter controls stay hidden despite existing grid/flex CSS');
-  for(const file of ['scope-fields.js','workspace-context-ui.js'])assert.ok(html.includes('/assets/'+file+'?v=authority-retrieval-20261021-2'),file+' version');
+  assert.ok(html.includes('/assets/scope-fields.js?v=authority-retrieval-20261021-2'),'scope-fields.js version');
+  for(const file of ['workspace-context-ui.js','workbench.js'])assert.ok(html.includes('/assets/'+file+'?v=unified-temporal-20261028-1'),file+' version');
   assert.ok(html.includes('/assets/workspace.js?v=graph-exploration-20261029-1'),'workspace.js version');
-  assert.ok(html.includes('/assets/workbench.js?v=ontology-sections-20261027-2'),'workbench.js version');
 });
 
 test('applying the shared editor preserves dedicated ontology/kind scope and original metadata AST',()=>{
   const applied={ontology_scope:'ids',ontology_ids:['o1'],kinds:['entity'],filters:unsupported,applicability:{platforms:{mode:'specific',values:['旧平台']}}},before=JSON.stringify(applied);
   const controls={'cb-raw-json':JSON.stringify(unsupported),'filters':JSON.stringify(unsupported)};
-  const environment={current:'p',context:{read:()=>applied},get:id=>({value:controls[id]||'',focus(){}}),window:{},JSON,Date,Error};
+  const environment={current:'p',context:{read:()=>applied},get:id=>({value:controls[id]||'',focus(){}}),window:{TemporalScope:require('../../knowledge_service/web/temporal-scope.js')},JSON,Date,Error};
   vm.createContext(environment);vm.runInContext(declaration(read('workspace-context-ui.js'),'capture')+';this.captureScope=capture;',environment);
   const captured=environment.captureScope();
   assert.equal(captured.ontology_scope,'ids');assert.equal(JSON.stringify(captured.ontology_ids),'["o1"]');assert.equal(JSON.stringify(captured.kinds),'["entity"]');

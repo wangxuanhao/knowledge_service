@@ -8,10 +8,11 @@ def test_qa_formatting_state_history_and_responsive_layout(workbench, tmp_path):
     page.click('[data-tab="qa"]')
     assert page.locator('.qa-page-heading h2').inner_text() == '知识问答'
     assert page.locator('.qa-hero').evaluate('(el)=>getComputedStyle(el).display') == 'block'
-    assert not page.locator('#qa-as-of').is_visible()
+    assert page.locator('#qa-as-of').count() == 0
+    assert not page.locator('#qa-include-references').is_visible()
     page.locator('#qa-settings>summary').click()
     page.locator('.qa-temporal-options summary').click()
-    assert page.locator('#qa-as-of').is_visible()
+    assert page.locator('#qa-include-references').is_visible()
     page.locator('.qa-temporal-options summary').click()
     page.locator('#qa-settings>summary').click()
     answer = '# 价格说明\n\n**团购价：** 商品销售价 [U1]\n- 外卖价\n<img src=x onerror="window.qaInjected=true">'

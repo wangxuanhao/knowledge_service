@@ -38,6 +38,11 @@ class RuntimeCapabilities:
                 _embedding_backend(self.encoder) == 'demo'
                 or bool(getattr(self.encoder, 'runtime_ready', False))),
         }
+        initialization = getattr(self.encoder, 'initialization_state', None)
+        if initialization is not None:
+            embedding['initialization_state'] = initialization
+            error = getattr(self.encoder, 'initialization_error', None)
+            embedding['initialization_error'] = redact(error) if error else None
 
         store = self.milvus_store
         connected = bool(store is not None and getattr(store, 'available', False))
@@ -82,6 +87,11 @@ class RuntimeCapabilities:
             'neo4j': {'status': 'degraded' if os.environ.get('KG_NEO4J_PASSWORD') else 'disabled',
                       'reason': '需连接探测' },
         }
+        if not embedding['ready'] and initialization == 'loading':
+            capabilities['semantic']['reason'] = '本地语义模型正在初始化，请稍后重试；关键词检索仍可使用。'
+        elif not embedding['ready'] and initialization == 'failed':
+            capabilities['semantic']['reason'] = '本地语义模型初始化失败：' + (
+                embedding.get('initialization_error') or '模型未就绪')
         degraded = (not embedding['ready'] or
                     (self.milvus_configured and not semantic_ready))
         return {

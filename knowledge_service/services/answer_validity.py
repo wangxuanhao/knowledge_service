@@ -54,6 +54,12 @@ def temporal(row, as_of):
     return 'unknown', 'published_at' if basis == 'published_at' else 'missing_valid_from'
 
 
+def _unknown_start(row):
+    # An explicit end can prove expiry without establishing when validity began.
+    return (not row.get('valid_from') or
+            (row.get('metadata') or {}).get('effective_time_source') == 'published_at')
+
+
 def visible(row, request, source_artifact=False):
     """Recheck every exact source version, including business metadata scope."""
     if row.get('recorded_at') and row['recorded_at'] > request['known_at']:
@@ -85,6 +91,10 @@ def classify(service, project, row, request):
     request = row_scope(row, request)
     if not visible(row, request):
         return None
+    strict_time = (request.get('include_unknown', True) is False
+                   and request.get('_explicit_valid_at', request.get('valid_at') is not None))
+    if strict_time and _unknown_start(row):
+        return None
     from ..domain.evidence_scope import source_scope
     source_request = source_scope(request, row)
     status, basis = temporal(row, request['valid_at'])
@@ -114,6 +124,8 @@ def classify(service, project, row, request):
         if not history:
             return None
         authority = max(history, key=lambda item: item['version'])
+        if strict_time and _unknown_start(authority):
+            return None
         governance[version] = authority
         return doc
 
@@ -154,6 +166,8 @@ def classify(service, project, row, request):
             if len(chunks) != 1:
                 continue
             states = {temporal(item, request['valid_at'])[0] for item in (governance[version], chunks[0])}
+            if strict_time and any(_unknown_start(item) for item in (governance[version], chunks[0])):
+                continue
             non_effective = states - {'effective'}
             state = next(iter(non_effective)) if len(non_effective) == 1 else (
                 'conflict' if non_effective else 'effective')
@@ -165,6 +179,11 @@ def classify(service, project, row, request):
             states = {item['status'] for item in occurrences}
             status = next(iter(states)) if len(states) == 1 else ('conflict' if states else 'unknown')
             basis = 'source_validity' if has_source else 'missing_exact_source'
+    # Reference lookup deliberately spans time to find expired/future material,
+    # but cannot restore unknown validity excluded by an explicit time scope.
+    # Apply this after source governance: a dated chunk may have an undated source.
+    if strict_time and (status == 'unknown' or (has_source and not occurrences)):
+        return None
     # References retain authorized frozen sources independently of source time.
     # Effective conclusions freeze only individually eligible occurrences.
     allowed = ([item for item in occurrences if item['status'] == 'effective'] if status == 'effective' else
@@ -243,6 +262,17 @@ def _prefetch_chunk_sources(repository, project, rows, request):
 def apply_validity(service, project, context, request):
     request = {**request, '_source_read_cache': {}}
     from ..domain.evidence_scope import source_scope
+    strict_time = (request.get('include_unknown', True) is False
+                   and request.get('_explicit_valid_at', request.get('valid_at') is not None))
+    qualifications = {}
+
+    def qualify(row, selected):
+        # The same occurrence can appear in several public retrieval arrays.
+        key = id(row)
+        if key not in qualifications:
+            qualifications[key] = classify(service, project, row, selected)
+        return qualifications[key]
+
     anchors = {}
     for container in [context, *context.get('platform_groups', [])]:
         for row in container.get('hits', []):
@@ -270,6 +300,8 @@ def apply_validity(service, project, context, request):
         anchor = anchors.get((proof.get('anchor_id'), proof.get('anchor_version_id'),
                               proof.get('query_platform'), proof.get('source_scope')))
         if anchor is None:
+            return None
+        if strict_time and qualify(anchor, row_scope(anchor, request)) is None:
             return None
         # Never execute a residual AST supplied by material. Recompute it from
         # this request and the independently qualified exact direct hit.
@@ -308,13 +340,22 @@ def apply_validity(service, project, context, request):
             continue
         seen.add(key)
         selected = qualification_request(row)
-        item = classify(service, project, row, selected) if selected is not None else None
+        item = qualify(row, selected) if selected is not None else None
         if item is None:
             continue
         classified.append(item)
         if (row.get('source_scope') == 'unknown' and
                 dimension_mode(request.get('applicability'), 'platforms') == 'specific'):
             classified[-1].update(answer_eligible=False, usage='reference')
+    if strict_time:
+        # Reject the same unknown source from raw hits/context as from E/U/R/F
+        # evidence. Filtering only citations leaves its text in the QA response.
+        for container in [context, *context.get('platform_groups', [])]:
+            for key in public_row_arrays:
+                if key in container:
+                    container[key] = [row for row in container[key]
+                        if (selected := qualification_request(row)) is not None
+                        and qualify(row, selected) is not None]
     context['evidence_rows'] = [row for row in classified if row['answer_eligible'] and
                               (row.get('version_id') or row['id'], row.get('query_platform')) in direct_keys]
     from .qa_policy import DOCUMENT

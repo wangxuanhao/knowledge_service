@@ -82,16 +82,17 @@
         if (parsed.origin !== window.location.origin || !/^\/api\/projects\/[^/]+\/qa\/conversations(?:\/[^/]+)?$/.test(parsed.pathname)) {
             throw new Error('此接口仅用于个人问答会话');
         }
-        var token = getToken(), owner = currentUser && String(currentUser.id);
+        var token = getToken(), owner = currentUser && String(currentUser.id), abortSignal = init && init.signal;
         var needsAuth = authEnforced !== false;
         function assertSameSession() {
+            if (abortSignal && abortSignal.aborted) throw abortSignal.reason || new DOMException('请求已取消', 'AbortError');
             if (needsAuth && (getToken() !== token || !currentUser || String(currentUser.id) !== owner)) {
                 throw Object.assign(new Error('登录状态已变化，请使用原账号重新登录后重试，本页未保存内容已保留'), {status: 401});
             }
         }
         if (needsAuth && (!token || !owner)) throw Object.assign(new Error('登录已失效，请在新标签页重新登录原账号后重试'), {status: 401});
         if (needsAuth && (conversationReauthRequired || token !== verifiedSessionToken || owner !== verifiedSessionOwner)) {
-            var identity = await originalFetch('/api/auth/me', {headers: {Authorization: 'Bearer ' + token}});
+            var identity = await originalFetch('/api/auth/me', {headers: {Authorization: 'Bearer ' + token}, signal: abortSignal});
             var data = await identity.json().catch(function () { return {}; });
             assertSameSession();
             if (!identity.ok || String(data.user && data.user.id) !== owner) {
@@ -105,6 +106,7 @@
         if (token) headers.set('Authorization', 'Bearer ' + token);
         init.headers = headers;
         var response = await originalFetch(input, init);
+        if (abortSignal && abortSignal.aborted) throw abortSignal.reason || new DOMException('请求已取消', 'AbortError');
         if (response.status === 401) {
             conversationReauthRequired = true;
             // Do not clear the workspace or navigate: that would destroy memory drafts.

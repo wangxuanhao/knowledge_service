@@ -204,6 +204,7 @@ async function authenticatedConversation(){
       }
       return json({detail:'登录失效'},401);
     }};
+  window.RequestDeadline=require('../../knowledge_service/web/request-deadline.js');
   const context={window,document,localStorage:tokens,Headers,URL,Response,console};
   vm.runInNewContext(fs.readFileSync(path.resolve(__dirname,'../../knowledge_service/web/auth.js'),'utf8'),context);
   listeners.get('DOMContentLoaded')();await window.__authReady;

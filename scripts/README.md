@@ -22,6 +22,7 @@
 - [archive_windows_docker_bind.py](archive_windows_docker_bind.py)、[copy_stopped_docker_volume.sh](copy_stopped_docker_volume.sh)、[migrate_docker_storage.py](migrate_docker_storage.py)：停止写入后的归档、复制与校验，配合 [迁移指南](../docs/2026-10-19-Docker-Linux-volume-migration.md)。
 - [install_ocr_models.py](install_ocr_models.py)、[prepare_model_layout.py](prepare_model_layout.py)：本地模型安装和布局。
 - [prepare_document_models.py](prepare_document_models.py)：部署前准备 Docling 的布局、表格和 RapidOCR 权重。默认写入 `data/model/document-parser/docling`，`--output-dir` 可指定目录，`--check` 仅校验已有文件。运行服务配置 `KG_DOCUMENT_ARTIFACTS_PATH`；PDF 请求只使用本地模型，缺失时明确返回不可用，DOCX/TXT 不依赖 PDF 模型。
+- [prepare_embedding_runtime.py](prepare_embedding_runtime.py)：将支持的 BGE-M3 流水线离线导出并验证为 FP32 ONNX；通过分词/向量对照后原子启用，保留原权重和旧版本。参数 `--model-dir data/model/embedding/bge-m3`，已有有效制品默认复用，`--rebuild` 创建新版本。依赖 `local-export`，不连接业务库、不修改 `.env`。
 - [production_storage_checkpoint.py](production_storage_checkpoint.py)：部署读取检查点。
 - [repair_source_scope.py](repair_source_scope.py)：来源范围修复计划及显式应用。
 - [migrate_source_objects.py](migrate_source_objects.py)：本地来源对象与历史队列 BYTEA 迁往显式配置的 S3/MinIO，默认只读盘点；完整校验原始大小和 SHA256 后，`--apply` 才上传并将队列改为对象引用。

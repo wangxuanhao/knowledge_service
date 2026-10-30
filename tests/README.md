@@ -17,6 +17,7 @@ node --test tests/service/*.test.cjs
 | 运维脚本安全回归 | `tests/scripts/test_*.py` | 已纳入 pytest 默认 `testpaths`，含迁移/停止写入/归档安全检查 |
 | Node 前端契约 | `tests/service/*.test.cjs` | Node 自动展开该 glob；pytest 不收集，也不要用 Node 目录形式运行 |
 | 独立浏览器布局 | `tests/service/qa-viewport-layout.browser.cjs` | 单独运行；需要 Node 可加载 `playwright`、系统浏览器或 `KG_BROWSER_EXECUTABLE` |
+| 脑图浏览器交互 | `tests/service/entity-mindmap-view.browser.cjs` | 真实 ECharts；验证等比缩放、搜索隐藏节点并聚焦、路径高亮、小地图相机、完整 SVG/PNG 下载、长文字边界、异步失效、重新挂载与三种屏幕尺寸；需要 Playwright 与系统浏览器 |
 | 会话浏览器交互 | `tests/service/qa-conversations.browser.cjs` | 完整工作台 + HTTP 夹具；验证跨浏览器恢复、失败重试、导入、手机菜单与输入框边界，不调用模型 |
 | 共享夹具 | `pg_support.py`、`ontology_seed.py`、`fixtures/*` | 被其他测试导入，不能因自己没有 test 函数而删除 |
 
@@ -27,6 +28,8 @@ node --test tests/service/qa-viewport-layout.browser.cjs
 ```
 
 该入口不是普通 Node 契约 glob 的一部分。它使用实际 HTML/CSS 验证移动端展开引用、异步侧栏变化后输入框仍可见，不访问业务 API 或模型。使用已有 Playwright 安装，通过 `NODE_PATH` 提供其模块；不要在应用目录新增前端构建依赖。
+
+脑图探索使用相同的浏览器依赖，单独运行 `node --test tests/service/entity-mindmap-view.browser.cjs`。纯模型与导出测试 `entity-mindmap-model.test.cjs`、`entity-mindmap-export.test.cjs` 已包含在默认 Node glob；截图及规范导出样本写入 `.benchmarks/mindmap-explorer/`。关系路径按本次加载的节点出现位置计算，不表示业务关系方向；导出包含折叠后代，截断结果有「部分结果」说明。
 
 纯 Docker 迁移安全测试也可以绕开 pytest 的全局 PG fixture 独立运行：
 

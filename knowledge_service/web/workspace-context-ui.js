@@ -5,7 +5,12 @@
   get('ingest-open-jobs').onclick=()=>showRuntimeView('jobs');
   const panel=get('scope'),details=get('cb-details');let trigger=null;
   const inputs=['query-platforms','query-businesses','query-audiences'];
-  const localTime=value=>{if(!value)return '';const date=new Date(value);return new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);};
+  function timeControls(){
+    const mode=get('scope-time-mode').value;
+    get('scope-valid-at-field').hidden=mode!=='at';get('scope-valid-at').disabled=mode!=='at';
+    get('scope-include-unknown').disabled=mode==='all';
+    if(mode==='all')get('scope-include-unknown').checked=true;
+  }
   function restore(){
     const page=context.page,allowed=context.isContentPage(page),host=get('tab-'+page);
     panel.classList.toggle('hidden',!allowed);details.open=false;
@@ -13,7 +18,9 @@
     if(allowed&&host)host.prepend(panel);
     const value=context.read(current),app=value.applicability||{};
     inputs.forEach((id,i)=>{const dimension=app[['platforms','businesses','audiences'][i]];get(id).value=(dimension?.values||[]).join('，');});
-    get('known-at').value=value.known_at||'';get('scope-known-at').value=localTime(value.known_at);get('scope-valid-at').value=localTime(value.valid_at);
+    const time=window.TemporalScope.restore(value);
+    get('known-at').value=value.known_at||'';get('scope-known-at').value=time.knownAt;get('scope-valid-at').value=time.validAt;
+    get('scope-time-mode').value=time.mode;get('scope-include-unknown').checked=time.includeUnknown;timeControls();
     get('filters').value=value.filters?JSON.stringify(value.filters,null,2):'';
     get('cb-raw-json').value=get('filters').value;
     window.ScopeEditor?.restore(value);
@@ -24,11 +31,11 @@
     const filters=raw||canonical;
     // Parse before changing the applied entry. A failed draft keeps the old scope.
     if(filters){try{JSON.parse(filters);}catch{get('cb-raw-json').focus();throw Error('更多字段 JSON 格式不正确，请修正后应用');}}
-    const time=get('scope-valid-at').value;
     const applied=context.read(current),preserved={};
+    const time=window.TemporalScope.capture({mode:get('scope-time-mode').value||'all',validAt:get('scope-valid-at').value,
+      knownAt:get('scope-known-at').value,includeUnknown:get('scope-include-unknown').checked},()=>new Date(),applied);
     for(const key of ['ontology_scope','ontology_ids','kinds'])if(applied[key]!==undefined)preserved[key]=applied[key];
-    return {...preserved,known_at:get('scope-known-at').value?new Date(get('scope-known-at').value).toISOString():null,valid_at:time?new Date(time).toISOString():null,
-      filters:filters?JSON.parse(filters):null,include_unknown:true,...(window.ApplicabilityUI?.readQueryScope?.()||{})};
+    return {...preserved,...time,filters:filters?JSON.parse(filters):null,...(window.ApplicabilityUI?.readQueryScope?.()||{})};
   }
   function changed(){
     details.open=false;renderChips();
@@ -40,10 +47,11 @@
     const host=get('applied-scope-chips');if(!host)return;host.replaceChildren();
     const value=context.read(current),parts=[];
     for(const [key,label] of [['platforms','平台'],['businesses','业务'],['audiences','对象']]){const values=value.applicability?.[key]?.values;if(values?.length)parts.push({label:label+'：'+values.join('、'),key});}
-    if(value.valid_at)parts.push({label:'业务时点：'+value.valid_at.slice(0,16).replace('T',' '),key:'valid_at'});
-    if(value.known_at)parts.push({label:'系统时点：'+value.known_at,key:'known_at'});
+    if(value.valid_at)parts.push({label:'业务时点（固定）：'+value.valid_at+' · '+(value.include_unknown===false?'不含生效时间未知':'含生效时间未知'),key:'valid_at'});
+    if(value.known_at)parts.push({label:'系统修订时点：'+value.known_at,key:'known_at'});
     if(value.filters)parts.push({label:'更多字段 '+window.ScopeFields.countConditions(value.filters)+' 项',key:'filters'});
-    for(const item of parts){const button=document.createElement('button');button.type='button';button.className='applied-scope-chip secondary';button.textContent=item.label+' ×';button.onclick=()=>{if(['platforms','businesses','audiences'].includes(item.key)){delete value.applicability[item.key];}else value[item.key]=null;store.edit(current,context.page,value);store.apply(current,context.page);restore();changed();};host.append(button);}
+    for(const item of parts){const button=document.createElement('button');button.type='button';button.className='applied-scope-chip secondary';button.textContent=item.label+' ×';button.onclick=()=>{if(['platforms','businesses','audiences'].includes(item.key)){delete value.applicability[item.key];}else{value[item.key]=null;if(item.key==='valid_at')value.include_unknown=true;}store.edit(current,context.page,value);store.apply(current,context.page);restore();changed();};host.append(button);}
+    get('scope-time-applied').textContent='已应用：'+window.TemporalScope.describe(value);
     get('scope-toggle').textContent='筛选'+(parts.length?' · '+parts.length:'');
     get('scope-toggle').setAttribute('aria-expanded',String(details.open));
   }
@@ -53,5 +61,6 @@
   document.addEventListener('keydown',event=>{if(event.key==='Escape'&&details.open){restore();trigger?.focus();}});
   get('project').addEventListener('change',restore);
   get('scope-to-qa').onclick=()=>{store.copy(current,context.page,'qa');window.KnowledgeTabs.open('qa');};
+  get('scope-time-mode').addEventListener('change',timeControls);
   context.register({restore,apply,reset});
 })();

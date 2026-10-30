@@ -42,7 +42,7 @@ function setup(){
     requests.push(JSON.parse(options.body));
     return Promise.resolve(new Response(new ReadableStream({start(controller){streams.push(controller);}})));
   };
-  const window={document:doc,fetch,innerWidth:1200,innerHeight:900,addEventListener(){}};
+  const window={document:doc,fetch,RequestDeadline:require('../../knowledge_service/web/request-deadline.js'),innerWidth:1200,innerHeight:900,addEventListener(){}};
   const context={window,document:doc,localStorage,current:'p',wb:{epoch:0},AbortController,TextDecoder,console,
     fetch,endpoint:s=>'/api/projects/'+context.current+s,scope:()=>({known_at:null}),setTimeout,
     esc:String,labelOf:x=>x,showTab(){throw Error('citation must not navigate');},status(){}};
@@ -91,7 +91,7 @@ test('running evidence opens once; safe done decorations and bounded history res
     structure_pending:null}]);
   assert.deepEqual(env.history()[0].scope,{known_at:null});
   assert.equal(env.history()[0].project_id,'p');
-  assert.deepEqual(env.history()[1].scope,env.requests[0]);
+  assert.deepEqual(env.history()[1].scope,env.history()[0].scope);
   env.window.clearKnowledgeChat();
   assert.equal(env.get('qa-transcript').querySelector('.qa-answer').querySelectorAll('button').length,1);
   assert.ok(env.get('qa-transcript').querySelector('.qa-evidence-panel').querySelector('.provenance-citation'));

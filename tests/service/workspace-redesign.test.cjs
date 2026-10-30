@@ -90,7 +90,7 @@ test('scope UI restores applied state without importing hidden form values',()=>
   const bridge={page:'search',store,isContentPage:()=>true,read:project=>store.read(project,'search'),
     register(value){value.restore();}};
   vm.runInNewContext(fs.readFileSync('knowledge_service/web/workspace-context-ui.js','utf8'),{
-    window:{WorkspaceContext:bridge,ScopeFields:{countConditions:()=>1}},
+    window:{WorkspaceContext:bridge,TemporalScope:require('../../knowledge_service/web/temporal-scope.js'),ScopeFields:{countConditions:()=>1}},
     document:{getElementById:get,addEventListener(){},createElement:()=>({})},
     current:'a',showRuntimeView(){},Date,JSON,Object,Array,Error,
   });

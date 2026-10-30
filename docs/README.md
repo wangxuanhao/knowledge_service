@@ -13,6 +13,8 @@
 
 ## 当前规格与验收
 
+- [依赖与启动审计](research/2026-10-28-dependency-audit.md)：依赖版本、循环导入、包入口优化和剩余冷启动成本；[检索问答冷启动排查](research/2026-10-28-search-qa-cold-start.md)保留原请求与真实服务复测。
+- [本地推理依赖拆分](research/2026-10-28-embedding-runtime-optimization.md)：已验证的 BGE-M3 ONNX 运行时、依赖从约 56 秒降至约 2 秒的真实服务复测，以及制品准备与恢复。
 - [生产检索检查点](research/2026-10-22-production-checkpoint.md)：真实数据差分、部署与尚未完成的容量/质量边界。
 - [存储回归补齐](research/2026-10-22-storage-regression-followup.md)：原 31 项失败映射、255 项专项复跑。
 - [项目文件清理](research/2026-10-22-project-file-cleanup.md)：删除依据、保留范围及整理后的检查结果。

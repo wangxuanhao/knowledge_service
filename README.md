@@ -52,9 +52,11 @@ data/                   本地模型、来源文件及样本数据，勿作缓�
 ```powershell
 conda activate llm_model
 # 仅新环境需要安装依赖：
-python -m pip install -e ".[local,milvus,neo4j,semantica-runtime,test]"
+python -m pip install -e ".[local-export,milvus,neo4j,ocr,semantica-runtime,test]"
 docker compose up -d --wait
 python -m knowledge_service.repository.migrate
+# 本地 BGE-M3 已放好后，首次或更换权重时准备一次；保留原始权重：
+python scripts/prepare_embedding_runtime.py --model-dir data/model/embedding/bge-m3
 python -u -m knowledge_service --port 8100
 ```
 
@@ -64,7 +66,14 @@ python -u -m knowledge_service --port 8100
 - 首次登录与账号管理按手册第 2 章操作。生产保持认证授权开启。
 - 当前部署使用 Docker Linux 命名卷。迁移/复制前先读 [数据卷迁移指南](docs/2026-10-19-Docker-Linux-volume-migration.md)，不要用新空卷覆盖现有挂载。
 - 本地 embedding 模型、LLM/OCR 配置按手册和 `.env.example` 设置。首次模型加载与暖态查询分开计时。
+- 本地 embedding 在启动时后台预热；语义/混合查询在模型准备好前会明确返回初始化状态。部署探针使用 `/readyz` 判断就绪，不能只看进程启动或 `/livez` 存活。
 - 首次检索由管理员明确发起项目向量化；已构建项目的普通修改通过增量同步追赶水位。
+
+上述 `pip install -e` 按 `pyproject.toml` 解析依赖，不读取 `uv.lock`。锁文件与既有 `llm_model` 环境不是同一版本快照，不能据此声称部署已复现；更换模型依赖组合前需验证实际本地模型、向量兼容性和文档解析。当前依赖、循环导入与冷启动评估见 [依赖审计](docs/research/2026-10-28-dependency-audit.md)。
+
+本地推理分为两个依赖入口：`local-export` 用于离线准备和向量对照，包含完整模型框架；`local-onnx` 只需要 ONNX Runtime 与 Tokenizers。已准备的 BGE-M3 在线默认使用轻量运行时，不导入 Torch/Transformers/SentenceTransformers。部署时保留原模型与整个 `onnx-runtime` 目录，初始化会核对源文件和全部制品。普通服务启动只读取制品，不重复导出。
+
+`KG_LOCAL_EMBEDDING_RUNTIME=auto` 自动选择有效制品；没有制品的其他模型兼容原 ST 路径。`onnx` 强制要求已准备制品；`sentence-transformers` 可显式回到原运行时。已存在但过期或损坏的制品会明确失败，需要重新准备，避免向既有索引写入不同语义的向量。实测、兼容范围与恢复方式见 [推理依赖拆分](docs/research/2026-10-28-embedding-runtime-optimization.md)。
 
 ## 测试与手册
 

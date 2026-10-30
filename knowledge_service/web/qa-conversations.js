@@ -5,17 +5,20 @@
   const failure=(message,status)=>Object.assign(new Error(message),{status});
   function createClient(options={}) {
     const fetcher=options.fetch||((...args)=>(root.Auth?.fetchConversation||root.fetch)(...args));
+    const deadline=root.RequestDeadline||(typeof require==='function'?require('./request-deadline.js'):null);
     const base=project=>'/api/projects/'+encodeURIComponent(project)+'/qa/conversations';
     async function request(url,method,body) {
-      const init={method};
-      if(body!==undefined){init.headers={'Content-Type':'application/json'};init.body=JSON.stringify(body);}
-      const response=await fetcher(url,init);
-      if(!response.ok) {
-        let message='会话操作失败（'+response.status+'）';
-        try {const data=await response.json();if(typeof data.detail==='string')message=data.detail;else if(data.detail)message=JSON.stringify(data.detail);}catch{}
-        throw failure(message,response.status);
-      }
-      return response.status===204?undefined:response.json();
+      return deadline.run(async signal=>{
+        const init={method,signal};
+        if(body!==undefined){init.headers={'Content-Type':'application/json'};init.body=JSON.stringify(body);}
+        const response=await fetcher(url,init);
+        if(!response.ok) {
+          let message='会话操作失败（'+response.status+'）';
+          try {const data=await response.json();if(typeof data.detail==='string')message=data.detail;else if(data.detail)message=JSON.stringify(data.detail);}catch{}
+          throw failure(message,response.status);
+        }
+        return response.status===204?undefined:response.json();
+      },{timeoutMs:options.timeoutMs??30000,message:'会话请求超时，未保存的内容仍保留，请重试。'});
     }
     return {
       list:(project,{limit=50,offset=0,q=''}={})=>request(base(project)+'?limit='+limit+'&offset='+offset+'&q='+encodeURIComponent(q),'GET'),

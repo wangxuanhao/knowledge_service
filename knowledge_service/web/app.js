@@ -66,20 +66,23 @@ function status(message, error=false){
     statusTimer=setTimeout(()=>{element.replaceChildren();element.classList.remove('error');},4000);
   }
 }
-async function api(path,body,method='POST'){
-  const multipart=typeof FormData!=='undefined'&&body instanceof FormData;
-  let response;
-  try{response=await fetch(path,{method,headers:body===undefined||multipart?{}:{'Content-Type':'application/json'},body:body===undefined?undefined:multipart?body:JSON.stringify(body)});}
-  catch(error){if(error.name==='AbortError')throw error;throw Error('无法连接知识服务，请检查服务状态和网络连接后重试。');}
-  const text=await response.text();let result;
-  try{result=text?JSON.parse(text):{};}catch{throw Error(response.ok?'服务返回了无法解析的数据':`服务请求失败（HTTP ${response.status}）：${text.slice(0,180)||'无错误详情'}`);}
-  if(!response.ok){
-    const error=Error(typeof result.detail==='string'?result.detail:JSON.stringify(result.detail));
-    error.status=response.status;
-    if(typeof result.code==='string')error.code=result.code;
-    throw error;
-  }
-  return result;
+async function api(path,body,method='POST',options){
+  const execute=async signal=>{
+    const multipart=typeof FormData!=='undefined'&&body instanceof FormData;
+    let response;
+    try{response=await fetch(path,{method,headers:body===undefined||multipart?{}:{'Content-Type':'application/json'},body:body===undefined?undefined:multipart?body:JSON.stringify(body),...(signal?{signal}:{})});}
+    catch(error){if(error.name==='AbortError'||error.name==='TimeoutError')throw error;throw Error('无法连接知识服务，请检查服务状态和网络连接后重试。');}
+    const text=await response.text();let result;
+    try{result=text?JSON.parse(text):{};}catch{throw Error(response.ok?'服务返回了无法解析的数据':`服务请求失败（HTTP ${response.status}）：${text.slice(0,180)||'无错误详情'}`);}
+    if(!response.ok){
+      const error=Error(typeof result.detail==='string'?result.detail:JSON.stringify(result.detail));
+      error.status=response.status;
+      if(typeof result.code==='string')error.code=result.code;
+      throw error;
+    }
+    return result;
+  };
+  return options?window.RequestDeadline.run(execute,options):execute();
 }
 function endpoint(suffix){if(!current)throw Error('请先选择或创建项目');return '/api/projects/'+encodeURIComponent(current)+suffix;}
 function scope(){return window.WorkspaceContext?WorkspaceContext.read(current):{known_at:iso('known-at'),filters:json('filters'),include_unknown:true};}

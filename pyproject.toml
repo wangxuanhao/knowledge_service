@@ -21,6 +21,11 @@ ocr = ["rapidocr>=3.9.2,<4", "onnxruntime>=1.20.1,<2", "Pillow>=10,<13", "packag
 neo4j = ["neo4j>=6,<7"]
 milvus = ["pymilvus>=3.0,<4"]
 local = ["sentence-transformers>=3,<7"]
+local-onnx = ["onnxruntime>=1.20.1,<2", "tokenizers>=0.21,<0.24"]
+local-export = [
+  "sentence-transformers>=3,<7", "onnx>=1.18,<2",
+  "onnxruntime>=1.20.1,<2", "tokenizers>=0.21,<0.24"
+]
 semantica-runtime = [
   "semantica[parse-docling]>=0.7,<0.8", "docling>=2.130,<3",
   "PyYAML>=6", "networkx>=3", "rich>=13", "tqdm>=4", "requests>=2",

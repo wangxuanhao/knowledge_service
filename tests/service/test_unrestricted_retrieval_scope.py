@@ -1,4 +1,9 @@
-from knowledge_service.integrations.milvus_store import MilvusStore
+import re
+
+import pytest
+
+from knowledge_service.domain.search_filter_catalog import default_catalog
+from knowledge_service.integrations.milvus_filters import compile_scope
 from test_native_qa_grouping import native_service
 
 
@@ -41,18 +46,25 @@ def test_grouping_does_not_reorder_global_relevance(monkeypatch):
 
 
 def test_milvus_without_time_condition_does_not_exclude_expired_or_future():
-    expression = MilvusStore(dim=2)._filter_expr('project', ['chunk'])
+    expression = compile_scope('project', {}, default_catalog(), kinds=['chunk']).expr
     assert 'valid_from' not in expression
     assert 'valid_until' not in expression
     assert 'platform_mode' not in expression
 
 
-def test_milvus_explicit_time_keeps_half_open_validity_filter():
-    expression = MilvusStore(dim=2)._filter_expr('project', ['chunk'], scope={
-        'valid_at': '2025-01-01', 'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}}})
-    assert 'valid_from_epoch_ms <= 1735689600000' in expression
-    assert 'valid_until_epoch_ms > 1735689600000' in expression
-    assert 'array_contains_any(platform_values, ["美团"])' in expression
+@pytest.mark.parametrize('include_unknown', [False, True])
+def test_milvus_explicit_time_keeps_half_open_validity_filter(include_unknown):
+    compiled = compile_scope('project', {
+        'valid_at': '2025-01-01', 'include_unknown': include_unknown,
+        'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}}},
+        default_catalog(), kinds=['chunk'])
+    expression = compiled.expr
+    parameters = re.findall(r'valid_(?:from|until)_us (?:<=|>) \{(\w+)\}', expression)
+    assert len(parameters) == 2
+    assert all(compiled.filter_params[key] == 1735689600000000 for key in parameters)
+    assert ('valid_from_us is null or' if include_unknown else 'valid_from_us is not null and') in expression
+    assert 'array_contains_any(platform_values,' in expression
+    assert ['美团'] in compiled.filter_params.values()
 
 
 def test_postgres_without_time_filter_returns_expired_and_future(tmp_path):

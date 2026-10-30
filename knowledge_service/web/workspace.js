@@ -188,7 +188,7 @@
   function createTimeline(){
     let el=get('graph-timeline');if(el)return el;
     el=make('div','','graph-timeline');el.id='graph-timeline';
-    el.innerHTML='<span class="tl-title">知识时间</span><button class="tl-prev secondary" title="上一个已知变更节点">‹</button><select class="tl-points" aria-label="选择知识系统时间"><option value="">当前状态</option></select><button class="tl-next secondary" title="下一个已知变更节点">›</button><button class="tl-now secondary">回到当前</button><button class="tl-refresh secondary" title="刷新时间节点">↻</button><small class="tl-note">仅在切换节点时刷新</small>';
+    el.innerHTML='<span class="tl-title">系统修订时间</span><button class="tl-prev secondary" title="上一个已知变更节点">‹</button><select class="tl-points" aria-label="选择系统修订时间"><option value="">当前系统版本</option></select><button class="tl-next secondary" title="下一个已知变更节点">›</button><button class="tl-now secondary">回到当前系统版本</button><button class="tl-refresh secondary" title="刷新时间节点">↻</button><small class="tl-note">仅切换系统修订，业务时间独立</small>';
     el.querySelector('.tl-points').onchange=()=>applyTimelinePoint(el.querySelector('.tl-points').value);
     el.querySelector('.tl-prev').onclick=()=>moveTimeline(-1);
     el.querySelector('.tl-next').onclick=()=>moveTimeline(1);
@@ -202,11 +202,11 @@
   }
   function renderTimelinePoints(){
     const el=createTimeline(),select=el.querySelector('.tl-points'),known=get('known-at').value;
-    select.innerHTML=uiTimeline.events.map((event,index)=>`<option value="${esc(event.known_at)}">${esc(timelineLabel(event,index))}</option>`).join('')+'<option value="">当前状态</option>';
+    select.innerHTML=uiTimeline.events.map((event,index)=>`<option value="${esc(event.known_at)}">${esc(timelineLabel(event,index))}</option>`).join('')+'<option value="">当前系统版本</option>';
     select.value=uiTimeline.events.some(event=>event.known_at===known)?known:'';
     const values=[...uiTimeline.events.map(event=>event.known_at),''],index=values.indexOf(select.value);
     el.querySelector('.tl-prev').disabled=index<=0;el.querySelector('.tl-next').disabled=index<0||index>=values.length-1;el.querySelector('.tl-now').disabled=!known;
-    el.querySelector('.tl-note').textContent=uiTimeline.truncated?'显示最近 100 个变更节点':'仅在切换节点时刷新';
+    el.querySelector('.tl-note').textContent=uiTimeline.truncated?'显示最近 100 个变更节点':'仅切换系统修订，业务时间独立';
   }
   async function loadTimelineEvents(force=false){
     if(!current)return;if(!force&&uiTimeline.project===current&&uiTimeline.events.length){renderTimelinePoints();return;}
@@ -223,7 +223,7 @@
     const values=[...uiTimeline.events.map(event=>event.known_at),''],currentValue=get('graph-timeline').querySelector('.tl-points').value,index=values.indexOf(currentValue),next=Math.max(0,Math.min(values.length-1,(index<0?values.length-1:index)+direction));applyTimelinePoint(values[next]);
   }
   function resetTimeline(){
-    uiTimeline.events=[];uiTimeline.project=null;uiTimeline.truncated=false;get('known-at').value='';const el=get('graph-timeline');if(el)el.querySelector('.tl-points').innerHTML='<option value="">当前状态</option>';
+    uiTimeline.events=[];uiTimeline.project=null;uiTimeline.truncated=false;get('known-at').value='';const el=get('graph-timeline');if(el)el.querySelector('.tl-points').innerHTML='<option value="">当前系统版本</option>';
   }
 
   const ontologyScope=()=>({
@@ -269,16 +269,18 @@
     prepare:row=>{ui.pinned.set(row.id,row);ui.mindmapRootId=row.id;choices();select.value=row.id;window.KnowledgeTabs.open('mindmap');},
     render:result=>{
       if(!wb.tree)wb.tree=echarts.init(get('mindmap-canvas'));
-      if(!mindmapView)mindmapView=EntityMindmapView.create({chart:wb.tree,host:get('mindmap-canvas'),
+      if(!mindmapView){mindmapView=EntityMindmapView.create({chart:wb.tree,host:get('mindmap-canvas'),
         summary:get('mindmap-summary'),empty:get('mindmap-empty'),zoomLabel:get('mindmap-zoom-level'),
         buttons:{in:get('mindmap-zoom-in'),out:get('mindmap-zoom-out'),reset:get('mindmap-reset-view')},
         labelOf,colorFor:type=>GraphPalette.colorFor(type)});
+        window.EntityMindmapExplorer?.mount({view:mindmapView,root:get('tab-mindmap'),host:get('mindmap-canvas'),labelOf,colorFor:type=>GraphPalette.colorFor(type)});
+      }
       mindmapView.render(result);
       renderDiscoveryHint().catch(()=>{});
     }});
-  window.openEntityMindmap=row=>mindmap.open(row,get('mindmap-depth').value).catch(error=>status(error.message,true));
-  act('draw-mindmap',()=>mindmap.draw(select.value,get('mindmap-depth').value));
-  select.onchange=()=>{ui.mindmapRootId=select.value;mindmap.invalidate();};
+  window.openEntityMindmap=row=>{mindmapView?.clear();return mindmap.open(row,get('mindmap-depth').value).catch(error=>status(error.message,true));};
+  act('draw-mindmap',()=>{mindmapView?.clear();return mindmap.draw(select.value,get('mindmap-depth').value);});
+  select.onchange=()=>{ui.mindmapRootId=select.value;mindmap.invalidate();mindmapView?.clear();};
   function choices(){
     for(const [selectId,filterId] of [['mindmap-root','mindmap-filter'],['graph-entity-choice','graph-entity-filter']]){
       const element=get(selectId),previous=element.value;
@@ -649,7 +651,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     get('hits').textContent='';
     const done=kgTime('search');
     let result;
-    try{result=await api(endpoint('/search'),body);}
+    try{result=await api(endpoint('/search'),body,'POST',{timeoutMs:45000,message:'检索等待超时，请重新检索；若持续出现，请检查服务连接。'});}
     catch(error){if(serial===ui.request&&p===current)get('search-summary').textContent='检索未完成：'+error.message;throw error;}
     window.WorkspaceContext?.requireRetrievalMode(body.retrieval_mode,result);
     done({mode:result.active_mode,candidates:result.candidate_count,hits:result.hits.length});

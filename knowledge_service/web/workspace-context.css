@@ -19,7 +19,14 @@ body main .source-filter-bar{flex-wrap:wrap;padding:10px;gap:7px}
 body main .source-filter-btn{white-space:nowrap;flex:0 0 auto;padding:7px 10px;font-size:12px;border-radius:7px}
 body main .source-filter-btn .filter-count{padding:0 4px}
 .qa-submitted-scope{display:block;margin:6px 4px 0;font-size:11px}
+.scope-temporal{margin:16px 0}.scope-temporal label{display:block;margin:10px 0}.scope-temporal .check{display:flex;align-items:flex-start;gap:7px}.scope-temporal .check input{width:auto;flex:none;margin-top:3px}#scope-time-applied{overflow-wrap:anywhere}.applied-scope-chip{max-width:100%;white-space:normal!important;overflow-wrap:anywhere;text-align:left}
 .project-card[hidden]{display:none}
+@media(max-width:700px){
+  body main #scope>#cb-details[open]{position:fixed;inset:112px 12px auto;width:auto;max-width:none;max-height:calc(100dvh - 132px)}
+  #applied-scope-chips{min-width:0;flex-basis:100%}
+  .page-scope-toolbar>#scope-toggle,.page-scope-toolbar>#scope-to-qa{flex-shrink:0}
+  body main #tab-qa>#scope{position:relative;inset:auto;width:100%;max-width:none;padding:8px 13px;margin:0}
+}
 @media(max-width:580px){
   body aside{background:#143f37;color:#edf6f0;padding:12px;gap:12px}
   body aside .brand{margin-bottom:0}

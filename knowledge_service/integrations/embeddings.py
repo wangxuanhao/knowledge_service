@@ -1,8 +1,10 @@
 """显式 embedding 后端；演示哈希被标记为非语义。"""
 import hashlib
 import json
+import logging
 import os
 import threading
+import time
 from pathlib import Path
 
 import httpx
@@ -128,26 +130,93 @@ class LocalEncoder:
         self._model = None
         self.runtime_ready = False
         self._lock = threading.RLock()
+        self._state_lock = threading.Lock()
+        self._warmup_thread = None
+        self.initialization_state = 'cold'
+        self.initialization_error = None
         self.dimension, self.dimension_source = _local_model_dimension_info(self.path)
 
     def __repr__(self):
         return f'LocalEncoder({self.path}, dim={self.dimension})'
 
+    def start_warmup(self):
+        """Start one preload without waiting for the model's long-held lock."""
+        with self._state_lock:
+            if self.runtime_ready or self.initialization_state in {'loading', 'failed'}:
+                return self._warmup_thread
+            self.initialization_state = 'loading'
+            self._warmup_thread = threading.Thread(
+                target=self._warmup, name='embedding-warmup', daemon=True)
+            self._warmup_thread.start()
+            return self._warmup_thread
+
+    def _warmup(self):
+        log = logging.getLogger('knowledge_service.embedding')
+        started = time.perf_counter()
+        log.info('本地语义模型开始预热，完成前语义与混合检索会明确提示准备状态。')
+        try:
+            self.encode(['语义检索初始化'])
+        except Exception as exc:
+            log.error('本地语义模型预热失败，耗时 %.2f s：%s',
+                      time.perf_counter() - started, redact(exc))
+        else:
+            log.info('本地语义模型预热完成，耗时 %.2f s。', time.perf_counter() - started)
+
+    def prepare_query(self):
+        if self.runtime_ready:
+            return
+        # A previously loaded model can recover from a transient inference error
+        # through the existing encode path, without reimporting/loading weights.
+        if self._model is not None and self.initialization_state == 'failed':
+            return
+        self.start_warmup()
+        if self.runtime_ready:
+            return
+        if self.initialization_state == 'failed':
+            raise RuntimeError('本地语义模型初始化失败：' +
+                               (self.initialization_error or '模型未就绪'))
+        raise RuntimeError('本地语义模型正在初始化，请稍后重试；关键词检索仍可使用。')
+
     def encode(self, texts):
+        if self._model is None:
+            with self._state_lock:
+                self.initialization_state = 'loading'
         with self._lock:
             try:
                 output = self._encode_locked(texts)
-            except Exception:
-                self.runtime_ready = False
+            except Exception as exc:
+                with self._state_lock:
+                    self.runtime_ready = False
+                    self.initialization_state = 'failed'
+                    self.initialization_error = redact(exc)
                 raise
-            self.runtime_ready = bool(output) and self.dimension is not None
+            with self._state_lock:
+                self.runtime_ready = bool(output) and self.dimension is not None
+                self.initialization_state = 'ready' if self.runtime_ready else 'failed'
+                self.initialization_error = None
             return output
 
     def _encode_locked(self, texts):
         if self._model is None:
             try:
-                from sentence_transformers import SentenceTransformer
-                self._model = SentenceTransformer(self.path, local_files_only=True)
+                started = time.perf_counter()
+                runtime = os.environ.get('KG_LOCAL_EMBEDDING_RUNTIME', 'auto').strip().lower()
+                if runtime not in {'auto', 'onnx', 'sentence-transformers'}:
+                    raise ValueError('KG_LOCAL_EMBEDDING_RUNTIME 必须是 auto、onnx 或 sentence-transformers')
+                activation = Path(self.path) / 'onnx-runtime' / 'active.json'
+                prepared = activation.exists() or activation.is_symlink()
+                if runtime == 'onnx' and not prepared:
+                    raise ValueError('ONNX 推理制品尚未准备，请先运行 scripts/prepare_embedding_runtime.py')
+                if runtime == 'onnx' or runtime == 'auto' and prepared:
+                    from .onnx_embeddings import OnnxSentenceEncoder as Model
+                else:
+                    from sentence_transformers import SentenceTransformer as Model
+                log = logging.getLogger('knowledge_service.embedding')
+                log.info('本地语义模型依赖导入完成，耗时 %.2f s，运行时 %s。',
+                         time.perf_counter() - started, getattr(Model, '__name__', type(Model).__name__))
+                started = time.perf_counter()
+                self._model = Model(self.path, local_files_only=True)
+                log.info('本地语义模型权重加载完成，耗时 %.2f s。', time.perf_counter() - started)
             except Exception as exc:
                 raise RuntimeError(f'本地 embedding 模型不可用：{redact(exc)}') from exc
         reported = None

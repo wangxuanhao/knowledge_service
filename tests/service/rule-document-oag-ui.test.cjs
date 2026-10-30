@@ -30,7 +30,7 @@ function setup(){
   const doc={createElement(tag){return new Element(tag,this);},createTextNode(text){const node=this.createElement('#text');node.textContent=text;return node;},
     getElementById(id){return descendants(this.body).find(node=>node.id===id)||null;},querySelectorAll(){return [];},querySelector(){return null;},addEventListener(){}};
   doc.body=doc.createElement('body');doc.activeElement=doc.body;
-  for(const id of ['qa-transcript','qa-hero','qa-query','qa','qa-progress','qa-summary','qa-live','qa-scroll','qa-composer','qa-clear','generate','qa-as-of','qa-include-references']){
+  for(const id of ['qa-transcript','qa-hero','qa-query','qa','qa-progress','qa-summary','qa-live','qa-scroll','qa-composer','qa-clear','generate','qa-include-references']){
     const node=doc.createElement('div');node.id=id;doc.body.append(node);
   }
   const storage=new Map(),requests=[],provenance=[],streams=[];
@@ -42,7 +42,7 @@ function setup(){
     requests.push(JSON.parse(options.body));
     return Promise.resolve(new Response(new ReadableStream({start(controller){streams.push(controller);}})));
   };
-  const window={document:doc,fetch,innerWidth:1200,innerHeight:900,addEventListener(){}};
+  const window={document:doc,fetch,TemporalScope:require('../../knowledge_service/web/temporal-scope.js'),RequestDeadline:require('../../knowledge_service/web/request-deadline.js'),innerWidth:1200,innerHeight:900,addEventListener(){}};
   const context={window,document:doc,localStorage,current:'p',wb:{epoch:0},AbortController,TextDecoder,console,
     fetch,endpoint:s=>'/api/projects/'+context.current+s,scope:()=>({known_at:null}),setTimeout,
     esc:String,labelOf:x=>x,platformGroupLabel:group=>'平台：'+group.platform,showTab(){throw Error('citation must not navigate');},status(){}};
@@ -94,10 +94,12 @@ test('validated final answer replaces unsafe streamed draft and history',async()
   assert.equal(env.history()[1].text,'没有已确认有效的依据。');
 });
 
-test('QA controls submit a historical business time and explicit reference visibility',async()=>{
-  const env=setup();env.get('qa-as-of').value='2024-01-01T08:30';env.get('qa-include-references').checked=false;
-  env.submit();await settle();assert.equal(env.requests[0].valid_at,new Date('2024-01-01T08:30').toISOString());
-  assert.equal(env.requests[0].include_references,false);assert.equal(env.requests[0].known_at,null);
+test('QA submits the shared historical business time and explicit reference visibility',async()=>{
+  const env=setup(),scope={valid_at:'2024-01-01T00:30:00.000Z',known_at:null,include_unknown:false};
+  env.context.scope=()=>scope;env.get('qa-include-references').checked=false;
+  env.submit();await settle();assert.equal(env.requests[0].valid_at,scope.valid_at);
+  assert.equal(env.requests[0].include_references,false);assert.equal(env.requests[0].known_at,null);assert.equal(env.requests[0].include_unknown,false);
+  assert.deepEqual(env.history()[0].scope,scope);
 });
 
 test('QA independently requests ontology expansion and retains its result in history',async()=>{
@@ -132,13 +134,13 @@ test('U citations remain offered after finalization and history preserves only a
 
 test('changed QA assets and accessible temporal controls have current cache versions',()=>{
   const html=fs.readFileSync(path.join(web,'index.html'),'utf8');
-  assert.ok(html.includes('/assets/workbench.js?v=ontology-sections-20261027-2'));
+  assert.ok(html.includes('/assets/workbench.js?v=unified-temporal-20261028-1'));
   assert.ok(html.includes('/assets/workbench.css?v=chunk-preview-hover-20261022-1'));
   assert.ok(html.includes('/assets/qa-presentation.js?v=ontology-sections-20261027-2'));
   assert.ok(html.includes('/assets/provenance-drawer.js?v=document-qa-history-20261026-1'));
   assert.ok(html.includes('/assets/qa-page.css?v=qa-viewport-scroll-20261026-1'));
   assert.match(html,/id="qa-include-references"[^>]*checked/);
-  assert.match(html,/id="qa-as-of"[^>]*type="datetime-local"/);
+  assert.doesNotMatch(html,/id="qa-as-of"/);assert.match(html,/id="scope-valid-at"[^>]*type="datetime-local"/);
 });
 
 test('streaming and failed history visibly mark the answer as an unvalidated draft',async()=>{

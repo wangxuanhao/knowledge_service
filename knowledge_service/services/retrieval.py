@@ -75,6 +75,9 @@ def rank_candidates(candidates, query, k, encoder, timings=None,
 
 def cached_query_vector(encoder, query, cache=None):
     """Encode a request query once when callers share a cache across workers."""
+    prepare = getattr(encoder, 'prepare_query', None)
+    if callable(prepare):
+        prepare()
     if cache is None:
         return encoder.encode([query])[0]
     lock = cache.get('lock')

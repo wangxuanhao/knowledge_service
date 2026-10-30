@@ -565,7 +565,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
   }
 
   const atEnd=()=>{const box=$c('qa-scroll');if(box)box.scrollTop=box.scrollHeight;};
-  function addScopeNote(turn,value){const note=document.createElement('small');note.className='qa-submitted-scope subtle';const label=window.ApplicabilityUI?.describe?.(value)||'全项目';note.textContent='提交范围：'+label+(value?.filters?' · 更多字段条件':'')+(value?.known_at?' · 系统时点 '+value.known_at:'')+(value?.valid_at?' · 业务时点 '+value.valid_at:'');turn.append(note);}
+  function addScopeNote(turn,value){const note=document.createElement('small');note.className='qa-submitted-scope subtle';const label=window.ApplicabilityUI?.describe?.(value)||'全项目';note.textContent='提交范围：'+label+(value?.filters?' · 更多字段条件':'')+' · '+(window.TemporalScope?.describe?.(value)||'');turn.append(note);}
   function addTurn(kind,text){
     const turn=document.createElement('li');
     turn.className='qa-turn qa-turn-'+kind;turn.dataset.role=kind;
@@ -850,7 +850,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     retry.onclick=()=>{if(!busy)replay();};
     box.append(text,retry);turn.append(box);retry.focus();atEnd();
   }
-  async function stream(body,turn,historyIndex=qaHistory.length){
+  async function stream(body,turn,historyIndex=qaHistory.length,submittedScope=null){
     if(busy||preparing||sessionManager?.loading||sessionManager?.state.conflict)return;
     try{window.ScopeFields.requireRetrievalScope(body);}
     catch(error){summary.textContent=error.message;progress.textContent='';return;}
@@ -858,7 +858,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     // to the chat scope; project/scope controls explicitly reset chat serial.
     const project=current,mine=++serial,scopeTicket=window.WorkspaceContext?.ticket(current,'qa');
     if(turn)provenance.close(false);
-    const record={kind:'assistant',text:'',scope:JSON.parse(JSON.stringify(body)),project_id:project};
+    const record={kind:'assistant',text:'',scope:JSON.parse(JSON.stringify(submittedScope||body)),project_id:project};
     // Reserve the retry slot in memory; only terminal answers belong in saved history.
     qaHistory[historyIndex]=record;
     const capture=payload=>{
@@ -912,25 +912,35 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
         finished=true;
       }
     };
+    let request=null,reader=null;
     try{
-      const response=await fetch(endpoint('/qa/stream'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});
+      request=window.RequestDeadline.create({signal:controller.signal,timeoutMs:45000,message:'问答请求等待超时，提问已保留，请重试。'});
+      const response=await request.wait(fetch(endpoint('/qa/stream'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:request.signal}));
       if(!response.ok){
         let detail='';
-        try{detail=(await response.json()).detail||'';}catch{try{detail=await response.text();}catch{detail='';}}
+        try{detail=(await request.wait(response.json())).detail||'';}
+        catch(error){
+          if(request.signal.aborted)throw request.signal.reason;
+          try{detail=await request.wait(response.text());}
+          catch(error){if(request.signal.aborted)throw request.signal.reason;detail='';}
+        }
         throw Error(typeof detail==='string'&&detail?detail:'服务请求失败（HTTP '+response.status+'）');
       }
-      const reader=response.body.getReader(),decoder=new TextDecoder();
+      reader=response.body.getReader();const decoder=new TextDecoder();
       while(true){
-        const {done,value}=await reader.read();
+        const {done,value}=await request.wait(reader.read(),{timeoutMs:60000,message:'回答等待超时，已收到的内容仍保留，请重试。'});
         if(mine!==serial||project!==current||(scopeTicket&&!window.WorkspaceContext.accepts(scopeTicket,current,'qa'))){await reader.cancel();throw Error('范围已变化，已停止显示旧回答');}
         if(done)break;
         buffer+=decoder.decode(value,{stream:true});
         const step=chat.splitSseBuffer(buffer);buffer=step.rest;
-        for(const item of step.events)handle(item);
+        for(const item of step.events){handle(item);if(finished)break;}
+        if(finished)break;
       }
-      buffer+=decoder.decode();
-      const tail=chat.splitSseBuffer(buffer+'\n\n');
-      for(const item of tail.events)handle(item);
+      if(!finished){
+        buffer+=decoder.decode();
+        const tail=chat.splitSseBuffer(buffer+'\n\n');
+        for(const item of tail.events){handle(item);if(finished)break;}
+      }
       if(!finished)throw Error('回答流提前结束');
       speak(true);
       target.dataset.state='done';progress.textContent='回答完成';
@@ -946,16 +956,18 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       markDraft(target,true);
       const emsg=error?.message||String(error);
       record.text=text;record.error=emsg;persist();
-      addFailure(target,emsg,()=>stream(body,target,historyIndex));
+      addFailure(target,emsg,()=>stream(body,target,historyIndex,submittedScope));
     }finally{
+      request?.close();
+      try{reader?.cancel()?.catch(()=>{});}catch{}
       if(mine===serial){busy=false;controller=null;send.disabled=!!(sessionManager?.loading||sessionManager?.state.conflict);if(!failed&&project===current)input.focus();}
     }
   }
   async function submit(){
     if(busy||preparing||sessionManager?.loading||sessionManager?.state.conflict)return;
     const query=input.value.trim();if(!query)return;
-    const asOf=$c('qa-as-of')?.value;
-    const body={...scope(),valid_at:asOf?new Date(asOf).toISOString():(scope().valid_at||null),include_references:$c('qa-include-references')?.checked??true,
+    const submittedScope=JSON.parse(JSON.stringify(scope()));
+    const body={...submittedScope,include_references:$c('qa-include-references')?.checked??true,
       query,generate:$c('generate').checked,retrieval_mode:$c('qa-mode')?.value||'hybrid',
       ontology_expansion:$c('qa-ontology-expansion')?.checked??false,k_entities:5,k_chunks:5};
     try{window.ScopeFields.requireRetrievalScope(body);}
@@ -964,13 +976,13 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     try{
       if(sessionManager)await sessionManager.ensureActive();
       if(project!==current||ticket!==serial)return;
-      addScopeNote(addTurn('user',query),scope());qaHistory.push({kind:'user',text:query,scope:scope(),project_id:current});input.value='';
+      addScopeNote(addTurn('user',query),submittedScope);qaHistory.push({kind:'user',text:query,scope:submittedScope,project_id:current});input.value='';
       // A failed save must not race a stream401 that would navigate away from a draft.
       if(sessionManager)await sessionManager.save(qaHistory);else persist();
       if(project!==current||ticket!==serial)return;
     }catch(error){if(project===current&&ticket===serial)summary.textContent='会话尚未保存：'+error.message;return;}
     finally{if(project===current&&ticket===serial){preparing=false;send.disabled=busy||!!(sessionManager?.loading||sessionManager?.state.conflict);}}
-    stream(body);
+    stream(body,undefined,qaHistory.length,submittedScope);
   }
   window.clearKnowledgeChat=({notify=false,clearPersist=false}={})=>{
     if(sessionManager&&clearPersist){sessionManager.requestClear().catch(()=>{});return;} // The controller reports errors in the active conversation.

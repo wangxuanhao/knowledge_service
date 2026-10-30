@@ -7,18 +7,19 @@ const vm=require('node:vm');
 const {frozenSourceDocument,attributeDetailsHtml}=require(path.resolve(
   __dirname,'../../knowledge_service/web/evidence-inspector.js'));
 
-async function renderEntity(attributes){
+async function renderEntity(attributes,details={}){
   const elements=new Map();
   const make=()=>({dataset:{},children:[],setAttribute(){},appendChild(node){this.children.push(node);},
     after(){},addEventListener(){},querySelector(){return make();},querySelectorAll(){return [];}});
   const get=id=>{if(!elements.has(id))elements.set(id,make());return elements.get(id);};
-  const window={},context={window,current:'p',$:get,scope:()=>({}),endpoint:s=>s,
+  const temporalFile=path.resolve(__dirname,'../../knowledge_service/web/temporal-scope.js');
+  const window={TemporalScope:fs.existsSync(temporalFile)?require(temporalFile):{}},context={window,current:'p',$:get,scope:()=>({}),endpoint:s=>s,
     document:{createElement:make,body:make()},esc:value=>String(value??'').replaceAll('<','&lt;').replaceAll('>','&gt;'),
     labelOf:value=>value,term:value=>value,RecordVersionContext:{revision:()=>1,summary:()=>''},
     api:async url=>url==='/ontologies'?{versions:[]}:{documents:[],message:'没有来源'}};
   vm.runInNewContext(fs.readFileSync(path.resolve(__dirname,'../../knowledge_service/web/evidence-inspector.js'),'utf8'),context);
   await window.renderEvidenceInspector({id:'entity',kind:'entity',type:'urn:test:Thing',text:'事物',version:1,
-    properties:{age:'raw metadata value'},attributes},[]);
+    properties:{age:'raw metadata value'},attributes,...details},[]);
   return get('graph-detail').innerHTML;
 }
 
@@ -28,6 +29,17 @@ test('raw properties never become a formal attribute section when canonical attr
     assert.doesNotMatch(html,/<section class="evidence-attributes">|兼容属性/);
     assert.match(html,/<details class="evidence-technical">[\s\S]*raw metadata value/);
   }
+});
+
+test('inspector separates unknown business boundaries, document publication and system record time without guessing provenance',async()=>{
+  const missing=await renderEntity([], {source_id:'source',metadata:{extracted_at:'2020-01-01'}});
+  assert.match(missing,/<dt>业务生效<\/dt><dd>未知<\/dd>/);
+  assert.match(missing,/<dt>业务失效（不含）<\/dt><dd>未设结束时间<\/dd>/);
+  assert.match(missing,/<dt>时间来源<\/dt><dd>未知<\/dd>/);
+  assert.doesNotMatch(missing.split('<details class="evidence-technical">')[0],/来源继承|原文抽取/);
+  const published=await renderEntity([], {metadata:{effective_time_source:'published_at',published_at:'2020-01-01'},recorded_at:'2024-01-01'});
+  assert.match(published,/<dt>时间来源<\/dt><dd>发布时间推定<\/dd>/);
+  assert.match(published,/<dt>原文发布日期<\/dt>/);assert.match(published,/<dt>系统记录<\/dt>/);
 });
 
 test('canonical attribute values stay visible while unrelated properties remain technical metadata',async()=>{

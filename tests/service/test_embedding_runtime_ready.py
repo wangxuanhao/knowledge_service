@@ -3,6 +3,8 @@ from contextlib import contextmanager
 import json
 import sys
 from types import SimpleNamespace
+from concurrent.futures import ThreadPoolExecutor
+import threading
 
 import httpx
 import pytest
@@ -97,6 +99,7 @@ def test_local_later_failure_clears_readiness_and_success_recovers(tmp_path, mon
     encoder, model, _ = local_encoder(tmp_path, monkeypatch)
     encoder.encode(['first'])
     assert encoder.runtime_ready is True
+
     model.error = RuntimeError('encoding failed')
     with pytest.raises(RuntimeError, match='encoding failed'):
         encoder.encode(['second'])
@@ -110,6 +113,122 @@ def test_local_later_failure_clears_readiness_and_success_recovers(tmp_path, mon
     model.vectors = [[1.0, 0.0]]
     encoder.encode(['repaired'])
     assert encoder.runtime_ready is True
+
+
+def test_query_does_not_queue_behind_the_first_model_load(tmp_path, monkeypatch):
+    from knowledge_service.services.retrieval import cached_query_vector
+
+    encoder, model, _ = local_encoder(tmp_path, monkeypatch)
+    entered, release = threading.Event(), threading.Event()
+    original = model.encode
+
+    def loading(*args, **kwargs):
+        entered.set()
+        assert release.wait(3)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(model, 'encode', loading)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(encoder.encode, ['first query'])
+        assert entered.wait(1)
+        second = pool.submit(cached_query_vector, encoder, '未成年')
+        try:
+            with pytest.raises(RuntimeError, match='初始化'):
+                second.result(timeout=.2)
+        finally:
+            release.set()
+        assert first.result(timeout=1) == [[1., 0.]]
+    assert cached_query_vector(encoder, '未成年') == [1., 0.]
+
+
+def test_startup_warmup_runs_once_without_blocking_or_readiness_probes_loading_models(tmp_path, monkeypatch):
+    encoder, model, created = local_encoder(tmp_path, monkeypatch)
+    entered, release = threading.Event(), threading.Event()
+    original = model.encode
+
+    def loading(*args, **kwargs):
+        entered.set()
+        assert release.wait(3)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(model, 'encode', loading)
+    worker = None
+    try:
+        worker = encoder.start_warmup()
+        assert entered.wait(1)
+        assert encoder.start_warmup() is worker
+        report = capabilities(encoder).snapshot()
+        assert report['embedding']['ready'] is False
+        assert report['embedding']['initialization_state'] == 'loading'
+        with pytest.raises(RuntimeError, match='初始化'):
+            encoder.prepare_query()
+        assert len(created) == 1 and model.calls == 0
+    finally:
+        release.set()
+        if worker is not None:
+            worker.join(timeout=1)
+    assert capabilities(encoder).snapshot()['embedding']['ready'] is True
+    assert encoder.start_warmup() is worker
+    assert len(created) == 1 and model.calls == 1
+
+
+def test_failed_warmup_reports_the_error_without_repeating_heavy_load_on_each_query(tmp_path, monkeypatch):
+    encoder, model, created = local_encoder(tmp_path, monkeypatch,
+        initialization_error=RuntimeError('bad model api_key=private-value'))
+    worker = encoder.start_warmup()
+    worker.join(timeout=1)
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match='初始化失败'):
+            encoder.prepare_query()
+    report = capabilities(encoder).snapshot()
+    assert report['embedding']['ready'] is False
+    assert report['embedding']['initialization_state'] == 'failed'
+    assert 'private-value' not in str(report)
+    assert len(created) == 1
+
+
+def test_app_starts_preloading_before_accepting_interactive_requests(tmp_path):
+    from fastapi.testclient import TestClient
+    from knowledge_service.api import create_app
+
+    encoder = embeddings.HashingEncoder()
+    starts = []
+    encoder.start_warmup = lambda: starts.append('started')
+    app = create_app(tmp_path / 'warmup-app', encoder=encoder)
+    assert starts == []
+    with TestClient(app) as client:
+        assert starts == ['started']
+        assert client.get('/api/health').status_code == 200
+        assert starts == ['started']
+
+
+def test_warming_queries_fail_promptly_through_json_and_sse_while_keyword_stays_available(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from knowledge_service.api import create_app
+    from test_rule_document_oag import _ready_keyword_index
+
+    class WarmingEncoder(embeddings.HashingEncoder):
+        semantic = True
+
+        def prepare_query(self):
+            raise RuntimeError('本地语义模型正在初始化，请稍后重试。')
+
+        def encode(self, texts):
+            raise AssertionError('interactive queries must not wait for model inference')
+
+    app = create_app(tmp_path / 'warming-requests', encoder=WarmingEncoder())
+    _ready_keyword_index(app.state.service, monkeypatch)
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={'name': 'warming'}).json()['id']
+        base = f'/api/projects/{project}'
+        for mode in ['semantic', 'hybrid']:
+            response = client.post(base + '/search', json={'query': '未成年', 'retrieval_mode': mode})
+            assert response.status_code == 503
+            assert '初始化' in response.json()['detail']
+        response = client.post(base + '/qa/stream', json={'query': '未成年', 'retrieval_mode': 'hybrid'})
+        assert response.status_code == 200
+        assert 'event: error' in response.text and '初始化' in response.text
+        assert client.post(base + '/search', json={'query': '未成年', 'retrieval_mode': 'keyword'}).status_code == 200
 
 
 def remote_encoder(monkeypatch):

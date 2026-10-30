@@ -253,6 +253,9 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
 
     @asynccontextmanager
     async def lifespan(app):
+        warmup = getattr(encoder, 'start_warmup', None)
+        if callable(warmup):
+            warmup()
         retained_uploads = [job['payload']['staged']['path']
             for job in service.data.list_artifacts('job')
             if job.get('kind') == 'ingest_upload' and job.get('status') != 'completed'

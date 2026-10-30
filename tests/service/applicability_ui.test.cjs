@@ -97,7 +97,8 @@ test('query platform scope is compact, optional, and preserves the existing scop
   });
   const source=fs.readFileSync('knowledge_service/web/workbench.js','utf8');
   assert.match(source,/readQueryScope\?\.\(\)/);
-  assert.match(source,/\.\.\.scope\(\),valid_at:asOf\?new Date\(asOf\)\.toISOString\(\):\(scope\(\)\.valid_at\|\|null\)/);
+  assert.match(source,/const submittedScope=JSON\.parse\(JSON\.stringify\(scope\(\)\)\)/);
+  assert.match(source,/const body=\{\.\.\.submittedScope,include_references:/);
   const workspace=fs.readFileSync('knowledge_service/web/workspace.js','utf8');
   assert.match(workspace,/\.\.\.scope\(\),query/);
   assert.match(workspace,/ApplicabilityUI\?\.describe\?\.\(r\)/);
