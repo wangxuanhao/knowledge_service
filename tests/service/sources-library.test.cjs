@@ -85,9 +85,49 @@ test('processing records summarize execution and keep the exact raw payload lazy
 test('processing record candidate action keeps its exact ingest run and document context',async()=>{
   const env=setup(),opened=[];env.context.OntologyIntake={open:async args=>opened.push(args)};
   await settle();await env.rows()[0].click();const reading=env.tab('处理记录').click();
-  env.requests.at(-1).resolve({runs:[{id:'specific-run',status:'completed',counts:{assertions_pending:3}}]});await reading;
+  env.requests.at(-1).resolve({runs:[{id:'specific-run',status:'completed',counts:{assertions_pending:0},readiness:{candidate_ready:true,graph_ready:false}}]});await reading;
   const action=env.body.querySelectorAll('button').find(button=>button.textContent==='核对本次处理的候选');
   assert.ok(action);await action.click();assert.equal(opened[0].runId,'specific-run');assert.equal(opened[0].documentId,'one');
+});
+
+test('formal pending source facts open the project review queue with its visible scope',async()=>{
+  const env=setup(),opened=[],intake=[];
+  env.context.KnowledgeNavigation={open:async(...args)=>opened.push(args)};
+  env.context.OntologyIntake={open:async args=>intake.push(args)};
+  await settle();await env.rows()[0].click();const reading=env.tab('处理记录').click();
+  env.requests.at(-1).resolve({runs:[{id:'formal-run',status:'completed',counts:{assertions_pending:3},readiness:{candidate_ready:true,graph_ready:true}}]});await reading;
+  const action=env.body.querySelectorAll('button').find(button=>button.textContent==='查看项目待审核事实');
+  assert.ok(action);assert.match(env.body.textContent,/显示当前项目全部待审核事实，不按本次处理筛选/);
+  const reads=env.requests.length;await action.click();
+  assert.equal(opened[0][0],'reviews');assert.equal(opened[0][1].projectId,'project-one');
+  assert.equal(intake.length,0);assert.equal(env.requests.length,reads,'navigation performs no write');
+});
+
+test('source processing actions do not guess historical discovery from the current document mode',async()=>{
+  const doc=documentRow('one');doc.metadata={...doc.metadata,extraction_mode:'discovery',run_id:'current-run'};
+  const env=setup({documents:[doc]});await settle();await env.rows()[0].click();const reading=env.tab('处理记录').click();
+  env.requests.at(-1).resolve({runs:[
+    {id:'unknown-old-run',readiness:{candidate_ready:true}},
+    {id:'already-in-graph',counts:{assertions_pending:0},readiness:{candidate_ready:true,graph_ready:true}},
+    {id:'formal-old-run',counts:{assertions_pending:2},readiness:{candidate_ready:true}},
+    {id:'current-run',readiness:{candidate_ready:true}},
+  ]});await reading;
+  const cards=env.body.querySelectorAll('.source-processing-run'),card=id=>cards.find(node=>node.dataset.runId===id);
+  assert.equal(card('unknown-old-run').querySelectorAll('button').length,0);
+  assert.equal(card('already-in-graph').querySelectorAll('button').length,0);
+  assert.equal(card('formal-old-run').querySelector('button').textContent,'查看项目待审核事实');
+  assert.equal(card('current-run').querySelector('button').textContent,'核对本次处理的候选');
+});
+
+test('captured source review actions reject a changed project or read-only role',async()=>{
+  for(const change of ['project','role']){
+    const env=setup(),opened=[];env.context.KnowledgeNavigation={open:async(...args)=>opened.push(args)};
+    await settle();await env.rows()[0].click();const reading=env.tab('处理记录').click();
+    env.requests.at(-1).resolve({runs:[{id:'formal-run',counts:{assertions_pending:1}}]});await reading;
+    const button=env.body.querySelectorAll('button').find(node=>node.textContent==='查看项目待审核事实');assert.ok(button);
+    if(change==='project')env.context.current='other';else env.setWriter(false);
+    await button.click();assert.equal(opened.length,0);
+  }
 });
 
 test('later confirmed source facts do not leave a discovery run looking like the current graph is unavailable',async()=>{

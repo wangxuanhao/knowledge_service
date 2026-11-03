@@ -6,38 +6,40 @@
     <title>登录 · 知序 Knowledge Service</title>
     <link rel="stylesheet" href="/assets/style.css?v=font-floor-11">
     <link rel="stylesheet" href="/assets/theme.css?v=redesign-teal-3">
-    <link rel="stylesheet" href="/assets/auth.css?v=auth-login-5">
+    <link rel="stylesheet" href="/assets/auth.css?v=login-original-bg-20261102-3">
 </head>
 <body class="login-body">
-    <!-- 独立登录页：不加载工作台任何业务脚本，登录成功后才跳转主页。
-         粒子网络画布铺满整屏作背景（login-bg.js），卡片叠在其上。 -->
+    <!-- 独立登录页；图谱背景不参与布局，登录成功后进入工作台。 -->
     <canvas id="login-canvas" aria-hidden="true"></canvas>
     <main class="login-page">
-        <section class="auth-card login-card" role="main">
+        <section class="auth-card login-card" aria-labelledby="login-title">
             <div class="login-brand">
-                <span class="login-mark" aria-hidden="true"></span>
+                <span class="login-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="m8 8 8 8 8-8M8 24l8-8 8 8M8 8v16"/><circle cx="8" cy="8" r="3"/><circle cx="24" cy="8" r="3"/><circle cx="16" cy="16" r="3.5"/><circle cx="8" cy="24" r="3"/><circle cx="24" cy="24" r="3"/></svg></span>
                 <div class="auth-brand">知序<small>KNOWLEDGE SERVICE</small></div>
             </div>
-            <h1>登录</h1>
-            <p class="auth-hint">
-                登录后进入知识服务主界面。超级管理员 / 管理员可写入与管理账号，
-                只读账号可检索、问答与查看脑图。
-            </p>
+            <h1 id="login-title">欢迎回来</h1>
+            <p class="auth-hint">登录知识工作台，连接资料、知识与答案。</p>
             <form id="login-form" autocomplete="on">
-                <label for="login-username">用户名</label>
-                <input id="login-username" name="username" autocomplete="username"
-                       placeholder="请输入用户名" required>
-                <label for="login-password">口令</label>
-                <input id="login-password" name="password" type="password"
-                       autocomplete="current-password" placeholder="至少 6 位" required>
+                <div class="login-field">
+                    <label for="login-username">用户名</label>
+                    <input id="login-username" name="username" autocomplete="username"
+                           autocapitalize="none" spellcheck="false" aria-describedby="login-error"
+                           placeholder="请输入用户名" required>
+                </div>
+                <div class="login-field">
+                    <label for="login-password">口令</label>
+                    <input id="login-password" name="password" type="password"
+                           autocomplete="current-password" aria-describedby="login-error"
+                           placeholder="请输入口令（至少 6 位）" required>
+                </div>
                 <p class="auth-error" id="login-error" role="alert"></p>
-                <button type="submit" class="auth-submit" id="login-submit">登 录</button>
+                <button type="submit" class="auth-submit" id="login-submit">登录工作台<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5"/></svg></button>
             </form>
             <!-- 账号由管理员在「用户与权限」里开通：这里不摆自助注册，也不摆点了必被拒的入口。 -->
-            <p class="login-foot">还没有账号？请联系管理员在「用户与权限」里为你开通。</p>
+            <p class="login-foot">还没有账号？请联系管理员开通。</p>
         </section>
     </main>
-    <script src="/assets/login-bg.js?v=login-bg-2"></script>
+    <script src="/assets/login-bg.js?v=login-original-bg-20261102-3"></script>
     <script src="/assets/login.js?v=auth-login-1"></script>
 </body>
 </html>

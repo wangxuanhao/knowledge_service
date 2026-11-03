@@ -1101,11 +1101,9 @@
   function renderEmptyActions(st) {
     const disc = st.discovery || null;
     const candidateCounts = disc && disc.candidate_status_counts;
-    const pending = candidateCounts ? (candidateCounts.pending || 0) : (disc ? (disc.unpublished_candidate_count || 0) : 0);
+    const pending = Number.isInteger(candidateCounts?.pending)?candidateCounts.pending:null;
     const included = candidateCounts && candidateCounts.included_in_draft || 0;
-    // 这一步整理出的是【实体类型 / 关系类型】，不是一条条实体，所以 chip 直接讲类型。
-    const entityTypeN = disc ? (disc.entity_types || []).length : null;
-    const relationTypeN = disc ? (disc.relation_types || []).length : null;
+    const documentCount=Number.isInteger(disc?.pending_document_count)?disc.pending_document_count:null;
     const bar = el('div', 'om-actionbar-inner');
     const counts = el('div', 'om-ab-counts');
     const chip = (label, value, cls, tip) => {
@@ -1116,14 +1114,13 @@
       return c;
     };
     counts.append(
-      chip('实体类型', entityTypeN, 'cls', '将生成的实体类型数（同名概念合并）'),
-      chip('关系类型', relationTypeN, 'rel', '将生成的关系类型数'),
-      chip('候选概念', disc ? (disc.candidate_count || 0) : null, 'pending', '知识写入抽出的候选总数'),
+      chip('来源资料', documentCount, '', '真正待核对候选对应的资料数'),
+      chip('待核对候选', pending, 'pending', '尚未加入草案、批准或入库的实体、关系和属性候选'),
     );
     bar.append(counts);
     const actions = el('div', 'om-ab-actions');
-    if (pending > 0) {
-      const btn = el('button', 'om-btn primary', '选择候选并预览');
+    if (pending > 0 || pending===null && (disc?.candidate_count||0)>0) {
+      const btn = el('button', 'om-btn primary', '按资料核对候选');
       btn.type = 'button';
       btn.disabled=!!(st.preview||st.loading);
       btn.title = '选择候选、核对来源并只读预览；明确目标并确认后才加入工作草案';
@@ -1135,9 +1132,9 @@
     }
     bar.append(actions);
     bar.append(el('div', 'om-ab-note', pending > 0
-      ? '打开清单和预览不会创建草案。确认加入本轮后，可继续手动建模、发现父类、审核与发布。'
+      ? `${documentCount===null?'资料数量待核对':`来自 ${documentCount} 份资料`}，共 ${pending} 条候选内容待核对。候选包括实体、关系和属性；选择、预览并确认加入草案后，继续审核发布。`
       : (included ? `${included} 个候选已纳入草案，请加载草案后校验、审核并发布。`
-        : '当前没有待处理候选，可使用顶部「新增定义」手动建模，或在资料库添加文件做开放抽取。')));
+        : pending===null?'待核对候选数量尚未读取；可按资料核对候选，或重新读取项目状态。':'当前没有待处理候选，可使用顶部「新增定义」手动建模，或在资料库添加文件做开放抽取。')));
     put(actionsHost, bar);
   }
 
@@ -1157,8 +1154,7 @@
     // 而不是画布虚线节点的 candidates.length（那一路从没接过数据源，恒为 0）。
     const disc = st.discovery || null;
     const candidateCounts = disc && disc.candidate_status_counts;
-    const pendingCandidates = candidateCounts ? (candidateCounts.pending || 0)
-      : (disc ? (disc.unpublished_candidate_count || 0) : (candidates.length || 0));
+    const pendingCandidates = Number.isInteger(candidateCounts?.pending) ? candidateCounts.pending : null;
     const includedCandidates = candidateCounts && candidateCounts.included_in_draft || 0;
     const draft = st.draft || null;
     const ops = (draft && draft.operations) || [];
@@ -1183,7 +1179,7 @@
       chip('实体类型', summary ? classes.length : null, 'cls', '当前画布中的实体类型定义数量，不是实体事实条数'),
       chip('关系类型', summary ? rels.length : null, 'rel', '当前画布中的关系类型定义数量，不是关系事实条数'),
       chip('属性', summary ? attrs.length : null, 'attr', '当前本体的实体属性数量'),
-      chip('待生成', pendingCandidates, 'pending', '新抽出、尚未纳入本体草案的候选'),
+      chip('待核对', pendingCandidates, 'pending', '新抽出、尚未纳入本体草案的候选'),
       ...(includedCandidates ? [chip('草案中', includedCandidates, 'pending', '已纳入草案，等待审核发布的候选')] : []),
       chip('冲突', draft ? conflicts : 0, 'conflict', '草案里与基线冲突、需要重新基线的变更数'),
       chip(onlyWorkflow?'发布待办':'发布阻断', blockers, onlyWorkflow?'workflow':'block', '下方逐项列出服务端发布条件及下一步；读不到显示 —'),
@@ -1202,7 +1198,7 @@
     const kindValue=kind=>linked===0?0:knownKinds?kinds[kind]:'未提供';
     bar.append(el('p','om-ab-fact-kinds',knownKinds||linked===0
       ?`关联候选事实明细：实体 ${kindValue('entity')} · 关系 ${kindValue('relation')} · 属性 ${kindValue('attribute')}。`
-      :`${linked===null?'候选事实数量尚未读取，请重读草案核对。':'候选事实是从原文抽出的实体、关系或属性陈述，不是段落或定义数。'}种类明细可从「待完善结构」进入候选核对页查看。`));
+      :`${linked===null?'候选事实数量尚未读取，请重读草案核对。':'候选事实是从原文抽出的实体、关系或属性陈述，不是段落或定义数。'}种类明细可从「按资料核对候选」查看。`));
     if(draft){
       const technical=el('details','om-ab-change-detail');technical.append(el('summary',null,`草案明细 · ${ops.length} 项底层操作`),
         el('p',null,'一个定义可能包含创建、名称说明、继承等多项底层操作；操作数不等于定义数，也不等于关联候选事实数。'));
@@ -1229,6 +1225,7 @@
     const btnReview = el('button', 'om-btn', localTask?.kind==='review'?localTask.message:submitted?
       bulkCount===null?'读取批量审核条件…':`批量批准（${bulkCount} 项变更）`:'校验并审核');
     btnReview.type = 'button';
+    btnReview.setAttribute('aria-describedby','om-review-action-help');
     btnReview.setAttribute('aria-busy',String(localTask?.kind==='review'));
     btnReview.disabled = !!(previewing || busy || !reviewGate.enabled || (submitted&&(bulkCount===null||bulkCount===0||st.reviewPlanLoading)));
     btnReview.title = previewing ? previewLock
@@ -1369,6 +1366,10 @@
       }
       bar.append(recovery);
     }
+    const reviewHelp=el('p','om-ab-note',(submitted?'':'将校验并提交审核，然后')
+      +'仅批量批准服务端允许的变更；其余变更仍需「按定义审核」。此操作不发布本体。');
+    reviewHelp.id='om-review-action-help';
+    opRow.append(reviewHelp);
     actions.append(opRow);
     bar.append(actions);
 

@@ -137,7 +137,7 @@
     ++refreshEpoch;++gateEpoch;
     const publication=version.metadata?.publication||{},receipt=publication.receipt||{};
     S.publication={projectId:current,versionId:version.id,version:version.version??version.metadata?.version,
-      createdAt:version.created_at||null,note:publication.note||version.note||'',facts:receipt.facts||{},refreshState:'pending',refreshError:'',promise:null};
+      createdAt:version.created_at||null,note:publication.note||version.note||'',facts:receipt.facts||{},index:receipt.index?{...receipt.index}:null,refreshState:'pending',refreshError:'',promise:null};
     S.draft=null;S.draftChoices=S.draftChoices.filter(item=>item.id!==expected.draftId);S.showingDraft=false;S.discovery=null;
     S.ontologyId=version.id;S.ontologyVersion=S.publication.version??null;S.summary=version.summary||null;S.selected=null;
     S.stageAvailability=null;S.readiness=null;S.reviewPlan=null;S.gatesLoading=false;S.reviewGateLoading=false;S.reviewPlanLoading=false;
@@ -564,12 +564,25 @@
     const heading=document.createElement('strong');heading.textContent=`已发布${receipt.version!=null?'为 v'+receipt.version:''} · 正式版本已生效`;
     const text=document.createElement('p'),facts=receipt.facts;
     const time=receipt.createdAt?new Date(receipt.createdAt).toLocaleString('zh-CN',{hour12:false}):'服务端未提供发布时间';
-    text.textContent=`发布时间：${time}`+(facts.selected!=null?` · 本次新增 ${facts.added??'待核对'} / 复用 ${facts.reused??'待核对'} / 跳过 ${facts.skipped??'待核对'} 条知识`:'');
+    text.textContent=`发布时间：${time}`;
+    const knowledge=document.createElement('p');knowledge.textContent=['selected','added','reused','skipped'].some(key=>facts[key]!=null)
+      ?`关联知识：本次新增 ${facts.added??'待核对'} / 复用 ${facts.reused??'待核对'} / 跳过 ${facts.skipped??'待核对'} 条知识`
+      :'关联知识：本次回执未提供处理结果。';
+    const index=document.createElement('p'),indexStatus=receipt.index?.status;
+    const indexLabels={not_requested:'未请求构建',pending:'已排队',queued:'已排队',running:'构建中',completed:'已完成',failed:'构建失败'};
+    index.textContent='索引（本次发布回执快照）：'+(Object.hasOwn(indexLabels,indexStatus)?indexLabels[indexStatus]:'未提供索引状态')+'。当前状态请查看构建任务。';
     const state=document.createElement('p');state.textContent=receipt.refreshState==='error'?'版本已发布，页面同步失败，可单独重试。':receipt.refreshState==='complete'?'页面已同步。':'页面正在同步，你可以继续操作。';
-    host.append(heading,text,state);
+    host.append(heading,text,knowledge,index,state);
     function button(label,action){const item=document.createElement('button');item.className='om-btn';item.type='button';item.textContent=label;item.addEventListener('click',action);host.append(item);}
     if(receipt.refreshState==='error')button('重试页面同步',()=>{void refreshPublished(receipt);});
     button('查看发布记录',()=>{if(S.publication===receipt&&current===receipt.projectId)window.OntologyPanel?.openHistory(receipt.versionId);});
+    if(receipt.index?.task_id||['pending','queued','running','completed','failed'].includes(indexStatus))button('查看构建任务',async()=>{
+      if(S.publication!==receipt||current!==receipt.projectId)return;
+      try{
+        if(!window.KnowledgeNavigation?.open)throw Error('构建任务导航尚未就绪，请刷新页面。');
+        await window.KnowledgeNavigation.open('jobs',{projectId:receipt.projectId});
+      }catch(error){if(S.publication===receipt&&current===receipt.projectId)status(error.message,true);}
+    });
     button('收起',()=>{if(S.publication===receipt){receipt.dismissed=true;renderPublicationFeedback();}});
   }
   function openDraftHistory(id) {
@@ -620,7 +633,7 @@
           </div>
           <label class="om-display-control">节点 <select id="om-node-display" aria-label="节点显示方式"><option value="cards">属性卡片</option><option value="compact">紧凑节点</option></select></label>
           <button type="button" class="om-btn ghost om-inspector-toggle" id="om-inspector-toggle" aria-controls="om-inspector-shell" aria-expanded="false">定义详情</button>
-          <button type="button" class="om-btn ghost admin-only" id="om-pending-intake">待完善结构</button>
+          <button type="button" class="om-btn ghost admin-only" id="om-pending-intake">按资料核对候选</button>
           <button type="button" class="om-btn ghost" id="om-discover-parents" title="根据当前草案或本体发现父类，只补充建议，审核发布后生效">发现父类</button>
         </div>
         <div class="om-preview-banner" id="om-preview-banner" hidden>
@@ -634,8 +647,9 @@
                aside{position:fixed;inset:0 auto 0 0;width:206px}，任何 aside 都会被固定到
                视口左上角、脱离三栏流（P1 实测踩到：三栏塌成空白）。 -->
           <div class="om-side" aria-label="本体术语目录">
+            <section id="om-candidate-tasks" class="om-candidate-tasks" aria-label="候选与草案待办" aria-live="polite"></section>
             <div id="om-catalog-host"></div>
-            <details class="om-hierarchy-directory"><summary>继承导航与项目候选</summary><div id="om-side" aria-label="本体三维清单"></div></details>
+            <details class="om-hierarchy-directory"><summary>继承导航</summary><div id="om-side" aria-label="本体三维清单"></div></details>
           </div>
           <div class="om-stage"><div class="om-cards-host" id="om-cards-host"></div><div class="om-canvas-host" id="om-canvas-host" hidden></div></div>
           <button type="button" class="om-inspector-backdrop" id="om-inspector-backdrop" aria-label="关闭定义详情"></button>
@@ -700,16 +714,10 @@
 
   // 左栏三维清单（类 / 关系 / 属性）。点谁 = 选中谁（唯一入口 select）。
   function renderSidebar() {
+    renderCandidateTasks();
     const host = document.getElementById('om-side'); if (!host) return;
     if (!S.summary) {
-      // 没有本体结构可画：区分三种空态（读不到 / 没发布本体但有候选 / 没候选），
-      // 每种给一句人话 + 能点的下一步，绝不再把"没发布本体"误报成"读取失败"。
       host.innerHTML = renderEmptyState();
-      const gen = document.getElementById('om-generate-draft');
-      if (gen) gen.addEventListener('click', () => openIntake());
-      // 第二个慢入口：显式让模型推断父子层级（传 true）
-      const inferH = document.getElementById('om-infer-hierarchy');
-      if (inferH) inferH.addEventListener('click', () => { void discoverParents(); });
       // 顶栏版本徽标不能停在占位「当前本体 v?」：没本体就说清"尚未发布"，别留个 v?。
       const ver = document.getElementById('om-version');
       if (ver) {
@@ -734,20 +742,7 @@
       }
       return classes.map(c=>row(c,'cls')).join('');
     };
-    // 已发布本体之后又抽出新候选：左栏顶部给一条"增量归纳"入口（基于当前版本，不影响已发布）。
-    // 否则新知识只会静默躺在 discovery 里，用户不知道"后续加知识怎么显示"。
-    const counts = S.discovery && S.discovery.candidate_status_counts;
-    const pendingN = counts ? (counts.pending || 0) : ((S.discovery && S.discovery.unpublished_candidate_count) || 0);
-    const directoryHeading=host.parentElement?.querySelector?.('summary');
-    if(directoryHeading)directoryHeading.textContent='继承导航与项目候选'+(pendingN?` · 待处理 ${pendingN}`:'');
-    const includedN = counts && counts.included_in_draft || 0;
-    const draftTip = includedN > 0 ? `<div class="om-discovery-inline"><b>${includedN} 个候选已纳入草案</b><p>等待校验、审核和发布，无需重复生成。正式知识会在发布后显示。</p></div>` : '';
-    const discTip = (pendingN > 0 ? `<div class="om-discovery-inline">
-      <b>又抽出 ${pendingN} 个新候选</b>
-      <p>先选择候选并核对来源；复用正式术语可直接确认知识，需补结构时明确加入工作草案。</p>
-      <button type="button" id="om-generate-draft-inline" class="om-btn primary" ${S.preview || S.loading || S.discoveringParents ? 'disabled' : ''}>选择候选并完善结构</button>
-    </div>` : '') + draftTip;
-    host.innerHTML = `${discTip}
+    host.innerHTML = `
       <h4><i class="om-dot"></i>本体类型 · ${classes.length}</h4>
       <ul class="om-tree" role="tree" aria-label="实体类继承导航">${classTree() || '<li class="om-none">（还没有类）</li>'}</ul>
       <h4 class="rel"><i class="om-dot"></i>关系类型 · ${rels.length}</h4>
@@ -762,10 +757,6 @@
       e.stopPropagation(); // 树是嵌套 li：阻止子类点击冒泡到父类，否则点到子类却选中父类
       select(li.dataset.sel);
     }));
-    const genInline = document.getElementById('om-generate-draft-inline');
-    if (genInline) genInline.addEventListener('click', () => {
-      openIntake();
-    });
     const ver = document.getElementById('om-version');
     if (ver) {
       // 必须一眼看出"现在画的是什么、算不算数"：用户改完看不见变化时，
@@ -786,46 +777,46 @@
     renderPreviewBanner();
   }
 
-  // 没有本体结构时的三种空态（左栏）。\"没发布本体\"是开放发现的正常中间态，不是故障——
-  // 这一句不能省，否则用户看到空画布会以为是坏了（本轮\"本体建模没内容\"就是它造成的）。
-  function renderEmptyState() {
-    if (S.loading) return '<div class="om-side-empty" role="status">正在加载本体与草案…</div>';
-    // 归纳中：顶部给一个明确的"正在归纳"说明，回答"点了之后呢"——
-    // 不只让按钮变灰，而是把"正在做什么 / 接下来会怎样"讲清楚。
+  // 待办只用服务端生命周期计数，不能用全部候选数猜测待核对数量。
+  function pendingCandidateSummary(d) {
+    const pending=d?.candidate_status_counts?.pending;
+    const sources=Number.isInteger(d?.pending_document_count)?`来自 ${d.pending_document_count} 份资料`:'资料数量待核对';
+    return Number.isInteger(pending)?`${sources}，共 ${pending} 条候选内容待核对`:`${sources}，待核对候选数量尚未读取`;
+  }
 
-    const d = S.discovery;
-    // ① 读不到发现概览（接口失败 / 网络问题）：诚实说"读不到"，不假装是空项目。
-    if (!d) {
-      return `<div class="om-side-empty">${escHtml(S.error || '读不到项目本体状态，请稍后重试。')}</div>`;
-    }
-    // ② 已发布本体但结构读不到（罕见，接口异常）：按错误提示。
-    if (d.published !== false) {
-      return `<div class="om-side-empty">${escHtml(S.error || '读取本体结构失败')}</div>`;
-    }
-    if (d.candidate_status_counts && !d.candidate_status_counts.pending
-        && d.candidate_status_counts.included_in_draft) {
-      return `<div class="om-side-empty"><h4>${d.candidate_status_counts.included_in_draft} 个候选已纳入草案</h4><p>无需重复生成。请重新加载草案结构后校验、审核并发布。</p></div>`;
-    }
-    // ③ 没发布本体：分"有候选"和"没候选"两种。
-    const hasCandidates = (d.candidate_count || 0) > 0;
-    if (hasCandidates) {
-      // 讲"类型"不讲"实体"：这一步整理出的是【实体类型 / 关系类型】，不是一条条实体。
-      const entityTypeN = (d.entity_types || []).length;
-      const relationTypeN = (d.relation_types || []).length;
-      return `<div class="om-side-empty om-discovery-guide">
-        <h4>这个项目还没生成本体</h4>
-        <p>知识写入已抽出 ${d.candidate_count} 个候选，将整理成
-          <b>${entityTypeN}</b> 个实体类型、<b>${relationTypeN}</b> 个关系类型
-          （同名概念会合并，不是把 ${d.entity_count || 0} 个实体名逐个建类）。</p>
-        <button type="button" id="om-generate-draft" class="om-btn primary" ${S.preview || S.discoveringParents ? 'disabled' : ''}>选择候选并预览</button>
-        <p class="om-guide-do">打开清单与预览不会创建草案；明确目标并确认加入后，才保存本轮结构修改。</p>
-        <p class="om-guide-note">加入后可通过顶部「发现父类」补充建议，或在画布上编辑继承。</p>
-      </div>`;
-    }
-    return `<div class="om-side-empty">
-      <h4>这个项目还没有本体，也没有待纳入的候选</h4>
-      <p>可使用顶部「新增定义」手动建模，或在资料库添加文件并开放抽取候选，再从「待完善结构」处理。</p>
-    </div>`;
+  function renderCandidateTasks() {
+    const host=document.getElementById('om-candidate-tasks');if(!host)return;
+    const heading='<h4>候选与草案待办</h4>';
+    if(typeof current==='undefined'||!current){host.innerHTML=heading+'<p>请先选择项目。</p>';return;}
+    if(S.loading){host.innerHTML=heading+'<p role="status">正在加载候选与草案待办…</p>';return;}
+    const d=S.discovery,counts=d?.candidate_status_counts;
+    const pending=Number.isInteger(counts?.pending)&&counts.pending>=0?counts.pending:null;
+    const included=Number.isInteger(counts?.included_in_draft)&&counts.included_in_draft>=0?counts.included_in_draft:null;
+    const candidateId=S.summary?'om-generate-draft-inline':'om-generate-draft';
+    const candidateControl=S.summary?'id="om-generate-draft-inline"':'id="om-generate-draft"';
+    let candidates;
+    if(!d)candidates='<p class="om-task-error">候选待办读取失败，数量暂不可用。</p><button type="button" id="om-retry-candidate-tasks" class="om-btn">重新读取待办</button>';
+    else if(pending===0)candidates=`<p>暂无待核对候选${d.published===false?' · 尚未发布本体':''}</p>`;
+    else candidates=`<p title="从资料候选补充本体">${pendingCandidateSummary(d)}</p><button type="button" ${candidateControl} class="om-btn primary" title="打开清单与预览不会创建草案；确认加入后仍需审核发布" ${S.preview||S.discoveringParents?'disabled':''}>按资料核对候选</button>`;
+    const hasDraft=!!S.draft?.id&&OPEN_STATES.includes(S.draft.status);
+    const chooseDraft=!hasDraft&&S.draftChoices.length>0;
+    let drafts='';
+    if(included>0)drafts+=`<p class="om-task-draft-count">${included} 个候选已纳入草案，待审核发布</p>`;
+    else if(included===null&&d)drafts+='<p class="om-task-note">草案关联候选数量尚未读取</p>';
+    if(S.draftLoadError)drafts+=`<p class="om-task-error">${escHtml(S.draftLoadError)}</p><button type="button" id="om-retry-draft-tasks" class="om-btn">重新读取草案</button>`;
+    else if(hasDraft||chooseDraft||included>0){
+      if(hasDraft&&!(included>0))drafts+='<p>工作草案尚未发布</p>';
+      drafts+=`<button type="button" id="om-view-draft-work" class="om-btn" title="查看草案定义、关联知识和审核发布清单">${hasDraft?'查看草案与关联知识':chooseDraft?'选择草案继续审核':'查找关联草案'}</button>`;
+    }else if(included===0)drafts+='<p class="om-task-note">暂无草案关联候选待发布</p>';
+    host.innerHTML=heading+candidates+(drafts?`<div class="om-task-draft">${drafts}</div>`:'');
+    document.getElementById(candidateId)?.addEventListener('click',()=>openIntake());
+    document.getElementById('om-view-draft-work')?.addEventListener('click',()=>openWorkspace(hasDraft?'facts':'definitions'));
+    for(const id of ['om-retry-candidate-tasks','om-retry-draft-tasks'])document.getElementById(id)?.addEventListener('click',()=>{void refresh();});
+  }
+
+  function renderEmptyState() {
+    const text=S.loading?'正在加载本体结构…':S.discovery?.published===false?'尚未发布本体，暂无可浏览的继承结构。':S.error||'读取本体结构失败，请重试。';
+    return `<div class="om-side-empty">${escHtml(text)}</div>`;
   }
 
   async function discoverParents() {

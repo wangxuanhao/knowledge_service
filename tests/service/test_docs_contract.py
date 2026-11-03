@@ -63,7 +63,7 @@ def test_all_29_chapters_explain_actions_results_and_recovery():
 
 def test_onboarding_and_three_intake_paths_keep_the_governance_boundaries():
     intro = _chapter(4)
-    for marker in ('具体知识', '结构', 'documents', 'ontology', 'discovery', '预览首份切片'):
+    for marker in ('具体知识', '结构', 'documents', 'ontology', 'discovery', '预览切片', '预览文件'):
         assert marker in intro
     controlled, discovery, manual = (_chapter(number) for number in (5, 6, 7))
     assert '不应因普通上传增加' in controlled

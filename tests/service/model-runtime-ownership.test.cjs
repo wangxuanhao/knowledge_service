@@ -74,6 +74,17 @@ test('catalog render consumes model choices and errors; explicit reload belongs 
   descendants(work).find(node=>node.textContent==='重读草案列表').click();await settle();assert.equal(refreshes,1);
 });
 
+test('empty catalog identifies an unpublished project while keeping draft and history context',()=>{
+  const side=element(),cards=element(),context={window:{},current:'p',document:{createElement:element,getElementById:()=>null}};
+  vm.runInNewContext(source('ontology-model-catalog.js'),context);
+  const state={summary:{classes:[]},ontologyId:null,draftChoices:[]};
+  context.window.OntologyCatalog.mount(side,cards,{S:state,status(){}});
+  for(const [change,label] of [[{},'尚未发布本体'],[{showingDraft:true},'草案未发布'],[{preview:{id:'old'}},'历史只读'],[{ontologyId:'release'},'已发布']]){
+    Object.assign(state,{showingDraft:false,preview:null,ontologyId:null},change);context.window.OntologyCatalog.render(state);
+    const summary=descendants(side).find(node=>node.className==='om-catalog-count');assert.ok(summary);assert.equal(summary.textContent,'0 个术语 · '+label);
+  }
+});
+
 test('draft changes group readable definitions behind a collapsed bounded detail list',()=>{
   const side=element(),cards=element(),work=element(),iri='https://example.test/ontology/very-long-definition-id';
   const context={window:{},current:'p',document:{createElement:element,getElementById:id=>id==='om-work-changes-host'?work:null}};

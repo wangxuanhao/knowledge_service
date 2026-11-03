@@ -56,6 +56,12 @@ function fixture(view = 'graph', initialGraph, additions = {}) {
   };
 }
 
+test('empty canvas points to the visible candidate and draft work area',t=>{
+  const f=fixture('graph',{nodes:[],edges:[]});t.after(()=>f.canvas.destroy());
+  const all=node=>[node,...node.children.flatMap(all)],empty=all(f.host).find(node=>node.className==='om-canvas-empty');
+  assert.equal(empty.hidden,false);assert.match(empty.textContent,/「候选与草案待办」.*「按资料核对候选」/);assert.doesNotMatch(empty.textContent,/待完善结构/);
+});
+
 test('two-click relation creation delegates both endpoints to the canonical atomic command helper', async t => {
   const calls = [];
   const f = fixture('graph', undefined, { globals: { api: async (url, body) => calls.push({url, body}), endpoint: suffix => '/p' + suffix },

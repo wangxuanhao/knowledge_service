@@ -105,7 +105,7 @@ def _operation(operation_id, action, target_iri, *, target_kind='class'):
     }
 
 
-def _create_draft(repo, project_id, operations=(), *, draft_id='draft-1'):
+def _create_draft(repo, project_id, operations=(), *, draft_id='draft-1', source_context=None):
     repo._ontology_drafts.create(project_id, {
         'id': draft_id,
         'base_ontology_id': None,
@@ -114,7 +114,7 @@ def _create_draft(repo, project_id, operations=(), *, draft_id='draft-1'):
         'revision': 1,
         'title': draft_id,
         'summary': '',
-        'source_context': {},
+        'source_context': source_context or {},
     })
     return repo._ontology_drafts.append_operations(
         project_id, draft_id, list(operations))
@@ -527,6 +527,86 @@ def test_draft_created_requires_at_least_one_proposed_binding(tmp_path):
             **_run(project_id),
             'candidate_bindings': [_binding(kind='existing')],
         })
+
+
+def _existing_draft_intake(project_id):
+    return {**_run(project_id), 'candidate_bindings': [_binding(kind='existing')],
+            'intake_request_hash': 'confirmed-request-hash',
+            'intake_result': {'target': {'draft_id': 'draft-1', 'create_new_draft': False}}}
+
+
+def _attached_intake_context(run):
+    return {'intake_bindings': [{'discovery_run_id': run['id'],
+        'selected_candidate_ids': run['accepted_candidate_ids'],
+        'source_fingerprint': run['source_fingerprint']}]}
+
+
+def test_existing_draft_intake_accepts_reusable_bindings_with_immutable_target_intent(tmp_path):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project = repo.create_project('append existing')['id']
+    payload = _existing_draft_intake(project)
+    _create_draft(repo, project, source_context=_attached_intake_context(payload))
+    run = repo._discovery_runs.create(project, payload)
+    assert run['status'] == 'draft_created'
+    assert run['candidate_bindings'][0]['binding_kind'] == 'existing'
+    assert repo._discovery_runs.create(project, payload) == run
+    with pytest.raises(DiscoveryRunConflict, match='immutable snapshot'):
+        repo._discovery_runs.create(project, {**payload, 'intake_request_hash': 'different-intent'})
+
+
+@pytest.mark.parametrize('invalid', ['missing_hash', 'empty_hash', 'missing_target',
+                                   'wrong_target', 'new_draft', 'non_boolean_new'])
+def test_reusable_draft_intake_rejects_missing_or_contradictory_intent(tmp_path, invalid):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project = repo.create_project('bad append intent')['id']
+    payload = _existing_draft_intake(project)
+    if invalid == 'missing_hash':
+        del payload['intake_request_hash']
+    elif invalid == 'empty_hash':
+        payload['intake_request_hash'] = ' '
+    elif invalid == 'missing_target':
+        payload['intake_result'] = {}
+    elif invalid == 'wrong_target':
+        payload['intake_result']['target']['draft_id'] = 'other-draft'
+    elif invalid == 'new_draft':
+        payload['intake_result']['target']['create_new_draft'] = True
+    else:
+        payload['intake_result']['target']['create_new_draft'] = 0
+    _create_draft(repo, project, source_context=_attached_intake_context(payload))
+    with pytest.raises(ValueError, match='draft_created.*proposed'):
+        repo._discovery_runs.create(project, payload)
+    assert not repo.list_discovery_runs(project)
+
+
+@pytest.mark.parametrize('foreign', [False, True])
+def test_reusable_intake_requires_an_existing_same_project_draft(tmp_path, foreign):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project = repo.create_project('append target')['id']
+    payload = _existing_draft_intake(project)
+    if foreign:
+        other = repo.create_project('other project')['id']
+        _create_draft(repo, other, source_context=_attached_intake_context(payload))
+    with pytest.raises(ValueError, match='governed draft does not exist'):
+        repo._discovery_runs.create(project, payload)
+    assert not repo.list_discovery_runs(project)
+
+
+@pytest.mark.parametrize('invalid', ['absent', 'wrong_candidates', 'wrong_source'])
+def test_reusable_intake_requires_its_matching_binding_on_the_target_draft(tmp_path, invalid):
+    repo = Repository(tmp_path / 'store.sqlite')
+    project = repo.create_project('append ownership')['id']
+    payload = _existing_draft_intake(project)
+    context = _attached_intake_context(payload)
+    if invalid == 'absent':
+        context = {}
+    elif invalid == 'wrong_candidates':
+        context['intake_bindings'][0]['selected_candidate_ids'] = ['different-candidate']
+    else:
+        context['intake_bindings'][0]['source_fingerprint'] = 'different-source'
+    _create_draft(repo, project, source_context=context)
+    with pytest.raises(ValueError, match='intake binding'):
+        repo._discovery_runs.create(project, payload)
+    assert not repo.list_discovery_runs(project)
 
 
 def test_mixed_draft_requires_reusable_binding_to_remain_operation_free(tmp_path):

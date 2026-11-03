@@ -129,12 +129,15 @@ def test_inventory_run_scope_uses_frozen_assertion_chunk_chain(tmp_path, monkeyp
         result = client.get(path + '/candidates', params={'run_id': first['id']}).json()
         assert [x['id'] for x in result['items']] == ['scope-a']
         assert result['total'] == 1
+        assert [x['document_id'] for x in result['documents']] == ['scoped-a']
+        assert result['summary']['pending_count'] == 1
         # Ingest binds the pre-extraction receipt, not the final document version.
         assert result['items'][0]['assertion_document_version_id'] == first['document_version_id']
         assert result['items'][0]['document_version_id'] != first['document_version_id']
         empty = client.get(path + '/candidates', params={
             'run_id': second['id'], 'document_id': 'scoped-a'}).json()
         assert empty['items'] == [] and empty['scope_note']
+        assert empty['documents'] == [] and empty['summary']['document_count'] == 0
         assert {x['id'] for x in client.get(path + '/candidates').json()['items']} == {
             'candidate-1', 'candidate-2', 'scope-a', 'scope-b'}
 
@@ -193,6 +196,7 @@ def test_inventory_batch_scope_checks_result_run_and_combines_filters(tmp_path):
     with TestClient(app) as client:
         result = client.get(path + '/candidates', params={'batch_id': first['id']}).json()
         assert [x['id'] for x in result['items']] == ['batch-a']
+        assert [x['document_id'] for x in result['documents']] == [document['id']]
         assert [x['id'] for x in client.get(path + '/candidates', params={
             'batch_id': first['id'], 'document_id': document['id'],
             'run_id': first_run['id']}).json()['items']] == ['batch-a']
@@ -395,6 +399,103 @@ def test_composite_publication_applies_only_selected_approved_batches(tmp_path):
         from knowledge_service.repository.page_reads import PageReads
         source = PageReads(repo).sources(p, {}, document_id='doc-1')['documents'][0]
         assert source['derived_breakdown']['entity'] == 1
+
+
+def test_appending_same_draft_dependencies_publishes_each_entity_once(tmp_path):
+    app, repo, p, path = _setup(tmp_path)
+    document = repo.get_record(p, 'doc-1')
+    changed = _record_payload(document)
+    changed['metadata']['discovery_candidates'].extend([
+        {'id': 'next-entity', 'kind': 'entity', 'text': '新增门店', 'proposed_type': '门店'},
+        {'id': 'next-relation', 'kind': 'relation', 'proposed_type': '经营',
+         'subject_id': 'candidate-1', 'object_id': 'next-entity'},
+    ])
+    repo.put_record(p, changed, expected_version=document['version'])
+    with TestClient(app) as client:
+        first, _ = _add(client, path, _request(), 'first-entity')
+        request = _request(create_new_draft=False, target_draft_id=first['draft']['id'],
+            expected_revision=first['draft']['revision'])
+        request['candidate_ids'] = ['candidate-1', 'next-entity', 'next-relation']
+        second, frozen = _add(client, path, request, 'append-with-owner')
+        replay = client.post(path + '/add-selection', json=frozen)
+        assert replay.status_code == 200, replay.text
+        assert replay.json() == second
+        assert len(app.state.ontology_drafts.store.list(p)) == 1
+        _publish(app.state.ontology_drafts, repo, p, second['draft'])
+        facts = repo.current_records(p, kinds=['entity', 'relation'])
+        entities = [fact for fact in facts if fact['kind'] == 'entity']
+        relations = [fact for fact in facts if fact['kind'] == 'relation']
+        assert len(entities) == 2 and len(relations) == 1
+        assert len({fact['id'] for fact in facts}) == 3
+        assert {relations[0]['subject_id'], relations[0]['object_id']} == {fact['id'] for fact in entities}
+        assert {run['status'] for run in repo.list_intake_runs(p)} == {'published'}
+        assert all(repo.get_assertion(p, candidate)['status'] == 'accepted'
+                   for candidate in request['candidate_ids'])
+
+
+def test_inventory_preserves_confirmed_mapping_for_same_draft_dependency_reuse(tmp_path):
+    app, repo, p, path = _setup(tmp_path)
+    published = seed_ontology(repo, p, '''@prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        <urn:test:Customer> a owl:Class ; rdfs:label "企业客户"@zh .''', {})
+    document = repo.get_record(p, 'doc-1')
+    changed = _record_payload(document)
+    changed['metadata']['discovery_candidates'].extend([
+        {'id': 'new-store', 'kind': 'entity', 'text': '新增门店', 'proposed_type': '门店'},
+        {'id': 'owns-store', 'kind': 'relation', 'proposed_type': '经营',
+         'subject_id': 'candidate-1', 'object_id': 'new-store'},
+    ])
+    repo.put_record(p, changed, expected_version=document['version'])
+    with TestClient(app) as client:
+        request = _request(expected_ontology_id=published['id'],
+            confirmed_mappings={'candidate-1': 'urn:test:Customer'})
+        request['candidate_ids'] = ['candidate-1', 'new-store', 'owns-store']
+        first, _ = _add(client, path, request, 'mapped-owner')
+        inventory = client.get(path + '/candidates').json()
+        owner = next(item for item in inventory['items'] if item['id'] == 'candidate-1')
+        link = next(link for link in owner['linked_drafts'] if link['draft_id'] == first['draft']['id'])
+        assert link['confirmed_mapping'] == {'target_iri': 'urn:test:Customer', 'target_kind': 'class'}
+        proposed = next(item for item in inventory['items'] if item['id'] == 'new-store')
+        assert all('confirmed_mapping' not in link for link in proposed['linked_drafts'])
+
+
+def test_same_draft_append_can_wait_for_publication_when_all_types_are_already_formal(tmp_path):
+    app, repo, p, path = _setup(tmp_path)
+    published = seed_ontology(repo, p, '''@prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        <urn:test:Customer> a owl:Class ; rdfs:label "企业客户"@zh .
+        <urn:test:Service> a owl:ObjectProperty ; rdfs:label "服务"@zh .''', {})
+    document = repo.get_record(p, 'doc-1')
+    changed = _record_payload(document)
+    changed['metadata']['discovery_candidates'].extend([
+        {'id': 'next-customer', 'kind': 'entity', 'text': '新客户', 'proposed_type': '企业客户'},
+        {'id': 'next-relation', 'kind': 'relation', 'proposed_type': '服务',
+         'subject_id': 'candidate-1', 'object_id': 'next-customer'},
+    ])
+    repo.put_record(p, changed, expected_version=document['version'])
+    with TestClient(app) as client:
+        first_request = _request(expected_ontology_id=published['id'],
+            confirmed_mappings={'candidate-1': 'urn:test:Customer'})
+        first_request['candidate_ids'] = ['candidate-1', 'candidate-2']
+        first, _ = _add(client, path, first_request, 'first-mixed-draft')
+        request = _request(create_new_draft=False, expected_ontology_id=published['id'],
+            target_draft_id=first['draft']['id'], expected_revision=first['draft']['revision'],
+            confirmed_mappings={'candidate-1': 'urn:test:Customer', 'next-customer': 'urn:test:Customer',
+                                'next-relation': 'urn:test:Service'})
+        request['candidate_ids'] = ['candidate-1', 'next-customer', 'next-relation']
+        preview = _preview(client, path, request)
+        assert preview['can_add']
+        assert not preview['new'] and len(preview['reused']) == 3
+        assert {item['outcome'] for item in preview['fact_outcomes']} == {'pending'}
+        pure_reuse = _request('next-customer', expected_ontology_id=published['id'],
+            confirmed_mappings={'next-customer': 'urn:test:Customer'})
+        assert not _preview(client, path, pure_reuse)['can_add'], 'Pure reuse must not create an empty draft.'
+        assert _preview(client, path, {**pure_reuse, 'create_new_draft': False})['can_confirm_reuse']
+        second, _ = _add(client, path, request, 'append-formal-types')
+        _publish(app.state.ontology_drafts, repo, p, second['draft'])
+        facts = repo.current_records(p, kinds=['entity', 'relation'])
+        assert len(facts) == 4 and len({fact['id'] for fact in facts}) == 4
+        assert sum(fact['kind'] == 'relation' for fact in facts) == 1
 
 
 @pytest.mark.parametrize(('outcome', 'error_code'), [

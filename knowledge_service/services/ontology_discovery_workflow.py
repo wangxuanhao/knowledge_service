@@ -3,7 +3,7 @@ from ..repository.discovery_run_store import discovery_result_kind
 from ..repository.page_reads import PageReads
 from .discovery_vocabulary import audit_formal_vocabulary
 from .ontology_discovery import (
-    _candidates, _candidate_lifecycle, _candidate_mindmap, _quality_warnings, _summary,
+    NORMAL_CANDIDATE_KINDS, _candidates, _candidate_lifecycle, _candidate_mindmap, _quality_warnings, _summary,
 )
 
 
@@ -23,7 +23,7 @@ class OntologyDiscoveryWorkflow:
         inputs = PageReads(repository).discovery_inputs(p)
         candidates = _candidates(inputs['documents'], inputs['assertions'])
         runs = self._runs(repository, p)
-        _, counts = _candidate_lifecycle(candidates, runs, inputs['materialized'])
+        states, counts = _candidate_lifecycle(candidates, runs, inputs['materialized'])
         ontologies = repository.list_ontologies(p)
         latest = next(iter(runs), None)
         return {**_summary(candidates),
@@ -32,6 +32,9 @@ class OntologyDiscoveryWorkflow:
             'published': bool(ontologies),
             'ontology_id': ontologies[-1]['id'] if ontologies else None,
             'candidate_status_counts': counts,
+            'pending_document_count': len({item['document_id'] for item in candidates
+                if item.get('kind') in NORMAL_CANDIDATE_KINDS
+                and states.get(item['id']) == 'pending' and item.get('document_id')}),
             'latest_run': ({'id': latest['id'], 'status': latest['status'],
                 'result_kind': discovery_result_kind(latest),
                 'unified_draft_id': latest.get('unified_draft_id'),

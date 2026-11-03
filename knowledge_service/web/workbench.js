@@ -49,8 +49,13 @@ async function renderDiscoveryHint(){
   hosts.forEach(host=>{if(!host)return;if(pending>0){host.hidden=false;host.innerHTML=`<span>开放本体发现：还有 <b>${pending}</b> 条候选待审核或未通过校验。它们仍保留在候选区，不需要重新上传原文。</span><button data-goto-discovery>前往本体建模层 ↗</button>`;host.querySelector('[data-goto-discovery]').onclick=()=>showTab('ontology-model');}else host.hidden=true;});
 }
 for(const tab of ['graph','search','mindmap'])document.querySelector(`[data-tab="${tab}"]`)?.addEventListener('click',()=>renderDiscoveryHint().catch(()=>{}));
+let snapshotGeneration=0,snapshotRequest=0;
+function snapshotViewVisible(){
+  const visible=id=>{const panel=document.getElementById(id);return !!panel&&!panel.hidden&&!panel.classList.contains('hidden');};
+  return window.RuntimeView?.current==='snapshots'&&visible('tab-runtime')&&visible('tab-evaluation');
+}
 const oldChange=$('project').onchange;
-$('project').onchange=()=>{wb.clearVersionContext();oldChange();wb.records.clear();for(const id of ['dashboard','source-list','source-body','resolve-result','tasks','operations','evaluation-result'])$(id).textContent='';const preferred=$('project').selectedOptions?.[0]?.dataset?.ontologyMode,mode=document.getElementById('extraction-mode');if(preferred&&mode){mode.value=preferred;mode.onchange?.();}wb.tree?.clear();renderDiscoveryHint().catch(()=>{});};
+$('project').onchange=()=>{snapshotGeneration++;snapshotRequest++;$('snapshot-cards').textContent='';wb.clearVersionContext();oldChange();wb.records.clear();for(const id of ['dashboard','source-list','source-body','resolve-result','tasks','operations','evaluation-result'])$(id).textContent='';const preferred=$('project').selectedOptions?.[0]?.dataset?.ontologyMode,mode=document.getElementById('extraction-mode');if(preferred&&mode){mode.value=preferred;mode.onchange?.();}wb.tree?.clear();renderDiscoveryHint().catch(()=>{});if(snapshotViewVisible())snapshots().catch(e=>status(e.message,true));};
 let dashboardRequest=0;
 async function dashboard(){const request=++dashboardRequest,p=current;controlsProject();const r=await api(endpoint('/dashboard'),{});if(request!==dashboardRequest||p!==current)return;
 
@@ -270,7 +275,7 @@ function documentUploadOptions(document){
   for(const key of ['published_at','valid_from','valid_until'])if(document[key])options[key]=document[key];
   return options;
 }
-const chunkPreviewState={chunks:[],selected:0,trigger:null};
+const chunkPreviewState={chunks:[],selected:0,trigger:null,session:null};
 function chunkPreviewBackground(active){
   for(const element of [document.querySelector('body>aside'),document.querySelector('body>main')]){
     if(!element)continue;
@@ -284,6 +289,7 @@ function chunkPreviewFocusable(){
     .filter(element=>!element.hidden&&element.getAttribute('aria-hidden')!=='true');
 }
 function closeChunkPreview(){
+  chunkPreviewState.session=null;
   const host=$('chunk-preview');
   if(host.hidden)return;
   host.hidden=true;
@@ -340,6 +346,7 @@ function renderChunkPreview(result,title){
     summary.append(chip);
   }
   const list=$('chunk-preview-list'),content=$('chunk-preview-content');
+  content.setAttribute('aria-busy','false');
   list.replaceChildren();
   content.replaceChildren();
   if(!chunks.length){
@@ -359,6 +366,56 @@ function renderChunkPreview(result,title){
     list.append(button);
   });
   selectChunkPreview(0);
+}
+function currentChunkPreviewSession(session){
+  return chunkPreviewState.session===session&&session.project===current&&
+    session.queueGeneration===window.DocumentUploadQueue?.generation&&
+    (!session.ticket||window.LibraryWorkspace.accepts(session.ticket,session.project));
+}
+function chunkPreviewMessage(title,message,busy=false){
+  chunkPreviewState.chunks=[];
+  $('chunk-preview-summary').textContent=title;
+  $('chunk-preview-list').replaceChildren();
+  const content=$('chunk-preview-content'),notice=document.createElement('div');
+  notice.className='chunk-preview-empty';notice.textContent=message;
+  content.setAttribute('aria-busy',String(busy));
+  content.replaceChildren(notice);
+}
+async function selectChunkPreviewFile(index){
+  const session=chunkPreviewState.session,doc=session?.documents[index];
+  if(!doc||!currentChunkPreviewSession(session))return;
+  const request=++session.request;
+  $('chunk-preview-file').value=String(index);
+  $('chunk-preview-file-count').textContent=`${index+1} / ${session.documents.length} 个文件`;
+  chunkPreviewMessage(doc.title,'正在解析文件并生成切片…',true);
+  try{
+    let result=session.cache.get(index);
+    if(!session.cache.has(index)){
+      let pending=session.pending.get(index);
+      if(!pending){
+        if(doc.file){
+          const form=new FormData();form.append('file',doc.file,doc.file.name);
+          form.append('options',JSON.stringify({title:doc.title,...documentUploadOptions(doc),...session.settings}));
+          pending=api('/api/projects/'+encodeURIComponent(session.project)+'/documents/upload/preview',form);
+        }else pending=api('/api/projects/'+encodeURIComponent(session.project)+'/documents/preview',
+          {title:doc.title,text:doc.text,...documentUploadOptions(doc),...session.settings});
+        session.pending.set(index,pending);
+      }
+      try{result=await pending;session.cache.set(index,result);}
+      finally{session.pending.delete(index);}
+    }
+    if(!currentChunkPreviewSession(session)||request!==session.request)return;
+    renderChunkPreview(result,doc.title);
+    status('切片预览完成，未调用模型或写入知识');
+  }catch(error){
+    if(!currentChunkPreviewSession(session)||request!==session.request)return;
+    chunkPreviewMessage(doc.title,'预览失败：'+error.message);
+    const retry=document.createElement('button');
+    retry.type='button';retry.className='secondary';retry.textContent='重试此文件';
+    retry.addEventListener('click',()=>selectChunkPreviewFile(index));
+    $('chunk-preview-content').append(retry);
+    status('切片预览失败：'+doc.title+' · '+error.message,true);
+  }
 }
 function trapChunkPreviewFocus(event){
   const host=$('chunk-preview');
@@ -382,20 +439,22 @@ function trapChunkPreviewFocus(event){
 $('chunk-preview-close').addEventListener('click',closeChunkPreview);
 $('chunk-preview').addEventListener('click',event=>{if(event.target===$('chunk-preview'))closeChunkPreview();});
 document.addEventListener('keydown',trapChunkPreviewFocus);
+$('chunk-preview-file').addEventListener('change',()=>selectChunkPreviewFile(Number($('chunk-preview-file').value)));
 bind('preview-chunks',async()=>{
   const p=controlsProject(),settings=readParseSettings();
   const previewTicket=window.LibraryWorkspace?.ticket();
-  const documents=await readDocumentBatch(true),doc=documents[0];
-  let result;
-  if(doc.file){
-    const form=new FormData();form.append('file',doc.file,doc.file.name);
-    form.append('options',JSON.stringify({title:doc.title,...documentUploadOptions(doc),...settings}));
-    result=await api('/api/projects/'+encodeURIComponent(p)+'/documents/upload/preview',form);
-  }else result=await api('/api/projects/'+encodeURIComponent(p)+'/documents/preview',{title:doc.title,text:doc.text,...documentUploadOptions(doc),...settings});
+  const documents=await readDocumentBatch(true);
   if(p!==current||(previewTicket&&!window.LibraryWorkspace.accepts(previewTicket,p)))return;
-  renderChunkPreview(result,doc.title);
+  chunkPreviewState.session={project:p,ticket:previewTicket,queueGeneration:window.DocumentUploadQueue?.generation,
+    documents,settings,request:0,cache:new Map(),pending:new Map()};
+  const picker=$('chunk-preview-file');picker.replaceChildren();
+  documents.forEach((doc,index)=>{
+    const option=document.createElement('option');option.value=String(index);option.textContent=doc.file?.name||doc.title;
+    picker.append(option);
+  });
   openChunkPreview();
-  status('切片预览完成，未调用模型或写入知识');
+  status('正在生成切片预览…');
+  void selectChunkPreviewFile(0);
 });
 bind('ingest',async()=>{
   const project=controlsProject(),mode=document.getElementById('extraction-mode').value,settings=readParseSettings();
@@ -445,7 +504,53 @@ bind('ingest',async()=>{
   }
   status(`已提交 ${accepted} 个文档，提交失败 ${failed} 个。本页会保留每个文件的提交结果。`,failed>0);
 });
-async function snapshots(){const p=current,r=await api(endpoint('/snapshots'),undefined,'GET');if(p!==current)return;const container=$('snapshot-cards');if(!r.snapshots.length){container.innerHTML='<div class="eval-snapshot-empty"><p>📋</p><p>还没有快照，先保存一个快照</p></div>';return;}const items=r.snapshots.map(s=>{const isAuto=s.kind==='auto'||s.name.startsWith('Before restoring ')||s.name.startsWith('恢复前自动备份 · ');let displayName=s.name;if(isAuto)displayName=s.name.replace(/^Before restoring /,'').replace(/^恢复前自动备份 · /,'');return{s,isAuto,displayName};});const nameCounts={};items.forEach(i=>{nameCounts[i.displayName]=(nameCounts[i.displayName]||0)+1;});items.sort((a,b)=>{if(a.isAuto!==b.isAuto)return a.isAuto?1:-1;return new Date(b.s.created_at)-new Date(a.s.created_at);});container.innerHTML='<div class="eval-snapshot-cards">'+items.map(({s,isAuto,displayName})=>{const dt=new Date(s.created_at);const dateStr=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0')+' '+String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0');const diffMs=Date.now()-dt.getTime();let rel='';if(diffMs>=0&&diffMs<60000)rel='刚刚';else if(diffMs<3600000)rel=Math.floor(diffMs/60000)+' 分钟前';else if(diffMs<86400000)rel=Math.floor(diffMs/3600000)+' 小时前';else if(diffMs<2592000000)rel=Math.floor(diffMs/86400000)+' 天前';const badge=isAuto?'<span class="eval-snapshot-badge auto">自动备份</span>':'<span class="eval-snapshot-badge manual">手动快照</span>';const recordCount=s.record_count!=null?'<span class="eval-snapshot-records">· '+s.record_count+' 条记录</span>':'';const idSuffix=nameCounts[displayName]>1?'<span class="eval-snapshot-id">#'+esc(s.id.slice(0,6))+'</span>':'';return '<div class="eval-snapshot-card" data-id="'+esc(s.id)+'"><div class="eval-snapshot-header"><span class="eval-snapshot-name">'+esc(displayName)+'</span>'+badge+'</div><div class="eval-snapshot-meta">'+esc(dateStr)+(rel?' · '+esc(rel):'')+idSuffix+recordCount+'</div><div class="eval-snapshot-actions"><button data-snapshot-restore="'+esc(s.id)+'" class="secondary">恢复</button></div></div>';}).join('')+'</div>';container.querySelectorAll('[data-snapshot-restore]').forEach(b=>{b.onclick=async()=>{const id=b.dataset.snapshotRestore;const card=b.closest('.eval-snapshot-card');const actions=b.closest('.eval-snapshot-actions');if(card.querySelector('.eval-restore-confirm'))return;const snap=items.find(i=>i.s.id===id);const displayName=snap?snap.displayName:'';const warning=document.createElement('div');warning.className='eval-restore-confirm';warning.innerHTML='<p>确定恢复到此快照？<br><span class="subtle">恢复前会自动创建恢复点，可随时撤销。</span></p><div class="eval-confirm-actions"><button class="eval-confirm-yes">确认恢复</button><button class="eval-confirm-no secondary">取消</button></div>';card.appendChild(warning);warning.scrollIntoView({behavior:'smooth',block:'nearest'});actions.style.display='none';warning.querySelector('.eval-confirm-yes').onclick=async()=>{const yesBtn=warning.querySelector('.eval-confirm-yes');const noBtn=warning.querySelector('.eval-confirm-no');yesBtn.disabled=true;noBtn.disabled=true;yesBtn.textContent='正在恢复…';yesBtn.classList.add('eval-restoring');try{const r=await api(endpoint('/snapshots/'+id+'/restore'),{});status('已恢复到「'+displayName+'」；恢复前状态已存为「'+(r.recovery_snapshot_name||'恢复前自动备份')+'」');await snapshots();}catch(e){status(e.message,true);yesBtn.disabled=false;noBtn.disabled=false;yesBtn.textContent='确认恢复';yesBtn.classList.remove('eval-restoring');}};warning.querySelector('.eval-confirm-no').onclick=()=>{warning.remove();actions.style.display='';};};});}
+async function snapshots(){
+  const project=controlsProject(),generation=snapshotGeneration,request=++snapshotRequest;
+  const sameProject=()=>project===current&&generation===snapshotGeneration;
+  const accepts=()=>sameProject()&&request===snapshotRequest;
+  let result;
+  try{result=await api('/api/projects/'+encodeURIComponent(project)+'/snapshots',undefined,'GET');}
+  catch(error){if(accepts())throw error;return;}
+  if(!accepts())return;
+  const container=$('snapshot-cards'),r=result;
+  if(!r.snapshots.length){container.innerHTML='<div class="eval-snapshot-empty"><p>📋</p><p>还没有快照，先保存一个快照</p></div>';return;}
+  const items=r.snapshots.map(s=>{const isAuto=s.kind==='auto'||s.name.startsWith('Before restoring ')||s.name.startsWith('恢复前自动备份 · ');let displayName=s.name;if(isAuto)displayName=s.name.replace(/^Before restoring /,'').replace(/^恢复前自动备份 · /,'');return{s,isAuto,displayName};});const nameCounts={};items.forEach(i=>{nameCounts[i.displayName]=(nameCounts[i.displayName]||0)+1;});items.sort((a,b)=>{if(a.isAuto!==b.isAuto)return a.isAuto?1:-1;return new Date(b.s.created_at)-new Date(a.s.created_at);});container.innerHTML='<div class="eval-snapshot-cards">'+items.map(({s,isAuto,displayName})=>{const dt=new Date(s.created_at);const dateStr=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0')+' '+String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0');const diffMs=Date.now()-dt.getTime();let rel='';if(diffMs>=0&&diffMs<60000)rel='刚刚';else if(diffMs<3600000)rel=Math.floor(diffMs/60000)+' 分钟前';else if(diffMs<86400000)rel=Math.floor(diffMs/3600000)+' 小时前';else if(diffMs<2592000000)rel=Math.floor(diffMs/86400000)+' 天前';const badge=isAuto?'<span class="eval-snapshot-badge auto">自动备份</span>':'<span class="eval-snapshot-badge manual">手动快照</span>';const recordCount=s.record_count!=null?'<span class="eval-snapshot-records">· '+s.record_count+' 条记录</span>':'';const idSuffix=nameCounts[displayName]>1?'<span class="eval-snapshot-id">#'+esc(s.id.slice(0,6))+'</span>':'';return '<div class="eval-snapshot-card" data-id="'+esc(s.id)+'"><div class="eval-snapshot-header"><span class="eval-snapshot-name">'+esc(displayName)+'</span>'+badge+'</div><div class="eval-snapshot-meta">'+esc(dateStr)+(rel?' · '+esc(rel):'')+idSuffix+recordCount+'</div><div class="eval-snapshot-actions"><button data-snapshot-restore="'+esc(s.id)+'" class="secondary">恢复</button></div></div>';}).join('')+'</div>';
+  const requireContext=()=>{
+    if(accepts())return true;
+    status('项目或备份列表已变化，请在当前项目重新选择快照。',true);return false;
+  };
+  container.querySelectorAll('[data-snapshot-restore]').forEach(button=>{
+    button.onclick=()=>{
+      if(!requireContext())return;
+      const id=button.dataset.snapshotRestore,card=button.closest('.eval-snapshot-card'),actions=button.closest('.eval-snapshot-actions');
+      if(card.querySelector('.eval-restore-confirm'))return;
+      const snap=items.find(item=>item.s.id===id),displayName=snap?snap.displayName:'';
+      const warning=document.createElement('div');warning.className='eval-restore-confirm';
+      warning.innerHTML='<p>确定恢复到此快照？<br><span class="subtle">恢复前会自动创建恢复点，可随时撤销。</span></p><div class="eval-confirm-actions"><button class="eval-confirm-yes">确认恢复</button><button class="eval-confirm-no secondary">取消</button></div>';
+      card.appendChild(warning);warning.scrollIntoView({behavior:'smooth',block:'nearest'});actions.style.display='none';
+      warning.querySelector('.eval-confirm-yes').onclick=async()=>{
+        if(!requireContext())return;
+        const yesBtn=warning.querySelector('.eval-confirm-yes'),noBtn=warning.querySelector('.eval-confirm-no');
+        yesBtn.disabled=true;noBtn.disabled=true;yesBtn.textContent='正在恢复…';yesBtn.classList.add('eval-restoring');
+        try{
+          const restored=await api('/api/projects/'+encodeURIComponent(project)+'/snapshots/'+encodeURIComponent(id)+'/restore',{});
+          if(!sameProject())return;
+          warning.textContent='已恢复，正在刷新备份列表…';
+          status('已恢复到「'+displayName+'」；恢复前状态已存为「'+(restored.recovery_snapshot_name||'恢复前自动备份')+'」');
+          await snapshots().catch(error=>{
+            if(!sameProject())return;
+            warning.textContent='已恢复；备份列表刷新失败，请点击“刷新”重试。';
+            status('快照已恢复，但备份列表刷新失败：'+error.message,true);
+          });
+        }catch(error){
+          if(!sameProject())return;
+          status(error.message,true);yesBtn.disabled=false;noBtn.disabled=false;yesBtn.textContent='确认恢复';yesBtn.classList.remove('eval-restoring');
+        }
+      };
+      warning.querySelector('.eval-confirm-no').onclick=()=>{warning.remove();actions.style.display='';};
+    };
+  });
+}
 // 快照与评测并入「项目与运行」：进入该分区就自动读一次快照列表
 // （原来要先点一下「刷新」才看得到——合并后的规则是「进这一屏，就把这一屏该给的数据给出来」）。
 window.RuntimeView?.on('snapshots',()=>snapshots().catch(e=>status(e.message,true)));
@@ -841,8 +946,17 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
         };});
     turn.append(block);atEnd();
   }
+  function showIndexNotice(message){
+    const notice=$c('qa-notice'),text=$c('qa-notice-text'),button=$c('qa-build');
+    const admin=window.Auth?.isAdmin?.()===true;
+    if(button)button.hidden=!admin;
+    if(notice&&text){
+      text.textContent=message+(admin?'':' 需要项目管理员修复索引；请联系管理员，修复后重试提问。');
+      notice.hidden=false;
+    }
+  }
   function addFailure(turn,message,replay){
-    if(/Milvus|语义|索引|维度/.test(message)){const notice=$c('qa-notice'),text=$c('qa-notice-text');if(notice&&text){text.textContent=message;notice.hidden=false;}}
+    if(/Milvus|语义|索引|维度/.test(message))showIndexNotice(message);
     turn.dataset.state='error';
     const box=document.createElement('div');box.className='qa-error';box.setAttribute('role','alert');
     const text=document.createElement('span');text.className='qa-error-text';text.textContent='回答失败：'+message;
@@ -1010,18 +1124,16 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     const semanticErrors=Object.entries(errors).filter(([key])=>key==='semantic'||key.endsWith(':semantic')).map(([,value])=>String(value)).join('；');
     const noVector=/语义索引尚未就绪|Embedding model differs|嵌入模型|嵌入维度/.test(semanticErrors);
     if(noVector){
-      text.textContent='Milvus 语义索引尚未就绪，本次检索未完成。请构建或修复索引后重新提问。';
-      notice.hidden=false;
+      showIndexNotice(window.Auth?.isAdmin?.()===true?'Milvus 语义索引尚未就绪，本次检索未完成。请构建或修复索引后重新提问。':'Milvus 语义索引尚未就绪，本次检索未完成。');
     }else if(payload?.degraded){
-      text.textContent='Milvus 检索未完成。请在「构建与任务」核验连接、模型与索引。';
-      notice.hidden=false;
+      showIndexNotice(window.Auth?.isAdmin?.()===true?'Milvus 检索未完成。请在「构建与任务」核验连接、模型与索引。':'Milvus 检索未完成。');
     }else{
       notice.hidden=true;
     }
   }
   $c('qa-build')?.addEventListener('click',async()=>{
     const btn=$c('qa-build'),text=$c('qa-notice-text');
-    if(!btn)return;
+    if(!btn||window.Auth?.isAdmin?.()!==true)return;
     btn.disabled=true;
     try{
       await window.ProjectVectorIndex.open(current);

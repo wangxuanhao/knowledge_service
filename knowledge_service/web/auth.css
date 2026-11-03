@@ -407,27 +407,25 @@ body main .ua-page .ua-primary { background: #0e7c7b; color: #fff; }
 body main .ua-page .ua-primary:hover { filter: brightness(1.1); }
 
 /* ============================================================================
-   独立登录页（login.html）—— 整页墨青粒子网络背景 + 居中玻璃卡片
-   背景由 login-bg.js 在 #login-canvas 上实时绘制（分层粒子 + 连线 + 大气光斑 + 随鼠标光影），
-   配色沿用系统主题：深墨青底 + 青色(#22d3ee / 淡青#5eead4)高亮，与侧栏观感统一。
+   独立登录页（login.html）—— 原始墨青粒子背景与居中卡片。
+   使用页面级令牌和选择器隔离工作台的 main / 表单主题。
    ============================================================================ */
 .login-body {
-    /* 覆盖工作台侧栏布局：登录页没有侧边栏，让卡片整体居中。 */
+    color-scheme: dark;
+    --login-ink: #edf7f5;
+    --login-muted: #a0bfba;
+    --login-accent: #8ce5d3;
     margin: 0;
     min-height: 100vh;
+    min-height: 100dvh;
     position: relative;
-    display: flex;
-    align-items: center;        /* 垂直居中 .login-page */
-    justify-content: center;
-    overflow: hidden;
-    color: #dbe9e7;
+    display: block;
+    overflow-x: hidden;
+    color: var(--login-ink);
     background:
-        /* 四周暗角，把视线聚向中央卡片 */
         radial-gradient(120% 100% at 50% 50%, rgba(1, 8, 8, 0) 52%, rgba(1, 8, 8, 0.6) 100%),
-        /* 顶部与底部淡青氛围光 */
         radial-gradient(1200px 640px at 50% -12%, rgba(45, 212, 191, 0.16), transparent 60%),
         radial-gradient(900px 520px at 88% 108%, rgba(8, 145, 178, 0.14), transparent 60%),
-        /* 深墨青渐变（系统侧栏墨青 #0f3a39 的暗化版，视觉统一） */
         linear-gradient(180deg, #0a2e2e, #072321 45%, #041414);
 }
 #login-canvas {
@@ -435,87 +433,168 @@ body main .ua-page .ua-primary:hover { filter: brightness(1.1); }
     inset: 0;
     display: block;
     z-index: 0;
-    pointer-events: none;   /* 画布不挡输入：点击直接落在卡片上 */
+    pointer-events: none;
 }
-.login-page {
+.login-body .login-page {
     position: relative;
     z-index: 1;
     width: 100%;
-    background: transparent;    /* 盖过 theme.css 对 main 的浅色底，露出底层粒子网络 */
+    max-width: none;
+    min-height: 100vh;
+    min-height: 100dvh;
+    margin: 0;                  /* 清除工作台为侧栏预留的 margin-left。 */
+    background: transparent;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 24px;
+    padding: 32px 24px;
     box-sizing: border-box;
 }
-/* 登录卡片：墨青毛玻璃，顶部青色高光条，柔和入场动画。 */
 .login-body .auth-card.login-card {
     position: relative;
-    width: min(400px, calc(100vw - 40px));
-    padding: 30px 30px 26px;
-    border: 1px solid rgba(94, 234, 212, 0.26);
-    border-radius: 16px;
-    background:
-        linear-gradient(180deg, rgba(11, 48, 45, 0.66), rgba(5, 22, 22, 0.78));
-    -webkit-backdrop-filter: blur(18px) saturate(150%);
-    backdrop-filter: blur(18px) saturate(150%);
+    flex: 0 1 432px;
+    width: 100%;
+    min-width: 0;
+    padding: 36px;
+    border: 1px solid rgba(151, 207, 191, .22);
+    border-radius: 22px;
+    background: linear-gradient(155deg, rgba(26, 65, 57, .96), rgba(11, 39, 35, .98));
     box-shadow:
-        0 0 0 1px rgba(94, 234, 212, 0.06),
-        0 30px 80px rgba(0, 0, 0, 0.5),
-        0 0 70px rgba(45, 212, 191, 0.14);
-    animation: login-enter .6s ease-out both;
+        inset 0 1px 0 rgba(213, 244, 230, .04),
+        0 28px 80px -24px rgba(0, 12, 10, .65);
+    animation: login-enter .45s ease-out both;
 }
-/* 卡片顶部一条青色高光描边，提升精致感 */
 .login-body .auth-card.login-card::before {
     content: '';
     position: absolute;
-    top: 0; left: 20px; right: 20px;
+    top: -1px; left: 44px; right: 44px;
     height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(94, 234, 212, 0.9), transparent);
-    opacity: .85;
+    background: linear-gradient(90deg, transparent, rgba(170, 227, 200, .65), transparent);
 }
 @keyframes login-enter {
-    from { opacity: 0; transform: translateY(16px) scale(.98); }
-    to   { opacity: 1; transform: translateY(0) scale(1); }
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
 }
-/* 品牌区：左侧一个青色小标记 + 右侧品牌字 */
 .login-brand {
     display: flex;
     align-items: center;
     gap: 12px;
+    margin-bottom: 32px;
 }
-/* 用一个小图谱符号作标记：两个光点 + 青色斜向连线（纯 CSS，无需额外子元素） */
-.login-mark::before,
-.login-mark::after {
-    content: '';
-    position: absolute;
-    border-radius: 50%;
-}
-.login-mark::before { left: 7px; top: 8px; width: 5px; height: 5px; background: rgba(165, 243, 252, 0.9); }
-.login-mark::after { right: 7px; bottom: 7px; width: 5px; height: 5px; background: rgba(103, 232, 249, 0.95); }
 .login-mark {
-    background:
-        radial-gradient(circle at 30% 30%, rgba(94, 234, 212, 0.9), rgba(34, 211, 238, 0.05) 70%),
-        linear-gradient(135deg, rgba(94, 234, 212, 0.0) 46%, rgba(94, 234, 212, 0.85) 46%, rgba(94, 234, 212, 0.85) 47%, rgba(94, 234, 212, 0.0) 47%),
-        linear-gradient(180deg, rgba(34, 211, 238, 0.25), rgba(8, 145, 178, 0.10));
-    border: 1px solid rgba(94, 234, 212, 0.35);
-    box-shadow: 0 0 14px rgba(34, 211, 238, 0.25);
+    display: grid;
+    place-items: center;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    border-radius: 13px;
+    color: var(--login-accent);
+    background: rgba(140, 229, 211, .08);
+    border: 1px solid rgba(140, 229, 211, .2);
 }
-.login-card h1 {
-    margin: 18px 0 4px;
-    font-size: 20px;
-    color: #e6f5f3;
+.login-mark svg { width: 30px; height: 30px; }
+.login-mark path { stroke: currentColor; stroke-width: 1.3; }
+.login-mark circle { fill: currentColor; }
+.login-card .auth-brand {
+    color: var(--login-ink);
+    font-size: 24px;
+    letter-spacing: 3px;
+    line-height: 1.25;
 }
-/* 登录页输入框底色改为墨青，贴合卡片而非默认蓝黑 */
-.login-body .auth-card input {
-    background: rgba(4, 18, 20, 0.6);
+.login-card .auth-brand small {
+    margin-top: 6px;
+    color: var(--login-muted);
+    font-size: 11px;
+    letter-spacing: 2px;
 }
-.login-foot {
-    margin: 16px 0 0;
+.login-body .login-card h1 {
+    margin: 0 0 10px;
+    color: var(--login-ink);
+    font-size: 28px;
+    font-weight: 600;
+    letter-spacing: .02em;
+}
+.login-card .auth-hint {
+    margin: 0 0 28px;
+    color: var(--login-muted);
+    font-size: 13px;
+    line-height: 1.8;
+}
+.login-field + .login-field { margin-top: 18px; }
+.login-body .login-card label {
+    margin: 0 0 8px;
+    color: #c4dbd5;
+    font-size: 13px;
+    font-weight: 500;
+}
+.login-body .login-card input:not([type=checkbox]):not([type=radio]) {
+    width: 100%;
+    min-height: 48px;
+    margin: 0;
+    padding: 12px 14px;
+    color: var(--login-ink);
+    caret-color: var(--login-accent);
+    background: #0c2926;
+    border: 1px solid #41635a;
+    border-radius: 10px;
+    font-size: 16px;
+    line-height: 1.5;
+    transition: border-color .15s, box-shadow .15s;
+}
+.login-body .login-card input::placeholder { color: #91b1a7; font-size: 14px; }
+.login-body .login-card input:hover { border-color: #779b8e; }
+.login-body .login-card input:focus {
+    outline: none;
+    border-color: var(--login-accent);
+    box-shadow: 0 0 0 3px rgba(140, 229, 211, .12);
+}
+.login-card .auth-error {
+    min-height: 20px;
+    margin: 10px 0 0;
+    color: #ffb7ad;
     font-size: 12px;
     line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+.login-body .login-card .auth-submit {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    min-height: 48px;
+    margin-top: 8px;
+    padding: 12px 16px;
+    border: 1px solid #9be3ce;
+    border-radius: 10px;
+    color: #0a3029;
+    background: linear-gradient(110deg, #ace8cf, #80d5bf);
+    box-shadow: 0 4px 14px rgba(1, 24, 19, .16);
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: .04em;
+}
+.login-card .auth-submit svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 1.5; }
+.login-body .login-card .auth-submit:hover { filter: brightness(1.06); }
+.login-body .login-card .auth-submit:focus-visible { outline: 2px solid var(--login-accent); outline-offset: 4px; }
+.login-body .login-card .auth-submit:disabled { opacity: .55; cursor: wait; }
+.login-card .login-foot {
+    margin: 24px 0 0;
+    padding-top: 20px;
+    border-top: 1px solid rgba(164, 204, 187, .14);
+    color: var(--login-muted);
+    font-size: 12px;
+    line-height: 1.8;
     text-align: center;
-    color: #7fa59c;
+}
+@media (max-width: 480px) {
+    .login-body .login-page { padding: 24px 16px; }
+    .login-body .auth-card.login-card { padding: 28px 24px; border-radius: 18px; }
+    .login-brand { margin-bottom: 28px; }
+    .login-body .login-card h1 { font-size: 26px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .login-body .auth-card.login-card { animation: none; }
+    .login-body .login-card input { transition: none; }
 }
 
 /* ============================================================================

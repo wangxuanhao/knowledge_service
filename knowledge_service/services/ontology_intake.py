@@ -224,8 +224,16 @@ class OntologyIntake:
             for run in runs:
                 if not run.get('unified_draft_id'):
                     continue
-                link = {'draft_id': run['unified_draft_id'], 'run_id': run['id'], 'status': run['status']}
+                accepted_ids = set(run.get('accepted_candidate_ids') or [])
+                confirmed = {binding['candidate_id']: {
+                    'target_iri': binding['target_iri'], 'target_kind': binding['target_kind']}
+                    for binding in run.get('candidate_bindings') or []
+                    if binding.get('binding_kind') == 'existing'
+                    and binding.get('candidate_id') in accepted_ids}
                 for candidate in run.get('candidate_snapshot') or []:
+                    link = {'draft_id': run['unified_draft_id'], 'run_id': run['id'], 'status': run['status']}
+                    if candidate['id'] in confirmed:
+                        link['confirmed_mapping'] = confirmed[candidate['id']]
                     linked.setdefault(candidate['id'], []).append(link)
             items = []
             for candidate in candidates:
@@ -246,7 +254,22 @@ class OntologyIntake:
                               'dependency_candidate': dependency,
                               'required_by': sorted(set(required_by.get(candidate['id'], [])))})
             items.sort(key=lambda x: (x.get('document_id') or '', x['id']))
+            documents = {}
+            for item in items:
+                key = item.get('document_id') or ''
+                group = documents.setdefault(key, {
+                    'document_id': key, 'document_title': item.get('document_title') or key,
+                    'total': 0, 'pending_count': 0, 'draft_count': 0, 'dependency_count': 0})
+                group['total'] += 1
+                awaiting_draft = not item['materialized'] and any(
+                    link['status'] == 'draft_created' for link in item['linked_drafts'])
+                group['draft_count' if awaiting_draft else 'pending_count'] += 1
+                group['dependency_count'] += int(item['materialized'])
+            directory = list(documents.values())
+            summary = {'document_count': len(directory), **{key: sum(group[key] for group in directory)
+                for key in ('total', 'pending_count', 'draft_count', 'dependency_count')}}
             return {'items': items[offset:offset + limit], 'total': len(items),
+                    'documents': directory, 'summary': summary,
                     'offset': offset, 'limit': limit, 'published_terms': terms,
                     'expected_ontology_id': parent['id'] if parent else None,
                     'scope_note': scope_note}
@@ -453,8 +476,11 @@ class OntologyIntake:
                     outcome, code, message = 'skip', 'ontology_validation_failed', (skip or {}).get('reason', '所选事实未通过最终结构校验')
                 elif candidate_id in processed:
                     outcome, code, message = 'reuse', 'already_materialized', '复用此候选已有的正式事实'
-                elif proposed:
-                    outcome, code, message = 'pending', 'requires_approved_structure', '按当前建议可通过校验；仍须关联结构最终获批，发布时重新核对'
+                elif proposed or target_id:
+                    outcome = 'pending'
+                    code = 'requires_approved_structure' if proposed else 'requires_draft_publication'
+                    message = ('按当前建议可通过校验；仍须关联结构最终获批，发布时重新核对' if proposed else
+                               '类型已正式发布；确认后加入目标草案，等待该草案发布时处理')
                 else:
                     outcome, code, message = 'add', 'published_mapping_valid', '已通过当前正式结构校验，确认后新增事实'
                 fact_outcomes.append({'candidate_id': candidate_id, 'outcome': outcome, 'reason_code': code, 'message': message})
@@ -473,7 +499,7 @@ class OntologyIntake:
             'fact_outcomes': fact_outcomes,
             'conflicts': conflicts, 'warnings': warnings, 'missing_dependencies': dependencies,
             'source_fingerprint': source_hash, 'preview_fingerprint': fingerprint,
-            'can_add': bool(proposed and (target_id or new_draft) and not conflicts and not dependencies),
+            'can_add': bool((target_id or (proposed and new_draft)) and not conflicts and not dependencies),
             'can_confirm_reuse': bool(reusable and not proposed and not conflicts and not dependencies
                                       and not target_id and not new_draft)}
         return result, draft, map_groups

@@ -591,9 +591,19 @@ class DiscoveryRunStore:
         if (run['status'] == 'draft_created'
                 and not any(_is_proposed_binding(binding)
                             for binding in run['candidate_bindings'])):
-            raise ValueError(
-                'draft_created discovery run requires at least one proposed '
-                'accepted binding')
+            result = run.get('intake_result')
+            target = result.get('target') if isinstance(result, dict) else None
+            request_hash = run.get('intake_request_hash')
+            existing_intake = (
+                isinstance(request_hash, str) and bool(request_hash.strip())
+                and isinstance(draft_id, str) and bool(draft_id.strip())
+                and isinstance(target, dict) and target.get('draft_id') == draft_id
+                and target.get('create_new_draft') is False
+                and any(_is_reusable_binding(binding) for binding in run['candidate_bindings']))
+            if not existing_intake:
+                raise ValueError(
+                    'draft_created discovery run requires at least one proposed '
+                    'accepted binding')
         if run['status'] == 'ready_to_finalize':
             unresolved_bindings = [
                 binding for binding in run['candidate_bindings']
@@ -650,11 +660,19 @@ class DiscoveryRunStore:
                 return existing
             if run['status'] == 'draft_created':
                 try:
-                    self.repo._ontology_drafts.get(
+                    draft = self.repo._ontology_drafts.get(
                         project_id, run['unified_draft_id'])
                 except KeyError as exc:
                     raise ValueError(
                         'discovery run governed draft does not exist') from exc
+                if not any(_is_proposed_binding(binding) for binding in run['candidate_bindings']):
+                    attached = (draft.get('source_context') or {}).get('intake_bindings') or []
+                    if not any(isinstance(binding, dict)
+                               and binding.get('discovery_run_id') == run['id']
+                               and binding.get('selected_candidate_ids') == run['accepted_candidate_ids']
+                               and binding.get('source_fingerprint') == run['source_fingerprint']
+                               for binding in attached):
+                        raise ValueError('reusable draft intake requires a matching attached intake binding')
                 _validate_binding_operations(
                     run,
                     self.repo._ontology_drafts.effective_operations(

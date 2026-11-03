@@ -90,7 +90,7 @@
   function renderEntries(state) {
     if(!list||!cards)return;
     const entries=catalogEntries(state.summary,{query:search.value,kind:kind.value,activeOnly:active.checked});
-    summaryLine.textContent=state.loading?'正在读取本体与草案…':`${entries.length} 个术语 · ${state.preview?'历史只读':state.showingDraft?'草案未发布':'已发布'}`;
+    summaryLine.textContent=state.loading?'正在读取本体与草案…':`${entries.length} 个术语 · ${state.preview?'历史只读':state.showingDraft?'草案未发布':state.ontologyId?'已发布':'尚未发布本体'}`;
     list.replaceChildren();cards.replaceChildren();
     const changes=state.view==='cards'?new Map(draftDefinitionGroups(state.draft,state.summary).map(group=>[group.target,group])):new Map();
     for(const entry of entries){

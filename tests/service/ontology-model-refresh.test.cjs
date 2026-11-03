@@ -9,9 +9,12 @@ function fixture(options = {}) {
   const rootClasses=new Set();
   const root = { innerHTML: '', querySelectorAll: selector => selector==='[data-om-view]'?(options.viewButtons||[]):[], classList:{toggle(name,on){if(on)rootClasses.add(name);else rootClasses.delete(name);}} };
   const sidebar = { innerHTML: '', querySelectorAll: () => [] };
+  const tasks = { innerHTML: '' }, taskButtons = new Map(), workspaceCalls=[];
   const summary = id => ({ classes: [{ id, label: id }, ...(options.twoClasses ? [{ id: 'other', label: 'Other' }] : [])], relations: [], attributes: [] });
   const window = options.catalog ? {OntologyCatalog:require('../../knowledge_service/web/ontology-model-catalog.js')} : {};
   if(options.canvas)window.OntologyCanvas=options.canvas;
+  if(options.navigation)window.KnowledgeNavigation={open:options.navigation};
+  window.OntologyWorkspace={mount(){},render(){},close(){},open:tab=>workspaceCalls.push(tab)};
   const api = async (url, body, method = 'POST') => {
     calls.push({ url, method, body });
     if(url.includes('/stage-availability')){if(options.waitForStage)await options.waitForStage;return options.stageAvailability||{stages:{review:{allowed:true}}};}
@@ -51,16 +54,56 @@ function fixture(options = {}) {
   const context = {
     window, current: 'p', api, endpoint: suffix => '/p' + suffix,
     document: { getElementById: id => options.withRoot && id === 'tab-ontology-model' ? root
-      : options.withSidebar && id === 'om-side' ? sidebar : id==='om-node-display'?options.displayControl||null
+      : options.withSidebar && id === 'om-side' ? sidebar : options.withSidebar&&id==='om-candidate-tasks'?tasks
+        :tasks.innerHTML.includes(`id="${id}"`)?(taskButtons.has(id)?taskButtons.get(id):taskButtons.set(id,{addEventListener(name,fn){this[name]=fn;}}).get(id)): id==='om-node-display'?options.displayControl||null
         :id==='om-canvas-host'?options.canvasHost||null:id==='om-publication-feedback'?options.feedbackHost||null:null, addEventListener() {},
       createElement:tag=>({tag,children:[],listeners:{},append(...items){this.children.push(...items);},addEventListener(name,fn){this.listeners[name]=fn;}}) },
     status: (message, error) => notices.push({ message, error }), console,
     ...(options.gateTimers || {}),
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../knowledge_service/web/ontology-model.js'), 'utf8'), context);
-  return { model: window.OntologyModel, calls, notices, root, sidebar, rootClasses,
+  return { model: window.OntologyModel, calls, notices, root, sidebar, tasks, taskButtons, workspaceCalls, rootClasses,
     switchProject: value => { context.current = value; } };
 }
+
+test('candidate tasks precede both catalogs outside the closed hierarchy in every view', () => {
+  const f=fixture({withRoot:true,withSidebar:true});
+  for(const view of ['types','hierarchy','cards']){
+    Object.assign(f.model.S,{view,summary:{classes:[],relations:[],attributes:[]},discovery:{published:true,pending_document_count:5,candidate_status_counts:{pending:23,included_in_draft:7}},draft:{id:'draft',status:'pending'}});
+    f.model.render();
+    const html=f.root.innerHTML;
+    assert.ok(html.indexOf('id="om-candidate-tasks"')>=0);
+    assert.ok(html.indexOf('id="om-candidate-tasks"')<html.indexOf('id="om-catalog-host"'));
+    assert.ok(html.indexOf('id="om-candidate-tasks"')<html.indexOf('<details class="om-hierarchy-directory"'));
+    assert.match(html,/<details class="om-hierarchy-directory"><summary>继承导航<\/summary>/);
+    assert.match(f.tasks.innerHTML,/来自 5 份资料，共 23 条候选内容待核对/);
+    assert.match(f.tasks.innerHTML,/7 个候选已纳入草案/);
+    assert.doesNotMatch(f.sidebar.innerHTML,/候选|草案|待核对/);
+  }
+  f.taskButtons.get('om-view-draft-work').click();
+  assert.deepEqual(f.workspaceCalls,['facts']);
+  assert.equal(f.calls.length,0,'viewing candidate/draft work never writes or selects a draft');
+});
+
+test('permanent candidate tasks distinguish loading, failed reads, unknown counts and empty work', () => {
+  const f=fixture({withRoot:true,withSidebar:true});
+  f.model.S.loading=true;f.model.render();assert.match(f.tasks.innerHTML,/正在加载/);
+  f.model.S.loading=false;f.model.render();assert.match(f.tasks.innerHTML,/读取失败|读不到/);
+  f.model.S.discovery={published:false,candidate_count:4};f.model.render();
+  assert.match(f.tasks.innerHTML,/待核对候选数量尚未读取/);assert.doesNotMatch(f.tasks.innerHTML,/暂无待核对候选|共 0 条/);
+  f.model.S.discovery={published:false,pending_document_count:0,candidate_status_counts:{pending:0,included_in_draft:0}};f.model.render();
+  assert.match(f.tasks.innerHTML,/暂无待核对候选/);assert.match(f.tasks.innerHTML,/尚未发布本体/);
+  assert.doesNotMatch(f.sidebar.innerHTML,/候选|草案|待核对/);
+});
+
+test('included candidate work offers explicit draft choice and preserves draft read failures', () => {
+  const f=fixture({withRoot:true,withSidebar:true});
+  Object.assign(f.model.S,{discovery:{published:true,candidate_status_counts:{pending:0,included_in_draft:8}},draftChoices:[{id:'a'},{id:'b'}]});
+  f.model.render();assert.match(f.tasks.innerHTML,/选择草案继续审核/);f.taskButtons.get('om-view-draft-work').click();
+  assert.equal(f.model.S.draft,null);assert.deepEqual(f.workspaceCalls,['definitions']);assert.equal(f.calls.length,0);
+  f.model.S.draftLoadError='工作草案列表读取失败，请重试后再保存。';f.model.render();
+  assert.match(f.tasks.innerHTML,/草案列表读取失败/);assert.doesNotMatch(f.tasks.innerHTML,/当前没有未发布/);
+});
 
 test('selecting from any model entry point focuses the canvas after rendering, but term cards do not move it',()=>{
   const events=[],f=fixture({withRoot:true,canvas:{mount(){},render(){events.push('render');},focus(iri){events.push(iri);}}});
@@ -128,6 +171,38 @@ test('dismissing the saved receipt does not cancel its independent page synchron
   const receipt=f.model.acceptPublication({id:'published',summary:{classes:[]},metadata:{version:1}},{projectId:'p',draftId:'new',revision:2});
   const syncing=f.model.refreshPublished(receipt);host.children.find(item=>item.textContent==='收起').listeners.click();
   release();await syncing;assert.equal(receipt.refreshState,'complete');assert.equal(f.model.S.discovery.candidate_status_counts.pending,0);assert.equal(host.hidden,true);
+});
+
+const feedbackHost=()=>({children:[],replaceChildren(){this.children=[];},append(...items){this.children.push(...items);},setAttribute(){}});
+test('publication feedback separates the saved version, linked facts and every index receipt state',()=>{
+  for(const [status,label] of [[undefined,'未提供索引状态'],['not_requested','未请求构建'],['queued','已排队'],['pending','已排队'],['running','构建中'],['completed','已完成'],['failed','构建失败'],['future-status','未提供索引状态']]){
+    const host=feedbackHost(),f=fixture({withRoot:true,feedbackHost:host});f.model.S.draft={id:'new',revision:2,status:'pending'};
+    const index=status?{status}:undefined;
+    const receipt=f.model.acceptPublication({id:'release-v2',metadata:{version:2,publication:{receipt:{facts:{selected:3,added:2,reused:1,skipped:0},index}}}}, {projectId:'p',draftId:'new',revision:2});
+    const text=host.children.map(node=>node.textContent).join(' ');
+    assert.match(text,/正式版本已生效/);assert.match(text,/关联知识.*新增 2.*复用 1.*跳过 0/);
+    assert.ok(text.includes('索引（本次发布回执快照）：'+label),status);
+    assert.equal(receipt.index?.status,status);
+    if(status!=='completed')assert.doesNotMatch(text,/索引.*已完成/);
+    assert.equal(f.calls.length,0,'feedback never starts an index build');
+    const hasTask=host.children.some(node=>node.textContent==='查看构建任务');
+    assert.equal(hasTask,['queued','pending','running','completed','failed'].includes(status));
+  }
+});
+
+test('index feedback remains its receipt snapshot after page reads and only navigates the current receipt project',async()=>{
+  const host=feedbackHost(),opened=[],f=fixture({withRoot:true,feedbackHost:host,navigation:async(target,args)=>opened.push({target,...args})});
+  f.model.S.draft={id:'new',revision:2,status:'pending'};
+  const index={status:'queued',task_id:'build-a'},version={id:'release-v2',metadata:{version:2,publication:{receipt:{index}}}};
+  const receipt=f.model.acceptPublication(version,{projectId:'p',draftId:'new',revision:2});
+  const oldButton=host.children.find(node=>node.textContent==='查看构建任务');assert.ok(oldButton);
+  index.status='completed';await f.model.refreshPublished(receipt);
+  assert.equal(receipt.index.status,'queued');assert.match(host.children.map(node=>node.textContent).join(' '),/索引（本次发布回执快照）：已排队/);
+  await oldButton.listeners.click();assert.deepEqual(opened,[{target:'jobs',projectId:'p'}]);assert.ok(f.calls.every(call=>call.method==='GET'));
+  f.switchProject('q');await oldButton.listeners.click();assert.equal(opened.length,1);
+  f.switchProject('p');f.model.S.draft={id:'next',revision:3};
+  f.model.acceptPublication({id:'release-v3',metadata:{version:3,publication:{receipt:{index:{status:'running'}}}}},{projectId:'p',draftId:'next',revision:3});
+  await oldButton.listeners.click();assert.equal(opened.length,1,'an older receipt cannot navigate on behalf of a newer release');
 });
 
 test('late review stage and plan cannot replace a newly selected project',async()=>{
@@ -233,7 +308,7 @@ test('incremental candidate action is visibly disabled while viewing history', a
   await f.model.refresh();
   f.model.S.preview = { id: 'historic', version: 1 };
   f.model.select(null);
-  assert.match(f.sidebar.innerHTML, /id="om-generate-draft-inline"[^>]*disabled/);
+  assert.match(f.tasks.innerHTML, /id="om-generate-draft-inline"[^>]*disabled/);
 });
 
 test('empty-history candidate generation controls are visibly disabled too', async () => {
@@ -243,9 +318,9 @@ test('empty-history candidate generation controls are visibly disabled too', asy
   f.model.S.summary = null;
   f.model.S.discovery = { published: false, candidate_count: 2 };
   f.model.select(null);
-  assert.match(f.sidebar.innerHTML, /id="om-generate-draft"[^>]*disabled/);
+  assert.match(f.tasks.innerHTML, /id="om-generate-draft"[^>]*disabled/);
   assert.doesNotMatch(f.sidebar.innerHTML, /id="om-infer-hierarchy"/);
-  assert.match(f.sidebar.innerHTML, /发现父类/);
+  assert.match(f.root.innerHTML, /发现父类/);
 });
 
 test('explicit draft creation selects the created draft without replacing another pending draft', async () => {
@@ -298,11 +373,20 @@ test('parent discovery ignores double clicks while one model request is running'
 test('new candidates exclude candidates already included in the pending draft', async () => {
   const f = fixture({ withRoot: true, withSidebar: true, discovery: {
     published: true, unpublished_candidate_count: 340,
-    candidate_status_counts: { pending: 230, included_in_draft: 110 },
+    candidate_status_counts: { pending: 230, included_in_draft: 110 }, pending_document_count: 5,
   } });
   await f.model.refresh();
-  assert.match(f.sidebar.innerHTML, /又抽出 230 个新候选/);
-  assert.doesNotMatch(f.sidebar.innerHTML, /又抽出 340/);
+  assert.match(f.tasks.innerHTML, /来自 5 份资料，共 230 条候选内容待核对/);
+  assert.doesNotMatch(f.tasks.innerHTML, /共 340 条/);
+  assert.match(f.tasks.innerHTML, /从资料候选补充本体/);
+  assert.doesNotMatch(f.tasks.innerHTML, /将整理成|选择候选并完善结构/);
+});
+
+test('missing source and lifecycle counts remain unknown in the candidate guide',async()=>{
+  const f=fixture({withRoot:true,withSidebar:true,discovery:{published:false,candidate_count:4,unpublished_candidate_count:4}});
+  await f.model.refresh();f.model.S.summary=null;f.model.render();
+  assert.match(f.tasks.innerHTML,/资料数量待核对，待核对候选数量尚未读取/);
+  assert.doesNotMatch(f.tasks.innerHTML,/来自 0 份|共 4 条|将整理成/);
 });
 
 

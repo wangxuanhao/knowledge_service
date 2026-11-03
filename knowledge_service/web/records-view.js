@@ -69,13 +69,14 @@
   libraryDetails.append(reviews_section);
   const bar=document.createElement('div');bar.className='record-library-tools';
   bar.innerHTML='<label>查询当前范围全部记录<input id="record-search" placeholder="名称、正文、别名或记录编号"></label><button type="button" id="record-search-submit" class="secondary record-search-submit">查询</button>'
-    +'<label class="record-kind-search">知识类别<select id="record-kind"><option value="">全部类别</option>'
+    +'<label class="record-kind-search">知识类别<select id="record-kind">'
     +Object.entries(kinds).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')+'</select></label>'
     +'<label class="record-ontology-search">本体版本<select id="record-ontology" aria-label="按本体版本筛选知识"></select></label>'
     +'<span id="record-count" aria-live="polite"></span>';
   host.before(bar);$('load-records').textContent='刷新记录';
   // 旧面板里的类别下拉与页签是同一件事的两种说法：选择页签时同步它，保证老逻辑（含测试）仍然成立。
   const syncKindSelect=()=>{const select=$('record-kind');if(select&&select.value!==view)select.value=view;};
+  syncKindSelect();
 
   const governance=[...tab.querySelectorAll('.panel')].find(p=>p.querySelector('#resolve-text'));
   if(governance){
@@ -302,7 +303,7 @@
     tabs.append(help);
   }
   function setView(key){
-    if(!VIEW_ORDER.includes(key))return;
+    if(!VIEW_ORDER.includes(key)){syncKindSelect();return;}
     view=key;syncKindSelect();renderTabs();return loadPage();
   }
   function actionsCell(row,index){
@@ -638,7 +639,7 @@
     // before the old response finishes or navigation without a menu click.
     request++;pager?.invalidate();clearTimeout(searchTimer);loading=false;host.setAttribute('aria-busy','false');
   });
-  $('project').addEventListener('change',()=>{request++;pager?.invalidate();clearTimeout(searchTimer);rows=[];total=0;ontology=null;assertions=null;operations=[];duplicates=null;pendingLedgerFocus=null;reclassifyPlan=undefined;$('record-search').value='';$('record-kind').value='';if(!tab.classList.contains('hidden'))load();});
+  $('project').addEventListener('change',()=>{request++;pager?.invalidate();clearTimeout(searchTimer);rows=[];total=0;ontology=null;assertions=null;operations=[];duplicates=null;pendingLedgerFocus=null;reclassifyPlan=undefined;$('record-search').value='';syncKindSelect();if(!tab.classList.contains('hidden'))load();});
   document.addEventListener('records:created',event=>{if(event.detail?.projectId===current&&!tab.classList.contains('hidden'))void loadPage();});
   document.addEventListener('workspace:scope-changed',event=>{
     if(event.detail?.page==='records'&&!tab.classList.contains('hidden'))void load();

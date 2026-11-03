@@ -116,10 +116,13 @@ test('an unpublished empty project renders its action bar and routes pending can
   assert.doesNotThrow(()=>window.OntologyPanel.mount(null,actions,window.OntologyModel));
   state.discovery={published:false,candidate_count:3,candidate_status_counts:{pending:3},entity_types:['客户']};
   window.OntologyPanel.render(state);
-  const pending=all(actions).find(node=>node.textContent==='选择候选并预览');assert.ok(pending);
+  const pending=all(actions).find(node=>node.textContent==='按资料核对候选');assert.ok(pending);
+  assert.ok(all(actions).some(node=>String(node.textContent||'').includes('资料数量待核对，共 3 条候选内容待核对')));
+  state.discovery.pending_document_count=2;window.OntologyPanel.render(state);
+  assert.ok(all(actions).some(node=>String(node.textContent||'').includes('来自 2 份资料，共 3 条候选内容待核对')));
   pending.listeners.click();assert.deepEqual(opened,['intake']);assert.deepEqual(legacy,[]);
   state.preview={id:'history'};window.OntologyPanel.render(state);
-  assert.equal(all(actions).find(node=>node.textContent==='选择候选并预览').disabled,true);
+  assert.equal(all(actions).find(node=>node.textContent==='按资料核对候选').disabled,true);
 });
 
 test('normal draft action bar reports its exact linked knowledge scope',()=>{
@@ -153,6 +156,18 @@ function actionFixture(options={}){
   return {actions,state,calls,messages,timers,events,context,panel:context.window.OntologyPanel,find:text=>all(actions).find(node=>node.textContent===text)};
 }
 
+test('review action visibly explains validation, submission and server-allowed approval before a click',()=>{
+  for(const submitted of [false,true]){
+    const f=actionFixture({draft:submitted?{submitted_at:'now',validation_fingerprint:'frozen'}:{},state:{reviewPlan:{revision:2,items:[{auto_approvable:true}]}}});
+    const helper=all(f.actions).find(node=>node.id==='om-review-action-help');assert.ok(helper);assert.notEqual(helper.hidden,true);
+    assert.ok(all(f.actions).find(node=>node.className==='om-ab-ops').children.includes(helper),'the explanation must move with the actual fixed-footer controls');
+    assert.match(helper.textContent,/仅批量批准服务端允许的变更/);assert.match(helper.textContent,/其余变更仍需「按定义审核」/);assert.match(helper.textContent,/此操作不发布本体/);
+    if(!submitted)assert.match(helper.textContent,/校验并提交审核/);
+    const review=f.find(submitted?'批量批准（1 项变更）':'校验并审核');assert.equal(review['aria-describedby'],'om-review-action-help');
+    assert.ok(!f.calls.some(call=>call.method==='POST'),'rendering the explanation never approves or submits');
+  }
+});
+
 test('submitted review resumes server eligible bulk approval without validation or resubmission',async()=>{
   const f=actionFixture({draft:{submitted_at:'now',validation_fingerprint:'frozen'},state:{gatesLoading:true,reviewGateLoading:false,
     reviewPlan:{revision:2,items:Array.from({length:188},()=>({auto_approvable:true}))}}});
@@ -170,7 +185,7 @@ test('draft footer distinguishes definitions and facts and exposes every server 
   ]}});
   for(const label of ['实体类型','关系类型','属性','关联候选事实'])assert.ok(f.find(label),label);
   assert.ok(!f.find('结构变更'),'low-level operations must not be presented as definition counts');
-  assert.ok(all(f.actions).some(node=>String(node.textContent).includes('进入候选核对页查看')));
+  assert.ok(all(f.actions).some(node=>String(node.textContent).includes('「按资料核对候选」查看')));
   for(const message of ['这份请求还没有提交过审核','188 条变更尚未形成最终决定'])assert.ok(f.find(message),message);
   assert.ok(all(f.actions).some(node=>String(node.textContent).includes('下一步：')&&String(node.textContent).includes('校验并审核')));
   assert.ok(all(f.actions).some(node=>String(node.textContent).includes('按定义审核')));

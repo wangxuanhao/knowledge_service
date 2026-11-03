@@ -79,6 +79,14 @@
 #tab-ontology-model.ontology-model .om-version-context-viewed{color:var(--om-teal)}
 #tab-ontology-model.ontology-model .om-body{display:flex;align-items:stretch;flex:1 1 auto;min-height:612px;max-height:740px;position:relative}
 #tab-ontology-model.ontology-model .om-side{width:208px;flex:0 0 208px;border-right:1px solid var(--om-line);background:var(--om-wash);padding:16px 11px;overflow:auto;scrollbar-width:thin}
+#tab-ontology-model.ontology-model .om-candidate-tasks{padding:10px;margin:0 0 15px;border:1px solid var(--ui-line-strong,#8fb0b0);border-radius:8px;background:var(--ui-surface,#fff);color:var(--ui-ink,#124242);overflow-wrap:anywhere}
+#tab-ontology-model.ontology-model .om-side .om-candidate-tasks h4{margin:0 0 7px;font-size:13px;line-height:1.5;color:var(--ui-ink,#124242)}
+#tab-ontology-model.ontology-model .om-candidate-tasks p{margin:0 0 7px;font-size:12px;line-height:1.6;color:var(--ui-ink-2,#3d5e5e)}
+#tab-ontology-model.ontology-model .om-candidate-tasks .om-btn{width:100%;margin:0;font-size:12px;padding:6px 7px;line-height:1.5;text-align:center;white-space:normal}
+#tab-ontology-model.ontology-model .om-task-draft{margin-top:9px;padding-top:9px;border-top:1px solid var(--ui-line,#d5e4e4)}
+#tab-ontology-model.ontology-model .om-task-draft-count{font-weight:600}
+#tab-ontology-model.ontology-model .om-candidate-tasks .om-task-note{font-size:11px;color:var(--ui-muted,#688585);margin-bottom:0}
+#tab-ontology-model.ontology-model .om-candidate-tasks .om-task-error{color:var(--ui-danger,#be123c)}
 #tab-ontology-model.ontology-model .om-side h4{margin:17px 0 8px;font-size:11px;color:var(--om-muted);font-weight:600;display:flex;align-items:center;gap:6px}
 #tab-ontology-model.ontology-model .om-side h4:first-child{margin-top:0}
 #tab-ontology-model.ontology-model .om-side h4 .om-dot,#tab-ontology-model.ontology-model .om-chip{display:inline-block;width:7px;height:7px;border-radius:2px;background:var(--om-teal);flex:0 0 auto;box-shadow:none}
@@ -121,4 +129,8 @@
 #tab-ontology-model.ontology-model .om-tree-external{display:block;color:var(--om-amber);padding:0 0 6px 20px;font-size:10px}
 @media(max-width:1280px){#tab-ontology-model.ontology-model .om-inspector-shell{display:none}#tab-ontology-model.ontology-model .om-inspector-toggle{display:inline-flex}#tab-ontology-model.ontology-model.om-inspector-open .om-inspector-shell{display:flex;position:fixed;inset:0 0 0 auto;z-index:75;width:min(380px,94vw);height:100dvh;box-shadow:-12px 0 40px #25453020}#tab-ontology-model.ontology-model.om-inspector-open .om-inspector-heading button{display:block}#tab-ontology-model.ontology-model.om-inspector-open .om-inspector-backdrop{display:block;position:fixed;inset:0;z-index:74;background:#234b3b30;border:0;border-radius:0}#tab-ontology-model.ontology-model .om-inspector-heading{padding-top:16px}}
 @media(max-width:900px){#tab-ontology-model.ontology-model .om-side{width:185px;flex-basis:185px}#tab-ontology-model.ontology-model .om-seg{margin-left:0}#tab-ontology-model.ontology-model .om-body{min-height:590px}#tab-ontology-model.ontology-model .om-topbar{gap:7px}}
+
 @media(max-width:650px){#tab-ontology-model.ontology-model .om-body{display:flex;flex-direction:column;max-height:none;min-height:0}#tab-ontology-model.ontology-model .om-side{width:100%;flex:0 0 auto;border-right:0;border-bottom:1px solid var(--om-line);max-height:260px;padding:12px}#tab-ontology-model.ontology-model .om-stage{width:100%;flex:1;min-height:560px}#tab-ontology-model.ontology-model .om-canvas-host{min-height:560px}#tab-ontology-model.ontology-model .om-topbar{padding:10px}#tab-ontology-model.ontology-model .om-brand{font-size:15px}#tab-ontology-model.ontology-model .om-version-context{align-items:flex-start;gap:3px}#tab-ontology-model.ontology-model .om-version-context-divider{display:none}#tab-ontology-model.ontology-model .om-actionbar{padding:10px}#tab-ontology-model.ontology-model .om-inspector-shell .om-detail{width:100%}}
+
+/* Keep primary work outside the bounded mobile term directory. */
+@media(max-width:760px){#tab-ontology-model.ontology-model .om-side{max-height:none}#tab-ontology-model.ontology-model #om-catalog-host{max-height:180px;overflow:auto;scrollbar-width:thin}}

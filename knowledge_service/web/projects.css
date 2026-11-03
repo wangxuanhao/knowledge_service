@@ -274,6 +274,20 @@
     margin-bottom: 0;
 }
 
+.projects-modal-feedback {
+    margin: 14px 0 0;
+    padding: 10px 12px;
+    border: 1px solid var(--ks-line);
+    border-radius: 8px;
+    background: var(--ks-sunken);
+    color: var(--ks-ink);
+    overflow-wrap: anywhere;
+}
+
+.projects-modal-feedback[hidden] { display: none; }
+.projects-modal-feedback[role="alert"] { color: #991b1b; border-color: #dca4a4; }
+.projects-modal-body input[aria-invalid="true"] { border-color: #b64747; }
+
 .projects-modal-footer {
     display: flex;
     gap: 10px;

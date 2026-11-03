@@ -15,7 +15,7 @@
           <h3 class="projects-modal-title">${esc(title)}</h3>
           <button type="button" class="projects-modal-close" aria-label="关闭">×</button>
         </div>
-        <div class="projects-modal-body">${body}</div>
+        <div class="projects-modal-body">${body}<p class="projects-modal-feedback" role="status" aria-live="polite" hidden></p></div>
         ${footer ? `<div class="projects-modal-footer">${footer}</div>` : ''}
       </div>`;
     document.body.appendChild(overlay);
@@ -29,7 +29,17 @@
     document.addEventListener('keydown', onKey);
     overlay.querySelector('.projects-modal-close').onclick = close;
     overlay.addEventListener('click', e=>{ if(e.target===overlay) close(); });
-    return {overlay, close};
+    const feedbackHost=overlay.querySelector('.projects-modal-feedback');
+    let invalidField=null;
+    const feedback=(message,{error=false,field=null}={})=>{
+      invalidField?.removeAttribute('aria-invalid');invalidField=field;
+      feedbackHost.textContent=message;
+      feedbackHost.hidden=!message;
+      feedbackHost.setAttribute('role',error?'alert':'status');
+      feedbackHost.setAttribute('aria-live',error?'assertive':'polite');
+      if(field){field.setAttribute('aria-invalid','true');field.focus();}
+    };
+    return {overlay, close, feedback};
   }
 
   /* ---- 复制项目 ID：排查链路时直接用（接口路径/日志/向量库分区都是这个 ID） ---- */
@@ -100,7 +110,7 @@
   function openRename(id){
     const project = projectsCache.find(p => p.id === id);
     if(!project) return;
-    const {overlay, close} = openModal({
+    const {overlay, close, feedback} = openModal({
       title: '项目设置',
       body: `<label>项目名称<input id="projects-rename-input" maxlength="200"></label><p class="subtle">处理方式在每次上传时选择。</p><div class="project-settings-links"><button id="project-index-config" class="secondary">项目向量化</button><button id="project-overview" class="secondary">项目概览</button><button id="project-backup" class="secondary">知识备份</button></div><hr><button id="project-remove" class="danger">删除项目…</button>`,
       footer: `<button id="projects-rename-confirm">保存</button><button class="secondary" id="projects-rename-cancel">取消</button>`
@@ -115,10 +125,10 @@
     overlay.querySelector('#projects-rename-cancel').onclick = close;
     overlay.querySelector('#projects-rename-confirm').onclick = async ()=>{
       const name = field.value.trim();
-      if(!name){ status('请输入项目名称', true); return; }
+      if(!name){ feedback('请输入项目名称',{error:true,field}); return; }
       const button = overlay.querySelector('#projects-rename-confirm');
       button.disabled = true;
-      status('处理中…');
+      feedback('处理中…');
       try{
         await api('/api/projects/' + encodeURIComponent(id), {name}, 'PUT');
         await projects();
@@ -126,7 +136,7 @@
         close();
         await renderProjects();
       }catch(e){
-        status(e.message, true);
+        feedback(e.message,{error:true});
         button.disabled = false;
       }
     };
@@ -179,7 +189,7 @@
   /* ---- create project (modal: 头部只有一个“创建项目”入口，弹窗内“创建”是提交动作，
      与重命名/删除弹窗交互保持一致，避免“入口按钮 + 展开表单里再一个创建按钮”的重复) ---- */
   function openCreate(){
-    const {overlay, close} = openModal({
+    const {overlay, close, feedback} = openModal({
       title: '创建项目',
       body: `
         <label>项目名称<input id="create-name" maxlength="200" placeholder="新项目名称"></label>
@@ -192,9 +202,9 @@
     overlay.querySelector('#create-project').onclick = async ()=>{
       const button = overlay.querySelector('#create-project');
       const name = nameField.value.trim();
-      if(!name){ status('请输入项目名称', true); return; }
+      if(!name){ feedback('请输入项目名称',{error:true,field:nameField}); return; }
       button.disabled = true;
-      status('处理中…');
+      feedback('处理中…');
       try{
         const p = await api('/api/projects', window.WorkspaceContext.projectPayload(name));
         await projects();
@@ -204,7 +214,7 @@
         close();
         window.KnowledgeTabs.open('sources');
       }catch(e){
-        status(e.message, true);
+        feedback(e.message,{error:true});
         button.disabled = false;
       }
     };

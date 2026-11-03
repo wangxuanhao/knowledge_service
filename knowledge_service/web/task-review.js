@@ -127,15 +127,30 @@
   const previousProjectChange=$('project').onchange;
   $('project').onchange=function(...args){previousProjectChange?.apply(this,args);generation++;if(!reviewPage.classList.contains('hidden'))reviews();if(!$('tab-jobs').classList.contains('hidden'))refresh().catch(e=>status(e.message,true));};
   let jobsGeneration=0;
+  const taskActor=()=>window.Auth?.user?.()||null;
+  const canReviewDiscovery=()=>Boolean(window.Auth?.isAdmin?.());
+  function discoveryFollowup(job){
+    const result=job.result,doc=result?.document,metadata=doc?.metadata||{};
+    if(job.status!=='completed'||!(result?.discovery_candidates>0||metadata.discovery_candidates?.length>0))return null;
+    const identity=value=>typeof value==='string'&&value.trim()?value:null;
+    const runId=identity(result.run_id)||(metadata.extraction_mode==='discovery'?identity(metadata.run_id):null);
+    const matchesRun=!metadata.run_id||metadata.run_id===runId;
+    const discoveryDocument=metadata.extraction_mode==='discovery'
+      ||metadata.readiness?.candidate_ready===true&&metadata.readiness?.graph_ready===false;
+    const documentId=identity(doc?.id)&&(runId?matchesRun:discoveryDocument)?doc.id:null;
+    return {runId,documentId,documentTitle:metadata.title||metadata.source_file||'',
+      label:runId?'核对本次处理的候选':documentId?'核对这份资料当前发现候选':'核对项目当前发现候选'};
+  }
   jobList=async()=>{
-    const serial=++jobsGeneration,p=current;
+    const serial=++jobsGeneration,p=current,projectGeneration=generation,actor=taskActor();
+    const accepts=()=>serial===jobsGeneration&&projectGeneration===generation&&p===current&&actor===taskActor();
     const watching=typeof wb!=='undefined'&&wb.jobs.size>0;
     const visible=!$('tab-jobs').classList.contains('hidden')&&!$('tab-runtime').classList.contains('hidden');
     const [result,scoped]=await Promise.all([
       watching?api('/api/jobs',undefined,'GET'):Promise.resolve({jobs:[]}),
       visible&&p?api('/api/projects/'+encodeURIComponent(p)+'/jobs',undefined,'GET'):Promise.resolve({jobs:[]}),
     ]);
-    if(serial!==jobsGeneration||p!==current)return result.jobs;
+    if(!accepts())return result.jobs;
     if(!visible||$('tab-jobs').classList.contains('hidden')||$('tab-runtime').classList.contains('hidden'))return result.jobs;
     const open=new Set([...$('tasks').querySelectorAll('details[open]')].map(d=>d.dataset.key));
     // Preserve each open log panel's scroll position across the full re-render; follow the
@@ -143,7 +158,8 @@
     const scrollState={};
     $('tasks').querySelectorAll('details[data-key]').forEach(d=>{const pre=d.querySelector('pre');if(pre)scrollState[d.dataset.key]={top:pre.scrollTop,atBottom:pre.scrollHeight-pre.scrollTop-pre.clientHeight<8};});
     const jobs=scoped.jobs;
-    $('tasks').innerHTML=jobs.map(j=>{
+    const followups=jobs.map(discoveryFollowup);
+    $('tasks').innerHTML=jobs.map((j,index)=>{
       const logs=j.logs||[],last={};
       for(const line of logs){
         if(/仍在等待|处理失败/.test(line))continue;
@@ -157,10 +173,25 @@
       const controls=action&&Object.hasOwn(j,'payload')?
         `<div class="admin-only"><button type="button" class="secondary" data-job-action="${action}" data-job-id="${esc(j.id)}">${{cancel:'取消任务',retry:'重试任务',resume:'重新排队'}[action]}</button></div>`:'';
       const resultSummary=j.result?(window.IngestResultSummary?.text(j.result)||'结果摘要尚未就绪，请刷新页面。'):'';
-      return `<article class="card task-summary"><div class="row"><h3>${esc(title)}</h3><b>${esc(states[j.status]||j.status)}</b></div><small>${esc(kinds[j.kind]||j.kind)} · ${esc(j.id)} · ${esc(beijingTime(j.created_at))}（北京时间） · 已运行 ${j.elapsed_seconds??'—'} 秒</small><p>${esc(j.failed_stage||j.stage||'等待前序任务完成')}</p>${j.error?`<p class="error">${esc(j.error)}</p>`:''}${j.result?.pending_reviews?`<p>本次产生 ${j.result.pending_reviews} 条知识候选。<button data-open-review class="secondary">前往知识审核 ↗</button></p>`:''}${resultSummary?`<p class="task-result-summary">${esc(resultSummary)}</p>`:''}<progress max="100" value="${j.progress||0}"></progress><small>阶段进度 ${j.progress||0}%（非模型处理比例）</small><ul>${Object.entries(last).map(([group,line])=>`<li><b>${group}</b> · ${esc(displayLog(line))}</li>`).join('')}</ul>${controls}${j.heartbeat_at?`<small>最近心跳 ${esc(beijingTime(j.heartbeat_at))}（北京时间），仅表示线程仍在等待，不代表实际推进。</small>`:''}<details data-key="${key}" ${open.has(key)?'open':''}><summary>完整日志与执行位置（${logs.length} 条，含重复等待）</summary><pre>${esc(logs.map(displayLog).join('\n'))}${j.worker_stack?'\n\n线程位置\n'+esc(j.worker_stack.join('\n')):''}${j.failure_stack?'\n\n失败位置\n'+esc(j.failure_stack.join('\n')):''}</pre></details></article>`;
+      const followup=followups[index],discoveryAction=followup&&canReviewDiscovery()
+        ?`<p class="admin-only"><button type="button" class="secondary" data-open-discovery="${index}">${esc(followup.label)}</button>${!followup.runId&&!followup.documentId?' <span class="subtle">显示当前项目全部发现候选，不按本次任务筛选</span>':''}</p>`:'';
+      return `<article class="card task-summary"><div class="row"><h3>${esc(title)}</h3><b>${esc(states[j.status]||j.status)}</b></div><small>${esc(kinds[j.kind]||j.kind)} · ${esc(j.id)} · ${esc(beijingTime(j.created_at))}（北京时间） · 已运行 ${j.elapsed_seconds??'—'} 秒</small><p>${esc(j.failed_stage||j.stage||'等待前序任务完成')}</p>${j.error?`<p class="error">${esc(j.error)}</p>`:''}${j.result?.pending_reviews?`<p>本次产生 ${j.result.pending_reviews} 条知识候选。<button data-open-review class="secondary">前往知识审核 ↗</button></p>`:''}${resultSummary?`<p class="task-result-summary">${esc(resultSummary)}</p>`:''}${discoveryAction}<progress max="100" value="${j.progress||0}"></progress><small>阶段进度 ${j.progress||0}%（非模型处理比例）</small><ul>${Object.entries(last).map(([group,line])=>`<li><b>${group}</b> · ${esc(displayLog(line))}</li>`).join('')}</ul>${controls}${j.heartbeat_at?`<small>最近心跳 ${esc(beijingTime(j.heartbeat_at))}（北京时间），仅表示线程仍在等待，不代表实际推进。</small>`:''}<details data-key="${key}" ${open.has(key)?'open':''}><summary>完整日志与执行位置（${logs.length} 条，含重复等待）</summary><pre>${esc(logs.map(displayLog).join('\n'))}${j.worker_stack?'\n\n线程位置\n'+esc(j.worker_stack.join('\n')):''}${j.failure_stack?'\n\n失败位置\n'+esc(j.failure_stack.join('\n')):''}</pre></details></article>`;
     }).join('')||'<p>当前项目暂无任务。</p>';
     $('tasks').querySelectorAll('details[data-key]').forEach(d=>{const pre=d.querySelector('pre'),state=scrollState[d.dataset.key];if(pre&&state)pre.scrollTop=state.atBottom?pre.scrollHeight:state.top;});
     $('tasks').querySelectorAll('[data-open-review]').forEach(button=>button.onclick=()=>reviewNav.click());
+    $('tasks').querySelectorAll('[data-open-discovery]').forEach(button=>button.onclick=async()=>{
+      if(!accepts()||!canReviewDiscovery())return;
+      const followup=followups[Number(button.dataset.openDiscovery)];if(!followup)return;
+      try{
+        if(!window.KnowledgeNavigation?.open||!window.OntologyIntake?.open)throw Error('候选核对模块尚未就绪，请刷新页面。');
+        await window.KnowledgeNavigation.open('ontology-model',{projectId:p});
+        if(!accepts()||!canReviewDiscovery())return;
+        const args={projectId:p,trigger:button};
+        if(followup.runId)args.runId=followup.runId;
+        if(followup.documentId){args.documentId=followup.documentId;args.documentTitle=followup.documentTitle;}
+        await window.OntologyIntake.open(args);
+      }catch(error){if(accepts())status(error.message,true);}
+    });
     $('tasks').querySelectorAll('[data-job-action]').forEach(button=>button.onclick=async()=>{
       button.disabled=true;
       try{

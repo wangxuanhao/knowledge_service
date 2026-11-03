@@ -9,6 +9,7 @@ data/service/
 data/log/
 data/sources/
 .omo
+.codefree
 .venv
 .preview
 .pytest_cache
@@ -26,6 +27,8 @@ data/sources/
 *.db-shm
 *.db-wal
 .benchmarks
+.claude
+.codegraph
 .superpowers
 /.worktrees/
 __pycache__

@@ -224,6 +224,7 @@
     item.append(heading);
   }
   function renderRuns(rows,doc,project){
+    const stamp=scopeStamp(),ticket=window.WorkspaceContext?.ticket(project,'sources');
     body.replaceChildren(detailNode('p','下方记录各次解析、切片和抽取的当次结果；后续本体发布或事实确认不会改写这些历史状态。重试属于新的尝试，流程结束不代表派生索引已同步。','source-detail-intro'));
     const status=detailNode('p','正在核验该资料已确认入图的事实…','source-detail-intro source-graph-status');status.setAttribute('aria-live','polite');body.append(status);
     if(!Array.isArray(rows)||!rows.length){body.append(detailNode('p','暂无独立处理记录。结构化导入的正文或旧资料可能没有解析运行记录。','source-detail-empty'));return status;}
@@ -245,11 +246,24 @@
       }
       if(readiness.children.length)item.append(readiness);
       if(run.failure){const failure=typeof run.failure==='string'?run.failure:run.failure.message||'本次处理未成功，详见原始数据。';item.append(detailNode('p',failure,'source-activity-error'));}
-      if(canWrite()&&run.id&&(run.counts?.assertions_pending>0||run.readiness?.candidate_ready)){
-        const review=detailNode('button','核对本次处理的候选','secondary admin-only');review.type='button';
+      // Pending assertions count formal review candidates only. Current document
+      // metadata can describe this run only when its saved run identity matches.
+      const mode=doc.metadata?.run_id===run.id?doc.metadata?.extraction_mode:null;
+      const formalPending=run.counts?.assertions_pending>0;
+      const formal=formalPending||run.readiness?.graph_ready===true||mode==='ontology';
+      const discovery=!formal&&run.readiness?.candidate_ready===true
+        &&(mode==='discovery'||run.readiness?.graph_ready===false);
+      if(canWrite()&&run.id&&(formalPending||discovery)){
+        const review=detailNode('button',formalPending?'查看项目待审核事实':'核对本次处理的候选','secondary admin-only');review.type='button';
+        if(formalPending)item.append(detailNode('p','显示当前项目全部待审核事实，不按本次处理筛选','subtle'));
         review.onclick=async()=>{
-          if(!canWrite()||project!==current||selected!==doc.id||!drawer.dialog.open)return;
+          if(!canWrite()||!sameContext(project,stamp,ticket)||selected!==doc.id||!drawer.dialog.open)return;
           try{
+            if(formalPending){
+              if(!window.KnowledgeNavigation)throw Error('知识审核导航尚未就绪，请刷新页面。');
+              window.WorkspaceDrawers.close({restoreFocus:false});
+              await window.KnowledgeNavigation.open('reviews',{projectId:project});return;
+            }
             if(!window.OntologyIntake)throw Error('候选核对模块尚未就绪，请刷新页面。');
             window.WorkspaceDrawers.close({restoreFocus:false});window.KnowledgeTabs.open('ontology-model');
             await window.OntologyIntake.open({projectId:project,documentId:doc.id,documentTitle:documentTitle(doc),runId:run.id,trigger:review});

@@ -56,6 +56,8 @@
 #tab-ontology-model.ontology-model #om-workspace-controls>.om-ab-ops,#tab-ontology-model.ontology-model #om-workspace-controls>.om-ab-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0;width:100%;align-items:stretch}
 #tab-ontology-model.ontology-model #om-workspace-controls .om-btn{width:100%;white-space:normal;min-height:36px;font-size:12px;margin:0}
 #tab-ontology-model.ontology-model #om-workspace-controls .om-pub-note{grid-column:1/-1;width:100%;min-width:0;max-width:none;box-sizing:border-box;margin:0;font-size:13px}
+#tab-ontology-model.ontology-model .om-ab-ops{flex-wrap:wrap;min-width:0}
+#tab-ontology-model.ontology-model #om-review-action-help{grid-column:1/-1;min-width:0;max-width:100%;overflow-wrap:anywhere;color:var(--ui-ink-2);margin:0}
 #tab-ontology-model.ontology-model #om-workspace-controls .om-btn.primary{grid-column:1/-1}
 #tab-ontology-model.ontology-model .om-workspace-footer[aria-busy=true] .om-btn:disabled{cursor:progress}
 #tab-ontology-model.ontology-model #om-workspace-controls button[aria-busy=true]::before{content:'';display:inline-block;width:11px;height:11px;box-sizing:border-box;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;margin-right:6px;vertical-align:-1px;animation:om-action-spin .8s linear infinite}

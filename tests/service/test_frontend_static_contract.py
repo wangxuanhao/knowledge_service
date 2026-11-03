@@ -209,7 +209,7 @@ def test_document_upload_workspace_contract():
     for marker in ('.document-upload-workspace', '.document-dropzone', '.document-queue-row',
                    '@media(max-width:850px)', ':focus-visible'):
         assert marker in css, marker
-    assert '/assets/workbench.css?v=chunk-preview-hover-20261022-1' in html
+    assert '/assets/workbench.css?v=multi-file-preview-20261102-1' in html
     assert '/assets/ingest-mode.js?v=canonical-20261021-5' in html
     assert 'max_batch_items' in js and 'max_batch_bytes' in js
     assert re.search(r'/assets/workbench\.js\?v=[\w.-]+', html)
@@ -471,7 +471,7 @@ def test_ontology_model_shows_discovery_guide_when_not_yet_published():
     # 有候选时先明确选择与预览，读取不能偷偷建立草案。
     assert "'/ontology-discovery/drafts'" not in model
     assert 'id="om-generate-draft"' in model
-    assert '选择候选并预览</button>' in model
+    assert '按资料核对候选</button>' in model
     assert 'OntologyIntake.open' in model
     assert '约 1 秒' not in model
     # 层级推断仍是显式的慢入口，不能挤进只读预览。
@@ -520,7 +520,7 @@ def test_ontology_model_offers_incremental_induction_after_publish():
     """
     model = read('ontology-model.js')
     assert 'om-generate-draft-inline' in model
-    assert '新候选' in model
+    assert '从资料候选补充本体' in model
 
 
 def test_ontology_model_allows_inline_constraint_editing():

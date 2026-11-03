@@ -102,9 +102,8 @@ def workbench(browser, tmp_path):
         page.set_default_timeout(5000)
         page.goto(f'http://127.0.0.1:{port}/', wait_until='load')
         page.wait_for_function("() => document.querySelectorAll('#project option').length > 1")
-        with page.expect_response(lambda response: response.request.method == 'POST'
-                                  and response.url.endswith(f'/projects/{project_id}/records/page')):
-            page.select_option('#project', project_id)
+        page.select_option('#project', project_id)
+        page.wait_for_function('(id) => current === id', arg=project_id)
         page.click('[data-tab="sources"]')
         page.locator('#tab-sources').wait_for(state='visible')
         page.click('#upload-source')
@@ -112,6 +111,7 @@ def workbench(browser, tmp_path):
         # 2026-10-05：写入页改回「纯文件上传」并取消折叠 —— 文件上传面板直接可见，
         # 不再需要展开 <details>。结构变了，活文档跟着改。
         page.locator('#tab-ingest .document-upload-panel').wait_for(state='visible')
+        page.click('[data-upload-step="2"]')
         yield SimpleNamespace(page=page, project=project_id)
     finally:
         try:
@@ -169,6 +169,7 @@ def _choose_text(page, title='预览规则', text='待切片的正文'):
 def _request_preview(page, path_suffix='/documents/upload/preview'):
     with page.expect_response(lambda response: response.url.endswith(path_suffix)):
         page.click('#preview-chunks')
+    page.wait_for_function("() => document.getElementById('chunk-preview-content').getAttribute('aria-busy') === 'false'")
 
 
 def _dialog_accessibility(page):
@@ -191,9 +192,9 @@ def _assert_background_is_inert(page, expected):
     assert page.locator('body > main').evaluate('(element) => element.inert') is expected
 
 
-def test_preview_host_is_a_body_level_dialog_and_record_import_is_collapsed(workbench):
+def test_preview_host_is_inside_upload_dialog_and_record_import_stays_separate(workbench):
     page = workbench.page
-    drawer = page.locator('body > #chunk-preview')
+    drawer = page.locator('#library-workspace-drawer > #chunk-preview')
 
     assert drawer.count() == 1
     assert drawer.locator('.chunk-preview-drawer').count() == 1
@@ -204,7 +205,7 @@ def test_preview_host_is_a_body_level_dialog_and_record_import_is_collapsed(work
     assert accessibility['description']
     structured_import = page.locator('details:has(#batch):has(#write-batch)')
     assert structured_import.count() == 1
-    assert structured_import.evaluate('(details) => details.open') is False
+    assert structured_import.evaluate('(details) => details.open') is True
     assert '结构化记录导入（高级）' in structured_import.locator('summary').inner_text()
     assert '不是批量上传文档' in structured_import.text_content()
 
@@ -290,11 +291,13 @@ def test_empty_and_failed_previews_have_distinct_recoverable_states(workbench):
     _route_json(page, '**/documents/upload/preview', {'detail': '预览暂时不可用'}, status=503)
     _request_preview(page)
 
-    drawer.wait_for(state='hidden')
+    drawer.wait_for(state='visible')
     page.wait_for_function("() => !document.getElementById('preview-chunks').disabled")
     assert '预览暂时不可用' in page.locator('#status').inner_text()
+    assert '预览暂时不可用' in drawer.locator('#chunk-preview-content').inner_text()
+    assert drawer.get_by_role('button', name='重试此文件').count() == 1
     assert page.locator('#preview-chunks').is_enabled()
-    _assert_background_is_inert(page, False)
+    _assert_background_is_inert(page, True)
 
 
 @pytest.mark.parametrize('width', [850, 520])
@@ -354,9 +357,39 @@ def test_file_preview_uses_upload_endpoint_and_opens_the_same_drawer(workbench):
 
     drawer = page.locator('#chunk-preview')
     drawer.wait_for(state='visible')
-    assert drawer.evaluate('(element) => element.parentElement === document.body')
+    assert drawer.evaluate("(element) => element.parentElement.id === 'library-workspace-drawer'")
     assert drawer.locator('.chunk-preview-drawer').get_attribute('role') == 'dialog'
     assert len(upload_calls) == 1
     assert len(text_calls) == 0
     assert '文件首段预览' in drawer.inner_text()
     assert drawer.locator('button[aria-current="true"]').count() == 1
+
+
+def test_multiple_files_can_be_selected_and_previewed_independently(workbench):
+    page = workbench.page
+    calls = _route_json(page, '**/documents/upload/preview', [
+        _preview_result('第一份文件的切片'),
+        _preview_result('第二份文件的切片'),
+    ])
+    page.set_input_files('#doc-file', [
+        {'name': 'first.txt', 'mimeType': 'text/plain', 'buffer': b'first source'},
+        {'name': 'second.txt', 'mimeType': 'text/plain', 'buffer': b'second source'},
+    ])
+    _request_preview(page)
+    drawer = page.locator('#chunk-preview')
+    drawer.wait_for(state='visible')
+    picker = drawer.get_by_role('combobox', name='预览文件')
+    assert picker.locator('option').all_text_contents() == ['first.txt', 'second.txt']
+    assert '第一份文件的切片' in drawer.locator('#chunk-preview-content').inner_text()
+
+    with page.expect_response(lambda response: response.url.endswith('/documents/upload/preview')):
+        picker.select_option('1')
+    page.wait_for_function("() => document.getElementById('chunk-preview-content').textContent.includes('第二份文件的切片')")
+    assert '第二份文件的切片' in drawer.locator('#chunk-preview-content').inner_text()
+    assert '第一份文件的切片' not in drawer.locator('#chunk-preview-content').inner_text()
+    assert 'second.txt' in drawer.locator('#chunk-preview-summary').inner_text()
+    assert 'filename="second.txt"' in calls[1].post_data_buffer.decode('utf-8')
+
+    picker.select_option('0')
+    assert '第一份文件的切片' in drawer.locator('#chunk-preview-content').inner_text()
+    assert len(calls) == 2

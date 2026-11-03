@@ -4,6 +4,85 @@ const fs=require('node:fs');
 const path=require('node:path');
 const file=path.join(__dirname,'../../knowledge_service/web/ontology-intake.js');
 const intake=fs.existsSync(file)?require(file):{};
+function appendCandidates(){
+  const source={document_id:'doc',document_version_id:'source-v1'};
+  return [
+    {...source,id:'bound-owner',kind:'entity',text:'原草案商户',proposed_type:'商户',required_by:['next-relation'],linked_drafts:[{draft_id:'draft',status:'draft_created'}]},
+    {...source,id:'new-place',kind:'entity',text:'新增门店',proposed_type:'门店'},
+    {...source,id:'next-relation',kind:'relation',text:'原草案商户 → 经营 → 新增门店',proposed_type:'经营',subject_id:'bound-owner',object_id:'new-place'},
+  ];
+}
+
+test('appending relations reuses only their same-draft source entities in preview and confirmation',async()=>{
+  const items=appendCandidates();items.push({...items[0],id:'unrelated-owner',required_by:[]});
+  const {controller:c,calls}=fixture({items});await c.open();c.selectMany(['new-place','next-relation'],true);
+  await c.preview();
+  const body=calls.find(call=>call.path==='/selection-preview').body;
+  assert.deepEqual(body.candidate_ids,['bound-owner','new-place','next-relation']);
+  assert.equal(body.target_draft_id,'draft');assert.equal(body.expected_revision,2);
+  assert.deepEqual(c.state.selected,['new-place','next-relation'],'the explicit selection remains distinct from reused context');
+  assert.equal(calls.filter(call=>call.path==='/add-selection').length,0);
+  await c.apply('add');assert.deepEqual(calls.at(-1).body.candidate_ids,body.candidate_ids);
+});
+
+test('same-draft attribute owners are reused once even when several selected facts depend on them',async()=>{
+  const items=appendCandidates();items.push({...items[2],id:'amount',kind:'attribute',entity_id:'bound-owner',proposed_type:'金额',value:9});
+  const {controller:c,calls}=fixture({items});await c.open();c.selectMany(['new-place','next-relation','amount'],true);await c.preview();
+  assert.deepEqual(calls.at(-1).body.candidate_ids,['amount','bound-owner','new-place','next-relation']);
+});
+
+test('same-draft dependencies retain their recorded published mapping without guessing from suggestions',async()=>{
+  const items=appendCandidates();items[0].linked_drafts[0].confirmed_mapping={target_iri:'urn:Original',target_kind:'class'};
+  items[0].suggested_mapping={target_iri:'urn:Suggested',target_kind:'class'};
+  const terms=[{iri:'urn:Original',kind:'class'},{iri:'urn:Suggested',kind:'class'}];
+  const {controller:c,calls}=fixture({items,terms});await c.open();c.selectMany(['new-place','next-relation'],true);await c.preview();
+  assert.deepEqual(calls.at(-1).body.confirmed_mappings,{'bound-owner':'urn:Original'});
+  assert.deepEqual(c.state.mappings,{},'recorded dependency context must not alter explicit user choices');
+});
+
+test('refreshing an inherited draft mapping invalidates the older preview',async()=>{
+  const initial=appendCandidates();initial[0].linked_drafts[0].confirmed_mapping={target_iri:'urn:Original',target_kind:'class'};
+  const refreshed=JSON.parse(JSON.stringify(initial[0]));refreshed.linked_drafts[0].confirmed_mapping.target_iri='urn:Updated';
+  const {controller:c}=fixture({readCandidates:route=>({
+    items:route.includes('offset=0')?initial:[refreshed],total:4,expected_ontology_id:'release',
+    published_terms:[{iri:'urn:Original',kind:'class'},{iri:'urn:Updated',kind:'class'}]})});
+  await c.open();c.selectMany(['new-place','next-relation'],true);await c.preview();await c.more();
+  assert.equal(c.state.preview,null);
+  await assert.rejects(c.apply('add'),/预览/);
+});
+
+test('draft dependency reuse follows the explicit destination and never crosses draft or source identity',async()=>{
+  for(const mode of ['new','other','reuse','other-link','other-document','other-version','unknown-version']){
+    const items=appendCandidates();
+    if(mode==='other-link')items[0].linked_drafts.push({draft_id:'other',status:'draft_created'});
+    if(mode==='other-document')items[0].document_id='different-doc';
+    if(mode==='other-version')items[0].document_version_id='old-v';
+    if(mode==='unknown-version')delete items[0].document_version_id;
+    const {controller:c,calls}=fixture({items});await c.open();c.selectMany(['new-place','next-relation'],true);
+    if(['new','other','reuse'].includes(mode))c.target(mode,5);
+    if(mode==='reuse')for(const id of c.state.selected){c.state.mappings[id]='urn:explicit';}
+    await c.preview();assert.deepEqual(calls.at(-1).body.candidate_ids,['new-place','next-relation'],mode);
+  }
+});
+
+test('switching the destination invalidates preview and removes previous draft dependency context',async()=>{
+  const {controller:c,calls}=fixture({items:appendCandidates()});await c.open();c.selectMany(['new-place','next-relation'],true);await c.preview();
+  assert.ok(calls.at(-1).body.candidate_ids.includes('bound-owner'));
+  c.target('new');await assert.rejects(c.apply('add'),/预览/);await c.preview();
+  assert.deepEqual(calls.at(-1).body.candidate_ids,['new-place','next-relation']);
+  c.target('draft',2);await c.preview();assert.ok(calls.at(-1).body.candidate_ids.includes('bound-owner'));
+});
+
+test('the drawer explains same-draft entity reuse and permits its complete fact preview',async()=>{
+  const f=uiFixture({candidates:appendCandidates()});await f.ui.open({projectId:'p'});
+  await f.find('选择当前列表（2 条）').onclick();
+  assert.ok(f.find('将复用所选草案中已有的 1 条关联实体，与本次选择一起核对；不会重复创建实体。'));
+  await f.find('预览选中内容（只读）').onclick();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.calls.find(call=>call.url.endsWith('/selection-preview')).body.candidate_ids)),['bound-owner','new-place','next-relation']);
+  assert.ok(f.find('本次选择 2 条候选，复用原草案关联实体 1 条，合计核对 3 条。'));
+  assert.equal(f.find('确认加入草案，等待发布').disabled,false);
+  assert.ok(!f.find('逐条事实范围或预期结果不完整，暂不能确认。请重新读取并预览。'));
+});
 function fixture(options={}){
   assert.equal(typeof intake.createController,'function','intake exposes a testable selection controller');
   const context={project:'p',draftId:'draft',revision:2,ontologyId:'release',preview:false},calls=[];
@@ -66,15 +145,15 @@ test('receipt reports actual independent fact and index outcomes',()=>{
 
 function uiFixture(options={}){
   const vm=require('node:vm'),rootNode=element('body'),drawers=[],calls=[];
-  function element(tag){return {tag,children:[],value:'',classList:{add(){},toggle(){}},setAttribute(){},append(...nodes){this.children.push(...nodes);},replaceChildren(...nodes){this.children=nodes;},focus(){}};}
-  const state={ontologyId:'release',draft:{id:'draft',status:'pending',revision:2}};
+  function element(tag){return {tag,children:[],value:'',scrollTop:0,scrollCalls:[],classList:{add(){},toggle(){}},setAttribute(name,value){this[name]=value;},append(...nodes){this.children.push(...nodes);},replaceChildren(...nodes){this.children=nodes;if(options.clampBodyOnReplace&&this.className==='ontology-intake')for(const drawer of drawers)drawer.body.scrollTop=0;},querySelector(selector){return selector.startsWith('.')?all(this).find(item=>String(item.className||'').split(' ').includes(selector.slice(1)))||null:null;},focus(){this.focused=true;window.document.activeElement=this;},getBoundingClientRect(){return options.rect?.(this,drawers[0])||{top:this.className==='workspace-drawer-body'?120:600};},scrollTo(options){this.scrollTop=options.top;this.scrollCalls.push(options);},scrollIntoView(){this.scrolled=true;for(const drawer of drawers)drawer.dialog.scrollTop=100;}};}
+  const state={ontologyId:'release',draft:options.noDraft?null:{id:'draft',status:'pending',revision:2}};
   const candidates=options.candidates||[{id:'a',text:'张三',kind:'entity',proposed_type:'客户',document_id:'doc',document_version_id:'version',evidence:'原文证据'}];
   const values=new Map();
-  const window={document:{createElement:element,body:rootNode,getElementById:()=>null,dispatchEvent(){}},sessionStorage:{getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)},Auth:{isAdmin:()=>true},
-    OntologyModel:{S:state,uid:()=> 'ui-key',refresh:options.refresh||(async()=>{})},WorkspaceDrawers:{create(config){const drawer={dialog:element('dialog'),open(){this.isOpen=true;},close(){this.isOpen=false;config.onClose();},...config};drawers.push(drawer);return drawer;}}};
+  const window={document:{createElement:element,body:rootNode,getElementById:id=>drawers.flatMap(drawer=>all(drawer.content)).find(item=>item.id===id)||null,dispatchEvent(){}},sessionStorage:{getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)},Auth:{isAdmin:()=>true},
+    matchMedia:()=>({matches:!!options.reducedMotion}),OntologyModel:{S:state,uid:()=> 'ui-key',refresh:options.refresh||(async()=>{})},WorkspaceDrawers:{create(config){const body=element('div');body.className='workspace-drawer-body';const drawer={dialog:element('dialog'),body,open(){this.isOpen=true;},close(){this.isOpen=false;config.onClose();},...config};drawers.push(drawer);return drawer;}}};
   const context={window,current:'p',setTimeout,clearTimeout,console,CustomEvent:class{constructor(type,options){this.type=type;this.detail=options.detail;}},api:async(url,body,method)=>{calls.push({url,body,method});
-    if(url.endsWith('/ontology-drafts'))return {items:[{id:'draft',status:'pending',revision:2,title:'手工草案'}]};
-    if(url.includes('/candidates'))return {items:candidates,total:candidates.length,expected_ontology_id:options.noOntology?null:'release',published_terms:options.terms||[]};
+    if(url.endsWith('/ontology-drafts'))return {items:options.noDraft?[]:options.drafts||[{id:'draft',status:'pending',revision:2,title:'手工草案'}]};
+    if(url.includes('/candidates'))return options.readCandidates?options.readCandidates(url):{items:candidates,total:candidates.length,documents:options.documents,expected_ontology_id:options.noOntology?null:'release',published_terms:options.terms||[]};
     if(url.endsWith('/selection-preview')){if(options.previewRead)await options.previewRead();return {can_add:true,suggestions:[],associated_fact_scope:candidates.filter(item=>body.candidate_ids.includes(item.id)),fact_outcomes:candidates.map(item=>({candidate_id:item.id,outcome:'pending',message:'依赖本轮结构审核通过'})),preview_fingerprint:'fp',source_fingerprint:'src',...options.previewResponse};}
     if(url.endsWith('/add-selection')&&options.confirmRead)return options.confirmRead(body);
     return {};
@@ -90,6 +169,92 @@ test('drawer previews real selected candidate identities and explicit target wit
   const preview=f.calls.find(call=>call.url.endsWith('/selection-preview'));
   assert.deepEqual(JSON.parse(JSON.stringify(preview.body.candidate_ids)),['a']);assert.equal(preview.body.target_draft_id,'draft');
   assert.ok(f.find('确认加入草案，等待发布'));assert.ok(!f.calls.some(call=>call.method==='POST'&&call.url.endsWith('/ontology-drafts')));
+});
+
+test('draft destination cards show new versus existing and preview only the explicit destination',async()=>{
+  const f=uiFixture();await f.ui.open({projectId:'p'});
+  const radio=value=>f.all(f.drawers[0].content).find(item=>item.type==='radio'&&item.name==='oi-draft-destination'&&item.value===value);
+  assert.ok(f.find('新建一份草案'));assert.ok(f.find('加入已有草案'));assert.equal(radio('existing').checked,true);
+  const existing=f.all(f.drawers[0].content).find(item=>item['aria-label']==='选择已有草案');assert.equal(existing.value,'draft');
+  assert.ok(!existing.children.some(item=>item.value==='new'));
+  await radio('new').onchange();assert.equal(f.ui.state.target,'new');assert.equal(radio('new').checked,true);
+  assert.ok(!f.all(f.drawers[0].content).some(item=>item['aria-label']==='选择已有草案'));
+  assert.ok(f.all(f.drawers[0].content).some(item=>/确认加入时才创建/.test(item.textContent||'')));
+  const checkbox=f.all(f.drawers[0].content).find(item=>item.type==='checkbox');checkbox.checked=true;await checkbox.onchange();
+  await f.find('预览选中内容（只读）').onclick();
+  assert.equal(f.calls.find(call=>call.url.endsWith('/selection-preview')).body.create_new_draft,true);
+  assert.ok(!f.calls.some(call=>call.url.endsWith('/add-selection')||call.method==='POST'&&call.url.endsWith('/ontology-drafts')));
+  await f.find('返回调整选择').onclick();await radio('existing').onchange();assert.equal(f.ui.state.target,'draft');
+});
+
+test('existing destination without an active draft stays explicitly unselected across reopening',async()=>{
+  const f=uiFixture({noDraft:true});await f.ui.open({projectId:'p'});
+  const existing=()=>f.all(f.drawers[0].content).find(item=>item.type==='radio'&&item.name==='oi-draft-destination'&&item.value==='existing');
+  assert.ok(existing());await existing().onchange();assert.equal(f.ui.state.target,'');assert.equal(existing().checked,true);
+  assert.ok(f.find('当前没有可加入的工作草案，可选择「新建一份草案」。'));
+  f.drawers[0].close();await f.ui.open({projectId:'p'});assert.equal(existing().checked,true);assert.equal(f.ui.state.target,'');
+  assert.equal(f.calls.filter(call=>call.method==='POST').length,0);
+});
+
+test('explicit existing draft survives switching to new, reuse and reopening without selecting another draft',async()=>{
+  const f=uiFixture({drafts:[{id:'draft',status:'pending',revision:2},{id:'other',status:'pending',revision:4}]});
+  await f.ui.open({projectId:'p'});
+  const destination=value=>f.all(f.drawers[0].content).find(item=>item.name==='oi-draft-destination'&&item.value===value);
+  let select=f.all(f.drawers[0].content).find(item=>item['aria-label']==='选择已有草案');select.value='other';await select.onchange();
+  assert.equal(f.ui.state.target,'other');destination('new').focus();await destination('new').onchange();
+  assert.equal(f.context.window.document.activeElement,destination('new'),'repainting the destination preserves keyboard focus on the replacement radio');
+  await destination('existing').onchange();
+  assert.equal(f.ui.state.target,'other');assert.equal(f.ui.state.targetRevision,4);
+  const goal=value=>f.all(f.drawers[0].content).find(item=>item.name==='oi-goal'&&item.value===value);
+  await goal('reuse').onchange();await goal('structure').onchange();assert.equal(f.ui.state.target,'other');
+  f.drawers[0].close();await f.ui.open({projectId:'p'});assert.equal(f.ui.state.target,'other');
+  assert.equal(f.calls.filter(call=>call.method==='POST').length,0);
+});
+
+test('changing draft destination retains the candidate-stage body position after a content rebuild',async()=>{
+  const f=uiFixture({clampBodyOnReplace:true,drafts:[{id:'draft',status:'pending',revision:2},{id:'other',status:'pending',revision:4}]});await f.ui.open({projectId:'p'});
+  const {body,dialog}=f.drawers[0],destination=value=>f.all(f.drawers[0].content).find(item=>item.name==='oi-draft-destination'&&item.value===value);
+  body.scrollTop=720;destination('new').focus();await destination('new').onchange();
+  assert.equal(body.scrollTop,720,'switching to new must keep the destination cards at the same body position');
+  destination('existing').focus();await destination('existing').onchange();assert.equal(body.scrollTop,720);
+  const select=f.all(f.drawers[0].content).find(item=>item['aria-label']==='选择已有草案');select.focus();select.value='other';await select.onchange();
+  assert.equal(body.scrollTop,720,'choosing an existing draft must not jump back to the candidate list');
+  assert.equal(dialog.scrollTop,0,'only the content body owns scrolling');assert.equal(f.ui.state.target,'other');
+  assert.equal(f.calls.filter(call=>call.method==='POST').length,0);
+});
+
+for(const goalHeight of [660,900])test(`destination expansion reveals the existing field above the sticky actions with a ${goalHeight}px goal`,async()=>{
+  const f=uiFixture({rect(node,drawer){
+    if(node.className==='workspace-drawer-body')return {top:100,bottom:950,height:850};
+    if(node.className==='oi-actions')return {top:860,bottom:950,height:90};
+    const offset=drawer?.body.scrollTop||0;
+    if(node.id==='oi-processing-goal')return {top:1000-offset,bottom:1000+goalHeight-offset,height:goalHeight};
+    if(node.id==='oi-existing-draft')return {top:1000+goalHeight-50-offset,bottom:1000+goalHeight-12-offset,height:38};
+    return {top:600,bottom:620,height:20};
+  }});await f.ui.open({projectId:'p'});
+  const {body,dialog}=f.drawers[0],destination=value=>f.all(f.drawers[0].content).find(item=>item.name==='oi-draft-destination'&&item.value===value);
+  body.scrollTop=720;destination('new').focus();await destination('new').onchange();
+  destination('existing').focus();await destination('existing').onchange();
+  const select=()=>f.all(f.drawers[0].content).find(item=>item['aria-label']==='选择已有草案');
+  assert.ok(select().getBoundingClientRect().bottom<=856,'expanded field must be visible above the sticky footer before native selection');
+  assert.ok(select().getBoundingClientRect().top>=104,'expanded field must remain below the drawer heading');
+  assert.equal(f.context.window.document.activeElement,destination('existing'),'revealing the field retains native radio focus');
+  const visibleOffset=body.scrollTop;select().focus();select().value='draft';await select().onchange();
+  assert.equal(body.scrollTop,visibleOffset,'an already visible destination does not jump on selection');
+  assert.equal(f.context.window.document.activeElement,select());assert.equal(dialog.scrollTop,0);
+  assert.equal(f.calls.filter(call=>call.method==='POST').length,0);
+});
+
+test('candidate body scroll is not carried into the preview progress or new preview stage',async()=>{
+  let finish;const f=uiFixture({previewRead:()=>new Promise(resolve=>finish=resolve)});await f.ui.open({projectId:'p'});
+  const checkbox=f.all(f.drawers[0].content).find(item=>item.type==='checkbox');checkbox.checked=true;await checkbox.onchange();
+  const {body,dialog}=f.drawers[0];body.scrollTop=720;const preview=f.find('预览选中内容（只读）').onclick();
+  for(let i=0;i<10;i++)await Promise.resolve();
+  try{assert.equal(body.scrollTop,0,'new progress feedback must start at the top of the content body');}
+  catch(error){finish();await preview;throw error;}
+  body.scrollTop=99;finish();await preview;
+  assert.equal(body.scrollCalls.at(-1).top,480,'preview navigation starts from the new stage rather than an old selection offset');
+  assert.equal(dialog.scrollTop,0);assert.ok(f.find('确认加入草案，等待发布'));
 });
 test('closing during preparation cannot reopen or populate a stale drawer',async()=>{
   let resolve;const f=uiFixture({refresh:()=>new Promise(done=>{resolve=done;})});const opening=f.ui.open({projectId:'p'});
@@ -311,7 +476,7 @@ test('large previews become a bounded confirmation step rather than extending th
   const suggestions=Array.from({length:188},(_,i)=>({action:i%3?'add_annotation':'create_term',target_iri:'urn:Type'+Math.floor(i/3),after:{kind:'class'}}));
   const f=uiFixture({previewResponse:{suggestions}});await f.ui.open({projectId:'p'});
   const checkbox=f.all(f.drawers[0].content).find(item=>item.type==='checkbox');checkbox.checked=true;await checkbox.onchange();await f.find('预览选中内容（只读）').onclick();
-  assert.equal(f.find('02 批量选择候选'),undefined,'selection page is replaced by the confirmation step');
+  assert.equal(f.find('01 按资料选择候选'),undefined,'selection page is replaced by the confirmation step');
   assert.ok(f.find('返回调整选择'));assert.ok(f.find('确认加入草案，等待发布'));
   const detail=f.all(f.drawers[0].content).find(item=>item.className==='oi-preview-details');
   assert.ok(detail);assert.equal(detail.open,false);
@@ -341,4 +506,88 @@ test('preview counts definitions, operations and factual candidates independentl
   suggestions.push(...Array.from({length:8},(_,i)=>({action:'add_parent',target_iri:'urn:'+i})));
   const associated_fact_scope=Array.from({length:118},(_,i)=>({id:'fact-'+i,kind:i<73?'entity':'relation'}));
   assert.deepEqual(intake.previewSummary({suggestions,associated_fact_scope}),{selected:118,entities:73,relations:45,attributes:0,newClasses:34,newRelations:26,newAttributes:0,definitions:60,operations:188});
+});
+
+const documentDirectory=[{document_id:'doc-a',document_title:'资料甲',total:2,pending_count:2,draft_count:0},{document_id:'doc-b',document_title:'资料乙',total:2,pending_count:1,draft_count:1}];
+function directoryResponse(items,extra={}){return {items,total:4,documents:documentDirectory,expected_ontology_id:'release',published_terms:[{iri:'urn:Customer',kind:'class'}],...extra};}
+test('document reads retain exact task scope, deduplicate global overlap and restore lazy selections',async()=>{
+  const a={id:'a',document_id:'doc-a',kind:'entity'},b={id:'b',document_id:'doc-b',kind:'entity'};
+  const {controller:c,calls}=fixture({readCandidates:path=>directoryResponse(path.includes('document_id=doc-b')?[b]:path.includes('offset=0')?[a]:[b],{scope_note:'范围已核对'})});
+  await c.open({batchId:'batch',runId:'run'});
+  assert.deepEqual(c.state.documents,documentDirectory);assert.deepEqual(c.state.expandedDocuments,{});
+  await c.toggleDocument('doc-b');assert.equal(c.state.offset,1);assert.equal(c.state.expandedDocuments['doc-b'],true);
+  assert.match(calls[1].path,/offset=0&limit=100&document_id=doc-b&batch_id=batch&run_id=run/);
+  c.select('b',true);c.mapping('b','urn:Customer');await c.more();assert.deepEqual(c.state.items.map(x=>x.id),['a','b']);
+  await c.toggleDocument('doc-b');assert.deepEqual(c.state.selected,['b']);c.close();await c.open({batchId:'batch',runId:'run'});
+  assert.deepEqual(c.state.selected,['b']);assert.equal(c.state.mappings.b,'urn:Customer');assert.equal(c.state.expandedDocuments['doc-b'],false);
+});
+test('lazy-only document pages are replayed on reopen without advancing global pagination',async()=>{
+  const a={id:'a',document_id:'doc-a',kind:'entity'},b={id:'b',document_id:'doc-b',kind:'entity'};
+  const {controller:c}=fixture({readCandidates:path=>directoryResponse(path.includes('document_id=doc-b')?[b]:[a])});
+  await c.open();await c.loadDocument('doc-b');c.select('b',true);c.close();await c.open();
+  assert.equal(c.state.offset,1);assert.deepEqual(c.state.selected,['b']);assert.deepEqual(c.state.items.map(x=>x.id),['a','b']);
+});
+test('pinned candidate entries trim directory and cannot read unrelated documents',async()=>{
+  const {controller:c,calls}=fixture({readCandidates:()=>directoryResponse([{id:'a',document_id:'doc-a',kind:'entity'},{id:'b',document_id:'doc-b',kind:'entity'}])});
+  await c.open({candidateIds:['a']});assert.deepEqual(c.state.documents.map(x=>x.document_id),['doc-a']);assert.equal(c.state.documents[0].total,1);
+  await assert.rejects(c.loadDocument('doc-b'),/范围/);assert.equal(calls.length,1);assert.deepEqual(c.state.selected,['a']);
+});
+test('late document responses cannot populate a closed or different project session',async()=>{
+  for(const change of ['close','project']){let finish;
+    const {controller:c,context}=fixture({readCandidates:path=>path.includes('document_id=doc-b')?new Promise(resolve=>finish=resolve):directoryResponse([{id:'a',document_id:'doc-a',kind:'entity'}])});
+    await c.open();const loading=c.loadDocument('doc-b');if(change==='close')c.close();else context.project='q';
+    finish(directoryResponse([{id:'b',document_id:'doc-b',kind:'entity'}]));await loading;assert.deepEqual(c.state.items.map(x=>x.id),['a']);
+  }
+});
+test('unloaded document headers start collapsed and group selection never includes hidden rows',async()=>{
+  const f=uiFixture({candidates:[{id:'a',document_id:'doc-a',kind:'entity',text:'甲'}],documents:documentDirectory});await f.ui.open({projectId:'p'});
+  assert.ok(f.find('资料甲'));assert.ok(f.find('资料乙'));assert.equal(f.all(f.drawers[0].content).filter(x=>x.type==='checkbox').length,0);
+  await f.find('选择当前列表（1 条）').onclick();assert.deepEqual(Array.from(f.ui.state.selected),['a']);
+  await f.find('全部展开').onclick();assert.ok(f.find('取消本资料已加载候选（1 条）'));await f.find('全部收起').onclick();assert.deepEqual(Array.from(f.ui.state.selected),['a']);
+});
+test('older inventories report only qualified loaded document counts',async()=>{
+  const f=uiFixture();await f.ui.open({projectId:'p'});assert.ok(f.all(f.drawers[0].content).some(x=>/已读取 1 份资料.*资料总数待核对/.test(x.textContent||'')));
+});
+
+test('single document defaults open and accessible collapse preferences remain isolated by actor and scope',async()=>{
+  let actor='first';const {controller:c}=fixture({getActor:()=>actor,readCandidates:()=>directoryResponse([{id:'a',document_id:'doc-a',kind:'entity'}],{documents:documentDirectory.slice(0,1)})});
+  await c.open({documentId:'doc-a'});assert.equal(c.state.expandedDocuments['doc-a'],true);await c.toggleDocument('doc-a');
+  actor='second';c.close();await c.open({documentId:'doc-a'});assert.equal(c.state.expandedDocuments['doc-a'],true);c.close();
+  actor='first';await c.open({documentId:'doc-a'});assert.equal(c.state.expandedDocuments['doc-a'],false);c.close();
+  await c.open();assert.equal(c.state.expandedDocuments['doc-a'],true);
+  const f=uiFixture();await f.ui.open({projectId:'p'});const toggle=f.all(f.drawers[0].content).find(x=>x.className==='oi-document-toggle');
+  assert.equal(toggle['aria-expanded'],'true');assert.equal(toggle['aria-controls'],'oi-document-body-doc');
+});
+test('group selection is limited to loaded matching candidates and preserves hidden mappings',async()=>{
+  const rows=[{id:'a',document_id:'doc-a',kind:'entity',proposed_type:'客户'},{id:'b',document_id:'doc-a',kind:'relation',proposed_type:'拥有'}];
+  const f=uiFixture({candidates:rows,documents:documentDirectory});await f.ui.open({projectId:'p'});
+  const kind=f.all(f.drawers[0].content).find(x=>x.id==='oi-filter-kind');kind.value='entity';kind.onchange();await f.find('全部展开').onclick();
+  await f.find('选择本资料已加载候选（1 条）').onclick();assert.deepEqual(Array.from(f.ui.state.selected),['a']);assert.equal(f.calls.filter(x=>x.method==='POST').length,0);
+  await f.find('全部收起').onclick();assert.deepEqual(Array.from(f.ui.state.selected),['a']);
+});
+test('document failure permits read retry while preserving selections and mappings',async()=>{
+  let fail=true;const {controller:c}=fixture({readCandidates:path=>{if(path.includes('document_id=doc-b')){if(fail)throw Error('读取失败');return directoryResponse([{id:'b',document_id:'doc-b',kind:'entity'}]);}return directoryResponse([{id:'a',document_id:'doc-a',kind:'entity'}]);}});
+  await c.open();c.select('a',true);c.mapping('a','urn:Customer');await assert.rejects(c.toggleDocument('doc-b'),/读取失败/);
+  assert.deepEqual(c.state.selected,['a']);assert.equal(c.state.mappings.a,'urn:Customer');assert.equal(c.state.documentErrors['doc-b'],'读取失败');
+  fail=false;await c.loadDocument('doc-b');assert.equal(c.state.documentErrors['doc-b'],undefined);assert.deepEqual(c.state.selected,['a']);
+});
+
+test('a fresh project guides a selected candidate to its processing goal before readonly preview',async()=>{
+  const f=uiFixture({noDraft:true,noOntology:true});await f.ui.open({projectId:'p'});
+  const pick=f.all(f.drawers[0].content).find(item=>item.type==='checkbox');pick.checked=true;await pick.onchange();
+  const next=f.find('下一步：选择处理方式');assert.ok(next);assert.equal(next.disabled,false);await next.onclick();
+  const goal=f.all(f.drawers[0].content).find(item=>item.id==='oi-processing-goal');assert.equal(goal.focused,true);
+  assert.equal(f.drawers[0].dialog.scrollTop,0,'revealing the goal never scrolls the outer dialog or its header');
+  assert.equal(f.drawers[0].body.scrollCalls.at(-1).top,480);
+  assert.equal(f.calls.filter(item=>item.method==='POST').length,0);
+  const structure=f.all(f.drawers[0].content).find(item=>item.type==='radio'&&item.value==='structure');await structure.onchange();
+  assert.equal(f.ui.state.target,'new');assert.equal(f.find('预览选中内容（只读）').disabled,false);
+});
+
+test('preview navigation scrolls only the drawer body and respects reduced motion',async()=>{
+  const f=uiFixture({reducedMotion:true});await f.ui.open({projectId:'p'});
+  const pick=f.all(f.drawers[0].content).find(item=>item.type==='checkbox');pick.checked=true;await pick.onchange();
+  f.drawers[0].body.scrollTop=25;await f.find('预览选中内容（只读）').onclick();
+  assert.equal(f.drawers[0].dialog.scrollTop,0);
+  assert.deepEqual(JSON.parse(JSON.stringify(f.drawers[0].body.scrollCalls.at(-1))),{top:480,behavior:'auto'});
 });

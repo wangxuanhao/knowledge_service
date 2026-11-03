@@ -6,9 +6,13 @@ const path=require('node:path');
 
 function fixture(reviewRows=[],options={}){
   const nodes=new Map(),calls=[],created=[];
-  function element(){const el={innerHTML:'',textContent:'',value:'',className:'',dataset:{},onclick:null,events:{},children:[],
+  function element(){const buttons=new Map();const el={innerHTML:'',textContent:'',value:'',className:'',dataset:{},onclick:null,events:{},children:[],
     append(child){this.children.push(child);},after(){},prepend(){throw Error('review must not be prepended to jobs');},
-    insertAdjacentHTML(){},querySelector(){return element();},querySelectorAll(){return [];},
+    insertAdjacentHTML(){},querySelector(){return element();},querySelectorAll(selector){
+      if(selector!=='[data-open-discovery]')return [];
+      return [...this.innerHTML.matchAll(/<button[^>]*data-open-discovery="([^"]*)"[^>]*>([^<]*)<\/button>/g)].map(([,index,text])=>{
+        if(!buttons.has(index)){const button=element();button.dataset.openDiscovery=index;button.textContent=text;buttons.set(index,button);}return buttons.get(index);
+      });},
     click(){return this.onclick?.();},addEventListener(name,fn){this.events[name]=fn;}};
     el.classList={contains:name=>el.className.split(' ').includes(name),add:name=>el.className+=' '+name,
       remove:name=>el.className=el.className.split(' ').filter(n=>n!==name).join(' '),toggle(){}};
@@ -20,7 +24,9 @@ function fixture(reviewRows=[],options={}){
     created_at:'2026-09-10T10:00:00Z',heartbeat_at:'2026-09-10T10:00:04Z',...options.job};
   // window 是浏览器里一定存在的东西：各模块在**加载时**就会向 window.RuntimeView 注册
   // 「项目与运行」的分区加载函数，沙箱少了它这些模块会直接抛 ReferenceError。
-  const context=vm.createContext({window:{IngestResultSummary:require('../../knowledge_service/web/ingest-result-summary.js')},current:'a',$:get,readParseSettings:()=>({chunk_size:1800}),showTab(){},
+  let actor={id:'admin-a',role:'admin'},writer=true;const opened=[],intake=[];
+  const context=vm.createContext({window:{IngestResultSummary:require('../../knowledge_service/web/ingest-result-summary.js'),Auth:{user:()=>actor,isAdmin:()=>writer},
+    KnowledgeNavigation:{open:async(target,args)=>{opened.push({target,...args});if(options.navigate)await options.navigate(context);}},OntologyIntake:{open:async args=>intake.push(args)}},current:'a',$:get,readParseSettings:()=>({chunk_size:1800}),showTab(){},
     document:{createElement(){const e=element();created.push(e);return e;},querySelector:get,querySelectorAll:()=>[]},
     esc:v=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'),
     status(){},jobList(){throw Error('old list must not be used');},bind:(id,fn)=>get(id).onclick=fn,
@@ -33,7 +39,7 @@ function fixture(reviewRows=[],options={}){
       if(url==='/api/projects/b/jobs')return {jobs:[]};
       throw Error('Unexpected URL: '+url);}});
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../../knowledge_service/web/task-review.js'),'utf8'),context);
-  return {context,get,calls,created};
+  return {context,get,calls,created,opened,intake,setActor:value=>{actor=value;},setWriter:value=>{writer=value;}};
 }
 
 test('refresh uses new project-scoped summary and preserves full logs collapsed',async()=>{
@@ -77,6 +83,60 @@ test('durable task cards offer state-appropriate controls without reviving legac
 test('completed discovery task surfaces saved candidate counts without opening full logs',async()=>{
   const {get}=fixture([],{job:{status:'completed',result:{records:[],pending_reviews:0,discovery_candidates:118}}});await get('load-jobs').onclick();
   const summary=get('tasks').innerHTML.split('<details')[0];assert.match(summary,/开放发现候选 118 条/);assert.match(summary,/尚未正式入库/);
+});
+
+test('completed discovery tasks open their saved run and document without writing or using the job id',async()=>{
+  for(const result of [
+    {run_id:'saved-run',document:{id:'saved-doc',metadata:{title:'Saved',run_id:'saved-run',extraction_mode:'discovery'}}},
+    {document:{id:'saved-doc',metadata:{run_id:'saved-run',extraction_mode:'discovery',readiness:{candidate_ready:true,graph_ready:false}}}},
+  ]){
+    const f=fixture([],{job:{status:'completed',result:{discovery_candidates:3,...result}}});await f.get('load-jobs').onclick();
+    const button=f.get('tasks').querySelectorAll('[data-open-discovery]')[0];assert.ok(button);assert.match(button.textContent,/核对本次处理的候选/);
+    const reads=f.calls.length;await button.click();
+    assert.equal(f.opened[0].target,'ontology-model');assert.equal(f.opened[0].projectId,'a');
+    assert.equal(f.intake[0].runId,'saved-run');assert.equal(f.intake[0].documentId,'saved-doc');
+    assert.equal(f.calls.length,reads,'follow-up never submits or creates a task');
+  }
+});
+
+test('discovery tasks missing durable identities explicitly offer project-wide current candidates',async()=>{
+  const f=fixture([],{job:{status:'completed',logs:['文档开始 · old-log.md · 4 字符'],result:{discovery_candidates:3}}});await f.get('load-jobs').onclick();
+  const button=f.get('tasks').querySelectorAll('[data-open-discovery]')[0];assert.ok(button);assert.equal(button.textContent,'核对项目当前发现候选');
+  assert.match(f.get('tasks').innerHTML,/显示当前项目全部发现候选，不按本次任务筛选/);
+  await button.click();assert.equal(f.intake[0].projectId,'a');assert.equal(f.intake[0].runId,undefined);assert.equal(f.intake[0].documentId,undefined);
+});
+
+test('saved discovery document scope is labelled current when the task did not save a run',async()=>{
+  const f=fixture([],{job:{status:'completed',result:{discovery_candidates:2,document:{id:'saved-doc',metadata:{readiness:{candidate_ready:true,graph_ready:false}}}}}});
+  await f.get('load-jobs').onclick();const button=f.get('tasks').querySelectorAll('[data-open-discovery]')[0];
+  assert.equal(button.textContent,'核对这份资料当前发现候选');await button.click();
+  assert.equal(f.intake[0].documentId,'saved-doc');assert.equal(f.intake[0].runId,undefined);
+});
+
+test('task discovery entry is absent for viewers, unfinished jobs or results without candidates',async()=>{
+  for(const [writer,status,count] of [[false,'completed',3],[true,'running',3],[true,'completed',0]]){
+    const f=fixture([],{job:{status,result:{discovery_candidates:count}}});f.setWriter(writer);await f.get('load-jobs').onclick();
+    assert.equal(f.get('tasks').querySelectorAll('[data-open-discovery]').length,0);assert.equal(f.intake.length,0);
+  }
+});
+
+test('task discovery scope rejects conflicting newer document metadata',async()=>{
+  const f=fixture([],{job:{status:'completed',result:{run_id:'old-run',discovery_candidates:2,document:{id:'doc',metadata:{run_id:'new-run',extraction_mode:'ontology'}}}}});
+  await f.get('load-jobs').onclick();await f.get('tasks').querySelectorAll('[data-open-discovery]')[0].click();
+  assert.equal(f.intake[0].runId,'old-run');assert.equal(f.intake[0].documentId,undefined);
+});
+
+test('stale task discovery buttons cannot follow a different project, actor or read-only role',async()=>{
+  for(const change of ['project','roundtrip','actor','role','during-navigation']){
+    const f=fixture([],{navigate:change==='during-navigation'?context=>{context.current='b';}:null,job:{status:'completed',result:{run_id:'saved-run',discovery_candidates:3}}});
+    await f.get('load-jobs').onclick();const button=f.get('tasks').querySelectorAll('[data-open-discovery]')[0];assert.ok(button);
+    if(change==='project')f.context.current='b';
+    if(change==='roundtrip'){f.context.current='b';f.get('project').onchange();f.context.current='a';f.get('project').onchange();}
+    if(change==='actor')f.setActor({id:'admin-b',role:'admin'});
+    if(change==='role')f.setWriter(false);
+    await button.click();assert.equal(f.intake.length,0,change);
+    if(change!=='during-navigation')assert.equal(f.opened.length,0,change);
+  }
 });
 
 test('review menu is independent and does not own ingestion settings',async()=>{

@@ -859,7 +859,7 @@
   }
 
   function buildEmpty(stage) {
-    const empty = mkEl('div', 'om-canvas-empty', '还没有可画的类：使用顶部「新增定义」建立实体类型，或从「待完善结构」选择候选。');
+    const empty = mkEl('div', 'om-canvas-empty', '还没有可画的类：使用顶部「新增定义」建立实体类型，或在「候选与草案待办」中点击「按资料核对候选」。');
     stage.appendChild(empty);
     M.els.empty = empty;
   }
