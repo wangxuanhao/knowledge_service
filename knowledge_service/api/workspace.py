@@ -45,8 +45,7 @@ def install(app, service):
     def metadata_facets(p: str, request: Scope):
         # 在所选时间下发现该项目的字段，与当前 metadata 谓词无关，
         # 以便用户能更改该谓词。
-        from ..repository.page_reads import PageReads
-        rows = PageReads(service.repository).metadata_groups(p, request.model_dump())
+        rows = service.data.metadata_groups(p, request.model_dump())
         fields = {}
         truncated = False
         records = 0

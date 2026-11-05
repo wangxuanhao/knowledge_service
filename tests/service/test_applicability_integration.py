@@ -8,6 +8,7 @@ from knowledge_service.services.ontology import Ontology
 from knowledge_service.services.answers import question_context
 from knowledge_service.services.reconciliation import reconcile
 from knowledge_service.services.service import KnowledgeService
+from keyword_index_fixture import ready_keyword_index
 
 
 @pytest.fixture
@@ -27,7 +28,7 @@ def _scope(platform):
     return {'applicability': {'platforms': {'mode': 'specific', 'values': [platform]}}}
 
 
-def test_scoped_and_search_keep_platforms_separate(system):
+def test_scoped_and_search_keep_platforms_separate(system, monkeypatch):
     _, service, project_id = system
     service.write(project_id, [
         {'id': 'meituan', 'kind': 'chunk', 'text': '美团直播规范：直播间不得虚假宣传',
@@ -42,13 +43,14 @@ def test_scoped_and_search_keep_platforms_separate(system):
         'kinds': ['chunk'], 'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}}})
     assert [row['id'] for row in scoped] == ['meituan']
 
+    ready_keyword_index(service, project_id, monkeypatch)
     result = service.search(project_id, {
         'query': '美团直播规范', 'retrieval_mode': 'keyword', 'k': 10,
         'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}}})
     assert [row['id'] for row in result['hits']] == ['meituan']
 
 
-def test_multi_platform_search_ranks_each_platform_and_keeps_empty_groups(system):
+def test_multi_platform_search_ranks_each_platform_and_keeps_empty_groups(system, monkeypatch):
     _, service, project_id = system
     service.write(project_id, [
         {'id': 'mt-doc', 'kind': 'document', 'text': '美团规则', 'metadata': _scope('美团')},
@@ -65,6 +67,7 @@ def test_multi_platform_search_ranks_each_platform_and_keeps_empty_groups(system
          'text': '京东例外条款', 'metadata': {'start_char': 10}},
     ])
 
+    ready_keyword_index(service, project_id, monkeypatch)
     result = service.search(project_id, {
         'query': '直播管理', 'retrieval_mode': 'keyword', 'k': 1,
         'k_chunks': 1,
@@ -144,7 +147,7 @@ def test_governance_rejects_cross_platform_entity_merge(system):
         Governance(service).merge(project_id, 'a', 'b', {'a': 1, 'b': 1})
 
 
-def test_question_context_uses_selected_platform_before_graph_or_ranking(system):
+def test_question_context_uses_selected_platform_before_graph_or_ranking(system, monkeypatch):
     _, service, project_id = system
     service.write(project_id, [
         {'id': 'mt-rule', 'kind': 'chunk', 'text': '美团直播规范：禁止虚假宣传',
@@ -153,6 +156,7 @@ def test_question_context_uses_selected_platform_before_graph_or_ranking(system)
          'metadata': _scope('京东')},
     ])
 
+    ready_keyword_index(service, project_id, monkeypatch)
     context = question_context(service, project_id, {
         'query': '美团直播规范', 'retrieval_mode': 'keyword', 'k': 10,
         'k_entities': 0, 'k_chunks': 10, 'hops': 2,
@@ -164,12 +168,13 @@ def test_question_context_uses_selected_platform_before_graph_or_ranking(system)
         'mode': 'specific', 'values': ['美团']}
 
 
-def test_question_words_do_not_override_explicit_platform_scope(system):
+def test_question_words_do_not_override_explicit_platform_scope(system, monkeypatch):
     _, service, project_id = system
     service.write(project_id, [
         {'id':'mt','kind':'chunk','text':'美团直播规范','metadata':_scope('美团')},
         {'id':'jd','kind':'chunk','text':'京东对美团直播规范的比较','metadata':_scope('京东')},
     ])
+    ready_keyword_index(service, project_id, monkeypatch)
     result=service.search(project_id, {'query':'美团直播规范','retrieval_mode':'keyword',
         'applicability':{'platforms':{'mode': 'specific', 'values': ['京东']}},'k':10})
     assert [row['id'] for row in result['hits']] == ['jd']
@@ -195,7 +200,7 @@ def test_extractor_cannot_override_upload_applicability(monkeypatch, system):
     assert entity['valid_from'].startswith('2026-09-01')
 
 
-def test_question_context_adds_same_version_neighbors_as_evidence(system):
+def test_question_context_adds_same_version_neighbors_as_evidence(system, monkeypatch):
     _, service, project_id = system
     document = service.write(project_id, [{
         'id': 'doc', 'kind': 'document', 'text': '总则。一般要求。例外条款。',
@@ -210,6 +215,7 @@ def test_question_context_adds_same_version_neighbors_as_evidence(system):
          'valid_from': '2020-01-01', 'metadata': {'start_char': 12}},
     ])
 
+    ready_keyword_index(service, project_id, monkeypatch)
     context = question_context(service, project_id, {
         'query': '美团直播一般要求', 'retrieval_mode': 'keyword', 'k': 1,
         'k_entities': 0, 'k_chunks': 1, 'hops': 0,
@@ -222,7 +228,7 @@ def test_question_context_adds_same_version_neighbors_as_evidence(system):
                for row in context['context_chunks'])
 
 
-def test_multi_platform_question_context_keeps_evidence_groups_separate(system):
+def test_multi_platform_question_context_keeps_evidence_groups_separate(system, monkeypatch):
     _, service, project_id = system
     for record_id, platform in [('mt', '美团'), ('jd', '京东')]:
         doc = service.write(project_id, [{
@@ -235,6 +241,7 @@ def test_multi_platform_question_context_keeps_evidence_groups_separate(system):
                 **_scope(platform), 'source_version_id': doc['version_id'],
                 'start_char': 0, 'end_char': len(doc['text'])},
         }])
+    ready_keyword_index(service, project_id, monkeypatch)
     context = question_context(service, project_id, {
         'query': '直播管理', 'retrieval_mode': 'keyword', 'k': 1,
         'k_entities': 0, 'k_chunks': 1, 'hops': 0,

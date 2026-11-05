@@ -1,5 +1,6 @@
 """Pure entity matching regressions; run directly without PostgreSQL fixtures."""
 import unittest
+from copy import deepcopy
 from types import SimpleNamespace
 
 from knowledge_service.services.entity_resolution import EntityResolver
@@ -50,7 +51,28 @@ class EntityMatchingContracts(unittest.TestCase):
         kwargs = search.requests[0][2]
         self.assertEqual(kwargs['retrieval_mode'], 'semantic')
         self.assertEqual(kwargs['content_channels'], ['entity'])
-        self.assertEqual(kwargs['scope']['_candidate_ids'], ['person'])
+        self.assertEqual(kwargs['scope']['filters'], {'field': 'id', 'op': 'in', 'value': ['person']})
+        self.assertNotIn('_candidate_ids', kwargs['scope'])
+
+    def test_semantic_eligibility_precedes_top_k_with_public_filters(self):
+        from knowledge_service.utils.filters import matches_filter
+
+        compatible = entity()
+        incompatible = entity('company', type='Company')
+
+        class PublicFilterSearch(Search):
+            def search(self, project, text, **kwargs):
+                self.requests.append((project, text, kwargs))
+                ranked = [{**incompatible, 'score': .99}, {**compatible, 'score': .95}]
+                qualified = [hit for hit in ranked
+                             if matches_filter(hit, kwargs['scope'].get('filters'))]
+                return {'hits': qualified[:kwargs['k']]}
+
+        search = PublicFilterSearch()
+        outcome = self.resolver([compatible, incompatible], search).resolve(
+            'p', entity('mention', text='张先生'), review_threshold=.7, merge_threshold=.9)
+        self.assertEqual((outcome.status, outcome.canonical_id), ('aligned', 'person'))
+        self.assertEqual(search.requests[0][2]['k'], 1)
 
     def test_exact_alias_and_empty_compatible_set_do_not_require_milvus(self):
         search = Search(error=RuntimeError('Milvus unavailable'))
@@ -70,7 +92,50 @@ class EntityMatchingContracts(unittest.TestCase):
         search = Search([{**rows[0], 'score': .95}])
         self.resolver(rows, search).resolve('p', entity('mention', text='张先生'),
                                            review_threshold=.7, merge_threshold=.9)
-        self.assertEqual(search.requests[0][2]['scope']['_candidate_ids'], ['person'])
+        self.assertEqual(search.requests[0][2]['scope']['filters'],
+                         {'field': 'id', 'op': 'in', 'value': ['person']})
+
+    def test_caller_filter_is_materialized_before_recall_without_increasing_depth(self):
+        from knowledge_service.services.entity_matching import semantic_candidates
+
+        allowed = entity(metadata={'city': '北京'})
+        excluded = entity('excluded', metadata={'city': '上海'})
+        predicate = {'field': 'city', 'op': 'eq', 'value': '北京'}
+        for _ in range(16):
+            predicate = {'or': [predicate]}
+        scope = {'filters': predicate, 'ontology_scope': 'ids', 'ontology_ids': ['release']}
+        original = deepcopy(scope)
+        search = Search([{**excluded, 'score': .99}, {**allowed, 'score': .95}])
+        matches = semantic_candidates(search, 'p', '张先生', [allowed, excluded], scope=scope)
+        self.assertEqual([row['id'] for row in matches], ['person'])
+        self.assertEqual(search.requests[0][2]['scope'], {
+            **scope, 'filters': {'field': 'id', 'op': 'in', 'value': ['person']}})
+        self.assertEqual(scope, original)
+        invalid = {**scope, 'filters': {'or': [predicate]}}
+        invalid_original = deepcopy(invalid)
+        search = Search()
+        with self.assertRaises(RuntimeError) as raised:
+            semantic_candidates(search, 'p', '张先生', [allowed], scope=invalid)
+        self.assertEqual(raised.exception.code, 'entity_resolution_configuration')
+        self.assertEqual(search.requests, [])
+        self.assertEqual(scope, original)
+        self.assertEqual(invalid, invalid_original)
+        # Missing authority versions retain their earlier failure priority.
+        with self.assertRaises(RuntimeError) as raised:
+            semantic_candidates(search, 'p', '张先生', [entity(version_id=None)], scope=invalid)
+        self.assertEqual(raised.exception.code, 'entity_resolution_unavailable')
+        self.assertEqual(search.requests, [])
+
+    def test_nonempty_authority_frame_with_no_filter_matches_stays_unavailable(self):
+        from knowledge_service.services.entity_matching import semantic_candidates
+
+        search = Search([{**entity(), 'score': .99}])
+        with self.assertRaises(RuntimeError) as raised:
+            semantic_candidates(search, 'p', '张先生', [entity()], scope={
+                'filters': {'field': 'id', 'op': 'eq', 'value': 'excluded'}})
+        self.assertEqual(raised.exception.code, 'entity_resolution_unavailable')
+        self.assertEqual(search.requests[0][2]['scope']['filters'],
+                         {'field': 'id', 'op': 'in', 'value': []})
 
     def test_service_resolver_uses_the_current_milvus_connection(self):
         first, second = object(), object()

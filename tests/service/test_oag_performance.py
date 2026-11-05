@@ -4,8 +4,10 @@ import json
 
 import pytest
 
+from keyword_index_fixture import ready_keyword_index
 from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
+from knowledge_service.repository.scoped_reads import ScopedReads
 from knowledge_service.services.answers import stream_events, answer_messages
 from knowledge_service.services.provenance import ProvenanceService
 
@@ -35,17 +37,37 @@ def test_simple_prompt_does_not_require_repeating_three_sections():
     assert '直接回答' in prompt and '[E编号]' in prompt
 
 
-def test_native_keyword_search_never_invokes_embedding():
+def test_native_keyword_search_never_invokes_embedding(qa, monkeypatch):
     from types import SimpleNamespace
     from knowledge_service.services.retrieval import RetrievalEngine
     def unavailable_encoder(_texts):
         raise AssertionError('keyword search must not load or call the embedding model')
+    service, repo, project = qa
+    ready_keyword_index(service, project, monkeypatch)
     encoder = SimpleNamespace(encode=unavailable_encoder)
-    repo = SimpleNamespace(current_records_by_version_ids=lambda *_: [])
-    store = SimpleNamespace(search_bm25=lambda *args, **kwargs: [])
-    result = RetrievalEngine(repo, encoder, store)._search_via_milvus(
-        'p', '退款', 'keyword', ['chunk'], 5, {'chunk': 5}, {})
+    calls = []
+
+    def search(project_id, query, **options):
+        calls.append((project_id, query, options))
+        return []
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError('native keyword search must not fall back or preload authority rows')
+
+    monkeypatch.setattr(repo, 'query', forbidden)
+    monkeypatch.setattr(ScopedReads, 'ranked_keyword', forbidden)
+    monkeypatch.setattr(ScopedReads, 'page', forbidden)
+    monkeypatch.setattr(ScopedReads, 'by_ids', forbidden)
+    store = SimpleNamespace(available=True, search=search)
+    result = RetrievalEngine(repo, encoder, store).search(
+        project, '退款', retrieval_mode='keyword', content_channels=['chunk'],
+        k=5, content_k={'chunk': 5})
     assert result['_backend'] == 'milvus' and result['active_mode'] == 'keyword'
+    assert len(calls) == 1 and calls[0][:2] == (project, '退款')
+    assert calls[0][2]['retrieval_mode'] == 'keyword'
+    assert calls[0][2]['query_vector'] is None
+    assert calls[0][2]['kinds'] == ['chunk']
+    assert result['channel_quotas'] == {'chunk': 5}
 
 
 @pytest.mark.parametrize('count', [10, 100])
@@ -82,7 +104,8 @@ def test_batch_trace_matches_single_trace_with_constant_shared_reads(qa, monkeyp
 
 def test_prepare_summarizes_all_temporal_groups_in_one_batch(qa, monkeypatch):
     service, repo, project = qa
-    chunks(repo, project, 2)
+    rows = chunks(repo, project, 2)
+    ready_keyword_index(service, project, monkeypatch)
     calls = []
     original = getattr(ProvenanceService, 'trace_answer_evidences', None)
     def traced(self, project, answer, citations):
@@ -92,12 +115,14 @@ def test_prepare_summarizes_all_temporal_groups_in_one_batch(qa, monkeypatch):
     result = service.answer(project, {'query': '退款', 'retrieval_mode': 'keyword',
                                     'valid_at': '2026-10-16', 'k_chunks': 5})
     assert len(calls) == 1
+    assert {row['id'] for row in result['evidence']} == {row['id'] for row in rows}
     assert calls[0] == [row['citation'] for row in result['evidence']]
 
 
-def test_json_and_sse_expose_numeric_stage_timings_without_fake_model_time(qa):
+def test_json_and_sse_expose_numeric_stage_timings_without_fake_model_time(qa, monkeypatch):
     service, repo, project = qa
     chunks(repo, project, 1)
+    ready_keyword_index(service, project, monkeypatch)
     request = {'query': '退款', 'retrieval_mode': 'keyword', 'valid_at': '2026-10-16'}
     result = service.answer(project, request)
     events = []
@@ -113,7 +138,7 @@ def test_json_and_sse_expose_numeric_stage_timings_without_fake_model_time(qa):
         assert 'llm_first_content' not in timing and 'llm' not in timing
 
 
-def test_reference_matching_happens_before_the_501_row_budget(qa):
+def test_reference_matching_happens_before_the_501_row_budget(qa, monkeypatch):
     service, repo, project = qa
     # The relevant source sorts after a full budget of unrelated current chunks.
     repo.put_batch(project, [{'id': f'a-noise-{i:04}', 'kind': 'chunk', 'text': '无关设备资料'}
@@ -125,8 +150,21 @@ def test_reference_matching_happens_before_the_501_row_budget(qa):
         'source_id': doc['id'], 'valid_from': doc['valid_from'], 'valid_until': doc['valid_until'],
         'metadata': {**doc['metadata'], 'source_version_id': doc['version_id'],
                      'start_char': 0, 'end_char': len(doc['text'])}})
+    ready_keyword_index(service, project, monkeypatch)
+    reference_reads = []
+    query = repo.query
+
+    def read(*args, **options):
+        reference_reads.append(options)
+        return query(*args, **options)
+
+    monkeypatch.setattr(repo, 'query', read)
     result = service.answer(project, {'query': '退款', 'retrieval_mode': 'keyword', 'valid_at': '2026-10-16'})
     assert any(row['id'] == 'z-relevant' for row in result['historical_references'])
+    assert len(reference_reads) == 1
+    assert reference_reads[0]['_reference_mode'] is True
+    assert reference_reads[0]['_reference_limit'] == 501
+    assert '退款' in reference_reads[0]['_reference_terms']
 
 
 def test_source_capture_does_not_reread_shared_documents(qa, monkeypatch):

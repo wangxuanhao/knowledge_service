@@ -9,7 +9,6 @@ from knowledge_service.domain.formal_facts import canonical_relation_key
 from knowledge_service.services.entity_resolution import EntityResolver
 from knowledge_service.integrations.semantica_adapter import _route_open_facts
 from knowledge_service.integrations.milvus_store import MilvusStore
-from knowledge_service.services.retrieval import RetrievalEngine
 
 
 def test_ingest_scope_and_publication_fallback():
@@ -258,21 +257,27 @@ def test_open_explicit_scalar_not_overridden_by_named_entity(object_type):
     assert [item['kind'] for item in accepted] == ['attribute']
 
 
-def test_milvus_v2_rejects_legacy_candidate_id_filters():
+def test_milvus_v2_rejects_legacy_candidate_id_filters(monkeypatch):
+    from knowledge_service.domain.search_filter_catalog import default_catalog
+
     store = MilvusStore()
-    with pytest.raises(ValueError, match='does not accept candidate_ids'):
-        store._filter_expr('p', candidate_ids=[])
-    with pytest.raises(ValueError, match='does not accept candidate_ids'):
-        store._filter_expr('p', candidate_ids=['v-1'])
+    options = {'retrieval_mode': 'keyword', 'index_version': 2,
+               'catalog': default_catalog(), 'kinds': ['chunk']}
 
-    class Encoder:
-        def encode(self, texts):
-            raise AssertionError('empty scope must return before encoding')
+    def forbidden(*args, **kwargs):
+        raise AssertionError('rejected or empty eligibility must do no native work')
 
-    result = RetrievalEngine(None, Encoder(), store)._search_via_milvus(
-        'p', '直播', 'keyword', [], ['chunk'], 10, {'chunk': 10}, {})
-    assert result['hits'] == []
-    assert result['candidate_count'] == 0
+    for method in ('_load_if_needed', '_query_vector', '_search_rpc'):
+        monkeypatch.setattr(store, method, forbidden)
+    for legacy_ids in ([], ['v-1']):
+        with pytest.raises(TypeError, match="unexpected keyword argument 'candidate_ids'"):
+            store.search('p', '直播', **options, candidate_ids=legacy_ids)
+        with pytest.raises(ValueError, match='不支持的在线检索范围字段: _candidate_ids'):
+            store.search('p', '直播', **options, scope={'_candidate_ids': legacy_ids})
+
+    # Only the PG-authorized version batch has an explicit empty short circuit.
+    assert store.search('p', '直播', **{**options, 'retrieval_mode': 'semantic'},
+                        eligible_version_ids=[]) == []
 
 
 def test_adjacent_context_supports_fixed_chunks_and_keeps_scope_boundary(tmp_path):

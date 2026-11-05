@@ -345,6 +345,9 @@ class Explorer:
         from .ontology import Ontology
         start = perf_counter()
         requested_mode = request.get('retrieval_mode') or ('semantic' if request.get('semantic') else 'keyword')
+        query = request.get('query', '').strip()
+        watermark = (self.repo.projections.project_watermark(p)
+                     if query and request.get('known_at') is None else None)
         rows = self.service.scoped(p, request)
         types = {request['entity_type']} if request.get('entity_type') else set()
         if types and request.get('include_subclasses', True):
@@ -360,25 +363,38 @@ class Explorer:
                  and (not request.get('predicate') or r.get('type') == request['predicate'])]
         chunks = [r for r in rows if r['kind'] == 'chunk']
         candidates = [*nodes.values(), *edges, *chunks]
+        candidate_versions = {row['id']: row['version_id'] for row in candidates}
         ontology_labels = self.service.ontology_labels(p)
         filtered_ms = (perf_counter() - start) * 1000
-        query = request.get('query', '').strip()
         hits = []
         timings = {}
         retrieval_result = None
         if query:
-            retrieval_scope = {key: request.get(key) for key in
-                ('filters', 'valid_at', 'known_at', 'include_unknown')}
-            retrieval_scope['_candidate_ids'] = [row['id'] for row in candidates]
-            retrieval_scope['_lexical_aliases'] = {row['id']: [ontology_labels.get(row.get('type', ''), '')]
-                for row in candidates}
+            retrieval_scope = {key: request[key] for key in RetrievalEngine.PAGE_SCOPE if key in request}
+            # scoped() already validated and evaluated the original predicate.
+            # Materialize that exact version frame without increasing AST depth;
+            # pair checks and the final watermark fence reject intervening writes.
+            retrieval_scope['filters'] = {'field': 'id', 'op': 'in', 'value': list(candidate_versions)}
+            if request.get('kinds') is not None:
+                retrieval_scope['kinds'] = request['kinds']
+            channels = [kind for kind in ('entity', 'chunk', 'relation')
+                        if request.get('kinds') is None or kind in request['kinds']]
+            # Class labels are a bounded ontology channel, independent of the
+            # native text index. Keep the already-qualified graph candidate gate.
+            label_types = {row.get('type') for row in nodes.values()
+                           if query.casefold() in ontology_labels.get(row.get('type', ''), '').casefold()}
+            if label_types and requested_mode != 'semantic':
+                retrieval_scope['_ontology_expansion'] = {'type_iris': sorted(label_types)}
             retrieval_result = RetrievalEngine(
                 self.repo, self.service.encoder,
                 getattr(self.service, 'milvus_store', None)).search(
                 p, query, retrieval_mode=requested_mode, scope=retrieval_scope,
-                content_channels=['entity', 'chunk', 'relation'], k=request.get('k', 15),
-                content_k={'entity': 5, 'chunk': 5, 'relation': 5}, candidates=candidates)
+                content_channels=channels, k=request.get('k', 15),
+                content_k={kind: 5 for kind in channels})
             hits = retrieval_result['hits']
+            if any(hit.get('id') not in candidate_versions
+                   or candidate_versions[hit['id']] != hit.get('version_id') for hit in hits):
+                raise RuntimeError('探索期间项目知识已变化，请重新探索')
             selected = {r['id'] for r in hits if r['kind'] == 'entity'}
             selected |= {r[key] for r in hits if r['kind'] == 'relation' for key in ('subject_id', 'object_id')}
             for hit in hits:
@@ -396,7 +412,7 @@ class Explorer:
         else:
             seeds = set()
         present = lambda row: {**public(row), 'type_label': ontology_labels.get(row.get('type', ''), row.get('type', ''))}
-        return {'nodes': [present(r) for r in nodes.values()], 'edges': [present(r) for r in edges],
+        result = {'nodes': [present(r) for r in nodes.values()], 'edges': [present(r) for r in edges],
                 'hits': [{**r, 'type_label': ontology_labels.get(r.get('type', ''), r.get('type', ''))} for r in hits],
                 'type_labels': {key: value for key, value in ontology_labels.items()
                                 if key.startswith(('urn:', 'http://', 'https://'))},
@@ -407,3 +423,6 @@ class Explorer:
                 'backends': retrieval_result['backends'] if retrieval_result else {},
                 'timing_ms': {'scope': round(filtered_ms, 1), **timings,
                               'total': round((perf_counter() - start) * 1000, 1)}}
+        if watermark is not None and self.repo.projections.project_watermark(p) != watermark:
+            raise RuntimeError('探索期间项目知识已变化，请重新探索')
+        return result

@@ -38,6 +38,24 @@ class ApplicationData:
         from ..repository.page_reads import PageReads
         return PageReads(self.__repository).assertions_batch(project_id,record_ids)
 
+    def metadata_groups(self, project_id, scope):
+        """Scoped metadata objects weighted by their record counts."""
+        from ..repository.page_reads import PageReads
+        return PageReads(self.__repository).metadata_groups(project_id, scope)
+
+    def projection_status(self, project_id, projection_sync):
+        """Selected-project index delivery state and active collection."""
+        from ..repository.projection_store import milvus_delivery_state
+        self.__repository.get_project(project_id)
+        cursor = self.__repository.projections.cursor(project_id, 'milvus')
+        watermark = self.__repository.projections.project_watermark(project_id)
+        state = milvus_delivery_state(cursor, projection_sync.schema_version)
+        if state in {'available', 'leased'}:
+            state = 'ready' if cursor['applied_seq'] == watermark else 'building'
+        return {'project_id': project_id, 'state': state,
+                'last_error': (cursor or {}).get('last_error'),
+                'collection': (cursor or {}).get('active_destination')}
+
     def insert_if_absent(self, project_id, record):
         return self.__repository.insert_if_absent(project_id, record)
 

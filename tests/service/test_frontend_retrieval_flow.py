@@ -1,5 +1,6 @@
 """Real-browser contract for the linked search/graph workspace and the one-shot knowledge chat."""
 from ontology_seed import seed_ontology
+from contextlib import contextmanager
 import json
 import re
 import socket
@@ -15,6 +16,7 @@ import uvicorn
 from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
 from knowledge_service.services.ontology import Ontology
+from keyword_index_fixture import ready_keyword_index
 
 INITIAL_GRAPH_HINT = '从左侧检索结果选择实体或关系'
 CHANNEL_LABELS = ['匹配实体', '原文片段', '关系链路']
@@ -187,19 +189,40 @@ def _channel_sections(page):
             has_text=re.compile(r'^(匹配实体|原文片段|关系链路)')))
 
 
+@pytest.fixture
+def keyword_index_ready(workbench, monkeypatch):
+    ready_keyword_index(workbench.service, workbench.project, monkeypatch)
+
+
 def _search(page, query='退款', mode='keyword'):
     page.select_option('#search-mode', mode)
     page.fill('#query', query)
-    with page.expect_response(lambda response: response.url.endswith('/search')):
+    with page.expect_response(lambda response: response.url.endswith('/search')) as response:
         page.click('#search')
+    assert response.value.status == 200, response.value.text()
+    result = response.value.json()
+    has_expansion = isinstance(result.get('ontology_expansion'), dict) or any(
+        hit.get('retrieval_channel') in {'ontology_entity_type', 'ontology_type'}
+        for hit in result.get('hits', []))
+    if has_expansion:
+        page.wait_for_function("""count => {
+            const groups = [...document.querySelectorAll('#hits > [data-expansion-group]')];
+            return groups.length === 2 && groups[0].dataset.expansionGroup === 'direct'
+                && groups[1].dataset.expansionGroup === 'supplemental'
+                && groups.reduce((total, group) => total + group.querySelectorAll('.hit-entry').length, 0) === count;
+        }""", arg=len(result.get('hits', [])))
+        assert page.locator('#hits > [data-expansion-group="direct"] > h3').inner_text().startswith('直接命中')
+        assert page.locator('#hits > [data-expansion-group="supplemental"] > h3').inner_text().startswith('本体扩展补充')
+        return
     page.wait_for_function("""() => [...document.querySelectorAll('#hits > section > .hit-kind')]
         .filter(el => /^(匹配实体|原文片段|关系链路)/.test(el.textContent)).length === 3""")
 
 
 def _select_keyword_qa(page):
     """The browser fixture has no vector service; select its real supported mode."""
-    page.locator('#qa-mode + .ks-select .ks-select-trigger').click()
-    page.locator('#qa-mode + .ks-select [data-value="keyword"]').click()
+    page.locator('#qa-settings > summary').click()
+    page.select_option('#qa-mode', 'keyword')
+    page.locator('#qa-settings > summary').click()
     assert page.locator('#qa-mode').input_value() == 'keyword'
     assert not page.locator('#generate').is_checked()
 
@@ -213,6 +236,48 @@ def _expand_qa_evidence(page, index=0):
     assert toggle.get_attribute('aria-expanded') == 'true'
     assert panel.is_visible()
     return panel
+
+
+@contextmanager
+def _graph_settings(page):
+    drawer = page.locator('#graph-settings-drawer')
+    opened_here = not drawer.is_visible()
+    if opened_here:
+        expected = page.evaluate("() => ({project:current,scope:{...WorkspaceContext.read(current,'search'),...wb.ontologyScope()}})")
+        with page.expect_response(lambda response: response.request.method == 'POST'
+                                  and urlparse(response.url).path.endswith('/records/page')
+                                  and response.request.post_data_json.get('kinds') == ['entity']
+                                  and not response.request.post_data_json.get('record_ids')) as candidates:
+            page.click('#graph-settings')
+        assert candidates.value.status == 200
+        candidates.value.body()
+        assert urlparse(candidates.value.url).path == f"/api/projects/{expected['project']}/records/page"
+        body = candidates.value.request.post_data_json
+        for key, value in expected['scope'].items():
+            assert body.get(key) == value
+        page.wait_for_function("document.querySelector('#graph-choice-status').textContent.startsWith('第 ')")
+    assert drawer.is_visible()
+    try:
+        yield drawer
+    finally:
+        if opened_here:
+            drawer.locator('.workspace-drawer-close').click()
+            assert drawer.is_hidden()
+
+
+def _select_graph_entity(page, record_id, *, wait=True):
+    with _graph_settings(page):
+        page.select_option('#graph-entity-choice', record_id)
+        if wait:
+            page.wait_for_function(
+                "id => document.querySelector('#graph-node').value === id", arg=record_id)
+
+
+def _refresh_graph(page):
+    with _graph_settings(page):
+        with page.expect_response(_is_graph_exchange):
+            page.click('#draw-graph')
+        page.wait_for_function("!document.getElementById('draw-graph').disabled")
 
 
 def test_ontology_preview_sets_ephemeral_version_context_and_project_change_resets_it(
@@ -252,8 +317,11 @@ def test_ontology_preview_sets_ephemeral_version_context_and_project_change_rese
         "headers: {'Content-Type': 'application/json'}, "
         "body: JSON.stringify({name: '版本上下文切换'})})).json(); "
         "await projects(); return created.id;}")
-    with page.expect_response(lambda response: response.url.endswith('/records/page')):
-        page.select_option('#project', other)
+    assert other != workbench.project
+    assert page.evaluate('current') == workbench.project
+    page.select_option('#project', other)
+    page.wait_for_function('project => current === project', arg=other)
+    assert page.locator('#project').input_value() == other
     assert page.evaluate('window.wb.versionContext') == empty
 
     page.evaluate("window.wb.setVersionContext({ontologyScope: 'unknown', source: 'test'})")
@@ -309,8 +377,8 @@ def test_ontology_context_strip_knowledge_context_and_ledger_navigation(workbenc
 
     page.click('[data-tab="ontology-model"]')
     page.wait_for_function(
-        "document.querySelector('#om-version-context')?.textContent.includes('当前生效本体：v2')")
-    assert '正在查看：v2（当前）' in page.locator('#om-version-context').inner_text()
+        "document.querySelector('.om-version-context-current')?.textContent === '正式本体 v2 · 已发布'")
+    assert page.locator('.om-version-context-viewed').inner_text() == '当前没有未发布的结构修改。'
 
     page.click('#om-history')
     page.wait_for_selector('#om-history-overlay:not([hidden])')
@@ -321,6 +389,7 @@ def test_ontology_context_strip_knowledge_context_and_ledger_navigation(workbenc
     assert 'ontology-' in history_text
 
     page.locator('.om-history-row').filter(has_text='v1').click()
+    page.locator('.om-history-item.sel .om-history-knowledge > summary').click()
     page.wait_for_function(
         "document.querySelector('.om-history-item.sel .om-knowledge-context')?.dataset.state === 'ready'")
     detail = page.locator(
@@ -333,10 +402,11 @@ def test_ontology_context_strip_knowledge_context_and_ledger_navigation(workbenc
         'button', name='查看这一版（只读）').click()
     page.wait_for_function(
         "document.querySelector('#om-version-context')?.textContent.includes('正在查看：v1（历史·只读）')")
-    assert '当前生效本体：v2' in page.locator('#om-version-context').inner_text()
+    assert page.locator('.om-version-context-current').inner_text() == '正式本体 v2 · 已发布'
 
     page.click('#om-history')
     page.wait_for_selector('#om-history-overlay:not([hidden])')
+    page.locator('.om-history-item.sel .om-history-knowledge > summary').click()
     page.wait_for_function(
         "document.querySelector('.om-history-item.sel .om-knowledge-context')?.dataset.state === 'ready'")
     page.locator('.om-history-item.sel').get_by_role(
@@ -352,6 +422,7 @@ def test_ontology_context_strip_knowledge_context_and_ledger_navigation(workbenc
     context_state['error'] = True
     page.locator('.om-history-row').filter(has_text='v2').first.evaluate(
         'button => button.click()')
+    page.locator('.om-history-item.sel .om-history-knowledge > summary').click()
     page.wait_for_function(
         "document.querySelector('.om-history-item.sel .om-knowledge-context')?.dataset.state === 'error'")
     error_text = page.locator(
@@ -410,11 +481,12 @@ def _assert_complete_entity_inspector(page, text):
 
 
 def _render_a_neighborhood(page):
-    page.select_option('#graph-entity-choice', 'a')
+    _select_graph_entity(page, 'a')
     page.wait_for_function(
         "document.querySelector('#graph-detail').textContent.includes('退款商户')")
-    with page.expect_response(lambda response: _is_graph_exchange(response)):
-        page.click('#graph-expand')
+    # Refresh replaces the setup graph; progressive expansion intentionally
+    # merges branches and would retain the fixture's unrelated starting nodes.
+    _refresh_graph(page)
     page.wait_for_function("""() => {
       const chart = window.echarts.getInstanceByDom(document.getElementById('graph-canvas'));
       const series = chart.getOption().series.find(item => item.type === 'graph');
@@ -483,6 +555,7 @@ def _settle_graph(page, timeout_ms=6000):
 
 # ── Task 1: the combined workspace keeps search, graph and details decoupled ──
 
+@pytest.mark.usefixtures('keyword_index_ready')
 def test_search_updates_only_the_result_rail_and_ignores_graph_keys(workbench):
     page = workbench.page
     page.click('[data-tab="search"]')
@@ -566,19 +639,19 @@ def test_entity_selection_requires_explicit_expand_and_full_graph_ignores_select
     original_nodes = _graph_node_ids(page)
     assert 'x' in original_nodes
     summary_before = page.locator('#graph-summary').inner_text()
-    page.select_option('#graph-entity-choice', 'a')
+    _select_graph_entity(page, 'a')
     page.wait_for_function("document.querySelector('#graph-detail').textContent.includes('退款商户')")
     _assert_complete_entity_inspector(page, '退款商户')
     assert _graph_node_ids(page) == original_nodes
     assert page.locator('#graph-summary').inner_text() == summary_before
     workbench.paths.clear()
-    page.select_option('#graph-entity-choice', '')
+    _select_graph_entity(page, '')
     page.wait_for_function("document.querySelector('#graph-summary').textContent.includes('请选择实体')")
     assert page.locator('#graph-node').input_value() == ''
     assert page.locator('#graph-detail').inner_html() == ''
     assert _graph_node_ids(page) == []
     assert not any(path.endswith('/graph-neighborhood') for path in workbench.paths)
-    page.select_option('#graph-entity-choice', 'a')
+    _select_graph_entity(page, 'a')
     page.wait_for_function("document.querySelector('#graph-detail').textContent.includes('退款商户')")
     bodies = []
     page.on('request', lambda request: bodies.append(request.post_data_json) if _is_graph_exchange(request) else None)
@@ -587,8 +660,7 @@ def test_entity_selection_requires_explicit_expand_and_full_graph_ignores_select
     page.wait_for_function("window.wb.nodes.has('b') && !window.wb.nodes.has('x')")
     expanded = _graph_node_ids(page)
     assert len(expanded) < len(original_nodes)
-    with page.expect_response(_is_graph_exchange):
-        page.click('#draw-graph')
+    _refresh_graph(page)
     assert bodies[-1]['seeds'] == ['a']
     assert bodies[-1]['hops'] == 1
     assert _graph_node_ids(page) == expanded
@@ -615,7 +687,7 @@ def test_entity_selection_fetches_complete_detail_outside_rendered_neighborhood(
     pattern, handler, held = _hold_record_request(page)
     try:
         with page.expect_request(_is_record_exchange):
-            page.select_option('#graph-entity-choice', 'x')
+            _select_graph_entity(page, 'x', wait=False)
         assert page.locator('#graph-expand').is_disabled()
         assert page.locator('#graph-node').input_value() == 'a'
         assert page.locator('#graph-entity-choice').input_value() == 'x'
@@ -660,7 +732,7 @@ def test_expand_stays_disabled_until_pending_entity_detail_resolves(workbench):
         assert page.locator('#graph-expand').is_disabled()
 
         with page.expect_request(_is_record_exchange):
-            page.select_option('#graph-entity-choice', 'x')
+            _select_graph_entity(page, 'x', wait=False)
         assert page.locator('#graph-expand').is_disabled()
 
         assert len(held_subgraphs) == 1
@@ -689,17 +761,18 @@ def test_entity_filter_removal_rolls_back_pending_detail(workbench):
     _render_a_neighborhood(page)
     pattern, handler, held = _hold_record_request(page)
     try:
-        with page.expect_request(_is_record_exchange):
-            page.select_option('#graph-entity-choice', 'x')
-        assert page.locator('#graph-expand').is_disabled()
+        with _graph_settings(page):
+            with page.expect_request(_is_record_exchange):
+                page.select_option('#graph-entity-choice', 'x')
+            assert page.locator('#graph-expand').is_disabled()
 
-        with page.expect_response(lambda response: response.url.endswith('/records/page')
-                                  and response.request.post_data_json.get('query') == '退款'):
-            page.fill('#graph-entity-filter', '退款')
-        page.wait_for_function("document.querySelector('#graph-entity-choice').value === 'a'")
-        assert page.locator('#graph-entity-choice').input_value() == 'a'
-        assert page.locator('#graph-node').input_value() == 'a'
-        assert page.locator('#graph-expand').is_enabled()
+            with page.expect_response(lambda response: response.url.endswith('/records/page')
+                                      and response.request.post_data_json.get('query') == '退款'):
+                page.fill('#graph-entity-filter', '退款')
+            page.wait_for_function("document.querySelector('#graph-entity-choice').value === 'a'")
+            assert page.locator('#graph-entity-choice').input_value() == 'a'
+            assert page.locator('#graph-node').input_value() == 'a'
+            assert page.locator('#graph-expand').is_enabled()
 
         response = _release_record_request(page, held)
         assert response.status == 200
@@ -717,20 +790,21 @@ def test_entity_filter_keeps_committed_fallback_when_no_entities_match(workbench
     _render_a_neighborhood(page)
     pattern, handler, held = _hold_record_request(page)
     try:
-        with page.expect_request(_is_record_exchange):
-            page.select_option('#graph-entity-choice', 'x')
-        assert page.locator('#graph-expand').is_disabled()
+        with _graph_settings(page):
+            with page.expect_request(_is_record_exchange):
+                page.select_option('#graph-entity-choice', 'x')
+            assert page.locator('#graph-expand').is_disabled()
 
-        with page.expect_response(lambda response: response.url.endswith('/records/page')
-                                  and response.request.post_data_json.get('query') == '完全不匹配'):
-            page.fill('#graph-entity-filter', '完全不匹配')
-        page.wait_for_function("document.querySelector('#graph-entity-choice').value === 'a'")
-        assert page.locator('#graph-entity-filter').input_value() == '完全不匹配'
-        assert page.locator('#graph-entity-choice option').evaluate_all(
-            '(options) => options.map(option => option.value)') == ['', 'a']
-        assert page.locator('#graph-entity-choice').input_value() == 'a'
-        assert page.locator('#graph-node').input_value() == 'a'
-        assert page.locator('#graph-expand').is_enabled()
+            with page.expect_response(lambda response: response.url.endswith('/records/page')
+                                      and response.request.post_data_json.get('query') == '完全不匹配'):
+                page.fill('#graph-entity-filter', '完全不匹配')
+            page.wait_for_function("document.querySelector('#graph-entity-choice').value === 'a'")
+            assert page.locator('#graph-entity-filter').input_value() == '完全不匹配'
+            assert page.locator('#graph-entity-choice option').evaluate_all(
+                '(options) => options.map(option => option.value)') == ['', 'a']
+            assert page.locator('#graph-entity-choice').input_value() == 'a'
+            assert page.locator('#graph-node').input_value() == 'a'
+            assert page.locator('#graph-expand').is_enabled()
 
         response = _release_record_request(page, held)
         assert response.status == 200
@@ -766,7 +840,7 @@ def test_late_entity_detail_does_not_replace_relation_detail(workbench):
     pattern, handler, held = _hold_record_request(page)
     try:
         with page.expect_request(_is_record_exchange):
-            page.select_option('#graph-entity-choice', 'x')
+            _select_graph_entity(page, 'x', wait=False)
         assert page.locator('#graph-expand').is_disabled()
         _trigger_graph_click(page, 'edge', 'r')
         page.wait_for_function(
@@ -804,7 +878,7 @@ def test_late_entity_detail_does_not_reopen_closed_drawer(workbench):
     pattern, handler, held = _hold_record_request(page)
     try:
         with page.expect_request(_is_record_exchange):
-            page.select_option('#graph-entity-choice', 'x')
+            _select_graph_entity(page, 'x', wait=False)
         assert page.locator('#graph-expand').is_disabled()
         page.evaluate("() => document.getElementById('detail-drawer-close').click()")
         assert page.locator('#graph-detail').inner_html() == ''
@@ -831,13 +905,16 @@ def test_failed_entity_read_restores_committed_selection(workbench):
     detail_before = page.locator('#graph-detail').inner_html()
 
     def fail_record(route):
-        route.fulfill(status=500, json={'detail': 'record failed'})
+        if _is_record_exchange(route.request):
+            route.fulfill(status=500, json={'detail': 'record failed'})
+        else:
+            route.continue_()
 
     pattern = re.compile(r'/records/page$')
     page.route(pattern, fail_record)
     try:
         with page.expect_response(_is_record_exchange):
-            page.select_option('#graph-entity-choice', 'x')
+            _select_graph_entity(page, 'x', wait=False)
         page.wait_for_function(
             "document.querySelector('#status').textContent.includes('record failed')")
     finally:
@@ -851,7 +928,7 @@ def test_failed_entity_read_restores_committed_selection(workbench):
 
 def test_relation_detail_preserves_entity_selection_for_expand(workbench):
     page = workbench.page
-    page.select_option('#graph-entity-choice', 'b')
+    _select_graph_entity(page, 'b')
     page.wait_for_function(
         "document.querySelector('#graph-detail').textContent.includes('退款平台')")
 
@@ -869,6 +946,7 @@ def test_relation_detail_preserves_entity_selection_for_expand(workbench):
     assert bodies[-1]['seeds'][0] == 'b'
 
 
+@pytest.mark.usefixtures('keyword_index_ready')
 def test_search_button_and_enter_each_issue_exactly_one_search(workbench):
     page = workbench.page
     page.click('[data-tab="search"]')
@@ -899,6 +977,7 @@ def test_search_button_and_enter_each_issue_exactly_one_search(workbench):
     assert bodies[1]['include_unknown'] is True
 
 
+@pytest.mark.usefixtures('keyword_index_ready')
 def test_ontology_expansion_toggle_stays_off_by_default_and_explains_itself(workbench):
     """本体扩展开关（P0-1 的入口）：默认关、自带中文说明、开启后请求与会话栏都要说清楚。
 
@@ -916,14 +995,18 @@ def test_ontology_expansion_toggle_stays_off_by_default_and_explains_itself(work
     _search(page)
     assert bodies[-1]['ontology_expansion'] is False, '默认必须是关闭'
 
-    toggle = page.locator('#ontology-expansion')
+    toggle = page.locator('#ontology-expansion-toggle')
     assert toggle.is_visible()
-    # 说明挂在 label 上（鼠标悬停在文字上就能看到），不是挂在 input 上
-    hint = page.locator('label.search-ontology-expansion').get_attribute('title') or ''
+    assert toggle.get_attribute('aria-pressed') == 'false'
+    assert not page.locator('#ontology-expansion').is_checked()
+    # The public state button owns the hint; its checkbox remains authoritative.
+    hint = toggle.get_attribute('title') or ''
     assert '子类' in hint and '只补召回' in hint, '开关必须自带中文说明'
 
     # 勾上后检索一个本体里存在的父类：结果栏要解释"是靠本体层级补到的"
-    page.check('#ontology-expansion')
+    toggle.click()
+    assert toggle.get_attribute('aria-pressed') == 'true'
+    assert page.locator('#ontology-expansion').is_checked()
     _search(page, query='Actor')
     assert bodies[-1]['ontology_expansion'] is True
     summary = page.locator('#search-summary').inner_text()
@@ -931,6 +1014,7 @@ def test_ontology_expansion_toggle_stays_off_by_default_and_explains_itself(work
     assert '子类' in summary
 
 
+@pytest.mark.usefixtures('keyword_index_ready')
 def test_entity_and_relation_hits_select_consistent_detail_without_redraw(workbench):
     page = workbench.page
     page.click('[data-tab="search"]')
@@ -954,6 +1038,7 @@ def test_entity_and_relation_hits_select_consistent_detail_without_redraw(workbe
         assert page.locator('[data-tab="search"]').get_attribute('class') == 'active'
 
 
+@pytest.mark.usefixtures('keyword_index_ready')
 def test_scope_application_preserves_qa_and_isolates_project_pages(workbench):
     page = workbench.page
     page.click('[data-tab="search"]')
@@ -982,27 +1067,26 @@ def test_graph_scope_filters_survive_expand_and_explicit_full_redraw(workbench):
     """Canvas type choices survive seed expansion and explicit bounded redraw."""
     page = workbench.page
     assert _graph_node_ids(page) == ['a', 'b', 's', 'x']
-    page.select_option('#graph-entity-choice', 'a')
-    with page.expect_response(_is_graph_exchange):
-        page.select_option('#type-scope', 'Thing')
-    with page.expect_response(_is_graph_exchange):
-        page.select_option('#predicate-scope', 'mentions')
+    with _graph_settings(page):
+        _select_graph_entity(page, 'a')
+        with page.expect_response(_is_graph_exchange):
+            page.select_option('#type-scope', 'Thing')
+        with page.expect_response(_is_graph_exchange):
+            page.select_option('#predicate-scope', 'mentions')
     page.wait_for_function("window.wb.nodes.size === 2")
     assert _graph_node_ids(page) == ['a', 'b']
     assert _graph_edge_ids(page) == ['r']
     bodies = []
     page.on('request', lambda request: bodies.append(request.post_data_json) if _is_graph_exchange(request) else None)
-    with page.expect_response(_is_graph_exchange):
-        page.click('#draw-graph')
-    page.select_option('#graph-entity-choice', 'b')
+    _refresh_graph(page)
+    _select_graph_entity(page, 'b')
     page.wait_for_function("document.querySelector('#graph-node').value === 'b'")
     with page.expect_response(_is_graph_exchange):
         page.click('#graph-expand')
     page.wait_for_function("window.wb.nodes.has('x')")
     assert _graph_node_ids(page) == ['a', 'b', 'x']
     assert _graph_edge_ids(page) == ['r']
-    with page.expect_response(_is_graph_exchange):
-        page.click('#draw-graph')
+    _refresh_graph(page)
     assert _graph_node_ids(page) == ['a', 'b', 'x']
     assert page.locator('#type-scope').input_value() == 'Thing'
     assert page.locator('#predicate-scope').input_value() == 'mentions'
@@ -1026,14 +1110,20 @@ def test_ontology_scope_reaches_graph_redraw_expand_and_mindmap(workbench):
     page.evaluate("id => window.wb.setVersionContext({ontologyScope:'ids',ontologyIds:[id],ontologyVersion:1,source:'test'})", release['id'])
     # Version changes invalidate the old seed. Explicitly select a new seed in
     # this bound release before drawing or expanding.
-    with page.expect_response(_is_graph_exchange):
-        page.evaluate("async () => {await window.drawGraph('a',1);}")
-    page.select_option('#graph-entity-choice', 'a')
+    with _graph_settings(page):
+        page.select_option('#graph-entity-choice', 'a')
+        page.wait_for_function("document.querySelector('#graph-node').value === 'a'")
+        with page.expect_response(_is_graph_exchange):
+            page.click('#draw-graph')
+        page.wait_for_function("!document.getElementById('draw-graph').disabled")
+        page.select_option('#graph-entity-choice', 'a')
     with page.expect_response(_is_graph_exchange):
         page.click('#graph-expand')
-    with page.expect_response(_is_graph_exchange):
-        page.click('#draw-graph')
-    page.select_option('#graph-entity-choice', 'a')
+    with _graph_settings(page):
+        with page.expect_response(_is_graph_exchange):
+            page.click('#draw-graph')
+        page.wait_for_function("!document.getElementById('draw-graph').disabled")
+        page.select_option('#graph-entity-choice', 'a')
     page.wait_for_function("document.querySelector('#graph-detail').textContent.includes('退款商户')")
     with page.expect_response(lambda response: response.url.endswith('/mindmap')):
         page.click('#graph-detail [data-action="mindmap"]')
@@ -1070,7 +1160,8 @@ def test_ontology_scope_banner_reset_redraws_graph_with_all_scope(workbench):
     assert bodies == []
     assert page.evaluate('window.wb.versionContext') == {'ontologyScope':'all','ontologyIds':None,'ontologyVersion':None,'source':None}
     assert '知识范围：全部本体' in page.locator('#graph-version-scope').inner_text()
-    page.select_option('#graph-entity-choice', 'a')
+    with _graph_settings(page):
+        page.select_option('#graph-entity-choice', 'a')
     page.wait_for_function("document.querySelector('#graph-node').value === 'a'")
     with page.expect_response(_is_graph_exchange):
         page.click('#graph-expand')
@@ -1107,6 +1198,7 @@ def test_graph_renderer_is_defined_once_and_owned_by_workspace():
         'workbench.js 的图谱入口必须显式引用 window.drawGraph'
 
 
+@pytest.mark.usefixtures('keyword_index_ready')
 def test_draw_and_expand_buttons_share_the_single_graph_renderer(workbench):
     """两个入口（绘制图谱 / 展开邻域）必须落到同一个渲染器：请求体与渲染产物都要一致。"""
     page = workbench.page
@@ -1224,6 +1316,7 @@ def test_sse_parser_handles_split_boundaries_crlf_multiline_and_malformed(workbe
     assert result['sentences'][1] == {'announce': '退款需要。', 'rest': '原始'}
 
 
+@pytest.mark.usefixtures('keyword_index_ready')
 def test_knowledge_chat_streams_evidence_deltas_and_done(workbench):
     page = workbench.page
     page.click('[data-tab="qa"]')
@@ -1340,6 +1433,7 @@ def test_knowledge_chat_retry_replays_the_exact_request(workbench):
     assert workbench.errors == []
 
 
+@pytest.mark.usefixtures('keyword_index_ready')
 def test_knowledge_chat_evidence_disclosure_and_cross_menu_navigation(workbench):
     page = workbench.page
     page.click('[data-tab="qa"]')
@@ -1381,6 +1475,7 @@ def test_knowledge_chat_evidence_disclosure_and_cross_menu_navigation(workbench)
     assert panel.get_by_text('查看冻结原文', exact=True).count() >= 1
 
 
+@pytest.mark.usefixtures('keyword_index_ready')
 def test_knowledge_chat_keyboard_ime_and_scope_change(workbench):
     page = workbench.page
     page.click('[data-tab="qa"]')
@@ -1419,18 +1514,22 @@ def test_knowledge_chat_keyboard_ime_and_scope_change(workbench):
         "body: JSON.stringify({name: '问答范围'})})).json(); "
         "await projects(); return created.id;}")
     assert page.locator('#project').is_visible()
-    with page.expect_response(lambda response: response.url.endswith('/records/page')):
-        page.select_option('#project', other)
+    assert other != workbench.project
+    page.select_option('#project', other)
+    page.wait_for_function('project => current === project', arg=other)
+    assert page.locator('#project').input_value() == other
     page.wait_for_function(
         "document.querySelectorAll('#qa-transcript .qa-turn').length === 0 && "
-        "document.querySelector('#qa-summary').textContent.includes('范围已变化')")
+        "document.querySelector('#qa-active-session-title').textContent === '新会话'")
     assert page.locator('#qa-transcript .qa-turn').count() == 0
-    assert '范围已变化' in (page.locator('#qa-summary').text_content() or '')
+    assert '项目已切换' in page.locator('#status').inner_text()
+    assert workbench.paths.count(f'/api/projects/{workbench.project}/qa/stream') == 1
     assert page.locator('#qa-hero').is_visible()
     assert (page.locator('#qa-live').text_content() or '') == ''
     assert workbench.errors == []
 
 
+@pytest.mark.usefixtures('keyword_index_ready')
 def test_mobile_composer_stays_reachable_with_expanded_evidence(workbench):
     page = workbench.page
     page.set_viewport_size({'width': 390, 'height': 844})
@@ -1464,6 +1563,7 @@ def test_mobile_composer_stays_reachable_with_expanded_evidence(workbench):
     assert workbench.errors == []
 
 
+@pytest.mark.usefixtures('keyword_index_ready')
 def test_chunk_evidence_opens_the_exact_frozen_source(workbench):
     """A citation keeps its exact source version after the current document changes."""
     page = workbench.page
@@ -1520,20 +1620,33 @@ def _provenance_stream(page):
     page.evaluate("""() => {
       const original = window.fetch;
       window.__qaRequests = [];
+      window.__qaCanceledStreams = [];
+      window.__qaClosedStreams = [];
       window.fetch = (url, options) => {
         if (!String(url).endsWith('/qa/stream')) return original(url, options);
         window.__qaRequests.push(JSON.parse(options.body));
+        const streamNumber = window.__qaRequests.length;
+        let settled = false;
         return Promise.resolve(new Response(new ReadableStream({start(controller) {
           window.__qaEvent = (event, data) => controller.enqueue(new TextEncoder().encode(
             'event: ' + event + '\\ndata: ' + JSON.stringify(data) + '\\n\\n'));
-          window.__qaEnd = () => controller.close();
-        }}), {headers: {'Content-Type': 'text/event-stream'}}));
+          window.__qaEnd = () => {if(!settled){settled=true;window.__qaClosedStreams.push(streamNumber);controller.close();}};
+        }, cancel() {settled=true;window.__qaCanceledStreams.push(streamNumber);}}),
+          {headers: {'Content-Type': 'text/event-stream'}}));
       };
     }""")
 
 
 def _emit(page, event, payload):
+    page.wait_for_function("typeof window.__qaEvent === 'function'")
     page.evaluate('([event, data]) => window.__qaEvent(event, data)', [event, payload])
+
+
+def _assert_mock_streams_settled(page, count):
+    page.wait_for_function(
+        'count => window.__qaCanceledStreams.length + window.__qaClosedStreams.length === count', arg=count)
+    assert page.evaluate(
+        '[...window.__qaCanceledStreams, ...window.__qaClosedStreams].sort((a,b)=>a-b)') == list(range(1, count + 1))
 
 
 def _provenance_evidence(answer='answer-running'):
@@ -1554,6 +1667,58 @@ def _mock_provenance(page, seen):
                                        'details': {'answer_id': 'answer-running'}}],
                             'edges': [], 'integrity': {'complete': True, 'warnings': []}})
     page.route('**/provenance', handler)
+
+
+def _conversation_save(response, project, *, answer_id=None, empty=False):
+    request = response.request
+    if request.method != 'PUT' or not urlparse(response.url).path.startswith(
+            f'/api/projects/{project}/qa/conversations/'):
+        return False
+    messages = request.post_data_json.get('messages')
+    return messages == [] if empty else bool(messages and messages[-1].get('answer_id') == answer_id)
+
+
+def _seed_conversation(page, project, messages):
+    """Seed an account-owned public snapshot, including old rows without IDs."""
+    return page.evaluate("""async ([project, messages]) => {
+      const request = window.Auth?.fetchConversation || window.fetch;
+      const base = '/api/projects/' + encodeURIComponent(project) + '/qa/conversations';
+      let response = await request(base, {method:'POST', headers:{'Content-Type':'application/json'},body:'{}'});
+      if(!response.ok)throw Error('fixture conversation create failed: '+response.status);
+      const created = (await response.json()).conversation;
+      response = await request(base+'/'+encodeURIComponent(created.id), {method:'PUT',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({expected_version:created.version,messages})});
+      if(!response.ok)throw Error('fixture conversation save failed: '+response.status);
+      return (await response.json()).conversation;
+    }""", [project, [{'scope': {}, **message} for message in messages]])
+
+
+def _read_conversation(page, project, conversation_id):
+    return page.evaluate("""async ([project, id]) => {
+      const request = window.Auth?.fetchConversation || window.fetch;
+      const response = await request('/api/projects/'+encodeURIComponent(project)+'/qa/conversations/'+encodeURIComponent(id));
+      if(!response.ok)throw Error('fixture conversation read failed: '+response.status);
+      return (await response.json()).conversation;
+    }""", [project, conversation_id])
+
+
+def _clear_conversation(page, project, *, keyboard=False):
+    button = page.locator('#qa-clear')
+    assert button.is_visible() and button.is_enabled()
+    if keyboard:
+        button.focus()
+        button.press('Enter')
+    else:
+        button.click()
+    assert page.locator('#qa-session-dialog').is_visible()
+    with page.expect_response(lambda response: _conversation_save(response, project, empty=True)) as saved:
+        page.click('#qa-session-dialog-confirm')
+    assert saved.value.status == 200
+    conversation = saved.value.json()['conversation']
+    assert conversation['messages'] == []
+    assert _read_conversation(page, project, conversation['id'])['messages'] == []
+    return conversation
 
 
 def test_knowledge_chat_provenance_running_safe_done_and_history(workbench):
@@ -1583,24 +1748,35 @@ def test_knowledge_chat_provenance_running_safe_done_and_history(workbench):
     _emit(page, 'delta', {'text': literal})
     assert page.locator('.qa-answer').inner_text() == literal
     assert page.locator('.qa-answer button').count() == 0
-    _emit(page, 'done', {'answer_id': 'answer-running', 'retrieval_run_id': 'run-answer-running'})
-    page.evaluate('window.__qaEnd()')
+    with page.expect_response(lambda response: _conversation_save(
+            response, workbench.project, answer_id='answer-running')) as saved:
+        _emit(page, 'done', {'answer_id': 'answer-running', 'retrieval_run_id': 'run-answer-running'})
+        page.evaluate('window.__qaEnd()')
     page.wait_for_function("document.querySelector('.qa-turn-assistant').dataset.state === 'done'")
+    _assert_mock_streams_settled(page, 1)
     assert page.locator('.qa-answer button').count() == 1
     assert page.locator('.qa-answer').inner_text() == literal
     assert page.locator('.qa-answer img').count() == 0
     assert page.evaluate('window.__xss || null') is None
-    key = 'kg_qa_v1_' + workbench.project
-    history = page.evaluate('(key) => JSON.parse(localStorage.getItem(key))', key)
-    assert len(history) == 2
-    assistant = history[1]
-    assert assistant['answer_id'] == 'answer-running'
-    assert assistant['retrieval_run_id'] == 'run-answer-running'
-    assert set(assistant['evidence'][0]) == {'citation', 'text_preview', 'kind', 'version', 'provenance_ref'}
-    assert len(assistant['evidence'][0]['text_preview']) == 240
-    assert 'discard-me' not in json.dumps(history) and 'full-document' not in json.dumps(history)
+    assert saved.value.status == 200
+    conversation = saved.value.json()['conversation']
+    history = conversation['messages']
+    submitted_history = saved.value.request.post_data_json['messages']
+    for snapshot in (submitted_history, history):
+        assert len(snapshot) == 2
+        assistant = snapshot[1]
+        assert assistant['answer_id'] == 'answer-running'
+        assert assistant['retrieval_run_id'] == 'run-answer-running'
+        assert set(assistant['evidence'][0]) == {'citation', 'text_preview', 'kind', 'version', 'provenance_ref'}
+        assert len(assistant['evidence'][0]['text_preview']) == 240
+        assert 'discard-me' not in json.dumps(snapshot) and 'full-document' not in json.dumps(snapshot)
 
-    page.reload(wait_until='load')
+    with page.expect_response(lambda response: response.request.method == 'GET'
+                              and urlparse(response.url).path.endswith(
+                                  '/qa/conversations/' + conversation['id'])) as restored:
+        page.reload(wait_until='load')
+    assert restored.value.status == 200
+    assert restored.value.json()['conversation']['messages'] == history
     page.wait_for_function("document.querySelectorAll('#project option').length > 1")
     page.select_option('#project', workbench.project)
     page.click('[data-tab="qa"]')
@@ -1612,7 +1788,8 @@ def test_knowledge_chat_provenance_running_safe_done_and_history(workbench):
     page.wait_for_function("document.querySelector('#provenance-drawer').dataset.state === 'ready'")
     assert len(seen) == 2
     page.keyboard.press('Escape')
-    page.click('#qa-clear')
+    cleared = _clear_conversation(page, workbench.project)
+    assert cleared['id'] == conversation['id']
     assert page.locator('.qa-turn').count() == 0
     assert page.locator('#provenance-drawer').is_hidden()
     assert workbench.errors == []
@@ -1621,13 +1798,14 @@ def test_knowledge_chat_provenance_running_safe_done_and_history(workbench):
 def test_knowledge_chat_missing_answer_identity_and_retry_replaces_history(workbench):
     page = workbench.page
     page.click('[data-tab="qa"]')
-    key = 'kg_qa_v1_' + workbench.project
-    page.evaluate('([key, rows]) => {localStorage.setItem(key, JSON.stringify(rows)); clearKnowledgeChat();}',
-                  [key, [{'kind': 'user', 'text': 'old'}, {'kind': 'assistant', 'text': 'old [E1]'}]])
+    conversation = _seed_conversation(page, workbench.project,
+        [{'kind': 'user', 'text': 'old'}, {'kind': 'assistant', 'text': 'old [E1]'}])
+    page.evaluate('clearKnowledgeChat()')
+    page.wait_for_function("document.querySelector('.qa-answer')?.textContent === 'old [E1]'")
     assert page.locator('.qa-answer').inner_text() == 'old [E1]'
     assert page.locator('.qa-answer button').count() == 0
-    assert page.locator('.qa-provenance-unresolved').inner_text() == '缺少答案标识，无法定位已冻结证据链'
-    page.click('#qa-clear')
+    assert page.locator('.qa-provenance-unresolved').inner_text() == '这条回答缺少答案标识，无法定位已冻结的证据链。请重新提问以生成可溯源的回答。'
+    assert _clear_conversation(page, workbench.project)['id'] == conversation['id']
     _provenance_stream(page)
     page.fill('#qa-query', 'retry provenance')
     page.click('#qa')
@@ -1635,18 +1813,25 @@ def test_knowledge_chat_missing_answer_identity_and_retry_replaces_history(workb
     _emit(page, 'error', {'detail': 'retry-me'})
     page.wait_for_function("document.querySelector('.qa-turn-assistant').dataset.state === 'error'")
     page.locator('.qa-retry').click()
+    page.wait_for_function('window.__qaRequests.length === 2')
     _emit(page, 'evidence', _provenance_evidence('new-answer'))
     _emit(page, 'delta', {'text': 'new [E1]'})
-    _emit(page, 'done', {})
-    page.evaluate('window.__qaEnd()')
+    with page.expect_response(lambda response: _conversation_save(
+            response, workbench.project, answer_id='new-answer')) as saved:
+        _emit(page, 'done', {})
+        page.evaluate('window.__qaEnd()')
     page.wait_for_function("document.querySelector('.qa-turn-assistant').dataset.state === 'done'")
     requests = page.evaluate('window.__qaRequests')
     assert len(requests) == 2 and requests[0] == requests[1]
-    history = page.evaluate('(key) => JSON.parse(localStorage.getItem(key))', key)
-    assert len(history) == 2
-    assert history[1]['answer_id'] == 'new-answer'
-    assert history[1]['retrieval_run_id'] == 'run-new-answer'
-    assert 'error' not in history[1]
+    _assert_mock_streams_settled(page, 2)
+    assert saved.value.status == 200
+    assert saved.value.json()['conversation']['id'] == conversation['id']
+    history = saved.value.json()['conversation']['messages']
+    for snapshot in (saved.value.request.post_data_json['messages'], history):
+        assert len(snapshot) == 2
+        assert snapshot[1]['answer_id'] == 'new-answer'
+        assert snapshot[1]['retrieval_run_id'] == 'run-new-answer'
+        assert 'error' not in snapshot[1]
     assert page.locator('.qa-turn-user').count() == page.locator('.qa-turn-assistant').count() == 1
 
 
@@ -1667,7 +1852,8 @@ def test_knowledge_chat_provenance_clear_aborts_and_ignores_stale_response(workb
     _emit(page, 'evidence', _provenance_evidence())
     _expand_qa_evidence(page)
     page.locator('.qa-evidence-item > button.provenance-citation').click()
-    page.evaluate('clearKnowledgeChat({clearPersist:true})')
+    assert page.evaluate('window.__provenanceSignal.aborted') is False
+    cleared = _clear_conversation(page, workbench.project, keyboard=True)
     assert page.evaluate('window.__provenanceSignal.aborted')
     page.evaluate("""() => {
       window.__resolveProvenance(new Response(JSON.stringify({
@@ -1678,6 +1864,8 @@ def test_knowledge_chat_provenance_clear_aborts_and_ignores_stale_response(workb
     page.wait_for_timeout(100)
     assert page.locator('#provenance-drawer').is_hidden()
     assert page.locator('.qa-turn').count() == 0
+    assert cleared['messages'] == []
+    _assert_mock_streams_settled(page, 1)
     assert page.evaluate('(key) => JSON.parse(localStorage.getItem(key))', 'kg_qa_v1_' + workbench.project) is None
 
 # --------------------------------------------------------------------------- 父类可见性
@@ -1722,9 +1910,13 @@ def _tooltip_text(page, node_id):
       if (index < 0) return null;
       chart.dispatchAction({type: 'showTip', seriesIndex: 0, dataIndex: index});
       await new Promise(resolve => setTimeout(resolve, 300));
-      const texts = [...document.querySelectorAll('#graph-canvas div')]
-        .map(node => node.innerText).filter(Boolean);
-      return texts[texts.length - 1] || '';
+      const identity = [...document.querySelectorAll('#graph-canvas .fg-hover-id')]
+        .find(node => node.textContent === id);
+      const tooltip = identity?.parentElement;
+      if(!tooltip)return null;
+      const style = getComputedStyle(tooltip);
+      if(!tooltip.getBoundingClientRect().width || style.visibility === 'hidden' || Number(style.opacity) === 0)return null;
+      return tooltip.innerText;
     }""", node_id)
 
 
@@ -1734,7 +1926,7 @@ def _open_entity_with_family(page, record_id, family):
     with page.expect_response(_is_graph_exchange):
         page.evaluate("async id => {await window.drawGraph(id,1);}", record_id)
     page.wait_for_function("id => window.wb.nodes.has(id)", arg=record_id)
-    page.select_option('#graph-entity-choice', record_id)
+    _select_graph_entity(page, record_id)
     page.wait_for_function("label => document.querySelector('#graph-detail').textContent.includes(label)", arg=family['class_label'])
 
 

@@ -6,7 +6,13 @@ import pytest
 
 from knowledge_service.repository.core import Repository
 from knowledge_service.repository.projection_store import ProjectionStore
+from knowledge_service.domain.search_filter_catalog import default_catalog
+from knowledge_service.domain.search_projection import ProjectionInput, build_projection
+from knowledge_service.repository.scoped_reads import ScopedReads
+from knowledge_service.services.projection_runtime import MilvusProjectionAdapter
+from knowledge_service.services.projection_sync import ProjectionSync
 from knowledge_service.services.retrieval import RetrievalEngine
+from test_projection_sync import MemoryMilvus
 
 
 class Cursor:
@@ -48,6 +54,7 @@ def bare_repository(database):
     repository = Repository.__new__(Repository)
     repository._db = database
     repository._lock = threading.RLock()
+    repository._transaction_state = threading.local()
     repository.get_project = lambda project_id: {'id': project_id}
     return repository
 
@@ -71,95 +78,116 @@ def test_insert_if_absent_runs_put_and_outbox_inside_one_transaction():
 class Encoder:
     identity = 'test-v1'
     semantic = True
+    dimension = 2
+
+    def __init__(self):
+        self.encoded = []
 
     def encode(self, texts):
+        self.encoded.extend(texts)
         return [[1.0, 0.0] for _ in texts]
 
 
-class ReadinessRepository:
-    def __init__(self):
-        self.ready = False
-        self.readiness_calls = []
-        self.query_calls = []
-        self.authority_rows = []
-
-    def projection_ready(self, project_id, target, schema_version):
-        self.readiness_calls.append((project_id, target, schema_version))
-        return self.ready
-
-    def query(self, project_id, **kwargs):
-        self.query_calls.append((project_id, kwargs))
-        return list(self.authority_rows)
-
-    def current_records_by_version_ids(self, project_id, version_ids):
-        by_version = {row['version_id']: row for row in self.authority_rows}
-        return [by_version[item] for item in version_ids if item in by_version]
-
-    def keyword_candidates(self, project_id, term, **kwargs):
-        # An empty FTS result still exercises lexical ranking over the engine's
-        # freshly qualified authority rows, including the explicit ID scope.
-        return []
-
-
-class RecordingMilvus:
+class RecordingMilvus(MemoryMilvus):
     available = True
+    dim = Encoder.dimension
 
     def __init__(self):
+        super().__init__()
         self.calls = []
 
-    def search_dense(self, project_id, vector, **kwargs):
-        self.calls.append((project_id, kwargs))
-        return [{'version_id': 'version-1', 'score': 0.9}]
+    def search(self, project_id, query, *, index_version, kinds, k, **options):
+        self.calls.append((project_id, query, index_version, kinds, options))
+        return [{'record_id': row['record_id'], 'version_id': row['version_id'], 'score': 0.9}
+                for key, row in self.rows.items()
+                if key[:2] == (project_id, index_version) and row['kind'] in kinds][:k]
 
 
-def test_new_authoritative_write_blocks_milvus_until_projection_catches_up():
-    repository = ReadinessRepository()
+def active_search_system(tmp_path):
+    repository = Repository(tmp_path / 'ready-search')
+    project = repository.create_project('ready search')['id']
     milvus = RecordingMilvus()
-    engine = RetrievalEngine(repository, Encoder(), milvus)
-    candidates = [{
-        'id': 'rule', 'version_id': 'version-1', 'kind': 'chunk', 'text': '规则',
-        'metadata': {}, 'embedding': [1.0, 0.0], 'embedding_model': 'test-v1',
-    }]
-    repository.authority_rows = candidates
+    encoder = Encoder()
+    sync = ProjectionSync(repository.projections, {'milvus': MilvusProjectionAdapter(
+        milvus, encoder=encoder)}, schema_version=3)
+    built = sync.rebuild(project, 'milvus')
+    assert built['indexed'] == built['applied_seq'] == 0
+    index = repository.projections.search_index(project, 3)
+    assert (index['embedding_model'], index['dim'], index['watermark']) == ('test-v1', 2, 0)
+    return repository, project, milvus, encoder, sync
 
-    with pytest.raises(RuntimeError, match='Milvus 投影未就绪'):
-        engine.search('project', '规则', retrieval_mode='semantic',
-                      content_channels=['chunk'], candidates=candidates)
+
+def reject_broad_query(*args, **kwargs):
+    raise AssertionError('current native retrieval must use bounded authority hydration')
+
+
+def test_new_authoritative_write_blocks_milvus_until_projection_catches_up(tmp_path, monkeypatch):
+    repository, project, milvus, encoder, sync = active_search_system(tmp_path)
+    first = repository.put_record(project, {'id': 'rule', 'kind': 'chunk', 'text': '规则'})
+    engine = RetrievalEngine(repository, encoder, milvus)
+    monkeypatch.setattr(repository, 'query', reject_broad_query)
+
+    with pytest.raises(RuntimeError, match='追平'):
+        engine.search(project, '规则', retrieval_mode='semantic', content_channels=['chunk'])
     assert milvus.calls == []
-    assert repository.query_calls == []
+    assert encoder.encoded == []
 
-    repository.ready = True
+    assert sync.drain_once(project, 'milvus').status == 'applied'
     ready = engine.search(
-        'project', '规则', retrieval_mode='semantic',
-        content_channels=['chunk'], candidates=candidates)
+        project, '规则', retrieval_mode='semantic', content_channels=['chunk'])
     assert len(milvus.calls) == 1
     assert ready['_backend'] == 'milvus'
-    assert repository.readiness_calls[-1][:2] == ('project', 'milvus')
+    assert ready['hits'][0]['version_id'] == first['version_id']
+    assert repository.projection_ready(project, 'milvus', 3)
+    repository.put_record(project, {'id': 'rule', 'kind': 'chunk', 'text': 'new source'},
+                          expected_version=first['version'])
+    with pytest.raises(RuntimeError, match='追平'):
+        engine.search(project, '规则', retrieval_mode='semantic', content_channels=['chunk'])
+    assert len(milvus.calls) == 1
 
 
-def test_explicit_keyword_with_stale_projection_discards_candidates_and_reapplies_id_scope():
-    repository = ReadinessRepository()
-    repository.authority_rows = [
-        {'id': 'authority', 'version_id': 'version-2', 'kind': 'chunk',
-         'text': '权威规则', 'metadata': {}, 'embedding': [1.0, 0.0],
-         'embedding_model': 'test-v1'},
-        {'id': 'outside-explicit-scope', 'version_id': 'version-3',
-         'kind': 'chunk', 'text': '不应返回', 'metadata': {},
-         'embedding': [1.0, 0.0], 'embedding_model': 'test-v1'},
-    ]
-    stale_candidates = [
-        {'id': 'stale', 'version_id': 'version-1', 'kind': 'chunk',
-         'text': '陈旧规则', 'metadata': {}, 'embedding': [1.0, 0.0],
-         'embedding_model': 'test-v1'},
-    ]
-    engine = RetrievalEngine(repository, Encoder(), RecordingMilvus())
+def test_current_keyword_rejects_stale_projection_and_reapplies_authority_id_scope(tmp_path, monkeypatch):
+    # Stale keyword fallback and caller-preloaded candidates were retired.
+    # A current index must be ready, and PG still qualifies every ranked hit.
+    repository, project, milvus, encoder, sync = active_search_system(tmp_path)
+    stale = repository.put_record(project, {'id': 'authority', 'kind': 'chunk', 'text': '陈旧规则'})
+    authority = repository.put_record(project, {'id': 'authority', 'kind': 'chunk', 'text': '权威规则'},
+                                      expected_version=stale['version'])
+    outside = repository.put_record(project, {'id': 'outside-explicit-scope', 'kind': 'chunk', 'text': '不应返回'})
+    engine = RetrievalEngine(repository, encoder, milvus)
+    monkeypatch.setattr(repository, 'query', reject_broad_query)
+    with pytest.raises(TypeError, match='candidates'):
+        engine.search(project, '规则', retrieval_mode='keyword', candidates=[stale])
+    with pytest.raises(RuntimeError, match='追平'):
+        engine.search(project, '规则', retrieval_mode='keyword', content_channels=['chunk'])
+    assert milvus.calls == []
+
+    assert sync.drain_once(project, 'milvus').status == 'applied'
+    hydrated, by_ids = [], ScopedReads.by_ids
+
+    def hydrate(reader, selected_project, scope, ids, *, kinds=None):
+        hydrated.append((selected_project, scope, list(ids), kinds))
+        return by_ids(reader, selected_project, scope, ids, kinds=kinds)
+
+    def offered(selected_project, query, **options):
+        milvus.calls.append((selected_project, query, options))
+        return [{'record_id': row['id'], 'version_id': row['version_id'], 'score': 1.}
+                for row in (stale, outside, authority)]
+
+    monkeypatch.setattr(ScopedReads, 'by_ids', hydrate)
+    monkeypatch.setattr(milvus, 'search', offered)
+    only_authority = {'field': 'id', 'op': 'eq', 'value': 'authority'}
 
     result = engine.search(
-        'project', '规则', retrieval_mode='keyword',
-        scope={'_candidate_ids': ['authority']}, candidates=stale_candidates)
+        project, '规则', retrieval_mode='keyword', content_channels=['chunk'],
+        scope={'filters': only_authority})
 
-    assert repository.query_calls
     assert [row['id'] for row in result['hits']] == ['authority']
+    assert result['hits'][0]['version_id'] == authority['version_id']
+    assert len(milvus.calls) == len(hydrated) == 1
+    assert hydrated[0][0] == project
+    assert hydrated[0][1]['filters'] == only_authority
+    assert hydrated[0][2:] == (['authority', 'outside-explicit-scope'], ['chunk'])
 
 
 class EmptyOntologyDrafts:
@@ -350,7 +378,7 @@ def test_background_cleanup_drain_acks_success_and_releases_failure():
     assert repository.released[0][:4] == ('p2', 'neo4j', 'worker', 'two')
 
 
-def test_repository_put_persists_embedding_only_in_projection_upsert_payload():
+def test_repository_put_keeps_vectors_out_of_pg_and_encodes_at_projection_boundary():
     class OutboxDatabase:
         in_transaction = True
 
@@ -413,5 +441,23 @@ def test_repository_put_persists_embedding_only_in_projection_upsert_payload():
     assert [row['operation'] for row in repository._db.outbox] == [
         'tombstone', 'upsert']
     assert 'embedding' not in json.loads(repository._db.outbox[0]['payload'])
-    assert event_payload['embedding'] == [0.25, 0.75]
+    assert 'embedding' not in event_payload
+    assert event_payload['embedding_model'] == 'test-v1'
     assert event_payload['version_id'] == saved['version_id']
+
+    # The external write derives its vector from text under the frozen model;
+    # the caller's transient vector is never restored from a PG payload.
+    catalog = default_catalog()
+    row = build_projection(ProjectionInput(saved), catalog, index_version=1)
+    assert row is not None and 'embedding' not in row
+    frozen = {'seq': repository._db.outbox[-1]['seq'], 'operation': 'upsert', 'payload': {
+        '_milvus_projection': {'index_version': 1, 'catalog_fingerprint': catalog.fingerprint,
+                              'embedding_model': Encoder.identity, 'row': row}}}
+    external, encoder = RecordingMilvus(), Encoder()
+    adapter = MilvusProjectionAdapter(external, encoder=encoder,
+                                     fence_is_current=lambda *args: True)
+    assert adapter.apply('project', frozen, fence='lease', index_version=1, catalog=catalog)
+    assert encoder.encoded == ['new']
+    projected = external.rows[('project', 1, 'rule')]
+    assert projected['version_id'] == saved['version_id']
+    assert projected['embedding'] == [1.0, 0.0]

@@ -112,7 +112,7 @@ MOCKS = r"""() => {
   const reply = body => new Response(JSON.stringify(body),{status:200,
     headers:{'Content-Type':'application/json'}});
   window.__applied=null;window.__previewed=null;window.__planRead=false;window.__planReads=0;
-  window.__recordPageBodies=[];window.__unexpectedRequests=[];window.__reclassifyRequests=[];
+  window.__recordPageBodies=[];window.__visibleRecordIds=[];window.__assertionBatchBodies=[];window.__unexpectedRequests=[];window.__reclassifyRequests=[];
   window.fetch = async (input,options={}) => {
     const url = typeof input === 'string' ? input : input.url;
     const parsed = new URL(url,'http://localhost');
@@ -129,7 +129,10 @@ MOCKS = r"""() => {
       if(body.ontology_scope==='unknown')filtered=filtered.filter(row=>!row.ontology_id);
       if(body.query)filtered=filtered.filter(row=>(row.id+' '+row.text).includes(body.query));
       const offset=Number(body.cursor||0),limit=body.limit||50;
-      return reply({total:filtered.length,records:filtered.slice(offset,offset+limit),
+      const pageRows=filtered.slice(offset,offset+limit);
+      // The ledger also asks for limit=1 counts for hidden kind tabs.
+      if(body.kinds?.length&&body.limit===50&&!body.record_ids)window.__visibleRecordIds=pageRows.map(row=>row.id);
+      return reply({total:filtered.length,records:pageRows,
         next_cursor:offset+limit<filtered.length?String(offset+limit):null});
     }
     const recordId=parsed.pathname.match(/\/records\/([^/]+)$/)?.[1];
@@ -137,6 +140,17 @@ MOCKS = r"""() => {
     if(parsed.pathname.endsWith('/ontologies')) return reply({versions:[
       {id:'o1',version:1,created_at:'2026-01-01T00:00:00Z'},
       {id:'o2',version:2,created_at:'2026-03-01T00:00:00Z'}]});
+    if(parsed.pathname.endsWith('/assertions/batch')){
+      const ids=body?.record_ids;
+      if(method!=='POST'||Object.keys(body||{}).join(',')!=='record_ids'||
+          !Array.isArray(ids)||!ids.length||ids.length>100||new Set(ids).size!==ids.length||
+          ids.some(id=>!window.__visibleRecordIds.includes(id))){
+        window.__unexpectedRequests.push('invalid assertions/batch request');
+        throw Error('invalid assertions/batch request');
+      }
+      window.__assertionBatchBodies.push(body);
+      return reply({assertions_by_record:Object.fromEntries(ids.map(id=>[id,[]])),truncated_record_ids:[]});
+    }
     if(parsed.pathname.endsWith('/assertions')) return reply({total:0,assertions:[]});
     if(parsed.pathname.endsWith('/duplicate-groups')) return reply({groups:[]});
     if(parsed.pathname.endsWith('/structure-pending')) return reply({pending_structure:0,pending_records:0,terms:[]});
@@ -200,6 +214,11 @@ def _open(browser, tmp_path, before=None, ready=None):
     assert first_page['kinds'] == ['entity']
     assert first_page['limit'] == 50 and first_page['cursor'] is None
     assert first_page['ontology_scope'] == 'all'
+    assertion_batches = page.evaluate('window.__assertionBatchBodies')
+    assert assertion_batches
+    assert assertion_batches[0]['record_ids'] == ['e1', 'e2']
+    assert all(set(batch) == {'record_ids'} and 0 < len(batch['record_ids']) <= 100
+               for batch in assertion_batches)
     # The ledger now reads governance only on explicit request. Opening it
     # neither scans migration plans nor previews/applies a migration.
     assert page.evaluate('window.__planRead') is False
@@ -287,6 +306,7 @@ def test_ledger_has_an_attribute_view_with_subject_and_value(browser, tmp_path):
     excerpt = re.sub(r'\s+', '', row.locator('.record-excerpt').inner_text())
     assert excerpt == '重量=12', f'属性行读不出「属性名 = 值」：{excerpt}'
     assert '一号包裹' in row.inner_text(), '属性行没有显示它挂在哪个实体上'
+    assert page.evaluate('window.__assertionBatchBodies.at(-1).record_ids') == ['a1']
     # 属性也能跳图谱：定位到它所属的实体（属性本身不是图上的点）
     assert row.locator('[data-locate-graph="e1"]').count() == 1
     page.close()

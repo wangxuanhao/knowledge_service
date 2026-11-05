@@ -17,6 +17,8 @@ _ACTIVITY_KINDS = {
     'retrieval', 'answer', 'ontology_draft', 'ontology_publish',
 }
 _TERMINAL_STATUSES = {'completed', 'failed', 'cancelled'}
+# Nine parameters per row keep each statement well below PostgreSQL's limit.
+_EDGE_INSERT_BATCH_SIZE = 1000
 _EDGE_RELATIONS = {
     'considered', 'used', 'offered', 'cites', 'supported-by', 'decided-by',
     'extracted-from', 'sourced-from', 'processed-by', 'published-from',
@@ -255,13 +257,12 @@ class ProvenanceStore:
             edge = self._validate_edge(edge)
             if edge['activity_id'] != activity_id:
                 raise ValueError('版本冲突：溯源边不属于该活动')
-            payload = self._payload(edge.get('payload', {}))
+            encoded = self._canonical_json(edge.get('payload', {}))
             key = self._edge_key(edge)
             duplicate = proposed.get(key)
-            if duplicate is not None and not self._strict_json_equal(
-                    duplicate[1], payload):
+            if duplicate is not None and duplicate[1] != encoded:
                 raise ValueError('版本冲突：同一溯源边载荷不一致')
-            proposed[key] = (edge, payload)
+            proposed[key] = (edge, encoded)
 
         rows = self._db.execute(
             '''SELECT * FROM provenance_edges
@@ -274,13 +275,38 @@ class ProvenanceStore:
         if not allow_insert and proposed_keys - existing_keys:
             raise ValueError('版本冲突：终态活动不能追加溯源边')
 
-        for key, (edge, payload) in proposed.items():
+        missing = []
+        for key, (edge, encoded) in proposed.items():
             row = existing.get(key)
             if row is not None:
-                if not self._edge_is_identical(row, payload):
+                if self._canonical_json(json.loads(row['payload'])) != encoded:
                     raise ValueError('版本冲突：溯源边已存在')
                 continue
-            self._insert_edge(project_id, edge, default_created_at)
+            missing.append((
+                edge.get('id') or str(uuid4()), project_id, edge['activity_id'],
+                edge['source_ref'], edge['relation'], edge['target_ref'],
+                edge['ordinal'], encoded,
+                edge.get('created_at') or default_created_at or utc_now()))
+
+        # Validate the entire frozen set before writing. The caller owns the
+        # transaction, so a failure in any later batch rolls back every batch.
+        for offset in range(0, len(missing), _EDGE_INSERT_BATCH_SIZE):
+            batch = missing[offset:offset + _EDGE_INSERT_BATCH_SIZE]
+            placeholders = ','.join('(?,?,?,?,?,?,?,?,?)' for _ in batch)
+            try:
+                self._db.execute(
+                    f'''INSERT INTO provenance_edges
+                        (id,project_id,activity_id,source_ref,relation,target_ref,
+                         ordinal,payload,created_at) VALUES {placeholders}''',
+                    [value for values in batch for value in values])
+            except IntegrityError as exc:
+                # A failed PostgreSQL statement aborts the transaction: do not
+                # issue a recovery SELECT. Only this exact PK violation is an
+                # ID conflict; FK/check/logical-key errors retain their type.
+                if (exc.sqlstate == '23505'
+                        and exc.diag.constraint_name == 'provenance_edges_pkey'):
+                    raise ValueError('版本冲突：溯源边 ID 已存在') from None
+                raise
 
     def _transition_activity(self, project_id, activity_id, status, payload, edges,
                              completed_at=None):

@@ -3,7 +3,9 @@ import json
 import sys
 import time
 import types
+from copy import deepcopy
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -16,13 +18,47 @@ from knowledge_service.integrations.embeddings import (
     encoder_dimension,
 )
 from knowledge_service.integrations.milvus_store import (
+    COLLECTION,
     MilvusStore,
     MilvusSchemaMismatch,
     VectorDimensionMismatch,
 )
+from knowledge_service.domain.search_filter_catalog import default_catalog
+from knowledge_service.domain.search_projection import ProjectionInput, build_projection
+from test_production_milvus_schema import production_metadata
 
 ROOT = Path(__file__).resolve().parents[2]
 MODEL_DIR = ROOT / 'data' / 'model'
+
+
+def _schema_client(dim, *, exists=True, legacy=False):
+    """External SDK metadata and row I/O only; store validation remains real."""
+    info, indexes = production_metadata()
+    next(field for field in info['fields'] if field['name'] == 'embedding')['params']['dim'] = dim
+    if legacy:
+        info = {'fields': [next(field for field in info['fields'] if field['name'] == 'embedding')]}
+        indexes = {}
+    live = {'exists': exists}
+    client = Mock()
+    client.rows = {}
+    client.has_collection.side_effect = lambda name, **kwargs: name == COLLECTION and live['exists']
+    client.describe_collection.side_effect = lambda name, **kwargs: deepcopy(info)
+    client.list_indexes.side_effect = lambda **kwargs: list(indexes)
+    client.describe_index.side_effect = lambda **kwargs: deepcopy(indexes[kwargs['index_name']])
+    client.list_collections.return_value = [COLLECTION]
+    client.search.return_value = [[]]
+
+    def create(name, *, schema, **kwargs):
+        assert name == COLLECTION
+        live['exists'] = True
+
+    def upsert(name, rows, **kwargs):
+        assert name == COLLECTION
+        client.rows.update((row['vector_id'], dict(row)) for row in rows)
+
+    client.create_collection.side_effect = create
+    client.upsert.side_effect = upsert
+    return client
 
 
 # --------------------------------------------------------------------------- model metadata
@@ -230,29 +266,65 @@ def test_milvus_store_keeps_encoder_identity_not_dimension_source(monkeypatch):
     assert store.encoder_identity != HashingEncoder.dimension_source
 
 
-def test_milvus_collection_is_configurable_for_isolated_deployments(monkeypatch):
+def test_shared_milvus_collection_isolates_projects_and_index_generations(monkeypatch):
     monkeypatch.setenv('KG_VECTOR_BACKEND', 'milvus')
     monkeypatch.setenv('KG_MILVUS_DIM', '256')
     monkeypatch.setenv('KG_MILVUS_COLLECTION', 'knowledge_redesign_validation')
-    monkeypatch.setattr(MilvusStore, 'connect', lambda self: self)
-    monkeypatch.setattr(MilvusStore, 'ensure_collection', lambda self: self)
-    assert _build_milvus_store(HashingEncoder()).collection_name == 'knowledge_redesign_validation'
+    client = _schema_client(256)
+
+    def connect(store):
+        store._client = client
+        return store
+
+    monkeypatch.setattr(MilvusStore, 'connect', connect)
+    store = _build_milvus_store(HashingEncoder())
+    # Older deployments selected a collection through this environment value.
+    # The current shared index instead isolates every request by project/build.
+    assert store.collection_name == COLLECTION == 'knowledge_vectors'
+    assert client.mock_calls == [], 'startup must only connect, never prepare the index'
+    with pytest.raises(ValueError, match='knowledge_vectors'):
+        MilvusStore(collection='knowledge_redesign_validation')
+
+    scopes = [('project-a', 1), ('project-a', 2), ('project-b', 1)]
+    for project, generation in scopes:
+        assert store.search(project, '退款', retrieval_mode='keyword', index_version=generation,
+                            catalog=default_catalog(), kinds=['chunk']) == []
+    assert client.search.call_count == len(scopes)
+    for call, (project, generation) in zip(client.search.call_args_list, scopes):
+        assert call.kwargs['collection_name'] == COLLECTION
+        assert call.kwargs['filter_params']['index_version'] == generation
+        project_parameter = next(name for name, value in call.kwargs['filter_params'].items()
+                                 if value == project)
+        assert f'project_id == {{{project_parameter}}}' in call.kwargs['filter']
+        assert 'index_version == {index_version}' in call.kwargs['filter']
+    for method in (client.create_collection, client.create_index, client.drop_collection,
+                   client.upsert, client.delete):
+        method.assert_not_called()
 
 
 def test_legacy_milvus_schema_keeps_connected_store_for_generation_rebuild(monkeypatch):
     monkeypatch.setenv('KG_VECTOR_BACKEND', 'milvus')
     monkeypatch.setenv('KG_MILVUS_DIM', '256')
-    monkeypatch.setattr(MilvusStore, 'connect', lambda self: self)
+    client = _schema_client(256, legacy=True)
 
-    def legacy_schema(self):
-        raise MilvusSchemaMismatch('legacy collection requires V2 rebuild')
+    def connect(store):
+        store._client = client
+        return store
 
-    monkeypatch.setattr(MilvusStore, 'ensure_collection', legacy_schema)
+    monkeypatch.setattr(MilvusStore, 'connect', connect)
     diagnostics = []
     store = _build_milvus_store(HashingEncoder(), diagnostics=diagnostics)
 
     assert isinstance(store, MilvusStore)
-    assert diagnostics and 'V2 rebuild' in diagnostics[0]
+    assert store.available and store._client is client
+    assert diagnostics == [] and client.mock_calls == []
+    with pytest.raises(MilvusSchemaMismatch, match='missing column vector_id'):
+        store.ensure_collection(project_id='project', index_version=2, catalog=default_catalog())
+    assert store.available and store._client is client
+    assert store.ping(), 'schema rejection must retain the connection for explicit maintenance'
+    for method in (client.close, client.create_collection, client.create_index,
+                   client.drop_collection, client.upsert, client.delete):
+        method.assert_not_called()
 
 
 def test_unknown_encoder_dimension_requires_an_explicit_positive_dimension(monkeypatch):
@@ -339,35 +411,94 @@ class FakeMilvusClient:
 
 def test_ensure_collection_raises_an_actionable_error_on_dimension_mismatch():
     """读到旧表维度与当前维度不一致：报错必须包含"差多少"和"怎么修"。"""
-    store = MilvusStore(dim=256, encoder_identity='demo-character-bigrams-sha256-256-v1')
-    store._client = FakeMilvusClient(dim=1024)
+    store = MilvusStore(dim=256, encoder_identity=HashingEncoder.identity)
+    store._client = _schema_client(1024)
     with pytest.raises(VectorDimensionMismatch) as excinfo:
-        store.ensure_collection()
+        store.ensure_collection(project_id='project', index_version=2, catalog=default_catalog())
     message = str(excinfo.value)
+    assert excinfo.value.collection == COLLECTION
     assert excinfo.value.collection_dim == 1024
     assert excinfo.value.expected_dim == 256
+    assert excinfo.value.encoder_identity == HashingEncoder.identity
     assert '1024' in message and '256' in message
-    assert 'indexes/rebuild' in message
-    assert 'demo-character-bigrams-sha256-256-v1' in message
-    assert store._client.dropped == []
+    assert '请统一模型配置' in message
+    assert store.available
+    for method in (store._client.create_collection, store._client.create_index,
+                   store._client.drop_collection, store._client.upsert, store._client.delete):
+        method.assert_not_called()
 
 
-def test_ensure_collection_can_recreate_the_table_at_the_new_dimension():
-    store = MilvusStore(dim=256)
-    store._client = FakeMilvusClient(dim=1024)
-    store.ensure_collection(recreate=True)
-    assert store._client.dropped == ['knowledge_records']
-    assert store._client.collections['knowledge_records'] == 256
+def test_explicit_collection_creation_reuses_compatible_project_generations_without_drop():
+    catalog = default_catalog()
+    store = MilvusStore(dim=256, encoder_identity=HashingEncoder.identity)
+    client = store._client = _schema_client(256, exists=False)
+    assert store.ensure_collection(project_id='project-a', index_version=1, catalog=catalog) is store
+    assert client.create_collection.call_count == client.create_index.call_count == 1
+    assert client.create_collection.call_args.args == (COLLECTION,)
+    schema = client.create_collection.call_args.kwargs['schema']
+    fields = {field.name: field for field in schema.fields}
+    assert len(fields) == len(catalog.column_defs()) == 21
+    assert set(fields) == {column.name for column in catalog.column_defs()}
+    assert fields['embedding'].params['dim'] == 256
+    assert fields['vector_id'].is_primary and not fields['vector_id'].auto_id
+    assert fields['project_id'].is_partition_key
+    assert schema.enable_dynamic_field is False
+    assert len(schema.functions) == 1
+    function = schema.functions[0].to_dict()
+    assert function['name'] == 'text_bm25' and int(function['type']) == 1
+    assert function['input_field_names'] == ['text'] and function['output_field_names'] == ['sparse']
+    index_definitions = {item.index_name: item.to_dict()
+                         for item in client.create_index.call_args.args[1]}
+    assert index_definitions['dense'] == {'field_name': 'embedding', 'index_name': 'dense',
+        'index_type': 'HNSW', 'metric_type': 'COSINE', 'M': 16, 'efConstruction': 256}
+    assert index_definitions['bm25'] == {'field_name': 'sparse', 'index_name': 'bm25',
+        'index_type': 'SPARSE_INVERTED_INDEX', 'metric_type': 'BM25'}
+    assert set(index_definitions) == {'dense', 'bm25', *(
+        'filter_' + column.name for column in catalog.column_defs() if column.index)}
+    for column in catalog.column_defs():
+        if column.index and column.name not in {'embedding', 'sparse'}:
+            assert index_definitions['filter_' + column.name] == {
+                'field_name': column.name, 'index_name': 'filter_' + column.name, 'index_type': 'INVERTED'}
+
+    identities, snapshots = [], {}
+    for project, generation in [('project-a', 1), ('project-a', 2), ('project-b', 1)]:
+        assert store.ensure_collection(project_id=project, index_version=generation, catalog=catalog) is store
+        row = build_projection(ProjectionInput({'project_id': project, 'id': 'record',
+            'version_id': 'v1', 'kind': 'chunk', 'text': f'退款 {project} {generation}'}),
+            catalog, index_version=generation)
+        assert row is not None
+        row['embedding'] = [1.] + [0.] * 255
+        assert store.upsert_rows([row], project_id=project, index_version=generation, catalog=catalog) == 1
+        for vector_id, original in snapshots.items():
+            assert {key: client.rows[vector_id][key] for key in original} == original
+        snapshots[row['vector_id']] = {key: row[key] for key in (
+            'project_id', 'index_version', 'record_id', 'version_id', 'text')}
+        identities.append((project, generation, row['vector_id']))
+    assert len(client.rows) == len({vector for _, _, vector in identities}) == 3
+    assert {(row['project_id'], row['index_version']) for row in client.rows.values()} == {
+        ('project-a', 1), ('project-a', 2), ('project-b', 1)}
+    assert client.create_collection.call_count == client.create_index.call_count == 1
+    assert all(call.args[0] == COLLECTION for call in client.upsert.call_args_list)
+    client.drop_collection.assert_not_called()
+    client.delete.assert_not_called()
 
 
 def test_upsert_dimension_mismatch_raises_the_same_error_type():
     """写入时才发现维度不对，也必须抛同一类异常（调用方只需处理一种）。"""
-    store = MilvusStore(dim=1024)
-    store._client = FakeMilvusClient(dim=1024)
+    catalog = default_catalog()
+    store = MilvusStore(dim=1024, encoder_identity=HashingEncoder.identity)
+    store._client = _schema_client(1024)
+    row = build_projection(ProjectionInput({'version_id': 'v1', 'project_id': 'p',
+        'id': 'r1', 'kind': 'chunk', 'text': '商户退款'}), catalog, index_version=2)
+    assert row is not None
+    row['embedding'] = [1.] + [0.] * 255
     with pytest.raises(VectorDimensionMismatch) as excinfo:
-        store.upsert([{'version_id': 'v1', 'project_id': 'p', 'id': 'r1',
-                       'text': '商户退款', 'embedding': [0.0] * 256}])
+        store.upsert_rows([row], project_id='p', index_version=2, catalog=catalog)
     assert '256' in str(excinfo.value) and '1024' in str(excinfo.value)
+    assert excinfo.value.collection == COLLECTION
+    assert (excinfo.value.collection_dim, excinfo.value.expected_dim) == (1024, 256)
+    assert excinfo.value.encoder_identity == HashingEncoder.identity
+    assert store._client.mock_calls == [], 'invalid vectors must fail before native preparation or writes'
 
 
 # --------------------------------------------------------------------------- 重建接口自愈
@@ -385,9 +516,11 @@ def test_rebuild_endpoint_uses_generation_without_dropping_shared_collection(
     store.ping = lambda: True
     app = create_app(tmp_path / 'dim.sqlite', HashingEncoder())
     app.state.service.milvus_store = store              # 测试里直接注入替身
+    rebuild_calls = []
     class Sync:
         def rebuild(self, project_id, target):
-            return {'destination': 'generation-v2'}
+            rebuild_calls.append((project_id, target))
+            return {'destination': 'generation-v2', 'indexed': 0, 'index_version': 2}
     app.state.service.projection_sync = Sync()
 
     with TestClient(app) as client:
@@ -402,10 +535,13 @@ def test_rebuild_endpoint_uses_generation_without_dropping_shared_collection(
                 break
             time.sleep(0.02)
         assert job['status'] == 'completed', job
+        assert rebuild_calls == [(project, 'milvus')]
         assert store._client.dropped == [], '任务不得直接删除共享 collection'
         assert store._client.collections['knowledge_records'] == 1024
-        assert job['result']['recreated'] is True
+        assert job['result']['recreated'] is False
         assert job['result']['destination'] == 'generation-v2'
+        assert job['result']['index_version'] == 2
+        assert job['result']['indexed'] == job['result']['total'] == 0
         assert job['result']['dim'] == 256
         assert job['result']['embedding_model'] == HashingEncoder.identity
 
@@ -422,14 +558,17 @@ def test_rebuild_endpoint_uses_generation_when_dimension_matches(
     store.ping = lambda: True
     app = create_app(tmp_path / 'dim-ok.sqlite', HashingEncoder())
     app.state.service.milvus_store = store
+    rebuild_calls = []
     class Sync:
         def rebuild(self, project_id, target):
-            return {'destination': 'generation-v2'}
+            rebuild_calls.append((project_id, target))
+            return {'destination': 'generation-v2', 'indexed': 0, 'index_version': 2}
     app.state.service.projection_sync = Sync()
 
     with TestClient(app) as client:
         project = client.post('/api/projects', json={'name': '维度一致'}).json()['id']
         submitted = client.post(f'/api/projects/{project}/indexes/rebuild')
+        assert submitted.status_code == 202, submitted.text
         job_id = submitted.json()['id']
         job = {}
         for _ in range(200):
@@ -438,6 +577,12 @@ def test_rebuild_endpoint_uses_generation_when_dimension_matches(
                 break
             time.sleep(0.02)
         assert job['status'] == 'completed', job
+        assert rebuild_calls == [(project, 'milvus')]
         assert store._client.dropped == []
-        assert job['result']['recreated'] is True
+        assert store._client.collections['knowledge_records'] == 256
+        assert job['result']['recreated'] is False
         assert job['result']['destination'] == 'generation-v2'
+        assert job['result']['index_version'] == 2
+        assert job['result']['indexed'] == job['result']['total'] == 0
+        assert job['result']['dim'] == 256
+        assert job['result']['embedding_model'] == HashingEncoder.identity

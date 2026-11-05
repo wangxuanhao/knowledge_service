@@ -299,6 +299,10 @@ class AnswerPromptGraphTests(unittest.TestCase):
 
         service = facade.KnowledgeService.__new__(facade.KnowledgeService)
         service.repository = SimpleNamespace()
+        # This provider-prompt fixture prepares a historical snapshot; give both
+        # entry points the same explicit scope instead of requesting a current index.
+        request = {'query': '退款允许申请什么？', 'generate': True,
+                   'valid_at': '2025-01-01', 'known_at': '2026-01-01'}
         with patch.dict(os.environ, {'KG_LLM_BASE_URL': 'https://provider.invalid',
                                       'KG_LLM_API_KEY': 'test', 'KG_LLM_MODEL': 'test'}), \
              patch.object(answers, 'prepare_answer', side_effect=prepared), \
@@ -306,8 +310,8 @@ class AnswerPromptGraphTests(unittest.TestCase):
              patch.object(provenance, 'ProvenanceService', FrozenProvenance), \
              patch.object(answers, 'external_client', provider), \
              patch.object(facade, 'external_client', provider):
-            sync = service.answer('p', {'query': '退款允许申请什么？', 'generate': True})
-            events = list(answers.stream_events(service, 'p', {'query': '退款允许申请什么？', 'generate': True}))
+            sync = service.answer('p', request)
+            events = list(answers.stream_events(service, 'p', request))
         self.assertEqual(sync['mode'], 'llm')
         self.assertTrue(any(event.startswith('event: done') for event in events))
         self.assertEqual(len(calls), 2)

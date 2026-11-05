@@ -5,6 +5,8 @@ from knowledge_service.integrations.embeddings import HashingEncoder
 from knowledge_service.services.ontology import Ontology
 from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
 from knowledge_service.services.governance import writable
+from test_retrieval import activate_index
+from test_reviews import install_failing_projection, projection_events, assert_failed_projection_prefix
 import pytest
 
 TTL='''@prefix : <https://test/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -467,6 +469,9 @@ def test_review_safety_for_attribute_dependencies(tmp_path,monkeypatch,mode):
         p=client.post('/api/projects',json={'name':'safety','use_default_ontology':False}).json()['id']
         base='/api/projects/'+p;repo=app.state.service.repository
         seed_project_ontology(client, base+'', TTL)
+        if mode=='embedding_failure':
+            index=activate_index(repo,p,app.state.service.encoder)
+            assert index['watermark']==0 and repo.current_records(p)==[]
         result=client.post(base+'/documents',json={'title':'原文','text':'甲数量2','resolve_entities':False})
         assert result.status_code==201,result.text
         def items():return client.get(base+'/reviews').json()['reviews']
@@ -487,13 +492,33 @@ def test_review_safety_for_attribute_dependencies(tmp_path,monkeypatch,mode):
                 repo.put_record(p,updated,expected_version=entity['version'])
             if mode=='legacy_property':attribute=items()[1]
             if mode=='embedding_failure':
-                def fail(*args):raise RuntimeError('test unavailable')
-                monkeypatch.setattr(app.state.service.encoder,'encode',fail)
+                before_history=repo.history(p,attribute['document_id'])
+                before_queue=projection_events(repo,p)
+                attempts,writes,drains=install_failing_projection(app.state.service,monkeypatch)
             response=send(attribute,'count')
-            assert response.status_code=={'stale_entity':409,'legacy_property':200,'embedding_failure':503}[mode],response.text
+            assert response.status_code=={'stale_entity':409,'legacy_property':200,'embedding_failure':200}[mode],response.text
             latest=repo.history(p,parent['record_id'])[-1]
             assert latest['properties'].get('https://test/count')!=2
-            if mode=='legacy_property':
+            if mode in ('legacy_property','embedding_failure'):
                 fact=next(r for r in repo.current_records(p) if r['kind']=='attribute')
                 assert fact['value']==2
-        assert items()[1]['status']==('approved' if mode=='legacy_property' else 'pending')
+            if mode=='embedding_failure':
+                assert latest==entity
+                assert fact['id']==response.json()['record_id']
+                assertion=repo.get_assertion(p,attribute['id'])
+                assert assertion['status']=='accepted' and assertion['canonical_record_id']==fact['id']
+                assert repo.list_assertion_events(p,attribute['id'])[-1]['to_status']=='accepted'
+                history=repo.history(p,attribute['document_id'])
+                assert len(history)==len(before_history)+1
+                assert [dict(row,superseded_at=None) for row in history[:-1]]==[
+                    dict(row,superseded_at=None) for row in before_history]
+                assert history[-2]['superseded_at']==history[-1]['recorded_at']
+                queued,first=assert_failed_projection_prefix(repo,p,index,attempts,writes,drains)
+                assert queued[:len(before_queue)]==before_queue
+                assert first['version_id'] in {event['version_id'] for event in before_queue}
+                # Attributes remain authority facts; only queued chunks/entities are encoded.
+                assert first['payload']['_milvus_projection']['row']['kind'] in {'chunk','entity'}
+                attribute_event=next(event for event in queued if event['operation']=='upsert'
+                                     and event['version_id']==fact['version_id'])
+                assert attribute_event['payload']['_milvus_projection']['row'] is None
+        assert items()[1]['status']==('approved' if mode in ('legacy_property','embedding_failure') else 'pending')

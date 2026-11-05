@@ -1551,6 +1551,9 @@ class Repository:
     def get_assertion(self, project_id, assertion_id):
         return self._assertions.get(project_id, assertion_id)
 
+    def get_assertions(self, project_id, assertion_ids):
+        return self._assertions.get_many(project_id, assertion_ids)
+
     def list_assertions(self, project_id, status=None, canonical_record_id=None, document_id=None, assertion_ids=None):
         return self._assertions.list(project_id, status, canonical_record_id, document_id, assertion_ids)
 
@@ -1811,8 +1814,26 @@ class Repository:
         attached = context.get('intake_bindings') or []
         if draft['source_kind'] not in {'discovery', 'candidate'} and not attached:
             return
+        runs, missing_run = [], None
         for binding in attached:
-            run = self.get_discovery_run(project_id, binding['discovery_run_id'])
+            try:
+                runs.append(self.get_discovery_run(project_id, binding['discovery_run_id']))
+            except KeyError as exc:
+                # Preserve earlier run/document/assertion failures even though
+                # the assertions are prefetched across all attached runs.
+                missing_run = exc
+                break
+        snapshots = [run.get('assertion_snapshots') or [] for run in runs]
+        batchable = all(isinstance(group, (list, tuple)) and all(
+            isinstance(expected, dict) and isinstance(expected.get('id'), str)
+            for expected in group) for group in snapshots)
+        # Do not let malformed snapshot fields preempt the existing run and
+        # document guards. Their exceptional path retains the original reads.
+        assertions = None
+        if batchable:
+            assertion_ids = [expected['id'] for group in snapshots for expected in group]
+            assertions = self.get_assertions(project_id, assertion_ids) if assertion_ids else {}
+        for run in runs:
             if (not run.get('intake_request_hash') or run['status'] != 'draft_created'
                     or run.get('unified_draft_id') != draft['id']):
                 raise OntologyPublicationConflict('stale_source', '关联候选运行已变化')
@@ -1824,11 +1845,14 @@ class Repository:
                 'source_context': {'documents': references}})
             for expected in run.get('assertion_snapshots') or []:
                 try:
-                    assertion = self.get_assertion(project_id, expected['id'])
+                    assertion = (self.get_assertion(project_id, expected['id'])
+                                 if assertions is None else assertions[expected['id']])
                 except KeyError as exc:
                     raise OntologyPublicationConflict('stale_source', '关联候选断言已撤回') from exc
                 if self._publish_fingerprint(assertion) != expected['fingerprint']:
                     raise OntologyPublicationConflict('stale_source', '关联候选断言已变化')
+        if missing_run is not None:
+            raise missing_run
         for reference in self._ontology_source_references(
                 draft.get('source_context') or {}):
             document_id = reference.get('document_id') or reference.get('id')

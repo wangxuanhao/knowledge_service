@@ -27,7 +27,13 @@ def test_workbench_has_all_control_targets_and_no_native_dialogs():
     assert '受控重解析原文' not in workspace
     assert 'button:disabled{cursor:not-allowed}' in workspace_css
     assert 'contain:layout paint' in workspace_css and 'requestAnimationFrame(()=>{if(ui.graph===result||ui.graph===base)chart.resize();})' in workspace
-    assert all(text in workspace for text in ('知识时间','当前状态','上一个已知变更节点','仅在切换节点时刷新','/timeline?limit=100'))
+    assert all(text in workspace for text in ('系统修订时间','当前系统版本','上一个已知变更节点','仅切换系统修订，业务时间独立','/timeline?limit=100'))
+    timeline=workspace[workspace.index('function applyTimelinePoint('):workspace.index('function moveTimeline(')]
+    assert "if(get('known-at').value===value){renderTimelinePoints();return;}" in timeline
+    assert "...WorkspaceContext.read(current,'search'),known_at:value||null" in timeline
+    assert "WorkspaceContext.store.apply(current,'search')" in timeline
+    assert "get('valid-at').value=" not in timeline
+    assert 'window.clearGraphWorkspace({preserveSearchResults:true})' in timeline
     assert 'tl-density' not in workspace and 'startPlayback' not in workspace
     assert 'ontology-term-create' not in workspace and "endpoint('/ontology/terms')" not in workspace
     model=(ROOT/'ontology-model.js').read_text(encoding='utf-8')
@@ -201,8 +207,9 @@ def test_knowledge_history_excludes_document_receipts_and_sources_show_build_sta
     # reads only the selected kind through the server cursor pager.
     views=re.search(r'const VIEW_ORDER=\[([^]]+)\]',records)
     assert views and re.findall(r"'([^']+)'",views.group(1)) == ['entity','relation','attribute','chunk']
-    assert 'if(!VIEW_ORDER.includes(key))return;' in records
-    assert 'view=key;syncKindSelect();renderTabs();return loadPage();' in records
+    set_view=records[records.index('function setView('):records.index('function actionsCell(')]
+    assert 'if(!VIEW_ORDER.includes(key)){syncKindSelect();return;}' in set_view
+    assert 'view=key;syncKindSelect();renderTabs();return loadPage();' in set_view
     criteria=records[records.index('const readCriteria='):records.index('function guard(')]
     assert '...scope(),...versionFields(),kinds:[view]' in criteria
     assert "query:$('record-search').value.trim()" in criteria

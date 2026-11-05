@@ -87,8 +87,12 @@ SHELL = """<!doctype html><html><head><meta charset="utf-8"></head><body>
     return payload;
   };
   document.getElementById('resolve-entity').onclick=async()=>{};
-  // 台账的待建模入口现在切到「本体建模层」页签（不再有审核台收件箱）。
+  // The ledger delegates candidate selection to the existing intake boundary.
   window.__pendingOpened=0;
+  window.OntologyIntake={open:async options=>{
+    window.__pendingOpened++;
+    window.__pendingTarget={projectId:options.projectId,trigger:options.trigger.dataset.ledgerKpi};
+  }};
   window.showTab=name=>{const b=document.querySelector(`[data-tab="${name}"]`);if(b)b.click();};
   document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{
     window.__tabClicked=button.dataset.tab;
@@ -108,7 +112,7 @@ MOCKS = r"""() => {
       {structure_pending:{state:'cleared',terms:[],marked:['urn:ontology:人员']}}),
     entity('e3','李四','urn:ontology:人员',{}),
   ];
-  window.__recordPageBodies=[];window.__pendingRequests=[];window.__unexpectedRequests=[];
+  window.__recordPageBodies=[];window.__visibleRecordIds=[];window.__assertionBatchBodies=[];window.__pendingRequests=[];window.__unexpectedRequests=[];
   window.fetch = async (input,options={}) => {
     const url = typeof input === 'string' ? input : input.url;
     const parsed = new URL(url,'http://localhost');
@@ -122,10 +126,24 @@ MOCKS = r"""() => {
       if(body.ontology_scope==='unknown')filtered=filtered.filter(row=>!row.ontology_id);
       if(body.query)filtered=filtered.filter(row=>(row.id+' '+row.text).includes(body.query));
       const offset=Number(body.cursor||0),limit=body.limit||50;
-      return payload({total:filtered.length,records:filtered.slice(offset,offset+limit),
+      const pageRows=filtered.slice(offset,offset+limit);
+      // Counter-only limit=1 reads do not change which rows are visible.
+      if(body.kinds?.length&&body.limit===50&&!body.record_ids)window.__visibleRecordIds=pageRows.map(row=>row.id);
+      return payload({total:filtered.length,records:pageRows,
         next_cursor:offset+limit<filtered.length?String(offset+limit):null});
     }
     if(parsed.pathname.endsWith('/ontologies')) return payload({versions:[{id:'o1',version:1,created_at:'2026-01-01T00:00:00Z'}]});
+    if(parsed.pathname.endsWith('/assertions/batch')){
+      const ids=body?.record_ids;
+      if(method!=='POST'||Object.keys(body||{}).join(',')!=='record_ids'||
+          !Array.isArray(ids)||!ids.length||ids.length>100||new Set(ids).size!==ids.length||
+          ids.some(id=>!window.__visibleRecordIds.includes(id))){
+        window.__unexpectedRequests.push('invalid assertions/batch request');
+        throw Error('invalid assertions/batch request');
+      }
+      window.__assertionBatchBodies.push(body);
+      return payload({assertions_by_record:Object.fromEntries(ids.map(id=>[id,[]])),truncated_record_ids:[]});
+    }
     if(parsed.pathname.endsWith('/assertions')) return payload({total:0,assertions:[]});
     if(parsed.pathname.endsWith('/duplicate-groups')) return payload({groups:[]});
     if(parsed.pathname.endsWith('/structure-pending')){
@@ -188,6 +206,11 @@ def _open(browser, tmp_path, before=None):
     assert first_page['kinds'] == ['entity']
     assert first_page['limit'] == 50 and first_page['cursor'] is None
     assert first_page['ontology_scope'] == 'all'
+    assertion_batches = page.evaluate('window.__assertionBatchBodies')
+    assert assertion_batches
+    assert assertion_batches[0]['record_ids'] == ['e1', 'e2', 'e3']
+    assert all(set(batch) == {'record_ids'} and 0 < len(batch['record_ids']) <= 100
+               for batch in assertion_batches)
     # Counts are read explicitly, independently of the row-level server badges.
     tile = page.locator('[data-ledger-kpi="pending"]')
     assert tile.locator('b').inner_text().strip() == '未读取'
@@ -208,9 +231,16 @@ def test_pending_tile_comes_from_server_and_opens_the_inbox(browser, tmp_path):
     assert tile.count() == 1
     assert tile.locator('b').inner_text().strip() == '2'
     assert tile.locator('small').inner_text().strip() == '个概念待定'
-    assert '本体建模层' in tile.get_attribute('title')
+    hint = tile.get_attribute('title')
+    assert all(text in hint for text in ('抽出来的概念还没进本体', '核对可处理候选',
+                                         '手动补充结构定义', 'urn:knowledge:ontology:甲:包裹',
+                                         'urn:knowledge:ontology:甲:寄件人'))
+    assert page.evaluate('window.__pendingOpened') == 0
     tile.click()
+    page.wait_for_function('window.__pendingOpened === 1')
     assert page.evaluate('window.__tabClicked') == 'ontology-model', '点数字要先切到本体建模层'
+    assert page.evaluate('window.__pendingTarget') == {'projectId': 'p1', 'trigger': 'pending'}
+    assert not page.evaluate('Boolean(window.__status?.isError)')
     page.close()
 
 

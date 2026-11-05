@@ -31,11 +31,16 @@ class RelationshipPixels(unittest.TestCase):
           const read=()=>{r.draw();const pixels=new Uint8Array(40*6*4);
             r.gl.readPixels(380,297,40,6,r.gl.RGBA,r.gl.UNSIGNED_BYTE,pixels);return Array.from(pixels);};
           r.showEdges=false;const background=read();r.showEdges=true;const lines=read();
-          const darkening=background.reduce((max,value,i)=>i%4===1?Math.max(max,value-lines[i]):max,0);
-          const result={darkening,gl_error:r.gl.getError(),edge_count:r.dataset.edgeCount};
+          // A colored relationship can contrast through any RGB channel.
+          // Exclude alpha, which is not visible color on the opaque canvas.
+          const darkening=background.reduce((max,value,i)=>i%4!==3?Math.max(max,value-lines[i]):max,0);
+          const result={darkening,gl_error:r.gl.getError(),edge_count:r.dataset.edgeCount,
+            cached_relations:r.cachedRelations};
           r.destroy();return result;
         }''', edge_count)
         self.assertEqual(result['gl_error'], 0)
+        self.assertEqual(result['edge_count'], edge_count)
+        self.assertEqual(result['cached_relations'], edge_count)
         self.assertGreaterEqual(result['darkening'], 20,
                                 f'A relationship must visibly darken a real canvas pixel: {result}')
 

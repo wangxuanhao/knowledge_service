@@ -26,9 +26,9 @@ def test_qa_formatting_state_history_and_responsive_layout(workbench, tmp_path):
     stream = ''.join('event: '+name+'\ndata: '+json.dumps(data, ensure_ascii=False)+'\n\n'
                      for name, data in events)
     page.route('**/qa/stream', lambda route: route.fulfill(body=stream, content_type='text/event-stream'))
-    page.locator('#qa-settings>summary').click()
+    assert page.locator('#generate').is_visible()
     page.check('#generate')
-    page.locator('#qa-settings>summary').click()
+    assert page.locator('#generate').is_checked()
     page.fill('#qa-query', '美团的价格有哪些定义？')
     page.click('#qa')
     page.wait_for_selector('.qa-turn-assistant[data-state="done"]')

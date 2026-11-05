@@ -2,6 +2,7 @@
 import json
 import re
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -17,13 +18,16 @@ def layout_page():
     with playwright.sync_playwright() as runtime:
         browser = runtime.chromium.launch(headless=True, executable_path=EDGE)
         page = browser.new_page(viewport={'width': 1280, 'height': 900})
-        state = {'fail': False}
+        state = {'fail': False, 'requests': [], 'unexpected': [], 'errors': []}
+        page.on('pageerror', lambda error: state['errors'].append(str(error)))
         batch = {'id': 'batch-a', 'status': 'completed', 'counts': {'completed': 1},
                  'requested_concurrency': 'auto', 'effective_concurrency': 4}
         state['batch'] = batch
+        state['item'] = {'id': 'file-a', 'original_name': '平台基础规则_价格说明.md',
+                         'status': 'completed', 'source_version_id': 'version-a', 'document_id': 'document-a'}
         styles = ''.join(re.findall(r'<link[^>]+rel="stylesheet"[^>]*>',
                                     (WEB / 'index.html').read_text(encoding='utf-8')))
-        html = f'''<html><head><meta charset="utf-8">{styles}</head><body><main>
+        html = f'''<html><head><meta charset="utf-8">{styles}</head><body class="is-admin"><main>
           <select id="project"><option value="a">A</option><option value="b">B</option></select>
           <div id="ingest-batches"></div><div id="ingest-batch-tasks"></div>
           <section id="tab-dashboard"><div class="metric-card"><span class="metric-icon">文</span></div></section>
@@ -33,35 +37,62 @@ def layout_page():
               <button class="om-btn primary">把这 58 个新候选生成进本体</button>
             </div></div><div class="om-canvas-host"></div><div class="om-detail">术语详情</div></div>
           </div></section>
-          </main><script>window.status=()=>{{}};</script>
+          </main><script>window.Auth={{isAdmin:()=>true}};
+            window.status=(message,isError)=>{{window.__layoutStatus={{message,isError:Boolean(isError)}};}};</script>
           <script src="/assets/ingest-batches.js"></script></body></html>'''
 
         def respond(route):
-            path = route.request.url.split('workbench.test', 1)[1].split('?')[0]
+            request = route.request
+            parsed = urlsplit(request.url)
+            path, query = parsed.path, parse_qs(parsed.query, keep_blank_values=True)
             if path.startswith('/assets/'):
                 file = WEB / path.removeprefix('/assets/')
                 route.fulfill(body=file.read_bytes(), content_type=(
                     'text/css' if file.suffix == '.css' else 'text/javascript'))
             elif path == '/':
                 route.fulfill(body=html, content_type='text/html')
-            elif path == '/api/ingest/capabilities':
-                route.fulfill(json={'concurrency_choices': ['auto', 1, 4]})
-            elif path.endswith('/items'):
-                route.fulfill(json={'items': [{'id': 'file-a', 'original_name': '平台基础规则_价格说明.md',
-                    'status': 'completed', 'source_version_id': 'version-a', 'document_id': 'document-a'}]})
-            elif path.endswith('/batch-a'):
-                route.fulfill(json=batch)
-            elif path.endswith('/ingest-batches'):
-                route.fulfill(status=503, json={'detail': '服务暂不可用'}) if state['fail'] else route.fulfill(
-                    json={'items': [batch] if '/projects/a/' in path else []})
             else:
-                route.fulfill(json={})
+                body = request.post_data_json if request.method == 'POST' else None
+                call = {'method': request.method, 'path': path, 'query': query, 'body': body}
+                state['requests'].append(call)
+                if path == '/api/ingest/capabilities' and request.method == 'GET' and not query:
+                    route.fulfill(json={'concurrency_choices': ['auto', 1, 4]})
+                elif path in ('/api/projects/a/ingest-batches', '/api/projects/b/ingest-batches'):
+                    assert request.method == 'GET' and query == {'limit': ['20']}
+                    route.fulfill(status=503, json={'detail': '服务暂不可用'}) if state['fail'] else route.fulfill(
+                        json={'items': [batch] if '/projects/a/' in path else []})
+                elif path == '/api/projects/a/ingest-batches/batch-a' and request.method == 'GET' and not query:
+                    route.fulfill(json=batch)
+                elif path == '/api/projects/a/ingest-batches/batch-a/items':
+                    assert request.method == 'GET' and query == {'limit': ['50'], 'status': ['']}
+                    route.fulfill(json={'items': [state['item']], 'next_cursor': None})
+                elif path == '/api/projects/a/ingest-batches/batch-a/cancel':
+                    assert request.method == 'POST' and not query and body == {}
+                    assert batch['counts'].get('retry_wait') == 1
+                    batch.update(status='cancelled', counts={'cancelled': 1})
+                    state['item']['status'] = 'cancelled'
+                    route.fulfill(json=batch)
+                else:
+                    state['unexpected'].append(call)
+                    route.abort()
 
         page.route('http://workbench.test/**', respond)
         page.goto('http://workbench.test/')
+        assert state['requests'] == [], 'Controller readiness must not start hidden batch reads'
+        page.evaluate('()=>IngestBatches.loadRecent()')
+        assert [call['path'] for call in state['requests']] == ['/api/projects/a/ingest-batches']
+        assert page.locator('.batch-item').count() == 0
+        page.get_by_role('button', name='查看批次详情', exact=True).click()
         page.wait_for_selector('.batch-item')
-        yield page, state
-        browser.close()
+        assert [call['path'] for call in state['requests']] == [
+            '/api/projects/a/ingest-batches', '/api/projects/a/ingest-batches/batch-a',
+            '/api/projects/a/ingest-batches/batch-a/items']
+        try:
+            yield page, state
+            assert state['unexpected'] == []
+            assert state['errors'] == []
+        finally:
+            browser.close()
 
 
 def test_batch_file_actions_are_grouped_and_do_not_stretch(layout_page):
@@ -80,9 +111,17 @@ def test_completed_batch_disables_inapplicable_actions(layout_page):
 def test_waiting_for_automatic_retry_can_be_cancelled(layout_page):
     page, state = layout_page
     state['batch'].update(status='running', counts={'retry_wait': 1})
-    page.evaluate('()=>IngestBatches.loadRecent()')
+    state['item']['status'] = 'retry_wait'
+    page.get_by_role('button', name='收起文件', exact=True).click()
+    page.get_by_role('button', name='查看批次详情', exact=True).click()
     page.get_by_role('button', name='取消未开始文件', exact=True).wait_for()
     page.wait_for_function("[...document.querySelectorAll('.batch-actions button')].some(b=>b.textContent==='取消未开始文件'&&!b.disabled)")
+    page.get_by_role('button', name='取消未开始文件', exact=True).click()
+    page.wait_for_function("document.querySelector('[data-batch-id=\"batch-a\"]').dataset.status==='cancelled'")
+    assert page.get_by_role('button', name='取消未开始文件', exact=True).is_disabled()
+    assert [call for call in state['requests'] if call['method'] == 'POST'] == [{
+        'method': 'POST', 'path': '/api/projects/a/ingest-batches/batch-a/cancel', 'query': {}, 'body': {}}]
+    assert not page.evaluate('Boolean(window.__layoutStatus?.isError)')
 
 
 def test_list_errors_are_deduplicated_and_clear_after_recovery(layout_page):

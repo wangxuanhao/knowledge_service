@@ -16,6 +16,7 @@ from knowledge_service.repository.pg_engine import SqliteishConnection
 ])
 def test_active_query_is_not_a_nested_transaction(status, expected):
     connection = SqliteishConnection.__new__(SqliteishConnection)
+    connection._closed = False
     connection._conn = SimpleNamespace(lock=RLock(),
         info=SimpleNamespace(transaction_status=status))
     assert connection.in_transaction is expected

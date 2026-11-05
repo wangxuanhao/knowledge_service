@@ -1,5 +1,6 @@
 import pytest
 
+from keyword_index_fixture import ready_keyword_index
 from knowledge_service.utils.ingest_runs import readiness
 from knowledge_service.repository import Repository
 from fastapi.testclient import TestClient
@@ -76,6 +77,11 @@ def test_late_extraction_failure_preserves_search_ready_chunks(tmp_path, monkeyp
         assert document['metadata']['status'] == 'failed'
         assert document['metadata']['readiness']['search_ready'] is True
         assert document['metadata']['readiness']['graph_ready'] is False
-        search = client.post(f'/api/projects/{project_id}/search', json={
-            'query': '退款', 'retrieval_mode': 'keyword'}).json()
+        ready_keyword_index(client.app.state.service, project_id, monkeypatch)
+        response = client.post(f'/api/projects/{project_id}/search', json={
+            'query': '退款', 'retrieval_mode': 'keyword', 'kinds': ['chunk']})
+        assert response.status_code == 200, response.text
+        search = response.json()
         assert search['hits']
+        assert {hit['version_id'] for hit in search['hits']} <= {chunk['version_id'] for chunk in chunks}
+        assert all(hit['kind'] == 'chunk' and hit['source_id'] == document['id'] for hit in search['hits'])

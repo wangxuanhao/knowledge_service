@@ -932,26 +932,61 @@ def test_preview_late_response_and_direct_project_change_cannot_leave_inert_back
     page.click('[data-tab="sources"]');page.click('#upload-source')
     page.locator('#doc-file').set_input_files({'name':'preview.txt','mimeType':'text/plain','buffer':b'preview content'})
     page.locator('[data-upload-step="2"]').click()
-    page.click('#preview-chunks')
-    for _ in range(20):
-        if pending:break
-        page.wait_for_timeout(50)
-    assert pending
-    page.locator('#library-workspace-drawer .workspace-drawer-close').click()
-    pending.pop(0).fulfill(json={'chunks':[{'text':'preview content','start_char':0,'end_char':15}],'total':1})
-    page.wait_for_function("!document.getElementById('preview-chunks').disabled")
+    with page.expect_request('**/documents/upload/preview') as first_request:
+        page.click('#preview-chunks')
+    page.wait_for_function('chunkPreviewState.session?.pending.has(0)')
+    assert first_request.value.method == 'POST'
+    assert len(pending) == 1
+    before = page.evaluate('''()=>{
+      window.__heldParentPreview=chunkPreviewState.session.pending.get(0);
+      return {ticket:LibraryWorkspace.ticket(),snapshot:LibraryWorkspace.snapshot()};
+    }''')
+    assert before['snapshot']['active'] is True
+    assert page.evaluate("ticket=>LibraryWorkspace.accepts(ticket,'p')", before['ticket'])
+    assert page.locator('#chunk-preview').is_visible()
+    assert page.locator('body>main').evaluate('(e)=>e.inert')
+    # The child overlay deliberately blocks parent pointer clicks. Exercise the
+    # parent's published close lifecycle while its actual preview fetch is held.
+    page.evaluate('()=>LibraryWorkspace.close({restoreFocus:false})')
+    assert not page.locator('#library-workspace-drawer').evaluate('(e)=>e.open')
+    closed = page.evaluate('LibraryWorkspace.snapshot()')
+    assert closed['active'] is False and closed['generation'] > before['snapshot']['generation']
+    assert not page.evaluate("ticket=>LibraryWorkspace.accepts(ticket,'p')", before['ticket'])
     assert page.locator('#chunk-preview').evaluate('(e)=>e.hidden')
     assert not page.locator('body>main').evaluate('(e)=>e.inert')
-    page.click('#upload-source');page.click('#preview-chunks')
-    for _ in range(20):
-        if pending:break
-        page.wait_for_timeout(50)
+    assert not page.locator('body>aside').evaluate('(e)=>e.inert')
+    assert page.locator('#doc-file-list .document-queue-row').count() == 1
     pending.pop(0).fulfill(json={'chunks':[{'text':'preview content','start_char':0,'end_char':15}],'total':1})
-    page.wait_for_selector('#chunk-preview:not([hidden])')
-    page.evaluate("()=>{const s=document.getElementById('project');s.add(new Option('第二项目','q'));s.value='q';s.onchange();}")
+    # This is the existing API Promise, not a replacement transport or a timer.
+    page.evaluate('()=>window.__heldParentPreview')
     assert page.locator('#chunk-preview').evaluate('(e)=>e.hidden')
+    assert page.locator('#chunk-preview-list button').count() == 0
+    assert page.locator('#chunk-preview-content pre').count() == 0
     assert not page.locator('body>main').evaluate('(e)=>e.inert')
     assert not page.locator('html').evaluate('(e)=>e.classList.contains("chunk-preview-open")')
+    assert not page.locator('body').evaluate('(e)=>e.classList.contains("chunk-preview-open")')
+    page.click('#upload-source')
+    assert page.locator('#doc-file-list .document-queue-row').count() == 1
+    with page.expect_request('**/documents/upload/preview') as second_request:
+        page.click('#preview-chunks')
+    page.wait_for_function('chunkPreviewState.session?.pending.has(0)')
+    assert second_request.value.method == 'POST'
+    assert len(pending) == 1
+    page.evaluate('()=>{window.__renderedParentPreview=chunkPreviewState.session.pending.get(0);}')
+    pending.pop(0).fulfill(json={'chunks':[{'text':'preview content','start_char':0,'end_char':15}],'total':1})
+    page.evaluate('()=>window.__renderedParentPreview')
+    page.wait_for_selector('#chunk-preview:not([hidden])')
+    assert page.locator('#chunk-preview-content pre').inner_text() == 'preview content'
+    assert page.locator('body>main').evaluate('(e)=>e.inert')
+    page.evaluate("()=>{const s=document.getElementById('project');s.add(new Option('第二项目','q'));s.value='q';s.onchange();}")
+    assert not page.locator('#library-workspace-drawer').evaluate('(e)=>e.open')
+    assert page.locator('#chunk-preview').evaluate('(e)=>e.hidden')
+    assert not page.locator('body>main').evaluate('(e)=>e.inert')
+    assert not page.locator('body>aside').evaluate('(e)=>e.inert')
+    assert not page.locator('html').evaluate('(e)=>e.classList.contains("chunk-preview-open")')
+    assert not page.locator('body').evaluate('(e)=>e.classList.contains("chunk-preview-open")')
+    assert page.locator('#doc-file-list .document-queue-row').count() == 0
+    assert page.evaluate('LibraryWorkspace.snapshot().project') == 'q'
     assert errors==[]
 
 

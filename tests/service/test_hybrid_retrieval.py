@@ -1,4 +1,12 @@
+from types import SimpleNamespace
+
+import pytest
+
+from keyword_index_fixture import ready_keyword_index
+from knowledge_service.domain.search_filter_catalog import default_catalog
 from knowledge_service.repository import Repository
+from knowledge_service.repository.scoped_reads import ScopedReads
+from knowledge_service.services.projection_sync import ProjectionSync
 from knowledge_service.services.retrieval import RetrievalEngine, rrf_fuse
 
 
@@ -8,6 +16,34 @@ class Encoder:
 
     def encode(self, texts):
         return [[1.0, 0.0] if '退款' in text else [0.0, 1.0] for text in texts]
+
+
+def keyword_engine(repo, project, monkeypatch):
+    service = SimpleNamespace(repository=repo, milvus_store=None)
+    ready_keyword_index(service, project, monkeypatch)
+    return RetrievalEngine(repo, Encoder(), service.milvus_store)
+
+
+def activate_semantic_index(repo, project):
+    sync = ProjectionSync(repo.projections, {}, schema_version=3)
+    rebuild = repo.projections.begin_rebuild(
+        project, 'milvus', 3, 'semantic-quota-fixture',
+        lease_guard=sync._rebuild_lease_guard, embedding_model=Encoder.identity, dim=2)
+    state = {**rebuild['state'], 'catalog': default_catalog().to_dict()}
+    with repo.projections.activation_guard(project, rebuild['claim'], 3) as watermark:
+        assert watermark == rebuild['snapshot_seq']
+        repo.projections.activate_index(rebuild['claim'], 3, watermark, state)
+    cursor = repo.projections.cursor(project, 'milvus')
+    assert cursor['status'] == 'ready'
+    assert cursor['schema_version'] == 3
+    assert cursor['applied_seq'] == repo.projections.project_watermark(project)
+    assert cursor['rebuild_state']['embedding_model'] == Encoder.identity
+    assert cursor['rebuild_state']['dim'] == 2
+    assert cursor['rebuild_state']['catalog'] == default_catalog().to_dict()
+    index = repo.projections.search_index(project, 3)
+    assert (index['embedding_model'], index['dim'], index['watermark']) == (
+        Encoder.identity, 2, watermark)
+    return index
 
 
 def test_rrf_is_deterministic_and_keeps_backend_ranks():
@@ -44,8 +80,7 @@ def test_fts_tracks_current_rows_and_can_be_rebuilt(tmp_path):
     assert [row['id'] for row in repo.keyword_candidates(project_id, 'XYZ-009')] == ['entity-1']
 
 
-def test_hybrid_requires_milvus_and_explicit_keyword_prefilters(tmp_path):
-    import pytest
+def test_hybrid_requires_milvus_and_explicit_keyword_prefilters(tmp_path, monkeypatch):
     repo = Repository(tmp_path / 'hybrid.sqlite')
     project_id = repo.create_project('甲')['id']
     repo.put_record(project_id, {
@@ -64,6 +99,7 @@ def test_hybrid_requires_milvus_and_explicit_keyword_prefilters(tmp_path):
         engine.search(project_id, '退款', retrieval_mode='hybrid',
             scope={'filters': {'field': 'region', 'op': 'eq', 'value': '北京'}},
             content_channels=['chunk'], k=5)
+    engine = keyword_engine(repo, project_id, monkeypatch)
     result = engine.search(
         project_id, '退款', retrieval_mode='keyword',
         scope={'filters': {'field': 'region', 'op': 'eq', 'value': '北京'}},
@@ -76,7 +112,10 @@ def test_hybrid_requires_milvus_and_explicit_keyword_prefilters(tmp_path):
     assert result['filter_stage'] == 'before_ranking'
 
     repo.put_record(project_id, {'id': 'no-vector', 'kind': 'chunk', 'text': '精确标识 Z-42'})
-    keyword = engine.search(
+    with pytest.raises(RuntimeError, match='追平'):
+        engine.search(project_id, 'Z-42', retrieval_mode='keyword',
+                      scope={}, content_channels=['chunk'], k=5)
+    keyword = keyword_engine(repo, project_id, monkeypatch).search(
         project_id, 'Z-42', retrieval_mode='keyword', scope={},
         content_channels=['chunk'], k=5)
     assert keyword['active_mode'] == 'keyword'
@@ -96,10 +135,11 @@ def test_historical_keyword_search_scans_historical_versions(tmp_path):
         scope={'known_at': old['recorded_at']}, content_channels=['chunk'], k=5)
 
     assert [row['id'] for row in result['hits']] == ['chunk-1']
-    assert result['keyword_backend'] == 'historical_scan'
+    assert result['hits'][0]['version_id'] == old['version_id']
+    assert result['keyword_backend'] == 'postgres_history'
 
 
-def test_search_preserves_independent_entity_chunk_and_relation_quotas(tmp_path):
+def test_search_preserves_independent_entity_chunk_and_relation_quotas(tmp_path, monkeypatch):
     repo = Repository(tmp_path / 'quotas.sqlite')
     project_id = repo.create_project('甲')['id']
     for index in range(4):
@@ -119,7 +159,15 @@ def test_search_preserves_independent_entity_chunk_and_relation_quotas(tmp_path)
             'text': f'退款关系 {index}', 'metadata': {},
         })
 
-    result = RetrievalEngine(repo, Encoder()).search(
+    engine = keyword_engine(repo, project_id, monkeypatch)
+    calls, native_search = [], engine.milvus.search
+
+    def search(*args, **options):
+        calls.append(options)
+        return native_search(*args, **options)
+
+    monkeypatch.setattr(engine.milvus, 'search', search)
+    result = engine.search(
         project_id, '退款', retrieval_mode='keyword',
         content_channels=['entity', 'chunk', 'relation'], k=99,
         content_k={'entity': 2, 'chunk': 2, 'relation': 1})
@@ -128,25 +176,54 @@ def test_search_preserves_independent_entity_chunk_and_relation_quotas(tmp_path)
             for kind in ('entity', 'chunk', 'relation')} == {
                 'entity': 2, 'chunk': 2, 'relation': 1}
     assert result['channel_quotas'] == {'entity': 2, 'chunk': 2, 'relation': 1}
+    assert [call['kinds'] for call in calls] == [['entity'], ['chunk'], ['relation']]
+    assert all(call['retrieval_mode'] == 'keyword' and call['index_version'] == 2
+               and 1 <= call['k'] <= RetrievalEngine.MAX_NATIVE_LIMIT for call in calls)
 
 
 def test_search_reuses_preloaded_scoped_rows_without_querying_repository(tmp_path, monkeypatch):
+    # Preserve the regression node while covering the supported bounded-ID contract.
     repo = Repository(tmp_path / 'preloaded.sqlite')
     project_id = repo.create_project('甲')['id']
-    repo.put_record(project_id, {
+    saved = repo.put_record(project_id, {
         'id': 'chunk-1', 'kind': 'chunk', 'text': '退款原文', 'metadata': {},
     })
-    rows = repo.query(project_id)
+    engine = keyword_engine(repo, project_id, monkeypatch)
+    native_calls, hydration_calls = [], []
+    by_ids = ScopedReads.by_ids
+
+    def native_search(project, query, **options):
+        native_calls.append((project, query, options))
+        return [{'record_id': saved['id'], 'version_id': saved['version_id'], 'score': 1.}]
+
+    def hydrate(reader, project, scope, ids, *, kinds=None):
+        hydration_calls.append((project, scope, ids, kinds))
+        return by_ids(reader, project, scope, ids, kinds=kinds)
 
     def unexpected_query(*args, **kwargs):
-        raise AssertionError('preloaded search must not read records again')
+        raise AssertionError('native search must hydrate only bounded ranked IDs')
 
     monkeypatch.setattr(repo, 'query', unexpected_query)
-    result = RetrievalEngine(repo, Encoder()).search(
+    monkeypatch.setattr(ScopedReads, 'page', unexpected_query)
+    monkeypatch.setattr(ScopedReads, 'by_ids', hydrate)
+    engine.milvus = SimpleNamespace(available=True, search=native_search)
+    with pytest.raises(TypeError, match='candidates'):
+        engine.search(project_id, '退款', retrieval_mode='keyword', candidates=[saved])
+    result = engine.search(
         project_id, '退款', retrieval_mode='keyword', content_channels=['chunk'],
-        k=5, candidates=rows)
+        k=5)
 
     assert [hit['id'] for hit in result['hits']] == ['chunk-1']
+    assert len(native_calls) == 1
+    assert native_calls[0][:2] == (project_id, '退款')
+    assert native_calls[0][2]['kinds'] == ['chunk']
+    assert native_calls[0][2]['retrieval_mode'] == 'keyword'
+    assert native_calls[0][2]['index_version'] == 2
+    assert 5 <= native_calls[0][2]['k'] <= RetrievalEngine.MAX_NATIVE_LIMIT
+    assert len(hydration_calls) == 1
+    assert hydration_calls[0][0] == project_id
+    assert hydration_calls[0][2:] == (['chunk-1'], ['chunk'])
+    assert result['hits'][0]['version_id'] == saved['version_id']
 
 
 def test_semantic_search_applies_quotas_before_channels_can_crowd_each_other(tmp_path):
@@ -164,14 +241,16 @@ def test_semantic_search_applies_quotas_before_channels_can_crowd_each_other(tmp
          'embedding': [1.0, 0.0], 'embedding_model': 'test-v1'},
     ]
     saved = repo.put_batch(project_id, records)
+    index = activate_semantic_index(repo, project_id)
+    calls = []
     class NativeStore:
         available = True
-        def search_dense(self, project, vector, *, kinds, k, scope):
-            return [{'version_id': row['version_id'], 'score': 1.}
+        def search(self, project, query, *, kinds, k, scope, **options):
+            calls.append((project, query, kinds, k, scope, options))
+            return [{'record_id': row['id'], 'version_id': row['version_id'], 'score': 1.}
                     for row in saved if row['kind'] in kinds][:k]
 
-    result = RetrievalEngine(repo, Encoder(), NativeStore(),
-        projection_readiness=lambda *args: True).search(
+    result = RetrievalEngine(repo, Encoder(), NativeStore()).search(
         project_id, '退款', retrieval_mode='semantic',
         content_channels=['entity', 'chunk', 'relation'], k=10,
         content_k={'entity': 1, 'chunk': 1, 'relation': 1})
@@ -179,3 +258,10 @@ def test_semantic_search_applies_quotas_before_channels_can_crowd_each_other(tmp
     assert {kind: sum(hit['kind'] == kind for hit in result['hits'])
             for kind in ('entity', 'chunk', 'relation')} == {
                 'entity': 1, 'chunk': 1, 'relation': 1}
+    assert result['channel_quotas'] == {'entity': 1, 'chunk': 1, 'relation': 1}
+    assert [call[2] for call in calls] == [['entity'], ['chunk'], ['relation']]
+    assert all(call[0:2] == (project_id, '退款') and call[4] == {} for call in calls)
+    assert all(1 <= call[3] <= RetrievalEngine.MAX_NATIVE_LIMIT for call in calls)
+    assert all(call[5]['retrieval_mode'] == 'semantic'
+               and call[5]['query_vector'] == [1., 0.]
+               and call[5]['index_version'] == index['index_version'] for call in calls)

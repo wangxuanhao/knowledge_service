@@ -176,6 +176,21 @@ class Ontology:
             self.graph.parse(data=turtle, format="turtle")
         except Exception as exc:
             raise ValueError(f"无效的 Turtle：{exc}") from exc
+        self._initialize_vocabulary()
+
+    @classmethod
+    def from_graph(cls, graph: Graph):
+        """Own a graph copy without a Turtle serialization/parsing round trip."""
+        ontology = cls.__new__(cls)
+        ontology.graph = RevisionGraph()
+        for prefix, namespace in graph.namespaces():
+            ontology.graph.bind(prefix, namespace)
+        for triple in graph:
+            ontology.graph.add(triple)
+        ontology._initialize_vocabulary()
+        return ontology
+
+    def _initialize_vocabulary(self):
         self._governed_records = {}
         self.classes = set()
         self.relations = set()
@@ -568,7 +583,7 @@ def term_kind(ontology, node):
     return None
 
 
-def term_impact(service, p, uri, ontology):
+def term_impact(service, p, uri, ontology, *, records=None):
     """统计该术语被哪些知识记录引用、被哪些约束/待审核候选关联（用于停用/调整前评估）。
 
     受影响记录分两类：
@@ -578,7 +593,7 @@ def term_impact(service, p, uri, ontology):
       只统计直接命中会让界面显示"关系 0 条"，掩盖真实后果。
     """
     node = URIRef(uri)
-    rows = service.repository.current_records(p)
+    rows = records if records is not None else service.repository.current_records(p)
     direct = [r for r in rows if r.get('type') == uri or uri in r.get('properties', {})]
     direct_ids = {r['id'] for r in direct}
     linked = []

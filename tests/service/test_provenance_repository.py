@@ -316,17 +316,18 @@ def test_composed_retrieval_completion_rolls_back_after_partial_edge_writes(
         _edge('used', 'ans_1', 'answer:ans_1', 'used', 'retrieval-run:rr_1'),
         _edge('offered', 'ans_1', 'answer:ans_1#E1', 'offered', 'record-version:v1'),
     ]
-    real_insert = repo._provenance._insert_edge
+    execute = repo._db.execute
     inserted = []
 
-    def fail_after_second_insert(edge_project_id, edge, default_created_at=None):
-        result = real_insert(edge_project_id, edge, default_created_at)
-        inserted.append(result['id'])
-        if len(inserted) == 2:
-            raise RuntimeError('injected after partial edge writes')
-        return result
+    def fail_after_second_insert(sql, params=()):
+        cursor = execute(sql, params)
+        if ' '.join(sql.split()).upper().startswith('INSERT INTO PROVENANCE_EDGES'):
+            inserted.append(cursor.rowcount)
+            if len(inserted) == 2:
+                raise RuntimeError('injected after partial edge writes')
+        return cursor
 
-    monkeypatch.setattr(repo._provenance, '_insert_edge', fail_after_second_insert)
+    monkeypatch.setattr(repo._db, 'execute', fail_after_second_insert)
 
     with pytest.raises(RuntimeError, match='injected after partial edge writes'):
         repo.complete_retrieval_and_begin_answer(
@@ -334,7 +335,7 @@ def test_composed_retrieval_completion_rolls_back_after_partial_edge_writes(
             retrieval_payload={'count': 1}, answer_payload={'offered': ['E1']},
             edges=edges)
 
-    assert inserted == ['considered', 'used']
+    assert inserted == [1, 2]
     assert repo.get_provenance_activity(project_id, 'rr_1')['status'] == 'running'
     with pytest.raises(KeyError):
         repo.get_provenance_activity(project_id, 'ans_1')

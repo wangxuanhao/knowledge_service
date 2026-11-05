@@ -18,7 +18,7 @@ from .ontology_drafts_core import (
     EDITABLE_STATES, RevisionConflict, StaleBase, StaleSource, ValidationChanged,
     ValidationFailed, _fingerprint, _status_guard,
 )
-from .ontology_operations import apply_operations, canonical_turtle_diff
+from .ontology_operations import canonical_turtle_diff
 from ..repository.discovery_run_store import DiscoveryRunConflict
 from ..repository.page_reads import PageReads
 from ..utils.attributes import primitive_datatype
@@ -157,17 +157,37 @@ def published_terms(turtle):
 
 def assert_intake_sources(repository, project_id, context):
     """Assertions can be withdrawn independently of their source document JSON."""
+    runs, missing_run = [], None
     for run_id in intake_run_ids(context):
-        run = repository.get_discovery_run(project_id, run_id)
+        try:
+            runs.append((run_id, repository.get_discovery_run(project_id, run_id)))
+        except KeyError as exc:
+            # A later missing run must not hide an earlier stale snapshot.
+            missing_run = exc
+            break
+    snapshots = [run.get('assertion_snapshots') or [] for _, run in runs]
+    batchable = all(isinstance(group, (list, tuple)) and all(
+        isinstance(expected, dict) and isinstance(expected.get('id'), str)
+        for expected in group) for group in snapshots)
+    # Malformed persisted snapshots must fail at their original validation
+    # point, after the preceding run checks, with the original exception.
+    assertions = None
+    if batchable:
+        assertion_ids = [expected['id'] for group in snapshots for expected in group]
+        assertions = repository.get_assertions(project_id, assertion_ids) if assertion_ids else {}
+    for run_id, run in runs:
         if run['status'] != 'draft_created':
             raise StaleSource('关联候选运行已不再等待本草案发布', details={'run_id': run_id})
         for expected in run.get('assertion_snapshots') or []:
             try:
-                assertion = repository.get_assertion(project_id, expected['id'])
+                assertion = (repository.get_assertion(project_id, expected['id'])
+                             if assertions is None else assertions[expected['id']])
             except KeyError as exc:
                 raise StaleSource('关联候选断言已撤回') from exc
             if _fingerprint(assertion) != expected['fingerprint']:
                 raise StaleSource('关联候选断言已发生变化', details={'candidate_id': expected['id']})
+    if missing_run is not None:
+        raise missing_run
 
 
 def close_intake_runs(repository, project_id, context):
@@ -314,6 +334,7 @@ class OntologyIntake:
             raise ValueError('确认映射只能引用本次所选候选')
         terms = published_terms(baseline)
         formal = {x['iri']: x for x in terms}
+        overlay_ontology = Ontology(overlay)
         graph = Graph().parse(data=overlay, format='turtle')
         original = set(graph)
         bindings, conflicts, dependencies = [], [], []
@@ -381,7 +402,7 @@ class OntologyIntake:
                     graph.add((node, RDF.type, RDF_KINDS[kind]))
                     graph.add((node, RDFS.label, Literal(label, lang='zh')))
                     graph.add((node, RDFS.comment, Literal(f'由所选资料候选提出的{label}；发布前核对适用范围。', lang='zh')))
-                elif not Ontology(overlay).is_active_term(node):
+                elif not overlay_ontology.is_active_term(node):
                     conflicts.append({'candidate_id': candidate['id'], 'code': 'draft_term_retired',
                                       'message': '目标定义已停用，需明确恢复后再加入'})
             group = map_groups[MAPPING_GROUPS[candidate['kind']]]
@@ -539,10 +560,12 @@ class OntologyIntake:
     def _run(self, p, run_id, request_hash, result, mappings, bindings, receipt, response, *, draft_id=None):
         candidates = result['associated_fact_scope']
         frozen_sources = self.drafts._refresh_source_context(p, source_context(candidates))['documents']
+        assertion_ids = [candidate['assertion_id'] for candidate in candidates if candidate.get('assertion_id')]
+        by_id = self.repository.get_assertions(p, assertion_ids) if assertion_ids else {}
         assertions = []
         for candidate in candidates:
             if candidate.get('assertion_id'):
-                assertion = self.repository.get_assertion(p, candidate['assertion_id'])
+                assertion = by_id[candidate['assertion_id']]
                 assertions.append({'id': assertion['id'], 'fingerprint': _fingerprint(assertion)})
         processed = _materialized_candidate_ids(materialized_records(self.repository, p))
         return {'id': run_id, 'project_id': p,
@@ -589,15 +612,12 @@ class OntologyIntake:
                 'selected_candidate_ids': result['candidate_ids'], 'request_id': run_id,
                 'source_fingerprint': result['source_fingerprint'], 'actor': actor})
             working, previous = self.drafts._ontology_for_draft(p, draft)
-            compiled = []
             # The draft guards every accumulated source, but new operations are
             # attributed only to this explicitly confirmed selection.
             source_draft = {**draft, 'source_kind': 'discovery', 'source_context': new_context}
-            for suggestion in suggestions:
-                command = {**suggestion, 'reason': '明确选择资料候选加入本轮修改'}
-                built = self.drafts._compile_command(p, source_draft, command, Ontology(working))
-                working = apply_operations(working, built)
-                compiled.extend(built)
+            compiled = self.drafts._compile_intake_commands(p, source_draft, [
+                {**suggestion, 'reason': '明确选择资料候选加入本轮修改'}
+                for suggestion in suggestions], Ontology(working))
             saved = self.drafts.store.append_operations(p, draft['id'], compiled)
             all_operations = [*previous, *saved]
             bindings = deepcopy([*result['new'], *result['reused']])

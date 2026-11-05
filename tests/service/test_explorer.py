@@ -2,6 +2,7 @@ from ontology_seed import seed_project_ontology
 from fastapi.testclient import TestClient
 from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
+from keyword_index_fixture import ready_keyword_index
 
 
 ATTRIBUTE_TTL = '''
@@ -235,7 +236,7 @@ def test_explorer_scope_sources_snapshot_and_evaluation(tmp_path):
         assert score['entities']['f1']==1 and score['relations']['f1']==1
 
 
-def test_document_job_and_stream(tmp_path):
+def test_document_job_and_stream(tmp_path, monkeypatch):
     import time
     with TestClient(create_app(tmp_path/'x.sqlite',HashingEncoder())) as client:
         p=client.post('/api/projects',json={'name':'tasks'}).json()['id']
@@ -249,6 +250,7 @@ def test_document_job_and_stream(tmp_path):
             time.sleep(.02)
         assert job['status']=='completed',job
         assert len(client.get(base+'/jobs').json()['jobs'])==1
+        ready_keyword_index(client.app.state.service, p, monkeypatch)
         response=client.post(base+'/qa/stream',json={'query':'原文','retrieval_mode':'keyword','generate':False})
         assert response.status_code==200 and 'event: evidence' in response.text and 'event: done' in response.text
 
@@ -262,14 +264,24 @@ def test_qa_stream_reads_scoped_records_once_and_returns_evidence_with_answer(tm
         assert client.post(base+'/documents',json={
             'title':'退款规则','text':'退款需要原始凭证','extraction_mode':'documents',
         }).status_code==201
-        repository=client.app.state.service.repository
+        service=client.app.state.service
+        ready_keyword_index(service, p, monkeypatch)
+        repository=service.repository
         original_query=repository.query
+        original_search=service.search
         driver_type=type(repository._db)
         original_execute=driver_type.execute
         query_context=local()
-        calls=[]
+        search_calls=[]
+        query_calls=[]
         reference_statements=[]
         reference_rows=[]
+
+        def counted_search(project_id, scope):
+            # Current primary retrieval is native ranking plus bounded PG
+            # hydration. Only the reference lookup uses the broad query port.
+            search_calls.append(((project_id,), dict(scope)))
+            return original_search(project_id, scope)
 
         def counted_execute(database, statement, *args, **kwargs):
             if getattr(query_context, 'reference', False):
@@ -277,7 +289,7 @@ def test_qa_stream_reads_scoped_records_once_and_returns_evidence_with_answer(tm
             return original_execute(database, statement, *args, **kwargs)
 
         def counted_query(*args, **kwargs):
-            calls.append((args, kwargs))
+            query_calls.append((args, kwargs))
             query_context.reference=bool(kwargs.get('_reference_mode'))
             try:
                 rows=original_query(*args, **kwargs)
@@ -288,18 +300,21 @@ def test_qa_stream_reads_scoped_records_once_and_returns_evidence_with_answer(tm
                 query_context.reference=False
 
         monkeypatch.setattr(repository,'query',counted_query)
+        monkeypatch.setattr(service,'search',counted_search)
         monkeypatch.setattr(driver_type,'execute',counted_execute)
         response=client.post(base+'/qa/stream',json={
             'query':'退款','generate':False,'retrieval_mode':'keyword',
         })
 
         assert response.status_code==200
-        primary = [(args, kwargs) for args, kwargs in calls
-                   if not kwargs.get('_reference_mode')]
-        references = [(args, kwargs) for args, kwargs in calls
+        primary = search_calls
+        references = [(args, kwargs) for args, kwargs in query_calls
                       if kwargs.get('_reference_mode')]
+        assert len(search_calls) == 1
+        assert len(query_calls) == 1
+        assert not [call for call in query_calls if not call[1].get('_reference_mode')]
         assert len(primary) == len(references) == 1
-        assert len(calls) == 2
+        assert len(search_calls) + len(query_calls) == 2
         assert primary[0][0] == references[0][0] == (p,)
         assert references[0][1]['_reference_limit'] == 501
         assert references[0][1]['_reference_terms'] == ['退款']
@@ -323,14 +338,32 @@ def test_qa_and_stream_preserve_ontology_scope_for_shared_context(tmp_path, monk
             'name': 'qa ontology scope', 'use_default_ontology': False,
         }).json()['id']
         service = client.app.state.service
+        ready_keyword_index(service, p, monkeypatch)
         scopes = []
+        search_calls = []
+        query_calls = []
+        original_search = service.search
+        original_scoped = service.scoped
+        original_query = service.repository.query
+
+        def capture_search(project_id, scope):
+            assert project_id == p
+            scopes.append(dict(scope))
+            search_calls.append((project_id, dict(scope)))
+            return original_search(project_id, scope)
 
         def capture_scoped(project_id, scope):
             assert project_id == p
             scopes.append(dict(scope))
-            return []
+            return original_scoped(project_id, scope)
 
+        def capture_query(*args, **kwargs):
+            query_calls.append((args, dict(kwargs)))
+            return original_query(*args, **kwargs)
+
+        monkeypatch.setattr(service, 'search', capture_search)
         monkeypatch.setattr(service, 'scoped', capture_scoped)
+        monkeypatch.setattr(service.repository, 'query', capture_query)
         request = {
             'query': '退款', 'generate': False, 'retrieval_mode': 'keyword',
             'ontology_scope': 'ids',
@@ -341,6 +374,10 @@ def test_qa_and_stream_preserve_ontology_scope_for_shared_context(tmp_path, monk
         stream = client.post(f'/api/projects/{p}/qa/stream', json=request)
 
         assert answer.status_code == stream.status_code == 200
+        assert 'event: done' in stream.text
+        assert len(search_calls) == len(query_calls) == 2
+        assert all(scope.get('_reference_mode') is True for _args, scope in query_calls)
+        assert not [call for call in query_calls if not call[1].get('_reference_mode')]
         assert len(scopes) == 4
         assert [bool(scope.get('_reference_mode')) for scope in scopes] == [
             False, True, False, True]
@@ -349,4 +386,9 @@ def test_qa_and_stream_preserve_ontology_scope_for_shared_context(tmp_path, monk
             assert scope['ontology_ids'] == ['ontology-v1']
         for primary, reference in (scopes[:2], scopes[2:]):
             assert primary['known_at'] == reference['known_at']
+            assert reference['_reference_terms'] == ['退款']
+        for (project_id, primary), (args, reference) in zip(search_calls, query_calls):
+            assert project_id == p and args == (p,)
+            assert primary['known_at'] == reference['known_at']
+            assert reference['_reference_limit'] == 501
             assert reference['_reference_terms'] == ['退款']

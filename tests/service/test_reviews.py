@@ -5,6 +5,7 @@ from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
 from knowledge_service.services.governance import writable
 from knowledge_service.services.ontology import Ontology
+from test_retrieval import activate_index
 
 TTL = '''@prefix : <https://test/> .
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -36,6 +37,88 @@ def decide(review, **options):
     client,_,_,base,c=review
     return client.post(base+'/reviews/'+c['document_id']+'/'+c['id'],json={
         'action':'approve','target_type':'knows','note':'确认方向与含义','expected_version':c['document_version'],**options})
+
+
+def projection_events(repo, project, after_seq=0):
+    from knowledge_service.repository.projection_store import _decode_row
+
+    rows = repo._db.execute('SELECT seq AS outbox_seq,operation,version_id,payload FROM projection_outbox '
+        'WHERE project_id=? AND seq>? ORDER BY seq', (project, after_seq)).fetchall()
+    raw_sequences = [int(row['outbox_seq']) for row in rows]
+    assert raw_sequences == list(range(after_seq + 1, after_seq + 1 + len(rows)))
+    events = [_decode_row(row) for row in rows]
+    assert [event['seq'] for event in events] == raw_sequences
+    return events
+
+
+def install_failing_projection(service, monkeypatch):
+    """Exercise the real leased delivery path; replace only external I/O."""
+    from knowledge_service.services.projection_runtime import MilvusProjectionAdapter
+    from knowledge_service.services.projection_sync import ProjectionSync
+
+    attempts, writes, drains = [], [], []
+
+    class Store:
+        dim = service.encoder.dimension
+
+        def check_collection(self, **kwargs):
+            return True
+
+        def upsert_rows(self, *args, **kwargs):
+            writes.append(('upsert', args, kwargs))
+            raise AssertionError('failed encoding must not reach external writes')
+
+        def delete_records(self, record_ids, *, project_id, index_version, catalog):
+            writes.append(('delete', list(record_ids), project_id, index_version, catalog.to_dict()))
+            return True
+
+    def fail(texts):
+        assert not service.repository._db.in_transaction, 'embedding must run after authority commit'
+        attempts.append(list(texts))
+        raise RuntimeError('test embedding failure')
+
+    monkeypatch.setattr(service.encoder, 'encode', fail)
+    adapter = MilvusProjectionAdapter(Store(), encoder=service.encoder)
+    sync = ProjectionSync(service.repository.projections, {'milvus': adapter}, schema_version=3)
+
+    def drain(project):
+        result = sync.drain_once(project, 'milvus')
+        drains.append(result)
+        return int(result)
+
+    monkeypatch.setattr(service, 'projection_drain', drain)
+    return attempts, writes, drains
+
+
+def assert_failed_projection_prefix(repo, project, index, attempts, writes, drains):
+    """Earlier document tombstones may deliver; no upsert or ACK may succeed."""
+    queued=projection_events(repo,project,index['watermark'])
+    assert all(event['payload']['_milvus_projection']['index_version']==index['index_version']
+               and event['payload']['_milvus_projection']['embedding_model']==index['embedding_model']
+               for event in queued)
+    first=next(event for event in queued if event['operation']=='upsert'
+               and event['payload']['_milvus_projection'].get('row') is not None)
+    body=first['payload']['_milvus_projection']['row']
+    assert body['version_id']==first['version_id']
+    assert body['version_id'] in {row['version_id'] for row in repo.history(project,body['record_id'])}
+    assert attempts==[[body['text']]]
+    prefix=[event for event in queued if event['seq']<first['seq'] and event['operation']=='tombstone']
+    document_ids={row['id'] for row in repo.current_records(project) if row['kind']=='document'}
+    assert all(event['payload']['_milvus_projection']['record_id'] in document_ids for event in prefix)
+    expected=[('delete', [event['payload']['_milvus_projection']['record_id']], project,
+               index['index_version'], index['catalog']) for event in prefix]
+    assert writes==expected
+    assert len(drains)==1 and drains[0].status=='requires_rebuild' and int(drains[0])==0
+    cursor=repo.projections.cursor(project,'milvus')
+    assert cursor['status']=='requires_rebuild' and cursor['last_error']=='test embedding failure'
+    assert cursor['claim_token'] is None
+    assert cursor['applied_seq']==index['watermark']<repo.projections.project_watermark(project)
+    assert repo._db.execute('SELECT COUNT(*) AS n FROM milvus_projection_receipts '
+        'WHERE project_id=? AND index_version=? AND version_id=?',
+        (project,index['index_version'],body['version_id'])).fetchone()['n']==0
+    with pytest.raises(RuntimeError,match='requires_rebuild'):
+        repo.projections.search_index(project,3)
+    return queued,first
 
 
 def test_pending_then_approve_is_atomic_and_preserves_graph(review):
@@ -103,12 +186,31 @@ def test_other_project_cannot_review_document(review):
 
 def test_embedding_failure_leaves_no_partial_approval(review,monkeypatch):
     client,service,p,base,c=review
-    def fail(texts):raise RuntimeError('test embedding failure')
-    monkeypatch.setattr(service.encoder,'encode',fail)
-    assert decide(review).status_code==503
-    assert client.get(base+'/reviews').json()['reviews'][0]['status']=='pending'
-    assert len(service.repository.history(p,c['document_id']))==2
-    assert not [r for r in service.repository.current_records(p) if r['kind']=='relation']
+    repo=service.repository
+    index=activate_index(repo,p,service.encoder)
+    attempts,writes,drains=install_failing_projection(service,monkeypatch)
+    before=repo.current_records(p)
+    response=decide(review)
+    assert response.status_code==200,response.text
+    assert client.get(base+'/reviews').json()['reviews'][0]['status']=='approved'
+    assert len(repo.history(p,c['document_id']))==3
+    after=repo.current_records(p)
+    assert [r for r in before if r['kind']=='entity']==[r for r in after if r['kind']=='entity']
+    relation=next(r for r in after if r['kind']=='relation')
+    assert relation['id']==response.json()['record_id']
+    assertion=repo.get_assertion(p,c['id'])
+    assert assertion['status']=='accepted' and assertion['canonical_record_id']==relation['id']
+    assert repo.list_assertion_events(p,c['id'])[-1]['to_status']=='accepted'
+    queued,first=assert_failed_projection_prefix(repo,p,index,attempts,writes,drains)
+    assert first['version_id']==relation['version_id']
+    relation_event=next(event for event in queued if event['operation']=='upsert'
+                        and event['version_id']==relation['version_id'])
+    envelope=relation_event['payload']['_milvus_projection']
+    assert envelope['index_version']==index['index_version']
+    assert envelope['embedding_model']==service.encoder.identity
+    assert envelope['row']['version_id']==relation['version_id']
+    assert 'embedding' not in envelope['row']
+    assert decide(review).status_code==409
 
 
 def test_merged_endpoint_redirect_and_deleted_endpoint_block(review):

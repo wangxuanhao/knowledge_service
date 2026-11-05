@@ -2,6 +2,7 @@ import pytest
 
 from knowledge_service.services.entity_resolution import EntityResolver
 from knowledge_service.repository import Repository
+from knowledge_service.utils.filters import matches_filter
 
 
 class Encoder:
@@ -30,7 +31,7 @@ def test_entity_resolver_has_aligned_review_and_separate_bands(tmp_path):
             # Scores are supplied by the Milvus retrieval seam; PG has no vectors.
             rows = repo.current_records(project, kinds=['entity'])
             return {'hits': [{**row, 'score': .95} for row in rows
-                             if row['id'] in kwargs['scope']['_candidate_ids']]}
+                             if matches_filter(row, kwargs['scope'].get('filters'))]}
 
     resolver = EntityResolver(repo, Encoder(), retrieval=MilvusRetrieval())
 

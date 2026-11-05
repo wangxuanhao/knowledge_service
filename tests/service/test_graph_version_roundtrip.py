@@ -35,15 +35,14 @@ def test_graph_edit_revision_and_ontology_match_ledger_and_history(workbench, re
     }''')
     page.select_option('#project', project)
     page.wait_for_function('id => current===id', arg=project)
-    first = page.evaluate(r'''async turtle => {
-      const first=await api(endpoint('/ontologies'),{turtle});
+    first = seed_ontology(workbench.service.repository, project, TTL, {})
+    page.evaluate(r'''async () => {
       await api(endpoint('/records'),{records:[
         {id:'edit-a',kind:'entity',text:'甲',type:'https://test/Person'},
         {id:'edit-b',kind:'entity',text:'乙',type:'https://test/Person'},
         {id:'edit-rel',kind:'relation',text:'甲认识乙',type:'https://test/knows',
           subject_id:'edit-a',object_id:'edit-b'}]});
-      return first;
-    }''', TTL)
+    }''')
     seed_ontology(workbench.service.repository, project, TTL + '\n<https://test/New> a <http://www.w3.org/2002/07/owl#Class> .', {})
     page.evaluate('async()=>{await loadOntologyTerms();await window.drawGraph();}')
     page.evaluate('''async id => {

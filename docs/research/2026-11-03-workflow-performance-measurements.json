@@ -1,0 +1,724 @@
+{
+  "date": "2026-11-03",
+  "revision": "cc6e9e9",
+  "method": "single instrumented diagnostic sample; anonymous structural replica; temporary isolated PostgreSQL; service methods, not browser end-to-end",
+  "quality_dependency_in_workflow": "deterministic passed dependency; real local engine measured separately below",
+  "llm_and_vector_delivery_measured": false,
+  "input_counts": {
+    "documents": 2,
+    "candidates": 154,
+    "definition_types": 83,
+    "candidate_kinds": {
+      "entity": 85,
+      "relation": 69
+    }
+  },
+  "stages": [
+    {
+      "name": "intake.preview.batch1",
+      "seconds": 4.486704200000531,
+      "sql_count": 18,
+      "sql_statements": {
+        "BEGIN": 1,
+        "SELECT": 16,
+        "WITH": 1
+      },
+      "calls": {
+        "sql.execute": 18,
+        "ontology.construct": 42,
+        "rdf.parse": 43,
+        "rdf.serialize": 4,
+        "repo.current_records": 1,
+        "ontology.validate_timeline": 1
+      },
+      "cumulative_seconds": {
+        "sql.execute": 0.062575,
+        "rdf.parse": 0.205173,
+        "ontology.construct": 0.231985,
+        "rdf.serialize": 0.104047,
+        "repo.current_records": 0.008507,
+        "ontology.validate_timeline": 3.834342
+      },
+      "outer_transaction_seconds": 4.483766599998489,
+      "metadata": {
+        "selected": 100,
+        "definitions_expected": 83
+      }
+    },
+    {
+      "name": "intake.confirm.batch1",
+      "seconds": 50.70068410000022,
+      "sql_count": 1473,
+      "sql_statements": {
+        "BEGIN": 1,
+        "SELECT": 1260,
+        "WITH": 1,
+        "SAVEPOINT": 5,
+        "INSERT": 200,
+        "RELEASE": 5,
+        "UPDATE": 1
+      },
+      "calls": {
+        "sql.execute": 1473,
+        "ontology.construct": 1431,
+        "rdf.parse": 1432,
+        "rdf.serialize": 1194,
+        "repo.current_records": 398,
+        "ontology.validate_timeline": 1,
+        "draft.compile_command": 198,
+        "repo.get_assertion": 100
+      },
+      "cumulative_seconds": {
+        "sql.execute": 5.542309,
+        "rdf.parse": 19.929764,
+        "ontology.construct": 23.572963,
+        "rdf.serialize": 17.00498,
+        "repo.current_records": 2.912649,
+        "ontology.validate_timeline": 0.387496,
+        "draft.compile_command": 28.893099,
+        "repo.get_assertion": 0.751021
+      },
+      "outer_transaction_seconds": 50.686048700001265,
+      "metadata": {
+        "selected": 100,
+        "suggestions": 198,
+        "frontend_budget_seconds": 25
+      }
+    },
+    {
+      "name": "intake.idempotent_replay.batch1",
+      "seconds": 0.2581227000009676,
+      "sql_count": 2,
+      "sql_statements": {
+        "BEGIN": 1,
+        "SELECT": 1
+      },
+      "calls": {
+        "sql.execute": 2
+      },
+      "cumulative_seconds": {
+        "sql.execute": 0.060071
+      },
+      "outer_transaction_seconds": 0.25462400000105845,
+      "metadata": {}
+    },
+    {
+      "name": "intake.preview.batch2",
+      "seconds": 4.69345130000147,
+      "sql_count": 244,
+      "sql_statements": {
+        "BEGIN": 1,
+        "SELECT": 242,
+        "WITH": 1
+      },
+      "calls": {
+        "sql.execute": 244,
+        "draft.source_snapshot": 2,
+        "repo.get_assertion": 100,
+        "ontology.construct": 70,
+        "rdf.parse": 71,
+        "rdf.serialize": 6,
+        "repo.current_records": 1,
+        "ontology.validate_timeline": 1
+      },
+      "cumulative_seconds": {
+        "sql.execute": 0.992982,
+        "repo.get_assertion": 0.607525,
+        "draft.source_snapshot": 0.811982,
+        "rdf.parse": 2.306303,
+        "ontology.construct": 2.59655,
+        "rdf.serialize": 0.17169,
+        "repo.current_records": 0.00477,
+        "ontology.validate_timeline": 0.315071
+      },
+      "outer_transaction_seconds": 4.690503999998327,
+      "metadata": {
+        "selected": 77,
+        "definitions_expected": 83
+      }
+    },
+    {
+      "name": "intake.confirm.batch2",
+      "seconds": 27.620570099999895,
+      "sql_count": 757,
+      "sql_statements": {
+        "BEGIN": 1,
+        "SELECT": 696,
+        "WITH": 1,
+        "SAVEPOINT": 3,
+        "INSERT": 52,
+        "RELEASE": 3,
+        "UPDATE": 1
+      },
+      "calls": {
+        "sql.execute": 757,
+        "draft.source_snapshot": 2,
+        "repo.get_assertion": 177,
+        "ontology.construct": 432,
+        "rdf.parse": 433,
+        "rdf.serialize": 316,
+        "repo.current_records": 104,
+        "ontology.validate_timeline": 1,
+        "draft.compile_command": 51
+      },
+      "cumulative_seconds": {
+        "sql.execute": 2.716119,
+        "repo.get_assertion": 0.965433,
+        "draft.source_snapshot": 0.769237,
+        "rdf.parse": 11.538809,
+        "ontology.construct": 13.663633,
+        "rdf.serialize": 8.110174,
+        "repo.current_records": 0.647434,
+        "ontology.validate_timeline": 0.38865,
+        "draft.compile_command": 12.874575
+      },
+      "outer_transaction_seconds": 27.616709900001297,
+      "metadata": {
+        "selected": 77,
+        "suggestions": 51,
+        "frontend_budget_seconds": 25
+      }
+    },
+    {
+      "name": "intake.idempotent_replay.batch2",
+      "seconds": 0.11635589999787044,
+      "sql_count": 2,
+      "sql_statements": {
+        "BEGIN": 1,
+        "SELECT": 1
+      },
+      "calls": {
+        "sql.execute": 2
+      },
+      "cumulative_seconds": {
+        "sql.execute": 0.039862
+      },
+      "outer_transaction_seconds": 0.11358059999838588,
+      "metadata": {}
+    },
+    {
+      "name": "draft.read.full",
+      "seconds": 0.6011524000023201,
+      "sql_count": 18,
+      "sql_statements": {
+        "SELECT": 18
+      },
+      "calls": {
+        "sql.execute": 18,
+        "ontology.construct": 3,
+        "rdf.parse": 3,
+        "rdf.serialize": 2
+      },
+      "cumulative_seconds": {
+        "sql.execute": 0.153523,
+        "rdf.parse": 0.05747,
+        "ontology.construct": 0.066686,
+        "rdf.serialize": 0.055791
+      },
+      "outer_transaction_seconds": 0.0,
+      "metadata": {}
+    },
+    {
+      "name": "draft.validate",
+      "seconds": 4.476047899999685,
+      "sql_count": 1144,
+      "sql_statements": {
+        "SELECT": 1140,
+        "BEGIN": 1,
+        "SAVEPOINT": 1,
+        "UPDATE": 1,
+        "RELEASE": 1
+      },
+      "calls": {
+        "sql.execute": 1144,
+        "draft.source_snapshot": 9,
+        "repo.get_assertion": 531,
+        "draft.full_validation": 1,
+        "ontology.construct": 6,
+        "rdf.parse": 6,
+        "rdf.serialize": 4,
+        "quality.dependency": 1,
+        "repo.current_records": 1
+      },
+      "cumulative_seconds": {
+        "sql.execute": 3.001095,
+        "repo.get_assertion": 2.383038,
+        "draft.source_snapshot": 3.293933,
+        "rdf.parse": 0.127208,
+        "ontology.construct": 0.14365,
+        "rdf.serialize": 0.109376,
+        "repo.current_records": 0.003603,
+        "draft.full_validation": 1.48831
+      },
+      "outer_transaction_seconds": 2.5827394999978424,
+      "metadata": {}
+    },
+    {
+      "name": "draft.submit",
+      "seconds": 7.525962499999878,
+      "sql_count": 1155,
+      "sql_statements": {
+        "SELECT": 1151,
+        "BEGIN": 1,
+        "SAVEPOINT": 1,
+        "UPDATE": 1,
+        "RELEASE": 1
+      },
+      "calls": {
+        "sql.execute": 1155,
+        "draft.source_snapshot": 9,
+        "repo.get_assertion": 531,
+        "draft.full_validation": 1,
+        "ontology.construct": 6,
+        "rdf.parse": 6,
+        "rdf.serialize": 4,
+        "quality.dependency": 1,
+        "repo.current_records": 1
+      },
+      "cumulative_seconds": {
+        "sql.execute": 5.560852,
+        "repo.get_assertion": 3.971051,
+        "draft.source_snapshot": 5.749095,
+        "rdf.parse": 0.167156,
+        "ontology.construct": 0.189841,
+        "rdf.serialize": 0.145724,
+        "repo.current_records": 0.009045,
+        "draft.full_validation": 2.521702
+      },
+      "outer_transaction_seconds": 5.119221299999481,
+      "metadata": {}
+    },
+    {
+      "name": "draft.review_plan",
+      "seconds": 0.7632033999980194,
+      "sql_count": 20,
+      "sql_statements": {
+        "SELECT": 20
+      },
+      "calls": {
+        "sql.execute": 20,
+        "ontology.construct": 2,
+        "rdf.parse": 2,
+        "rdf.serialize": 2
+      },
+      "cumulative_seconds": {
+        "sql.execute": 0.29575,
+        "rdf.parse": 0.03052,
+        "ontology.construct": 0.036733,
+        "rdf.serialize": 0.059054
+      },
+      "outer_transaction_seconds": 0.0,
+      "metadata": {}
+    },
+    {
+      "name": "draft.batch_approve",
+      "seconds": 12.381466499999078,
+      "sql_count": 2065,
+      "sql_statements": {
+        "SELECT": 1810,
+        "BEGIN": 1,
+        "SAVEPOINT": 2,
+        "INSERT": 249,
+        "RELEASE": 2,
+        "UPDATE": 1
+      },
+      "calls": {
+        "sql.execute": 2065,
+        "ontology.construct": 11,
+        "rdf.parse": 11,
+        "rdf.serialize": 8,
+        "draft.source_snapshot": 12,
+        "repo.get_assertion": 708,
+        "draft.full_validation": 2,
+        "quality.dependency": 2,
+        "repo.current_records": 2
+      },
+      "cumulative_seconds": {
+        "sql.execute": 8.865515,
+        "rdf.parse": 0.330527,
+        "ontology.construct": 0.382477,
+        "rdf.serialize": 0.343989,
+        "repo.get_assertion": 5.140466,
+        "draft.source_snapshot": 7.000838,
+        "repo.current_records": 0.016406,
+        "draft.full_validation": 4.796294
+      },
+      "outer_transaction_seconds": 5.815141999999469,
+      "metadata": {}
+    },
+    {
+      "name": "draft.publish",
+      "seconds": 369.4820088999986,
+      "sql_count": 82754,
+      "sql_statements": {
+        "SELECT": 55104,
+        "BEGIN": 2,
+        "INSERT": 27019,
+        "SAVEPOINT": 3,
+        "RELEASE": 3,
+        "UPDATE": 469,
+        "DELETE": 154
+      },
+      "calls": {
+        "sql.execute": 82754,
+        "draft.source_snapshot": 6,
+        "repo.get_assertion": 531,
+        "draft.full_validation": 1,
+        "ontology.construct": 9,
+        "rdf.parse": 9,
+        "rdf.serialize": 4,
+        "quality.dependency": 1,
+        "repo.current_records": 7,
+        "ontology.validate_timeline": 1,
+        "repo.formal_write_snapshot": 1
+      },
+      "cumulative_seconds": {
+        "sql.execute": 354.681484,
+        "repo.get_assertion": 3.086497,
+        "draft.source_snapshot": 2.955996,
+        "rdf.parse": 0.277191,
+        "ontology.construct": 0.32631,
+        "rdf.serialize": 0.173584,
+        "repo.current_records": 0.041264,
+        "draft.full_validation": 1.816894,
+        "ontology.validate_timeline": 0.567051,
+        "repo.formal_write_snapshot": 0.062606
+      },
+      "outer_transaction_seconds": 363.3868569999977,
+      "metadata": {}
+    },
+    {
+      "name": "formal_fusion.service_write",
+      "seconds": 7.919226300000446,
+      "sql_count": 4047,
+      "sql_statements": {
+        "SELECT": 2193,
+        "BEGIN": 2,
+        "LOCK": 1,
+        "SAVEPOINT": 1,
+        "INSERT": 1233,
+        "RELEASE": 1,
+        "UPDATE": 462,
+        "DELETE": 154
+      },
+      "calls": {
+        "sql.execute": 4047,
+        "repo.formal_write_snapshot": 1,
+        "repo.current_records": 2,
+        "ontology.construct": 3,
+        "rdf.parse": 3,
+        "ontology.validate_timeline": 1
+      },
+      "cumulative_seconds": {
+        "sql.execute": 7.467216,
+        "repo.current_records": 0.008202,
+        "repo.formal_write_snapshot": 0.026689,
+        "rdf.parse": 0.004432,
+        "ontology.construct": 0.005134,
+        "ontology.validate_timeline": 0.125172
+      },
+      "outer_transaction_seconds": 7.052832800003671,
+      "metadata": {
+        "records": 154,
+        "entities": 152,
+        "relations": 2,
+        "background_entities": 149,
+        "projection_drain": false,
+        "milvus": false,
+        "encoder": "HashingEncoder",
+        "scope": "service_pg_no_external_projection"
+      }
+    },
+    {
+      "name": "formal_fusion.merge_preview",
+      "seconds": 0.009823899999901187,
+      "sql_count": 2,
+      "sql_statements": {
+        "SELECT": 2
+      },
+      "calls": {
+        "repo.current_records": 1,
+        "sql.execute": 2
+      },
+      "cumulative_seconds": {
+        "sql.execute": 0.006057,
+        "repo.current_records": 0.009464
+      },
+      "outer_transaction_seconds": 0.0,
+      "metadata": {
+        "records": 154,
+        "entities": 152,
+        "relations": 2,
+        "background_entities": 149,
+        "projection_drain": false,
+        "milvus": false,
+        "encoder": "HashingEncoder",
+        "scope": "service_pg_no_external_projection"
+      }
+    },
+    {
+      "name": "formal_fusion.merge_confirmed",
+      "seconds": 3.1901452999991307,
+      "sql_count": 113,
+      "sql_statements": {
+        "SELECT": 74,
+        "BEGIN": 2,
+        "LOCK": 1,
+        "SAVEPOINT": 1,
+        "INSERT": 19,
+        "RELEASE": 1,
+        "UPDATE": 11,
+        "DELETE": 4
+      },
+      "calls": {
+        "repo.current_records": 4,
+        "sql.execute": 113,
+        "repo.formal_write_snapshot": 1,
+        "ontology.construct": 2,
+        "rdf.parse": 2,
+        "ontology.validate_timeline": 1
+      },
+      "cumulative_seconds": {
+        "sql.execute": 0.389661,
+        "repo.current_records": 0.05467,
+        "repo.formal_write_snapshot": 0.10574,
+        "rdf.parse": 0.003035,
+        "ontology.construct": 0.003459,
+        "ontology.validate_timeline": 0.197998
+      },
+      "outer_transaction_seconds": 0.42913099999714177,
+      "metadata": {
+        "records": 154,
+        "entities": 152,
+        "relations": 2,
+        "background_entities": 149,
+        "projection_drain": false,
+        "milvus": false,
+        "encoder": "HashingEncoder",
+        "scope": "service_pg_no_external_projection",
+        "affected_relations": 1,
+        "relation_collisions": 1,
+        "confirmed_preview": true
+      }
+    },
+    {
+      "name": "formal_fusion.undo_merge",
+      "seconds": 0.5715285000005679,
+      "sql_count": 121,
+      "sql_statements": {
+        "SELECT": 75,
+        "BEGIN": 2,
+        "LOCK": 1,
+        "SAVEPOINT": 1,
+        "INSERT": 25,
+        "RELEASE": 1,
+        "UPDATE": 12,
+        "DELETE": 4
+      },
+      "calls": {
+        "repo.current_records": 3,
+        "sql.execute": 121,
+        "repo.formal_write_snapshot": 1,
+        "ontology.construct": 2,
+        "rdf.parse": 2,
+        "ontology.validate_timeline": 1
+      },
+      "cumulative_seconds": {
+        "sql.execute": 0.29721,
+        "repo.current_records": 0.030966,
+        "repo.formal_write_snapshot": 0.098512,
+        "rdf.parse": 0.002993,
+        "ontology.construct": 0.003395,
+        "ontology.validate_timeline": 0.192785
+      },
+      "outer_transaction_seconds": 0.32014930000150343,
+      "metadata": {
+        "records": 154,
+        "entities": 152,
+        "relations": 2,
+        "background_entities": 149,
+        "projection_drain": false,
+        "milvus": false,
+        "encoder": "HashingEncoder",
+        "scope": "service_pg_no_external_projection",
+        "merged_relation_supports": 2
+      }
+    },
+    {
+      "name": "formal_fusion.validate_timeline.no_boundaries",
+      "seconds": 0.017264100002648775,
+      "sql_count": 0,
+      "sql_statements": {},
+      "calls": {
+        "ontology.validate_timeline": 1
+      },
+      "cumulative_seconds": {
+        "ontology.validate_timeline": 0.017191
+      },
+      "outer_transaction_seconds": 0.0,
+      "metadata": {
+        "records": 10,
+        "entities": 5,
+        "attributes": 5,
+        "boundaries": 0,
+        "max_count": 1,
+        "expected_conflicts": 0,
+        "ontology_parsing_timed": false,
+        "scope": "pure_ontology_validation",
+        "projection_drain": false,
+        "external_systems": false
+      }
+    },
+    {
+      "name": "formal_fusion.validate_timeline.ten_boundaries",
+      "seconds": 0.1655121000003419,
+      "sql_count": 0,
+      "sql_statements": {},
+      "calls": {
+        "ontology.validate_timeline": 1
+      },
+      "cumulative_seconds": {
+        "ontology.validate_timeline": 0.165461
+      },
+      "outer_transaction_seconds": 0.0,
+      "metadata": {
+        "records": 10,
+        "entities": 5,
+        "attributes": 5,
+        "boundaries": 10,
+        "max_count": 1,
+        "expected_conflicts": 0,
+        "ontology_parsing_timed": false,
+        "scope": "pure_ontology_validation",
+        "projection_drain": false,
+        "external_systems": false
+      }
+    }
+  ],
+  "governance_result": {
+    "operations": 249,
+    "definitions": 83,
+    "unique_candidates": 154,
+    "formal_records": 154,
+    "index_status": "pending",
+    "facts_receipt_totals": {
+      "selected": 177,
+      "added": 154,
+      "reused": 23,
+      "skipped": 0
+    }
+  },
+  "formal_fusion_result": {
+    "input_records": 154,
+    "background_entities": 149,
+    "projection_drain": false,
+    "milvus": false,
+    "merged_live_relations": 1,
+    "merged_relation_accepted_supports": 2,
+    "restored_live_records": 154,
+    "restored_live_relations": 2,
+    "restored_accepted_supports": {
+      "keep": 1,
+      "drop": 1,
+      "a-rel": 1,
+      "z-rel": 1
+    },
+    "restored_records_reported": 3,
+    "merge_ledgers": 2,
+    "timeline": {
+      "no_boundaries": {
+        "records": 10,
+        "boundaries": 0,
+        "segments_checked": 1,
+        "conforms": true
+      },
+      "ten_boundaries": {
+        "records": 10,
+        "boundaries": 10,
+        "segments_checked": 11,
+        "conforms": true
+      }
+    }
+  },
+  "live_read_only": {
+    "draft_status": "accepted",
+    "revision": 7,
+    "operation_count": 249,
+    "definition_count": 83,
+    "associated_unique_candidates": 154,
+    "unprofiled_seconds": [
+      3.717598999999609,
+      2.6243457999989914
+    ],
+    "profiled_seconds": 3.0911956999989343,
+    "sql_calls": [
+      {
+        "function": "execute",
+        "calls": 18,
+        "cumulative_seconds": 1.2245
+      }
+    ]
+  },
+  "local_quality": {
+    "scope": "read-only real graph; installed local quality only; no extraction/model inference",
+    "draft_status": "accepted",
+    "revision": 7,
+    "engine_version": "0.7.0",
+    "classes": 41,
+    "properties": 42,
+    "initialization_seconds": 24.612636000005296,
+    "check_seconds": [
+      0.004024800000479445,
+      0.006046700000297278,
+      0.0031875999993644655
+    ],
+    "passed": true,
+    "issues": 167,
+    "operations": 249,
+    "evidence_total": 25092,
+    "evidence_distribution": {
+      "102": 198,
+      "96": 51
+    },
+    "expected_publication_edges": 26089,
+    "expected_publication_provenance_sql": 78281
+  },
+  "cached_quality": {
+    "passed": true,
+    "severity_counts": {
+      "warning": 167
+    }
+  },
+  "provenance_diagnosis": {
+    "full_sample_evidence_distribution": {
+      "102": 198,
+      "96": 51
+    },
+    "full_sample_evidence_count": 25092,
+    "full_sample_edge_count_calculated": 26089,
+    "full_sample_sql_calculated": 78281,
+    "share_of_measured_publication_sql_calculated": 0.9459482321096261,
+    "method": "exact source formula and scope-merge reconstruction, checked against same-size stored evidence; not a full-sample caller trace",
+    "small_trace": {
+      "operations": 18,
+      "evidence": 144,
+      "edges": 217,
+      "sql_total": 981,
+      "three_edge_query_calls": [
+        217,
+        217,
+        217
+      ]
+    }
+  },
+  "cleanup": {
+    "temporary_databases_checked": 2,
+    "remaining": []
+  },
+  "limitations": [
+    "Not a throughput or P95 certification",
+    "No real LLM/OCR throughput or live vector index test",
+    "No multi-project concurrent workload or large historical-corpus benchmark",
+    "Cold imports and first-use costs are separately identified only where measured"
+  ]
+}

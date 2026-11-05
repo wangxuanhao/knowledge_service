@@ -375,15 +375,16 @@ def test_partial_source_graph_failure_rolls_back_entire_retrieval(provenance, mo
     repo, service, project = provenance
     record, _ = _mapped(repo, project, sources=[_source(repo, project)])
     run = service.begin_retrieval(project, {'query': 'fact'})
-    original = repo._provenance._insert_edge
+    execute = repo._db.execute
 
-    def fail(project_id, edge, default_created_at=None):
-        result = original(project_id, edge, default_created_at)
-        if edge['relation'] == relation:
+    def fail(sql, params=()):
+        cursor = execute(sql, params)
+        if (' '.join(sql.split()).upper().startswith('INSERT INTO PROVENANCE_EDGES')
+                and relation in params[4::9]):
             raise RuntimeError('source insert failed')
-        return result
+        return cursor
 
-    monkeypatch.setattr(repo._provenance, '_insert_edge', fail)
+    monkeypatch.setattr(repo._db, 'execute', fail)
     with pytest.raises(RuntimeError, match='source insert failed'):
         service.complete_retrieval(project, run, {}, [{'citation': 'E1', **record}])
     assert repo.get_provenance_activity(project, run)['status'] == 'running'
@@ -818,8 +819,11 @@ def _sse_item(raw):
 
 def _qa_stream(provenance, monkeypatch, *, empty=False, generate=False):
     from knowledge_service.services import answers
+    from test_production_projection_receipts import activate_legacy
     repo, _, project = provenance
     rows = [] if empty else [_source(repo, project)[1]]
+    # Mocked retrieval still pins a ready generation through the real PG guard.
+    activate_legacy(repo, project, {}, watermark=repo.projections.project_watermark(project))
     context = {'hits': rows, 'evidence_rows': rows, 'candidate_count': len(rows),
                'answer_purpose': 'rule_judgment', 'answer_label': '',
                'filter_stage': 'before_ranking', 'embedding_model': 'test', 'semantic': False,
@@ -874,19 +878,21 @@ def test_sse_starts_retrieval_before_context_and_marks_retrieval_error(provenanc
 
 @pytest.mark.parametrize('relation', ['offered', 'supported-by'])
 def test_sse_retrieval_write_failure_rolls_back_before_evidence(provenance, monkeypatch, relation):
-    from knowledge_service.repository.provenance_store import ProvenanceStore
     repo, _, project = provenance
     stream, _ = _qa_stream(provenance, monkeypatch)
-    original = ProvenanceStore._insert_edge
+    execute = repo._db.execute
     inserted = []
 
-    def broken_insert(self, project_id, edge, *args, **kwargs):
-        if edge['relation'] == relation:
-            raise psycopg.OperationalError('injected write failure')
-        inserted.append(edge['relation'])
-        return original(self, project_id, edge, *args, **kwargs)
+    def broken_insert(sql, params=()):
+        cursor = execute(sql, params)
+        if ' '.join(sql.split()).upper().startswith('INSERT INTO PROVENANCE_EDGES'):
+            relations = params[4::9]
+            inserted.extend(relations)
+            if relation in relations:
+                raise psycopg.OperationalError('injected write failure')
+        return cursor
 
-    monkeypatch.setattr(ProvenanceStore, '_insert_edge', broken_insert)
+    monkeypatch.setattr(repo._db, 'execute', broken_insert)
     assert [name for name, _ in map(_sse_item, stream)] == ['error']
     assert inserted  # Failure occurs after writes inside the transaction.
     activities = repo.list_provenance_activities(project)
@@ -919,6 +925,7 @@ def test_sse_evidence_is_committed_and_trace_running_until_done(provenance, monk
     timings = done.pop('timings_ms')
     assert timings['total'] >= timings['freeze'] >= 0
     assert (name, done) == ('done', {'answer': '[E1] evidence', 'mode': 'evidence_only',
+        'complete': True, 'incomplete_reason': None, 'coverage_warnings': [],
         'answer_id': answer, 'retrieval_run_id': run, 'provenance_complete': True,
         'answer_purpose': 'rule_judgment', 'answer_label': '',
         'generation': {'requested': False, 'called': False, 'skip_reason': 'disabled',
@@ -950,18 +957,19 @@ def test_sse_llm_citations_are_committed_before_done(provenance, monkeypatch):
 
 
 def test_sse_answer_commit_failure_never_emits_done(provenance, monkeypatch):
-    from knowledge_service.repository.provenance_store import ProvenanceStore
     repo, service, project = provenance
     stream, _ = _qa_stream(provenance, monkeypatch)
     payload = _sse_item(next(stream))[1]
-    original = ProvenanceStore._insert_edge
+    execute = repo._db.execute
 
-    def broken_cite(self, project_id, edge, *args, **kwargs):
-        if edge['relation'] == 'cites':
+    def broken_cite(sql, params=()):
+        cursor = execute(sql, params)
+        if (' '.join(sql.split()).upper().startswith('INSERT INTO PROVENANCE_EDGES')
+                and 'cites' in params[4::9]):
             raise psycopg.OperationalError('injected cite failure')
-        return original(self, project_id, edge, *args, **kwargs)
+        return cursor
 
-    monkeypatch.setattr(ProvenanceStore, '_insert_edge', broken_cite)
+    monkeypatch.setattr(repo._db, 'execute', broken_cite)
     assert [name for name, _ in map(_sse_item, stream)] == ['delta', 'error']
     assert service.trace_answer_evidence(project, payload['answer_id'], 'E1')['answer'] == {
         'status': 'failed', 'citation_status': 'offered'}

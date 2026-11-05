@@ -11,6 +11,9 @@ from ..core.time import utc_now
 from .core import _json
 
 
+ASSERTION_READ_BATCH_SIZE = 1000
+
+
 class AssertionStore:
     """断言及其事件账本；与 Repository 共享同一连接和锁。"""
 
@@ -108,6 +111,25 @@ class AssertionStore:
         if row is None:
             raise KeyError(assertion_id)
         return self._assertion(row)
+
+    def get_many(self, project_id, assertion_ids):
+        """Return full records keyed by ID; absent or foreign IDs are omitted.
+
+        Keep batches on the caller's shared connection/snapshot. This internal
+        read has no lineage endpoint's 100-ID or 256-character limits.
+        """
+        self.repo.get_project(project_id)
+        ids = list(dict.fromkeys(assertion_ids))
+        result = {}
+        with self._lock:
+            for offset in range(0, len(ids), ASSERTION_READ_BATCH_SIZE):
+                rows = self._db.execute(
+                    'SELECT * FROM assertions WHERE project_id=? AND id=ANY(?::text[])',
+                    (project_id, ids[offset:offset + ASSERTION_READ_BATCH_SIZE])).fetchall()
+                for row in rows:
+                    item = self._assertion(row)
+                    result[item['id']] = item
+        return result
 
     def list(self, project_id, status=None, canonical_record_id=None, document_id=None, assertion_ids=None):
         self.repo.get_project(project_id)

@@ -472,7 +472,7 @@ def _apply_scoped_shacl_patch(graph: Graph, target: URIRef, before: dict,
         graph.add(triple)
 
 
-def _validate_definition_graph(graph: Graph) -> None:
+def _validate_definition_graph(graph: Graph, *, ontology: Ontology | None = None) -> None:
     class_nodes = _graph_classes(graph)
     undeclared_children = set(graph.subjects(RDFS.subClassOf, None)) - class_nodes
     if undeclared_children:
@@ -504,7 +504,8 @@ def _validate_definition_graph(graph: Graph) -> None:
     for class_node in class_nodes:
         validate_hierarchy(class_node)
 
-    ontology = Ontology(graph.serialize(format='turtle'))
+    ontology = ontology if ontology is not None else Ontology.from_graph(graph)
+    ontology._refresh_vocabulary()
     constraint_owners = ontology.relations | ontology.attributes
     for predicate in (RDFS.domain, RDFS.range):
         for owner in graph.subjects(predicate, None):
@@ -545,7 +546,18 @@ def _validate_definition_graph(graph: Graph) -> None:
 
 def apply_operations(base_turtle: str, operations: Iterable[dict]) -> str:
     """The only mutation entry point: apply ordered operations to one RDF graph."""
-    graph = _graph(base_turtle)
+    ontology = Ontology(base_turtle)
+    _apply_operations(ontology, operations)
+    return ontology.graph.serialize(format='turtle')
+
+
+def _apply_operations(ontology: Ontology, operations: Iterable[dict]) -> None:
+    """Mutate request-owned state using the string API's exact rules and checks.
+
+    An error may leave this working graph changed; callers must own it and
+    discard it on failure. Each call validates its complete operation prefix.
+    """
+    graph = ontology.graph
     for operation in operations:
         if not isinstance(operation, dict):
             raise ValueError('本体操作必须是对象')
@@ -703,8 +715,7 @@ def apply_operations(base_turtle: str, operations: Iterable[dict]) -> str:
         else:
             raise ValueError(f'不支持的本体操作：{action}')
     _validate_supported_bnodes(graph)
-    _validate_definition_graph(graph)
-    return graph.serialize(format='turtle')
+    _validate_definition_graph(graph, ontology=ontology)
 
 
 def _issue(code: str, severity: str, message: str, term_iris,

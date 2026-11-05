@@ -50,7 +50,10 @@ def test_delete_project_removes_all_children(tmp_path):
     repo.put_record(pid, {'id': 'r1', 'kind': 'document', 'text': 'doc1'})
     repo.put_record(pid, {'id': 'r2', 'kind': 'entity', 'text': 'ent1'})
     # add ontology
-    seed_ontology(repo, pid, 'turtle', {'classes': ['A']})
+    seed_ontology(repo, pid, '''
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        <urn:project-delete:A> a owl:Class .
+    ''', {'classes': ['A']})
     # add artifact
     repo.save_artifact('summary', {'id': 'art1', 'project_id': pid, 'data': 1})
     result = repo.delete_project(pid)

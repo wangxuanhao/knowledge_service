@@ -6,6 +6,7 @@ import pytest
 from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
 from knowledge_service.models import Scope
+from keyword_index_fixture import install_keyword_store, ready_keyword_index
 
 
 @pytest.fixture
@@ -100,19 +101,21 @@ def test_packaged_echarts_asset_is_served(client):
     assert b'echarts' in response.content.lower()
 
 
-def test_filtered_ingestion_search_and_restart(client):
+def test_filtered_ingestion_search_and_restart(client, monkeypatch):
     p = project(client)
     for city in ['北京','上海']:
         result = client.post(f'/api/projects/{p}/documents', json={
             'title': city+'规则', 'text': '商户必须提供退款。', 'extraction_mode':'documents',
             'metadata':{'region':{'city':city}, 'tags':['规则']}, 'valid_from':'2025-01-01'})
         assert result.status_code == 201, result.text
+    ready_keyword_index(client.app.state.service, p, monkeypatch)
     scope = {'query':'退款', 'retrieval_mode':'keyword', 'k':1, 'filters':{'field':'region.city','op':'eq','value':'北京'}}
     result = client.post(f'/api/projects/{p}/search', json=scope).json()
     assert len(result['hits']) == 1
     assert result['hits'][0]['metadata']['region']['city'] == '北京'
     assert result['candidate_count'] == 1
     p2 = project(client)
+    ready_keyword_index(client.app.state.service, p2, monkeypatch)
     assert client.post(f'/api/projects/{p2}/search',json=scope).json()['hits'] == []
 
 
@@ -161,11 +164,25 @@ def test_background_ingestion_has_stage_logs(client):
         time.sleep(.02)
     assert job['status']=='completed',job
     logs='\n'.join(job['logs'])
-    for message in ('文档开始','原文收据已保存','切片完成','向量化','原子落库','落库完成'):
+    for message in ('文档开始','原文收据已保存','切片完成','PostgreSQL 原子落库',
+                    '文档检索已就绪','抽取阶段结束','落库完成'):
         assert message in logs
+    repository = client.app.state.service.repository
+    document = repository.get_record(p, job['result']['document']['id'])
+    assert document['metadata']['status'] == 'ready'
+    assert job['result']['status'] == 'completed'
+    # Documents are durable before an external index is explicitly built.
+    events = repository._db.execute(
+        'SELECT operation,version_id FROM projection_outbox WHERE project_id=? ORDER BY seq',
+        (p,)).fetchall()
+    upserts = {row['version_id'] for row in events if row['operation'] == 'upsert'}
+    assert {row['version_id'] for row in repository.current_records(p)} <= upserts
+    assert repository.projections.project_watermark(p) == len(events) > 0
+    with pytest.raises(RuntimeError, match='not_built'):
+        repository.projections.search_index(p, 3)
 
 
-def test_revision_and_half_open_time(client):
+def test_revision_and_half_open_time(client, monkeypatch):
     p = project(client)
     record = {'id':'rule', 'kind':'entity', 'type':'Merchant', 'text':'旧条款',
               'valid_from':'2020-01-01', 'valid_until':'2022-01-01', 'metadata':{'version':'old'}}
@@ -173,6 +190,7 @@ def test_revision_and_half_open_time(client):
     old = client.post(path,json={'records':[record]})
     assert old.status_code == 201, old.text
     old = old.json()['records'][0]
+    ready_keyword_index(client.app.state.service, p, monkeypatch)
     assert client.post(f'/api/projects/{p}/search',json={'query':'条款','retrieval_mode':'keyword','valid_at':'2022-01-01'}).json()['hits'] == []
     record.update(text='修正条款',metadata={'version':'corrected'})
     new = client.put(path+'/rule',json={'record':record,'expected_version':1})
@@ -227,7 +245,7 @@ def test_invalid_writes_roll_back_but_unknown_concepts_are_kept(client):
     assert client.post(path+'/ontologies',json={'turtle':'invalid'}).status_code == 405
 
 
-def test_relationships_cannot_leak_filtered_or_inactive_endpoints(client):
+def test_relationships_cannot_leak_filtered_or_inactive_endpoints(client, monkeypatch):
     p = project(client)
     path = f'/api/projects/{p}'
     rows = [dict(id='a',kind='entity',type='Platform',text='平台',metadata={'city':'上海'}),
@@ -239,6 +257,7 @@ def test_relationships_cannot_leak_filtered_or_inactive_endpoints(client):
     graph = client.post(path+'/graph',json=scope).json()
     assert [n['id'] for n in graph['nodes']] == ['b']
     assert graph['edges'] == []
+    ready_keyword_index(client.app.state.service, p, monkeypatch)
     result = client.post(path+'/search',json={**scope,'query':'商户','retrieval_mode':'keyword'}).json()
     assert {r['id'] for r in result['hits']} == {'b'}
 
@@ -322,13 +341,17 @@ def test_failed_extraction_keeps_receipt_without_partial_records(client, monkeyp
     assert len(client.get(path+'/records/'+rows[0]['id']+'/history').json()['versions']) == 2
 
 
-def test_api_persists_across_restart(tmp_path):
+def test_api_persists_across_restart(tmp_path, monkeypatch):
     database = tmp_path/'restart.sqlite'
     with TestClient(create_app(database, HashingEncoder())) as first:
         p = project(first)
         assert first.post(f'/api/projects/{p}/documents', json={
             'title':'持久化','text':'重启后的退款证据','extraction_mode':'documents'}).status_code == 201
+        ready_keyword_index(first.app.state.service, p, monkeypatch)
+        selected = first.app.state.service.repository.projections.search_index(p, 3)
     with TestClient(create_app(database, HashingEncoder())) as second:
+        install_keyword_store(second.app.state.service, monkeypatch)
+        assert second.app.state.service.repository.projections.search_index(p, 3) == selected
         result = second.post(f'/api/projects/{p}/search', json={'query':'退款','retrieval_mode':'keyword'}).json()
         assert result['candidate_count'] == 1
         assert '重启后的退款证据' in result['hits'][0]['text']
@@ -349,31 +372,63 @@ def test_malformed_llm_response_is_service_unavailable(client, monkeypatch):
             'audiences': {'mode': 'all', 'values': []},
         },
     })
-    monkeypatch.setattr(httpx.Client, 'post', lambda *a, **k: httpx.Response(
-        200, json={'choices':[]}, request=httpx.Request('POST','https://example.invalid')))
+    ready_keyword_index(client.app.state.service, p, monkeypatch)
+    provider_calls = []
+    def malformed(*args, **kwargs):
+        provider_calls.append(kwargs['json'])
+        return httpx.Response(200, json={'choices':[]},
+                              request=httpx.Request('POST','https://example.invalid'))
+    monkeypatch.setattr(httpx.Client, 'post', malformed)
     # TestClient inherits httpx.Client, so invoke the ASGI transport through request.
     response = client.request('POST', f'/api/projects/{p}/qa', json={'query':'退款','retrieval_mode':'keyword','generate':True})
     assert response.status_code == 503
+    assert len(provider_calls) == 1
 
 
 def test_ingest_failure_does_not_overwrite_concurrent_revision(client, monkeypatch):
     service = client.app.state.service
+    repository = service.repository
     p = project(client)
-    def edit_then_fail(texts):
-        receipt = service.repository.current_records(p)[0]
+    execute = repository.execute_formal_write
+    attempts, conflicts = [], []
+
+    def competing_completion(plan):
+        completions = [action for action in plan['actions']
+                       if action['kind'] == 'record_put'
+                       and action['record']['kind'] == 'document'
+                       and action['record']['metadata']['status'] == 'ready']
+        if not completions:
+            return execute(plan)
+        assert len(completions) == 1 and not attempts
+        completion = completions[0]
+        receipt = repository.get_record(p, completion['record']['id'])
+        assert receipt['version'] == completion['expected_version'] == 1
         replacement = {k:v for k,v in receipt.items() if k not in {
             'project_id','version','version_id','recorded_at','superseded_at'}}
         replacement['text'] = 'USER EDIT TO PRESERVE'
-        service.repository.put_record(p, replacement, expected_version=receipt['version'])
-        raise RuntimeError('simulated embedding failure')
-    monkeypatch.setattr(service.encoder, 'encode', edit_then_fail)
+        repository.put_record(p, replacement, expected_version=receipt['version'])
+        attempts.append(receipt['id'])
+        try:
+            return execute(plan)
+        except ValueError as exc:
+            conflicts.append(str(exc))
+            raise
+
+    # Race the detached completion plan at the real PG CAS boundary; the
+    # document-only path no longer calls an encoder during ingestion.
+    monkeypatch.setattr(repository, 'execute_formal_write', competing_completion)
     response = client.post(f'/api/projects/{p}/documents', json={
         'title':'并发文档','text':'ORIGINAL','extraction_mode':'documents'})
     assert response.status_code == 503
-    current = service.repository.current_records(p)
-    assert len(current) == 1
-    assert current[0]['text'] == 'USER EDIT TO PRESERVE'
-    assert len(service.repository.history(p, current[0]['id'])) == 2
+    assert len(attempts) == 1
+    assert conflicts == ['版本冲突：正式写入依赖已变更']
+    current = repository.current_records(p)
+    documents = [row for row in current if row['kind'] == 'document']
+    assert len(documents) == 1
+    assert documents[0]['text'] == 'USER EDIT TO PRESERVE'
+    assert documents[0]['version'] == 2
+    assert len(repository.history(p, documents[0]['id'])) == 2
+    assert [row['text'] for row in current if row['kind'] == 'chunk'] == ['ORIGINAL']
 
 
 def test_ingest_prefers_relation_extracted_validity_over_request(client, monkeypatch):

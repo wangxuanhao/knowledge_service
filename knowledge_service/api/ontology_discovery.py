@@ -11,8 +11,7 @@ from ..services.ontology_discovery_workflow import (
 from ..services.discovery_vocabulary import (
     GeneratedVocabularyConflict, InvalidBaselineVocabulary,
 )
-from ..services.ontology_intake import OntologyIntake
-from ..repository.discovery_run_store import DiscoveryRunConflict
+from ..services.ontology_intake import DiscoveryRunConflict, OntologyIntake
 
 
 class SelectionRequest(Request):

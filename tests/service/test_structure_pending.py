@@ -10,6 +10,7 @@ from ontology_seed import seed_project_ontology
 from ontology_seed import seed_ontology
 import pytest
 
+from keyword_index_fixture import ready_keyword_index
 from knowledge_service.integrations.embeddings import HashingEncoder
 from knowledge_service.repository import Repository
 from knowledge_service.services import structure_pending
@@ -52,15 +53,19 @@ def test_unknown_concept_is_accepted_and_marked_pending(tmp_path):
     assert stored['pending']['text'] == '一个包裹'
 
 
-def test_pending_knowledge_stays_searchable_and_visible(tmp_path):
+def test_pending_knowledge_stays_searchable_and_visible(tmp_path, monkeypatch):
     """可检索、可看原文：它出现在范围读取与关键词检索结果里（只是带标记）。"""
     repo, service, project_id = _service(tmp_path)
-    service.write(project_id, [{'id': 'pending', 'kind': 'entity',
+    written = service.write(project_id, [{'id': 'pending', 'kind': 'entity',
                                 'type': 'urn:knowledge:ontology:甲:包裹', 'text': '跨城包裹'}])
     rows = service.scoped(project_id, {'kinds': ['entity']})
     assert [row['id'] for row in rows] == ['pending']
+    ready_keyword_index(service, project_id, monkeypatch)
     hits = service.search(project_id, {'query': '跨城包裹', 'retrieval_mode': 'keyword', 'k': 5})
     assert any(hit['id'] == 'pending' for hit in hits['hits']), '结构待定的知识仍然要能搜到'
+    pending = next(hit for hit in hits['hits'] if hit['id'] == 'pending')
+    assert pending['version_id'] == written[0]['version_id']
+    assert pending['metadata']['structure_pending']['terms'] == ['urn:knowledge:ontology:甲:包裹']
 
 
 def test_pending_endpoint_makes_its_relation_pending(tmp_path):
@@ -128,7 +133,7 @@ def test_pending_records_are_not_inputs_to_constraint_validation(tmp_path):
     assert '本体建模层' in body['structure_pending_note']
 
 
-def test_answer_evidence_chain_excludes_pending_and_labels_it(tmp_path):
+def test_answer_evidence_chain_excludes_pending_and_labels_it(tmp_path, monkeypatch):
     """问答：待定知识不进证据链，但**显式标注**出来（能查、能引用、不算正式证据）。"""
     repo, service, project_id = _service(tmp_path, 'answer.sqlite')
     # This test isolates unknown ontology terms, rather than unknown platform scope.
@@ -138,6 +143,7 @@ def test_answer_evidence_chain_excludes_pending_and_labels_it(tmp_path):
                                {'id': 'pending', 'kind': 'entity',
                                 'type': 'urn:knowledge:ontology:甲:包裹', 'text': '一个包裹',
                                 'metadata': {'applicability': applicability}}])
+    ready_keyword_index(service, project_id, monkeypatch)
     request = {'query': '包裹', 'k': 10, 'k_entities': 5, 'k_chunks': 5,
                'retrieval_mode': 'keyword', 'hops': 0}
     context = question_context(service, project_id, request)
@@ -145,7 +151,9 @@ def test_answer_evidence_chain_excludes_pending_and_labels_it(tmp_path):
     pending_ids = [row['id'] for row in context['structure_pending_rows']]
     assert 'pending' in pending_ids, '待定知识必须作为"不算证据"单独列出来，不能静默消失'
     assert 'pending' not in evidence_ids
-    assert context['structure_pending_rows'][0]['structure_pending']['terms']
+    assert context['structure_pending_rows'][0]['structure_pending']['terms'] == ['urn:knowledge:ontology:甲:包裹']
+    assert all(row['id'] != 'pending' for key in (
+        'historical_references', 'future_references', 'uncertain_references') for row in context[key])
 
 
 def test_state_clears_automatically_once_the_concept_is_modeled(tmp_path):

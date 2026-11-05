@@ -2,6 +2,7 @@
 from ontology_seed import seed_project_ontology
 from fastapi.testclient import TestClient
 from rdflib import OWL, RDF, RDFS, URIRef, XSD
+from rdflib.collection import Collection
 
 from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
@@ -362,9 +363,14 @@ def test_browser_repeated_parent_and_attribute_edits_use_real_api(tmp_path, monk
             }}'''
         html = f'''<html><head><meta charset="utf-8">
             <link rel="stylesheet" href="/assets/ontology-model.css">
-            <link rel="stylesheet" href="/assets/ontology-model-panel.css"></head><body>
+            <link rel="stylesheet" href="/assets/ontology-model-panel.css">
+            <link rel="stylesheet" href="/assets/ontology-model-workspace.css">
+            <link rel="stylesheet" href="/assets/ontology-review-workspace.css"></head><body>
             <section class="ontology-model" id="tab-ontology-model"></section><script>{bootstrap}</script>
+            <script src="/assets/ontology-draft-data.js"></script>
+            <script src="/assets/ontology-model-workspace.js"></script>
             <script src="/assets/ontology-model.js"></script>
+            <script src="/assets/ontology-review-workspace.js"></script>
             <script src="/assets/ontology-model-panel.js"></script>
             <script>window.loaded=OntologyModel.refresh();</script></body></html>'''
         browser = runtime.chromium.launch(headless=True, executable_path=str(edge))
@@ -397,73 +403,142 @@ def test_browser_repeated_parent_and_attribute_edits_use_real_api(tmp_path, monk
                 directory.locator(':scope > summary').click()
             page.locator('#om-side [data-sel="' + iri + '"]').click()
 
+        def open_constraint_editor():
+            editor = page.locator('.om-constraint-edit')
+            if not editor.evaluate('(node) => node.open'):
+                editor.locator(':scope > summary').click()
+            return editor
+
+        def open_type_picker():
+            picker = open_constraint_editor().locator('.om-type-picker')
+            if not picker.evaluate('(node) => node.open'):
+                picker.locator(':scope > summary').click()
+            return picker
+
         select_definition('urn:acceptance:Child')
+        revisions = []
         for parent in ('ParentA', 'ParentB'):
-            page.get_by_text('编辑继承（父类）', exact=True).click()
-            row = page.locator('.om-constraint-edit .om-ce-row')
-            row.locator('select').select_option('urn:acceptance:' + parent)
-            row.get_by_role('button', name='添加', exact=True).click()
+            picker = open_type_picker()
+            assert picker.locator('input[value="urn:acceptance:Child"]').count() == 0
+            picker.locator('input[value="urn:acceptance:' + parent + '"]').check()
+            picker.get_by_role('button', name='应用选择', exact=True).click()
             page.wait_for_function('''parent => !OntologyModel.S.loading && OntologyModel.S.summary.classes
                 .find(c=>c.id==='urn:acceptance:Child').parents.includes(parent)''',
                 arg='urn:acceptance:' + parent)
+            revisions.append(page.evaluate('OntologyModel.S.draft.revision'))
         assert len(command_requests) == 2
+        assert [request['command'] for request in command_requests] == [
+            {'action': 'batch', 'commands': [
+                {'action': 'add_parent', 'target_iri': 'urn:acceptance:Child',
+                 'value': 'urn:acceptance:' + parent}]} for parent in ('ParentA', 'ParentB')]
         assert command_requests[1]['expected_revision'] > command_requests[0]['expected_revision']
-        remaining = page.locator('.om-constraint-edit select').evaluate('(s)=>[...s.options].map(o=>o.value)')
-        assert not {'urn:acceptance:Child', 'urn:acceptance:ParentA', 'urn:acceptance:ParentB'} & set(remaining)
+        assert command_requests[1]['expected_revision'] == revisions[0]
+        assert all(revision > request['expected_revision']
+                   for revision, request in zip(revisions, command_requests))
+        picker = open_type_picker()
+        assert picker.locator('input[value="urn:acceptance:Child"]').count() == 0
+        selected = picker.locator('input[type=checkbox]:checked').evaluate_all('(nodes)=>nodes.map(n=>n.value)')
+        assert set(selected) == {'urn:acceptance:ParentA', 'urn:acceptance:ParentB'}
+        assert picker.get_by_role('button', name='应用选择', exact=True).is_disabled()
         assert page.evaluate('OntologyModel.S.graph.edges.filter(e=>e.kind==="inherit").length') == 2
         draft_id = page.evaluate('OntologyModel.S.draft.id')
         def review_and_publish_ui(note):
             before = page.evaluate('OntologyModel.S.ontologyId')
-            page.get_by_role('button', name='校验并审核', exact=True).click()
+            page.locator('#om-workspace-toggle').click()
+            workspace = page.locator('#om-workspace-shell')
+            workspace.wait_for(state='visible')
+            workspace.get_by_role('button', name='校验并审核', exact=True).click()
             page.wait_for_function('''() => !OntologyModel.S.loading && OntologyModel.S.draft?.submitted_at''')
-            page.get_by_role('button', name='逐条审核', exact=True).click(timeout=3000)
-            dialog = page.get_by_role('dialog', name='逐条审核')
+            workspace.get_by_role('button', name='按定义审核', exact=True).click()
+            dialog = page.get_by_role('dialog', name='按定义审核')
             dialog.wait_for()
-            for checkbox in dialog.locator('input[type=checkbox]').all():
-                checkbox.check()
-            for row in dialog.locator('.om-review-item').all():
-                approve = row.get_by_role('button', name='收下', exact=True)
-                if approve.is_enabled():
-                    row.get_by_role('textbox', name='处理理由').fill('Synthetic change reviewed against source and schema')
-                    approve.click()
-                    row.get_by_text('已收下', exact=True).wait_for()
-                    page.wait_for_function('''() => document.querySelector('.om-review-dialog')
-                        .getAttribute('aria-busy')!=='true' ''')
-            dialog.get_by_role('button', name='关闭逐条审核', exact=True).click()
-            page.get_by_placeholder('必填：这一版改了什么').fill(note)
-            page.get_by_role('button', name=__import__('re').compile('^发布为 v')).click()
+            page.wait_for_function('''() => document.querySelector('.om-definition-review')
+                .getAttribute('aria-busy')==='false' ''')
+            while dialog.locator('.odr-row').count():
+                pending = dialog.locator('.odr-row').count()
+                dialog.get_by_role('textbox', name='处理理由').fill('Synthetic change reviewed against source and schema')
+                for checkbox in dialog.get_by_role('checkbox').all():
+                    checkbox.check()
+                with page.expect_response(lambda response: response.request.method == 'POST'
+                        and urlsplit(response.url).path.endswith('/decisions/by-definition')) as decision:
+                    dialog.get_by_role('button', name='批准并下一项', exact=True).click()
+                assert decision.value.status == 200, decision.value.text()
+                page.wait_for_function('''() => document.querySelector('.om-definition-review')
+                    .getAttribute('aria-busy')==='false' ''')
+                assert dialog.locator('.odr-row').count() < pending
+            dialog.get_by_role('button', name='关闭', exact=True).click()
+            page.wait_for_function('''() => !OntologyModel.S.gatesLoading''')
+            for warning in workspace.locator('.om-ab-warnings input[type=checkbox]').all():
+                warning.check()
+            workspace.get_by_placeholder('必填：这一版改了什么').fill(note)
+            with page.expect_response(lambda response: response.request.method == 'POST'
+                    and urlsplit(response.url).path.endswith('/publish')) as publication:
+                workspace.get_by_role('button', name=__import__('re').compile('^发布为 v')).click()
+            assert publication.value.status == 200, publication.value.text()
             page.wait_for_function('''before => !OntologyModel.S.loading && OntologyModel.S.ontologyId!==before''', arg=before)
+            workspace.wait_for(state='hidden')
             return checked(client.get(base + '/ontology'))
 
         first_release = review_and_publish_ui('Browser: two parents added')
         # Edit again after publication: it must create a new draft, not mutate the accepted one.
-        page.get_by_text('编辑继承（父类）', exact=True).click()
-        page.locator('.om-ce-chip').filter(has_text='Parent A').get_by_role('button').click()
+        select_definition('urn:acceptance:Child')
+        picker = open_type_picker()
+        picker.locator('input[value="urn:acceptance:ParentA"]').uncheck()
+        picker.get_by_role('button', name='应用选择', exact=True).click()
         page.wait_for_function('''() => !OntologyModel.S.loading && OntologyModel.S.summary.classes
             .find(c=>c.id==='urn:acceptance:Child').parents.length===1''')
         assert page.evaluate('OntologyModel.S.draft.id') != draft_id
+        assert len(command_requests) == 3
+        assert command_requests[-1]['command'] == {'action': 'batch', 'commands': [
+            {'action': 'remove_parent', 'target_iri': 'urn:acceptance:Child',
+             'value': 'urn:acceptance:ParentA'}]}
+        second_draft_id = page.evaluate('OntologyModel.S.draft.id')
+        removal_revision = page.evaluate('OntologyModel.S.draft.revision')
         select_definition('urn:acceptance:rating')
-        page.get_by_text('编辑所属类 / 数据类型', exact=True).click()
-        domain = page.locator('.om-ce-row').filter(has_text='所属类 domain')
-        domain.locator('select').select_option('urn:acceptance:ParentB')
-        domain.get_by_role('button', name='添加', exact=True).click()
+        picker = open_type_picker()
+        assert picker.locator('input[value="urn:acceptance:Child"]').is_checked()
+        picker.locator('input[value="urn:acceptance:ParentB"]').check()
+        picker.get_by_role('button', name='应用选择', exact=True).click()
         page.wait_for_function('''() => !OntologyModel.S.loading && OntologyModel.S.summary.attributes
             .find(a=>a.id==='urn:acceptance:rating').domain.length===2''')
-        page.get_by_text('编辑所属类 / 数据类型', exact=True).click()
-        datatype = page.locator('.om-ce-row').filter(has_text='数据类型')
+        assert len(command_requests) == 4
+        assert command_requests[-1]['expected_revision'] == removal_revision
+        assert command_requests[-1]['command'] == {'action': 'batch', 'commands': [
+            {'action': 'add_domain', 'target_iri': 'urn:acceptance:rating',
+             'value': 'urn:acceptance:ParentB'}]}
+        domain_revision = page.evaluate('OntologyModel.S.draft.revision')
+        datatype = open_constraint_editor().locator('.om-ce-row').filter(has_text='数据类型')
         datatype.locator('select').select_option(str(XSD.string))
         datatype.get_by_role('button', name='应用类型', exact=True).click()
         page.wait_for_function('''() => !OntologyModel.S.loading && OntologyModel.S.summary.attributes
             .find(a=>a.id==='urn:acceptance:rating').range.includes('http://www.w3.org/2001/XMLSchema#string')''')
         second_id = page.evaluate('OntologyModel.S.draft.id')
+        assert second_id == second_draft_id
+        assert len(command_requests) == 5
+        assert command_requests[-1]['expected_revision'] == domain_revision
+        assert command_requests[-1]['command'] == {
+            'action': 'set_datatype', 'target_iri': 'urn:acceptance:rating', 'datatype': str(XSD.string)}
         review_and_publish_ui('Browser: parent removed and attribute updated')
         current = Ontology(checked(client.get(base + '/ontology'))['turtle']).graph
         assert set(current.objects(URIRef('urn:acceptance:Child'), RDFS.subClassOf)) == {URIRef('urn:acceptance:ParentB')}
+        domains = list(current.objects(URIRef('urn:acceptance:rating'), RDFS.domain))
+        assert len(domains) == 1
+        union_heads = list(current.objects(domains[0], OWL.unionOf))
+        assert len(union_heads) == 1
+        domain_members = list(Collection(current, union_heads[0]))
+        assert len(domain_members) == 2
+        assert set(domain_members) == {
+            URIRef('urn:acceptance:Child'), URIRef('urn:acceptance:ParentB')}
         assert set(current.objects(URIRef('urn:acceptance:rating'), RDFS.range)) == {XSD.string}
         original = Ontology(checked(client.get(base + '/ontology', params={'ontology_id': initial['id']}))['turtle']).graph
         assert not list(original.objects(URIRef('urn:acceptance:Child'), RDFS.subClassOf))
+        assert set(original.objects(URIRef('urn:acceptance:rating'), RDFS.domain)) == {URIRef('urn:acceptance:Child')}
+        assert set(original.objects(URIRef('urn:acceptance:rating'), RDFS.range)) == {XSD.decimal}
         prior = Ontology(checked(client.get(base + '/ontology', params={'ontology_id': first_release['id']}))['turtle']).graph
-        assert len(list(prior.objects(URIRef('urn:acceptance:Child'), RDFS.subClassOf))) == 2
+        assert set(prior.objects(URIRef('urn:acceptance:Child'), RDFS.subClassOf)) == {
+            URIRef('urn:acceptance:ParentA'), URIRef('urn:acceptance:ParentB')}
+        assert set(prior.objects(URIRef('urn:acceptance:rating'), RDFS.domain)) == {URIRef('urn:acceptance:Child')}
+        assert set(prior.objects(URIRef('urn:acceptance:rating'), RDFS.range)) == {XSD.decimal}
         # The independent parent action remains available after publication,
         # even with no new discovery candidates; repeated runs do not publish.
         published_id = page.evaluate('OntologyModel.S.ontologyId')

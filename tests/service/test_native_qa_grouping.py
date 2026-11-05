@@ -1,15 +1,18 @@
+from collections import Counter
 import json
-import time
 from concurrent.futures import ThreadPoolExecutor
-from threading import Lock, RLock
+from threading import Barrier, Lock, RLock
 from types import SimpleNamespace
 
 import pytest
 
+from knowledge_service.domain.search_filter_catalog import default_catalog
 from knowledge_service.models import Search
 from knowledge_service.repository.core import Repository
+from knowledge_service.repository.scoped_reads import ScopedReads
 from knowledge_service.services import service as service_module
 from knowledge_service.services.answers import answer_messages, _retrieved_question_context as question_context
+from knowledge_service.services.projection_sync import ProjectionSync
 from knowledge_service.services.retrieval import RetrievalEngine
 from knowledge_service.services.service import KnowledgeService
 
@@ -21,6 +24,26 @@ class VocabularyRepository:
             'businesses': ['直播'],
             'audiences': [],
         }
+
+
+def _activate_native_index(repository, project, *, embedding_model, dim):
+    sync = ProjectionSync(repository.projections, {}, schema_version=3)
+    rebuild = repository.projections.begin_rebuild(
+        project, 'milvus', 3, 'native-grouping-fixture',
+        lease_guard=sync._rebuild_lease_guard, embedding_model=embedding_model, dim=dim)
+    state = {**rebuild['state'], 'catalog': default_catalog().to_dict()}
+    with repository.projections.activation_guard(project, rebuild['claim'], 3) as watermark:
+        assert watermark == rebuild['snapshot_seq']
+        repository.projections.activate_index(rebuild['claim'], 3, watermark, state)
+    cursor = repository.projections.cursor(project, 'milvus')
+    assert cursor['status'] == 'ready' and cursor['schema_version'] == 3
+    assert cursor['applied_seq'] == repository.projections.project_watermark(project)
+    assert cursor['rebuild_state']['embedding_model'] == embedding_model
+    assert cursor['rebuild_state']['dim'] == dim
+    index = repository.projections.search_index(project, 3)
+    assert (index['embedding_model'], index['dim'], index['watermark']) == (
+        embedding_model, dim, watermark)
+    return index
 
 
 def test_platform_group_limits_are_validated_at_the_request_boundary():
@@ -301,39 +324,51 @@ def test_ungrouped_unknown_scope_never_enters_answer_evidence():
     assert [row['id'] for row in context['unknown_scope_rows']] == ['unknown']
 
 
-def test_native_backfill_filters_current_versions_without_per_hit_get_record():
-    class Repository:
-        def projection_ready(self, *_args):
-            return True
+def test_native_backfill_filters_current_versions_without_per_hit_get_record(tmp_path, monkeypatch):
+    repository = Repository(tmp_path / 'native-backfill')
+    project = repository.create_project('native backfill')['id']
+    current = repository.put_record(project, {'id': 'current', 'kind': 'chunk', 'text': 'current'})
+    old = repository.put_record(project, {'id': 'old', 'kind': 'chunk', 'text': 'old'})
+    repository.put_record(project, {'id': 'old', 'kind': 'chunk', 'text': 'new'}, expected_version=1)
+    index = _activate_native_index(repository, project, embedding_model='test', dim=1)
+    native_calls, hydration_calls = [], []
+    by_ids = ScopedReads.by_ids
 
-        def current_records_by_version_ids(self, _project_id, version_ids):
-            rows = {
-                'current-v': {'id': 'current', 'version_id': 'current-v',
-                              'kind': 'chunk', 'text': 'current', 'metadata': {},
-                              'superseded_at': None},
-                'old-v': {'id': 'old', 'version_id': 'old-v', 'kind': 'chunk',
-                          'text': 'old', 'metadata': {},
-                          'superseded_at': '2026-01-01T00:00:00Z'},
-            }
-            return [rows[item] for item in version_ids
-                    if rows[item]['superseded_at'] is None]
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError('native backfill must use one bounded authority read, never broad or per-hit reads')
 
-        def get_record(self, *_args):
-            raise AssertionError('native backfill must not perform per-hit reads')
+    def hydrate(reader, project_id, scope, ids, *, kinds=None):
+        hydration_calls.append((project_id, scope, ids, kinds))
+        return by_ids(reader, project_id, scope, ids, kinds=kinds)
+
+    monkeypatch.setattr(repository, 'get_record', forbidden)
+    monkeypatch.setattr(repository, 'query', forbidden)
+    monkeypatch.setattr(ScopedReads, 'page', forbidden)
+    monkeypatch.setattr(ScopedReads, 'by_ids', hydrate)
 
     class Milvus:
         available = True
 
-        def search_bm25(self, *_args, **_kwargs):
-            return [{'version_id': 'current-v', 'score': 0.9},
-                    {'version_id': 'old-v', 'score': 0.8}]
+        def search(self, project_id, query, **options):
+            native_calls.append((project_id, query, options))
+            return [{'record_id': current['id'], 'version_id': current['version_id'], 'score': 0.9},
+                    {'record_id': old['id'], 'version_id': old['version_id'], 'score': 0.8}]
 
     encoder = SimpleNamespace(identity='test', semantic=True,
                               encode=lambda texts: [[1.0] for _ in texts])
-    result = RetrievalEngine(Repository(), encoder, Milvus()).search(
-        'project', '直播', retrieval_mode='keyword')
+    result = RetrievalEngine(repository, encoder, Milvus()).search(
+        project, '直播', retrieval_mode='keyword')
 
     assert [row['id'] for row in result['hits']] == ['current']
+    assert result['hits'][0]['version_id'] == current['version_id']
+    assert len(native_calls) == 1
+    assert native_calls[0][:2] == (project, '直播')
+    assert native_calls[0][2]['retrieval_mode'] == 'keyword'
+    assert native_calls[0][2]['query_vector'] is None
+    assert native_calls[0][2]['index_version'] == index['index_version']
+    assert len(hydration_calls) == 1
+    assert hydration_calls[0][0] == project
+    assert hydration_calls[0][2:] == (['current', 'old'], ['entity', 'relation', 'chunk'])
 
 
 def test_mixed_group_backend_uses_bounded_authority_for_source_and_context(
@@ -356,14 +391,13 @@ def test_mixed_group_backend_uses_bounded_authority_for_source_and_context(
         def search(self, _project_id, _query, **kwargs):
             values = (((kwargs['scope'].get('applicability') or {})
                       .get('platforms') or {}).get('values') or [])
-            fallback = kwargs['fallback_cache']
+            assert 'fallback_cache' not in kwargs
             if values == ['美团']:
-                fallback.setdefault('rows', authority)
-                backend, hits = 'postgres_local', [authority[0]]
+                backend, hits = 'postgres_history', [authority[0]]
             else:
                 backend, hits = 'milvus', []
             return {'hits': hits, 'candidate_count': len(hits),
-                    'active_mode': 'keyword', 'degraded': backend != 'milvus',
+                    'active_mode': 'keyword', 'degraded': False,
                     '_backend': backend, 'backends': {}}
 
     source_reads = []
@@ -374,7 +408,8 @@ def test_mixed_group_backend_uses_bounded_authority_for_source_and_context(
 
         def source_context(self, project, scope, hits):
             source_reads.append((project, scope, hits))
-            return ({'source_chunks': [authority[1]], 'context_chunks': [authority[2]]}
+            return ({'source_chunks': [{**authority[1], '_source_anchor_versions': ['entity-v']}],
+                     'context_chunks': [{**authority[2], '_source_anchor_versions': ['entity-v']}]}
                     if hits else {'source_chunks': [], 'context_chunks': []})
 
     monkeypatch.setattr(service_module, 'RetrievalEngine', Engine)
@@ -389,7 +424,7 @@ def test_mixed_group_backend_uses_bounded_authority_for_source_and_context(
     service.ontology_expansion = lambda *_args, **_kwargs: None
     service.ontology_labels = lambda _project_id: {}
     service.scoped = lambda *_args, **_kwargs: (_ for _ in ()).throw(
-        AssertionError('group fallback must reuse its authority cache'))
+        AssertionError('grouped source context must not preload authority rows'))
 
     request = {
         'query': '直播', 'retrieval_mode': 'keyword',
@@ -417,40 +452,56 @@ def test_mixed_group_backend_uses_bounded_authority_for_source_and_context(
                  if group['platform'] == '美团')
     assert [row['id'] for row in group['source_chunks']] == ['c1']
     assert [row['id'] for row in group['context_chunks']] == ['c2']
+    authorizations = result['_source_context_authorizations']
+    assert len(authorizations) == 2
+    assert {(proof['artifact_id'], proof['artifact_version_id'], proof['anchor_id'], proof['anchor_version_id'])
+            for proof in authorizations.values()} == {
+                ('c1', 'c1-v', 'entity', 'entity-v'), ('c2', 'c2-v', 'entity', 'entity-v')}
+    for row in [*group['source_chunks'], *group['context_chunks']]:
+        proof = authorizations[row['_source_context_authorization']]
+        assert proof['query_platform'] == '美团' and proof['source_scope'] == 'specific'
+        assert '_source_anchor_versions' not in row
 
 
-def test_concurrent_platform_fallbacks_share_one_authority_query():
-    class Repository:
-        def __init__(self):
-            self.calls = 0
-            self.calls_lock = Lock()
+def test_concurrent_platform_searches_without_milvus_fail_before_authority_reads(monkeypatch):
+    # The 2026-10-19 redesign retired automatic local fallback. Its old one-read
+    # cache budget is now zero: an unavailable index cannot authorize a preload.
+    calls, lock = Counter(), Lock()
 
-        def query(self, *_args, **_kwargs):
-            with self.calls_lock:
-                self.calls += 1
-            time.sleep(0.05)
-            return []
+    def forbidden(name):
+        def read(*_args, **_kwargs):
+            with lock:
+                calls[name] += 1
+            raise AssertionError('missing Milvus must fail before any authority read')
+        return read
 
-        def keyword_candidates(self, *_args, **_kwargs):
-            return []
-
-    repository = Repository()
+    repository = SimpleNamespace(query=forbidden('query'),
+        keyword_candidates=forbidden('keyword_candidates'),
+        current_records_by_version_ids=forbidden('current_records_by_version_ids'))
+    monkeypatch.setattr(ScopedReads, 'by_ids', forbidden('by_ids'))
+    monkeypatch.setattr(ScopedReads, 'page', forbidden('page'))
+    monkeypatch.setattr(ScopedReads, 'ranked_keyword', forbidden('ranked_keyword'))
     encoder = SimpleNamespace(identity='test', semantic=False)
     engine = RetrievalEngine(repository, encoder)
-    fallback_cache = {'applicability': {}, 'lock': Lock()}
+    with pytest.raises(TypeError, match='fallback_cache'):
+        engine.search('project', '直播', retrieval_mode='keyword',
+                      fallback_cache={'applicability': {}, 'lock': Lock()})
+    barrier = Barrier(4)
 
     def search(platform):
-        return engine.search(
-            'project', '直播', retrieval_mode='keyword',
-            scope={'applicability': {
-                'platforms': {'mode': 'specific', 'values': [platform]}}},
-            platform_match='specific_only', fallback_cache=fallback_cache)
+        barrier.wait()
+        with pytest.raises(RuntimeError, match='Milvus') as error:
+            engine.search('project', '直播', retrieval_mode='keyword',
+                scope={'applicability': {
+                    'platforms': {'mode': 'specific', 'values': [platform]}}},
+                platform_match='specific_only')
+        return error.value
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(search, ['美团', '京东', '抖音', '快手']))
 
-    assert repository.calls == 1
-    assert all(result['hits'] == [] for result in results)
+    assert len(results) == 4 and all(isinstance(error, RuntimeError) for error in results)
+    assert calls == Counter()
 
 
 def test_grouped_mixed_question_context_does_not_rescan_scoped_rows():
@@ -557,20 +608,7 @@ def test_group_backend_errors_are_preserved_and_exposed_to_qa(monkeypatch):
 
 @pytest.mark.parametrize('retrieval_mode', ['semantic', 'hybrid'])
 def test_grouped_semantic_search_encodes_query_once_for_all_platforms(
-        retrieval_mode):
-    class Repository(VocabularyRepository):
-        def distinct_applicability_values(self, _project_id):
-            return {
-                'platforms': [f'平台{index:02d}' for index in range(20)],
-                'businesses': [], 'audiences': [],
-            }
-
-        def projection_ready(self, *_args):
-            return True
-
-        def current_records_by_version_ids(self, _project_id, _version_ids):
-            return []
-
+        retrieval_mode, tmp_path):
     class Encoder:
         identity = 'test'
         semantic = True
@@ -584,26 +622,49 @@ def test_grouped_semantic_search_encodes_query_once_for_all_platforms(
                 self.calls += 1
             return [[1.0, 0.0] for _ in texts]
 
+    calls, calls_lock = [], Lock()
+
     class Milvus:
         available = True
 
-        def search_dense(self, *_args, **_kwargs):
-            return []
-
-        def search_hybrid(self, *_args, **_kwargs):
+        def search(self, project_id, query, **options):
+            with calls_lock:
+                calls.append((project_id, query, options))
             return []
 
     service = KnowledgeService.__new__(KnowledgeService)
-    service.repository = Repository()
+    service.repository = Repository(tmp_path / 'grouped-query-vector')
+    project = service.repository.create_project('grouped query vector')['id']
     service.encoder = Encoder()
+    index = _activate_native_index(service.repository, project,
+        embedding_model=service.encoder.identity, dim=2)
     service.milvus_store = Milvus()
     service.ontology_expansion = lambda *_args, **_kwargs: None
     service.ontology_labels = lambda _project_id: {}
 
-    result = service.search('project', {
+    result = service.search(project, {
         'query': '直播', 'retrieval_mode': retrieval_mode,
         'applicability': {'platforms': {'mode': 'specific', 'values': [f'平台{index:02d}' for index in range(20)]}},
         'include_unknown': True})
 
     assert len(result['platform_groups']) == 21
     assert service.encoder.calls == 1
+    assert len(calls) == 63
+    assert Counter((tuple(call[2]['kinds']), call[2]['platform_match']) for call in calls) == Counter({
+        ((kind,), match): count for kind in ('entity', 'chunk', 'relation')
+        for match, count in (('specific_only', 20), ('all_only', 1))})
+    platform_calls = Counter()
+    for project_id, query, options in calls:
+        assert (project_id, query) == (project, '直播')
+        assert options['retrieval_mode'] == retrieval_mode
+        assert options['query_vector'] == [1.0, 0.0]
+        assert options['index_version'] == index['index_version']
+        assert options['catalog'] == default_catalog()
+        assert 5 <= options['k'] <= RetrievalEngine.MAX_NATIVE_LIMIT
+        if options['platform_match'] == 'specific_only':
+            platform_calls.update(options['scope']['applicability']['platforms']['values'])
+    assert platform_calls == Counter({f'平台{index:02d}': 3 for index in range(20)})
+    assert all(group['hits'] == [] for group in result['platform_groups'])
+    assert result['channel_quotas'] == {'entity': 5, 'chunk': 5, 'relation': 5}
+    assert [(group['platform'], group['source_scope']) for group in result['platform_groups']] == [
+        *[(f'平台{index:02d}', 'specific') for index in range(20)], (None, 'all')]

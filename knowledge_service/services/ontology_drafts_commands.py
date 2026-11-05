@@ -9,16 +9,17 @@ from .ontology_drafts_core import (
 from .ontology import Ontology
 from .ontology import local_name
 from .ontology import term_impact
-from .ontology_operations import apply_operations
+from .ontology_operations import _apply_operations, apply_operations
 from .ontology_operations import build_operation
 from .ontology_operations import build_restore_operation
 from .ontology_operations import canonical_turtle_diff
 from .ontology_operations import operation_fingerprint
 from .ontology_operations import retirement_dependencies
-from rdflib import RDF
+from rdflib import BNode, RDF
 from rdflib import RDFS
 from rdflib import URIRef
 from rdflib.namespace import OWL
+from rdflib.plugins.serializers.turtle import TurtleSerializer
 import json
 
 
@@ -195,16 +196,23 @@ class DraftCommandMixin:
                 })
         return raw
 
-    def _rebuild_operations(self, project_id, draft, operations, ontology, command):
+    def _rebuild_operations(self, project_id, draft, operations, ontology, command,
+                            *, _intake_records=None, _intake_in_place=False):
         evidence = self._authoritative_evidence(draft, command)
         confidence = command.get('confidence')
         rebuilt = []
-        working = Ontology(ontology.graph.serialize(format='turtle'))
+        working = (ontology if _intake_in_place
+                   else Ontology(ontology.graph.serialize(format='turtle')))
         for raw in operations:
             action = raw['action']
             target = raw['target_iri']
+            impact_context = {'ontology': working}
+            if _intake_records is not None:
+                impact_context['records'] = _intake_records
+            if _intake_in_place:
+                impact_context['_turtle_order'] = True
             impact = {
-                **self._impact(project_id, target, ontology=working),
+                **self._impact(project_id, target, **impact_context),
                 **(raw.get('impact') or {}),
             }
             validation = {
@@ -232,6 +240,9 @@ class DraftCommandMixin:
                 item['risk'] = 'medium'
                 item['fingerprint'] = operation_fingerprint(item)
             rebuilt.append(item)
+            if _intake_in_place:
+                _apply_operations(working, [item])
+                continue
             try:
                 applied = apply_operations(
                     working.graph.serialize(format='turtle'), [item])
@@ -240,7 +251,38 @@ class DraftCommandMixin:
             working = Ontology(applied)
         return rebuilt
 
-    def _compile_command(self, project_id, draft, command, ontology):
+    def _compile_intake_commands(self, project_id, draft, commands, ontology):
+        """Compile only confirmed additive intake suggestions in request-local state."""
+        allowed = {'create_term', 'add_annotation', 'add_parent',
+                   'add_domain', 'add_range', 'set_datatype'}
+        if any(not isinstance(command, dict) or command.get('action') not in allowed
+               or any(key in command for key in ('supersedes_operation_id', 'operation_id'))
+               for command in commands):
+            raise ValueError('intake suggestions must be additive atomic commands')
+        # Preserve caller ownership even if a later command fails. All following
+        # commands and definition checks reuse this single mutable working graph.
+        working = Ontology(ontology.graph.serialize(format='turtle'))
+        records = self.repository.current_records(project_id)
+        compiled = []
+        for command in commands:
+            # Recursive Turtle emission assigns fresh blank-node identities on
+            # the legacy path. Preserve that path only for impacts that expose
+            # incoming blank nodes (e.g. SHACL paths or OWL union list cells).
+            in_place = not any(isinstance(subject, BNode) for subject in
+                working.graph.subjects(None, URIRef(command['target_iri'])))
+            built = self._compile_command(
+                project_id, draft, command, working,
+                _intake_records=records, _intake_in_place=in_place)
+            if not in_place:
+                working = Ontology(apply_operations(
+                    working.graph.serialize(format='turtle'), built))
+            compiled.extend(built)
+        # Also validate empty selections and retain a whole-graph boundary check.
+        _apply_operations(working, [])
+        return compiled
+
+    def _compile_command(self, project_id, draft, command, ontology,
+                         *, _intake_records=None, _intake_in_place=False):
         if not isinstance(command, dict):
             raise ValueError('command must be an object')
         action = command.get('action')
@@ -305,9 +347,11 @@ class DraftCommandMixin:
         return self._rebuild_operations(project_id, draft, [{
             'action': action, 'target_iri': target,
             'before': before, 'after': after,
-        }], ontology, command)
+        }], ontology, command, _intake_records=_intake_records,
+            _intake_in_place=_intake_in_place)
 
-    def _impact(self, project_id, target_iri, *, ontology=None):
+    def _impact(self, project_id, target_iri, *, ontology=None, records=None,
+                _turtle_order=False):
         ontology = ontology or Ontology(
             self._base_turtle(project_id, self._latest_id(project_id)))
         target = URIRef(target_iri)
@@ -319,8 +363,8 @@ class DraftCommandMixin:
                 if child not in descendants and ontology.is_active_term(child):
                     descendants.add(child)
                     pending_nodes.append(child)
-        references = term_impact(self, project_id, target_iri, ontology)
-        records = self.repository.current_records(project_id)
+        references = term_impact(self, project_id, target_iri, ontology, records=records)
+        records = records if records is not None else self.repository.current_records(project_id)
         direct = [
             row for row in records
             if row.get('type') == target_iri
@@ -332,9 +376,21 @@ class DraftCommandMixin:
             and (row.get('subject_id') in direct_ids
                  or row.get('object_id') in direct_ids)]
         affected_records = [*direct, *linked]
+        incoming = list(ontology.graph.subject_predicates(target))
+        if _turtle_order and len(incoming) > 1:
+            # Match the named-subject/predicate order of the legacy Turtle
+            # round trip without serializing or reparsing the working graph.
+            serializer = TurtleSerializer(ontology.graph)
+            serializer.preprocess()
+            owners = {subject: {} for subject, _ in incoming}
+            for subject, predicate in incoming:
+                owners[subject][predicate] = []
+            incoming = [(subject, predicate)
+                        for subject in serializer.orderSubjects() if subject in owners
+                        for predicate in serializer.sortProperties(owners[subject])]
         constraint_details = [{
             'subject': str(subject), 'predicate': str(predicate),
-        } for subject, predicate in ontology.graph.subject_predicates(target)]
+        } for subject, predicate in incoming]
         constraints = len(constraint_details)
         formal_records = len(affected_records)
         pending_ids = set()

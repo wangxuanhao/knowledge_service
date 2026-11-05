@@ -1,5 +1,6 @@
 """Milvus ranks entity candidates; PostgreSQL owns eligibility and payloads."""
 from math import isfinite
+from ..utils.filters import matches_filter, validate_filter
 
 
 class EntityMatchingUnavailable(RuntimeError):
@@ -46,8 +47,11 @@ def semantic_candidates(retrieval, project_id, text, rows, *, scope=None, limit=
     if any(not row.get('version_id') for row in eligible.values()):
         raise EntityMatchingUnavailable()
     try:
+        filters = (scope or {}).get('filters')
+        validate_filter(filters)
+        eligible = {key: row for key, row in eligible.items() if matches_filter(row, filters)}
         result = retrieval.search(project_id, text, retrieval_mode='semantic',
-            scope={**(scope or {}), '_candidate_ids': list(eligible)},
+            scope={**(scope or {}), 'filters': {'field': 'id', 'op': 'in', 'value': list(eligible)}},
             content_channels=['entity'], k=limit)
     except Exception as exc:
         raise EntityMatchingUnavailable(
