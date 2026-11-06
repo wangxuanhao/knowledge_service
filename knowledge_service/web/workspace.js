@@ -2,7 +2,7 @@
 (() => {
   // 节点拖动调整视图布局；空白拖动平移。事实修改仍走版本化编辑器。
   const ui = {request:0, options:[], pinned:new Map(),picker:{request:0,cursor:null,query:'',page:0},mindmapPicker:{request:0,cursor:null,query:'',page:0,options:[]},mindmapRootId:'',ontology:null, graph:null};
-  let ontologyLoadGeneration=0;
+  let ontologyLoadGeneration=0,graphContextReady=false,localScopeOverride=null,localScopeOwner='',localScopeCanvas=null,recordReadAbort=null,graphReadAbort=null;
   const graphRequests=GraphTypeFilter.createGraphRequestGate();
   const get = id => document.getElementById(id);
   const make = (tag, html, className='') => {const e=document.createElement(tag);e.innerHTML=html;e.className=className;return e;};
@@ -217,7 +217,7 @@
   function applyTimelinePoint(value){
     if(get('known-at').value===value){renderTimelinePoints();return;}
     get('known-at').value=value;if(window.WorkspaceContext){WorkspaceContext.store.edit(current,'search',{...WorkspaceContext.read(current,'search'),known_at:value||null});WorkspaceContext.store.apply(current,'search');WorkspaceContext.restore();}renderTimelinePoints();
-    window.clearGraphWorkspace({preserveSearchResults:true});
+    document.dispatchEvent(new CustomEvent('workspace:scope-changed',{detail:{projectId:current,page:'search',scope:WorkspaceContext.read(current,'search')}}));
   }
   function moveTimeline(direction){
     const values=[...uiTimeline.events.map(event=>event.known_at),''],currentValue=get('graph-timeline').querySelector('.tl-points').value,index=values.indexOf(currentValue),next=Math.max(0,Math.min(values.length-1,(index<0?values.length-1:index)+direction));applyTimelinePoint(values[next]);
@@ -337,6 +337,7 @@
     return true;
   }
   function invalidatePendingDetail(){
+    recordReadAbort?.abort();recordReadAbort=null;
     recordOpenEpoch++;
     settlePendingDetail(detailSelectionEpoch);
     detailSelectionEpoch++;
@@ -369,53 +370,73 @@
     }
     const local=wb.nodes.get(id);
     if(local){inspect(local);status('已选择：'+local.text+' · 点击“展开邻域”查看邻域');return;}
-    const token=beginPendingDetail(id),project=current;
     try{
-      const row=await window.openKnowledgeRecord({id,kind:'entity'});
-      if(!row){settlePendingDetail(token);return;}
+      const row=await window.inspectKnowledgeRecord({id,kind:'entity'},{qualify:'record'});
+      if(!row)return;
       status('已选择：'+row.text+' · 点击“展开邻域”查看邻域');
-    }catch(error){if(settlePendingDetail(token))status(error.message,true);}
+    }catch(error){status(error.message,true);}
   };
   async function selectEntityDetail(id){
-    const local=wb.nodes.get(id);
-    if(local){
-      if(get('tab-search').classList.contains('hidden')){window.suppressNextAutoGraph?.();window.KnowledgeTabs.open('search');}
-      inspect(local);
-      return local;
-    }
-    const choice=get('graph-entity-choice');
-    if(![...choice.options].some(option=>option.value===id)){
-      get('graph-entity-filter').value='';choices();
-    }
-    choice.value=id;
-    if(choice.value!==id)return window.openKnowledgeRecord({id,kind:'entity'});
-    await choice.onchange();
+    return window.openKnowledgeRecord({id,kind:'entity'});
   }
   window.selectEntityDetail=selectEntityDetail;
   // Full graph, source assertions and exact lookup share the same live inspector
   // and its revision/permission-checked record editor, without loading an option prefix.
-  window.openKnowledgeRecord=async({id,kind,projectId=current,scope:fixedScope}={})=>{
+  window.openKnowledgeRecord=async({id,kind,projectId=current,scope:fixedScope,version_id:expectedVersionId,version:expectedVersion}={})=>{
     if(!id)throw Error('缺少知识记录 ID');
     if(projectId!==current)throw Error('项目已切换，请在当前项目重新打开记录');
-    const project=current,applied=window.WorkspaceContext?.read(current,'search')||scope(),openEpoch=++recordOpenEpoch;
-    const temporal=fixedScope||{...applied,...ontologyScope()},ticket=window.WorkspaceContext?.ticket(project,'search');
+    const virtual=wb.nodes.get(id);if(GraphTypeFilter.isAttributeNode(virtual)||GraphTypeFilter.isAttributeEdge(virtual))return window.openKnowledgeRecord({id:virtual.subject_id,kind:'entity',projectId,scope:fixedScope});
+    graphRequests.invalidate();graphReadAbort?.abort();localBranches?.invalidatePending();recordReadAbort?.abort();
+    const controller=recordReadAbort=new AbortController();
+    window.GraphOverview?.explicit();
+    const project=current,ownerStamp=JSON.stringify(graphScope());let openEpoch=++recordOpenEpoch;
+    const scene=window.FullGraphView?.mode==='full'?window.FullGraphView.filters:null,sceneStamp=scene?JSON.stringify(scene):null;
+    const effective={...graphScope(),...(fixedScope||{}),...(scene||{})},ticket=window.WorkspaceContext?.ticket(project,'search');
+    const {entity_type,predicate,...temporal}=effective;
     const base='/api/projects/'+encodeURIComponent(project);
-    const found=await api(base+'/records/page',{...temporal,record_ids:[id],limit:1,include_total:false});
-    const isCurrent=()=>openEpoch===recordOpenEpoch&&project===current&&(!ticket||window.WorkspaceContext.accepts(ticket,current,'search'));
-    if(!isCurrent())return null;
+    const isCurrent=()=>openEpoch===recordOpenEpoch&&project===current&&ownerStamp===JSON.stringify(graphScope())&&(!sceneStamp||sceneStamp===JSON.stringify(window.FullGraphView?.filters))&&(!ticket||window.WorkspaceContext.accepts(ticket,current,'search'));
+    const found=await api(base+'/records/page',{...temporal,record_ids:[id],limit:1,include_total:false},'POST',{signal:controller.signal}).catch(error=>{if(!isCurrent())return null;throw error;});
+    if(!isCurrent()||!found)return null;
     let row=found.records?.find(record=>record.id===id);
     if(!row)throw Error('当前已应用范围内没有该知识记录');
     if(kind&&row.kind!==kind)throw Error('记录类型已变化，请刷新图谱');
-    if(row.kind==='entity'){
-      const detail=await api(base+'/graph-neighborhood',{...temporal,seeds:[id],hops:0,direction:'both',max_nodes:1,max_edges:1});
-      if(!isCurrent())return null;
-      row=detail.records.find(record=>record.id===id&&record.kind==='entity');
-      if(!row)throw Error('实体资格已变化，请在当前范围重新选择');
+    if((expectedVersionId&&row.version_id!==expectedVersionId)||(!expectedVersionId&&expectedVersion!=null&&row.version!==expectedVersion))throw Error('知识版本已变化，请刷新后重新打开');
+    if(row.kind==='entity'&&effective.entity_type!=null&&String(row.type||'')!==String(effective.entity_type))throw Error('当前实体类型筛选排除了该记录；请调整筛选后重试');
+    if(row.kind==='relation'&&effective.predicate&&row.type!==effective.predicate)throw Error('当前关系类型筛选排除了该记录；请调整筛选后重试');
+    if(row.kind==='document'||row.kind==='chunk'){
+      const versionId=row.metadata?.source_document_version_id;
+      if(versionId&&window.SourceReader)return window.SourceReader.open({projectId:project,versionId});
+      return window.SourcesView?.open();
     }
-    if(!get('tab-search').classList.contains('hidden'))inspect(row);
-    else{window.suppressNextAutoGraph?.();window.KnowledgeTabs.open('search');inspect(row);}
+    if(row.kind==='attribute')return window.openKnowledgeRecord({id:row.subject_id,kind:'entity',projectId:project,scope:effective});
+    if(!['entity','relation'].includes(row.kind))throw Error('当前记录没有可显示的正式图谱对象');
+    window.suppressNextAutoGraph?.();if(get('tab-search').classList.contains('hidden'))window.KnowledgeTabs.open('search');
+    if(!isCurrent())return null;
+    const context={projectId:project,scope:effective};
+    if(window.FullGraphView?.hasRecord?.(row,context)){
+      if(row.kind==='entity'){
+        row=await readInspectorRecord(row,effective,controller.signal,'entity').catch(error=>{if(!isCurrent())return null;throw error;});
+        if(!isCurrent()||!row)return null;
+      }
+      inspect(row,{scope:effective});openEpoch=recordOpenEpoch;
+      if(isCurrent())await window.FullGraphView.focusRecord(row,context,isCurrent);return row;
+    }
+    const local=row.kind==='relation'?ui.graph?.edges.find(edge=>edge.id===row.id):wb.nodes.get(row.id),matchingLocal=local&&
+      JSON.stringify(effective)===JSON.stringify(effectiveGraphScope())&&sameRecordVersion(local,row);
+    if(matchingLocal){
+      row={...local,...row};
+      window.FullGraphView?.switchMode('local');inspect(row,{scope:effective});openEpoch=recordOpenEpoch;
+      await window.GraphWorkspaceLayout?.settled();if(isCurrent())GraphWorkbench.focusRecord(row);return row;
+    }
+    const result=await window.drawGraph(row.kind==='relation'?row.subject_id:row.id,0,{scope:effective,exactRecord:row,
+      seeds:row.kind==='relation'?[row.subject_id,row.object_id]:[row.id],maxNodes:row.kind==='relation'?2:1,maxEdges:1,accepts:isCurrent});
+    if(!result||!isCurrent())return null;
+    if(row.kind==='entity')row={...result.nodes.find(node=>node.id===row.id),...row};
+    inspect(row,{scope:effective});openEpoch=recordOpenEpoch;
+    await window.GraphWorkspaceLayout?.settled();if(isCurrent())GraphWorkbench.focusRecord(row);
     return row;
   };
+  const sameRecordVersion=(a,b)=>b.version_id?a.version_id===b.version_id:b.version==null||a.version===b.version;
 
   async function loadEntityChoices(query='',cursor=null,target='graph'){
     const project=current;if(!project)return null;
@@ -451,7 +472,7 @@
     }
     if(ui.graph)updateGraphTypeChoices(ui.graph);
   }
-  function inspect(row){
+  function inspect(row,{scope:inspectionScope}={}){
     invalidatePendingDetail();
     if(GraphTypeFilter.isAttributeNode(row)){
       const entity=wb.nodes.get(row.subject_id);
@@ -460,9 +481,37 @@
     }
     const isEntity=row.kind==='entity';
     if(isEntity){ui.pinned.set(row.id,row);selectedEntityId=row.id;ui.mindmapRootId=row.id;choices();get('graph-node').value=row.id;get('mindmap-root').value=row.id;get('graph-entity-choice').value=row.id;}
-    window.renderEvidenceInspector(row,[...ui.options,...ui.pinned.values()]);
+    const detailOptions=[...ui.options,...ui.pinned.values()];
+    if(row.kind==='relation')for(const id of [row.subject_id,row.object_id]){
+      const data=window.FullGraphView?.renderer?.dataset,endpoint=wb.nodes.get(id)||data?.records[data.nodeIndex.get(id)];if(endpoint)detailOptions.push(endpoint);
+    }
+    window.renderEvidenceInspector(row,detailOptions,{scope:inspectionScope||effectiveGraphScope()});
     GraphWorkbench.selection(row);
   }
+  async function readInspectorRecord(row,effective,signal,qualify){
+    if(qualify==='entity'&&row.kind==='entity'&&Array.isArray(row.attributes)&&Array.isArray(row.class_parents)&&Object.hasOwn(row,'class_ontology_id'))return row;
+    const {entity_type,predicate,...applied}=effective,base='/api/projects/'+encodeURIComponent(current);
+    const neighborhood=qualify==='entity'&&row.kind==='entity';
+    const result=await api(base+(neighborhood?'/graph-neighborhood':'/records/page'),{...applied,...(neighborhood?
+      {seeds:[row.id],hops:0,direction:'both',max_nodes:1,max_edges:1}:{record_ids:[row.id],limit:1,include_total:false})},'POST',{signal});
+    const full=result.records?.find(value=>value.id===row.id&&value.kind===row.kind);
+    if(!full)throw Error('当前已应用范围内没有该知识记录');
+    if(!sameRecordVersion(full,row))throw Error('知识版本或资格已变化，请重新选择');
+    return full;
+  }
+  window.inspectKnowledgeRecord=async(row,{scope:fixedScope,qualify=false}={})=>{
+    const effective=fixedScope||effectiveGraphScope();
+    if(!qualify){inspect(row,{scope:effective});return row;}
+    recordReadAbort?.abort();const controller=recordReadAbort=new AbortController(),epoch=++recordOpenEpoch;
+    const token=beginPendingDetail(row.id),project=current,owner=JSON.stringify(graphScope()),ticket=window.WorkspaceContext?.ticket(project,'search');
+    const accepts=()=>epoch===recordOpenEpoch&&project===current&&!controller.signal.aborted&&owner===JSON.stringify(graphScope())&&(!ticket||window.WorkspaceContext.accepts(ticket,current,'search'));
+    try{
+      const full=await readInspectorRecord(row,effective,controller.signal,qualify);
+      if(!accepts())return null;
+      inspect(full,{scope:effective});return full;
+    }catch(error){if(!accepts()||error.name==='AbortError')return null;throw error;}
+    finally{settlePendingDetail(token);}
+  };
   // 图谱悬停提示：把"这个实体是什么、它的类在本体里挂在谁下面"一次说清。
   // 用户反馈："检索 没看到有父类的信息" + "知识图谱也没父类相关的信息" ——
   // 层级在**类**之间，实体节点本身没有父类，所以这里显示的是"它所属的类"的父类链
@@ -510,7 +559,7 @@
     bar.innerHTML='<small>按实体类型查看 · 只显示所选类型，不展开邻居</small><div>'+['',...groups].map((type,i)=>`<button class="secondary" data-type-index="${i}" aria-pressed="${type===selectedType}" title="${esc(type?term(type):'恢复当前检索范围全部类型')}">${dot(type)}${esc(type?typeLabel(type):'全部类型')} <b>${type?baseEntities.filter(n=>n.type===type).length:baseEntities.length}</b></button>`).join('')+'</div>';
     bar.querySelectorAll('button').forEach(button=>button.onclick=()=>renderGraph(base,['',...groups][Number(button.dataset.typeIndex)],base));
     const positioned=GraphWorkbench.positions(result,current);
-    const viewport=GraphWorkbench.viewport(current,graphScope(),positioned);
+    const viewport=GraphWorkbench.viewport(current,effectiveGraphScope(),positioned);
     ui.graph=result;wb.nodes=new Map(result.nodes.map(n=>[n.id,n]));
     const categoryKey=n=>window.GraphAppearance?GraphAppearance.categoryKey(n):(GraphTypeFilter.isAttributeNode(n)?'attribute:':'entity:'+String(n.type||''));
     const chart=initChart(), types=[...new Set(result.nodes.map(categoryKey))], matched=new Set(result.matched_ids||[]);
@@ -543,9 +592,15 @@
     // native graph edge labels retain their own screen-space transform.
 chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor:'#ffffff',borderColor:'#e1e2e8',textStyle:{color:'#27272a'},padding:16,extraCssText:'border-radius:10px;box-shadow:0 8px 24px #10182824;max-width:310px'},legend:[{show:false,type:'scroll',data:types,formatter:categoryLabel,bottom:0,textStyle:{fontSize:12,color:'#627b82'}}],series:[{type:'graph',layout:'none',draggable:true,roam:'scale',scaleLimit:{min:.05,max:4},...GraphWorkbench.bounds(positioned,chart.getWidth(),chart.getHeight()),center:null,zoom:1,...viewport,selectedMode:'single',select:{itemStyle:{borderColor:appearance.selected,borderWidth:3},lineStyle:{color:appearance.selected,width:2,opacity:1},label:{show:showLabels,fontWeight:600},edgeLabel:{show:showEdgeLabels}},labelLayout:null,label:{show:showLabels,position:'right',fontSize:12,color:appearance.text,distance:6,width:128,overflow:'truncate',backgroundColor:null,padding:0,borderRadius:0},edgeSymbol:['none','arrow'],edgeLabel:{show:showEdgeLabels&&result.nodes.length<=20,formatter:'{c}',fontSize:11,color:'#92939f'},emphasis:{focus:'adjacency',lineStyle:{color:appearance.selected,width:1.5,opacity:.7},label:{show:showLabels,color:'#3f3f46'},edgeLabel:{show:showEdgeLabels}},force:{repulsion:320,edgeLength:100,gravity:.1,initLayout:'circular',layoutAnimation:false},categories:types.map(name=>({name,itemStyle:{color:name==='attribute:'?attrColor:nodeColor({type:name.slice(7)})}})),data:positioned.map(n=>{const attribute=GraphTypeFilter.isAttributeNode(n),label=attribute?'属性值':(n.type_label||displayType(n.type));const index=catIndex(categoryKey(n)),size=nodeSizes?.get(n.id)||nodeSize;return {id:n.id,name:n.text,x:n.x,y:n.y,category:index,categoryName:label,symbol:attribute?'roundRect':'circle',symbolSize:attribute?[72,22]:(matched.has(n.id)?Math.max(18,size+6):size),label:{show:labelIds.has(n.id)?undefined:false},itemStyle:{color:attribute?attrColor:nodeColor(n),borderColor:appearance.outline,borderWidth:result.nodes.length>100?0:1.2,...(attribute&&n.status==='contradicting'?{borderColor:'#b42318',borderWidth:2,borderType:'dashed'}:{}),...(matched.has(n.id)?{borderColor:appearance.selected,borderWidth:3}:{})}}}),links:result.edges.map(e=>{const attribute=GraphTypeFilter.isAttributeEdge(e);return {id:e.id,source:e.subject_id,target:e.object_id,name:e.type_label||displayType(e.type),value:e.type_label||displayType(e.type),rawType:term(e.type),lineStyle:attribute?{type:'dashed',opacity:.55,width:1}:undefined};}),lineStyle:{color:appearance.edge,opacity:.35,width:1,curveness:.1}}]},{replaceMerge:['series']});
     const visibleEntities=GraphTypeFilter.entityNodes(result),visibleRelations=GraphTypeFilter.relationEdges(result),attributeCount=result.nodes.length-visibleEntities.length;
-    GraphWorkbench.mount(chart,result,current,inspect,graphScope(),options);
+    GraphWorkbench.mount(chart,result,current,inspect,effectiveGraphScope(),options);
     bindLocalExploration(result,selectedType);
     chart.resize();layoutDone({nodes:result.nodes.length,edges:result.edges.length});get('graph-summary').textContent=`${selectedType?'只看 '+labelOf(selectedType)+' · ':''}${visibleEntities.length} 实体 / ${visibleRelations.length} 关系${attributeCount?' · '+attributeCount+' 个属性值':''}${selectedType?' · 隐藏其他类型及跨类型连线':''}${matched.size?' · 蓝色边框为检索命中':''}${result.timing_ms?' · 服务 '+result.timing_ms.total+' ms':''}${graphBudgetSummary(base)}`;
+    if(localScopeOverride){
+      const fixed=effectiveGraphScope(),time=window.TemporalScope?.describe(fixed)||'';
+      get('graph-summary').textContent+=' · 固定记录范围'+(time?'：'+time:'')+(fixed.ontology_scope==='ids'?' · 指定本体 '+fixed.ontology_ids.join('、'):'');
+    }
+    const viewTime=window.TemporalScope?.describe(effectiveGraphScope())||'';
+    window.GraphWorkspaceLayout?.setState('partial',{message:`局部图谱 · 当前可见 ${visibleEntities.length} 实体 / ${visibleRelations.length} 关系${viewTime?' · '+viewTime:''}`});
     // Compact, discrete history navigation; no drag/playback re-query loop.
     const tl=createTimeline();get('graph-type-buttons')?.after(tl);
     // The type and timeline rows reduce the remaining flex height after ECharts has
@@ -555,7 +610,9 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     loadTimelineEvents().catch(error=>status(error.message,true));
   }
   function fitGraph(chart){GraphWorkbench.fit(chart);}
-  function renderHits(result){
+  function renderHits(result,authorityScope=scope()){
+    const {entity_type,predicate,...authority}=authorityScope;
+    const frozenAuthority=JSON.parse(JSON.stringify(authority));
     const sourceChunks=result.source_chunks||[];
     const contextChunks=result.context_chunks||[];
     const hits=result.hits||[];
@@ -571,7 +628,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
       const score=Number(r.score||r.keyword_score||0).toFixed(2);
       const tag=isSource?'命中知识的来源原文':(labelOf(r.type)||'原文');
       const btn=kind==='entity'||kind==='relation'
-        ?`<button data-graph-node="${esc(kind==='entity'?r.id:r.subject_id)}">在图谱中查看</button>`
+        ?`<button data-graph-node="${esc(r.id)}" data-graph-kind="${esc(kind)}"${r.version_id?` data-graph-version-id="${esc(r.version_id)}"`:''}${r.version!=null?` data-graph-version="${esc(r.version)}"`:''}>在图谱中查看</button>`
         :(kind==='chunk'&&r.source_id?`<button data-source-record="${esc(r.source_id)}" class="secondary">查看原文</button>`:'');
       const applicability=window.ApplicabilityUI?.describe?.(r);
       const expansionLabel=isExpansion(r)?' · 类型扩展':'';
@@ -629,7 +686,14 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
         resultSection('supplemental','本体扩展补充',supplemental,summary,empty)+provenance;
     }
     get('hits').innerHTML=content;
-    get('hits').querySelectorAll('[data-graph-node]').forEach(b=>b.onclick=async()=>{try{await selectEntityDetail(b.dataset.graphNode);}catch(error){status(error.message,true);}});
+    get('hits').querySelectorAll('[data-graph-node]').forEach(b=>b.onclick=async()=>{
+      const display=(window.FullGraphView?.mode==='full'?window.FullGraphView.filters:null)||graphScope();
+      try{await window.openKnowledgeRecord({id:b.dataset.graphNode,kind:b.dataset.graphKind,
+        ...(b.dataset.graphVersionId?{version_id:b.dataset.graphVersionId}:{}),
+        ...(b.dataset.graphVersion!==undefined?{version:Number(b.dataset.graphVersion)}:{}),
+        scope:{...frozenAuthority,entity_type:display.entity_type,predicate:display.predicate}});
+      }catch(error){status(error.message,true);}
+    });
     get('hits').querySelectorAll('[data-source-record]').forEach(b=>b.onclick=()=>historyFor({id:b.dataset.sourceRecord}));
   }
   // 检索和问答共用实体 → 类型路径及补召回计数，避免把同类内容误认为实体自身事实。
@@ -657,7 +721,10 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     done({mode:result.active_mode,candidates:result.candidate_count,hits:result.hits.length});
     if(serial!==ui.request||p!==current||(scopeTicket&&!window.WorkspaceContext.accepts(scopeTicket,current,'search')))return;
     delete result.nodes;delete result.edges;
-    renderHits(result);
+    const authorityScope=Object.fromEntries(['applicability','filters','valid_at','known_at','include_unknown','kinds','ontology_scope','ontology_ids'].filter(key=>key in body).map(key=>[key,body[key]]));
+    if(!('ontology_scope' in authorityScope))authorityScope.ontology_scope='all';
+    if(!('ontology_ids' in authorityScope))authorityScope.ontology_ids=null;
+    renderHits(result,authorityScope);
     const modeLabel={hybrid:'混合',semantic:'语义',keyword:'关键词'}[result.active_mode]||result.active_mode;
     const explicitScope=body.applicability&&Object.values(body.applicability).some(value=>Array.isArray(value)?value.length:value?.mode==='specific');
     const resolvedScope=explicitScope?window.ApplicabilityUI?.describe?.(result.query_scope||result.scope||result):
@@ -671,6 +738,26 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
   const graphScope=()=>({...window.WorkspaceContext?.read(current,'search')||scope(),...ontologyScope(),
     entity_type:get('type-scope').value||null,
     predicate:get('predicate-scope').value||null});
+  const graphOwnerScope=()=>{const {entity_type,predicate,...owner}=graphScope();return owner;};
+  const effectiveGraphScope=()=>{
+    const live=graphScope();if(!localScopeOverride||localScopeOwner!==JSON.stringify(graphOwnerScope()))return live;
+    const result={...localScopeOverride};
+    for(const field of ['entity_type','predicate'])if(live[field]!==localScopeCanvas?.[field])result[field]=live[field];
+    return result;
+  };
+  window.GraphWorkspaceContext={read:()=>({projectId:current,scope:graphScope(),ontologyId:ui.ontology?.id||null,versionContext:wb.versionContext}),get ready(){return graphContextReady;},get hasLocalView(){return Boolean(ui.graph);}};
+  function invalidateGraphContext({pending=false}={}){
+    if(pending)graphContextReady=false;
+    localScopeOverride=null;localScopeOwner='';localScopeCanvas=null;
+    graphReadAbort?.abort();recordReadAbort?.abort();
+    document.dispatchEvent(new CustomEvent('graph-workspace:invalidated'));
+  }
+  function graphContextRestored(project,generation){
+    if(project!==current||generation!==ontologyLoadGeneration)return;
+    graphContextReady=true;
+    document.dispatchEvent(new CustomEvent('graph-workspace:ready',{detail:{projectId:project}}));
+    autoLoadGraph();
+  }
   function graphBudgetSummary(graph){
     const value=graph.neighborhood;if(!value)return '';
     const direction={both:'双向',forward:'沿箭头',backward:'逆箭头'}[value.direction];
@@ -686,7 +773,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     localSelectedType=selectedType;
     const source={nodes:graph.nodes,edges:graph.edges};let index=null;
     const getIndex=()=>index||(index=new GraphExploration.NeighborIndex(source));
-    GraphExplorer.setContext({mode:'local',key:JSON.stringify([current,graphScope()]),revision:++localGraphRevision,
+    GraphExplorer.setContext({mode:'local',key:JSON.stringify([current,effectiveGraphScope()]),revision:++localGraphRevision,
       selected:wb.nodes.get(get('graph-node').value)||null,adapter:{
         neighbors:(id,options)=>getIndex().page(id,options),focus:(id,options)=>getIndex().focus(id,options),
         setFocus:value=>GraphWorkbench.setFocus(value),select:row=>{GraphWorkbench.locate(row.id);inspect(row);},
@@ -695,48 +782,68 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
       }});
   }
   window.refreshLocalGraphExplorer=()=>{if(ui.graph)bindLocalExploration(ui.graph,localSelectedType);else window.GraphExplorer?.clear({mode:'local'});};
-  window.suspendLocalGraphExplorer=()=>{graphRequests.invalidate();localBranches?.invalidatePending();};
+  window.suspendLocalGraphExplorer=()=>{graphRequests.invalidate();graphReadAbort?.abort();localBranches?.invalidatePending();};
   window.drawGraph=async(node=null,hops=1,options={})=>{
     if(hops===''||!Number.isInteger(Number(hops))||Number(hops)<0||Number(hops)>10)throw Error('扩展跳数请输入 0–10 的整数');
     const id=node||get('graph-node').value||null;
     if(!id){const empty=graphRequests.begin(current,graphScope(),null);graphRequests.release(empty);get('graph-summary').textContent='请选择实体后展开局部邻域；查看当前范围全部实体请切换“全量大图”。';return null;}
-    const project=current,scopeSnapshot=graphScope();
+    window.GraphOverview?.explicit();
+    const sceneStamp=window.FullGraphView?.mode==='full'?JSON.stringify(window.FullGraphView.filters):null;
+    const project=current,ownerSnapshot=graphScope(),scopeSnapshot=options.scope||effectiveGraphScope();
     const branchKey=JSON.stringify([project,scopeSnapshot]),expanding=options.expand&&localBranches&&localBranchScope===branchKey&&ui.graph?.nodes.some(row=>row.id===id);
     const branchTicket=expanding?localBranches.begin(id,branchKey):null;
     if(expanding&&!branchTicket)return null;
     const ticket=graphRequests.begin(project,scopeSnapshot,id),scopeTicket=window.WorkspaceContext?.ticket(project,'search');
-    const isCurrent=()=>graphRequests.isCurrent(ticket,current,graphScope(),id)&&(!scopeTicket||window.WorkspaceContext.accepts(scopeTicket,current,'search'));
+    graphReadAbort?.abort();const controller=graphReadAbort=new AbortController();
+    const isCurrent=()=>graphRequests.isCurrent(ticket,current,scopeSnapshot,id)&&JSON.stringify(ownerSnapshot)===JSON.stringify(graphScope())&&(!sceneStamp||sceneStamp===JSON.stringify(window.FullGraphView?.filters))&&(!options.accepts||options.accepts())&&(!scopeTicket||window.WorkspaceContext.accepts(scopeTicket,current,'search'));
     const {entity_type,predicate,...appliedScope}=scopeSnapshot;
-    const neighborhood={seeds:[id],hops:Number(hops),direction:get('graph-direction')?.value||'both',
-      max_nodes:Number(get('graph-max-nodes')?.value)||500,max_edges:Number(get('graph-max-edges')?.value)||1000};
+    const neighborhood={seeds:options.seeds||[id],hops:Number(hops),direction:get('graph-direction')?.value||'both',
+      max_nodes:options.maxNodes||Number(get('graph-max-nodes')?.value)||500,max_edges:options.maxEdges||Number(get('graph-max-edges')?.value)||1000};
     const done=kgTime('graph-neighborhood');
+    window.GraphWorkspaceLayout?.setState('loading',{message:'正在读取当前范围的局部图谱…'});
     try{
       let result;
-      try{result=await api('/api/projects/'+encodeURIComponent(project)+'/graph-neighborhood',{...appliedScope,...neighborhood});}
+      try{result=await api('/api/projects/'+encodeURIComponent(project)+'/graph-neighborhood',{...appliedScope,...neighborhood},'POST',{signal:controller.signal});}
       catch(error){
         if(!isCurrent())return null;
         throw error;
       }
       if(!isCurrent())return null;
+      if(options.exactRecord){
+        const exact=options.exactRecord,entities=(result.records||[]).filter(row=>row.kind==='entity');
+        if(exact.kind==='entity'){
+          if(!entities.some(row=>row.id===exact.id&&sameRecordVersion(row,exact)))throw Error('实体版本或资格已变化，请在当前范围重新选择');
+        }else{
+          if(![exact.subject_id,exact.object_id].every(id=>entities.some(row=>row.id===id)))throw Error('当前已应用范围不包含关系的两个合格端点，无法在图谱定位');
+          result={...result,records:[...result.records,exact]};
+        }
+      }
       const nodes=(result.records||[]).filter(row=>row.kind==='entity'||GraphTypeFilter.isAttributeNode(row));
-      const visible=nodes.filter(row=>!entity_type||row.type===entity_type),ids=new Set(visible.map(row=>row.id));
+      const visible=nodes.filter(row=>entity_type==null||String(row.type||'')===String(entity_type)),ids=new Set(visible.map(row=>row.id));
       const edges=(result.records||[]).filter(row=>(row.kind==='relation'||GraphTypeFilter.isAttributeEdge(row))&&ids.has(row.subject_id)&&ids.has(row.object_id)&&(!predicate||row.type===predicate));
+      if(options.exactRecord&&!((options.exactRecord.kind==='entity'?visible:edges).some(row=>row.id===options.exactRecord.id)))throw Error('当前实体类型或关系类型筛选排除了该记录或端点；请调整筛选后重试');
       result={...result,nodes:visible,edges,neighborhood:{...neighborhood,truncated:Boolean(result.truncated)}};
       done({node:id,hops,nodes:result.nodes.length,edges:result.edges.length,truncated:result.truncated});
       if(window.GraphExploration){
         if(expanding){if(!localBranches.accept(branchTicket,result))return null;result=localBranches.graph();}
         else{localBranches=new GraphExploration.BranchSession({maxNodes:neighborhood.max_nodes,maxEdges:neighborhood.max_edges,maxAttributes:result.attribute_budget||200});localBranchScope=branchKey;localBranches.reset(result,id,branchKey);localSelectedType='';}
       }
+      if(options.scope){localScopeOverride=JSON.parse(JSON.stringify(scopeSnapshot));localScopeOwner=JSON.stringify(graphOwnerScope());localScopeCanvas={entity_type:ownerSnapshot.entity_type,predicate:ownerSnapshot.predicate};}
+      if(window.FullGraphView?.mode==='full')window.FullGraphView.switchMode('local');
       renderGraph(result,localSelectedType,result,{preservePath:Boolean(expanding)});
       // 开放本体发现的提示条要跟着图谱一起刷新：这原本只在 workbench.js 的旧 drawGraph 副本里做，
       // 收敛成单一份实现后带到这里，避免 discovery 模式下提示停留在旧状态。
       renderDiscoveryHint().catch(()=>{});
       return result;
+    }catch(error){
+      if(isCurrent())window.GraphWorkspaceLayout?.setState('error',{message:'局部图谱未能完成：'+error.message+'；请检查当前范围后重试。'});
+      throw error;
     }finally{
       graphRequests.release(ticket);
     }
   };
   window.clearGraphWorkspace=({preserveSearchResults=false}={})=>{
+    graphReadAbort?.abort();
     localBranches?.clear();localBranches=null;localBranchScope='';localSelectedType='';
     GraphWorkbench.clear();
     graphRequests.invalidate();invalidatePendingDetail();
@@ -748,14 +855,16 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     if(!preserveSearchResults){get('hits').replaceChildren();get('search-summary').textContent='';}
   };
   document.addEventListener('version-context:changed',()=>{
+    invalidateGraphContext();
     renderOntologyScopeBanners();
     window.clearGraphWorkspace({preserveSearchResults:true});
     wb.tree?.clear();
+    queueMicrotask(autoLoadGraph);
   });
   renderOntologyScopeBanners();
   async function refreshGraphCanvasTypes(){
     if(!current)return;const node=get('graph-node').value,selected=ui.pinned.get(node)||wb.nodes.get(node);
-    window.clearGraphWorkspace({preserveSearchResults:true});if(selected)inspect(selected);
+    window.GraphOverview?.invalidate();window.clearGraphWorkspace({preserveSearchResults:true});if(selected)inspect(selected);
     try{await window.drawGraph(node||null,get('graph-hops').value);}catch(error){status(error.message,true);}
   }
   for(const id of ['type-scope','predicate-scope'])get(id).addEventListener('change',refreshGraphCanvasTypes);
@@ -773,10 +882,13 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
   window.ScopeEditor={restore(value){cb.conditions=[];cb.custom=Boolean(value.filters);renderCB();updateChip();}};
   async function refreshOwnedScope(){
     const page=window.WorkspaceContext?.page;
-    if(page==='search'){ui.request++;window.clearGraphWorkspace();await Promise.all([options(),discoverMetadata()]);if(get('query').value.trim()&&get('scope-purpose')?.value!=='graph')await runSearch();}
+    if(page==='search'){const project=current,generation=ontologyLoadGeneration;invalidateGraphContext({pending:true});ui.request++;window.clearGraphWorkspace();await Promise.all([options(),discoverMetadata()]);graphContextRestored(project,generation);if(get('query').value.trim()&&get('scope-purpose')?.value!=='graph')await runSearch();}
     else if(page==='records'||page==='sources')await discoverMetadata();
   }
   document.addEventListener('workspace:scope-changed',()=>{refreshOwnedScope().catch(error=>status(error.message,true));});
+  document.addEventListener('workspace:page-changed',event=>{
+    if(event.detail?.page!=='search'){graphRequests.invalidate();graphReadAbort?.abort();invalidatePendingDetail();}
+  });
   act('apply-scope',async()=>{window.WorkspaceContext.apply();});
   const previousAddFilter=get('add-filter')?.onclick;
   if(previousAddFilter)get('add-filter').onclick=async()=>{await previousAddFilter();};
@@ -820,6 +932,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
   const priorChange=get('project').onchange;
   get('project').onchange=()=>{
     const generation=++ontologyLoadGeneration;
+    invalidateGraphContext({pending:true});
     priorChange();ui.request++;ui.options=[];ui.mindmapPicker.options=[];ui.mindmapPicker.request++;ui.mindmapRootId='';select.value='';get('mindmap-filter').value='';choices();ui.ontology=null;resetTimeline();window.clearGraphWorkspace();
     for(const id of ['filters','cb-raw-json','query-platforms','query-businesses','query-audiences'])get(id).value='';
     if(get('cb-show-system'))get('cb-show-system').checked=false;
@@ -829,7 +942,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     get('query').value='';get('graph-node').value='';updateChip();
     if(current){const project=current;sessionStorage.setItem('knowledge-project',project);loadOntologyTerms().then(result=>{
       if(project!==current||generation!==ontologyLoadGeneration)return;ui.ontology=result;return Promise.all([options(),discoverMetadata()]);
-    }).then(()=>{if(project===current&&generation===ontologyLoadGeneration)autoLoadGraph();}).catch(e=>{if(project===current&&generation===ontologyLoadGeneration)status(e.message,true);});}
+    }).then(()=>{graphContextRestored(project,generation);}).catch(e=>{if(project===current&&generation===ontologyLoadGeneration)status(e.message,true);});}
   };
   // 打开「检索与交互图谱」且尚未渲染时，自动加载当前 scope 全图。
   // 挂在 click / 项目切换 / 页面恢复项目 三个时机，避免默认 active tab 不触发 click 导致空白。
@@ -843,10 +956,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
   function autoLoadGraph(){
     if(suppressNextAutoGraph){suppressNextAutoGraph=false;return;}
     const graphView=!get('tab-search').classList.contains('hidden');
-    if(graphView&&current&&!ui.graph&&!graphRequests.isBusy()){
-      drawGraph(null,get('graph-hops').value)
-        .catch(e=>status(e.message,true));
-    }
+    if(graphView&&current&&graphContextReady)window.GraphOverview?.ensure();
   }
   /* 兜底刷新：不管新版本是谁发布的（本体建模层、本体建模层、别人、另一个浏览器标签），
      用户切回检索 / 问答 / 脑图页时都要自己跟上。以前只有"审核台发布 + 本页收到事件"这一条路，
@@ -866,6 +976,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
       await Promise.all([options(),discoverMetadata()]);
       if(project!==current||generation!==ontologyLoadGeneration)return false;
       resetTimeline();
+      invalidateGraphContext();
       window.clearGraphWorkspace({preserveSearchResults:true});
       status(`检测到本体新版本（${id.slice(0,8)}…）：类型下拉、时间轴与图谱已按新版本刷新。`);
       return true;
@@ -898,6 +1009,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     if(!current||(event.detail?.projectId&&event.detail.projectId!==current))return;
     const project=current;
     const generation=++ontologyLoadGeneration;
+    invalidateGraphContext({pending:true});
     const versionId=event?.detail?.versionId||'';
     const short=versionId?versionId.slice(0,8)+'…':'';
     ui.ontology=null;ui.options=[];ui.request++;
@@ -911,7 +1023,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
       // 旧图谱是按旧范围/旧本体渲染的，先清掉；检索页可见时立刻重画，不可见时
       // 由 autoLoadGraph()（tab 点击时触发）按最新状态补画。
       window.clearGraphWorkspace({preserveSearchResults:true});
-      if(!get('tab-search').classList.contains('hidden'))await window.drawGraph(null,get('graph-hops').value);
+      graphContextRestored(project,generation);
       status(`本体新版本已发布${short?`（${short}）`:''}：类型下拉、时间轴与图谱已按新版本刷新。`);
     }catch(error){
       status(`新版本已发布，但这一页的检索/图谱刷新失败：${error.message}。可点「重新渲染全图」重试。`,true);

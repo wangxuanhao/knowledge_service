@@ -30,6 +30,8 @@ def _capture(page, name):
 
 def _open_graph_settings(page):
     # Candidate pages load only when their drawer is visible.
+    if page.locator('#graph-stage').get_attribute('data-graph-mode') == 'full':
+        page.click('[data-fg-mode="local"]')
     with page.expect_response(lambda response: response.url.endswith('/records/page')) as response:
         page.click('#graph-settings')
     return response.value.request.post_data_json

@@ -78,8 +78,8 @@ test('UI keeps explicit graph purpose and bumps each changed runtime resource',(
   assert.ok(html.includes('id="scope-compatibility"'),'scope incompatibility remains visible');
   assert.ok(html.includes('#scope [hidden]{display:none!important}'),'page-owned filter controls stay hidden despite existing grid/flex CSS');
   assert.ok(html.includes('/assets/scope-fields.js?v=authority-retrieval-20261021-2'),'scope-fields.js version');
-  for(const file of ['workspace-context-ui.js','workbench.js'])assert.ok(html.includes('/assets/'+file+'?v='+(file==='workbench.js'?'workflow-ux-20261102-2':'unified-temporal-20261028-1')),file+' version');
-  assert.ok(html.includes('/assets/workspace.js?v=graph-exploration-20261029-1'),'workspace.js version');
+  for(const [file,version] of [['workspace-context-ui.js','graph-workspace-20261105-1'],['workbench.js','graph-hit-targets-20261105-1']])assert.ok(html.includes('/assets/'+file+'?v='+version),file+' version');
+  assert.ok(html.includes('/assets/workspace.js?v=graph-overview-20261105-4'),'workspace.js version');
 });
 
 test('applying the shared editor preserves dedicated ontology/kind scope and original metadata AST',()=>{

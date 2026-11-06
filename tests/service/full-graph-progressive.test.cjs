@@ -137,8 +137,8 @@ test('isolated entity sweep keeps the completed relationship layer without reupl
   assert.equal(gl.draws.length,drawCount);
 });
 
-test('small partial graphs pad five-pixel node discs while dense normal graphs retain two-pixel nodes',()=>{
-  const {gl,renderer}=drawingHarness();renderer.sync();renderer.draw();assert.equal(gl.sizes.at(-1),5+2,'sparse five-pixel discs reserve a physical pixel on each side for coverage');
+test('small partial graphs pad ten-pixel node discs while dense normal graphs retain two-pixel nodes',()=>{
+  const {gl,renderer}=drawingHarness();renderer.sync();renderer.draw();assert.equal(gl.sizes.at(-1),10+2,'sparse ten-pixel discs reserve a physical pixel on each side for coverage');
   renderer.dataset.addNodes(Array.from({length:800},(_,i)=>({id:'extra'+i})));renderer.sync();renderer.draw();
   assert.equal(gl.sizes.at(-1),2);
 });

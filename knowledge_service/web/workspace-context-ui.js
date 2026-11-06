@@ -15,7 +15,7 @@
     const page=context.page,allowed=context.isContentPage(page),host=get('tab-'+page);
     panel.classList.toggle('hidden',!allowed);details.open=false;
     const purpose=get('scope-purpose-controls');if(purpose)purpose.hidden=page!=='search';
-    if(allowed&&host)host.prepend(panel);
+    if(allowed&&host&&!window.GraphWorkspaceLayout?.placeScope(panel))host.prepend(panel);
     const value=context.read(current),app=value.applicability||{};
     inputs.forEach((id,i)=>{const dimension=app[['platforms','businesses','audiences'][i]];get(id).value=(dimension?.values||[]).join('，');});
     const time=window.TemporalScope.restore(value);

@@ -4,6 +4,9 @@
   const tokens=root.GraphAppearance?.tokens||{background:'#ffffff',edge:'#a8c9e2',text:'#888995',outline:'#ffffff',selected:'#1689e9'};
   const rgb=hex=>new Uint8Array([1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)));
   const fallbackColors=new Map();
+  // CSS pixels, independent of backing-store resolution and camera zoom.
+  const nodeHitRadius=12,edgeHitRadius=10;
+  const smallNodeSize=(size,scale)=>Math.max(12,Math.min(28,size*Math.sqrt(scale)));
   const nodeRGB=record=>{
     if(root.GraphAppearance)return root.GraphAppearance.rgbFor(record);
     const color=root.GraphPalette?.colorFor(record.type||'')||'#0e7c7b';
@@ -92,13 +95,18 @@
   // One active projection; append work visits only that type's new indexes.
   // The full session dataset remains authoritative for paging and counts.
   class TypeProjection{
-    constructor(source,type){this.source=source;this.type=type;this.dataset=new GraphDataset({indexTypes:false});this.nodes=0;this.edges=0;}
+    constructor(source,type,predicate=null){this.source=source;this.type=type;this.predicate=predicate;this.dataset=new GraphDataset({indexTypes:false});this.nodes=0;this.edges=0;}
     sync(){
-      const source=this.source,group=source.types.get(this.type);if(!group)return;
+      const source=this.source,group=this.type==null?null:source.types.get(this.type);
+      if(this.type==null){
+        if(source.nodeCount>this.nodes)this.dataset.addNodes(source.records.slice(this.nodes),source.positions.subarray(this.nodes*2));this.nodes=source.nodeCount;
+        if(source.edgeCount>this.edges)this.dataset.addEdges(source.edges.slice(this.edges).filter(row=>!this.predicate||row.type===this.predicate));this.edges=source.edgeCount;return;
+      }
+      if(!group)return;
       const rows=[],positions=new Float32Array((group.nodes.length-this.nodes)*2);
       for(let i=this.nodes;i<group.nodes.length;i++){const index=group.nodes[i],offset=(i-this.nodes)*2;rows.push(source.records[index]);positions[offset]=source.positions[index*2];positions[offset+1]=source.positions[index*2+1];}
       if(rows.length)this.dataset.addNodes(rows,positions);this.nodes=group.nodes.length;
-      if(group.edges.length>this.edges)this.dataset.addEdges(group.edges.slice(this.edges).map(index=>source.edges[index]));this.edges=group.edges.length;
+      if(group.edges.length>this.edges)this.dataset.addEdges(group.edges.slice(this.edges).map(index=>source.edges[index]).filter(row=>!this.predicate||row.type===this.predicate));this.edges=group.edges.length;
     }
   }
   class Camera{
@@ -136,9 +144,7 @@
       // Hover decoration follows the small visible scene; the complete 300k
       // dataset never acquires an extra per-pointer node/edge scan or draw loop.
       if(d.nodeCount>2000||d.edgeCount>4000){this.clearHover();return;}
-      const p=this.renderPositions||d.positions,[wx,wy]=this.camera.screenToWorld(x,y,this.width,this.height),radius=18/this.camera.unit(this.width,this.height);
-      let index=-1,best=radius*radius;
-      for(let i=0;i<d.nodeCount;i++){const distance=(p[i*2]-wx)**2+(p[i*2+1]-wy)**2;if(distance<best){best=distance;index=i;}}
+      const index=this.nearestNode(x,y);
       if(index<0){this.clearHover();return;}
       if(index!==this.hovered){
         this.hovered=index;const row=d.records[index],links=d.edges.filter(edge=>edge.subject_id===row.id||edge.object_id===row.id).length;
@@ -215,10 +221,16 @@
     setTypeFilter(type){
       const next=type==null?null:String(type);if(next===(this.typeFilter??null))return;
       this.clearHover();this.setExplorationFocus(null);
-      this.typeFilter=next;this.typeProjection=next===null?null:new TypeProjection(this.dataset,next);
+      this.typeFilter=next;this.typeProjection=next===null&&!this.predicateFilter?null:new TypeProjection(this.dataset,next,this.predicateFilter);
       this.selected=-1;this.selectedEdge=-1;this.layoutKey=null;this.sync();
     }
-    setDataset(dataset){this.clearHover();this.setExplorationFocus(null);this.dataset=dataset;this.typeFilter=null;this.typeProjection=null;this.selected=-1;this.selectedEdge=-1;this.sessionManifest=null;this.smallSession=false;this.renderPositions=null;this.layoutKey=null;this.sync();}
+    setPredicateFilter(predicate){
+      const next=predicate||null;if(next===(this.predicateFilter??null))return;
+      this.clearHover();this.setExplorationFocus(null);this.predicateFilter=next;
+      this.typeProjection=this.typeFilter==null&&!next?null:new TypeProjection(this.dataset,this.typeFilter??null,next);
+      this.selected=-1;this.selectedEdge=-1;this.layoutKey=null;this.sync();
+    }
+    setDataset(dataset){this.clearHover();this.setExplorationFocus(null);this.dataset=dataset;this.typeFilter=null;this.predicateFilter=null;this.typeProjection=null;this.selected=-1;this.selectedEdge=-1;this.sessionManifest=null;this.smallSession=false;this.renderPositions=null;this.layoutKey=null;this.sync();}
     setSessionManifest(manifest){
       const small=Number.isInteger(manifest?.entity_count)&&manifest.entity_count<=200&&manifest.entity_count>=0&&Number.isInteger(manifest?.relation_count)&&manifest.relation_count<=400&&manifest.relation_count>=0;
       if(this.smallSession!==small||this.sessionManifest?.id!==manifest?.id){this.layoutKey=null;if(small)this.camera=new Camera();}
@@ -362,11 +374,11 @@
         gl.useProgram(this.program);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.disableVertexAttribArray(this.cacheLocations.position);gl.enableVertexAttribArray(l.position);gl.bindBuffer(gl.ARRAY_BUFFER,this.edgeBuffer);gl.vertexAttribPointer(l.position,2,gl.FLOAT,false,0,0);gl.uniform1i(l.point,false);gl.uniform4f(l.color,...theme.selected,1);gl.drawArrays(gl.LINES,this.selectedEdge*2,2);
         }
       }
-      const size=this.smallSession?Math.max(12,Math.min(28,16*Math.sqrt(this.camera.scale))):Math.min(10,Math.max(this.displayDataset.nodeCount<=800?5:2,Math.sqrt(this.camera.scale)*2));
+      const size=this.nodeScreenSize(0);
       const sparse=this.displayDataset.nodeCount<=800,p=sparse?this.pointLocations:l;
       gl.useProgram(sparse?this.pointProgram:this.program);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.disableVertexAttribArray(this.cacheLocations.position);gl.disableVertexAttribArray(l.position);gl.enableVertexAttribArray(p.position);gl.bindBuffer(gl.ARRAY_BUFFER,this.groupedNodeBuffer);gl.vertexAttribPointer(p.position,2,gl.FLOAT,false,0,0);gl.uniform2f(p.center,this.camera.x,this.camera.y);gl.uniform2f(p.scale,min/this.width*this.camera.scale,min/this.height*this.camera.scale);gl.uniform1f(p.size,size*this.dpr+(sparse?2:0));
       if(sparse){gl.uniform1i(p.ring,false);gl.uniform1f(p.outline,size>=5?this.dpr:0);}else gl.uniform1i(l.point,true);
-      for(const range of this.nodeRanges){if(this.smallSession)gl.uniform1f(p.size,Math.max(3,Math.min(20,range.size*Math.sqrt(this.camera.scale)))*this.dpr+2);gl.uniform4f(p.color,...range.color,focus ? .12 : this.smallSession ? .72 : 1);gl.drawArrays(gl.POINTS,range.first,range.count);}
+      for(const range of this.nodeRanges){if(this.smallSession)gl.uniform1f(p.size,smallNodeSize(range.size,this.camera.scale)*this.dpr+2);gl.uniform4f(p.color,...range.color,focus ? .12 : this.smallSession ? .72 : 1);gl.drawArrays(gl.POINTS,range.first,range.count);}
       if(focus){gl.bindBuffer(gl.ARRAY_BUFFER,this.nodeBuffer);gl.vertexAttribPointer(p.position,2,gl.FLOAT,false,0,0);for(const i of focus){gl.uniform1f(p.size,this.nodeScreenSize(i)*this.dpr+2);gl.uniform4f(p.color,...Array.from(nodeRGB(this.displayDataset.records[i]),v=>v/255),1);gl.drawArrays(gl.POINTS,i,1);}}
       if(active>=0&&active<this.displayDataset.nodeCount){const ring=this.pointLocations;gl.useProgram(this.pointProgram);gl.disableVertexAttribArray(p.position);gl.enableVertexAttribArray(ring.position);gl.bindBuffer(gl.ARRAY_BUFFER,this.nodeBuffer);gl.vertexAttribPointer(ring.position,2,gl.FLOAT,false,0,0);gl.uniform2f(ring.center,this.camera.x,this.camera.y);gl.uniform2f(ring.scale,min/this.width*this.camera.scale,min/this.height*this.camera.scale);gl.uniform1i(ring.ring,true);gl.uniform1f(ring.outline,0);gl.uniform1f(ring.size,((this.smallSession?this.nodeScreenSize(active):size)+8)*this.dpr+2);gl.uniform4f(ring.color,...theme.selected,1);gl.drawArrays(gl.POINTS,active,1);}
       if(this.viewStableFrames++>0)this.captureView();this.finishFrame(started);
@@ -396,7 +408,7 @@
     drawExplorationFocus(ctx,positions){
       const focus=this.explorationFocus,d=this.displayDataset;if(focus.dataset!==d)return;
       const project=index=>this.camera.worldToScreen(positions[index*2],positions[index*2+1],this.width,this.height);
-      const radius=index=>(this.smallSession?this.nodeScreenSize(index):Math.min(10,Math.max(d.nodeCount<=800?5:2,Math.sqrt(this.camera.scale)*2)))/2;
+      const radius=index=>this.nodeScreenSize(index)/2;
       ctx.save();ctx.globalAlpha=1;ctx.lineCap='round';
       if(this.showEdges){ctx.strokeStyle=tokens.edge;ctx.lineWidth=1.5;for(const [a,b] of focus.edgeEndpoints){const start=project(a),end=project(b);ctx.beginPath();ctx.moveTo(...start);ctx.lineTo(...end);ctx.stroke();}}
       for(const index of focus.nodeIndices){const [x,y]=project(index);ctx.beginPath();ctx.arc(x,y,radius(index),0,Math.PI*2);ctx.fillStyle='rgb('+Array.from(nodeRGB(d.records[index])).join(',')+')';ctx.fill();ctx.strokeStyle=tokens.outline;ctx.lineWidth=1;ctx.stroke();}
@@ -415,7 +427,7 @@
       }
       ctx.restore();
     }
-    nodeScreenSize(index){return Math.max(3,Math.min(20,(this.nodeSizes?.[index]||6)*Math.sqrt(this.camera.scale)));}
+    nodeScreenSize(index){return this.smallSession?smallNodeSize(this.nodeSizes?.[index]||16,this.camera.scale):Math.min(10,Math.max(this.displayDataset.nodeCount<=800?10:2,Math.sqrt(this.camera.scale)*2));}
     drawSmallLabels(ctx,positions){
       const d=this.displayDataset,occupied=[],centers=d.records.map((_,i)=>this.camera.worldToScreen(positions[i*2],positions[i*2+1],this.width,this.height)),order=d.records.map((_,i)=>i);
       const active=this.hovered>=0?this.hovered:this.selected;
@@ -435,8 +447,48 @@
         }
       }
     }
-    pick(x,y){const started=performance.now(),d=this.displayDataset,positions=this.renderPositions||d.positions,[wx,wy]=this.camera.screenToWorld(x,y,this.width,this.height),r=(this.smallSession?22:10)/this.camera.unit(this.width,this.height);let best=r*r,index=-1;for(let i=0;i<d.nodeCount;i++){const dx=positions[i*2]-wx,dy=positions[i*2+1]-wy,dist=dx*dx+dy*dy;if(dist<best&&(!this.smallSession||dist<((this.nodeScreenSize(i)/2+4)/this.camera.unit(this.width,this.height))**2)){best=dist;index=i;}}this.selected=index;this.selectedEdge=-1;let record=index>=0?d.records[index]:null;if(!record&&this.showEdges){let nearest=(r*.3)**2;for(let i=0;i<d.edgeCount;i++){const edge=d.edges[i],a=d.nodeIndex.get(edge.subject_id)*2,b=d.nodeIndex.get(edge.object_id)*2,ax=positions[a],ay=positions[a+1],dx=positions[b]-ax,dy=positions[b+1]-ay,length=dx*dx+dy*dy,t=length?Math.max(0,Math.min(1,((wx-ax)*dx+(wy-ay)*dy)/length)):0,dist=(wx-ax-t*dx)**2+(wy-ay-t*dy)**2;if(dist<nearest){nearest=dist;record=edge;this.selectedEdge=i;}}}this.lastPickMs=performance.now()-started;this.requestDraw();if(record)this.onSelect(record);return record;}
+    nearestNode(x,y){
+      const d=this.displayDataset,positions=this.renderPositions||d.positions,unit=this.camera.unit(this.width,this.height);
+      const [wx,wy]=this.camera.screenToWorld(x,y,this.width,this.height),r=(this.smallSession?22:nodeHitRadius)/unit;
+      let best=r*r,index=-1;
+      for(let i=0;i<d.nodeCount;i++){
+        const dx=positions[i*2]-wx,dy=positions[i*2+1]-wy,dist=dx*dx+dy*dy;
+        if(dist<best&&(!this.smallSession||dist<(Math.max(nodeHitRadius,this.nodeScreenSize(i)/2+4)/unit)**2)){best=dist;index=i;}
+      }
+      return index;
+    }
+    pick(x,y){
+      const started=performance.now(),d=this.displayDataset,positions=this.renderPositions||d.positions;
+      const [wx,wy]=this.camera.screenToWorld(x,y,this.width,this.height),unit=this.camera.unit(this.width,this.height);
+      const index=this.nearestNode(x,y);this.selected=index;this.selectedEdge=-1;
+      let record=index>=0?d.records[index]:null;
+      if(!record&&this.showEdges){
+        let nearest=(edgeHitRadius/unit)**2;
+        for(let i=0;i<d.edgeCount;i++){
+          const edge=d.edges[i],a=d.nodeIndex.get(edge.subject_id)*2,b=d.nodeIndex.get(edge.object_id)*2;
+          const ax=positions[a],ay=positions[a+1],dx=positions[b]-ax,dy=positions[b+1]-ay,length=dx*dx+dy*dy;
+          const t=length?Math.max(0,Math.min(1,((wx-ax)*dx+(wy-ay)*dy)/length)):0;
+          const dist=(wx-ax-t*dx)**2+(wy-ay-t*dy)**2;
+          if(dist<nearest){nearest=dist;record=edge;this.selectedEdge=i;}
+        }
+      }
+      this.lastPickMs=performance.now()-started;this.requestDraw();if(record)this.onSelect(record);return record;
+    }
     locate(id){const i=this.displayDataset.nodeIndex.get(id);if(i===undefined)return false;const positions=this.renderPositions||this.displayDataset.positions;this.selected=i;this.selectedEdge=-1;this.camera.x=positions[i*2];this.camera.y=positions[i*2+1];this.camera.scale=Math.max(8,this.camera.scale);this.requestDraw();this.onSelect(this.displayDataset.records[i]);return true;}
+    focusRecord(record){
+      const data=this.displayDataset,relation=record.kind==='relation';
+      const edge=relation?data.edges.findIndex(row=>row.id===record.id):-1;
+      const index=relation?-1:data.nodeIndex.get(record.id),row=relation?data.edges[edge]:data.records[index];
+      if(!row||(record.version_id&&row.version_id!==record.version_id)||(!record.version_id&&record.version!=null&&row.version!==record.version))return false;
+      const indices=relation?[data.nodeIndex.get(row.subject_id),data.nodeIndex.get(row.object_id)]:[index];
+      if(indices.some(value=>value===undefined))return false;
+      const positions=this.renderPositions||data.positions,xs=indices.map(i=>positions[i*2]),ys=indices.map(i=>positions[i*2+1]);
+      this.selected=relation?-1:index;this.selectedEdge=edge;
+      this.camera.x=(Math.min(...xs)+Math.max(...xs))/2;this.camera.y=(Math.min(...ys)+Math.max(...ys))/2;
+      const spanX=Math.max(.08,Math.max(...xs)-Math.min(...xs)),spanY=Math.max(.08,Math.max(...ys)-Math.min(...ys)),unit=Math.max(1,Math.min(this.width,this.height)/2);
+      this.camera.scale=Math.min(20,Math.max(.15,Math.min(Math.max(1,this.width-100)/(spanX*unit),Math.max(1,this.height-100)/(spanY*unit))));
+      this.requestDraw();return true;
+    }
     stats(){return {loaded_entities:this.dataset.nodeCount,loaded_relations:this.dataset.edgeCount,drawn_entities:this.drawnNodes||0,drawn_relations:this.drawnEdges||0,relation_layer:'complete-world-cache',cached_relations:this.cachedRelations||0,node_layer:this.usedViewCache?'complete-view-cache':'live-color-groups',cached_entities:this.viewSnapshot?.nodes||0,view_cache_error:this.viewCacheError||0,layout:this.smallSession?'small-relations-v1':'stable-id-v1',canonical_layout:'stable-id-v1',last_pick_ms:this.lastPickMs||0,gpu:this.gl.getParameter(this.gl.RENDERER),context_lost:!!this.lost};}
     destroy(){if(this.destroyed)return;this.destroyed=true;this.setExplorationFocus(null);this.abort.abort();this.observer.disconnect();cancelAnimationFrame(this.pendingFrame);if(!this.lost){this.gl.deleteBuffer(this.nodeBuffer);this.gl.deleteBuffer(this.groupedNodeBuffer);this.gl.deleteBuffer(this.edgeBuffer);if(this.strokeBuffer)this.gl.deleteBuffer(this.strokeBuffer);if(this.strokeProgram)this.gl.deleteProgram(this.strokeProgram);this.gl.deleteBuffer(this.quadBuffer);this.gl.deleteTexture(this.cacheTexture);if(this.viewTexture)this.gl.deleteTexture(this.viewTexture);this.gl.deleteFramebuffer(this.cacheFramebuffer);this.gl.deleteProgram(this.cacheProgram);if(this.viewProgram)this.gl.deleteProgram(this.viewProgram);this.gl.deleteProgram(this.pointProgram);this.gl.deleteProgram(this.program);}this.host.innerHTML='';this.dataset=new GraphDataset();this.typeProjection=null;this.typeFilter=null;this.nodeGroups=null;this.nodeRanges=[];this.invalidateViewCache();}
   }

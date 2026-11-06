@@ -1,4 +1,4 @@
-/* Both renderers occupy the same tracks. Loading and type counts never size the canvas. */
+/* Both renderers share a canvas track; optional controls only size their own rows. */
 body main #tab-search .search-graph-workspace,
 body main #tab-search .search-graph-workspace:has(>#graph-stage[data-graph-mode="full"]){height:auto;min-height:0;grid-template-rows:auto;align-items:stretch}
 body main #tab-search .search-graph-workspace>.search-results-pane{height:auto;min-height:0;max-height:none;align-self:stretch;contain:size}
@@ -6,8 +6,8 @@ body main #tab-search #graph-stage,
 body main #tab-search #graph-stage[data-graph-mode="full"]{
  --graph-canvas-height:clamp(280px,calc(100dvh - 550px),680px);
  --graph-toolbar-height:36px;--graph-footer-height:36px;
- display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:38px var(--graph-toolbar-height) var(--graph-canvas-height) 64px 22px var(--graph-footer-height) 18px;
- gap:6px;height:auto;min-height:0;padding:14px;align-content:start;
+ display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:44px calc(var(--graph-toolbar-height) + 6px) var(--graph-canvas-height) auto auto auto auto;
+ gap:0;height:auto;min-height:0;padding:14px;align-content:start;
 }
 body main #tab-search .graph-stage-heading{grid-row:1;display:flex;gap:12px;min-width:0;height:38px;margin:0}
 body main #tab-search .graph-stage-heading h2{flex:0 0 auto;font-size:14px}
@@ -30,7 +30,8 @@ body main #tab-search #graph-stage[data-graph-mode="full"] .full-graph-host{
  margin:0;border:1px solid #dbe5e8;border-radius:8px;background:#ffffff;overflow:hidden;
 }
 body main #tab-search #graph-type-buttons,
-body main #tab-search .full-graph-types{grid-row:4;min-width:0;min-height:0;height:64px;box-sizing:border-box;margin:0;padding:7px 0 0;border:0;overflow:hidden;background:transparent}
+body main #tab-search .full-graph-types{grid-row:4;min-width:0;min-height:0;height:64px;box-sizing:border-box;margin:6px 0 0;padding:7px 0 0;border:0;overflow:hidden;background:transparent}
+body main #tab-search #graph-type-buttons:empty{display:none}
 body main #tab-search #graph-type-buttons>small,
 body main #tab-search .full-graph-type-heading{margin:0 0 5px;font-size:11px;line-height:15px}
 body main #tab-search #graph-type-buttons>div,
@@ -43,17 +44,26 @@ body main #tab-search .full-graph-type-heading{padding-right:0;white-space:nowra
 body main #tab-search .full-graph-types:has(.full-graph-type-pagination:not([hidden])) .full-graph-type-heading{padding-right:145px}
 body main #tab-search .full-graph-type-summary{overflow:hidden;text-overflow:ellipsis}
 body main #tab-search #graph-summary,
-body main #tab-search .full-graph-progress{grid-row:5;min-width:0;height:22px;box-sizing:border-box;margin:0;padding:1px 0;color:#6b828a;font-size:11px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body main #tab-search .full-graph-progress{grid-row:5;min-width:0;height:22px;box-sizing:border-box;margin:6px 0 0;padding:1px 0;color:#6b828a;font-size:11px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 body main #tab-search #graph-timeline,
-body main #tab-search .full-graph-footer{grid-row:6;display:flex;align-items:center;flex-wrap:nowrap;gap:6px;min-width:0;height:36px;box-sizing:border-box;margin:0;padding:3px 0;border:0;background:transparent;overflow-x:auto}
+body main #tab-search .full-graph-footer{grid-row:6;display:flex;align-items:center;flex-wrap:nowrap;gap:6px;min-width:0;height:var(--graph-footer-height);box-sizing:border-box;margin:6px 0 0;padding:3px 0;border:0;background:transparent;overflow-x:auto}
 body main #tab-search #graph-timeline>*{flex-shrink:0}
 body main #tab-search #graph-timeline .tl-points{flex:1 1 100px;min-width:70px}
 body main #tab-search .full-graph-batches{flex-wrap:nowrap;gap:5px;margin:0}
 body main #tab-search .full-graph-batches button{height:28px;padding:4px 8px;font-size:11px}
 body main #tab-search #graph-pan-hint,
-body main #tab-search .full-graph-section .fg-scope-note{grid-row:7;min-width:0;margin:0;color:#8a9ca2;font-size:11px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body main #tab-search .full-graph-section .fg-scope-note{grid-row:7;min-width:0;margin:6px 0 0;color:#8a9ca2;font-size:11px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body main #tab-search #graph-timeline{grid-row:5;margin-top:8px}
+body main #tab-search #graph-summary{grid-row:6;height:auto;margin:10px 0 0;padding:0;line-height:1.6;white-space:normal;overflow-wrap:anywhere}
+body main #tab-search #graph-pan-hint{margin-top:4px;line-height:1.6;white-space:normal;overflow-wrap:anywhere}
 body:has(#graph-stage.is-graph-fullscreen){overflow:hidden}
-body main #tab-search #graph-stage.is-graph-fullscreen{position:fixed;inset:0;z-index:100;width:100vw;height:100dvh;max-height:none;padding:18px;border:0;border-radius:0;background:#fff;grid-template-rows:38px var(--graph-toolbar-height) minmax(0,1fr) 64px 22px var(--graph-footer-height) 18px}
+body main #tab-search #graph-stage.is-graph-fullscreen{position:fixed;inset:0;z-index:100;width:100vw;height:100dvh;max-height:none;padding:18px;border:0;border-radius:0;background:#fff;grid-template-rows:44px calc(var(--graph-toolbar-height) + 6px) minmax(0,1fr) 70px minmax(28px,auto) calc(var(--graph-footer-height) + 6px) minmax(28px,auto)}
+/* Match the full-mode footer budget while keeping local status and help together. */
+body main #tab-search #graph-stage.is-graph-fullscreen[data-graph-mode="local"]{grid-template-rows:44px calc(var(--graph-toolbar-height) + 6px) minmax(0,1fr) minmax(28px,auto) minmax(28px,auto) 70px calc(var(--graph-footer-height) + 6px)}
+body main #tab-search #graph-stage.is-graph-fullscreen #graph-summary{grid-row:4;margin-top:6px}
+body main #tab-search #graph-stage.is-graph-fullscreen #graph-pan-hint{grid-row:5}
+body main #tab-search #graph-stage.is-graph-fullscreen #graph-type-buttons{grid-row:6}
+body main #tab-search #graph-stage.is-graph-fullscreen #graph-timeline{grid-row:7;margin-top:6px}
 body main #tab-search #graph-stage.is-graph-fullscreen :is(#graph-canvas,.full-graph-host){height:100%;min-height:0;max-height:none}
 body main #tab-search #graph-stage.is-graph-fullscreen .full-graph-settings-panel{z-index:110}
 body main #tab-search .search-graph-workspace.is-graph-fullscreen-workspace:has(>#graph-stage){position:fixed;inset:0;z-index:100;width:100vw;height:100dvh;min-height:0;margin:0;gap:0;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);background:#fff}

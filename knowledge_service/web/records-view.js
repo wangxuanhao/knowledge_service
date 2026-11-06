@@ -3,7 +3,7 @@
    与审核台的分工：审核台管"结构要不要过"，台账管"已经进来的具体知识长什么样、要不要纠错"。
    创建、修订和治理均复用正式服务；表格与实体选择器从服务端分页，不预载全项目。 */
 (() => {
-  const host=$('records'), tab=$('tab-records');let rows=[],total=0,request=0,page=0,view='entity';
+  const host=$('records'), tab=$('tab-records');let rows=[],total=0,request=0,page=0,view='entity',loadedScope=null;
   const visible=()=>!tab.hidden&&!tab.classList.contains('hidden');
   const pageCounts=new Map();let pager=null,loading=false,searchTimer=null,operationsLoaded=false;
   const openCreator=(kind,options)=>{if(window.RecordCreate?.open)return window.RecordCreate.open(kind,options);status('知识创建组件未加载，请刷新页面重试。',true);};
@@ -317,7 +317,7 @@
       }
       // D1「台账 → 图谱」：把这一个实体/关系画到图谱中心（复用检索命中那套跳转，不重新造定位逻辑）。
       // 属性也能定位：它挂在实体上，所以把「所属实体」画到图谱中心（属性本身不是图上的点）。
-      const seed=row.kind==='attribute'?row.subject_id:(row.kind==='entity'?row.id:(row.kind==='relation'?row.subject_id:null));
+      const seed=row.kind==='attribute'?row.subject_id:(['entity','relation'].includes(row.kind)?row.id:null);
       if(seed){
         const locate=node('button','secondary','在图谱定位');locate.type='button';
         locate.title='跳到「检索与交互图谱」并把这一个实体/关系画在画布中心（不改变台账的查询范围）';
@@ -325,7 +325,8 @@
         locate.onclick=()=>{
           window.suppressNextAutoGraph?.();        // 别让进检索页的自动补画把刚选中的实体冲掉
           window.showTab?.('search');
-          Promise.resolve(window.selectEntityDetail?.(seed))
+          Promise.resolve(window.openKnowledgeRecord?.({id:seed,kind:row.kind==='attribute'?'entity':row.kind,
+            projectId:current,scope:loadedScope||undefined,...(row.kind==='attribute'?{}:{version_id:row.version_id,version:row.version})}))
             .catch(error=>window.status?.(error?.message||String(error),true));
         };
         box.append(locate);
@@ -554,7 +555,7 @@
       if(!direction){pageCounts.clear();rows=[];assertions=null;host.innerHTML='<div class="record-empty" role="status">正在读取服务端分页…</div>';}
       const result=await (direction==='next'?pager.next():direction==='previous'?pager.previous():pager.load(criteria));
       if(!guard(serial,p,stamp,ticket)||!result)return;
-      rows=result.records;total=result.total;page=result.page;pageCounts.set(view,total);assertions=null;
+      rows=result.records;const {kinds,query,...recordScope}=criteria;loadedScope=JSON.parse(JSON.stringify(recordScope));total=result.total;page=result.page;pageCounts.set(view,total);assertions=null;
       // Keep only bounded visible records in the ledger cache; other readers may own node caches separately.
       wb.records=new Map(rows.map(row=>[row.id,row]));loading=false;renderTabs();syncKindSelect();render();
       const accepts=()=>guard(serial,p,stamp,ticket);

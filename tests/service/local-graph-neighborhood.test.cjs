@@ -14,9 +14,12 @@ function workspace({reply,seed='a'}={}){
     get:id=>elements.get(id),scope:()=>({known_at:'draft-must-not-leak'}),ontologyScope:()=>({ontology_scope:'all'}),kgTime:()=>()=>{},
     scopedRead:async()=>{throw Error('legacy scopedRead merges unapplied hidden controls');},
     api:async(url,body)=>{requests.push({route:url.replace('/api/projects/project',''),body});return reply?await reply():{records:[{id:'a',kind:'entity',type:'Person'},{id:'b',kind:'entity',type:'Person'},{id:'r',kind:'relation',type:'knows',subject_id:'a',object_id:'b'}],nodes:[],edges:[],truncated:true,continuation:{reason:'budget_exhausted'}};},
-    renderGraph:result=>rendered.push(result),renderDiscoveryHint:async()=>{},console};
+    renderGraph:result=>rendered.push(result),renderDiscoveryHint:async()=>{},AbortController,console};
   vm.createContext(context);
-  vm.runInContext(source.slice(source.indexOf('  const graphScope='),source.indexOf('  window.clearGraphWorkspace=')),context);
+  // The extracted graph methods retain the same owned request/scope state as
+  // the page; initialization lives above this bounded method slice.
+  const ownedState=source.match(/^  let ontologyLoadGeneration=.*$/m)[0];
+  vm.runInContext(ownedState+'\n'+source.slice(source.indexOf('  const graphScope='),source.indexOf('  window.clearGraphWorkspace=')),context);
   return {context,store,requests,rendered,elements,draw:context.window.drawGraph};
 }
 test('local graph sends a seed and explicit budgets with the applied search Scope',async()=>{

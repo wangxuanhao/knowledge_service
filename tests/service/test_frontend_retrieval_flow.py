@@ -163,11 +163,12 @@ def workbench(browser, tmp_path):
     # owns /records/page and does not load until its page is opened.
     page.select_option('#project', project_id)
     page.wait_for_function('project => current === project', arg=project_id)
-    page.wait_for_function(
-        "document.querySelector('#graph-summary').textContent !== "
-        f"{json.dumps(INITIAL_GRAPH_HINT)}")
+    page.wait_for_function("""() => GraphWorkspaceContext.ready
+      && FullGraphView.loader?.state === 'complete'
+      && FullGraphView.renderer.dataset.nodeCount > 0""")
     # Interaction tests start from an explicitly seeded bounded fixture graph.
-    # Product boot itself remains unseeded and does not scan the whole project.
+    # Product boot uses its bounded overview; this fixture then explicitly opens
+    # the local graph needed by the interaction tests.
     page.evaluate("""async () => {
       document.getElementById('graph-node').value='a';
       await window.drawGraph('a',3);
@@ -240,6 +241,9 @@ def _expand_qa_evidence(page, index=0):
 
 @contextmanager
 def _graph_settings(page):
+    page.wait_for_function('() => GraphWorkspaceContext.ready')
+    if page.evaluate("() => FullGraphView.mode === 'full'"):
+        page.click('[data-fg-mode="local"]')
     drawer = page.locator('#graph-settings-drawer')
     opened_here = not drawer.is_visible()
     if opened_here:
@@ -497,6 +501,21 @@ def _render_a_neighborhood(page):
 def _hold_record_request(page, record_id='x'):
     pattern = re.compile(r'/records/page$')
     held = []
+    # Model a transport that still delivers a successful old response after
+    # cancellation. Keep stale-selection guards covered instead of relying on
+    # AbortController to prevent the response from reaching the inspector.
+    page.evaluate('''recordId => {
+      if(window.__heldRecordApi)throw Error('A held record API is already installed');
+      const original=window.__heldRecordApi=window.api;
+      window.api=(path,body,method='POST',options)=>{
+        const ids=body?.record_ids;
+        if(method==='POST'&&String(path).endsWith('/records/page')&&ids?.length===1&&ids[0]===recordId){
+          const {signal,...rest}=options||{};
+          return original(path,body,method,rest);
+        }
+        return original(path,body,method,options);
+      };
+    }''', record_id)
 
     def hold(route):
         if _is_record_exchange(route.request, record_id):
@@ -508,6 +527,12 @@ def _hold_record_request(page, record_id='x'):
     return pattern, hold, held
 
 
+def _restore_held_record_api(page):
+    page.evaluate('''() => {
+      if(window.__heldRecordApi){window.api=window.__heldRecordApi;delete window.__heldRecordApi;}
+    }''')
+
+
 def _is_record_exchange(exchange, record_id='x'):
     request = exchange.request if hasattr(exchange, 'request') else exchange
     return (request.method == 'POST'
@@ -517,10 +542,13 @@ def _is_record_exchange(exchange, record_id='x'):
 
 def _release_record_request(page, held, record_id='x'):
     assert len(held) == 1
-    with page.expect_response(lambda response: _is_record_exchange(response, record_id)) as info:
-        held.pop().continue_()
-    response = info.value
-    response.body()
+    try:
+        with page.expect_response(lambda response: _is_record_exchange(response, record_id)) as info:
+            held.pop().continue_()
+        response = info.value
+        response.body()
+    finally:
+        _restore_held_record_api(page)
     page.evaluate("""() => new Promise(resolve =>
       requestAnimationFrame(() => requestAnimationFrame(resolve)))""")
     page.wait_for_function("!document.querySelector('#graph-expand').disabled")
@@ -563,7 +591,13 @@ def test_search_updates_only_the_result_rail_and_ignores_graph_keys(workbench):
     # The project boot may intentionally populate the graph. Search owns only the
     # result rail, so compare against the settled graph state rather than racing it.
     summary_before = _settle_graph(page)   # 先等首屏渲染落定，再快照（否则会和异步渲染赛跑）
-    graph_before = page.locator('#graph-canvas').evaluate('(el) => el.outerHTML')
+    page.evaluate('''() => {
+      const series=wb.chart.getModel().getSeriesByIndex(0);
+      window.__searchGraphBefore={chart:wb.chart,series,data:series.option.data,links:series.option.links,
+        zoom:series.option.zoom,center:JSON.stringify(series.option.center),
+        canvas:document.querySelector('#graph-canvas canvas')};
+    }''')
+    graph_before = _graph_node_ids(page)
     detail_before = page.locator('#graph-detail').evaluate('(el) => el.outerHTML')
     # 只统计"检索动作"发出的请求：进入检索页本身会按最新本体补画一次图谱
     # （"切回页签自动跟上新版本"），那是页面进入行为，不属于这条断言的射程。
@@ -597,7 +631,16 @@ def test_search_updates_only_the_result_rail_and_ignores_graph_keys(workbench):
     page.wait_for_function("!document.querySelector('#search').disabled")
 
     assert '不应出现的节点' not in page.locator('#hits').inner_text()
-    assert page.locator('#graph-canvas').evaluate('(el) => el.outerHTML') == graph_before
+    # Opening the shared result pane resizes the existing canvas. Its graph,
+    # renderer and camera must survive; pixel dimensions may change.
+    assert _graph_node_ids(page) == graph_before
+    assert page.evaluate('''() => {
+      const before=window.__searchGraphBefore,series=wb.chart.getModel().getSeriesByIndex(0);
+      return wb.chart===before.chart&&series===before.series&&series.option.data===before.data&&
+        series.option.links===before.links&&series.option.zoom===before.zoom&&
+        JSON.stringify(series.option.center)===before.center&&
+        document.querySelector('#graph-canvas canvas')===before.canvas;
+    }''')
     assert page.locator('#graph-detail').evaluate('(el) => el.outerHTML') == detail_before
     assert page.locator('#graph-summary').inner_text() == summary_before
     assert not any(path.endswith('/graph-neighborhood') for path in workbench.paths)
@@ -702,6 +745,7 @@ def test_entity_selection_fetches_complete_detail_outside_rendered_neighborhood(
         for route in held:
             route.abort()
         page.unroute(pattern, handler)
+        _restore_held_record_api(page)
 
     assert f'/api/projects/{workbench.project}/records/page' in workbench.paths
     assert not any(path.endswith('/graph-neighborhood') for path in workbench.paths)
@@ -754,6 +798,7 @@ def test_expand_stays_disabled_until_pending_entity_detail_resolves(workbench):
             route.abort()
         page.unroute(subgraph_pattern, hold_subgraph)
         page.unroute(record_pattern, record_handler)
+        _restore_held_record_api(page)
 
 
 def test_entity_filter_removal_rolls_back_pending_detail(workbench):
@@ -780,6 +825,7 @@ def test_entity_filter_removal_rolls_back_pending_detail(workbench):
         for route in held:
             route.abort()
         page.unroute(pattern, handler)
+        _restore_held_record_api(page)
 
     assert '退款商户' in page.locator('#graph-detail').inner_text()
     assert '无关实体' not in page.locator('#graph-detail').inner_text()
@@ -812,6 +858,7 @@ def test_entity_filter_keeps_committed_fallback_when_no_entities_match(workbench
         for route in held:
             route.abort()
         page.unroute(pattern, handler)
+        _restore_held_record_api(page)
 
     assert page.locator('#graph-entity-filter').input_value() == '完全不匹配'
     assert page.locator('#graph-entity-choice').input_value() == 'a'
@@ -855,6 +902,7 @@ def test_late_entity_detail_does_not_replace_relation_detail(workbench):
         for route in held:
             route.abort()
         page.unroute(pattern, handler)
+        _restore_held_record_api(page)
 
     detail = page.locator('#graph-detail').inner_text()
     assert '退款关系' in detail
@@ -892,6 +940,7 @@ def test_late_entity_detail_does_not_reopen_closed_drawer(workbench):
         for route in held:
             route.abort()
         page.unroute(pattern, handler)
+        _restore_held_record_api(page)
 
     assert page.locator('#graph-detail').inner_html() == ''
     assert page.locator('#graph-entity-choice').input_value() == 'a'
@@ -1022,17 +1071,20 @@ def test_entity_and_relation_hits_select_consistent_detail_without_redraw(workbe
     graph_nodes = _graph_node_ids(page)
     graph_summary = page.locator('#graph-summary').inner_text()
 
-    for index, expected_seed in ((0, 'a'), (2, 'a')):
+    for index, expected_id, expected_text in ((0, 'a', '退款商户'), (2, 'r', '退款关系')):
         workbench.paths.clear()
-        _channel_sections(page).nth(index).locator('[data-graph-node]').first.click()
-        page.evaluate("""() => new Promise(resolve =>
-          requestAnimationFrame(() => requestAnimationFrame(resolve)))""")
+        if not page.locator('#hits').is_visible():
+            page.click('#graph-panel-tab-results')
+        hit=_channel_sections(page).nth(index).locator('[data-graph-node]').first
+        assert hit.get_attribute('data-graph-node') == expected_id
+        hit.click()
+        page.wait_for_function("id => document.querySelector('#graph-detail').dataset.recordId === id", arg=expected_id)
         assert not any(path.endswith('/graph-neighborhood') for path in workbench.paths)
         assert not any(path.endswith('/explore') or path.endswith('/search')
                        for path in workbench.paths)
-        assert page.locator('#graph-entity-choice').input_value() == expected_seed
-        assert page.locator('#graph-node').input_value() == expected_seed
-        assert '退款商户' in page.locator('#graph-detail').inner_text()
+        assert page.locator('#graph-entity-choice').input_value() == 'a'
+        assert page.locator('#graph-node').input_value() == 'a'
+        assert expected_text in page.locator('#graph-detail').inner_text()
         assert _graph_node_ids(page) == graph_nodes
         assert page.locator('#graph-summary').inner_text() == graph_summary
         assert page.locator('[data-tab="search"]').get_attribute('class') == 'active'
@@ -1211,6 +1263,9 @@ def test_draw_and_expand_buttons_share_the_single_graph_renderer(workbench):
         "document.querySelector('#graph-detail').textContent.includes('退款商户')")
     assert page.locator('#graph-type-buttons').count() == 1
     assert '局部邻域' in page.locator('#graph-summary').inner_text()
+    # Exact hit navigation may reuse the already-loaded full overview. This
+    # renderer-sharing check explicitly continues with local expansion.
+    page.click('[data-fg-mode="local"]')
 
     # 「展开邻域」这个按钮原先绑在 workbench.js 的旧副本上；收敛后必须和上面同源：
     # 请求体带 valid_at（旧副本不发这个字段），并且类型筛选按钮/时间轴仍在（旧副本不会创建）。
@@ -1533,6 +1588,7 @@ def test_knowledge_chat_keyboard_ime_and_scope_change(workbench):
 def test_mobile_composer_stays_reachable_with_expanded_evidence(workbench):
     page = workbench.page
     page.set_viewport_size({'width': 390, 'height': 844})
+    page.click('#qa-app-menu-toggle')
     page.click('[data-tab="qa"]')
     _select_keyword_qa(page)
     for index, question in enumerate(('退款', '退款商户')):

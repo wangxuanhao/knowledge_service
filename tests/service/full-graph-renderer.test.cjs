@@ -242,7 +242,7 @@ test('selecting a small-graph entity emphasizes its own relationships only',()=>
 test('known small full graphs show readable nodes and nearby related entities at overview scale',()=>{
   const {renderer,draws}=smallRelationshipScene();renderer.draw();
   const sizes=draws.filter(row=>row.mode===renderer.gl.POINTS).map(row=>row.uniforms.get('u_size'));
-  assert.ok(sizes.length&&sizes.every(size=>size>=7&&size<=12),'small constellation points stay within 5–10px plus antialias margins');
+  assert.ok(sizes.length&&sizes.every(size=>size>=16&&size<=24),'interactive small graph entities use 14–22px plus antialias margins');
   const positions=renderer.renderPositions||renderer.dataset.positions,unit=renderer.camera.unit(renderer.width,renderer.height);
   const lengths=renderer.dataset.edges.map(edge=>{const a=renderer.dataset.nodeIndex.get(edge.subject_id)*2,b=renderer.dataset.nodeIndex.get(edge.object_id)*2;return Math.hypot(positions[a]-positions[b],positions[a+1]-positions[b+1])*unit;});
   assert.ok(lengths.reduce((sum,value)=>sum+value,0)/lengths.length<130,'relationship layout must replace the long hash-scattered edges');
@@ -419,6 +419,38 @@ for(const edgeCount of [3,5001])test('relation picking highlights only its exist
   pick(0,0);renderer.locate('a');assert.equal(renderer.selectedEdge,-1);
   renderer.camera.scale=1;renderer.camera.x=0;renderer.camera.y=0;pick(0,0);
   const replacement=new GraphDataset();replacement.addNodes(nodes);renderer.setDataset(replacement);assert.equal(renderer.selectedEdge,-1);
+});
+
+for(const scale of [.25,1,4])for(const dpr of [1,2])test(`graph click targets keep their CSS-pixel tolerance at zoom ${scale} and DPR ${dpr}`,()=>{
+  const {renderer}=bufferScene(),selected=[];
+  renderer.dpr=dpr;renderer.camera.scale=scale;renderer.onSelect=row=>selected.push(row);
+  const nodes=[{id:'a',kind:'entity'},{id:'b',kind:'entity'}];
+  const relation={id:'ab',kind:'relation',subject_id:'a',object_id:'b'};
+  renderer.dataset.addNodes(nodes,new Float32Array([-.4,0,.4,0]));renderer.dataset.addEdges([relation]);renderer.sync();
+  const middle=renderer.camera.worldToScreen(0,0,renderer.width,renderer.height);
+  assert.equal(renderer.pick(middle[0],middle[1]+9),relation,'a thin line is selectable inside its 10px CSS halo');
+  assert.equal(renderer.selectedEdge,0);assert.equal(selected.at(-1),relation);
+  assert.equal(renderer.pick(middle[0],middle[1]+11),null,'blank space outside the halo does not select a relationship');
+  const node=renderer.camera.worldToScreen(-.4,0,renderer.width,renderer.height);
+  assert.equal(renderer.pick(node[0],node[1]+11),nodes[0],'a node has at least a 24px click target');
+  assert.equal(renderer.selectedEdge,-1,'node priority clears the previous relationship');
+  renderer.showEdges=false;
+  assert.equal(renderer.pick(middle[0],middle[1]+9),null,'hidden relationships remain unselectable');
+});
+
+test('larger graph hit targets still choose the closest existing relationship',()=>{
+  const {renderer}=bufferScene();renderer.onSelect=()=>{};
+  renderer.dataset.addNodes([{id:'a'},{id:'b'},{id:'c'},{id:'d'}],new Float32Array([-.5,0,.5,0,-.5,.04,.5,.04]));
+  const lower={id:'lower',subject_id:'a',object_id:'b'},upper={id:'upper',subject_id:'c',object_id:'d'};
+  renderer.dataset.addEdges([lower,upper]);renderer.sync();
+  const [x,y]=renderer.camera.worldToScreen(0,0,renderer.width,renderer.height);
+  assert.equal(renderer.pick(x,y-8),upper,'overlapping halos resolve by distance rather than input order');
+  assert.equal(renderer.selectedEdge,1);
+});
+
+test('small graph nodes keep a readable diameter after zooming out',()=>{
+  const {renderer}=smallRelationshipScene();renderer.camera.scale=.15;
+  for(let i=0;i<renderer.dataset.nodeCount;i++)assert.ok(renderer.nodeScreenSize(i)>=12);
 });
 
 test('context restoration refreshes grouped positions and destroy disposes their buffer',()=>{

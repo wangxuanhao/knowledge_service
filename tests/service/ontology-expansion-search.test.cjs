@@ -9,16 +9,17 @@ const escape=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<'
 function harness({helpers=true}={}){
   const buttons=new Map(),graphSelections=[],sourceSelections=[];
   const hits={innerHTML:'',querySelectorAll(selector){
-    const attribute=selector.slice(1,-1),key=attribute==='data-graph-node'?'graphNode':'sourceRecord';
-    const elements=[...this.innerHTML.matchAll(new RegExp(attribute+'="([^"]+)"','g'))].map(match=>({dataset:{[key]:match[1]}}));
+    const attribute=selector.slice(1,-1);
+    const elements=[...this.innerHTML.matchAll(/<button\b[^>]*>/g)].filter(match=>match[0].includes(attribute+'="')).map(match=>({dataset:Object.fromEntries(
+      [...match[0].matchAll(/data-([\w-]+)="([^"]*)"/g)].map(([,name,value])=>[name.replace(/-([a-z])/g,(_,letter)=>letter.toUpperCase()),value]))}));
     buttons.set(attribute,elements);return elements;
   }};
-  const context={window:{},get:()=>hits,labelOf:value=>value,esc:escape,
-    selectEntityDetail:async id=>graphSelections.push(id),historyFor:row=>sourceSelections.push(row.id),status:()=>{}};
+  const context={window:{openKnowledgeRecord:async({id})=>graphSelections.push(id)},get:()=>hits,labelOf:value=>value,esc:escape,scope:()=>({}),graphScope:()=>({entity_type:null,predicate:null}),
+    historyFor:row=>sourceSelections.push(row.id),status:()=>{}};
   vm.createContext(context);
   if(helpers)vm.runInContext(fs.readFileSync(path.join(web,'qa-presentation.js'),'utf8'),context);
   const source=fs.readFileSync(path.join(web,'workspace.js'),'utf8');
-  const declaration=source.match(/  function renderHits\(result\)\{[\s\S]*?\n  \}/)?.[0];
+  const declaration=source.match(/  function renderHits\([^\n]*\)\{[\s\S]*?\n  \}/)?.[0];
   assert.ok(declaration,'search renderer remains independently testable');
   vm.runInContext(declaration+';this.render=renderHits;',context);
   return {render:context.render,hits,buttons,graphSelections,sourceSelections};
@@ -127,7 +128,7 @@ test('separate result and context cards preserve graph/source actions and escape
     ontology_expansion:{...ledger,entity_matches:[{text:'<img src=x>',type_label:'<script>alert(1)</script>'}]}});
   for(const button of subject.buttons.get('data-graph-node'))await button.onclick();
   for(const button of subject.buttons.get('data-source-record'))button.onclick();
-  assert.deepEqual(subject.graphSelections,['direct','subject-expanded']);
+  assert.deepEqual(subject.graphSelections,['direct','expanded']);
   assert.deepEqual(subject.sourceSelections,['document-source','document-neighbor']);
   assert.match(subject.hits.innerHTML,/&lt;img src=x&gt; → &lt;script&gt;/);
   assert.doesNotMatch(subject.hits.innerHTML,/<img|<script/);

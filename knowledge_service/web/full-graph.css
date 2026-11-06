@@ -4,6 +4,10 @@
 .fg-labels{position:absolute;inset:0;pointer-events:none}
 .full-graph-progress{font-size:12px;line-height:1.65;color:#627b82}.full-graph-progress.error{color:#be123c}
 .fg-record-list{max-height:170px;overflow:auto}.fg-scope-note{font-size:12px;color:#789096;line-height:1.6}
+.full-graph-host>.full-graph-empty{position:absolute;inset:12px;z-index:4;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.full-graph-host>.full-graph-empty[hidden]{display:none}
+.full-graph-empty-card{box-sizing:border-box;max-width:480px;width:100%;padding:18px;border:1px solid #dbe5e8;border-radius:10px;background:#fff;box-shadow:0 4px 18px #183a4410;pointer-events:auto;color:#3d5e63;font-size:13px;line-height:1.65}
+.full-graph-empty-card p{margin:0 0 12px}.full-graph-empty-card .full-graph-empty-candidates{font-size:12px;color:#627b82}.full-graph-empty-card .full-graph-empty-actions{margin:0;gap:7px}
 body main #tab-search .full-graph-mode{margin:0;padding:0;border:0}
 body main #tab-search .full-graph-mode .full-graph-controls{display:flex;gap:2px;margin:0;padding:3px;border:1px solid #d5e4e4;border-radius:7px;background:#eef4f5}
 body main #tab-search .full-graph-mode button{border:0;border-radius:5px;background:transparent;color:#627b82;font-size:12px;line-height:1.4;padding:5px 10px;white-space:nowrap}

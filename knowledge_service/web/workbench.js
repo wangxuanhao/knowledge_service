@@ -113,7 +113,7 @@ async function dashboard(){const request=++dashboardRequest,p=current;controlsPr
     <p class="subtle" style="margin-top:16px">有效期未知：${r.unknown_validity} 条。旧数据不会用导入时间冒充生效时间。</p>
   `;}
 bind('load-dashboard',dashboard);
-function initChart(){if(!window.echarts)throw Error('本地图形资源未加载');if(!wb.chart){wb.chart=echarts.init($('graph-canvas'));wb.chart.on('click',params=>{if(params.dataType==='node'){const row=wb.nodes.get(params.data.id);if(row){$('graph-node').value=row.id;$('graph-detail').innerHTML=card(row,true);$('graph-detail').querySelector('[data-history]').onclick=()=>historyFor(row);$('graph-detail').querySelector('[data-edit]').onclick=()=>editRecord(row);}}});}return wb.chart;}
+function initChart(){if(!window.echarts)throw Error('本地图形资源未加载');if(!wb.chart){wb.chart=echarts.init($('graph-canvas'),null,{useCoarsePointer:true,pointerSize:window.matchMedia?.('(pointer:coarse)')?.matches?44:24});wb.chart.on('click',params=>{if(params.dataType==='node'){const row=wb.nodes.get(params.data.id);if(row){$('graph-node').value=row.id;$('graph-detail').innerHTML=card(row,true);$('graph-detail').querySelector('[data-history]').onclick=()=>historyFor(row);$('graph-detail').querySelector('[data-edit]').onclick=()=>editRecord(row);}}});}return wb.chart;}
 // 图谱渲染器已收敛到 workspace.js 的 window.drawGraph（唯一实现，见 workspace.js:260）。
 // 这里原本还有一份同名的旧 drawGraph 副本（旧样式，没有类型筛选/时间轴/命中描边），
 // 它其实永远执行不到——名字槽位被后加载的 workspace.js 覆盖了——却让"改一份另一份还是旧的"反复发生，故作删除。

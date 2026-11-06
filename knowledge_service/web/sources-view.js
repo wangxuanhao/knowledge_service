@@ -316,6 +316,7 @@
     }
   }
   function renderAssertions(rows,project){
+    const sourceScope=JSON.parse(JSON.stringify(window.WorkspaceContext?.read(project,'sources')||scope()));
     body.replaceChildren();
     if(!rows.length){body.textContent='此资料暂无提取断言；仅文档处理不会抽取实体与关系。';return;}
     for(const row of rows){
@@ -325,7 +326,7 @@
       const quote=document.createElement('p');quote.className='subtle';quote.textContent=row.quote||'';item.append(label,text,quote);
       if(row.canonical_record_id){
         const open=document.createElement('button');open.type='button';open.className='secondary';open.textContent='查看正式知识';
-        open.onclick=async()=>{window.WorkspaceDrawers.close({restoreFocus:false});window.KnowledgeTabs.open('records');await window.openKnowledgeRecord?.({id:row.canonical_record_id,projectId:project});};item.append(open);
+        open.onclick=async()=>{window.WorkspaceDrawers.close({restoreFocus:false});window.KnowledgeTabs.open('records');await window.openKnowledgeRecord?.({id:row.canonical_record_id,projectId:project,scope:sourceScope});};item.append(open);
       }
       body.append(item);
     }

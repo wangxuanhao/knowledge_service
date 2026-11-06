@@ -21,7 +21,7 @@
     const degrees=new Map(nodes.map(node=>[node.id,0]));
     for(const edge of edges){if(edge.subject_id===edge.object_id||!degrees.has(edge.subject_id)||!degrees.has(edge.object_id))continue;
       degrees.set(edge.subject_id,degrees.get(edge.subject_id)+1);degrees.set(edge.object_id,degrees.get(edge.object_id)+1);}
-    return new Map(Array.from(degrees,([id,degree])=>[id,5+Math.min(degree*.3,5)]));
+    return new Map(Array.from(degrees,([id,degree])=>[id,14+Math.min(degree*.45,8)]));
   }
   function labelsFor(nodes,preferred=[],limit=50){
     const present=new Set(nodes.map(node=>node.id)),ordered=new Set();

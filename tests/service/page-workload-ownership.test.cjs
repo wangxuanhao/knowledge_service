@@ -6,6 +6,11 @@ const vm=require('node:vm');
 const web=name=>fs.readFileSync(path.join(__dirname,'../../knowledge_service/web',name),'utf8');
 const settle=async()=>{for(let i=0;i<30;i++)await Promise.resolve();};
 const deferred=()=>{let resolve;const promise=new Promise(done=>resolve=done);return {promise,resolve};};
+function graphReadiness(source,context){
+  Object.assign(context,{graphContextReady:false,localScopeOverride:null,localScopeOwner:'',localScopeCanvas:null,recordReadAbort:null,graphReadAbort:null,CustomEvent});
+  context.document??={};context.document.dispatchEvent??=()=>{};
+  return source.slice(source.indexOf('  function invalidateGraphContext('),source.indexOf('  function graphBudgetSummary('));
+}
 
 function element(tag='div'){
   const node={tagName:tag,children:[],listeners:{},dataset:{},className:'',value:'',hidden:false,innerHTML:'',textContent:'',
@@ -139,7 +144,7 @@ test('project selection clears stale graph state and completes current project l
     autoLoadGraph(){calls.push('autoLoadGraph');}};
   project.onchange=()=>{calls.push('priorChange');context.current=project.value;};
   for(const id of ['filters','query','graph-node','type-scope','predicate-scope','graph-entity-filter'])get(id).value='old';
-  vm.runInNewContext(source.slice(source.indexOf('  // Ignore out-of-order project responses'),
+  vm.runInNewContext(graphReadiness(source,context)+source.slice(source.indexOf('  // Ignore out-of-order project responses'),
     source.indexOf('  // 打开「检索与交互图谱」且尚未渲染时')),context);
   assert.doesNotThrow(()=>project.onchange(),'project selection must reach loading without removed editor helpers');
   assert.equal(context.current,'new');assert.equal(project.title,'New project');
@@ -151,6 +156,7 @@ test('project selection clears stale graph state and completes current project l
     ['knowledge-project','new'],'loadOntology']);
   const ontology={id:'new-release'};gate.resolve(ontology);await settle();
   assert.equal(context.ui.ontology,ontology);assert.deepEqual(calls.slice(-3),['options','metadata','autoLoadGraph']);
+  assert.equal(context.graphContextReady,true,'the real readiness hook runs only after current project controls settle');
 });
 
 test('returning to a project rejects its superseded ontology read',async()=>{
@@ -170,10 +176,10 @@ test('a publication refresh starts a new ontology read and rejects the earlier r
   const context={document:{getElementById:()=>null,addEventListener(name,handler){listeners[name]=handler;}},
     api:()=>{const gate=deferred();gates.push(gate);return gate.promise;},endpoint:suffix=>suffix,
     window:{clearGraphWorkspace(){},drawGraph:async()=>{}},ui:{request:0,options:[],ontology:null},ontologyLoadGeneration:0,
-    options:async()=>{},discoverMetadata:async()=>{},resetTimeline(){},status(){},get:()=>({classList:{contains:()=>true}})};
+    options:async()=>{},discoverMetadata:async()=>{},resetTimeline(){},autoLoadGraph(){},status(){},get:()=>({classList:{contains:()=>true}})};
   vm.createContext(context);vm.runInContext(source.slice(0,source.indexOf('const recordName=')),context);
   vm.runInContext("current='p'",context);
-  vm.runInContext(workspace.slice(workspace.indexOf("  document.addEventListener('ontology-model:published'"),workspace.indexOf('  // Dashboard loads on entry')),context);
+  vm.runInContext(graphReadiness(workspace,context)+workspace.slice(workspace.indexOf("  document.addEventListener('ontology-model:published'"),workspace.indexOf('  // Dashboard loads on entry')),context);
   const before=vm.runInContext('loadOntologyTerms()',context);
   const publishing=listeners['ontology-model:published']({detail:{projectId:'p',versionId:'new'}});
   assert.equal(gates.length,2,'publication must not reuse a read started before the write');

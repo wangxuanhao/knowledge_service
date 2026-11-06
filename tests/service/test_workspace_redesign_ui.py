@@ -59,6 +59,10 @@ def redesign_page():
             elif path.endswith('/records/page'): value={'records':[],'total':0,'next_cursor':None}
             elif path.endswith('/metadata/facets'): value={'fields':[],'records':1}
             elif path.endswith('/graph-neighborhood'): value={'records':[],'truncated':False}
+            elif path.endswith('/graph-sessions'): value={'id':'empty-ui-session','entity_count':0,'relation_count':0,'watermark':1,'layout_version':'stable-id-v1'}
+            elif '/graph-sessions/' in path and path.endswith('/page'):
+                value={'session_id':path.split('/')[-2],'kind':route.request.post_data_json['kind'],
+                       'records':[],'entities':[],'next_cursor':None,'watermark':1,'layout_version':'stable-id-v1'}
             elif path.endswith('/sources'): value={'documents':[{'id':'d','kind':'document','version':1,'text':'退款原文','metadata':{'title':'退款规则','source_format':'txt','status':'completed'},'derived_count':1}]}
             elif path.endswith('/ontologies'): value={'versions':[]}
             elif path.endswith('/ontology'): route.fulfill(status=404,json={'detail':'尚未发布本体'});return
@@ -74,6 +78,7 @@ def redesign_page():
         page.wait_for_function("() => document.querySelectorAll('#project option').length>1")
         page.select_option('#project','p')
         page.wait_for_function("() => typeof current === 'string' && current === 'p'")
+        page.wait_for_function("() => GraphWorkspaceContext.ready && FullGraphView.loader?.state === 'complete'")
         yield page,errors
 
 
@@ -181,6 +186,7 @@ def test_page_scope_drafts_tags_and_management_exclusion(redesign_page):
 def test_graph_settings_dock_has_close_escape_backdrop_and_numeric_hops(redesign_page):
     page,errors=redesign_page
     page.click('[data-tab="search"]')
+    page.click('[data-fg-mode="local"]')
     page.click('#graph-settings')
     drawer=page.locator('#graph-settings-drawer')
     assert drawer.evaluate('(e)=>e.open')
@@ -313,7 +319,7 @@ def test_local_mode_first_click_restores_visible_names_after_full_view(redesign_
         page.locator('[data-fg-mode="full"]').click()
         assert not page.locator('#graph-canvas').is_visible()
         if cycle==0:
-            page.locator('[data-fg="load"]').click()
+            page.locator('[data-fg="restart"]').click()
             page.wait_for_function('FullGraphView.renderer?.dataset.nodeCount===73')
             page.evaluate('()=>FullGraphView.resume()')
             page.wait_for_function('FullGraphView.loader.state==="complete"')
@@ -541,7 +547,7 @@ def test_graph_mode_buttons_keep_a_clear_active_state_at_each_width(redesign_pag
 
 def test_graph_settings_name_controls_center_the_boxes_text_and_group(redesign_page):
     page,errors=redesign_page
-    page.click('[data-tab="search"]');page.click('#graph-settings')
+    page.click('[data-tab="search"]');page.click('[data-fg-mode="local"]');page.click('#graph-settings')
     for width in [1440,390]:
         page.set_viewport_size({'width':width,'height':950})
         page.locator('#graph-edge-labels').scroll_into_view_if_needed()
@@ -575,11 +581,14 @@ def test_full_graph_entity_types_filter_incremental_pages_without_changing_the_l
             'records':records,'entities':entities,'next_cursor':cursor})
     page.route('**/projects/p/graph-sessions/type-session/page',graph_page)
     page.evaluate("()=>{window.__typeOriginalLabel=labelOf;window.labelOf=type=>type==='urn:A'||type==='urn:B'?'同名类型':window.__typeOriginalLabel(type);}")
-    page.click('[data-tab="search"]');page.click('[data-fg-mode="full"]');page.click('[data-fg="load"]')
+    page.click('[data-tab="search"]');page.click('[data-fg-mode="full"]')
+    # Exercise manual pagination through the public loader entry point. The
+    # default overview deliberately completes small manifests automatically.
+    page.evaluate("()=>FullGraphView.restart({projectId:'p',scope:GraphWorkspaceContext.read().scope})")
     page.wait_for_function('()=>FullGraphView.renderer?.dataset.nodeCount===2')
     types=page.locator('.full-graph-types');a=types.locator('[data-fg-type="urn:A"]')
     assert a.is_visible() and a.get_attribute('data-type-count')=='2'
-    assert '当前已加载' in types.inner_text()
+    assert '当前为局部图' in page.locator('.full-graph-progress').inner_text()
     a.click();assert len(requests)==1
     assert page.evaluate('FullGraphView.renderer.typeFilter')=='urn:A'
     page.click('[data-fg="next"]');page.wait_for_function('()=>FullGraphView.renderer.dataset.nodeCount===4')
@@ -599,7 +608,7 @@ def test_full_graph_entity_types_filter_incremental_pages_without_changing_the_l
     assert types.locator('[data-fg-type=""]').get_attribute('data-type-count')=='1'
     assert page.evaluate('FullGraphView.renderer.dataset.nodeCount')==6
     assert page.evaluate('FullGraphView.renderer.displayDataset.nodeCount')==3
-    assert '完整清单' in types.inner_text()
+    assert '全量加载完成' in page.locator('.full-graph-progress').inner_text()
     assert types.locator('[data-fg-type="urn:A"]').get_attribute('title')!=types.locator('[data-fg-type="urn:B"]').get_attribute('title')
     before=len(requests);types.locator('[data-fg-types-all]').click()
     assert len(requests)==before
@@ -610,7 +619,8 @@ def test_full_graph_entity_types_filter_incremental_pages_without_changing_the_l
         clipped=page.evaluate('''()=>{const stage=document.getElementById('graph-stage').getBoundingClientRect();return Array.from(document.querySelectorAll('.full-graph-section [data-fg]')).filter(el=>{const r=el.getBoundingClientRect();return r.width&&r.height&&(r.bottom>stage.bottom+1||r.top<stage.top);}).map(el=>el.dataset.fg);}''')
         assert not clipped,clipped
         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
-    a.click();page.click('[data-fg="restart"]');page.wait_for_function('()=>FullGraphView.loader.state==="paused"&&FullGraphView.renderer.dataset.nodeCount===2')
+    a.click();page.evaluate("()=>FullGraphView.restart({projectId:'p',scope:GraphWorkspaceContext.read().scope})")
+    page.wait_for_function('()=>FullGraphView.loader.state==="paused"&&FullGraphView.renderer.dataset.nodeCount===2')
     assert page.evaluate('FullGraphView.renderer.typeFilter') is None
     assert not types.locator('[data-fg-type="urn:B"]').count()
     page.evaluate("()=>document.dispatchEvent(new CustomEvent('workspace:scope-changed',{detail:{page:'search'}}))")
@@ -653,13 +663,16 @@ def test_full_graph_many_types_keep_the_evidence_and_canvas_panels_level(redesig
     page.route('**/projects/p/graph-sessions/level-session/page',lambda route:route.fulfill(json={
         'session_id':manifest['id'],'kind':route.request.post_data_json['kind'],'watermark':1,'layout_version':'stable-id-v1',
         'records':edges if route.request.post_data_json['kind']=='connected' else nodes,'entities':nodes,'next_cursor':None}))
-    page.click('[data-tab="search"]');page.click('[data-fg-mode="full"]');page.click('[data-fg="load"]');page.click('[data-fg="auto"]')
+    page.click('[data-tab="search"]');page.click('[data-fg-mode="full"]')
+    page.evaluate('()=>FullGraphView.restart()');page.evaluate('()=>FullGraphView.resume()')
     page.wait_for_function('()=>FullGraphView.loader.state==="complete"')
+    page.click('#graph-results-toggle')
     for width,height in [(1920,1080),(1440,950),(1440,728),(1024,768)]:
         page.set_viewport_size({'width':width,'height':height})
-        page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
-        layout=page.evaluate('''()=>{const area=document.querySelector('.search-graph-workspace'),left=area.querySelector('.search-results-pane').getBoundingClientRect(),right=document.getElementById('graph-stage').getBoundingClientRect(),canvas=area.querySelector('.full-graph-host').getBoundingClientRect(),types=area.querySelector('.full-graph-type-controls').getBoundingClientRect();return {left:{top:left.top,bottom:left.bottom},right:{top:right.top,bottom:right.bottom,height:right.height},canvas:canvas.height,types:types.height};}''')
+        page.evaluate('()=>GraphWorkspaceLayout.settled()')
+        layout=page.evaluate('''()=>{const area=document.querySelector('.search-graph-workspace'),left=document.getElementById('graph-workspace-panel').getBoundingClientRect(),right=document.getElementById('graph-stage').getBoundingClientRect(),canvas=area.querySelector('.full-graph-host').getBoundingClientRect(),types=area.querySelector('.full-graph-type-controls').getBoundingClientRect();return {left:{top:left.top,bottom:left.bottom,width:left.width},right:{top:right.top,bottom:right.bottom,height:right.height},canvas:canvas.height,types:types.height};}''')
         assert abs(layout['left']['top']-layout['right']['top'])<=1 and abs(layout['left']['bottom']-layout['right']['bottom'])<=1,layout
+        assert 300 <= layout['left']['width'] <= 320,layout
         assert layout['canvas']>=279 and layout['types']<=65,layout
         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
     original=page.evaluate("document.querySelector('.search-results-pane').getBoundingClientRect().height")
@@ -686,7 +699,7 @@ def test_full_graph_zoom_tools_stay_left_and_keep_progressive_controls(redesign_
     assert page.locator('[data-fg="zoom-in"]').count()==1, 'full mode must retain plus/minus controls'
     for action in ['load','next','auto','pause','cancel','restart','reset']:
         assert page.locator(f'[data-fg="{action}"]').is_visible()
-    page.click('[data-fg="load"]')
+    page.click('[data-fg="restart"]')
     page.wait_for_function('()=>FullGraphView.renderer?.dataset.nodeCount===2')
     scale=page.evaluate('FullGraphView.renderer.camera.scale')
     page.click('[data-fg="zoom-in"]')
@@ -793,12 +806,18 @@ def test_graph_toolbar_stays_reachable_while_details_and_paths_are_open(redesign
         # Dismiss transient operation notices before measuring panel overlap.
         notice=page.locator('#status .ks-notice__close')
         if notice.count():notice.click()
-        page.locator('.graph-toolbar').scroll_into_view_if_needed()
-        blocked=page.evaluate('''ids=>ids.filter(id=>{
-          const el=document.getElementById(id);if(!el)return true;
-          const r=el.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
-          return !r.width||!r.height||!hit||!(hit===el||el.contains(hit));
-        })''',ids)
+        # Compact toolbars scroll horizontally on narrower canvases. Each
+        # control must remain reachable and uncovered after scrolling to it.
+        blocked=[]
+        for control in ids:
+            button=page.locator('#'+control)
+            button.scroll_into_view_if_needed()
+            reachable=button.evaluate('''el=>{
+              const r=el.getBoundingClientRect(),bar=el.closest('.graph-toolbar').getBoundingClientRect();
+              const hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+              return r.width>0&&r.height>0&&r.left>=bar.left-1&&r.right<=bar.right+1&&!!hit&&(hit===el||el.contains(hit));
+            }''')
+            if not reachable:blocked.append(control)
         assert blocked==[],f'Toolbar buttons hidden or covered at {page.viewport_size}: {blocked}'
         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
 
@@ -844,7 +863,7 @@ def test_graph_candidate_previous_page_and_brain_exact_root_keep_applied_search_
         brain.append(route.request.post_data_json)
         route.fulfill(json={'tree':{'id':'deep-root','text':'深页实体','children':[]},'bounded':True,'truncated':False})
     page.route('**/records/page',records);page.route('**/mindmap',mindmap)
-    page.click('[data-tab="search"]');page.click('#graph-settings')
+    page.click('[data-tab="search"]');page.click('[data-fg-mode="local"]');page.click('#graph-settings')
     page.fill('#graph-entity-filter','graph-query')
     page.wait_for_function("document.getElementById('graph-choice-status').textContent.includes('第 1 / 2 页')")
     page.click('#graph-choice-next')

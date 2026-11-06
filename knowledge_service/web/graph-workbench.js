@@ -314,6 +314,21 @@
     if(!node)return false;const [x,y]=series.coordinateSystem.dataToPoint([node.x,node.y]);
     roam(state.chart,'pan',{dx:state.chart.getWidth()/2-x,dy:state.chart.getHeight()/2-y});queueCull();return true;
   }
+  function focusRecord(row){
+    if(!state)return false;
+    if(row.kind!=='relation')return locate(row.id);
+    const edge=state.graph.edges.find(edge=>edge.id===row.id&&(!row.version_id||row.version_id===edge.version_id));
+    if(!edge)return false;
+    const chart=state.chart,series=chart.getModel().getSeriesByIndex(0),points=[edge.subject_id,edge.object_id].map(id=>series.option.data.find(node=>node.id===id));
+    if(points.some(node=>!node))return false;
+    const pixels=points.map(node=>series.coordinateSystem.dataToPoint([node.x,node.y]));
+    const spanX=Math.abs(pixels[0][0]-pixels[1][0]),spanY=Math.abs(pixels[0][1]-pixels[1][1]);
+    const factor=Math.min(2,Math.max(.05,Math.min(Math.max(1,chart.getWidth()-120)/Math.max(1,spanX),Math.max(1,chart.getHeight()-100)/Math.max(1,spanY))));
+    roam(chart,'zoom',{scale:factor,originX:chart.getWidth()/2,originY:chart.getHeight()/2});
+    const updated=chart.getModel().getSeriesByIndex(0),center=points.map(node=>updated.coordinateSystem.dataToPoint([node.x,node.y]));
+    roam(chart,'pan',{dx:chart.getWidth()/2-(center[0][0]+center[1][0])/2,dy:chart.getHeight()/2-(center[0][1]+center[1][1])/2});
+    chart.dispatchAction({type:'highlight',seriesIndex:0,dataType:'edge',dataIndex:state.graph.edges.indexOf(edge)});queueCull();return true;
+  }
   function clear(){window.GraphExplorer?.clear();generation++;if(revealFrame)cancelAnimationFrame(revealFrame);revealFrame=0;if(cullFrame)cancelAnimationFrame(cullFrame);cullFrame=0;if(cullTimer)clearTimeout(cullTimer);cullTimer=0;state?.chart.__maintenanceResetGesture?.();state=null;path=null;scopeStamp='';session.clear();if(host){host.open=false;syncTools();host.remove();host=null;}toggle?.remove();toggle=null;$('graph-relayout')?.remove();}
-  window.GraphWorkbench={positions,viewport,bounds,mount,fit,zoom,setLabels,setFocus,locate,reveal,selection,canClick:()=>session.canClick(),clear};
+  window.GraphWorkbench={positions,viewport,bounds,mount,fit,zoom,setLabels,setFocus,locate,focusRecord,reveal,selection,canClick:()=>session.canClick(),clear};
 })();

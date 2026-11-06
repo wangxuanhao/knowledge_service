@@ -60,8 +60,12 @@
   };
   function localTime(value){if(!value)return '未记录';const d=new Date(value);return Number.isNaN(d.valueOf())?value:d.toLocaleString('zh-CN',{hour12:false});}
   const typeHint=type=>{const primary=labelOf(type),local=term(type);return primary===local?esc(primary):`${esc(primary)} <span class="subtle">${esc(local)}</span>`;};
-  window.renderEvidenceInspector=async(row,options)=>{
-    const ticket=++serial,p=current,stamp=JSON.stringify(scope());
+  window.renderEvidenceInspector=async(row,options,{scope:fixedScope}={})=>{
+    const ticket=++serial,p=current,stamp=JSON.stringify(scope()),ownerPage=window.WorkspaceContext?.page||'search',ownerTicket=window.WorkspaceContext?.ticket(p,ownerPage);
+    const ownerVersion=JSON.stringify(window.wb?.versionContext||null);
+    const {entity_type,predicate,...applied}=JSON.parse(JSON.stringify(fixedScope||scope()));
+    const readOnly=Boolean(applied.known_at);
+    const accepts=()=>ticket===serial&&current===p&&stamp===JSON.stringify(scope())&&ownerVersion===JSON.stringify(window.wb?.versionContext||null)&&(!ownerTicket||window.WorkspaceContext.accepts(ownerTicket,p,ownerPage));
     host.dataset.recordId=row.id;
     const name=id=>options.find(n=>n.id===id)?.text||id;
     const aliases=Array.isArray(row.metadata?.aliases)?row.metadata.aliases:[];
@@ -87,7 +91,7 @@
         +'</dl></section>';
     })():'';
     host.innerHTML=`<section class="evidence-identity"><span class="evidence-kind">${esc({entity:'实体',relation:'关系',chunk:'原文片段',document:'文档'}[row.kind]||row.kind)} · ${typeHint(row.type)}</span><h3>${esc(row.text)}</h3>${row.kind==='relation'?`<div class="relation-path"><b>${esc(name(row.subject_id))}</b><span>↓ ${typeHint(row.type)}</span><b>${esc(name(row.object_id))}</b></div>`:''}${aliases.length?'<p class="evidence-aliases">别名：'+aliases.map(esc).join('、')+'</p>':''}<div class="evidence-action-groups"><div class="evidence-actions"><button data-action="edit" class="admin-only">编辑</button>${row.kind==='entity'?'<button data-action="add-relation" class="admin-only">新增关系</button><button data-action="add-attribute" class="admin-only">新增属性</button>':''}<button data-action="history" class="secondary">修订历史 · r${row.version}</button>${row.kind==='entity'||row.kind==='relation'?'<button data-action="ledger" class="secondary">在台账查看</button>':''}${row.kind==='entity'?'<button data-action="mindmap" class="secondary">展开脑图</button>':''}</div>${row.kind==='entity'||row.kind==='relation'?'<div class="evidence-danger"><span>危险操作</span></div>':''}</div></section>${formalAttributes?`<section class="evidence-attributes"><h4>实体属性</h4>${formalAttributes}</section>`:''}${entityFamily}<section class="evidence-sources"><h4>原文证据</h4><div id="inspector-source-list" aria-live="polite">正在查找来源…</div></section><section class="evidence-time"><h4>时间</h4><dl><dt>业务生效</dt><dd>${esc(row.valid_from?localTime(row.valid_from):'未知')}</dd><dt>业务失效（不含）</dt><dd>${esc(row.valid_until?localTime(row.valid_until):'未设结束时间')}</dd><dt>时间来源</dt><dd>${esc(temporal.provenance(row))}</dd>${row.metadata?.published_at?`<dt>原文发布日期</dt><dd>${esc(localTime(row.metadata.published_at))}</dd>`:''}<dt>系统记录</dt><dd>${esc(localTime(row.recorded_at))}</dd></dl></section><details class="evidence-technical"><summary>Metadata / 属性 / 技术标识</summary><pre>${esc(JSON.stringify({id:row.id,type:row.type,source_id:row.source_id,ontology_id:row.ontology_id,metadata:row.metadata,properties:row.properties},null,2))}</pre></details>`;
-    host.querySelector('[data-action="edit"]').onclick=()=>editRecord(row);
+    host.querySelector('[data-action="edit"]').onclick=()=>{if(!readOnly&&accepts())editRecord(row);};
     const version=document.createElement('p');version.id='inspector-version';version.className='subtle';
     version.textContent=RecordVersionContext.revision(row)+' · 本体归属读取中…';
     host.querySelector('.evidence-identity h3').after(version);
@@ -100,17 +104,17 @@
       version.after(note);
     }
     api(endpoint('/ontologies'),undefined,'GET').then(result=>{
-      if(ticket===serial&&current===p&&stamp===JSON.stringify(scope())){
+      if(accepts()){
         version.textContent=RecordVersionContext.summary(row,RecordVersionContext.build(result.versions||[]));
         version.title='普通编辑只增加知识修订；本体归属由每次修订保存的本体发布标识确定。';
       }
     }).catch(()=>{
-      if(ticket===serial&&current===p)version.textContent=RecordVersionContext.summary(row,null);
+      if(accepts())version.textContent=RecordVersionContext.summary(row,null);
     });
     host.querySelector('[data-action="edit"]').textContent=row.kind==='relation'?'编辑这条关系':row.kind==='entity'?'编辑这个实体':'编辑';
     host.querySelector('[data-action="history"]').onclick=()=>historyFor(row);
-    host.querySelector('[data-action="add-relation"]')?.addEventListener('click',()=>window.RecordCreate?.open('relation',{subject:row}));
-    host.querySelector('[data-action="add-attribute"]')?.addEventListener('click',()=>window.RecordCreate?.open('attribute',{subject:row}));
+    host.querySelector('[data-action="add-relation"]')?.addEventListener('click',()=>{if(!readOnly&&accepts())window.RecordCreate?.open('relation',{subject:row});});
+    host.querySelector('[data-action="add-attribute"]')?.addEventListener('click',()=>{if(!readOnly&&accepts())window.RecordCreate?.open('attribute',{subject:row});});
     // D1「图谱 → 台账」：跳回台账并定位到这一行（记录可能分批加载，focusLedgerRecord 在取回数据后落地）。
     host.querySelector('[data-action="ledger"]')?.addEventListener('click',()=>window.focusLedgerRecord?.(row));
     if(row.kind==='entity'||row.kind==='relation'){
@@ -118,8 +122,9 @@
       remove.textContent=row.kind==='relation'?'删除这条关系':'删除实体及其关联关系';
       remove.title='软删除后可在「知识台账 → 可撤销的操作」里撤销';
       remove.onclick=async()=>{
+        if(readOnly){status('历史知识范围只读；切回当前系统版本后可维护。',true);return;}
         if(!window.Auth?.isAdmin?.()){status('只有管理员可以删除知识记录',true);return;}
-        if(ticket!==serial||p!==current||stamp!==JSON.stringify(scope())){status('项目或范围已变化，请重新选择记录',true);return;}
+        if(!accepts()){status('项目或范围已变化，请重新选择记录',true);return;}
         if(remove.dataset.confirm!=='true'){
           remove.dataset.confirm='true';remove.textContent='再次点击确认删除';
           remove.insertAdjacentHTML('afterend','<small class="delete-hint">这是可撤销的软删除；点击其他记录可取消。</small>');return;
@@ -127,20 +132,24 @@
         remove.disabled=true;
         try{
           const result=await api('/api/projects/'+encodeURIComponent(p)+'/delete',{record_id:row.id,expected_version:row.version});
-          if(ticket!==serial||p!==current||stamp!==JSON.stringify(scope()))return;
+          if(!accepts())return;
           status(`已软删除 ${result.deleted} 条记录；可在「知识台账 → 可撤销的操作」撤销。`);
           host.innerHTML='<p class="evidence-empty">该知识已软删除，正在刷新图谱…</p>';$('draw-graph').click();
         }catch(error){status(error.message,true);remove.disabled=false;}
       };
       host.querySelector('.evidence-danger').appendChild(remove);
     }
+    if(readOnly){
+      for(const button of host.querySelectorAll('[data-action="edit"],[data-action="add-relation"],[data-action="add-attribute"],.evidence-danger button')){button.disabled=true;button.title='历史知识范围只读；切回当前系统版本后可维护。';}
+      const note=document.createElement('p');note.className='subtle';note.textContent='历史知识范围 · 只读';host.querySelector('.evidence-identity').append(note);
+    }
     const mind=host.querySelector('[data-action="mindmap"]');if(mind)mind.onclick=()=>window.openEntityMindmap(row);
     try{
-      const result=await api(endpoint('/records/'+encodeURIComponent(row.id)+'/evidence'),scope());
-      if(ticket!==serial||current!==p||stamp!==JSON.stringify(scope())||!$('inspector-source-list'))return;
+      const result=await api(endpoint('/records/'+encodeURIComponent(row.id)+'/evidence'),applied);
+      if(!accepts()||!$('inspector-source-list'))return;
       $('inspector-source-list').innerHTML=result.documents.length?result.documents.map((doc,i)=>`<article class="source-evidence-card"><strong>${esc(doc.title)}</strong><small>来源修订 r${doc.version} · ${esc({exact:'精确证据位置',recovered_in_chunk:'历史切片内恢复定位',chunk:'仅保存切片级位置',offset:'记录偏移定位',passage:'证据文本匹配',text:'名称 / 内容匹配',unlocated:'历史来源无法定位'}[doc.mode])}</small><blockquote>${esc(doc.preview||'原文内容未保存')}</blockquote><button data-source-evidence="${i}">${doc.source_location?.document_version_id?'在原文中打开 ↗':doc.highlight?'查看原文并定位 ↗':'查看来源文档 ↗'}</button></article>`).join(''):`<p class="evidence-empty">${esc(result.message)}</p>`;
       host.querySelectorAll('[data-source-evidence]').forEach(b=>b.onclick=()=>openSource(result.documents[Number(b.dataset.sourceEvidence)],row.kind==='entity'?row.text:null));
-    }catch(e){if(ticket===serial&&current===p&&$('inspector-source-list'))$('inspector-source-list').textContent='来源读取失败：'+e.message;}
+    }catch(e){if(accepts()&&$('inspector-source-list'))$('inspector-source-list').textContent='来源读取失败：'+e.message;}
   };
   const change=$('project').onchange;
   $('project').onchange=()=>{serial++;if(sourceDialog.open)sourceDialog.close();change?.();};

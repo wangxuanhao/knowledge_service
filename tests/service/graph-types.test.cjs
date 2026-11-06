@@ -98,7 +98,9 @@ test('workspace gates graph rendering and invalidates requests when clearing',()
   assert.ok(workspace.includes('graphRequests.begin('));
   assert.ok(workspace.includes('graphRequests.isCurrent('));
   assert.ok(workspace.includes('graphRequests.release(ticket)'));
-  assert.ok(workspace.includes('!graphRequests.isBusy()'));
+  const auto=workspace.slice(workspace.indexOf('  function autoLoadGraph(){'),workspace.indexOf('  /* 兜底刷新：'));
+  assert.ok(auto.includes('graphView&&current&&graphContextReady'));
+  assert.ok(auto.includes('window.GraphOverview?.ensure()'),'automatic overview delegates request ownership to the coordinator');
   assert.ok(!workspace.includes('ui.busy'));
   const resetStart=workspace.indexOf('window.clearGraphWorkspace=');
   const clear=workspace.slice(resetStart,workspace.indexOf("act('search'",resetStart));

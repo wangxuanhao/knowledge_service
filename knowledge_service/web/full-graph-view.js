@@ -9,6 +9,7 @@
     stage.append(section);
     const scopeBanner=document.getElementById('graph-version-scope');if(scopeBanner)modes.before(scopeBanner);
     const host=section.querySelector('.full-graph-host'),status=section.querySelector('.full-graph-progress');
+    const emptyNotice=document.createElement('section');emptyNotice.className='full-graph-empty';emptyNotice.hidden=true;emptyNotice.setAttribute('aria-label','空图谱操作指引');emptyNotice.setAttribute('aria-live','polite');host.append(emptyNotice);
     const control=action=>section.querySelector('[data-fg="'+action+'"]');
     control('pause').textContent='本批后暂停';
     let renderer=null,loader=null,mode='local',fixed=null,loadedProject=null,run=0,lastProgress=null;
@@ -40,16 +41,20 @@
     }
     typeList.addEventListener('click',event=>{
       const button=event.target.closest('[data-fg-type]');if(!button||!renderer)return;
-      renderer.setTypeFilter(button.dataset.fgType);renderTypes();bindExplorer();
+      if(fixed?.entity_type&&button.dataset.fgType!==fixed.entity_type){message('当前已应用实体类型筛选不包含此类型；请先调整筛选。',true);return;}
+      renderer.setTypeFilter(button.dataset.fgType);refreshProjection();
     });
     const project=()=>document.getElementById('project')?.value||'';
-    const scope=()=>({...((window.WorkspaceContext?.read(project(),'search'))||(typeof window.scope==='function'?window.scope():{})),...(window.wb?.ontologyScope?.()||{})});
+    const scope=()=>window.GraphWorkspaceContext?.read().scope||({...((window.WorkspaceContext?.read(project(),'search'))||(typeof window.scope==='function'?window.scope():{})),...(window.wb?.ontologyScope?.()||{})});
     const counts=value=>' · 实体 '+value.entities.toLocaleString()+' / '+value.manifest.entity_count.toLocaleString()+' · 关系 '+value.relations.toLocaleString()+' / '+value.manifest.relation_count.toLocaleString();
-    const message=(text,error=false)=>{
-      if(lastProgress&&!text.includes(' · 实体 '))text+=(lastProgress.stage==='complete'?' · 已核对完整清单':' · 当前为局部图')+counts(lastProgress);
+    const message=(text,error=false,appendCounts=true)=>{
+      if(appendCounts&&lastProgress&&!text.includes(' · 实体 '))text+=(lastProgress.stage==='complete'?' · 已核对完整清单':' · 当前为局部图')+counts(lastProgress);
       status.textContent=text;status.title=text;status.classList.toggle('error',error);
     };
-    const select=record=>{bindExplorer(record);return window.openKnowledgeRecord?.({id:record.id,kind:record.kind||'entity',projectId:loadedProject,scope:fixed});};
+    const select=record=>{
+      if(loadedProject!==project())return null;bindExplorer(record);
+      return Promise.resolve(window.inspectKnowledgeRecord?.(record,{scope:fixed,qualify:record.kind==='entity'?'entity':'record'})).catch(error=>{if(error.name!=='AbortError')message(error.message,true);});
+    };
     function bindExplorer(selected){
       if(mode!=='full'||!window.GraphExplorer)return;
       const data=renderer?.displayDataset;
@@ -62,12 +67,9 @@
           setFocus:value=>renderer?.setExplorationFocus(value),select:row=>renderer?.locate(row.id),canCollapse:()=>false,
           expand:async id=>{
             const row=data?.records[data.nodeIndex.get(id)];if(!row)throw Error('当前显示图中没有该实体，请重新选择。');
-            // Canvas-only type filters must not silently reject the full graph's
-            // selected anchor when handing it to the scoped neighborhood query.
-            for(const key of ['type-scope','predicate-scope']){const input=document.getElementById(key);if(input)input.value='';}
             switchMode('local');
             const input=document.getElementById('graph-node');if(input)input.value=id;
-            const result=await window.drawGraph(id,document.getElementById('graph-hops')?.value||1);
+            const result=await window.drawGraph(id,document.getElementById('graph-hops')?.value||1,{scope:{...fixed,entity_type:renderer.typeFilter??fixed?.entity_type,predicate:renderer.predicateFilter??fixed?.predicate}});
             if(result){await window.selectEntityDetail?.(id);GraphExplorer.open();}
           }
         }});
@@ -80,6 +82,7 @@
       control('restart').disabled=!loader?.manifest;
     }
     const stop=()=>{run++;loader?.cancel();controls();};
+    const interrupt=()=>{if(loader?.state==='loading'||loader?.automatic)stop();};
     function switchMode(next){
       if(next==='full')window.suspendLocalGraphExplorer?.();
       mode=next;stage.dataset.graphMode=mode;section.hidden=mode!=='full';
@@ -88,26 +91,41 @@
       const pathTools=document.getElementById('graph-path-tools');
       if(pathTools){pathTools.hidden=mode==='full';document.querySelector('.search-graph-workspace .inspector-rail')?.classList.toggle('is-path-open',mode==='local'&&pathTools.open);}
       for(const button of modes.querySelectorAll('[data-fg-mode]'))button.setAttribute('aria-pressed',String(button.dataset.fgMode===mode));
-      if(mode==='local'){if(loader&&loader.state!=='complete'){stop();message('加载已取消，当前图不完整；可重新开始。');}if(window.GraphWorkbench?.reveal)window.GraphWorkbench.reveal();else window.wb?.chart?.resize();window.refreshLocalGraphExplorer?.();}else{renderer?.resize();bindExplorer();}
+      if(mode==='local'){
+        if(loader&&loader.state!=='complete'){stop();message('加载已取消，当前图不完整；可重新开始。');}
+        if(window.GraphWorkbench?.reveal)window.GraphWorkbench.reveal();else window.wb?.chart?.resize();window.refreshLocalGraphExplorer?.();
+        window.GraphWorkspaceLayout?.setState('partial',{message:'局部图谱 · '+(document.getElementById('graph-summary')?.textContent||'选择实体后展开邻域。')});
+      }else{
+        renderer?.resize();bindExplorer();
+        if(lastProgress){const complete=lastProgress.stage==='complete',time=window.TemporalScope?.describe(fixed||{})||'';
+          window.GraphWorkspaceLayout?.setState(complete?'complete':'partial',{message:(complete?'当前范围图谱已完整加载':'当前范围为局部概览')+counts(lastProgress)+(time?' · '+time:'')});}
+      }
     }
     modes.addEventListener('click',event=>{const button=event.target.closest('[data-fg-mode]');if(button)switchMode(button.dataset.fgMode);});
     function progress(value,epoch){
       if(epoch!==run)return;renderer?.setSessionManifest(value.manifest);controls();lastProgress=value;renderTypes();
       const label=value.stage==='complete'?'全量加载完成':value.stage==='cancelled'?'已取消，当前图不完整':value.stage==='error'?'加载中断，当前图不完整':value.pause_requested?'当前批完成后暂停':value.stage==='paused'&&!value.automatic?'已暂停，当前为局部图':value.phase==='entities'?'正在补齐实体（含孤立实体）':'正在加载关系与实体';
-      message(label+counts(value)+(value.stage==='paused'&&!value.automatic?' · 可点下一批或自动继续。':''));
+      const visible=renderer?.displayDataset;
+      message(label+counts(value)+(visible?` · 当前可见 ${visible.nodeCount} 实体 / ${visible.edgeCount} 关系`:'')+(value.stage==='paused'&&!value.automatic?' · 可点下一批或自动继续。':''));
       const explorer=window.GraphExplorer?.snapshot();if(explorer?.open||explorer?.focused)bindExplorer();
     }
-    async function start(){
-      stop();lastProgress=null;typePage=0;renderTypes(null,null);const epoch=run,selected=project();if(!selected){message('请先选择项目。',true);return;}
+    function refreshProjection(){if(lastProgress)progress(lastProgress,run);else renderTypes();bindExplorer();}
+    async function start(options={}){
+      if(!options.projectId&&window.GraphOverview?.ensure)return window.GraphOverview.ensure({retry:true});
+      emptyNotice.hidden=true;
+      stop();lastProgress=null;typePage=0;renderTypes(null,null);const epoch=run,selected=options.projectId||project();if(!selected){message('请先选择项目。',true);return;}
       try{
-        if(!renderer){renderer=new window.FullGraph.Renderer(host,{onSelect:select,onError:text=>message(text,true)});loader=new window.FullGraph.SessionLoader(renderer);}
+        if(!renderer)renderer=new window.FullGraph.Renderer(host,{onSelect:select,onError:text=>message(text,true)});
+        loader=new window.FullGraph.SessionLoader(renderer,{batchSize:options.batchSize||200});
         // begin() cancels the previous session synchronously before clearing its records.
         let acceptProgress=false;loader.onProgress=value=>{if(acceptProgress)progress(value,epoch);};
         renderer.showEdges=control('edges').checked!==false;
         renderer.showLabels=control('labels')?.checked!==false;
-        fixed=scope();loadedProject=selected;message('正在核对图谱范围与完整清单…');
-        const pending=loader.begin(selected,fixed);acceptProgress=true;controls();bindExplorer();await pending;bindExplorer();
-      }catch(error){if(error.name!=='AbortError'&&epoch===run)message(error.message+' 当前图不完整，请重新开始。',true);}
+        fixed=options.scope||scope();loadedProject=selected;switchMode('full');message('正在核对图谱范围与完整清单…');
+        const {entity_type,predicate,...authorityScope}=fixed;
+        const pending=loader.begin(selected,authorityScope);renderer.setTypeFilter(entity_type||null);renderer.setPredicateFilter(predicate||null);
+        acceptProgress=true;controls();bindExplorer();await pending;bindExplorer();return loader;
+      }catch(error){if(error.name!=='AbortError'&&epoch===run)message(error.message+' 当前图不完整，请重新开始。',true);throw error;}
       finally{if(epoch===run)controls();}
     }
     async function advance(automatic=false){
@@ -116,29 +134,30 @@
       catch(error){if(error.name!=='AbortError'&&epoch===run)message(error.message+' 当前图不完整，请重新开始。',true);}
       finally{if(epoch===run)controls();}
     }
-    function pause(){loader?.pause();controls();}
-    function cancel(){stop();message('加载已取消，当前图不完整；重新开始可核对新的完整清单。');}
+    function pause(){window.GraphOverview?.pause();loader?.pause();controls();}
+    function cancel(){if(window.GraphOverview?.cancel)window.GraphOverview.cancel();else stop();message('加载已取消，当前图不完整；重新开始可核对新的完整清单。');}
     function locate(){
       if(!renderer){message('请先加载首批图谱。',true);return;}
       const query=control('query').value.trim();if(!query)return;const data=renderer.displayDataset;
       const match=(data.nodeIndex.has(query)?query:null)||data.records.find(row=>row.text===query)?.id||data.records.find(row=>String(row.text).includes(query))?.id;
-      if(match&&renderer.locate(match)!==false){message('已定位实体；可在详情中查看编辑、来源和历史。');return;}
+      if(match&&renderer.focusRecord(data.records[data.nodeIndex.get(match)])){select(data.records[data.nodeIndex.get(match)]);message('已定位实体；可在详情中查看编辑、来源和历史。');return;}
       const edge=data.edges.find(row=>row.id===query);
-      if(edge&&renderer.locate(edge.subject_id)!==false){select(edge);message('已定位关系与起点，可在知识详情中维护。');return;}
+      if(edge&&renderer.focusRecord(edge)){select(edge);message('已定位关系及两端实体，可在知识详情中维护。');return;}
       message('当前显示图中没有可定位的匹配项；可切换全部类型、继续加载或使用全库检索。',true);
     }
     section.addEventListener('click',event=>{
       const action=event.target.closest('[data-fg]')?.dataset.fg;
-      if(action==='load'||action==='restart')start();if(action==='next')advance();if(action==='auto')advance(true);
+      if(action==='load'||action==='restart')start().catch(error=>message(error.message,true));if(action==='next')advance();if(action==='auto')advance(true);
       if(action==='pause')pause();if(action==='cancel')cancel();if(action==='reset')renderer?.reset();if(action==='locate')locate();
       if(action==='zoom-in')renderer?.zoom(1.25);if(action==='zoom-out')renderer?.zoom(1/1.25);
-      if(action==='all-types'){renderer?.setTypeFilter(null);renderTypes();bindExplorer();}
+      if(action==='all-types'){renderer?.setTypeFilter(fixed?.entity_type||null);refreshProjection();}
       if(action==='type-prev'&&typePage>0){typePage--;renderTypes();}if(action==='type-next'&&!control('type-next').disabled){typePage++;renderTypes();}
     });
     control('query').addEventListener('keydown',event=>{if(event.key==='Enter')locate();});
     control('edges').addEventListener('change',event=>{if(renderer){renderer.showEdges=event.target.checked;renderer.requestDraw();}});
     control('labels')?.addEventListener('change',event=>{if(renderer){renderer.showLabels=event.target.checked;renderer.requestDraw();}});
     const invalidate=()=>{
+      emptyNotice.hidden=true;
       stop();if(renderer)renderer.setDataset(new window.FullGraph.GraphDataset());
       if(loader)loader.manifest=null;fixed=null;loadedProject=null;lastProgress=null;typePage=0;renderTypes(null,null);controls();message('项目或范围已改变，请重新开始加载图谱。');
       bindExplorer();
@@ -151,7 +170,63 @@
     document.addEventListener('workspace:scope-changed',event=>{if(!event.detail?.page||event.detail.page==='search')invalidate();});
     document.addEventListener('version-context:changed',invalidate);
     window.addEventListener('beforeunload',()=>loader?.destroy(),{once:true});
-    window.FullGraphView={switchMode,load:start,restart:start,next:()=>advance(),resume:()=>advance(true),pause,cancel,get renderer(){return renderer;},get loader(){return loader;},get mode(){return mode;}};
+    function hasRecord(record,context){
+      const authority=value=>{const {entity_type,predicate,...body}=value||{};return JSON.stringify(Object.fromEntries(Object.entries(body).sort(([a],[b])=>a.localeCompare(b))));};
+      if(!renderer||loadedProject!==context.projectId||authority(fixed)!==authority(context.scope))return false;
+      const data=renderer.displayDataset,row=record.kind==='relation'?data.edges.find(edge=>edge.id===record.id):data.records[data.nodeIndex.get(record.id)];
+      if(!row||(record.version_id&&row.version_id!==record.version_id)||(!record.version_id&&record.version!=null&&row.version!==record.version))return false;
+      return true;
+    }
+    async function focusRecord(record,context,accepts=()=>true){
+      if(!hasRecord(record,context))return false;
+      switchMode('full');await window.GraphWorkspaceLayout?.settled();
+      if(!accepts()||!hasRecord(record,context))return false;
+      renderer.resize();return renderer.focusRecord(record);
+    }
+    function showEmptyGuidance(){
+      // Renderer construction replaces the host's canvas children once.
+      // Reattach this page-owned notice after that initialization.
+      if(emptyNotice.parentNode!==host)host.append(emptyNotice);
+      const guidance=window.GraphOverview?.emptyGuidance(fixed||{})||{message:'当前范围没有正式实体或关系。',actions:[]};
+      const card=document.createElement('div');card.className='full-graph-empty-card';
+      const text=document.createElement('p');text.textContent=guidance.message;card.append(text);
+      let candidateStatus;
+      if(guidance.filtered===false){candidateStatus=document.createElement('p');candidateStatus.className='full-graph-empty-candidates';candidateStatus.textContent='候选状态尚未核验，可前往候选核对查看。候选不属于正式图谱。';card.append(candidateStatus);}
+      const actions=document.createElement('div');actions.className='full-graph-controls full-graph-empty-actions';
+      for(const action of guidance.actions){
+        const button=document.createElement('button');button.type='button';button.dataset.graphEmptyAction=action.id;button.textContent=action.label;
+        button.onclick=()=>{
+          if(action.id==='adjust')document.getElementById('scope-toggle')?.click();
+          if(action.id==='reset'){
+            for(const id of ['type-scope','predicate-scope']){const input=document.getElementById(id);if(input)input.value='';}
+            if(window.wb?.versionContext?.ontologyScope!=='all')window.wb?.clearVersionContext?.();
+            document.getElementById('reset-scope')?.click();
+          }
+          if(action.id==='sources')window.KnowledgeTabs?.open('sources');
+          if(action.id==='jobs'){window.RuntimeView?.show('jobs',{load:false});window.KnowledgeTabs?.open('runtime');}
+          if(action.id==='candidates')window.KnowledgeTabs?.open('ontology-model');
+        };
+        actions.append(button);
+      }
+      card.append(actions);emptyNotice.replaceChildren(card);emptyNotice.hidden=false;
+      if(candidateStatus&&typeof api==='function'){
+        const epoch=run,selected=loadedProject,scopeKey=JSON.stringify(fixed);
+        api('/api/projects/'+encodeURIComponent(selected)+'/ontology-discovery',undefined,'GET',{signal:loader?.abort?.signal}).then(value=>{
+          if(epoch!==run||loadedProject!==selected||scopeKey!==JSON.stringify(fixed)||emptyNotice.hidden||mode!=='full'||document.getElementById('tab-search')?.classList.contains('hidden'))return;
+          const count=value.unpublished_candidate_count;if(!Number.isInteger(count)||count<0)return;
+          candidateStatus.textContent=count?'还有 '+count.toLocaleString()+' 条候选待审核或未通过校验；候选不属于正式图谱。':'当前没有未发布候选；候选通过核对并正式入图后才会显示。';
+        }).catch(()=>{});
+      }
+    }
+    function setOverviewState(kind,detail){
+      if(kind==='empty')showEmptyGuidance();else emptyNotice.hidden=true;
+      const visible=renderer?.displayDataset;
+      message(detail.message+(detail.totalEntities==null?'':` · 已加载实体 ${detail.loadedEntities} / ${detail.totalEntities} · 关系 ${detail.loadedRelations} / ${detail.totalRelations}`)+
+        (visible&&(renderer.typeFilter||renderer.predicateFilter)?` · 当前可见 ${visible.nodeCount} 实体 / ${visible.edgeCount} 关系`:''),kind==='error',false);
+    }
+    window.FullGraphView={switchMode,load:start,restart:start,next:()=>advance(),resume:()=>advance(true),pause,cancel,stop,interrupt,hasRecord,focusRecord,setOverviewState,invalidate,
+      get filters(){return {entity_type:renderer?.typeFilter??fixed?.entity_type??null,predicate:renderer?.predicateFilter??fixed?.predicate??null};},
+      get renderer(){return renderer;},get loader(){return loader;},get mode(){return mode;}};
     controls();renderTypes(null,null);
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();

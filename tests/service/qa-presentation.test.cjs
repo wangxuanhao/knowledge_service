@@ -100,10 +100,10 @@ test('search summary uses the same entity-to-type explanation as QA',()=>{
 
 test('search marks supplemental type hits while direct query hits retain their existing labels',()=>{
   const source=fs.readFileSync(path.resolve(__dirname,'../../knowledge_service/web/workspace.js'),'utf8');
-  const declaration=source.match(/  function renderHits\(result\)\{[\s\S]*?\n  \}/)?.[0];
+  const declaration=source.match(/  function renderHits\([^\n]*\)\{[\s\S]*?\n  \}/)?.[0];
   assert.ok(declaration);
   const hits={innerHTML:'',querySelectorAll:()=>[]};
-  const context={window:{},get:()=>hits,labelOf:value=>value,esc:value=>String(value)};
+  const context={window:{},get:()=>hits,labelOf:value=>value,esc:value=>String(value),scope:()=>({}),graphScope:()=>({entity_type:null,predicate:null})};
   vm.runInNewContext(declaration+';this.render=renderHits;',context);
   const rows=['entity','relation','chunk'].flatMap(kind=>[
     {kind,id:'direct-'+kind,subject_id:'root',text:'direct-'+kind,type:'平台',retrieval_channel:'milvus'},

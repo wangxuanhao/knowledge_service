@@ -4,22 +4,27 @@ const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
 const {createStore}=require('../../knowledge_service/web/workspace-context.js');
+const GraphTypeFilter=require('../../knowledge_service/web/graph-types.js');
 const source=fs.readFileSync(path.join(__dirname,'../../knowledge_service/web/workspace.js'),'utf8');
 function harness(reply){
   const store=createStore();store.edit('p','search',{known_at:'2025-01-01',filters:{field:'metadata.city',op:'eq',value:'杭州'}});store.apply('p','search');
   const selected={id:'selected',kind:'entity',text:'之前选择',type:'Thing'};
-  const elements=new Map(Object.entries({'graph-node':{value:'selected'},'graph-entity-choice':{value:'selected',options:[]},'mindmap-root':{value:'selected'},'graph-entity-filter':{value:''},'graph-choice-status':{textContent:''},'graph-choice-next':{disabled:false},'tab-search':{classList:{contains:()=>false}}}));
-  const requests=[],inspected=[];
+  const elements=new Map(Object.entries({'graph-node':{value:'selected'},'graph-entity-choice':{value:'selected',options:[]},'mindmap-root':{value:'selected'},'graph-entity-filter':{value:''},'graph-choice-status':{textContent:''},'graph-choice-next':{disabled:false},'type-scope':{value:''},'predicate-scope':{value:''},'tab-search':{classList:{contains:()=>false}}}));
+  const requests=[],inspected=[],focused=[];
   const context={window:{WorkspaceContext:{read:store.read,ticket:store.ticket,accepts:store.accepts}},current:'p',recordOpenEpoch:0,ontologyScope:()=>({ontology_scope:'all',ontology_ids:null}),ui:{options:[selected],pinned:new Map(),picker:{request:0,cursor:null,query:'',page:0}},
+    GraphTypeFilter,graphRequests:GraphTypeFilter.createGraphRequestGate(),AbortController,recordReadAbort:null,graphReadAbort:null,localBranches:null,localBranchScope:'',localSelectedType:'',localScopeOverride:null,localScopeOwner:'',localScopeCanvas:null,
+    GraphWorkbench:{focusRecord:row=>focused.push(row)},renderGraph:result=>{context.ui.graph=result;context.wb.nodes=new Map(result.nodes.map(row=>[row.id,row]));},renderDiscoveryHint:async()=>{},
     wb:{nodes:new Map()},status:()=>{},get:id=>elements.get(id),scope:()=>({known_at:'draft'}),endpoint:route=>'/api/projects/p'+route,choices:()=>{},kgTime:()=>()=>{},
     inspect:row=>inspected.push(row),api:async(url,body)=>{requests.push({url,body});return reply?await reply(url,body):{records:[{id:'deep-149999',kind:'entity',text:'深页实体'}],next_cursor:'next-page',total:150000};}};
   vm.createContext(context);
   const direct=source.slice(source.indexOf('  async function selectEntityDetail('),source.indexOf('  async function options('));
-  vm.runInContext(direct,context);
-  return {context,store,elements,requests,inspected};
+  vm.runInContext(source.slice(source.indexOf('  const graphScope='),source.indexOf('  window.GraphWorkspaceContext='))+direct+
+    source.slice(source.indexOf('  window.drawGraph=async('),source.indexOf('  window.clearGraphWorkspace=')),context);
+  return {context,store,elements,requests,inspected,focused};
 }
 test('search entity absent from loaded choices opens by a scoped exact ID lookup',async()=>{
-  const subject=harness((url,body)=>url.endsWith('/graph-neighborhood')?{records:[{id:'deep-149999',kind:'entity',text:'深页实体',class_parents:[]}]}:{records:[{id:'deep-149999',kind:'entity',text:'深页实体'}]});
+  const row={id:'deep-149999',kind:'entity',text:'深页实体',version_id:'deep-v1',attributes:[],class_parents:[],class_ontology_id:null};
+  const subject=harness(()=>({records:[row]}));
   const choice=subject.elements.get('graph-entity-choice');Object.defineProperty(choice,'value',{get:()=>'',set:()=>{}});
   await subject.context.window.selectEntityDetail('deep-149999');
   const request=subject.requests[0];
@@ -27,17 +32,27 @@ test('search entity absent from loaded choices opens by a scoped exact ID lookup
   assert.equal(request.body.known_at,'2025-01-01');
   assert.deepEqual(JSON.parse(JSON.stringify(request.body.filters)),{field:'metadata.city',op:'eq',value:'杭州'});
   assert.deepEqual(Array.from(request.body.record_ids),['deep-149999']);
+  assert.equal(request.body.limit,1);assert.equal(request.body.include_total,false);
+  assert.equal(Object.hasOwn(request.body,'query'),false,'exact navigation must not load a picker prefix');
+  assert.equal(subject.requests.length,2);const graph=subject.requests[1];assert.ok(graph.url.endsWith('/graph-neighborhood'));
+  assert.deepEqual(Array.from(graph.body.seeds),[row.id]);assert.equal(graph.body.hops,0);assert.equal(graph.body.max_nodes,1);
+  assert.equal(graph.body.known_at,request.body.known_at);assert.deepEqual(JSON.parse(JSON.stringify(graph.body.filters)),JSON.parse(JSON.stringify(request.body.filters)));
   assert.equal(subject.inspected[0].id,'deep-149999');
+  assert.equal(subject.focused[0].id,row.id);
 });
 
-test('an already rendered entity opens its existing detail without loading picker choices',async()=>{
-  const subject=harness();
-  const row={id:'rendered',kind:'entity',text:'已渲染实体'};
+test('an already rendered entity qualifies its version and focuses without rebuilding or loading picker choices',async()=>{
+  const row={id:'rendered',kind:'entity',text:'已渲染实体',version_id:'rendered-v1',attributes:[],class_parents:[],class_ontology_id:null};
+  const subject=harness(()=>({records:[row]}));
   subject.context.wb.nodes.set(row.id,row);
+  const graph=subject.context.ui.graph={nodes:[row],edges:[]},nodes=subject.context.wb.nodes;
   const choice=subject.elements.get('graph-entity-choice');Object.defineProperty(choice,'value',{get:()=>'',set:()=>{}});
   await subject.context.window.selectEntityDetail(row.id);
-  assert.equal(subject.requests.length,0);
-  assert.equal(subject.inspected[0],row);
+  assert.equal(subject.requests.length,1);assert.ok(subject.requests[0].url.endsWith('/records/page'));
+  assert.deepEqual(Array.from(subject.requests[0].body.record_ids),[row.id]);assert.equal(subject.requests[0].body.limit,1);
+  assert.equal(Object.hasOwn(subject.requests[0].body,'query'),false);
+  assert.equal(subject.context.ui.graph,graph);assert.equal(subject.context.wb.nodes,nodes);
+  assert.deepEqual(JSON.parse(JSON.stringify(subject.inspected[0])),row);assert.equal(subject.focused[0],subject.inspected[0]);
 });
 test('entity choices use bounded query pages and preserve the chosen graph seed',async()=>{
   const subject=harness();

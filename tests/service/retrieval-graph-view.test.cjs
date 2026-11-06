@@ -3,6 +3,9 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
+const fullGraph={};
+vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../knowledge_service/web/full-graph.js'),'utf8'),fullGraph);
+const focusRecord=fullGraph.FullGraph.Renderer.prototype.focusRecord;
 
 class Element {
   constructor(){this.hidden=false;this.disabled=false;this.dataset={};this.value='';this.textContent='';this.listeners={};this.attributes={};this.childNodes=[];this.style={setProperty(name,value){this[name]=value;}};this.classes=new Set();this.classList={toggle:(name,on)=>on?this.classes.add(name):this.classes.delete(name)};}
@@ -30,19 +33,22 @@ function harness({labels={}}={}){
   const section=new Element(),parts=new Map();
   for(const selector of ['.full-graph-host','.full-graph-progress','.full-graph-type-controls','.full-graph-type-summary','.full-graph-type-empty','.full-graph-type-heading','.full-graph-type-row','.full-graph-type-page','.full-graph-type-pagination',...['load','next','auto','pause','restart','cancel','reset','zoom-in','zoom-out','query','locate','edges','all-types','type-prev','type-next'].map(action=>'[data-fg="'+action+'"]')])parts.set(selector,new Element());
   section.children=parts;
-  let created=0,cancelled=0,resizeCount=0,resetCount=0,projectChanges=0,drawerCloses=0,loaded=[],actions=[];
+  let created=0,cancelled=0,resizeCount=0,resetCount=0,projectChanges=0,drawerCloses=0,loaded=[],actions=[],manifestRequest=null;
   class GraphDataset {
-    constructor(){this.nodeIndex=new Map();this.records=[];this.edges=[];this.types=new Map();}
-    add(records){for(const record of records){if(this.nodeIndex.has(record.id))continue;const index=this.records.length;this.nodeIndex.set(record.id,index);this.records.push(record);const type=String(record.type||'');if(!this.types.has(type))this.types.set(type,{nodes:[],edges:[]});this.types.get(type).nodes.push(index);}}
+    constructor(){this.nodeIndex=new Map();this.records=[];this.edges=[];this.types=new Map();this.positions=[];}
+    get nodeCount(){return this.records.length;}get edgeCount(){return this.edges.length;}
+    add(records){for(const record of records){if(this.nodeIndex.has(record.id))continue;const index=this.records.length;this.nodeIndex.set(record.id,index);this.records.push(record);this.positions.push(index*.2,index*.1);const type=String(record.type||'');if(!this.types.has(type))this.types.set(type,{nodes:[],edges:[]});this.types.get(type).nodes.push(index);}}
   }
   const initialData=()=>{const data=new GraphDataset();data.add([{id:'e1',text:'申请',type:'https://a.test/Type'},{id:'e2',text:'审批',type:'https://b.test/Type'}]);data.edges.push({id:'r1',kind:'relation',subject_id:'e1',object_id:'e2'});return data;};
   const located=[],selected=[],filters=[],colors=[];
   class Renderer {
-    constructor(host,options){this.setDataset(initialData());this.options=options;this.camera={scale:1};}
+    constructor(host,options){this.setDataset(initialData());this.options=options;this.camera={scale:1};this.width=800;this.height=500;}
     resize(){resizeCount++;}reset(){resetCount++;}zoom(factor){this.camera.scale*=factor;}
     locate(id){if(!this.displayDataset.nodeIndex.has(id))return false;located.push(id);return true;}
+    focusRecord(record){const accepted=focusRecord.call(this,record);if(accepted)located.push(record.id);return accepted;}
     setDataset(value){this.dataset=value;this.displayDataset=value;this.typeFilter=null;this.sessionManifest=null;}
     setTypeFilter(type){filters.push(type);this.typeFilter=type;this.refresh();}
+    setPredicateFilter(predicate){this.predicateFilter=predicate;this.refresh();}
     refresh(){if(this.typeFilter===null){this.displayDataset=this.dataset;return;}const data=new GraphDataset();data.add(this.dataset.records.filter(record=>String(record.type||'')===this.typeFilter));data.edges=this.dataset.edges.filter(edge=>data.nodeIndex.has(edge.subject_id)&&data.nodeIndex.has(edge.object_id));this.displayDataset=data;}
     setSessionManifest(value){this.sessionManifest=value;}requestDraw(){}
   }
@@ -50,7 +56,7 @@ function harness({labels={}}={}){
     constructor(renderer){this.renderer=renderer;this.state='idle';}
     cancel(){cancelled++;this.state='cancelled';this.notify();}
     notify(){if(!this.manifest)return;this.renderer.refresh();this.onProgress?.({stage:this.state,phase:'connected',manifest:this.manifest,entities:this.renderer.dataset.records.length,relations:this.renderer.dataset.edges.length,automatic:this.automatic});}
-    async begin(project,scope){this.cancel();this.manifest=null;this.renderer.setDataset(new GraphDataset());this.state='loading';loaded.push({project,scope});await (this.manifestRequest?.()||Promise.resolve());this.renderer.setDataset(initialData());this.manifest={entity_count:150001,relation_count:300000};this.state='paused';this.notify();}
+    async begin(project,scope){this.cancel();this.manifest=null;this.renderer.setDataset(new GraphDataset());this.state='loading';loaded.push({project,scope});await (manifestRequest?.()||Promise.resolve());const initial=initialData();this.renderer.dataset.add(initial.records);this.renderer.dataset.edges.push(...initial.edges);this.manifest={entity_count:150001,relation_count:300000};this.state='paused';this.notify();}
     async next(){actions.push('next');this.notify();}
     async resume(){actions.push('auto');this.automatic=true;this.state='loading';this.notify();}
     pause(){actions.push('pause');this.automatic=false;this.state='paused';this.notify();}
@@ -60,12 +66,12 @@ function harness({labels={}}={}){
   project.onchange=()=>{projectChanges++;};
   const events=new Map();
   const document={readyState:'complete',getElementById:id=>elements.get(id),createElement:()=>created++===0?modes:created===2?section:new Element(),querySelector:()=>rail,addEventListener:(name,fn)=>events.set(name,fn)};
-  const window={FullGraph:{Renderer,SessionLoader:Loader,GraphDataset},GraphAppearance:{colorFor:record=>{colors.push(record.type);return record.type==='https://a.test/Type'?'#123456':'#654321';}},WorkspaceDrawers:{active:{dialog:{id:'graph-settings-drawer'}},close(){drawerCloses++;}},WorkspaceContext:{read:()=>({known_at:'2026-10-01',filters:{field:'metadata.city',op:'eq',value:'杭州'}})},wb:{ontologyScope:()=>({ontology_scope:'ids',ontology_ids:['v3']})},openKnowledgeRecord:record=>selected.push(record),addEventListener(){}};
+  const window={FullGraph:{Renderer,SessionLoader:Loader,GraphDataset},GraphAppearance:{colorFor:record=>{colors.push(record.type);return record.type==='https://a.test/Type'?'#123456':'#654321';}},WorkspaceDrawers:{active:{dialog:{id:'graph-settings-drawer'}},close(){drawerCloses++;}},WorkspaceContext:{read:()=>({known_at:'2026-10-01',filters:{field:'metadata.city',op:'eq',value:'杭州'}})},wb:{ontologyScope:()=>({ontology_scope:'ids',ontology_ids:['v3']})},inspectKnowledgeRecord:(record,context)=>selected.push({...record,projectId:project.value,scope:context.scope}),addEventListener(){}};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../knowledge_service/web/full-graph-view.js'),'utf8'),{document,window,labelOf:type=>labels[type]});
   const click=action=>section.listeners.click({target:{closest:selector=>selector==='[data-fg]'?{dataset:{fg:action}}:null}});
   const typeButtons=()=>parts.get('.full-graph-type-controls').querySelectorAll('[data-fg-type]');
   const filter=type=>parts.get('.full-graph-type-controls').listeners.click({target:typeButtons().find(button=>button.dataset.fgType===type)});
-  return {view:window.FullGraphView,project,stage,heading,section,locals,pathTools,rail,buttons,parts,loaded,actions,located,selected,filters,colors,events,click,typeButtons,filter,get cancelled(){return cancelled;},get resizeCount(){return resizeCount;},get resetCount(){return resetCount;},get projectChanges(){return projectChanges;},get drawerCloses(){return drawerCloses;}};
+  return {view:window.FullGraphView,project,stage,heading,section,locals,pathTools,rail,buttons,parts,loaded,actions,located,selected,filters,colors,events,click,typeButtons,filter,setManifestRequest:request=>manifestRequest=request,get cancelled(){return cancelled;},get resizeCount(){return resizeCount;},get resetCount(){return resetCount;},get projectChanges(){return projectChanges;},get drawerCloses(){return drawerCloses;}};
 }
 
 test('full graph mode hides every local filter, budget and history control without clearing local settings',()=>{
@@ -94,10 +100,12 @@ test('full loading and selection retain the page-owned metadata, temporal and on
   assert.deepEqual(Array.from(subject.loaded[0].scope.ontology_ids),['v3']);
   subject.view.renderer.options.onSelect({id:'r1',kind:'relation'});
   assert.equal(subject.selected[0].projectId,'p');
-  assert.equal(subject.selected[0].scope,subject.loaded[0].scope);
+  assert.deepEqual(JSON.parse(JSON.stringify(subject.selected[0].scope)),JSON.parse(JSON.stringify(subject.loaded[0].scope)));
   subject.parts.get('[data-fg="query"]').value='r1';
   subject.parts.get('[data-fg="query"]').listeners.keydown({key:'Enter'});
-  assert.deepEqual(subject.located,['e1']);
+  assert.deepEqual(subject.located,['r1'],'relation location focuses the exact relation and both endpoints');
+  assert.equal(subject.view.renderer.selected,-1);assert.equal(subject.view.renderer.selectedEdge,0);
+  assert.ok(Number.isFinite(subject.view.renderer.camera.x)&&Number.isFinite(subject.view.renderer.camera.y));
   assert.equal(subject.selected.at(-1).id,'r1');
   assert.match(subject.parts.get('.full-graph-progress').textContent,/实体.*150,001/,'locating a record retains partial counts');
   subject.view.switchMode('local');assert.ok(subject.cancelled>0);
@@ -159,7 +167,7 @@ test('full graph owns loaded type counts with canonical labels, colors and stabl
   assert.equal(initial[1].style['--fg-type-color'],'#654321');assert.ok(subject.colors.includes(a)&&subject.colors.includes(b));
   assert.match(subject.parts.get('.full-graph-type-summary').textContent,/已加载/);
   assert.doesNotMatch(subject.parts.get('.full-graph-type-summary').textContent,/完整清单/);
-  subject.filter(a);assert.equal(subject.view.renderer.typeFilter,a);assert.deepEqual(subject.filters,[a]);
+  subject.filter(a);assert.equal(subject.view.renderer.typeFilter,a);assert.deepEqual(subject.filters,[null,a]);
   assert.equal(initial[0].attributes['aria-pressed'],'true');assert.equal(initial[1].attributes['aria-pressed'],'false');
   subject.view.renderer.dataset.add([{id:'e1',type:a},{id:'e3',text:'新申请',type:a},{id:'e4',text:'未知实体'}]);subject.view.loader.notify();
   const later=subject.typeButtons();assert.equal(later[0],initial[0],'batch counts preserve the existing focused category node');
@@ -167,7 +175,7 @@ test('full graph owns loaded type counts with canonical labels, colors and stabl
   assert.equal(later[2].dataset.fgType,'');assert.match(later[2].textContent,/未知类型/);
   assert.equal(subject.parts.get('[data-fg="all-types"]').textContent,'全部类型 · 4');
   assert.equal(subject.loaded.length,1);assert.deepEqual(subject.actions,[],'display filtering never advances the loading session');
-  subject.click('all-types');assert.equal(subject.view.renderer.typeFilter,null);assert.deepEqual(subject.filters,[a,null]);
+  subject.click('all-types');assert.equal(subject.view.renderer.typeFilter,null);assert.deepEqual(subject.filters,[null,a,null]);
   assert.equal(subject.parts.get('[data-fg="all-types"]').attributes['aria-pressed'],'true');
   subject.filter('');assert.equal(subject.view.renderer.typeFilter,'','unknown type must remain distinct from all types');
   subject.view.loader.state='complete';subject.view.loader.notify();assert.match(subject.parts.get('.full-graph-type-summary').textContent,/完整清单/);
@@ -198,7 +206,7 @@ test('the first full-graph type page reads at most its forty visible categories 
 
 test('restart keeps old categories and totals cleared while the new manifest is pending',async()=>{
   const subject=harness();await subject.view.load();subject.filter('https://a.test/Type');let release;
-  subject.view.loader.manifestRequest=()=>new Promise(resolve=>{release=resolve;});
+  subject.setManifestRequest(()=>new Promise(resolve=>{release=resolve;}));
   const pending=subject.view.restart();
   try{
     assert.equal(subject.view.renderer.dataset.records.length,0);assert.equal(subject.view.renderer.sessionManifest,null);
@@ -212,8 +220,8 @@ test('restart keeps old categories and totals cleared while the new manifest is 
 
 test('a failed restart manifest cannot restore old categories or append old session totals to its error',async()=>{
   const subject=harness();await subject.view.load();subject.filter('https://b.test/Type');let reject;
-  subject.view.loader.manifestRequest=()=>new Promise((resolve,fail)=>{reject=fail;});
-  const pending=subject.view.restart();reject(new Error('清单读取失败'));await pending;
+  subject.setManifestRequest(()=>new Promise((resolve,fail)=>{reject=fail;}));
+  const pending=subject.view.restart(),rejected=assert.rejects(pending,/清单读取失败/);reject(new Error('清单读取失败'));await rejected;
   assert.equal(subject.typeButtons().length,0);assert.equal(subject.view.renderer.sessionManifest,null);
   assert.equal(subject.parts.get('.full-graph-type-summary').textContent,'');
   assert.equal(subject.parts.get('[data-fg="all-types"]').textContent,'全部类型 · 0');
@@ -226,8 +234,8 @@ test('full graph locate searches the filtered view and never reports a rejected 
   for(const value of ['e2','审批','r1']){query.value=value;subject.click('locate');assert.doesNotMatch(status.textContent,/已定位/);}
   assert.deepEqual(subject.located,[]);assert.deepEqual(subject.selected,[]);
   query.value='申请';subject.click('locate');assert.deepEqual(subject.located,['e1']);assert.match(status.textContent,/已定位实体/);
-  subject.view.renderer.locate=()=>false;subject.click('locate');assert.doesNotMatch(status.textContent,/已定位/);
-  subject.click('all-types');query.value='r1';subject.click('locate');assert.deepEqual(subject.selected,[],'a failed edge endpoint locate must not claim a relation was located');
+  const selectedCount=subject.selected.length;subject.view.renderer.focusRecord=()=>false;subject.click('locate');assert.doesNotMatch(status.textContent,/已定位/);
+  subject.click('all-types');query.value='r1';subject.click('locate');assert.equal(subject.selected.length,selectedCount,'a failed relation focus must not inspect or claim it was located');
 });
 
 test('full graph pause and cancel retain type selection while restart and scope changes reset it',async()=>{

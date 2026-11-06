@@ -39,7 +39,7 @@ test('only bounded small graphs add degree-based node hierarchy',()=>{
   const edges=nodes.slice(1).map(node=>({subject_id:'n0',object_id:node.id}));
   const sizes=subject.sizesFor(nodes,edges);
   assert.ok(sizes.get('n0')>sizes.get('n1'),'the central entity stands out');
-  assert.ok([...sizes.values()].every(size=>size>=5&&size<=10),'use the reference small-dot size range');
+  assert.ok([...sizes.values()].every(size=>size>=14&&size<=22),'small graph entities need a readable interactive diameter');
   assert.equal(subject.sizesFor(Array.from({length:201},(_,i)=>({id:i})),[]),null,'large progressive graphs skip degree decoration');
 });
 
