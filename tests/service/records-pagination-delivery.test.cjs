@@ -66,6 +66,8 @@ test('ledger attribute labels keep shared formatting while attribute values rema
   await get('load-records').onclick();
   await created.find(node=>node.dataset.ledgerView==='attribute').onclick();
   const excerpt=get('tbody').children.at(-1).children[0].children[0];
-  assert.equal(excerpt.innerHTML,'<b>金额 <span class="subtle">amount</span></b> = &lt;svg onload=alert(1)&gt;');
-  assert.doesNotMatch(excerpt.innerHTML,/<svg\b/);
+  assert.equal(excerpt.children[0].tagName,'b');
+  assert.equal(excerpt.children[0].innerHTML,'金额 <span class="subtle">amount</span>');
+  assert.equal(excerpt.children[1].tagName,'#text');
+  assert.equal(excerpt.children[1].textContent,' = <svg onload=alert(1)>');
 });

@@ -34,7 +34,9 @@ function fixture(options={}){
     if(!nodes.has(id)){const node=new Element();node.id=id;}return nodes.get(id);
   };
   const nav=get('nav-records');
-  const document={createElement:tag=>new Element(tag),querySelector:selector=>selector==='[data-tab="records"]'?nav:null,
+  const document={createElement:tag=>new Element(tag),
+    createTextNode:text=>{const node=new Element('#text');node.textContent=text;return node;},
+    querySelector:selector=>selector==='[data-tab="records"]'?nav:null,
     addEventListener(name,fn){(events[name]??=[]).push(fn);},querySelectorAll:()=>[]};
   const rows=options.rows||[{id:'first',kind:'entity',text:'张三',type:'Employee',version:1,metadata:{},ontology_id:'published'}];
   const context=vm.createContext({window:{RecordCreate:create,Auth:{isAdmin:()=>true},TaskReview:{open(){context.reviewOpened=true;}}},document,

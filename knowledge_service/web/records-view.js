@@ -370,6 +370,27 @@
         :text==='迁移状态未检查'?'点击台账上方“检查本体归属”读取服务端迁移计划。':'迁移计划不可用或没有覆盖这条知识，不能推断迁移状态。';
     return badge;
   }
+  function appendExcerpt(cell,excerpt,fullText=excerpt.textContent){
+    const detail=node('details','record-fulltext');detail.hidden=true;
+    detail.append(node('summary',null,'查看全文'),node('div','record-fulltext-content',fullText));
+    cell.append(excerpt,detail);
+  }
+  function syncExcerptVisibility(){
+    const details=[...host.querySelectorAll('.record-fulltext')]
+      .filter(detail=>detail.previousElementSibling.getClientRects().length);
+    details.forEach(detail=>detail.previousElementSibling.classList.add('has-fulltext'));
+    const overflowing=details.map(detail=>{
+      const excerpt=detail.previousElementSibling;
+      return excerpt.scrollHeight>excerpt.clientHeight+1;
+    });
+    details.forEach((detail,index)=>{
+      detail.hidden=!overflowing[index];
+      detail.previousElementSibling.classList.toggle('has-fulltext',overflowing[index]);
+    });
+  }
+  // Recheck actual wrapping after container resizing or stylesheet/font layout changes.
+  const excerptObserver=window.ResizeObserver?new window.ResizeObserver(syncExcerptVisibility):null;
+  excerptObserver?.observe(host);
   function cells(row){
     const ownershipCell=()=>{const cell=node('td');const label=node('b',null,ownership(row));label.title=ownershipDetail(row);cell.append(label);return cell;};
     const supportCell=()=>{const cell=node('td'),summary=supportBreakdown(row);
@@ -387,11 +408,14 @@
         node('small',null,row.recorded_at?new Date(row.recorded_at).toLocaleString():'—'));
       const migration=migrationBadge(row,release);if(migration)cell.append(migration);return cell;};
     if(view==='chunk'){
-      const text=node('td');const excerpt=node('div','record-excerpt',String(row.text||'').slice(0,200));
+      const text=node('td');const excerpt=node('div','record-excerpt',String(row.text||''));
+      appendExcerpt(text,excerpt);
       const detail=document.createElement('details');detail.innerText='';detail.append(node('summary',null,'编号与有效期'),node('small',null,`${row.id}\n${row.valid_from||'未知'} → ${row.valid_until||'未知'}`));
-      text.append(excerpt,detail);
+      text.append(detail);
       const source=node('td');const sourceRow=wb.records.get(row.source_id)||rows.find(item=>item.id===row.source_id);
-      source.append(node('b',null,sourceRow?(sourceRow.metadata?.title||sourceRow.text||row.source_id):(row.source_id||'—')));
+      const sourceText=node('div','record-excerpt');
+      sourceText.append(node('b',null,sourceRow?(sourceRow.metadata?.title||sourceRow.text||row.source_id):(row.source_id||'—')));
+      appendExcerpt(source,sourceText);
       return [text,source,versionCell(),supportCell()];
     }
     /* 属性视角：一条属性记录 = 某个实体 + 属性名 + 值 + 数据类型（不是实体、也不是关系）。
@@ -400,26 +424,31 @@
       const first=node('td');
       const shown=row.value===undefined?'':(typeof row.value==='string'?row.value:JSON.stringify(row.value));
       const excerpt=node('div','record-excerpt');
-      excerpt.innerHTML=`<b>${typeHint(row.type)||esc(row.type||'（未命名属性）')}</b> = ${esc(String(shown).slice(0,160))}`;
+      const label=node('b');label.innerHTML=typeHint(row.type)||esc(row.type||'（未命名属性）');
+      excerpt.append(label,document.createTextNode(' = '+shown));
+      appendExcerpt(first,excerpt,String(shown));
       const detail=document.createElement('details');
       detail.append(node('summary',null,'编号、数据类型与有效期'),
         node('small',null,`${row.id}\n数据类型 ${row.datatype||'—'} · ${row.valid_from||'未知'} → ${row.valid_until||'未知'}`));
-      first.append(excerpt,detail);
+      first.append(detail);
       const badge=pendingBadge(row);if(badge)first.append(badge);
       const subject=node('td');
-      subject.append(node('b',null,nameOf(row.subject_id)),node('small',null,'所属实体'));
+      const subjectText=node('div','record-excerpt');subjectText.append(node('b',null,nameOf(row.subject_id)));
+      appendExcerpt(subject,subjectText);subject.append(node('small',null,'所属实体'));
       return [first,subject,ownershipCell(),versionCell(),supportCell()];
     }
     const first=node('td');
     if(view==='relation'){
       const excerpt=node('div','record-excerpt');
       excerpt.innerHTML=`<b>${esc(nameOf(row.subject_id))}</b> —[${typeHint(row.type)}]→ <b>${esc(nameOf(row.object_id))}</b>`;
+      appendExcerpt(first,excerpt);
       const detail=document.createElement('details');detail.append(node('summary',null,'原文上下文'),node('small',null,String(row.text||'')));
-      first.append(excerpt,detail);
+      first.append(detail);
     }else{
-      const excerpt=node('div','record-excerpt',String(row.text||'').slice(0,160));
+      const excerpt=node('div','record-excerpt',String(row.text||''));
+      appendExcerpt(first,excerpt);
       const detail=document.createElement('details');detail.append(node('summary',null,'编号与有效期'),node('small',null,`${row.id}\n${row.valid_from||'未知'} → ${row.valid_until||'未知'}`));
-      first.append(excerpt,detail);
+      first.append(detail);
     }
     const badge=pendingBadge(row);if(badge)first.append(badge);
     const typeCell=node('td'),typeLabel=node('small');
@@ -446,6 +475,7 @@
           const actions=node('td');actions.append(actionsCell(row,index));tr.append(actions);
           body.append(tr);
         });
+    syncExcerptVisibility();
     host.querySelectorAll('[data-edit-row]').forEach(b=>b.onclick=()=>editRecord(visible[Number(b.dataset.editRow)]));
     host.querySelectorAll('[data-history-row]').forEach(b=>b.onclick=()=>historyFor(visible[Number(b.dataset.historyRow)]));
     $('records-prev').disabled=loading||page===0;$('records-next').disabled=loading||!state.next_cursor;

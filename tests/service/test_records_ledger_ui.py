@@ -300,6 +300,47 @@ def select_view(page, kind):
     page.wait_for_function("() => document.getElementById('records').getAttribute('aria-busy')==='false'")
 
 
+@pytest.mark.parametrize('kind,short', [('entity', True), ('entity', False),
+                                       ('attribute', False), ('chunk', False)])
+def test_long_ledger_content_can_be_expanded_in_full_as_literal_text(page, kind, short):
+    page.add_style_tag(path=str(WEB / 'records-view.css'))
+    page.set_viewport_size({'width': 1280, 'height': 1000})
+    text = '排版对齐与知识阅读。' * 6 if short else (
+        '很长的知识内容，用于核对列表折叠后仍能查看全部文字。' * 18
+        + '<img src=x onerror="window.ledgerHtmlExecuted=true">全文最后一句')
+    page.evaluate("""({kind, text}) => {
+      const original = window.fetch;
+      window.fetch = async (input, options) => {
+        const response = await original(input, options);
+        if (!String(input).endsWith('/records/page')) return response;
+        const data = await response.json();
+        data.records = data.records.map(row => row.kind !== kind ? row : {
+          ...row, text, ...(kind === 'attribute' ? {value: text} : {})
+        });
+        return new Response(JSON.stringify(data), {status: 200,
+          headers: {'Content-Type': 'application/json'}});
+      };
+    }""", {'kind': kind, 'text': text})
+    if kind == 'entity':
+        page.click('#load-records')
+    else:
+        select_view(page, kind)
+    page.wait_for_function("() => document.getElementById('records').getAttribute('aria-busy')==='false'")
+    cell = page.locator('.record-library tbody tr').first.locator('td').first
+    fulltext = cell.locator('details.record-fulltext')
+    assert fulltext.count() == 1, '长内容必须有查看全文入口'
+    assert not fulltext.locator('.record-fulltext-content').is_visible()
+    fulltext.locator('summary').click()
+    assert fulltext.locator('.record-fulltext-content').inner_text() == text
+    assert fulltext.locator('.record-fulltext-content').is_visible()
+    assert cell.locator('img').count() == 0
+    assert not page.evaluate('Boolean(window.ledgerHtmlExecuted)')
+    if short:
+        fulltext.locator('summary').click()
+        page.set_viewport_size({'width': 2560, 'height': 1000})
+        fulltext.wait_for(state='hidden')
+
+
 def test_ledger_speaks_its_scope_and_names_the_other_pages(page):
     """一句话边界：这里管具体的东西；改分类、审结构都去「本体建模层」。"""
     intro = page.inner_text('.ledger-intro')
