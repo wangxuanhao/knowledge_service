@@ -48,8 +48,8 @@
 - [x] Root runs full native `node --test tests/service/*.test.cjs`; counts from actual output. Serialize new browser module plus existing overview/layout, relevant graph/search/entity/scope portions of retrieval flow, unified scope/path, version/temporal and click-target checks. Run existing neighborhood-hop/session backend guards and the real-PG performance module in the sole pytest process; do not run an unrelated whole backend suite.
 - [x] Adapt only obsolete UI expectations; retain exact IDs, history/scope, stale-response, no-unrequested-read and no-rebuild guards. Recheck modified shared fixture behavior, not only failures.
 - [x] Inspect desktop/narrow/fullscreen screenshots and the actual service assets/health. Verify candidate source hashes, preservation of ledger changes and previous hit-target/label work, cache URLs, no dependencies/prototype data/secrets in the commit, and `git diff --check`.
-- [ ] Final integrated review after functional and performance evidence. Update spec/plan with truthful measured results, commit only this feature/docs/tests, then integrate to local master within the user's standing local integration authorization. No remote push or unrelated worktree cleanup. Handle actual concurrent branch movement without discarding work; verify the resulting source tree and meaningful post-integration checks.
-- [ ] Report concise Chinese result, actual commit/service URL, measurements with context, and any material limits. Do not claim zero functional risk or production-wide FPS from a synthetic benchmark.
+- [x] Final integrated review after functional and performance evidence. Update spec/plan with truthful measured results, commit only this feature/docs/tests, then integrate to local master within the user's standing local integration authorization. No remote push or unrelated worktree cleanup. Handle actual concurrent branch movement without discarding work; verify the resulting source tree and meaningful post-integration checks.
+- [x] Prepare concise Chinese handoff with actual commit/service URL, measurements with context, and material limits. Performance wording follows the measured scope.
 
 ## 验收记录（2026-11-09）
 
@@ -87,4 +87,6 @@
 
 检索只发检索请求，修改跳数不读取邻域，普通选择只读取详情。一次局部入口包含一次精确资格读取、一次邻域读取及原有时间线/候选/详情辅助读取，全局session读取为0。缓存全局定位的session读取为0，大图未缓存入口只创建一个session并读取一页200条。原始证据在`frontend-before-recheck.json`、`frontend-after-recheck.json`及此前各轮JSON，均位于同一忽略的基准目录。
 
-上述PG测试使用本机合成项目，前端测试使用合成传输及实际渲染器。实际业务库规模、网络、模型与索引耗时需按各自链路评估。当前生产资源与冻结候选的哈希一致，最终提交及本地master集成待执行。
+上述PG测试使用本机合成项目，前端测试使用合成传输及实际渲染器。实际业务库规模、网络、模型与索引耗时需按各自链路评估。
+
+2026-11-09功能提交`df33521`已从`feat/search-local-neighborhood-20261106`快进合并到本地`master`。合并后再次运行完整Node契约得到 **964 passed、0 failed、0 skipped**，服务`http://127.0.0.1:8100/`健康检查200。7个HTTP静态资源逐字节匹配工作区，137个冻结前端文件在归一Git换行后匹配，台账、点击目标和标签相关资源保留。最终检查工作区与合并分支的产品代码一致，验收记录在本地基准目录的`native-master-20261109.log`与`master-live-20261109.json`。
