@@ -10,6 +10,18 @@ const relation=(id,from,to)=>({id,subject_id:from,object_id:to,kind:'relation'})
 const graph=(ids,edges=[],metadata={})=>({...metadata,nodes:ids.map(entity),edges});
 const ids=rows=>rows.map(row=>row.id);
 
+test('refresh intent preserves base and branch request settings independently of selection',()=>{
+  const session=new model.BranchSession();
+  session.reset(graph(['a','b'],[],{neighborhood:{seeds:['a'],hops:3,direction:'forward'}}),'a','s');
+  session.expand('b',graph(['b','c'],[relation('bc','b','c')],{neighborhood:{seeds:['b'],hops:2,direction:'backward'}}),'s');
+  assert.deepEqual(session.refreshPlan(),[
+    {seed:'a',seeds:['a'],hops:3,direction:'forward'},
+    {seed:'b',seeds:['b'],hops:2,direction:'backward'},
+  ]);
+  session.reset(graph([],[],{neighborhood:{seeds:['a'],hops:3,direction:'forward'}}),'a','s');
+  assert.equal(session.refreshPlan()[0].seed,'a','undo can reuse the original intent after deleting the seed');
+});
+
 test('UMD exposes the same constructors in browser and CommonJS',()=>{
   assert.equal(typeof model.NeighborIndex,'function');
   assert.equal(typeof model.BranchSession,'function');

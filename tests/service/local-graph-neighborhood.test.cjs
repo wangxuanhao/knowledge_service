@@ -18,7 +18,7 @@ function workspace({reply,seed='a'}={}){
   vm.createContext(context);
   // The extracted graph methods retain the same owned request/scope state as
   // the page; initialization lives above this bounded method slice.
-  const ownedState=source.match(/^  let ontologyLoadGeneration=.*$/m)[0];
+  const ownedState=source.match(/^  let ontologyLoadGeneration=.*$/m)[0]+'\n'+source.match(/^  let changedGraph=.*$/m)[0];
   vm.runInContext(ownedState+'\n'+source.slice(source.indexOf('  const graphScope='),source.indexOf('  window.clearGraphWorkspace=')),context);
   return {context,store,requests,rendered,elements,draw:context.window.drawGraph};
 }

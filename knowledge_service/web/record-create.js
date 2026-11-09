@@ -58,7 +58,7 @@
     if(!record.text)throw Error(kind==='entity'?'请填写实体名称':'请填写关系显示文本');
     return record;
   }
-  function createSession({project,request,accepts=()=>true,canWrite=()=>false,scope={}}){
+  function createSession({project,request,accepts=()=>true,canWrite=()=>false,scope={},notify=detail=>root.KnowledgeChanges?.notify(detail)}){
     const base='/api/projects/'+encodeURIComponent(project),fixedScope=clone(scope);let publication=null;
     function assertCurrent(){if(!project||!accepts())throw Error('项目或查询范围已变化，请重新打开表单');}
     async function read(suffix,body){assertCurrent();const result=await request(base+suffix,body,body===undefined?'GET':'POST');assertCurrent();return result;}
@@ -78,11 +78,14 @@
       },
       async submit(record){
         assertCurrent();if(!canWrite())throw Error('只有管理员可以创建知识记录');
+        if(fixedScope.known_at)throw Error('历史知识范围只读，请切回当前版本后维护');
         if(!publication||record.ontology_id!==publication.id)throw Error('请选择已读取的本体发布');
         const latest=await read('/ontology');
         if(latest.id!==publication.id)throw Error('本体已更新，请重新打开表单使用最新发布');
         if(!canWrite())throw Error('只有管理员可以创建知识记录');
-        return read('/records',{records:[record]});
+        const result=await request(base+'/records',{records:[record]},'POST');
+        const refreshFailed=await notify({projectId:project,records:result.records||[],kind:'create'});
+        assertCurrent();return {...result,refresh_failed:Boolean(refreshFailed)};
       },
     };
   }
@@ -145,6 +148,7 @@
     const trigger=root.document.activeElement;
     opened?.close();const serial=++openSerial,context=root.WorkspaceContext,page=context?.page||'records';
     const currentScope=()=>context?context.read(project,page):(typeof scope==='function'?scope():{});
+    if(currentScope().known_at){if(typeof status==='function')status('历史知识范围只读，请切回当前版本后维护。',true);return;}
     const ticket=context?.ticket(project,page),stamp=JSON.stringify(currentScope());
     const accepts=()=>serial===openSerial&&current===project&&JSON.stringify(currentScope())===stamp&&(!ticket||context.accepts(ticket,project,page));
     const session=createSession({project,scope:currentScope(),accepts,canWrite:writer,request:(...args)=>api(...args)});
@@ -205,7 +209,7 @@
             subject_id:pickers[0]?.value?.id,object_id:pickers[1]?.value?.id,mode:mode?.value,value:value?.value,
             valid_from:from.value,valid_until:until.value},publication);
           const result=await session.submit(record);if(!accepts())return;
-          submitted=true;message.textContent='已创建正式记录，旧记录与修订历史保留。';
+          submitted=true;message.textContent='已创建正式记录，旧记录与修订历史保留。'+(result.refresh_failed?' 部分视图刷新失败，请重试刷新。':'');
           root.document.dispatchEvent(new CustomEvent('records:created',{detail:{projectId:project,records:result.records||[]}}));
           actions.append(button('在台账查看',()=>{const row=result.records?.[0];close();if(row)root.focusLedgerRecord?.(row);}));
           if(typeof status==='function')status('已创建'+({entity:'实体',relation:'关系',attribute:'属性'}[kind]));

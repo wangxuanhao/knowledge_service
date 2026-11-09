@@ -10,6 +10,28 @@ const publication={id:'published-7',summary:{classes:[{id:'Employee',label_zh:'�
   attributes:[{id:'age',domain:['Employee'],range:[xsd+'integer']},{id:'active',range:[xsd+'boolean']},
     {id:'salary',range:[xsd+'decimal']}]}};
 
+test('a committed creation notifies its originating project even after its form becomes stale',async()=>{
+  let current=true;const notices=[];
+  const session=create.createSession({project:'p',accepts:()=>current,canWrite:()=>true,
+    notify:async detail=>{notices.push(detail);return false;},request:async(url)=>{
+      if(url.endsWith('/ontology'))return publication;
+      current=false;return {records:[{id:'new'}]};
+    }});
+  await session.loadPublication();
+  await assert.rejects(session.submit({kind:'entity',ontology_id:publication.id}),/范围.*变化/);
+  assert.equal(notices.length,1);assert.equal(notices[0].projectId,'p');
+  assert.equal(notices[0].records[0].id,'new');
+});
+
+test('historical creation is rejected before any formal write',async()=>{
+  let writes=0;
+  const session=create.createSession({project:'p',scope:{known_at:'2026-01-01'},canWrite:()=>true,
+    request:async url=>{if(url.endsWith('/records'))writes++;return publication;}});
+  await session.loadPublication();
+  await assert.rejects(session.submit({ontology_id:publication.id}),/历史.*只读/);
+  assert.equal(writes,0);
+});
+
 test('creation catalog preserves multiple or unconstrained endpoints and requires a published identity',()=>{
   assert.equal(typeof create.catalog,'function');
   const catalog=create.catalog(publication);

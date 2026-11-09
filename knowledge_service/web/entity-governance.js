@@ -105,7 +105,8 @@
       expected = selection.expected_versions;
     }
     assertProject(p);
-    await api(base + '/resolution-reviews/' + encodeURIComponent(review.id), reviewDecisionPayload(review,decision,reason,expected,selection));
+    const result=await api(base + '/resolution-reviews/' + encodeURIComponent(review.id), reviewDecisionPayload(review,decision,reason,expected,selection));
+    if(decision==='merged')await window.KnowledgeChanges?.notify({projectId:p,records:result.merge?.records||[],kind:'merge'});
     assertProject(p); return true;
   }
   async function refresh() {

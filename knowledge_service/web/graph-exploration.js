@@ -208,6 +208,12 @@
       return this.graph();
     }
 
+    refreshPlan(){
+      return [{seed:this.seed,...this._base.neighborhood},
+        ...[...this._branches].map(([seed,graph])=>({seed,...graph.neighborhood}))]
+        .map(({truncated,...value})=>({...value,seeds:[...(value.seeds||[value.seed])]}));
+    }
+
     // Solve visibility from the fixed base on every merge. A detached cycle has
     // no starting anchor and therefore cannot keep itself alive.
     _merge(replacementSeed,replacementGraph,replaceBase=false){
@@ -285,7 +291,7 @@
         selected.edges.set(edge.id,edge);
       }
       const bounded={...(replaceBase?graph:{}),nodes:[...selected.nodes.values()],edges:[...selected.edges.values()],truncated};
-      if(replaceBase&&jsonMap(graph.neighborhood))bounded.neighborhood={...graph.neighborhood,truncated};
+      if(jsonMap(graph.neighborhood))bounded.neighborhood={...graph.neighborhood,truncated};
       if(Array.isArray(graph.records))bounded.records=[...bounded.nodes,...bounded.edges];
       for(const key of presentationMaps){if(owns(graph,key)&&jsonMap(graph[key]))bounded[key]=graph[key];}
       if(owns(graph,'attribute_count'))bounded.attribute_count=graph.attribute_count;

@@ -37,13 +37,13 @@
       }
       return loader;
     }
-    async function open(context,{accepts=()=>true,target,qualify}={}){
+    async function open(context,{accepts=()=>true,target,qualify,preserveView=false}={}){
       // The lease belongs to the live owner; the session reads the frozen
       // originating scope. A page reentry must not replace it with owner scope.
       const lease=explicit(),owned=entry;
       const active=()=>lease.accepts()&&accepts();
       owned.pending=(async()=>{
-        const loader=await view.load({projectId:context.projectId,scope:clone(context.scope),batchSize:200,transactional:true,accepts:active,target,
+        const loader=await view.load({projectId:context.projectId,scope:clone(context.scope),batchSize:200,transactional:true,accepts:active,target,preserveView,
           prepare:async loader=>{
             if(!await finishBounded(loader,active,owned)||!active())return null;
             if(qualify)await qualify(loader);

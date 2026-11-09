@@ -263,3 +263,110 @@ def test_keyboard_result_activation_moves_focus_into_visible_detail_panel(redesi
       return panel.contains(focused) && !!focused.getClientRects().length && !focused.closest('[hidden]');
     }'''), 'activating a result must not leave keyboard focus in its hidden result tab'
     assert errors == []
+
+
+@pytest.mark.parametrize('width', [320, 390, 768, 1440])
+def test_search_mode_keeps_full_label_and_native_arrow_space(redesign_page, width):
+    page, errors = redesign_page
+    _open(page, width, 900)
+    for mode in ['hybrid', 'keyword', 'semantic']:
+        page.select_option('#search-mode', mode)
+        size = page.locator('#search-mode').evaluate('''node => {
+          const style = getComputedStyle(node), canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d');context.font = style.font;
+          return {available: node.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+            text: context.measureText(node.selectedOptions[0].textContent).width,
+            arrow: parseFloat(style.paddingRight)};
+        }''')
+        assert size['available'] >= size['text'] + 4, size
+        assert size['arrow'] >= 26, size
+    assert page.evaluate('() => document.documentElement.scrollWidth <= innerWidth + 1')
+    assert errors == []
+
+
+@pytest.mark.parametrize('mode', ['local', 'full'])
+@pytest.mark.parametrize('width', [320, 390, 768, 1440])
+def test_many_graph_types_use_accessible_compact_menu_without_nested_scroll(redesign_page, mode, width):
+    page, errors = redesign_page
+    _open(page, width, 900)
+    nodes = [dict(id=f'menu-{i}', kind='entity', type=f'urn:Type{i}',
+                  type_label=f'类型{i} · 很长的业务实体分类名称', text=f'实体{i}', version=1)
+             for i in range(85)]
+    page.route('**/records/page', lambda route: route.fulfill(json={'records': nodes, 'total': len(nodes), 'next_cursor': None}))
+    page.route('**/graph-neighborhood', lambda route: route.fulfill(json={'records': nodes, 'truncated': False}))
+    page.route('**/timeline?*', lambda route: route.fulfill(json={'events': [], 'truncated': False}))
+    manifest = dict(id='type-menu-session', entity_count=len(nodes), relation_count=0,
+                    watermark=1, layout_version='stable-id-v1')
+    page.route('**/graph-sessions', lambda route: route.fulfill(json=manifest))
+    page.route('**/graph-sessions/type-menu-session/page', lambda route: route.fulfill(json={
+        'session_id': manifest['id'], 'kind': route.request.post_data_json['kind'],
+        'records': nodes if route.request.post_data_json['kind'] == 'entities' else [],
+        'entities': [], 'next_cursor': None, 'watermark': 1, 'layout_version': 'stable-id-v1'}))
+    if mode == 'local':
+        page.evaluate("() => drawGraph('menu-0', 1)")
+        root, canvas = '#graph-type-buttons', '#graph-canvas'
+        choice = '[data-type-index="85"]'
+    else:
+        page.click('[data-fg-mode="full"]')
+        page.evaluate('() => FullGraphView.restart()')
+        page.wait_for_function('() => FullGraphView.loader.state === "complete"')
+        root, canvas = '.full-graph-types', '.full-graph-host'
+        choice = '[data-fg-type="urn:Type84"]'
+    page.evaluate('() => GraphWorkspaceLayout.settled()')
+    bar = page.locator(root)
+    assert _bounds(page, root)['height'] <= 40
+    before = _bounds(page, canvas)
+    assert before['height'] >= 160
+    toggle = bar.locator('[data-graph-type-toggle]')
+    assert toggle.is_visible(), 'all graph types need one compact, keyboard-operable entry'
+    toggle.focus()
+    page.keyboard.press('Enter')
+    menu = bar.locator('.graph-type-menu')
+    assert menu.is_visible()
+    assert toggle.get_attribute('aria-expanded') == 'true'
+    assert _within(menu.bounding_box(), {'x': 0, 'y': 0, 'width': width, 'height': 900})
+    scroll = menu.evaluate('''node => [node, ...node.querySelectorAll('*')].filter(el => {
+      const style = getComputedStyle(el);
+      return /(auto|scroll)/.test(style.overflowY) && el.scrollHeight > el.clientHeight + 1;
+    }).map(el => ({horizontal: el.scrollWidth > el.clientWidth + 1}))''')
+    assert len(scroll) <= 1 and not any(row['horizontal'] for row in scroll), scroll
+    if mode == 'full':
+        assert bar.locator('[data-fg-type]').count() == 40
+        bar.locator('[data-fg="type-next"]').click()
+        assert bar.locator('[data-fg-type]').count() == 40
+        bar.locator('[data-fg="type-next"]').click()
+        assert bar.locator('[data-fg-type]').count() == 5
+    selected = bar.locator(choice)
+    selected.scroll_into_view_if_needed()
+    selected.click()
+    assert selected.get_attribute('aria-pressed') == 'true'
+    if mode == 'local':
+        assert page.evaluate('() => wb.nodes.size') == 1
+    else:
+        assert page.evaluate('() => FullGraphView.renderer.displayDataset.nodeCount') == 1
+    assert abs(_bounds(page, canvas)['height'] - before['height']) <= 1
+    assert not menu.is_visible(), 'choosing a type returns the compact canvas view'
+    toggle = bar.locator('[data-graph-type-toggle]')
+    toggle.click()
+    menu = bar.locator('.graph-type-menu')
+    assert menu.is_visible()
+    page.keyboard.press('Escape')
+    assert not menu.is_visible()
+    assert toggle.get_attribute('aria-expanded') == 'false'
+    assert toggle.evaluate('node => node === document.activeElement')
+    toggle.click()
+    menu.get_by_role('button', name='收起类型列表', exact=True).click()
+    assert not menu.is_visible()
+    assert toggle.evaluate('node => node === document.activeElement')
+    toggle.click()
+    page.locator('#query').click()
+    assert not menu.is_visible(), 'the type list must dismiss when returning to the workspace'
+    assert toggle.get_attribute('aria-expanded') == 'false'
+    assert _bounds(page, root)['height'] <= 40
+    bar.locator('[data-fg-types-all]' if mode == 'full' else '[data-type-index="0"]').click()
+    if mode == 'local':
+        assert page.evaluate('() => wb.nodes.size') == len(nodes)
+    else:
+        assert page.evaluate('() => FullGraphView.renderer.displayDataset.nodeCount') == len(nodes)
+    assert page.evaluate('() => document.documentElement.scrollWidth <= innerWidth + 1')
+    assert errors == []

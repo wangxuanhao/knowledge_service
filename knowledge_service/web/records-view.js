@@ -520,9 +520,10 @@
     const p=current,serial=request;
     try{
       const result=await api('/api/projects/'+encodeURIComponent(p)+'/operations/'+encodeURIComponent(operationId)+'/undo',{});
-      if(p!==current||serial!==request)return;
-      status(`已撤销：恢复 ${result.restored} 条记录到这次操作之前。`);
-      await load();if(p===current)await loadOperations();
+      const refreshFailed=await window.KnowledgeChanges?.notify({projectId:p,records:result.records||[],kind:'undo'});
+      if(p!==current)return;
+      status(`已撤销：恢复 ${result.restored} 条记录到这次操作之前。`+(refreshFailed?' 部分视图刷新失败，请重试刷新。':''));
+      if(!window.KnowledgeChanges)await load();if(p===current)await loadOperations();
     }catch(error){if(p===current&&serial===request)status('撤销失败：'+error.message,true);}
   }
   /* 「还有知识挂在旧本体版本上」：只在真有时给**一行**真话，并且说清去哪儿处理。
@@ -671,7 +672,8 @@
     request++;pager?.invalidate();clearTimeout(searchTimer);loading=false;host.setAttribute('aria-busy','false');
   });
   $('project').addEventListener('change',()=>{request++;pager?.invalidate();clearTimeout(searchTimer);rows=[];total=0;ontology=null;assertions=null;operations=[];duplicates=null;pendingLedgerFocus=null;reclassifyPlan=undefined;$('record-search').value='';syncKindSelect();if(!tab.classList.contains('hidden'))load();});
-  document.addEventListener('records:created',event=>{if(event.detail?.projectId===current&&!tab.classList.contains('hidden'))void loadPage();});
+  window.refreshKnowledgeLedger=async()=>visible()?(await load())!==false:true;
+  document.addEventListener('records:created',event=>{if(!window.KnowledgeChanges&&event.detail?.projectId===current&&!tab.classList.contains('hidden'))void loadPage();});
   document.addEventListener('workspace:scope-changed',event=>{
     if(event.detail?.page==='records'&&!tab.classList.contains('hidden'))void load();
   });

@@ -132,9 +132,11 @@
         remove.disabled=true;
         try{
           const result=await api('/api/projects/'+encodeURIComponent(p)+'/delete',{record_id:row.id,expected_version:row.version});
-          if(!accepts())return;
-          status(`已软删除 ${result.deleted} 条记录；可在「知识台账 → 可撤销的操作」撤销。`);
-          host.innerHTML='<p class="evidence-empty">该知识已软删除，正在刷新图谱…</p>';$('draw-graph').click();
+          if(accepts())host.innerHTML='<p class="evidence-empty">该知识已软删除，正在刷新图谱…</p>';
+          const refreshFailed=await window.KnowledgeChanges?.notify({projectId:p,records:result.records||[],kind:'delete'});
+          if(p!==current)return;
+          status(`已软删除 ${result.deleted} 条记录；可在「知识台账 → 可撤销的操作」撤销。`+(refreshFailed?' 图谱刷新失败，请重试刷新。':''));
+          if(!window.KnowledgeChanges&&accepts())$('draw-graph').click();
         }catch(error){status(error.message,true);remove.disabled=false;}
       };
       host.querySelector('.evidence-danger').appendChild(remove);

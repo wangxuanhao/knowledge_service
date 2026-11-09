@@ -1,7 +1,7 @@
 /* Full entity graph: compact buffers, bounded labels and shared record details. */
 (function(root){
   'use strict';
-  const tokens=root.GraphAppearance?.tokens||{background:'#ffffff',edge:'#a8c9e2',text:'#888995',outline:'#ffffff',selected:'#1689e9'};
+  const tokens=root.GraphAppearance?.tokens||{background:'#ffffff',edge:'#a8c9e2',text:'#888995',outline:'#ffffff',selected:'#1689e9',nodeOpacity:1,edgeOpacity:.35,edgeWidth:1,selectedEdgeWidth:2};
   const rgb=hex=>new Uint8Array([1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)));
   const fallbackColors=new Map();
   // CSS pixels, independent of backing-store resolution and camera zoom.
@@ -283,7 +283,7 @@
     drawStrokes(first,count,selected=false){
       const gl=this.gl,p=this.strokeLocations,min=Math.min(this.width,this.height);gl.useProgram(this.strokeProgram);gl.disableVertexAttribArray(this.locations.position);gl.disableVertexAttribArray(this.pointLocations.position);gl.disableVertexAttribArray(this.cacheLocations.position);gl.bindBuffer(gl.ARRAY_BUFFER,this.strokeBuffer);
       for(const [offset,name] of ['position','target','corner'].entries()){gl.enableVertexAttribArray(p[name]);gl.vertexAttribPointer(p[name],2,gl.FLOAT,false,24,offset*8);}
-      gl.uniform2f(p.center,this.camera.x,this.camera.y);gl.uniform2f(p.scale,min/this.width*this.camera.scale,min/this.height*this.camera.scale);gl.uniform2f(p.viewport,this.canvas.width,this.canvas.height);gl.uniform1f(p.width,(selected?2:1)*this.dpr);gl.uniform4f(p.color,...(selected?theme.selected:theme.edge),selected ? .7 : this.focusNodes ? .1 : this.cacheOpacity||.35);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.drawArrays(gl.TRIANGLES,first*6,count*6);
+      gl.uniform2f(p.center,this.camera.x,this.camera.y);gl.uniform2f(p.scale,min/this.width*this.camera.scale,min/this.height*this.camera.scale);gl.uniform2f(p.viewport,this.canvas.width,this.canvas.height);gl.uniform1f(p.width,(selected?tokens.selectedEdgeWidth:tokens.edgeWidth)*this.dpr);gl.uniform4f(p.color,...(selected?theme.selected:theme.edge),selected ? 1 : this.focusNodes ? .1 : tokens.edgeOpacity);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.drawArrays(gl.TRIANGLES,first*6,count*6);
       for(const name of ['position','target','corner'])gl.disableVertexAttribArray(p[name]);
     }
     invalidateViewCache(){this.viewSnapshot=null;this.viewStableFrames=0;this.usedViewCache=false;}
@@ -378,7 +378,7 @@
       const sparse=this.displayDataset.nodeCount<=800,p=sparse?this.pointLocations:l;
       gl.useProgram(sparse?this.pointProgram:this.program);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.disableVertexAttribArray(this.cacheLocations.position);gl.disableVertexAttribArray(l.position);gl.enableVertexAttribArray(p.position);gl.bindBuffer(gl.ARRAY_BUFFER,this.groupedNodeBuffer);gl.vertexAttribPointer(p.position,2,gl.FLOAT,false,0,0);gl.uniform2f(p.center,this.camera.x,this.camera.y);gl.uniform2f(p.scale,min/this.width*this.camera.scale,min/this.height*this.camera.scale);gl.uniform1f(p.size,size*this.dpr+(sparse?2:0));
       if(sparse){gl.uniform1i(p.ring,false);gl.uniform1f(p.outline,size>=5?this.dpr:0);}else gl.uniform1i(l.point,true);
-      for(const range of this.nodeRanges){if(this.smallSession)gl.uniform1f(p.size,smallNodeSize(range.size,this.camera.scale)*this.dpr+2);gl.uniform4f(p.color,...range.color,focus ? .12 : this.smallSession ? .72 : 1);gl.drawArrays(gl.POINTS,range.first,range.count);}
+      for(const range of this.nodeRanges){if(this.smallSession)gl.uniform1f(p.size,smallNodeSize(range.size,this.camera.scale)*this.dpr+2);gl.uniform4f(p.color,...range.color,focus ? .12 : this.smallSession ? tokens.nodeOpacity : 1);gl.drawArrays(gl.POINTS,range.first,range.count);}
       if(focus){gl.bindBuffer(gl.ARRAY_BUFFER,this.nodeBuffer);gl.vertexAttribPointer(p.position,2,gl.FLOAT,false,0,0);for(const i of focus){gl.uniform1f(p.size,this.nodeScreenSize(i)*this.dpr+2);gl.uniform4f(p.color,...Array.from(nodeRGB(this.displayDataset.records[i]),v=>v/255),1);gl.drawArrays(gl.POINTS,i,1);}}
       if(active>=0&&active<this.displayDataset.nodeCount){const ring=this.pointLocations;gl.useProgram(this.pointProgram);gl.disableVertexAttribArray(p.position);gl.enableVertexAttribArray(ring.position);gl.bindBuffer(gl.ARRAY_BUFFER,this.nodeBuffer);gl.vertexAttribPointer(ring.position,2,gl.FLOAT,false,0,0);gl.uniform2f(ring.center,this.camera.x,this.camera.y);gl.uniform2f(ring.scale,min/this.width*this.camera.scale,min/this.height*this.camera.scale);gl.uniform1i(ring.ring,true);gl.uniform1f(ring.outline,0);gl.uniform1f(ring.size,((this.smallSession?this.nodeScreenSize(active):size)+8)*this.dpr+2);gl.uniform4f(ring.color,...theme.selected,1);gl.drawArrays(gl.POINTS,active,1);}
       if(this.viewStableFrames++>0)this.captureView();this.finishFrame(started);

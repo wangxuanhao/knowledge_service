@@ -23,8 +23,10 @@
   let request=0,activeRow=null,activeOntologies=null,entityPickers=[],activeScope=null;
   function captureScope(){const context=window.WorkspaceContext,page=context?.page||'records',p=current,ticket=context?.ticket(p,page),stamp=JSON.stringify(typeof scope==='function'?scope():{});
     return ()=>p===current&&stamp===JSON.stringify(typeof scope==='function'?scope():{})&&(!ticket||context.accepts(ticket,p,page));}
-  function assertEditable(){if(!window.Auth?.isAdmin?.())throw Error('只有管理员可以保存知识修订');if(!activeScope?.())throw Error('查询范围已变化，请重新打开编辑器');}
+  function assertEditable(){if(!window.Auth?.isAdmin?.())throw Error('只有管理员可以保存知识修订');if(!activeScope?.())throw Error('查询范围已变化，请重新打开编辑器');if(scope()?.known_at)throw Error('历史知识范围只读，请切回当前版本后维护');}
   function close(){request++;entityPickers.forEach(picker=>picker.invalidate());entityPickers=[];dialog.close();}
+  window.captureRecordEditor=()=>{const serial=request,p=current,id=activeRow?.id;return ()=>
+    serial===request&&p===current&&dialog.open&&activeRow?.id===id;};
   $('close-record-dialog').onclick=close;
   dialog.addEventListener('cancel',()=>{request++;});
   function open(mode,title){
@@ -62,13 +64,14 @@
     // Preserve bound hierarchy only when the type and immutable release agree.
     const sameModel=node?.type===saved.type&&node?.ontology_id===saved.ontology_id;
     const displayed=sameModel?{...node,...saved}:{...saved,class_ontology_id:null};
-    return window.renderEvidenceInspector?.(displayed,[...wb.nodes.values()]);
+    return window.renderEvidenceInspector?.(displayed,[...wb.nodes.values()],{scope:window.readGraphMaintenanceScope?.()});
   }
   async function saveRevision(record,expectedVersion){
     assertEditable();
     const serial=request,p=current;
     const saved=await api(endpoint('/records/'+encodeURIComponent(record.id)),{record,expected_version:expectedVersion},'PUT');
-    if(serial!==request||p!==current||!dialog.open||!activeScope?.())return;
+    const refresh=window.KnowledgeChanges?.notify({projectId:p,records:[saved],kind:'revise'});
+    if(serial!==request||p!==current||!dialog.open||!activeScope?.()){await refresh;return;}
     activeRow=saved;populateRaw(saved);wb.records.set(saved.id,saved);editContext();
     // Update the open card before announcing success; closing the modal cannot
     // cancel an already-committed revision's immediate presentation.
@@ -76,10 +79,10 @@
     const summary=RecordVersionContext.summary(saved,activeOntologies);
     const message=`已保存${summary}；旧修订保留，本体结构未修改。`;
     $('record-dialog-message').classList.remove('error');$('record-dialog-message').textContent=message;status(message);
-    const refreshFailed=await refreshViews();
+    const refreshFailed=refresh?await refresh:await refreshViews();
     if(serial!==request||p!==current||!dialog.open||activeRow?.version_id!==saved.version_id)return;
     $('record-dialog-message').textContent=message+(refreshFailed?' 部分视图刷新失败，请刷新图谱或台账。':'');
-    await syncInspector(saved);
+    if(!window.KnowledgeChanges)await syncInspector(saved);
     if(serial===request&&p===current&&dialog.open&&activeRow?.version_id===saved.version_id)return saved;
   }
   async function compareConflict(local,serial,p){
@@ -308,7 +311,7 @@
       $('record-dialog-message').textContent='处理中…';
       try{assertEditable();await run();if(serial!==request||p!==current||!activeScope?.())return;
         $('record-dialog-message').textContent=$('status').textContent;$('record-dialog-message').classList.toggle('error',$('status').classList.contains('error'));
-        if(!$('status').classList.contains('error'))await refreshViews();
+        if(!window.KnowledgeChanges&&!$('status').classList.contains('error'))await refreshViews();
       }catch(e){if(serial===request&&p===current){$('record-dialog-message').textContent=e.message;$('record-dialog-message').classList.add('error');}}
     };
   }

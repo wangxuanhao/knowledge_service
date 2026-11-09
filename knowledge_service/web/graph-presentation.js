@@ -7,6 +7,12 @@
     const surface=stage.closest('.search-graph-workspace')||stage;
     const actions=document.createElement('div');actions.className='graph-presentation-actions';
     const modes=heading.querySelector('.full-graph-mode');if(modes)actions.append(modes);
+    const create=document.createElement('button');create.type='button';create.id='graph-create-entity';create.className='secondary admin-only';create.textContent='新增实体';
+    const readOnly=()=>Boolean(window.readGraphMaintenanceScope?.()?.known_at);
+    window.syncGraphCreateAccess=()=>{create.disabled=readOnly();create.title=create.disabled?'历史知识范围只读':'依据当前已发布本体创建实体';};
+    create.onclick=()=>{if(readOnly()){status('历史知识范围只读，请切回当前版本后维护。',true);return;}window.RecordCreate?.open('entity');};
+    for(const event of ['workspace:scope-changed','version-context:changed','graph-workspace:ready'])document.addEventListener(event,window.syncGraphCreateAccess);
+    actions.append(create);window.syncGraphCreateAccess();
     const toggle=document.createElement('button');toggle.type='button';toggle.id='graph-fullscreen';toggle.className='secondary';
     actions.append(toggle);heading.append(actions);
     let expanded=false,hadNative=false;

@@ -503,6 +503,7 @@ def test_failed_explicit_keeps_a_prior_authoritative_empty_guide_on_reentry(over
 def test_explicit_search_navigation_honors_active_full_type_chip_and_reuses_allowed_records(overview_page):
     page, errors, _, state = overview_page
     _loaded(page)
+    page.locator('.full-graph-types [data-graph-type-toggle]').click()
     page.click('[data-fg-type="TypeA"]')
     assert '当前可见 2 实体' in page.locator('.full-graph-progress').inner_text()
     page.evaluate('''() => {window.__filteredBefore=FullGraphView.renderer.dataset;}''')

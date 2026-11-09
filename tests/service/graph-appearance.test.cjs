@@ -14,6 +14,14 @@ function appearance(){
   return {subject:context.window.GraphAppearance,palette:context.window.GraphPalette};
 }
 
+test('both renderers share readable small-graph node and relation treatment',()=>{
+  const {subject}=appearance();
+  assert.equal(subject.tokens.nodeOpacity,1);
+  assert.equal(subject.tokens.edgeOpacity,.35);
+  assert.equal(subject.tokens.edgeWidth,1);
+  assert.equal(subject.tokens.selectedEdgeWidth,2);
+});
+
 test('canonical entity types retain the same color with translated names and partial/full records',()=>{
   const {subject,palette}=appearance();
   const full={id:'a',type:'urn:Merchant',text:'甲商户'};

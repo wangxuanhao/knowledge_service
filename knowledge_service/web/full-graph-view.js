@@ -48,6 +48,11 @@
       section.querySelector('.full-graph-type-pagination').hidden=total<=typePageSize;
       section.querySelector('.full-graph-type-page').textContent=total?'第 '+(typePage+1)+' / '+Math.ceil(total/typePageSize)+' 页':'';
       control('type-prev').disabled=typePage===0;control('type-next').disabled=(typePage+1)*typePageSize>=total;
+      window.GraphTypeMenu?.mount(section.querySelector('.full-graph-types'),{
+        row:section.querySelector('.full-graph-type-row'),list:typeList,
+        description:section.querySelector('.full-graph-type-heading'),pagination:section.querySelector('.full-graph-type-pagination'),
+        total,selectedLabel:selected===null?'':typeLabel(selected)
+      });
     }
     typeList.addEventListener('click',event=>{
       const button=event.target.closest('[data-fg-type]');if(!button||!renderer)return;
@@ -94,6 +99,7 @@
     function switchMode(next){
       if(next==='full')window.suspendLocalGraphExplorer?.();
       mode=next;stage.dataset.graphMode=mode;section.hidden=mode!=='full';
+      window.syncGraphCreateAccess?.();
       if(mode==='full'&&window.WorkspaceDrawers?.active?.dialog?.id==='graph-settings-drawer')window.WorkspaceDrawers.close({restoreFocus:false});
       for(const element of stage.querySelectorAll('[data-graph-local],.graph-toolbar,.graph-display-switch,#graph-settings,#graph-local-type-controls,#graph-pan-hint,#graph-summary,#graph-canvas,#graph-type-buttons,#graph-timeline'))element.hidden=mode==='full';
       const pathTools=document.getElementById('graph-path-tools');
@@ -109,7 +115,7 @@
           window.GraphWorkspaceLayout?.setState(complete?'complete':'partial',{message:(complete?'当前范围图谱已完整加载':'当前范围为局部概览')+counts(lastProgress)+(time?' · '+time:'')});}
       }
     }
-    modes.addEventListener('click',event=>{const button=event.target.closest('[data-fg-mode]');if(button)switchMode(button.dataset.fgMode);});
+    modes.addEventListener('click',event=>{const button=event.target.closest('[data-fg-mode]');if(button){switchMode(button.dataset.fgMode);window.onGraphMaintenanceModeChange?.();}});
     function progress(value,epoch){
       if(epoch!==run)return;renderer?.setSessionManifest(value.manifest);controls();lastProgress=value;renderTypes();
       const label=value.stage==='complete'?'全量加载完成':value.stage==='cancelled'?'已取消，当前图不完整':value.stage==='error'?'加载中断，当前图不完整':value.pause_requested?'当前批完成后暂停':value.stage==='paused'&&!value.automatic?'已暂停，当前为局部图':value.phase==='entities'?'正在补齐实体（含孤立实体）':'正在加载关系与实体';
@@ -157,12 +163,20 @@
           if(epoch!==run)return null;
           if(options.accepts&&!options.accepts()){const error=Error('图谱导航已过期');error.name='AbortError';throw error;}
           validateStagedTarget(ownedLoader.dataset,options.target,{complete:ownedLoader.state==='complete',scope:nextScope});
+          const preserved=options.preserveView?{camera:renderer.camera,
+            node:renderer.displayDataset.records[renderer.selected]?.id,edge:renderer.displayDataset.edges[renderer.selectedEdge]?.id,
+            type:renderer.typeFilter,predicate:renderer.predicateFilter}:null;
           fixed=nextScope;loadedProject=selected;lastProgress=null;typePage=0;emptyNotice.hidden=true;targetNotice.hidden=true;
-          ownedLoader.renderer=renderer;renderer.setDataset(ownedLoader.dataset);renderer.setTypeFilter(entity_type||null);renderer.setPredicateFilter(predicate||null);
-          renderer.setSessionManifest(ownedLoader.manifest);renderer.sync();showScope();switchMode('full');
+          ownedLoader.renderer=renderer;renderer.setDataset(ownedLoader.dataset);
+          renderer.setTypeFilter(preserved?preserved.type:nextScope.entity_type||null);
+          renderer.setPredicateFilter(preserved?preserved.predicate:nextScope.predicate||null);
+          renderer.setSessionManifest(ownedLoader.manifest);
+          if(preserved){renderer.camera=preserved.camera;renderer.selected=renderer.displayDataset.nodeIndex.get(preserved.node)??-1;
+            renderer.selectedEdge=renderer.displayDataset.edges.findIndex(row=>row.id===preserved.edge);}
+          renderer.sync();showScope();switchMode('full');
           acceptProgress=true;if(stagedProgress)progress(stagedProgress,epoch);
         }
-        bindExplorer();return ownedLoader;
+        bindExplorer();window.onGraphDataFresh?.('full');return ownedLoader;
       }catch(error){
         if(staged&&epoch===run){
           loader?.cancel();({loader,fixed,loadedProject,lastProgress,typePage}=previous);
@@ -193,7 +207,11 @@
     }
     section.addEventListener('click',event=>{
       const action=event.target.closest('[data-fg]')?.dataset.fg;
-      if(action==='load'||action==='restart')start().catch(error=>message(error.message,true));if(action==='next')advance();if(action==='auto')advance(true);
+      if(action==='load'||action==='restart'){
+        if(window.hasPendingKnowledgeGraphChange?.())void window.refreshKnowledgeGraph();
+        else start().catch(error=>message(error.message,true));
+      }
+      if(action==='next')advance();if(action==='auto')advance(true);
       if(action==='pause')pause();if(action==='cancel')cancel();if(action==='reset')renderer?.reset();if(action==='locate')locate();
       if(action==='zoom-in')renderer?.zoom(1.25);if(action==='zoom-out')renderer?.zoom(1/1.25);
       if(action==='all-types'){renderer?.setTypeFilter(fixed?.entity_type||null);refreshProjection();}
@@ -282,7 +300,17 @@
       message(detail.message+(detail.totalEntities==null?'':` · 已加载实体 ${detail.loadedEntities} / ${detail.totalEntities} · 关系 ${detail.loadedRelations} / ${detail.totalRelations}`)+
         (visible&&(renderer.typeFilter||renderer.predicateFilter)?` · 当前可见 ${visible.nodeCount} 实体 / ${visible.edgeCount} 关系`:''),kind==='error',false);
     }
-    window.FullGraphView={switchMode,load:start,restart:start,next:()=>advance(),resume:()=>advance(true),pause,cancel,stop,interrupt,hasRecord,focusRecord,showUnloadedTarget,setOverviewState,invalidate,
+    async function refresh({accepts=()=>true}={}){
+      const selectedProject=loadedProject||project();
+      const nextScope={...(fixed||scope())};
+      const next=await window.GraphOverview.open({projectId:selectedProject,scope:nextScope},{preserveView:true,
+        accepts:()=>accepts()&&mode==='full'});
+      if(!next||next!==loader||selectedProject!==project())return false;
+      renderer.requestDraw();
+      return true;
+    }
+    window.FullGraphView={switchMode,load:start,restart:start,refresh,next:()=>advance(),resume:()=>advance(true),pause,cancel,stop,interrupt,hasRecord,focusRecord,showUnloadedTarget,setOverviewState,invalidate,
+      get scope(){return fixed?JSON.parse(JSON.stringify(fixed)):null;},
       get filters(){return {entity_type:renderer?.typeFilter??fixed?.entity_type??null,predicate:renderer?.predicateFilter??fixed?.predicate??null};},
       get renderer(){return renderer;},get loader(){return loader;},get mode(){return mode;}};
     controls();renderTypes(null,null);

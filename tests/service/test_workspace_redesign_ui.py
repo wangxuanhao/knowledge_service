@@ -587,6 +587,7 @@ def test_full_graph_entity_types_filter_incremental_pages_without_changing_the_l
     page.evaluate("()=>FullGraphView.restart({projectId:'p',scope:GraphWorkspaceContext.read().scope})")
     page.wait_for_function('()=>FullGraphView.renderer?.dataset.nodeCount===2')
     types=page.locator('.full-graph-types');a=types.locator('[data-fg-type="urn:A"]')
+    types.locator('[data-graph-type-toggle]').click()
     assert a.is_visible() and a.get_attribute('data-type-count')=='2'
     assert '当前为局部图' in page.locator('.full-graph-progress').inner_text()
     a.click();assert len(requests)==1
@@ -614,11 +615,15 @@ def test_full_graph_entity_types_filter_incremental_pages_without_changing_the_l
     assert len(requests)==before
     assert page.evaluate('FullGraphView.renderer.displayDataset===FullGraphView.renderer.dataset')
     for width in [1440,390]:
-        page.set_viewport_size({'width':width,'height':728 if width>700 else 844});assert a.is_visible()
+        page.set_viewport_size({'width':width,'height':728 if width>700 else 844})
+        types.locator('[data-graph-type-toggle]').click()
+        assert a.is_visible()
+        page.keyboard.press('Escape')
         page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
         clipped=page.evaluate('''()=>{const stage=document.getElementById('graph-stage').getBoundingClientRect();return Array.from(document.querySelectorAll('.full-graph-section [data-fg]')).filter(el=>{const r=el.getBoundingClientRect();return r.width&&r.height&&(r.bottom>stage.bottom+1||r.top<stage.top);}).map(el=>el.dataset.fg);}''')
         assert not clipped,clipped
         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+    types.locator('[data-graph-type-toggle]').click()
     a.click();page.evaluate("()=>FullGraphView.restart({projectId:'p',scope:GraphWorkspaceContext.read().scope})")
     page.wait_for_function('()=>FullGraphView.loader.state==="paused"&&FullGraphView.renderer.dataset.nodeCount===2')
     assert page.evaluate('FullGraphView.renderer.typeFilter') is None

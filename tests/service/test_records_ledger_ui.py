@@ -88,6 +88,7 @@ SHELL = """<!doctype html><html><head><meta charset="utf-8"></head><body>
   window.suppressNextAutoGraph=()=>{window.__suppressed=true;};
   window.showTab=tab=>{window.__tab=tab;};
   window.selectEntityDetail=async id=>{window.__graphLocated=id;};
+  window.openKnowledgeRecord=async record=>{window.__graphRecord=record;window.__graphLocated=record.id;};
   window.endpoint=suffix=>'/api/projects/p1'+suffix;
   window.api=async(url,body,method)=>{
     const options={method:method||(body===undefined?'GET':'POST'),headers:{'Content-Type':'application/json'}};
@@ -624,11 +625,12 @@ def test_entity_row_locate_button_forwards_the_entity_id_to_the_graph(page):
     assert page.evaluate("() => window.__suppressed") is True, '进图谱前必须先按下下一次自动补画，否则实体刚选中就被冲掉'
 
 
-def test_relation_row_locate_button_forwards_the_subject_entity(page):
+def test_relation_row_locate_button_forwards_the_exact_relation(page):
     select_view(page, 'relation')          # 切到「关系」视角，只有 r1 一行
-    assert page.query_selector_all('[data-locate-graph="e1"]'), '关系行应转发 subject_id（e1）而不是关系自身 id'
-    page.click('[data-locate-graph="e1"]')
-    assert page.evaluate("() => window.__graphLocated") == 'e1'
+    assert page.query_selector_all('[data-locate-graph="r1"]'), '关系行应定位这条关系及其两个端点'
+    page.click('[data-locate-graph="r1"]')
+    assert page.evaluate("() => window.__graphLocated") == 'r1'
+    assert page.evaluate("() => window.__graphRecord.kind") == 'relation'
 
 
 def test_chunk_rows_have_no_locate_button(page):

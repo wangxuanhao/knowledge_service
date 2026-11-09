@@ -425,11 +425,12 @@
     renderActionsInto(drawer.actionsBox);
     try {
       const res = await api(endpoint('/reclassify'), { groups: keys }, 'POST');
+      const refreshFailed=await window.KnowledgeChanges?.notify({projectId:project,records:res.records||[],kind:'reclassify'});
       if (project !== activeProject()) return;
       state.result = res;
       state.preview = null; state.previewSig = '';
       state.selected.clear();
-      status(res.note || `已迁移 ${res.migrated || 0} 条知识。`);
+      status((res.note || `已迁移 ${res.migrated || 0} 条知识。`)+(refreshFailed?' 部分视图刷新失败，请重试刷新。':''));
       await refresh();                    // 迁完立刻重读：迁移条/分组表都要跟上
       renderDrawer();
     } catch (error) {
@@ -444,9 +445,12 @@
   async function doUndo(operationId) {
     if (!operationId) return;
     if (!window.confirm('撤销这次迁移会把受影响的记录整批恢复到迁移之前（产生新版本，历史不丢）。继续？')) return;
+    const project=activeProject();
     try {
       const res = await api(endpoint('/operations/' + encodeURIComponent(operationId) + '/undo'), {});
-      status(`已撤销这次迁移：恢复 ${res.restored || 0} 条记录。`);
+      const refreshFailed=await window.KnowledgeChanges?.notify({projectId:project,records:res.records||[],kind:'undo'});
+      if(project!==activeProject())return;
+      status(`已撤销这次迁移：恢复 ${res.restored || 0} 条记录。`+(refreshFailed?' 部分视图刷新失败，请重试刷新。':''));
       state.result = null;
       await refresh();
       renderDrawer();

@@ -18,7 +18,7 @@ function harness(reply){
     inspect:row=>inspected.push(row),api:async(url,body)=>{requests.push({url,body});return reply?await reply(url,body):{records:[{id:'deep-149999',kind:'entity',text:'深页实体'}],next_cursor:'next-page',total:150000};}};
   vm.createContext(context);
   const direct=source.slice(source.indexOf('  async function selectEntityDetail('),source.indexOf('  async function options('));
-  vm.runInContext(source.slice(source.indexOf('  const graphScope='),source.indexOf('  window.GraphWorkspaceContext='))+direct+
+  vm.runInContext(source.match(/^  let changedGraph=.*$/m)[0]+'\n'+source.slice(source.indexOf('  const graphScope='),source.indexOf('  window.GraphWorkspaceContext='))+direct+
     source.slice(source.indexOf('  window.drawGraph=async('),source.indexOf('  window.clearGraphWorkspace=')),context);
   return {context,store,elements,requests,inspected,focused};
 }

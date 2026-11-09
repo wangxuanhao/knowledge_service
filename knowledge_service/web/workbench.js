@@ -124,11 +124,45 @@ function editRecord(row){showTab('records');const fields=['id','kind','text','ty
 bind('load-graph',async()=>{showTab('search');await window.drawGraph();});
 bind('resolve-entity',async()=>{const r=await scopedRead('/resolve',{text:$('resolve-text').value,threshold:Number($('resolve-threshold').value)});const rows=r.canonical?[r.canonical]:r.candidates;$('resolve-result').innerHTML=`<p>${esc(r.status)} · ${esc(r.backend)}</p>`+rows.map(x=>`<div class="candidate"><strong>${esc(x.text)}</strong> ${typeHint(x.type)} ${x.score!==undefined?'· '+x.score.toFixed(3):''}<small>${esc(x.id)} · v${x.version}</small><button data-keep="${esc(x.id)}">设为保留实体</button> <button data-drop="${esc(x.id)}" class="secondary">设为合并实体</button></div>`).join('');for(const row of rows)wb.records.set(row.id,row);$('resolve-result').querySelectorAll('[data-keep]').forEach(b=>b.onclick=()=>{$('keep-id').value=b.dataset.keep;});$('resolve-result').querySelectorAll('[data-drop]').forEach(b=>b.onclick=()=>{$('drop-id').value=b.dataset.drop;});});
 async function latest(id){const p=current;const r=await api(endpoint('/records/'+encodeURIComponent(id)+'/history'),undefined,'GET');if(p!==current)throw Error('项目已切换');return r.versions[r.versions.length-1];}
-bind('add-alias',async()=>{const id=$('keep-id').value;const row=await latest(id);await api(endpoint('/aliases'),{entity_id:id,alias:$('alias-name').value,expected_version:row.version});status('别名已保存，消歧可直接命中规范实体。');});
-bind('merge-entities',async()=>{if(!$('merge-confirm').checked)throw Error('请先勾选合并确认');const keep=$('keep-id').value,drop=$('drop-id').value;if(!window.EntityGovernance)throw Error('实体治理组件未就绪，请刷新后重试');const selection=await window.EntityGovernance.prepareMerge(keep,drop);if(selection===null)return;const r=await api(endpoint('/merge'),{keep_id:keep,drop_id:drop,expected_versions:selection.expected_versions,attribute_winners:selection.attribute_winners,preview_fingerprint:selection.preview_fingerprint});$('merge-confirm').checked=false;status('Semantica 融合完成，操作 '+r.operation_id+'；可在「知识台账 → 可撤销的操作」撤销。');await operations();});
-bind('soft-delete',async()=>{if(!$('delete-confirm').checked)throw Error('请勾选软删除确认');const id=$('revision-id').value;const r=await api(endpoint('/delete'),{record_id:id,expected_version:Number($('revision-version').value)});$('delete-confirm').checked=false;status(`已软删除 ${r.deleted} 条记录（含关联关系）；可在「知识台账 → 可撤销的操作」撤销。`);await operations();});
-bind('restore-version',async()=>{const r=await api(endpoint('/restore'),{record_id:$('revision-id').value,version:Number($('restore-number').value),expected_version:Number($('revision-version').value)});$('revision-version').value=r.version;status('历史内容已恢复为新版本 '+r.version);});
-async function operations(){const p=current,r=await api(endpoint('/operations'),undefined,'GET');if(p!==current)return;$('operations').innerHTML=r.operations.map(x=>`<div class="candidate"><b>${esc(x.metadata.operation)}</b> · ${esc(x.recorded_at)}<small>${esc(x.metadata.operation_id)}</small><button data-undo="${esc(x.metadata.operation_id)}">撤销该操作</button></div>`).join('')||'<p>暂无治理操作。</p>';$('operations').querySelectorAll('[data-undo]').forEach(b=>b.onclick=async()=>{try{const r=await api(endpoint('/operations/'+b.dataset.undo+'/undo'),{});status('已恢复 '+r.restored+' 条记录。');await operations();}catch(e){status(e.message,true);}});}
+async function committedKnowledgeChange(projectId,result,kind){
+  const failed=await window.KnowledgeChanges?.notify({projectId,records:result.records||[result],kind});
+  return failed?' 部分视图刷新失败，请重试刷新。':'';
+}
+bind('add-alias',async()=>{
+  const p=current,id=$('keep-id').value,row=await latest(id);
+  const result=await api(endpoint('/aliases'),{entity_id:id,alias:$('alias-name').value,expected_version:row.version});
+  const note=await committedKnowledgeChange(p,result,'alias');
+  if(p===current)status('别名已保存，消歧可直接命中规范实体。'+note);
+});
+bind('merge-entities',async()=>{
+  if(!$('merge-confirm').checked)throw Error('请先勾选合并确认');
+  const p=current,keep=$('keep-id').value,drop=$('drop-id').value;
+  if(!window.EntityGovernance)throw Error('实体治理组件未就绪，请刷新后重试');
+  const selection=await window.EntityGovernance.prepareMerge(keep,drop);if(selection===null)return;
+  const result=await api('/api/projects/'+encodeURIComponent(p)+'/merge',{keep_id:keep,drop_id:drop,
+    expected_versions:selection.expected_versions,attribute_winners:selection.attribute_winners,preview_fingerprint:selection.preview_fingerprint});
+  const note=await committedKnowledgeChange(p,result,'merge');if(p!==current)return;
+  $('merge-confirm').checked=false;status('融合完成；可在「知识台账 → 可撤销的操作」撤销。'+note);await operations();
+});
+bind('soft-delete',async()=>{
+  if(!$('delete-confirm').checked)throw Error('请勾选软删除确认');
+  const p=current,id=$('revision-id').value;
+  const acceptsEditor=window.captureRecordEditor?.()||(()=>p===current&&$('revision-id').value===id);
+  const result=await api(endpoint('/delete'),{record_id:id,expected_version:Number($('revision-version').value)});
+  const note=await committedKnowledgeChange(p,result,'delete');if(p!==current)return;
+  if(acceptsEditor())$('delete-confirm').checked=false;
+  status(`已软删除 ${result.deleted} 条记录（含关联关系）；可在「知识台账 → 可撤销的操作」撤销。`+note);await operations();
+});
+bind('restore-version',async()=>{
+  const p=current,id=$('revision-id').value;
+  const acceptsEditor=window.captureRecordEditor?.()||(()=>p===current&&$('revision-id').value===id);
+  const result=await api(endpoint('/restore'),{record_id:id,
+    version:Number($('restore-number').value),expected_version:Number($('revision-version').value)});
+  const note=await committedKnowledgeChange(p,result,'restore');if(p!==current)return;
+  if(acceptsEditor())$('revision-version').value=result.version;
+  status('历史内容已恢复为新版本 '+result.version+note);
+});
+async function operations(){const p=current,r=await api(endpoint('/operations'),undefined,'GET');if(p!==current)return;$('operations').innerHTML=r.operations.map(x=>`<div class="candidate"><b>${esc(x.metadata.operation)}</b> · ${esc(x.recorded_at)}<small>${esc(x.metadata.operation_id)}</small><button data-undo="${esc(x.metadata.operation_id)}">撤销该操作</button></div>`).join('')||'<p>暂无治理操作。</p>';$('operations').querySelectorAll('[data-undo]').forEach(b=>b.onclick=async()=>{try{const r=await api('/api/projects/'+encodeURIComponent(p)+'/operations/'+b.dataset.undo+'/undo',{});const note=await committedKnowledgeChange(p,r,'undo');if(p!==current)return;status('已恢复 '+r.restored+' 条记录。'+note);await operations();}catch(e){if(p===current)status(e.message,true);}});}
 bind('load-operations',operations);
 bind('load-sources',async()=>{const r=await scopedRead('/sources');$('source-list').innerHTML=r.documents.map((d,i)=>`<button data-source="${i}" class="source-item">${esc(d.metadata.title||d.metadata.source_file||d.id)}<small>${d.text.length} 字 · ${d.derived_count} 条派生知识</small></button>`).join('');$('source-list').querySelectorAll('[data-source]').forEach(b=>b.onclick=()=>{const d=r.documents[Number(b.dataset.source)];$('source-body').textContent=d.text||'旧项目未保存完整原文；可查片段与原始导入记录。';$('source-title').textContent=d.metadata.title||d.id;});if(r.documents.length)$('source-list').querySelector('button').click();});
 bind('draw-mindmap',async()=>{const ontologyScope=wb.ontologyScope?wb.ontologyScope():{};const r=await scopedRead('/mindmap',{...ontologyScope,root_id:$('mindmap-root').value,depth:Number($('mindmap-depth').value)});if(!wb.tree)wb.tree=echarts.init($('mindmap-canvas'));const convert=n=>({name:n.text+(n.predicate?' · '+labelOf(n.predicate):''),id:n.id,children:n.children.map(convert)});wb.tree.setOption({tooltip:{formatter:p=>esc(p.name)},series:[{type:'tree',data:[convert(r.tree)],top:'8%',left:'20%',bottom:'8%',right:'20%',symbolSize:9,roam:true,label:{position:'right',verticalAlign:'middle',align:'left'},leaves:{label:{position:'right',align:'left'}},expandAndCollapse:true,initialTreeDepth:3}]},true);wb.tree.resize();renderDiscoveryHint().catch(()=>{});});
@@ -534,9 +568,11 @@ async function snapshots(){
         yesBtn.disabled=true;noBtn.disabled=true;yesBtn.textContent='正在恢复…';yesBtn.classList.add('eval-restoring');
         try{
           const restored=await api('/api/projects/'+encodeURIComponent(project)+'/snapshots/'+encodeURIComponent(id)+'/restore',{});
+          const refreshFailed=await window.KnowledgeChanges?.notify({projectId:project,records:[],kind:'snapshot-restore'});
+          const refreshNote=refreshFailed?' 部分视图刷新失败，请重试刷新。':'';
           if(!sameProject())return;
           warning.textContent='已恢复，正在刷新备份列表…';
-          status('已恢复到「'+displayName+'」；恢复前状态已存为「'+(restored.recovery_snapshot_name||'恢复前自动备份')+'」');
+          status('已恢复到「'+displayName+'」；恢复前状态已存为「'+(restored.recovery_snapshot_name||'恢复前自动备份')+'」'+refreshNote);
           await snapshots().catch(error=>{
             if(!sameProject())return;
             warning.textContent='已恢复；备份列表刷新失败，请点击“刷新”重试。';

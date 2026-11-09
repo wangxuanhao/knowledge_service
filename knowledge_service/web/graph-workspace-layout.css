@@ -6,7 +6,7 @@ body main #tab-search #graph-workspace-header>h2{flex:0 0 auto;margin:0;font-siz
 body main #tab-search #graph-workspace-header .retrieval-query-panel{flex:1 1 auto;min-width:0;margin:0;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none}
 body main #tab-search #graph-workspace-header .searchbar{display:flex;align-items:center;flex-wrap:nowrap;gap:6px;min-width:0}
 body main #tab-search #graph-workspace-header .searchbar>input{flex:1 1 160px;min-width:90px;width:0;margin:0;height:34px}
-body main #tab-search #graph-workspace-header .searchbar>select{flex:0 0 100px;width:100px;min-width:0;height:34px;margin:0;font-size:12px}
+body main #tab-search #graph-workspace-header .searchbar>select{flex:0 0 116px;width:116px;min-width:116px;height:34px;margin:0;padding:5px 30px 5px 10px;font-size:12px}
 body main #tab-search #graph-workspace-header .searchbar>button{height:34px;margin:0;padding:5px 9px;white-space:nowrap}
 body main #tab-search #graph-workspace-header .search-options{flex:0 0 auto;margin:0}
 body main #tab-search #graph-workspace-header .search-options>summary{height:34px;padding:6px 8px;box-sizing:border-box;white-space:nowrap;font-size:12px}
@@ -45,11 +45,27 @@ body main #tab-search #graph-workspace-surface #graph-stage .full-graph-settings
 body main #tab-search #graph-workspace-surface #graph-canvas,body main #tab-search #graph-workspace-surface .full-graph-host{grid-row:3;min-width:0;width:100%;height:100%;min-height:0;max-height:none;margin:0;box-sizing:border-box;overflow:hidden}
 body main #tab-search #graph-workspace-surface #graph-type-buttons,body main #tab-search #graph-workspace-surface .full-graph-types{grid-row:4;position:relative;min-width:0;height:38px;min-height:0;margin:0;padding:5px 0 0;box-sizing:border-box;overflow:hidden}
 body main #tab-search #graph-workspace-surface #graph-type-buttons>small,body main #tab-search #graph-workspace-surface .full-graph-type-heading{display:none}
-body main #tab-search #graph-workspace-surface #graph-type-buttons>div{height:32px;padding:0;max-height:none}
-body main #tab-search #graph-workspace-surface .full-graph-type-row{height:32px;overflow:auto;scrollbar-width:thin}
+body main #tab-search #graph-workspace-surface #graph-type-buttons>.graph-type-bar,body main #tab-search #graph-workspace-surface .full-graph-type-row{display:flex;align-items:center;gap:6px;height:32px;min-width:0;padding:0;max-height:none;overflow:visible}
+body main #tab-search #graph-workspace-surface .graph-type-bar>button{flex:0 0 auto;max-width:45%;min-width:0;overflow:hidden;text-overflow:ellipsis}
+body main #tab-search #graph-workspace-surface .graph-type-bar>.graph-type-toggle{flex:0 1 auto;max-width:65%;padding-right:24px;position:relative;overflow:hidden;text-overflow:ellipsis}
+body main #tab-search #graph-workspace-surface .graph-type-bar[hidden]{display:none}
+body main #tab-search #graph-workspace-surface .graph-type-toggle::after{content:'⌄';position:absolute;right:8px;top:3px;font-size:14px}
 body main #tab-search #graph-workspace-surface .full-graph-type-empty{margin:2px 0;font-size:12px}
-body main #tab-search #graph-workspace-surface .full-graph-types:has(.full-graph-type-pagination:not([hidden])){height:70px}
-body main #tab-search #graph-workspace-surface .full-graph-type-pagination{position:static;justify-content:flex-end;margin:0;height:30px;background:transparent}
+/* Popovers occupy the top layer, clear of the canvas and toolbar overflow clips. */
+body main #tab-search #graph-workspace-surface .graph-type-menu{position:fixed;inset:auto;box-sizing:border-box;margin:0;padding:12px;border:1px solid var(--ui-line-2);border-radius:9px;background:var(--ui-surface);color:var(--ui-ink);box-shadow:var(--ui-shadow-lift);overflow:hidden}
+body main #tab-search #graph-workspace-surface .graph-type-menu:popover-open{display:flex;flex-direction:column;gap:8px;height:auto;min-height:0}
+body main #tab-search #graph-workspace-surface .graph-type-menu:not(:popover-open){display:none}
+body main #tab-search #graph-workspace-surface .graph-type-menu-heading{display:flex;flex:none;align-items:center;justify-content:space-between;gap:8px;margin:0;padding:0;border:0;font-size:13px}
+body main #tab-search #graph-workspace-surface .graph-type-menu-heading>button{display:grid;place-items:center;min-width:26px;max-width:none;width:26px;height:26px;padding:0;font-size:18px}
+body main #tab-search #graph-workspace-surface .graph-type-menu .graph-type-menu-description{display:flex;flex:none;flex-wrap:wrap;gap:3px 8px;height:auto;margin:0;padding:0;white-space:normal;overflow:visible;font-size:11px;color:var(--ui-muted)}
+body main #tab-search #graph-workspace-surface .graph-type-menu .graph-type-menu-description>strong{display:none}
+body main #tab-search #graph-workspace-surface .graph-type-menu .graph-type-menu-description[hidden]{display:none}
+body main #tab-search #graph-workspace-surface .graph-type-menu .full-graph-type-summary{white-space:normal;overflow-wrap:anywhere}
+body main #tab-search #graph-workspace-surface .graph-type-menu .graph-type-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;flex:1 1 auto;gap:6px;min-width:0;min-height:0;max-height:none;height:auto;margin:0;padding:2px;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+body main #tab-search #graph-workspace-surface .graph-type-choices>button{display:flex;align-items:center;gap:5px;min-width:0;max-width:none;width:100%;height:auto;min-height:32px;padding:6px 8px;line-height:1.45;white-space:normal;text-align:left;overflow-wrap:anywhere;box-shadow:none}
+body main #tab-search #graph-workspace-surface .graph-type-choices>button::before,body main #tab-search #graph-workspace-surface .graph-type-choices>button>i{flex:none}
+body main #tab-search #graph-workspace-surface .graph-type-menu .full-graph-type-pagination{position:static;display:flex;flex:none;align-items:center;justify-content:flex-end;gap:7px;margin:0;padding:5px 0 0;height:30px;border-top:1px solid var(--ui-line);background:transparent}
+body main #tab-search #graph-workspace-surface .graph-type-menu .full-graph-type-pagination[hidden]{display:none}
 body main #tab-search #graph-workspace-surface #graph-timeline,body main #tab-search #graph-workspace-surface .full-graph-footer{grid-row:5;display:flex;align-items:center;align-content:center;flex-wrap:nowrap;gap:5px;min-width:0;height:34px;min-height:0;margin:0;padding:3px 0;border:0;overflow-x:auto;overflow-y:hidden}
 body main #tab-search #graph-workspace-surface .full-graph-batches{flex-wrap:nowrap}
 body main #tab-search #graph-workspace-surface #graph-summary,body main #tab-search #graph-workspace-surface .full-graph-progress{grid-row:6;min-width:0;height:24px;min-height:0;margin:0;padding:3px 0;font-size:12px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box}
@@ -92,7 +108,7 @@ body main #tab-search #graph-workspace-surface.is-graph-fullscreen-workspace #gr
  body main #tab-search #graph-workspace-surface .graph-stage-heading{gap:4px}
  body main #tab-search #graph-workspace-surface .graph-stage-heading h2{font-size:12px}
  body main #tab-search #graph-workspace-surface .full-graph-mode button{padding:4px 6px;font-size:11px}
- body main #tab-search #graph-workspace-surface #graph-fullscreen,body main #tab-search #graph-workspace-surface #graph-results-toggle{padding:4px 5px;font-size:11px}
+ body main #tab-search #graph-workspace-surface #graph-fullscreen,body main #tab-search #graph-workspace-surface #graph-results-toggle,body main #tab-search #graph-workspace-surface #graph-create-entity{height:28px;min-height:28px;padding:4px 5px;font-size:11px}
 }
 @media(max-width:580px){
  body main #tab-search #graph-workspace-state{padding:6px 10px}
@@ -115,7 +131,8 @@ body main #tab-search #graph-workspace-surface.is-graph-fullscreen-workspace #gr
  body main #tab-search #graph-workspace-header .searchbar{flex-wrap:wrap}
  body main #tab-search #graph-workspace-header .searchbar>input{flex:1 1 calc(100% - 62px);min-width:0}
  body main #tab-search #graph-workspace-header .searchbar>#search{order:0;flex:0 0 52px}
- body main #tab-search #graph-workspace-header .searchbar>select{order:1;flex:0 0 100px}
+ body main #tab-search #graph-workspace-header .searchbar>select{order:1;flex:0 0 116px}
+ body main #tab-search #graph-workspace-surface .graph-type-menu .graph-type-choices{grid-template-columns:minmax(0,1fr)}
  body main #tab-search #graph-workspace-header #ontology-expansion-toggle{order:2;flex:1 1 auto;min-width:0;padding-inline:5px;font-size:11px;gap:4px}
  body main #tab-search #graph-workspace-header .search-options{order:3}
  body main #tab-search #graph-workspace-header .search-options>summary{padding-inline:5px;font-size:11px}

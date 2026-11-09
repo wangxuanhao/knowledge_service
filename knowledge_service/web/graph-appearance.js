@@ -1,7 +1,8 @@
 /* Shared presentation only: canonical type identity is independent of labels and pages. */
 (function(root){
   'use strict';
-  const tokens=Object.freeze({background:'#ffffff',edge:'#a8c9e2',text:'#888995',outline:'#ffffff',selected:'#1689e9'});
+  const tokens=Object.freeze({background:'#ffffff',edge:'#a8c9e2',text:'#888995',outline:'#ffffff',selected:'#1689e9',
+    nodeOpacity:1,edgeOpacity:.35,edgeWidth:1,selectedEdgeWidth:2});
   const rgbCache=new Map();
   const attribute=record=>record?.kind==='attribute_value'||record?.virtual===true&&record?.type==='KS_ATTRIBUTE_VALUE';
   function categoryKey(record){return attribute(record)?'attribute:':'entity:'+String(record?.type||'');}
