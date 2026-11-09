@@ -255,6 +255,7 @@ def test_keyboard_result_activation_moves_focus_into_visible_detail_panel(redesi
     assert page.locator('#query').evaluate('(node) => node === document.activeElement'), 'async results must preserve query focus'
     result.focus()
     page.keyboard.press('Enter')
+    page.wait_for_function("() => document.getElementById('graph-detail').dataset.recordId === 'layout-0'")
     page.evaluate('() => GraphWorkspaceLayout.settled()')
     assert page.locator('#graph-detail').is_visible()
     assert page.evaluate('''() => {

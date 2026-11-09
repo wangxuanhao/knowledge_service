@@ -117,12 +117,12 @@ test('a stale qualified inspection cannot replace the inspector after owner revi
 function searchHits(){
   const calls=[],buttons=[],host={html:''};let live={known_at:null,filters:null,entity_type:'Person',predicate:'knows'};
   Object.defineProperty(host,'innerHTML',{set(value){this.html=value;buttons.length=0;
-    for(const match of value.matchAll(/<button\s+([^>]*data-graph-node[^>]*)>/g)){
-      const button={dataset:{}};for(const attr of match[1].matchAll(/data-([\w-]+)="([^"]*)"/g))button.dataset[attr[1].replace(/-([a-z])/g,(_,letter)=>letter.toUpperCase())]=attr[2];buttons.push(button);
+    for(const match of value.matchAll(/<button\b([^>]*data-graph-view[^>]*)>/g)){
+      const button={dataset:{},closest:()=>({querySelectorAll:()=>buttons})};for(const attr of match[1].matchAll(/data-([\w-]+)="([^"]*)"/g))button.dataset[attr[1].replace(/-([a-z])/g,(_,letter)=>letter.toUpperCase())]=attr[2];buttons.push(button);
     }},get(){return this.html;}});
-  host.querySelectorAll=selector=>selector==='[data-graph-node]'?buttons:[];
-  const context={window:{openKnowledgeRecord:async value=>calls.push(value)},get:()=>host,scope:()=>live,graphScope:()=>live,
-    ontologyScope:()=>({ontology_scope:'all',ontology_ids:null}),esc:String,labelOf:String,platformGroupLabel:()=>'',status(){},historyFor(){}};
+  host.querySelectorAll=selector=>selector==='[data-graph-view]'?buttons:[];
+  const context={document:{activeElement:null},window:{openKnowledgeRecord:async value=>calls.push(value)},get:()=>host,scope:()=>live,graphScope:()=>live,
+    ontologyScope:()=>({ontology_scope:'all',ontology_ids:null}),readGraphHops:()=>1,localActionLabel:()=> '展开1跳邻域',esc:String,labelOf:String,platformGroupLabel:()=>'',status(){},historyFor(){}};
   vm.createContext(context);const source=fs.readFileSync(path.join(__dirname,'../../knowledge_service/web/workspace.js'),'utf8');
   vm.runInContext(source.slice(source.indexOf('  function renderHits('),source.indexOf('  // 检索和问答共用')),context);
   return {calls,buttons,render:(result,scope)=>context.renderHits(result,scope),setLive:value=>live=value};
@@ -133,6 +133,7 @@ test('search navigation forwards hit revision and originating authority scope wi
   h.render({hits:[{id:'hit',kind:'entity',text:'命中',version:1,version_id:'hit-v1'}]},fixed);
   h.setLive({known_at:null,filters:null,entity_type:'Person',predicate:'knows'});await h.buttons[0].onclick();
   assert.equal(h.calls[0].version_id,'hit-v1');assert.equal(h.calls[0].version,1);
+  assert.equal(h.calls[0].view,'local');assert.equal(h.calls[0].hops,1);
   assert.deepEqual(JSON.parse(JSON.stringify(h.calls[0].scope)),{...fixed,entity_type:'Person',predicate:'knows'});
 });
 

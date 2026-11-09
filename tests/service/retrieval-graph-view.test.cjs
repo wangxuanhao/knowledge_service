@@ -31,7 +31,7 @@ function harness({labels={}}={}){
   const modes=new Element(),buttons=['local','full'].map(mode=>Object.assign(new Element(),{dataset:{fgMode:mode}}));
   modes.groups=new Map([['[data-fg-mode]',buttons]]);
   const section=new Element(),parts=new Map();
-  for(const selector of ['.full-graph-host','.full-graph-progress','.full-graph-type-controls','.full-graph-type-summary','.full-graph-type-empty','.full-graph-type-heading','.full-graph-type-row','.full-graph-type-page','.full-graph-type-pagination',...['load','next','auto','pause','restart','cancel','reset','zoom-in','zoom-out','query','locate','edges','all-types','type-prev','type-next'].map(action=>'[data-fg="'+action+'"]')])parts.set(selector,new Element());
+  for(const selector of ['.full-graph-host','.full-graph-progress','.full-graph-batches','.fg-scope-note','.full-graph-type-controls','.full-graph-type-summary','.full-graph-type-empty','.full-graph-type-heading','.full-graph-type-row','.full-graph-type-page','.full-graph-type-pagination',...['load','next','auto','pause','restart','cancel','reset','zoom-in','zoom-out','query','locate','edges','all-types','type-prev','type-next'].map(action=>'[data-fg="'+action+'"]')])parts.set(selector,new Element());
   section.children=parts;
   let created=0,cancelled=0,resizeCount=0,resetCount=0,projectChanges=0,drawerCloses=0,loaded=[],actions=[],manifestRequest=null;
   class GraphDataset {

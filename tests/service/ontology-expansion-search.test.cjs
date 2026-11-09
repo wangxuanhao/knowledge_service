@@ -12,10 +12,11 @@ function harness({helpers=true}={}){
     const attribute=selector.slice(1,-1);
     const elements=[...this.innerHTML.matchAll(/<button\b[^>]*>/g)].filter(match=>match[0].includes(attribute+'="')).map(match=>({dataset:Object.fromEntries(
       [...match[0].matchAll(/data-([\w-]+)="([^"]*)"/g)].map(([,name,value])=>[name.replace(/-([a-z])/g,(_,letter)=>letter.toUpperCase()),value]))}));
-    buttons.set(attribute,elements);return elements;
+    for(const element of elements)element.closest=()=>({querySelectorAll:()=>[element]});
+    buttons.set(attribute,elements);if(attribute==='data-graph-view')buttons.set('data-graph-node',elements.filter(element=>element.dataset.graphNode));return elements;
   }};
-  const context={window:{openKnowledgeRecord:async({id})=>graphSelections.push(id)},get:()=>hits,labelOf:value=>value,esc:escape,scope:()=>({}),graphScope:()=>({entity_type:null,predicate:null}),
-    historyFor:row=>sourceSelections.push(row.id),status:()=>{}};
+  const context={document:{activeElement:null},window:{openKnowledgeRecord:async({id})=>graphSelections.push(id)},get:()=>hits,labelOf:value=>value,esc:escape,scope:()=>({}),graphScope:()=>({entity_type:null,predicate:null}),
+    historyFor:row=>sourceSelections.push(row.id),readGraphHops:()=>1,localActionLabel:()=> '展开1跳邻域',status:()=>{}};
   vm.createContext(context);
   if(helpers)vm.runInContext(fs.readFileSync(path.join(web,'qa-presentation.js'),'utf8'),context);
   const source=fs.readFileSync(path.join(web,'workspace.js'),'utf8');

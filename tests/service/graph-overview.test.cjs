@@ -28,9 +28,9 @@ function harness({entityCount=4,relationCount=2,failPage=0,mismatch=false}={}){
   if(fs.existsSync(overviewPath))vm.runInContext(fs.readFileSync(overviewPath,'utf8'),context);
   assert.equal(typeof context.window.GraphOverview?.create,'function','bounded graph overview coordinator is available');
   const renderer={setDataset(data){this.dataset=data;},sync(){renders.push([this.dataset.nodeCount,this.dataset.edgeCount]);}};
-  const view={loader:null,async load({projectId,scope,batchSize}){
+  const view={loader:null,async load({projectId,scope,batchSize,prepare}){
     this.loader?.cancel();this.loader=new context.window.FullGraph.SessionLoader(renderer,{batchSize});
-    await this.loader.begin(projectId,scope);return this.loader;
+    await this.loader.begin(projectId,scope);if(prepare)await prepare(this.loader);return this.loader;
   },cancel(){this.loader?.cancel();},interrupt(){if(this.loader?.state==='loading'||this.loader?.automatic)this.loader.cancel();},
     hasUsableView(){return Boolean(renderer.dataset?.nodeCount||renderer.dataset?.edgeCount||this.loader?.state==='complete');}};
   const coordinator=context.window.GraphOverview.create({readContext:()=>current,isReady:()=>ready,isVisible:()=>visible,view,setState:(kind,detail)=>states.push({kind,...detail})});
@@ -51,6 +51,25 @@ test('small manifest completes isolated entities within three total page request
   assert.ok(h.calls.filter(call=>call.url.endsWith('/page')).every(call=>call.body.limit===200));
   assert.equal(h.view.loader.state,'complete');assert.equal(h.renderer.dataset.nodeCount,200);assert.equal(h.renderer.dataset.edgeCount,400);
   assert.equal(h.states.at(-1).kind,'complete');
+});
+
+test('explicit overview uses the originating snapshot with the same one-page large budget',async()=>{
+  const h=harness({entityCount:1000,relationCount:800});h.setReady(true);
+  const scope={known_at:'2025-01-01T00:00:00Z',ontology_scope:'ids',ontology_ids:['historical']};
+  assert.equal(typeof h.coordinator.open,'function');
+  await h.coordinator.open({projectId:'p',scope});
+  assert.equal(h.calls.length,2);assert.equal(h.calls[1].body.limit,200);
+  assert.equal(h.calls[0].body.known_at,scope.known_at);
+  assert.deepEqual(Array.from(h.calls[0].body.ontology_ids),scope.ontology_ids);
+  const before=h.calls.length;await h.coordinator.ensure();assert.equal(h.calls.length,before);
+});
+
+test('explicit small overview is capped at three pages',async()=>{
+  const h=harness({entityCount:200,relationCount:400});h.setReady(true);
+  assert.equal(typeof h.coordinator.open,'function');
+  await h.coordinator.open({projectId:'p',scope:{}});
+  assert.equal(h.calls.filter(call=>call.url.endsWith('/page')).length,3);
+  assert.equal(h.view.loader.state,'complete');
 });
 
 for(const count of [0,3])test('authoritative '+(count?'isolated':'empty')+' graph is reported without a relation request',async()=>{

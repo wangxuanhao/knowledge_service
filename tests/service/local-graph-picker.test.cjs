@@ -54,6 +54,54 @@ test('an already rendered entity qualifies its version and focuses without rebui
   assert.equal(subject.context.ui.graph,graph);assert.equal(subject.context.wb.nodes,nodes);
   assert.deepEqual(JSON.parse(JSON.stringify(subject.inspected[0])),row);assert.equal(subject.focused[0],subject.inspected[0]);
 });
+
+test('explicit local navigation bypasses a cached full target and reads requested expansion budgets',async()=>{
+  const row={id:'cached',kind:'entity',text:'全局已缓存',version_id:'cached-v1'};
+  const neighbor={id:'neighbor',kind:'entity',text:'邻居',version_id:'neighbor-v1'};
+  const subject=harness((url)=>({records:url.endsWith('/records/page')?[row]:[row,neighbor]}));
+  for(const [id,value] of [['graph-hops','3'],['graph-direction','backward'],['graph-max-nodes','1000'],['graph-max-edges','2000']])subject.elements.set(id,{value});
+  subject.context.readInspectorRecord=async row=>row;
+  let focused=false;subject.context.window.FullGraphView={mode:'full',filters:{},hasRecord:()=>true,focusRecord:()=>{focused=true;},switchMode:()=>{}};
+  await subject.context.window.openKnowledgeRecord({id:row.id,kind:'entity',view:'local',hops:3});
+  assert.equal(focused,false);
+  assert.equal(subject.requests.length,2);
+  const read=subject.requests[1];assert.ok(read.url.endsWith('/graph-neighborhood'));
+  assert.equal(read.body.hops,3);assert.equal(read.body.direction,'backward');
+  assert.equal(read.body.max_nodes,1000);assert.equal(read.body.max_edges,2000);
+  assert.deepEqual(Array.from(read.body.seeds),[row.id]);
+  assert.equal(subject.context.ui.graph.nodes.length,2);
+});
+
+test('explicit local relation expands both endpoints while retaining its exact edge',async()=>{
+  const a={id:'a',kind:'entity',version_id:'a-v1'},b={id:'b',kind:'entity',version_id:'b-v1'};
+  const edge={id:'edge',kind:'relation',type:'knows',subject_id:'a',object_id:'b',version_id:'edge-v2'};
+  const subject=harness(url=>({records:url.endsWith('/records/page')?[edge]:[a,b]}));
+  subject.elements.set('graph-hops',{value:'2'});
+  await subject.context.window.openKnowledgeRecord({id:edge.id,kind:'relation',view:'local',hops:2,version_id:'edge-v2'});
+  const read=subject.requests[1];assert.equal(read.body.hops,2);
+  assert.deepEqual(Array.from(read.body.seeds),['a','b']);assert.equal(read.body.max_nodes,500);
+  assert.equal(subject.context.ui.graph.edges[0].version_id,'edge-v2');
+});
+
+test('invalid explicit local hops reject before reading or replacing a valid graph',async()=>{
+  const subject=harness();const graph=subject.context.ui.graph={nodes:[],edges:[]};
+  await assert.rejects(subject.context.window.openKnowledgeRecord({id:'selected',kind:'entity',view:'local',hops:1.5}),/0–10/);
+  assert.equal(subject.requests.length,0);assert.equal(subject.context.ui.graph,graph);
+});
+
+test('exact relation takes one reserved budget slot without adding an over-budget parallel edge',async()=>{
+  const a={id:'a',kind:'entity',version_id:'a-v1'},b={id:'b',kind:'entity',version_id:'b-v1'};
+  const exact={id:'exact',kind:'relation',type:'knows',subject_id:'a',object_id:'b',version_id:'exact-v2'};
+  const earlier={...exact,id:'earlier',version_id:'earlier-v1'};
+  const subject=harness(url=>({records:url.endsWith('/records/page')?[exact]:[a,b,earlier],truncated:false,attribute_budget:200,attribute_count:0}));
+  subject.elements.set('graph-hops',{value:'3'});subject.elements.set('graph-max-edges',{value:'1'});
+  await subject.context.window.openKnowledgeRecord({id:exact.id,kind:'relation',view:'local',hops:3,version_id:'exact-v2'});
+  assert.deepEqual(Array.from(subject.context.ui.graph.edges,row=>row.id),['exact']);
+  assert.equal(subject.context.ui.graph.truncated,true);
+  assert.equal(subject.context.ui.graph.neighborhood.truncated,true);
+  assert.equal(subject.context.ui.graph.attribute_budget,200);
+  assert.equal(subject.requests[1].body.hops,3);assert.equal(subject.requests[1].body.max_edges,1);
+});
 test('entity choices use bounded query pages and preserve the chosen graph seed',async()=>{
   const subject=harness();
   assert.equal(typeof subject.context.loadEntityChoices,'function');

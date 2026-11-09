@@ -883,6 +883,11 @@ def test_invalid_scope_draft_keeps_applied_scope_and_current_detail(workbench):
 def test_late_entity_detail_does_not_replace_relation_detail(workbench):
     page = workbench.page
     _render_a_neighborhood(page)
+    graph_before = _graph_node_ids(page)
+    summary_before = _settle_graph(page)
+    bodies = []
+    page.on('request', lambda request: bodies.append(request.post_data_json)
+            if urlparse(request.url).path.endswith('/graph-neighborhood') else None)
 
     pattern, handler, held = _hold_record_request(page)
     try:
@@ -892,8 +897,9 @@ def test_late_entity_detail_does_not_replace_relation_detail(workbench):
         _trigger_graph_click(page, 'edge', 'r')
         page.wait_for_function(
             "document.querySelector('#graph-detail').textContent.includes('退款关系')")
-        assert page.locator('#graph-entity-choice').input_value() == 'a'
-        assert page.locator('#graph-node').input_value() == 'a'
+        assert page.locator('#graph-entity-choice').input_value() == ''
+        assert page.locator('#graph-node').input_value() == ''
+        assert '点选端点' in page.locator('#graph-expand-target').inner_text()
         assert page.locator('#graph-expand').is_enabled()
 
         response = _release_record_request(page, held)
@@ -907,16 +913,25 @@ def test_late_entity_detail_does_not_replace_relation_detail(workbench):
     detail = page.locator('#graph-detail').inner_text()
     assert '退款关系' in detail
     assert '无关实体' not in detail
+    assert page.locator('#graph-entity-choice').input_value() == ''
+    assert page.locator('#graph-node').input_value() == ''
+    assert page.locator('#graph-expand').is_enabled()
+    assert _graph_node_ids(page) == graph_before
+    assert page.locator('#graph-summary').inner_text() == summary_before
+    assert bodies == [], 'late detail delivery and relation inspection must not read a neighborhood'
+
+    page.click('#graph-expand')
+    page.wait_for_function("document.querySelector('#status').textContent.includes('请先选择实体')")
+    assert bodies == [], 'a relation must not expand a hidden previous entity selection'
+    _trigger_graph_click(page, 'node', 'a')
+    page.wait_for_function("document.querySelector('#graph-detail').dataset.recordId === 'a'")
     assert page.locator('#graph-entity-choice').input_value() == 'a'
     assert page.locator('#graph-node').input_value() == 'a'
-    assert page.locator('#graph-expand').is_enabled()
-
-    bodies = []
-    page.on('request', lambda request: bodies.append(request.post_data_json)
-            if _is_graph_exchange(request) else None)
+    assert bodies == [], 'choosing a visible endpoint only inspects it'
     with page.expect_response(lambda response: _is_graph_exchange(response)):
         page.click('#graph-expand')
-    assert bodies[-1]['seeds'][0] == 'a'
+    assert len(bodies) == 1 and bodies[0]['seeds'] == ['a']
+    assert workbench.errors == []
 
 
 def test_late_entity_detail_does_not_reopen_closed_drawer(workbench):
@@ -975,24 +990,38 @@ def test_failed_entity_read_restores_committed_selection(workbench):
     assert page.locator('#graph-expand').is_enabled()
 
 
-def test_relation_detail_preserves_entity_selection_for_expand(workbench):
+def test_relation_detail_requires_visible_endpoint_selection_before_expand(workbench):
     page = workbench.page
     _select_graph_entity(page, 'b')
     page.wait_for_function(
         "document.querySelector('#graph-detail').textContent.includes('退款平台')")
 
+    bodies = []
+    page.on('request', lambda request: bodies.append(request.post_data_json)
+            if urlparse(request.url).path.endswith('/graph-neighborhood') else None)
     _trigger_graph_click(page, 'edge', 'r')
     page.wait_for_function(
         "document.querySelector('#graph-detail').textContent.includes('退款关系')")
-    assert page.locator('#graph-entity-choice').input_value() == 'b'
-    assert page.locator('#graph-node').input_value() == 'b'
+    assert page.locator('#graph-entity-choice').input_value() == ''
+    assert page.locator('#graph-node').input_value() == ''
+    assert '点选端点' in page.locator('#graph-expand-target').inner_text()
+    assert bodies == []
 
-    bodies = []
-    page.on('request', lambda request: bodies.append(request.post_data_json)
-            if _is_graph_exchange(request) else None)
+    page.click('#graph-expand')
+    page.wait_for_function("document.querySelector('#status').textContent.includes('请先选择实体')")
+    assert bodies == [], 'relation inspection must not retain b as a hidden expansion seed'
+    _trigger_graph_click(page, 'node', 'a')
+    page.wait_for_function("document.querySelector('#graph-detail').dataset.recordId === 'a'")
+    assert page.locator('#graph-entity-choice').input_value() == 'a'
+    assert page.locator('#graph-node').input_value() == 'a'
+    assert '退款商户' in page.locator('#graph-expand-target').inner_text()
+    page.fill('#graph-hops', '2')
+    assert bodies == [], 'endpoint inspection and hop edits must not fetch a neighborhood'
     with page.expect_response(lambda response: _is_graph_exchange(response)):
         page.click('#graph-expand')
-    assert bodies[-1]['seeds'][0] == 'b'
+    assert len(bodies) == 1 and bodies[0]['seeds'] == ['a']
+    assert bodies[0]['hops'] == 2
+    assert workbench.errors == []
 
 
 @pytest.mark.usefixtures('keyword_index_ready')
@@ -1064,30 +1093,58 @@ def test_ontology_expansion_toggle_stays_off_by_default_and_explains_itself(work
 
 
 @pytest.mark.usefixtures('keyword_index_ready')
-def test_entity_and_relation_hits_select_consistent_detail_without_redraw(workbench):
+def test_entity_and_relation_hits_open_selected_hop_neighborhoods_without_unrequested_reads(workbench):
     page = workbench.page
     page.click('[data-tab="search"]')
     _search(page)
-    graph_nodes = _graph_node_ids(page)
-    graph_summary = page.locator('#graph-summary').inner_text()
+    bodies = []
+    page.on('request', lambda request: bodies.append(request.post_data_json)
+            if _is_graph_exchange(request) else None)
 
-    for index, expected_id, expected_text in ((0, 'a', '退款商户'), (2, 'r', '退款关系')):
-        workbench.paths.clear()
+    for index, expected_id, expected_text, hops, seeds in (
+            (0, 'a', '退款商户', 2, ['a']), (2, 'r', '退款关系', 3, ['a', 'b'])):
         if not page.locator('#hits').is_visible():
             page.click('#graph-panel-tab-results')
-        hit=_channel_sections(page).nth(index).locator('[data-graph-node]').first
+        workbench.paths.clear()
+        workbench.detail_paths.clear()
+        bodies.clear()
+        page.fill('#graph-hops', str(hops))
+        assert bodies == [], 'editing the shared depth must not prefetch a neighborhood'
+        hit = _channel_sections(page).nth(index).locator('[data-graph-node]').first
         assert hit.get_attribute('data-graph-node') == expected_id
-        hit.click()
-        page.wait_for_function("id => document.querySelector('#graph-detail').dataset.recordId === id", arg=expected_id)
-        assert not any(path.endswith('/graph-neighborhood') for path in workbench.paths)
-        assert not any(path.endswith('/explore') or path.endswith('/search')
+        assert hit.inner_text() == f'展开{hops}跳邻域'
+        expected_version = hit.get_attribute('data-graph-version-id')
+        with page.expect_response(_is_graph_exchange) as neighborhood:
+            hit.click()
+        response = neighborhood.value
+        assert response.status == 200
+        records = response.json()['records']
+        page.wait_for_function('''id => document.querySelector('#graph-detail').dataset.recordId === id
+          && !document.querySelector('[data-graph-node="'+id+'"]').disabled''', arg=expected_id)
+        assert len(bodies) == 1 and bodies[0]['seeds'] == seeds
+        assert bodies[0]['hops'] == hops and bodies[0]['direction'] == 'both'
+        assert bodies[0]['max_nodes'] == 500 and bodies[0]['max_edges'] == 1000
+        assert set(bodies[0]) == SUBGRAPH_BODY_FIELDS
+        assert workbench.detail_paths == [], 'local navigation needs no extra zero-hop inspector read'
+        assert not any(path.endswith('/explore') or path.endswith('/search') or '/graph-sessions' in path
                        for path in workbench.paths)
-        assert page.locator('#graph-entity-choice').input_value() == 'a'
-        assert page.locator('#graph-node').input_value() == 'a'
+        selected = 'a' if expected_id == 'a' else ''
+        assert page.locator('#graph-entity-choice').input_value() == selected
+        assert page.locator('#graph-node').input_value() == selected
         assert expected_text in page.locator('#graph-detail').inner_text()
-        assert _graph_node_ids(page) == graph_nodes
-        assert page.locator('#graph-summary').inner_text() == graph_summary
+        assert _graph_node_ids(page) == sorted(row['id'] for row in records if row['kind'] == 'entity')
+        assert _graph_edge_ids(page) == sorted(row['id'] for row in records if row['kind'] == 'relation')
+        exact = next(row for row in records if row['id'] == expected_id)
+        assert exact['version_id'] == expected_version
+        if expected_id == 'r':
+            assert {'a', 'b'} <= set(_graph_node_ids(page)) and 'r' in _graph_edge_ids(page)
+            assert '退款商户' in page.locator('#graph-detail').inner_text()
+            assert '退款平台' in page.locator('#graph-detail').inner_text()
+        assert f'局部邻域 {hops} 跳' in _settle_graph(page)
+        assert page.locator('#graph-hops').input_value() == str(hops)
+        assert page.evaluate('FullGraphView.mode') == 'local'
         assert page.locator('[data-tab="search"]').get_attribute('class') == 'active'
+    assert workbench.errors == []
 
 
 @pytest.mark.usefixtures('keyword_index_ready')

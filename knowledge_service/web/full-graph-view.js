@@ -9,6 +9,16 @@
     stage.append(section);
     const scopeBanner=document.getElementById('graph-version-scope');if(scopeBanner)modes.before(scopeBanner);
     const host=section.querySelector('.full-graph-host'),status=section.querySelector('.full-graph-progress');
+    const targetNotice=document.createElement('div');targetNotice.className='full-graph-controls';targetNotice.hidden=true;section.querySelector('.full-graph-batches').append(targetNotice);
+    const scopeNote=section.querySelector('.fg-scope-note');
+    const scopeDescription=value=>{
+      const parts=[window.TemporalScope?.describe(value||{})||''];
+      if(value?.ontology_scope==='ids')parts.push('指定本体：'+(value.ontology_ids||[]).join('、'));
+      if(value?.filters)parts.push('Metadata 条件：'+JSON.stringify(value.filters));
+      for(const [key,label] of [['platforms','平台'],['businesses','业务'],['audiences','适用对象']]){const item=value?.applicability?.[key];if(item)parts.push(label+'：'+(item.values?.join('、')||item.mode));}
+      return parts.filter(Boolean).join(' · ');
+    };
+    const showScope=()=>{scopeNote.textContent='图谱实际范围 · '+scopeDescription(fixed)+' · 每批200条；继续加载由用户选择。';scopeNote.title=scopeNote.textContent;};
     const emptyNotice=document.createElement('section');emptyNotice.className='full-graph-empty';emptyNotice.hidden=true;emptyNotice.setAttribute('aria-label','空图谱操作指引');emptyNotice.setAttribute('aria-live','polite');host.append(emptyNotice);
     const control=action=>section.querySelector('[data-fg="'+action+'"]');
     control('pause').textContent='本批后暂停';
@@ -67,10 +77,8 @@
           setFocus:value=>renderer?.setExplorationFocus(value),select:row=>renderer?.locate(row.id),canCollapse:()=>false,
           expand:async id=>{
             const row=data?.records[data.nodeIndex.get(id)];if(!row)throw Error('当前显示图中没有该实体，请重新选择。');
-            switchMode('local');
-            const input=document.getElementById('graph-node');if(input)input.value=id;
-            const result=await window.drawGraph(id,document.getElementById('graph-hops')?.value||1,{scope:{...fixed,entity_type:renderer.typeFilter??fixed?.entity_type,predicate:renderer.predicateFilter??fixed?.predicate}});
-            if(result){await window.selectEntityDetail?.(id);GraphExplorer.open();}
+            const result=await window.openKnowledgeRecord({...row,view:'local',scope:{...fixed,entity_type:renderer.typeFilter??fixed?.entity_type,predicate:renderer.predicateFilter??fixed?.predicate}});
+            if(result)GraphExplorer.open();
           }
         }});
     }
@@ -110,22 +118,60 @@
       const explorer=window.GraphExplorer?.snapshot();if(explorer?.open||explorer?.focused)bindExplorer();
     }
     function refreshProjection(){if(lastProgress)progress(lastProgress,run);else renderTypes();bindExplorer();}
+    function validateStagedTarget(data,target,{complete=false,scope={}}={}){
+      if(!target)return;
+      const observed=data.records[data.nodeIndex.get(target.id)]||data.edges.find(row=>row.id===target.id);
+      if(!observed){if(complete)throw Error('当前完整范围内已没有该记录，记录资格可能已变化；请刷新后重试。');return;}
+      if(observed&&(observed.kind!==target.kind||(target.version_id?observed.version_id!==target.version_id:target.version!=null&&observed.version!==target.version)))throw Error('知识版本已变化，请刷新后重新打开；原有图谱已保留。');
+      const visibleEntity=row=>row?.kind==='entity'&&(scope.entity_type==null||String(row.type||'')===String(scope.entity_type));
+      if(observed.kind==='entity'&&!visibleEntity(observed))throw Error('当前实体类型筛选排除了该记录；请调整筛选后重试。');
+      if(observed.kind==='relation'&&((scope.predicate&&observed.type!==scope.predicate)||![observed.subject_id,observed.object_id].every(id=>visibleEntity(data.records[data.nodeIndex.get(id)]))))throw Error('当前范围或类型筛选不包含关系及两个合格端点；请调整筛选后重试。');
+    }
     async function start(options={}){
       if(!options.projectId&&window.GraphOverview?.ensure)return window.GraphOverview.ensure({retry:true});
-      emptyNotice.hidden=true;
-      stop();lastProgress=null;typePage=0;renderTypes(null,null);const epoch=run,selected=options.projectId||project();if(!selected){message('请先选择项目。',true);return;}
+      const staged=Boolean(options.transactional),previous={loader,fixed,loadedProject,lastProgress,typePage};
+      if(staged){run++;if(loader?.state==='loading'||loader?.automatic)loader.cancel();controls();}
+      else{emptyNotice.hidden=true;targetNotice.hidden=true;stop();lastProgress=null;typePage=0;renderTypes(null,null);}
+      const epoch=run,selected=options.projectId||project();if(!selected){message('请先选择项目。',true);return;}
       try{
         if(!renderer)renderer=new window.FullGraph.Renderer(host,{onSelect:select,onError:text=>message(text,true)});
-        loader=new window.FullGraph.SessionLoader(renderer,{batchSize:options.batchSize||200});
+        // Explicit global navigation stages its first validated batch while the
+        // current local/full scene remains usable. Default entry keeps streaming.
+        loader=new window.FullGraph.SessionLoader(staged?{setDataset(){},sync(){}}:renderer,{batchSize:options.batchSize||200});
+        const ownedLoader=loader,nextScope=options.scope||scope();
         // begin() cancels the previous session synchronously before clearing its records.
-        let acceptProgress=false;loader.onProgress=value=>{if(acceptProgress)progress(value,epoch);};
+        let acceptProgress=false,stagedProgress=null;loader.onProgress=value=>{stagedProgress=value;if(acceptProgress)progress(value,epoch);};
         renderer.showEdges=control('edges').checked!==false;
         renderer.showLabels=control('labels')?.checked!==false;
-        fixed=options.scope||scope();loadedProject=selected;switchMode('full');message('正在核对图谱范围与完整清单…');
-        const {entity_type,predicate,...authorityScope}=fixed;
-        const pending=loader.begin(selected,authorityScope);renderer.setTypeFilter(entity_type||null);renderer.setPredicateFilter(predicate||null);
-        acceptProgress=true;controls();bindExplorer();await pending;bindExplorer();return loader;
-      }catch(error){if(error.name!=='AbortError'&&epoch===run)message(error.message+' 当前图不完整，请重新开始。',true);throw error;}
+        if(!staged){fixed=nextScope;loadedProject=selected;showScope();switchMode('full');}
+        message('正在核对图谱范围与完整清单…');
+        const {entity_type,predicate,...authorityScope}=nextScope;
+        const pending=ownedLoader.begin(selected,authorityScope);
+        if(!staged){renderer.setTypeFilter(entity_type||null);renderer.setPredicateFilter(predicate||null);acceptProgress=true;}
+        controls();if(!staged)bindExplorer();await pending;
+        if(epoch!==run)return null;
+        if(staged){
+          if(options.accepts&&!options.accepts()){const error=Error('图谱导航已过期');error.name='AbortError';throw error;}
+          validateStagedTarget(ownedLoader.dataset,options.target,{complete:ownedLoader.state==='complete',scope:nextScope});
+          if(options.prepare)await options.prepare(ownedLoader);
+          if(epoch!==run)return null;
+          if(options.accepts&&!options.accepts()){const error=Error('图谱导航已过期');error.name='AbortError';throw error;}
+          validateStagedTarget(ownedLoader.dataset,options.target,{complete:ownedLoader.state==='complete',scope:nextScope});
+          fixed=nextScope;loadedProject=selected;lastProgress=null;typePage=0;emptyNotice.hidden=true;targetNotice.hidden=true;
+          ownedLoader.renderer=renderer;renderer.setDataset(ownedLoader.dataset);renderer.setTypeFilter(entity_type||null);renderer.setPredicateFilter(predicate||null);
+          renderer.setSessionManifest(ownedLoader.manifest);renderer.sync();showScope();switchMode('full');
+          acceptProgress=true;if(stagedProgress)progress(stagedProgress,epoch);
+        }
+        bindExplorer();return ownedLoader;
+      }catch(error){
+        if(staged&&epoch===run){
+          loader?.cancel();({loader,fixed,loadedProject,lastProgress,typePage}=previous);
+          const restored=loader,restoredEpoch=run;
+          if(restored)restored.onProgress=value=>{if(loader===restored)progress(value,restoredEpoch);};
+          controls();
+        }
+        if(error.name!=='AbortError'&&epoch===run)message(error.message+(staged?' 原有图谱已保留，请重试。':' 当前图不完整，请重新开始。'),true);throw error;
+      }
       finally{if(epoch===run)controls();}
     }
     async function advance(automatic=false){
@@ -157,7 +203,7 @@
     control('edges').addEventListener('change',event=>{if(renderer){renderer.showEdges=event.target.checked;renderer.requestDraw();}});
     control('labels')?.addEventListener('change',event=>{if(renderer){renderer.showLabels=event.target.checked;renderer.requestDraw();}});
     const invalidate=()=>{
-      emptyNotice.hidden=true;
+      emptyNotice.hidden=true;targetNotice.hidden=true;
       stop();if(renderer)renderer.setDataset(new window.FullGraph.GraphDataset());
       if(loader)loader.manifest=null;fixed=null;loadedProject=null;lastProgress=null;typePage=0;renderTypes(null,null);controls();message('项目或范围已改变，请重新开始加载图谱。');
       bindExplorer();
@@ -179,9 +225,21 @@
     }
     async function focusRecord(record,context,accepts=()=>true){
       if(!hasRecord(record,context))return false;
+      targetNotice.hidden=true;
       switchMode('full');await window.GraphWorkspaceLayout?.settled();
       if(!accepts()||!hasRecord(record,context))return false;
       renderer.resize();return renderer.focusRecord(record);
+    }
+    function showUnloadedTarget(record,context){
+      message('目标尚未载入当前概览；可继续加载，或展开该目标的局部邻域。');
+      const button=document.createElement('button');button.type='button';button.dataset.fgTargetLocal='';button.textContent='展开局部邻域';
+      button.onclick=async()=>{
+        button.disabled=true;
+        try{await window.openKnowledgeRecord({...record,projectId:context.projectId,scope:context.scope,view:'local'});}
+        catch(error){if(error.name!=='AbortError')message(error.message,true);}
+        finally{button.disabled=false;}
+      };
+      targetNotice.replaceChildren(button);targetNotice.hidden=false;
     }
     function showEmptyGuidance(){
       // Renderer construction replaces the host's canvas children once.
@@ -224,7 +282,7 @@
       message(detail.message+(detail.totalEntities==null?'':` · 已加载实体 ${detail.loadedEntities} / ${detail.totalEntities} · 关系 ${detail.loadedRelations} / ${detail.totalRelations}`)+
         (visible&&(renderer.typeFilter||renderer.predicateFilter)?` · 当前可见 ${visible.nodeCount} 实体 / ${visible.edgeCount} 关系`:''),kind==='error',false);
     }
-    window.FullGraphView={switchMode,load:start,restart:start,next:()=>advance(),resume:()=>advance(true),pause,cancel,stop,interrupt,hasRecord,focusRecord,setOverviewState,invalidate,
+    window.FullGraphView={switchMode,load:start,restart:start,next:()=>advance(),resume:()=>advance(true),pause,cancel,stop,interrupt,hasRecord,focusRecord,showUnloadedTarget,setOverviewState,invalidate,
       get filters(){return {entity_type:renderer?.typeFilter??fixed?.entity_type??null,predicate:renderer?.predicateFilter??fixed?.predicate??null};},
       get renderer(){return renderer;},get loader(){return loader;},get mode(){return mode;}};
     controls();renderTypes(null,null);

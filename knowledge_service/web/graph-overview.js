@@ -30,6 +30,31 @@
       cancelled.add(entry.key);
       report('cancelled',view.loader,'已取消加载，当前图不完整；可重新开始。');
     }
+    async function finishBounded(loader,accepts,owned){
+      const manifest=loader.manifest,small=manifest?.entity_count<=200&&manifest?.relation_count<=400;
+      for(let pages=1;small&&pages<3&&loader.state==='paused'&&!owned.paused;pages++){
+        await loader.next();if(!accepts())return null;
+      }
+      return loader;
+    }
+    async function open(context,{accepts=()=>true,target,qualify}={}){
+      // The lease belongs to the live owner; the session reads the frozen
+      // originating scope. A page reentry must not replace it with owner scope.
+      const lease=explicit(),owned=entry;
+      const active=()=>lease.accepts()&&accepts();
+      owned.pending=(async()=>{
+        const loader=await view.load({projectId:context.projectId,scope:clone(context.scope),batchSize:200,transactional:true,accepts:active,target,
+          prepare:async loader=>{
+            if(!await finishBounded(loader,active,owned)||!active())return null;
+            if(qualify)await qualify(loader);
+            return loader;
+          }});
+        if(!active()||!loader)return null;
+        report(loader.state==='complete'?'complete':'partial',loader,loader.state==='complete'?'当前范围图谱已完整加载。':'当前为局部概览；可加载下一批或自动继续。');
+        return loader;
+      })();
+      try{return await owned.pending;}finally{if(entry===owned)owned.pending=null;}
+    }
     async function ensure({retry=false}={}){
       const context=readContext();if(!context?.projectId||!isReady()||!isVisible())return null;
       const key=keyOf(context);if(cancelled.has(key)&&!retry){entry={key,kind:'cancelled'};return null;}
@@ -42,12 +67,10 @@
         try{
           loader=await view.load({projectId:context.projectId,scope:clone(context.scope),batchSize:200});
           if(!current(owned,serial)||!loader)return null;
-          const manifest=loader.manifest,small=manifest?.entity_count<=200&&manifest?.relation_count<=400;
+          const manifest=loader.manifest;
           // begin already read one page. Only certified small manifests may
           // finish automatically, with an absolute budget of three pages.
-          for(let pages=1;small&&pages<3&&loader.state==='paused'&&!owned.paused;pages++){
-            await loader.next();if(!current(owned,serial))return null;
-          }
+          if(!await finishBounded(loader,()=>current(owned,serial),owned))return null;
           owned.kind=loader.state==='complete'?(manifest.entity_count||manifest.relation_count?'complete':'empty'):'partial';
           report(owned.kind,loader,owned.kind==='empty'?emptyGuidance(context.scope).message:owned.kind==='complete'?'当前范围图谱已完整加载。':'当前为局部概览；可加载下一批或自动继续。');
           return loader;
@@ -66,7 +89,7 @@
       }
       else if(view.loader?.state==='loading'||view.loader?.automatic){epoch++;view.cancel();}
     }
-    return {ensure,invalidate,explicit,cancel,pause(){if(entry)entry.paused=true;},leave,snapshot:()=>entry?{key:entry.key,kind:entry.kind}:null};
+    return {ensure,open,invalidate,explicit,cancel,pause(){if(entry)entry.paused=true;},leave,snapshot:()=>entry?{key:entry.key,kind:entry.kind}:null};
   }
   const api=root.GraphOverview={create,emptyGuidance};
   function install(){

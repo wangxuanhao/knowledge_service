@@ -30,6 +30,13 @@ body main #tab-search #graph-workspace-surface .graph-presentation-actions{gap:5
 body main #tab-search #graph-workspace-surface #graph-results-toggle{height:30px;margin:0;padding:4px 8px;font-size:12px;white-space:nowrap}
 body main #tab-search #graph-workspace-surface :is(.graph-toolbar,.full-graph-toolbar){grid-row:2;display:flex;align-items:center;align-content:center;flex-wrap:nowrap;gap:6px;min-width:0;height:36px;margin:0;padding:0;border:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
 body main #tab-search #graph-workspace-surface .graph-toolbar :is(.graph-view-tools,.graph-tool-actions){display:contents}
+body main #tab-search #graph-workspace-surface #graph-expand-target{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+body main #tab-search #graph-workspace-surface .graph-discovery-notice{flex:none;margin:0}
+body main #tab-search #graph-workspace-surface .graph-discovery-notice[hidden]{display:none}
+body main #tab-search #graph-workspace-surface .graph-discovery-notice>summary{padding:5px 8px;white-space:nowrap;color:#7a5313;cursor:pointer}
+body main #tab-search #graph-workspace-surface .graph-discovery-notice:not([open])>.discovery-hint{display:none}
+body main #tab-search #graph-workspace-surface .graph-discovery-notice>.discovery-hint{position:fixed;inset:auto 16px 16px auto;z-index:115;display:block;width:min(360px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;box-sizing:border-box;margin:0;white-space:normal;box-shadow:var(--ui-shadow-lift)}
+body main #tab-search #graph-workspace-surface .graph-discovery-notice>.discovery-hint button{display:block;margin:8px 0 0}
 body main #tab-search #graph-workspace-surface :is(.graph-toolbar,.full-graph-toolbar)>*,body main #tab-search #graph-workspace-surface .graph-toolbar button{flex-shrink:0}
 body main #tab-search #graph-workspace-surface .full-graph-locate{order:initial;flex:1 0 180px;margin-left:auto}
 body main #tab-search #graph-workspace-surface #graph-stage .full-graph-section{display:contents}
@@ -88,6 +95,8 @@ body main #tab-search #graph-workspace-surface.is-graph-fullscreen-workspace #gr
  body main #tab-search #graph-workspace-surface #graph-fullscreen,body main #tab-search #graph-workspace-surface #graph-results-toggle{padding:4px 5px;font-size:11px}
 }
 @media(max-width:580px){
+ body main #tab-search #graph-workspace-state{padding:6px 10px}
+ body main #tab-search #graph-workspace-surface:has(>#graph-stage)[data-panel="results"],body main #tab-search #graph-workspace-surface:has(>#graph-stage)[data-panel="detail"]{grid-template-rows:minmax(0,1fr) minmax(150px,28%)}
  /* Reuse the existing workspace menu, leaving the graph an operable phone view. */
  body:has(#tab-search:not(.hidden)){display:flex;flex-direction:column}
  body:has(#tab-search:not(.hidden))>main{flex:1 1 0;min-height:0;height:auto}

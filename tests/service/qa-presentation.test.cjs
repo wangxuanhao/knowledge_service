@@ -103,7 +103,7 @@ test('search marks supplemental type hits while direct query hits retain their e
   const declaration=source.match(/  function renderHits\([^\n]*\)\{[\s\S]*?\n  \}/)?.[0];
   assert.ok(declaration);
   const hits={innerHTML:'',querySelectorAll:()=>[]};
-  const context={window:{},get:()=>hits,labelOf:value=>value,esc:value=>String(value),scope:()=>({}),graphScope:()=>({entity_type:null,predicate:null})};
+  const context={window:{},get:()=>hits,localActionLabel:()=> '展开1跳邻域',labelOf:value=>value,esc:value=>String(value),scope:()=>({}),graphScope:()=>({entity_type:null,predicate:null})};
   vm.runInNewContext(declaration+';this.render=renderHits;',context);
   const rows=['entity','relation','chunk'].flatMap(kind=>[
     {kind,id:'direct-'+kind,subject_id:'root',text:'direct-'+kind,type:'平台',retrieval_channel:'milvus'},

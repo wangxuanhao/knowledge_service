@@ -127,6 +127,35 @@
       if(next&&!pathOpen&&active())showPanel('detail');pathOpen=next;
     }).observe(inspector,{attributes:true,attributeFilter:['class']});
 
+    // Keep the existing discovery count, message and action without allocating
+    // an implicit canvas-grid row when the asynchronous notice arrives.
+    const stage=get('graph-stage');let discovery=null,observedHint=null;
+    const updateDiscovery=()=>{
+      if(!discovery||!observedHint)return;
+      const hidden=observedHint.hidden,count=observedHint.querySelector('b')?.textContent||'';
+      discovery.hidden=hidden;if(hidden)discovery.open=false;
+      discovery.querySelector('summary').textContent='待核对候选'+(count?' '+count:'');
+    };
+    const placeDiscovery=()=>{
+      const hint=get('graph-canvas-discovery-hint');if(!hint)return;
+      if(!discovery){
+        discovery=document.createElement('details');discovery.className='graph-discovery-notice';
+        const summary=document.createElement('summary');summary.className='graph-tool-button';discovery.append(summary);
+      }
+      if(observedHint!==hint){
+        observedHint=hint;
+        new MutationObserver(updateDiscovery).observe(hint,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['hidden']});
+      }
+      if(hint.parentElement!==discovery)discovery.append(hint);
+      const toolbar=stage.querySelector(stage.dataset.graphMode==='full'?'.full-graph-toolbar':'.graph-toolbar');
+      if(toolbar&&discovery.parentElement!==toolbar){discovery.open=false;toolbar.append(discovery);}
+      updateDiscovery();
+    };
+    new MutationObserver(placeDiscovery).observe(stage,{childList:true,attributes:true,attributeFilter:['data-graph-mode']});
+    document.addEventListener('pointerdown',event=>{if(discovery?.open&&!discovery.contains(event.target))discovery.open=false;});
+    document.addEventListener('keydown',event=>{if(event.key==='Escape'&&discovery?.open){discovery.open=false;discovery.querySelector('summary').focus({preventScroll:true});}});
+    placeDiscovery();
+
     document.addEventListener('workspace:page-changed',()=>{if(active())placeScope(get('scope'));resize();});
     get('project').addEventListener('change',closePanel);
     document.addEventListener('workspace:scope-changed',resize);
