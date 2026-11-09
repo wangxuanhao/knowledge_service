@@ -210,11 +210,15 @@
 
     // Solve visibility from the fixed base on every merge. A detached cycle has
     // no starting anchor and therefore cannot keep itself alive.
-    _merge(replacementSeed,replacementGraph){
+    _merge(replacementSeed,replacementGraph,replaceBase=false){
       const branches=replacementGraph?new Map(this._branches):this._branches;
-      if(replacementGraph)branches.set(replacementSeed,replacementGraph);
+      const base=replaceBase?replacementGraph:this._base;
+      if(replacementGraph){
+        if(replaceBase)branches.delete(replacementSeed);
+        else branches.set(replacementSeed,replacementGraph);
+      }
       const merged={nodes:new Map(),edges:new Map()},active=new Set();
-      addGraph(merged,this._base);
+      addGraph(merged,base);
       let changed=true;
       while(changed){
         changed=false;
@@ -225,7 +229,7 @@
       }
       // First occurrence order remains base, then branch insertion order even
       // when a child branch precedes the branch that makes its anchor visible.
-      const ordered={nodes:new Map(),edges:new Map()};addGraph(ordered,this._base);
+      const ordered={nodes:new Map(),edges:new Map()};addGraph(ordered,base);
       for(const [seed,branch] of branches){if(active.has(seed))addGraph(ordered,branch);}
       for(const [id,edge] of ordered.edges){if(!ordered.nodes.has(edge.subject_id)||!ordered.nodes.has(edge.object_id))ordered.edges.delete(id);}
       return {...ordered,active};
@@ -244,11 +248,13 @@
       return ticket;
     }
 
-    _bound(seed,graph,current){
+    _bound(seed,graph,current,replaceBase=false){
       // Reserve owners rooted after the proposed replacement, so descendants
       // it detaches release their budget while genuinely shared owners remain.
-      const surviving=this._merge(seed,graph).active;
-      const reserved={nodes:new Map(),edges:new Map()};addGraph(reserved,this._base);
+      const surviving=this._merge(seed,graph,replaceBase).active;
+      const reserved={nodes:new Map(),edges:new Map()};
+      if(replaceBase)reserved.nodes.set(seed,graph.nodes.find(node=>node?.id===seed));
+      else addGraph(reserved,this._base);
       for(const [anchor,branch] of this._branches){if(anchor!==seed&&surviving.has(anchor))addGraph(reserved,branch);}
       let entities=0,attributes=0,relations=0,attributeEdges=0;
       for(const node of reserved.nodes.values()){if(realNode(node))entities++;else attributes++;}
@@ -258,7 +264,7 @@
       for(const candidate of graph.nodes){
         if(!candidate||candidate.id==null){truncated=true;continue;}
         if(selected.nodes.has(candidate.id))continue;
-        const node=current.nodes.get(candidate.id)||candidate;
+        const node=replaceBase?candidate:current.nodes.get(candidate.id)||candidate;
         if(!reserved.nodes.has(node.id)){
           if(realNode(node)?entities>=this.maxNodes:attributes>=this.maxAttributes){truncated=true;continue;}
           if(realNode(node))entities++;else attributes++;
@@ -269,7 +275,7 @@
       for(const candidate of graph.edges){
         if(!candidate||candidate.id==null){truncated=true;continue;}
         if(selected.edges.has(candidate.id))continue;
-        const edge=current.edges.get(candidate.id)||candidate;
+        const edge=replaceBase?candidate:current.edges.get(candidate.id)||candidate;
         if(!reserved.nodes.has(edge.subject_id)||!reserved.nodes.has(edge.object_id)){truncated=true;continue;}
         if(!reserved.edges.has(edge.id)){
           if(realEdge(edge)?relations>=this.maxEdges:attributeEdges>=this.maxAttributes){truncated=true;continue;}
@@ -278,24 +284,31 @@
         }
         selected.edges.set(edge.id,edge);
       }
-      const bounded={nodes:[...selected.nodes.values()],edges:[...selected.edges.values()],truncated};
+      const bounded={...(replaceBase?graph:{}),nodes:[...selected.nodes.values()],edges:[...selected.edges.values()],truncated};
+      if(replaceBase&&jsonMap(graph.neighborhood))bounded.neighborhood={...graph.neighborhood,truncated};
       if(Array.isArray(graph.records))bounded.records=[...bounded.nodes,...bounded.edges];
       for(const key of presentationMaps){if(owns(graph,key)&&jsonMap(graph[key]))bounded[key]=graph[key];}
       if(owns(graph,'attribute_count'))bounded.attribute_count=graph.attribute_count;
       return bounded;
     }
 
-    accept(ticket,graph){
+    accept(ticket,graph,{replaceBase=false}={}){
       if(!ticket||ticket.epoch!==this._epoch||ticket.scopeKey!==this._scopeKey||this._pending.get(ticket.seed)!==ticket)return false;
       if(!graph||!Array.isArray(graph.nodes)||!Array.isArray(graph.edges))return false;
+      if(replaceBase&&(ticket.seed!==this.seed||!graph.nodes.some(node=>realNode(node)&&node.id===this.seed)))return false;
       const current=this._merge();
       if(!realNode(current.nodes.get(ticket.seed)))return false;
       for(const edge of graph.edges){
         const existing=edge&&current.edges.get(edge.id);
         if(existing&&(existing.subject_id!==edge.subject_id||existing.object_id!==edge.object_id))return false;
       }
-      const bounded=this._bound(ticket.seed,graph,current);
-      this._branches.set(ticket.seed,bounded);
+      const bounded=this._bound(ticket.seed,graph,current,replaceBase);
+      if(replaceBase){
+        this._base=bounded;
+        this._branches.delete(ticket.seed);
+      }else{
+        this._branches.set(ticket.seed,bounded);
+      }
       this._pending.delete(ticket.seed);
       this._prune();
       return true;

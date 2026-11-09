@@ -80,7 +80,7 @@ def run():
         page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
         assert not page.evaluate("()=>wb.nodes.has('x')"),'late response must not revive a collapsed branch'
         page.unroute('**/graph-neighborhood',hold_neighborhood)
-        page.evaluate("()=>window.openKnowledgeRecord({id:'y',kind:'entity'})")
+        page.evaluate("()=>window.inspectKnowledgeRecord({id:'y',kind:'entity'},{qualify:'record'})")
         assert page.evaluate('()=>GraphExplorer.snapshot().selected===null'),'outside detail must not become a displayed anchor'
         page.click('#graph-expand');page.wait_for_function("()=>wb.nodes.has('y')&&!wb.nodes.has('a')")
         assert requests[-1]=='y','existing expand must fetch a fresh outside anchor'
@@ -103,8 +103,7 @@ def run():
         assert page.evaluate('()=>GraphExplorer.snapshot().mode==="full"')
         assert page.locator('#graph-neighbors').is_visible(),'late local response must not steal the full-mode menu'
         page.unroute('**/graph-neighborhood',hold_neighborhood)
-        page.click('[data-fg="load"]')
-        page.wait_for_function('()=>FullGraphView.loader?.state==="paused"');page.click('[data-fg="auto"]')
+        page.click('[data-fg="restart"]')
         page.wait_for_function('()=>FullGraphView.loader.state==="complete"')
         assert page.locator('#graph-neighbors').is_visible(),'shared neighbor menu must be reachable in full mode'
         page.evaluate("()=>FullGraphView.renderer.locate('a')")
@@ -130,18 +129,31 @@ def run():
         page.click('[data-fg="restart"]');page.wait_for_function('()=>FullGraphView.loader.state==="loading"&&GraphExplorer.snapshot().selected===null')
         assert not page.evaluate('()=>GraphExplorer.snapshot().page.items.length'),'restart must discard old neighbor rows before manifest returns'
         assert manifests;manifests.pop().fulfill(json=manifest)
-        page.wait_for_function('()=>FullGraphView.loader.state==="paused"')
+        page.wait_for_function('()=>FullGraphView.loader.state==="complete"')
         dimensions=[]
         for width,height in [(1440,950),(1280,800),(1024,768),(768,950),(390,844)]:
             page.set_viewport_size({'width':width,'height':height})
-            modes={}
+            modes={};stages={}
             for mode in ['local','full']:
-                page.click(f'[data-fg-mode="{mode}"]');page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+                page.click(f'[data-fg-mode="{mode}"]');page.evaluate('()=>GraphWorkspaceLayout.settled()')
                 box=page.locator('#graph-canvas' if mode=='local' else '.full-graph-host').bounding_box();modes[mode]=box
+                stages[mode]=page.locator('#graph-stage').bounding_box()
+                assert box['height']>=180 and box['width']>=150,(width,mode,box)
+                assert page.evaluate('()=>document.documentElement.scrollWidth<=innerWidth+1')
                 assert page.locator('#graph-neighbors').is_visible()
                 clipped=page.locator('.graph-toolbar button' if mode=='local' else '.full-graph-toolbar button').evaluate_all('(buttons)=>buttons.filter(b=>b.offsetParent&&b.scrollWidth>b.clientWidth+2).map(b=>b.id||b.dataset.fg)')
                 assert not clipped,(width,mode,clipped)
-            assert abs(modes['local']['y']-modes['full']['y'])<1 and abs(modes['local']['height']-modes['full']['height'])<1,(width,modes)
+            if width>=1024:
+                assert abs(modes['local']['y']-modes['full']['y'])<1 and abs(modes['local']['height']-modes['full']['height'])<1,(width,modes)
+            else:
+                # Wrapped page status changes available viewport height. Both
+                # renderers still occupy the same row inside their graph stage.
+                local_top=modes['local']['y']-stages['local']['y']
+                full_top=modes['full']['y']-stages['full']['y']
+                assert abs(local_top-full_top)<1,(width,modes,stages)
+                local_reserved=stages['local']['height']-modes['local']['height']
+                full_reserved=stages['full']['height']-modes['full']['height']
+                assert abs(local_reserved-full_reserved)<1,(width,modes,stages)
             dimensions.append({'width':width,'height':modes['local']['height']})
         print('phase: responsive-geometry',flush=True)
         page.select_option('#project','')

@@ -832,6 +832,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     const sceneStamp=window.FullGraphView?.mode==='full'?JSON.stringify(window.FullGraphView.filters):null;
     const project=current,ownerSnapshot=graphScope(),scopeSnapshot=options.scope||effectiveGraphScope();
     const branchKey=JSON.stringify([project,scopeSnapshot]),expanding=options.expand&&localBranches&&localBranchScope===branchKey&&ui.graph?.nodes.some(row=>row.id===id);
+    const replacingBase=expanding&&id===localBranches.seed&&Number(hops)!==ui.graph.neighborhood?.hops;
     const branchTicket=expanding?localBranches.begin(id,branchKey):null;
     if(expanding&&!branchTicket)return null;
     const ticket=graphRequests.begin(project,scopeSnapshot,id),scopeTicket=window.WorkspaceContext?.ticket(project,'search');
@@ -864,6 +865,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
       }
       const nodes=(result.records||[]).filter(row=>row.kind==='entity'||GraphTypeFilter.isAttributeNode(row));
       const visible=nodes.filter(row=>entity_type==null||String(row.type||'')===String(entity_type)),ids=new Set(visible.map(row=>row.id));
+      if(replacingBase&&!ids.has(id))throw Error('当前范围未找到该实体，原有图谱已保留。');
       let edges=(result.records||[]).filter(row=>(row.kind==='relation'||GraphTypeFilter.isAttributeEdge(row))&&ids.has(row.subject_id)&&ids.has(row.object_id)&&(!predicate||row.type===predicate));
       if(options.exactRecord&&!((options.exactRecord.kind==='entity'?visible:edges).some(row=>row.id===options.exactRecord.id)))throw Error('当前实体类型或关系类型筛选排除了该记录或端点；请调整筛选后重试');
       if(options.exactRecord?.kind==='relation'){
@@ -879,7 +881,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
       result={...result,nodes:visible,edges,neighborhood:{...neighborhood,truncated:Boolean(result.truncated)}};
       done({node:id,hops,nodes:result.nodes.length,edges:result.edges.length,truncated:result.truncated});
       if(window.GraphExploration){
-        if(expanding){if(!localBranches.accept(branchTicket,result))return null;result=localBranches.graph();}
+        if(expanding){if(!localBranches.accept(branchTicket,result,{replaceBase:replacingBase}))return null;result=localBranches.graph();}
         else{localBranches=new GraphExploration.BranchSession({maxNodes:neighborhood.max_nodes,maxEdges:neighborhood.max_edges,maxAttributes:result.attribute_budget||200});localBranchScope=branchKey;localBranches.reset(result,id,branchKey);localSelectedType='';}
       }
       if(options.scope){localScopeOverride=JSON.parse(JSON.stringify(scopeSnapshot));localScopeOwner=JSON.stringify(graphOwnerScope());localScopeCanvas={entity_type:ownerSnapshot.entity_type,predicate:ownerSnapshot.predicate};}

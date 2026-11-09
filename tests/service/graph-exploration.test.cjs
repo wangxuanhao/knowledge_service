@@ -154,6 +154,65 @@ test('shared descendants survive one owner collapse and disappear after the fina
   assert.deepEqual(new Set(ids(session.graph().nodes)),new Set(['a','b','x']));
 });
 
+test('refreshing the base anchor replaces its old neighborhood and metadata',()=>{
+  const session=new model.BranchSession();
+  const before=graph(['a','b','c','d'],[relation('ab','a','b'),relation('bc','b','c'),relation('cd','c','d')],{neighborhood:{hops:3},truncated:true});
+  session.reset(before,'a','s');
+  session.expand('a',graph(['a','old'],[relation('old-edge','a','old')]),'s');
+  const after=graph(['a','b','c'],[relation('ab','a','b'),relation('bc','b','c')],{neighborhood:{hops:2},truncated:false});
+  assert.equal(session.accept(session.begin('a','s'),after,{replaceBase:true}),true);
+  assert.deepEqual(ids(session.graph().nodes),['a','b','c']);
+  assert.deepEqual(ids(session.graph().edges),['ab','bc']);
+  assert.equal(session.graph().neighborhood.hops,2);
+  assert.equal(session.graph().truncated,false);
+  assert.equal(session.canCollapse('a'),false);
+  assert.deepEqual(ids(before.nodes),['a','b','c','d']);
+});
+
+test('base shrink preserves anchored shared branches and prunes detached descendants',()=>{
+  const session=new model.BranchSession();
+  session.reset(graph(['a','b','c','d']),'a','s');
+  session.expand('b',graph(['b','shared']),'s');
+  session.expand('shared',graph(['shared','leaf']),'s');
+  session.expand('d',graph(['d','orphan']),'s');
+  const detached=session.begin('orphan','s');
+  assert.equal(session.accept(session.begin('a','s'),graph(['a','b','c']),{replaceBase:true}),true);
+  assert.deepEqual(ids(session.graph().nodes),['a','b','c','shared','leaf']);
+  assert.equal(session.has('b'),true);
+  assert.equal(session.has('d'),false);
+  assert.equal(session.accept(detached,graph(['orphan','late'])),false);
+});
+
+test('failed and superseded base refreshes retain the accepted scene',()=>{
+  const session=new model.BranchSession();
+  session.reset(graph(['a','b','c','d']),'a','s');
+  const stale=session.begin('a','s'),latest=session.begin('a','s');
+  assert.equal(session.accept(stale,graph(['a']),{replaceBase:true}),false);
+  assert.equal(session.accept(latest,null,{replaceBase:true}),false);
+  assert.deepEqual(ids(session.graph().nodes),['a','b','c','d']);
+});
+
+test('base replacement reserves accepted branches within all aggregate budgets',()=>{
+  const session=new model.BranchSession({maxNodes:4,maxEdges:2,maxAttributes:1});
+  session.reset(graph(['a','b','c'],[relation('ab','a','b')]),'a','s');
+  const branch=graph(['b','x'],[relation('bx','b','x')]);
+  branch.nodes.push({id:'p',kind:'attribute_value'});
+  branch.edges.push({...relation('bp','b','p'),kind:'attribute_edge'});
+  session.expand('b',branch,'s');
+  const replacement=graph(['a','b','d','e'],[relation('ab','a','b'),relation('bd','b','d')],{neighborhood:{hops:2,truncated:false}});
+  replacement.nodes.push({id:'q',kind:'attribute_value'});
+  replacement.edges.push({...relation('aq','a','q'),kind:'attribute_edge'});
+  replacement.records=[...replacement.nodes,...replacement.edges];
+  assert.equal(session.accept(session.begin('a','s'),replacement,{replaceBase:true}),true);
+  const visible=session.graph();
+  assert.deepEqual(ids(visible.nodes),['a','b','d','x','p']);
+  assert.deepEqual(ids(visible.edges),['ab','bx','bp']);
+  assert.equal(visible.truncated,true);
+  assert.equal(visible.neighborhood.truncated,true);
+  assert.equal(visible.records.length,visible.nodes.length+visible.edges.length);
+  assert.equal(session.has('b'),true);
+});
+
 test('collapse, reset, clear and newer same-anchor requests reject stale tickets',()=>{
   const session=new model.BranchSession(),base=graph(['a']);
   session.reset(base,'a','s');

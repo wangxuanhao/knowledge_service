@@ -29,6 +29,77 @@ def _neighborhoods(calls):
     return [body for path, body in calls if path.endswith('/graph-neighborhood')]
 
 
+def _shrinking_neighborhoods(page, state, with_branch=False):
+    nodes = state['nodes'][:4]
+    edges = [dict(id=f'chain-{i}', kind='relation', type='knows',
+                  subject_id=f'n{i}', object_id=f'n{i+1}', version=1, version_id=f'chain-v{i}')
+             for i in range(3)]
+    side = [dict(id=f'side{i}', kind='entity', type='Thing', text=f'分支{i}',
+                 version=1, version_id=f'side-v{i}') for i in range(1, 4)] if with_branch else []
+    side_edges = [dict(id=f'side-edge-{i}', kind='relation', type='knows',
+                       subject_id='n0' if i == 1 else f'side{i-1}', object_id=f'side{i}',
+                       version=1, version_id=f'side-edge-v{i}') for i in range(1, 4)] if with_branch else []
+    state.update(nodes=nodes + side, edges=edges + side_edges)
+    requests = []
+
+    def neighborhood(route):
+        body = route.request.post_data_json
+        requests.append(body)
+        if body['seeds'] == ['n0']:
+            depth = min(body['hops'], 3)
+            records = nodes[:depth + 1] + edges[:depth] + side[:depth] + side_edges[:depth]
+        else:
+            assert body['seeds'] == ['side2'] and body['hops'] == 1
+            records = side + side_edges[1:]
+        route.fulfill(json={'records': records, 'truncated': False})
+
+    page.route('**/graph-neighborhood', neighborhood)
+    return requests
+
+
+def test_selected_base_node_can_shrink_and_grow_using_the_shared_hop_control(overview_page):
+    page, errors, _, state = overview_page
+    _loaded(page)
+    requests = _shrinking_neighborhoods(page, state)
+    _hops(page, 3)
+    _search(page, [state['nodes'][0]])
+    _local(page, 'n0')
+    page.wait_for_function("() => document.getElementById('graph-detail').dataset.recordId==='n0'")
+    assert page.evaluate('() => [...wb.nodes.keys()].sort()') == ['n0', 'n1', 'n2', 'n3']
+    for depth in [2, 0, 3, 1]:
+        before = len(requests)
+        _hops(page, depth)
+        assert len(requests) == before
+        page.click('#graph-expand')
+        page.wait_for_function("() => !document.getElementById('graph-expand').disabled")
+        assert len(requests) == before + 1
+        assert requests[-1]['seeds'] == ['n0'] and requests[-1]['hops'] == depth
+        assert page.evaluate('() => [...wb.nodes.keys()].sort()') == [f'n{i}' for i in range(depth + 1)]
+        assert page.evaluate('() => wb.chart.getOption().series[0].links.length') == depth
+        assert f'局部邻域 {depth} 跳' in page.locator('#graph-summary').inner_text()
+        assert page.locator('#graph-hops').input_value() == str(depth)
+    assert errors == []
+
+
+def test_base_shrink_keeps_another_explicitly_expanded_visible_branch(overview_page):
+    page, errors, _, state = overview_page
+    _loaded(page)
+    requests = _shrinking_neighborhoods(page, state, with_branch=True)
+    page.evaluate("() => openKnowledgeRecord({id:'n0',kind:'entity',view:'local',hops:3})")
+    page.evaluate("() => inspectKnowledgeRecord(wb.nodes.get('side2'))")
+    _hops(page, 1)
+    page.click('#graph-expand')
+    page.wait_for_function("() => !document.getElementById('graph-expand').disabled")
+    page.evaluate("() => inspectKnowledgeRecord(wb.nodes.get('n0'))")
+    _hops(page, 2)
+    page.click('#graph-expand')
+    page.wait_for_function("() => !document.getElementById('graph-expand').disabled && !wb.nodes.has('n3')")
+    assert requests[-1]['seeds'] == ['n0'] and requests[-1]['hops'] == 2
+    assert page.evaluate("() => ['n0','n1','n2','side1','side2','side3'].every(id=>wb.nodes.has(id))")
+    assert page.evaluate("() => wb.chart.getOption().series[0].links.some(edge=>edge.id==='side-edge-3')")
+    assert errors == []
+
+
 @pytest.mark.parametrize('hops', [0, 2, 3, 10])
 def test_search_local_action_uses_current_hops_even_with_cached_full_target(overview_page, hops):
     page, errors, calls, state = overview_page
