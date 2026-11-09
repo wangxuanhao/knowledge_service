@@ -436,7 +436,7 @@ class Repository:
 
     @contextmanager
     def _transaction(self, *, repeatable_read_only=False, serializable=False):
-        with self._lock, self._transaction_owner():
+        with self._lock, self._db.transaction_scope(), self._transaction_owner():
             if self._db.in_transaction:
                 if serializable and not getattr(self._transaction_state, 'serializable', False):
                     raise RuntimeError(

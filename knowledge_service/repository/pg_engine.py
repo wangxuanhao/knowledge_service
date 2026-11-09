@@ -155,10 +155,38 @@ class SqliteishConnection:
         self._lock_timeout_ms = lock_timeout_ms
         self._read_pool = None
         self._read_pool_lock = threading.Lock()
+        self._operation_lock = threading.RLock()
+        self._transaction_depth = 0
         self._closed = False
         self._owns_connection = True
         self._conn = psycopg.connect(dsn, autocommit=True)
         self._configure_connection(self._conn)
+
+    def _ensure_connection(self):
+        if self._closed:
+            raise psycopg.InterfaceError('connection is closed')
+        if not self._conn.closed:
+            return
+        if not self._owns_connection or self._transaction_depth:
+            raise psycopg.OperationalError('database connection was lost during an operation')
+        connection = psycopg.connect(self._dsn, autocommit=True, connect_timeout=5)
+        try:
+            self._configure_connection(connection)
+        except BaseException:
+            connection.close()
+            raise
+        self._conn = connection
+
+    @contextmanager
+    def transaction_scope(self):
+        """Keep a transaction on one physical connection, including failures."""
+        with self._operation_lock:
+            self._ensure_connection()
+            self._transaction_depth += 1
+            try:
+                yield
+            finally:
+                self._transaction_depth -= 1
 
     def _configure_connection(self, connection):
         from .connection import _register_type_adapters
@@ -213,6 +241,8 @@ class SqliteishConnection:
             reader._conn = connection
             reader._read_pool = None
             reader._read_pool_lock = threading.Lock()
+            reader._operation_lock = threading.RLock()
+            reader._transaction_depth = 0
             reader._closed = False
             reader._owns_connection = False
             try:
@@ -229,35 +259,42 @@ class SqliteishConnection:
 
     # ── sqlite3 兼容面 ────────────────────────────────────────────────────
     def execute(self, sql: str, params: Sequence[Any] | Mapping[str, Any] = ()):
-        if self._closed:
-            raise psycopg.InterfaceError('connection is closed')
-        cur = self._conn.cursor()
-        cur.execute(translate(sql), params or ())
-        return cur
+        with self._operation_lock:
+            self._ensure_connection()
+            cur = self._conn.cursor()
+            cur.execute(translate(sql), params or ())
+            return cur
 
     def executemany(self, sql: str, seq: Iterable[Sequence[Any]]):
-        if self._closed:
-            raise psycopg.InterfaceError('connection is closed')
-        cur = self._conn.cursor()
-        cur.executemany(translate(sql), seq)
-        return cur
+        with self._operation_lock:
+            self._ensure_connection()
+            cur = self._conn.cursor()
+            cur.executemany(translate(sql), seq)
+            return cur
 
     def executescript(self, script: str):
         """按语句切分执行（PG 不支持一次多条），用于 DDL 场景。"""
-        if self._closed:
-            raise psycopg.InterfaceError('connection is closed')
-        cur = self._conn.cursor()
-        cur.execute(translate(script))
-        return cur
+        with self._operation_lock:
+            self._ensure_connection()
+            cur = self._conn.cursor()
+            cur.execute(translate(script))
+            return cur
 
     def commit(self):
         # autocommit 连接下的显式提交：只在处于事务中时发出。
-        if self.in_transaction:
-            self._conn.cursor().execute('COMMIT')
+        with self._operation_lock:
+            self._ensure_connection()
+            if self.in_transaction:
+                self._conn.cursor().execute('COMMIT')
 
     def rollback(self):
-        if self.in_transaction:
-            self._conn.cursor().execute('ROLLBACK')
+        with self._operation_lock:
+            if self._closed:
+                raise psycopg.InterfaceError('connection is closed')
+            if self._conn.closed:
+                return
+            if self.in_transaction:
+                self._conn.cursor().execute('ROLLBACK')
 
     @property
     def in_transaction(self) -> bool:
@@ -286,13 +323,14 @@ class SqliteishConnection:
         pass
 
     def close(self):
-        with self._read_pool_lock:
-            self._closed = True
-            pool, self._read_pool = self._read_pool, None
-        if pool is not None:
-            pool.close()
-        if self._owns_connection:
-            self._conn.close()
+        with self._operation_lock:
+            with self._read_pool_lock:
+                self._closed = True
+                pool, self._read_pool = self._read_pool, None
+            if pool is not None:
+                pool.close()
+            if self._owns_connection:
+                self._conn.close()
 
     @property
     def raw(self):

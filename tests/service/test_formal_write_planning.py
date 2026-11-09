@@ -1,5 +1,5 @@
 import copy
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from threading import RLock, local
 
 import pytest
@@ -42,6 +42,9 @@ class SnapshotRepository:
 
 
 class RecordingDatabase:
+    def transaction_scope(self):
+        return nullcontext()
+
     def __init__(self):
         self.in_transaction = False
         self.statements = []

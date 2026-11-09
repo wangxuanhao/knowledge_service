@@ -1,4 +1,4 @@
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import json
 from pathlib import Path
 import threading
@@ -29,6 +29,9 @@ class Cursor:
 
 
 class TransactionDatabase:
+    def transaction_scope(self):
+        return nullcontext()
+
     def __init__(self):
         self.in_transaction = False
         self.statements = []

@@ -32,6 +32,8 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from ..core.security import TokenError, credential_fingerprint, decode_access_token
+from ..repository.connection import InterfaceError, OperationalError
+from .error_responses import database_unavailable_response
 
 LOG = logging.getLogger('knowledge_service')
 
@@ -180,7 +182,11 @@ def install_auth_middleware(app, *, users, jwt_secret: str):
 
         # 3) 回查数据库：token 有效不代表账号仍有效（可能登录后被禁用/删除，
         #    也可能口令已被改或被管理员重置 —— 后者靠令牌里的口令指纹识别）。
-        row = await run_in_threadpool(users.get_for_authentication, payload.get('sub'))
+        try:
+            row = await run_in_threadpool(users.get_for_authentication, payload.get('sub'))
+        except (InterfaceError, OperationalError) as exc:
+            LOG.warning('认证数据库连接不可用：%s', type(exc).__name__)
+            return database_unavailable_response()
         if row is None or not row['is_active']:
             return _unauthorized('账号不可用或已被禁用', code='account_disabled')
         if payload.get('pw') != credential_fingerprint(row['password_hash']):

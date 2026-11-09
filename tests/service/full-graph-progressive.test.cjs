@@ -37,6 +37,26 @@ test('begin renders a connected first batch then pauses before fetching the corp
   assert.equal(progress.some(value=>value.stage==='complete'),false);
 });
 
+for(const status of [500,502])test('plain-text HTTP '+status+' reports a graph service failure',async()=>{
+  const {loader,context}=harness();
+  context.fetch=async()=>({ok:false,status,json:async()=>{throw new SyntaxError('Unexpected token I');}});
+  await assert.rejects(()=>loader.begin('p',{}),error=>error.name!=='SyntaxError'&&error.status===status&&error.message.includes('HTTP '+status));
+  assert.equal(loader.state,'error');assert.equal(loader.dataset.nodeCount,0);
+});
+
+test('structured database unavailability retains its actionable message',async()=>{
+  const {loader,context}=harness();
+  context.fetch=async()=>({ok:false,status:503,json:async()=>({detail:'数据库连接暂时不可用，请稍后重试。',code:'database_unavailable'})});
+  await assert.rejects(()=>loader.begin('p',{}),error=>error.status===503&&error.code==='database_unavailable'&&error.message.includes('数据库'));
+});
+
+test('a failed non-JSON page preserves the previously loaded graph',async()=>{
+  const {loader,context}=harness();await loader.begin('p',{});
+  context.fetch=async()=>({ok:false,status:500,json:async()=>{throw new SyntaxError('Unexpected token I');}});
+  await assert.rejects(()=>loader.next(),/HTTP 500/);
+  assert.equal(loader.state,'error');assert.equal(loader.dataset.nodeCount,2);assert.equal(loader.dataset.edgeCount,1);
+});
+
 test('manual next retains cursors and auto resume sweeps isolated entities before exact completion',async()=>{
   const {loader,calls,renders,progress}=harness();await loader.begin('p',{});await loader.next();
   assert.equal(calls[2].body.cursor,'relation-cursor');

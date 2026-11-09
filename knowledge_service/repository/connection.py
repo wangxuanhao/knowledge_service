@@ -117,6 +117,8 @@ def _reject_sqlite(dsn: str) -> None:
 #      检索抛错，而不是按设计降级。
 # 因此在这里给出唯一出处，运行时代码只引用这两个名字，不直接依赖驱动。
 DatabaseError = psycopg.Error
+OperationalError = psycopg.OperationalError
+InterfaceError = psycopg.InterfaceError
 IntegrityError = psycopg.errors.IntegrityError
 SerializationFailure = psycopg.errors.SerializationFailure
 DeadlockDetected = psycopg.errors.DeadlockDetected

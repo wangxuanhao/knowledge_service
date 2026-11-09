@@ -492,7 +492,21 @@
     stats(){return {loaded_entities:this.dataset.nodeCount,loaded_relations:this.dataset.edgeCount,drawn_entities:this.drawnNodes||0,drawn_relations:this.drawnEdges||0,relation_layer:'complete-world-cache',cached_relations:this.cachedRelations||0,node_layer:this.usedViewCache?'complete-view-cache':'live-color-groups',cached_entities:this.viewSnapshot?.nodes||0,view_cache_error:this.viewCacheError||0,layout:this.smallSession?'small-relations-v1':'stable-id-v1',canonical_layout:'stable-id-v1',last_pick_ms:this.lastPickMs||0,gpu:this.gl.getParameter(this.gl.RENDERER),context_lost:!!this.lost};}
     destroy(){if(this.destroyed)return;this.destroyed=true;this.setExplorationFocus(null);this.abort.abort();this.observer.disconnect();cancelAnimationFrame(this.pendingFrame);if(!this.lost){this.gl.deleteBuffer(this.nodeBuffer);this.gl.deleteBuffer(this.groupedNodeBuffer);this.gl.deleteBuffer(this.edgeBuffer);if(this.strokeBuffer)this.gl.deleteBuffer(this.strokeBuffer);if(this.strokeProgram)this.gl.deleteProgram(this.strokeProgram);this.gl.deleteBuffer(this.quadBuffer);this.gl.deleteTexture(this.cacheTexture);if(this.viewTexture)this.gl.deleteTexture(this.viewTexture);this.gl.deleteFramebuffer(this.cacheFramebuffer);this.gl.deleteProgram(this.cacheProgram);if(this.viewProgram)this.gl.deleteProgram(this.viewProgram);this.gl.deleteProgram(this.pointProgram);this.gl.deleteProgram(this.program);}this.host.innerHTML='';this.dataset=new GraphDataset();this.typeProjection=null;this.typeFilter=null;this.nodeGroups=null;this.nodeRanges=[];this.invalidateViewCache();}
   }
-  async function request(url,body,signal){const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal});const payload=await response.json();if(!response.ok)throw new Error(payload.detail||'全量图读取失败');return payload;}
+  async function request(url,body,signal){
+    const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal});
+    let payload;
+    try{payload=await response.json();}
+    catch(error){
+      if(error.name==='AbortError')throw error;
+      const failure=new Error(response.ok?'图谱服务返回了无法解析的数据，请重试。':`图谱读取失败（HTTP ${response.status}），请检查服务状态后重试。`);
+      failure.status=response.status;throw failure;
+    }
+    if(!response.ok){
+      const error=new Error(payload.detail||'全量图读取失败');
+      error.status=response.status;if(payload.code)error.code=payload.code;throw error;
+    }
+    return payload;
+  }
   class SessionLoader{
     constructor(renderer,{onProgress=()=>{},batchSize=400}={}){
       this.renderer=renderer;this.onProgress=onProgress;this.epoch=0;this.state='idle';

@@ -25,6 +25,8 @@ import httpx
 
 from ..core.config import load_environment
 from ..utils.diagnostics import redact
+from ..repository.connection import InterfaceError, OperationalError
+from .error_responses import database_unavailable_response
 from ..bootstrap import (
     DocumentParseError,
     EmbeddingDimensionConfigurationError,
@@ -458,6 +460,12 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
     @app.exception_handler(ValidationError)
     async def invalid_model(request: Request, exc: ValidationError):
         return JSONResponse(status_code=422, content={'detail': str(exc)})
+
+    @app.exception_handler(OperationalError)
+    @app.exception_handler(InterfaceError)
+    async def database_unavailable(request: Request, exc):
+        LOG.warning('数据库连接不可用：%s', type(exc).__name__)
+        return database_unavailable_response()
 
     @app.exception_handler(RuntimeError)
     async def unavailable(request: Request, exc: RuntimeError):
