@@ -23,7 +23,8 @@ def concise(value,limit=1200):
 
 
 class Jobs:
-    def __init__(self,repository,heartbeat_seconds=30, *, handlers=None, workers=2):
+    def __init__(self,repository,heartbeat_seconds=30, *, handlers=None, workers=2, llm_models=None):
+        self.llm_models = llm_models
         self.repo=repository
         self.lock=threading.RLock()
         self.heartbeat_seconds=heartbeat_seconds
@@ -128,7 +129,17 @@ class Jobs:
 
             def execute():
                 try:
-                    value = fn(task['payload'], task.get('project_id'), progress, task['id'])
+                    from ..core.llm_config import bound_llm
+                    from contextlib import nullcontext
+                    binding = nullcontext()
+                    options = task['payload'].get('options', task['payload'])
+                    if (self.llm_models is not None and task['kind'] in ('ingest', 'ingest_upload')
+                            and options.get('extraction_mode', 'ontology') != 'documents'):
+                        config = self.llm_models.pin('job:' + task['id'])
+                        persist({'llm': config.public_identity()})
+                        binding = bound_llm(config)
+                    with binding:
+                        value = fn(task['payload'], task.get('project_id'), progress, task['id'])
                     completion.put((True, value))
                 except BaseException as exc:
                     completion.put((False, exc))

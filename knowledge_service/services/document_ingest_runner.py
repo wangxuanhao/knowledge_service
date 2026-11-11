@@ -9,6 +9,8 @@ from ..models import Ingest, UploadOptions
 from ..integrations.document_parser import DocumentParser
 from .chunking import split_source_blocks, split_mapped_chunks
 from .ingest_checkpoints import IngestCheckpoints
+from ..core.llm_config import current_llm
+from .llm_runtime import llm_operation
 
 
 class DocumentCheckpointContext:
@@ -30,7 +32,8 @@ class DocumentCheckpointContext:
         settings=()
         if self.mode!='documents':
             versions.append('integrations/semantica_adapter.py')
-            settings=tuple(os.getenv(name,'') for name in ('KG_LLM_MODEL','KG_LLM_BASE_URL','KG_LLM_MAX_TOKENS'))
+            config=current_llm()
+            settings=(config.model,config.base_url,str(config.max_tokens))
         return settings,tuple((name,(root/name).stat().st_mtime_ns,(root/name).stat().st_size) for name in versions)
 
     def guard(self):
@@ -109,6 +112,11 @@ class DocumentIngestRunner:
         self.halt=halt
         self.file_limit=file_limit
 
+    @llm_operation(
+        task_key=lambda self, item, settings, owner:
+            'document:' + item['id'] + ':' + str(item.get('document_generation', 0)),
+        uses_llm=lambda self, item, settings, owner:
+            (item.get('options') or {}).get('extraction_mode', settings.get('extraction_mode', 'ontology')) != 'documents')
     def run(self, item, settings, owner):
         if self.halt is not None and self.halt.is_set():raise InterruptedError('ingest worker shutdown')
         self.store.update_progress(item['id'], owner, item['lease_token'], stage='parsing', progress=3)

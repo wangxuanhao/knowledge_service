@@ -5,12 +5,12 @@ from copy import deepcopy
 import hashlib
 import inspect
 import json
-import os
 import threading
 from time import perf_counter
 from uuid import uuid4
 
 from ..core.time import utc_now
+from .llm_runtime import llm_operation
 from ..models import Question, Scope
 from ..repository.scoped_reads import ScopedReads
 
@@ -73,10 +73,18 @@ class RetrievalExperiments:
     def __init__(self, service, jobs=None, *, authorize=None, auth_disabled=False):
         self.service = service
         self.repo = service.repository
+        self._llm_models = getattr(service, 'llm_models', None)
         self.jobs = jobs
         self.lock = threading.RLock()
         self.authorize = authorize or self._authorize
         self.auth_disabled = auth_disabled
+
+    @property
+    def llm_models(self):
+        if self._llm_models is None:
+            from .llm_models import LLMModels
+            self._llm_models = LLMModels(self.repo)
+        return self._llm_models
 
     def _authorize(self, actor_id, *, write=False):
         if self.auth_disabled and actor_id == 'system:auth-disabled':
@@ -111,13 +119,14 @@ class RetrievalExperiments:
 
     def _runtime(self):
         from .answers import answer_messages
-        configured = all(os.environ.get(key, '').strip() for key in
-            ('KG_LLM_BASE_URL', 'KG_LLM_API_KEY', 'KG_LLM_MODEL'))
-        return {'configured': configured, 'model': os.environ.get('KG_LLM_MODEL') or None,
-                'endpoint_digest': digest(os.environ.get('KG_LLM_BASE_URL', '')),
+        from ..core.llm_config import bound_llm_config
+        config = bound_llm_config() or self.llm_models.resolve()
+        return {'configured': config.configured, 'model': config.model or None,
+                'endpoint_digest': digest(config.base_url),
                 'prompt_digest': digest(inspect.getsource(answer_messages)),
                 'sampling': {'temperature': None, 'seed': None, 'source': 'provider_default_unknown'}}
 
+    @llm_operation(uses_llm=lambda self, project, request, **kwargs: bool(request.get('generate')))
     def create(self, project, request, *, actor_id):
         self.authorize(actor_id, write=True)
         questions = request.get('questions')
@@ -171,6 +180,8 @@ class RetrievalExperiments:
             'manifest': manifest, 'manifest_digest': digest(manifest), 'results': [],
             'summary': {}, 'completed_items': 0, 'total_items': len(variants) * len(questions),
             'attempts': 0, 'job_id': None}
+        if manifest['generate']:
+            self.llm_models.pin('experiment:' + run['id'])
         self.repo.save_artifact(ARTIFACT, run)
         self._enqueue(run)
         return self.get(project, run['id'], actor_id=actor_id)
@@ -293,6 +304,10 @@ class RetrievalExperiments:
         # endpoint after an experiment's sources or owner lose eligibility.
         return {key: run.get(key) for key in ('id', 'project_id', 'status', 'completed_items', 'total_items')}
 
+    @llm_operation(
+        task_key=lambda self, project, id, **kwargs: 'experiment:' + id,
+        uses_llm=lambda self, project, id, **kwargs:
+            self._owned(project, id, kwargs['actor_id'], write=True)['manifest'].get('generate', False))
     def execute(self, project, id, *, actor_id, progress=None, task_id=None):
         run = self._owned(project, id, actor_id, write=True)
         if run['status'] in TERMINAL:

@@ -12,7 +12,7 @@
   }
   const management=document.createElement('section');management.className='nav-group nav-management';management.dataset.layer='system';
   const title=document.createElement('h2');title.textContent='管理';management.append(title);
-  for(const name of ['projects','useradmin']){const button=buttons.get(name);if(button)management.append(button);}
+  for(const name of ['projects','useradmin','llm-models']){const button=buttons.get(name);if(button)management.append(button);}
   nav.after(management);
   // Internal destinations stay registered so their original loaders and deep links remain usable.
   const internal=document.createElement('div');internal.hidden=true;
@@ -20,9 +20,12 @@
   nav.append(internal);
   const syncRoles=()=>{
     const viewer=document.body.classList.contains('is-viewer');
+    const models=buttons.get('llm-models');if(models)models.hidden=!window.LLMModels?.canAccess();
     document.querySelectorAll('aside .nav-group').forEach(group=>{const items=[...group.querySelectorAll('button')];group.hidden=viewer&&items.length>0&&items.every(button=>button.classList.contains('admin-only'));});
   };
   syncRoles();new MutationObserver(syncRoles).observe(document.body,{attributes:true,attributeFilter:['class']});
+  Promise.resolve(window.__authReady).then(syncRoles);
+  buttons.get('llm-models')?.addEventListener('click',()=>window.LLMModels?.open());
   buttons.get('useradmin')?.addEventListener('click',()=>window.UserAdmin?.open());
   buttons.get('projects')?.addEventListener('click',()=>window.ProjectsView?.refresh());
   buttons.get('quality')?.addEventListener('click',()=>window.RuntimeView?.show('snapshots',{quality:true}));

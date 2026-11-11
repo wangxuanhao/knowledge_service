@@ -235,6 +235,7 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
         milvus_store=milvus_store,
         milvus_configured=os.environ.get('KG_VECTOR_BACKEND', '') == 'milvus',
         milvus_error=milvus_errors[-1] if milvus_errors else None,
+        llm_models=service.llm_models,
     )
     document_uploads = DocumentUploads(upload_temp)
 
@@ -312,6 +313,8 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
     # 三级角色之间的越权与超级管理员保护写在 api/users.py —— 两处分工不重复。
     from .users import install as install_users
     install_users(app, users=users)
+    from .llm_models import register as register_llm_models
+    register_llm_models(app, service.llm_models)
 
     @app.middleware('http')
     async def fresh_workbench_assets(request, call_next):

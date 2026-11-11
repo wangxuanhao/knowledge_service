@@ -9,7 +9,7 @@ let current = '';
 // 键名含连字符必须加引号（本体三页是 data-tab 名，不是合法标识符）。
 // 「项目与运行」把原来的 项目管理 / 项目总览 / 后台任务 / 快照·评测 四页合并成一个入口（D2）。
 // 分区的"后缀"由 runtime-view.js 在切分区时补上（如「项目与运行 · 运行总览」）。
-const titles = {runtime:'构建与任务',projects:'项目管理',quality:'质量评测',useradmin:'人员管理','ontology-model':'本体建模层',search:'检索与交互图谱',qa:'知识问答',ingest:'添加文件',records:'知识台账',sources:'资料库',mindmap:'实体脑图'};
+const titles = {runtime:'构建与任务',projects:'项目管理',quality:'质量评测',useradmin:'人员管理','llm-models':'模型管理','ontology-model':'本体建模层',search:'检索与交互图谱',qa:'知识问答',ingest:'添加文件',records:'知识台账',sources:'资料库',mindmap:'实体脑图'};
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const json = id => $(id).value.trim() ? JSON.parse($(id).value) : null;
 const iso = id => $(id).value ? new Date($(id).value).toISOString() : null;

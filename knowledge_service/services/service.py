@@ -12,6 +12,8 @@ from contextlib import contextmanager, nullcontext
 from copy import copy, deepcopy
 
 from ..core.net import external_client
+from ..core.llm_config import current_llm
+from .llm_runtime import llm_operation
 
 from ..models import IngestSettings, RecordWrite
 from ..domain.applicability import (
@@ -49,6 +51,8 @@ class KnowledgeService:
     def __init__(self, repository, encoder, milvus_store=None,
                  projection_drain=None):
         self.repository = repository
+        from .llm_models import LLMModels
+        self.llm_models = LLMModels(repository)
         self.data = ApplicationData(repository)
         self.encoder = encoder
         self.milvus_store = milvus_store
@@ -767,6 +771,7 @@ class KnowledgeService:
                 records=(extractor.discover(input_text,**discovery_options) if discovery_options is not None
                          else extractor.extract(input_text,ontology))
             return {'records':deepcopy(records),
+                    'llm':current_llm().public_identity(),
                     'review_candidates':deepcopy(getattr(extractor,'review_candidates',[])),
                     'diagnostics':deepcopy(getattr(extractor,'extraction_diagnostics',{}))}
         if checkpoint_context is None:
@@ -775,14 +780,14 @@ class KnowledgeService:
             fingerprint=checkpoint_fingerprint(file_hash=checkpoint_context.file_hash,
                 text_hash=hashlib.sha256(text.encode()).hexdigest(),mode='discovery' if discovery_options is not None else 'ontology',
                 ontology=ontology.turtle if hasattr(ontology,'turtle') else checkpoint_context.ontology_fingerprint,
-                model=os.getenv('KG_LLM_MODEL',''),base_url=os.getenv('KG_LLM_BASE_URL',''),
+                model=current_llm().model,base_url=current_llm().base_url,
                 prompt_version='semantica-v1',extractor_version=hashlib.sha256(
                     (__import__('pathlib').Path(__file__).resolve().parents[1]/'integrations/semantica_adapter.py').read_bytes()).hexdigest(),
                 parser_version=hashlib.sha256(
                     (__import__('pathlib').Path(__file__).resolve().parents[1]/'integrations/markdown_parser.py').read_bytes()).hexdigest(),
                 chunk_version=hashlib.sha256(
                     (__import__('pathlib').Path(__file__).resolve().parent/'chunking.py').read_bytes()).hexdigest(),
-                max_tokens=os.getenv('KG_LLM_MAX_TOKENS',''),active_ontology=checkpoint_context.expected_active_ontology,
+                max_tokens=str(current_llm().max_tokens),active_ontology=checkpoint_context.expected_active_ontology,
                 chunk_metadata=checkpoint_context.chunks[ordinal].get('metadata',{}),document_generation=checkpoint_context.item.get('document_generation',0),settings=settings)
             result=checkpoint_context.execute(ordinal,fingerprint,extract)
         extractor.review_candidates=deepcopy(result['review_candidates'])
@@ -794,6 +799,7 @@ class KnowledgeService:
         return [{**row,'failure':public_failure(row.get('failure'))}
                 for row in self.repository.list_ingest_runs(project_id,document_id)]
 
+    @llm_operation(uses_llm=lambda self, project_id, request: request.get('extraction_mode', 'ontology') != 'documents')
     def ingest(self, project_id, request):
         """文档收据在抽取失败时依然保留；派生知识原子化提交。"""
         # API 请求通常已经通过 Ingest 校验；重试/内部调用还会附带 checkpoint 等私有字段。
@@ -843,6 +849,8 @@ class KnowledgeService:
         metadata = {**request.get('metadata', {}), 'title': request['title'], 'uploaded_at': utc_now(),
                     'status': 'processing','active_stage':'document','extraction_mode':extraction_mode,
                     'readiness':initial_readiness}
+        if extraction_mode in ('ontology', 'discovery'):
+            metadata['llm'] = current_llm().public_identity()
         document = dict(id=doc_id, kind='document', text=request['text'], metadata=metadata,
                         valid_from=request.get('valid_from'), valid_until=request.get('valid_until'))
         with self.repository._formal_write_transaction() if checkpoint_context else nullcontext():
@@ -879,10 +887,8 @@ class KnowledgeService:
                 extract_method=_ConfiguredExtractor.extract
                 if (getattr(extract_method,'__module__','').endswith('.semantica_adapter')
                         and getattr(extract_method,'__name__','')=='extract'):
-                    required=('KG_LLM_API_KEY','KG_LLM_BASE_URL','KG_LLM_MODEL')
-                    missing=[key for key in required if not os.getenv(key,'').strip()]
-                    if missing:
-                        raise RuntimeError('Semantica LLM 需要 '+ '、'.join(missing))
+                    if not current_llm().configured:
+                        raise RuntimeError('请在模型管理中设置默认 LLM，或配置 KG_LLM_API_KEY、KG_LLM_BASE_URL、KG_LLM_MODEL')
             indexed_at=utc_now()
             for row in chunk_records:
                 row.update(source_id=doc_id,valid_from=request.get('valid_from'),valid_until=request.get('valid_until'))
@@ -1212,6 +1218,7 @@ class KnowledgeService:
             error.failed_chunk_ordinal=getattr(exc,'failed_chunk_ordinal',None)
             raise error from exc
 
+    @llm_operation(uses_llm=lambda self, project_id, request: bool(request.get('generate')))
     def answer(self, project_id, request):
         from time import perf_counter
         from .answers import prepare_answer, final_answer, answer_messages, finish_timings, generation_state
@@ -1231,9 +1238,8 @@ class KnowledgeService:
             material = model_evidence(evidence, retrieval)
             if request.get('generate') and material:
                 llm_started = perf_counter()
-                url = os.environ.get('KG_LLM_BASE_URL', '').rstrip('/')
-                key = os.environ.get('KG_LLM_API_KEY', '')
-                model = os.environ.get('KG_LLM_MODEL', '')
+                config = current_llm()
+                url, key, model = config.base_url, config.api_key, config.model
                 if not all((url, key, model)):
                     raise RuntimeError('请配置 KG_LLM_BASE_URL、KG_LLM_API_KEY、KG_LLM_MODEL 以生成回答')
                 called = True

@@ -66,7 +66,8 @@ class ReclassifyApply(ReclassifyGroups):
 def install(app,service):
     router=APIRouter(prefix='/api')
     explorer=Explorer(service);governance=Governance(service)
-    jobs=Jobs(service.data, handlers=job_handlers(service, app.state.document_uploads))
+    jobs=Jobs(service.data, handlers=job_handlers(service, app.state.document_uploads),
+              llm_models=service.llm_models)
     reclassify=Reclassify(service)
     app.state.jobs=jobs
     from ..models import IngestBatchCreate, IngestItemRetry, UploadOptions

@@ -8,12 +8,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 from typing import Any, Callable, Literal
 
 from pydantic import BaseModel,Field,StrictBool,StrictFloat,StrictInt,StrictStr
 
 from ..core.time import normalize_time
+from ..core.llm_config import current_llm
 from ..domain.ontology_names import canonical_name
 from ..utils.diagnostics import event, redact, stage
 
@@ -201,14 +201,7 @@ LLM_MAX_TOKENS_DEFAULT = 65536
 
 def _llm_max_tokens() -> int:
     """抽取调用要用的 completion 预算（含思维链）。"""
-    raw = os.getenv('KG_LLM_MAX_TOKENS', '').strip()
-    if not raw:
-        return LLM_MAX_TOKENS_DEFAULT
-    try:
-        value = int(raw)
-    except ValueError:
-        return LLM_MAX_TOKENS_DEFAULT
-    return value if value > 0 else LLM_MAX_TOKENS_DEFAULT
+    return current_llm().max_tokens
 
 
 def _extract_entities_open(text,config,exceptions=None):
@@ -480,16 +473,15 @@ class SemanticaExtractor:
     def discover(self, text: str, include_attributes: bool = False, *,
                  reserved_class_names=()) -> list[dict]:
         """为无模式的项目执行开放词表 Semantica 抽取。"""
-        required = ['KG_LLM_API_KEY', 'KG_LLM_BASE_URL', 'KG_LLM_MODEL']
-        missing = [key for key in required if not os.getenv(key, '').strip()]
-        if missing:
-            raise RuntimeError('Semantica LLM 需要环境变量：' + ', '.join(missing))
+        llm = current_llm()
+        if not llm.configured:
+            raise RuntimeError('Semantica LLM 需要默认模型，或环境变量 KG_LLM_API_KEY、KG_LLM_BASE_URL、KG_LLM_MODEL')
         if not text.strip():
             raise ValueError('抽取文本不能为空')
         exceptions=[]
         try:
-            config = dict(provider='openai', llm_model=os.environ['KG_LLM_MODEL'],
-                          api_key=os.environ['KG_LLM_API_KEY'], base_url=os.environ['KG_LLM_BASE_URL'],
+            config = dict(provider='openai', llm_model=llm.model,
+                          api_key=llm.api_key, base_url=llm.base_url,
                           silent_fail=False, max_tokens=_llm_max_tokens())
             event('Semantica 开放实体发现 · 不使用项目本体白名单')
             with stage('LLM 开放实体类型发现'):
@@ -534,10 +526,9 @@ class SemanticaExtractor:
             'attribute_skipped_invalid_entity': 0,
             'attribute_reclassified_relation': 0,
         }
-        required = ['KG_LLM_API_KEY', 'KG_LLM_BASE_URL', 'KG_LLM_MODEL']
-        missing = [key for key in required if not os.getenv(key, '').strip()]
-        if missing:
-            raise RuntimeError('Semantica LLM 需要环境变量：' + ', '.join(missing))
+        llm = current_llm()
+        if not llm.configured:
+            raise RuntimeError('Semantica LLM 需要默认模型，或环境变量 KG_LLM_API_KEY、KG_LLM_BASE_URL、KG_LLM_MODEL')
         if not text.strip():
             raise ValueError('抽取文本不能为空')
         if ontology is None:
@@ -579,11 +570,11 @@ class SemanticaExtractor:
             entity_types = [item['id'] for item in summary['classes']]
         if len(set(relation_types)) != len(relation_types):
             relation_types = [item['id'] for item in summary['relations']]
-        config = dict(provider='openai', llm_model=os.environ['KG_LLM_MODEL'],
-                      api_key=os.environ['KG_LLM_API_KEY'], base_url=os.environ['KG_LLM_BASE_URL'],
+        config = dict(provider='openai', llm_model=llm.model,
+                      api_key=llm.api_key, base_url=llm.base_url,
                       silent_fail=False, max_tokens=_llm_max_tokens())
         try:
-            event('LLM 模型 · '+os.environ['KG_LLM_MODEL'])
+            event('LLM 模型 · '+llm.model)
             with stage('初始化实体抽取器'):
                 ner = StrictNER(method='llm', entity_types=entity_types, **config)
             with stage('LLM 实体抽取（内部含请求、可能的重试与响应解析）'):

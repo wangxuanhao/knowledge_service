@@ -21,12 +21,14 @@ from rdflib import URIRef
 from rdflib.namespace import OWL
 from rdflib.plugins.serializers.turtle import TurtleSerializer
 import json
+from .llm_runtime import llm_operation
 
 
 
 class DraftCommandMixin:
     """本体变更命令的编译与影响评估（把前端命令展开成服务端可校验的操作集）。"""
 
+    @llm_operation
     def discover_parents(self, project_id, draft_id, expected_revision):
         """Append fresh hierarchy suggestions without replacing existing draft edits."""
         from collections import Counter

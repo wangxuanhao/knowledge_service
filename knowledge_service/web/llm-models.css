@@ -1,0 +1,43 @@
+/* Quiet platform administration, aligned with the account and project pages. */
+aside [data-tab="llm-models"][hidden]{display:none!important}
+#tab-llm-models{min-width:0;max-width:100%}
+.llm-page{padding:20px;border:1px solid var(--ks-line,#d5e4e4);border-radius:10px;background:var(--ks-surface,#fff);color:var(--ks-ink,#124242);font-size:13px;line-height:1.6}
+.llm-head,.llm-list-head,.llm-profile,.llm-profile-title,.llm-actions,.llm-dialog-actions{display:flex;align-items:center;gap:12px}
+.llm-head{justify-content:space-between;align-items:flex-start;margin-bottom:20px}
+.llm-head h2,.llm-dialog h2{margin:0 0 4px;font-size:16px;line-height:1.5}
+.llm-sub,.llm-note{margin:0;color:var(--ks-muted,#688585);font-size:12px;line-height:1.7}
+.llm-active{padding:16px 18px;border:1px solid var(--ks-line,#d5e4e4);border-left:3px solid var(--ks-accent,#0e7c7b);border-radius:6px;background:var(--ks-sunken,#eef5f5);overflow-wrap:anywhere}
+.llm-eyebrow{font-size:12px;color:var(--ks-muted,#688585)}
+.llm-active h3{font-size:16px;margin:5px 0;font-weight:600}
+.llm-active p{margin:4px 0 0;font-size:12px;color:var(--ks-ink-2,#3d5e5e)}
+.llm-list-head{margin:22px 0 10px;flex-wrap:wrap}
+.llm-list-head h3{margin:0;font-size:13px;font-weight:600}
+.llm-list-head>button{margin-left:auto}
+.llm-list{border:1px solid var(--ks-line,#d5e4e4);border-radius:7px;overflow:hidden}
+.llm-profile{justify-content:space-between;padding:16px;border-bottom:1px solid var(--ks-line,#d5e4e4)}
+.llm-profile:last-child{border-bottom:0}
+.llm-identity{min-width:0;overflow-wrap:anywhere}
+.llm-profile-title{align-items:baseline;flex-wrap:wrap;gap:8px}
+.llm-profile h4{margin:0;font-size:14px;font-weight:600}
+.llm-badge{padding:1px 7px;border-radius:4px;color:var(--ks-accent,#0e7c7b);background:var(--ks-sunken,#eef5f5);font-size:11px}
+.llm-model-name{margin:5px 0 0;font-size:13px}
+.llm-url{margin:2px 0 5px;color:var(--ks-muted,#688585);font-size:12px}
+.llm-key-state{font-size:12px;color:var(--ks-muted,#688585)}
+.llm-actions{flex-shrink:0;flex-wrap:wrap;gap:8px}
+.llm-empty{padding:20px 16px;margin:0;color:var(--ks-muted,#688585);text-align:center}
+.llm-note{margin-top:14px}
+.llm-flash{padding:10px 12px;margin:14px 0 0;border:1px solid var(--ks-line,#d5e4e4);border-radius:6px;background:var(--ks-sunken,#eef5f5);overflow-wrap:anywhere}
+.llm-flash:empty{display:none}
+.llm-flash.is-error{background:#fff5f5;color:#a1363a;border-color:#ebc9c9}
+.llm-flash.is-success{background:#edf7f2;color:#21654f;border-color:#c9e1d5}
+.llm-page button,.llm-dialog button{min-height:36px;padding:7px 12px;margin:0;border:1px solid var(--ks-accent,#0e7c7b);border-radius:6px;background:var(--ks-accent,#0e7c7b);color:#fff;font:inherit;font-size:13px;line-height:20px;white-space:nowrap;box-shadow:none;cursor:pointer}
+.llm-page button.secondary,.llm-dialog button.secondary{border-color:var(--ks-line-strong,#bed0d0);background:var(--ks-surface,#fff);color:var(--ks-accent,#0e7c7b)}
+.llm-page button:disabled,.llm-dialog button:disabled{opacity:.55;cursor:default}
+.llm-page :is(button,input):focus-visible,.llm-dialog :is(button,input):focus-visible{outline:2px solid var(--ks-accent,#0e7c7b);outline-offset:3px}
+.llm-dialog{width:min(480px,calc(100vw - 32px));max-height:calc(100dvh - 40px);padding:24px;box-sizing:border-box;border:1px solid var(--ks-line,#d5e4e4);border-radius:10px;background:var(--ks-surface,#fff);color:var(--ks-ink,#124242);font-size:13px;line-height:1.6;box-shadow:0 18px 60px #10353526;overflow:auto}
+.llm-dialog::backdrop{background:rgba(18,50,50,.3)}
+.llm-form{display:grid;gap:16px;margin-top:20px}
+.llm-field{display:grid;gap:6px;font-size:13px;font-weight:500;margin:0}
+.llm-field input{width:100%;min-width:0;height:40px;margin:0;padding:8px 11px;box-sizing:border-box;border:1px solid var(--ks-line-strong,#bed0d0);border-radius:6px;background:var(--ks-surface,#fff);color:var(--ks-ink,#124242);font:inherit;box-shadow:none}
+.llm-dialog-actions{justify-content:flex-end;margin-top:6px;padding-top:16px;border-top:1px solid var(--ks-line,#d5e4e4)}
+@media(max-width:720px){.llm-page{padding:16px}.llm-profile{align-items:flex-start;flex-direction:column}.llm-head{gap:10px}.llm-actions{width:100%}.llm-actions button{flex:1}.llm-dialog{padding:20px}.llm-head .llm-sub{max-width:34ch}}

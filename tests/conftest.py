@@ -59,6 +59,7 @@ def isolated_source_objects(monkeypatch, tmp_path):
     """Tests publish into their own local object root; explicit test overrides win."""
     monkeypatch.setenv('KG_SOURCE_OBJECT_BACKEND', 'local')
     monkeypatch.setenv('KG_SOURCE_OBJECT_ROOT', str(tmp_path / 'source-objects'))
+    monkeypatch.setenv('KG_LLM_KEY_FILE', str(tmp_path / 'llm.key'))
     # Network import tests inject a transport; unrelated source tests stay offline.
     monkeypatch.setenv('KG_SOURCE_REMOTE_IMAGES_ENABLED', 'false')
     for key in tuple(os.environ):

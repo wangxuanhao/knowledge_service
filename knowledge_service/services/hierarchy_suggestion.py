@@ -21,7 +21,6 @@
 """
 import json
 import logging
-import os
 import re
 from copy import deepcopy
 
@@ -63,9 +62,9 @@ def clear_cache():
 
 
 def _llm_settings():
-    url = os.environ.get('KG_LLM_BASE_URL', '').strip().rstrip('/')
-    key = os.environ.get('KG_LLM_API_KEY', '').strip()
-    model = os.environ.get('KG_LLM_MODEL', '').strip()
+    from ..core.llm_config import current_llm
+    config = current_llm()
+    url, key, model = config.base_url, config.api_key, config.model
     if not all((url, key, model)):
         raise HierarchySuggestionsUnavailable(
             '未配置 KG_LLM_BASE_URL、KG_LLM_API_KEY、KG_LLM_MODEL，跳过层级建议')
@@ -199,7 +198,7 @@ def suggest_hierarchy(class_names, *, examples=(), request_name='', timeout=120,
     """
     url, key, model = _llm_settings()
     names = sorted({name for name in class_names if isinstance(name, str) and name.strip()})
-    cache_key = (PROMPT_VERSION, request_name or '', tuple(names))
+    cache_key = (PROMPT_VERSION, url, model, request_name or '', tuple(names))
     if not refresh and cache_key in _SUGGESTION_CACHE:
         LOG.info('层级建议命中缓存：候选类 %d 个', len(names))
         return deepcopy(_SUGGESTION_CACHE[cache_key])

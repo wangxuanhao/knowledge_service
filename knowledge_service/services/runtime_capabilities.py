@@ -19,7 +19,8 @@ def _embedding_backend(encoder):
 
 class RuntimeCapabilities:
     def __init__(self, *, encoder, milvus_store=None,
-                 milvus_configured=False, milvus_error=None):
+                 milvus_configured=False, milvus_error=None, llm_models=None):
+        self.llm_models = llm_models
         self.encoder = encoder
         self.milvus_store = milvus_store
         self.milvus_configured = bool(milvus_configured)
@@ -72,8 +73,15 @@ class RuntimeCapabilities:
             'error': redact(error) if error else None,
         }
         semantic_ready = embedding['semantic'] and embedding['ready'] and collection_ready
-        llm_configured = all(os.environ.get(key, '').strip() for key in
-                             ('KG_LLM_BASE_URL','KG_LLM_API_KEY','KG_LLM_MODEL'))
+        from ..core.llm_config import current_llm
+        try:
+            llm = self.llm_models.resolve() if self.llm_models else current_llm()
+            llm_configured = llm.configured
+            llm_error = None
+        except RuntimeError:
+            llm = None
+            llm_configured = False
+            llm_error = '模型配置暂不可用，请由超级管理员检查配置和加密密钥'
         capabilities = {
             'keyword': {'status': 'ready'},
             'semantic': {'status': 'ready' if semantic_ready else 'unavailable',
@@ -81,7 +89,8 @@ class RuntimeCapabilities:
                          'reason': None if semantic_ready else
                          '语义与混合检索不可用：编码模型或 Milvus 索引未就绪；不会自动更换检索模式'},
             'llm': {'status': 'degraded' if llm_configured else 'disabled',
-                    'reason': '已配置，远程可用性尚未探测' if llm_configured else '未配置'},
+                    'reason': llm_error or ('已配置，远程可用性尚未探测' if llm_configured else '未配置'),
+                    'model': llm.model if llm else None},
             'ocr': {'status': 'degraded' if find_spec('docling') else 'disabled',
                     'reason': '需实际文档解析验证 OCR 模型' },
             'neo4j': {'status': 'degraded' if os.environ.get('KG_NEO4J_PASSWORD') else 'disabled',

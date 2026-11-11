@@ -2,10 +2,11 @@
 import asyncio
 import json
 import logging
-import os
 from time import perf_counter
 
 from ..core.net import external_client
+from ..core.llm_config import current_llm
+from .llm_runtime import llm_stream
 from . import structure_pending
 from .provenance import ProvenanceService
 from ..domain.applicability import dimension_mode
@@ -491,8 +492,11 @@ def generation_state(request, evidence, context, *, called=False):
               None if available else
               'no_eligible_evidence' if not evidence and unverified else
               'no_evidence' if not evidence else None)
-    return {'requested': requested, 'called': bool(called),
-            'skip_reason': reason, 'material_status': material}
+    result = {'requested': requested, 'called': bool(called),
+              'skip_reason': reason, 'material_status': material}
+    if called:
+        result['llm'] = current_llm().public_identity()
+    return result
 
 
 def missing_evidence_text(context):
@@ -554,6 +558,7 @@ def finish_timings(context, started):
     return timings
 
 
+@llm_stream(uses_llm=lambda service, p, request: bool(request.get('generate')))
 def stream_events(service,p,request):
     started = perf_counter()
     def event(name,payload):return 'event: '+name+'\ndata: '+json.dumps(payload,ensure_ascii=False)+'\n\n'
@@ -584,7 +589,8 @@ def stream_events(service,p,request):
         material = model_evidence(evidence, context)
         if request.get('generate') and material:
             llm_started = perf_counter()
-            url=os.getenv('KG_LLM_BASE_URL','').rstrip('/');key=os.getenv('KG_LLM_API_KEY','');model=os.getenv('KG_LLM_MODEL','')
+            config = current_llm()
+            url, key, model = config.base_url, config.api_key, config.model
             if not all((url,key,model)):raise RuntimeError('请配置 KG_LLM_BASE_URL、KG_LLM_API_KEY、KG_LLM_MODEL')
             messages=answer_messages(request['query'], material,
                                      as_of=context.get('as_of'), known_at=context.get('known_at'),

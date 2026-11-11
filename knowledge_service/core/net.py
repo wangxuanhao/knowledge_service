@@ -35,6 +35,7 @@
 import os
 
 import httpx
+from .llm_config import bound_llm_config
 
 
 def outbound_proxy():
@@ -48,7 +49,8 @@ def external_client(timeout, **kwargs):
     所有出口代理决策集中在此，避免各调用点各自 ``httpx.Client()`` 而
     隐式继承系统代理。
     """
-    proxy = outbound_proxy()
+    config = bound_llm_config()
+    proxy = kwargs.pop('proxy', config.proxy if config is not None else outbound_proxy())
     if proxy:
         return httpx.Client(timeout=timeout, proxy=proxy, trust_env=False, **kwargs)
     return httpx.Client(timeout=timeout, trust_env=False, **kwargs)
