@@ -160,3 +160,23 @@
         grid-template-columns: 1fr;
     }
 }
+
+/* Runtime overview: restrained figures and concise, left-aligned sections. */
+body main #tab-dashboard #dashboard .dashboard-metrics{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}
+body main #tab-dashboard #dashboard .metric-card{padding:14px 16px;border-radius:8px;box-shadow:none;text-align:left;min-width:0}
+body main #tab-dashboard #dashboard .metric-icon{width:26px;height:26px;font-size:14px;border-radius:6px;margin-bottom:10px}
+body main #tab-dashboard #dashboard .metric-card strong{font-size:22px;line-height:1.25;font-weight:650;overflow-wrap:anywhere}
+body main #tab-dashboard #dashboard .metric-extra{font-size:13px}
+body main #tab-dashboard #dashboard .metric-label{font-size:12px}
+body main #tab-dashboard #dashboard .metric-rate{margin-top:6px;font-size:12px}
+body main #tab-dashboard #dashboard .dashboard-columns{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+body main #tab-dashboard #dashboard .dashboard-section{padding:14px 16px;min-width:0;border-radius:8px}
+body main #tab-dashboard #dashboard .dashboard-section h3{font-size:14px;margin-bottom:10px;padding-bottom:10px}
+body main #tab-dashboard #dashboard .dashboard-section>.subtle{margin:12px 0;font-size:13px}
+body main #tab-dashboard #dashboard .distribution span{min-width:0;overflow-wrap:anywhere}
+body main #tab-dashboard #dashboard .distribution b{flex-shrink:0;font-size:13px}
+body main #tab-dashboard #dashboard .dashboard-empty{padding:16px;text-align:left;font-size:13px}
+body main #tab-dashboard #dashboard .dashboard-empty-icon{font-size:16px;margin-bottom:6px}
+body main #tab-dashboard #dashboard :is(.dashboard-empty-title,.dashboard-empty-text){font-size:13px}
+@media(max-width:900px){body main #tab-dashboard #dashboard .dashboard-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){body main #tab-dashboard #dashboard .dashboard-columns{grid-template-columns:1fr}}

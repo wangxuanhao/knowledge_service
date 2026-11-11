@@ -398,3 +398,25 @@
         gap: 12px;
     }
 }
+
+/* A missing task is a short status message, not a full-height illustration. */
+body main #tab-jobs .tasks-container{gap:10px}
+body main #tab-jobs .tasks-stats{padding:10px 12px;gap:16px;margin-bottom:0;flex-wrap:wrap}
+body main #tab-jobs .tasks-stats:not(:has(.tasks-stat)){display:none}
+body main #tab-jobs .tasks-stat-dot{width:7px;height:7px}
+body main #tab-jobs .tasks-stat-value{font-size:13px}
+body main #tab-jobs .tasks-empty{padding:16px;text-align:left;border:1px solid var(--ui-line,#dce8e6);background:var(--ui-surface-2,#f4f9f8);border-radius:8px}
+body main #tab-jobs .tasks-empty-icon{font-size:16px;line-height:20px;margin-bottom:6px}
+body main #tab-jobs .tasks-empty-title{font-size:13px;margin-bottom:4px;font-weight:500}
+body main #tab-jobs .tasks-empty-text{font-size:13px;line-height:1.6;color:var(--ui-muted,#617b79)}
+body main #tab-jobs .task-card{padding:14px 16px;border-radius:8px;min-width:0;box-shadow:none}
+body main #tab-jobs .task-header{gap:12px;align-items:flex-start}
+body main #tab-jobs .task-title{min-width:0;gap:8px}
+body main #tab-jobs .task-title>div:last-child{min-width:0}
+body main #tab-jobs .task-icon{width:28px;height:28px;flex-shrink:0;font-size:14px;border-radius:6px}
+body main #tab-jobs .task-name{font-size:13px;overflow-wrap:anywhere}
+body main #tab-jobs :is(.task-type,.task-meta,.task-logs-title,.task-logs-content,.task-result-content){font-size:12px}
+body main #tab-jobs .task-status-badge{font-size:12px;padding:3px 9px;white-space:nowrap;flex-shrink:0}
+body main #tab-jobs .task-controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+body main #tab-jobs :is(.task-logs-toggle,.task-result-toggle){min-height:32px;font-size:12px;padding:4px 0;white-space:normal;text-align:left}
+body main #tab-jobs :is(.task-logs-content,.task-result-content,.task-error){overflow-wrap:anywhere}

@@ -1,1 +1,89 @@
-.ua-search{display:flex;gap:10px;margin:14px 0}.ua-search input{flex:1}.ua-table-wrap{overflow:auto}.ua-login{display:block;font-size:12px;color:#678276;margin-top:3px}.ua-edit-card{width:min(490px,100vw);height:100vh;max-height:100vh!important;overflow:auto;border-radius:12px 0 0 12px!important;background:var(--ks-surface,#fff)!important;color:var(--ks-ink,#244238)!important}.ua-management-overlay{justify-content:flex-end!important;padding:0!important}.ua-edit-form,.ua-reset-form{display:grid;gap:16px}.ua-edit-form label,.ua-reset-form label{display:grid;gap:5px}.ua-edit-secondary{margin-top:24px;display:grid;gap:15px}.ua-edit-secondary summary{cursor:pointer;padding:8px 0}.ua-confirm{padding:16px;border:1px solid #c77d61;border-radius:8px;margin-top:20px}.ua-confirm[hidden]{display:none}.ua-confirm button{margin-right:8px}.ua-edit-card .ua-head{display:flex;align-items:center;justify-content:space-between}.ua-edit-card .ua-head h2{font-size:18px}.ua-edit-card .ua-flash{color:#9b382c}.ua-page .ua-head{display:flex;align-items:center;justify-content:space-between}@media(max-width:650px){.ua-search{flex-wrap:wrap}.ua-table th,.ua-table td{white-space:nowrap}}
+/* Account management: scoped light surfaces, readable controls and compact rows. */
+#tab-useradmin{min-width:0;max-width:100%}
+#tab-useradmin .ua-page{min-width:0;padding:20px;background:var(--ks-surface,#fff);border:1px solid var(--ks-line,#d5e4e4);border-radius:10px;box-shadow:none;font-size:13px;line-height:1.6}
+#tab-useradmin .ua-head{align-items:center;gap:16px;margin:0}
+#tab-useradmin .ua-head h2{margin:0 0 4px;font-size:16px;line-height:1.5}
+#tab-useradmin .ua-head button{flex-shrink:0;min-height:36px;padding:7px 14px;font-size:13px;line-height:20px;white-space:nowrap;box-shadow:none}
+#tab-useradmin .ua-sub{font-size:12px;line-height:1.6;color:var(--ks-muted,#688585)}
+#tab-useradmin .ua-description{margin:10px 0 18px;font-size:13px;color:var(--ks-ink-2,#3d5e5e)}
+#tab-useradmin .ua-flash{min-height:0;margin:0 0 14px;padding:10px 12px;border:1px solid var(--ks-line,#d5e4e4);border-radius:6px;font-size:13px;line-height:1.6;overflow-wrap:anywhere}
+#tab-useradmin .ua-flash:empty{display:none}
+#tab-useradmin .ua-flash.is-error{color:#a1363a;background:#fff5f5;border-color:#ebc9c9}
+#tab-useradmin .ua-flash.is-good{color:#21654f;background:#edf7f2;border-color:#c9e1d5}
+#tab-useradmin .ua-search{display:grid;grid-template-columns:minmax(0,1fr) 180px auto;align-items:end;gap:12px;margin:0 0 20px;padding:14px;background:var(--ks-sunken,#eef5f5);border:1px solid var(--ks-line,#d5e4e4);border-radius:8px}
+#tab-useradmin .ua-search label{display:grid;gap:6px;min-width:0;margin:0;font-size:12px;font-weight:500;line-height:18px;color:var(--ks-ink-2,#3d5e5e)}
+#tab-useradmin .ua-search :is(input,select,button){width:100%;min-width:0;height:38px;margin:0;padding:8px 12px;font:inherit;font-size:13px;line-height:20px;border-radius:6px;box-sizing:border-box;box-shadow:none}
+#tab-useradmin .ua-search :is(input,select){color:var(--ks-ink,#124242);background-color:var(--ks-surface,#fff);border:1px solid var(--ks-line-strong,#bed0d0)}
+#tab-useradmin .ua-search button{width:auto;min-width:76px;white-space:nowrap}
+#tab-useradmin .ua-list-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 10px}
+#tab-useradmin .ua-list-head h3{margin:0;font-size:13px;font-weight:600}
+#tab-useradmin #ua-result-count{font-size:12px;color:var(--ks-muted,#688585)}
+#tab-useradmin .ua-table-wrap{max-width:100%;overflow:auto;overscroll-behavior-x:contain;border:1px solid var(--ks-line,#d5e4e4);border-radius:7px}
+#tab-useradmin .ua-table{width:100%;min-width:680px;table-layout:fixed;border-collapse:collapse;font-size:14px;line-height:1.6}
+#tab-useradmin .ua-table th:nth-child(1){width:38%}
+#tab-useradmin .ua-table th:nth-child(2){width:31%}
+#tab-useradmin .ua-table th:nth-child(3){width:15%}
+#tab-useradmin .ua-table th:nth-child(4){width:16%}
+#tab-useradmin .ua-table :is(th,td){padding:13px 16px;text-align:left;vertical-align:top;overflow-wrap:anywhere;white-space:normal}
+#tab-useradmin .ua-table th{padding-top:10px;padding-bottom:10px;background:var(--ks-sunken,#eef5f5);font-size:12px;font-weight:600;line-height:20px;color:var(--ks-ink-2,#3d5e5e)}
+#tab-useradmin .ua-table td{border-bottom:1px solid var(--ks-line,#d5e4e4);color:var(--ks-ink,#124242)}
+#tab-useradmin .ua-table tr:last-child td{border-bottom:0}
+#tab-useradmin .ua-table tr.is-self{background:var(--ks-surface,#fff)}
+#tab-useradmin .ua-table strong{font-size:14px;font-weight:600;line-height:22px}
+#tab-useradmin :is(.ua-login,.ua-role-description){display:block;margin-top:5px;font-size:12px;line-height:1.6;color:var(--ks-muted,#688585);overflow-wrap:anywhere}
+#tab-useradmin .ua-self-tag{display:inline-block;margin-left:8px;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:400;line-height:18px;color:var(--ks-accent,#0e7c7b);background:var(--ks-sunken,#eef5f5);white-space:nowrap}
+#tab-useradmin .ua-role{display:inline-block;padding:1px 7px;border:1px solid var(--ks-line,#d5e4e4);border-radius:5px;font-size:12px;line-height:20px;white-space:nowrap}
+#tab-useradmin .ua-role.is-admin{color:var(--ks-accent,#0e7c7b);background:var(--ks-sunken,#eef5f5);border-color:var(--ks-line,#d5e4e4)}
+#tab-useradmin .ua-role.is-viewer{color:var(--ks-ink-2,#3d5e5e);background:var(--ks-surface,#fff);border-color:var(--ks-line,#d5e4e4)}
+#tab-useradmin .ua-state{display:inline-flex;align-items:center;gap:6px;font-size:13px;line-height:22px;white-space:nowrap}
+#tab-useradmin .ua-state:before{content:'';width:6px;height:6px;flex-shrink:0;border-radius:50%;background:currentColor}
+#tab-useradmin .ua-state.is-on{color:#277252}
+#tab-useradmin .ua-state.is-off{color:var(--ks-muted,#688585)}
+#tab-useradmin .ua-table button{min-height:32px;min-width:68px;margin:0;padding:5px 12px;font-size:12px;line-height:20px;white-space:nowrap;box-shadow:none}
+#tab-useradmin .ua-protected{font-size:12px;line-height:22px;color:var(--ks-muted,#688585)}
+#tab-useradmin .ua-table .ua-empty{padding:22px 16px;font-size:13px;color:var(--ks-muted,#688585);text-align:center}
+#tab-useradmin .ua-scope-note{margin:12px 0 0;font-size:12px;line-height:1.7;color:var(--ks-muted,#688585)}
+
+/* Only account edit/create side panels; personal password dialog keeps its own style. */
+body:has(.ua-management-overlay){overflow:hidden}
+body .ua-management-overlay{align-items:stretch;justify-content:flex-end;padding:0;background:rgba(18,50,50,.28)}
+body .ua-management-overlay .ua-edit-card{width:min(480px,100vw);max-width:100%;height:100dvh;max-height:100dvh;margin:0;padding:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;border:0;border-left:1px solid var(--ks-line,#d5e4e4);border-radius:0;background:var(--ks-surface,#fff);color:var(--ks-ink,#124242);font-size:13px;line-height:1.6;box-sizing:border-box;box-shadow:-8px 0 30px #10353514}
+.ua-management-overlay .ua-edit-card .ua-head{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0;padding:20px 24px 16px;border-bottom:1px solid var(--ks-line,#d5e4e4);background:var(--ks-surface,#fff)}
+.ua-management-overlay .ua-head h2{margin:0;font-size:16px;line-height:1.5}
+.ua-management-overlay .ua-head .ua-close{display:grid;place-items:center;flex-shrink:0;width:30px;height:30px;padding:0;border:1px solid var(--ks-line,#d5e4e4);border-radius:6px;background:var(--ks-surface,#fff);color:var(--ks-muted,#688585);font-size:20px;line-height:1;box-shadow:none}
+.ua-management-overlay .ua-head .ua-close:hover{background:var(--ks-sunken,#eef5f5);color:var(--ks-ink,#124242)}
+.ua-management-overlay .ua-dialog-intro{margin:16px 24px;color:var(--ks-muted,#688585);font-size:12px;line-height:1.7}
+.ua-management-overlay .ua-edit-card .ua-flash{min-height:0;margin:0 24px 16px;padding:10px 12px;border-radius:6px;background:#fff5f5;color:#a1363a;font-size:13px;line-height:1.6;overflow-wrap:anywhere}
+.ua-management-overlay .ua-edit-card .ua-flash:empty{display:none}
+.ua-management-overlay :is(.ua-edit-form,.ua-reset-form){display:grid;gap:18px;margin:0;padding:0 24px 24px}
+.ua-management-overlay :is(.ua-edit-form,.ua-reset-form) label{display:grid;gap:7px;margin:0;font-size:13px;font-weight:500;line-height:1.6;color:var(--ks-ink,#124242)}
+.ua-management-overlay :is(.ua-edit-form,.ua-reset-form) :is(input,select){display:block;width:100%;min-width:0;height:40px;margin:0;padding:8px 11px;border:1px solid var(--ks-line-strong,#bed0d0);border-radius:6px;background:var(--ks-surface,#fff);color:var(--ks-ink,#124242);font:inherit;font-size:13px;box-sizing:border-box}
+.ua-management-overlay :is(input,select):is([readonly],:disabled){background:var(--ks-sunken,#eef5f5);color:var(--ks-muted,#688585)}
+.ua-management-overlay .ua-field small{display:block;margin-top:6px;font-size:12px;line-height:1.6;color:var(--ks-muted,#688585)}
+.ua-management-overlay button:not(.ua-close){min-height:36px;padding:7px 12px;border:1px solid var(--ks-accent,#0e7c7b);border-radius:6px;background:var(--ks-accent,#0e7c7b);color:#fff;font:inherit;font-size:13px;line-height:20px;white-space:nowrap;box-shadow:none;cursor:pointer}
+.ua-management-overlay button.secondary{background:var(--ks-surface,#fff);color:var(--ks-accent,#0e7c7b);border-color:var(--ks-line-strong,#bed0d0)}
+.ua-management-overlay button.danger{background:var(--ks-surface,#fff);border-color:#d6a4a4;color:#a1363a}
+.ua-management-overlay button:disabled{opacity:.55;cursor:wait}
+.ua-management-overlay :is(button,input,select,summary):focus-visible{outline:2px solid var(--ks-accent,#0e7c7b);outline-offset:2px}
+.ua-management-overlay .ua-edit-secondary{display:grid;gap:14px;margin:0 24px 24px;padding-top:20px;border-top:1px solid var(--ks-line,#d5e4e4)}
+.ua-management-overlay .ua-edit-secondary h3{margin:0;font-size:13px;font-weight:600}
+.ua-management-overlay .ua-edit-secondary>button{justify-self:start}
+.ua-management-overlay .ua-edit-secondary :is(p,.subtle){margin:0;font-size:12px;line-height:1.7;color:var(--ks-muted,#688585)}
+.ua-management-overlay .ua-edit-secondary summary{padding:10px 0;font-size:13px;font-weight:500;color:var(--ks-ink,#124242);cursor:pointer}
+.ua-management-overlay .ua-reset-form{padding:6px 0 0}
+.ua-management-overlay .ua-delete-section{display:grid;justify-items:start;gap:10px;padding-top:16px;border-top:1px solid var(--ks-line,#d5e4e4)}
+.ua-management-overlay .ua-confirm{margin:0 24px 24px;padding:14px;border:1px solid #e0b2ad;border-radius:7px;background:#fff8f6;font-size:13px;line-height:1.7}
+.ua-management-overlay .ua-confirm[hidden]{display:none}
+.ua-management-overlay .ua-confirm p{margin:0 0 12px;overflow-wrap:anywhere}
+.ua-management-overlay .ua-confirm button{margin:0 8px 0 0}
+@media(max-width:650px){
+ #tab-useradmin .ua-page{padding:16px}
+ #tab-useradmin .ua-search{grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:12px}
+ #tab-useradmin .ua-search-field{grid-column:1/-1}
+ #tab-useradmin .ua-head{align-items:flex-start}
+ #tab-useradmin .ua-head button{padding:7px 10px}
+ .ua-management-overlay .ua-edit-card .ua-head{padding:18px 18px 14px}
+ .ua-management-overlay .ua-dialog-intro{margin-left:18px;margin-right:18px}
+ .ua-management-overlay .ua-edit-form{padding-left:18px;padding-right:18px}
+ .ua-management-overlay :is(.ua-edit-secondary,.ua-confirm){margin-left:18px;margin-right:18px}
+}

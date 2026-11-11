@@ -397,6 +397,49 @@ def test_user_page_create_drawer_and_compact_table(browser, site):
     assert page.locator('.ua-edit-form button[type="submit"]').inner_text() == '创建登录账号'
 
 
+def test_user_page_filter_count_explains_the_displayed_accounts(browser, site):
+    inactive = {**ALICE_ROW, 'is_active': False}
+    page = _open_users_page(browser, site, users=[SUPER_ROW, BOSS_ROW, inactive])
+    assert page.locator('#ua-result-count').inner_text() == '显示 3 / 3 个账号'
+    page.select_option('#ua-state', 'off')
+    assert page.locator('#ua-result-count').inner_text() == '显示 1 / 3 个账号'
+    assert page.locator('[data-ua-rows] tr').count() == 1
+    assert '小艾' in page.locator('[data-ua-rows]').inner_text()
+    page.fill('#ua-search', '找不到的人员')
+    assert page.locator('#ua-result-count').inner_text() == '显示 0 / 3 个账号'
+    assert '没有符合条件的人员' in page.locator('[data-ua-rows]').inner_text()
+    assert not [call for call in _calls(page, '/api/users') if call['method'] != 'GET']
+
+
+def test_user_page_role_help_explains_selection_without_changing_accounts(browser, site):
+    page = _open_users_page(browser, site, me=BOSS_ROW, users=[SUPER_ROW, BOSS_ROW, ALICE_ROW])
+    page.click('#ua-add')
+    assert '只读访问' in page.locator('[data-role-help]').inner_text()
+    page.select_option('.ua-edit-form [name="role"]', 'admin')
+    assert '维护知识' in page.locator('[data-role-help]').inner_text()
+    assert '超级管理员' not in page.locator('.ua-edit-form [name="role"]').inner_text()
+    assert not [call for call in _calls(page, '/api/users') if call['method'] != 'GET']
+
+
+def test_user_page_refresh_failure_is_distinct_from_an_empty_list(browser, site):
+    page = _open_users_page(browser, site, users=[SUPER_ROW, ALICE_ROW])
+    page.evaluate("""() => {
+      window.__peopleFetch = window.fetch;
+      window.fetch = async (input, options) => String(input) === '/api/users'
+        ? new Response(JSON.stringify({detail: '人员清单暂不可用'}), {status: 503,
+            headers: {'Content-Type': 'application/json'}})
+        : window.__peopleFetch(input, options);
+    }""")
+    page.click('#ua-refresh')
+    page.wait_for_function("document.getElementById('ua-result-count').textContent==='读取失败'")
+    assert '人员清单暂不可用' in page.locator('[data-ua-flash]').inner_text()
+    assert '点击刷新重试' in page.locator('[data-ua-rows]').inner_text()
+    page.evaluate('() => { window.fetch = window.__peopleFetch; }')
+    page.click('#ua-refresh')
+    page.wait_for_function("document.getElementById('ua-result-count').textContent==='显示 2 / 2 个账号'")
+    assert not page.locator('[data-ua-flash]').is_visible()
+
+
 def test_password_dialog_validates_mismatch_before_request(browser, site):
     """改自己口令：两次不一致必须当场拦下，不发请求（手册第 5 章的校验）。"""
     page = _open_users_page(browser, site, users=[SUPER_ROW, ALICE_ROW])

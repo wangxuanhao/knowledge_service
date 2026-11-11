@@ -30,3 +30,23 @@
 @media(max-width:850px){
   .runtime .runtime-views button{flex:1 1 100%}
 }
+
+/* Compact workbench rhythm; IDs deliberately outrank the shared theme. */
+body main #tab-runtime .runtime-views{gap:6px;margin-bottom:12px}
+body main #tab-runtime .runtime-views button{flex:0 1 auto;min-width:104px;min-height:36px;padding:8px 16px;align-items:center;font-size:13px;line-height:18px;border-radius:7px}
+body main :is(#tab-dashboard,#tab-jobs,#tab-evaluation){font-size:13px;line-height:1.6;min-width:0}
+body main :is(#tab-dashboard,#tab-jobs,#tab-evaluation)>.panel{padding:18px;margin-bottom:14px;border-radius:10px;box-shadow:none;background:var(--ui-surface,#fff)}
+body main :is(#tab-dashboard,#tab-jobs,#tab-evaluation) h2{font-size:16px;line-height:1.5;margin-bottom:10px}
+body main :is(#tab-dashboard,#tab-jobs,#tab-evaluation)>.panel>.row:first-child{justify-content:space-between;gap:10px}
+body main :is(#tab-dashboard,#tab-jobs,#tab-evaluation)>.panel>.row:first-child h2{margin:0 auto 0 0}
+body main :is(#tab-dashboard,#tab-jobs,#tab-evaluation) button{font-size:13px;line-height:18px;min-height:36px;padding:8px 12px;white-space:nowrap}
+body main :is(#tab-dashboard,#tab-jobs,#tab-evaluation) :is(.runtime-purpose,.runtime-lead,.subtle){font-size:12px;line-height:1.7;color:var(--ui-muted,#617b79)}
+body main :is(#tab-dashboard,#tab-jobs) .runtime-purpose{margin:10px 0 16px;max-width:90ch}
+body main #tab-evaluation>.runtime-lead{margin-bottom:12px;font-size:13px}
+body main :is(#tab-dashboard,#tab-jobs,#tab-evaluation) :is(input,select,textarea){font-size:13px;border-radius:7px}
+body main :is(#tab-dashboard,#tab-jobs,#tab-evaluation) :is(input,select){min-height:36px;padding:8px 10px;margin-top:0}
+@media(max-width:600px){
+  body main #tab-runtime .runtime-views button{flex:1 1 0;min-width:0;padding:8px}
+  body main :is(#tab-dashboard,#tab-jobs,#tab-evaluation)>.panel{padding:14px}
+  body main :is(#tab-dashboard,#tab-jobs,#tab-evaluation) .row{flex-wrap:wrap}
+}
