@@ -55,6 +55,6 @@ Files: docs/平台规则资料上传与ZIP打包操作手册.md; docs/2026-11-11
 - [x] Generate real DOCX with embedded picture, digital/scanned PDF, long image, MD-assets package and ordered image ZIP; verify upload, original reading, parsed text, source evidence and append batch behavior. Reuse existing local models; do not disclose credentials.
 - [x] Record real OCR coverage at top/middle/bottom, tile-boundary checks, actual limits and limitations. Video is ASR speech text; do not claim frame OCR or layout-perfect Word rendering.
 - [x] Refresh manual and examples for one-ZIP-one-document; clearly explain rejection/splitting of old multi-document packages and retention of old saved sources.
-- [ ] Final spec and quality review, git diff --check, review status and exact staged paths, commit to local master. No push requested.
+- [x] Final spec and quality review, git diff --check, review status and exact staged paths, commit to local master. No push requested.
 
 Only root runs pytest because tests share knowledge_test and teardown. Do not change .env or delete existing projects/data. User approved implementation and local master submission; continue through review without asking for the same approval again.
