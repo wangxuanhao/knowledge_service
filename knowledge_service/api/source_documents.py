@@ -1,13 +1,15 @@
 """Authorized fixed-version source reads and audited OCR decisions."""
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from .audit_identity import audit_actor
 from ..services.source_documents import SourceDocumentService, SourceDocumentUnavailable, SourceOCRError
 from ..integrations.video_asr import ASRError
+from ..integrations.pdf_preview import PDFPreviewError
+from ..services.source_pdf_preview import SourcePDFPreviewService
 
 
 class IgnoreImage(BaseModel):
@@ -20,6 +22,7 @@ def install(app, service):
         sources = SourceDocumentService.for_service(service)
         app.state.source_documents = sources
     router = APIRouter(prefix='/api/projects/{project_id}/source-documents')
+    pdf_previews = SourcePDFPreviewService(sources)
 
     def read_source(project_id: str, version_id: str):
         try:
@@ -46,6 +49,17 @@ def install(app, service):
         return Response(result['data'], media_type=result['mime_type'], headers={
             'Content-Disposition': "attachment; filename*=UTF-8''" + quote(result['original_name'], safe=''),
             'X-Content-Type-Options': 'nosniff'})
+
+    @router.get('/{version_id}/pdf-preview')
+    def pdf_preview(project_id: str, version_id: str, page: int = Query(default=1, ge=1, le=10_000)):
+        try:
+            return pdf_previews.page(project_id, version_id, page)
+        except SourceDocumentUnavailable as exc:
+            raise HTTPException(status_code=503, detail={
+                'code': 'source_object_unavailable', 'message': str(exc)}) from exc
+        except PDFPreviewError as exc:
+            raise HTTPException(status_code=exc.status_code, detail={
+                'code': exc.code, 'message': str(exc)}) from exc
 
     @router.get('/{version_id}/package')
     def package(project_id: str, version_id: str):

@@ -2,14 +2,14 @@
 (() => {
   // Conservative fallback permits selection; submission requires capabilities.
   let limits={max_file_bytes:25_000_000,max_batch_items:20,max_batch_bytes:100_000_000,
-    supported_extensions:['.txt','.md','.pdf','.docx','.html','.htm','.mp4','.webm']};
+    supported_extensions:['.txt','.md','.pdf','.docx','.html','.htm','.png','.jpg','.jpeg','.webp','.mp4','.webm']};
   const file=document.getElementById('doc-file'),text=document.getElementById('doc-text');
   const modes=[...document.querySelectorAll('input[name="document-input-mode"]')];
   const rows=[];let generation=0;
   const mode=()=>modes.find(input=>input.checked)?.value||'file';
   const key=f=>[f.name,f.size||0,f.lastModified||0].join(':');
   const size=value=>value<1000?value+' B':value<1_000_000?(value/1000).toFixed(1)+' KB':Number((value/1_000_000).toFixed(2))+' MB';
-  const icon=name=>/\.zip$/i.test(name)?'ZIP':/\.pdf$/i.test(name)?'PDF':/\.docx$/i.test(name)?'DOCX':/\.html?$/i.test(name)?'HTML':/\.md$/i.test(name)?'MD':'TXT';
+  const icon=name=>/\.zip$/i.test(name)?'ZIP':/\.pdf$/i.test(name)?'PDF':/\.docx$/i.test(name)?'DOCX':/\.html?$/i.test(name)?'HTML':/\.md$/i.test(name)?'MD':/\.(png|jpe?g|webp)$/i.test(name)?'图片':/\.(mp4|webm)$/i.test(name)?'视频':'TXT';
   const statusText=item=>({ready:'待提交',uploading:'正在上传',queued:'已进入队列',failed:'提交失败'}[item.status]||item.status);
   const field=id=>document.getElementById(id);
   const timeMode=()=>field('doc-time-mode')?.value==='manual'?'manual':'auto';
@@ -131,17 +131,17 @@
     }
     const total=rows.reduce((sum,item)=>sum+(item.file.size||0),0);
     const summary=document.getElementById('doc-upload-summary');
-    if(summary)summary.textContent=rows.length?`${rows.length} 个文件 · ${size(total)} · ${rows.filter(item=>item.status==='queued').length} 个已提交`:'尚未选择文件';
+    if(summary)summary.textContent=rows.length?`${rows.length} 份资料 · ${size(total)} · ${rows.filter(item=>item.status==='queued').length} 份已提交`:'尚未选择文件';
     const help=document.getElementById('doc-batch-help');
     const hasPackage=rows.some(item=>/\.zip$/i.test(item.file.name));
-    if(help)help.textContent=[rows.length>1?'多文件分别以文件名作为标题；适用范围和 Metadata 为本批共用。自动模式逐份识别时间，手工填写的时间覆盖本批所有文件。':'',
-      hasPackage?'ZIP 内每份 Markdown 分别建立资料，图片按相对路径关联。可预览包内文档后提交。':''].filter(Boolean).join(' ');
+    if(help)help.textContent=['可分次追加文件，最后统一提交；每个文件对应一份资料。',rows.length>1?'多文件分别以文件名作为标题；适用范围和 Metadata 为本批共用。自动模式逐份识别时间，手工填写的时间覆盖本批所有文件。':'',
+      hasPackage?'ZIP 一包一份资料，正文与相对附件共同预览；连续截图须在清单中明确页序。':''].filter(Boolean).join(' ');
     const preview=document.getElementById('preview-chunks');
     if(preview)preview.textContent='预览切片';
     const title=document.getElementById('doc-title');
     if(title){title.disabled=mode()==='file'&&rows.length>1;title.required=mode()==='text';}
     const submit=document.getElementById('ingest');
-    if(submit)submit.textContent=mode()==='file'?(rows.length?`上传并解析 ${queue.eligible().length} 个文件`:'上传并处理'):'提交正文并处理';
+    if(submit)submit.textContent=mode()==='file'?(rows.length?`上传并解析 ${queue.eligible().length} 份资料`:'上传并处理'):'提交正文并处理';
     window.LibraryWorkspace?.queueChanged?.();
   }
 
@@ -152,6 +152,7 @@
         const extension='.'+(value.name||'').split('.').pop().toLowerCase();
         if(!limits.supported_extensions.map(x=>x.startsWith('.')?x:'.'+x).includes(extension))throw Error(value.name+'：不支持该文件格式。');
         if((value.size||0)>limits.max_file_bytes)throw Error(value.name+'：单个文件不能超过 '+size(limits.max_file_bytes)+'。');
+        if(/\.(png|jpe?g|webp)$/i.test(value.name)&&limits.ocr_max_image_bytes&&(value.size||0)>limits.ocr_max_image_bytes)throw Error(value.name+'：图片不能超过 '+size(limits.ocr_max_image_bytes)+'，请按提示调整原图后再上传。');
       }
       const known=new Set(rows.map(item=>key(item.file)));
       const unique=incoming.filter(value=>!known.has(key(value))&&(known.add(key(value)),true));
@@ -170,15 +171,16 @@
       if(value.markdown_package&&!extensions.includes('.zip'))extensions.push('.zip');
       limits={...value,supported_extensions:extensions};
       if(file)file.accept=extensions.join(',');
-      const names={'.txt':'TXT','.md':'Markdown','.pdf':'PDF','.docx':'DOCX','.html':'HTML','.htm':'HTML','.mp4':'MP4','.webm':'WebM','.zip':'ZIP 知识包'};
+      const names={'.txt':'TXT','.md':'Markdown','.pdf':'PDF','.docx':'DOCX','.html':'HTML','.htm':'HTML','.png':'PNG','.jpg':'JPEG','.jpeg':'JPEG','.webp':'WebP','.mp4':'MP4','.webm':'WebM','.zip':'ZIP 知识包'};
       const formats=document.getElementById('doc-upload-formats');
       if(formats)formats.textContent='支持 '+[...new Set(extensions.map(extension=>names[extension]||extension))].join('、');
       const suffixes=document.getElementById('doc-upload-extensions');
       if(suffixes)suffixes.textContent=extensions.join(' · ');
       const packageHelp=document.getElementById('doc-upload-package-help');
-      if(packageHelp){packageHelp.hidden=!value.markdown_package;packageHelp.textContent='ZIP 知识包保留 Markdown 与 assets 相对目录，可切换包内文档预览图文正文与切片。';}
+      if(packageHelp){packageHelp.hidden=!value.markdown_package;packageHelp.textContent='ZIP 一包一份资料：保留正文与 assets 相对目录，可预览包内正文及附件。多份正文请分别打包；图片合集通过 schema_version=2 的 document.pages 明确页序。';}
       const help=document.getElementById('doc-upload-limits');
-      if(help)help.textContent=`单文件最大 ${size(value.max_file_bytes)}，最多 ${value.max_batch_items} 个，单批合计不超过 ${size(value.max_batch_bytes)}。`;
+      if(help)help.textContent=`单文件最大 ${size(value.max_file_bytes)}，最多 ${value.max_batch_items} 份资料，单批合计不超过 ${size(value.max_batch_bytes)}。`+
+        (value.ocr_max_image_bytes?` 图片最大 ${size(value.ocr_max_image_bytes)}`:'')+(value.ocr_max_pixels?`、${Number((value.ocr_max_pixels/1_000_000).toFixed(2))} 百万像素`:'')+(value.ocr_max_image_bytes||value.ocr_max_pixels?'；服务端校验实际图片内容与尺寸。':'');
       const chip=document.querySelector('.document-limit-chip');if(chip)chip.textContent='单文件 '+size(value.max_file_bytes);
       render();
     },

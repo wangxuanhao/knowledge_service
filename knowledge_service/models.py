@@ -218,6 +218,9 @@ class IngestCapabilities(BaseModel):
     ocr_languages: list[str]
     ocr_image_extensions: list[str]
     ocr_max_pixels: int
+    ocr_max_image_bytes: int = 10 * 1024 * 1024
+    one_document_per_package: bool = True
+    package_schema_versions: list[int] = Field(default_factory=lambda: [2])
     asr_available: bool = False
     asr_video_extensions: list[str] = Field(default_factory=lambda: ['.mp4','.webm'])
     asr_concurrency_limit: int = 1

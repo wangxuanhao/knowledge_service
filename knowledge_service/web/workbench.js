@@ -475,28 +475,25 @@ function chunkPreviewMessage(title,message,busy=false){
   content.setAttribute('aria-busy',String(busy));
   content.replaceChildren(notice);
 }
-function renderChunkPreviewPackage(info,selectedPath){
-  const host=$('chunk-preview-package'),picker=$('chunk-preview-document');
-  host.hidden=!info;picker.replaceChildren();
+function renderChunkPreviewPackage(info){
+  const host=$('chunk-preview-package');
+  host.hidden=!info;
   if(!info)return;
-  $('chunk-preview-package-summary').textContent=`包内 ${info.document_count} 份 Markdown · ${info.image_count} 处图片引用`;
-  for(const item of info.documents){const option=document.createElement('option');option.value=item.path;
-    option.textContent=item.path+(item.warning_count?' · 有附件警告':'');picker.append(option);}
-  picker.value=selectedPath||info.selected_path;
+  const count=Number(info.asset_count??info.image_count)||0;
+  $('chunk-preview-package-summary').textContent=`一包一份资料 · 正文及 ${count} 附件`;
 }
-async function selectChunkPreviewFile(index,packagePath){
+async function selectChunkPreviewFile(index){
   const session=chunkPreviewState.session,doc=session?.documents[index];
   if(!doc||!currentChunkPreviewSession(session))return;
-  const path=packagePath??session.memberPaths.get(index)??'';
   const previewLabel=session.view==='source'?'原文预览':'切片预览';
   session.fileIndex=index;
   const request=++session.request;
   $('chunk-preview-file').value=String(index);
   $('chunk-preview-file-count').textContent=`${index+1} / ${session.documents.length} 个文件`;
-  renderChunkPreviewPackage(session.packages.get(index),path);
+  renderChunkPreviewPackage(session.packages.get(index));
   chunkPreviewMessage(doc.title,session.view==='source'?'正在读取图文原文…':'正在解析文件并生成切片…',true);
   try{
-    const key=path?index+':'+path:index;
+    const key=index;
     let result=session.cache.get(key);
     if(!result){
       let pending=session.pending.get(key);
@@ -504,7 +501,6 @@ async function selectChunkPreviewFile(index,packagePath){
         if(doc.file){
           const form=new FormData();form.append('file',doc.file,doc.file.name);
           form.append('preview_view',session.view);
-          if(path)form.append('package_path',path);
           form.append('options',JSON.stringify({title:doc.title,...documentUploadOptions(doc),...session.settings}));
           pending=api('/api/projects/'+encodeURIComponent(session.project)+'/documents/upload/preview',form);
         }else pending=api('/api/projects/'+encodeURIComponent(session.project)+'/documents/preview',
@@ -512,15 +508,14 @@ async function selectChunkPreviewFile(index,packagePath){
         session.pending.set(key,pending);
       }
       try{result=await pending;
-        const resultKey=result.package?index+':'+result.package.selected_path:key;
-        session.cache.set(resultKey,result);
+        session.cache.set(key,result);
         while(session.cache.size>4)session.cache.delete(session.cache.keys().next().value);
       }
       finally{session.pending.delete(key);}
     }
     if(!currentChunkPreviewSession(session)||request!==session.request)return;
-    if(result.package){session.packages.set(index,result.package);session.memberPaths.set(index,result.package.selected_path);}
-    renderChunkPreviewPackage(result.package,result.package?.selected_path);
+    if(result.package)session.packages.set(index,result.package);
+    renderChunkPreviewPackage(result.package);
     renderChunkPreview(result,result.title||doc.title);
     status(previewLabel+'完成');
   }catch(error){
@@ -528,7 +523,7 @@ async function selectChunkPreviewFile(index,packagePath){
     chunkPreviewMessage(doc.title,'预览失败：'+error.message);
     const retry=document.createElement('button');
     retry.type='button';retry.className='secondary';retry.textContent='重试此文件';
-    retry.addEventListener('click',()=>selectChunkPreviewFile(index,path));
+    retry.addEventListener('click',()=>selectChunkPreviewFile(index));
     $('chunk-preview-content').append(retry);
     status(previewLabel+'失败：'+doc.title+' · '+error.message,true);
   }
@@ -557,14 +552,13 @@ $('chunk-preview-close').addEventListener('click',closeChunkPreview);
 $('chunk-preview').addEventListener('click',event=>{if(event.target===$('chunk-preview'))closeChunkPreview();});
 document.addEventListener('keydown',trapChunkPreviewFocus);
 $('chunk-preview-file').addEventListener('change',()=>selectChunkPreviewFile(Number($('chunk-preview-file').value)));
-$('chunk-preview-document').addEventListener('change',()=>selectChunkPreviewFile(chunkPreviewState.session?.fileIndex,$('chunk-preview-document').value));
 async function startDocumentPreview(view){
   const p=controlsProject(),settings=view==='chunks'?readParseSettings():{};
   const previewTicket=window.LibraryWorkspace?.ticket();
   const documents=await readDocumentBatch(true);
   if(p!==current||(previewTicket&&!window.LibraryWorkspace.accepts(previewTicket,p)))return;
   chunkPreviewState.session={project:p,ticket:previewTicket,queueGeneration:window.DocumentUploadQueue?.generation,
-    documents,settings,view,request:0,cache:new Map(),pending:new Map(),packages:new Map(),memberPaths:new Map()};
+    documents,settings,view,request:0,cache:new Map(),pending:new Map(),packages:new Map()};
   const picker=$('chunk-preview-file');picker.replaceChildren();
   documents.forEach((doc,index)=>{
     const option=document.createElement('option');option.value=String(index);option.textContent=doc.file?.name||doc.title;

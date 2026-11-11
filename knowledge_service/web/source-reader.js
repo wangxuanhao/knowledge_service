@@ -17,10 +17,40 @@
     // Stored Python offsets count Unicode code points; DOM offsets count UTF-16 units.
     return [points.slice(0,start).join('').length,points.slice(0,end).join('').length];
   }
-  if(typeof module!=='undefined')module.exports={boxStyle,sourceUrl,tableRowRange,characterRange};
+  function ocrProgress(run={}){
+    const details=run.processing_details||{},tiles=Array.isArray(details.tiles)?details.tiles:[];
+    const total=Math.max(0,Number(details.tiles_total)||tiles.length),completed=Math.max(0,Number(details.tiles_completed??tiles.filter(tile=>tile.status==='completed').length)||0);
+    const failed=tiles.filter(tile=>run.status!=='ignored'&&['failed','error','pending'].includes(tile.status)).map((tile,index)=>{
+      let region=tile.region||tile.bounds||tile.box;
+      if(Array.isArray(region)&&region.length===4&&details.width>0&&details.height>0){
+        const [left,top,right,bottom]=region;
+        region={x:left/details.width,y:top/details.height,width:(right-left)/details.width,height:(bottom-top)/details.height};
+      }
+      return {...tile,index:tile.ordinal??tile.index??tile.tile_index??index,region:region&&boxStyle(region)?region:null,message:tile.error?.message||tile.public_error||''};
+    });
+    const incomplete=run.status!=='ignored'&&(run.status==='partial'||(total>0&&completed<total)||failed.length>0);
+    return {total,completed,failed,incomplete,label:run.status==='processing'?'识别中':run.status==='pending'?'待识别':incomplete?'部分完成':run.status==='completed'?'识别成功':null};
+  }
+  function pdfPage(doc,location){
+    const firstPage=values=>values.map(Number).find(page=>Number.isInteger(page)&&page>0);
+    const pages=value=>value?[value.page_number,value.page_no,value.page,...(Array.isArray(value.source_locations)?value.source_locations.flatMap(item=>[item.page_number,item.page_no,item.page]):[])]:[];
+    // Evidence spans are already clipped by locate; their native-page mapping
+    // must win over a chunk-wide page list or a less specific image location.
+    const spans=location?.spans||location?.locations||[],targets=[...spans,location].filter(Boolean);
+    for(const target of targets){
+      const block=(doc.blocks||[]).find(item=>(item.block_id||item.id)===target.block_id);
+      const page=firstPage([...pages(target.payload),...pages(target),...pages(block?.payload)]);if(page)return page;
+    }
+    for(const target of targets){
+      const asset=(doc.assets||[]).find(item=>item.id===target.asset_id),provenance=asset?.provenance;
+      const page=firstPage([...pages(provenance),...(provenance?.locations||[]).flatMap(pages)]);if(page)return page;
+    }
+    return firstPage(targets.flatMap(target=>target.page_numbers||[]))||1;
+  }
+  if(typeof module!=='undefined')module.exports={boxStyle,sourceUrl,tableRowRange,characterRange,ocrProgress,pdfPage};
   if(typeof window==='undefined')return;
   const make=(tag,text,className='')=>{const n=document.createElement(tag);n.textContent=text??'';n.className=className;return n;};
-  const labels={heading:'标题',paragraph:'段落',table:'表格',list:'列表',code:'代码',blockquote:'引用',image:'图片',image_ocr:'图片 OCR',completed:'识别成功',failed:'识别失败',pending:'待识别',processing:'识别中',low_confidence:'置信度不足',needs_attention:'需要处理',available:'已固化',missing:'缺失',ignored:'已人工忽略',external_unfrozen:'外部图片，未固化'};
+  const labels={heading:'标题',paragraph:'段落',table:'表格',list:'列表',code:'代码',blockquote:'引用',image:'图片',image_ocr:'图片 OCR',completed:'识别成功',partial:'部分完成',failed:'识别失败',pending:'待识别',processing:'识别中',low_confidence:'置信度不足',needs_attention:'需要处理',available:'已固化',missing:'缺失',ignored:'已人工忽略',external_unfrozen:'外部图片，未固化'};
   const dialog=make('dialog','','source-reader');dialog.id='source-reader';dialog.setAttribute('aria-labelledby','source-reader-title');
   const header=make('header'),title=make('h2','固定版本原文');title.id='source-reader-title';
   const close=make('button','关闭 ×','secondary');close.type='button';close.onclick=()=>dialog.close();
@@ -78,7 +108,7 @@
     if(!dialog.open)dialog.showModal();
     try{
       let doc=await get(sourceUrl(projectId,versionId),signal);if(token!==serial)return;
-      title.textContent=doc.original_name||doc.title||'固定版本原文';const versionNote='固定版本 '+(doc.version||versionId)+' · '+(doc.sha256||doc.source_object?.sha256||'');note.textContent=versionNote;
+      title.textContent=window.SourceContent.isPdfSource(doc)?window.SourceContent.sourceInfo(doc).filename:doc.original_name||doc.title||'固定版本原文';const versionNote='固定版本 '+(doc.version||versionId)+' · '+(doc.sha256||doc.source_object?.sha256||'');note.textContent=versionNote;
       if(!location&&(assertionId||chunkVersionId)){
         const query=new URLSearchParams();if(assertionId)query.set('assertion_id',assertionId);if(chunkVersionId)query.set('chunk_version_id',chunkVersionId);
         location=await get(sourceUrl(projectId,versionId,'locate')+'?'+query,signal);
@@ -95,16 +125,21 @@
         body.textContent='正在加载…';note.textContent=versionNote;for(const [k,b] of Object.entries(tabButtons))b.setAttribute('aria-pressed',String(k===tab));
         try{
           if(tab==='raw'){
-            const binary=/\.(pdf|docx?|odt|pptx?|mp4|webm)$/i.test(doc.original_name||'');
+            const source=window.SourceContent.sourceInfo(doc),binary=source.binary;
             if(raw===null){raw=binary?doc.source_text||'该格式请下载原文件查看。':await get(sourceUrl(projectId,versionId,'source'),signal,true);}
             if(!accepts())return;
             const downloads=make('div','','source-downloads'),downloadItems=window.SourceContent.downloadOptions(doc);
             for(const option of downloadItems)downloads.append(view.downloadLink(option));
-            const explanation=make('p',binary?'下方是解析后的正文；原始二进制文件请通过下载入口查看。':downloadItems.length>1?'下方是当前 Markdown 源文件；原始 ZIP 知识包保留在独立下载入口。':'下方是当前固定版本的 Markdown / 文本源文件。','source-reader-note');
+            const explanation=make('p',source.rawExplanation,'source-reader-note');
             body.replaceChildren(downloads,explanation,make('pre',raw));
           }else if(tab==='reading'){
-            rendered??=await get(sourceUrl(projectId,versionId,'rendered'),signal,true);if(!accepts())return;
-            view.mount(rendered);
+            if(window.SourceContent.isPdfSource(doc)){
+              await view.renderPdf(doc,pdfPage(doc,location),location);
+              if(!accepts())return;
+            }else{
+              rendered??=await get(sourceUrl(projectId,versionId,'rendered'),signal,true);if(!accepts())return;
+              view.mount(rendered);
+            }
           }else{
             doc=await get(sourceUrl(projectId,versionId),signal);parsed=doc.blocks||[];
             if(!accepts())return;body.replaceChildren();
@@ -151,11 +186,27 @@
               const pinnedRunId=location?.ocr_run_id||location?.boxes?.[0]?.ocr_run_id;
               let run=(result.runs||[]).find(r=>r.id===pinnedRunId)||result.run||result;
               if(asset.status==='ignored')run={...run,status:'ignored',error_code:null,public_error:null};
-              section.append(make('p','OCR 状态：'+(labels[run.status]||run.status||'未处理')),make('p',(run.engine||'图片 OCR')+' '+(run.engine_version||'')+' · 平均置信度 '+(run.average_confidence??'未知')),make('pre',run.normalized_text||result.normalized_text||''));
-              section.append(overlay(asset,run.blocks||result.blocks||[],projectId,versionId));
-              if(['failed','low_confidence','needs_attention','pending'].includes(run.status)||run.error_code){
+              const progress=ocrProgress(run),boxes=run.blocks||result.blocks||[];
+              section.append(make('p','OCR 状态：'+(progress.label||labels[run.status]||run.status||'未处理')),make('p',(run.engine||'图片 OCR')+' '+(run.engine_version||'')+' · 平均置信度 '+(run.average_confidence??'未知')));
+              section.append(make('p','单次 OCR 重试只更新识别结果；更新检索切片或图谱需在资料详情重新处理。','source-reader-note'));
+              if(progress.total)section.append(make('p',`已处理 ${progress.completed} / 总计 ${progress.total}`,'source-ocr-progress'));
+              if(progress.incomplete&&!['processing','pending'].includes(run.status))section.append(make('p','识别覆盖不完整；已保留成功区域的文字，请定位失败区域并重试。','source-ocr-warning'));
+              const locateRegion=(region,text)=>{location={asset_id:asset.id,ocr_run_id:run.id,boxes:region?[{...region,text}]:[],tab:'reading'};show('reading');};
+              for(const [index,box] of boxes.entries()){
+                const text=box.text||box.normalized_text||'';if(!text)continue;
+                const locate=make('button',text,'secondary source-ocr-segment');locate.type='button';locate.setAttribute('aria-label','定位原图文字 '+(index+1));
+                locate.onclick=()=>locateRegion(box,text);section.append(locate);
+              }
+              if(!boxes.length)section.append(make('pre',run.normalized_text||result.normalized_text||''));
+              for(const tile of progress.failed){
+                const region=tile.region;
+                const locate=make('button','定位未完成区域 '+(tile.index+1)+(tile.message?' · '+tile.message:''),'secondary source-ocr-segment source-ocr-warning');locate.type='button';
+                locate.onclick=()=>locateRegion(region,'未完成的 OCR 区域');section.append(locate);
+              }
+              section.append(overlay(asset,boxes,projectId,versionId));
+              if(run.status!=='processing'&&(progress.incomplete||['failed','low_confidence','needs_attention','pending'].includes(run.status)||run.error_code)){
                 section.append(make('p',run.public_error||'OCR 需要人工处理。'));
-                const retry=make('button','重试 OCR','secondary');retry.onclick=async()=>{try{await api(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/ocr/retry'),{});await show('parsed');}catch(e){status(e.message,true);}};
+                const retry=make('button',progress.incomplete?'重试未完成 OCR 区域':'重试 OCR','secondary');retry.type='button';retry.onclick=async()=>{retry.disabled=true;try{await api(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/ocr/retry'),{});if(accepts()){status('识别结果已更新；如需更新检索或图谱，请在资料详情重新处理');await show('parsed');}}catch(e){if(accepts()){retry.disabled=false;status(e.message,true);}}};
                 const ignore=make('button','该图片无知识文字，忽略并继续','secondary');ignore.onclick=async()=>{const reason=prompt('请输入忽略原因（将保存操作者与时间）');if(!reason?.trim())return;try{await api(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/ocr/ignore'),{reason});await show('parsed');}catch(e){status(e.message,true);}};section.append(retry,ignore);
               }
               body.append(section);
@@ -204,10 +255,11 @@
               const runId=location.ocr_run_id||boxes[0]?.ocr_run_id;
               const run=(result.runs||[]).find(r=>r.id===runId)||result.run||{};
               figure.append(make('p',(run.engine||'图片 OCR')+' '+(run.engine_version||'')+' · 平均置信度 '+(run.average_confidence??'未知')),make('pre',boxes.map(b=>b.text||b.normalized_text||'').join('\n')));
-              figure.scrollIntoView({block:'center'});
+              // Hydration below loads the original before focusing its exact region.
             }
           }
           view.hydrateImages();
+          if(tab==='reading'&&location?.asset_id&&!Number.isFinite(location.start_ms))view.focusRegion(location.asset_id,location.boxes||location.ocr_blocks||[]);
           if(tab==='reading'&&location?.asset_id&&Number.isFinite(location.start_ms))view.seekVideo(location.asset_id,location.start_ms);
         }catch(e){if(e.name!=='AbortError'&&accepts()){view.dispose();body.textContent=e.message;}}
       }
@@ -218,5 +270,5 @@
       await show(location?.tab==='parsed'?'parsed':'reading');
     }catch(e){if(e.name!=='AbortError'&&token===serial)body.textContent=e.message;}
   }
-  window.SourceReader={open,dispose:invalidate,boxStyle,sourceUrl,tableRowRange,characterRange};
+  window.SourceReader={open,dispose:invalidate,boxStyle,sourceUrl,tableRowRange,characterRange,ocrProgress,pdfPage};
 })();

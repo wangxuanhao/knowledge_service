@@ -1,4 +1,4 @@
-"""Package selected Markdown and referenced image/video assets into uploadable ZIPs."""
+"""Create one upload ZIP per selected Markdown, or one ordered image-page ZIP."""
 from __future__ import annotations
 
 import argparse
@@ -18,13 +18,12 @@ from knowledge_service.integrations.document_media import (  # noqa: E402
     IMAGE_MIMES, MAX_DOCUMENT_IMAGE_BYTES, MAX_DOCUMENT_IMAGES, MAX_IMAGE_BYTES, inspect_image,
 )
 from knowledge_service.integrations.document_parser import MAX_TEXT_CHARS, MAX_UPLOAD_BYTES  # noqa: E402
-from knowledge_service.integrations.markdown_package import MarkdownPackageReader, safe_path  # noqa: E402
+from knowledge_service.integrations.document_package import (  # noqa: E402
+    SingleDocumentPackageReader, PAGE_EXTENSIONS, inspect_page_image,
+)
+from knowledge_service.integrations.markdown_package import safe_path  # noqa: E402
 from knowledge_service.integrations.markdown_parser import parse_markdown  # noqa: E402
 from knowledge_service.integrations.video_asr import inspect_video, ASRError, MAX_VIDEO_BYTES  # noqa: E402
-
-
-MANIFEST_START = b'{"documents":['
-MANIFEST_END = b']}'
 
 
 def reject_links(path):
@@ -68,15 +67,48 @@ def json_bytes(value):
 
 
 def select_documents(args):
+    if args.images:
+        if args.manifest is not None or args.selection:
+            raise ValueError('--image cannot be combined with --manifest, --file or --list-file')
+        pages = [safe_path(path) for path in args.images]
+        if len(set(pages)) != len(pages):
+            raise ValueError('Duplicate image page path')
+        document = {'pages': pages}
+        if args.title is not None:
+            document['title'] = args.title
+        validate_properties(document)
+        return [document]
+    if args.title is not None:
+        raise ValueError('--title is only supported with --image; use --manifest for Markdown titles')
     if args.manifest is not None:
         if args.selection:
             raise ValueError('--manifest cannot be combined with --file or --list-file')
         if args.manifest.stat().st_size > MAX_UPLOAD_BYTES:
             raise ValueError('Input manifest exceeds byte limit')
         manifest = json.loads(args.manifest.read_text(encoding='utf-8-sig'))
-        if not isinstance(manifest, dict) or not isinstance(manifest.get('documents'), list):
+        if isinstance(manifest, dict) and 'schema_version' in manifest:
+            if type(manifest['schema_version']) is not int or manifest['schema_version'] != 2:
+                raise ValueError('Only schema_version=2 is supported')
+            document = manifest.get('document')
+            if 'documents' in manifest or not isinstance(document, dict):
+                raise ValueError('Version 2 requires one document object')
+            validate_properties(document)
+            if ('entry' in document) == ('pages' in document):
+                raise ValueError('Version 2 requires exactly one of entry or pages')
+            if 'pages' in document:
+                pages = document['pages']
+                if not isinstance(pages, list):
+                    raise ValueError('document.pages must be a list')
+                pages = [safe_path(path) for path in pages]
+                if len(set(pages)) != len(pages):
+                    raise ValueError('Duplicate image page path')
+                return [{**document, 'pages': pages}]
+            entries = [{**{key: value for key, value in document.items() if key != 'entry'},
+                        'path': document['entry']}]
+        elif not isinstance(manifest, dict) or not isinstance(manifest.get('documents'), list):
             raise ValueError('manifest.documents must be a list')
-        entries = manifest['documents']
+        else:
+            entries = manifest['documents']
     else:
         entries = []
         for selection in args.selection or []:
@@ -97,11 +129,7 @@ def select_documents(args):
             path = safe_path(original)
             if not path.lower().endswith('.md'):
                 raise ValueError('Selected document must have a .md extension')
-            if not isinstance(entry.get('metadata', {}), dict):
-                raise ValueError('Manifest document metadata must be an object')
-            if 'title' in entry and (not isinstance(entry['title'], str) or
-                                    not entry['title'].strip() or len(entry['title']) > 300):
-                raise ValueError('Manifest title must be a nonempty string of at most 300 characters')
+            validate_properties(entry)
             normalized = {'path': path}
             for key in ('title', 'metadata'):
                 if key in entry:
@@ -115,6 +143,15 @@ def select_documents(args):
     if not selected:
         raise ValueError('Select at least one Markdown document')
     return selected
+
+
+def validate_properties(entry):
+    if not isinstance(entry.get('metadata', {}), dict):
+        raise ValueError('Manifest document metadata must be an object')
+    if 'title' in entry and (not isinstance(entry['title'], str) or
+                            not entry['title'].strip() or len(entry['title']) > 300):
+        raise ValueError('Manifest title must be a nonempty string of at most 300 characters')
+    json_bytes(entry)
 
 
 def prepare_document(root, entry, files, warnings):
@@ -163,7 +200,28 @@ def prepare_document(root, entry, files, warnings):
                 raise ValueError(f'{"Video" if is_video else "Image"} {reference!r}: {exc}') from exc
     except (ValueError, OSError, SyntaxError, ImportError) as exc:
         raise ValueError(f'Markdown {path!r}: {exc}') from exc
-    return dict(entry=entry, encoded_entry=json_bytes(entry), files=members)
+    return dict(entry={**{key: value for key, value in entry.items() if key != 'path'}, 'entry': path},
+                files=members)
+
+
+def prepare_pages(root, entry, files):
+    pages = entry['pages']
+    if not pages or len(pages) > MAX_DOCUMENT_IMAGES:
+        raise ValueError(f'Image pages must contain 1..{MAX_DOCUMENT_IMAGES} images')
+    members, total = {}, 0
+    for path in pages:
+        try:
+            if Path(path).suffix.lower() not in PAGE_EXTENSIONS:
+                raise ValueError('Ordered image pages support PNG, JPEG and WebP only')
+            record, data = read_source(root, path, MAX_IMAGE_BYTES)
+            inspect_page_image(data, path)
+            total += len(data)
+            if total > MAX_DOCUMENT_IMAGE_BYTES:
+                raise ValueError('Document image bytes exceed limit')
+            files[path] = members[path] = record
+        except (ValueError, OSError, SyntaxError, ImportError) as exc:
+            raise ValueError(f'Image {path!r}: {exc}') from exc
+    return dict(entry=entry, files=members)
 
 
 def member_size(name, size):
@@ -171,10 +229,10 @@ def member_size(name, size):
     return 76 + 2 * len(name.encode('utf-8')) + size
 
 
-def write_package(root, stage, number, documents, files, expected_size, reader):
+def write_package(root, stage, number, document, files, expected_size, reader):
     name = f'rule-documents-{number:03d}.zip'
     target = stage / name
-    manifest = MANIFEST_START + b','.join(doc['encoded_entry'] for doc in documents) + MANIFEST_END
+    manifest = json_bytes({'schema_version': 2, 'document': document['entry']})
     with zipfile.ZipFile(target, 'w', compression=zipfile.ZIP_STORED, allowZip64=False) as archive:
         archive.writestr('manifest.json', manifest)
         for path, record in files.items():
@@ -199,14 +257,18 @@ def write_package(root, stage, number, documents, files, expected_size, reader):
         raise ValueError(f'ZIP size calculation mismatch: {name}')
     data = target.read_bytes()
     package = reader.read(data, name)
-    for document in package['documents']:
-        for image in document['assets']:
+    for parsed_document in package['documents']:
+        for image in parsed_document['assets']:
             if image['kind'] == 'local' and image['status'] != 'available':
-                raise ValueError(f"Markdown {document['path']!r}: unavailable image {image['url']!r}")
-    paths = [doc['entry']['path'] for doc in documents]
-    return dict(filename=name, documents=paths, images=[path for path in files if path not in paths and not path.lower().endswith(('.mp4','.webm'))],
+                raise ValueError(f"Markdown {parsed_document['path']!r}: unavailable image {image['url']!r}")
+    entry = document['entry']
+    paths = [entry['entry']] if 'entry' in entry else []
+    result = dict(filename=name, documents=paths, images=[path for path in files if path not in paths and not path.lower().endswith(('.mp4','.webm'))],
                 videos=[path for path in files if path not in paths and path.lower().endswith(('.mp4','.webm'))],
                 size_bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
+    if 'pages' in entry:
+        result['pages'] = entry['pages']
+    return result
 
 
 def package_documents(args):
@@ -226,40 +288,22 @@ def package_documents(args):
         raise ValueError(f'--max-zip-bytes must be between 1 and {MAX_UPLOAD_BYTES}')
     entries = select_documents(args)
     output.parent.mkdir(parents=True, exist_ok=True)
-    reader = MarkdownPackageReader()
+    reader = SingleDocumentPackageReader()
     files, warnings, packages = {}, [], []
-    documents, current_files = [], {}
-    payload_size = 0
-    manifest_size = len(MANIFEST_START) + len(MANIFEST_END)
     with tempfile.TemporaryDirectory(prefix=f'.{output.name}-', dir=output.parent) as temporary:
         stage = Path(temporary) / 'complete'
         stage.mkdir()
-        current_size = 0
         for entry in entries:
-            document = prepare_document(root, entry, files, warnings)
-            new_files = {path: info for path, info in document['files'].items() if path not in current_files}
-            added_size = sum(member_size(path, info['size_bytes']) for path, info in new_files.items())
-            next_manifest_size = manifest_size + len(document['encoded_entry']) + bool(documents)
-            next_size = 22 + member_size('manifest.json', next_manifest_size) + payload_size + added_size
-            if documents and (len(documents) >= args.max_documents or next_size > args.max_zip_bytes or
-                              len(current_files) + len(new_files) + 1 > reader.max_files):
-                packages.append(write_package(root, stage, len(packages) + 1, documents,
-                                              current_files, current_size, reader))
-                documents, current_files = [], {}
-                payload_size = 0
-                new_files = document['files']
-                added_size = sum(member_size(path, info['size_bytes']) for path, info in new_files.items())
-                next_manifest_size = len(MANIFEST_START) + len(document['encoded_entry']) + len(MANIFEST_END)
-                next_size = 22 + member_size('manifest.json', next_manifest_size) + added_size
-            if next_size > args.max_zip_bytes or len(new_files) + len(current_files) + 1 > reader.max_files:
-                raise ValueError(f"Markdown {entry['path']!r}: document and images exceed package limit")
-            documents.append(document)
-            current_files.update(new_files)
-            payload_size += added_size
-            manifest_size, current_size = next_manifest_size, next_size
-        packages.append(write_package(root, stage, len(packages) + 1, documents,
-                                      current_files, current_size, reader))
-        receipt = dict(source_root=str(root), max_documents=args.max_documents,
+            document = prepare_pages(root, entry, files) if 'pages' in entry else prepare_document(root, entry, files, warnings)
+            members = document['files']
+            manifest = json_bytes({'schema_version': 2, 'document': document['entry']})
+            size = 22 + member_size('manifest.json', len(manifest)) + sum(
+                member_size(path, info['size_bytes']) for path, info in members.items())
+            if size > args.max_zip_bytes or len(members) + 1 > reader.max_files:
+                label = entry.get('path', entry.get('title', 'image pages'))
+                raise ValueError(f'Document {label!r}: document and images exceed package limit')
+            packages.append(write_package(root, stage, len(packages) + 1, document, members, size, reader))
+        receipt = dict(source_root=str(root), schema_version=2, max_documents=1,
                        max_zip_bytes=args.max_zip_bytes, packages=packages, warnings=warnings,
                        files=[{key: info[key] for key in ('path', 'size_bytes', 'sha256')} for info in files.values()])
         (stage / 'packaging-report.json').write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + '\n',
@@ -278,7 +322,10 @@ def main(argv=None):
     parser.add_argument('--list-file', dest='selection', action='append', type=Path,
                         help='UTF-8/BOM path list, blank/# lines ignored, selectors follow CLI order')
     parser.add_argument('--manifest', type=Path, help='JSON documents manifest, exclusive with file/list selectors')
-    parser.add_argument('--max-documents', type=int, default=200, help='Documents per ZIP, 1..1000 (default 200)')
+    parser.add_argument('--image', dest='images', action='append', help='Relative image page path; repeat in reading order')
+    parser.add_argument('--title', help='Title for an ordered --image package')
+    parser.add_argument('--max-documents', type=int, default=1,
+                        help='Deprecated compatibility option, 1..1000; each ZIP always contains one document')
     parser.add_argument('--max-zip-bytes', type=int, default=24_000_000,
                         help='Stored ZIP byte limit, 1..25000000 (default 24000000)')
     args = parser.parse_args(argv)

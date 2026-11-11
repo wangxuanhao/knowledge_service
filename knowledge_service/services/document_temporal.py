@@ -58,11 +58,11 @@ def _eligible_text(text):
     return pattern.sub(lambda match: ''.join('\n' if char == '\n' else ' ' for char in match[0]), text)
 
 
-def source_temporal_exclusions(source):
+def source_temporal_exclusions(source,*,chunks=None):
     """Map exclusions into original block text, before window/header repetition."""
     from ..integrations.markdown_parser import MarkdownParser, temporal_excluded_ranges
 
-    excluded = []
+    excluded = [];by_block={}
     parser = None
     offset = 0
     for block in source['blocks']:
@@ -79,9 +79,31 @@ def source_temporal_exclusions(source):
             parser = parser or MarkdownParser()
             raw = source['source_text'][block['source_start_char']:block['source_end_char']]
             ranges = temporal_excluded_ranges(parser.md.parse(raw), text)
+        by_block[block['block_id']]=ranges
         excluded.extend((offset + len(prefix) + start, offset + len(prefix) + end) for start, end in ranges)
         offset += len(prefix) + len(text) + 2
-    return excluded
+    if chunks is None:return excluded
+    mapped=[]
+    block_types={block['block_id']:block['type'] for block in source['blocks']}
+    for chunk in chunks:
+        for span in chunk.get('source_spans',[]):
+            if block_types.get(span.get('block_id'))=='table' and not span.get('payload',{}).get('inline_media_fragment'):
+                if span.get('payload',{}).get('table_header'):continue
+                # Repeated table headers exist only in windows. The document
+                # stream retains the original table once, at its row offset.
+                base=chunk['start_char']-span['block_start_char']
+                mapped.extend((base+start,base+end) for start,end in by_block.get(span.get('block_id'),[]))
+                continue
+            for start,end in by_block.get(span.get('block_id'),[]):
+                first=max(start,span['block_start_char']);last=min(end,span['block_end_char'])
+                if first<last:
+                    base=chunk['start_char']+span['chunk_start_char']-span['block_start_char']
+                    mapped.append((base+first,base+last))
+    merged=[]
+    for start,end in sorted(set(mapped)):
+        if merged and start<=merged[-1][1]:merged[-1]=(merged[-1][0],max(end,merged[-1][1]))
+        else:merged.append((start,end))
+    return merged
 
 
 def _candidates(text, supplied_title, excluded_ranges):

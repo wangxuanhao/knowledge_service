@@ -35,7 +35,7 @@ function fixture(respond=(_file,index)=>result('正文 '+index),input='file'){
   const calls=[],messages=[];
   class FormData{constructor(){this.values=new Map();}append(key,value){this.values.set(key,value);}get(key){return this.values.get(key);}}
   const window={DocumentUploadQueue:{generation:1},LibraryWorkspace:{ticket:()=>({}),accepts:()=>true}};
-  const context={document,window,FormData,current:'project',$:get,
+  const context={document,window,FormData,Response,Blob,atob,esc:value=>String(value),current:'project',$:get,
     controlsProject:()=>context.current,readParseSettings:()=>({chunk_size:900,chunk_overlap:50}),
     readDocumentBatch:async()=>documents,
     status:(...args)=>messages.push(args),
@@ -51,7 +51,6 @@ function fixture(respond=(_file,index)=>result('正文 '+index),input='file'){
   return {get,context,window,files,calls,messages,preview:()=>get('preview-chunks').onclick(),
     previewSource:()=>get('preview-source').onclick(),
     async select(index){const picker=get('chunk-preview-file');picker.value=String(index);assert.equal(typeof picker.events.change,'function','file picker must switch the preview');await picker.events.change();},
-    async selectDocument(path){const picker=get('chunk-preview-document');picker.value=path;await picker.events.change();},
     close(){get('chunk-preview-close').events.click();}};
 }
 
@@ -83,59 +82,69 @@ test('source preview hides the chunk navigation while the article is still loadi
   finally{env.close();slow.resolve({source_preview:{html:'原文',images:[],assets:{}}});await opening;}
 });
 
+test('image-page source preview preserves page order and reads the matching original bytes',async()=>{
+  const one='a'.repeat(64),two='b'.repeat(64);
+  const env=fixture(()=>({source_preview:{html:'<span class="source-image" data-image-index="0"></span><span class="source-image" data-image-index="1"></span>',
+    images:[{index:0,status:'available',asset_key:one,alt:'第 1 页'},{index:1,status:'available',asset_key:two,alt:'第 2 页'}],
+    assets:{[one]:{base64:Buffer.from('page one').toString('base64'),mime_type:'image/png'},[two]:{base64:Buffer.from('page two').toString('base64'),mime_type:'image/webp'}}}}));
+  let sessionOptions;
+  env.window.SourceContent={sourceUrl:(p,v,s)=>'/api/projects/'+p+'/source-documents/'+v+'/'+s,
+    createSession:options=>{sessionOptions=options;return {mount(html){options.host.textContent=html;},hydrateImages(){},dispose(){}};}};
+  await env.previewSource();
+  const html=env.get('chunk-preview-content').textContent;
+  assert.ok(html.indexOf(one)<html.indexOf(two));assert.match(html,/第 1 页/);assert.match(html,/第 2 页/);
+  const bytes=await sessionOptions.fetcher('/api/projects/project/source-documents/upload-preview/assets/'+two);
+  assert.equal(bytes.headers.get('content-type'),'image/webp');assert.equal(await bytes.text(),'page two');
+});
+
 for(const input of ['file','text'])test(input+' preview forwards the automatic document time mode through the normal route',async()=>{
   const env=fixture(undefined,input);await env.preview();
   assert.equal(env.calls[0].options.document_time_mode,'auto');
   assert.match(env.calls[0].url,input==='file'?/documents\/upload\/preview$/:/documents\/preview$/);
 });
 
-const packageResult=path=>({...result('包内正文 '+path),title:'标题 '+path,
-  package:{filename:'rules.zip',selected_path:path,document_count:2,image_count:3,
-    documents:[{path:'platform/a.md',title:'规则 A'},{path:'platform/b.md',title:'规则 B'}]}});
+const packageResult=()=>({...result('包内正文'),title:'规则 A',
+  package:{filename:'rules.zip',selected_path:'platform/a.md',document_count:1,image_count:3,
+    documents:[{path:'platform/a.md',title:'规则 A'}]}});
 
-test('ZIP preview exposes member documents and switches the requested article with matching cache',async()=>{
-  const env=fixture((_file,index,path)=>index===0?packageResult(path||'platform/a.md'):result('普通文件'));
+test('ZIP preview describes one document and its attachments while only uploaded files can switch',async()=>{
+  const env=fixture((_file,index)=>index===0?packageResult():result('普通文件'));
   env.files[0].name='rules.zip';
   await env.preview();
   assert.equal(env.get('chunk-preview-package').hidden,false);
-  assert.deepEqual(env.get('chunk-preview-document').children.map(option=>option.value),['platform/a.md','platform/b.md']);
-  assert.match(env.get('chunk-preview-package-summary').textContent,/2.*3/);
-  await env.selectDocument('platform/b.md');
-  assert.equal(env.calls[1].packagePath,'platform/b.md');
-  assert.match(env.get('chunk-preview-content').textContent,/包内正文 platform\/b.md/);
-  await env.selectDocument('platform/a.md');
-  assert.equal(env.calls.length,2);
-  assert.match(env.get('chunk-preview-content').textContent,/包内正文 platform\/a.md/);
+  assert.equal(env.get('chunk-preview-document').events.change,undefined);
+  assert.match(env.get('chunk-preview-package-summary').textContent,/一包一份资料.*正文及 3 附件/);
   await env.select(1);
   assert.equal(env.get('chunk-preview-package').hidden,true);
   assert.match(env.get('chunk-preview-content').textContent,/普通文件/);
+  await env.select(0);assert.equal(env.calls.length,2);
+  assert.match(env.get('chunk-preview-content').textContent,/包内正文/);
+  assert.ok(env.calls.every(call=>!call.packagePath));
 });
 
-test('a pending ZIP member cannot overwrite the member or upload file selected afterwards',async()=>{
+test('a pending ZIP preview cannot overwrite the uploaded file selected afterwards',async()=>{
   const slow=deferred();
-  const env=fixture((_file,index,path)=>index===1?result('普通文件'):
-    path==='platform/b.md'?slow.promise:packageResult('platform/a.md'));
-  await env.preview();
-  const pending=env.selectDocument('platform/b.md');
+  const env=fixture((_file,index)=>index===1?result('普通文件'):slow.promise);
+  const pending=env.preview();await new Promise(setImmediate);
   await env.select(1);
-  slow.resolve(packageResult('platform/b.md'));await pending;
+  slow.resolve(packageResult());await pending;await new Promise(setImmediate);
   assert.equal(env.get('chunk-preview-package').hidden,true);
   assert.match(env.get('chunk-preview-content').textContent,/普通文件/);
 });
 
-test('retrying a failed ZIP member retries that member instead of showing the previous cached article',async()=>{
+test('retrying a failed ZIP retries the package as one document',async()=>{
   let attempts=0;
-  const env=fixture((_file,_index,path)=>{
-    if(path==='platform/b.md'&&attempts++===0)throw Error('第二份暂时失败');
-    return packageResult(path||'platform/a.md');
+  const env=fixture(()=>{
+    if(attempts++===0)throw Error('资料暂时失败');
+    return packageResult();
   });
-  await env.preview();await env.selectDocument('platform/b.md');
-  assert.match(env.get('chunk-preview-content').textContent,/第二份暂时失败/);
+  await env.preview();
+  assert.match(env.get('chunk-preview-content').textContent,/资料暂时失败/);
   const retry=env.get('chunk-preview-content').children.find(child=>child.textContent==='重试此文件');
   await retry.events.click();
-  assert.equal(env.calls.at(-1).packagePath,'platform/b.md');
-  assert.equal(env.calls.length,3);
-  assert.match(env.get('chunk-preview-content').textContent,/包内正文 platform\/b.md/);
+  assert.equal(env.calls.at(-1).packagePath,undefined);
+  assert.equal(env.calls.length,2);
+  assert.match(env.get('chunk-preview-content').textContent,/包内正文/);
 });
 
 test('two uploaded files can each be previewed and switching back reuses the matching result',async()=>{

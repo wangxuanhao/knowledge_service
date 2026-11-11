@@ -63,6 +63,34 @@ test('binary and ZIP-backed Markdown downloads retain distinct source/package na
   assert.equal(downloadOptions({source_file:'rule.md',source_format:'md'})[0].filename,'rule.md');
 });
 
+test('ZIP primary provenance owns source names and MIME while the complete package keeps its ZIP name',()=>{
+  const {downloadOptions,isPdfSource}=content();
+  const packaged={original_name:'资料包.zip',format:'zip',mime_type:'application/zip',parser_metadata:{provenance:{package:{
+    entry_path:'规则/规则原件.pdf',filename:'规则原件.pdf',mime_type:'application/pdf',sha256:'a'.repeat(64)}}}};
+  assert.equal(isPdfSource(packaged),true);
+  assert.deepEqual(downloadOptions(packaged),[
+    {suffix:'source',label:'下载当前资料原件',filename:'规则原件.pdf'},
+    {suffix:'package',label:'下载原始 ZIP 知识包',filename:'资料包.zip'}]);
+  const image={...packaged,parser_metadata:{provenance:{package:{entry_path:'assets/截图.png',filename:'截图.png',mime_type:'image/png'}}}};
+  assert.equal(downloadOptions(image)[0].filename,'截图.png');
+});
+
+test('raw source view distinguishes primary binary bytes from a readable image-page JSON manifest',()=>{
+  const {sourceInfo,downloadOptions}=content();
+  assert.equal(typeof sourceInfo,'function');
+  const packaged=(filename,mime_type)=>({original_name:'pages.zip',format:'zip',mime_type:'application/zip',parser_metadata:{provenance:{package:{entry_path:filename,filename,mime_type}}}});
+  for(const [filename,mime_type] of [['文档.docx','application/vnd.openxmlformats-officedocument.wordprocessingml.document'],['截图.webp','image/webp'],['讲解.webm','video/webm'],['规则.pdf','application/pdf']]){
+    const info=sourceInfo(packaged(filename,mime_type));assert.equal(info.binary,true,filename);
+    assert.equal(info.filename,filename);assert.match(info.rawExplanation,/解析后的正文/);
+  }
+  const pages=packaged('manifest.json','application/json'),info=sourceInfo(pages);
+  assert.equal(info.binary,false);assert.equal(info.isPageManifest,true);
+  assert.match(info.rawExplanation,/图片页序清单.*JSON/);assert.doesNotMatch(info.rawExplanation,/Markdown/);
+  assert.deepEqual(downloadOptions(pages),[
+    {suffix:'source',label:'下载图片页序清单',filename:'manifest.json'},
+    {suffix:'package',label:'下载原始 ZIP 知识包',filename:'pages.zip'}]);
+});
+
 test('entrypoint loads the shared content renderer before both reader entry points',()=>{
   const html=fs.readFileSync(path.resolve(__dirname,'../../knowledge_service/web/index.html'),'utf8');
   assert.match(html,/source-content\.js\?v=[\w.-]+/);

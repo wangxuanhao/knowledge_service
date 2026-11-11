@@ -257,14 +257,15 @@ def test_zip_batch_resolves_each_document_independently(client):
     batch = client.post(f'/api/projects/{project}/ingest-batches', json={'settings': {
         'document_time_mode': 'auto', 'extraction_mode': 'documents', 'requested_concurrency': 1}}).json()
     base = f'/api/projects/{project}/ingest-batches/{batch["id"]}'
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, 'w') as archive:
-        archive.writestr('dated.md', '# 规则\n生效日期：2025-02-01\n\n正文。')
-        archive.writestr('unknown.md', '# 未知\n发布日期：2025-01-01\n\n正文。')
-        archive.writestr('code.md', '# 代码\n\n`本规则自2025年1月1日起生效。`')
-    raw = buffer.getvalue()
-    response = client.post(base + '/files', files={'file': ('rules.zip', raw)})
-    assert response.status_code == 201, response.text
+    packages={}
+    for name,text in [('dated.md','# 规则\n生效日期：2025-02-01\n\n正文。'),
+                      ('unknown.md','# 未知\n发布日期：2025-01-01\n\n正文。'),
+                      ('code.md','# 代码\n\n`本规则自2025年1月1日起生效。`')]:
+        buffer=io.BytesIO()
+        with zipfile.ZipFile(buffer,'w') as archive:archive.writestr(name,text)
+        filename=name.replace('.md','.zip');packages[filename]=buffer.getvalue()
+        response=client.post(base+'/files',files={'file':(filename,packages[filename])})
+        assert response.status_code==201,response.text
     assert client.post(base + '/start').status_code == 202
     for _ in range(150):
         items = client.get(base + '/items').json()['items']
@@ -273,13 +274,13 @@ def test_zip_batch_resolves_each_document_independently(client):
         time.sleep(.1)
     assert all(item['status'] == 'completed' for item in items), items
     docs = {item['original_name']: item['result']['document'] for item in items}
-    assert docs['dated.md']['valid_from'] == '2025-01-31T16:00:00.000000Z'
-    assert docs['unknown.md']['valid_from'] is None
-    assert docs['unknown.md']['metadata']['effective_time_source'] == 'unknown'
-    assert docs['code.md']['valid_from'] is None
-    for document in docs.values():
+    assert docs['dated.zip']['valid_from'] == '2025-01-31T16:00:00.000000Z'
+    assert docs['unknown.zip']['valid_from'] is None
+    assert docs['unknown.zip']['metadata']['effective_time_source'] == 'unknown'
+    assert docs['code.zip']['valid_from'] is None
+    for filename,document in docs.items():
         source_id = document['metadata']['source_document_version_id']
-        assert client.get(f'/api/projects/{project}/source-documents/{source_id}/package').content == raw
+        assert client.get(f'/api/projects/{project}/source-documents/{source_id}/package').content == packages[filename]
 
 
 def test_failed_upload_retry_reuses_dates_and_frozen_source(client, tmp_path, monkeypatch):

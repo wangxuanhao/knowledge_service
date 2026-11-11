@@ -334,6 +334,8 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
     install_source_documents(app, service)
     from .parity import install
     install(app, service)
+    from .document_reprocessing import install as install_document_reprocessing
+    install_document_reprocessing(app, service)
     install_neo4j(app, service)
     projection_adapters = {}
     cleanup_handlers = {'neo4j': app.state.neo4j.delete_project}

@@ -45,7 +45,7 @@ def test_multipart_preview_parses_without_writing(client):
     assert client.post(f'/api/projects/{project}/records/page', json={}).json()['records'] == []
 
 
-def markdown_package():
+def markdown_package(selected=0):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w') as archive:
         archive.writestr('platform/first.md',
@@ -57,14 +57,15 @@ def markdown_package():
                          '![外链](https://example.invalid/image.png)\n\n'
                          '<script>alert(1)</script><p onclick="alert(2)">安全正文</p>')
         archive.writestr('platform/assets/example.png', png())
-        archive.writestr('manifest.json', json.dumps({'documents': [
+        choices = [
             {'path': 'platform/first.md', 'title': '首份规则', 'metadata': {'rule_id': 'first'}},
             {'path': 'platform/second.md', 'title': '第二份规则'},
-        ]}, ensure_ascii=False))
+        ]
+        archive.writestr('manifest.json', json.dumps({'documents': [choices[selected]]}, ensure_ascii=False))
     return buffer.getvalue()
 
 
-def test_zip_preview_lists_documents_and_reads_selected_article_with_images_without_writing(client, monkeypatch):
+def test_zip_preview_reads_one_document_and_its_images_without_writing(client, monkeypatch):
     project = make_project(client)
     sources = client.app.state.source_documents
     monkeypatch.setattr(sources.object_store, 'put', lambda *a, **k: pytest.fail('preview wrote source bytes'))
@@ -78,9 +79,9 @@ def test_zip_preview_lists_documents_and_reads_selected_article_with_images_with
     assert first.status_code == 200, first.text
     body = first.json()
     assert body['package']['selected_path'] == 'platform/first.md'
-    assert [row['path'] for row in body['package']['documents']] == ['platform/first.md', 'platform/second.md']
-    assert body['package']['document_count'] == 2
-    assert body['package']['image_count'] == 4
+    assert [row['path'] for row in body['package']['documents']] == ['platform/first.md']
+    assert body['package']['document_count'] == 1
+    assert body['package']['image_count'] == 2
     assert body['title'] == '首份规则'
     assert body['metadata']['rule_id'] == 'first'
     assert body['document_time']['valid_from'] == '2026-09-01T16:00:00.000000Z'
@@ -95,7 +96,7 @@ def test_zip_preview_lists_documents_and_reads_selected_article_with_images_with
     assert body['total'] >= 1
     assert '第二份独立正文' not in ''.join(row['text'] for row in body['chunks'])
 
-    second = client.post(url, files={'file': ('rules.zip', raw)},
+    second = client.post(url, files={'file': ('second-rule.zip', markdown_package(1))},
                          data={'options': options, 'package_path': 'platform/second.md'})
 
     assert second.status_code == 200, second.text
@@ -140,18 +141,18 @@ def test_zip_preview_rejects_invalid_or_disabled_packages_and_cleans_staging(cli
     assert list(client.app.state.document_uploads.root.iterdir()) == []
 
 
-def test_zip_preview_validates_mime_for_each_reference_to_shared_image_bytes(client):
+def test_zip_preview_rejects_mismatched_inline_mime_before_source_publication(client):
     project = make_project(client)
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w') as archive:
-        archive.writestr('a.md', '![valid](a.png)\n\n'
+        archive.writestr('a.md', '![valid](assets/a.png)\n\n'
                          + '![mismatched](data:image/jpeg;base64,' + base64.b64encode(png()).decode() + ')')
-        archive.writestr('a.png', png())
+        archive.writestr('assets/a.png', png())
     response = client.post(f'/api/projects/{project}/documents/upload/preview',
                            files={'file': ('rules.zip', buffer.getvalue())})
-    assert response.status_code == 200, response.text
-    images = response.json()['source_preview']['images']
-    assert [image['status'] for image in images] == ['available', 'missing']
+    assert response.status_code == 422, response.text
+    assert response.json()['code'] == 'invalid_package'
+    assert list(client.app.state.document_uploads.root.iterdir()) == []
 
 
 @pytest.mark.parametrize('filename', ['a.md', 'rules.zip'])

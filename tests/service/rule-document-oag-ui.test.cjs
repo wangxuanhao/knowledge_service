@@ -134,7 +134,7 @@ test('U citations remain offered after finalization and history preserves only a
 
 test('changed QA assets and accessible temporal controls have current cache versions',()=>{
   const html=fs.readFileSync(path.join(web,'index.html'),'utf8');
-  assert.ok(html.includes('/assets/workbench.js?v=split-previews-20261110-2'));
+  assert.ok(html.includes('/assets/workbench.js?v=unified-media-20261111-1'));
   assert.ok(html.includes('/assets/workbench.css?v=split-previews-20261110-1'));
   assert.ok(html.includes('/assets/qa-presentation.js?v=ontology-sections-20261027-2'));
   assert.ok(html.includes('/assets/provenance-drawer.js?v=document-qa-history-20261026-1'));

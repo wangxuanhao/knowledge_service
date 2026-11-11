@@ -75,8 +75,8 @@ class IngestBatches:
             if len(data)>self.limits.max_file_bytes:raise ValueError('文件超过服务端大小上限')
         digest=hashlib.sha256(data).hexdigest()
         if Path(name).suffix.lower()=='.zip':
-            from ..integrations.markdown_package import MarkdownPackageReader
-            package=MarkdownPackageReader(max_documents=self.limits.max_batch_items).read(bytes(data),name)
+            from ..integrations.document_package import SingleDocumentPackageReader
+            package=SingleDocumentPackageReader().read(bytes(data),name)
             prepared=[]
             # Validate every member before publishing any source metadata or bytes.
             for entry in package['documents']:
@@ -85,19 +85,19 @@ class IngestBatches:
                     raise ValueError('知识包内文档超过服务端单文件或正文长度上限')
                 item_options={**(options or {}),'title':entry.get('title') or entry['path'],
                     'metadata':{**(options or {}).get('metadata',{}),**entry.get('metadata',{}),
-                        'original_zip_name':name,'package_sha256':digest,'package_entry_path':entry['path']}}
+                        'original_zip_name':name,'package_sha256':digest,'package_entry_path':entry['path'],
+                        'package_single_document':True}}
                 UploadOptions.model_validate(item_options)
                 prepared.append((entry,encoded,item_options))
             # Remote imports and image decoding must not hold a database UOW;
             # the publication guard below protects only object writes/references.
-            prepared_sources={entry['path']:self.sources.prepare(bytes(data),entry['path'],
-                text=entry['text'],assets=entry['assets']) for entry,_,_ in prepared}
+            prepared_sources={entry['path']:self.sources.prepare_package(bytes(data),name,entry,package.get('root_prefix','')) for entry,_,_ in prepared}
             result=[]
             with self.sources.store.publication_guard():
                 obj=self.sources.store.register_object(self.sources.object_store.put(bytes(data),'application/zip',digest))
                 for index,(entry,encoded,item_options) in enumerate(prepared):
-                    row=self.store.add_item(project_id,batch_id,entry['path'],None,
-                        digest,(key or digest)+':'+entry['path'],
+                    row=self.store.add_item(project_id,batch_id,name,None,
+                        digest,key or digest,
                         self.limits.max_batch_items,self.limits.max_batch_bytes,
                         options=item_options,
                         accounted_size=len(data) if index==0 else 0,upload_object_id=obj['id'])

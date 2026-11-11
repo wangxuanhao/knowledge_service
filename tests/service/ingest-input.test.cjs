@@ -46,7 +46,7 @@ test('visible format guidance follows server ZIP capability with matching picker
   assert.match(fields['doc-upload-extensions'].textContent,/\.zip/);
   assert.match(fields['doc-file'].accept,/\.zip/);
   assert.equal(fields['doc-upload-package-help'].hidden,false);
-  assert.match(fields['doc-upload-package-help'].textContent,/包内.*预览/);
+  assert.match(fields['doc-upload-package-help'].textContent,/一包一份资料.*预览包内正文及附件/);
   queue.add([file('rules.zip')]);
   queue.clear();
   queue.setCapabilities({...capabilities,supported_extensions:['.txt','.md'],markdown_package:false});
@@ -75,6 +75,26 @@ test('file queue accepts supported formats without browser decoding',async()=>{
   assert.equal(JSON.stringify(rows.map(row=>row.file.name)),JSON.stringify(selected.map(item=>item.name)));
   assert.equal(rows[2].text,undefined);
   assert.equal(rows[2].title,'c.pdf');
+});
+
+test('repeated file picker selections append independent image and ZIP documents with server limits',async()=>{
+  const {fields,queue,modes,batch}=form();
+  modes[0].checked=true;modes[1].checked=false;fields.project.value='p';
+  queue.setCapabilities({max_file_bytes:25_000_000,max_batch_items:1000,max_batch_bytes:1_000_000_000,
+    supported_extensions:['.png','.jpg','.jpeg','.webp','.pdf','.docx','.md','.zip','.mp4','.webm'],
+    markdown_package:true,one_document_per_package:true,package_schema_versions:[2],ocr_max_image_bytes:10_485_760,ocr_max_pixels:40_000_000});
+  fields['doc-file'].files=[file('long.png')];await fields['doc-file'].onchange();
+  fields['doc-file'].files=[file('rules.zip'),file('page.webp')];await fields['doc-file'].onchange();
+  assert.deepEqual(Array.from(await batch(),row=>row.file.name),['long.png','rules.zip','page.webp']);
+  assert.match(fields['doc-upload-summary'].textContent,/3 份资料/);
+  assert.match(fields['doc-batch-help'].textContent,/一包一份资料/);
+  assert.doesNotMatch(fields['doc-batch-help'].textContent,/每份 Markdown 分别/);
+  assert.match(fields['doc-file'].accept,/\.png.*\.jpg.*\.jpeg.*\.webp/);
+  assert.match(fields['doc-upload-formats'].textContent,/PNG.*JPEG.*WebP/);
+  assert.match(fields['doc-upload-limits'].textContent,/10\.49 MB/);
+  assert.match(fields['doc-upload-limits'].textContent,/40 百万像素/);
+  assert.throws(()=>queue.add([file('oversized.jpg',10_485_761)]),/图片.*10\.49 MB/);
+  assert.equal(queue.items().length,3,'a rejected image does not clear prior selections');
 });
 
 test('file queue enforces type, per-file, count, total and duplicate limits',()=>{

@@ -14,7 +14,8 @@ MAX_TEXT_CHARS = 1_000_000
 TEXT_EXTENSIONS = {'.txt', '.md'}
 DOCLING_EXTENSIONS = {'.pdf', '.docx', '.html', '.htm'}
 VIDEO_EXTENSIONS = {'.mp4', '.webm'}
-SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | DOCLING_EXTENSIONS | VIDEO_EXTENSIONS
+IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp'}
+SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | DOCLING_EXTENSIONS | VIDEO_EXTENSIONS | IMAGE_EXTENSIONS
 
 
 class DocumentParseError(ValueError):
@@ -67,14 +68,34 @@ class DocumentParser:
         source = Path(path)
         extension = Path(original_name).suffix.lower()
         if extension not in SUPPORTED_EXTENSIONS:
-            raise DocumentParseError('unsupported_format', '仅支持 TXT、Markdown、PDF、DOCX、HTML、MP4、WebM 文件')
+            raise DocumentParseError('unsupported_format', '仅支持 TXT、Markdown、PDF、DOCX、HTML、PNG、JPEG、WebP、MP4、WebM 文件')
         actual_size = source.stat().st_size if size is None else size
         if actual_size > self.max_upload_bytes:
             raise DocumentParseError('file_too_large', f'单个文件超过服务端上限（{self.max_upload_bytes} 字节）')
         checksum = digest or sha256(source.read_bytes()).hexdigest()
 
         assets,provenance=[],{}
-        if extension in VIDEO_EXTENSIONS:
+        if extension in IMAGE_EXTENSIONS:
+            from PIL import Image
+            from .document_media import inspect_image
+            try:
+                raw = source.read_bytes()
+                details = inspect_image(raw)
+                expected = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp'}
+                if details['mime_type'] != expected[extension]:
+                    raise ValueError('图片内容与扩展名不一致')
+                with Image.open(source) as image:
+                    if getattr(image, 'n_frames', 1) != 1:
+                        raise ValueError('独立图片暂不支持动画或多帧，请导出静态图片')
+                text = ''
+                provenance = {'media_type': 'image'}
+                assets = [dict(kind='local', status='available', original_path=Path(original_name).name,
+                               data=raw, provenance={'media_type': 'image'}, **details)]
+                structural = dict(document_parser='builtin-image', parser_version='1',
+                                  ocr_mode='on_ingest', image_count=1, warnings=[])
+            except (ValueError, OSError, SyntaxError) as exc:
+                raise DocumentParseError('invalid_image', str(exc)) from exc
+        elif extension in VIDEO_EXTENSIONS:
             from .video_asr import inspect_video, ASRError
             try:
                 details=inspect_video(source.read_bytes(), 'video/mp4' if extension=='.mp4' else 'video/webm')
@@ -104,7 +125,7 @@ class DocumentParser:
         else:
             text, structural, assets, provenance = self._parse_docling(source)
 
-        if (not text or not text.strip()) and extension not in VIDEO_EXTENSIONS:
+        if (not text or not text.strip()) and extension not in VIDEO_EXTENSIONS | IMAGE_EXTENSIONS:
             raise DocumentParseError('empty_document', '文档解析后没有可处理的正文')
         if len(text) > MAX_TEXT_CHARS:
             raise DocumentParseError('text_too_large', '解析后的正文超过 100 万字符限制')

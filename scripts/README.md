@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 启动应用 | [start-service.ps1](start-service.ps1) 或 `python -m knowledge_service --port 8100` | 已有 conda 环境和基础设施；正常业务服务 |
 | 生成当前手册 | [build_knowledge_service_manual.py](build_knowledge_service_manual.py) | 不连接业务库；生成并静态校验当前 MD/HTML |
-| 打包部分平台规则与媒体 | [package_rule_documents.py](package_rule_documents.py) | 通过选件清单收集 MD 与引用图片、视频，保留相对目录并自动分包，输出 manifest 和核对报告 |
+| 打包部分平台规则与媒体 | [package_rule_documents.py](package_rule_documents.py) | 每份选中 MD 各生成一个 v2 单资料 ZIP，收集引用图片、视频；也可按顺序打包图片合集，输出清单和核对报告 |
 | 真实上传到图谱验收 | [verify_platform_rule_pipeline.py](verify_platform_rule_pipeline.py) | 创建隔离项目，通过真实 OCR/LLM、候选选择、本体审核发布、来源校验、索引、三类检索和图谱会话验证最小关系链，保存状态支持恢复 |
 | 静态校验当前手册 | [verify_redesign_manual.py](verify_redesign_manual.py) | 检查章节、路由、链接、图片；`--build` 可同时生成 |
 | 内容与权威数据差分 | [verify_production_content.py](verify_production_content.py) | 正常认证和真实服务；默认依赖保留的指定验收项目 ID，不是任意部署的通用 smoke |
@@ -17,13 +17,46 @@
 
 本机服务健康可直接请求 `GET http://127.0.0.1:8100/api/health`；健康通过不替代检索、写入、发布或容量验收。旧 `smoke_service.py` 已移除，因为它依赖已废弃的默认本体/自动向量化假设和返回字段。
 
+### 平台规则单资料 ZIP 打包
+
+在仓库根目录运行 `python scripts/package_rule_documents.py --help` 查看当前参数。源目录只读，输出目录必须在源目录之外且尚不存在。**每个 ZIP 只上传为一份资料**；选择十份 MD 就生成十个 ZIP，不再按 200 份 MD 合包。连续截图可用有序图片合集生成一个 ZIP。
+
+| 参数 | 用法与约束 |
+| --- | --- |
+| `--root`、`--output-dir` | 必填；源文件根目录与本次新输出目录 |
+| `--file` | 相对根目录的 MD 路径，可重复 |
+| `--list-file` | UTF-8/BOM 路径清单，可重复；空行和 `#` 注释忽略，可与 `--file` 按顺序混用 |
+| `--manifest` | JSON 选件清单，不能与 `--file` / `--list-file` 同用；可读旧 `documents` 多项或 v2 单资料，MD 仍逐份输出 ZIP 并保留 title、metadata |
+| `--image`、`--title` | 按阅读顺序重复 `--image`，组成一份 PNG/JPEG/WebP 图片资料；`--title` 只用于此模式，不能同时使用 MD 选件参数 |
+| `--max-zip-bytes` | 默认 24,000,000，最大 25,000,000；单份资料超限报错，不自动拆开 |
+| `--max-documents` | 已弃用的兼容参数，不能恢复多资料合包 |
+
+只打包一份真实规则：
+
+```powershell
+& 'D:\anaconda\envs\llm_model\python.exe' scripts/package_rule_documents.py `
+  --root 'D:\workspace\知识图谱源数据\平台经济规则' `
+  --file '抖音电商/创作者管理_「违规营销：憋单」实施细则_aHsCBTFBK4YS.md' `
+  --output-dir 'D:\workspace\knowledge_service_v2\outputs\unified-media-example\single-rule-packages'
+```
+
+成功后检查 `rule-documents-001.zip` 和 `packaging-report.json`。报告包含每包资料/媒体路径、字节数、SHA256 和外链警告。脚本校验包结构及媒体，不执行 OCR/ASR。
+
+旧多资料包不能直接作为新上传：先保留原包并解压副本，再以解压目录为 `--root`、旧清单为 `--manifest`，或用 `--file` / `--list-file` 选择部分 MD，输出多个新版包。CLI 的多项输入清单仍可用，但生成的上传包必须使用 `schema_version: 2` 与一个 `document`。已入库历史来源保持原有读取方式。
+
+新版 ZIP 的 `document.entry` 指定一个主文件，或用 `document.pages` 明确图片页序；两个字段互斥。无清单包只允许一个根主文件及 `assets/` 附件，单个外层目录可归一化。独立图片/图片页限静态 PNG/JPEG/WebP，每张 10 MiB、4000 万像素；所有 ZIP 还受单文件 25,000,000 字节上限约束。
+
+完整目录、两种 manifest、`--list-file` 与图片合集命令及错误处理见[资料上传与 ZIP 打包操作手册](../docs/平台规则资料上传与ZIP打包操作手册.md)。页面只在第 1 步显示完整上传区；第 2、3 步显示文件摘要，可点击“返回修改文件”回到第 1 步追加，队列保留。新样例输出统一放在 `D:\workspace\knowledge_service_v2\outputs\unified-media-example\packages\`；文件生成与验收结论须分别核对。
+
+已上传资料可在详情的“重新处理 / 构建图谱”中选择“仅文档检索”“开放发现”或“使用项目本体”，复用固定来源创建新处理代际，不必重复打包上传；资料 ID 和处理历史保留。仅文档模式执行解析、OCR/ASR、切片与检索处理，暂不抽取实体关系。单项 OCR 重试只更新识别结果；需要更新切片、检索或图谱时执行整份重新处理。项目索引首次需显式构建，已有项目仍须核对增量同步就绪。
+
 ### 真实规则链路验收
 
 在仓库根目录与现有环境运行。文件可用打包工具按 `--file` 或 `--list-file` 选取。验收命令会在隔离项目审核并发布所选的一条关系及其两个实体，默认采用 10000 字符固定窗口。账户从当前 `.env` 读取，也可使用 `KG_ACCEPTANCE_USERNAME`、`KG_ACCEPTANCE_PASSWORD` 指定。
 
 ```powershell
 & 'D:\anaconda\envs\llm_model\python.exe' scripts/verify_platform_rule_pipeline.py `
-  --file 'D:\workspace\knowledge_service_v2\outputs\platform-rule-e2e-text\rule-documents-001.zip' `
+  --file 'D:\workspace\knowledge_service_v2\outputs\unified-media-example\packages\rule-documents-001.zip' `
   --output-dir '.benchmarks/my-rule-acceptance' `
   --platform '抖音电商'
 ```

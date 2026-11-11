@@ -7,7 +7,7 @@ from urllib.parse import urlsplit, unquote
 import bleach
 from markdown_it import MarkdownIt
 
-PARSER_VERSION = '1.3'
+PARSER_VERSION = '1.4'
 IMAGE_LIMIT = 10 * 1024 * 1024
 HTML_TAGS = {'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table',
              'caption', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'colgroup',
@@ -96,7 +96,9 @@ def image_reference(url, alt='', max_data_bytes=IMAGE_LIMIT, media_type='image')
     elif scheme or decoded.startswith(('//', '/', '\\')):
         result.update(kind='unsafe', status='blocked')
     else:
-        result.update(kind='local', path=decoded.split('#', 1)[0].split('?', 1)[0], status='pending')
+        # Split actual URL delimiters before decoding literal filename %23/%3F.
+        path = unquote(url.strip().split('#', 1)[0].split('?', 1)[0])
+        result.update(kind='local', path=path, status='pending')
     return result
 
 
@@ -160,7 +162,6 @@ class SourceHTMLParser(HTMLParser):
             alt = attrs.get('alt') or attrs.get('title') or ''
             index = self.register_image(attrs.get('src') or '', alt, 'video' if tag == 'video' else 'image')
             self.output.append(image_placeholder(index, alt))
-            self.append_text(alt)
             return
         if tag not in HTML_TAGS:
             return
@@ -215,11 +216,16 @@ class SourceHTMLParser(HTMLParser):
 
 def prepare_source_tokens(tokens, html_parser, register_image):
     """Resolve HTML and Markdown images together before rendering either syntax."""
-    html_parser.register_image = register_image
     for token in tokens:
         if token.type not in {'inline', 'html_block'}:
             continue
         html_parser.reset_capture()
+        token.meta['source_media_positions'] = []
+        def capture_image(url, alt, media_type='image'):
+            index = register_image(url, alt, media_type)
+            token.meta['source_media_positions'].append((index, len(html_parser.text)))
+            return index
+        html_parser.register_image = capture_image
         if token.type == 'html_block':
             token.content = html_parser.feed_fragment(token.content)
         else:
@@ -238,9 +244,9 @@ def prepare_source_tokens(tokens, html_parser, register_image):
                     if html_parser.in_code or html_parser.blocked:
                         child.type = 'text'
                         child.content = f'![{child.content}]({child.attrGet("src") or ""})'
+                        html_parser.append_text(child.content)
                     else:
-                        child.meta['source_image_index'] = register_image(child.attrGet('src') or '', child.content, child.meta.get('media_type','image'))
-                    html_parser.append_text(child.content)
+                        child.meta['source_image_index'] = capture_image(child.attrGet('src') or '', child.content, child.meta.get('media_type','image'))
                 elif child.type in {'text', 'code_inline'}:
                     html_parser.append_text(child.content, excluded=child.type == 'code_inline')
                 elif child.type in {'softbreak', 'hardbreak'}:
@@ -277,16 +283,29 @@ class MarkdownParser:
             segment = tokens[index:last + 1]
             kind = {'heading_open': 'heading', 'paragraph_open': 'paragraph', 'table_open': 'table', 'bullet_list_open': 'list', 'ordered_list_open': 'list', 'fence': 'code', 'code_block': 'code', 'blockquote_open': 'blockquote'}.get(token.type, token.type)
             payload = {}
+            block_images = []
             block_id = 'block-' + hashlib.sha256(f'{document_version_id}:{start}:{end}:{kind}'.encode()).hexdigest()[:24]
             def register_image(url, alt, media_type='image'):
                 ref = image_reference(url, alt, media_type=media_type)
                 ref.update(block_id=block_id, source_start_line=start + 1, source_end_line=end)
                 ordinal = len(images)
+                ref['source_image_ordinal'] = ordinal
                 images.append(ref)
-                payload.setdefault('images', []).append({key: value for key, value in ref.items() if key != 'data'})
+                block_images.append(ordinal)
                 return ordinal
             prepare_source_tokens(segment, html_parser, register_image)
-            content = '\n'.join(inline_text(t) if t.type in {'inline', 'html_block'} else t.content for t in segment if t.type in {'inline', 'html_block', 'fence', 'code_block'})
+            content_parts, token_offsets = [], {}
+            content_length = 0
+            for t in segment:
+                if t.type not in {'inline', 'html_block', 'fence', 'code_block'}:
+                    continue
+                if content_parts:
+                    content_length += 1
+                token_offsets[id(t)] = content_length
+                piece = inline_text(t) if t.type in {'inline', 'html_block'} else t.content
+                content_parts.append(piece)
+                content_length += len(piece)
+            content = '\n'.join(content_parts)
             if kind == 'heading':
                 level = int(token.tag[1:])
                 headings = headings[:level - 1] + [content]
@@ -295,17 +314,29 @@ class MarkdownParser:
                 payload['language'] = token.info.strip()
             if kind == 'table':
                 headers, rows, row = [], [], []
+                row_tokens, table_length = [], 0
                 in_header = False
                 for t in segment:
                     if t.type == 'thead_open': in_header = True
                     elif t.type == 'thead_close': in_header = False
-                    elif t.type == 'tr_open': row = []
-                    elif t.type == 'inline': row.append(inline_text(t))
+                    elif t.type == 'tr_open': row = []; row_tokens = []
+                    elif t.type == 'inline': row.append(inline_text(t)); row_tokens.append(t)
                     elif t.type == 'tr_close':
+                        cell_offset = table_length
+                        for cell_token, cell in zip(row_tokens, row):
+                            token_offsets[id(cell_token)] = cell_offset
+                            cell_offset += len(cell) + len(' | ')
+                        table_length += len(' | '.join(row)) + 1
                         if in_header: headers = row
                         else: rows.append(row)
                 payload.update(headers=headers, rows=rows, row_source_lines=list(range(start + 3, start + 3 + len(rows))))
                 content = '\n'.join(' | '.join(r) for r in [headers, *rows])
+            for t in segment:
+                for image_index, local_offset in t.meta.get('source_media_positions', []):
+                    images[image_index]['block_text_offset'] = token_offsets[id(t)] + local_offset
+            if block_images:
+                payload['images'] = [{key: value for key, value in images[ordinal].items() if key != 'data'}
+                                     for ordinal in block_images]
             payload['temporal_excluded_ranges'] = temporal_excluded_ranges(segment, content)
             if token.nesting == 1 or kind in {'code', 'html_block'}:
                 token.attrSet('data-block-id', block_id)

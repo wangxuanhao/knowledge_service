@@ -78,24 +78,55 @@ class ImageOCRService:
             self.store.update_asset_ocr(project_id,version_id,asset_id,'completed')
             return receipt
         run=dict(id=str(uuid4()),project_id=project_id,document_version_id=version_id,asset_id=asset_id,asset_sha256=asset['sha256'],status='failed',attempt=len(self.store.ocr_runs(project_id,version_id,asset_id))+1,engine=self.adapter.engine,engine_version='unknown',language_config=getattr(self.adapter,'languages','ch,en'),preprocess_fingerprint='pending',configuration_fingerprint=fingerprint,average_confidence=None,text_sha256=None,normalized_text='',error_code=None,public_error=None,started_at=utc_now(),completed_at=None)
+        run['processing_details']={}
         blocks=[]
+        prior_runs=self.store.ocr_runs(project_id,version_id,asset_id)
+        resume=next((r.get('processing_details',{}).get('tiles',[]) for r in reversed(prior_runs)
+                     if r.get('configuration_fingerprint')==fingerprint and r.get('status') in {'partial','processing'}),None)
+        progress_tiles={}
+        def progress(tile):
+            progress_tiles[tile['id']]=tile
+            tiles=sorted(progress_tiles.values(),key=lambda t:t.get('ordinal',0))
+            run.update(status='processing',processing_details=dict(tiles=tiles,
+                tiles_total=tile.get('tiles_total',len(tiles)),tiles_completed=sum(t['status']=='completed' for t in tiles)))
+            self.store.save_ocr(run,[])
+            self.store.update_asset_ocr(project_id,version_id,asset_id,'processing')
+        def details(output):
+            return {key:output[key] for key in ('tiles','tiles_total','tiles_completed','width','height') if key in output}
+        def evidence(accepted):
+            return [dict(b,id=str(uuid4()),project_id=project_id,document_version_id=version_id,
+                         ocr_run_id=run['id'],ordinal=i) for i,b in enumerate(accepted)]
         try:
             if configuration_error: raise configuration_error
-            output=self.adapter.recognize(self.object_store.read(asset['storage_key']))
+            raw=self.object_store.read(asset['storage_key'])
+            if hasattr(self.adapter,'recognize_with_progress'):
+                output=self.adapter.recognize_with_progress(raw,resume_tiles=resume,on_tile=progress)
+            else:output=self.adapter.recognize(raw)
+            run['processing_details']=details(output)
             raw_average=output.get('average_confidence')
             run.update(engine_version=output['engine_version'],preprocess_fingerprint=output['preprocess_fingerprint'],average_confidence=raw_average if isinstance(raw_average,(int,float)) and math.isfinite(raw_average) else None)
             accepted,average=self.quality_check(output)
             run.update(engine_version=output['engine_version'],preprocess_fingerprint=output['preprocess_fingerprint'],average_confidence=average)
             text='\n'.join(b['normalized_text'] for b in accepted)
             run.update(status='completed',normalized_text=text,text_sha256=hashlib.sha256(text.encode()).hexdigest())
-            blocks=[dict(b,id=str(uuid4()),project_id=project_id,document_version_id=version_id,ocr_run_id=run['id'],ordinal=i) for i,b in enumerate(accepted)]
+            blocks=evidence(accepted)
         except OCRError as exc:
+            partial=getattr(exc,'partial_result',None)
+            if partial:
+                accepted=[OcrBlock.model_validate(b).model_dump() for b in partial.get('blocks',[]) if b['confidence']>=self.min_confidence]
+                text='\n'.join(b['normalized_text'] for b in accepted)
+                run.update(status='partial',normalized_text=text,text_sha256=hashlib.sha256(text.encode()).hexdigest(),
+                           engine_version=partial.get('engine_version','unknown'),preprocess_fingerprint=partial.get('preprocess_fingerprint','pending'),
+                           processing_details=details(partial))
+                blocks=evidence(accepted)
+            else:run['status']='failed'
             run.update(error_code=exc.code,public_error=str(exc),completed_at=utc_now())
-            self.store.save_ocr(run,[])
+            receipt=self.store.save_ocr(run,blocks)
+            exc.partial_receipt=receipt if partial else None
             self.store.update_asset_ocr(project_id,version_id,asset_id,'needs_attention')
             raise
         except Exception as exc:
-            run.update(error_code='ocr_failed',public_error='Image recognition failed',completed_at=utc_now())
+            run.update(status='failed',error_code='ocr_failed',public_error='Image recognition failed',completed_at=utc_now())
             self.store.save_ocr(run,[])
             self.store.update_asset_ocr(project_id,version_id,asset_id,'needs_attention')
             raise OCRError('ocr_failed','Image recognition failed') from exc

@@ -111,6 +111,7 @@ def split_source_blocks(blocks, options, return_text=False):
             header_length = len(' | '.join(block['payload']['headers']))
             for row in table_rows:
                 span = row['source_spans'][0]
+                span['payload'].update({key:block['payload'][key] for key in ('source_locations','page_no') if key in block['payload']})
                 row['start_char'] = stream_offset + span['block_start_char']
                 row['end_char'] = stream_offset + span['block_end_char']
                 if span['payload'].get('repeated_header'):
@@ -129,7 +130,8 @@ def split_source_blocks(blocks, options, return_text=False):
         prefix = '#' * block['payload'].get('level', 1) + ' ' if block['type'] == 'heading' else ''
         pending.append(dict(text=prefix + text,
             source_spans=[dict(block_id=block['block_id'], chunk_start_char=len(prefix),
-                chunk_end_char=len(prefix) + len(text), block_start_char=0, block_end_char=len(text), payload={})],
+                chunk_end_char=len(prefix) + len(text), block_start_char=0, block_end_char=len(text),
+                payload={key:block['payload'][key] for key in ('source_locations','page_no') if key in block['payload']})],
             metadata=dict(source_kind='markdown', source_document_version_id=block['document_version_id'],
                           heading_path=block['heading_path'])))
     flush()

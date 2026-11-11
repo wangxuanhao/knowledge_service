@@ -899,14 +899,25 @@ class KnowledgeService:
                     'source_version_id':receipt['version_id'],
                     'status':'ready','indexed_at':indexed_at}
             existing_chunks={}
+            retired_chunks=[]
             if prior:
                 for chunk in chunk_records:
                     try:existing_chunks[chunk['id']]=self.repository.get_record(project_id,chunk['id'])['version']
                     except KeyError:existing_chunks[chunk['id']]=0
+                current_ids={chunk['id'] for chunk in chunk_records}
+                for old in self.repository.document_chunks(project_id,doc_id):
+                    if old['id'] in current_ids:continue
+                    tombstone={key:value for key,value in old.items() if key in RecordWrite.model_fields}
+                    tombstone['metadata']={**tombstone.get('metadata',{}),'_deleted':True}
+                    retired_chunks.append(tombstone)
+                    existing_chunks[old['id']]=old['version']
             with self.lock:
                 indexed=self.write(
-                    project_id, chunk_records, expected_versions=existing_chunks if prior else None, operation='extract',
+                    project_id, [*chunk_records,*retired_chunks], expected_versions=existing_chunks if prior else None, operation='extract',
                     operation_context=operation_context)
+                if retired_chunks:
+                    retired_ids={row['id'] for row in retired_chunks}
+                    indexed=[row for row in indexed if row['id'] not in retired_ids]
                 if checkpoint_context:checkpoint_context.map_chunks(project_id,indexed)
                 if request.get('_source_span_mapper'):request['_source_span_mapper'](indexed)
             saved_chunks=indexed
@@ -1180,7 +1191,11 @@ class KnowledgeService:
             if isinstance(exc,OntologyValidationError):
                 failure_details={'validation_error_count':len(exc.errors),'validation_errors':exc.errors[:100]}
             failure_readiness=run['readiness'] if run else initial_readiness
-            cleanup_chunks=bool(saved_chunks) and processed_chunks==0 and extraction_mode!='documents'
+            rebuilding_saved_document=bool(metadata.get('reprocessing'))
+            cleanup_chunks=bool(saved_chunks) and processed_chunks==0 and extraction_mode!='documents' and not rebuilding_saved_document
+            if rebuilding_saved_document and prior:
+                previous_readiness=prior.get('metadata',{}).get('readiness',{})
+                failure_readiness={**failure_readiness,**{key:True for key in ('keyword_ready','semantic_ready') if previous_readiness.get(key)}}
             if cleanup_chunks:
                 failure_readiness=initial_readiness
             document['metadata'] = {**metadata, 'status': 'failed', 'active_stage':'failed',

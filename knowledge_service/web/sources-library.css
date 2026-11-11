@@ -69,3 +69,10 @@
 #source-detail-drawer .source-reading-controls button[aria-pressed=true]{color:#fff;background:var(--ks-accent,#216952);border-color:var(--ks-accent,#216952)}
 #source-detail-drawer .source-reading-note{flex-basis:100%;margin:0;font-size:12px;line-height:1.7;color:var(--ks-muted)}
 #source-detail-drawer .source-downloads{margin:0}
+#source-detail-drawer .source-reprocess{display:grid;gap:10px;border-top:1px solid var(--ks-line);padding-top:14px}
+#source-detail-drawer .source-reprocess h4{margin:0;font-size:13px}
+#source-detail-drawer .source-reprocess p{margin:0;font-size:12px;line-height:1.8;color:var(--ks-muted)}
+#source-detail-drawer .source-reprocess label{display:flex;align-items:center;flex-wrap:wrap;gap:10px;font-size:12px}
+#source-detail-drawer .source-reprocess select{max-width:100%;min-width:170px}
+#source-detail-drawer .source-reprocess button{justify-self:start;min-height:34px}
+#source-detail-drawer .source-reprocess .source-reprocess-status{color:var(--ui-ink)}

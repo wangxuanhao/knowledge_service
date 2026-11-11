@@ -3,9 +3,11 @@ import mimetypes
 import os
 import html
 import hashlib
+import io
 import logging
 import re
 import time
+import zipfile
 from uuid import uuid4
 from collections import defaultdict,deque
 from urllib.parse import quote
@@ -41,20 +43,35 @@ class SourceDocumentService:
         prepared=self.prepare(data,original_name,text,assets,metadata,provenance)
         return self.publish(project_id,document_id,prepared)
 
-    def prepare(self,data,original_name,text=None,assets=None,metadata=None,provenance=None):
+    def prepare(self,data,original_name,text=None,assets=None,metadata=None,provenance=None,reading_text=None):
         """Parse and fetch before opening any publication transaction."""
         version_id=str(uuid4())
         standalone_video=(provenance or {}).get('media_type')=='video'
-        text=('' if standalone_video else data.decode('utf-8-sig')) if text is None else text
-        parsed=parse_markdown('<video src="source-video"></video>' if standalone_video else text,version_id)
+        standalone_image=(provenance or {}).get('media_type')=='image'
+        text=('' if standalone_video or standalone_image else data.decode('utf-8-sig')) if text is None else text
+        reading_text='<video src="source-video"></video>' if standalone_video else '![](source-image)' if standalone_image else text if reading_text is None else reading_text
+        parsed=parse_markdown(reading_text,version_id)
+        # Attribute only unambiguous native text; repeated PDF headers must not
+        # borrow the page of another occurrence merely because text is equal.
+        native=defaultdict(list)
+        for item in (provenance or {}).get('items',[]):
+            key=' '.join(str(item.get('text','')).split())
+            if key and item.get('provenance'):native[key].append(item['provenance'])
+        for block in parsed['blocks']:
+            candidates=native.get(' '.join(block['normalized_text'].split()),[])
+            if len(candidates)==1:
+                block['payload']['source_locations']=candidates[0]
+                pages={location.get('page_no') for location in candidates[0] if location.get('page_no')}
+                if len(pages)==1:block['payload']['page_no']=next(iter(pages))
         parsed['text']=text
         parsed['document_version_id']=version_id
         parsed['metadata']={**(metadata or {}),'provenance':provenance or {}}
         parsed['metadata']['warnings']=list(parsed['metadata'].get('warnings',[]))
         supplied=list(assets or [])
-        if standalone_video:
+        if standalone_video or standalone_image:
             # An internal reference keeps filename URL delimiters out of media matching.
-            supplied=[dict(asset,path='source-video',url='source-video',resolved_path='source-video') for asset in supplied]
+            reference='source-video' if standalone_video else 'source-image'
+            supplied=[dict(asset,path=reference,url=reference,resolved_path=reference) for asset in supplied]
         refs=[];used=set()
         by_path=defaultdict(deque);first_by_path={}
         for index,asset in enumerate(supplied):
@@ -130,6 +147,32 @@ class SourceDocumentService:
         mime='application/zip' if markdown_name and data.startswith(b'PK\x03\x04') else mimetypes.guess_type(original_name)[0] or 'application/octet-stream'
         return dict(data=data,original_name=original_name,mime_type=mime,parsed=parsed,assets=prepared)
 
+    def prepare_package(self,data,original_name,entry,root_prefix=''):
+        """A new ZIP is one frozen source, with a separately addressable primary."""
+        primary_path=entry.get('primary_archive_path',root_prefix+entry['path']) if 'primary_data' in entry else root_prefix+'manifest.json'
+        if 'primary_data' in entry:
+            primary=entry['primary_data']
+            primary_name=entry['primary_filename']
+        else:
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                from ..integrations.markdown_package import safe_path
+                info=next(info for info in archive.infolist() if safe_path(info.filename)==primary_path)
+                primary=archive.read(info)
+                primary_path=info.filename
+            primary_name='manifest.json'
+        container=dict(entry_path=primary_path,filename=primary_name,
+                       mime_type=mimetypes.guess_type(primary_name)[0] or 'application/octet-stream',
+                       sha256=hashlib.sha256(primary).hexdigest())
+        provenance={**entry.get('provenance',{}),'package':container}
+        metadata={**entry.get('parser_metadata',{}),'package_single_document':True,
+                  'warnings':list(entry.get('warnings',[]))}
+        if provenance.get('media_type')=='image_pages':metadata['source_format']='image_pages'
+        reading=entry.get('parsed',{}).get('text')
+        if reading is None and provenance.get('media_type')=='image_pages':
+            reading='\n\n'.join('![]('+quote(asset.get('path',asset.get('original_path','')),safe='/')+')' for asset in entry['assets'])
+        return self.prepare(data,original_name,text=entry['text'],assets=entry['assets'],metadata=metadata,
+                            provenance=provenance,reading_text=reading)
+
     def publish(self,project_id,document_id,prepared):
         # GC and byte publication share this lock; network/image decoding never do.
         with self.store.publication_guard():
@@ -189,6 +232,18 @@ class SourceDocumentService:
                 LOG.warning('Frozen source object is missing and cannot be reconstructed: version=%s sha256=%s',version_id,version['sha256'])
                 raise SourceDocumentUnavailable('来源原始文件缺失，请恢复来源存储后重试') from exc
             LOG.warning('Serving checksum-verified frozen Markdown because source object is missing: version=%s sha256=%s',version_id,version['sha256'])
+        container=version.get('parser_metadata',{}).get('provenance',{}).get('package')
+        if container:
+            try:
+                with zipfile.ZipFile(io.BytesIO(original)) as archive:
+                    primary=archive.read(container['entry_path'])
+                if hashlib.sha256(primary).hexdigest()!=container['sha256']:
+                    raise ValueError('Package primary checksum mismatch')
+            except (KeyError,ValueError,RuntimeError,zipfile.BadZipFile) as exc:
+                raise SourceDocumentUnavailable('资料包主文件缺失或校验失败，请恢复来源存储') from exc
+            return dict(text=version['source_text'],original_name=container['filename'],
+                        mime_type=container['mime_type'],data=primary,
+                        package_data=original,package_mime_type='application/zip')
         if version['format']=='markdown' and original.startswith(b'PK\x03\x04'):
             # Raw reading and source download represent the selected Markdown, not binary ZIP.
             return dict(text=version['source_text'],original_name=version['original_name'],mime_type='text/markdown; charset=utf-8',data=version['source_text'].encode('utf-8'),package_data=original,package_mime_type='application/zip')

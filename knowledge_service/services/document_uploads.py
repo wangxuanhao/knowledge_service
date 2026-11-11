@@ -45,7 +45,7 @@ class DocumentUploads:
         extension = Path(original_name).suffix.lower()
         supported = SUPPORTED_EXTENSIONS | ({'.zip'} if allow_package else set())
         if not original_name or extension not in supported:
-            formats = 'TXT、Markdown、PDF、DOCX、HTML、MP4、WebM' + ('、Markdown 附件 ZIP 知识包' if allow_package else '')
+            formats = 'TXT、Markdown、PDF、DOCX、HTML、PNG、JPEG、WebP、MP4、WebM' + ('、单资料 ZIP 包' if allow_package else '')
             raise DocumentParseError('unsupported_format', '仅支持 ' + formats + ' 文件')
         target = self.root / f'{uuid4().hex}{extension}'
         digest = sha256()
@@ -87,6 +87,10 @@ class DocumentUploads:
         except KeyError:prior=None
         if prior and prior.get('metadata',{}).get('status')=='ready':
             return dict(document=prior,records=[],replayed=True)
+        if prior and prior.get('metadata',{}).get('document_generation',0)>0:
+            error=ValueError('资料已有新的处理代际，请在资料详情查看并继续当前处理任务')
+            error.code='stale_document_generation'
+            raise error
         source_id=(prior or {}).get('metadata',{}).get('source_document_version_id')
         if source_id:
             source=sources.get(project_id,source_id)
@@ -117,7 +121,7 @@ class DocumentUploads:
         from .document_temporal import source_temporal_exclusions
         data.update(text=text,metadata={**metadata,'warnings':warnings},_document_id=document_id,
                     _prepared_chunks=chunks,_source_span_mapper=map_chunks,
-                    _document_temporal_exclusions=source_temporal_exclusions(source))
+                    _document_temporal_exclusions=source_temporal_exclusions(source,chunks=chunks))
         return service.ingest(project_id,data)
 
     def discard(self, staged: StagedUpload):

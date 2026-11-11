@@ -129,11 +129,54 @@
       open.onclick=()=>{window.WorkspaceDrawers.close({restoreFocus:false});window.SourceReader.open({projectId:project,versionId:doc.metadata.source_document_version_id});};meta.append(open);
     }
     renderReadingControls(doc,project,stamp,ticket);
+    renderReprocessing(doc,project,stamp,ticket);
     await showText(doc,project,accepts);if(!accepts())return;body.scrollTop=0;
     list.querySelectorAll('.source-item').forEach(button=>button.setAttribute('aria-current',String(button===trigger)));
   }
   function sameContext(project,stamp,ticket){
     return project===current&&stamp===scopeStamp()&&(!ticket||window.WorkspaceContext.accepts(ticket,current,'sources'));
+  }
+  function renderReprocessing(doc,project,stamp,ticket){
+    if(!canWrite())return;
+    const panel=detailNode('section',undefined,'source-reprocess admin-only');
+    panel.append(detailNode('h4','重新处理 / 构建图谱'));
+    meta.append(panel);
+    if(!doc.metadata?.source_document_version_id){
+      panel.append(detailNode('p','此旧资料没有关联固定原始来源。请重新上传原文件，再选择处理方式；已有正文仍可阅读。'));return;
+    }
+    panel.append(detailNode('p','沿用此资料编号、固定原件及可复用的成功 OCR / 转写，创建新的处理任务并保留处理历史。补全 OCR 后，请在此重新处理，才能重建切片和检索索引。'));
+    const label=detailNode('label','处理方式'),select=detailNode('select');select.setAttribute('aria-label','重新处理方式');
+    for(const [value,text] of [['documents','仅文档检索'],['discovery','开放发现'],['ontology','使用项目本体']]){
+      const option=detailNode('option',text);option.value=value;select.append(option);
+    }
+    select.value='documents';label.append(select);panel.append(label);
+    panel.append(detailNode('p','仅文档检索：重建正文切片与检索；开放发现：生成候选，不会直接发布图谱，需审核本体与确认事实；使用项目本体：按已发布的项目本体重新抽取并校验事实，未发布本体时会提示先发布。'));
+    panel.append(detailNode('p','重新处理会更新当前切片与候选；新候选仍需审核。模式切换不会直接清空图谱，已审核事实保留原来源版本和审核历史。'));
+    const status=detailNode('p','','source-reprocess-status');status.setAttribute('role','status');
+    const start=detailNode('button','创建处理任务','secondary');start.type='button';panel.append(start,status);
+    let pending=false,submitted=false,keyMode=null,key=null;
+    const accepts=()=>panel.isConnected&&drawer.dialog.open&&selected===doc.id&&sameContext(project,stamp,ticket);
+    start.onclick=async()=>{
+      if(pending||submitted||!canWrite()||!accepts())return;
+      const mode=select.value;
+      if(mode!==keyMode){keyMode=mode;key=window.crypto?.randomUUID?.()||Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);}
+      pending=true;start.disabled=true;select.disabled=true;status.textContent='正在创建处理任务…';
+      try{
+        const result=await api('/api/projects/'+encodeURIComponent(project)+'/documents/'+encodeURIComponent(doc.id)+'/reprocess',
+          {extraction_mode:mode,idempotency_key:key});
+        if(!accepts())return;
+        submitted=true;status.textContent='已创建新的处理任务。请在后台任务查看进度；处理结束后仍需核验检索与图谱索引的同步状态。';
+        const view=detailNode('button','查看处理任务','secondary');view.type='button';
+        view.onclick=async()=>{
+          if(!accepts())return;
+          try{await window.KnowledgeNavigation.open('jobs',{projectId:project});window.WorkspaceDrawers.close({restoreFocus:false});}
+          catch(error){if(accepts())status.textContent='任务页面打开失败：'+error.message;}
+        };
+        panel.append(view);
+        if(result.batch?.id)panel.dataset.batchId=result.batch.id;
+      }catch(error){if(accepts())status.textContent='创建失败：'+error.message;}
+      finally{pending=false;if(accepts()){start.disabled=submitted;select.disabled=submitted;}}
+    };
   }
   function renderReadingControls(doc,project,stamp,ticket){
     const version=doc.metadata?.source_document_version_id;

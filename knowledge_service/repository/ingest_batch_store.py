@@ -107,6 +107,77 @@ class IngestBatchStore:
         with self.repo._transaction():
             self.db.execute('UPDATE ingest_batch_items SET source_version_id=? WHERE id=? AND batch_id=? AND project_id=?',(version_id,item_id,batch_id,project_id))
 
+    @contextmanager
+    def document_reprocessing_guard(self, project_id, document_id):
+        """Serialize new generations and retries of the same project document."""
+        with self.repo._transaction():
+            self.db.execute('SELECT pg_advisory_xact_lock(hashtextextended(?,0))',
+                ('document-reprocess:'+project_id+':'+document_id,))
+            yield
+
+    def reprocessing_operation(self, project_id, document_id, key):
+        with self.repo._transaction():
+            item = _row(self.db.execute('''SELECT * FROM ingest_batch_items
+                WHERE project_id=? AND document_id=? AND idempotency_key=?''',
+                (project_id, document_id, 'document-reprocess:'+key)).fetchone())
+            return {'batch': self.get_batch(project_id, item['batch_id']), 'item': item} if item else None
+
+    def latest_document_settings(self, project_id, document_id):
+        with self.repo._transaction():
+            row = self.db.execute('''SELECT b.settings_json,i.options_json FROM ingest_batch_items i
+                JOIN ingest_batches b ON b.id=i.batch_id AND b.project_id=i.project_id
+                WHERE i.project_id=? AND i.document_id=?
+                ORDER BY i.document_generation DESC,i.created_at DESC,i.id DESC LIMIT 1''',
+                (project_id, document_id)).fetchone()
+            if row is None:
+                return {}
+            row = _row(row)
+            return {**row['settings'], **row['options']}
+
+    def active_document_item(self, project_id, document_id):
+        with self.repo._transaction():
+            return _row(self.db.execute('''SELECT * FROM ingest_batch_items
+                WHERE project_id=? AND document_id=?
+                AND status IN ('pending','running','retry_wait','interrupted')
+                ORDER BY document_generation DESC,created_at DESC LIMIT 1''',
+                (project_id, document_id)).fetchone())
+
+    def document_item(self, project_id, document_id, item_id):
+        with self.repo._transaction():
+            return _row(self.db.execute('''SELECT * FROM ingest_batch_items
+                WHERE project_id=? AND document_id=? AND id=?''',
+                (project_id, document_id, item_id)).fetchone())
+
+    def add_existing_source(self, project_id, batch_id, document_id, source_version_id,
+                            idempotency_key, options=None, generation_floor=0):
+        """Bind a new item to owned immutable source bytes, never a previous checkpoint."""
+        with self.document_reprocessing_guard(project_id, document_id):
+            batch = self.db.execute('''SELECT * FROM ingest_batches WHERE project_id=? AND id=?
+                FOR UPDATE''', (project_id, batch_id)).fetchone()
+            if batch is None:
+                raise KeyError(batch_id)
+            if batch['status'] != 'draft':
+                raise ValueError('batch accepts files only while draft')
+            source = self.db.execute('''SELECT v.*,o.sha256,o.size_bytes FROM source_document_versions v
+                JOIN source_objects o ON o.id=v.source_object_id
+                WHERE v.project_id=? AND v.document_id=? AND v.id=?''',
+                (project_id, document_id, source_version_id)).fetchone()
+            if source is None:
+                raise KeyError('Source version not found')
+            if self.active_document_item(project_id, document_id):
+                raise ValueError('document already has an active processing item')
+            maximum = self.db.execute('''SELECT COALESCE(MAX(document_generation),0)
+                FROM ingest_batch_items WHERE project_id=? AND document_id=?''',
+                (project_id, document_id)).fetchone()[0]
+            generation = max(int(maximum), int(generation_floor)) + 1
+            return _row(self.db.execute('''INSERT INTO ingest_batch_items
+                (id,batch_id,project_id,document_id,source_document_id,source_version_id,
+                 document_generation,original_name,size_bytes,file_sha256,idempotency_key,options_json,upload_object_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?) RETURNING *''',
+                (uuid4().hex,batch_id,project_id,document_id,document_id,source_version_id,
+                 generation,source['original_name'],source['size_bytes'],source['sha256'],
+                 'document-reprocess:'+idempotency_key,_json(options or {}),source['source_object_id'])).fetchone())
+
     def list_items(self, project_id, batch_id, limit=50, offset=0, status=None):
         limit,offset = self._page(limit,offset)
         with self.repo._transaction():
@@ -319,6 +390,11 @@ class IngestBatchStore:
                     return self.get_batch(project_id,batch_id)
                 raise ValueError('item is not retryable')
             for row in rows:
+                with self.document_reprocessing_guard(project_id, row['document_id']):
+                    latest = self.db.execute('''SELECT MAX(document_generation) FROM ingest_batch_items
+                        WHERE project_id=? AND document_id=?''', (project_id,row['document_id'])).fetchone()[0]
+                    if latest is not None and latest > row['document_generation']:
+                        raise ValueError('此处理任务已被更新的处理取代，请查看最新批次')
                 if mode=='restart_document':
                     self.db.execute('UPDATE ingest_batch_items SET document_generation=document_generation+1,source_restart_of=source_version_id,source_version_id=NULL WHERE id=?',(row['id'],))
                 self.db.execute("UPDATE ingest_batch_items SET status='pending',retry_mode=?,stage='queued',progress=0,error_code=NULL,error_message=NULL,public_error=NULL,auto_retry_count=0,next_retry_at=NULL,completed_at=NULL,updated_at=clock_timestamp() WHERE id=?",(mode,row['id']))

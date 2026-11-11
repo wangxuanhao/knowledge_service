@@ -145,6 +145,12 @@ def normalize_docling_document(document,*,scanned_pages=(),ocr_regions=(),digita
     for ordinal,(item,level) in enumerate(document.iterate_items()):
         provenance=[p.model_dump(mode='json') for p in getattr(item,'prov',[])]
         entry=dict(ordinal=ordinal,self_ref=item.self_ref,label=item.label.value,provenance=provenance)
+        if hasattr(item,'text'):entry['text']=item.text
+        elif isinstance(item,TableItem):
+            from .markdown_parser import parse_markdown
+            table_blocks=parse_markdown(item.export_to_markdown(doc=document))['blocks']
+            table_text=[block['normalized_text'] for block in table_blocks if block['type']=='table']
+            if len(table_text)==1:entry['text']=table_text[0]
         if isinstance(item,PictureItem):
             page_no=fallback_pages.get(item.self_ref)
             raster=raster_paths.get(item.self_ref)

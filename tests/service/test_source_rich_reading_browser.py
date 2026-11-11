@@ -1,5 +1,6 @@
 """Real Edge UI fixtures for the shared rich reader (no parser/object-store claim)."""
 import io
+import base64
 from pathlib import Path
 
 from PIL import Image
@@ -184,14 +185,34 @@ def test_late_image_blob_is_discarded_on_project_change_and_binary_view_is_label
         page.route('**/source-documents/binary', lambda route: route.fulfill(json={
             'original_name': 'guide.pdf', 'format': 'pdf', 'mime_type': 'application/pdf',
             'source_text': '来自 PDF 的解析正文', 'blocks': [], 'assets': []}))
+        png = io.BytesIO()
+        Image.new('RGB', (300, 400), '#1c63b7').save(png, 'PNG')
+        def pdf_page(route):
+            calls.append(route.request.url)
+            assert route.request.headers.get('authorization') == 'Bearer fixture'
+            number = int(route.request.url.rsplit('=', 1)[-1])
+            return route.fulfill(json={'page_number': number, 'page_count': 2,
+                'page_width': 300, 'page_height': 400, 'width': 300, 'height': 400,
+                'mime_type': 'image/png', 'image_base64': base64.b64encode(png.getvalue()).decode()})
+        page.route('**/source-documents/binary/pdf-preview?*', pdf_page)
         page.evaluate("SourceReader.open({projectId:'other',versionId:'binary'})")
         page.locator('#source-reader').wait_for()
+        page.wait_for_function("document.querySelector('.source-pdf-page img')?.naturalWidth===300")
+        assert page.locator('.source-pdf-page img').evaluate('(n)=>n.naturalHeight') == 400
+        page.get_by_role('button', name='下一页', exact=True).click()
+        page.wait_for_function("document.querySelector('.source-pdf-page img')?.alt.includes('第 2 页')")
+        assert page.get_by_role('button', name='下一页', exact=True).is_disabled()
+        assert page.evaluate('liveUrls.size') == 1, 'page replacement releases its previous PNG URL'
+        assert sum('/binary/pdf-preview?' in url for url in calls) == 2
+        preview_reads = sum(url.endswith('/binary/source') for url in calls)
+        assert preview_reads == 0, 'page preview does not decode or embed PDF bytes'
         page.get_by_role('button', name='原始视图', exact=True).click()
         page.get_by_text('下方是解析后的正文；原始二进制文件请通过下载入口查看。', exact=True).wait_for()
         assert page.locator('.source-reader-body pre').inner_text() == '来自 PDF 的解析正文'
         assert page.locator('.source-reader-body iframe,.source-reader-body embed').count() == 0
-        assert not any(url.endswith('/binary/source') for url in calls), 'binary bytes are fetched only for explicit downloads'
+        assert sum(url.endswith('/binary/source') for url in calls) == preview_reads, 'raw view must not fetch/decode PDF bytes as text'
         page.keyboard.press('Escape')
+        page.wait_for_function('liveUrls.size===0')
         assert errors == []
         browser.close()
 

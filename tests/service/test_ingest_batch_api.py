@@ -37,9 +37,8 @@ def test_zip_documents_ocr_spans_and_package_are_fixed(tmp_path):
     fake=OCR();app.state.source_documents.image_ocr.adapter=fake
     buffer=io.BytesIO()
     with zipfile.ZipFile(buffer,'w') as archive:
-        archive.writestr('a.md','# First\n\n![rule](x.png)')
-        archive.writestr('b.md','# Second\n\nText rules.')
-        archive.writestr('x.png',png())
+        archive.writestr('a.md','# First\n\n![rule](assets/x.png)')
+        archive.writestr('assets/x.png',png())
     raw=buffer.getvalue()
     with TestClient(app) as client:
         project=client.post('/api/projects',json={'name':'zip','ontology_mode':'documents'}).json()['id']
@@ -47,9 +46,12 @@ def test_zip_documents_ocr_spans_and_package_are_fixed(tmp_path):
         base=f'/api/projects/{project}/ingest-batches/{batch["id"]}'
         response=client.post(base+'/files',files={'file':('rules.zip',raw)},headers={'Idempotency-Key':'zip'})
         assert response.status_code==201,response.text
-        assert response.json()['total']==2
-        assert client.post(base+'/files',files={'file':('rules.zip',raw)},headers={'Idempotency-Key':'zip'}).json()['total']==2
+        assert response.json()['total']==1
+        assert client.post(base+'/files',files={'file':('rules.zip',raw)},headers={'Idempotency-Key':'zip'}).json()['total']==1
         assert client.get(base).json()['total_bytes']==len(raw)
+        added=client.post(base+'/files',files={'file':('b.md',b'# Second\n\nText rules.')})
+        assert added.status_code==201,added.text
+        assert client.get(base+'/items').json()['total']==2
         assert client.post(base+'/start').status_code==202
         for _ in range(150):
             items=client.get(base+'/items').json()['items']
@@ -57,7 +59,7 @@ def test_zip_documents_ocr_spans_and_package_are_fixed(tmp_path):
             time.sleep(.1)
         assert all(item['status']=='completed' for item in items),items
         assert fake.calls==1
-        item=next(item for item in items if item['original_name']=='a.md')
+        item=next(item for item in items if item['original_name']=='rules.zip')
         source_id=item['source_version_id']
         document=item['result']['document']
         assert document['metadata']['source_document_version_id']==source_id
@@ -117,20 +119,23 @@ def test_manifest_title_and_metadata_are_per_document(tmp_path):
     import io,zipfile,json
     from knowledge_service.integrations.embeddings import HashingEncoder
     app=create_app(tmp_path/'manifest.sqlite',encoder=HashingEncoder())
-    buffer=io.BytesIO()
-    with zipfile.ZipFile(buffer,'w') as archive:
-        archive.writestr('a.md','first')
-        archive.writestr('b.md','second')
-        archive.writestr('manifest.json',json.dumps({'documents':[
-            {'path':'a.md','title':'Title A','metadata':{'rank':1}},
-            {'path':'b.md','title':'Title B','metadata':{'rank':2}}]}))
+    packages=[]
+    for name,title,rank in [('a.md','Title A',1),('b.md','Title B',2)]:
+        buffer=io.BytesIO()
+        with zipfile.ZipFile(buffer,'w') as archive:
+            archive.writestr(name,'Rule body')
+            archive.writestr('manifest.json',json.dumps({'schema_version':2,'document':{
+                'entry':name,'title':title,'metadata':{'rank':rank}}}))
+        packages.append(buffer.getvalue())
     with TestClient(app) as client:
         project=client.post('/api/projects',json={'name':'manifest'}).json()['id']
         batch=client.post(f'/api/projects/{project}/ingest-batches',json={'settings':{'extraction_mode':'documents'}}).json()
-        response=client.post(f'/api/projects/{project}/ingest-batches/{batch["id"]}/files',
-            files={'file':('archive.zip',buffer.getvalue())},data={'options':json.dumps({'title':'Caller','metadata':{'rank':0,'shared':True}})})
-        assert response.status_code==201,response.text
-        items=response.json()['items']
+        items=[]
+        for index,raw in enumerate(packages):
+            response=client.post(f'/api/projects/{project}/ingest-batches/{batch["id"]}/files',
+                files={'file':(f'archive-{index}.zip',raw)},data={'options':json.dumps({'title':'Caller','metadata':{'rank':0,'shared':True}})})
+            assert response.status_code==201,response.text
+            items.extend(response.json()['items'])
         assert [row['options']['title'] for row in items]==['Title A','Title B']
         assert [row['options']['metadata']['rank'] for row in items]==[1,2]
         assert all(row['options']['metadata']['shared'] for row in items)

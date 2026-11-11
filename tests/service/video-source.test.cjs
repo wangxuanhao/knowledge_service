@@ -19,7 +19,9 @@ test('reader provides ASR segments and routes their timestamps back to video rea
   assert.match(reader,/\/asr/);
   assert.match(reader,/segment\.start_ms/);
   assert.match(reader,/view\.seekVideo/);
-  assert.match(reader,/mp4\|webm/);
+  assert.match(reader,/SourceContent\.sourceInfo\(doc\)/);
+  const {sourceInfo}=require('../../knowledge_service/web/source-content.js');
+  for(const format of ['mp4','webm'])assert.equal(sourceInfo({original_name:'clip.'+format,source_format:format}).binary,true);
 });
 
 test('video session authenticates bytes, seeks after metadata and releases its blob on disposal',async()=>{

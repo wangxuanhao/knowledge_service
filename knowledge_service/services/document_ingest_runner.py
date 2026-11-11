@@ -157,7 +157,7 @@ class DocumentIngestRunner:
         context = DocumentCheckpointContext(self.store,self.checkpoints,item,owner,self.sources,chunks,self.halt,payload.get('extraction_mode'))
         from .document_temporal import source_temporal_exclusions
         payload.update(_document_id=item['document_id'], _checkpoint_context=context, _prepared_chunks=chunks,
-            _document_temporal_exclusions=source_temporal_exclusions(source))
+            _document_temporal_exclusions=source_temporal_exclusions(source,chunks=chunks))
         token=ingest_commit_guard.set(context.formal_guard)
         try:
             return self.service.ingest(item['project_id'], payload)
@@ -184,6 +184,12 @@ class DocumentIngestRunner:
         if item.get('source_restart_of'):
             previous=self.sources.source(item['project_id'],item['source_restart_of'])
             if previous.get('package_data'):
+                previous_version=self.sources.get(item['project_id'],item['source_restart_of'])
+                if previous_version.get('parser_metadata',{}).get('package_single_document'):
+                    from ..integrations.document_package import SingleDocumentPackageReader
+                    package=SingleDocumentPackageReader().read(previous['package_data'],item['original_name'])
+                    prepared=self.sources.prepare_package(previous['package_data'],item['original_name'],package['documents'][0],package.get('root_prefix',''))
+                    return self.sources.publish(item['project_id'],item['document_id'],prepared)
                 from ..integrations.markdown_package import MarkdownPackageReader
                 package=MarkdownPackageReader().read(previous['package_data'])
                 entry=next(row for row in package['documents'] if row['path']==item['original_name'])
@@ -196,6 +202,11 @@ class DocumentIngestRunner:
             if len(data)!=obj['size_bytes'] or hashlib.sha256(data).hexdigest()!=obj['sha256']:
                 raise ValueError('Upload object checksum or size mismatch')
             if (item.get('options') or {}).get('metadata',{}).get('package_entry_path'):
+                if item['options']['metadata'].get('package_single_document'):
+                    from ..integrations.document_package import SingleDocumentPackageReader
+                    package=SingleDocumentPackageReader().read(data,item['original_name'])
+                    prepared=self.sources.prepare_package(data,item['original_name'],package['documents'][0],package.get('root_prefix',''))
+                    return self.sources.publish(item['project_id'],item['document_id'],prepared)
                 from ..integrations.markdown_package import MarkdownPackageReader
                 package=MarkdownPackageReader().read(data)
                 entry=next(row for row in package['documents'] if row['path']==item['original_name'])

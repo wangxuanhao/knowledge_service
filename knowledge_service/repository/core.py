@@ -1377,6 +1377,17 @@ class Repository:
                 values[dimension].update(row['value'] for row in rows)
         return {dimension: sorted(items) for dimension, items in values.items()}
 
+    def document_chunks(self, project_id, document_id):
+        """Current live chunks of one document, including all business dates."""
+        self.get_project(project_id)
+        with self._lock:
+            rows=self._db.execute("""SELECT * FROM record_versions WHERE project_id=?
+                AND superseded_at IS NULL AND payload::jsonb->>'kind'='chunk'
+                AND payload::jsonb->>'source_id'=?
+                AND payload::jsonb#>>'{metadata,_deleted}' IS DISTINCT FROM 'true' ORDER BY id""",
+                (project_id,document_id)).fetchall()
+            return [self._record(row) for row in rows]
+
     def current_records(self, project_id, kinds=None):
         """读取当前活跃版本（含已过期和未来事实）。
 

@@ -9,7 +9,7 @@ from ..integrations.document_media import (
     MAX_DOCUMENT_IMAGES, MAX_DOCUMENT_IMAGE_BYTES, inspect_image,
 )
 from ..integrations.document_parser import DocumentParseError, MAX_TEXT_CHARS
-from ..integrations.markdown_package import MarkdownPackageReader
+from ..integrations.document_package import SingleDocumentPackageReader
 from ..integrations.markdown_parser import parse_markdown
 from ..integrations.video_asr import inspect_video, ASRError
 from .chunking import split_document, split_source_blocks
@@ -63,6 +63,8 @@ def parsed_source_entry(parsed):
     """Match converted document images without fetching external or local paths."""
     if parsed.provenance.get('media_type')=='video':
         markdown=parse_markdown('<video src="source-video"></video>')
+    elif parsed.provenance.get('media_type')=='image':
+        markdown=parse_markdown('![](source-image)')
     elif parsed.metadata.get('source_format') == 'txt':
         markdown = dict(rendered_html='<pre>' + escape(parsed.text) + '</pre>', images=[])
     else:
@@ -70,6 +72,8 @@ def parsed_source_entry(parsed):
     supplied = {asset.get('original_path', asset.get('path')): asset for asset in parsed.assets}
     if parsed.provenance.get('media_type')=='video' and parsed.assets:
         supplied={'source-video':dict(parsed.assets[0],url='source-video',path='source-video')}
+    elif parsed.provenance.get('media_type')=='image' and parsed.assets:
+        supplied={'source-image':dict(parsed.assets[0],url='source-image',path='source-image')}
     assets, warnings = [], list(parsed.metadata.get('warnings', []))
     for reference in markdown['images']:
         asset = {**reference, **supplied.get(reference.get('path', reference['url']), {})}
@@ -94,7 +98,7 @@ def preview_upload(uploads, upload, options, limits, package_path=None, preview_
                 result.update(source_preview=article, warnings=warnings)
             return result
         try:
-            package = MarkdownPackageReader(max_documents=limits.max_batch_items).read(
+            package = SingleDocumentPackageReader(parser=uploads.parser).read(
                 staged.path.read_bytes(), staged.original_name)
         except (ValueError, zipfile.BadZipFile, RuntimeError, NotImplementedError) as exc:
             raise DocumentParseError('invalid_package', 'ZIP 知识包无法解析，请检查目录、manifest 和文件编码。' + str(exc)) from exc
@@ -108,7 +112,7 @@ def preview_upload(uploads, upload, options, limits, package_path=None, preview_
             raise DocumentParseError('package_document_not_found', 'ZIP 中找不到所选文档。' + selected_path)
         settings = options.model_dump()
         settings.update(title=entry['title'] or entry['path'], metadata={**options.metadata, **entry['metadata']})
-        metadata = dict(source_format='md', source_file=entry['path'],
+        metadata = dict(entry.get('parser_metadata',{}),source_format=entry.get('parser_metadata',{}).get('source_format','md'), source_file=entry['path'],
                         video_count=sum(asset.get('provenance',{}).get('media_type')=='video' for asset in entry['assets']))
         exclusions = source_temporal_exclusions(entry['parsed'])
         if preview_view == 'source':
@@ -124,6 +128,8 @@ def preview_upload(uploads, upload, options, limits, package_path=None, preview_
         result.update(title=settings['title'], metadata=settings['metadata'],
                       package=dict(filename=staged.original_name, selected_path=entry['path'],
                                    document_count=len(documents), image_count=sum(len(item['assets']) for item in documents),
+                                   asset_count=sum(len(item['assets']) for item in documents),
+                                   video_count=sum(asset.get('provenance',{}).get('media_type')=='video' for item in documents for asset in item['assets']),
                                    documents=[dict(path=item['path'], title=item['title'] or item['path'],
                                                    image_count=len(item['assets']), warning_count=len(item['warnings']))
                                               for item in documents]))

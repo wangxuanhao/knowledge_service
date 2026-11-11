@@ -924,8 +924,12 @@ def test_upload_steps_preserve_original_inputs_but_direct_project_switch_cleans_
     page.click('[data-tab="sources"]');page.click('#upload-source')
     page.locator('#doc-file').set_input_files({'name':'drawer-check.txt','mimeType':'text/plain','buffer':b'drawer verification'})
     page.locator('[data-upload-step="1"]').click()
+    assert page.locator('#doc-dropzone').is_hidden()
+    assert 'drawer-check.txt' in page.locator('#library-upload-selection').inner_text()
     page.locator('#doc-title').fill('未提交资料')
     page.locator('[data-upload-step="2"]').click()
+    assert page.locator('#doc-file-list').is_hidden()
+    assert '1 份资料' in page.locator('#library-upload-selection').inner_text()
     assert 'drawer-check.txt' in page.locator('#doc-file-list').text_content()
     page.keyboard.press('Escape');page.click('#upload-source')
     assert page.locator('#doc-title').input_value()=='未提交资料'
@@ -956,6 +960,9 @@ def test_preview_late_response_and_direct_project_change_cannot_leave_inert_back
     page.click('[data-tab="sources"]');page.click('#upload-source')
     page.locator('#doc-file').set_input_files({'name':'preview.txt','mimeType':'text/plain','buffer':b'preview content'})
     page.locator('[data-upload-step="2"]').click()
+    assert page.locator('#preview-chunks').is_hidden()
+    page.locator('#library-upload-selection').get_by_role('button',name='返回修改文件').click()
+    assert page.locator('#preview-chunks').is_visible()
     with page.expect_request('**/documents/upload/preview') as first_request:
         page.click('#preview-chunks')
     page.wait_for_function('chunkPreviewState.session?.pending.has(0)')

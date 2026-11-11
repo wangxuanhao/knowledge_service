@@ -74,7 +74,11 @@
     const stepButtons=['选择文件','资料与处理方式','确认并处理'].map((text,i)=>{
       const b=button(String(i+1).padStart(2,'0')+'  '+text,()=>setStep(i));b.dataset.uploadStep=i;steps.append(b);return b;
     });
-    workspace.replaceChildren(...stages);panel.append(steps,fileZone,workspace);
+    const selection=node('section','library-upload-selection');selection.id='library-upload-selection';selection.setAttribute('aria-label','本批资料');selection.setAttribute('aria-live','polite');
+    const selectionInfo=node('div','library-upload-selection-info'),selectionCount=node('strong'),selectionNames=node('span','library-upload-selection-names');
+    const editFiles=button('返回修改文件',()=>{setStep(0);get('doc-dropzone')?.focus();});
+    selectionInfo.append(selectionCount,selectionNames);selection.append(selectionInfo,editFiles);
+    workspace.replaceChildren(...stages);panel.append(steps,selection,workspace);
     const footer=node('div','library-wizard-navigation'),previous=button('上一步',()=>setStep(state.snapshot().step-1)),next=button('下一步：资料与处理方式',()=>setStep(state.snapshot().step+1),'');
     footer.append(previous,next);panel.append(footer);
     get('ingest').textContent='开始处理';
@@ -84,6 +88,11 @@
     // top-layer dialog makes it usable without closing or duplicating this form.
     const preview=get('chunk-preview');if(preview)shell.dialog.append(preview);
     get('open-ingest-results').addEventListener('click',()=>shell.close({restoreFocus:false}),true);
+    function updateSelection(){
+      const rows=root.DocumentUploadQueue?.items?.()||[],names=rows.slice(0,3).map(item=>item.file.name);
+      selectionCount.textContent=rows.length+' 份资料';
+      selectionNames.textContent=names.length?names.join('、')+(rows.length>3?'；另 '+(rows.length-3)+' 份':''):'尚未选择文件';
+    }
     function updateSummary(){
       summary.replaceChildren();
       const mode=get('extraction-mode'),modeLabel=mode?.selectedOptions?.[0]?.textContent||'按所选方式处理';
@@ -95,7 +104,7 @@
     }
     function setStep(value){
       const currentState=state.step(value);stages.forEach((e,i)=>e.hidden=i!==currentState.step);
-      fileZone.dataset.compact=String(currentState.step!==0);
+      selection.hidden=currentState.step===0;updateSelection();
       stepButtons.forEach((e,i)=>e.setAttribute('aria-current',i===currentState.step?'step':'false'));
       previous.hidden=currentState.step===0;next.hidden=currentState.step===2;
       next.textContent=currentState.step===0?'下一步：资料与处理方式':'下一步：确认处理';
@@ -127,7 +136,7 @@
     return {open,close:options=>shell.close(options),projectChanged(id){shell.close({restoreFocus:false});state.projectChanged(id);get('ingest').disabled=false;},
       ticket:()=>state.ticket(),
       accepts:(ticket,id)=>state.accepts(ticket,id)&&project()===id,
-      queueChanged(){const view=state.snapshot();if(view.active&&view.mode==='upload'&&view.step===2)updateSummary();},
+      queueChanged(){const view=state.snapshot();if(view.active&&view.mode==='upload'){updateSelection();if(view.step===2)updateSummary();}},
       showBatch({projectId,batchId,ticket}){if(!state.accepts(ticket,projectId)||project()!==projectId)return;open('batches');
         root.IngestBatches?.monitor(projectId,{id:batchId});
         const card=[...batches.querySelectorAll('[data-batch-id]')].find(n=>n.dataset.batchId===batchId);card?.scrollIntoView({block:'start'});},

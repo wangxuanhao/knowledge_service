@@ -174,12 +174,17 @@ class SourceStore:
         with self.repo._lock:
             runs=[dict(r) for r in self.repo._db.execute('SELECT * FROM source_asset_ocr_runs WHERE project_id=? AND document_version_id=? AND asset_id=? ORDER BY started_at',(project_id,version_id,asset_id)).fetchall()]
             blocks=[dict(b) for b in self.repo._db.execute('SELECT b.* FROM source_asset_ocr_blocks b JOIN source_asset_ocr_runs r ON r.id=b.ocr_run_id AND r.project_id=b.project_id AND r.document_version_id=b.document_version_id WHERE b.project_id=? AND b.document_version_id=? AND r.asset_id=? ORDER BY b.ordinal',(project_id,version_id,asset_id)).fetchall()]
-            for run in runs: run['blocks']=[b for b in blocks if b['ocr_run_id']==run['id']]
+            for run in runs:
+                run['processing_details']=json.loads(run.get('processing_details') or '{}')
+                run['blocks']=[b for b in blocks if b['ocr_run_id']==run['id']]
             return runs
 
     def save_ocr(self, run, blocks):
         with self.repo.unit_of_work():
-            self._insert('source_asset_ocr_runs',run)
+            value={**run,'processing_details':encode(run.get('processing_details') or {})}
+            update=','.join(f'{field}=excluded.{field}' for field in value if field not in {'id','project_id','document_version_id','asset_id'})
+            self._insert('source_asset_ocr_runs',value,'ON CONFLICT(id) DO UPDATE SET '+update+
+                         ' WHERE source_asset_ocr_runs.project_id=excluded.project_id AND source_asset_ocr_runs.document_version_id=excluded.document_version_id AND source_asset_ocr_runs.asset_id=excluded.asset_id')
             for block in blocks: self._insert('source_asset_ocr_blocks',block)
         return dict(run,blocks=blocks)
 
@@ -188,6 +193,7 @@ class SourceStore:
             row=self.repo._db.execute("SELECT * FROM source_asset_ocr_runs WHERE project_id=? AND asset_sha256=? AND configuration_fingerprint=? AND status='completed' ORDER BY completed_at DESC LIMIT 1",(project_id,sha256,fingerprint)).fetchone()
             if not row: return None
             run=dict(row)
+            run['processing_details']=json.loads(run.get('processing_details') or '{}')
             run['blocks']=[b for b in self._list('source_asset_ocr_blocks',project_id,run['document_version_id'],'ordinal') if b['ocr_run_id']==run['id']]
             return run
 

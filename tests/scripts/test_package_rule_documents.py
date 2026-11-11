@@ -1,6 +1,7 @@
 """Run the local package command through its public CLI and current ZIP reader."""
 import base64
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -9,9 +10,6 @@ import sys
 import zipfile
 
 import pytest
-
-from knowledge_service.integrations.markdown_package import MarkdownPackageReader
-
 
 SCRIPT = Path(__file__).resolve().parents[2] / 'scripts' / 'package_rule_documents.py'
 PNG = base64.b64decode(
@@ -46,6 +44,11 @@ def report(output):
     return json.loads((output / 'packaging-report.json').read_text(encoding='utf-8'))
 
 
+def read_package(data):
+    from knowledge_service.integrations.document_package import SingleDocumentPackageReader
+    return SingleDocumentPackageReader().read(data)
+
+
 def assert_failed(result, output, *details):
     assert result.returncode == 2, result.stdout + result.stderr
     for detail in details:
@@ -73,19 +76,21 @@ def test_partial_selection_preserves_original_bytes_resolves_images_and_deduplic
 
     assert result.returncode == 0, result.stderr
     archives = list(output.glob('*.zip'))
-    assert len(archives) == 1
+    assert len(archives) == 2
     with zipfile.ZipFile(archives[0]) as archive:
-        assert set(archive.namelist()) == {'manifest.json', '分类/one.md', 'two.md', '图像/a b.png'}
+        assert set(archive.namelist()) == {'manifest.json', '分类/one.md', '图像/a b.png'}
         assert archive.read('分类/one.md') == original
         assert all(info.compress_type == zipfile.ZIP_STORED for info in archive.infolist())
-    parsed = MarkdownPackageReader().read(archives[0].read_bytes())
-    assert [doc['path'] for doc in parsed['documents']] == ['分类/one.md', 'two.md']
+        assert json.loads(archive.read('manifest.json')) == {'schema_version': 2, 'document': {'entry': '分类/one.md'}}
+    parsed = read_package(archives[0].read_bytes())
+    assert [doc['path'] for doc in parsed['documents']] == ['分类/one.md']
     assert len(parsed['documents'][0]['assets']) == 5
     assert all(asset['status'] == 'available' for doc in parsed['documents']
                for asset in doc['assets'] if asset['kind'] in {'local', 'base64'})
     receipt = report(output)
     package = receipt['packages'][0]
-    assert package['documents'] == ['分类/one.md', 'two.md']
+    assert package['documents'] == ['分类/one.md']
+    assert receipt['packages'][1]['documents'] == ['two.md']
     assert package['images'] == ['图像/a b.png']
     assert package['size_bytes'] == archives[0].stat().st_size
     assert package['sha256'] == hashlib.sha256(archives[0].read_bytes()).hexdigest()
@@ -105,7 +110,7 @@ def test_selectors_follow_command_line_order_and_manifest_preserves_explicit_met
     output = tmp_path / 'ordered'
     result = cli(root, output, '--list-file', str(selected), '--file', 'a.md', '--file', 'b.md')
     assert result.returncode == 0, result.stderr
-    assert report(output)['packages'][0]['documents'] == ['b.md', 'a.md']
+    assert [item['documents'] for item in report(output)['packages']] == [['b.md'], ['a.md']]
 
     manifest = put(tmp_path, 'input.json', json.dumps({'documents': [
         {'path': 'a.md', 'title': '原样标题', 'metadata': {'platform': 'explicit', 'nested': {'x': [1, True]}}},
@@ -114,11 +119,9 @@ def test_selectors_follow_command_line_order_and_manifest_preserves_explicit_met
     output = tmp_path / 'manifest-packages'
     result = cli(root, output, '--manifest', str(manifest))
     assert result.returncode == 0, result.stderr
-    package = MarkdownPackageReader().read(next(output.glob('*.zip')).read_bytes())
-    assert package['manifest']['documents'] == [
-        {'path': 'a.md', 'title': '原样标题', 'metadata': {'platform': 'explicit', 'nested': {'x': [1, True]}}},
-        {'path': 'b.md'},
-    ]
+    package = read_package(next(output.glob('*.zip')).read_bytes())
+    assert package['manifest'] == {'schema_version': 2, 'document':
+        {'entry': 'a.md', 'title': '原样标题', 'metadata': {'platform': 'explicit', 'nested': {'x': [1, True]}}}}
 
 
 @pytest.mark.parametrize(('reference', 'detail'), [
@@ -177,7 +180,7 @@ def test_rejects_bad_manifest(tmp_path, entries):
     assert_failed(cli(root, output, '--manifest', str(manifest)), output)
 
 
-def test_greedy_split_obeys_document_count_and_exact_stored_zip_bytes(tmp_path):
+def test_each_document_has_its_own_zip_and_obeys_exact_stored_zip_bytes(tmp_path):
     root = tmp_path / 'sources'
     for name in ('a.md', 'b.md', 'c.md'):
         put(root, name, '# rule\n' + 'x' * 500)
@@ -190,7 +193,7 @@ def test_greedy_split_obeys_document_count_and_exact_stored_zip_bytes(tmp_path):
     counted = tmp_path / 'counted'
     result = cli(root, counted, *selected, '--max-documents', '2')
     assert result.returncode == 0, result.stderr
-    assert [p['documents'] for p in report(counted)['packages']] == [['a.md', 'b.md'], ['c.md']]
+    assert [p['documents'] for p in report(counted)['packages']] == [['a.md'], ['b.md'], ['c.md']]
     bounded = tmp_path / 'bounded'
     result = cli(root, bounded, *selected, '--max-zip-bytes', str(single_size))
     assert result.returncode == 0, result.stderr
@@ -198,6 +201,40 @@ def test_greedy_split_obeys_document_count_and_exact_stored_zip_bytes(tmp_path):
     assert all(p['size_bytes'] == single_size for p in report(bounded)['packages'])
     failed = tmp_path / 'too-small'
     assert_failed(cli(root, failed, *selected, '--max-zip-bytes', str(single_size - 1)), failed, 'a.md', 'limit')
+
+
+def test_ordered_image_mode_creates_one_v2_document_without_modifying_sources(tmp_path):
+    root, output = tmp_path / 'sources', tmp_path / 'images'
+    put(root, 'assets/02.png', PNG)
+    put(root, 'assets/01.png', PNG)
+    result = cli(root, output, '--image', 'assets/02.png', '--image', 'assets/01.png', '--title', '规则截图')
+    assert result.returncode == 0, result.stderr
+    archives = list(output.glob('*.zip'))
+    assert len(archives) == 1
+    with zipfile.ZipFile(archives[0]) as archive:
+        assert json.loads(archive.read('manifest.json')) == {'schema_version': 2, 'document':
+            {'title': '规则截图', 'pages': ['assets/02.png', 'assets/01.png']}}
+        assert archive.read('assets/02.png') == PNG
+    parsed = read_package(archives[0].read_bytes())
+    assert [asset['provenance']['page_no'] for asset in parsed['documents'][0]['assets']] == [1, 2]
+    assert report(output)['packages'][0]['pages'] == ['assets/02.png', 'assets/01.png']
+
+
+def test_image_and_markdown_modes_cannot_be_mixed(tmp_path):
+    root, output = tmp_path / 'sources', tmp_path / 'packages'
+    put(root, 'rule.md', '# Rule')
+    put(root, 'assets/01.png', PNG)
+    assert_failed(cli(root, output, '--file', 'rule.md', '--image', 'assets/01.png'), output)
+
+
+def test_ordered_images_reject_animation_before_publishing(tmp_path):
+    from PIL import Image
+    stream = io.BytesIO()
+    frames = [Image.new('RGB', (2, 2), color=color) for color in ('red', 'blue')]
+    frames[0].save(stream, format='PNG', save_all=True, append_images=frames[1:], duration=100)
+    root, output = tmp_path / 'sources', tmp_path / 'packages'
+    put(root, 'assets/page.png', stream.getvalue())
+    assert_failed(cli(root, output, '--image', 'assets/page.png'), output)
 
 
 def test_failure_after_staging_first_package_publishes_no_finalized_outputs(tmp_path):
