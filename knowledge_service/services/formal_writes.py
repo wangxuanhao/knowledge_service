@@ -274,6 +274,13 @@ class _Planner:
             self._plan_record_put(
                 document, self.expected.get(document['id'], document_version))
         auto = []
+        # Reconciliation keeps each extracted mention as a retired record. Its
+        # source occurrence supports the surviving fact, not the retired ID.
+        reconciled_targets = {
+            row['metadata']['merged_into'] for row in self.records_input
+            if self.operation == 'extract' and row['kind'] in {'entity', 'relation'}
+            and row.get('metadata', {}).get('_deleted')
+            and row.get('metadata', {}).get('merged_into')}
         for ordinal, original in enumerate(self.records_input):
             record = self._canonical_record(original)
             expected_version = self.expected.get(record['id'])
@@ -364,10 +371,22 @@ class _Planner:
                     and record['kind'] in {'relation', 'attribute'}
                     and not record.get('metadata', {}).get('_deleted')):
                 self.fact_redirects.append((canonical_id, canonical_id))
+            retired_target = (record.get('metadata', {}).get('merged_into')
+                              if self.operation == 'extract'
+                              and record.get('metadata', {}).get('_deleted')
+                              and original['kind'] in {'entity', 'relation'} else None)
+            if (retired_target and original.get('source_id')
+                    and not self.policy.get('suppress_auto_assertions')):
+                # Resolve the canonical version after all survivor updates have
+                # been planned, including several mentions in the same batch.
+                auto.append((self._source_assertion(
+                    original, expected_version or 0, ordinal), retired_target, None))
             if (not self.policy.get('suppress_auto_assertions')
                     and self.operation in {'extract', 'manual_write', 'approve_review',
                                            'adopt_discovery'}
                     and original['kind'] in {'entity', 'relation', 'attribute'}
+                    and not (self.operation == 'extract' and expected_version
+                             and original['id'] in reconciled_targets)
                     and not record.get('metadata', {}).get('_deleted')):
                 auto.append((
                     self._source_assertion(

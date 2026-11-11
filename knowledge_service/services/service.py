@@ -1069,6 +1069,7 @@ class KnowledgeService:
                         discovery_candidates.append(item)
                     event(f"开放发现片段 {index+1}/{len(chunks)} 结果 · 实体 {sum(x['kind']=='entity' for x in candidates)} · 关系 {sum(x['kind']=='relation' for x in candidates)} · 属性 {sum(x['kind']=='attribute' for x in candidates)}")
             extracted_at = utc_now()
+            extracted_source_hash = hashlib.sha256(request['text'].encode('utf-8')).hexdigest()
             for row in derived:
                 extracted_start = row.get('valid_from')
                 valid_from = extracted_start or request.get('valid_from')
@@ -1079,6 +1080,8 @@ class KnowledgeService:
                 effective_source = ('explicit' if extracted_start else
                                     metadata.get('effective_time_source', 'unknown'))
                 row['metadata'] = {**metadata, **row.get('metadata', {}),
+                    'source_version_id': receipt['version_id'],
+                    'source_hash': extracted_source_hash,
                     'applicability':metadata['applicability'],
                     'published_at':metadata.get('published_at'),
                     'effective_time_source':effective_source,
