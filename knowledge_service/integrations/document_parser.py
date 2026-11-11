@@ -13,7 +13,8 @@ MAX_UPLOAD_BYTES = 25_000_000
 MAX_TEXT_CHARS = 1_000_000
 TEXT_EXTENSIONS = {'.txt', '.md'}
 DOCLING_EXTENSIONS = {'.pdf', '.docx', '.html', '.htm'}
-SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | DOCLING_EXTENSIONS
+VIDEO_EXTENSIONS = {'.mp4', '.webm'}
+SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | DOCLING_EXTENSIONS | VIDEO_EXTENSIONS
 
 
 class DocumentParseError(ValueError):
@@ -66,14 +67,26 @@ class DocumentParser:
         source = Path(path)
         extension = Path(original_name).suffix.lower()
         if extension not in SUPPORTED_EXTENSIONS:
-            raise DocumentParseError('unsupported_format', '仅支持 TXT、Markdown、PDF、DOCX、HTML 文件')
+            raise DocumentParseError('unsupported_format', '仅支持 TXT、Markdown、PDF、DOCX、HTML、MP4、WebM 文件')
         actual_size = source.stat().st_size if size is None else size
         if actual_size > self.max_upload_bytes:
             raise DocumentParseError('file_too_large', f'单个文件超过服务端上限（{self.max_upload_bytes} 字节）')
         checksum = digest or sha256(source.read_bytes()).hexdigest()
 
         assets,provenance=[],{}
-        if extension in TEXT_EXTENSIONS:
+        if extension in VIDEO_EXTENSIONS:
+            from .video_asr import inspect_video, ASRError
+            try:
+                details=inspect_video(source.read_bytes(), 'video/mp4' if extension=='.mp4' else 'video/webm')
+            except ASRError as exc:
+                raise DocumentParseError(exc.code,str(exc),503 if exc.code=='asr_engine_unavailable' else 422) from exc
+            text=''
+            provenance={'media_type':'video'}
+            assets=[dict(kind='local',status='available',original_path=Path(original_name).name,
+                         data=source.read_bytes(),mime_type=details['mime_type'],provenance=dict(media_type='video',duration_ms=details['duration_ms']))]
+            structural=dict(document_parser='ffprobe-video',parser_version='1',ocr_mode='not_applicable',
+                            duration_ms=details['duration_ms'],warnings=[])
+        elif extension in TEXT_EXTENSIONS:
             try:
                 text = source.read_bytes().decode('utf-8-sig')
             except UnicodeError as exc:
@@ -91,7 +104,7 @@ class DocumentParser:
         else:
             text, structural, assets, provenance = self._parse_docling(source)
 
-        if not text or not text.strip():
+        if (not text or not text.strip()) and extension not in VIDEO_EXTENSIONS:
             raise DocumentParseError('empty_document', '文档解析后没有可处理的正文')
         if len(text) > MAX_TEXT_CHARS:
             raise DocumentParseError('text_too_large', '解析后的正文超过 100 万字符限制')

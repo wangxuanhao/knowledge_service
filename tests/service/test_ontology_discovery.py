@@ -435,3 +435,32 @@ def test_materialization_validation_keeps_invalid_relation_pending():
     assert {item['candidate_id'] for item in skipped}=={'candidate-bad-count','candidate-edge'}
     assert report=={'conforms':True,'accepted_count':3,'skipped_count':2}
 from rdflib import RDFS, URIRef
+
+def test_discovery_assertions_pin_document_hash_and_source_receipt(tmp_path, monkeypatch):
+    import hashlib
+    from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
+
+    def discover(self, text, include_attributes=False, *, reserved_class_names=()):
+        return [{'id': 'platform', 'kind': 'entity', 'text': '平台',
+                 'proposed_type': '平台', 'evidence': '平台'}]
+
+    monkeypatch.setattr(SemanticaExtractor, 'discover', discover)
+    with TestClient(create_app(tmp_path / 'discovery-hash', HashingEncoder())) as client:
+        project = client.post('/api/projects', json={'name': 'discovery-hash',
+            'use_default_ontology': False, 'ontology_mode': 'discovery'}).json()['id']
+        text = '平台管理创作者。'
+        response = client.post(f'/api/projects/{project}/documents', json={
+            'title': '规则', 'text': text, 'extraction_mode': 'discovery',
+            'resolve_entities': False})
+        assert response.status_code == 201, response.text
+        candidates = response.json()['document']['metadata']['discovery_candidates']
+        assertions = client.get(f'/api/projects/{project}/assertions').json()['assertions']
+        assert len(candidates) == len(assertions) == 1
+        assertion = assertions[0]
+        expected = hashlib.sha256(text.encode('utf-8')).hexdigest()
+        assert assertion['source_hash'] == expected
+        assert candidates[0]['source_hash'] == expected
+        assert candidates[0]['source_version_id'] == assertion['document_version_id']
+        evidence = client.get(f'/api/projects/{project}/assertions/{assertion["id"]}/evidence')
+        assert evidence.status_code == 200
+        assert evidence.json()['integrity']['source_hash_status'] == 'matched'

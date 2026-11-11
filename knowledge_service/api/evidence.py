@@ -3,13 +3,13 @@
 业务逻辑在 services.evidence；本文件只把 HTTP 请求转成对业务函数的调用。
 """
 from ..models import Scope
-from ..services.evidence import evidence, resolve_assertion_evidence
+from ..services.evidence import evidence
 
 
 def install(app, service):
     @app.get('/api/projects/{p}/assertions/{assertion_id}/evidence')
     def assertion_evidence(p: str, assertion_id: str):
-        return resolve_assertion_evidence(service.data, p, assertion_id)
+        return service.data.assertion_evidence(p, assertion_id)
 
     @app.post('/api/projects/{p}/records/{record_id}/evidence')
     def source_evidence(p: str, record_id: str, request: Scope):

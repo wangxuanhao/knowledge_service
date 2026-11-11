@@ -78,7 +78,7 @@ test('UI keeps explicit graph purpose and bumps each changed runtime resource',(
   assert.ok(html.includes('id="scope-compatibility"'),'scope incompatibility remains visible');
   assert.ok(html.includes('#scope [hidden]{display:none!important}'),'page-owned filter controls stay hidden despite existing grid/flex CSS');
   assert.ok(html.includes('/assets/scope-fields.js?v=authority-retrieval-20261021-2'),'scope-fields.js version');
-  for(const [file,version] of [['workspace-context-ui.js','graph-workspace-20261105-1'],['workbench.js','graph-maintenance-20261109-2']])assert.ok(html.includes('/assets/'+file+'?v='+version),file+' version');
+  for(const [file,version] of [['workspace-context-ui.js','graph-workspace-20261105-1'],['workbench.js','split-previews-20261110-2']])assert.ok(html.includes('/assets/'+file+'?v='+version),file+' version');
   assert.ok(html.includes('/assets/workspace.js?v=graph-maintenance-20261109-2'),'workspace.js version');
 });
 

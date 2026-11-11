@@ -1,10 +1,12 @@
 """Real-browser contract for the knowledge-write chunk preview drawer."""
 from ontology_seed import seed_ontology
 import json
+import io
 import re
 import socket
 import threading
 import time
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,6 +16,7 @@ import uvicorn
 from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
 from knowledge_service.services.ontology import Ontology
+from source_test_images import png
 
 
 def _browser_path():
@@ -166,10 +169,118 @@ def _choose_text(page, title='预览规则', text='待切片的正文'):
     })
 
 
-def _request_preview(page, path_suffix='/documents/upload/preview'):
+def _request_preview(page, path_suffix='/documents/upload/preview', button='preview-chunks'):
     with page.expect_response(lambda response: response.url.endswith(path_suffix)):
-        page.click('#preview-chunks')
+        page.click('#'+button)
     page.wait_for_function("() => document.getElementById('chunk-preview-content').getAttribute('aria-busy') === 'false'")
+
+
+def test_drag_upload_remains_visible_and_updates_confirmation_in_every_step(workbench):
+    page = workbench.page
+    for step in range(3):
+        page.click(f'[data-upload-step="{step}"]')
+        assert page.locator('#doc-dropzone').is_visible()
+    page.evaluate("""() => {
+      const files = new DataTransfer();
+      files.items.add(new File(['第一份正文'], 'first.txt', {type:'text/plain'}));
+      document.getElementById('doc-dropzone').dispatchEvent(new DragEvent('drop', {bubbles:true,cancelable:true,dataTransfer:files}));
+    }""")
+    page.wait_for_function("window.DocumentUploadQueue.items().length===1")
+    assert '1 个文件' in page.locator('#library-upload-confirm').inner_text()
+    page.evaluate("""() => {
+      const files = new DataTransfer();
+      files.items.add(new File(['第二份正文'], 'second.txt', {type:'text/plain'}));
+      document.getElementById('doc-dropzone').dispatchEvent(new DragEvent('drop', {bubbles:true,cancelable:true,dataTransfer:files}));
+    }""")
+    page.wait_for_function("window.DocumentUploadQueue.items().length===2")
+    assert '2 个文件' in page.locator('#library-upload-confirm').inner_text()
+    assert page.locator('#preview-source').is_visible()
+    assert page.locator('#preview-chunks').is_visible()
+
+
+def test_invalid_drop_has_visible_feedback_on_the_confirmation_step(workbench):
+    page = workbench.page
+    page.evaluate("""() => {
+      const files = new DataTransfer();
+      files.items.add(new File(['invalid'], 'unsupported.exe', {type:'application/octet-stream'}));
+      document.getElementById('doc-dropzone').dispatchEvent(new DragEvent('drop', {bubbles:true,cancelable:true,dataTransfer:files}));
+    }""")
+    page.wait_for_function("document.getElementById('doc-batch-help').textContent.includes('不支持')")
+    assert page.locator('#doc-batch-help').is_visible()
+    assert page.evaluate('window.DocumentUploadQueue.items().length') == 0
+
+
+@pytest.mark.parametrize('width', [390, 1440])
+def test_real_zip_preview_switches_articles_images_and_chunks_without_importing(workbench, width):
+    page = workbench.page
+    page.set_viewport_size({'width': width, 'height': 960})
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as archive:
+        archive.writestr('platform/a.md', '# 第一份规则\n\n生效日期：2026年9月2日\n\n'
+                         '<table><tr><td>图片案例</td><td><img src="assets/a.png"></td></tr></table>\n\n'
+                         '第一份独立正文')
+        archive.writestr('platform/b.md', '# 第二份规则\n\n第二份独立正文\n\n'
+                         '![missing](assets/missing.png)\n\n![remote](https://example.invalid/image.png)\n\n'
+                         '<p onclick="window.zipPreviewPwned=true">安全正文</p>')
+        archive.writestr('platform/assets/a.png', png())
+    asset_requests = []
+    page.on('request', lambda request: asset_requests.append(request.url)
+            if '/source-documents/upload-preview/' in request.url or 'example.invalid' in request.url else None)
+    page.evaluate("""() => {
+      window.previewUrls = new Set(); window.revokedPreviewUrls = new Set();
+      const create = URL.createObjectURL.bind(URL), revoke = URL.revokeObjectURL.bind(URL);
+      URL.createObjectURL = value => { const url=create(value); window.previewUrls.add(url); return url; };
+      URL.revokeObjectURL = url => { window.revokedPreviewUrls.add(url); revoke(url); };
+    }""")
+    page.set_input_files('#doc-file', {'name': 'rules.zip', 'mimeType': 'application/zip', 'buffer': buffer.getvalue()})
+    assert 'ZIP' in page.locator('#doc-upload-formats').inner_text()
+    assert '.zip' in page.locator('#doc-file').get_attribute('accept')
+    assert page.locator('#preview-chunks').inner_text() == '预览切片'
+    assert page.locator('#preview-source').inner_text() == '预览原文'
+
+    _request_preview(page, button='preview-source')
+
+    drawer = page.locator('#chunk-preview')
+    assert drawer.locator('#chunk-preview-title').inner_text() == '原文预览'
+    assert drawer.locator('#chunk-preview-list').is_hidden()
+    assert drawer.locator('#chunk-preview-document option').count() == 2
+    assert '2 份 Markdown' in drawer.locator('#chunk-preview-package-summary').inner_text()
+    assert '第一份独立正文' in drawer.locator('#chunk-preview-content').inner_text()
+    image = drawer.locator('#chunk-preview-content img')
+    image.scroll_into_view_if_needed()
+    page.wait_for_function("() => document.querySelector('#chunk-preview-content img')?.naturalWidth > 0")
+    assert image.get_attribute('src').startswith('blob:')
+    drawer.locator('.source-image-open').click()
+    zoom = page.get_by_role('dialog', name='图片全屏查看')
+    assert zoom.is_visible()
+    page.keyboard.press('Escape')
+    assert not zoom.is_visible()
+    assert drawer.is_visible()
+    drawer.locator('.source-image-open').click()
+    zoom.get_by_role('button', name='关闭图片 ×').click()
+
+    with page.expect_response(lambda response: response.url.endswith('/documents/upload/preview')):
+        drawer.locator('#chunk-preview-document').select_option('platform/b.md')
+    page.wait_for_function("() => document.getElementById('chunk-preview-content').textContent.includes('第二份独立正文')")
+    assert '图片缺失或不可读' in drawer.locator('#chunk-preview-content').inner_text()
+    assert '外链图片' in drawer.locator('#chunk-preview-content').inner_text()
+    assert page.evaluate('window.zipPreviewPwned') is None
+    assert not asset_requests
+    drawer.locator('#chunk-preview-document').select_option('platform/a.md')
+    page.wait_for_function("() => document.getElementById('chunk-preview-content').textContent.includes('第一份独立正文')")
+    assert drawer.locator('#chunk-preview-document').evaluate('(element) => element.scrollWidth <= element.clientWidth + 2')
+    screenshots = Path(__file__).resolve().parents[2] / '.benchmarks' / 'zip-preview-20261110'
+    screenshots.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(screenshots / f'zip-preview-{width}.png'))
+    drawer.locator('#chunk-preview-close').click()
+    assert page.evaluate('window.previewUrls.size === window.revokedPreviewUrls.size')
+    assert page.locator('#doc-file-list .document-queue-row').count() == 1
+    _request_preview(page)
+    assert drawer.locator('#chunk-preview-title').inner_text() == '切片预览'
+    assert drawer.locator('#chunk-preview-list').is_visible()
+    assert drawer.locator('#chunk-preview-content pre').count() == 1
+    assert drawer.locator('#chunk-preview-content img').count() == 0
+    assert drawer.get_by_role('button', name='图文正文').count() == 0
 
 
 def _dialog_accessibility(page):
@@ -338,6 +449,57 @@ def test_preview_traps_focus_and_stays_inside_narrow_viewports(workbench, width)
     assert page.evaluate('document.documentElement.clientWidth === window.innerWidth')
     assert page.evaluate(
         'document.documentElement.scrollWidth <= window.innerWidth')
+
+
+@pytest.mark.parametrize('width', [390, 1440])
+def test_document_date_evidence_scrolls_without_hiding_preview_controls(workbench, width):
+    page = workbench.page
+    page.set_viewport_size({'width': width, 'height': 844})
+    result = _preview_result('第一片正文', '第二片正文')
+    result['document_time'] = {
+        'published_at': '2026-09-24T16:00:00Z', 'valid_from': None, 'valid_until': None,
+        'document_temporal': {'fields': {'published_at': {
+            'status': 'extracted', 'candidates': [
+                {'raw': '<img src=x onerror="window.previewTemporalPwned=true">'
+                        + '发布时间：2026年9月25日' + '文档日期依据' * 20,
+                 'start_char': index * 20, 'end_char': index * 20 + 19, 'kind': 'header'}
+                for index in range(40)
+            ],
+        }}, 'warnings': []},
+    }
+    _route_json(page, '**/documents/upload/preview', result)
+    _choose_text(page)
+    _request_preview(page)
+    drawer = page.locator('#chunk-preview')
+    drawer.wait_for(state='visible')
+    dates = drawer.locator('#chunk-preview-summary')
+    assert '原文发布时间 · 2026-09-25' in dates.inner_text()
+    assert '业务生效 · 未知' in dates.inner_text()
+    assert '未设结束时间' in dates.inner_text()
+    assert '持续有效' not in dates.inner_text()
+    evidence = dates.locator('details')
+    assert evidence.evaluate('(element) => element.open') is False
+    evidence.locator('summary').click()
+    assert evidence.evaluate('(element) => element.open') is True
+    assert '解析正文位置 0–19' in evidence.inner_text()
+    assert evidence.locator('img').count() == 0
+    assert page.evaluate('window.previewTemporalPwned') is None
+
+    overview = drawer.locator('.chunk-preview-overview')
+    assert overview.evaluate('(element) => element.scrollHeight > element.clientHeight')
+    assert overview.evaluate('(element) => element.clientHeight <= innerHeight * .45 + 1')
+    overview.evaluate('(element) => { element.scrollTop = element.scrollHeight; }')
+    assert overview.evaluate('(element) => element.scrollTop > 0')
+    overview.evaluate('(element) => { element.scrollTop = 0; }')
+    for region in [overview, drawer.locator('.chunk-preview-content')]:
+        assert region.evaluate('(element) => element.scrollWidth <= element.clientWidth + 1')
+    content_box = drawer.locator('.chunk-preview-content').bounding_box()
+    assert content_box and content_box['height'] > 40
+    assert content_box['y'] + content_box['height'] <= 845
+    drawer.get_by_role('button', name=re.compile(r'^片段\s*2')).click()
+    assert '第二片正文' in drawer.locator('#chunk-preview-content').inner_text()
+    drawer.get_by_role('button', name=re.compile('关闭')).click()
+    drawer.wait_for(state='hidden')
 
 
 def test_file_preview_uses_upload_endpoint_and_opens_the_same_drawer(workbench):

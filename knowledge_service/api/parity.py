@@ -84,6 +84,7 @@ def install(app,service):
     def ingest_capabilities():
         result=limits.model_dump()
         result['ocr_available']=app.state.source_documents.image_ocr.adapter.available()
+        result['asr_available']=app.state.source_documents.video_asr.adapter.available()
         result['ocr_max_pixels']=getattr(app.state.source_documents.image_ocr.adapter,'max_pixels',limits.ocr_max_pixels)
         return result
 
@@ -230,27 +231,21 @@ def install(app,service):
     def preview_document(p:str,request:Ingest):
         service.data.get_project(p)
         from ..services.chunking import split_document
+        from ..services.document_temporal import document_time_preview
         chunks=split_document(request.text, request.model_dump())
         return {'total':len(chunks),'chunks':chunks[:20],'preview_limit':20,
+                'document_time':document_time_preview(request.text, request.model_dump()),
                 'strategy':request.chunk_strategy,'chunk_size':request.chunk_size,'chunk_overlap':request.chunk_overlap}
 
     @router.post('/projects/{p}/documents/upload/preview')
-    def preview_upload(p: str, file: UploadFile = File(...), options: str = Form('{}')):
+    def preview_upload(p: str, file: UploadFile = File(...), options: str = Form('{}'),
+                       package_path: str | None = Form(None),
+                       preview_view: Literal['source', 'chunks', 'combined'] = Form('combined')):
         service.data.get_project(p)
         uploads = app.state.document_uploads
         parsed_options = uploads.parse_options(options)
-        staged = uploads.stage(file)
-        try:
-            payload, parsed = uploads.payload(staged, parsed_options)
-            from ..services.chunking import split_document
-            chunks = split_document(payload['text'], payload)
-            return {'total': len(chunks), 'chunks': chunks[:20], 'preview_limit': 20,
-                    'strategy': parsed_options.chunk_strategy,
-                    'chunk_size': parsed_options.chunk_size,
-                    'chunk_overlap': parsed_options.chunk_overlap,
-                    'parsed': parsed.metadata}
-        finally:
-            uploads.discard(staged)
+        from ..services.document_preview import preview_upload as build_upload_preview
+        return build_upload_preview(uploads, file, parsed_options, limits, package_path, preview_view)
 
     @router.post('/projects/{p}/documents/upload/jobs', status_code=202)
     def document_upload_job(p: str, file: UploadFile = File(...), options: str = Form('{}')):

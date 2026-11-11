@@ -78,10 +78,14 @@ class MarkdownPackageReader:
                     asset.update(resolved_path=resolved, original_path=image['path'])
                     if resolved in files:
                         mime=mimetypes.guess_type(resolved)[0]
-                        if mime not in {'image/png','image/jpeg','image/webp','image/gif','image/bmp','image/tiff'}:
+                        is_video=image.get('provenance',{}).get('media_type')=='video'
+                        allowed={'video/mp4','video/webm'} if is_video else {'image/png','image/jpeg','image/webp','image/gif','image/bmp','image/tiff'}
+                        if mime not in allowed:
                             asset['status']='missing'
                             warnings.append(dict(code='source_asset_missing',path=resolved,reason='unsupported_image_format'))
                         else:
+                            if is_video and len(files[resolved])>25_000_000:
+                                raise ValueError('Package video exceeds 25 MB limit')
                             asset.update(data=files[resolved], status='available', mime_type=mime)
                     else:
                         asset['status'] = 'missing'

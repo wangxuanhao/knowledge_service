@@ -68,6 +68,54 @@ def test_reader_locates_entity_without_painting_whole_blocks(tmp_path):
         browser.close()
 
 
+def test_reader_tabs_wait_until_initial_source_metadata_is_ready():
+    doc = dict(original_name='规则.md', version=1, sha256='fixed', assets=[], chunks=[],
+               blocks=[dict(block_id='body', type='paragraph', normalized_text='已加载正文',
+                            source_start_line=1, source_end_line=1)])
+    with sync_playwright() as runtime:
+        browser = runtime.chromium.launch(headless=True, executable_path=
+            r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe')
+        page = browser.new_page()
+
+        def respond(route):
+            if route.request.url.endswith('/rendered'):
+                route.fulfill(content_type='text/html', body='<p>已加载正文</p>')
+            elif '/source-documents/' in route.request.url:
+                route.fulfill(json=doc)
+            else:
+                route.fulfill(content_type='text/html', body='<button>打开</button>')
+
+        page.route('http://reader.test/**', respond)
+        page.goto('http://reader.test/')
+        page.add_script_tag(path=str(WEB / 'source-content.js'))
+        page.add_script_tag(path=str(WEB / 'source-reader.js'))
+        page.evaluate('''doc => {
+            const originalFetch = window.fetch.bind(window);
+            window.fetch = (url, ...args) => {
+                if (String(url).endsWith('/source-documents/v') && !window.metadataReleased) {
+                    return new Promise(resolve => {
+                        window.releaseMetadata = () => {
+                            window.metadataReleased = true;
+                            resolve(new Response(JSON.stringify(doc), {
+                                headers: {'Content-Type': 'application/json'}
+                            }));
+                        };
+                    });
+                }
+                return originalFetch(url, ...args);
+            };
+            void SourceReader.open({projectId: 'p', versionId: 'v'});
+        }''', doc)
+        parsed = page.get_by_role('button', name='解析视图', exact=True)
+        assert parsed.is_disabled(), 'view clicks must wait for their source-specific handlers'
+        page.evaluate('window.releaseMetadata()')
+        parsed.click()
+        page.locator('.source-parsed-block').wait_for()
+        assert parsed.get_attribute('aria-pressed') == 'true'
+        assert '已加载正文' in page.locator('.source-reader-body').inner_text()
+        browser.close()
+
+
 if __name__ == '__main__':
     import sys
     output = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('.benchmarks/source-reader-location')

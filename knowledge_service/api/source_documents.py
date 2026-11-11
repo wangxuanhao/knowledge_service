@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from .audit_identity import audit_actor
 from ..services.source_documents import SourceDocumentService, SourceDocumentUnavailable, SourceOCRError
+from ..integrations.video_asr import ASRError
 
 
 class IgnoreImage(BaseModel):
@@ -36,7 +37,7 @@ def install(app, service):
     def rendered(project_id: str, version_id: str):
         result = sources.rendered(project_id, version_id)
         return HTMLResponse(result['html'], headers={
-            'Content-Security-Policy': "default-src 'none'; img-src 'self'; style-src 'none'",
+            'Content-Security-Policy': "default-src 'none'; img-src 'self'; media-src 'self' blob:; style-src 'none'",
             'X-Content-Type-Options': 'nosniff'})
 
     @router.get('/{version_id}/source')
@@ -69,6 +70,17 @@ def install(app, service):
             return {'run': runs[-1] if runs else {'status': 'pending'},
                     'blocks': runs[-1].get('blocks', []) if runs else [], 'runs': runs}
         return result
+
+    @router.get('/{version_id}/assets/{asset_id}/asr')
+    def asr(project_id: str, version_id: str, asset_id: str):
+        return sources.asr(project_id,version_id,asset_id)
+
+    @router.post('/{version_id}/assets/{asset_id}/asr/retry')
+    def retry_asr(project_id: str, version_id: str, asset_id: str):
+        try:
+            return sources.video_asr.process_asset(project_id,version_id,asset_id,retry=True)
+        except ASRError as exc:
+            raise HTTPException(status_code=422,detail={'code':exc.code,'message':str(exc)}) from exc
 
     @router.post('/{version_id}/assets/{asset_id}/ocr/retry')
     def retry_ocr(project_id: str, version_id: str, asset_id: str):

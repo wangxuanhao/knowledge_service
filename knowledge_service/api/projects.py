@@ -21,7 +21,7 @@ def _cleanup_project_projections(app, service, repository, project_id):
     owner = f'api-delete:{uuid4()}'
     targets = []
     if service.milvus_store is not None:
-        targets.append(('milvus', lambda: service.milvus_store.delete(project_id)))
+        targets.append(('milvus', lambda: service.milvus_store.cleanup_project(project_id)))
     targets.append(('neo4j', lambda: app.state.neo4j.delete_project(project_id)))
     for target, cleanup in targets:
         try:

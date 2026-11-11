@@ -51,6 +51,17 @@
   // IRI 取末段短名：http://meituan.com/kg#Merchant → Merchant
   const shortIri = (v) => safe(v).split(/[\/:#]/).pop();
 
+  function documentTimeSnapshot(result) {
+    const doc=result?.document;
+    if(!doc)return null;
+    const metadata=doc.metadata||{};
+    return {published_at:doc.published_at??metadata.published_at??null,
+      valid_from:doc.valid_from??null,valid_until:doc.valid_until??null,
+      revised_at:doc.revised_at??metadata.revised_at??null,
+      effective_time_source:doc.effective_time_source||metadata.effective_time_source,
+      document_temporal:doc.document_temporal||metadata.document_temporal};
+  }
+
   // ---- 抽屉容器（右侧滑出；复用 provenance-drawer 范式） --------------------
   const root = el('section', 'ingest-drawer');
   root.id = 'ingest-drawer';
@@ -180,6 +191,7 @@
       d.documentId = docId;
       d.runId=job.result?.run_id||job.result?.document?.metadata?.run_id||null;
       d.resultSummary=window.IngestResultSummary?.text(job.result)||'';d.hasSavedKnowledge=!!window.IngestResultSummary?.hasKnowledge(job.result);
+      d.documentTime=documentTimeSnapshot(job.result);
       const assertionsUrl = '/api/projects/' + encodeURIComponent(d.projectId)
         + '/assertions?document_id=' + encodeURIComponent(docId);
       const r = await api(assertionsUrl, undefined, 'GET');
@@ -233,6 +245,11 @@
     card.append(barWrap);
     card.append(el('p', 'ingest-job__stage', d.stage || ''));
     if(d.resultSummary)card.append(el('p','ingest-job__result-summary',d.resultSummary));
+    if(d.documentTime&&window.DocumentTemporalUI){
+      const temporal=el('div','ingest-job__result-summary');
+      temporal.innerHTML=window.DocumentTemporalUI.render(d.documentTime);
+      card.append(temporal);
+    }
 
     if (d.status === 'failed' && d.error) {
       card.append(el('p', 'ingest-job__error', '原文收据已保留，可改后重新上传：' + d.error));
@@ -426,6 +443,7 @@
       d.documentId = documentId;
       d.runId=item.result?.run_id||item.result?.document?.metadata?.run_id||null;d.batchId=item.batch_id||null;
       d.resultSummary=window.IngestResultSummary?.text(item.result)||'';d.hasSavedKnowledge=!!window.IngestResultSummary?.hasKnowledge(item.result);
+      d.documentTime=documentTimeSnapshot(item.result);
       const result = await api('/api/projects/' + encodeURIComponent(d.projectId)
         + '/assertions?document_id=' + encodeURIComponent(documentId), undefined, 'GET');
       d.asserts = Array.isArray(result.assertions) ? result.assertions : [];

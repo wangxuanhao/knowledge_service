@@ -24,13 +24,18 @@ def capabilities():
         concurrency_choices=['auto',1,2,4,8],server_concurrency_limit=_positive('KNOWLEDGE_INGEST_DOCUMENT_CONCURRENCY',4),
         llm_concurrency_limit=_positive('KNOWLEDGE_LLM_CONCURRENCY',2),ocr_concurrency_limit=_positive('KNOWLEDGE_OCR_CONCURRENCY',1),
         ocr_available=_ocr_available(),ocr_languages=['zh','en'],ocr_image_extensions=['.png','.jpg','.jpeg','.webp','.bmp','.gif','.tif','.tiff'],
-        ocr_max_pixels=_positive('KNOWLEDGE_OCR_MAX_PIXELS',40_000_000),
+        ocr_max_pixels=_positive('KNOWLEDGE_OCR_MAX_PIXELS',40_000_000),asr_available=_asr_available(),
+        asr_max_duration_seconds=min(600,_positive('KG_VIDEO_ASR_MAX_DURATION_SECONDS',600)),
         supported_extensions=sorted(SUPPORTED_EXTENSIONS|({'.zip'} if package_enabled else set())),
         markdown_package=package_enabled,source_reader=_flag('KNOWLEDGE_INGEST_SOURCE_READER'))
 
 def _ocr_available():
     from ..integrations.image_ocr import RapidOCRAdapter
     return RapidOCRAdapter().available()
+
+def _asr_available():
+    from ..integrations.video_asr import FunASRAdapter
+    return FunASRAdapter().available()
 
 def public_item(row):
     row={k:v for k,v in row.items() if k not in ('content','upload_object_id','storage_key','upload_storage_key','lease_owner','lease_token','lease_until')}

@@ -40,11 +40,13 @@ class DocumentUploads:
         except (ValidationError, ValueError) as exc:
             raise DocumentParseError('invalid_options', 'options 必须是符合上传契约的 JSON 对象') from exc
 
-    def stage(self, upload) -> StagedUpload:
+    def stage(self, upload, *, allow_package=False, max_bytes=MAX_UPLOAD_BYTES) -> StagedUpload:
         original_name = Path(upload.filename or '').name
         extension = Path(original_name).suffix.lower()
-        if not original_name or extension not in SUPPORTED_EXTENSIONS:
-            raise DocumentParseError('unsupported_format', '仅支持 TXT、Markdown、PDF、DOCX、HTML 文件')
+        supported = SUPPORTED_EXTENSIONS | ({'.zip'} if allow_package else set())
+        if not original_name or extension not in supported:
+            formats = 'TXT、Markdown、PDF、DOCX、HTML、MP4、WebM' + ('、Markdown 附件 ZIP 知识包' if allow_package else '')
+            raise DocumentParseError('unsupported_format', '仅支持 ' + formats + ' 文件')
         target = self.root / f'{uuid4().hex}{extension}'
         digest = sha256()
         size = 0
@@ -55,8 +57,8 @@ class DocumentUploads:
                     if not chunk:
                         break
                     size += len(chunk)
-                    if size > MAX_UPLOAD_BYTES:
-                        raise DocumentParseError('file_too_large', '单个文件不能超过 25 MB')
+                    if size > max_bytes:
+                        raise DocumentParseError('file_too_large', f'单个文件不能超过 {max_bytes / 1_000_000:g} MB')
                     digest.update(chunk)
                     handle.write(chunk)
         except Exception:
@@ -112,8 +114,10 @@ class DocumentUploads:
         def map_chunks(saved):
             for row,chunk in zip(saved,chunks):
                 if chunk.get('source_spans'):sources.store.add_spans(project_id,source['id'],row['version_id'],chunk['source_spans'])
+        from .document_temporal import source_temporal_exclusions
         data.update(text=text,metadata={**metadata,'warnings':warnings},_document_id=document_id,
-                    _prepared_chunks=chunks,_source_span_mapper=map_chunks)
+                    _prepared_chunks=chunks,_source_span_mapper=map_chunks,
+                    _document_temporal_exclusions=source_temporal_exclusions(source))
         return service.ingest(project_id,data)
 
     def discard(self, staged: StagedUpload):

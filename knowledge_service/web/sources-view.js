@@ -52,6 +52,7 @@
       ${stats.length?`<span class="source-meta__stats">${esc(stats.join(' · '))}</span>`:''}
     </div>${missing?'<p class="source-meta__missing">未记录原始文件信息；可以阅读已保存正文，资料编号见下方来源信息。</p>':''}
     <div class="source-meta__mapping"><h4>资料状态</h4><p>${esc(state.detail)}</p></div>
+    ${window.DocumentTemporalUI?.render(doc)||''}
     <details class="source-technical"><summary>资料标识与来源信息</summary><dl><dt>资料编号</dt><dd>${esc(doc.id)}</dd>${metadata.source_document_version_id?`<dt>原始文件版本编号</dt><dd>${esc(metadata.source_document_version_id)}</dd>`:''}${parser?`<dt>解析器</dt><dd>${esc(parser)}</dd>`:''}</dl></details>`;
   }
   function updateCounts(){

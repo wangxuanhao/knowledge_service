@@ -802,9 +802,12 @@ class KnowledgeService:
         public_settings = {key: value for key, value in request.items()
                            if key in IngestSettings.model_fields}
         settings = IngestSettings.model_validate(public_settings).model_dump()
+        if settings['document_time_mode'] == 'manual' and previous_source in {'explicit', 'published_at', 'unknown'}:
+            settings['metadata']['effective_time_source'] = previous_source
+        from .document_temporal import resolve_document_temporal
+        settings = resolve_document_temporal(request['text'], {**settings, 'title': request['title']},
+            excluded_ranges=request.get('_document_temporal_exclusions', ()))
         request.update(settings)
-        if previous_source in {'explicit', 'published_at', 'unknown'}:
-            request['metadata']['effective_time_source'] = previous_source
         extraction_mode=request['extraction_mode']
         event(f"文档开始 · {request['title']} · {len(request['text'])} 字符 · 项目 {project_id} · 模式 {extraction_mode}",5)
         self.repository.get_project(project_id)
@@ -1017,6 +1020,7 @@ class KnowledgeService:
                         for name in (record.local_name,*record.labels)
                         if str(name).strip())
                 event('开放本体发现已启用 · 候选不会直接进入正式图谱',15)
+                discovery_source_hash = hashlib.sha256(request['text'].encode('utf-8')).hexdigest()
                 for index,chunk in enumerate(chunk_records):
                     with stage(f"开放发现片段 {index+1}/{len(chunks)} · 位置 {chunk['metadata']['start_char']}–{chunk['metadata']['end_char']}",15+int(60*index/len(chunks))):
                         candidates=self.extract_ingest_chunk(extractor,chunk['text'],discovery_options={
@@ -1035,6 +1039,7 @@ class KnowledgeService:
                         item_end=(item_start+len(item_evidence)
                             if local_offset>=0 else chunk['metadata']['end_char'])
                         item={**item,'id':id_map[item['id']], 'chunk_id':chunk['id'],
+                            'source_version_id':receipt['version_id'],'source_hash':discovery_source_hash,
                             'start_char':item_start,'end_char':item_end,
                             'evidence':item_evidence,'status':'pending','created_at':utc_now(),
                             'applicability':metadata['applicability'],

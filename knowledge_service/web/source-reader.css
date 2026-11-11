@@ -30,3 +30,6 @@
 .source-image-zoom::backdrop{background:#142e2dbb}.source-image-zoom header{display:flex;justify-content:space-between;align-items:center;gap:18px;margin-bottom:14px}.source-image-zoom p{margin:0;overflow-wrap:anywhere}.source-image-zoom button{flex-shrink:0}.source-image-zoom>img{display:block;width:auto;max-width:100%;height:auto;max-height:calc(90vh - 100px);object-fit:contain;margin:auto}
 .source-reader,.source-reader-body{box-sizing:border-box;min-width:0}.source-reader-tabs{flex-wrap:wrap}.source-reader-body{font-family:inherit}.source-reader-body .source-reader-note{padding:0}
 @media(max-width:600px){.source-reader{width:96vw;max-width:96vw}.source-reader>header{gap:12px}.source-reader h2{font-size:17px}.source-reader-tabs{padding-left:14px;padding-right:14px}.source-image-zoom{padding:12px}.source-image-zoom header{gap:10px;font-size:12px}.source-rich-content th,.source-rich-content td{padding:8px 10px}}
+ .source-rich-content video{display:block;width:100%;max-height:60vh;margin:12px 0;background:#101828;border-radius:8px}
+ .source-asr-segment{display:block;width:100%;text-align:left;white-space:normal;margin:8px 0}
+ .source-video-state{display:block;margin:8px 0;color:var(--muted,#667085)}

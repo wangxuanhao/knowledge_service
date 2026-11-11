@@ -74,6 +74,7 @@
   async function open({projectId,versionId,location=null,assertionId=null,chunkVersionId=null,focusText=null}){
     controller?.abort();clearContent();controller=new AbortController();const {signal}=controller,token=++serial;
     if(!dialog.open)returnFocus=document.activeElement;restoreFocus=true;body.textContent='正在加载固定版本原文…';note.textContent='';
+    for(const button of Object.values(tabButtons))button.disabled=true;
     if(!dialog.open)dialog.showModal();
     try{
       let doc=await get(sourceUrl(projectId,versionId),signal);if(token!==serial)return;
@@ -94,7 +95,7 @@
         body.textContent='正在加载…';note.textContent=versionNote;for(const [k,b] of Object.entries(tabButtons))b.setAttribute('aria-pressed',String(k===tab));
         try{
           if(tab==='raw'){
-            const binary=/\.(pdf|docx?|odt|pptx?)$/i.test(doc.original_name||'');
+            const binary=/\.(pdf|docx?|odt|pptx?|mp4|webm)$/i.test(doc.original_name||'');
             if(raw===null){raw=binary?doc.source_text||'该格式请下载原文件查看。':await get(sourceUrl(projectId,versionId,'source'),signal,true);}
             if(!accepts())return;
             const downloads=make('div','','source-downloads'),downloadItems=window.SourceContent.downloadOptions(doc);
@@ -112,8 +113,8 @@
               part.dataset.chunkVersionId=chunk.version_id;
               part.append(make('summary','模型片段 · '+chunk.id+' · 固定版本 '+chunk.version_id));
               const kind=chunk.metadata?.source_kind;
-              part.append(make('p',kind==='image_ocr'?'图片 OCR 文字；抽取时会附加识别误差提醒。':'Markdown / 文档正文片段'),make('pre',chunk.text));
-              part.append(make('small','来源块：'+(chunk.spans||[]).map(s=>s.block_id||s.ocr_block_id).filter(Boolean).join('、')));
+              part.append(make('p',kind==='video_asr'?'视频语音转写；点击下方语音时段定位原视频。':kind==='image_ocr'?'图片 OCR 文字；抽取时会附加识别误差提醒。':'Markdown / 文档正文片段'),make('pre',chunk.text));
+              part.append(make('small','来源块：'+(chunk.spans||[]).map(s=>s.block_id||s.ocr_block_id||s.asr_segment_id).filter(Boolean).join('、')));
               body.append(part);
             }
             for(const block of parsed){const section=make('section','','source-parsed-block');section.dataset.blockId=block.block_id||block.id;
@@ -121,6 +122,23 @@
               if(block.payload?.rows)section.append(make('pre',JSON.stringify(block.payload.rows,null,2)));body.append(section);}
             for(const asset of doc.assets||[]){
               const section=make('section','','source-parsed-block');section.append(make('h3',asset.original_path||'图片'),make('p','附件状态：'+(labels[asset.status]||asset.status||'未处理')));
+              if(asset.provenance?.media_type==='video'){
+                if(asset.kind==='external'){section.append(make('p','外部视频，未固化。请提供本地视频附件。'));body.append(section);continue;}
+                const result=await get(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/asr'),signal);
+                if(!accepts())return;
+                const run=(result.runs||[]).find(item=>item.id===location?.asr_run_id)||result.run||{status:'pending'};
+                section.append(make('p','ASR 状态：'+(labels[run.status]||run.status)),make('p',(run.engine||'SenseVoice / FSMN-VAD')+' '+(run.engine_version||'')));
+                for(const segment of run.segments||result.segments||[]){
+                  const seek=make('button',(segment.start_ms/1000).toFixed(2)+'–'+(segment.end_ms/1000).toFixed(2)+' 秒 · '+segment.normalized_text,'secondary source-asr-segment');seek.type='button';
+                  seek.onclick=()=>{location={asset_id:asset.id,start_ms:segment.start_ms,end_ms:segment.end_ms,asr_run_id:run.id,asr_segment_id:segment.id,tab:'reading'};show('reading');};section.append(seek);
+                }
+                if(run.public_error)section.append(make('p',run.public_error));
+                if(run.status==='failed'||run.status==='pending'){
+                  const retry=make('button','重试语音转写','secondary');retry.type='button';
+                  retry.onclick=async()=>{retry.disabled=true;try{await api(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/asr/retry'),{});await show('parsed');}catch(e){if(accepts()){retry.disabled=false;status(e.message,true);}}};section.append(retry);
+                }
+                body.append(section);continue;
+              }
               if(asset.status==='missing'){
                 section.append(make('p','缺失图片，请补传完整知识包。若已确认该引用不参与知识提取，可以明确忽略。'));
                 const ignore=make('button','该引用不参与知识提取，忽略并继续','secondary');
@@ -177,7 +195,7 @@
           if(firstFocus){note.textContent+=precise?' · 已定位证据文字':' · 已定位来源块（未保存精确文字范围）';firstFocus.scrollIntoView({block:'center'});}
           if(location?.asset_id&&tab==='reading'){
             const asset=(doc.assets||[]).find(a=>a.id===location.asset_id);
-            if(asset){
+            if(asset&&asset.provenance?.media_type!=='video'){
               const boxes=location.boxes||location.ocr_blocks||[],figure=overlay(asset,boxes,projectId,versionId);
               const existing=[...body.querySelectorAll('img[data-asset-id]')].find(n=>n.dataset.assetId===asset.id);
               if(existing)existing.replaceWith(figure);else body.append(figure);
@@ -190,9 +208,13 @@
             }
           }
           view.hydrateImages();
+          if(tab==='reading'&&location?.asset_id&&Number.isFinite(location.start_ms))view.seekVideo(location.asset_id,location.start_ms);
         }catch(e){if(e.name!=='AbortError'&&accepts()){view.dispose();body.textContent=e.message;}}
       }
-      for(const [id,b] of Object.entries(tabButtons))b.onclick=()=>show(id);
+      for(const [id,b] of Object.entries(tabButtons)){
+        b.onclick=()=>show(id);
+        b.disabled=false;
+      }
       await show(location?.tab==='parsed'?'parsed':'reading');
     }catch(e){if(e.name!=='AbortError'&&token===serial)body.textContent=e.message;}
   }

@@ -196,7 +196,7 @@ test('actual extracted time provenance requires matching current boundaries and 
 test('shared controls replace the duplicate QA date and time helper loads before all consumers with new versions',()=>{
   const html=read('index.html');assert.equal(html.includes('id="qa-as-of"'),false,'QA duplicate business date is removed');
   for(const id of ['scope-time-mode','scope-valid-at-field','scope-include-unknown','scope-time-help','scope-time-applied'])assert.ok(html.includes('id="'+id+'"'),id);
-  for(const [file,version] of [['workspace-context-ui.js','graph-workspace-20261105-1'],['workbench.js','graph-maintenance-20261109-2'],['evidence-inspector.js','graph-maintenance-20261109-2']])assert.ok(html.includes('/assets/'+file+'?v='+version),file);
+  for(const [file,version] of [['workspace-context-ui.js','graph-workspace-20261105-1'],['workbench.js','split-previews-20261110-2'],['evidence-inspector.js','graph-maintenance-20261109-2']])assert.ok(html.includes('/assets/'+file+'?v='+version),file);
   assert.ok(html.includes('/assets/temporal-scope.js?v=unified-temporal-20261028-2'),'temporal helper DST preservation version');
   assert.ok(html.includes('/assets/workspace.js?v=graph-maintenance-20261109-2'),'workspace includes concurrent graph updates');
   assert.ok(html.includes('/assets/workspace-context.css?v=unified-temporal-20261028-2'),'responsive scope styles version');

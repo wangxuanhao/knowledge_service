@@ -18,6 +18,9 @@
     if(previous?.extraction_mode!==current.extraction_mode||(previous?.ontology_id??null)!==(current.ontology_id??null)){
       throw Error('未完成上传批次的提取模式或本体版本与当前选择不同。请先清空文件列表，再重新选择文件提交新批次。');
     }
+    if((previous?.document_time_mode||'manual')!==(current.document_time_mode||'manual')){
+      throw Error('未完成上传批次的文档时间模式与当前选择不同。请先清空文件列表，再重新选择文件提交新批次。');
+    }
   }
   function queueLease(queue,project,currentProject){
     const generation=queue?.generation;

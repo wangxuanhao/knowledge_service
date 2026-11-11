@@ -80,6 +80,10 @@ def split_mapped_chunks(chunks, options, return_text=False):
             current_metadata['heading_paths'] = paths
         if current_metadata.get('source_kind') == 'image_ocr':
             current_metadata['ocr_block_ids'] = list(dict.fromkeys(s['ocr_block_id'] for s in mapped))
+        if current_metadata.get('source_kind') == 'video_asr':
+            current_metadata['asr_segment_ids'] = list(dict.fromkeys(s['asr_segment_id'] for s in mapped))
+            current_metadata['start_ms'] = min(s['payload']['start_ms'] for s in mapped)
+            current_metadata['end_ms'] = max(s['payload']['end_ms'] for s in mapped)
         rows.append({**row, 'source_spans': mapped, 'metadata': current_metadata})
     return (rows, text) if return_text else rows
 

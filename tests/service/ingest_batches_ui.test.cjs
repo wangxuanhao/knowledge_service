@@ -30,6 +30,15 @@ test('partial upload sessions cannot silently retain a different ontology releas
   assert.doesNotThrow(()=>ui.assertSessionSettings({extraction_mode:'discovery',ontology_id:null},
     {extraction_mode:'discovery'}));
 });
+test('partial upload sessions retain their document time mode and treat legacy settings as manual',()=>{
+  const settings={extraction_mode:'documents'};
+  assert.throws(()=>ui.assertSessionSettings({...settings,document_time_mode:'auto'},
+    {...settings,document_time_mode:'manual'}),/时间模式/);
+  assert.throws(()=>ui.assertSessionSettings(settings,{...settings,document_time_mode:'auto'}),/时间模式/);
+  assert.doesNotThrow(()=>ui.assertSessionSettings(settings,{...settings,document_time_mode:'manual'}));
+  assert.doesNotThrow(()=>ui.assertSessionSettings({...settings,document_time_mode:'auto'},
+    {...settings,document_time_mode:'auto'}));
+});
 test('late batch completions cannot overwrite a new queue generation or clear its session',()=>{
   const {queueLease}=require('../../knowledge_service/web/ingest-batches.js');
   assert.equal(typeof queueLease,'function');

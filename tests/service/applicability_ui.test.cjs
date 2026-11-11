@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 
 function setup(){
-  const ids=['doc-file','doc-text','doc-title','doc-meta','doc-published-at','doc-valid-from','doc-valid-until',
+  const ids=['doc-file','doc-text','doc-title','doc-meta','doc-time-mode','doc-published-at','doc-valid-from','doc-valid-until',
     'doc-platforms','doc-businesses','doc-audiences','doc-platforms-mode','doc-businesses-mode','doc-audiences-mode',
     'doc-effective-help','query-platforms','query-businesses','query-audiences','project','ingest',
     'doc-file-list','doc-batch-help','doc-upload-summary','doc-clear-files','doc-retry-files','doc-dropzone'];
@@ -24,6 +24,7 @@ function setup(){
 
 test('upload applicability and dates are top-level options, not arbitrary metadata',()=>{
   const {fields:f,read}=setup();
+  f['doc-time-mode'].value='manual';
   f['doc-meta'].value='{"region":"华东"}';
   f['doc-platforms-mode'].value='specific';
   f['doc-businesses-mode'].value='specific';
@@ -50,6 +51,7 @@ test('upload applicability and dates are top-level options, not arbitrary metada
 
 test('explicit effective time wins and expiry must be later than effective time',()=>{
   const {fields:f,read}=setup();
+  f['doc-time-mode'].value='manual';
   f['doc-published-at'].value='2026-09-01T08:30';
   f['doc-valid-from'].value='2026-09-02T08:30';
   f['doc-valid-until'].value='2026-09-02T08:30';
@@ -58,7 +60,8 @@ test('explicit effective time wins and expiry must be later than effective time'
   const value=read();
   assert.equal(value.valid_from,new Date('2026-09-02T08:30').toISOString());
   assert.match(f['doc-effective-help'].textContent,/显式生效时间/);
-  assert.match(f['doc-effective-help'].textContent,/持续有效/);
+  assert.match(f['doc-effective-help'].textContent,/未设结束时间/);
+  assert.doesNotMatch(f['doc-effective-help'].textContent,/持续有效/);
 });
 
 test('text and batch documents share cloned top-level applicability options',async()=>{
@@ -133,7 +136,8 @@ test('HTML exposes three-state upload fields, project vocabularies, time semanti
   }
   assert.match(html,/指定范围/);assert.match(html,/全部适用/);assert.match(html,/暂不确定/);
   assert.match(html,/左闭右开|\[生效[^<]*失效\)/);
-  assert.match(html,/本批文件共用[^<]*(?:范围|时间)|范围与时间由本批文件共用/);
+  assert.match(html,/适用范围由本批文件共用/);
+  assert.match(html,/留空.*逐份|逐份.*留空/);
   const ingest=fs.readFileSync('knowledge_service/web/ingest-mode.js','utf8');
   assert.match(ingest,/applicability-values/);
   assert.match(ingest,/metadata\.applicability/);
@@ -154,7 +158,8 @@ test('evidence formatter surfaces applicability and validity returned by the ser
   assert.match(text,/平台：美团/);
   assert.match(text,/业务：外卖/);
   assert.match(text,/对象：商户/);
-  assert.match(text,/持续有效/);
+  assert.match(text,/未设结束时间/);
+  assert.doesNotMatch(text,/持续有效/);
   assert.match(fs.readFileSync('knowledge_service/web/workbench.js','utf8'),/ApplicabilityUI\?\.describe\?\.\(row\)/);
 });
 
@@ -162,7 +167,18 @@ test('unknown effective time is not described as ongoing validity',()=>{
   const {fields:f,window}=setup();
   const text=window.ApplicabilityUI.describe({valid_from:null,valid_until:null});
   assert.doesNotMatch(text,/持续有效/);
-  assert.match(f['doc-effective-help'].textContent,/尚未提供发布时间或生效时间/);
-  assert.match(f['doc-effective-help'].textContent,/未设失效时间/);
+  assert.match(f['doc-effective-help'].textContent,/逐份识别/);
+  assert.match(f['doc-effective-help'].textContent,/未设结束时间/);
   assert.doesNotMatch(f['doc-effective-help'].textContent,/持续有效/);
+});
+
+test('switching time mode refreshes batch override and inferred publication help',()=>{
+  const {fields:f}=setup();
+  f['doc-published-at'].value='2026-09-01T08:30';
+  f['doc-time-mode'].value='manual';f['doc-time-mode'].dispatch('change');
+  assert.match(f['doc-effective-help'].textContent,/沿用发布时间.*推定|发布时间推定/);
+  f['doc-time-mode'].value='auto';f['doc-time-mode'].dispatch('change');
+  assert.match(f['doc-effective-help'].textContent,/本批覆盖/);
+  assert.match(f['doc-effective-help'].textContent,/逐份识别/);
+  assert.doesNotMatch(f['doc-effective-help'].textContent,/实际生效：2026-09-01/);
 });

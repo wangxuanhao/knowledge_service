@@ -52,7 +52,7 @@ data/                   本地模型、来源文件及样本数据，勿作缓�
 ```powershell
 conda activate llm_model
 # 仅新环境需要安装依赖：
-python -m pip install -e ".[local-export,milvus,neo4j,ocr,semantica-runtime,test]"
+python -m pip install -e ".[local-export,milvus,neo4j,ocr,asr,semantica-runtime,test]"
 docker compose up -d --wait
 python -m knowledge_service.repository.migrate
 # 本地 BGE-M3 已放好后，首次或更换权重时准备一次；保留原始权重：
@@ -73,6 +73,10 @@ python -u -m knowledge_service --port 8100
 
 本地推理分为两个依赖入口：`local-export` 用于离线准备和向量对照，包含完整模型框架；`local-onnx` 只需要 ONNX Runtime 与 Tokenizers。已准备的 BGE-M3 在线默认使用轻量运行时，不导入 Torch/Transformers/SentenceTransformers。部署时保留原模型与整个 `onnx-runtime` 目录，初始化会核对源文件和全部制品。普通服务启动只读取制品，不重复导出。
 
+视频 ASR 使用 `asr` 可选依赖。本机已验证 FunASR 1.3.22、Torch / Torchaudio 2.8.0 与 CPU 双线程，运行主机须在 PATH 提供 FFmpeg / ffprobe。部署时复制完整的 `iic/SenseVoiceSmall` 与 `iic/speech_fsmn_vad_zh-cn-16k-common-pytorch` 本地模型目录，分别配置 `KG_VIDEO_ASR_MODEL_ROOT` 与 `KG_VIDEO_ASR_VAD_ROOT`。两份模型使用 Apache-2.0 许可证，复制时保留各自许可证与说明。Worker 禁用网络、模型更新和远程代码，每个任务独立启动并退出释放模型内存，默认超时 600 秒，首次导入模型耗时计入该预算。
+
+首期视频上限为 25 MB、10 分钟，支持 H.264 / AAC MP4 与 VP8、VP9、AV1 配 Opus / Vorbis WebM。独立视频、Markdown 的 `<video src="assets/clip.mp4">` 与 `[观看视频](assets/clip.webm)` 共用上传和 ZIP 附件链路。本地视频原件进入来源对象存储，ASR 文字与真实 VAD 时段进入 PostgreSQL，阅读器通过鉴权 Blob 播放并按转写段定位。预览展示原件，正式处理执行转写。外部视频链接标记为待固化，由提交者提供本地附件。
+
 `KG_LOCAL_EMBEDDING_RUNTIME=auto` 自动选择有效制品；没有制品的其他模型兼容原 ST 路径。`onnx` 强制要求已准备制品；`sentence-transformers` 可显式回到原运行时。已存在但过期或损坏的制品会明确失败，需要重新准备，避免向既有索引写入不同语义的向量。实测、兼容范围与恢复方式见 [推理依赖拆分](docs/research/2026-10-28-embedding-runtime-optimization.md)。
 
 ## 测试与手册
@@ -91,7 +95,7 @@ Python 默认收集 `tests/service` 和 `tests/scripts`。Node 的 `.cjs` 必须
 
 ## 真实验收与容量
 
-保留的“容量验收 · 15万实体 / 30万关系（保留测试）”项目可从项目管理进入，当前有 150001 实体、300000 关系。业务数据、模型、上传资料和 Docker 卷不属于本次文件清理范围。
+2026-11-10 按用户要求备份并清理历史项目，当前保留“案例演示 · 平台规则知识图谱”，包含 2 份原文、85 个实体和 69 条关系。原容量验收项目已纳入清理前备份，具体备份、核验及保留范围见[项目整理记录](docs/2026-11-10-项目整理记录.md)。
 
 本体编辑、实体融合/消歧/撤销、版本治理及现行回归均保留。当前 15 万节点向量检索性能、新的性能 P95 和有效规则问答质量仍有待验收，普通小项目或单项绘图测量不能替代。详见 [生产检查点](docs/research/2026-10-22-production-checkpoint.md) 和完整手册第 27 章。
 

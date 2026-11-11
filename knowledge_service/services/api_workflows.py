@@ -38,6 +38,11 @@ class ApplicationData:
         from ..repository.page_reads import PageReads
         return PageReads(self.__repository).assertions_batch(project_id,record_ids)
 
+    def assertion_evidence(self, project_id, assertion_id):
+        """Resolve frozen sources using the concrete persistence dependency."""
+        from .evidence import resolve_assertion_evidence
+        return resolve_assertion_evidence(self.__repository, project_id, assertion_id)
+
     def metadata_groups(self, project_id, scope):
         """Scoped metadata objects weighted by their record counts."""
         from ..repository.page_reads import PageReads

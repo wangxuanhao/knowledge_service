@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import tempfile
 
-from ..models import Ingest
+from ..models import Ingest, UploadOptions
 from ..integrations.document_parser import DocumentParser
 from .chunking import split_source_blocks, split_mapped_chunks
 from .ingest_checkpoints import IngestCheckpoints
@@ -25,7 +25,8 @@ class DocumentCheckpointContext:
 
     def _runtime_identity(self):
         root=Path(__file__).resolve().parents[1]
-        versions=['integrations/markdown_parser.py','services/chunking.py','services/image_ocr.py']
+        versions=['integrations/markdown_parser.py','services/chunking.py','services/image_ocr.py',
+                  'integrations/video_asr.py','integrations/video_asr_worker.py','services/video_asr.py']
         settings=()
         if self.mode!='documents':
             versions.append('integrations/semantica_adapter.py')
@@ -139,9 +140,16 @@ class DocumentIngestRunner:
         metadata = {**options.pop('metadata', {}),**{k:v for k,v in source.get('parser_metadata',{}).items() if k!='provenance'},'warnings':warnings,'source_document_version_id':source['id'],
                     'batch_id':item['batch_id'], 'batch_item_id':item['id'], 'file_sha256':item['file_sha256'],
                     'document_generation':item.get('document_generation',0)}
-        payload = Ingest.model_validate(dict(options, title=title, text=text, metadata=metadata)).model_dump()
+        if not text and options.get('extraction_mode')=='documents':
+            # Media-only reading receipts can complete without inventing indexable text.
+            payload = UploadOptions.model_validate(dict(options,title=title,metadata=metadata)).model_dump()
+            payload['text']=text
+        else:
+            payload = Ingest.model_validate(dict(options, title=title, text=text, metadata=metadata)).model_dump()
         context = DocumentCheckpointContext(self.store,self.checkpoints,item,owner,self.sources,chunks,self.halt,payload.get('extraction_mode'))
-        payload.update(_document_id=item['document_id'], _checkpoint_context=context, _prepared_chunks=chunks)
+        from .document_temporal import source_temporal_exclusions
+        payload.update(_document_id=item['document_id'], _checkpoint_context=context, _prepared_chunks=chunks,
+            _document_temporal_exclusions=source_temporal_exclusions(source))
         token=ingest_commit_guard.set(context.formal_guard)
         try:
             return self.service.ingest(item['project_id'], payload)

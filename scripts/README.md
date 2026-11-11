@@ -8,12 +8,27 @@
 | --- | --- | --- |
 | 启动应用 | [start-service.ps1](start-service.ps1) 或 `python -m knowledge_service --port 8100` | 已有 conda 环境和基础设施；正常业务服务 |
 | 生成当前手册 | [build_knowledge_service_manual.py](build_knowledge_service_manual.py) | 不连接业务库；生成并静态校验当前 MD/HTML |
+| 打包部分平台规则与媒体 | [package_rule_documents.py](package_rule_documents.py) | 通过选件清单收集 MD 与引用图片、视频，保留相对目录并自动分包，输出 manifest 和核对报告 |
+| 真实上传到图谱验收 | [verify_platform_rule_pipeline.py](verify_platform_rule_pipeline.py) | 创建隔离项目，通过真实 OCR/LLM、候选选择、本体审核发布、来源校验、索引、三类检索和图谱会话验证最小关系链，保存状态支持恢复 |
 | 静态校验当前手册 | [verify_redesign_manual.py](verify_redesign_manual.py) | 检查章节、路由、链接、图片；`--build` 可同时生成 |
 | 内容与权威数据差分 | [verify_production_content.py](verify_production_content.py) | 正常认证和真实服务；默认依赖保留的指定验收项目 ID，不是任意部署的通用 smoke |
 | 部署前后存储检查点 | [production_storage_checkpoint.py](production_storage_checkpoint.py) | 读取 PG 和 Milvus schema/计数/回执；`--output` 保存，`--compare` 对比 |
 | 真实账号权限专题 | [verify_auth_rbac.py](verify_auth_rbac.py) | 真实认证专题，需要指定服务和可用账号 |
 
 本机服务健康可直接请求 `GET http://127.0.0.1:8100/api/health`；健康通过不替代检索、写入、发布或容量验收。旧 `smoke_service.py` 已移除，因为它依赖已废弃的默认本体/自动向量化假设和返回字段。
+
+### 真实规则链路验收
+
+在仓库根目录与现有环境运行。文件可用打包工具按 `--file` 或 `--list-file` 选取。验收命令会在隔离项目审核并发布所选的一条关系及其两个实体，默认采用 10000 字符固定窗口。账户从当前 `.env` 读取，也可使用 `KG_ACCEPTANCE_USERNAME`、`KG_ACCEPTANCE_PASSWORD` 指定。
+
+```powershell
+& 'D:\anaconda\envs\llm_model\python.exe' scripts/verify_platform_rule_pipeline.py `
+  --file 'D:\workspace\knowledge_service_v2\outputs\platform-rule-e2e-text\rule-documents-001.zip' `
+  --output-dir '.benchmarks/my-rule-acceptance' `
+  --platform '抖音电商'
+```
+
+首次运行创建项目与批次，再次使用相同输入和输出目录可恢复。输出包括 `state.json`、候选和发布回执、固定来源校验、索引状态、三类检索及图谱结果，完成后生成 `report.json`。质量拦截会保存失败阶段并返回非零，需要在资料库审核、补件或重试后继续。已有记录缺少来源哈希时，命令根据固定文档与不可变切片独立验证，再核对 MinIO 原件和原包哈希。正式本体定义继续按业务审核确定。
 
 ## 运维与模型工具
 

@@ -251,6 +251,29 @@ test('result drawer surfaces saved task counts independently of current document
   assert.match(f.text(),/开放发现候选 3 条.*实体 1.*关系 1.*属性 1/);
 });
 
+for(const entry of ['task','batch'])test(entry+' completion retains saved document dates and evidence without another record read',async()=>{
+  const result={document:{id:'doc-1',text:'FULL_DOCUMENT_TEXT',valid_from:null,valid_until:null,
+    metadata:{published_at:'2026-09-24T16:00:00Z',document_temporal:{fields:{published_at:{
+      status:'extracted',candidates:[{raw:'发布日期：2026年9月25日',start_char:0,end_char:17}],
+    }},warnings:[]}}}};
+  const f=fixture({jobResult:result,assertionError:Error('当前知识状态暂不可用')}),snapshots=[];
+  const renderer=require('../../knowledge_service/web/document-temporal-ui.js');
+  f.context.window.DocumentTemporalUI={render(snapshot){snapshots.push(snapshot);return renderer.render(snapshot);}};
+  if(entry==='task'){
+    f.context.window.IngestResults.watch('dated-job','规则.md',{projectId:'p',mode:'documents'});await f.settle();
+  }else await f.context.window.IngestResults.showBatchItem({id:'dated-item',original_name:'规则.md',document_id:'doc-1',result},
+    {projectId:'p',mode:'documents'});
+  const time=f.list.children[0].children.find(node=>node.innerHTML?.includes('文档时间'));
+  assert.ok(time,'saved document time remains available when current assertions cannot load');
+  assert.match(time.innerHTML,/原文发布时间.*2026-09-25/);
+  assert.match(time.innerHTML,/业务生效.*未知/);
+  assert.match(time.innerHTML,/识别依据/);
+  assert.doesNotMatch(time.innerHTML,/持续有效/);
+  assert.ok(snapshots.length>0);
+  assert.ok(snapshots.every(snapshot=>snapshot.text===undefined));
+  assert.ok(!f.apiCalls.some(url=>url.includes('/records/')));
+});
+
 test('reprocessed document details are explicitly distinguished from the old task and batch snapshot',async()=>{
   for(const entry of ['task','batch']){
     const result={run_id:'old-run',document:{id:'doc-1',metadata:{discovery_candidates:[{id:'original-candidate',kind:'entity'}]}},discovery_candidates:1};

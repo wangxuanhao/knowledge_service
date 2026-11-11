@@ -295,7 +295,7 @@ def test_synchronous_cleanup_acks_success_and_keeps_failures_for_retry():
             self.failed.append((project_id, target, owner, token, str(error)))
 
     class Milvus:
-        def delete(self, project_id):
+        def cleanup_project(self, project_id):
             return 1
 
     class Neo4j:
@@ -328,7 +328,7 @@ def test_synchronous_cleanup_respects_an_existing_lease():
             return None
 
     class Store:
-        def delete(self, project_id):
+        def cleanup_project(self, project_id):
             raise AssertionError('leased cleanup must not execute')
 
     class Neo4j:

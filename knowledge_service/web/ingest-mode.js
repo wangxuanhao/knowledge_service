@@ -2,16 +2,17 @@
 (() => {
   // Conservative fallback permits selection; submission requires capabilities.
   let limits={max_file_bytes:25_000_000,max_batch_items:20,max_batch_bytes:100_000_000,
-    supported_extensions:['.txt','.md','.pdf','.docx','.html','.htm']};
+    supported_extensions:['.txt','.md','.pdf','.docx','.html','.htm','.mp4','.webm']};
   const file=document.getElementById('doc-file'),text=document.getElementById('doc-text');
   const modes=[...document.querySelectorAll('input[name="document-input-mode"]')];
   const rows=[];let generation=0;
   const mode=()=>modes.find(input=>input.checked)?.value||'file';
   const key=f=>[f.name,f.size||0,f.lastModified||0].join(':');
-  const size=value=>value<1000?value+' B':value<1_000_000?(value/1000).toFixed(1)+' KB':(value/1_000_000)+' MB';
-  const icon=name=>/\.pdf$/i.test(name)?'PDF':/\.docx$/i.test(name)?'DOCX':/\.html?$/i.test(name)?'HTML':/\.md$/i.test(name)?'MD':'TXT';
+  const size=value=>value<1000?value+' B':value<1_000_000?(value/1000).toFixed(1)+' KB':Number((value/1_000_000).toFixed(2))+' MB';
+  const icon=name=>/\.zip$/i.test(name)?'ZIP':/\.pdf$/i.test(name)?'PDF':/\.docx$/i.test(name)?'DOCX':/\.html?$/i.test(name)?'HTML':/\.md$/i.test(name)?'MD':'TXT';
   const statusText=item=>({ready:'待提交',uploading:'正在上传',queued:'已进入队列',failed:'提交失败'}[item.status]||item.status);
   const field=id=>document.getElementById(id);
+  const timeMode=()=>field('doc-time-mode')?.value==='manual'?'manual':'auto';
   const splitList=value=>[...new Set(String(value||'').split(/[,，]/).map(item=>item.trim()).filter(Boolean))];
   const instant=(id,label)=>{
     const value=field(id)?.value?.trim();
@@ -35,10 +36,15 @@
       parts.push(dimensionText('业务',applicability.businesses));
       parts.push(dimensionText('对象',applicability.audiences));
     }
-    const effective=value?.valid_from||value?.effective_at||value?.published_at;
-    if(effective)parts.push('生效：'+localTime(effective));
+    const published=value?.published_at||value?.metadata?.published_at;
+    const inferred=!value?.valid_from&&!value?.effective_at&&value?.document_time_mode==='manual'&&published;
+    const effective=value?.valid_from||value?.effective_at||inferred;
+    const source=value?.effective_time_source||value?.metadata?.effective_time_source;
+    if(published)parts.push('发布时间：'+localTime(published));
+    if(effective)parts.push('生效：'+localTime(effective)+(inferred||source==='published_at'?'（发布时间推定）':''));
+    else if(value&&('valid_from' in value||value.document_time_mode))parts.push('生效：未知');
     if(value?.valid_until)parts.push('失效：'+localTime(value.valid_until));
-    else if(effective&&value&&'valid_until' in value)parts.push('持续有效');
+    else if(value&&('valid_until' in value||value.document_time_mode))parts.push('未设结束时间');
     return parts.join(' · ');
   };
   const readDimension=name=>{
@@ -60,10 +66,18 @@
   const updateEffectiveHelp=()=>{
     const help=field('doc-effective-help');if(!help)return;
     const published=field('doc-published-at')?.value?.trim(),explicit=field('doc-valid-from')?.value?.trim();
-    const until=field('doc-valid-until')?.value?.trim(),effective=explicit||published;
-    const source=explicit?'显式生效时间':published?'沿用发布时间':'尚未提供发布时间或生效时间';
-    help.textContent=(effective?'实际生效：'+localTime(effective)+'（'+source+'）':source)+'；'+
-      (until?'失效：'+localTime(until):effective?'未设失效时间，持续有效。':'未设失效时间。')+
+    const until=field('doc-valid-until')?.value?.trim();
+    if(timeMode()==='auto'){
+      help.textContent='手工填写的时间为本批覆盖值；留空字段从每份文档逐份识别。'+
+        (explicit?'显式生效时间：'+localTime(explicit)+'。':'生效时间未识别时保持未知。')+
+        (until?'失效时间覆盖为 '+localTime(until)+'。':'未识别到失效日期时显示未设结束时间。')+
+        '预览可核验日期与识别依据；时间区间按左闭右开 [生效, 失效) 解释。';
+      return;
+    }
+    const effective=explicit||published;
+    const source=explicit?'显式生效时间':published?'沿用发布时间推定':'尚未提供发布时间或生效时间';
+    help.textContent='手工填写的时间由本批文件共用；'+(effective?'实际生效：'+localTime(effective)+'（'+source+'）':source)+'；'+
+      (until?'失效：'+localTime(until)+'。':'未设结束时间。')+
       '时间区间按左闭右开 [生效, 失效) 解释。';
   };
   window.ApplicabilityUI={
@@ -119,11 +133,16 @@
     const summary=document.getElementById('doc-upload-summary');
     if(summary)summary.textContent=rows.length?`${rows.length} 个文件 · ${size(total)} · ${rows.filter(item=>item.status==='queued').length} 个已提交`:'尚未选择文件';
     const help=document.getElementById('doc-batch-help');
-    if(help)help.textContent=rows.length>1?'多文件分别以文件名作为标题；适用范围、发布时间、生效/失效时间和 Metadata 为本批共用。':'';
+    const hasPackage=rows.some(item=>/\.zip$/i.test(item.file.name));
+    if(help)help.textContent=[rows.length>1?'多文件分别以文件名作为标题；适用范围和 Metadata 为本批共用。自动模式逐份识别时间，手工填写的时间覆盖本批所有文件。':'',
+      hasPackage?'ZIP 内每份 Markdown 分别建立资料，图片按相对路径关联。可预览包内文档后提交。':''].filter(Boolean).join(' ');
+    const preview=document.getElementById('preview-chunks');
+    if(preview)preview.textContent='预览切片';
     const title=document.getElementById('doc-title');
     if(title){title.disabled=mode()==='file'&&rows.length>1;title.required=mode()==='text';}
     const submit=document.getElementById('ingest');
     if(submit)submit.textContent=mode()==='file'?(rows.length?`上传并解析 ${queue.eligible().length} 个文件`:'上传并处理'):'提交正文并处理';
+    window.LibraryWorkspace?.queueChanged?.();
   }
 
   const queue=window.DocumentUploadQueue={
@@ -151,6 +170,13 @@
       if(value.markdown_package&&!extensions.includes('.zip'))extensions.push('.zip');
       limits={...value,supported_extensions:extensions};
       if(file)file.accept=extensions.join(',');
+      const names={'.txt':'TXT','.md':'Markdown','.pdf':'PDF','.docx':'DOCX','.html':'HTML','.htm':'HTML','.mp4':'MP4','.webm':'WebM','.zip':'ZIP 知识包'};
+      const formats=document.getElementById('doc-upload-formats');
+      if(formats)formats.textContent='支持 '+[...new Set(extensions.map(extension=>names[extension]||extension))].join('、');
+      const suffixes=document.getElementById('doc-upload-extensions');
+      if(suffixes)suffixes.textContent=extensions.join(' · ');
+      const packageHelp=document.getElementById('doc-upload-package-help');
+      if(packageHelp){packageHelp.hidden=!value.markdown_package;packageHelp.textContent='ZIP 知识包保留 Markdown 与 assets 相对目录，可切换包内文档预览图文正文与切片。';}
       const help=document.getElementById('doc-upload-limits');
       if(help)help.textContent=`单文件最大 ${size(value.max_file_bytes)}，最多 ${value.max_batch_items} 个，单批合计不超过 ${size(value.max_batch_bytes)}。`;
       const chip=document.querySelector('.document-limit-chip');if(chip)chip.textContent='单文件 '+size(value.max_file_bytes);
@@ -171,12 +197,20 @@
     render();
   };
   modes.forEach(input=>input.addEventListener('change',refresh));
-  if(file)file.onchange=()=>{try{queue.add(file.files);}catch(error){window.uploadQueueError?.(error);throw error;}finally{file.value='';}};
+  async function addSelectedFiles(files){
+    const selected=[...files],requestGeneration=generation,project=field('project')?.value;
+    try{
+      await window.IngestBatches?.loadCapabilities?.();
+      if(generation!==requestGeneration||project!==field('project')?.value)return;
+      queue.add(selected);
+    }catch(error){window.uploadQueueError?.(error);}
+  }
+  if(file)file.onchange=()=>{const selected=[...file.files];file.value='';return addSelectedFiles(selected);};
   const dropzone=document.getElementById('doc-dropzone');
   if(dropzone){
     for(const name of ['dragenter','dragover'])dropzone.addEventListener(name,event=>{event.preventDefault();dropzone.classList.add('drag-over');});
     for(const name of ['dragleave','drop'])dropzone.addEventListener(name,event=>{event.preventDefault();dropzone.classList.remove('drag-over');});
-    dropzone.addEventListener('drop',event=>{try{queue.add(event.dataTransfer.files);}catch(error){window.uploadQueueError?.(error);}});
+    dropzone.addEventListener('drop',event=>addSelectedFiles(event.dataTransfer.files));
     dropzone.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();file?.click();}});
   }
   document.getElementById('doc-clear-files')?.addEventListener('click',()=>queue.clear());
@@ -198,12 +232,12 @@
   };
   window.readDocumentUploadOptions=()=>{
     const applicability=readApplicability();
-    const options={metadata:validateMetadata(),applicability};
+    const options={metadata:validateMetadata(),applicability,document_time_mode:timeMode()};
     options.metadata.applicability=cloneApplicability(applicability);
     const published_at=instant('doc-published-at','发布时间');
     const valid_from=instant('doc-valid-from','生效时间');
     const valid_until=instant('doc-valid-until','失效时间');
-    const effective=valid_from||published_at;
+    const effective=valid_from||(options.document_time_mode==='manual'?published_at:undefined);
     if(effective&&valid_until&&valid_until<=effective)throw Error('失效时间必须晚于生效时间。');
     if(published_at)options.published_at=published_at;
     if(valid_from)options.valid_from=valid_from;
@@ -238,6 +272,7 @@
   };
   window.uploadQueueError=error=>{const target=document.getElementById('doc-batch-help');if(target)target.textContent=error.message;};
   for(const id of ['doc-published-at','doc-valid-from','doc-valid-until'])field(id)?.addEventListener('input',updateEffectiveHelp);
+  field('doc-time-mode')?.addEventListener('change',updateEffectiveHelp);
   for(const name of ['platforms','businesses','audiences']){
     field('doc-'+name+'-mode')?.addEventListener('change',()=>syncDimension(name));syncDimension(name);
   }

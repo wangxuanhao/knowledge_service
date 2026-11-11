@@ -65,3 +65,20 @@ def test_source_location_uses_frozen_version_and_chunk(monkeypatch):
                               {'version_id': 'chunk-v'})
     assert calls == [('p', 'frozen-v', 'chunk-v')]
     assert result['document_version_id'] == 'frozen-v'
+
+
+def test_exact_asr_quote_recomputes_video_time_from_only_intersecting_segments():
+    from knowledge_service.services.evidence import _clip_source_location
+    spans=[dict(asr_segment_id='first',chunk_start_char=0,chunk_end_char=4,block_start_char=0,block_end_char=4),
+           dict(asr_segment_id='second',chunk_start_char=5,chunk_end_char=9,block_start_char=0,block_end_char=4)]
+    segments=[dict(id='first',asset_id='asset',asr_run_id='run',start_ms=100,end_ms=400),
+              dict(id='second',asset_id='asset',asr_run_id='run',start_ms=600,end_ms=900)]
+    resolution=dict(location=dict(mode='exact',start_char=5,end_char=9),chunk={'start_char':0},
+                    source_location=dict(status='available',spans=spans,segments=segments,asset_id='asset',
+                        start_ms=100,end_ms=900,asr_segment_id='first',asr_run_id='run'))
+    _clip_source_location(resolution)
+    mapped=resolution['source_location']
+    assert mapped['precision']=='evidence'
+    assert mapped['segments']==[segments[1]]
+    assert mapped['asr_segment_id']=='second' and mapped['asr_run_id']=='run'
+    assert mapped['start_ms']==600 and mapped['end_ms']==900 and mapped['asset_id']=='asset'

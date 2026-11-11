@@ -138,6 +138,7 @@ class ResolutionReviewDecision(Request):
 
 class IngestSettings(Request):
     metadata: dict[str, Any] = Field(default_factory=dict)
+    document_time_mode: Literal['auto', 'manual'] = 'manual'
     applicability: Applicability | None = None
     published_at: str | None = None
     valid_from: str | None = None
@@ -171,12 +172,25 @@ class IngestSettings(Request):
         if self.published_at is not None:
             self.metadata['published_at'] = self.published_at
         explicit = self.valid_from is not None
-        self.valid_from = normalize_time(self.valid_from) if explicit else self.published_at
+        self.valid_from = (normalize_time(self.valid_from) if explicit else
+                           self.published_at if self.document_time_mode == 'manual' else None)
         self.valid_until = normalize_time(self.valid_until)
         if self.valid_from and self.valid_until and self.valid_until <= self.valid_from:
             raise ValueError('失效时间必须晚于生效时间')
-        self.metadata['effective_time_source'] = ('explicit' if explicit else
-            'published_at' if self.published_at else 'unknown')
+        previous_source = self.metadata.get('effective_time_source')
+        temporal = self.metadata.get('document_temporal')
+        temporal_fields = temporal.get('fields') if isinstance(temporal, dict) else None
+        temporal_start = temporal_fields.get('valid_from') if isinstance(temporal_fields, dict) else None
+        source = ('explicit' if explicit else
+                  'published_at' if self.valid_from else 'unknown')
+        if (self.document_time_mode == 'auto' and isinstance(temporal_start, dict)
+                and temporal_start.get('value') == self.valid_from
+                and temporal_start.get('status') == 'extracted'):
+            source = 'extracted'
+        elif (self.document_time_mode == 'manual' and previous_source == 'published_at'
+              and self.valid_from == self.published_at):
+            source = 'published_at'
+        self.metadata['effective_time_source'] = source
         return self
 
 class Ingest(IngestSettings):
@@ -204,6 +218,10 @@ class IngestCapabilities(BaseModel):
     ocr_languages: list[str]
     ocr_image_extensions: list[str]
     ocr_max_pixels: int
+    asr_available: bool = False
+    asr_video_extensions: list[str] = Field(default_factory=lambda: ['.mp4','.webm'])
+    asr_concurrency_limit: int = 1
+    asr_max_duration_seconds: int = 600
     supported_extensions: list[str]
     markdown_package: bool
     source_reader: bool

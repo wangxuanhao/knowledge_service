@@ -35,6 +35,8 @@
     const state=createState({canWrite:()=>Boolean(root.Auth?.isAdmin?.()),clear(){
       root.DocumentUploadQueue?.clear();
       for(const id of ['doc-title','doc-meta','doc-platforms','doc-businesses','doc-audiences','doc-published-at','doc-valid-from','doc-valid-until'])get(id).value='';
+      const timeMode=get('doc-time-mode');
+      if(timeMode){timeMode.value='auto';timeMode.dispatchEvent(new Event('change'));}
       for(const name of ['platforms','businesses','audiences']){const select=get('doc-'+name+'-mode');select.value='unknown';select.dispatchEvent(new Event('change'));}
       get('batch').value=initialBatch;get('doc-submit-results').replaceChildren();
     }});
@@ -58,6 +60,8 @@
     host.append(nav,context,notice,...Object.values(sections));
     const taskLink=button('打开构建与任务 ↗',()=>{shell.close({restoreFocus:false});showRuntimeView('jobs');});sections.batches.append(taskLink);
     const workspace=panel.querySelector('.document-upload-workspace'),fileMain=panel.querySelector('.document-upload-main'),options=panel.querySelector('.document-options');
+    const fileZone=fileMain.querySelector('.document-upload-zone');fileZone.classList.add('library-upload-drop');
+    fileZone.append(get('doc-batch-help'));
     const advanced=panel.querySelector('.parse-settings'),actions=panel.querySelector('.document-actions');
     const stages=[0,1,2].map(()=>node('section','library-upload-stage'));
     workspace.append(...stages);
@@ -70,7 +74,7 @@
     const stepButtons=['选择文件','资料与处理方式','确认并处理'].map((text,i)=>{
       const b=button(String(i+1).padStart(2,'0')+'  '+text,()=>setStep(i));b.dataset.uploadStep=i;steps.append(b);return b;
     });
-    workspace.replaceChildren(...stages);panel.append(steps,workspace);
+    workspace.replaceChildren(...stages);panel.append(steps,fileZone,workspace);
     const footer=node('div','library-wizard-navigation'),previous=button('上一步',()=>setStep(state.snapshot().step-1)),next=button('下一步：资料与处理方式',()=>setStep(state.snapshot().step+1),'');
     footer.append(previous,next);panel.append(footer);
     get('ingest').textContent='开始处理';
@@ -84,12 +88,14 @@
       summary.replaceChildren();
       const mode=get('extraction-mode'),modeLabel=mode?.selectedOptions?.[0]?.textContent||'按所选方式处理';
       const rows=[['文件',get('doc-upload-summary').textContent],['处理方式',modeLabel],['本体依据',mode?.value==='documents'?'仅文档问答，无需本体':root.IngestOntology?.state?.().release?.id||'请核对当前处理方式中的本体提示'],
-        ['范围与时间','以第二步填写的本批公共值为准；查询页筛选不会写入资料。']];
+        ['范围与时间',get('doc-time-mode')?.value==='manual'?'按本批手工填写的时间处理；空白生效时间沿用发布时间推定。':
+          '留空时间逐份识别，手工填写的时间覆盖本批所有文件；查询页筛选不会写入资料。']];
       for(const [label,value] of rows){const row=node('p');row.append(node('strong',null,label+'：'),node('span',null,value));summary.append(row);}
       summary.append(node('p','subtle','提交后在“处理批次”查看进度、失败重试和实际写入结果。'));
     }
     function setStep(value){
       const currentState=state.step(value);stages.forEach((e,i)=>e.hidden=i!==currentState.step);
+      fileZone.dataset.compact=String(currentState.step!==0);
       stepButtons.forEach((e,i)=>e.setAttribute('aria-current',i===currentState.step?'step':'false'));
       previous.hidden=currentState.step===0;next.hidden=currentState.step===2;
       next.textContent=currentState.step===0?'下一步：资料与处理方式':'下一步：确认处理';
@@ -121,6 +127,7 @@
     return {open,close:options=>shell.close(options),projectChanged(id){shell.close({restoreFocus:false});state.projectChanged(id);get('ingest').disabled=false;},
       ticket:()=>state.ticket(),
       accepts:(ticket,id)=>state.accepts(ticket,id)&&project()===id,
+      queueChanged(){const view=state.snapshot();if(view.active&&view.mode==='upload'&&view.step===2)updateSummary();},
       showBatch({projectId,batchId,ticket}){if(!state.accepts(ticket,projectId)||project()!==projectId)return;open('batches');
         root.IngestBatches?.monitor(projectId,{id:batchId});
         const card=[...batches.querySelectorAll('[data-batch-id]')].find(n=>n.dataset.batchId===batchId);card?.scrollIntoView({block:'start'});},

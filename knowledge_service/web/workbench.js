@@ -306,10 +306,13 @@ function readParseSettings(){
 }
 function documentUploadOptions(document){
   const options={metadata:document.metadata,applicability:document.applicability};
-  for(const key of ['published_at','valid_from','valid_until'])if(document[key])options[key]=document[key];
+  for(const key of ['document_time_mode','published_at','valid_from','valid_until'])if(document[key])options[key]=document[key];
   return options;
 }
-const chunkPreviewState={chunks:[],selected:0,trigger:null,session:null};
+const chunkPreviewState={chunks:[],selected:0,trigger:null,session:null,content:null};
+function clearChunkPreviewContent(){
+  chunkPreviewState.content?.dispose();chunkPreviewState.content=null;
+}
 function chunkPreviewBackground(active){
   for(const element of [document.querySelector('body>aside'),document.querySelector('body>main')]){
     if(!element)continue;
@@ -323,6 +326,7 @@ function chunkPreviewFocusable(){
     .filter(element=>!element.hidden&&element.getAttribute('aria-hidden')!=='true');
 }
 function closeChunkPreview(){
+  clearChunkPreviewContent();
   chunkPreviewState.session=null;
   const host=$('chunk-preview');
   if(host.hidden)return;
@@ -334,9 +338,13 @@ function closeChunkPreview(){
   chunkPreviewState.trigger=null;
   if(trigger?.isConnected&&!trigger.disabled)trigger.focus();
 }
-function openChunkPreview(){
+function openChunkPreview(trigger,view){
   const host=$('chunk-preview');
-  chunkPreviewState.trigger=$('preview-chunks');
+  chunkPreviewState.trigger=trigger;
+  host.dataset.view=view;
+  $('chunk-preview-list').hidden=view==='source';
+  $('chunk-preview-title').textContent=view==='source'?'原文预览':'切片预览';
+  $('chunk-preview-description').textContent=view==='source'?'查看所选资料的图文原文与附件状态。':'查看解析后的切片、数量及原文位置。';
   host.hidden=false;
   document.documentElement.classList.add('chunk-preview-open');
   document.body.classList.add('chunk-preview-open');
@@ -346,6 +354,7 @@ function openChunkPreview(){
 function selectChunkPreview(index){
   const chunk=chunkPreviewState.chunks[index];
   if(!chunk)return;
+  clearChunkPreviewContent();
   chunkPreviewState.selected=index;
   const buttons=[...$('chunk-preview-list').querySelectorAll('button')];
   buttons.forEach((button,buttonIndex)=>{
@@ -367,26 +376,76 @@ function selectChunkPreview(index){
   text.textContent=String(chunk.text??'');
   content.replaceChildren(heading,text);
 }
+function renderChunkPreviewSource(result){
+  clearChunkPreviewContent();
+  const source=result.source_preview,session=chunkPreviewState.session,content=$('chunk-preview-content');
+  if(!session||!currentChunkPreviewSession(session))return;
+  if(!source){content.textContent=session.documents[session.fileIndex]?.text||'这份资料的原文暂不可用。';return;}
+  if(!window.SourceContent){content.textContent='图文预览组件尚未就绪，请刷新页面。';return;}
+  const images=new Map(source.images.map(image=>[image.index,image])),blobs=new Map();
+  const html=source.html.replace(/<span class="source-image" data-image-index="(\d+)">[\s\S]*?<\/span>/g,(_match,index)=>{
+    const image=images.get(Number(index)),asset=source.assets[image?.asset_key];
+    if(image?.status==='available'&&asset&&/^[a-f0-9]{64}$/.test(image.asset_key)){
+      const url=window.SourceContent.sourceUrl(session.project,'upload-preview','assets/'+image.asset_key);
+      if(image.media_type==='video')return '<video controls preload="metadata" src="'+url+'"></video>';
+      return '<img src="'+url+'" alt="'+esc(image.alt||'原文图片')+'">';
+    }
+    const video=image?.media_type==='video';
+    return '<span class="source-image-unavailable">'+esc(image?.status==='external'?(video?'外部视频未固化，请提供本地附件':'外链图片，提交后按配置固化'):(video?'视频缺失或不可读':'图片缺失或不可读'))+'</span>';
+  });
+  const reader=window.SourceContent.createSession({host:content,projectId:session.project,versionId:'upload-preview',
+    isCurrent:()=>currentChunkPreviewSession(session)&&chunkPreviewState.content===reader,
+    fetcher:async url=>{
+      const key=url.slice(url.lastIndexOf('/')+1),asset=source.assets[key];
+      if(!asset)return new Response(null,{status:404});
+      if(!blobs.has(key))blobs.set(key,new Blob([Uint8Array.from(atob(asset.base64),char=>char.charCodeAt(0))],{type:asset.mime_type}));
+      return new Response(blobs.get(key));
+    }});
+  chunkPreviewState.content=reader;
+  reader.mount(html||'<p>这份文档的图文正文为空。</p>');reader.hydrateImages();
+}
 function renderChunkPreview(result,title){
+  clearChunkPreviewContent();
   const chunks=Array.isArray(result?.chunks)?result.chunks:[];
   chunkPreviewState.chunks=chunks;
   chunkPreviewState.selected=0;
+  const sourceView=chunkPreviewState.session?.view==='source';
   const summary=$('chunk-preview-summary');
   summary.replaceChildren();
-  for(const value of [title,`共 ${Number(result?.total)||0} 片`,`本次预览 ${chunks.length} 片`]){
+  const labels=[title];
+  if(!sourceView)labels.push(`共 ${Number(result?.total)||0} 片`,`本次预览 ${chunks.length} 片`);
+  for(const value of labels){
     const chip=document.createElement('span');
     chip.className='chunk-preview-chip';
     chip.textContent=String(value||'未命名内容');
     summary.append(chip);
   }
+  if(result?.document_time&&window.DocumentTemporalUI){
+    const temporal=document.createElement('div');
+    temporal.innerHTML=window.DocumentTemporalUI.render(result.document_time);
+    summary.append(temporal);
+  }
+  if(sourceView&&result?.source_preview){
+    const note=document.createElement('p'),images=result.source_preview.images;
+    note.className='chunk-preview-media-note';
+    const missing=images.filter(image=>image.status==='missing'||image.status==='blocked').length;
+    note.textContent=`本份文档有 ${images.length} 处图片引用${missing?'，其中 '+missing+' 处缺失或不可读':''}。图片 OCR 与知识抽取在提交后执行。`;
+    if(images.some(image=>image.media_type==='video'))note.textContent='包含视频附件。视频语音转写与知识抽取在正式处理时执行，预览只播放原件。';
+    summary.append(note);
+  }
+  if(!sourceView&&result?.media_note){
+    const note=document.createElement('p');note.className='chunk-preview-media-note';note.textContent=result.media_note;summary.append(note);
+  }
   const list=$('chunk-preview-list'),content=$('chunk-preview-content');
+  list.hidden=sourceView;
   content.setAttribute('aria-busy','false');
   list.replaceChildren();
   content.replaceChildren();
+  if(sourceView){renderChunkPreviewSource(result);return;}
   if(!chunks.length){
     const empty=document.createElement('div');
     empty.className='chunk-preview-empty';
-    empty.textContent='未生成切片，请调整切片设置后重试。';
+    empty.textContent=result?.media_note||'未生成切片，请调整切片设置后重试。';
     content.append(empty);
     return;
   }
@@ -407,6 +466,7 @@ function currentChunkPreviewSession(session){
     (!session.ticket||window.LibraryWorkspace.accepts(session.ticket,session.project));
 }
 function chunkPreviewMessage(title,message,busy=false){
+  clearChunkPreviewContent();
   chunkPreviewState.chunks=[];
   $('chunk-preview-summary').textContent=title;
   $('chunk-preview-list').replaceChildren();
@@ -415,45 +475,68 @@ function chunkPreviewMessage(title,message,busy=false){
   content.setAttribute('aria-busy',String(busy));
   content.replaceChildren(notice);
 }
-async function selectChunkPreviewFile(index){
+function renderChunkPreviewPackage(info,selectedPath){
+  const host=$('chunk-preview-package'),picker=$('chunk-preview-document');
+  host.hidden=!info;picker.replaceChildren();
+  if(!info)return;
+  $('chunk-preview-package-summary').textContent=`包内 ${info.document_count} 份 Markdown · ${info.image_count} 处图片引用`;
+  for(const item of info.documents){const option=document.createElement('option');option.value=item.path;
+    option.textContent=item.path+(item.warning_count?' · 有附件警告':'');picker.append(option);}
+  picker.value=selectedPath||info.selected_path;
+}
+async function selectChunkPreviewFile(index,packagePath){
   const session=chunkPreviewState.session,doc=session?.documents[index];
   if(!doc||!currentChunkPreviewSession(session))return;
+  const path=packagePath??session.memberPaths.get(index)??'';
+  const previewLabel=session.view==='source'?'原文预览':'切片预览';
+  session.fileIndex=index;
   const request=++session.request;
   $('chunk-preview-file').value=String(index);
   $('chunk-preview-file-count').textContent=`${index+1} / ${session.documents.length} 个文件`;
-  chunkPreviewMessage(doc.title,'正在解析文件并生成切片…',true);
+  renderChunkPreviewPackage(session.packages.get(index),path);
+  chunkPreviewMessage(doc.title,session.view==='source'?'正在读取图文原文…':'正在解析文件并生成切片…',true);
   try{
-    let result=session.cache.get(index);
-    if(!session.cache.has(index)){
-      let pending=session.pending.get(index);
+    const key=path?index+':'+path:index;
+    let result=session.cache.get(key);
+    if(!result){
+      let pending=session.pending.get(key);
       if(!pending){
         if(doc.file){
           const form=new FormData();form.append('file',doc.file,doc.file.name);
+          form.append('preview_view',session.view);
+          if(path)form.append('package_path',path);
           form.append('options',JSON.stringify({title:doc.title,...documentUploadOptions(doc),...session.settings}));
           pending=api('/api/projects/'+encodeURIComponent(session.project)+'/documents/upload/preview',form);
         }else pending=api('/api/projects/'+encodeURIComponent(session.project)+'/documents/preview',
           {title:doc.title,text:doc.text,...documentUploadOptions(doc),...session.settings});
-        session.pending.set(index,pending);
+        session.pending.set(key,pending);
       }
-      try{result=await pending;session.cache.set(index,result);}
-      finally{session.pending.delete(index);}
+      try{result=await pending;
+        const resultKey=result.package?index+':'+result.package.selected_path:key;
+        session.cache.set(resultKey,result);
+        while(session.cache.size>4)session.cache.delete(session.cache.keys().next().value);
+      }
+      finally{session.pending.delete(key);}
     }
     if(!currentChunkPreviewSession(session)||request!==session.request)return;
-    renderChunkPreview(result,doc.title);
-    status('切片预览完成，未调用模型或写入知识');
+    if(result.package){session.packages.set(index,result.package);session.memberPaths.set(index,result.package.selected_path);}
+    renderChunkPreviewPackage(result.package,result.package?.selected_path);
+    renderChunkPreview(result,result.title||doc.title);
+    status(previewLabel+'完成');
   }catch(error){
     if(!currentChunkPreviewSession(session)||request!==session.request)return;
     chunkPreviewMessage(doc.title,'预览失败：'+error.message);
     const retry=document.createElement('button');
     retry.type='button';retry.className='secondary';retry.textContent='重试此文件';
-    retry.addEventListener('click',()=>selectChunkPreviewFile(index));
+    retry.addEventListener('click',()=>selectChunkPreviewFile(index,path));
     $('chunk-preview-content').append(retry);
-    status('切片预览失败：'+doc.title+' · '+error.message,true);
+    status(previewLabel+'失败：'+doc.title+' · '+error.message,true);
   }
 }
 function trapChunkPreviewFocus(event){
   const host=$('chunk-preview');
   if(host.hidden)return;
+  if(document.querySelector('dialog.source-image-zoom[open]'))return;
   if(event.key==='Escape'){
     event.preventDefault();
     closeChunkPreview();
@@ -474,22 +557,25 @@ $('chunk-preview-close').addEventListener('click',closeChunkPreview);
 $('chunk-preview').addEventListener('click',event=>{if(event.target===$('chunk-preview'))closeChunkPreview();});
 document.addEventListener('keydown',trapChunkPreviewFocus);
 $('chunk-preview-file').addEventListener('change',()=>selectChunkPreviewFile(Number($('chunk-preview-file').value)));
-bind('preview-chunks',async()=>{
-  const p=controlsProject(),settings=readParseSettings();
+$('chunk-preview-document').addEventListener('change',()=>selectChunkPreviewFile(chunkPreviewState.session?.fileIndex,$('chunk-preview-document').value));
+async function startDocumentPreview(view){
+  const p=controlsProject(),settings=view==='chunks'?readParseSettings():{};
   const previewTicket=window.LibraryWorkspace?.ticket();
   const documents=await readDocumentBatch(true);
   if(p!==current||(previewTicket&&!window.LibraryWorkspace.accepts(previewTicket,p)))return;
   chunkPreviewState.session={project:p,ticket:previewTicket,queueGeneration:window.DocumentUploadQueue?.generation,
-    documents,settings,request:0,cache:new Map(),pending:new Map()};
+    documents,settings,view,request:0,cache:new Map(),pending:new Map(),packages:new Map(),memberPaths:new Map()};
   const picker=$('chunk-preview-file');picker.replaceChildren();
   documents.forEach((doc,index)=>{
     const option=document.createElement('option');option.value=String(index);option.textContent=doc.file?.name||doc.title;
     picker.append(option);
   });
-  openChunkPreview();
-  status('正在生成切片预览…');
+  openChunkPreview($(view==='source'?'preview-source':'preview-chunks'),view);
+  status(view==='source'?'正在生成原文预览…':'正在生成切片预览…');
   void selectChunkPreviewFile(0);
-});
+}
+bind('preview-source',()=>startDocumentPreview('source'));
+bind('preview-chunks',()=>startDocumentPreview('chunks'));
 bind('ingest',async()=>{
   const project=controlsProject(),mode=document.getElementById('extraction-mode').value,settings=readParseSettings();
   Object.assign(settings,window.IngestOntology.settings(project,mode));

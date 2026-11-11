@@ -69,7 +69,7 @@
       ...(packaged?[{suffix:'package',label:'下载原始 ZIP 知识包',filename:filename.replace(/\.(md|markdown)$/i,'')+'.zip'}]:[])];
   }
   function createSession({host,projectId,versionId,...options}){
-    const document=host.ownerDocument,scope=createResourceScope(options),seen=new WeakSet(),images=new Set();
+    const document=host.ownerDocument,scope=createResourceScope(options),seen=new WeakSet(),images=new Set(),videos=new Set(),pendingSeeks=new Map();
     const make=(tag,text,css='')=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(css)node.className=css;return node;};
     let observer=null,zoom=null;
     const closeZoom=(restore=true)=>{
@@ -98,8 +98,9 @@
       for(const node of template.content.querySelectorAll('*'))for(const name of node.getAttributeNames()){
         if(/^on/i.test(name)||['srcset','autofocus'].includes(name))node.removeAttribute(name);
       }
-      for(const img of template.content.querySelectorAll('img')){
-        img.dataset.assetUrl=img.getAttribute('src')||'';img.removeAttribute('src');
+      for(const media of template.content.querySelectorAll('img,video')){
+        media.dataset.assetUrl=media.getAttribute('src')||'';media.removeAttribute('src');
+        if(media.tagName==='VIDEO'){media.removeAttribute('poster');media.removeAttribute('autoplay');media.removeAttribute('loop');}
       }
       for(const link of template.content.querySelectorAll('a')){
         const href=link.getAttribute('href')||'';
@@ -136,6 +137,43 @@
         }else load();
       }
       for(const missing of host.querySelectorAll('span[data-asset-id]'))missing.classList.add('source-image-unavailable');
+      hydrateVideos();
+    }
+    function seekVideo(assetId,startMs){
+      if(!scope.active()||!Number.isFinite(startMs)||startMs<0)return false;
+      pendingSeeks.set(assetId,startMs);
+      const video=[...host.querySelectorAll('video[data-asset-id]')].find(node=>node.dataset.assetId===assetId);
+      if(!video)return false;
+      const seek=()=>{
+        if(!scope.active())return;
+        const seconds=pendingSeeks.get(assetId)/1000;
+        if(!Number.isFinite(seconds))return;
+        video.currentTime=Number.isFinite(video.duration)?Math.min(seconds,Math.max(0,video.duration-.01)):seconds;
+        pendingSeeks.delete(assetId);
+      };
+      if(video.readyState>=1)seek();
+      else{video.addEventListener('loadedmetadata',seek,{once:true});scope.addCleanup(()=>video.removeEventListener('loadedmetadata',seek));}
+      video.scrollIntoView({block:'center'});return true;
+    }
+    function hydrateVideos(){
+      if(!scope.active())return;
+      for(const video of host.querySelectorAll('video')){
+        if(seen.has(video))continue;seen.add(video);videos.add(video);
+        const url=validatedAssetUrl(video.dataset.assetUrl||video.getAttribute('src'),projectId,versionId);
+        video.removeAttribute('src');video.removeAttribute('autoplay');video.removeAttribute('poster');
+        video.controls=true;video.preload='metadata';
+        const state=make('span','正在读取视频…','source-video-state');state.setAttribute('role','status');video.after(state);
+        const fail=message=>{if(scope.active()){state.textContent=message;video.hidden=true;}};
+        if(!url){fail('视频未固化或地址不属于当前资料版本');continue;}
+        scope.loadBlob(url,(objectUrl,blob)=>{
+          if(blob.size>25_000_000){scope.release(objectUrl);fail('视频超过 25 MB 播放上限');return;}
+          video.onloadedmetadata=()=>{if(scope.active())state.hidden=true;};
+          video.onerror=()=>{scope.release(objectUrl);fail('视频无法播放，请下载原文件查看');};
+          video.src=objectUrl;
+          const start=pendingSeeks.get(video.dataset.assetId);
+          if(start!==undefined)seekVideo(video.dataset.assetId,start);
+        },()=>fail('视频读取失败，请下载原文件查看'));
+      }
     }
     function downloadLink({suffix,label,filename}){
       const link=make('a',label);link.href=sourceUrl(projectId,versionId,suffix);link.download=filename;
@@ -153,9 +191,11 @@
     scope.addCleanup(()=>{
       observer?.disconnect();closeZoom(false);
       for(const img of images){img.onload=null;img.onerror=null;img.removeAttribute('src');}
+      for(const video of videos){video.pause();video.onloadedmetadata=null;video.onerror=null;video.removeAttribute('src');video.load();}
+      videos.clear();pendingSeeks.clear();
       images.clear();host.classList.remove('source-rich-content');
     });
-    return {...scope,mount,hydrateImages,downloadLink,async render(){const html=await scope.read(sourceUrl(projectId,versionId,'rendered'));if(mount(html))hydrateImages();}};
+    return {...scope,mount,hydrateImages,hydrateVideos,seekVideo,downloadLink,async render(){const html=await scope.read(sourceUrl(projectId,versionId,'rendered'));if(mount(html))hydrateImages();}};
   }
   return {sourceUrl,validatedAssetUrl,createResourceScope,createSession,downloadOptions};
 });

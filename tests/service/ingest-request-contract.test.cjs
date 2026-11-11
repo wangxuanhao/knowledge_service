@@ -6,13 +6,14 @@ const vm=require('node:vm');
 
 const source=fs.readFileSync(path.resolve(__dirname,'../../knowledge_service/web/workbench.js'),'utf8');
 const submitSource=source.slice(source.indexOf("bind('ingest',async()=>{"),source.indexOf('async function snapshots()'));
+const optionsSource=source.slice(source.indexOf('function documentUploadOptions(document)'),source.indexOf('const chunkPreviewState='));
 
 function fixture(mode,route){
   const nodes=new Map(),element=()=>({textContent:'',append(){}});
   const get=id=>{if(!nodes.has(id))nodes.set(id,element());return nodes.get(id);};
   get('extraction-mode').value=mode;
   const document={getElementById:get,createElement:element};
-  const payloads=[],file={name:'rule.txt'},documents=[{title:'规则',text:'原文',...(route==='text'?{}:{file})}];
+  const payloads=[],file={name:'rule.txt'},documents=[{title:'规则',text:'原文',document_time_mode:'auto',...(route==='text'?{}:{file})}];
   let submit;
   class FormData{
     constructor(){this.values=new Map();}
@@ -24,10 +25,10 @@ function fixture(mode,route){
   if(route==='batch')window.IngestBatches={async submit(project,docs,settings){payloads.push(settings);return {id:'batch'};}};
   const context={window,document,FormData,current:'project',wb:{jobs:new Map()},$:get,
     bind(id,handler){assert.equal(id,'ingest');submit=handler;},controlsProject:()=> 'project',
-    readParseSettings:()=>({chunk_size:1800,chunk_overlap:200}),documentUploadOptions:()=>({metadata:{}}),
+    readParseSettings:()=>({chunk_size:1800,chunk_overlap:200}),
     readDocumentBatch:async()=>documents,status(){},
     api:async(url,payload)=>{payloads.push(payload instanceof FormData?JSON.parse(payload.get('options')):payload);return {id:'job'};}};
-  vm.runInNewContext(submitSource,context);
+  vm.runInNewContext(optionsSource+'\n'+submitSource,context);
   return {submit,payloads};
 }
 
@@ -37,6 +38,7 @@ for(const route of ['batch','upload','text'])for(const mode of ['ontology','disc
     await env.submit();
     assert.equal(env.payloads.length,1);
     assert.equal(env.payloads[0].extraction_mode,mode);
+    assert.equal(env.payloads[0].document_time_mode,'auto');
     assert.equal(Object.hasOwn(env.payloads[0],'extract'),false);
   });
 }

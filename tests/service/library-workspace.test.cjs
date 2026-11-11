@@ -49,6 +49,16 @@ test('switching project through the shared cleanup clears a draft once and rejec
   assert.equal(clears,1);assert.equal(ui.accepts(ticket,'q'),false);assert.equal(ui.snapshot().active,false);
   ui.open('upload','q');assert.equal(clears,1);assert.equal(ui.snapshot().step,0);
 });
+test('project draft cleanup restores automatic document time and refreshes its help',()=>{
+  const source=fs.readFileSync(file,'utf8');
+  const clear=source.match(/clear\(\)\{\r?\n([\s\S]*?)\r?\n    \}\}\);/)[1];
+  const fields=new Map(),events=[];
+  const get=id=>{if(!fields.has(id))fields.set(id,{value:'manual',dispatchEvent:event=>events.push([id,event.type]),replaceChildren(){}});return fields.get(id);};
+  vm.runInNewContext('(function(){'+clear+'})()',{
+    root:{DocumentUploadQueue:{clear(){}}},get,initialBatch:'[]',Event:class{constructor(type){this.type=type;}}});
+  assert.equal(get('doc-time-mode').value,'auto');
+  assert.ok(events.some(([id,type])=>id==='doc-time-mode'&&type==='change'));
+});
 test('read-only sessions cannot open upload or structured forms, while batch viewing remains bounded by existing route access',()=>{
   const ui=state();assert.throws(()=>ui.open('upload','p'),/管理员/);assert.throws(()=>ui.open('structured','p'),/管理员/);
   assert.equal(ui.open('batches','p').mode,'batches');assert.throws(()=>ui.open('other','p'),/未知/);

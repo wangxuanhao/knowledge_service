@@ -209,8 +209,8 @@ def test_document_upload_workspace_contract():
     for marker in ('.document-upload-workspace', '.document-dropzone', '.document-queue-row',
                    '@media(max-width:850px)', ':focus-visible'):
         assert marker in css, marker
-    assert '/assets/workbench.css?v=multi-file-preview-20261102-1' in html
-    assert '/assets/ingest-mode.js?v=canonical-20261021-5' in html
+    assert '/assets/workbench.css?v=split-previews-20261110-1' in html
+    assert '/assets/ingest-mode.js?v=split-previews-20261110-2' in html
     assert 'max_batch_items' in js and 'max_batch_bytes' in js
     assert re.search(r'/assets/workbench\.js\?v=[\w.-]+', html)
 

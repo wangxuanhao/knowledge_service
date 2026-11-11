@@ -15,6 +15,7 @@ from ..integrations.source_object_store import source_object_store_from_environm
 from ..integrations.image_ocr import OCRError as SourceOCRError
 from ..repository.source_store import SourceStore
 from .image_ocr import ImageOCRService
+from .video_asr import VideoASRService
 
 
 LOG = logging.getLogger(__name__)
@@ -29,10 +30,11 @@ class SourceDocumentService:
     def for_service(cls, service):
         return cls(service.repository, source_object_store_from_environment())
 
-    def __init__(self, repo, object_store, ocr_adapter=None, remote_image_importer=None):
+    def __init__(self, repo, object_store, ocr_adapter=None, remote_image_importer=None, asr_adapter=None):
         self.store=SourceStore(repo)
         self.object_store=object_store
         self.image_ocr=ImageOCRService(self.store,object_store,ocr_adapter)
+        self.video_asr=VideoASRService(self.store,object_store,asr_adapter)
         self.remote_image_importer=remote_image_importer
 
     def persist(self,project_id,document_id,data,original_name,text=None,assets=None,metadata=None,provenance=None):
@@ -42,12 +44,17 @@ class SourceDocumentService:
     def prepare(self,data,original_name,text=None,assets=None,metadata=None,provenance=None):
         """Parse and fetch before opening any publication transaction."""
         version_id=str(uuid4())
-        text=data.decode('utf-8-sig') if text is None else text
-        parsed=parse_markdown(text,version_id)
+        standalone_video=(provenance or {}).get('media_type')=='video'
+        text=('' if standalone_video else data.decode('utf-8-sig')) if text is None else text
+        parsed=parse_markdown('<video src="source-video"></video>' if standalone_video else text,version_id)
+        parsed['text']=text
         parsed['document_version_id']=version_id
         parsed['metadata']={**(metadata or {}),'provenance':provenance or {}}
         parsed['metadata']['warnings']=list(parsed['metadata'].get('warnings',[]))
         supplied=list(assets or [])
+        if standalone_video:
+            # An internal reference keeps filename URL delimiters out of media matching.
+            supplied=[dict(asset,path='source-video',url='source-video',resolved_path='source-video') for asset in supplied]
         refs=[];used=set()
         by_path=defaultdict(deque);first_by_path={}
         for index,asset in enumerate(supplied):
@@ -67,6 +74,7 @@ class SourceDocumentService:
         remote_cache={};total_image_bytes=0;remote_deadline=time.monotonic()+15
         for ordinal,ref in enumerate(refs):
             asset=dict(ref,id=str(uuid4()))
+            is_video=asset.get('provenance',{}).get('media_type')=='video'
             asset['provenance']={**asset.get('provenance',{}),'source_image_ordinal':ordinal}
             if ordinal>=200:
                 asset.pop('data',None)
@@ -77,6 +85,10 @@ class SourceDocumentService:
             if asset['kind']=='external':
                 url=asset.get('url',asset.get('original_path',''))
                 asset['provenance']={**asset.get('provenance',{}),'original_url':url}
+                if is_video:
+                    parsed['metadata']['warnings'].append('外部视频未固化，请在知识包中提供本地视频附件：'+url[:300])
+                    prepared.append(asset)
+                    continue
                 enabled=os.getenv('KG_SOURCE_REMOTE_IMAGES_ENABLED','true').lower() in {'1','true','yes'}
                 if enabled or self.remote_image_importer is not None:
                     from ..integrations.remote_images import RemoteImageImporter, RemoteImageError
@@ -97,15 +109,18 @@ class SourceDocumentService:
             if 'data' in asset:
                 mime=asset.get('mime_type') or mimetypes.guess_type(asset.get('original_path',asset.get('path','')))[0] or 'application/octet-stream'
                 from ..integrations.document_media import inspect_image
+                from ..integrations.video_asr import inspect_video, ASRError
                 try:
-                    details=inspect_image(asset['data'],None if mime=='application/octet-stream' else mime)
+                    details=inspect_video(asset['data'],mime) if is_video else inspect_image(asset['data'],None if mime=='application/octet-stream' else mime)
+                    if is_video:
+                        asset['provenance'].update(media_type='video',duration_ms=details['duration_ms'],has_audio=details['has_audio'])
                     total_image_bytes+=len(asset['data'])
                     if total_image_bytes>100*1024*1024:raise ValueError('Document image limit exceeded')
                     asset.update(details)
                 except ImportError as exc:
                     from ..integrations.document_parser import DocumentParseError
                     raise DocumentParseError('model_unavailable','未安装文档图片解析能力，请安装文档解析依赖',503) from exc
-                except (ValueError,OSError):
+                except (ValueError,OSError,ASRError):
                     asset.pop('data',None);asset['status']='missing'
                     parsed['metadata']['warnings'].append('图片不可用或超过限制：'+asset.get('original_path',asset.get('url',''))[:300])
             elif asset['kind']=='local': asset['status']='missing'
@@ -139,7 +154,7 @@ class SourceDocumentService:
         ordered=[]
         for block in version['blocks']:
             for ref in block['payload'].get('images',[]):
-                match=next((a for a in assets if a not in ordered and a['original_path'] in {ref.get('path'),ref.get('url')}),None)
+                match=next((a for a in assets if a not in ordered and {a['original_path'],a.get('resolved_path')} & {ref.get('path'),ref.get('url')}),None)
                 if match: ordered.append(match)
         def replace(match):
             index=int(match.group(1))
@@ -147,10 +162,13 @@ class SourceDocumentService:
             asset=ordered[index]
             if asset.get('source_object_id'):
                 url=f'/api/projects/{quote(project_id,safe="")}/source-documents/{quote(version_id,safe="")}/assets/{quote(asset["id"],safe="")}'
+                if asset.get('provenance',{}).get('media_type')=='video':
+                    return '<video controls preload="metadata" data-asset-id="'+html.escape(asset['id'],quote=True)+'" src="'+html.escape(url,quote=True)+'"></video>'
                 width,height=asset.get('width'),asset.get('height')
                 dimensions=f' width="{width}" height="{height}"' if all(type(value) is int and 0<value<=1_000_000 for value in (width,height)) else ''
                 return '<img data-asset-id="'+html.escape(asset['id'],quote=True)+'" src="'+html.escape(url,quote=True)+'" alt="'+html.escape(asset['alt_text'],quote=True)+'"'+dimensions+'>'
-            return '<span data-asset-id="'+html.escape(asset['id'],quote=True)+'">'+('外部图片，未固化' if asset['kind']=='external' else '图片缺失')+'</span>'
+            label='视频' if asset.get('provenance',{}).get('media_type')=='video' else '图片'
+            return '<span data-asset-id="'+html.escape(asset['id'],quote=True)+'">'+('外部'+label+'，未固化' if asset['kind']=='external' else label+'缺失')+'</span>'
         rendered=re.sub(r'<span class="source-image" data-image-index="(\d+)">.*?</span>',replace,version['rendered_html'],flags=re.S)
         return dict(document_version_id=version_id,html=rendered,blocks=version['blocks'],assets=version['assets'])
     def source(self,project_id,version_id):
@@ -183,6 +201,10 @@ class SourceDocumentService:
         runs=self.store.ocr_runs(project_id,version_id,asset_id)
         run=runs[-1] if runs else None
         return dict(runs=runs,run=run,blocks=run['blocks'] if run else [])
+    def asr(self,project_id,version_id,asset_id):
+        runs=self.store.asr_runs(project_id,version_id,asset_id)
+        run=runs[-1] if runs else None
+        return dict(runs=runs,run=run or {'status':'pending'},segments=run['segments'] if run else [])
     def locate(self,project_id,version_id,chunk_version_id=None,assertion_id=None): return self.store.locate(project_id,version_id,chunk_version_id,assertion_id)
 
     def collect_unreferenced_objects(self):
