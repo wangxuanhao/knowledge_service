@@ -1,6 +1,6 @@
 # 知识服务
 
-更新日期：2026-11-11。FastAPI + PostgreSQL + Milvus 的知识平台，提供资料解析、受控/开放抽取、本体草案治理、知识编辑与融合、图谱浏览、检索和证据问答。
+更新日期：2026-11-12。FastAPI + PostgreSQL + Milvus 的知识平台，提供资料解析、受控/开放抽取、本体草案治理、知识编辑与融合、图谱浏览、检索和证据问答。
 
 先看这些入口：
 
@@ -86,7 +86,22 @@ python -u -m knowledge_service --port 8100
 
 视频 ASR 使用 `asr` 可选依赖。本机已验证 FunASR 1.3.22、Torch / Torchaudio 2.8.0 与 CPU 双线程，运行主机须在 PATH 提供 FFmpeg / ffprobe。部署时复制完整的 `iic/SenseVoiceSmall` 与 `iic/speech_fsmn_vad_zh-cn-16k-common-pytorch` 本地模型目录，分别配置 `KG_VIDEO_ASR_MODEL_ROOT` 与 `KG_VIDEO_ASR_VAD_ROOT`。两份模型使用 Apache-2.0 许可证，复制时保留各自许可证与说明。Worker 禁用网络、模型更新和远程代码，每个任务独立启动并退出释放模型内存，默认超时 600 秒，首次导入模型耗时计入该预算。
 
-首期视频上限为 25 MB、10 分钟，支持 H.264 / AAC MP4 与 VP8、VP9、AV1 配 Opus / Vorbis WebM。独立视频、Markdown 的 `<video src="assets/clip.mp4">` 与 `[观看视频](assets/clip.webm)` 共用上传和 ZIP 附件链路。本地视频原件进入来源对象存储，ASR 文字与真实 VAD 时段进入 PostgreSQL，阅读器通过鉴权 Blob 播放并按转写段定位。预览展示原件，正式处理执行转写。外部视频链接标记为待固化，由提交者提供本地附件。
+ASR 模型统一放在项目目录，不能只保留 `model.pt`；配置、词表和说明须一起复制：
+
+```text
+data/model/asr/
+  SenseVoiceSmall/
+  speech_fsmn_vad_zh-cn-16k-common-pytorch/
+```
+
+```dotenv
+KG_VIDEO_ASR_MODEL_ROOT=data/model/asr/SenseVoiceSmall
+KG_VIDEO_ASR_VAD_ROOT=data/model/asr/speech_fsmn_vad_zh-cn-16k-common-pytorch
+```
+
+从仓库根目录启动服务。修改模型路径后重启，先检查 `/api/ingest/capabilities` 中 `asr_available`，再上传含语音的本地短视频核对真实转写和播放；可用性检查不能替代实际推理。模型不随 Git 提交，迁移机器时须单独复制。此次校验和离线实测见 [ASR 模型迁移与项目清理](docs/2026-11-12-ASR模型迁移与项目清理.md)。
+
+首期视频上限为 25 MB、10 分钟，支持 H.264 / AAC MP4 与 VP8、VP9、AV1 配 Opus / Vorbis WebM。独立视频、Markdown 的 `<video src="assets/clip.mp4">` 与指向本地附件（例如 `assets/clip.webm`）的 Markdown 超链接共用上传和 ZIP 附件链路。本地视频原件进入来源对象存储，ASR 文字与真实 VAD 时段进入 PostgreSQL，阅读器通过鉴权 Blob 播放并按转写段定位。预览展示原件，正式处理执行转写。外部视频链接标记为待固化，由提交者提供本地附件。
 
 `KG_LOCAL_EMBEDDING_RUNTIME=auto` 自动选择有效制品；没有制品的其他模型兼容原 ST 路径。`onnx` 强制要求已准备制品；`sentence-transformers` 可显式回到原运行时。已存在但过期或损坏的制品会明确失败，需要重新准备，避免向既有索引写入不同语义的向量。实测、兼容范围与恢复方式见 [推理依赖拆分](docs/research/2026-10-28-embedding-runtime-optimization.md)。
 
