@@ -211,6 +211,15 @@
     if(!chart.__maintenanceGestures){
       chart.__maintenanceGestures=true;
       const zr=chart.getZr();
+      // Native graph roam checks the fitted plot rectangle, leaving canvas
+      // margins unresponsive. Own wheel input across this chart's entire host;
+      // capture prevents a second zoom from ZRender's native wheel handler.
+      chart.getDom().addEventListener('wheel',event=>{
+        if(state?.chart!==chart||$('graph-stage')?.dataset.graphMode==='full'||!Number.isFinite(event.deltaY)||!event.deltaY)return;
+        event.preventDefault();event.stopPropagation();
+        const box=chart.getDom().getBoundingClientRect(),unit=event.deltaMode===1?16:event.deltaMode===2?box.height:1;
+        zoom(chart,Math.exp(-Math.max(-2000,Math.min(2000,event.deltaY*unit))*.0015),[event.clientX-box.left,event.clientY-box.top]);
+      },{capture:true,passive:false});
       chart.on('graphroam',()=>{if(state?.chart===chart)queueCull(120);});
       let pan=null;
       const queued=GraphInteraction.createPanQueue({apply:(dx,dy)=>{
@@ -269,12 +278,12 @@
       }));
     }
   }
-  function zoom(chart,factor){
+  function zoom(chart,factor,origin){
     const current=Number(chart.getModel().getSeriesByIndex(0).get('zoom'))||1;
     if(!Number.isFinite(factor)||factor<=0)return current;
     const next=Math.min(4,Math.max(.2,current*factor));
     if(next!==current)roam(chart,'zoom',{scale:next/current,
-      originX:chart.getWidth()/2,originY:chart.getHeight()/2});
+      originX:origin?.[0]??chart.getWidth()/2,originY:origin?.[1]??chart.getHeight()/2});
     return next;
   }
   function setLabels(show){

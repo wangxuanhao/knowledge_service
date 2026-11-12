@@ -117,10 +117,11 @@ test('display zoom uses the canvas center and preserves entity positions',()=>{
 // Browser checks separately exercise the real GLSL pixels and CPU frame time.
 function bufferGL(){
   let next=0,bound=null,program=null,copyError=0;
-  const buffers=new Map(),attributes=new Map(),enabled=new Set(),uploads=[],draws=[],deleted=[],uniforms=new Map(),copies=[],deletedTextures=[];
+  const buffers=new Map(),attributes=new Map(),enabled=new Set(),uploads=[],subUploads=[],draws=[],deleted=[],uniforms=new Map(),copies=[],deletedTextures=[];
   const gl={ARRAY_BUFFER:1,STATIC_DRAW:2,FLOAT:3,UNSIGNED_BYTE:4,LINES:5,POINTS:6,TRIANGLE_STRIP:7,VERTEX_SHADER:8,FRAGMENT_SHADER:9,COMPILE_STATUS:10,LINK_STATUS:11,MAX_TEXTURE_SIZE:12,FRAMEBUFFER:13,FRAMEBUFFER_COMPLETE:14,RENDERER:15,TRIANGLES:16,RGB:6407,RGBA:6408};
   Object.assign(gl,{
     createBuffer:()=>({id:++next}),bindBuffer:(_,buffer)=>{bound=buffer;},bufferData:(_,data)=>{buffers.set(bound,new data.constructor(data));uploads.push({buffer:bound,data:new data.constructor(data)});},deleteBuffer:buffer=>deleted.push(buffer),
+    bufferSubData:(_,offset,data)=>{buffers.get(bound).set(data,offset/4);subUploads.push({buffer:bound,offset,data:Array.from(data)});},
     createShader:()=>({}),shaderSource(){},compileShader(){},getShaderParameter:()=>true,attachShader(){},linkProgram(){},deleteShader(){},getProgramParameter:()=>true,createProgram:()=>({id:++next}),useProgram:value=>{program=value;},
     getAttribLocation:(_,name)=>({a_position:0,a_target:1,a_corner:2})[name]??1,getUniformLocation:(_,name)=>name,enableVertexAttribArray:index=>enabled.add(index),disableVertexAttribArray:index=>enabled.delete(index),vertexAttrib3f(){},
     vertexAttribPointer:(index,size,type,normalized,stride,offset)=>attributes.set(index,{buffer:bound,size,type,normalized,stride,offset}),
@@ -139,7 +140,7 @@ function bufferGL(){
   gl.uniform4f=(location,...values)=>uniforms.set(location,values);
   gl.uniform1f=(location,value)=>uniforms.set(location,value);
   gl.uniform2f=(location,...values)=>uniforms.set(location,values);gl.deleteTexture=texture=>deletedTextures.push(texture);
-  return {gl,buffers,uploads,draws,deleted,copies,deletedTextures};
+  return {gl,buffers,uploads,subUploads,draws,deleted,copies,deletedTextures};
 }
 
 function bufferScene(withAppearance=true){
@@ -147,6 +148,77 @@ function bufferScene(withAppearance=true){
   const renderer=Object.assign(Object.create(Renderer.prototype),{gl:recording.gl,dataset:new GraphDataset(),camera:new Camera(),selected:-1,showEdges:true,dpr:1,width:800,height:600,canvas:{width:800,height:600},durations:[],requestDraw(){},drawLabels(){}});
   renderer.setupGL();return {renderer,GraphDataset,...recording};
 }
+
+test('manual node drag updates only the node and incident GPU buffers without rebuilding the scene',()=>{
+  const {renderer,buffers,uploads,subUploads}=bufferScene();
+  renderer.dataset.addNodes([{id:'a',type:'A'},{id:'b',type:'B'},{id:'c',type:'A'}],new Float32Array([0,0,.1,.2,.4,.5]));
+  renderer.dataset.addEdges([{id:'ab',subject_id:'a',object_id:'b'},{id:'ac',subject_id:'a',object_id:'c'}]);renderer.sync();
+  const records=JSON.stringify(renderer.dataset.records),before=Array.from(renderer.renderPositions),uploadCount=uploads.length;
+  const drag=renderer.beginNodeDrag(1);
+  assert.ok(renderer.moveNode(drag,.7,.8));
+  const after=Array.from(renderer.renderPositions);
+  assert.deepEqual(after.slice(0,2),before.slice(0,2));assert.deepEqual(after.slice(4),before.slice(4));
+  assert.ok(Math.abs(after[2]-.7)<1e-6&&Math.abs(after[3]-.8)<1e-6);
+  assert.equal(uploads.length,uploadCount,'drag must not reupload all entities or all edges');
+  assert.equal(subUploads.filter(row=>row.buffer===renderer.edgeBuffer).length,1,'only the incident relation changes');
+  assert.ok(Math.abs(buffers.get(renderer.nodeBuffer)[2]-.7)<1e-6);
+  assert.deepEqual(Array.from(buffers.get(renderer.edgeBuffer)).slice(4),[before[0],before[1],before[4],before[5]]);
+  assert.equal(JSON.stringify(renderer.dataset.records),records,'moving a display node never edits knowledge records');
+  assert.deepEqual(Array.from(renderer.dataset.positions),before,'canonical worker layout stays separate from the manual view');
+  renderer.dataset.addNodes([{id:'d',type:'A'}],new Float32Array([-.1,-.2]));renderer.sync();
+  assert.ok(Math.abs(renderer.renderPositions[2]-.7)<1e-6,'later batches preserve the manual view');
+});
+
+test('manual node positions survive small layout and type changes but reset for a new dataset',()=>{
+  const {renderer,GraphDataset}=bufferScene();
+  renderer.dataset.addNodes([{id:'a',type:'A'},{id:'b',type:'B'}]);renderer.dataset.addEdges([{id:'ab',subject_id:'a',object_id:'b'}]);
+  renderer.setSessionManifest({id:'manual',entity_count:2,relation_count:1});renderer.sync();
+  renderer.moveNode(renderer.beginNodeDrag(0),.25,.4);
+  renderer.width=940;renderer.height=700;renderer.sync();
+  assert.ok(Math.abs(renderer.renderPositions[0]-.25)<1e-6);
+  renderer.setTypeFilter('A');assert.ok(Math.abs(renderer.renderPositions[1]-.4)<1e-6);
+  renderer.setTypeFilter(null);assert.ok(Math.abs(renderer.renderPositions[0]-.25)<1e-6);
+  const old=renderer.beginNodeDrag(0),next=new GraphDataset();next.addNodes([{id:'a',type:'A'}],new Float32Array([-.2,-.3]));renderer.setDataset(next);
+  assert.equal(renderer.moveNode(old,1,1),false,'an expired drag cannot move a replacement dataset');
+  assert.ok(Math.abs(renderer.renderPositions[0]+.2)<1e-6);
+});
+
+test('manual node drag keeps dense relation endpoints visible outside the fixed overview texture',()=>{
+  const {renderer,draws,gl}=bufferScene();
+  renderer.dataset.addNodes([{id:'a',type:'A'},{id:'b',type:'B'}],new Float32Array([0,0,.1,.1]));
+  renderer.dataset.addEdges(Array.from({length:4001},(_,i)=>({id:'edge-'+i,subject_id:'a',object_id:'b'})));renderer.sync();
+  renderer.moveNode(renderer.beginNodeDrag(0),2,1.5);draws.length=0;renderer.draw();
+  assert.ok(renderer.cacheExtent[0]>=2&&renderer.cacheExtent[1]>=1.5,'updated relation texture must contain edited geometry');
+  assert.ok(draws.some(draw=>draw.mode===gl.TRIANGLE_STRIP&&draw.count===4),'dense view keeps its cached relation layer');
+  assert.ok(!draws.some(draw=>draw.mode===gl.LINES&&draw.count===8002),'later camera frames do not overdraw every dense relationship');
+});
+
+test('manual node drag includes new incident edges appended during the same gesture',()=>{
+  const {renderer,buffers}=bufferScene();
+  renderer.dataset.addNodes([{id:'a'},{id:'b'}],new Float32Array([0,0,.1,.1]));renderer.sync();
+  const drag=renderer.beginNodeDrag(0);renderer.moveNode(drag,.5,.5);
+  renderer.dataset.addEdges([{id:'ab',subject_id:'a',object_id:'b'}]);renderer.sync();
+  assert.ok(renderer.moveNode(drag,.8,.9));
+  const edge=buffers.get(renderer.edgeBuffer);
+  assert.ok(Math.abs(edge[0]-.8)<1e-6&&Math.abs(edge[1]-.9)<1e-6,'new relationship follows the dragged node');
+});
+
+test('changing a certified small manifest to a large scene refreshes drag buffer groups',()=>{
+  const {renderer}=bufferScene();renderer.dataset.addNodes([{id:'a'},{id:'b'}]);
+  renderer.setSessionManifest({id:'small',entity_count:2,relation_count:0});renderer.sync();
+  renderer.setSessionManifest({id:'large',entity_count:5000,relation_count:6000});renderer.sync();
+  assert.ok(renderer.beginNodeDrag(0),'large scene must use its numeric color groups after the small gate changes');
+});
+
+test('manual node drag rebinds its GPU slot if the small layout resizes during the gesture',()=>{
+  const {renderer,buffers}=bufferScene();
+  renderer.dataset.addNodes([{id:'a'},{id:'b'}]);renderer.dataset.addEdges([{id:'ab',subject_id:'a',object_id:'b'}]);
+  renderer.setSessionManifest({id:'small-resize',entity_count:2,relation_count:1});renderer.sync();
+  const drag=renderer.beginNodeDrag(0);renderer.moveNode(drag,.25,.3);
+  renderer.width=960;renderer.height=720;renderer.sync();
+  assert.ok(renderer.moveNode(drag,.6,.7));
+  assert.ok(Math.abs(buffers.get(renderer.edgeBuffer)[0]-.6)<1e-6);
+});
 
 test('canonical type indexes count unique entities and index only within-type relationships',()=>{
   const {GraphDataset}=load(),data=new GraphDataset();
@@ -477,6 +549,12 @@ function overviewScene({outlier=false,extent=.8}={}){
 }
 
 function warmOverview(scene){scene.renderer.draw();scene.renderer.draw();scene.draws.length=0;}
+
+test('manual selected ring outside the viewport cannot enter the complete-view cache',()=>{
+  const {renderer}=overviewScene();renderer.selected=0;
+  renderer.moveNode(renderer.beginNodeDrag(0),(renderer.width/2-5)/renderer.camera.unit(renderer.width,renderer.height),0);
+  assert.equal(renderer.canCaptureView(),false,'cache eligibility must use the manual display coordinates');
+});
 
 test('complete overview cache reuses one affine quad with exact dataset counts',()=>{
   const scene=overviewScene(),{renderer,copies,draws}=scene;renderer.draw();assert.equal(copies.length,0,'append frames avoid copying a new bitmap each batch');
