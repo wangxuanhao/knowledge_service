@@ -8,7 +8,63 @@
   empty.innerHTML='<div class="source-empty-icon" aria-hidden="true">📄</div><h3></h3><p></p>';layout.append(empty);
   refresh.textContent='刷新';refresh.classList.add('secondary');
   let serial=0,detailSerial=0,citationSerial=0,selected=null,activeTab='text',loadedProject=null,loadedScope=null,loadedState=null,allDocuments=[],currentFilter='all';
-  let inFlight=null,nextCursor=null,total=0,directoryCounts=null;
+  let inFlight=null,nextCursor=null,total=0,directoryCounts=null,appliedQuery='',loadedQuery=null,composing=false;
+  let retrievalMode='keyword',loadedMode=null,pendingModeChange=false;
+  let searchSteps=[],loadedSteps=null,addingStep=false,searchSucceeded=false,searchLoading=false,boundedBySemantic=false;
+  const stepsStamp=()=>JSON.stringify(searchSteps);
+  const boundedSearch=()=>boundedBySemantic||semanticSearch()||searchSteps.some(step=>step.retrieval_mode==='semantic');
+  const semanticSearch=()=>retrievalMode==='semantic'&&Boolean(appliedQuery);
+  const searchForm=document.createElement('form');searchForm.id='source-search-form';searchForm.className='source-search';searchForm.setAttribute('role','search');
+  searchForm.innerHTML='<label for="source-search-input">搜索资料</label><div class="source-search__controls"><div class="source-search__mode"><label for="source-search-mode">搜索方式</label><select id="source-search-mode"><option value="keyword">关键词</option><option value="semantic">向量正文</option></select></div><input id="source-search-input" type="search" maxlength="2000" placeholder="搜索名称、文件名或正文" autocomplete="off"><button type="submit">搜索</button><button id="source-search-clear" type="button" class="secondary">清空</button></div>';
+  layout.before(searchForm);
+  const searchInput=searchForm.querySelector('input');
+  const searchMode=$('source-search-mode');searchMode.value=retrievalMode;
+  const stepsUI=document.createElement('div');stepsUI.id='source-search-steps';stepsUI.className='source-search__steps';stepsUI.setAttribute('aria-label','检索条件链');searchForm.append(stepsUI);
+  const searchActions=document.createElement('div');searchActions.className='source-search__actions';searchForm.append(searchActions);
+  const refine=document.createElement('button');refine.id='source-search-refine';refine.type='button';refine.className='secondary';refine.textContent='在结果中继续检索';searchActions.append(refine);
+  const back=document.createElement('button');back.id='source-search-back';back.type='button';back.className='secondary';searchActions.append(back);
+  function renderSearchSteps(){
+    stepsUI.replaceChildren();
+    const chain=[...searchSteps,...(appliedQuery?[{query:appliedQuery,retrieval_mode:retrievalMode}]:[])];
+    chain.forEach((step,index)=>{
+      const chip=document.createElement('span');chip.className='source-search__step';
+      const label=document.createElement('span');label.textContent=(index+1)+'. '+(step.retrieval_mode==='semantic'?'向量正文':'关键词')+'：'+step.query;
+      const remove=document.createElement('button');remove.type='button';remove.className='secondary';remove.textContent='×';remove.setAttribute('aria-label','删除第 '+(index+1)+' 步：'+step.query);
+      remove.onclick=()=>replaySteps(chain.filter((_,position)=>position!==index));chip.append(label,remove);stepsUI.append(chip);
+    });
+    const hint=document.createElement('span');hint.className='subtle';hint.textContent=addingStep?'正在追加条件：在上一步命中资料的全部正文中检索；最多8步。':'最多8步';stepsUI.append(hint);
+    refine.disabled=addingStep||searchLoading||!searchSucceeded||!appliedQuery||!allDocuments.length||chain.length>=8;
+    back.textContent=addingStep?'取消继续检索':'退回上一步';back.disabled=!addingStep&&!chain.length;
+  }
+  function replaySteps(chain){
+    addingStep=false;const last=chain.at(-1);searchSteps=chain.slice(0,-1);appliedQuery=last?.query||'';
+    if(last)retrievalMode=last.retrieval_mode;searchMode.value=retrievalMode;searchInput.value=appliedQuery;return load();
+  }
+  refine.onclick=()=>{if(refine.disabled)return;addingStep=true;searchInput.value='';renderSearchSteps();searchInput.focus();};
+  back.onclick=()=>{if(addingStep){addingStep=false;searchInput.value=appliedQuery;searchMode.value=retrievalMode;renderSearchSteps();return;}return replaySteps(searchSteps);};
+  searchMode.addEventListener('change',()=>{
+    if(composing){pendingModeChange=true;return;}
+    if(addingStep&&!searchInput.value.trim())return;
+    return applySearch();
+  });
+  searchInput.addEventListener('compositionstart',()=>{composing=true;});
+  searchInput.addEventListener('compositionend',()=>{composing=false;if(pendingModeChange){pendingModeChange=false;if(addingStep&&!searchInput.value.trim())return;return applySearch();}});
+  searchInput.addEventListener('keydown',event=>{
+    if(event.key!=='Enter')return;
+    event.preventDefault();if(!composing&&!event.isComposing&&event.keyCode!==229)applySearch();
+  });
+  searchForm.addEventListener('submit',event=>{event.preventDefault();if(!composing)applySearch();});
+  function applySearch(){
+    const term=searchInput.value.trim();
+    if(addingStep){if(!term)return;searchSteps=[...searchSteps,{query:appliedQuery,retrieval_mode:loadedMode||retrievalMode}];addingStep=false;}
+    if(!term&&searchSteps.length){searchInput.value=appliedQuery;searchMode.value=retrievalMode;renderSearchSteps();return;}
+    retrievalMode=searchMode.value==='semantic'?'semantic':'keyword';appliedQuery=term;searchInput.value=appliedQuery;return load();
+  }
+  function clearSearch(){retrievalMode=searchMode.value==='semantic'?'semantic':'keyword';searchSteps=[];addingStep=false;boundedBySemantic=false;appliedQuery='';searchInput.value='';}
+  function resetSearch(){clearSearch();retrievalMode='keyword';searchMode.value='keyword';pendingModeChange=false;}
+  function clearAndLoad(){clearSearch();searchInput.focus();return load();}
+  $('source-search-clear').onclick=clearAndLoad;
+  const emptyClear=document.createElement('button');emptyClear.id='source-empty-clear-search';emptyClear.type='button';emptyClear.className='secondary';emptyClear.textContent='清空搜索';emptyClear.hidden=true;emptyClear.onclick=clearAndLoad;empty.append(emptyClear);
   let richContent=null,detailContent=null,readingControls=null,readingMode='rich',readingNote=null;
   const textReads=new Map();
   const loadMore=document.createElement('button');loadMore.id='source-load-more';loadMore.type='button';loadMore.className='secondary';loadMore.textContent='加载更多资料';loadMore.hidden=true;layout.after(loadMore);
@@ -28,7 +84,7 @@
   function closeDetail(){drawer.close({restoreFocus:false});clearDetail();}
   function message(heading,detail){
     empty.querySelector('h3').textContent=heading;empty.querySelector('p').textContent=detail;
-    empty.hidden=false;layout.classList.add('is-empty');list.replaceChildren();
+    emptyClear.hidden=!appliedQuery;empty.hidden=false;layout.classList.add('is-empty');list.replaceChildren();
   }
   const FORMAT_LABELS={pdf:'PDF',docx:'Word',doc:'Word',md:'Markdown',markdown:'Markdown',txt:'纯文本',text:'纯文本',html:'HTML',htm:'HTML'};
   const formatLabel=format=>FORMAT_LABELS[String(format||'').toLowerCase()]||String(format||'').toUpperCase()||'资料正文';
@@ -56,6 +112,7 @@
     <details class="source-technical"><summary>资料标识与来源信息</summary><dl><dt>资料编号</dt><dd>${esc(doc.id)}</dd>${metadata.source_document_version_id?`<dt>原始文件版本编号</dt><dd>${esc(metadata.source_document_version_id)}</dd>`:''}${parser?`<dt>解析器</dt><dd>${esc(parser)}</dd>`:''}</dl></details>`;
   }
   function updateCounts(){
+    page.querySelector('.source-filter-bar')?.setAttribute('aria-label',boundedSearch()?'本次召回资料处理状态（最多100片段）':'资料处理状态');
     const counts=directoryCounts||{ready:0,processing:0,failed:0,all:allDocuments.length};
     if(!directoryCounts)allDocuments.forEach(doc=>counts[buildState(doc).className]++);
     for(const name of Object.keys(counts))$(name+'-count').textContent=counts[name];
@@ -85,6 +142,10 @@
   function renderDocumentList(){
     closeDetail();updateCounts();
     if(!allDocuments.length){
+      if(appliedQuery){
+        if(boundedSearch())message('本次召回范围内无资料',`本次最多100片段召回范围内，当前条件和处理状态下没有可展示的资料。可调整条件、切换状态或清空搜索。`);
+        else message('没有匹配的资料',`当前范围和处理状态下，搜索“${appliedQuery}”无结果。可调整关键词、切换状态或清空搜索。`);return;
+      }
       if(currentFilter!=='all'&&directoryCounts?.all){message('当前筛选无结果','可切换其他处理状态查看资料。');return;}
       message('当前范围暂无原文',canWrite()?'可以切换项目、调整筛选条件，或点击“添加文件”上传资料。':'可以切换项目或调整筛选条件查看已有资料。');return;
     }
@@ -101,6 +162,7 @@
       button.innerHTML=`<span class="source-item__name"><b>${esc(documentTitle(doc))}</b><small>${esc(doc.metadata?.source_file||'已保存正文 · 原始文件名未记录')}</small></span>
         <span class="source-state ${state.className}">${state.label}</span><span class="source-item__type source-format">${esc(formatLabel(doc.metadata?.source_format))}</span>
         <span class="source-item__counts">${doc.text_length==null?'正文按需读取':esc(doc.text_length)+' 字'} · 派生摘要 ${esc(doc.derived_count??'待核验')} 条</span><span class="source-item__open" aria-hidden="true">查看 ›</span>`;
+      if(semanticSearch()&&doc.match?.text){const snippet=document.createElement('span');snippet.className='source-item__match';snippet.textContent=doc.match.text;button.append(snippet);}
       button.addEventListener('click',()=>openDocument(doc,button));list.append(button);
     }
   }
@@ -377,31 +439,36 @@
   }
   function load({append=false,reuse=false}={}){
     const project=current,ticket=window.WorkspaceContext?.ticket(project,'sources');
-    if(!project){refresh.disabled=false;summary.textContent='尚未选择项目';message('选择项目后自动展示原文','请在左侧选择已有项目。');return false;}
+    if(!project){searchSucceeded=false;searchLoading=false;renderSearchSteps();refresh.disabled=false;summary.textContent='尚未选择项目';message('选择项目后自动展示原文','请在左侧选择已有项目。');return false;}
     let filter,stamp;
-    try{filter=scope();stamp=JSON.stringify(filter);}catch(error){refresh.disabled=false;message('筛选条件不正确',error.message);return false;}
-    const state=currentFilter,cursor=append?nextCursor:null,key=JSON.stringify([project,stamp,state,cursor]);
+    try{filter=scope();stamp=JSON.stringify(filter);}catch(error){searchSucceeded=false;searchLoading=false;renderSearchSteps();refresh.disabled=false;message('筛选条件不正确',error.message);return false;}
+    const state=currentFilter,term=appliedQuery,mode=retrievalMode,chain=stepsStamp(),cursor=append?nextCursor:null,key=JSON.stringify([project,stamp,state,term,mode,chain,cursor]);
     if(inFlight?.key===key&&inFlight.serial===serial)return inFlight.promise;
-    if(reuse&&loadedProject===project&&loadedScope===stamp&&loadedState===state)return Promise.resolve(true);
-    const request=++serial,accepts=()=>request===serial&&sameContext(project,stamp,ticket)&&currentFilter===state;
+    if(reuse&&loadedProject===project&&loadedScope===stamp&&loadedState===state&&loadedQuery===term&&loadedMode===mode&&loadedSteps===chain)return Promise.resolve(true);
+    const request=++serial,accepts=()=>request===serial&&sameContext(project,stamp,ticket)&&currentFilter===state&&appliedQuery===term&&retrievalMode===mode&&stepsStamp()===chain;
+    searchLoading=true;searchSucceeded=false;boundedBySemantic=false;renderSearchSteps();
     closeDetail();
     if(!append){loadedProject=null;loadedScope=null;loadedState=null;allDocuments=[];directoryCounts=null;nextCursor=null;updateCounts();
-      summary.textContent='正在读取当前项目的原文…';message('正在加载原文','加载完成后选择资料查看详情。');
+      summary.textContent=semanticSearch()?'正在进行向量正文召回…':'正在读取当前项目的原文…';message('正在加载原文','加载完成后选择资料查看详情。');
       list.innerHTML='<div class="source-placeholder">正在加载文档目录…</div>';}
     refresh.disabled=true;loadMore.disabled=true;loadMore.hidden=!append;
     const promise=(async()=>{try{
-      const query='?limit=50&summary_only=true&state='+encodeURIComponent(state)+(cursor?'&cursor='+encodeURIComponent(cursor):'');
-      const result=await api('/api/projects/'+encodeURIComponent(project)+'/sources'+query,filter);
+      const query='?limit=50&summary_only=true&state='+encodeURIComponent(state)+(term?'&query='+encodeURIComponent(term):'')+(mode==='semantic'?'&retrieval_mode=semantic':'')+(cursor?'&cursor='+encodeURIComponent(cursor):'');
+      const result=await api('/api/projects/'+encodeURIComponent(project)+'/sources'+query,searchSteps.length?{...filter,search_steps:JSON.parse(chain)}:filter);
       if(!accepts())return false;
-      loadedProject=project;loadedScope=stamp;loadedState=state;
+      loadedProject=project;loadedScope=stamp;loadedState=state;loadedQuery=term;loadedMode=mode;loadedSteps=chain;searchSucceeded=true;boundedBySemantic=result.bounded_by_semantic===true;
       allDocuments=[...new Map([...(append?allDocuments:[]),...(result.documents||[])].map(doc=>[doc.id,doc])).values()];
       nextCursor=result.next_cursor||null;total=result.total??allDocuments.length;directoryCounts=result.counts||null;
-      summary.textContent=`当前范围共 ${total} 篇文档 · 已加载 ${allDocuments.length} 篇 · 选择资料查看详情`;
+      summary.textContent=searchSteps.length&&boundedSearch()
+        ?`召回范围内继续检索 · ${searchSteps.length+1} 步条件 · 当前状态 ${total} 份资料 · 已加载 ${allDocuments.length} 份 · 状态计数仅指本次召回集${result.complete===false?' · 召回不完整，请刷新重试':''}`
+        :semanticSearch()
+        ?`向量正文召回 · 搜索“${term}” · 本次召回 ${directoryCounts?.all??total} 份资料 / 最多100片段 · 当前状态 ${total} 份 · 已加载 ${allDocuments.length} 份 · 状态计数仅指本次召回集${result.complete===false?' · 召回不完整，请刷新重试':''}`
+        :(term?`搜索“${term}” · `:'')+`当前范围共 ${total} 篇文档 · 已加载 ${allDocuments.length} 篇 · 选择资料查看详情${result.complete===false?' · 结果不完整，请刷新重试':''}`;
       loadMore.hidden=!nextCursor;
       renderDocumentList();return true;
     }catch(error){
-      if(accepts()){summary.textContent='原文加载失败';message('暂时无法读取原文',error.message+'；请点击右上角“刷新”重试。');}return false;
-    }finally{if(request===serial){refresh.disabled=false;loadMore.disabled=false;if(inFlight?.serial===request)inFlight=null;}}
+      if(accepts()){summary.textContent=semanticSearch()?'向量正文召回失败':'原文加载失败';message(semanticSearch()?'暂时无法进行向量正文召回':'暂时无法读取原文',error.message+'；请点击右上角“刷新”重试。');}return false;
+    }finally{if(request===serial){searchLoading=false;renderSearchSteps();refresh.disabled=false;loadMore.disabled=false;if(inFlight?.serial===request)inFlight=null;}}
     })();
     inFlight={key,serial:request,promise};return promise;
   }
@@ -411,6 +478,7 @@
   window.selectSource=async sourceId=>{
     if(!sourceId)throw Error('该证据没有可定位的来源');
     const citation=++citationSerial;
+    resetSearch();
     if(currentFilter!=='all'){currentFilter='all';syncFilterButtons();}
     closeDetail();const project=current,stamp=scopeStamp(),loaded=await load({reuse:true}),request=serial,detailRequest=detailSerial;
     const accepts=()=>citation===citationSerial&&detailRequest===detailSerial&&request===serial&&project===current&&stamp===scopeStamp();
@@ -433,6 +501,6 @@
   upload.onclick=()=>{if(!canWrite())return;if(window.LibraryWorkspace)window.LibraryWorkspace.open('upload');else window.KnowledgeTabs.open('ingest');};
   document.querySelector('[data-tab="sources"]')?.addEventListener('click',()=>load());
   document.addEventListener('workspace:scope-changed',event=>{if(event.detail.page==='sources'){serial++;closeDetail();if(visible())load();}});
-  $('project').addEventListener('change',()=>{serial++;closeDetail();loadedProject=null;loadedScope=null;loadedState=null;allDocuments=[];directoryCounts=null;nextCursor=null;loadMore.hidden=true;updateCounts();message('正在切换项目','进入资料库后会自动加载。');if(visible())load();});
+  $('project').addEventListener('change',()=>{serial++;resetSearch();closeDetail();loadedProject=null;loadedScope=null;loadedState=null;loadedQuery=null;loadedMode=null;allDocuments=[];directoryCounts=null;nextCursor=null;loadMore.hidden=true;updateCounts();message('正在切换项目','进入资料库后会自动加载。');if(visible())load();});
   if(visible())load();
 })();

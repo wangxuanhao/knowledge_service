@@ -191,7 +191,8 @@ class RetrievalEngine:
     """Rank the page scope in Milvus, then hydrate only bounded authority hits."""
     MODES = frozenset({'hybrid', 'semantic', 'keyword'})
     PAGE_SCOPE = frozenset({'applicability', 'filters', 'valid_at', 'known_at',
-                           'include_unknown', 'ontology_scope', 'ontology_ids'})
+                           'include_unknown', 'ontology_scope', 'ontology_ids',
+                           '_source_document_scope'})
     MAX_REFILLS = 4
     MAX_NATIVE_LIMIT = 512
 
@@ -301,6 +302,8 @@ class RetrievalEngine:
                 raise RuntimeError('Milvus 索引不可用，请连接服务并在项目页面向量化')
             index, catalog = self._current_index(project_id, expected_index if current_qa else None)
             native_scope = dict(page_scope)
+            if native_scope.pop('_source_document_scope', None) is not None:
+                qualified_batches = True
             if current_qa:
                 native_scope.pop('known_at', None)
             try:

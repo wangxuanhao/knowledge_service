@@ -7,7 +7,7 @@ const vm=require('node:vm');
 // Small DOM boundary for the browser module, paired with the real drawer manager
 // and deferred API reads to exercise focus, node movement and request lifetimes.
 class Element {
-  constructor(tag,doc){this.tagName=tag.toUpperCase();this.ownerDocument=doc;this.children=[];this.dataset={};this.attributes={};this.listeners={};this.className='';this._text='';this.hidden=false;this.open=false;this.scrollTop=0;
+  constructor(tag,doc){this.tagName=tag.toUpperCase();this.ownerDocument=doc;this.children=[];this.dataset={};this.attributes={};this.listeners={};this.value='';this.className='';this._text='';this.hidden=false;this.open=false;this.scrollTop=0;
     this.classList={contains:name=>this.className.split(/\s+/).includes(name),add:(...names)=>names.forEach(name=>{if(!this.classList.contains(name))this.className+=' '+name;}),remove:(...names)=>{this.className=this.className.split(/\s+/).filter(name=>!names.includes(name)).join(' ');},toggle:(name,force)=>{const add=force??!this.classList.contains(name);this.classList[add?'add':'remove'](name);return add;}};}
   append(...nodes){for(const node of nodes){if(node.tagName==='#FRAGMENT'){this.append(...[...node.children]);continue;}node.remove();node.parentNode=this;this.children.push(node);}}
   remove(){if(this.parentNode){this.parentNode.children=this.parentNode.children.filter(node=>node!==this);this.parentNode=null;}}
@@ -39,14 +39,14 @@ const descendants=node=>node.children.flatMap(child=>[child,...descendants(child
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
 const documentRow=(id,status='completed')=>({id,text:'原文 '+id,derived_count:3,metadata:{title:'资料 '+id,source_file:id+'.txt',source_format:'txt',source_size_bytes:120,status,source_document_version_id:'version-'+id}});
 
-function setup({documents=[documentRow('one'),documentRow('two','failed')],writer=true,acceptedAssertions=[],acceptedReadError=null,rendered=null}={}){
+function setup({documents=[documentRow('one'),documentRow('two','failed')],writer=true,acceptedAssertions=[],acceptedReadError=null,rendered=null,sourceRead=null}={}){
   const document={createElement(tag){const node=new Element(tag,this);if(tag==='template')node.content=new Element('#fragment',this);return node;},getElementById(id){return descendants(this.body).find(node=>node.id===id)||null;},querySelector(selector){return this.body.querySelector(selector);},querySelectorAll(selector){return this.body.querySelectorAll(selector);},addEventListener(name,fn){(this.listeners[name]??=[]).push(fn);},listeners:{},async dispatch(name,event){await Promise.all((this.listeners[name]||[]).map(fn=>fn(event)));}};
   document.body=document.createElement('body');document.activeElement=document.body;
   const make=(tag,id,parent=document.body)=>{const node=document.createElement(tag);node.id=id;parent.append(node);return node;};
   const page=make('section','tab-sources'),panel=make('div','sources-panel',page),layout=make('div','sources-layout',panel);layout.className='source-layout';
   const list=make('div','source-list',layout),article=make('article','source-article',layout),title=make('h3','source-title',article),body=make('pre','source-body',article);
   const refresh=make('button','load-sources',panel),upload=make('button','upload-source',panel),project=make('select','project');
-  const requests=[],fetches=[],revoked=[],drawers=[],navigation=[],external=[];let scopeRevision=0,scopeValue={filters:null};
+  const requests=[],sourceRequests=[],fetches=[],revoked=[],drawers=[],navigation=[],external=[];let scopeRevision=0,scopeValue={filters:null};
   const WorkspaceDrawers=require('../../../knowledge_service/web/workspace-drawers.js').createManager(document),createDrawer=WorkspaceDrawers.create;
   WorkspaceDrawers.create=options=>{const drawer=createDrawer(options);drawer.options=options;drawers.push(drawer);return drawer;};
   const context={document,current:'project-one',console,AbortController,URL,URLSearchParams,setTimeout,clearTimeout,location:{origin:'http://test'},WorkspaceDrawers,Auth:{isAdmin:()=>writer},WorkspaceContext:{read:()=>scopeValue,ticket:(project,page)=>({project,page,revision:scopeRevision}),accepts:(ticket,project,page)=>ticket.project===project&&ticket.page===page&&ticket.revision===scopeRevision},
@@ -58,16 +58,20 @@ function setup({documents=[documentRow('one'),documentRow('two','failed')],write
         return acceptedReadError?Promise.reject(acceptedReadError):Promise.resolve({assertions:acceptedAssertions});
       }
       if(url.includes('/sources')){
+        sourceRequests.push({url,body,method});
+        if(sourceRead)return sourceRead(url,body,method);
         const query=new URL(url,'http://test').searchParams,state=query.get('state')||'all',id=query.get('document_id');
         const status=doc=>doc.metadata?.status==='failed'?'failed':doc.metadata?.status==='processing'?'processing':'ready';
-        const counts={all:documents.length,ready:0,failed:0,processing:0};documents.forEach(doc=>counts[status(doc)]++);
-        const found=documents.filter(doc=>(!id||doc.id===id)&&(state==='all'||status(doc)===state));
+        const terms=[...(body?.search_steps||[]).map(step=>step.query),query.get('query')||''].map(term=>term.toLowerCase());
+        const matching=documents.filter(doc=>terms.every(term=>!term||[doc.text,doc.metadata?.title,doc.metadata?.source_file].some(value=>String(value||'').toLowerCase().includes(term))));
+        const counts={all:matching.length,ready:0,failed:0,processing:0};matching.forEach(doc=>counts[status(doc)]++);
+        const found=matching.filter(doc=>(!id||doc.id===id)&&(state==='all'||status(doc)===state));
         return Promise.resolve({documents:found.map(doc=>({...doc,text:undefined})),total:found.length,counts});
       }
       if(/\/records\/[^/?]+(?:\?.*)?$/.test(url))return Promise.resolve(documents.find(doc=>url.split('?')[0].endsWith('/'+doc.id))||{});
       return new Promise((resolve,reject)=>requests.push({url,body,method,resolve,reject}));}};
   context.window=context;vm.createContext(context);const shared=path.resolve(__dirname,'../../../knowledge_service/web/source-content.js');if(fs.existsSync(shared))vm.runInContext(fs.readFileSync(shared,'utf8'),context);vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../../../knowledge_service/web/sources-view.js'),'utf8'),context);
-  return {context,document,page,list,article,title,body,refresh,upload,project,drawers,requests,fetches,revoked,navigation,external,documents,get:id=>document.getElementById(id),rows:()=>list.querySelectorAll('.source-item'),tab:name=>document.querySelector('.source-detail-tabs').querySelectorAll('button').find(button=>button.textContent===name),filter:name=>document.querySelectorAll('.source-filter-btn').find(button=>button.dataset.filter===name),setDocuments:rows=>{documents=rows;},setWriter:value=>{writer=value;},changeScope:async()=>{scopeRevision++;scopeValue={filters:{status:'changed'}};await document.dispatch('workspace:scope-changed',{detail:{page:'sources'}});await settle();}};
+  return {context,document,page,list,article,title,body,refresh,upload,project,drawers,requests,sourceRequests,fetches,revoked,navigation,external,documents,get:id=>document.getElementById(id),rows:()=>list.querySelectorAll('.source-item'),tab:name=>document.querySelector('.source-detail-tabs').querySelectorAll('button').find(button=>button.textContent===name),filter:name=>document.querySelectorAll('.source-filter-btn').find(button=>button.dataset.filter===name),setDocuments:rows=>{documents=rows;},setWriter:value=>{writer=value;},changeScope:async()=>{scopeRevision++;scopeValue={filters:{status:'changed'}};await document.dispatch('workspace:scope-changed',{detail:{page:'sources'}});await settle();}};
 }
 
 

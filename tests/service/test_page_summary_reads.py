@@ -148,6 +148,77 @@ def test_source_directory_point_and_cursor_respect_project_scope_and_history(tmp
     assert explorer.sources(p,{},document_id='other')['documents']==[]
 
 
+def test_library_search_matches_name_filename_and_body_across_pages(tmp_path, monkeypatch):
+    repo=Repository(tmp_path/'source-search');p=repo.create_project('p')['id']
+    record(repo,p,'a',metadata={'title':'退款规则','status':'ready'})
+    record(repo,p,'b',metadata={'source_file':'退款说明.PDF','status':'failed'})
+    record(repo,p,'z',text='正文中的退款流程',metadata={'status':'processing'})
+    record(repo,p,'other',metadata={'title':'无关资料'})
+    record(repo,p,'chunk','chunk',source_id='a',text='不同关键词的正文切片')
+    service=KnowledgeService(repo,HashingEncoder())
+    monkeypatch.setattr(service,'scoped',lambda *a,**k:pytest.fail('search loaded the entire project'))
+    explorer=Explorer(service)
+    first=explorer.sources(p,{},summary_only=True,limit=1,query='  退款  ')
+    assert first['total']==3 and first['counts']=={'all':3,'ready':1,'failed':1,'processing':1}
+    assert [d['id'] for d in first['documents']]==['a']
+    assert 'text' not in first['documents'][0]
+    assert first['documents'][0]['derived_count']==1, '文档搜索不能过滤派生知识摘要'
+    second=explorer.sources(p,{},summary_only=True,limit=1,query='退款',cursor=first['next_cursor'])
+    third=explorer.sources(p,{},summary_only=True,limit=1,query='退款',cursor=second['next_cursor'])
+    assert [d['id'] for d in second['documents']+third['documents']]==['b','z']
+    assert third['next_cursor'] is None
+    failed=explorer.sources(p,{},summary_only=True,state='failed',query='退款')
+    assert failed['total']==1 and failed['counts']['all']==3
+    assert [d['id'] for d in failed['documents']]==['b']
+    assert explorer.sources(p,{},query='pdf')['documents'][0]['id']=='b'
+
+
+def test_library_search_is_literal_and_cursor_is_bound_to_query(tmp_path):
+    repo=Repository(tmp_path/'source-literal');p=repo.create_project('p')['id']
+    record(repo,p,'a',metadata={'title':'ABC 100%_special'})
+    record(repo,p,'b',text='abc second')
+    explorer=Explorer(KnowledgeService(repo,HashingEncoder()))
+    first=explorer.sources(p,{},limit=1,summary_only=True,query='aBc')
+    assert first['total']==2 and first['next_cursor']
+    with pytest.raises(ValueError,match='cursor|游标'):
+        explorer.sources(p,{},limit=1,summary_only=True,query='other',cursor=first['next_cursor'])
+    assert explorer.sources(p,{},query='%_')['total']==1
+    assert explorer.sources(p,{},query="' OR TRUE --")['total']==0
+    assert explorer.sources(p,{},query='   ')['total']==2
+
+
+def test_library_search_preserves_project_metadata_and_historical_scope(tmp_path):
+    repo=Repository(tmp_path/'source-search-scope');p=repo.create_project('p')['id'];q=repo.create_project('q')['id']
+    old=record(repo,p,'one',text='old keyword',metadata={'region':'east'})
+    record(repo,p,'two',text='keyword',metadata={'region':'west'})
+    record(repo,q,'foreign',text='keyword')
+    repo.put_record(p,{'id':'one','kind':'document','text':'new content',
+        'metadata':{'region':'east'}},expected_version=1)
+    explorer=Explorer(KnowledgeService(repo,HashingEncoder()))
+    east={'filters':{'field':'metadata.region','op':'eq','value':'east'}}
+    assert explorer.sources(p,east,query='keyword')['total']==0
+    historical=explorer.sources(p,{**east,'known_at':old['recorded_at']},query='keyword',summary_only=True)
+    assert [d['id'] for d in historical['documents']]==['one']
+    assert explorer.sources(p,{},query='keyword')['total']==1
+
+
+def test_library_search_api_and_length_validation(tmp_path):
+    app=create_app(tmp_path/'source-search-api',encoder=HashingEncoder())
+    with TestClient(app) as client:
+        repo=app.state.service.repository;p=repo.create_project('p')['id']
+        record(repo,p,'a',metadata={'title':'唯一名称'})
+        record(repo,p,'b')
+        url=f'/api/projects/{p}/sources'
+        response=client.post(url,params={'summary_only':True,'query':'唯一'},json={})
+        assert response.status_code==200,response.text
+        assert response.json()['total']==1
+        assert [d['id'] for d in response.json()['documents']]==['a']
+        assert 'text' not in response.json()['documents'][0]
+        assert client.post(url,params={'query':'x'*2001},json={}).status_code==422
+        with pytest.raises(ValueError,match='搜索'):
+            Explorer(app.state.service).sources(p,{},query='x'*2001)
+
+
 def test_discovery_overview_never_materializes_unrelated_facts(tmp_path,monkeypatch):
     repo=Repository(tmp_path/'discovery');p=repo.create_project('p')['id']
     record(repo,p,'doc',metadata={'title':'source','discovery_candidates':[

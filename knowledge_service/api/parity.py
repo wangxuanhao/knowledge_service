@@ -1,6 +1,6 @@
 """探索、迁移、治理与持久化任务的 HTTP 契约。"""
 from typing import Literal
-from pydantic import Field
+from pydantic import Field, field_validator
 from fastapi import APIRouter, File, Form, Header, Query, UploadFile, Request as HttpRequest
 from .audit_identity import audit_actor
 from fastapi.responses import StreamingResponse, FileResponse
@@ -12,6 +12,22 @@ from ..services.job_handlers import job_handlers
 from ..services.reclassify import Reclassify
 from ..services.answers import stream_events
 
+
+
+class SourceSearchStep(Request):
+    query: str = Field(min_length=1,max_length=2000)
+    retrieval_mode: Literal['keyword','semantic']
+
+    @field_validator('query')
+    @classmethod
+    def nonempty_query(cls,value):
+        if not value.strip():
+            raise ValueError('搜索词不能为空')
+        return value.strip()
+
+
+class SourcesScope(Scope):
+    search_steps: list[SourceSearchStep] = Field(default_factory=list,max_length=7)
 
 
 class Subgraph(Scope):
@@ -274,10 +290,13 @@ def install(app,service):
     def dashboard(p:str,request:Scope):return explorer.dashboard(p,request.model_dump())
 
     @router.post('/projects/{p}/sources')
-    def sources(p:str,request:Scope,limit:int=50,cursor:str|None=None,
-                summary_only:bool=False,state:str='all',document_id:str|None=None):
-        return explorer.sources(p,request.model_dump(),limit=limit,cursor=cursor,
-            summary_only=summary_only,state=state,document_id=document_id)
+    def sources(p:str,request:SourcesScope,limit:int=50,cursor:str|None=None,
+                summary_only:bool=False,state:str='all',document_id:str|None=None,
+                query:str=Query(default='',max_length=2000),
+                retrieval_mode:Literal['keyword','semantic']='keyword'):
+        return explorer.sources(p,request.model_dump(exclude={'search_steps'}),limit=limit,cursor=cursor,
+            summary_only=summary_only,state=state,document_id=document_id,query=query,
+            retrieval_mode=retrieval_mode,search_steps=[step.model_dump() for step in request.search_steps])
 
     @router.post('/projects/{p}/subgraph')
     def subgraph(p:str,request:Subgraph):return explorer.graph(

@@ -251,7 +251,11 @@ class PageReads:
 
     @_snapshot_read
     def sources(self, project, scope, *, limit=50, cursor=None, summary_only=False,
-                state='all', document_id=None):
+                state='all', document_id=None, query=''):
+        if not isinstance(query,str) or len(query)>2000:
+            raise ValueError('资料搜索词必须是最多 2000 字符的字符串')
+        query=query.strip()
+        scope=scope or {}
         if type(limit) is not int or not 1 <= limit <= 200:
             raise ValueError('资料目录分页上限必须在 1 到 200 之间')
         if document_id is not None and (not isinstance(document_id,str) or not document_id or len(document_id)>1000):
@@ -261,7 +265,7 @@ class PageReads:
         if scope.get('kinds') is not None and 'document' not in scope['kinds']:
             return {'documents':[],'total':0,'next_cursor':None,
                     'counts':{'all':0,'ready':0,'processing':0,'failed':0}}
-        base,params=reads._qualified(project,scope or {},kinds=['document'])
+        base,params=reads._qualified(project,scope,kinds=['document'],query=query)
         states=self.repo._db.execute('''SELECT CASE r.payload::jsonb#>>'{metadata,status}'
                 WHEN 'failed' THEN 'failed' WHEN 'processing' THEN 'processing' ELSE 'ready' END AS state,
                 count(*) AS count FROM record_versions r WHERE '''+base+' GROUP BY 1',params).fetchall()
@@ -278,16 +282,39 @@ class PageReads:
         # This reads at most one bounded page; summary payload projection below
         # avoids transferring source bodies and extraction metadata.
         if not summary_only:
-            page=reads.page(project,selected,kinds=['document'],after=cursor,limit=limit)
+            page=reads.page(project,selected,kinds=['document'],after=cursor,limit=limit,query=query)
         else:
-            page=self._source_metadata_page(reads,project,selected,cursor,limit)
+            page=self._source_metadata_page(reads,project,selected,cursor,limit,query=query)
         docs=page['records']
         self._source_derivatives(project,scope or {},docs)
         return {'documents':docs,'total':page['total'],'next_cursor':page['next_cursor'],'counts':counts}
 
-    def _source_metadata_page(self, reads, project, scope, cursor, limit):
+    @_snapshot_read
+    def source_summaries(self, project, scope, document_ids):
+        """Hydrate at most 100 qualified parent summaries without source bodies."""
+        ids=list(dict.fromkeys(document_ids))
+        if len(ids)>100:
+            raise ValueError('资料摘要批次最多 100 份')
+        if not ids:
+            return []
+        self.repo.get_project(project)
+        sql,params=ScopedReads(self.repo)._qualified(project,scope,kinds=['document'])
+        fields=('title','source_file','source_format','source_size_bytes','document_parser',
+                'page_count','source_document_version_id','status')
+        metadata=','.join("'"+key+"',r.body#>'{metadata,"+key+"}'" for key in fields)
+        rows=self.repo._db.execute('''WITH documents AS MATERIALIZED (
+            SELECT r.project_id,r.id,r.version,r.version_id,r.recorded_at,r.superseded_at,
+                r.payload::jsonb AS body FROM record_versions r WHERE '''+sql+'''
+                AND r.id=ANY(?::text[])
+        ) SELECT r.project_id,r.id,r.version,r.version_id,r.recorded_at,r.superseded_at,
+            jsonb_build_object('id',r.id,'kind','document','valid_from',r.body->'valid_from',
+            'valid_until',r.body->'valid_until','metadata',jsonb_strip_nulls(jsonb_build_object('''+
+            metadata+''')))::text AS payload FROM documents r''',[*params,ids]).fetchall()
+        return [self.repo._record(row) for row in rows]
+
+    def _source_metadata_page(self, reads, project, scope, cursor, limit, *, query=''):
         # Reuse the keyset validation without reading the authoritative bodies.
-        page=reads.page(project,scope,kinds=['document'],after=cursor,limit=limit,compact_graph=True)
+        page=reads.page(project,scope,kinds=['document'],after=cursor,limit=limit,compact_graph=True,query=query)
         ids=[row['version_id'] for row in page['records']]
         if not ids:
             page['records']=[]
@@ -319,7 +346,11 @@ class PageReads:
             kinds=[kind for kind in kinds if kind in scope['kinds']]
         if not docs or not kinds:
             return
-        sql,params=ScopedReads(self.repo)._qualified(project,scope,kinds=kinds,keyset=True)
+        # Progressive conditions qualify the parent documents already selected.
+        # Derived records retain their own public scope qualification.
+        derivative_scope={key:value for key,value in scope.items()
+            if key not in {'_source_keyword_queries','_source_document_ids'}}
+        sql,params=ScopedReads(self.repo)._qualified(project,derivative_scope,kinds=kinds,keyset=True)
         ids=[doc['id'] for doc in docs]
         known=normalize_time(scope.get('known_at'))
         if known is None:

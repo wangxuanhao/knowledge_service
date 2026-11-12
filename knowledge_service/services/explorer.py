@@ -263,10 +263,24 @@ class Explorer:
         from ..repository.page_reads import PageReads
         return PageReads(self.repo).dashboard(p,scope)
 
-    def sources(self,p,scope,*,limit=50,cursor=None,summary_only=False,state='all',document_id=None):
+    def sources(self,p,scope,*,limit=50,cursor=None,summary_only=False,state='all',document_id=None,query='',retrieval_mode='keyword',search_steps=None):
         from ..repository.page_reads import PageReads
+        if search_steps and document_id is None:
+            from .source_progressive_search import SourceProgressiveSearch
+            return SourceProgressiveSearch(self.service).search(p,scope,query,
+                retrieval_mode=retrieval_mode,search_steps=search_steps,limit=limit,
+                cursor=cursor,summary_only=summary_only,state=state)
+        if retrieval_mode not in {'keyword','semantic'}:
+            raise ValueError('资料检索模式必须是 keyword 或 semantic')
+        if not isinstance(query,str) or len(query)>2000:
+            raise ValueError('资料搜索词必须是最多 2000 字符的字符串')
+        if retrieval_mode=='semantic' and query.strip() and document_id is None:
+            from .source_semantic_search import SourceSemanticSearch
+            return SourceSemanticSearch(self.service).search(p,scope,query.strip(),
+                limit=limit,cursor=cursor,state=state)
         return PageReads(self.repo).sources(p,scope,limit=limit,cursor=cursor,
-            summary_only=summary_only,state=state,document_id=document_id)
+            summary_only=summary_only,state=state,document_id=document_id,
+            query='' if document_id is not None else query)
 
     def mindmap(self,p,scope,root_id,depth=3):
         from ..repository.scoped_reads import ScopedReads

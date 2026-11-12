@@ -157,7 +157,40 @@ class ScopedReads:
         filtered, filter_params = _filter_sql(scope.get('filters'), alias)
         clauses.append(filtered)
         params.extend(filter_params)
+        # Private progressive predicates constrain authoritative parent rows;
+        # no result page or full document-ID enumeration is involved.
+        for query in scope.get('_source_keyword_queries', []):
+            predicate, values = self._keyword_sql(query, alias)
+            clauses.append(predicate)
+            params.extend(values)
+        if '_source_document_ids' in scope:
+            clauses.append(f'{alias}.id=ANY(?::text[])')
+            params.append(scope['_source_document_ids'])
+        parent_scope = scope.get('_source_document_scope')
+        if parent_scope is not None:
+            # This private gate is supplied only by the source library. Parent
+            # IDs and metadata must qualify before vector top-k is selected.
+            if parent_scope.get('kinds') is not None and 'document' not in parent_scope['kinds']:
+                clauses.append('FALSE')
+            else:
+                parent, values = self._base(project, parent_scope, 'source_document')
+                clauses.append(f"{alias}.read_kind='chunk' AND EXISTS (SELECT 1 FROM record_versions source_document "
+                    f"WHERE source_document.project_id={alias}.project_id AND source_document.id={alias}.payload::jsonb->>'source_id' "
+                    f"AND source_document.read_kind='document' AND {parent})")
+                params.extend(values)
         return ' AND '.join(clauses), params
+
+    @staticmethod
+    def _keyword_sql(query, alias):
+        sql = ("(strpos(lower(COALESCE(r.payload::jsonb->>'text','')),lower(?))>0 "
+                    "OR strpos(lower(r.id),lower(?))>0 OR EXISTS (SELECT 1 FROM jsonb_array_elements_text("
+                    "CASE WHEN jsonb_typeof(r.payload::jsonb#>'{metadata,aliases}')='array' "
+                    "THEN r.payload::jsonb#>'{metadata,aliases}' ELSE '[]'::jsonb END) alias "
+                    "WHERE strpos(lower(alias),lower(?))>0) "
+                    "OR (r.read_kind='document' AND ("
+                    "strpos(lower(COALESCE(r.payload::jsonb#>>'{metadata,title}','')),lower(?))>0 "
+                    "OR strpos(lower(COALESCE(r.payload::jsonb#>>'{metadata,source_file}','')),lower(?))>0)))")
+        return sql.replace("r.", alias+"."), [query]*5
 
     def _qualified(self, project, scope, *, kinds=None, query='', keyset=False, entity_source=None):
         kinds = scope.get('kinds') if kinds is None else kinds
@@ -210,12 +243,9 @@ class ScopedReads:
         if query:
             if not isinstance(query, str):
                 raise ValueError('搜索词必须是字符串')
-            sql += (" AND (strpos(lower(COALESCE(r.payload::jsonb->>'text','')),lower(?))>0 "
-                    "OR strpos(lower(r.id),lower(?))>0 OR EXISTS (SELECT 1 FROM jsonb_array_elements_text("
-                    "CASE WHEN jsonb_typeof(r.payload::jsonb#>'{metadata,aliases}')='array' "
-                    "THEN r.payload::jsonb#>'{metadata,aliases}' ELSE '[]'::jsonb END) alias "
-                    "WHERE strpos(lower(alias),lower(?))>0))")
-            params.extend([query, query, query])
+            predicate, values = self._keyword_sql(query, 'r')
+            sql += ' AND ' + predicate
+            params.extend(values)
         return sql, params
 
     @staticmethod
