@@ -81,22 +81,22 @@ function edit(item=null){
     var pwDialog = null;
 
     function buildPasswordDialog() {
-        pwDialog = el('div', 'ua-overlay');
+        pwDialog = el('div', 'ua-overlay ua-password-overlay');
         pwDialog.innerHTML =
             '<section class="ua-card ua-card-narrow" role="dialog" aria-modal="true" aria-labelledby="ua-pw-title">' +
             '  <header class="ua-head"><div>' +
-            '    <h2 id="ua-pw-title">修改我的口令</h2>' +
-            '    <p class="ua-sub">只改<b>自己</b>的口令。改完：这台设备会换上新令牌继续用，' +
-            '      <b>其他设备上的登录立刻失效</b>（口令是"当前登录凭据"的一部分，这是故意的）。</p>' +
+            '    <h2 id="ua-pw-title">修改口令</h2>' +
+            '    <p class="ua-sub">更新当前账号的登录口令</p>' +
             '  </div><button type="button" class="ua-close" data-ua-pw-close aria-label="关闭">×</button></header>' +
-            '  <p class="ua-flash" data-ua-pw-flash></p>' +
+            '  <p class="ua-pw-notice">修改后，当前设备保持登录，其他设备需重新登录。</p>' +
+            '  <p class="ua-flash" data-ua-pw-flash role="status" aria-live="polite"></p>' +
             '  <div class="ua-form ua-form-column">' +
-            '    <label>当前口令<input data-ua-pw-current type="password" autocomplete="current-password"></label>' +
-            '    <label>新口令（至少 6 位）<input data-ua-pw-new type="password" autocomplete="new-password"></label>' +
-            '    <label>再输一次新口令<input data-ua-pw-again type="password" autocomplete="new-password"></label>' +
+            '    <label>当前口令<input data-ua-pw-current type="password" autocomplete="current-password" placeholder="请输入当前口令"></label>' +
+            '    <label>新口令<input data-ua-pw-new type="password" autocomplete="new-password" placeholder="请输入新口令" aria-describedby="ua-pw-help"><small id="ua-pw-help">至少 6 位</small></label>' +
+            '    <label>确认新口令<input data-ua-pw-again type="password" autocomplete="new-password" placeholder="请再次输入新口令"></label>' +
             '    <div class="ua-pw-actions">' +
-            '      <button type="button" class="ua-primary" data-ua-pw-save>保存新口令</button>' +
             '      <button type="button" class="ua-action" data-ua-pw-close>取消</button>' +
+            '      <button type="button" class="ua-primary" data-ua-pw-save>保存新口令</button>' +
             '    </div>' +
             '  </div>' +
             '</section>';

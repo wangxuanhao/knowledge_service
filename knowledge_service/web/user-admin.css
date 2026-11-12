@@ -44,7 +44,39 @@
 #tab-useradmin .ua-table .ua-empty{padding:22px 16px;font-size:13px;color:var(--ks-muted,#688585);text-align:center}
 #tab-useradmin .ua-scope-note{margin:12px 0 0;font-size:12px;line-height:1.7;color:var(--ks-muted,#688585)}
 
-/* Only account edit/create side panels; personal password dialog keeps its own style. */
+/* Personal password dialog. Keep these overrides separate from account drawers. */
+body:has(.ua-password-overlay:not([hidden])){overflow:hidden}
+body .ua-password-overlay{align-items:center;padding:24px;background:rgba(18,50,50,.32);box-sizing:border-box}
+.ua-password-overlay .ua-card-narrow{width:min(440px,100%);max-height:calc(100dvh - 48px);overflow:auto;margin:auto;padding:28px;box-sizing:border-box;border:1px solid var(--ks-line,#d5e4e4);border-radius:16px;background:var(--ks-surface,#fff);color:var(--ks-ink,#124242);box-shadow:0 24px 80px #10353526;font-size:13px;line-height:1.6}
+.ua-password-overlay .ua-head{gap:16px;align-items:flex-start}
+.ua-password-overlay .ua-head h2{margin:0 0 6px;color:var(--ks-ink,#124242);font-size:20px;line-height:1.4;font-weight:600}
+.ua-password-overlay .ua-sub{margin:0;color:var(--ks-muted,#688585);font-size:13px;line-height:1.6}
+.ua-password-overlay .ua-close{display:grid;place-items:center;width:32px;height:32px;padding:0;border:1px solid var(--ks-line,#d5e4e4);border-radius:8px;background:transparent;color:var(--ks-muted,#688585);font-size:22px;line-height:1;cursor:pointer}
+.ua-password-overlay .ua-close:hover{background:var(--ks-sunken,#eef5f5);color:var(--ks-ink,#124242);border-color:var(--ks-line-strong,#bed0d0)}
+.ua-password-overlay .ua-pw-notice{margin:20px 0;padding:12px 14px;border:1px solid var(--ks-line,#d5e4e4);border-radius:8px;background:var(--ks-sunken,#eef5f5);color:var(--ks-ink-2,#3d5e5e);font-size:12px;line-height:1.8}
+.ua-password-overlay .ua-form{display:grid;gap:18px;margin:0}
+.ua-password-overlay .ua-form label{display:grid;gap:7px;margin:0;color:var(--ks-ink,#124242);font-size:13px;font-weight:500;line-height:1.6}
+.ua-password-overlay .ua-form input{display:block;width:100%;min-width:0;height:44px;margin:0;padding:10px 12px;box-sizing:border-box;border:1px solid var(--ks-line-strong,#bed0d0);border-radius:8px;background:var(--ks-surface,#fff);color:var(--ks-ink,#124242);font:inherit;font-size:14px;box-shadow:none}
+.ua-password-overlay .ua-form input::placeholder{color:var(--ks-muted,#688585);opacity:1;font-size:13px;font-weight:400}
+.ua-password-overlay .ua-form input:focus{border-color:var(--ks-accent,#0e7c7b);outline:2px solid var(--ks-line,#d5e4e4);outline-offset:1px}
+.ua-password-overlay .ua-form small{color:var(--ks-muted,#688585);font-size:12px;font-weight:400;line-height:1.5}
+.ua-password-overlay .ua-pw-actions{display:flex;justify-content:flex-end;gap:10px;margin:4px 0 0;padding-top:20px;border-top:1px solid var(--ks-line,#d5e4e4)}
+.ua-password-overlay .ua-pw-actions button{min-height:40px;margin:0;padding:9px 16px;border:1px solid var(--ks-line-strong,#bed0d0);border-radius:8px;background:var(--ks-surface,#fff);color:var(--ks-ink-2,#3d5e5e);font:inherit;font-size:13px;line-height:20px;cursor:pointer;box-shadow:none}
+.ua-password-overlay .ua-pw-actions .ua-primary{border-color:var(--ks-accent,#0e7c7b);background:var(--ks-accent,#0e7c7b);color:#fff}
+.ua-password-overlay .ua-pw-actions button:hover{filter:brightness(.96)}
+.ua-password-overlay .ua-pw-actions button:disabled{opacity:.55;cursor:wait}
+.ua-password-overlay button:focus-visible{outline:2px solid var(--ks-accent,#0e7c7b);outline-offset:3px}
+.ua-password-overlay .ua-flash{min-height:0;margin:0 0 18px;padding:10px 12px;border-radius:8px;font-size:13px;line-height:1.6;overflow-wrap:anywhere}
+.ua-password-overlay .ua-flash:empty{display:none}
+.ua-password-overlay .ua-flash.is-error{background:#fff5f5;color:#a1363a}
+.ua-password-overlay .ua-flash.is-good{background:#edf7f2;color:#21654f}
+@media(max-width:480px){
+ body .ua-password-overlay{padding:16px}
+ .ua-password-overlay .ua-card-narrow{padding:22px 20px;max-height:calc(100dvh - 32px)}
+ .ua-password-overlay .ua-pw-actions button{flex:1}
+}
+
+/* Only account edit/create side panels. */
 body:has(.ua-management-overlay){overflow:hidden}
 body .ua-management-overlay{align-items:stretch;justify-content:flex-end;padding:0;background:rgba(18,50,50,.28)}
 body .ua-management-overlay .ua-edit-card{width:min(480px,100vw);max-width:100%;height:100dvh;max-height:100dvh;margin:0;padding:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;border:0;border-left:1px solid var(--ks-line,#d5e4e4);border-radius:0;background:var(--ks-surface,#fff);color:var(--ks-ink,#124242);font-size:13px;line-height:1.6;box-sizing:border-box;box-shadow:-8px 0 30px #10353514}
