@@ -28,6 +28,84 @@ from .llm_runtime import llm_operation
 class DraftCommandMixin:
     """本体变更命令的编译与影响评估（把前端命令展开成服务端可校验的操作集）。"""
 
+    def _type_merge_plan(self, project_id, draft, ontology, source_iri, target_iri):
+        from .ontology_type_merge import plan_class_merge, canonical_graph_snapshot
+        records = self.repository.current_records(project_id)
+        impact = self._impact(project_id, source_iri, ontology=ontology, records=records)
+        direct = []
+        for row in records:
+            if row.get('kind') != 'entity' or not row.get('type'):
+                continue
+            try:
+                resolved = ontology.resolve(row['type'], allowed=ontology.classes)
+            except ValueError:
+                continue
+            if str(resolved) == source_iri:
+                direct.append(row)
+        direct_ids = {row['id'] for row in direct}
+        linked = [row for row in records if row.get('kind') == 'relation'
+                  and (row.get('subject_id') in direct_ids
+                       or row.get('object_id') in direct_ids)]
+        affected_records = [*direct, *linked]
+        counts = {'entity': len(direct), 'relation': len(linked), 'attribute': 0}
+        impact.update({
+            'formal_records': len(affected_records), 'record_count': len(affected_records),
+            'record_ids': [row['id'] for row in affected_records],
+            'record_ids_truncated': False, 'kind_counts': counts,
+            'linked_relation_count': len(linked),
+            'record_preview': [{'id': row['id'], 'kind': row['kind'],
+                                'via': 'type' if row['id'] in direct_ids else 'endpoint',
+                                'text': (row.get('text') or '').strip()}
+                               for row in affected_records[:50]],
+            'referenced': bool(affected_records or impact['descendants']
+                               or impact['constraints'] or impact['pending']),
+            'classification_preview': {**impact['classification_preview'], 'records': counts},
+        })
+        affected = set(impact['record_ids'])
+        # Include complete pending snapshots (with container membership/version),
+        # so changing a mapping without changing its count invalidates confirmation.
+        pending = []
+        for row in records:
+            metadata = row.get('metadata') or {}
+            for key in ('review_candidates', 'discovery_candidates'):
+                for candidate in metadata.get(key) or []:
+                    if candidate.get('status') == 'pending':
+                        pending.append({'record_id': row['id'], 'version': row.get('version'),
+                                        'candidate': candidate})
+        fingerprint = _fingerprint({
+            'project_id': project_id, 'draft_id': draft['id'], 'revision': draft['revision'],
+            'base_ontology_id': draft['base_ontology_id'],
+            'current_ontology_id': self._latest_id(project_id),
+            'graph': canonical_graph_snapshot(ontology.graph),
+            'source_iri': source_iri, 'target_iri': target_iri,
+            'records': sorted((row['id'], row.get('version')) for row in records if row['id'] in affected),
+            'pending': sorted(pending, key=_canonical_json),
+        })
+        warnings = [{'code': 'controlled_migration_required',
+                     'message': '加入草案后须审核发布，再预演迁移旧知识；实例不会自动迁移。'},
+                    {'code': 'pending_mapping_review_required',
+                     'message': '未发布候选须按最终获批结构重新核对映射。'}]
+        try:
+            operations, _ = plan_class_merge(ontology, source_iri, target_iri,
+                                             published=draft['base_ontology_id'] is not None)
+        except ValueError as exc:
+            return {'source_iri': source_iri, 'target_iri': target_iri,
+                    'expected_revision': draft['revision'], 'preview_fingerprint': fingerprint,
+                    'can_merge': False, 'operations': [], 'impact': impact,
+                    'warnings': [*warnings, {'code': 'merge_blocked', 'message': str(exc)}]}
+        return {'source_iri': source_iri, 'target_iri': target_iri,
+                'expected_revision': draft['revision'], 'preview_fingerprint': fingerprint,
+                'can_merge': True, 'operations': operations, 'impact': impact, 'warnings': warnings}
+
+    def type_merge_preview(self, project_id, draft_id, expected_revision, source_iri, target_iri):
+        with self.repository.unit_of_work():
+            draft = self.store.get(project_id, draft_id)
+            self._assert_revision(draft, expected_revision)
+            _status_guard(draft, EDITABLE_STATES, '预览类型合并')
+            self._check_current(project_id, draft, expected_revision)
+            turtle, _ = self._ontology_for_draft(project_id, draft)
+            return self._type_merge_plan(project_id, draft, Ontology(turtle), source_iri, target_iri)
+
     @llm_operation
     def discover_parents(self, project_id, draft_id, expected_revision):
         """Append fresh hierarchy suggestions without replacing existing draft edits."""
@@ -288,6 +366,28 @@ class DraftCommandMixin:
         if not isinstance(command, dict):
             raise ValueError('command must be an object')
         action = command.get('action')
+        if action == 'merge_class':
+            source, target = command.get('target_iri'), command.get('replacement_iri')
+            if not source or not target or not command.get('preview_fingerprint'):
+                raise ValueError('类型合并须先预览并确认目标')
+            plan = self._type_merge_plan(project_id, draft, ontology, source, target)
+            if command['preview_fingerprint'] != plan['preview_fingerprint']:
+                raise ValueError('合并预览已变化，请重新预览确认')
+            if not plan['can_merge']:
+                raise ValueError(plan['warnings'][-1]['message'])
+            compiled = self._rebuild_operations(project_id, draft, plan['operations'], ontology, command)
+            if any((item.get('validation') or {}).get('errors') for item in compiled):
+                raise ValueError('合并操作存在阻塞，不能加入草案')
+            # Ordinary commands may persist blocked atoms. A merge must instead
+            # fail before append, including every sequential intermediate graph.
+            working = ontology.graph.serialize(format='turtle')
+            for item in compiled:
+                working = apply_operations(working, [_semantic_operation(item)])
+            from rdflib.compare import isomorphic
+            intended = apply_operations(ontology.graph.serialize(format='turtle'), plan['operations'])
+            if not isomorphic(Ontology(working).graph, Ontology(intended).graph):
+                raise ValueError('合并操作与预览目标结构不一致')
+            return compiled
         if action == 'batch':
             commands = command.get('commands')
             if not isinstance(commands, list) or not 1 <= len(commands) <= 100:

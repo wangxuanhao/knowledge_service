@@ -526,7 +526,8 @@ def _validate_definition_graph(graph: Graph, *, ontology: Ontology | None = None
                 raise ValueError(f'range 类不存在：{value}')
             if kind == 'attribute' and value not in _SUPPORTED_DATATYPES:
                 raise ValueError(f'不支持的 datatype 数据类型：{value}')
-    for subject, target_class in graph.subject_objects(SH.targetClass):
+    for subject, target_class in [*graph.subject_objects(SH.targetClass),
+                                  *graph.subject_objects(SH['class'])]:
         if (_shape_deactivated(graph, subject)
                 or target_class in ontology.classes):
             continue
@@ -818,7 +819,9 @@ def retirement_dependencies(ontology: Ontology, target_iri: str, *,
                     f'{kind}_dependency', 'error',
                     '活动 domain/range 约束依赖将被停用的术语',
                     [owner, target], operation_ids))
-    for subject in ontology.graph.subjects(SH.targetClass, target):
+    for subject, predicate in [(subject, predicate)
+            for predicate in (SH.targetClass, SH['class'])
+            for subject in ontology.graph.subjects(predicate, target)]:
         if _shape_deactivated(ontology.graph, subject):
             deactivated_info.append(_issue(
                 'deactivated_shacl_dependency', 'info',
@@ -826,7 +829,8 @@ def retirement_dependencies(ontology: Ontology, target_iri: str, *,
                 [_owning_shape(ontology.graph, subject), target], operation_ids))
             continue
         errors.append(_issue(
-            'active_shacl_target_class_dependency', 'error',
+            ('active_shacl_target_class_dependency' if predicate == SH.targetClass
+             else 'active_shacl_class_dependency'), 'error',
             'SHACL targetClass 依赖将被停用的类',
             [subject, target], operation_ids))
     for subject in ontology.graph.subjects(SH.path, target):
@@ -848,7 +852,7 @@ def retirement_dependencies(ontology: Ontology, target_iri: str, *,
                 '活动术语的替换关系指向将被停用的术语',
                 [subject, target], operation_ids))
     warnings = []
-    excluded = _STRUCTURAL_PREDICATES | {SH.targetClass, SH.path, SH.property}
+    excluded = _STRUCTURAL_PREDICATES | {SH.targetClass, SH['class'], SH.path, SH.property}
     for subject, predicate in ontology.graph.subject_predicates(target):
         if (isinstance(subject, URIRef) and subject != target
                 and subject in (ontology.classes | ontology.relations | ontology.attributes)
@@ -899,11 +903,13 @@ def validate_ontology_invariants(ontology: Ontology) -> dict:
                         f'{kind}_dependency', 'error',
                         '活动约束依赖已停用术语', [owner, value]))
     for subject, predicate, value in ontology.graph:
-        if (predicate in {SH.targetClass, SH.path} and value in declared
+        if (predicate in {SH.targetClass, SH['class'], SH.path} and value in declared
                 and not ontology.is_active_term(value)
                 and not _shape_deactivated(ontology.graph, subject)):
             code = ('active_shacl_target_class_dependency'
-                    if predicate == SH.targetClass else 'active_shacl_path_dependency')
+                    if predicate == SH.targetClass else
+                    'active_shacl_class_dependency' if predicate == SH['class'] else
+                    'active_shacl_path_dependency')
             errors.append(_issue(
                 code, 'error', 'SHACL 约束依赖已停用术语',
                 [_owning_shape(ontology.graph, subject), value]))
@@ -1135,7 +1141,8 @@ def canonical_turtle_diff(base_turtle: str, edited_turtle: str, *,
                           published: bool = True,
                           base_ontology_id: str | None = None,
                           source_ontology_id: str | None = None,
-                          restore_operation_builder=None) -> list[dict]:
+                          restore_operation_builder=None,
+                          staged_retirement: bool = False) -> list[dict]:
     """Compile a graph-semantic Turtle diff into reviewable atomic operations."""
     immutable_source_id = source_ontology_id
     base = _graph(base_turtle)
@@ -1277,6 +1284,12 @@ def canonical_turtle_diff(base_turtle: str, edited_turtle: str, *,
 
     if not operations:
         raise ValueError('Turtle diff 包含不支持的 OWL/RDF 变更')
+    if staged_retirement:
+        # A merge must release old edges before inserting replacement edges;
+        # retirement is valid only once every active reference has moved.
+        operations.sort(key=lambda operation: (
+            2 if operation['action'] == 'retire_term' else
+            0 if operation['action'].startswith('remove_') else 1))
     candidate = apply_operations(base_turtle, operations)
     if not isomorphic(_graph(candidate), edited):
         raise ValueError('Turtle diff 包含无法安全编译的复杂 RDF 变更')

@@ -42,6 +42,7 @@ from __future__ import annotations
 
 from copy import copy
 
+from rdflib import URIRef
 from rdflib.namespace import DCTERMS
 
 from ..repository.page_reads import PageReads
@@ -292,7 +293,7 @@ class Reclassify:
 
     def _context(self, project_id, versions, current_ontology, labels_current):
         """一次 plan 里共享的上下文：版本顺序、标签、已解析过的本体（缓存，别再解析整段 Turtle）。"""
-        ordered = sorted(versions, key=lambda item: str(item.get('created_at') or ''))
+        ordered = list(versions)
         return {'project_id': project_id,
                 'order': [item['id'] for item in ordered],
                 'version_label': self._version_labels(versions),
@@ -324,24 +325,13 @@ class Reclassify:
         action, target = 'unmapped', None
         declared = structure_pending.resolves(current_ontology, term, kind)
         active = declared and current_ontology.is_active_term(term)
-        if declared:
-            replacement = _replacement(current_ontology, term, kind)
-            usable = bool(replacement) and structure_pending.resolves(
-                current_ontology, replacement, kind)
-            if not active and usable:
-                # 类型还在，但已被停用且写了替代映射：这正是"停用类时要求指定替代类"
-                # 留下的数据 —— 现在用它把知识直接落到替代概念上，比先搬版本再让用户自己改强。
-                action, target = 'rename', replacement
-            elif not active and not usable:
-                # 停用、又没有可用的替代类：**不能**当"原样搬" —— 本体门禁不允许把停用
-                # 术语写进新版本（"停用"本身就是"别再用它"）。这类知识归「没有去处」。
-                action, target = 'unmapped', None
-            else:
-                action, target = 'carry', term
+        replacement_path, replacement_issue = [], None
+        if active:
+            action, target = 'carry', term
         else:
-            replacement = _replacement(current_ontology, term, kind) \
-                or self._replacement_in_history(term, kind, version, ctx)
-            if replacement and structure_pending.resolves(current_ontology, replacement, kind):
+            replacement, replacement_path, replacement_issue = self._replacement_chain(
+                term, kind, version, ctx)
+            if replacement:
                 action, target = 'rename', replacement
         note = {
             'carry': '类型在新本体里还在：只把归属改到新版本，类型不动。',
@@ -352,6 +342,8 @@ class Reclassify:
         if action == 'unmapped' and declared:
             note = ('这个类型已经被停用、又没有可用的替代类：本体门禁不允许把停用术语写进新版本。'
                     '请在本体建模层恢复它、或指定替代类，再来迁移。')
+        if replacement_issue:
+            note = replacement_issue + '。请在本体建模层核对替代映射并发布，再预演迁移。'
         return {
             'key': self._key(row),
             'kind': kind,
@@ -364,25 +356,63 @@ class Reclassify:
             'to_label': _term_name(labels_current, target) if target else None,
             'record_count': 0, 'records': [], 'sample_limit': _SAMPLE_LIMIT,
             'note': note,
+            'replacement_path': replacement_path,
         }
 
-    def _replacement_in_history(self, term, kind, from_version, ctx):
-        """替代映射记在**哪一版**上都算：从这条知识挂的那一版往后找，取最先出现的那个。
-
-        现实里映射常常记在一个中间版本上（那一版把类停用并指定了替代类），而最新版
-        干脆把这个类删了。只看当前版本会误判成"没有去处"，把本来能自动迁的知识丢给人工。
-        """
+    def _historical_replacement_targets(self, term, kind, from_version, ctx):
+        """Only use history for a missing current term; never pick an arbitrary mapping."""
         order = ctx['order']
         start = order.index(from_version) if from_version in order else 0
+        targets = set()
         for version in order[start:]:
             try:
                 ontology = self._old_ontology(version, ctx)
-            except Exception:
+            except (KeyError, ValueError):
+                return set(), '替代映射历史版本无法读取'
+            node = _term_node(ontology, term, kind)
+            if node is None:
+                if _term_node(ontology, term, None) is not None:
+                    return set(), '替代映射中的术语种类与原知识不一致'
                 continue
-            replacement = _replacement(ontology, term, kind)
-            if replacement:
-                return replacement
-        return None
+            targets.update(ontology.graph.objects(node, DCTERMS.isReplacedBy))
+        return targets, None
+
+    def _replacement_chain(self, term, kind, from_version, ctx):
+        """Resolve a unique chain to an active term of the original kind.
+
+        Current declarations are authoritative, including an explicit dead end.
+        Historical mappings are consulted only when the term has disappeared.
+        A cycle or multiple alternatives is a decision for a human, not a sort.
+        """
+        current = ctx['current_ontology']
+        value, seen, path = term, set(), []
+        while value:
+            node = _term_node(current, value, kind)
+            identity = str(node) if node is not None else str(value)
+            if identity in seen:
+                return None, path, '替代映射形成循环'
+            seen.add(identity)
+            path.append(identity)
+            if node is not None:
+                if current.is_active_term(node):
+                    return str(node), path, None
+                targets = set(current.graph.objects(node, DCTERMS.isReplacedBy))
+            else:
+                if _term_node(current, value, None) is not None:
+                    return None, path, '替代目标的术语种类与原知识不一致'
+                targets, issue = self._historical_replacement_targets(
+                    value, kind, from_version, ctx)
+                if issue:
+                    return None, path, issue
+            if len(targets) > 1:
+                return None, path, '存在多个替代目标，不能自动选择'
+            if not targets:
+                return None, path, '替代链没有可用的活动目标'
+            value = next(iter(targets))
+            if not isinstance(value, URIRef):
+                return None, path, '替代目标必须是同种类术语的 IRI'
+            value = str(value)
+        return None, path, '替代链没有可用的活动目标'
 
     def _selected(self, plan, keys):
         """把请求里的组 key 解析成计划里的组；不认的 key 与「没有去处」都当面拒绝。"""

@@ -310,6 +310,89 @@ def test_rename_falls_back_to_replacement_mapping_recorded_on_older_version(tmp_
     assert local_name(after['e1']['type']) == '包裹'
 
 
+CHAIN_PREFIXES = '''
+@prefix ex: <https://example.test/chain#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+'''
+
+
+def _replacement_system(tmp_path):
+    repo, service, p = _service(tmp_path, 'replacement-chain')
+    initial = CHAIN_PREFIXES + 'ex:A a owl:Class . ex:B a owl:Class . ex:C a owl:Class .'
+    v1 = seed_ontology(repo, p, initial, Ontology(initial).summary())
+    service.write(p, [{'id': 'mention', 'kind': 'entity',
+        'type': 'https://example.test/chain#A', 'text': '原文对象',
+        'ontology_id': v1['id']}])
+    return repo, service, p, v1
+
+
+def test_replacement_chain_reaches_active_target_and_preserves_identity_and_undo(tmp_path):
+    repo, service, p, v1 = _replacement_system(tmp_path)
+    changed = CHAIN_PREFIXES + '''
+    ex:A a owl:Class ; owl:deprecated true ; dcterms:isReplacedBy ex:B .
+    ex:B a owl:Class ; owl:deprecated true ; dcterms:isReplacedBy ex:C .
+    ex:C a owl:Class .'''
+    latest = seed_ontology(repo, p, changed, Ontology(changed).summary())
+    planner = Reclassify(service)
+    group = planner.plan(p)['groups'][0]
+    assert group['migratable'] and group['to_type'] == 'https://example.test/chain#C'
+    assert planner.preview(p, [group['key']])['blocked'] is False
+    before = _rows(service, p)['mention']
+    assert before['ontology_id'] == v1['id'], '预览不应改实例'
+    result = planner.apply(p, [group['key']], '审核员')
+    after = _rows(service, p)['mention']
+    assert after['id'] == before['id'] and after['text'] == before['text']
+    assert after['ontology_id'] == latest['id'] and after['type'].endswith('#C')
+    assert after['version'] > before['version']
+    Governance(service).undo_merge(p, result['operation_id'])
+    assert _rows(service, p)['mention']['type'] == before['type']
+
+
+@pytest.mark.parametrize('declarations,reason', [
+    ('ex:A a owl:Class; owl:deprecated true; dcterms:isReplacedBy ex:B,ex:C . '
+     'ex:B a owl:Class . ex:C a owl:Class .', '多个'),
+    ('ex:A a owl:Class; owl:deprecated true; dcterms:isReplacedBy ex:B . '
+     'ex:B a owl:Class; owl:deprecated true; dcterms:isReplacedBy ex:A .', '循环'),
+    ('ex:A a owl:Class; owl:deprecated true; dcterms:isReplacedBy ex:rel . '
+     'ex:rel a owl:ObjectProperty .', '种类'),
+    ('ex:A a owl:Class; owl:deprecated true; dcterms:isReplacedBy ex:B . '
+     'ex:B a owl:Class; owl:deprecated true .', '替代'),
+])
+def test_replacement_chain_refuses_ambiguous_cyclic_wrong_kind_and_dead_end(tmp_path, declarations, reason):
+    repo, service, p, _ = _replacement_system(tmp_path)
+    changed = CHAIN_PREFIXES + declarations
+    seed_ontology(repo, p, changed, Ontology(changed).summary())
+    group = Reclassify(service).plan(p)['groups'][0]
+    assert group['action'] == 'unmapped' and not group['migratable']
+    assert group['to_type'] is None and reason in group['note']
+
+
+def test_historical_replacement_chain_can_cross_versions_but_conflicts_are_not_guessed(tmp_path):
+    repo, service, p, _ = _replacement_system(tmp_path)
+    middle = CHAIN_PREFIXES + '''
+    ex:A a owl:Class; owl:deprecated true; dcterms:isReplacedBy ex:B .
+    ex:B a owl:Class . ex:C a owl:Class .'''
+    seed_ontology(repo, p, middle, Ontology(middle).summary())
+    later = CHAIN_PREFIXES + '''
+    ex:B a owl:Class; owl:deprecated true; dcterms:isReplacedBy ex:C .
+    ex:C a owl:Class .'''
+    seed_ontology(repo, p, later, Ontology(later).summary())
+    current = CHAIN_PREFIXES + 'ex:C a owl:Class .'
+    seed_ontology(repo, p, current, Ontology(current).summary())
+    group = Reclassify(service).plan(p)['groups'][0]
+    assert group['to_type'] == 'https://example.test/chain#C'
+    # Two historical replacements are not an instruction to choose whichever
+    # happens to be iterated first, even if both ultimately reach C.
+    conflicting = CHAIN_PREFIXES + '''
+    ex:A a owl:Class; owl:deprecated true; dcterms:isReplacedBy ex:C .
+    ex:C a owl:Class .'''
+    seed_ontology(repo, p, conflicting, Ontology(conflicting).summary())
+    seed_ontology(repo, p, current, Ontology(current).summary())
+    group = Reclassify(service).plan(p)['groups'][0]
+    assert not group['migratable'] and '多个' in group['note']
+
+
 def test_preview_and_write_reach_the_same_verdict(tmp_path):
     """预演与真正写入同一个结论：预演说会被拦，写入就必须一条都不写。
 

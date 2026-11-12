@@ -39,6 +39,11 @@ class CommandRequest(RevisionRequest):
     command: dict[str, Any]
 
 
+class TypeMergePreviewRequest(RevisionRequest):
+    source_iri: str = Field(min_length=1)
+    target_iri: str = Field(min_length=1)
+
+
 class DecisionsRequest(RevisionRequest):
     expected_ontology_id: str | None
     validation_fingerprint: str
@@ -133,6 +138,11 @@ def install(app, service):
         result = drafts.command(
             p, draft_id, request.expected_revision, request.command)
         return drafts.project_response(result, view=view)
+
+    @router.post('/{draft_id}/type-merge-preview')
+    def type_merge_preview(p: str, draft_id: str, request: TypeMergePreviewRequest):
+        return drafts.type_merge_preview(
+            p, draft_id, request.expected_revision, request.source_iri, request.target_iri)
 
     @router.post('/{draft_id}/discover-parents')
     def discover_parents(p: str, draft_id: str, request: RevisionRequest,

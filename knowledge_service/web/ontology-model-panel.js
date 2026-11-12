@@ -544,6 +544,10 @@
   function renderDetail(state) {
     if (!detailHost) return;
     const st = state || S();
+    if (mergeForm && (mergeForm.project !== activeProject() || mergeForm.source !== st.selected || st.preview)) {
+      ++mergeForm.request;
+      mergeForm = null;
+    }
     if(createProject!==activeProject()){createProject=activeProject();createOpen=false;createValues={};createPreset={};++createOpening;}
     const selected = st.selected;
     if (!selected) {
@@ -632,6 +636,94 @@
    * 不做什么：不直接改生效本体（仍走 草案 → 审核 → 发布）；读不到影响面就不许停
    * （按未判定处理），不替服务端判断"能不能停"，也不自己估算条数。
    * ======================================================================== */
+  function replacementSelect(term, kind, className, placeholder) {
+    const select = el('select', 'om-new-input ' + className);
+    select.setAttribute('aria-label', placeholder);
+    const empty = el('option', null, placeholder); empty.value = ''; select.append(empty);
+    for (const candidate of S().summary?.[kind] || []) {
+      if (candidate.id === term.id || candidate.active === false) continue;
+      const option = el('option', null, help().label(candidate)); option.value = candidate.id; select.append(option);
+    }
+    return select;
+  }
+
+  let mergeForm = null;
+  function mergeSection(term) {
+    if (S().preview || term.active === false) return el('p', 'om-detail-note', '仅可在最新工作草案中合并启用的实体类型。');
+    const project = activeProject(), source = term.id;
+    if (!mergeForm || mergeForm.project !== project || mergeForm.source !== source) {
+      mergeForm = {project, source, target:'', reason:'', request:0, busy:false, preview:null};
+    }
+    const form = mergeForm;
+    const identity = () => JSON.stringify([S().draft?.id, S().draft?.revision]);
+    if (form.identity && form.identity !== identity() && form.phase !== 'preparing') {
+      form.preview = null; form.busy = false; ++form.request; form.identity = identity();
+      form.message = '草案已变化，请重新预览。';
+    }
+    const visible = () => !!project && mergeForm === form && activeProject() === project && S().selected === source && !S().preview;
+    const targetValid = () => (S().summary?.classes || []).some(t => t.id === form.target && t.id !== source && t.active !== false);
+    const sec = el('details', 'om-detail-sec om-constraint-edit om-merge'); sec.open = !!(form.target || form.message);
+    sec.append(el('summary', 'om-detail-title', '合并到已有类型'),
+      el('p', 'om-detail-note', '准备草案并预览定义变更；源类型将停用，实例之间不会合并。加入草案 → 逐项审核发布 → 预演迁移旧知识。'));
+    const target = replacementSelect(term, 'classes', 'om-merge-target', '请选择合并目标'); target.value = form.target;
+    const reason = el('textarea', 'om-new-input om-merge-reason'); reason.rows = 2; reason.value = form.reason;
+    reason.placeholder = '必填：说明类型合并原因'; reason.setAttribute('aria-label', '类型合并原因');
+    const result = el('div', 'om-merge-result'); result.setAttribute('aria-live', 'polite');
+    const preview = el('button', 'om-btn secondary om-merge-preview', form.busy ? '正在处理…' : '准备草案并预览影响'); preview.type = 'button';
+    const confirm = el('button', 'om-btn primary om-merge-confirm', '确认合并变更加入草案'); confirm.type = 'button';
+    const sync = () => {
+      preview.disabled = form.busy || !form.reason.trim() || !targetValid() || !visible();
+      confirm.disabled = form.busy || !form.preview?.can_merge || !form.preview?.preview_fingerprint || form.identity !== identity() || !visible() || !targetValid();
+    };
+    const invalidate = () => { form.preview = null; form.message = ''; ++form.request; form.busy = false; result.replaceChildren(el('p', 'om-detail-note', '选择或原因已变化，请重新预览。')); sync(); };
+    target.addEventListener('change', () => { form.target = target.value; invalidate(); });
+    reason.addEventListener('input', () => { form.reason = reason.value; invalidate(); });
+    if (form.message) result.append(el('p', 'om-detail-note', form.message));
+    if (form.preview) {
+      const data = form.preview, impact = data.impact || {}, n = k => Number(impact[k]) || 0;
+      result.append(el('p', 'om-detail-line', `${n('record_count')} 条正式知识 · ${n('linked_relation_count')} 条关联关系受影响；保存草案不会迁移这些知识。`));
+      const list = el('ul', 'om-detail-rows');
+      const actions = {retire_term:'停用', add_parent:'增加父类', remove_parent:'移除父类', add_domain:'增加主体类型', remove_domain:'移除主体类型', add_range:'增加客体类型', remove_range:'移除客体类型', update_annotation:'更新名称或说明', add_annotation:'补充名称或说明', remove_annotation:'移除名称或说明', advanced_rdf_patch:'调整校验约束引用'};
+      for (const operation of data.operations || []) list.append(el('li', null, `${actions[operation.action] || '调整定义'} · ${labelOfIri(operation.target_iri || source)}`));
+      result.append(el('p', 'om-detail-note', `预计 ${data.operations?.length || 0} 项定义变更，审核时可逐项核对；部分批准不代表合并完成。`), list);
+      for (const warning of data.warnings || []) result.append(el('p', 'om-detail-note', typeof warning === 'string' ? warning : warning.message || '请核对服务端提示。'));
+      if (!data.can_merge) result.append(el('p', 'om-detail-note', '当前方案不能合并，请处理上述提示后重试。'));
+    }
+    preview.addEventListener('click', async () => {
+      if (form.busy || !visible() || !targetValid() || !form.reason.trim()) return;
+      const M = model(), request = ++form.request;
+      form.preview = null; form.busy = true; form.phase = 'preparing'; sync();
+      const validRequest = () => visible() && request === form.request;
+      try {
+        if (!M?.ensureDraft) throw new Error('主控未就绪，无法准备草案。');
+        const draft = await M.ensureDraft();
+        if (!validRequest()) return;
+        if (!draft?.id || draft.revision == null || S().draft?.id !== draft.id || S().draft?.revision !== draft.revision) throw new Error('草案已变化，请重新预览。');
+        form.identity = identity(); form.phase = 'previewing';
+        const data = await api(endpoint(`/ontology-drafts/${encodeURIComponent(draft.id)}/type-merge-preview`), {expected_revision:draft.revision, source_iri:source, target_iri:form.target}, 'POST');
+        if (!validRequest() || form.identity !== identity()) return;
+        if (data.source_iri !== source || data.target_iri !== form.target || data.expected_revision !== draft.revision) throw new Error('预览与当前草案不一致，请重新预览。');
+        form.preview = data; form.message = '';
+      } catch (error) { if (validRequest()) form.message = error?.message || '预览失败，请重试。'; }
+      finally { if (validRequest()) {form.busy = false; form.phase = ''; renderDetail();} }
+    });
+    confirm.addEventListener('click', async () => {
+      sync(); if (confirm.disabled) return;
+      form.busy = true; sync();
+      try {
+        await model().sendCommand({action:'merge_class', target_iri:source, replacement_iri:form.target, preview_fingerprint:form.preview.preview_fingerprint, reason:form.reason.trim()});
+        form.preview = null;
+        if (visible()) { form.message = '合并变更已加入草案。请逐项审核并发布，再预演迁移旧知识；当前实体尚未迁移。请重新核对候选映射。'; status(form.message); }
+      } catch (error) { form.preview = null; if (visible()) form.message = error?.message || '提交失败，请重新预览。'; }
+      finally { form.busy = false; if (visible()) renderDetail(); }
+    });
+    const buttons = el('div', 'om-retire-actions'); buttons.append(preview, confirm);
+    const migration = el('button', 'om-btn secondary', '打开受控重分类'); migration.type = 'button';
+    migration.addEventListener('click', () => { if (visible()) window.OntologyReclassify?.open?.(); });
+    sec.append(newField('合并目标', target), newField('合并原因', reason), result, buttons, migration); sync();
+    return sec;
+  }
+
   function retireSection(term) {
     if (S().preview) return el('p', 'om-detail-note', '历史版本只读，生命周期变更需回到最新后加入草案。');
     const active = term.active !== false;
@@ -643,6 +735,17 @@
       ? '停用后不再用于新写入；历史知识与版本轨迹保留。先核对影响，再加入草案审核。'
       : '选择同项目的来源发布及要恢复的定义字段；恢复激活与字段变更仍需逐项审核。'));
 
+    let replacement = null;
+    if (active) {
+      const kind = ['classes', 'relations', 'attributes'].find(key => (S().summary?.[key] || []).some(item => item.id === iri));
+      replacement = replacementSelect(term, kind, 'om-retire-replacement', '不指定替代目标');
+      const notice = el('p', 'om-detail-note');
+      const updateNotice = () => { notice.textContent = replacement.value
+        ? '替代目标随停用变更加入草案。审核发布后，请到受控重分类预演迁移旧知识；保存草案不会迁移实体。'
+        : '历史知识与版本轨迹保留；未指定替代目标，没有自动迁移目标，请先核对类型去向。'; };
+      replacement.addEventListener('change', updateNotice); updateNotice();
+      sec.append(newField('替代术语（可选，同种类）', replacement), notice);
+    }
     let source = null;
     const selectedFields = new Set();
     if (!active) {
@@ -725,7 +828,8 @@
       try {
         if (!active && (!source.value || !selectedFields.size)) throw new Error('请选择来源发布及至少一个恢复字段。');
         await M.sendCommand({ action: active ? 'retire_term' : 'restore_term', target_iri: iri, reason: text,
-          ...(!active ? { source_ontology_id: source.value, selected_fields: [...selectedFields] } : {}) });
+          ...(!active ? { source_ontology_id: source.value, selected_fields: [...selectedFields] }
+            : replacement.value ? {after:{replacement:{iri:replacement.value}}} : {}) });
         status(`${active ? '停用' : '恢复'}变更已加入草案，仍需逐条审核后才生效。`);
       } catch (error) {
         status((error && error.message) || '提交失败', true);
@@ -951,7 +1055,7 @@
     }
     box.append(related);
 
-    box.append(retireSection(cls));
+    box.append(mergeSection(cls), retireSection(cls));
     put(detailHost, box);
   }
 
