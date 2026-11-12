@@ -1,0 +1,121 @@
+/* One presentation for both graph renderers; all data/interaction modules retain ownership. */
+body main #tab-search #graph-workspace-header{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;min-height:0;margin:0 0 14px;padding:4px 0 0}
+body main #tab-search #graph-workspace-header:has(#cb-details[open]){z-index:40}
+body main #tab-search #graph-workspace-header>.retrieval-page-heading{display:flex;align-items:center;gap:14px;min-width:0;min-height:28px}
+body main #tab-search .retrieval-page-heading h2{margin:0;font-size:20px;line-height:1.4;font-weight:600;color:var(--ui-ink)}
+body main #tab-search .retrieval-project-name{max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ui-muted);font-size:12px}
+body main #tab-search #graph-workspace-header>.retrieval-query-panel{order:initial;min-width:0;width:100%;padding:8px 10px;border:1px solid var(--ui-line);border-radius:9px;background:var(--ui-surface)}
+body main #tab-search #graph-workspace-header .searchbar{gap:8px;flex-wrap:wrap}
+body main #tab-search #graph-workspace-header .searchbar>input{flex:1 1 200px;min-width:120px;height:36px;border:0;background:transparent;font-size:14px}
+body main #tab-search #graph-workspace-header .searchbar>select{flex:0 0 112px;min-width:112px;width:112px;height:34px;padding:5px 30px 5px 10px;border:0;border-left:1px solid var(--ui-line);border-radius:0;background:transparent}
+body main #tab-search #graph-workspace-header .searchbar>button,body main #tab-search #graph-workspace-header .search-options>summary{height:34px;min-height:34px;font-size:12px;padding:6px 10px}
+body main #tab-search #graph-workspace-header .searchbar>#search{display:inline-flex;align-items:center;gap:6px;background:var(--ui-accent-strong);color:var(--ui-surface);border-color:var(--ui-accent-strong)}
+body main #tab-search #graph-workspace-header .search-options{position:relative}
+body main #tab-search #graph-workspace-header .retrieval-page-heading>.search-options{margin:0 0 0 auto;flex:none}
+body main #tab-search #graph-workspace-header .retrieval-page-heading>.search-options>summary{height:30px;min-height:30px;padding:4px 8px;font-size:12px;border:1px solid var(--ui-line);border-radius:6px;background:var(--ui-surface);color:var(--ui-ink-2)}
+body main #tab-search #graph-workspace-header .search-options-panel{right:0;max-width:calc(100vw - 32px);z-index:25}
+body main #tab-search #graph-workspace-header>#scope{order:initial;flex:none;width:100%;max-width:none;min-width:0;padding:0;border:0;background:transparent}
+body main #tab-search #graph-workspace-header .page-scope-toolbar{flex-wrap:wrap;gap:8px;min-height:32px}
+body main #tab-search #graph-workspace-header #applied-scope-chips{flex:1 1 120px;max-width:none;gap:6px;overflow:auto;min-width:0}
+body main #tab-search #graph-workspace-header .applied-scope-chip{max-width:360px;padding:5px 8px;background:var(--ui-surface-2);border-color:var(--ui-line);color:var(--ui-ink-2);font-size:12px}
+body main #tab-search #graph-workspace-header #scope-toggle,body main #tab-search #graph-workspace-header #scope-to-qa{height:32px;flex:none;padding:5px 10px;font-size:12px}
+body main #tab-search #graph-workspace-header #scope-to-qa{margin-left:auto}
+body main #tab-search #graph-workspace-header #scope>#cb-details[open]{position:fixed;inset:16px 16px 16px auto;z-index:90;box-sizing:border-box;width:380px;max-width:calc(100vw - 32px);max-height:none;margin:0;overflow:auto;border:1px solid var(--ui-line);border-radius:12px;background:var(--ui-surface);box-shadow:var(--ui-shadow-lift);padding:0 18px 14px}
+body main #tab-search #scope .scope-rail-heading{position:sticky;top:0;z-index:2;margin:0 -18px 16px;padding:16px 18px;background:var(--ui-surface);border-bottom:1px solid var(--ui-line)}
+body main #tab-search #scope .scope-actions{position:sticky;bottom:-14px;z-index:2;display:flex;flex-wrap:wrap;gap:8px;padding:12px 0;background:var(--ui-surface);border-top:1px solid var(--ui-line)}
+
+body main #tab-search #graph-workspace-surface:has(>#graph-stage){border-color:var(--ui-line);border-radius:10px;background:var(--ui-surface)}
+body main #tab-search #graph-workspace-surface #graph-stage,body main #tab-search #graph-workspace-surface #graph-stage.is-graph-fullscreen{padding:0 12px 6px;grid-template-rows:52px 44px minmax(0,1fr) 34px 36px 24px 20px}
+body main #tab-search #graph-workspace-surface .graph-stage-heading{height:52px;gap:10px;margin:0 -12px;padding:8px 12px;border-bottom:1px solid var(--ui-line);background:var(--ui-surface)}
+body main #tab-search #graph-workspace-surface .graph-stage-heading #graph-version-scope{font-size:12px;color:var(--ui-muted)}
+body main #tab-search #graph-workspace-surface .graph-presentation-actions{margin-left:auto;gap:6px;flex-wrap:nowrap;overflow:auto;scrollbar-width:thin}
+body main #tab-search #graph-workspace-surface .full-graph-mode{margin:0;flex:none;order:-1}
+body main #tab-search #graph-workspace-surface .full-graph-mode .full-graph-controls{display:flex;gap:3px;padding:3px;background:var(--ui-surface-2);border:1px solid var(--ui-line);border-radius:7px}
+body main #tab-search #graph-workspace-surface .full-graph-mode button{height:30px;min-height:30px;padding:5px 12px;margin:0;border:0;border-radius:5px;font-size:12px;background:transparent;color:var(--ui-ink-2)}
+body main #tab-search #graph-workspace-surface .full-graph-mode button[aria-pressed="true"]{background:var(--ui-accent-strong);color:var(--ui-surface);box-shadow:none}
+body main #tab-search #graph-workspace-surface :is(.graph-toolbar,.full-graph-toolbar){height:44px;min-height:44px;gap:6px;padding:5px 0;align-items:center}
+body main #tab-search #graph-workspace-surface :is(.graph-toolbar,.full-graph-toolbar) button,body main #tab-search #graph-workspace-surface :is(#graph-results-toggle,#graph-create-entity,#graph-fullscreen),body main #tab-search #graph-workspace-surface .full-graph-options>summary{display:inline-flex;align-items:center;justify-content:center;gap:5px;flex:none;min-height:32px;height:32px;margin:0;padding:5px 9px;border:1px solid var(--ui-line);border-radius:6px;background:var(--ui-surface);color:var(--ui-ink-2);font-size:12px;line-height:20px;box-shadow:none;white-space:nowrap}
+body main #tab-search #graph-workspace-surface :is(button,summary):focus-visible,body main #tab-search #scope-toggle:focus-visible{outline:2px solid var(--ui-accent);outline-offset:2px}
+body main #tab-search #graph-workspace-surface #graph-expand-target{max-width:180px;margin-right:auto;color:var(--ui-muted)}
+body main #tab-search #graph-workspace-surface .graph-view-tools:empty,body main #tab-search #graph-workspace-surface .full-graph-view-tools:empty{display:none}
+body main #tab-search #graph-workspace-surface .graph-hop-control{display:flex;align-items:center;gap:5px;margin:0;color:var(--ui-ink-2);font-size:12px}
+body main #tab-search #graph-workspace-surface .graph-hop-control input{height:32px;border-color:var(--ui-line);background:var(--ui-surface);color:var(--ui-ink)}
+body main #tab-search #graph-workspace-surface .full-graph-locate{order:initial;flex:1 1 200px;min-width:150px;max-width:390px;margin:0 auto 0 0;gap:5px}
+body main #tab-search #graph-workspace-surface .full-graph-locate input{height:32px;min-width:90px;border-color:var(--ui-line);background:var(--ui-surface);font-size:12px}
+body main #tab-search #graph-workspace-surface :is(#graph-canvas,.full-graph-host){grid-column:1;grid-row:3;height:100%;border:1px solid var(--ui-line);border-radius:8px;background:var(--ui-surface);box-shadow:none}
+body main #tab-search #graph-workspace-surface .retrieval-camera-tools{grid-column:1;grid-row:3;z-index:4;display:flex;justify-self:end;align-self:end;gap:3px;max-width:calc(100% - 20px);margin:10px;padding:4px;border:1px solid var(--ui-line);border-radius:8px;background:var(--ui-surface);box-shadow:0 2px 8px #1035350a}
+body main #tab-search #graph-workspace-surface .retrieval-camera-tools button{display:inline-flex;align-items:center;justify-content:center;gap:5px;height:30px;min-height:30px;min-width:30px;margin:0;padding:4px 7px;border:0;border-radius:5px;background:var(--ui-surface);color:var(--ui-ink-2);font-size:12px}
+body main #tab-search #graph-workspace-surface .retrieval-camera-tools button:hover{background:var(--ui-surface-2)}
+body main #tab-search #graph-workspace-surface .retrieval-camera-tools button svg{width:15px;height:15px}
+body main #tab-search #graph-workspace-surface :is(.graph-type-bar,.full-graph-type-row){gap:6px}
+body main #tab-search #graph-workspace-surface :is(#graph-type-buttons,.full-graph-types){height:34px;padding-top:5px;margin:0}
+body main #tab-search #graph-workspace-surface :is(#graph-type-buttons,.full-graph-types) button{height:28px;border:1px solid var(--ui-line);border-radius:6px;background:var(--ui-surface);color:var(--ui-ink-2);font-size:12px}
+body main #tab-search #graph-workspace-surface :is(#graph-type-buttons,.full-graph-types) button[aria-pressed="true"]{background:var(--ui-surface-2);border-color:var(--ui-accent);color:var(--ui-accent-strong)}
+body main #tab-search #graph-workspace-surface .full-graph-type-button::before{width:8px;height:8px}
+body main #tab-search #graph-workspace-surface :is(#graph-summary,.full-graph-progress){color:var(--ui-muted);font-size:12px}
+body main #tab-search #graph-workspace-surface :is(#graph-pan-hint,.fg-scope-note){color:var(--ui-muted)}
+body main #tab-search #graph-workspace-surface .full-graph-footer{height:36px}
+body main #tab-search #graph-workspace-surface .full-graph-batches button{height:30px;padding:4px 9px;border-color:var(--ui-line);border-radius:6px;background:var(--ui-surface);color:var(--ui-ink-2);font-size:12px}
+body main #tab-search #graph-workspace-surface .full-graph-batches :is([data-fg="load"],[data-fg="auto"]){background:var(--ui-surface-2);color:var(--ui-accent-strong);border-color:var(--ui-line-2)}
+body main #tab-search #graph-workspace-surface .graph-explorer{top:100px;max-height:calc(100% - 126px);border-color:var(--ui-line);color:var(--ui-ink-2);background:var(--ui-surface)}
+body main #tab-search #graph-workspace-surface #graph-workspace-panel{border-color:var(--ui-line);background:var(--ui-surface)}
+body main #tab-search #graph-workspace-panel [role="tab"][aria-selected="true"]{background:var(--ui-surface-2);color:var(--ui-accent-strong);border-color:var(--ui-line)}
+/* Both modes share the same top-layer drawer, including full-screen use. */
+body :is(#graph-settings-drawer,#full-graph-settings-drawer){position:fixed;inset:16px 16px 16px auto;width:380px;max-width:calc(100vw - 32px);height:calc(100dvh - 32px);max-height:calc(100dvh - 32px);margin:0;padding:0;border:1px solid var(--ui-line);border-radius:12px;background:var(--ui-surface);color:var(--ui-ink);box-shadow:var(--ui-shadow-lift);overflow:hidden}
+body :is(#graph-settings-drawer,#full-graph-settings-drawer)[open]{display:flex;flex-direction:column}
+body :is(#graph-settings-drawer,#full-graph-settings-drawer)::backdrop{background:#10353524}
+body :is(#graph-settings-drawer,#full-graph-settings-drawer)>.workspace-drawer-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex:none;padding:18px;border-bottom:1px solid var(--ui-line);background:var(--ui-surface)}
+body :is(#graph-settings-drawer,#full-graph-settings-drawer)>.workspace-drawer-heading h2{font-size:16px;margin:0 0 6px;color:var(--ui-ink)}
+body :is(#graph-settings-drawer,#full-graph-settings-drawer)>.workspace-drawer-heading p{margin:0;font-size:12px;line-height:1.65;color:var(--ui-muted)}
+body :is(#graph-settings-drawer,#full-graph-settings-drawer)>.workspace-drawer-body{flex:1;min-height:0;padding:18px;overflow:auto}
+body :is(#graph-settings-drawer,#full-graph-settings-drawer) .workspace-drawer-close{flex:none;height:30px;margin:0;padding:4px 8px;border:1px solid var(--ui-line);border-radius:6px;background:var(--ui-surface);color:var(--ui-ink-2);font-size:12px}
+body :is(#graph-settings-drawer,#full-graph-settings-drawer) :is(.graph-settings-panel,.full-graph-settings-panel){position:static;inset:auto;display:block;width:auto;max-width:none;height:auto;max-height:none;margin:0;padding:0;border:0;background:transparent;box-shadow:none;color:var(--ui-ink-2);font-size:14px}
+body main #tab-search #graph-workspace-surface #graph-stage #full-graph-settings-drawer .full-graph-settings-panel{position:static;inset:auto;width:auto;max-width:none;max-height:none;padding:0;margin:0;border:0;background:transparent;box-shadow:none;overflow:visible}
+body :is(#graph-settings-drawer,#full-graph-settings-drawer) :is(h3,strong){font-size:14px;color:var(--ui-ink)}
+body :is(#graph-settings-drawer,#full-graph-settings-drawer) :is(input,select){accent-color:var(--ui-accent);border-color:var(--ui-line)}
+body :is(#graph-settings-drawer,#full-graph-settings-drawer) .check{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ui-ink-2);margin:14px 0}
+body :is(#graph-settings-drawer,#full-graph-settings-drawer) p{font-size:12px;line-height:1.7;color:var(--ui-muted)}
+@media(max-width:1000px){
+ body main #tab-search #graph-workspace-surface .graph-stage-heading #graph-version-scope{display:none}
+ body main #tab-search #graph-workspace-header .searchbar>input{flex-basis:180px}
+}
+@media(max-width:768px){
+ body main #tab-search #graph-workspace-header{gap:10px;margin-bottom:12px}
+ body main #tab-search #graph-workspace-header .searchbar>input{flex:1 1 calc(100% - 90px);min-width:80px}
+ body main #tab-search #graph-workspace-header .searchbar>#search{order:0;flex:none}
+ body main #tab-search #graph-workspace-header .searchbar>select{order:1}
+ body main #tab-search #graph-workspace-header #ontology-expansion-toggle{order:2;flex:none;min-width:0}
+ body main #tab-search #graph-workspace-header .search-options{order:3}
+ body main #tab-search #graph-workspace-surface #graph-stage{grid-template-rows:44px 76px minmax(120px,1fr) 34px 30px 20px 16px;padding:0 8px 4px}
+ body main #tab-search #graph-workspace-surface .graph-stage-heading{height:44px;margin:0 -8px;padding:4px 8px;gap:6px}
+ body main #tab-search #graph-workspace-surface .full-graph-mode button{padding:5px 8px}
+ body main #tab-search #graph-workspace-surface :is(#graph-results-toggle,#graph-create-entity,#graph-fullscreen){padding:4px 7px;font-size:12px}
+ body main #tab-search #graph-workspace-surface .graph-presentation-actions{flex:0 1 auto}
+ body main #tab-search #graph-workspace-surface :is(.graph-toolbar,.full-graph-toolbar){position:static;height:76px;min-height:76px;padding:3px 0;align-content:center;overflow-x:auto;overflow-y:hidden}
+ body main #tab-search #graph-workspace-surface :is(.graph-toolbar,.full-graph-toolbar)>.graph-discovery-notice{position:absolute;top:136px;left:14px;z-index:6;max-width:calc(100% - 28px);border:1px solid var(--ui-line);border-radius:6px;background:var(--ui-surface);box-shadow:var(--ui-shadow-lift)}
+ body main #tab-search #graph-workspace-surface .graph-toolbar{display:grid;grid-template-columns:auto auto minmax(40px,1fr);grid-auto-rows:32px;gap:5px}
+ body main #tab-search #graph-workspace-surface .graph-toolbar .graph-hop-control{grid-row:1;grid-column:1}
+ body main #tab-search #graph-workspace-surface #graph-expand{grid-row:1;grid-column:2}
+ body main #tab-search #graph-workspace-surface #graph-expand-target{grid-row:1;grid-column:3;min-width:0;width:100%;max-width:none}
+ body main #tab-search #graph-workspace-surface #graph-path-toggle{grid-row:2;grid-column:1}
+ body main #tab-search #graph-workspace-surface #graph-settings{grid-row:2;grid-column:2}
+ body main #tab-search #graph-workspace-surface .graph-toolbar #graph-neighbors{grid-row:2;grid-column:3;justify-self:start}
+ body main #tab-search #graph-workspace-surface .full-graph-toolbar{flex-wrap:wrap;gap:5px}
+ body main #tab-search #graph-workspace-surface .full-graph-locate{flex:1 0 100%;max-width:none;min-width:0;order:0}
+ body main #tab-search #graph-workspace-surface .full-graph-options{order:1;margin:0}
+ body main #tab-search #graph-workspace-surface .full-graph-toolbar #graph-neighbors{order:2}
+ body main #tab-search #graph-workspace-surface :is(#graph-timeline,.full-graph-footer){height:30px;padding:0}
+ body main #tab-search #graph-workspace-surface :is(#graph-summary,.full-graph-progress){height:20px;padding:1px 0;line-height:18px}
+ body main #tab-search #graph-workspace-surface :is(#graph-pan-hint,.fg-scope-note){height:16px;padding:0;line-height:16px}
+ body main #tab-search #graph-workspace-surface .graph-explorer{top:132px;max-height:calc(100% - 158px)}
+}
+@media(max-width:420px){
+ body main #tab-search .retrieval-page-heading h2{font-size:18px}
+ body main #tab-search #graph-workspace-header .searchbar{gap:5px}
+ body main #tab-search #graph-workspace-header .searchbar>select{flex-basis:112px;min-width:112px;width:112px}
+ body main #tab-search #graph-workspace-header .search-options>summary{padding-inline:6px}
+ body main #tab-search #graph-workspace-header #ontology-expansion-toggle{padding-inline:6px}
+ body main #tab-search #graph-workspace-surface .full-graph-mode button{padding:5px 6px}
+ body main #tab-search #graph-workspace-surface .graph-presentation-actions{gap:4px}
+ body main #tab-search #graph-workspace-surface :is(#graph-results-toggle,#graph-create-entity,#graph-fullscreen){padding:4px 6px}
+}

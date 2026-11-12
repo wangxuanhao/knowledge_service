@@ -1,0 +1,35 @@
+/* Load after the workspace/theme/QA styles. Only the outer app rail is scoped here. */
+.workspace-icon{display:inline-block;width:18px;height:18px;flex:0 0 18px;vertical-align:middle;pointer-events:none}
+body>aside .workspace-rail-control{display:none}
+body>aside :is(button[data-tab],.nav-group)[hidden]{display:none!important}
+body>aside button[data-tab]>.workspace-icon{margin-right:10px}
+body>aside button[data-tab]>.workspace-nav-label{vertical-align:middle}
+body>aside button[data-tab]:focus-visible,body>aside .workspace-rail-control:focus-visible{outline:2px solid #5eead4;outline-offset:3px}
+@media(min-width:741px){
+  body>aside{overflow:visible}
+  body>aside #workspace-nav-collapse{display:grid;place-items:center;position:absolute;top:21px;right:9px;width:28px;height:28px;padding:5px;border:1px solid #ffffff26;background:#164643;color:#d5e8e4;border-radius:7px;z-index:2}
+  body>aside>.brand{padding-right:24px}
+  body.workspace-nav-compact{--workspace-rail-width:72px;display:block}
+  body.workspace-nav-compact>aside{position:fixed;inset:0 auto 0 0;width:var(--workspace-rail-width);height:100dvh;padding:14px 10px;gap:12px;display:flex;flex-direction:column;overflow:visible}
+  body.workspace-nav-compact>main{margin-left:var(--workspace-rail-width);width:calc(100% - var(--workspace-rail-width));min-width:0}
+  body.workspace-nav-compact>aside>.brand{padding:0;justify-content:center;order:-3;margin:0}
+  body.workspace-nav-compact>aside>.brand .brand-text{display:none}
+  body.workspace-nav-compact>aside>.brand .brand-mark{width:32px;height:32px;flex-basis:32px}
+  body.workspace-nav-compact>aside #workspace-nav-collapse{position:static;order:-2;align-self:center;width:38px;height:32px}
+  body.workspace-nav-compact>aside #workspace-nav-collapse svg{transform:rotate(180deg)}
+  body.workspace-nav-compact>aside #workspace-project-toggle{display:grid;place-items:center;order:-1;align-self:center;width:40px;height:38px;padding:8px;border:1px solid #ffffff26;background:#ffffff08;color:#d5e8e4;border-radius:8px}
+  body.workspace-nav-compact>aside>.workspace-project-picker{display:none;position:absolute;left:calc(100% + 8px);top:91px;width:250px;max-width:calc(100vw - 90px);padding:16px;margin:0;border:1px solid #36655f;border-radius:10px;background:#123e3b;box-shadow:0 12px 30px #0b302c33;z-index:45;font-size:12px}
+  body.workspace-nav-compact>aside>.workspace-project-picker.workspace-project-open{display:block}
+  body.workspace-nav-compact>aside>nav{flex:1 1 auto;min-height:40px;overflow-y:auto;overflow-x:hidden;width:100%;gap:10px}
+  body.workspace-nav-compact>aside .nav-group{padding:0;border:0;background:transparent;gap:4px;min-width:0}
+  body.workspace-nav-compact>aside .nav-group>h2{position:absolute;width:1px;height:1px;margin:-1px;clip-path:inset(50%);overflow:hidden}
+  body.workspace-nav-compact>aside .nav-group+.nav-group{border-top:1px solid #ffffff1c;padding-top:10px}
+  body.workspace-nav-compact>aside button[data-tab]{width:100%;height:42px;padding:10px 0;text-align:center;white-space:nowrap}
+  body.workspace-nav-compact>aside button[data-tab]>.workspace-nav-label{display:none}
+  body.workspace-nav-compact>aside button[data-tab]>.workspace-icon{margin:0;width:20px;height:20px}
+  body.workspace-nav-compact>aside .nav-management{flex:none;border-top:1px solid #ffffff26;padding-top:10px}
+  body.workspace-nav-compact>aside #session{width:100%;padding:7px 3px;margin-top:0;flex:none}
+  body.workspace-nav-compact>aside #session .session-who{justify-content:center;margin:0;padding:0;min-height:34px}
+  body.workspace-nav-compact>aside #session :is(.session-meta,.session-caret){display:none}
+  body.workspace-nav-compact>aside #session .session-menu{left:calc(100% + 12px);right:auto;bottom:0;width:240px;max-width:calc(100vw - 90px)}
+}

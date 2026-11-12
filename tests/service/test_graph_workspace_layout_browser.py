@@ -36,11 +36,13 @@ def _within(inner, outer):
             and inner['y'] + inner['height'] <= outer['y'] + outer['height'] + 1)
 
 
-def test_compact_header_owns_existing_query_and_unique_page_scope(redesign_page):
+def test_unified_header_owns_existing_query_and_unique_page_scope(redesign_page):
     page, errors = redesign_page
     _open(page)
     header = _bounds(page, '#graph-workspace-header')
-    assert 56 <= header['height'] <= 64
+    assert 100 <= header['height'] <= 190
+    assert page.locator('#graph-workspace-header > .retrieval-page-heading').is_visible()
+    assert _bounds(page, '#scope')['y'] >= _bounds(page, '.retrieval-query-panel')['y'] + _bounds(page, '.retrieval-query-panel')['height']
     for selector in ['#query', '#search', '#scope-toggle', '#scope-to-qa']:
         assert _within(_bounds(page, selector), header), selector
     assert not page.locator('#graph-workspace-panel').is_visible()
