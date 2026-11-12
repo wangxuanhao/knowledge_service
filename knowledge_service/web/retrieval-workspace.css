@@ -4,19 +4,24 @@ body main #tab-search #graph-workspace-header:has(#cb-details[open]){z-index:40}
 body main #tab-search #graph-workspace-header>.retrieval-page-heading{display:flex;align-items:center;gap:14px;min-width:0;min-height:28px}
 body main #tab-search .retrieval-page-heading h2{margin:0;font-size:20px;line-height:1.4;font-weight:600;color:var(--ui-ink)}
 body main #tab-search .retrieval-project-name{max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ui-muted);font-size:12px}
-body main #tab-search #graph-workspace-header>.retrieval-query-panel{order:initial;min-width:0;width:100%;padding:8px 10px;border:1px solid var(--ui-line);border-radius:9px;background:var(--ui-surface)}
+body main #tab-search #graph-workspace-header>.retrieval-query-panel{order:initial;min-width:0;width:100%;padding:8px 10px;border:1px solid var(--ui-line);border-bottom:0;border-radius:10px 10px 0 0;background:var(--ui-surface)}
 body main #tab-search #graph-workspace-header .searchbar{gap:8px;flex-wrap:wrap}
 body main #tab-search #graph-workspace-header .searchbar>input{flex:1 1 200px;min-width:120px;height:36px;border:0;background:transparent;font-size:14px}
 body main #tab-search #graph-workspace-header .searchbar>select{flex:0 0 112px;min-width:112px;width:112px;height:34px;padding:5px 30px 5px 10px;border:0;border-left:1px solid var(--ui-line);border-radius:0;background:transparent}
 body main #tab-search #graph-workspace-header .searchbar>button,body main #tab-search #graph-workspace-header .search-options>summary{height:34px;min-height:34px;font-size:12px;padding:6px 10px}
 body main #tab-search #graph-workspace-header .searchbar>#search{display:inline-flex;align-items:center;gap:6px;background:var(--ui-accent-strong);color:var(--ui-surface);border-color:var(--ui-accent-strong)}
-body main #tab-search #graph-workspace-header .search-options{position:relative}
-body main #tab-search #graph-workspace-header .retrieval-page-heading>.search-options{margin:0 0 0 auto;flex:none}
-body main #tab-search #graph-workspace-header .retrieval-page-heading>.search-options>summary{height:30px;min-height:30px;padding:4px 8px;font-size:12px;border:1px solid var(--ui-line);border-radius:6px;background:var(--ui-surface);color:var(--ui-ink-2)}
-body main #tab-search #graph-workspace-header .search-options-panel{right:0;max-width:calc(100vw - 32px);z-index:25}
-body main #tab-search #graph-workspace-header>#scope{order:initial;flex:none;width:100%;max-width:none;min-width:0;padding:0;border:0;background:transparent}
+body main #tab-search #graph-workspace-header .search-options{position:static}
+body main #tab-search #graph-workspace-header>.retrieval-query-panel:has(.search-options[open]){z-index:24}
+body main #tab-search #graph-workspace-header .search-options{margin:0;flex:none}
+body main #tab-search #graph-workspace-header .search-options>summary{display:inline-flex;align-items:center;gap:6px;border:1px solid transparent;border-radius:8px;background:var(--ui-surface);color:var(--ui-ink-2)}
+body main #tab-search #graph-workspace-header .search-options>summary:hover{background:var(--ui-surface-2)}
+body main #tab-search #graph-workspace-header #ontology-expansion-toggle{margin:0}
+body main #tab-search #graph-workspace-header .search-options-panel{position:absolute;top:calc(100% + 8px);right:8px;width:360px;max-width:calc(100vw - 40px);z-index:25}
+body main #tab-search #graph-workspace-header>#scope{order:initial;flex:none;width:100%;max-width:none;min-width:0;margin-top:-12px;padding:6px 10px 10px;border:1px solid var(--ui-line);border-top:0;border-radius:0 0 10px 10px;background:var(--ui-surface)}
 body main #tab-search #graph-workspace-header .page-scope-toolbar{flex-wrap:wrap;gap:8px;min-height:32px}
 body main #tab-search #graph-workspace-header #applied-scope-chips{flex:1 1 120px;max-width:none;gap:6px;overflow:auto;min-width:0}
+body main #tab-search #graph-workspace-header #applied-scope-chips:empty{display:flex}
+body main #tab-search #graph-workspace-header #applied-scope-chips:empty::before{content:'范围：全部知识';font-size:12px;color:var(--ui-muted);white-space:nowrap}
 body main #tab-search #graph-workspace-header .applied-scope-chip{max-width:360px;padding:5px 8px;background:var(--ui-surface-2);border-color:var(--ui-line);color:var(--ui-ink-2);font-size:12px}
 body main #tab-search #graph-workspace-header #scope-toggle,body main #tab-search #graph-workspace-header #scope-to-qa{height:32px;flex:none;padding:5px 10px;font-size:12px}
 body main #tab-search #graph-workspace-header #scope-to-qa{margin-left:auto}
@@ -25,7 +30,7 @@ body main #tab-search #scope .scope-rail-heading{position:sticky;top:0;z-index:2
 body main #tab-search #scope .scope-actions{position:sticky;bottom:-14px;z-index:2;display:flex;flex-wrap:wrap;gap:8px;padding:12px 0;background:var(--ui-surface);border-top:1px solid var(--ui-line)}
 
 body main #tab-search #graph-workspace-surface:has(>#graph-stage){border-color:var(--ui-line);border-radius:10px;background:var(--ui-surface)}
-body main #tab-search #graph-workspace-surface #graph-stage,body main #tab-search #graph-workspace-surface #graph-stage.is-graph-fullscreen{padding:0 12px 6px;grid-template-rows:52px 44px minmax(0,1fr) 34px 36px 24px 20px}
+body main #tab-search #graph-workspace-surface #graph-stage,body main #tab-search #graph-workspace-surface #graph-stage.is-graph-fullscreen{padding:0 12px 8px;grid-template-rows:52px 44px minmax(0,1fr) auto 0 26px 20px}
 body main #tab-search #graph-workspace-surface .graph-stage-heading{height:52px;gap:10px;margin:0 -12px;padding:8px 12px;border-bottom:1px solid var(--ui-line);background:var(--ui-surface)}
 body main #tab-search #graph-workspace-surface .graph-stage-heading #graph-version-scope{font-size:12px;color:var(--ui-muted)}
 body main #tab-search #graph-workspace-surface .graph-presentation-actions{margin-left:auto;gap:6px;flex-wrap:nowrap;overflow:auto;scrollbar-width:thin}
@@ -57,9 +62,43 @@ body main #tab-search #graph-workspace-surface :is(#graph-pan-hint,.fg-scope-not
 body main #tab-search #graph-workspace-surface .full-graph-footer{height:36px}
 body main #tab-search #graph-workspace-surface .full-graph-batches button{height:30px;padding:4px 9px;border-color:var(--ui-line);border-radius:6px;background:var(--ui-surface);color:var(--ui-ink-2);font-size:12px}
 body main #tab-search #graph-workspace-surface .full-graph-batches :is([data-fg="load"],[data-fg="auto"]){background:var(--ui-surface-2);color:var(--ui-accent-strong);border-color:var(--ui-line-2)}
-body main #tab-search #graph-workspace-surface .graph-explorer{top:100px;max-height:calc(100% - 126px);border-color:var(--ui-line);color:var(--ui-ink-2);background:var(--ui-surface)}
+body main #tab-search #graph-workspace-surface #graph-stage .graph-explorer{top:var(--retrieval-canvas-top,100px);max-height:var(--retrieval-canvas-room,calc(100% - 126px));border-color:var(--ui-line);color:var(--ui-ink-2);background:var(--ui-surface)}
 body main #tab-search #graph-workspace-surface #graph-workspace-panel{border-color:var(--ui-line);background:var(--ui-surface)}
 body main #tab-search #graph-workspace-panel [role="tab"][aria-selected="true"]{background:var(--ui-surface-2);color:var(--ui-accent-strong);border-color:var(--ui-line)}
+/* Types and revision/loading controls are peers, with a real gap between them. */
+body main #tab-search #graph-workspace-surface .retrieval-footer-tools{grid-row:4;grid-column:1;display:flex;align-items:center;flex-wrap:wrap;gap:10px 16px;min-width:0;min-height:56px;margin-top:8px;padding:9px 0;border-top:1px solid var(--ui-line);box-sizing:border-box}
+body main #tab-search #graph-workspace-surface .retrieval-footer-tools:empty{display:none}
+body main #tab-search #graph-workspace-surface .retrieval-footer-tools>:is(#graph-type-buttons,.full-graph-types){flex:0 1 auto;width:auto;min-width:0;max-width:min(360px,40%);height:36px;min-height:36px;padding:0;margin:0;overflow:hidden}
+body main #tab-search #graph-workspace-surface .retrieval-footer-tools :is(.graph-type-bar,.full-graph-type-row){height:36px;align-items:center}
+body main #tab-search #graph-workspace-surface .retrieval-footer-tools>:is(#graph-timeline,.full-graph-footer){flex:1 1 300px;align-items:center;width:auto;min-width:0;height:36px;min-height:36px;padding:0;margin:0;gap:8px;overflow-x:auto;overflow-y:hidden}
+body main #tab-search #graph-workspace-surface #graph-stage :is(#graph-summary,.full-graph-progress){grid-row:6;height:100%;min-height:0;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body main #tab-search #graph-workspace-surface #graph-stage :is(#graph-pan-hint,.fg-scope-note){grid-row:7;height:100%;min-height:0;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body main #tab-search #graph-workspace-surface #graph-timeline .tl-points{flex:1 0 180px;min-width:180px;max-width:260px;width:auto;height:32px;margin:0;padding:5px 30px 5px 10px!important;font-size:12px}
+body main #tab-search #graph-workspace-surface #graph-timeline .tl-title{color:var(--ui-muted);font-weight:400}
+body main #tab-search #graph-workspace-surface #graph-timeline .tl-note{flex:none;max-width:160px;overflow:hidden;text-overflow:ellipsis;color:var(--ui-muted)}
+body main #tab-search #graph-workspace-surface .graph-explorer-options{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start;gap:10px;padding:12px;border:1px solid var(--ui-line);border-radius:10px;background:var(--ui-surface)}
+body main #tab-search #graph-workspace-surface .graph-explorer-options label{min-width:0;gap:6px;margin:0;color:var(--ui-muted);font-size:12px}
+body main #tab-search #graph-workspace-surface .graph-explorer-options select{width:100%;height:36px;margin:0;padding:6px 30px 6px 10px;font-size:13px}
+body main #tab-search #graph-workspace-surface .graph-explorer-options [data-explorer="focus"]{grid-column:1/-1;justify-self:stretch;width:100%;height:34px;border-color:var(--ui-line);border-radius:8px;background:var(--ui-surface-2);color:var(--ui-accent-strong)}
+/* Scope the override of theme.css's important legacy arrow rules to this view. */
+body main #tab-search #graph-workspace-header #search-mode,
+body main #tab-search #graph-workspace-header #scope select,
+body main #tab-search #graph-workspace-surface #graph-stage :is(.graph-explorer select,#graph-timeline select),
+body :is(#graph-settings-drawer,#full-graph-settings-drawer) select{appearance:none;border:1px solid var(--ui-line);border-color:var(--ui-line)!important;border-radius:8px;padding-right:30px!important;background-color:var(--ui-surface)!important;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20' fill='none' stroke='%23688585' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 8 4 4 4-4'/%3E%3C/svg%3E")!important;background-size:16px 16px!important;background-position:right 9px center!important;background-repeat:no-repeat!important;color:var(--ui-ink-2);box-shadow:none;cursor:pointer}
+body main #tab-search #graph-workspace-header #search-mode:hover,
+body main #tab-search #graph-workspace-header #scope select:hover,
+body main #tab-search #graph-workspace-surface #graph-stage :is(.graph-explorer select,#graph-timeline select):hover,
+body :is(#graph-settings-drawer,#full-graph-settings-drawer) select:hover{border-color:var(--ui-line-2)!important;background-color:var(--ui-surface)!important}
+body main #tab-search #graph-workspace-header #search-mode:focus-visible,
+body main #tab-search #graph-workspace-header #scope select:focus-visible,
+body main #tab-search #graph-workspace-surface #graph-stage :is(.graph-explorer select,#graph-timeline select):focus-visible,
+body :is(#graph-settings-drawer,#full-graph-settings-drawer) select:focus-visible{outline:2px solid var(--ui-accent-dim);outline-offset:2px;border-color:var(--ui-accent)!important}
+@media(forced-colors:active){
+ body main #tab-search #graph-workspace-header #search-mode,
+ body main #tab-search #graph-workspace-header #scope select,
+ body main #tab-search #graph-workspace-surface #graph-stage :is(.graph-explorer select,#graph-timeline select),
+ body :is(#graph-settings-drawer,#full-graph-settings-drawer) select{appearance:auto;background-image:none!important;padding-right:11px!important}
+}
 /* Both modes share the same top-layer drawer, including full-screen use. */
 body :is(#graph-settings-drawer,#full-graph-settings-drawer){position:fixed;inset:16px 16px 16px auto;width:380px;max-width:calc(100vw - 32px);height:calc(100dvh - 32px);max-height:calc(100dvh - 32px);margin:0;padding:0;border:1px solid var(--ui-line);border-radius:12px;background:var(--ui-surface);color:var(--ui-ink);box-shadow:var(--ui-shadow-lift);overflow:hidden}
 body :is(#graph-settings-drawer,#full-graph-settings-drawer)[open]{display:flex;flex-direction:column}
@@ -81,12 +120,19 @@ body :is(#graph-settings-drawer,#full-graph-settings-drawer) p{font-size:12px;li
 }
 @media(max-width:768px){
  body main #tab-search #graph-workspace-header{gap:10px;margin-bottom:12px}
+ body main #tab-search #graph-workspace-header>#scope{margin-top:-10px}
  body main #tab-search #graph-workspace-header .searchbar>input{flex:1 1 calc(100% - 90px);min-width:80px}
  body main #tab-search #graph-workspace-header .searchbar>#search{order:0;flex:none}
  body main #tab-search #graph-workspace-header .searchbar>select{order:1}
  body main #tab-search #graph-workspace-header #ontology-expansion-toggle{order:2;flex:none;min-width:0}
  body main #tab-search #graph-workspace-header .search-options{order:3}
- body main #tab-search #graph-workspace-surface #graph-stage{grid-template-rows:44px 76px minmax(120px,1fr) 34px 30px 20px 16px;padding:0 8px 4px}
+ body main #tab-search #graph-workspace-header .search-options>summary{justify-content:center;width:34px;padding:6px}
+ body main #tab-search #graph-workspace-header .search-options>summary::after{display:none}
+ body main #tab-search #graph-workspace-header .retrieval-settings-label{display:none}
+ body main #tab-search #graph-workspace-surface #graph-stage{grid-template-rows:44px 76px minmax(120px,1fr) auto 0 20px 16px;padding:0 8px 4px}
+ body main #tab-search #graph-workspace-surface .retrieval-footer-tools{flex-wrap:nowrap;min-height:56px;padding:9px 0;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
+ body main #tab-search #graph-workspace-surface .retrieval-footer-tools>:is(#graph-type-buttons,.full-graph-types){flex:0 0 auto;max-width:100%}
+ body main #tab-search #graph-workspace-surface .retrieval-footer-tools>:is(#graph-timeline,.full-graph-footer){flex:0 0 360px}
  body main #tab-search #graph-workspace-surface .graph-stage-heading{height:44px;margin:0 -8px;padding:4px 8px;gap:6px}
  body main #tab-search #graph-workspace-surface .full-graph-mode button{padding:5px 8px}
  body main #tab-search #graph-workspace-surface :is(#graph-results-toggle,#graph-create-entity,#graph-fullscreen){padding:4px 7px;font-size:12px}
@@ -107,12 +153,13 @@ body :is(#graph-settings-drawer,#full-graph-settings-drawer) p{font-size:12px;li
  body main #tab-search #graph-workspace-surface :is(#graph-timeline,.full-graph-footer){height:30px;padding:0}
  body main #tab-search #graph-workspace-surface :is(#graph-summary,.full-graph-progress){height:20px;padding:1px 0;line-height:18px}
  body main #tab-search #graph-workspace-surface :is(#graph-pan-hint,.fg-scope-note){height:16px;padding:0;line-height:16px}
- body main #tab-search #graph-workspace-surface .graph-explorer{top:132px;max-height:calc(100% - 158px)}
 }
 @media(max-width:420px){
  body main #tab-search .retrieval-page-heading h2{font-size:18px}
+ body main #tab-search #graph-workspace-header #applied-scope-chips{flex:1 1 0;min-width:0}
+ body main #tab-search #graph-workspace-header #applied-scope-chips:empty::before{overflow:hidden;text-overflow:ellipsis}
  body main #tab-search #graph-workspace-header .searchbar{gap:5px}
- body main #tab-search #graph-workspace-header .searchbar>select{flex-basis:112px;min-width:112px;width:112px}
+ body main #tab-search #graph-workspace-header .searchbar>select{flex-basis:102px;min-width:102px;width:102px}
  body main #tab-search #graph-workspace-header .search-options>summary{padding-inline:6px}
  body main #tab-search #graph-workspace-header #ontology-expansion-toggle{padding-inline:6px}
  body main #tab-search #graph-workspace-surface .full-graph-mode button{padding:5px 6px}

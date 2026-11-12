@@ -48,3 +48,10 @@ Files: extend current `tests/service/test_graph_workspace_layout_browser.py` or 
 - Broader initial Python run: 86 passed / 13 failed. Six layout failures were corrected and covered by the latest passing run. Seven existing static failures were verified against original HEAD `1996d4114452a3aca053d1c39f966bbe4c2bd2b6`; evidence `.benchmarks/retrieval-baseline-static.json`. They concern retired literal/version assertions in untouched modules; unrelated functionality was not rewritten.
 - Spec and quality review passed after fixing legacy CSS specificity and candidate notice clipping.
 - Final focused full-screen/path/source/keyboard regressions: 5 passed. Latest browser verification total: 22 passed across the two focused runs; no skipped tests.
+
+## Screenshot-feedback correction
+
+- Search settings restored to original search toolbar; scope summary joined to search card.
+- Original type/timeline/load nodes grouped with explicit spacing; lazy recreation and original delegation retained. Native selects use a scoped light skin; neighbor focus action gets its own row, and its panel stays inside the canvas.
+- Latest polish tests plus 320px regression: 9 passed. Full-screen/source/inspector regression passed after correcting legacy summary grid placement and footer wrapping. Existing many-type menu checks passed in both modes and four viewport widths.
+- Node contracts: 1060 passed; JavaScript syntax and git whitespace checks passed. Current localhost assets verified against local files. Screenshots inspected under `.benchmarks/retrieval-polish/`.

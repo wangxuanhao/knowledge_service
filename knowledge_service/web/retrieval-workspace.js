@@ -11,7 +11,16 @@
     if(title)heading.append(title);
     const project=document.createElement('span');project.className='retrieval-project-name';heading.append(project);
     const searchOptions=header.querySelector('.search-options');
-    if(searchOptions)heading.append(searchOptions);
+    if(searchOptions){
+      header.querySelector('.searchbar')?.append(searchOptions);
+      const summary=searchOptions.querySelector('summary');
+      if(summary){
+        summary.setAttribute('aria-label','检索设置');
+        const label=document.createElement('span');label.className='retrieval-settings-label';
+        for(const node of [...summary.childNodes])label.append(node);
+        summary.append(label);
+      }
+    }
     const syncProject=()=>{project.textContent=get('project')?.selectedOptions?.[0]?.textContent||'';};
     get('project')?.addEventListener('change',syncProject);syncProject();
     header.prepend(heading);
@@ -32,6 +41,27 @@
     camera(stage,[get('graph-zoom-out'),get('graph-zoom-in'),get('graph-reset-view')].filter(Boolean),true);
     const full=stage.querySelector('.full-graph-section');
     camera(full,[...(full?.querySelectorAll('.full-graph-view-tools button')||[])],false);
+
+    // Local type controls and timeline are created lazily, and can be removed
+    // and rebuilt by the graph owner. Group the actual nodes after each mount.
+    const localFooter=document.createElement('div');localFooter.className='retrieval-footer-tools';
+    localFooter.dataset.graphLocal='';localFooter.hidden=stage.dataset.graphMode==='full';stage.append(localFooter);
+    const fullFooter=document.createElement('div');fullFooter.className='retrieval-footer-tools';
+    if(full){
+      for(const node of [full.querySelector('.full-graph-types'),full.querySelector('.full-graph-footer')])if(node)fullFooter.append(node);
+      full.append(fullFooter);
+    }
+    function mountLocalFooter(){
+      for(const id of ['graph-type-buttons','graph-timeline']){
+        const node=get(id);if(node&&node.parentElement!==localFooter)localFooter.append(node);
+      }
+    }
+    mountLocalFooter();new MutationObserver(mountLocalFooter).observe(stage,{childList:true});
+    for(const node of [get('graph-summary'),full?.querySelector('.full-graph-progress')]){
+      if(!node)continue;
+      const describe=()=>{node.title=node.textContent;};describe();
+      new MutationObserver(describe).observe(node,{childList:true,characterData:true,subtree:true});
+    }
 
     // The full settings use the same modal drawer manager as local settings.
     // Keep its dialog inside the section so FullGraphView.control() still finds
@@ -56,7 +86,20 @@
       const localTools=stage.querySelector(':scope > .retrieval-camera-tools');
       if(localTools)localTools.hidden=!local;
       if(local&&fullSettings?.dialog.open)fullSettings.close({restoreFocus:false});
+      positionNeighbors();
     }
+    function positionNeighbors(){
+      const canvas=stage.dataset.graphMode==='full'?full?.querySelector('.full-graph-host'):get('graph-canvas');
+      if(!canvas||canvas.hidden)return;
+      const box=canvas.getBoundingClientRect(),outer=stage.getBoundingClientRect();
+      if(!box.height)return;
+      for(const [name,value] of [['--retrieval-canvas-top',Math.max(0,Math.round(box.top-outer.top+8))+'px'],
+        ['--retrieval-canvas-room',Math.max(0,Math.floor(box.height-16))+'px']]){
+        if(stage.style.getPropertyValue(name)!==value)stage.style.setProperty(name,value);
+      }
+    }
+    const neighborLayout=new ResizeObserver(positionNeighbors);
+    for(const node of [stage,get('graph-canvas'),full?.querySelector('.full-graph-host')])if(node)neighborLayout.observe(node);
     new MutationObserver(modeChanged).observe(stage,{attributes:true,attributeFilter:['data-graph-mode']});
     modeChanged();
 
@@ -71,6 +114,7 @@
       for(const [action,name] of [['locate','locate'],['reset','maximize'],['zoom-in','zoom-in'],['zoom-out','zoom-out']])
         decorate(full?.querySelector('[data-fg="'+action+'"]'),name);
       decorate(trigger,'settings');
+      decorate(searchOptions?.querySelector('summary'),'sliders');
     }
     document.addEventListener('workspace:page-changed',()=>{
       if(page.classList.contains('hidden'))fullSettings?.close({restoreFocus:false});
