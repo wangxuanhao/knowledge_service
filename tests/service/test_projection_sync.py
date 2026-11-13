@@ -1,5 +1,8 @@
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+import unittest
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -13,6 +16,7 @@ from knowledge_service.services.projection_runtime import MilvusProjectionAdapte
 from knowledge_service.services.projection_sync import (
     ProjectionRebuildRequired, ProjectionSync,
 )
+from knowledge_service.services.projection_runtime import ProjectionWorker
 
 
 def snapshot_record(record_id='snapshot', version='snapshot-v3', project_id='project'):
@@ -48,6 +52,7 @@ class FakeReceipts:
 
     def __init__(self, store):
         self.store, self.rows = store, {}
+        self.vector_rows = {}
         self.resets, self.pages_written = [], []
 
     def _scope(self, claimed):
@@ -64,11 +69,15 @@ class FakeReceipts:
             assert (row['project_id'], row['index_version']) == (project_id, index_version)
             self.rows[project_id, index_version, row['record_id']] = {
                 'version_id': row['version_id'], 'fingerprint': projection_fingerprint(row)}
+            self.vector_rows[project_id, index_version, row['vector_id']] = {
+                'record_id': row['record_id'], 'version_id': row['version_id'],
+                'fingerprint': projection_fingerprint(row)}
 
     def reset(self, claimed):
         scope = self._scope(claimed)
         self.resets.append((*scope, claimed.token))
         self.rows = {key: value for key, value in self.rows.items() if key[:2] != scope}
+        self.vector_rows = {key: value for key, value in self.vector_rows.items() if key[:2] != scope}
 
     def replace_page(self, claimed, rows):
         assert isinstance(rows, (list, tuple)) and len(rows) <= 512
@@ -83,13 +92,27 @@ class FakeReceipts:
             assert envelope['index_version'] == index_version
             if event['operation'] == 'tombstone':
                 self.rows.pop((project_id, index_version, envelope['record_id']), None)
-            elif envelope.get('row') is not None:
-                self.seed(project_id, index_version, [envelope['row']])
+                self.vector_rows = {key: value for key, value in self.vector_rows.items()
+                    if key[:2] != (project_id, index_version) or value['record_id'] != envelope['record_id']}
+            elif envelope.get('rows') is not None or envelope.get('row') is not None:
+                rows = envelope.get('rows')
+                if rows is None:
+                    rows = [envelope['row']]
+                elif envelope.get('record_id'):
+                    self.vector_rows = {key: value for key, value in self.vector_rows.items()
+                        if key[:2] != (project_id, index_version) or value['record_id'] != envelope['record_id']}
+                self.seed(project_id, index_version, rows)
 
     def for_record_ids(self, project_id, index_version, record_ids):
         assert len(record_ids) <= 1000
         return {record_id: self.rows[project_id, index_version, record_id]
                 for record_id in record_ids if (project_id, index_version, record_id) in self.rows}
+
+    def for_vector_ids(self, project_id, index_version, vector_ids):
+        assert len(vector_ids) <= 1000
+        return {vector_id: {name: value[name] for name in ('version_id', 'fingerprint')}
+                for vector_id in vector_ids
+                if (value := self.vector_rows.get((project_id, index_version, vector_id))) is not None}
 
     def pages(self, project_id, index_version, *, batch_size=512):
         rows = {key[2]: value for key, value in self.rows.items()
@@ -99,7 +122,7 @@ class FakeReceipts:
             yield {record_id: rows[record_id] for record_id in ids[offset:offset + batch_size]}
 
     def count(self, project_id, index_version):
-        return sum(key[:2] == (project_id, index_version) for key in self.rows)
+        return sum(key[:2] == (project_id, index_version) for key in self.vector_rows)
 
     def manifest(self, project_id, index_version):
         assert not self.store.guard_active
@@ -246,7 +269,10 @@ class MemoryMilvus:
         self.rows, self.writes, self.deletes, self.retired = {}, [], [], []
 
     def ensure_collection(self, *, project_id, index_version, catalog):
-        assert catalog == default_catalog() and len(catalog.column_defs()) == 21
+        assert catalog == default_catalog() and len(catalog.column_defs()) == 27
+        assert {'owner_id', 'support_context_id', 'support_context_version',
+                'window_index', 'window_start', 'window_end'} <= {
+                    column.name for column in catalog.column_defs()}
         return self
 
     def check_collection(self, *, catalog):
@@ -269,9 +295,15 @@ class MemoryMilvus:
 
     def validate_projection(self, expected, *, project_id, index_version, catalog):
         assert isinstance(expected, ReceiptManifest)
-        actual = ProjectionSync._milvus_manifest([
-            row for key, row in self.rows.items() if key[:2] == (project_id, index_version)])
-        return {'ok': actual == dict(expected)}
+        rows = [row for key, row in self.rows.items() if key[:2] == (project_id, index_version)]
+        ok = True
+        for start in range(0, len(rows), 512):
+            page = rows[start:start + 512]
+            actual = {row['vector_id']: {'version_id': row['version_id'],
+                'fingerprint': projection_fingerprint(row)} for row in page}
+            ok = len(actual) == len(page) and actual == expected.lookup_vectors(list(actual)) and ok
+        return {'ok': ok and len(rows) == len(expected), 'count': len(rows),
+                'expected_count': len(expected)}
 
     def delete_versions(self, project_id, versions):
         self.retired.append((project_id, tuple(versions)))
@@ -532,3 +564,126 @@ def test_begin_rebuild_exception_is_handled_without_unbound_claim_error():
         ProjectionSync(store, {'milvus': adapter}, schema_version=2).rebuild('project', 'milvus')
     assert store.failures == [] and store.finished == []
     assert adapter.phases == [] and adapter._store().writes == []
+
+
+class ProjectionTargetSchemaTests(unittest.TestCase):
+    def test_api_drains_milvus_four_and_neo4j_three_without_cross_target_schema_changes(self):
+        import knowledge_service.api as api
+
+        acknowledged = []
+
+        class TargetStore(FakeStore):
+            def ack_contiguous(self, claimed, schema_version):
+                acknowledged.append((claimed.target, schema_version))
+                return super().ack_contiguous(claimed, schema_version)
+
+        store = TargetStore([batch(1), batch(2)])
+        service = MagicMock()
+        service.encoder = Encoder()
+        repository = SimpleNamespace(projections=store, storage_namespace='test')
+        graph = FakeGraphAdapter()
+        configured = []
+
+        class AssemblyComplete(Exception):
+            pass
+
+        def configure(*args, **kwargs):
+            configured.append(ProjectionSync(*args, **kwargs))
+            raise AssemblyComplete
+
+        def install_graph(app, service):
+            app.state.neo4j = SimpleNamespace(
+                _driver=object(), database='neo4j', delete_project=lambda project: None,
+                status=lambda: {'configured': True})
+
+        with patch.dict('os.environ', {'KG_SKIP_DOTENV': '1', 'KG_VECTOR_BACKEND': 'milvus'}), \
+                patch.multiple(api, Repository=MagicMock(return_value=repository),
+                    KnowledgeService=MagicMock(return_value=service), RuntimeCapabilities=MagicMock(),
+                    DocumentUploads=MagicMock(), UserStore=MagicMock(), _ensure_seed_superadmin=MagicMock(),
+                    OntologySync=MagicMock(), _build_milvus_store=MagicMock(return_value=MemoryMilvus()),
+                    Neo4jProjectionAdapter=MagicMock(return_value=graph), install_neo4j=install_graph,
+                    ProjectionSync=configure), \
+                patch('knowledge_service.core.security.resolve_jwt_secret', return_value=('test', False)):
+            with self.assertRaises(AssemblyComplete):
+                api.create_app('unused-pure-test-dsn', encoder=service.encoder, auth_disabled=True)
+
+        sync, = configured
+        # Use a deterministic encoder/store while exercising the assembled sync
+        # and real Milvus adapter delivery, including its receipt acknowledgement.
+        sync.adapters['milvus'] = FakeAdapter()
+        worker = ProjectionWorker(SimpleNamespace(), sync, cleanup_handlers={}, max_batches_per_project=1)
+        self.assertEqual(worker.drain_project('project'), 2)
+        self.assertEqual(acknowledged, [('neo4j', 3), ('milvus', 4)])
+        self.assertEqual(store.activated_tokens, [])
+        self.assertEqual(store.schema_version, 4)
+        self.assertEqual(sync.schema_for('milvus'), 4)
+        self.assertEqual(sync.schema_for('neo4j'), 3)
+        self.assertEqual(sync.schema_version, 4)
+        self.assertEqual(store.receipts.count('project', 1), 1)
+        self.assertEqual(len(graph.applied), 1)
+
+    def test_mapped_milvus_rebuild_fences_capture_progress_and_activation_with_four(self):
+        store, adapter = FakeStore(watermark=3), FakeAdapter()
+        sync = ProjectionSync(store, {'milvus': adapter}, schema_version={'milvus': 4, 'neo4j': 3})
+        result = sync.rebuild('project', 'milvus')
+        self.assertTrue(result['ready'])
+        self.assertEqual(store.current_claim.schema_version, 4)
+        self.assertEqual(store.schema_version, 4)
+        self.assertEqual(store.activated_tokens, ['build-token'])
+
+    def test_mapped_neo4j_rebuild_retains_three_through_alias_switch(self):
+        store = FakeStore(watermark=3, rebuild={
+            'claim': batch(build_id='graph-build', token='graph-token'),
+            'snapshot_seq': 3, 'records': [],
+            'state': {'build_id': 'graph-build', 'phase': 'snapshot',
+                      'snapshot_seq': 3, 'applied_seq': 3, 'index_version': 1}})
+        store.alias_switch_guard = store.activation_guard
+        store.rollback_deadline = lambda now: '2099-01-01T00:00:00Z'
+
+        def finish(claimed, schema_version, applied, rollback_until, state, previous):
+            store.assert_current(claimed)
+            self.assertEqual((claimed.target, schema_version), ('neo4j', 3))
+            self.assertEqual(state['phase'], 'ready')
+            store.finished.append(dict(state))
+
+        store.finish_rebuild = finish
+        graph = MagicMock()
+        graph.begin_rebuild.return_value = 'new-graph'
+        graph.validate_rebuild.return_value = {'ok': True}
+        graph.current_destination.return_value = 'old-graph'
+        sync = ProjectionSync(store, {'neo4j': graph}, schema_version={'milvus': 4, 'neo4j': 3})
+        result = sync.rebuild('project', 'neo4j')
+        self.assertTrue(result['ready'])
+        self.assertEqual(store.current_claim.schema_version, 3)
+        self.assertEqual(len(store.finished), 1)
+        graph.begin_rebuild.assert_called_once_with('project', 3,
+            unittest.mock.ANY, fence='graph-token')
+        graph.switch_alias.assert_called_once_with('project', 'new-graph',
+            build_id='graph-build', fence='graph-token')
+
+    def test_worker_audits_claim_and_fail_with_the_target_schema(self):
+        observed = []
+        claim = SimpleNamespace(owner='audit', token='token')
+
+        class Projections:
+            def claim_maintenance(self, project, target, schema, owner):
+                observed.append(('claim', target, schema))
+                return claim
+
+            def mark_failed(self, claimed, error, schema):
+                observed.append(('failed', 'neo4j', schema))
+
+            def release_maintenance(self, claimed):
+                observed.append(('released', claimed.token))
+
+        def failed_manifest(*args):
+            raise RuntimeError('audit failed')
+
+        repository = SimpleNamespace(projections=Projections(), projection_authority_manifest=failed_manifest)
+        adapter = SimpleNamespace(audit_authority=lambda *args: None,
+            audit_authority_manifest=lambda *args: None, INDEXED_KINDS={'entity'})
+        sync = ProjectionSync(repository.projections, {'neo4j': adapter},
+            schema_version={'milvus': 4, 'neo4j': 3})
+        with self.assertRaisesRegex(RuntimeError, 'audit failed'):
+            ProjectionWorker(repository, sync, cleanup_handlers={}).audit_project('project')
+        self.assertEqual(observed, [('claim', 'neo4j', 3), ('failed', 'neo4j', 3), ('released', 'token')])

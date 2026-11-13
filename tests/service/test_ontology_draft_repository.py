@@ -539,7 +539,7 @@ def test_full_restore_requires_supported_integer_schema_version(tmp_path, versio
 def test_current_light_restore_keeps_its_section_contract(tmp_path):
     project_id = 'current-light-project'
     snapshot = {
-        'schema_version': 18,
+        'schema_version': 19,
         'governance_history_included': False,
         'project': {
             'id': project_id,

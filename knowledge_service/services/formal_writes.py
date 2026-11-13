@@ -15,7 +15,10 @@ from ..domain.formal_facts import (
     FORMAL_OPERATIONS, SOURCE_METADATA, canonical_attribute_key,
     canonical_relation_key, manual_assertion_id, typed_value_identity)
 from ..utils.assertions import ALLOWED_TRANSITIONS, occurrence_id
-from .ontology import Ontology
+from .ontology import Ontology, UnknownOntologyTerm
+from ..domain.entity_identity import (IdentityPolicy, IdentityResolutionStale, compatible_identity,
+    exact_candidates, identity_scope, key_values, merge_identity_keys, policy_source_qualified,
+    source_boundary, source_qualified)
 
 
 def _fingerprint(value):
@@ -36,22 +39,39 @@ def _assertion_comparable(item):
         'source_hash', 'start_char', 'end_char', 'quote', 'payload')}
 
 
+def _published_identity_policy(ontology, class_iri):
+    if ontology is None:
+        return IdentityPolicy()
+    try:
+        return ontology.identity_policy(class_iri)
+    except UnknownOntologyTerm:
+        return IdentityPolicy()
+
+
 class _Planner:
     def __init__(self, snapshot, operation, assertions, expected, policy):
         # Repository snapshots are detached. Treat corpus rows as read-only;
         # changed records/assertions are copied before replacing their entries.
         self.snapshot = snapshot
+        self.ontology = Ontology(snapshot['ontology']['turtle']) if snapshot.get('ontology') else None
         self.operation = operation
         self.expected = expected
         self.policy = copy.deepcopy(policy)
         self.records = {row['id']: row for row in self.snapshot['records']}
         self.assertions = {row['id']: row for row in self.snapshot['assertions']}
+        self.original_assertions = dict(self.assertions)
         self.reviews = {
             row['id']: row for row in self.snapshot['resolution_reviews']}
         self.merge_operations = {
             row['id']: row for row in self.snapshot['merge_operations']}
         self.fact_keys = [dict(row) for row in self.snapshot['fact_keys']]
         self.mappings = list(self.snapshot['record_version_assertions'])
+        self.event_ids_by_decision = {}
+        for event in self.snapshot['assertion_events']:
+            self.event_ids_by_decision.setdefault((event['assertion_id'],event['decision_version']),set()).add(event['id'])
+        self.mapping_versions = {}
+        for mapping in self.mappings:
+            self.mapping_versions.setdefault((mapping['assertion_id'],mapping['assertion_event_id'],mapping['record_id']),set()).add(mapping['record_version_id'])
         self.actions = []
         self.result_refs = []
         self.assertion_result_ids = []
@@ -65,6 +85,8 @@ class _Planner:
         self.input_assertions = list(copy.deepcopy(assertions or []))
         self.records_input = list(self.policy.get('records', []))
         self._token_sequence = 0
+        self.identity_gate_bindings = []
+        self.identity_support_assertion_ids = []
 
     def _token(self):
         self._token_sequence += 1
@@ -142,7 +164,7 @@ class _Planner:
             canonical.pop('source_id', None)
             canonical['metadata'] = {
                 key: value for key, value in canonical.get('metadata', {}).items()
-                if key not in SOURCE_METADATA}
+                if key not in SOURCE_METADATA and key != '_identity_resolution_checked'}
         return canonical
 
     def _source_assertion(self, record, expected_version, ordinal):
@@ -197,6 +219,14 @@ class _Planner:
                   and existing['canonical_record_id'] == canonical_id):
                 mode = 'replay'
                 resulting_version = existing['decision_version']
+                # A replay verifies its original accepted mapping. A later
+                # canonical metadata revision must not retarget that event.
+                if set(record_ref) == {'version_id'}:
+                    event_ids = self.event_ids_by_decision.get((assertion['id'],resulting_version),set())
+                    versions = {version for event_id in event_ids for version in
+                        self.mapping_versions.get((assertion['id'],event_id,canonical_id),set())}
+                    if len(versions)==1:
+                        record_ref={'version_id':next(iter(versions))}
                 if existing.get('_planned_accept_ref') not in (None, record_ref):
                     raise ValueError('断言重放与其版本支撑映射冲突')
             else:
@@ -288,7 +318,8 @@ class _Planner:
             selected_ref = None
             if record['kind'] in {'relation', 'attribute'}:
                 old_key = self._active_key_for_record(record['id'])
-                if record.get('metadata', {}).get('_deleted'):
+                if (record.get('metadata', {}).get('_deleted')
+                        or record.get('metadata', {}).get('_quarantined')):
                     self._retire_key(record['id'])
                 else:
                     fact_key = (canonical_relation_key(record)
@@ -340,11 +371,13 @@ class _Planner:
                             canonical_id = mapped_id
                             selected_ref = copy.deepcopy(self.record_refs[canonical_id])
                             self.canonical_by_input[original['id']] = canonical_id
-                            if old_key:
+                            quarantined=self.records.get(record['id'],{}).get('metadata',{}).get('_quarantined')
+                            resolving=any(a.get('kind')=='conflict_set_resolve' for a in self.policy.get('conflict_actions',[]))
+                            if old_key or (quarantined and self.operation=='approve_review' and resolving):
                                 source = self.records.get(record['id'])
                                 if source is None:
                                     raise RuntimeError('旧事实键指向不存在的源记录')
-                                tombstone = _writable(source)
+                                tombstone = _writable(record if quarantined and resolving else source)
                                 tombstone['metadata'] = {
                                     **tombstone.get('metadata', {}), '_deleted': True,
                                     'merged_into_fact': canonical_id,
@@ -478,7 +511,7 @@ class _Planner:
                 supported = supported or any(
                     row['assertion_id'] in accepted
                     and row['record_id'] == canonical_id
-                    and row['record_version_id'] == current_version_id
+                    and (row['record_version_id'] == current_version_id or source_qualified(current))
                     for row in self.mappings)
             if supported:
                 continue
@@ -600,12 +633,190 @@ class _Planner:
             'after_state_refs': copy.deepcopy(self.result_refs),
         })
 
+    def _plan_conflicts(self):
+        for raw in self.policy.get('conflict_actions',[]):
+            action=copy.deepcopy(raw)
+            kind=action.get('kind')
+            if kind=='conflict_set_create':
+                if self.operation!='merge_rewrite' or not self.policy.get('ledger'):
+                    raise ValueError('只有已确认的身份融合可以建立属性冲突集合')
+                members=[]
+                ids=action.pop('member_ids')
+                if not 2<=len(ids)<=100:raise ValueError('冲突集合须包含2..100个成员')
+                for record_id in sorted(set(ids)):
+                    record=self.records[record_id]
+                    if (not record.get('metadata',{}).get('_quarantined') or record.get('kind')!='attribute'
+                        or record.get('subject_id')!=action['entity_id'] or record.get('type')!=action['predicate']):
+                        raise ValueError('冲突集合与隔离属性不一致')
+                    supports=[dict(id=a['id'],version=a['decision_version']) for a in self.assertions.values()
+                              if a.get('canonical_record_id')==record_id and a['status']=='contradicting']
+                    if not supports or len(supports)>1000:raise ValueError('隔离成员须有1..1000条可审计的冲突支撑')
+                    members.append(dict(record_ref=copy.deepcopy(self.record_refs[record_id]),assertion_versions=sorted(supports,key=lambda a:a['id'])))
+                action['members']=members
+            elif kind=='conflict_set_resolve':
+                if self.operation!='approve_review' or not action.get('reason'):
+                    raise ValueError('冲突集合只能通过有理由的正式审核关闭')
+            elif kind=='conflict_sets_reverse':
+                if self.operation!='merge_reversal':raise ValueError('冲突集合回退需要融合回退事务')
+            else:raise ValueError('未知冲突账本动作')
+            self.actions.append(action)
+
+    def _update_identity_record(self, record):
+        """Materialize learned keys before bindings without changing old events."""
+        record_id=record['id']
+        old_ref=copy.deepcopy(self.record_refs[record_id])
+        if 'token' in old_ref:
+            action=next(action for action in self.actions
+                        if action['kind']=='record_put' and action['token']==old_ref['token'])
+            action['record']=copy.deepcopy(record)
+            self.records[record_id]={**self.records[record_id],**copy.deepcopy(record)}
+            new_ref=old_ref
+        else:
+            original=self.records[record_id]
+            new_ref=self._plan_record_put(record,original['version'])
+            put=self.actions.pop()
+            self.actions.insert(0,put)
+            # Existing result membership must point at the final canonical
+            # version, while an assertion replay retains its historical ref.
+            if old_ref in self.result_refs[:-1]:
+                self.result_refs.pop()
+                self.result_refs=[copy.deepcopy(new_ref) if ref==old_ref else ref
+                                  for ref in self.result_refs]
+            for action in self.actions:
+                if action['kind']=='merge_ledger':
+                    if not any(row['id']==record_id for row in action['before_state']):
+                        action['before_state'].append(copy.deepcopy(original))
+                    action['expected_versions'].setdefault(record_id,original['version'])
+                    action['after_state_refs']=[copy.deepcopy(new_ref) if ref==old_ref else ref
+                                               for ref in action['after_state_refs']]
+                    if new_ref not in action['after_state_refs']:
+                        action['after_state_refs'].append(copy.deepcopy(new_ref))
+        for action in self.actions:
+            kind=action['kind']
+            target=(action.get('canonical_after') if kind=='assertion_move'
+                    else action.get('canonical_record_id'))
+            original=(self.original_assertions.get(action['assertion']['id'])
+                      if kind=='assertion_accept' else None)
+            historical_replay=(kind=='assertion_accept' and action['mode']=='replay'
+                and original is not None and original['status']=='accepted'
+                and original['decision_version']==action['resulting_version'])
+            accepts=(kind=='assertion_accept' and not historical_replay
+                     or kind=='assertion_transition' and action['status']=='accepted'
+                     or kind=='assertion_move' and action['status_after']=='accepted')
+            if target==record_id and accepts:
+                action['record_ref']=copy.deepcopy(new_ref)
+                assertion_id=(action['assertion']['id'] if kind=='assertion_accept' else action['id'])
+                current=self.assertions[assertion_id]
+                if current['status']=='accepted' and current.get('canonical_record_id')==record_id:
+                    current['_planned_accept_ref']=copy.deepcopy(new_ref)
+
+    def _plan_identity_support(self):
+        """Validate final accepted identity bindings, then learn their keys once.
+
+        Source occurrences remain immutable. Only still-accepted bindings
+        participate, so reversing a merge can return a learned key to its
+        original identity without preserving an abandoned key on the survivor.
+        """
+        from .identity_type_lineage import IdentityTypeLineage
+        lineage=IdentityTypeLineage(self.snapshot,self.ontology,self.actions)
+        touched={action['record']['id'] for action in self.actions
+                 if action['kind']=='record_put' and action['record'].get('kind')=='entity'}
+        new_bindings=set()
+        for action in self.actions:
+            kind=action['kind']
+            if kind=='assertion_accept':
+                touched.add(action['canonical_record_id'])
+                if action['mode']!='replay':new_bindings.add(action['assertion']['id'])
+            elif kind=='assertion_transition' and action['status']=='accepted':
+                touched.add(action['canonical_record_id']);new_bindings.add(action['id'])
+            elif kind=='assertion_move' and action['status_after']=='accepted':
+                touched.add(action['canonical_after']);new_bindings.add(action['id'])
+        groups={}
+        for assertion in self.assertions.values():
+            if assertion['kind']=='entity' and assertion['status']=='accepted':
+                groups.setdefault(assertion.get('canonical_record_id'),[]).append(assertion)
+        for record_id,assertions in groups.items():
+            target=self.records.get(record_id)
+            if target is None or target.get('kind')!='entity':
+                raise ValueError('已接受的实体断言必须关联存在的规范实体')
+            if target.get('metadata',{}).get('_deleted'):
+                if any(assertion['id'] in new_bindings for assertion in assertions):
+                    raise ValueError('已停用的实体不能接受新的身份支撑')
+                continue
+            policy=_published_identity_policy(self.ontology,target['type'])
+            canonical_type=lineage.normalize(target['type'],target.get('ontology_id'))
+            effective=_writable(target)
+            effective['metadata']=copy.deepcopy(target.get('metadata',{}))
+            sources=[]
+            for assertion in sorted(assertions,key=lambda row:row['id']):
+                payload=assertion['payload']
+                if payload.get('kind') not in (None,'entity'):
+                    raise ValueError('实体断言载荷类型与规范身份不一致')
+                source={**payload,'kind':'entity','type':lineage.source_type(assertion,target)}
+                if source['type']!=canonical_type:
+                    raise ValueError('实体断言与规范实体的稳定类型 IRI 不一致')
+                if identity_scope(source,policy)!=identity_scope(target,policy):
+                    raise ValueError('实体断言与规范实体的身份范围不一致')
+                keys=merge_identity_keys(effective,source,policy)
+                if keys or 'identity_keys' in effective['metadata']:
+                    effective['metadata']['identity_keys']=keys
+                sources.append((assertion,source))
+            normalized={**effective,'type':canonical_type}
+            for assertion,source in sources:
+                if not compatible_identity(source,normalized,policy):
+                    raise ValueError('实体断言身份策略、唯一键或业务时间/适用范围不兼容')
+                if record_id in touched and source_boundary(source)!=source_boundary(normalized):
+                    self.identity_gate_bindings.append([assertion['id'],record_id])
+            if record_id in touched:
+                if policy.declared:
+                    effective['type']=canonical_type
+                    effective['metadata'].update({
+                        'identity_policy':policy.mode,'identity_key_fields':list(policy.keys),
+                        'identity_namespace':identity_scope(effective,policy),
+                        'identity_source_qualified':policy_source_qualified(effective,policy)})
+                else:
+                    for key in ('identity_policy','identity_key_fields','identity_namespace','identity_source_qualified'):
+                        effective['metadata'].pop(key,None)
+                effective['metadata'].pop('_unsupported',None)
+                effective['metadata'].pop('unsupported_reason',None)
+                if effective!=_writable(target):
+                    self._update_identity_record(effective)
+        rewritten={action['record']['id'] for action in self.actions
+                   if action['kind']=='record_put' and action['record'].get('kind')=='entity'}
+        self.identity_support_assertion_ids=sorted(assertion['id'] for record_id,assertions in groups.items()
+            if record_id in rewritten for assertion in assertions)
+        if rewritten:
+            # Unchanged owners retain their claims. Rewritten final survivors
+            # reclaim keys through the normal trigger; duplicate survivors
+            # therefore still fail atomically under the database constraint.
+            self.actions.insert(0,{'kind':'identity_key_release','record_ids':sorted(rewritten)})
+
+    def _plan_attribute_support(self):
+        from ..utils.attributes import primitive_datatype
+        accepted=set()
+        for action in self.actions:
+            if action['kind']=='assertion_accept' and action['mode']!='replay':accepted.add(action['assertion']['id'])
+            elif action['kind']=='assertion_transition' and action['status']=='accepted':accepted.add(action['id'])
+            elif action['kind']=='assertion_move' and action['status_after']=='accepted':accepted.add(action['id'])
+        for assertion_id in accepted:
+            assertion=self.assertions[assertion_id]
+            if assertion['kind']!='attribute':continue
+            target=self.records.get(assertion.get('canonical_record_id'))
+            source=assertion['payload'];actual=source.get('value')
+            datatype=primitive_datatype(actual)
+            if (not target or target.get('kind')!='attribute' or source.get('datatype',datatype)!=datatype
+                    or target.get('datatype')!=datatype or _fingerprint(actual)!=_fingerprint(target.get('value'))):
+                raise ValueError('属性断言的原生值和数据类型必须与规范属性值一致')
+
     def build(self):
         auto = self._plan_records()
         self._plan_assertions(auto)
         self._plan_reviews()
         self._plan_source_retraction()
         self._plan_ledger()
+        self._plan_identity_support()
+        self._plan_attribute_support()
+        self._plan_conflicts()
         return self.actions, self.result_refs, self.assertion_result_ids
 
 
@@ -664,16 +875,74 @@ class FormalFactWriter:
         ontology_row = snapshot.get('ontology')
         ontology = Ontology(ontology_row['turtle']) if ontology_row else None
         frozen_policy = copy.deepcopy(policy)
+        snapshot_records = {row['id']: row for row in snapshot['records']}
+        identity_pool = {row['id']: row for row in snapshot['records']
+                         if row.get('kind') == 'entity' and not row.get('metadata', {}).get('_deleted')}
+        for record_id,row in list(identity_pool.items()):
+            if _published_identity_policy(ontology,row['type']).declared:
+                identity_pool[record_id]={**row,'type':str(ontology.resolve(row['type'],ontology.classes))}
         for record in frozen_policy.get('records', []):
             self._reject_deprecated_write_term(record, ontology, operation)
+            if record.get('kind') == 'entity':
+                identity = _published_identity_policy(ontology,record['type'])
+                if identity.declared:
+                    record['type'] = str(ontology.resolve(record['type'], ontology.classes))
+                    record.setdefault('metadata', {}).update({
+                        'identity_policy': identity.mode,
+                        'identity_key_fields': list(identity.keys),
+                        'identity_namespace': identity_scope(record, identity),
+                        'identity_source_qualified': policy_source_qualified(record, identity),
+                    })
+                    key_values(record, identity)
+                else:
+                    for key in ('identity_policy', 'identity_key_fields', 'identity_namespace', 'identity_source_qualified'):
+                        record.get('metadata', {}).pop(key, None)
+                checked = record.get('metadata', {}).get('_identity_resolution_checked')
+                if checked is not None:
+                    candidates = sorted(row['id'] for row in exact_candidates(
+                        record, identity_pool.values(), identity))
+                    if candidates != checked['candidates']:
+                        raise IdentityResolutionStale('身份候选已变化，请基于最新快照重新解析并重试导入')
+                    if not record.get('metadata', {}).get('_deleted'):
+                        identity_pool[record['id']] = record
+        # Treat extraction redirects as proposals. The immutable snapshot and
+        # normal dependency CAS recheck every selected survivor at commit.
+        rows = {row['id']: row for row in snapshot['records']}
+        rows.update({row['id']: row for row in frozen_policy.get('records', [])})
+        redirects = dict((frozen_policy.get('ledger') or {}).get('redirects', {}))
+        redirects.update({row['id']: row['metadata']['merged_into']
+            for row in frozen_policy.get('records', []) if row.get('kind') == 'entity'
+            and (row.get('metadata') or {}).get('merged_into')
+            and (row.get('metadata') or {}).get('_deleted')})
+        cross_source = []
+        for record in frozen_policy.get('records', []):
+            old = snapshot_records.get(record['id'])
+            if (old and record.get('kind') == 'entity' and source_qualified(record)
+                    and not record.get('metadata', {}).get('_deleted')
+                    and source_boundary(old) != source_boundary(record)):
+                cross_source.append([record['id'], record['id']])
+        for source_id, target_id in redirects.items():
+            source, target = rows.get(source_id), rows.get(target_id)
+            if not source or not target or source.get('kind') != 'entity':
+                continue
+            identity = _published_identity_policy(ontology,source['type'])
+            if not compatible_identity(source, target, identity):
+                raise ValueError('实体融合身份策略或唯一键冲突')
+            if source_boundary(source) != source_boundary(target):
+                cross_source.append([source_id, target_id])
         planner = _Planner(
             snapshot, operation, assertions, expected, frozen_policy)
         actions, result_refs, assertion_result_ids = planner.build()
+        cross_source.extend(planner.identity_gate_bindings)
+        if cross_source:
+            actions.insert(0, {'kind': 'source_identity_projection_gate',
+                              'redirects': [list(pair) for pair in sorted(set(map(tuple,cross_source)))]})
         plan = {
             'operation': operation, 'project_id': project_id,
             'canonical_by_input': copy.deepcopy(planner.canonical_by_input),
             'actions': actions, 'result_refs': result_refs,
             'assertion_result_ids': assertion_result_ids,
+            'identity_support_assertion_ids': planner.identity_support_assertion_ids,
             'review_items': copy.deepcopy(
                 frozen_policy.get('resolution_reviews', [])),
             'dependencies': self._dependencies(snapshot),

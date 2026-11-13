@@ -32,7 +32,7 @@ def _assertion(repo, project_id, assertion_id, status, *, subject_id, value):
         project_id, assertion_id, 1, status, 'test decision', 'test')
 
 
-def test_subgraph_attribute_modes_group_values_and_expand_only_selected_entity(tmp_path):
+def test_subgraph_attribute_modes_keep_only_entity_relationship_network(tmp_path, monkeypatch):
     app = create_app(tmp_path/'attribute-explorer.sqlite', HashingEncoder())
     with TestClient(app) as client:
         project_id = client.post('/api/projects', json={
@@ -77,58 +77,30 @@ def test_subgraph_attribute_modes_group_values_and_expand_only_selected_entity(t
 
         service.scoped = counted_scoped
 
-        summary = client.post(base+'/subgraph', json={}).json()
-        entity_a = next(row for row in summary['nodes'] if row['id'] == 'a')
-        assert len(entity_a['attributes']) == 1
-        group = entity_a['attributes'][0]
-        assert group['predicate'] == 'https://test/age'
-        assert group['label'] == '年龄'
-        assert [(value['value'], value['status']) for value in group['values']] == [
-            (20, 'accepted'), (21, 'accepted'), (99, 'contradicting')]
-        conflict = next(value for value in group['values'] if value['status'] == 'contradicting')
-        assert conflict['candidate_id'] == conflict['assertion_id'] == 'conflict-a'
-        assert conflict['provenance'] == {
-            'document_id': 'candidate-source',
-            'document_version_id': 'candidate-source-v1',
-            'chunk_id': 'candidate-chunk', 'source_hash': None,
-            'start_char': None, 'end_char': None, 'quote': '年龄 99',
-        }
-        assert next(value for value in group['values'] if value['record_id'] == 'a-age-one')[
-            'accepted_support_count'] == 1
-        assert all(row['kind'] == 'entity' for row in summary['nodes'])
-        assert all(edge['kind'] == 'relation' for edge in summary['edges'])
+        def forbidden_property_preload(*args, **kwargs):
+            raise AssertionError('graph must load entity properties through the sidebar only')
 
-        hidden = client.post(base+'/subgraph', json={'attribute_mode': 'none'}).json()
-        assert all('attributes' not in row for row in hidden['nodes'])
-        assert all(row['kind'] == 'entity' for row in hidden['nodes'])
-
-        expanded = client.post(base+'/subgraph', json={
-            'node_id': 'a', 'hops': 1, 'attribute_mode': 'expanded',
-        }).json()
-        attribute_nodes = [row for row in expanded['nodes'] if row['kind'] == 'attribute_value']
-        assert [(row['value'], row['status']) for row in attribute_nodes] == [
-            (20, 'accepted'), (21, 'accepted'), (99, 'contradicting')]
-        assert {row['subject_id'] for row in attribute_nodes} == {'a'}
-        assert len({row['id'] for row in attribute_nodes}) == 3
-        attribute_edges = [edge for edge in expanded['edges'] if edge['type'] == 'KS_ATTRIBUTE']
-        assert len(attribute_edges) == 3
-        assert {edge['subject_id'] for edge in attribute_edges} == {'a'}
-        assert {edge['object_id'] for edge in attribute_edges} == {
-            row['id'] for row in attribute_nodes}
-        assert all(row['value'] not in (30, 31) for row in attribute_nodes)
-        expanded_again = client.post(base+'/subgraph', json={
-            'node_id': 'a', 'hops': 1, 'attribute_mode': 'expanded',
-        }).json()
-        assert [row['id'] for row in expanded_again['nodes'] if row['kind'] == 'attribute_value'] == [
-            row['id'] for row in attribute_nodes]
-        assert len(scoped_calls) == 4
-        assert scoped_calls[0]['kinds'] == scoped_calls[2]['kinds'] == scoped_calls[3]['kinds'] == [
-            'entity', 'relation', 'attribute']
-        assert scoped_calls[1]['kinds'] == ['entity', 'relation']
-        assert all(not {'node_id', 'hops', 'attribute_mode'} & call.keys()
-                   for call in scoped_calls)
-
+        from knowledge_service.repository.scoped_reads import ScopedReads
+        monkeypatch.setattr(repo, 'list_assertions', forbidden_property_preload)
+        monkeypatch.setattr(repo, 'list_record_version_assertions', forbidden_property_preload)
+        monkeypatch.setattr(ScopedReads, 'entity_attributes', forbidden_property_preload)
+        for request in ({}, {'attribute_mode': 'none'},
+                        {'node_id': 'a', 'hops': 1, 'attribute_mode': 'expanded'}):
+            response = client.post(base+'/subgraph', json=request)
+            assert response.status_code == 200, response.text
+            graph = response.json()
+            assert {row['id'] for row in graph['nodes']} == {'a', 'b'}
+            assert {row['id'] for row in graph['edges']} == {'a-knows-b'}
+            assert all(row['kind'] == 'entity' and 'attributes' not in row for row in graph['nodes'])
+            assert all(row['kind'] == 'relation' for row in graph['edges'])
+            assert graph['attribute_display'] == 'sidebar'
+            assert graph['attribute_mode'] == ('none' if request.get('attribute_mode') == 'none' else 'summary')
+        # Unseeded compatibility reads exclude properties; the seed uses bounded BFS.
+        assert len(scoped_calls) == 2
+        assert all(call['kinds'] == ['entity', 'relation'] for call in scoped_calls)
+        assert all(not {'node_id', 'hops', 'attribute_mode'} & call.keys() for call in scoped_calls)
         assert client.post(base+'/subgraph', json={'attribute_mode': 'invalid'}).status_code == 422
+
 
 
 def test_subgraph_summary_does_not_require_a_published_ontology(tmp_path):
@@ -156,11 +128,13 @@ def test_subgraph_summary_does_not_require_a_published_ontology(tmp_path):
             'node_id': 'a', 'attribute_mode': 'expanded',
         })
         assert [response.status_code for response in (summary, hidden, expanded)] == [200, 200, 200]
-        group = summary.json()['nodes'][0]['attributes'][0]
-        assert group['predicate'] == group['label'] == 'https://unpublished.test/age'
-        assert 'attributes' not in hidden.json()['nodes'][0]
-        assert [row['value'] for row in expanded.json()['nodes']
-                if row['kind'] == 'attribute_value'] == [20]
+        for response in (summary, hidden, expanded):
+            graph = response.json()
+            assert [row['id'] for row in graph['nodes']] == ['a']
+            assert graph['edges'] == []
+            assert graph['attribute_display'] == 'sidebar'
+            assert 'attributes' not in graph['nodes'][0]
+
 
 
 def test_subgraph_filters_entity_type_and_predicate_without_dangling_edges(tmp_path):

@@ -42,7 +42,9 @@ def test_alias_merge_and_restore_preserve_history(system):
     current = {r['id']:r for r in service.scoped(p,{})}
     assert 'b' not in current and current['r']['subject_id'] == 'a'
     assert '张先生' in current['a']['metadata']['aliases']
-    assert current['a']['metadata']['merged_sources'][0]['id'] == 'b'
+    assert 'merged_sources' not in current['a']['metadata']
+    support=service.repository.list_assertions(p,canonical_record_id='a',status='accepted')
+    assert any(item['payload']['id']=='b' for item in support)
     history = service.repository.history(p,'b')
     assert len(history) == 2
     old = service.scoped(p,{'known_at':history[0]['recorded_at']})

@@ -342,8 +342,58 @@ class MilvusStore:
             self._validated[catalog.fingerprint] = monotonic()
         return self
 
+    def _upgrade_context_columns(self,catalog,info,indexes):
+        """Explicit builds may add exactly the six nullable v4 system fields.
+
+        Existing rows, vectors, old generations and unrelated fields are never
+        rewritten. An interrupted additive upgrade can resume from its subset.
+        Ordinary reads and delivery use check_collection and cannot enter here.
+        """
+        names={'owner_id','support_context_id','support_context_version','window_index','window_start','window_end'}
+        columns=catalog.column_defs();existing={field.get('name') for field in info.get('fields',[])}
+        missing=[column for column in columns if column.name not in existing and column.name in names]
+        if not missing:return False
+        allowed={'missing column '+column.name for column in missing}
+        allowed.update('missing index filter_'+column.name for column in columns if column.index)
+        problems=[issue for issue in self._schema_issues(catalog,info,indexes) if issue not in allowed]
+        if problems:raise MilvusSchemaMismatch('共享结构无法追加来源上下文字段：'+', '.join(problems))
+        for column in missing:
+            options={'nullable':True}
+            if column.max_length:options['max_length']=column.max_length
+            self._rpc(self._client.add_collection_field,collection_name=COLLECTION,
+                field_name=column.name,data_type=_TYPES[column.field_type],**options)
+            self._invalidate()
+        return True
+
+    def _materialize_context_columns(self,*,timeout_seconds=180):
+        """Explicit schema upgrades must cover sealed rows before indexing them.
+
+        Milvus 3.0 can leave added scalar indexes pending on old segments until
+        a schema-version compaction. This preserves rows and all project scopes.
+        """
+        def behind(*,required=False):
+            stats=self._rpc(self._client.get_collection_stats,COLLECTION)
+            if not isinstance(stats,Mapping) or not {
+                    'schema_version_consistent_segments','schema_version_total_segments'}<=stats.keys():
+                if required:raise RuntimeError('旧分段结构升级进度缺失，不能确认升级完成')
+                return False
+            consistent=_metadata_int(stats['schema_version_consistent_segments'])
+            total=_metadata_int(stats['schema_version_total_segments'])
+            if consistent<0 or total<0 or consistent>total:raise RuntimeError('旧分段结构升级状态无效')
+            return consistent<total
+        if not behind():return False
+        job=self._rpc(self._client.compact,collection_name=COLLECTION)
+        deadline=monotonic()+timeout_seconds
+        while True:
+            state=str(self._rpc(self._client.get_compaction_state,job)).lower()
+            if state in {'failed','timeout','timedout'}:raise RuntimeError('旧分段结构升级失败，请核对 Milvus 分段压缩状态后重试')
+            if not behind(required=True):return True
+            if monotonic()>=deadline:
+                raise RuntimeError('旧分段结构尚未完成升级，请等待 Milvus 分段压缩后显式重试')
+            sleep(min(.5,max(0,deadline-monotonic())))
+
     def ensure_collection(self, *, project_id, index_version, catalog):
-        """Explicit build prepares fixed indexes; never infers or adds columns."""
+        """Explicit builds prepare known system fields and their fixed indexes."""
         self._scope(project_id, index_version)
         catalog.column_defs()
         if self._client is None:
@@ -352,6 +402,9 @@ class MilvusStore:
             if not self._rpc(self._client.has_collection, COLLECTION):
                 return self._create_collection(catalog=catalog)
             info, indexes = self._metadata()
+            upgraded=self._upgrade_context_columns(catalog,info,indexes)
+            if upgraded:
+                info,indexes=self._metadata()
             columns = catalog.column_defs()
             issues = self._schema_issues(catalog, info, indexes)
             missing_indexes = [c for c in columns if c.index
@@ -365,6 +418,11 @@ class MilvusStore:
                 params = self._indexes(missing_indexes)
                 self._rpc(self._client.create_index, COLLECTION, params, sync=False)
                 pending.extend(item.index_name for item in params)
+            if upgraded or {'filter_owner_id','filter_support_context_id'}&set(pending):
+                materialized=self._materialize_context_columns()
+                if upgraded or materialized:
+                    self._rpc(self._client.load_collection,COLLECTION,refresh=True)
+                    self._invalidate()
             if pending:
                 self._wait_for_indexes(pending)
                 self._invalidate()
@@ -460,11 +518,12 @@ class MilvusStore:
         fields = [c.name for c in catalog.column_defs() if c.name not in {'embedding', 'sparse'}]
         count, ok, page = 0, True, []
         expected_count = len(expected)
-        lookup = getattr(expected, 'lookup', None)
+        vector_lookup=getattr(expected,'lookup_vectors',None)
+        lookup = vector_lookup or getattr(expected, 'lookup', None)
         if lookup is None:
             lookup = lambda ids: {record_id: expected[record_id] for record_id in ids if record_id in expected}
         def compare(values):
-            actual = {row['record_id']: {'version_id': row['version_id'],
+            actual = {row['vector_id'] if vector_lookup else row['record_id']: {'version_id': row['version_id'],
                       'fingerprint': projection_fingerprint(row)} for row in values}
             return len(actual) == len(values) and actual == lookup(list(actual))
         for row in self._query_pages(expression, params, fields):
@@ -477,6 +536,28 @@ class MilvusStore:
             ok = compare(page) and ok
         return {'ok': ok and count == expected_count, 'count': count,
                 'expected_count': expected_count}
+
+    def validate_projection_subset(self,expected,*,project_id,index_version,catalog):
+        if len(expected)>512:raise ValueError('原生对账分页最多512个向量')
+        self.check_collection(catalog=catalog)
+        expression,params=self._scope(project_id,index_version)
+        expression+=' and vector_id in {vectors}';params['vectors']=list(expected)
+        fields=[column.name for column in catalog.column_defs() if column.name not in {'embedding','sparse'}]
+        values=list(self._query_pages(expression,params,fields)) if expected else []
+        actual={row['vector_id']:{'version_id':row['version_id'],'fingerprint':projection_fingerprint(row)} for row in values}
+        return {'ok':len(values)==len(expected) and actual==expected,'count':len(values)}
+
+    def validate_projection_count(self,expected_count,*,project_id,index_version,catalog):
+        """Complete a paged audit without fetching the generation's payloads."""
+        if type(expected_count) is not int or expected_count<0:raise ValueError('原生对账数量必须为非负整数')
+        self.check_collection(catalog=catalog)
+        expression,params=self._scope(project_id,index_version)
+        result=self._rpc(self._client.query,COLLECTION,filter=expression,filter_params=params,
+                         output_fields=['count(*)'],consistency_level='Strong')
+        if len(result)!=1 or type(result[0].get('count(*)')) is not int:
+            raise RuntimeError('原生索引数量对账返回格式不正确')
+        count=result[0]['count(*)']
+        return {'ok':count==expected_count,'count':count,'expected_count':expected_count}
 
     def _load_if_needed(self, *, catalog):
         with self._preparation_lock:
@@ -526,7 +607,8 @@ class MilvusStore:
             expression += ' and version_id in {eligible_versions}'
             params['eligible_versions'] = list(dict.fromkeys(eligible_version_ids))
         self._load_if_needed(catalog=catalog)
-        outputs = ['record_id', 'version_id', 'kind', 'type', 'text']
+        outputs = ['record_id','version_id','kind','type','text','owner_id',
+                   'support_context_id','support_context_version','window_index','window_start','window_end']
         if retrieval_mode == 'hybrid':
             requests = [AnnSearchRequest(data=self._query_vector(query_vector), anns_field='embedding',
                             param={'metric_type': 'COSINE'}, limit=k, expr=expression, expr_params=params),
@@ -534,7 +616,7 @@ class MilvusStore:
                             limit=k, expr=expression, expr_params=params)]
             result = self._search_rpc(self._client.hybrid_search, collection_name=COLLECTION,
                                reqs=requests, ranker=RRFRanker(), limit=k,
-                               output_fields=outputs, consistency_level='Strong')
+                               output_fields=outputs,consistency_level='Strong',group_by_field='record_id',group_size=1)
         else:
             dense = retrieval_mode == 'semantic'
             result = self._search_rpc(self._client.search, collection_name=COLLECTION,
@@ -542,7 +624,7 @@ class MilvusStore:
                          anns_field='embedding' if dense else 'sparse', filter=expression,
                          filter_params=params, limit=k,
                          search_params={'metric_type': 'COSINE' if dense else 'BM25'},
-                         output_fields=outputs, consistency_level='Strong')
+                         output_fields=outputs,consistency_level='Strong',group_by_field='record_id',group_size=1)
         return self._hits(result)
 
     @staticmethod
@@ -551,6 +633,7 @@ class MilvusStore:
         for batch in result:
             for hit in batch:
                 entity = hit.get('entity') or {}
-                hits.append({**{key: entity.get(key) for key in ('record_id','version_id','kind','type','text')},
+                hits.append({**{key: entity.get(key) for key in ('record_id','version_id','kind','type','text','owner_id',
+                    'support_context_id','support_context_version','window_index','window_start','window_end')},
                              'score': float(hit.get('distance', 0.0))})
         return hits

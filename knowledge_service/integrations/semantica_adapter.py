@@ -15,6 +15,7 @@ from pydantic import BaseModel,Field,StrictBool,StrictFloat,StrictInt,StrictStr
 from ..core.time import normalize_time
 from ..core.llm_config import current_llm
 from ..domain.ontology_names import canonical_name
+from ..utils.attributes import primitive_datatype
 from ..utils.diagnostics import event, redact, stage
 
 LOG = logging.getLogger('knowledge_service.semantica_adapter')
@@ -152,7 +153,8 @@ class _OpenFact(BaseModel):
 
 
 class _OpenFacts(BaseModel):
-    facts: list[_OpenFact] = Field(default_factory=list, max_length=500)
+    # Retain malformed objects for per-item quarantine instead of losing siblings.
+    facts: list[_OpenFact | dict[str, Any]] = Field(default_factory=list, max_length=500)
 
 
 class _GuidedEntity(BaseModel):
@@ -252,7 +254,7 @@ RESERVED_CLASS_NAMES contains normalized entity-class names. Never emit a reserv
 For each fact return subject, predicate, object, fact_kind, literal_type, confidence and exact evidence copied from SOURCE_DOCUMENT.
 Use fact_kind=relation only when object is the exact text of an independently identifiable entity in ENTITIES.
 Use fact_kind=attribute only when object is a scalar field value of the subject, such as a number, amount, date, duration, status, code or enum.
-An action, responsibility, prohibition, ownership statement, classification, heading or document structure is not an attribute.
+Without an explicit property definition, stay conservative: do not invent scalar fields from arbitrary action or responsibility paragraphs, headings, classifications or document structure.
 If an object could be either an entity or a scalar field, use fact_kind=ambiguous. Never emit the same fact as both relation and attribute.
 Predicate is an open, concise, domain-specific name in the source language and may normalize wording from the evidence.
 Always return both relation and attribute candidates. Downstream routing applies the output policy only after checking cross-kind predicate collisions.
@@ -282,6 +284,17 @@ def _route_open_facts(text,entity_candidates,facts,include_attributes=False,*,re
         raw=item.model_dump() if hasattr(item,'model_dump') else dict(item)
         evidence=str(raw.get('evidence') or '')
         source_kind=raw.get('fact_kind') or 'ambiguous'
+        if source_kind=='attribute':
+            try:
+                primitive_datatype(raw.get('object'))
+            except ValueError:
+                exceptions.append(_open_exception(text,source_kind,'unsupported_attribute_value',
+                    '属性值必须是原生字符串、布尔值、整数或有限浮点数，已隔离无效值',raw));continue
+        try:
+            _OpenFact.model_validate(raw)
+        except (ValueError, TypeError):
+            exceptions.append(_open_exception(text,source_kind,'invalid_fact_schema',
+                '事实格式无效，已隔离且不影响其他候选',raw));continue
         if evidence not in text:
             exceptions.append(_open_exception(text,source_kind,'evidence_not_in_source',
                 '事实证据无法在正文中定位，已从正常候选隔离',raw));continue
@@ -663,7 +676,11 @@ class SemanticaExtractor:
                 raise RuntimeError(
                     'attribute extraction is enabled but no extractor was configured')
             with stage('LLM 实体属性抽取（结果全部待审核）'):
-                batch=attribute_extractor(text,entities,ontology,config)
+                attribute_config={**config,
+                    'attribute_max_per_entity':getattr(self,'attribute_max_per_entity',50),
+                    'attribute_max_total':getattr(self,'attribute_max_total',500),
+                    'ontology_slice_summary':summary}
+                batch=attribute_extractor(text,entities,ontology,attribute_config)
             attributes=batch.attributes
             attribute_diagnostics=batch.diagnostics
             for key,value in attribute_diagnostics.items():
@@ -712,13 +729,16 @@ class SemanticaExtractor:
                     continue
                 self.review_candidates.append(dict(kind='attribute',entity_id=lookup[(entity.text,entity.label)],
                     subject=entity.text,proposed_type=item.attribute,value=item.value,confidence=item.confidence,
+                    datatype=primitive_datatype(item.value),
                     reason=('模型证据无法在原文精确定位，需人工核对' if getattr(item,'evidence_status','exact')=='unverified'
+                            else '属性值未被完整连续引文支持，需人工核对' if getattr(item,'value_evidence_status','exact') in {'incomplete_quote','unverified'}
                             else '属性值需核对原文与本体定义'),
-                    attribute_evidence=item.evidence,evidence_status=getattr(item,'evidence_status','exact')))
+                    attribute_evidence=item.evidence,evidence_status=getattr(item,'evidence_status','exact'),
+                    metadata={'value_evidence_status':getattr(item,'value_evidence_status','exact')}))
             skipped=attribute_diagnostics.get('skipped_invalid_schema',0)+attribute_diagnostics.get('skipped_invalid_entity',0)
             event(f"属性抽取汇总 · 模型返回 {attribute_diagnostics.get('returned',len(attributes))} · "
                   f"进入审核 {len(attributes)} · 证据待核 {attribute_diagnostics.get('unverified_evidence',0)} · "
-                  f"无效项跳过 {skipped}")
+                  f"无效项跳过 {skipped} · 预算截断 {attribute_diagnostics.get('skipped_attribute_limit',0)+attribute_diagnostics.get('skipped_total_limit',0)}")
         missing=self.extraction_diagnostics['skipped_missing_relation_endpoint']
         if missing:
             event(f'关系抽取校验 · {missing} 条因端点不在实体结果中已跳过')

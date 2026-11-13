@@ -34,7 +34,7 @@
   }
   if(typeof module!=='undefined'&&module.exports)module.exports={frozenSourceDocument,attributeDetailsHtml};
   if(typeof window==='undefined'||typeof document==='undefined')return;
-  const host=$('graph-detail');let serial=0;
+  const host=$('graph-detail');let serial=0,attributePanel=null;
   const sourceDialog=document.createElement('dialog');sourceDialog.id='source-evidence-dialog';
   sourceDialog.setAttribute('aria-labelledby','source-evidence-title');
   sourceDialog.innerHTML='<header><h2 id="source-evidence-title"></h2><button id="close-source-evidence" class="secondary">关闭 ×</button></header><p id="source-evidence-note"></p><pre id="source-evidence-text"></pre>';
@@ -61,6 +61,7 @@
   function localTime(value){if(!value)return '未记录';const d=new Date(value);return Number.isNaN(d.valueOf())?value:d.toLocaleString('zh-CN',{hour12:false});}
   const typeHint=type=>{const primary=labelOf(type),local=term(type);return primary===local?esc(primary):`${esc(primary)} <span class="subtle">${esc(local)}</span>`;};
   window.renderEvidenceInspector=async(row,options,{scope:fixedScope}={})=>{
+    attributePanel?.dispose();attributePanel=null;
     const ticket=++serial,p=current,stamp=JSON.stringify(scope()),ownerPage=window.WorkspaceContext?.page||'search',ownerTicket=window.WorkspaceContext?.ticket(p,ownerPage);
     const ownerVersion=JSON.stringify(window.wb?.versionContext||null);
     const {entity_type,predicate,...applied}=JSON.parse(JSON.stringify(fixedScope||scope()));
@@ -69,7 +70,7 @@
     host.dataset.recordId=row.id;
     const name=id=>options.find(n=>n.id===id)?.text||id;
     const aliases=Array.isArray(row.metadata?.aliases)?row.metadata.aliases:[];
-    const formalAttributes=row.kind==='entity'?attributeDetailsHtml(row.attributes,esc):'';
+    const formalAttributes=row.kind==='entity'?'<div id="inspector-attribute-panel" aria-live="polite"></div>':'';
     // 本体归属：这个实体属于哪个类、它的父类是谁（用户反馈"检索没看到有父类的信息"）。
     // 层级在**类**之间，实体本身没有父类，所以这里说的是"它所属类在本体里的上位类"，
     // 数据来自服务端 class_parents / class_ancestors（service.ontology_family，与图谱同一份）。
@@ -92,6 +93,14 @@
     })():'';
     host.innerHTML=`<section class="evidence-identity"><span class="evidence-kind">${esc({entity:'实体',relation:'关系',chunk:'原文片段',document:'文档'}[row.kind]||row.kind)} · ${typeHint(row.type)}</span><h3>${esc(row.text)}</h3>${row.kind==='relation'?`<div class="relation-path"><b>${esc(name(row.subject_id))}</b><span>↓ ${typeHint(row.type)}</span><b>${esc(name(row.object_id))}</b></div>`:''}${aliases.length?'<p class="evidence-aliases">别名：'+aliases.map(esc).join('、')+'</p>':''}<div class="evidence-action-groups"><div class="evidence-actions"><button data-action="edit" class="admin-only">编辑</button>${row.kind==='entity'?'<button data-action="add-relation" class="admin-only">新增关系</button><button data-action="add-attribute" class="admin-only">新增属性</button>':''}<button data-action="history" class="secondary">修订历史 · r${row.version}</button>${row.kind==='entity'||row.kind==='relation'?'<button data-action="ledger" class="secondary">在台账查看</button>':''}${row.kind==='entity'?'<button data-action="mindmap" class="secondary">展开脑图</button>':''}</div>${row.kind==='entity'||row.kind==='relation'?'<div class="evidence-danger"><span>危险操作</span></div>':''}</div></section>${formalAttributes?`<section class="evidence-attributes"><h4>实体属性</h4>${formalAttributes}</section>`:''}${entityFamily}<section class="evidence-sources"><h4>原文证据</h4><div id="inspector-source-list" aria-live="polite">正在查找来源…</div></section><section class="evidence-time"><h4>时间</h4><dl><dt>业务生效</dt><dd>${esc(row.valid_from?localTime(row.valid_from):'未知')}</dd><dt>业务失效（不含）</dt><dd>${esc(row.valid_until?localTime(row.valid_until):'未设结束时间')}</dd><dt>时间来源</dt><dd>${esc(temporal.provenance(row))}</dd>${row.metadata?.published_at?`<dt>原文发布日期</dt><dd>${esc(localTime(row.metadata.published_at))}</dd>`:''}<dt>系统记录</dt><dd>${esc(localTime(row.recorded_at))}</dd></dl></section><details class="evidence-technical"><summary>Metadata / 属性 / 技术标识</summary><pre>${esc(JSON.stringify({id:row.id,type:row.type,source_id:row.source_id,ontology_id:row.ontology_id,metadata:row.metadata,properties:row.properties},null,2))}</pre></details>`;
     host.querySelector('[data-action="edit"]').onclick=()=>{if(!readOnly&&accepts())editRecord(row);};
+    if(row.kind==='entity'&&window.EntityAttributePanel){
+      attributePanel=EntityAttributePanel.mount($('inspector-attribute-panel'),{projectId:p,entity:row,scope:applied,request:api,accepts,onEntityChange:async owner=>{
+        if(!accepts())return;
+        for(const button of host.querySelectorAll('[data-action="edit"],[data-action="add-relation"],[data-action="add-attribute"],.evidence-danger button')){button.disabled=true;button.title='实体修订已变化，正在重新读取完整记录。';}
+        try{await window.inspectKnowledgeRecord({...owner,kind:'entity'},{scope:applied,qualify:'entity'});}
+        catch(error){if(accepts())status('实体完整记录刷新失败，请重试属性刷新：'+error.message,true);throw error;}
+      }});
+    }
     const version=document.createElement('p');version.id='inspector-version';version.className='subtle';
     version.textContent=RecordVersionContext.revision(row)+' · 本体归属读取中…';
     host.querySelector('.evidence-identity h3').after(version);

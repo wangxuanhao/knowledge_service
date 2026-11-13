@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from .projection_inputs import ProjectionInputs
+from ..domain.search_projection import ProjectionInput
+from ..domain.search_filter_catalog import parse_filter_json
 
 
 class CapturedProjectionInputs:
@@ -16,14 +18,22 @@ class CapturedProjectionInputs:
             # Captured version IDs and their bodies are immutable. Close each
             # read transaction before the caller encodes a potentially slow batch.
             with self.repository.independent_read_view() as reader:
-                ids = [row['version_id'] for row in reader._db.execute('''SELECT version_id
+                captured = reader._db.execute('''SELECT version_id,projection_input
                     FROM projection_rebuild_snapshots WHERE project_id=? AND target=?
                     AND build_id=? AND ordinal>=? ORDER BY ordinal LIMIT ?''',
-                    (self.project_id, self.target, self.build_id, ordinal, self.batch_size)).fetchall()]
-                if not ids:
+                    (self.project_id, self.target, self.build_id, ordinal, self.batch_size)).fetchall()
+                if not captured:
                     return
-                values = ProjectionInputs(reader).snapshot_versions(self.project_id, ids)
-                if len(values) != len(ids):
-                    raise RuntimeError('captured projection version disappeared')
-            ordinal += len(ids)
+                values=[]
+                for row in captured:
+                    if row['projection_input']:
+                        body=parse_filter_json(row['projection_input'])
+                        # Context decision versions are native integers, not business decimals.
+                        for context in body.get('source_contexts') or []:context['version']=int(context['version'])
+                        values.append(ProjectionInput(**body))
+                    else:
+                        legacy=ProjectionInputs(reader).snapshot_versions(self.project_id,[row['version_id']])
+                        if not legacy:raise RuntimeError('captured projection version disappeared')
+                        values.extend(legacy)
+            ordinal += len(captured)
             yield from values

@@ -160,12 +160,16 @@ class ProvenanceService:
             'embedding_model': _text(context.get('embedding_model')),
             'semantic': context.get('semantic') is True,
             'channels': {key: value for key, value in context.get('channels', {}).items()
-                         if key in {'entity', 'chunk', 'graph_evidence'} and type(value) is int},
+                         if key in {'entity', 'attribute', 'chunk', 'graph_evidence'} and type(value) is int},
+            'attribute_conflicts':_public_json(context.get('attribute_conflicts',[])[:50]),
         })
         used = {'activity_id': answer_id, 'source_ref': f'answer:{answer_id}',
                 'relation': 'used', 'target_ref': f'retrieval-run:{run_id}', 'ordinal': 0, 'payload': {}}
         reader = _CaptureReadCache(repo, project_id)
         reader.load_versions([row['version_id'] for row in evidence if row.get('version_id')])
+        reader.load_versions([version for row in evidence for version in
+            ((row.get('matched_source_context') or {}).get('record_version_id'),
+             (row.get('matched_source_context') or {}).get('support_fact_version_id')) if version])
         source_versions = set()
         for row in reader.versions.values():
             metadata = row.get('metadata')
@@ -189,6 +193,18 @@ class ProvenanceService:
                      'channel': _text(item.get('channel') or item.get('kind')), 'selected': True}
             audit.update({key: _public_json(item[key]) for key in _TEMPORAL_FIELDS
                           if key in item and key != 'source_eligibility'})
+            if item.get('kind')=='attribute':
+                stored=reader.versions.get(item['version_id']) or {}
+                actual=stored.get('value');start=item.get('window_start',0);end=item.get('window_end')
+                if isinstance(actual,str):
+                    if type(start) is not int or start<0 or start>len(actual):raise ValueError('属性证据窗口起点无效')
+                    end=min(len(actual),start+6000) if type(end) is not int else end
+                    if not start<=end<=min(len(actual),start+6000):raise ValueError('属性证据窗口超出预算')
+                    matched=actual[start:end]
+                else:matched=actual
+                audit['attribute_fact']={'owner_id':stored.get('subject_id'),'property_id':stored.get('type'),
+                    'datatype':stored.get('datatype'),'value':_public_json(matched),'window_start':start,
+                    'window_end':end,'truncated':bool(item.get('value_truncated'))}
             if 'source_eligibility' in item:
                 audit['source_eligibility'] = _source_eligibility(item['source_eligibility'])
             record_ref = graph['record_ref']
@@ -392,6 +408,7 @@ class ProvenanceService:
                         'answer_id': answer_id, 'citation': citation},
             'answer': {'status': activity['status'], 'citation_status': citation_status},
             'retrieval': {'run_ref': f'retrieval-run:{run_id}', 'query': request['query'],
+                          'attribute_conflicts':request.get('attribute_conflicts',[]),
                           'requested_mode': request['requested_mode'], 'active_modes': request['active_modes'],
                           **{key: offered['payload'][key] for key in _TEMPORAL_FIELDS if key in offered['payload']},
                           **{key: offered['payload'][key] for key in ('rank', 'score', 'selected')}},
@@ -490,14 +507,36 @@ class _SourceCapture:
             if self.source_allowed((record.get('metadata') or {}).get('source_version_id')):
                 chunk_ref = self.chunk(record)
                 self.edge(ref, 'supported-by', chunk_ref)
-        elif record['kind'] in {'entity', 'relation'}:
-            mappings = self.repo.list_record_version_assertions(self.project, record_version_id=version_id)
+        elif record['kind'] in {'entity', 'relation', 'attribute'}:
+            source_ref=ref
+            from ..domain.entity_identity import source_qualified
+            proof=evidence.get('matched_source_context') if source_qualified(record) else None
+            if proof and proof.get('record_version_id'):
+                mapped=self.repo.get_record_version(self.project,proof['record_version_id'])
+                target=proof.get('support_fact_id') or record['id']
+                events=self.repo.list_assertion_events(self.project,proof['assertion_id'])
+                event=next((item for item in events if item['id']==proof['id']),None)
+                if (mapped['id']!=target or event is None or event.get('canonical_record_id')!=target
+                        or event['to_status']!='accepted' or event.get('decision_version')!=proof['version']):
+                    raise ValueError('实体证据来源上下文与精确接受决定不一致')
+                mappings=[item for item in self.repo.list_record_version_assertions(self.project,record_version_id=proof['record_version_id'])
+                    if item['assertion_id']==proof['assertion_id'] and item['assertion_event_id']==proof['id']]
+                if proof.get('support_fact_id'):
+                    fact=self.repo.get_record_version(self.project,proof['support_fact_version_id'])
+                    if fact['id']!=target or record['id'] not in (fact.get('subject_id'),fact.get('object_id')):
+                        raise ValueError('实体参与事实的证据端点不一致')
+                    source_ref=self.add_node(_node('record_version','record-version:'+fact['version_id'],_text(fact.get('text')) or fact['id'],
+                        'captured',fact['recorded_at'],record_id=fact['id'],version=fact['version'],kind=fact['kind'],
+                        text_preview=_text(fact.get('text')),valid_from=fact.get('valid_from'),valid_until=fact.get('valid_until'),
+                        recorded_at=fact['recorded_at'],terminal_reason=None))
+                    self.edge(ref,'supported-by',source_ref,{'support_kind':'incident_fact','context_id':proof['id'],'context_version':proof['version']})
+            else:mappings = self.repo.list_record_version_assertions(self.project, record_version_id=version_id)
             if not mappings:
                 self.warn('record_version_support_ambiguous', ref, '历史记录版本缺少可唯一确定的断言支撑映射。')
             else:
                 manual = True
                 for mapping in mappings:
-                    if not self.assertion(ref, mapping):
+                    if not self.assertion(source_ref, mapping):
                         manual = False
                 if manual:
                     self.nodes[ref]['details']['terminal_reason'] = 'manual_record'

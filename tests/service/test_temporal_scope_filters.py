@@ -118,7 +118,8 @@ def test_strict_reference_only_freezes_known_time_source_occurrences(dates):
     repo.list_record_version_assertions = lambda *_a, **_kw: [
         {'assertion_id': name, 'assertion_event_id': 'accepted'} for name in assertions]
     repo.get_assertion = lambda _p, name: assertions[name]
-    repo.list_assertion_events = lambda *_: [{'id': 'accepted', 'created_at': '2020-01-01'}]
+    repo.list_assertion_events = lambda *_: [{'id': 'accepted', 'created_at': '2020-01-01',
+        'decision_version': 1, 'to_status': 'accepted', 'canonical_record_id': 'fact'}]
     item = classify(service, 'p', {**fact, **dates}, {
         'valid_at': NOW, 'known_at': NOW, 'include_unknown': False})
     assert item is not None

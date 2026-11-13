@@ -57,15 +57,21 @@ class ProjectionInputsTests(unittest.TestCase):
         self.assertEqual(repo.views, 1)
         self.assertEqual(len(repo.statements), 1)
 
-    def test_collector_has_no_endpoint_or_assertion_joins(self):
+    def test_collector_bounds_support_joins_and_does_not_hydrate_relation_endpoints(self):
         repo = SnapshotRepository([[raw_row(kind='relation', ontology_known=True)]])
         value, = ProjectionInputs(repo).collect('project', ['row'])
         self.assertTrue(value.ontology_known)
         self.assertFalse(hasattr(value, 'subject'))
         statement = repo.statements[0][0]
-        self.assertNotIn('JOIN', statement.upper())
+        self.assertNotIn('subject__', statement)
+        self.assertNotIn('object__', statement)
+        self.assertIn("WHERE r.read_kind='attribute' AND e.project_id=r.project_id", statement)
+        self.assertIn('e.id=r.read_subject_id', statement)
+        self.assertIn('s.project_id=r.project_id AND s.record_id=r.id', statement)
+        self.assertIn('LIMIT 10001', statement)
         self.assertNotIn('assertion', statement)
         self.assertIn('r.read_visible', statement)
+        self.assertEqual(len(repo.statements), 1)
 
     def test_selection_order_is_explicit_and_never_silently_truncated(self):
         repo = SnapshotRepository([[raw_row('a'), raw_row('b')]])

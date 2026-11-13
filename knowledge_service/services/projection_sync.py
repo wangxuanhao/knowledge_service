@@ -6,6 +6,7 @@ Task 4/6 adapters must persist the highest sequence/fence and reject late writes
 from __future__ import annotations
 
 from contextlib import contextmanager
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from dataclasses import dataclass
 import hashlib
@@ -45,8 +46,20 @@ class ProjectionSync:
     def __init__(self, store, adapters, *, schema_version):
         self.store = store
         self.adapters = dict(adapters)
-        self.schema_version = schema_version
+        self._schema_versions = dict(schema_version) if isinstance(schema_version, Mapping) else None
+        # Keep the legacy Milvus-only audit interface while each delivery target
+        # uses its own capability version. Integer callers retain one version.
+        self.schema_version = (self._schema_versions.get('milvus')
+                               if self._schema_versions is not None else schema_version)
         self.owner = str(uuid4())
+
+    def schema_for(self, target):
+        if self._schema_versions is None:
+            return self.schema_version
+        try:
+            return self._schema_versions[target]
+        except KeyError:
+            raise ValueError(f'projection schema is not configured: {target}') from None
 
     def _adapter(self, target):
         try:
@@ -158,20 +171,21 @@ class ProjectionSync:
     def drain_once(self, project_id, target, *, destination=None, after_seq=None,
                    limit=100):
         adapter = self._adapter(target)
+        schema_version = self.schema_for(target)
         claimed = self.store.claim_contiguous_batch(
-            project_id, target, self.schema_version, limit=limit,
+            project_id, target, schema_version, limit=limit,
             after_seq=after_seq, owner=self.owner)
         if claimed is None:
-            state = (self.store.delivery_state(project_id, target, self.schema_version)
+            state = (self.store.delivery_state(project_id, target, schema_version)
                      if hasattr(self.store, 'delivery_state') else 'empty')
             return DrainResult(state, 0, state == 'leased')
         try:
             self._apply_claimed(adapter, project_id, claimed, destination)
-            self.store.ack_contiguous(claimed, self.schema_version)
+            self.store.ack_contiguous(claimed, schema_version)
             return DrainResult('applied', len(claimed.events), False)
         except Exception as exc:
             try:
-                self.store.mark_failed(claimed, exc, self.schema_version)
+                self.store.mark_failed(claimed, exc, schema_version)
             except ProjectionLeaseLost:
                 pass
             if getattr(exc, 'requires_rebuild', False):
@@ -181,7 +195,7 @@ class ProjectionSync:
 
     def _fail_rebuild(self, claimed, exc):
         try:
-            self.store.mark_failed(claimed, exc, self.schema_version)
+            self.store.mark_failed(claimed, exc, self.schema_for(claimed.target))
         except ProjectionLeaseLost:
             pass
 
@@ -215,20 +229,21 @@ class ProjectionSync:
         if target == 'milvus':
             return self._rebuild_milvus(project_id)
         adapter = self._adapter(target)
+        schema_version = self.schema_for(target)
         claimed = None
         try:
             rebuild = self.store.begin_rebuild(
-                project_id, target, self.schema_version, self.owner,
+                project_id, target, schema_version, self.owner,
                 lease_guard=self._rebuild_lease_guard)
             claimed = rebuild['claim']
             state = dict(rebuild['state'])
             destination = state.get('destination')
             if destination is None:
                 destination = self._rebuild_external(claimed, adapter.begin_rebuild,
-                    project_id, self.schema_version, state, fence=claimed.token)
+                    project_id, schema_version, state, fence=claimed.token)
                 state.update(destination=destination, phase='snapshot_loading')
                 self.store.record_rebuild_progress(
-                    claimed, self.schema_version, state)
+                    claimed, schema_version, state)
             phase = state.get('phase')
             if (phase in {'snapshot_loaded', 'catchup', 'validating'}
                     and ('expected_versions' not in state
@@ -238,7 +253,7 @@ class ProjectionSync:
                 phase = state['phase'] = 'snapshot_loading'
                 state['applied_seq'] = rebuild['snapshot_seq']
                 self.store.record_rebuild_progress(
-                    claimed, self.schema_version, state)
+                    claimed, schema_version, state)
             if phase in {'snapshot', 'snapshot_loading', 'capturing'}:
                 if phase == 'snapshot_loading':
                     self._rebuild_external(claimed, adapter.reset_rebuild,
@@ -246,7 +261,7 @@ class ProjectionSync:
                         fence=claimed.token)
                 state['phase'] = 'snapshot_loading'
                 self.store.record_rebuild_progress(
-                    claimed, self.schema_version, state)
+                    claimed, schema_version, state)
                 self._rebuild_external(claimed, adapter.load_snapshot,
                     project_id, destination, rebuild['records'],
                     rebuild['snapshot_seq'], fence=claimed.token,
@@ -259,15 +274,15 @@ class ProjectionSync:
                              expected_projection=projection,
                              expected_digest=self._expected_digest(projection))
                 self.store.record_rebuild_progress(
-                    claimed, self.schema_version, state)
+                    claimed, schema_version, state)
                 state['phase'] = 'catchup'
                 self.store.record_rebuild_progress(
-                    claimed, self.schema_version, state)
+                    claimed, schema_version, state)
             applied = int(state.get('applied_seq', rebuild['snapshot_seq']))
 
             while applied < self.store.project_watermark(project_id):
                 next_claim = self.store.claim_contiguous_batch(
-                    project_id, target, self.schema_version, after_seq=applied,
+                    project_id, target, schema_version, after_seq=applied,
                     owner=self.owner, build=claimed)
                 if next_claim is None:
                     raise RuntimeError('projection rebuild cannot reach watermark')
@@ -279,18 +294,18 @@ class ProjectionSync:
                 projection = dict(state.get('expected_projection') or {})
                 self._advance_projection(projection, claimed.events)
                 applied = self.store.ack_contiguous(
-                    claimed, self.schema_version)
+                    claimed, schema_version)
                 state.update(phase='catchup', applied_seq=applied,
                              expected_versions=expected,
                              expected_projection=projection,
                              expected_digest=self._expected_digest(projection))
                 self.store.record_rebuild_progress(
-                    claimed, self.schema_version, state)
+                    claimed, schema_version, state)
 
             if state.get('phase') != 'switching':
                 state['phase'] = 'validating'
                 self.store.record_rebuild_progress(
-                    claimed, self.schema_version, state)
+                    claimed, schema_version, state)
                 # A resumed build owns a new claim token even when its snapshot
                 # and outbox prefix were already loaded by the previous owner.
                 self._rebuild_external(claimed, adapter.seal_rebuild,
@@ -301,13 +316,13 @@ class ProjectionSync:
                 if not _validation_ok(validation):
                     raise RuntimeError('projection rebuild validation failed')
                 self.store.record_rebuild_progress(
-                    claimed, self.schema_version, state)
+                    claimed, schema_version, state)
 
             with self.store.alias_switch_guard(
-                    project_id, claimed, self.schema_version) as locked_watermark:
+                    project_id, claimed, schema_version) as locked_watermark:
                 while applied < locked_watermark:
                     next_claim = self.store.claim_contiguous_batch(
-                        project_id, target, self.schema_version,
+                        project_id, target, schema_version,
                         after_seq=applied, owner=self.owner, build=claimed)
                     if next_claim is None:
                         raise RuntimeError('projection changed before alias switch')
@@ -318,7 +333,7 @@ class ProjectionSync:
                     projection = dict(state.get('expected_projection') or {})
                     self._advance_projection(projection, claimed.events)
                     applied = self.store.ack_contiguous(
-                        claimed, self.schema_version)
+                        claimed, schema_version)
                     state.update(expected_versions=expected,
                                  expected_projection=projection,
                                  expected_digest=self._expected_digest(projection))
@@ -338,7 +353,7 @@ class ProjectionSync:
                     state.update(phase='switching', applied_seq=applied,
                                  previous_destination=previous)
                     self.store.record_rebuild_progress(
-                        claimed, self.schema_version, state)
+                        claimed, schema_version, state)
                 self.store.renew_claim(claimed)
                 adapter.switch_alias(
                     project_id, destination, build_id=state['build_id'],
@@ -347,7 +362,7 @@ class ProjectionSync:
                     datetime.now(timezone.utc))
                 state['phase'] = 'ready'
                 self.store.finish_rebuild(
-                    claimed, self.schema_version, applied, rollback_until,
+                    claimed, schema_version, applied, rollback_until,
                     state, previous)
             return {'ready': True, 'applied_seq': applied,
                     'rollback_until': rollback_until,
@@ -360,7 +375,7 @@ class ProjectionSync:
 
     def _freeze_build_event(self, project_id, claimed, event, state, catalog):
         """Complete only the brief capture-window events before first delivery."""
-        from ..domain.search_projection import build_projection
+        from ..domain.search_projection import build_projections
         from ..repository.projection_inputs import ProjectionInputs
         payload = event.get('payload') or {}
         envelope = payload.get('_milvus_projection')
@@ -373,8 +388,8 @@ class ProjectionSync:
             envelope['record_id'] = payload['record_id']
         else:
             inputs = ProjectionInputs(self.store.repository).snapshot_versions(project_id, [event['version_id']])
-            envelope['row'] = build_projection(inputs[0], catalog,
-                index_version=state['index_version']) if inputs else None
+            rows=list(build_projections(inputs[0],catalog,index_version=state['index_version'])) if inputs else []
+            envelope.update(rows=rows,row=rows[0] if rows else None,record_id=payload.get('id'))
         self.store.freeze_milvus_event(claimed, event, envelope)
         return envelope
 
@@ -390,7 +405,7 @@ class ProjectionSync:
                 envelope = self._freeze_build_event(project_id, claimed, event, state, catalog)
             if envelope is None:
                 raise ProjectionRebuildRequired(project_id, 'milvus',
-                    current_schema=claimed.schema_version, required_schema=self.schema_version)
+                    current_schema=claimed.schema_version, required_schema=self.schema_for('milvus'))
             kwargs = {'fence': claimed.token, 'index_version': claimed.index_version, 'catalog': catalog}
             # Cold encoding can outlive the claim even during ordinary delivery.
             # The same guard fences both incremental and explicit build writes.
@@ -402,7 +417,9 @@ class ProjectionSync:
     @staticmethod
     def _milvus_manifest(rows):
         from ..domain.search_projection import projection_fingerprint
-        return {row['record_id']: {'version_id': row['version_id'],
+        rows=list(rows)
+        multiple=len({row['record_id'] for row in rows})!=len(rows)
+        return {row['vector_id'] if multiple else row['record_id']: {'version_id': row['version_id'],
                                   'fingerprint': projection_fingerprint(row)} for row in rows}
 
     @classmethod
@@ -416,10 +433,11 @@ class ProjectionSync:
 
     def _rebuild_milvus(self, project_id):
         adapter = self._adapter('milvus')
+        schema_version = self.schema_for('milvus')
         claimed = None
         preflight_finished = False
         try:
-            rebuild = self.store.begin_rebuild(project_id, 'milvus', self.schema_version,
+            rebuild = self.store.begin_rebuild(project_id, 'milvus', schema_version,
                          self.owner, lease_guard=self._rebuild_lease_guard,
                          **adapter.index_configuration())
             claimed, state = rebuild['claim'], dict(rebuild['state'])
@@ -428,11 +446,11 @@ class ProjectionSync:
                                                   project_id, state, rebuild['records'])
             preflight_finished = True
             claimed.index_version, claimed.catalog = state['index_version'], state['catalog']
-            self.store.record_rebuild_progress(claimed, self.schema_version, state)
+            self.store.record_rebuild_progress(claimed, schema_version, state)
             phase = state.get('phase')
             if phase in {'snapshot', 'capturing', 'snapshot_loading'}:
                 state['phase'] = 'snapshot_loading'
-                self.store.record_rebuild_progress(claimed, self.schema_version, state)
+                self.store.record_rebuild_progress(claimed, schema_version, state)
                 # Clean explicit retries reuse this version; no collection drop.
                 self._rebuild_external(claimed, adapter._store().delete_records, None,
                     project_id=project_id, index_version=state['index_version'], catalog=catalog)
@@ -443,37 +461,37 @@ class ProjectionSync:
                 state.update(phase='catchup', applied_seq=rebuild['snapshot_seq'],
                              indexed=indexed)
                 state.pop('expected_projection', None)
-                self.store.record_rebuild_progress(claimed, self.schema_version, state)
+                self.store.record_rebuild_progress(claimed, schema_version, state)
             applied = int(state.get('applied_seq', rebuild['snapshot_seq']))
 
             def catch_up(watermark):
                 nonlocal claimed, applied, state
                 while applied < watermark:
                     next_claim = self.store.claim_contiguous_batch(project_id, 'milvus',
-                        self.schema_version, after_seq=applied, owner=self.owner, build=claimed)
+                        schema_version, after_seq=applied, owner=self.owner, build=claimed)
                     if next_claim is None:
                         raise RuntimeError('project index cannot reach watermark')
                     claimed = next_claim
                     self._apply_milvus_claimed(adapter, project_id, claimed, renew_in_background=True)
-                    applied = self.store.ack_contiguous(claimed, self.schema_version)
+                    applied = self.store.ack_contiguous(claimed, schema_version)
                     state.update(phase='catchup', applied_seq=applied)
-                    self.store.record_rebuild_progress(claimed, self.schema_version, state)
+                    self.store.record_rebuild_progress(claimed, schema_version, state)
 
             activated = False
             for _attempt in range(3):
                 catch_up(self.store.project_watermark(project_id))
                 state['phase'] = 'validating'
-                self.store.record_rebuild_progress(claimed, self.schema_version, state)
+                self.store.record_rebuild_progress(claimed, schema_version, state)
                 validation = self._rebuild_external(claimed, adapter.validate, project_id, state, catalog,
                     expected=self.store.receipts.manifest(project_id, state['index_version']))
                 if not _validation_ok(validation):
                     raise RuntimeError('project index validation failed')
                 # The short PG guard contains only a watermark comparison and
                 # activation CAS. Encoding and Milvus RPCs always happen outside.
-                with self.store.activation_guard(project_id, claimed, self.schema_version) as watermark:
+                with self.store.activation_guard(project_id, claimed, schema_version) as watermark:
                     if watermark == applied:
                         state['validation'] = validation
-                        self.store.activate_index(claimed, self.schema_version, applied, state)
+                        self.store.activate_index(claimed, schema_version, applied, state)
                         activated = True
                 if activated:
                     break
@@ -486,7 +504,7 @@ class ProjectionSync:
             if claimed is not None:
                 if not preflight_finished and isinstance(exc, ValueError):
                     try:
-                        self.store.discard_preflight_capture(claimed, self.schema_version)
+                        self.store.discard_preflight_capture(claimed, schema_version)
                     except ProjectionLeaseLost:
                         pass
                 self._fail_rebuild(claimed, exc)

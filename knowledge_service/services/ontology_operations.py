@@ -13,7 +13,7 @@ from collections.abc import Iterable
 from rdflib import BNode, Graph, Literal, RDF, RDFS, URIRef
 from rdflib.collection import Collection
 from rdflib.compare import isomorphic, to_canonical_graph
-from rdflib.namespace import Namespace, OWL, SH
+from rdflib.namespace import Namespace, OWL, SH, XSD
 
 from .ontology import Ontology, term_kind
 from .ontology_iri import valid_application_iri
@@ -26,6 +26,16 @@ from .ontology_shape import (
 
 
 DCTERMS = Namespace('http://purl.org/dc/terms/')
+IDENTITY_PREDICATES = frozenset(URIRef('https://knowledge.local/schema/' + name)
+    for name in ('identityPolicy', 'identityScope', 'identityKey'))
+
+
+def is_identity_annotation(operation: dict) -> bool:
+    """Identity configuration changes matching semantics on either operation side."""
+    return (operation.get('action') in {'add_annotation', 'remove_annotation'}
+            and any((operation.get(side) or {}).get('predicate') in {
+                str(predicate) for predicate in IDENTITY_PREDICATES}
+                for side in ('before', 'after')))
 
 _DECLARATIONS = {
     'class': OWL.Class,
@@ -130,13 +140,14 @@ def operation_fingerprint(operation: dict) -> str:
 
 
 def operation_risk(action: str, *, source: str = 'manual', impact=None,
-                   warnings=None, confidence=None) -> str:
+                   warnings=None, confidence=None, before=None, after=None) -> str:
     """Apply the fixed server-side risk floor; confidence can never lower it."""
     action = _ACTION_ALIASES.get(action, action)
     impact = impact or {}
     warnings = warnings or []
     count = lambda *keys: max(int(impact.get(key, 0) or 0) for key in keys)
-    if (action in _HIGH_ACTIONS
+    if (is_identity_annotation({'action': action, 'before': before, 'after': after})
+            or action in _HIGH_ACTIONS
             or count('formal_records', 'formal_record_count', 'record_count') > 0
             or count('descendants', 'descendant_count') > 50
             or count('constraints', 'constraint_count') > 10
@@ -178,7 +189,8 @@ def is_batch_eligible(operation: dict, *,
         operation.get('action', ''),
         source=operation.get('source', validation.get('source', 'manual')),
         impact=operation.get('impact'), warnings=warnings,
-        confidence=operation.get('confidence', validation.get('confidence')))
+        confidence=operation.get('confidence', validation.get('confidence')),
+        before=operation.get('before'), after=operation.get('after'))
     return operation.get('risk') == 'low' and floor == 'low'
 
 
@@ -217,7 +229,7 @@ def build_operation(action: str, target_iri: str, *, before=None, after=None,
         },
         'risk': operation_risk(
             action, source=source, impact=impact, warnings=warnings,
-            confidence=confidence),
+            confidence=confidence, before=before, after=after),
         'reason': reason,
     }
     operation['fingerprint'] = operation_fingerprint(operation)
@@ -474,6 +486,7 @@ def _apply_scoped_shacl_patch(graph: Graph, target: URIRef, before: dict,
 
 def _validate_definition_graph(graph: Graph, *, ontology: Ontology | None = None) -> None:
     class_nodes = _graph_classes(graph)
+    _validate_identity_annotations(graph, class_nodes)
     undeclared_children = set(graph.subjects(RDFS.subClassOf, None)) - class_nodes
     if undeclared_children:
         child = min(undeclared_children, key=str)
@@ -543,6 +556,24 @@ def _validate_definition_graph(graph: Graph, *, ontology: Ontology | None = None
         raise ValueError(
             '活动术语不能依赖已停用术语（active dependency）：'
             + _canonical_json(report['errors']))
+
+
+def _validate_identity_annotations(graph: Graph, class_nodes: set) -> None:
+    """Validate the completed graph; an undeclared legacy policy stays scoped."""
+    for predicate in IDENTITY_PREDICATES:
+        for owner in set(graph.subjects(predicate, None)):
+            if owner not in class_nodes or not isinstance(owner, URIRef):
+                raise ValueError(f'实体身份字段只能用于已声明的 class：{owner}')
+            values = list(graph.objects(owner, predicate))
+            name = str(predicate).rsplit('/', 1)[-1]
+            if name != 'identityKey' and len(values) > 1:
+                raise ValueError(f'实体身份字段 {name} 必须唯一：{owner}')
+            for value in values:
+                if (not isinstance(value, Literal) or not str(value).strip()
+                        or (value.datatype not in {None, XSD.string, RDF.langString})):
+                    raise ValueError(f'实体身份字段 {name} 必须是非空文本：{owner}')
+                if name == 'identityPolicy' and str(value) not in {'reference', 'scoped'}:
+                    raise ValueError('实体身份策略必须唯一且为 reference/scoped')
 
 
 def apply_operations(base_turtle: str, operations: Iterable[dict]) -> str:

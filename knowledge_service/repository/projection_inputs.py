@@ -6,9 +6,11 @@ one independent repeatable read view across all keyset batches. Payload numbers
 are parsed from PostgreSQL text as Decimal before any native type conversion.
 """
 from __future__ import annotations
+from dataclasses import replace
 
 from ..domain.search_filter_catalog import parse_filter_json
 from ..domain.search_projection import ProjectionInput
+from .scoped_reads import _support_matches_record
 
 
 _ENVELOPE = ('project_id', 'id', 'version', 'version_id', 'recorded_at', 'superseded_at')
@@ -35,10 +37,26 @@ def _selection(values, limit):
 
 
 def _statement(where):
-    return f"""SELECT r.*, EXISTS (SELECT 1 FROM ontologies o
-             WHERE o.project_id=r.project_id
-               AND o.id=r.payload::jsonb->>'ontology_id') AS ontology_known
-        FROM record_versions r WHERE r.project_id=? AND {where}
+    return f"""SELECT r.*, (o.id IS NOT NULL) AS ontology_known,
+          owner.label AS owner_label, property.label AS property_label,
+          COALESCE(support.contexts,'[]'::json) AS source_contexts
+        FROM record_versions r
+        LEFT JOIN ontologies o ON o.project_id=r.project_id AND o.id=r.payload::jsonb->>'ontology_id'
+        LEFT JOIN LATERAL (SELECT e.payload::jsonb->>'text' AS label FROM record_versions e
+            WHERE r.read_kind='attribute' AND e.project_id=r.project_id
+              AND e.id=r.read_subject_id AND e.superseded_at IS NULL AND e.read_kind='entity' LIMIT 1) owner ON TRUE
+        LEFT JOIN LATERAL (SELECT COALESCE(NULLIF(item->>'label_zh',''),NULLIF(item->>'label',''),item->>'name') AS label
+            FROM jsonb_array_elements(COALESCE(o.summary::jsonb->'attributes','[]'::jsonb)) item
+            WHERE r.read_kind='attribute' AND (item->>'id'=r.read_type OR item->>'name'=r.read_type) LIMIT 1) property ON TRUE
+        LEFT JOIN LATERAL (SELECT json_agg(c.context ORDER BY c.id) AS contexts FROM (
+            SELECT s.id,json_build_object('id',s.id,'version',s.decision_version,
+                'valid_from',s.valid_from,'valid_until',s.valid_until,
+                'metadata',json_build_object('applicability',s.applicability::jsonb)) AS context
+            FROM source_context_support s WHERE s.project_id=r.project_id AND s.record_id=r.id
+              AND r.read_kind IN ('entity','relation','attribute')
+              AND {_support_matches_record('r','s')}
+              AND s.known_until IS NULL AND s.invalid_reason IS NULL ORDER BY s.id LIMIT 10001) c) support ON TRUE
+        WHERE r.project_id=? AND {where}
         ORDER BY r.id,r.version_id LIMIT ?"""
 
 
@@ -55,7 +73,13 @@ def _record(row, prefix=''):
 
 
 def _input(row):
-    return ProjectionInput(record=_record(row), ontology_known=row['ontology_known'])
+    contexts=row.get('source_contexts') or []
+    if isinstance(contexts,str):
+        import json
+        contexts=json.loads(contexts)
+    if len(contexts)>10000:raise ValueError('单条记录的来源上下文超过投影预算，请检查来源并分批维护')
+    return ProjectionInput(record=_record(row), ontology_known=row['ontology_known'],
+        owner_label=row.get('owner_label') or '',property_label=row.get('property_label') or '',source_contexts=tuple(contexts))
 
 
 class ProjectionInputs:
@@ -66,7 +90,14 @@ class ProjectionInputs:
     def _read(reader, project_id, where, params, limit):
         with reader._lock:
             rows = reader._db.execute(_statement(where), [project_id, *params, limit]).fetchall()
-        return tuple(_input(row) for row in rows)
+        values=tuple(_input(row) for row in rows)
+        from .projection_contexts import ProjectionContexts
+        contexts={}
+        for start in range(0,len(values),1000):
+            batch=values[start:start+1000]
+            contexts.update(ProjectionContexts(reader).collect(project_id,[value.record for value in batch],
+                direct={value.record['id']:list(value.source_contexts) for value in batch}))
+        return tuple(replace(value,source_contexts=tuple(contexts.get(value.record['id'],()))) for value in values)
 
     def collect(self, project_id, record_ids=None, *, version_ids=None, limit=256):
         """Collect exact versions or current IDs, in requested first-ID order.
@@ -82,7 +113,7 @@ class ProjectionInputs:
         selected = versions if versions is not None else records
         if selected == []:
             return ()
-        where, params = "r.superseded_at IS NULL AND r.read_visible AND r.read_kind IN ('entity','relation','chunk')", []
+        where, params = "r.superseded_at IS NULL AND r.read_visible AND NOT r.read_quarantined AND r.read_kind IN ('entity','relation','attribute','chunk')", []
         if versions is not None:
             where += ' AND r.version_id=ANY(?::text[])'
             params = [versions]
@@ -108,9 +139,10 @@ class ProjectionInputs:
             values = self._read(reader, project_id, 'r.version_id=ANY(?::text[])', [selected], len(selected))
         # Receipt versions were current when captured. Catchup events remove
         # versions superseded after that snapshot before validation/activation.
-        return tuple(ProjectionInput({**value.record, 'superseded_at': None}, value.ontology_known) for value in values)
+        from dataclasses import replace
+        return tuple(replace(value,record={**value.record,'superseded_at':None}) for value in values)
 
-    def batches(self, project_id, *, batch_size=64):
+    def batches(self, project_id, *, batch_size=64,after=None):
         """Yield bounded current-row tuples in one consistent project snapshot.
 
         Business transactions reuse their writer connection for read-own-writes
@@ -123,10 +155,10 @@ class ProjectionInputs:
                 not getattr(self.repository, '_is_read_view', False)):
             raise RuntimeError('projection batches cannot run inside a business transaction; '
                                'use collect or an independent read view')
-        after = None
+        if after is not None and (not isinstance(after,str) or not after):raise ValueError('无效的投影游标')
         with self.repository.independent_read_view() as reader:
             while True:
-                where, params = "r.superseded_at IS NULL AND r.read_visible AND r.read_kind IN ('entity','relation','chunk')", []
+                where, params = "r.superseded_at IS NULL AND r.read_visible AND NOT r.read_quarantined AND r.read_kind IN ('entity','relation','attribute','chunk')", []
                 if after is not None:
                     where += ' AND r.id>?'
                     params.append(after)

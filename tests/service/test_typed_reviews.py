@@ -51,8 +51,13 @@ def test_entity_relation_attribute_dependency_and_version_lifecycle(tmp_path,mon
         assert next(r for r in candidates() if r['kind']=='relation')['blocked']
         assert decide('relation','knows').status_code==422
         assert decide('attribute','count').status_code==422
+        entity_candidate_id=next(r for r in candidates() if r['kind']=='entity')['id']
         response=decide('entity','Person');assert response.status_code==200,response.text
         entity_id=response.json()['record_id']
+        entity_assertion=repo.get_assertion(p,entity_candidate_id)
+        assert entity_assertion['payload']['proposed_type']=='NewPerson'
+        assert not entity_assertion['payload'].get('type')
+        assert repo.history(p,entity_id)[-1]['type']=='https://test/Person'
         assert not any(r['blocked'] for r in candidates())
         assert decide('attribute','companyCount').status_code==422
         assert decide('attribute','name').status_code==422
@@ -71,6 +76,7 @@ def test_entity_relation_attribute_dependency_and_version_lifecycle(tmp_path,mon
         assertion=repo.get_assertion(p,next(r for r in candidates() if r['kind']=='attribute')['id'])
         assert assertion['quote']=='2'
         assert assertion['canonical_record_id']==attribute['id']
+        assert repo.get_assertion(p,entity_candidate_id)['payload']==entity_assertion['payload']
         assert all(r['status']=='approved' for r in candidates())
 
 
@@ -406,7 +412,10 @@ def test_attribute_provider_isolates_bad_items_and_marks_unverified_evidence(mon
     assert result.attributes[0].evidence=='甲 数量 2'
     assert result.diagnostics=={'returned':4,'accepted':1,'unverified_evidence':0,
         'skipped_invalid_schema':2,'skipped_invalid_entity':1,
-        'skipped_redundant_value':0,'skipped_attribute_limit':0}
+        'skipped_redundant_value':0,'skipped_attribute_limit':0,
+        'skipped_total_limit':0,'budget_per_entity':50,'budget_total':500,'truncated':0,
+        'unverified_value_evidence':0,'incomplete_value_evidence':0,
+        'ontology_attributes_selected':2,'ontology_attributes_excluded_by_domain':1}
 
 
 def test_attribute_provider_filters_redundant_values_and_caps_each_entity(monkeypatch):
@@ -417,11 +426,10 @@ def test_attribute_provider_filters_redundant_values_and_caps_each_entity(monkey
         def generate_typed(self,prompt,schema):
             assert schema==AttributeResponse
             assert '大多数实体可能没有任何属性' in prompt
-            assert '动作、禁止事项、职责、所有权' in prompt
-            assert '分类、文档结构' in prompt
-            assert '属性是主体稳定的标量特征' in prompt
+            assert '已声明的字符串属性允许完整段落、职责和说明内容' in prompt
+            assert '未定义的属性保持保守' in prompt
             assert '章节标题和与主体同名的值都不属于属性' in prompt
-            assert '只返回少数最重要的属性' in prompt
+            assert 'extraction_budget' in prompt
             return AttributeResponse(attributes=[
                 dict(entity_index=0,attribute='name',value='  aCmE \t',evidence='invented evidence',confidence=.99),
                 dict(entity_index=0,attribute='a1',value='v1',evidence='事实',confidence=.5),
@@ -433,11 +441,12 @@ def test_attribute_provider_filters_redundant_values_and_caps_each_entity(monkey
                 dict(entity_index=0,attribute='a6',value='v6',evidence='事实',confidence=.7)])
     monkeypatch.setattr(providers,'create_provider',lambda *args,**kw:Provider())
     result=extract_attributes('Acme 乙 事实',[Entity('Acme','Company',0,4),Entity('乙','Company',5,6)],
-        Ontology(TTL),dict(provider='openai',llm_model='test',api_key='test',base_url='test'))
+        Ontology(TTL),dict(provider='openai',llm_model='test',api_key='test',base_url='test',attribute_max_per_entity=5))
     assert [(item.entity_index,item.attribute) for item in result.attributes]==[
         (0,'a1'),(1,'other'),(0,'a2'),(0,'a3'),(0,'a4'),(0,'a6')]
     assert result.diagnostics['skipped_redundant_value']==1
     assert result.diagnostics['skipped_attribute_limit']==1
+    assert result.diagnostics['truncated']==1
     assert result.diagnostics['unverified_evidence']==1
 
 
@@ -516,9 +525,18 @@ def test_review_safety_for_attribute_dependencies(tmp_path,monkeypatch,mode):
                 queued,first=assert_failed_projection_prefix(repo,p,index,attempts,writes,drains)
                 assert queued[:len(before_queue)]==before_queue
                 assert first['version_id'] in {event['version_id'] for event in before_queue}
-                # Attributes remain authority facts; only queued chunks/entities are encoded.
+                # The failed earlier chunk keeps the later attribute projection queued.
                 assert first['payload']['_milvus_projection']['row']['kind'] in {'chunk','entity'}
                 attribute_event=next(event for event in queued if event['operation']=='upsert'
                                      and event['version_id']==fact['version_id'])
-                assert attribute_event['payload']['_milvus_projection']['row'] is None
+                attribute_row=attribute_event['payload']['_milvus_projection']['row']
+                assert attribute_row['kind']=='attribute'
+                assert attribute_row['record_id']==fact['id']
+                assert attribute_row['owner_id']==latest['id']
+                assert attribute_row['type']==fact['type']
+                assert attribute_row['text'].rsplit('\n',1)[-1]==str(fact['value'])=='2'
+                assert (attribute_row['window_start'],attribute_row['window_end'])==(0,1)
+                assert 'embedding' not in attribute_row and 'sparse' not in attribute_row
+                assert attribute_event['seq']>first['seq']
+                assert repo.projections.cursor(p,'milvus')['applied_seq']<attribute_event['seq']
         assert items()[1]['status']==('approved' if mode in ('legacy_property','embedding_failure') else 'pending')

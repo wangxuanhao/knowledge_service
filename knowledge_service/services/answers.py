@@ -110,8 +110,17 @@ def _prompt_graph_facts(groups):
     return facts, truncated
 
 
-def answer_messages(question, evidence, *, as_of=None, known_at=None, answer_purpose=None):
+def answer_messages(question, evidence, *, as_of=None, known_at=None, answer_purpose=None,attribute_conflicts=None):
     """Build one platform-aware prompt shared by JSON and SSE answers."""
+    def finish(messages):
+        if attribute_conflicts:
+            markers=[{key:row.get(key) for key in ('id','entity_id','predicate','version','state','member_count')}
+                     for row in attribute_conflicts[:50]]
+            material=json.loads(messages[1]['content'])
+            material.setdefault('query_context',{})['attribute_conflicts']=markers
+            messages[1]['content']=json.dumps(material,ensure_ascii=False)
+            messages[0]['content']+='attribute_conflicts 是尚未解决的属性争议；涉及这些实体和属性时必须明确待核对，不能从原文片段选取某个争议值作为确定结论；请指向统一知识审核。'
+        return messages
     groups, graph_rows = {}, {}
     for row in evidence:
         quote = answer_purpose == DOCUMENT and row.get('document_quote_allowed') is True
@@ -121,6 +130,8 @@ def answer_messages(question, evidence, *, as_of=None, known_at=None, answer_pur
         graph_rows.setdefault(key, []).append(row)
         groups.setdefault(key, []).append({
             'id': row['citation'], 'text': row['text'],
+            **({key:row.get(key) for key in ('kind','owner_id','owner_label','property_id','type_label','datatype',
+                'matched_value','value_truncated','window_start','window_end')} if row.get('kind')=='attribute' else {}),
             'applicability': (row.get('metadata') or {}).get('applicability'),
             'published_at': (row.get('metadata') or {}).get('published_at'),
             'valid_from': row.get('valid_from'),
@@ -139,7 +150,7 @@ def answer_messages(question, evidence, *, as_of=None, known_at=None, answer_pur
             group['graph_facts_truncated'] = True
         platform_evidence.append(group)
     if answer_purpose == DOCUMENT:
-        return [
+        return finish([
             {'role': 'system', 'content':
              '只依据给定冻结文档回答定义、解释和种类问题，每条说明引用给定的 [E编号]、[U编号]、[R编号] 或 [F编号]。'
              '开头说明：按文档说明，有效性待核对。U 是有效性未知、R 是在核对时点已失效、F 是尚未生效；'
@@ -151,8 +162,8 @@ def answer_messages(question, evidence, *, as_of=None, known_at=None, answer_pur
             {'role': 'user', 'content': json.dumps({'question': question,
              'platform_evidence': platform_evidence,
              'query_context': {'as_of': as_of, 'known_at': known_at,
-                               'answer_purpose': DOCUMENT}}, ensure_ascii=False)}]
-    return [
+                               'answer_purpose': DOCUMENT}}, ensure_ascii=False)}])
+    return finish([
         {'role': 'system', 'content':
          '你回答知识图谱问题，只依据给定证据推理，不得引入证据之外的事实。'
          'query_context.as_of 是本次业务判断时点，known_at 是系统知识时点；不得混用。'
@@ -172,7 +183,7 @@ def answer_messages(question, evidence, *, as_of=None, known_at=None, answer_pur
             'question': question, 'platform_evidence': platform_evidence,
             'query_context': {'as_of': as_of, 'known_at': known_at},
         }, ensure_ascii=False)},
-    ]
+    ])
 
 
 def _reasoning_paths(seeds, relations, max_hops):
@@ -227,7 +238,7 @@ def _retrieved_question_context(service, p, request):
     requires local filtering/history.
     """
     search_request = {**request, 'kinds': [kind for kind in
-        (request.get('kinds') or ['entity', 'chunk']) if kind in {'entity', 'chunk'}]}
+        (request.get('kinds') or ['entity', 'attribute', 'chunk']) if kind in {'entity', 'attribute', 'chunk'}]}
     if not request.get('_explicit_valid_at', request.get('valid_at') is not None):
         search_request.pop('valid_at', None)
     result = service.search(p, search_request)
@@ -246,7 +257,7 @@ def _retrieved_question_context(service, p, request):
     if not request.get('_explicit_valid_at', request.get('valid_at') is not None):
         scope.pop('valid_at', None)
     scope.update(
-        kinds=['entity', 'relation', 'chunk'],
+        kinds=['entity', 'relation', 'attribute', 'chunk'],
         ontology_scope=request.get('ontology_scope') or 'all',
         include_unknown=request.get('include_unknown', True),
     )
@@ -290,7 +301,9 @@ def _retrieved_question_context(service, p, request):
         return evidence, unknown
 
     def preserve_retrieval_metadata(items, retrieved):
-        fields = ('retrieval_channel', 'score', 'keyword_score', 'rrf_score', 'backend_ranks')
+        fields = ('retrieval_channel', 'score', 'keyword_score', 'rrf_score', 'backend_ranks',
+                  'matched_value','value_truncated','value_length','window_start','window_end','matched_source_context',
+                  'owner_id','owner_label','property_id','property_label')
         metadata = {(row['id'], row['version_id']): {key: row[key] for key in fields if key in row}
                     for row in retrieved if row.get('id') and row.get('version_id')}
         # Context keeps authority fields; only exact ranked record versions regain rank/channel.
@@ -356,6 +369,7 @@ def _retrieved_question_context(service, p, request):
                 if info.get('error')},
             'channels': {
                 'entity': sum(row.get('kind') == 'entity' for row in direct),
+                'attribute': sum(row.get('kind') == 'attribute' for row in direct),
                 'chunk': sum(row.get('kind') == 'chunk' for row in direct),
                 'graph_evidence': graph_count,
             },
@@ -423,6 +437,7 @@ def _retrieved_question_context(service, p, request):
             if info.get('error')},
         'channels': {
             'entity': sum(row.get('kind') == 'entity' for row in direct),
+            'attribute': sum(row.get('kind') == 'attribute' for row in direct),
             'chunk': sum(row.get('kind') == 'chunk' for row in direct),
             'graph_evidence': len(found)},
         'applicability': result.get('applicability'),
@@ -439,6 +454,18 @@ def question_context(service, p, request):
     retrieved = perf_counter()
     scoped_request = {**request, 'applicability': context.get('applicability') or request.get('applicability')}
     context = apply_validity(service, p, context, scoped_request)
+    if hasattr(service.repository,'_db'):
+        from ..repository.attribute_conflicts import ConflictReads
+        entities=sorted({row.get('owner_id') or row.get('subject_id') if row.get('kind')=='attribute' else row.get('id')
+            for row in [*context.get('hits',[]),*context.get('evidence_rows',[])] if row.get('kind') in {'entity','attribute'}}-{None})
+        with service.repository.independent_read_view() as reader:
+            conflicts=ConflictReads(reader).scoped_warnings(p,scoped_request,entities or None)
+        context['attribute_conflicts']=[{**{key:item.get(key) for key in ('id','entity_id','predicate','version','state')},
+                                      'member_count':len(item.get('members',[]))} for item in conflicts['conflict_sets']]
+        if conflicts['conflict_sets']:
+            context.setdefault('coverage_warnings',[]).append('当前范围存在尚未解决的属性冲突；争议值未作为正式证据，请在知识审核中核对。')
+        if conflicts.get('truncated'):
+            context.setdefault('coverage_warnings',[]).append('冲突提示达到分页上限，当前提示并非全部冲突。')
     context['answer_purpose'] = request['answer_purpose']
     context['answer_label'] = DOCUMENT_LABEL if request['answer_purpose'] == DOCUMENT else ''
     context['timings_ms'] = {'retrieval': (retrieved - started) * 1000,
@@ -500,6 +527,8 @@ def generation_state(request, evidence, context, *, called=False):
 
 
 def missing_evidence_text(context):
+    if context.get('attribute_conflicts'):
+        return '当前查询范围存在尚未解决的属性冲突，争议值暂不作为确定依据；请在知识审核中核对后再确认相关结论。'
     if context.get('answer_purpose') == DOCUMENT and model_evidence([], context):
         return '已找到相关文档，以下仅说明其内容，不能据此确认当前有效规则。'
     if any(row.get('usage') == 'qualified_quote'
@@ -523,7 +552,11 @@ def final_answer(answer, mode, evidence, context):
         answer = '\n\n'.join(f"[{row['citation']}] {quote_text(row['text'])}" for row in evidence)
         mode = 'evidence_only'
     if not answer.strip():
-        answer = missing_evidence_text(context)
+        answer = ('\n\n'.join(f"[{row['citation']}] {quote_text(row['text'])}" for row in evidence)
+                  if evidence else missing_evidence_text(context))
+        mode='evidence_only'
+    if context.get('attribute_conflicts') and '属性冲突' not in answer:
+        answer+='\n\n当前查询范围还存在未解决的属性冲突；相关争议值需在知识审核中核对，不能据此确认结论。'
     if document:
         if mode == 'llm':
             labels = {'unknown': '有效性待核对', 'expired': '已失效，仅作历史文档说明',
@@ -594,7 +627,7 @@ def stream_events(service,p,request):
             if not all((url,key,model)):raise RuntimeError('请配置 KG_LLM_BASE_URL、KG_LLM_API_KEY、KG_LLM_MODEL')
             messages=answer_messages(request['query'], material,
                                      as_of=context.get('as_of'), known_at=context.get('known_at'),
-                                     answer_purpose=context.get('answer_purpose'))
+                                     answer_purpose=context.get('answer_purpose'),attribute_conflicts=context.get('attribute_conflicts'))
             called=True
             with external_client(180) as client:
                 with client.stream('POST',url+'/chat/completions',headers={'Authorization':'Bearer '+key},json={'model':model,'messages':messages,'stream':True}) as response:

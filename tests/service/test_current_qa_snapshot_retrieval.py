@@ -29,7 +29,8 @@ def _harness(monkeypatch):
     state = {'current': True, 'index_version': 2, 'watermark': 9}
     calls = {'native': [], 'hydration': [], 'history': [], 'validity': [], 'frozen': [], 'index': []}
     index = {'index_version': 2, 'watermark': 9, 'dim': 2,
-             'embedding_model': 'test-model', 'catalog': default_catalog().to_dict()}
+             'embedding_model': 'test-model', 'catalog': default_catalog().to_dict(),
+             'search_capabilities':['attributes_v1']}
 
     def native_search(project, query, **options):
         calls['native'].append((project, query, deepcopy(options)))
@@ -87,6 +88,7 @@ def _harness(monkeypatch):
             state['current'] and (generation, watermark) == (state['index_version'], state['watermark'])))
     encoder = SimpleNamespace(identity='test-model', semantic=True,
                               encode=lambda texts: [[1.0, 0.0] for _text in texts])
+    monkeypatch.setattr('knowledge_service.services.llm_models.LLMModels',lambda _repo:SimpleNamespace())
     service = KnowledgeService(repository, encoder,
                                SimpleNamespace(available=True, search=native_search))
     monkeypatch.setattr(answer_validity, 'utc_now', clock)
@@ -106,7 +108,7 @@ def _harness(monkeypatch):
 def _request(mode='hybrid', **extra):
     return {'query': '退款', 'retrieval_mode': mode, 'ontology_context': False,
             'graph_context': False, 'include_references': False, 'generate': False,
-            'k_entities': 1, 'k_chunks': 0, 'k_relations': 0, **extra}
+            'k_entities': 1, 'k_chunks': 0, 'k_relations': 0, 'k_attributes':0, **extra}
 
 
 @pytest.mark.parametrize('entrypoint', ['json', 'sse'])

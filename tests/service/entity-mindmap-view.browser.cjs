@@ -13,7 +13,7 @@ html=html.replace(/<link\b[^>]*>/gi,tag=>{
   return href?'<style>'+fs.readFileSync(path.join(web,href[1]),'utf8')+'</style>':'';
 });
 const workspace=fs.readFileSync(path.join(web,'workspace.js'),'utf8');
-const bindings=workspace.match(/  get\('mindmap-zoom-in'\)\.onclick[^\n]+\n[^\n]+\n[^\n]+/);
+const bindings=workspace.match(/  get\('mindmap-zoom-in'\)[\s\S]*?(?=  const mindmap=)/);
 assert.ok(bindings,'load the actual workspace view-button bindings');
 let browser;
 before(async()=>{
@@ -28,13 +28,16 @@ after(async()=>{await browser?.close();});
 async function settle(page){
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
 }
-async function fixture(viewport={width:1440,height:1000}){
-  const page=await browser.newPage({viewport});
+async function fixture(viewport={width:1440,height:1000},options={}){
+  const page=await browser.newPage({viewport,...options});
   await page.route('**/*',route=>route.abort());
   await page.setContent(html,{waitUntil:'load'});
   await page.evaluate(()=>{
     document.documentElement.classList.remove('auth-pending');
     document.querySelectorAll('main>.tab').forEach(tab=>tab.classList.toggle('hidden',tab.id!=='tab-mindmap'));
+    const filter=document.createElement('label');filter.className='mindmap-filter-control';
+    filter.innerHTML='<span>搜索实体</span><input id="mindmap-filter" placeholder="搜索实体名称、别名或类型">';
+    document.getElementById('mindmap-root').parentElement.before(filter);
   });
   await page.addScriptTag({path:path.join(web,'vendor/echarts.min.js')});
   await page.addScriptTag({path:path.join(web,'entity-mindmap-model.js')});
@@ -43,10 +46,10 @@ async function fixture(viewport={width:1440,height:1000}){
   await page.addScriptTag({path:path.join(web,'entity-mindmap-explorer.js')});
   await page.evaluate(()=>{
     const get=id=>document.getElementById(id),host=get('mindmap-canvas');
-    window.chart=echarts.init(host);
+    window.chart=echarts.init(host);window.inspectedEntities=[];
     window.mindmapView=EntityMindmapView.create({chart,host,
       summary:get('mindmap-summary'),empty:get('mindmap-empty'),zoomLabel:get('mindmap-zoom-level'),
-      buttons:{in:get('mindmap-zoom-in'),out:get('mindmap-zoom-out'),reset:get('mindmap-reset-view')}});
+      buttons:{in:get('mindmap-zoom-in'),out:get('mindmap-zoom-out'),reset:get('mindmap-reset-view')},onInspect:row=>inspectedEntities.push(row)});
     EntityMindmapExplorer.mount({view:mindmapView,root:get('tab-mindmap'),host});
     mindmapView.render({tree:{id:'a',text:'根实体',children:[
       {id:'b',text:'关联实体',children:[{id:'c',text:'下级实体'}]},
@@ -80,6 +83,140 @@ async function metrics(page){
       separation:Math.hypot(b[0]-a[0],b[1]-a[1]),root:a,cards};
   });
 }
+test('mindmap cards inspect canonical entities while branches still collapse and pan stays independent',async()=>{
+  const page=await fixture();
+  const clickEntity=async entityId=>{
+    const point=await page.evaluate(id=>{
+      const data=chart.getModel().getSeriesByIndex(0).getData();let index=-1;
+      for(let i=0;i<data.count();i++)if(data.getRawDataItem(i).entityId===id)index=i;
+      const center=data.getItemGraphicEl(index).transformCoordToGlobal(0,0),box=document.getElementById('mindmap-canvas').getBoundingClientRect();
+      return {x:box.left+center[0],y:box.top+center[1]};
+    },entityId);
+    await page.mouse.click(point.x,point.y);await settle(page);
+  };
+  await clickEntity('d');assert.equal(await page.evaluate(()=>inspectedEntities.at(-1).id),'d');
+  await clickEntity('b');assert.equal(await page.evaluate(()=>inspectedEntities.at(-1).id),'b');
+  assert.match(await page.locator('#mindmap-summary').innerText(),/已显示 3 \/ 4/);
+  assert.equal(await page.evaluate(()=>inspectedEntities.length),2);await page.close();
+});
+
+async function assertFitted(page){
+  const result=await page.evaluate(()=>mindmapView.geometry());
+  assert.ok(result.nodes.length);
+  for(const node of result.nodes){
+    assert.ok(node.x-node.width/2>=23&&node.x+node.width/2<=result.width-23,JSON.stringify({node,result}));
+    assert.ok(node.y-node.height/2>=23&&node.y+node.height/2<=result.height-23,JSON.stringify({node,result}));
+  }
+}
+
+test('blank canvas margins pan in both directions and keep dragging outside the host',async()=>{
+  const page=await fixture();
+  try{
+    const host=page.locator('#mindmap-canvas');await host.scrollIntoViewIfNeeded();
+    const box=await host.boundingBox(),before=await metrics(page);
+    await page.mouse.move(box.x+8,box.y+8);await page.mouse.down();
+    await page.mouse.move(box.x-60,box.y+80,{steps:8});await page.mouse.up();
+    await settle(page);
+    const after=await metrics(page);
+    assert.ok(Math.abs(after.root[0]-before.root[0]+68)<3,'blank margin must pan horizontally with the pointer');
+    assert.ok(Math.abs(after.root[1]-before.root[1]-72)<3,'pointer capture must continue the vertical pan outside the canvas');
+    assert.equal(after.zoom,before.zoom);
+    assert.equal(await page.locator('#mindmap-summary').innerText(),'已显示 4 / 4 个节点');
+  }finally{await page.close();}
+});
+
+test('initial render and fit control include every visible card, and fit mode follows resizing',async()=>{
+  const page=await fixture();
+  try{
+    await page.evaluate(()=>mindmapView.render({tree:{id:'wide',text:'宽脑图',children:Array.from({length:24},(_,i)=>({id:String(i),text:'节点 '+i}))}}));
+    await settle(page);await assertFitted(page);
+    await page.evaluate(()=>mindmapView.pan(450,-300));
+    await page.getByRole('button',{name:'适应画布',exact:true}).click();
+    await settle(page);await assertFitted(page);
+    await page.setViewportSize({width:900,height:740});
+    await settle(page);await assertFitted(page);
+    await page.getByRole('button',{name:'复位视图',exact:true}).click();
+    await settle(page);assert.equal((await metrics(page)).zoom,1);
+    await page.evaluate(()=>mindmapView.pan(100,60));
+    await page.setViewportSize({width:1000,height:800});await settle(page);
+    assert.equal((await metrics(page)).zoom,1,'manual camera must not be automatically fitted');
+  }finally{await page.close();}
+});
+
+test('generation settings collapse to release more vertical canvas space',async()=>{
+  const page=await fixture({width:1440,height:900});
+  try{
+    const toggle=page.getByRole('button',{name:'收起设置',exact:true});
+    const before=await page.locator('#mindmap-canvas').boundingBox();
+    await toggle.click();await settle(page);
+    assert.equal(await page.locator('#mindmap-root').isVisible(),false);
+    const after=await page.locator('#mindmap-canvas').boundingBox();
+    assert.ok(after.height>before.height+40,'released settings space must go to the canvas');
+    const reopen=page.getByRole('button',{name:'展开设置',exact:true});await reopen.focus();await page.keyboard.press('Enter');
+    assert.equal(await page.locator('#mindmap-root').isVisible(),true);
+  }finally{await page.close();}
+});
+
+test('fit excludes folded descendants and fits a fully expanded deep tree on a phone',async()=>{
+  const page=await fixture({width:390,height:844});
+  try{
+    await page.evaluate(()=>mindmapView.render({tree:{id:'root',text:'根',children:[{id:'branch',text:'分支',children:
+      Array.from({length:40},(_,i)=>({id:'leaf-'+i,text:'后代 '+i}))}]}}));
+    await settle(page);await assertFitted(page);
+    assert.equal((await page.evaluate(()=>mindmapView.geometry().nodes.length)),2,'folded children must not enter fit bounds');
+    await page.evaluate(()=>{
+      let tree={id:'end',text:'末端'};
+      for(let i=0;i<9;i++)tree={id:'level-'+i,text:'层级 '+i,children:[tree]};
+      mindmapView.render({tree});
+      const expand=node=>{node.collapsed=false;node.children.forEach(expand);};expand(mindmapView.getTree());mindmapView.fit();
+    });
+    await settle(page);await assertFitted(page);
+    assert.equal((await page.evaluate(()=>mindmapView.geometry().nodes.length)),10);
+  }finally{await page.close();}
+});
+
+test('dragging a card never toggles its branch, and cancelled capture leaves the next click usable',async()=>{
+  const page=await fixture();
+  try{
+    const host=page.locator('#mindmap-canvas');await host.scrollIntoViewIfNeeded();
+    const point=await page.evaluate(()=>{
+      const node=mindmapView.geometry().nodes.find(node=>node.id==='mindmap-root.0'),box=document.getElementById('mindmap-canvas').getBoundingClientRect();
+      document.getElementById('mindmap-canvas').addEventListener('pointerdown',event=>window.lastPointerId=event.pointerId,{once:true});
+      return {x:box.left+node.x,y:box.top+node.y};
+    });
+    await page.mouse.move(point.x,point.y);await page.mouse.down();
+    await page.mouse.move(point.x+60,point.y+20,{steps:5});await page.mouse.up();await settle(page);
+    assert.equal(await page.evaluate(()=>mindmapView.getTree().children[0].collapsed),false);
+    await page.mouse.down();await page.mouse.move(point.x+80,point.y+40,{steps:3});
+    await page.evaluate(()=>document.getElementById('mindmap-canvas').dispatchEvent(new PointerEvent('pointercancel',{pointerId:lastPointerId,bubbles:true})));
+    assert.equal(await host.evaluate(element=>element.classList.contains('is-panning')),false);
+    await page.mouse.up();
+    const next=await page.evaluate(()=>{
+      const node=mindmapView.geometry().nodes.find(node=>node.id==='mindmap-root.0'),box=document.getElementById('mindmap-canvas').getBoundingClientRect();
+      return {x:box.left+node.x,y:box.top+node.y};
+    });
+    await page.mouse.click(next.x,next.y);
+    assert.equal(await page.evaluate(()=>mindmapView.getTree().children[0].collapsed),true);
+  }finally{await page.close();}
+});
+
+test('two-finger touch pinch zooms while one-finger touch still pans',async()=>{
+  const page=await fixture({width:390,height:844},{hasTouch:true,isMobile:true});
+  try{
+    await page.locator('#mindmap-canvas').scrollIntoViewIfNeeded();
+    const box=await page.locator('#mindmap-canvas').boundingBox(),client=await page.context().newCDPSession(page);
+    const x=box.x+box.width/2,y=Math.max(box.y+90,Math.min(box.y+box.height/2,700));
+    const initial=await metrics(page);
+    const send=(type,points)=>client.send('Input.dispatchTouchEvent',{type,touchPoints:points.map(([id,x,y])=>({id,x,y}))});
+    await send('touchStart',[[1,x-30,y],[2,x+30,y]]);
+    for(let step=1;step<=5;step++)await send('touchMove',[[1,x-30-step*6,y],[2,x+30+step*6,y]]);
+    await send('touchEnd',[]);await settle(page);
+    const pinched=await metrics(page);assert.ok(pinched.zoom>initial.zoom*1.5,'pinch must zoom the actual camera');
+    await send('touchStart',[[1,x,y]]);await send('touchMove',[[1,x+40,y+30]]);await send('touchEnd',[]);await settle(page);
+    const panned=await metrics(page);assert.equal(panned.zoom,pinched.zoom);
+    assert.ok(Math.abs(panned.root[0]-pinched.root[0]-40)<3);
+  }finally{await page.close();}
+});
 
 test('mindmap plus and minus buttons scale the rendered tree and reset restores it',async()=>{
   const page=await fixture();
@@ -148,12 +285,12 @@ test('toolbar zoom respects limits and continues from native wheel zoom',async()
     assert.equal(maximum.zoom,2);
     assert.equal(maximum.label,'200%');
     assert.ok(Math.abs(maximum.separation/initial.separation-2)<.01);
-    for(let i=0;i<13;i++)await page.getByRole('button',{name:'缩小脑图'}).click();
+    for(let i=0;i<32;i++)await page.getByRole('button',{name:'缩小脑图'}).click();
     await settle(page);
     const minimum=await metrics(page);
-    assert.equal(minimum.zoom,.25);
-    assert.equal(minimum.label,'25%');
-    assert.ok(Math.abs(minimum.separation/initial.separation-.25)<.01);
+    assert.equal(minimum.zoom,.01);
+    assert.equal(minimum.label,'1%');
+    assert.ok(Math.abs(minimum.separation/initial.separation-.01)<.001);
     await page.getByRole('button',{name:'复位视图'}).click();
     await page.locator('#mindmap-canvas').hover();
     await page.mouse.wheel(0,-120);

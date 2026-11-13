@@ -268,6 +268,22 @@ def test_batch_migration_is_one_undoable_operation(system):
     assert Reclassify(service).plan(p)['stale_records'] == 4, '回退后面板重新全部列出'
 
 
+def test_unrelated_write_after_audited_remap_preserves_original_source_type(system):
+    repo, service, p, _, v2 = system
+    source = repo.list_assertions(p, canonical_record_id='e3', status='accepted')[0]
+    before_payload = json.loads(json.dumps(source['payload'], ensure_ascii=False))
+    old = repo.get_record(p, 'e3')
+    migration = Reclassify(service).plan(p)
+    Reclassify(service).apply(p, _keys(migration, 'rename'), 'reviewer')
+    migrated = repo.get_record(p, 'e3')
+    service.write(p, [{'id':'unrelated', 'kind':'entity', 'type':'包裹',
+                       'text':'另一条独立知识', 'ontology_id':v2['id']}])
+    assert repo.get_record(p, 'e3')['version_id'] == migrated['version_id']
+    assert repo.get_assertion(p, source['id'])['payload'] == before_payload
+    assert local_name(repo.get_record(p, 'e3')['type']) == '包裹'
+    assert local_name(repo.get_record(p, 'e3', known_at=old['recorded_at'])['type']) == '包'
+
+
 def test_apply_refuses_empty_selection_and_groups_without_a_target(system):
     """默认不跑：空选、选到「没有去处」、选到不存在的组，都当面拒绝且一行不改。"""
     _, service, p, v1, _ = system

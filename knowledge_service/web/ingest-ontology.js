@@ -69,7 +69,16 @@
     } catch { return {id}; }
   }
 
-  const helpers = {createController, releaseLabel, resultRelease};
+  function attributeExtractionHelp(state={}) {
+    if(state.mode==='documents')return '仅文档模式不抽取实体、关系或属性，该开关已禁用。';
+    const review='默认关闭，开启后结果先进入“知识台账 → 知识审核 → 属性事实”。';
+    if(state.mode==='discovery')return '发现模式按原文提出保守的属性候选；如需按已发布 TTL 的数据属性定义抽取，请切换为使用项目本体。'+review;
+    const definitions=state.status==='ready'&&state.release?.summary?.attributes;
+    const count=Array.isArray(definitions)?'当前已发布本体定义 '+definitions.filter(item=>item.active!==false).length+' 项属性。':'';
+    return count+'按本次已发布 TTL 的数据属性定义提取具体值；数值、布尔值保持原生类型，字符串属性可包含说明段落和换行。'+review;
+  }
+
+  const helpers = {createController, releaseLabel, resultRelease, attributeExtractionHelp};
   if (typeof module !== 'undefined') module.exports = helpers;
   if (typeof window === 'undefined') return;
   const base = project => '/api/projects/' + encodeURIComponent(project);
@@ -90,6 +99,8 @@
     return controller.refresh(project, mode);
   }
   function render(s) {
+    const attributeHelp=document.getElementById('parse-attributes-help');
+    if(attributeHelp)attributeHelp.textContent=attributeExtractionHelp(s);
     if (!host) return;
     host.hidden = s.mode !== 'ontology';
     host.replaceChildren();

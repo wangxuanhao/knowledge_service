@@ -142,6 +142,13 @@ class MemoryMilvus:
         rows = [row for row in self.rows.values() if row['project_id'] == project_id and row['index_version'] == index_version]
         return {'ok': ProjectionSync._milvus_manifest(rows) == expected, 'count': len(rows)}
 
+    def validate_projection_subset(self,expected,*,project_id,index_version,catalog):
+        from knowledge_service.domain.search_projection import projection_fingerprint
+        rows=[row for row in self.rows.values() if row['project_id']==project_id and row['index_version']==index_version
+              and row['vector_id'] in expected]
+        actual={row['vector_id']:{'version_id':row['version_id'],'fingerprint':projection_fingerprint(row)} for row in rows}
+        return {'ok':actual==expected,'count':len(rows)}
+
     def delete_versions(self, project_id, versions):
         for key in list(self.rows):
             row = self.rows[key]

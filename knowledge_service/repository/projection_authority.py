@@ -1,7 +1,7 @@
 """Compact authority snapshots and bounded payload reads for projection audits."""
 
 
-INDEXED_KINDS = frozenset({'entity', 'relation', 'chunk'})
+INDEXED_KINDS = frozenset({'entity', 'relation', 'attribute', 'chunk'})
 
 
 class ProjectionAuthorityReads:
@@ -29,6 +29,7 @@ class ProjectionAuthorityReads:
                 SELECT id,version_id FROM record_versions
                 WHERE project_id=? AND superseded_at IS NULL
                   AND read_kind=ANY(?::text[])
+                  AND NOT read_quarantined
                   AND (read_visible OR
                     COALESCE(payload::jsonb#>'{metadata,_deleted}', 'null'::jsonb)
                     IN ('null'::jsonb,'false'::jsonb,'0'::jsonb,

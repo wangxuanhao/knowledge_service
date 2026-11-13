@@ -52,6 +52,18 @@ def _json(value):
     return encode_filter_json(value)
 
 
+def _support_matches_record(alias,support='support'):
+    """An accepted occurrence of an old literal cannot support a new value.
+
+    Names, scopes and ontology/identity remaps may revise a fact's presentation;
+    its native value and datatype still require their own accepted evidence.
+    """
+    return (f"({alias}.read_kind<>'attribute' OR ({support}.kind='attribute' AND EXISTS("
+        f'SELECT 1 FROM record_versions evidence_value WHERE evidence_value.project_id={alias}.project_id '
+        f'AND evidence_value.version_id={support}.record_version_id AND evidence_value.read_kind=\'attribute\' '
+        f'AND evidence_value.read_attribute_fingerprint={alias}.read_attribute_fingerprint)))')
+
+
 def _filter_sql(filters, alias):
     """Compile the public typed predicate language, including missing vs null."""
     validate_filter(filters)
@@ -109,19 +121,9 @@ class ScopedReads:
     def __init__(self, repository):
         self.repo = repository
 
-    def _base(self, project, scope, alias='r'):
-        scope = scope or {}
-        clauses, params = [f'{alias}.project_id=?'], [project]
-        known = normalize_time(scope.get('known_at'))
-        if scope.get('_source_artifact'):
-            if known is not None:
-                clauses.append(f'{alias}.recorded_at<=?')
-                params.append(known)
-        elif known is None:
-            clauses.append(f'{alias}.superseded_at IS NULL')
-        else:
-            clauses.extend([f'{alias}.recorded_at<=?', f'({alias}.superseded_at IS NULL OR {alias}.superseded_at>?)'])
-            params.extend([known, known])
+    @staticmethod
+    def _scope_predicates(scope, alias):
+        clauses, params = [], []
         valid = normalize_time(scope.get('valid_at'))
         if valid and not scope.get('_reference_mode'):
             epoch = int(datetime.fromisoformat(valid.replace('Z', '+00:00')).timestamp() * 1000)
@@ -131,8 +133,6 @@ class ScopedReads:
                  f'({alias}.valid_from_known AND {alias}.valid_from_epoch_ms<=?)'),
                 f'(NOT {alias}.valid_until_known OR {alias}.valid_until_epoch_ms>?)'])
             params.extend([epoch, epoch])
-        if not scope.get('_identity_read'):
-            clauses.append(f'{alias}.read_visible')
         selected = normalize_applicability(scope.get('applicability'))
         for dimension, prefix in (('platforms', 'platform'), ('businesses', 'business'), ('audiences', 'audience')):
             selection = selected[dimension]
@@ -146,6 +146,86 @@ class ScopedReads:
                 raise ValueError('无效的平台组范围')
             clauses.append(f'{alias}.platform_mode=?')
             params.append(modes[match])
+        return ' AND '.join(clauses) or 'TRUE', params
+
+    @staticmethod
+    def _support_known(scope, alias='support'):
+        known = normalize_time(scope.get('known_at'))
+        if known is None:
+            return f'{alias}.known_until IS NULL', []
+        return (f'{alias}.known_from<=? AND ({alias}.known_until IS NULL OR {alias}.known_until>?)',
+                [known, known])
+
+    def _source_qualification(self, project, scope, alias):
+        own, own_params = self._scope_predicates(scope, alias)
+        if scope.get('_identity_read'):
+            return own, own_params
+        # A source-less old row retains its conservative direct declaration.
+        # Once mapped, support is mandatory even after withdrawal or a partial
+        # rebuild. Missing projection rows can never reactivate a declaration.
+        at = normalize_time(scope.get('known_at'))
+        mapping_cutoff = ' AND origin.created_at<=?' if at else ''
+        event_cutoff = ' AND accepted_origin.created_at<=?' if at else ''
+        legacy_params = [at, at] if at else []
+        legacy = (f'NOT EXISTS(SELECT 1 FROM record_version_assertions origin '
+                  f'WHERE origin.project_id={alias}.project_id AND origin.record_id={alias}.id{mapping_cutoff}) '
+                  f'AND NOT EXISTS(SELECT 1 FROM assertion_events accepted_origin '
+                  f'WHERE accepted_origin.project_id={alias}.project_id '
+                  f"AND accepted_origin.canonical_record_id={alias}.id AND accepted_origin.to_status='accepted'{event_cutoff})")
+        legacy = '(' + legacy + ')'
+        known, known_params = self._support_known(scope)
+        supported_scope, scope_params = self._scope_predicates(scope, 'support')
+        reference = (f"({alias}.read_kind='entity' AND ({alias}.payload::jsonb#>>'{{metadata,identity_policy}}'='reference' "
+                     f"OR {alias}.payload::jsonb#>'{{metadata,identity_source_qualified}}'='true'::jsonb))")
+        accepted = (f'EXISTS(SELECT 1 FROM source_context_support support WHERE support.project_id={alias}.project_id '
+                    f'AND support.record_id={alias}.id AND support.invalid_reason IS NULL AND {known} AND {_support_matches_record(alias)})')
+        if scope.get('_read_kinds') and 'entity' not in scope['_read_kinds']:
+            return f'({own} AND ({legacy} OR {accepted}))', [*own_params, *legacy_params, *known_params]
+        qualified = (f'EXISTS(SELECT 1 FROM source_context_support support WHERE support.project_id={alias}.project_id '
+                     f'AND support.record_id={alias}.id AND support.invalid_reason IS NULL AND {known} AND {supported_scope} AND {_support_matches_record(alias)})')
+        if scope.get('_endpoint_identity'):
+            return f'(({reference} AND {accepted}) OR (NOT coalesce({reference},false) AND {own} AND ({legacy} OR {accepted})))', [
+                *known_params, *own_params, *legacy_params, *known_params]
+        entity_scope = qualified
+        entity_params = [*known_params, *scope_params]
+        needs_fact_scope=(scope.get('valid_at') is not None and not scope.get('_reference_mode')
+            or scope.get('_platform_match') is not None
+            or any(value['mode']=='specific' for value in normalize_applicability(scope.get('applicability')).values()))
+        if not scope.get('_qualifying_fact') and needs_fact_scope:
+            fact_scope = {**scope, '_qualifying_fact': True}
+            # These predicates select the requested entity; its supporting
+            # business fact need only match the time, ontology and applicability.
+            fact_scope.pop('filters',None)
+            fact_scope.pop('_type_iris',None)
+            fact_sql, fact_params = self._qualified(project, fact_scope, kinds=['relation','attribute'])
+            fact_sql = re.sub(r'\br\.', 'support_fact.', fact_sql)
+            endpoint = (f"EXISTS(SELECT 1 FROM record_versions support_fact WHERE {fact_sql} "
+                        f"AND ((support_fact.read_kind='relation' AND ({alias}.id=support_fact.read_subject_id "
+                        f"OR {alias}.id=support_fact.read_object_id)) OR (support_fact.read_kind='attribute' "
+                        f"AND {alias}.id=support_fact.read_subject_id)))")
+            entity_scope = f'({qualified} OR ({accepted} AND {endpoint}))'
+            entity_params.extend([*known_params, *fact_params])
+        return (f'(({reference} AND {entity_scope}) OR (NOT coalesce({reference},false) AND {own} '
+                f'AND ({legacy} OR {accepted})))'), [*entity_params, *own_params, *legacy_params, *known_params]
+
+    def _base(self, project, scope, alias='r'):
+        scope = scope or {}
+        clauses, params = [f'{alias}.project_id=?', f'NOT {alias}.read_quarantined'], [project]
+        known = normalize_time(scope.get('known_at'))
+        if scope.get('_source_artifact'):
+            if known is not None:
+                clauses.append(f'{alias}.recorded_at<=?')
+                params.append(known)
+        elif known is None:
+            clauses.append(f'{alias}.superseded_at IS NULL')
+        else:
+            clauses.extend([f'{alias}.recorded_at<=?', f'({alias}.superseded_at IS NULL OR {alias}.superseded_at>?)'])
+            params.extend([known, known])
+        qualification, qualification_params = self._source_qualification(project, scope, alias)
+        clauses.append(qualification)
+        params.extend(qualification_params)
+        if not scope.get('_identity_read'):
+            clauses.append(f'{alias}.read_visible')
         ontology = scope.get('ontology_scope') or 'all'
         if ontology == 'ids':
             clauses.append(f"{alias}.payload::jsonb->>'ontology_id' = ANY(?::text[])")
@@ -187,16 +267,17 @@ class ScopedReads:
                     "CASE WHEN jsonb_typeof(r.payload::jsonb#>'{metadata,aliases}')='array' "
                     "THEN r.payload::jsonb#>'{metadata,aliases}' ELSE '[]'::jsonb END) alias "
                     "WHERE strpos(lower(alias),lower(?))>0) "
-                    "OR (r.read_kind='document' AND ("
+                    "OR (r.read_kind='attribute' AND (strpos(lower(COALESCE(r.payload::jsonb->>'value','')),lower(?))>0 "
+                    "OR strpos(lower(r.read_type),lower(?))>0)) OR (r.read_kind='document' AND ("
                     "strpos(lower(COALESCE(r.payload::jsonb#>>'{metadata,title}','')),lower(?))>0 "
                     "OR strpos(lower(COALESCE(r.payload::jsonb#>>'{metadata,source_file}','')),lower(?))>0)))")
-        return sql.replace("r.", alias+"."), [query]*5
+        return sql.replace("r.", alias+"."), [query]*7
 
     def _qualified(self, project, scope, *, kinds=None, query='', keyset=False, entity_source=None):
         kinds = scope.get('kinds') if kinds is None else kinds
         if kinds is not None and (not isinstance(kinds, (list, tuple, set)) or any(kind not in KINDS for kind in kinds)):
             raise ValueError('无效的记录类型')
-        sql, params = self._base(project, scope)
+        sql, params = self._base(project, {**scope, '_read_kinds': kinds})
         if kinds is not None and len(kinds) == 1:
             # Scalar equality lets the (project,kind,id,version) keyset index
             # supply ordering directly. ANY(singleton) caused a full sort of
@@ -224,7 +305,8 @@ class ScopedReads:
                     # for both endpoints instead of hundreds of thousands of probes.
                     endpoints.append(f'EXISTS (SELECT 1 FROM {entity_source} {alias} WHERE {alias}.id=r.read_{field})')
                     continue
-                eligible, values = self._base(project, scope, alias)
+                eligible, values = self._base(project, {**scope, '_endpoint_identity': True,
+                                                       '_read_kinds': ['entity']}, alias)
                 # A page must stop on its ordered outer keyset. Flattening an
                 # endpoint EXISTS into a semi-join can scan/sort the entire
                 # relation corpus before LIMIT, even with accurate statistics.
@@ -416,17 +498,46 @@ class ScopedReads:
             score_params.extend((term, weight))
         score = ' + '.join(score_terms)
         fields = ','.join('r.' + field for field in FIELDS.split(','))
+        known=normalize_time(scope.get('known_at'))
+        owner_known=('e.superseded_at IS NULL' if known is None else
+            'e.recorded_at<=? AND (e.superseded_at IS NULL OR e.superseded_at>?)')
+        owner_params=[] if known is None else [known,known]
         statement = f'''WITH qualified AS (
-            SELECT {fields}, lower(COALESCE(r.payload::jsonb->>'text','') || ' ' ||
-                COALESCE(r.payload::jsonb#>>'{{metadata,aliases}}','')) AS haystack
-            FROM record_versions r WHERE {predicates}
+            SELECT {fields},owner.label owner_label,property.label property_label,
+                lower(COALESCE(r.payload::jsonb->>'text','') || ' ' ||
+                COALESCE(r.payload::jsonb#>>'{{metadata,aliases}}','') || ' ' ||
+                CASE WHEN r.read_kind='attribute' THEN COALESCE(r.payload::jsonb->>'value','') || ' ' || r.read_type || ' ' ||
+                    COALESCE(owner.label,'') || ' ' || COALESCE(property.label,'') ELSE '' END) AS haystack
+            FROM record_versions r
+            LEFT JOIN ontologies o ON o.project_id=r.project_id AND o.id=r.payload::jsonb->>'ontology_id'
+            LEFT JOIN LATERAL (SELECT left(e.payload::jsonb->>'text',2000) label FROM record_versions e
+                WHERE r.read_kind='attribute' AND e.project_id=r.project_id AND e.id=r.read_subject_id
+                AND e.read_kind='entity' AND e.read_visible AND NOT e.read_quarantined AND {owner_known} LIMIT 1) owner ON TRUE
+            LEFT JOIN LATERAL (SELECT COALESCE(NULLIF(item->>'label_zh',''),NULLIF(item->>'label',''),item->>'name') label
+                FROM jsonb_array_elements(COALESCE(o.summary::jsonb->'attributes','[]'::jsonb)) item
+                WHERE r.read_kind='attribute' AND (item->>'id'=r.read_type OR item->>'name'=r.read_type) LIMIT 1) property ON TRUE
+            WHERE {predicates}
           ), ranked AS (SELECT qualified.*, ({score}) AS keyword_score FROM qualified)
           SELECT * FROM ranked WHERE keyword_score>0
           ORDER BY keyword_score DESC,id,version LIMIT ?'''
         with self.repo._lock:
-            rows = self.repo._db.execute(statement, [*params, *score_params, limit]).fetchall()
-        return [{**self.repo._record(row), 'keyword_score': float(row['keyword_score']),
-                 'score': float(row['keyword_score'])} for row in rows]
+            rows = self.repo._db.execute(statement, [*owner_params,*params, *score_params, limit]).fetchall()
+        result=[{**self.repo._record(row), 'keyword_score': float(row['keyword_score']),
+                 'score': float(row['keyword_score']),
+                 **({'owner_label':row['owner_label'],'property_label':row['property_label']} if row.get('owner_label') else {})} for row in rows]
+        # Return a bounded passage around a literal match, retaining full value
+        # access through the version-checked property reader.
+        for row in result:
+            if row.get('kind')=='attribute':
+                actual=row.get('value');row.update(owner_id=row.get('subject_id'),property_id=row.get('type'))
+                if isinstance(actual,str):
+                    positions=[actual.casefold().find(term) for term,_ in weights if term]
+                    position=min((offset for offset in positions if offset>=0),default=0)
+                    start=max(0,position-200);end=min(len(actual),start+6000)
+                    row.update(value=actual[start:end],matched_value=actual[start:end],value_length=len(actual),
+                        value_truncated=start>0 or end<len(actual),window_start=start,window_end=end,text=actual[start:end])
+                else:row['matched_value']=actual
+        return result
 
     @_snapshot_read
     def by_ids(self, project, scope, ids, *, kinds=None):
@@ -461,17 +572,23 @@ class ScopedReads:
         return {'records': [self.repo._record(row) for row in rows[:limit]], 'truncated': len(rows) > limit}
 
     @_snapshot_read
-    def neighbors(self, project, scope, seeds, *, hops=1, max_nodes=500, max_edges=1000, direction='forward'):
+    def neighbors(self, project, scope, seeds, *, hops=1, max_nodes=500, max_edges=1000,
+                  direction='forward', entity_type=None, predicate=None):
         if type(hops) is not int or not 0 <= hops <= 10:
             raise ValueError('邻域跳数必须是 0 到 10 之间的整数')
         if type(max_nodes) is not int or not 1 <= max_nodes <= 10000 or type(max_edges) is not int or not 1 <= max_edges <= 10000:
             raise ValueError('无效的邻域预算')
         if direction not in {'forward', 'backward', 'both'}:
             raise ValueError('无效的邻域方向')
+        if any(value is not None and (not isinstance(value, str) or not value)
+               for value in (entity_type, predicate)):
+            raise ValueError('图谱实体类型和关系谓词必须是非空字符串')
+        entity_scope = {**scope, '_type_iris': [entity_type]} if entity_type else scope
+        relation_scope = {**scope, '_type_iris': [predicate]} if predicate else scope
         def entities(ids):
             ids = list(ids)
             return [row for offset in range(0, len(ids), 5000)
-                    for row in self.by_ids(project, scope, ids[offset:offset + 5000], kinds=['entity'])]
+                    for row in self.by_ids(project, entity_scope, ids[offset:offset + 5000], kinds=['entity'])]
         nodes = {row['id']: row for row in entities(seeds)}
         truncated = len(nodes) > max_nodes
         nodes = dict(list(nodes.items())[:max_nodes])
@@ -481,7 +598,7 @@ class ScopedReads:
         for _ in range(hops):
             if not frontier:
                 break
-            sql, params = self._qualified(project, scope or {}, kinds=['relation'], keyset=True)
+            sql, params = self._qualified(project, relation_scope or {}, kinds=['relation'], keyset=True)
             columns = (['subject_id', 'object_id'] if direction == 'both' else
                        ['subject_id' if direction == 'forward' else 'object_id'])
             predicate = ' OR '.join(f"r.payload::jsonb->>'{column}'=ANY(?::text[])" for column in columns)
@@ -553,6 +670,19 @@ class ScopedReads:
         if not hits:
             return {'source_chunks': [], 'context_chunks': []}
         version_ids = [row['version_id'] for row in hits if row.get('version_id')]
+        version_links={version:{version} for version in version_ids}
+        from ..domain.entity_identity import source_qualified
+        qualified_entities=[row for row in hits if row.get('kind')=='entity' and source_qualified(row)]
+        if qualified_entities:
+            from .projection_contexts import ProjectionContexts
+            from ..domain.applicability import build_scope_predicate
+            contexts=ProjectionContexts(self.repo).collect(project,qualified_entities,known_at=scope.get('known_at'))
+            predicate=build_scope_predicate(scope.get('applicability'),scope.get('valid_at'),scope.get('include_unknown',True))
+            for hit in qualified_entities:
+                for context in contexts.get(hit['id'],[]):
+                    if context.get('record_version_id') and predicate.matches(context):
+                        version_links.setdefault(context['record_version_id'],set()).add(hit['version_id'])
+            version_ids=sorted(version_links)
         anchor_ids = {row['id'] for row in hits if row.get('kind') == 'chunk'}
         anchors = self.by_ids(project, scope, sorted(anchor_ids), kinds=['chunk'])
         anchor_versions = {row['version_id']: {row['version_id']} for row in anchors}
@@ -568,16 +698,19 @@ class ScopedReads:
               AND a.document_version_id=r.payload::jsonb#>>'{{metadata,source_version_id}}'
             JOIN record_version_assertions m ON m.project_id=a.project_id AND m.assertion_id=a.id
             JOIN assertion_events e ON e.id=m.assertion_event_id AND e.assertion_id=a.id
+            JOIN source_context_support support ON support.project_id=e.project_id AND support.id=e.id
             WHERE {qualified} AND r.payload::jsonb->>'kind'='chunk'
-              AND m.record_version_id=ANY(?::text[])"""
+              AND support.invalid_reason IS NULL AND m.record_version_id=ANY(?::text[])"""
         values = [*params, version_ids]
+        support_known,support_params=self._support_known(scope,'support')
+        statement+=' AND '+support_known;values.extend(support_params)
         if scope.get('known_at'):
             statement += ' AND m.created_at<=? AND a.created_at<=? AND e.created_at<=?'
             values.extend([normalize_time(scope['known_at'])] * 3)
         with self.repo._lock:
             mapped = self.repo._db.execute(statement + ' LIMIT 200', values).fetchall()
         for row in mapped:
-            anchor_versions.setdefault(row['version_id'], set()).add(row['anchor_record_version_id'])
+            anchor_versions.setdefault(row['version_id'], set()).update(version_links.get(row['anchor_record_version_id'],{row['anchor_record_version_id']}))
         anchors = list({row['version_id']: row for row in [*anchors, *[self.repo._record(row) for row in mapped]]}.values())
         # The source authority must still qualify; frozen old source text alone
         # cannot authorize a withdrawn or out-of-scope document.

@@ -4,11 +4,10 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 import pytest
 from knowledge_service.api import create_app
-from knowledge_service.domain.search_filter_catalog import default_catalog
 from knowledge_service.integrations.embeddings import HashingEncoder
 from knowledge_service.models import Question
-from knowledge_service.repository.scoped_reads import ScopedReads
 from knowledge_service.services.answers import answer_messages
+from keyword_index_fixture import activate_keyword_index, install_keyword_store
 
 AS_OF = '2025-01-01T00:00:00Z'
 
@@ -21,22 +20,14 @@ def _ready_keyword_index(service, monkeypatch):
     uses the local SQL implementation instead of requiring a Milvus server.
     """
     repo = service.repository
+    read_index = repo.projections.search_index
 
-    def selected_index(project, _schema):
-        return {'index_version': 1, 'watermark': repo.projections.project_watermark(project),
-                'catalog': default_catalog().to_dict(), 'dim': service.encoder.dimension,
-                'embedding_model': service.encoder.identity}
-
-    def search(project, query, *, kinds, k, scope, platform_match=None, **options):
-        assert options['retrieval_mode'] == 'keyword'
-        rows = ScopedReads(repo).ranked_keyword(
-            project, {**scope, '_platform_match': platform_match}, query,
-            kinds=kinds, limit=min(k, 100))
-        return [{'record_id': row['id'], 'version_id': row['version_id'], 'score': row['score']}
-                for row in rows]
+    def selected_index(project, schema):
+        activate_keyword_index(repo, project)
+        return read_index(project, schema)
 
     monkeypatch.setattr(repo.projections, 'search_index', selected_index)
-    monkeypatch.setattr(service, 'milvus_store', SimpleNamespace(available=True, search=search))
+    install_keyword_store(service, monkeypatch)
 
 
 @pytest.fixture
@@ -220,7 +211,8 @@ def test_occurrences_are_checked_individually_before_fact_support(invalid_reason
         list_record_version_assertions=lambda *_args, **_kwargs: mappings,
         get_assertion=lambda _p, assertion_id: assertions[assertion_id],
         list_assertion_events=lambda _p, assertion_id: [{'id': assertion_id + '-event',
-            'created_at': '2030-01-01' if invalid_reason == 'later_approval' and assertion_id == 'bad' else '2020-01-01'}],
+            'created_at': '2030-01-01' if invalid_reason == 'later_approval' and assertion_id == 'bad' else '2020-01-01',
+            'decision_version': 1, 'to_status': 'accepted', 'canonical_record_id': 'entity'}],
     )
     row = {'id': 'entity', 'version_id': 'ev', 'kind': 'entity', 'valid_from': '2020-01-01',
            'query_platform': '美团', 'metadata': app('美团')}

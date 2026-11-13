@@ -56,6 +56,48 @@ class Merge(Request):
     expected_versions:dict[str,int]
     attribute_winners:list[str]=[]
     preview_fingerprint:str|None=Field(default=None,min_length=64,max_length=64)
+    confirmed_identity:bool=False
+
+class DuplicateScan(Request):
+    limit:int=Field(default=20,ge=1,le=50)
+    cursor:str|None=Field(default=None,max_length=10000)
+
+class DuplicateGroup(Request):
+    key:str=Field(min_length=1,max_length=10000)
+
+class DuplicateConfirmGroup(DuplicateGroup):
+    preview_fingerprint:str=Field(pattern='^[a-f0-9]{64}$')
+
+class DuplicateConfirm(Request):
+    groups:list[DuplicateConfirmGroup]=Field(min_length=1,max_length=20)
+
+class DuplicateSources(DuplicateConfirmGroup):
+    entity_id:str=Field(min_length=1,max_length=200)
+    expected_version_id:str=Field(min_length=1,max_length=200)
+    limit:int=Field(default=10,ge=1,le=20)
+    cursor:str|None=Field(default=None,max_length=5000)
+
+class ConflictMemberRead(Scope):
+    expected_version_id:str|None=Field(default=None,max_length=200)
+    limit:int=Field(default=10,ge=1,le=50)
+    cursor:str|None=Field(default=None,max_length=5000)
+
+class ConflictPage(Scope):
+    limit:int=Field(default=20,ge=1,le=50)
+    cursor:str|None=Field(default=None,max_length=200)
+    entity_id:str|None=Field(default=None,min_length=1,max_length=200)
+
+class ConflictDecision(Request):
+    attribute_id:str=Field(min_length=1,max_length=200)
+    decision:Literal['accept','reject']
+    valid_from:str|None=None
+    valid_until:str|None=None
+
+class ConflictResolve(Request):
+    expected_version:int=Field(ge=1)
+    expected_members:list[dict]=Field(min_length=2,max_length=100)
+    decisions:list[ConflictDecision]=Field(min_length=2,max_length=100)
+    reason:str=Field(min_length=1,max_length=2000)
 
 class Delete(Request):
     record_id:str
@@ -316,11 +358,53 @@ def install(app,service):
     def merge(p:str,request:Merge,http_request:HttpRequest):return governance.merge(
         p,request.keep_id,request.drop_id,request.expected_versions,
         attribute_winners=request.attribute_winners, preview_fingerprint=request.preview_fingerprint,
+        confirmed_identity=request.confirmed_identity,
         actor=audit_actor(http_request))
 
     @router.post('/projects/{p}/merge/preview')
     def merge_preview(p:str,request:Merge):return governance.merge_preview(
         p,request.keep_id,request.drop_id,request.expected_versions)
+
+    @router.post('/projects/{p}/duplicates/scan')
+    def duplicate_scan(p:str,request:DuplicateScan):return governance.scan_duplicates(p,**request.model_dump())
+
+    @router.post('/projects/{p}/duplicates/preview')
+    def duplicate_preview(p:str,request:DuplicateGroup):return governance.preview_duplicate_group(p,request.key)
+
+    @router.post('/projects/{p}/duplicates/confirm')
+    def duplicate_confirm(p:str,request:DuplicateConfirm,http_request:HttpRequest):
+        return governance.confirm_duplicate_groups(p,[g.model_dump() for g in request.groups],actor=audit_actor(http_request))
+
+    @router.post('/projects/{p}/duplicates/sources')
+    def duplicate_sources(p:str,request:DuplicateSources):return governance.duplicate_sources(p,**request.model_dump())
+
+    @router.post('/projects/{p}/attribute-conflicts')
+    def conflict_page(p:str,request:ConflictPage):
+        from ..repository.attribute_conflicts import ConflictReads
+        data=request.model_dump();limit=data.pop('limit');cursor=data.pop('cursor');entity=data.pop('entity_id')
+        return ConflictReads(service.repository).page(p,data,limit=limit,cursor=cursor,entity_id=entity)
+
+    @router.post('/projects/{p}/attribute-conflicts/{set_id}/read')
+    def conflict_read(p:str,set_id:str,request:Scope):
+        from ..repository.attribute_conflicts import ConflictReads
+        return ConflictReads(service.repository).read(p,set_id,request.model_dump())
+
+    @router.post('/projects/{p}/attribute-conflicts/{set_id}/members/{record_id}/read')
+    def conflict_member(p:str,set_id:str,record_id:str,request:ConflictMemberRead):
+        from ..repository.attribute_conflicts import ConflictReads
+        data=request.model_dump();expected=data.pop('expected_version_id');data.pop('limit');data.pop('cursor')
+        return ConflictReads(service.repository).member(p,set_id,record_id,data,expected_version_id=expected)
+
+    @router.post('/projects/{p}/attribute-conflicts/{set_id}/members/{record_id}/sources')
+    def conflict_sources(p:str,set_id:str,record_id:str,request:ConflictMemberRead):
+        from ..repository.attribute_conflicts import ConflictReads
+        data=request.model_dump();expected=data.pop('expected_version_id');limit=data.pop('limit');cursor=data.pop('cursor')
+        return ConflictReads(service.repository).sources(p,set_id,record_id,data,expected_version_id=expected,limit=limit,cursor=cursor)
+
+    @router.post('/projects/{p}/attribute-conflicts/{set_id}/resolve')
+    def conflict_resolve(p:str,set_id:str,request:ConflictResolve,http_request:HttpRequest):
+        from ..services.attribute_conflicts import AttributeConflicts
+        return AttributeConflicts(service).resolve(p,set_id,request.model_dump(exclude_unset=True),actor=audit_actor(http_request))
 
     @router.post('/projects/{p}/delete')
     def delete(p:str,request:Delete):return governance.delete(p,request.record_id,request.expected_version)

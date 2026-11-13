@@ -13,7 +13,7 @@ from knowledge_service.repository.scoped_reads import ScopedReads
 from knowledge_service.services import service as service_module
 from knowledge_service.services.answers import answer_messages, _retrieved_question_context as question_context
 from knowledge_service.services.projection_sync import ProjectionSync
-from knowledge_service.services.retrieval import RetrievalEngine
+from knowledge_service.services.retrieval import PROJECTION_SCHEMA_VERSIONS, RetrievalEngine
 from knowledge_service.services.service import KnowledgeService
 
 
@@ -27,22 +27,26 @@ class VocabularyRepository:
 
 
 def _activate_native_index(repository, project, *, embedding_model, dim):
-    sync = ProjectionSync(repository.projections, {}, schema_version=3)
+    schema_version = PROJECTION_SCHEMA_VERSIONS['milvus']
+    sync = ProjectionSync(repository.projections, {}, schema_version=schema_version)
     rebuild = repository.projections.begin_rebuild(
-        project, 'milvus', 3, 'native-grouping-fixture',
+        project, 'milvus', schema_version, 'native-grouping-fixture',
         lease_guard=sync._rebuild_lease_guard, embedding_model=embedding_model, dim=dim)
-    state = {**rebuild['state'], 'catalog': default_catalog().to_dict()}
-    with repository.projections.activation_guard(project, rebuild['claim'], 3) as watermark:
+    state = {**rebuild['state'], 'catalog': default_catalog().to_dict(),
+        'search_capabilities': ['attributes_v1', 'attribute_windows_v1', 'source_contexts_v1',
+            'entity_source_contexts_v1', 'relation_source_contexts_v1', 'entity_fact_contexts_v1']}
+    with repository.projections.activation_guard(project, rebuild['claim'], schema_version) as watermark:
         assert watermark == rebuild['snapshot_seq']
-        repository.projections.activate_index(rebuild['claim'], 3, watermark, state)
+        repository.projections.activate_index(rebuild['claim'], schema_version, watermark, state)
     cursor = repository.projections.cursor(project, 'milvus')
-    assert cursor['status'] == 'ready' and cursor['schema_version'] == 3
+    assert cursor['status'] == 'ready' and cursor['schema_version'] == schema_version
     assert cursor['applied_seq'] == repository.projections.project_watermark(project)
     assert cursor['rebuild_state']['embedding_model'] == embedding_model
     assert cursor['rebuild_state']['dim'] == dim
-    index = repository.projections.search_index(project, 3)
+    index = repository.projections.search_index(project, schema_version)
     assert (index['embedding_model'], index['dim'], index['watermark']) == (
         embedding_model, dim, watermark)
+    assert index['search_capabilities'] == state['search_capabilities']
     return index
 
 
@@ -368,7 +372,7 @@ def test_native_backfill_filters_current_versions_without_per_hit_get_record(tmp
     assert native_calls[0][2]['index_version'] == index['index_version']
     assert len(hydration_calls) == 1
     assert hydration_calls[0][0] == project
-    assert hydration_calls[0][2:] == (['current', 'old'], ['entity', 'relation', 'chunk'])
+    assert hydration_calls[0][2:] == (['current', 'old'], ['entity', 'relation', 'attribute', 'chunk'])
 
 
 def test_mixed_group_backend_uses_bounded_authority_for_source_and_context(
@@ -649,9 +653,9 @@ def test_grouped_semantic_search_encodes_query_once_for_all_platforms(
 
     assert len(result['platform_groups']) == 21
     assert service.encoder.calls == 1
-    assert len(calls) == 63
+    assert len(calls) == 84
     assert Counter((tuple(call[2]['kinds']), call[2]['platform_match']) for call in calls) == Counter({
-        ((kind,), match): count for kind in ('entity', 'chunk', 'relation')
+        ((kind,), match): count for kind in ('entity', 'chunk', 'relation', 'attribute')
         for match, count in (('specific_only', 20), ('all_only', 1))})
     platform_calls = Counter()
     for project_id, query, options in calls:
@@ -663,8 +667,8 @@ def test_grouped_semantic_search_encodes_query_once_for_all_platforms(
         assert 5 <= options['k'] <= RetrievalEngine.MAX_NATIVE_LIMIT
         if options['platform_match'] == 'specific_only':
             platform_calls.update(options['scope']['applicability']['platforms']['values'])
-    assert platform_calls == Counter({f'平台{index:02d}': 3 for index in range(20)})
+    assert platform_calls == Counter({f'平台{index:02d}': 4 for index in range(20)})
     assert all(group['hits'] == [] for group in result['platform_groups'])
-    assert result['channel_quotas'] == {'entity': 5, 'chunk': 5, 'relation': 5}
+    assert result['channel_quotas'] == {'entity': 5, 'chunk': 5, 'relation': 5, 'attribute': 5}
     assert [(group['platform'], group['source_scope']) for group in result['platform_groups']] == [
         *[(f'平台{index:02d}', 'specific') for index in range(20)], (None, 'all')]

@@ -265,6 +265,11 @@
   get('mindmap-zoom-in').onclick=()=>mindmapView?.zoom(1.2);
   get('mindmap-zoom-out').onclick=()=>mindmapView?.zoom(1/1.2);
   get('mindmap-reset-view').onclick=()=>mindmapView?.reset();
+  get('mindmap-toggle-settings').onclick=()=>{
+    const settings=get('mindmap-settings'),button=get('mindmap-toggle-settings');
+    settings.hidden=!settings.hidden;button.setAttribute('aria-expanded',String(!settings.hidden));
+    button.textContent=settings.hidden?'展开设置':'收起设置';
+  };
   const mindmap=EntityMindmap.createController({getProject:()=>current,
     getScope:()=>({...window.WorkspaceContext?.read(current,'search')||scope(),...ontologyScope()}),
     ticket:()=>window.WorkspaceContext?.ticket(current,'search'),accepts:ticket=>!ticket||window.WorkspaceContext.accepts(ticket,current,'search'),api,
@@ -274,6 +279,10 @@
       if(!mindmapView){mindmapView=EntityMindmapView.create({chart:wb.tree,host:get('mindmap-canvas'),
         summary:get('mindmap-summary'),empty:get('mindmap-empty'),zoomLabel:get('mindmap-zoom-level'),
         buttons:{in:get('mindmap-zoom-in'),out:get('mindmap-zoom-out'),reset:get('mindmap-reset-view')},
+        onInspect:row=>window.EntityAttributePanel?.open({entity:row,projectId:current,
+          scope:{...window.WorkspaceContext?.read(current,'search')||scope(),...ontologyScope()}}),
+        onHover:row=>window.EntityAttributePanel?.hoverHtml(row,{projectId:current,
+          scope:{...window.WorkspaceContext?.read(current,'search')||scope(),...ontologyScope()}}),
         labelOf,colorFor:type=>GraphPalette.colorFor(type)});
         window.EntityMindmapExplorer?.mount({view:mindmapView,root:get('tab-mindmap'),host:get('mindmap-canvas'),labelOf,colorFor:type=>GraphPalette.colorFor(type)});
       }
@@ -547,7 +556,7 @@
   // 用户反馈："检索 没看到有父类的信息" + "知识图谱也没父类相关的信息" ——
   // 层级在**类**之间，实体节点本身没有父类，所以这里显示的是"它所属的类"的父类链
   // （数据来自 /subgraph 的 class_parents / class_ancestors，唯一出处是服务端 ontology_family）。
-  function graphTooltip(point){
+  function graphTooltip(point,tooltipTicket,callback){
     if(point.dataType==='edge'){
       const raw=point.data.rawType;
       return esc(raw&&raw!==point.data.name?point.data.name+'（'+raw+'）':point.data.name);
@@ -565,7 +574,14 @@
       rows.push(`完整继承链：${esc([node.class_label,...ancestors].filter(Boolean).join(' → '))}`);
     }
     const links=(ui.graph?.edges||[]).filter(edge=>edge.subject_id===node.id||edge.object_id===node.id).length;
-    return '<div class="fg-hover-meta"><span class="fg-hover-kind">实体</span><span>'+links+' 条关系</span></div>'+rows.join('<br>')+'<div class="fg-hover-id">'+esc(node.id||point.data.id)+'</div>';
+    const html='<div class="fg-hover-meta"><span class="fg-hover-kind">实体</span><span>'+links+' 条关系</span></div>'+rows.join('<br>')+'<div class="fg-hover-id">'+esc(node.id||point.data.id)+'</div>';
+    if(node.id&&typeof callback==='function'){
+      const project=current,applied=effectiveGraphScope(),stamp=JSON.stringify(applied),version=JSON.stringify(wb.versionContext||null),chart=wb.chart;
+      window.EntityAttributePanel?.hoverHtml(node,{projectId:project,scope:applied}).then(summary=>{
+        if(current===project&&chart===wb.chart&&stamp===JSON.stringify(effectiveGraphScope())&&version===JSON.stringify(wb.versionContext||null))callback(tooltipTicket,html+summary);
+      }).catch(()=>{});
+    }
+    return html;
   }
   function updateGraphTypeChoices(graph){
     for(const [id,rows,kind] of [['type-scope',graph.nodes,'entity'],['predicate-scope',graph.edges,'relation']]){
@@ -666,15 +682,20 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
       const score=!isSource&&scoreValue!==undefined?` · ${scoreLabel} ${Number(scoreValue.toPrecision(5))}`:'';
       const tag=isSource?'命中知识的来源原文':(labelOf(r.type)||'原文');
       const identity=`data-graph-id="${esc(r.id)}" data-graph-kind="${esc(kind)}"${r.version_id?` data-graph-version-id="${esc(r.version_id)}"`:''}${r.version!=null?` data-graph-version="${esc(r.version)}"`:''}`;
-      const btn=kind==='entity'||kind==='relation'
+      const btn=kind==='attribute'
+        ?`<button data-attribute-owner="${esc(r.owner_id||r.subject_id)}" data-attribute-fact="${esc(r.id)}" data-attribute-predicate="${esc(r.type)}"${r.version_id?` data-attribute-version-id="${esc(r.version_id)}"`:''}${r.version!=null?` data-attribute-version="${esc(r.version)}"`:''}>查看属性与来源</button>`
+        :kind==='entity'||kind==='relation'
         ?`<button data-graph-node="${esc(r.id)}" data-graph-view="local" ${identity}>${localActionLabel()}</button><button class="secondary" data-graph-view="full" ${identity}>全局查看</button>`
         :(kind==='chunk'&&r.source_id?`<button data-source-record="${esc(r.source_id)}" class="secondary">查看原文</button>`:'');
       const applicability=window.ApplicabilityUI?.describe?.(r);
       const expansionLabel=isExpansion(r)?' · 类型扩展':'';
-      return `<article class="hit-entry${isSource?' hit-source':''}"><b>${esc((r.text||'').slice(0,80))}</b><span>${esc(tag)}${score}${applicability?' · '+esc(applicability):''}${expansionLabel}</span><p>${esc((r.text||'').slice(0,180))}</p>${btn?`<div class="row">${btn}</div>`:''}</article>`;
+      const title=kind==='attribute'?`${r.owner_label||r.owner_id||r.subject_id} → ${r.property_label||r.type_label||labelOf(r.type)}`:(r.text||'').slice(0,80);
+      const excerpt=kind==='attribute'?(typeof r.matched_value==='string'?r.matched_value:JSON.stringify(r.matched_value??r.value)):(r.text||'');
+      return `<article class="hit-entry${isSource?' hit-source':''}"><b>${esc(title)}</b><span>${esc(tag)}${score}${applicability?' · '+esc(applicability):''}${expansionLabel}${r.value_truncated?' · 属性片段':''}</span><p>${esc((excerpt||'').slice(0,180))}</p>${btn?`<div class="row">${btn}</div>`:''}</article>`;
     };
     const entities=hits.filter(r=>r.kind==='entity');
     const relations=hits.filter(r=>r.kind==='relation');
+    const attributes=hits.filter(r=>r.kind==='attribute');
     // 「原文片段」组 = 命中实体/关系的来源原文 + chunk 全文命中，两部分分块展示。
     // 这是检索溯源的落点：搜「商家」命中「商户」时，来源原文里其实没有「商家」这个词，
     // 但它支撑了命中的实体，必须一并展示，否则用户只看到实体、看不到它来自哪段原文。
@@ -690,6 +711,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     let content=[
       platformSummary,
       `<section><h3 class="hit-kind">匹配实体 <small>${entities.length} / ${result.channel_quotas?.entity??5}</small></h3>${entities.map(r=>entry(r,'entity')).join('')||'<p class="subtle">暂无命中</p>'}</section>`,
+      `<section><h3 class="hit-kind">属性值 <small>${attributes.length} / ${result.channel_quotas?.attribute??5}</small></h3>${attributes.map(r=>entry(r,'attribute')).join('')||'<p class="subtle">暂无命中</p>'}</section>`,
       chunkSection,
       `<section><h3 class="hit-kind">关系链路 <small>${relations.length} / ${result.channel_quotas?.relation??5}</small></h3>${relations.map(r=>entry(r,'relation')).join('')||'<p class="subtle">暂无命中</p>'}</section>`,
     ].join('');
@@ -702,7 +724,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
       const direct=unique(split.direct),supplemental=unique(split.supplemental);
       const sources=unique(sourceChunks),neighbors=unique(contextChunks);
       const channels=rows=>`<div class="ontology-result-grid">`+[
-        ['entity','匹配实体'],['chunk','原文片段'],['relation','关系链路'],
+        ['entity','匹配实体'],['attribute','属性值'],['chunk','原文片段'],['relation','关系链路'],
       ].map(([kind,label])=>{const items=rows.filter(row=>row.kind===kind);
         if(!items.length)return '';
         return `<section><h4 class="hit-kind">${label} <small>${items.length} 条</small></h4>${items.map(row=>entry(row,kind)).join('')||'<p class="subtle">暂无命中</p>'}</section>`;
@@ -725,6 +747,11 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
         resultSection('supplemental','本体扩展补充',supplemental,summary,empty)+provenance;
     }
     get('hits').innerHTML=content;
+    get('hits').querySelectorAll('[data-attribute-fact]').forEach(button=>button.onclick=()=>{
+      window.EntityAttributePanel?.open({entity:{id:button.dataset.attributeOwner,text:'实体属性'},projectId:current,
+        scope:frozenAuthority,predicate:button.dataset.attributePredicate,focusRecordId:button.dataset.attributeFact,
+        expectedFactVersion:{...(button.dataset.attributeVersionId?{version_id:button.dataset.attributeVersionId}:{}),...(button.dataset.attributeVersion?{version:Number(button.dataset.attributeVersion)}:{})}});
+    });
     get('hits').querySelectorAll('[data-graph-view]').forEach(b=>b.onclick=async()=>{
       if(b.disabled)return;
       const display=(window.FullGraphView?.mode==='full'?window.FullGraphView.filters:null)||graphScope();
@@ -755,7 +782,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
       // 默认关闭；命中实体名、别名或类名后，沿所属类型及子类补充相关内容。
       // 它只补召回，不放宽可见范围（权限/时态仍由 scope 决定）；关闭时读路径与旧行为一致。
       ontology_expansion:Boolean(get('ontology-expansion')?.checked),
-      k_entities:5,k_chunks:5,k_relations:5};
+      k_entities:5,k_chunks:5,k_relations:5,k_attributes:5};
     try{window.ScopeFields.requireRetrievalScope(body);}
     catch(error){get('search-summary').textContent=error.message;throw error;}
     get('search-summary').textContent=body.retrieval_mode==='keyword'?'读取所选范围…':'正在进行语义检索，首次加载模型可能需要较长时间…';

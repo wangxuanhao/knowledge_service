@@ -190,6 +190,9 @@ services:
       ETCD_REQUEST_TIMEOUT: "30000"
       ETCD_DIAL_TIMEOUT: "10000"
       LOG_LEVEL: "warn"
+      # Added nullable fields need old sealed segments upgraded before their
+      # indexes can finish (Milvus 3.0 defaults this background step to false).
+      DATACOORD_COMPACTION_BUMPSCHEMAVERSION_ENABLED: "true"
       MINIO_REGION: "${MINIO_REGION:-us-east-1}"
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000

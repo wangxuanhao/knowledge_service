@@ -290,6 +290,12 @@ class Repository:
             fact_keys = [dict(row) for row in self._db.execute(
                 'SELECT * FROM fact_keys WHERE project_id=? ORDER BY fact_key,created_at',(project_id,)).fetchall()]
             merge_operations = self.list_merge_operations(project_id)
+            conflict_sets=[dict(row) for row in self._db.execute(
+                'SELECT * FROM attribute_conflict_sets WHERE project_id=? ORDER BY id',(project_id,)).fetchall()]
+            conflict_members=[dict(row) for row in self._db.execute(
+                'SELECT * FROM attribute_conflict_members WHERE project_id=? ORDER BY set_id,record_id',(project_id,)).fetchall()]
+            for item in conflict_sets:item['decisions']=json.loads(item['decisions'])
+            for item in conflict_members:item['assertion_versions']=json.loads(item['assertion_versions'])
             artifacts = []
             for row in self._db.execute(
                     'SELECT id,kind,project_id,payload FROM artifacts WHERE project_id=? ORDER BY seq',
@@ -315,6 +321,7 @@ class Repository:
                     'governance': {'assertions': assertions, 'assertion_events': assertion_events,
                         'fact_keys': fact_keys, 'ingest_runs': ingest_runs,
                         'resolution_reviews': resolution_reviews, 'merge_operations': merge_operations,
+                        'attribute_conflict_sets':conflict_sets,'attribute_conflict_members':conflict_members,
                         'ontology': ontology_governance}}
 
     def restore_projection(self, snapshot):
@@ -409,6 +416,8 @@ class Repository:
                     'merge_operations', governance.get('merge_operations', ()),
                     ('redirects', 'assertion_moves', 'before_state', 'after_state',
                      'expected_versions'))
+                insert_rows('attribute_conflict_sets',governance.get('attribute_conflict_sets',()),('decisions',))
+                insert_rows('attribute_conflict_members',governance.get('attribute_conflict_members',()),('assertion_versions',))
 
             insert_rows(
                 'record_version_assertions',
@@ -675,7 +684,7 @@ class Repository:
         self._db.execute(
             '''LOCK TABLE projects,ontologies,record_versions,assertions,
                           assertion_events,record_version_assertions,fact_keys,
-                          resolution_reviews,merge_operations
+                          resolution_reviews,merge_operations,attribute_conflict_sets,attribute_conflict_members
                IN SHARE ROW EXCLUSIVE MODE''')
 
     @contextmanager
@@ -771,6 +780,7 @@ class Repository:
                 for table in ('provenance_edges', 'provenance_activities', 'record_version_assertions')
             }
             ontology_governance_deleted = self._ontology_drafts.delete_counts(project_id)
+            self._db.execute('DELETE FROM attribute_conflict_sets WHERE project_id=?',(project_id,))
             r = self._db.execute('DELETE FROM record_versions WHERE project_id=?', (project_id,))
             records_deleted = r.rowcount
             # record_fts 是 FTS5 虚拟表，无外键不参与级联，必须显式删除，
@@ -1219,9 +1229,12 @@ class Repository:
             'assertions': assertions,
             'assertion_events': events,
             'record_version_assertions': [dict(row) for row in self._db.execute(
-                '''SELECT * FROM record_version_assertions
-                   WHERE project_id=? ORDER BY record_id,record_version_id,
-                                                assertion_id,assertion_event_id''',
+                '''SELECT m.*,r.read_type AS mapped_type,
+                          r.payload::jsonb->>'ontology_id' AS mapped_ontology_id
+                   FROM record_version_assertions m JOIN record_versions r
+                     ON r.project_id=m.project_id AND r.version_id=m.record_version_id
+                   WHERE m.project_id=? ORDER BY m.record_id,m.record_version_id,
+                                                m.assertion_id,m.assertion_event_id''',
                 (project_id,)).fetchall()],
             'fact_keys': [dict(row) for row in self._db.execute(
                 '''SELECT * FROM fact_keys WHERE project_id=?
@@ -1230,6 +1243,31 @@ class Repository:
             'resolution_reviews': self._reviews.export(project_id),
             'merge_operations': self.list_merge_operations(project_id),
         }
+        # Retain only compact class aliases from releases referenced by this
+        # detached identity state. Removed classes must resolve in their bound
+        # publication, without loading every historical Turtle into the planner.
+        releases={ontology_id} if ontology_id else set()
+        releases.update(row.get('ontology_id') for row in snapshot['records'] if row.get('kind')=='entity')
+        entity_assertions={row['id'] for row in assertions if row['kind']=='entity'}
+        releases.update((row.get('payload') or {}).get('ontology_id') for row in assertions if row['kind']=='entity')
+        releases.update(row.get('mapped_ontology_id') for row in snapshot['record_version_assertions']
+                        if row['assertion_id'] in entity_assertions)
+        for ledger in snapshot['merge_operations']:
+            releases.update(row.get('ontology_id') for row in [*ledger['before_state'],*ledger['after_state']]
+                            if row.get('kind')=='entity')
+        releases=sorted(value for value in releases if isinstance(value,str) and value)
+        aliases={}
+        for offset in range(0,len(releases),1000):
+            rows=self._db.execute('''SELECT id,coalesce((SELECT jsonb_agg(
+                    jsonb_build_object('id',term.value->'id','name',term.value->'name',
+                        'active',coalesce(term.value->'active','true'::jsonb)) ORDER BY term.value->>'id')
+                FROM jsonb_array_elements(CASE WHEN jsonb_typeof(summary::jsonb->'classes')='array'
+                    THEN summary::jsonb->'classes' ELSE '[]'::jsonb END) term(value)),
+                    '[]'::jsonb) AS classes FROM ontologies
+                WHERE project_id=? AND id=ANY(?::text[]) ORDER BY id''',
+                (project_id,releases[offset:offset+1000])).fetchall()
+            aliases.update({row['id']:json.loads(row['classes']) for row in rows})
+        snapshot['ontology_class_aliases']=aliases
         snapshot['fingerprint'] = self._publish_fingerprint(snapshot)
         return snapshot
 
@@ -1355,6 +1393,22 @@ class Repository:
     def projection_authority_records(self, project_id, version_ids):
         from .projection_authority import ProjectionAuthorityReads
         return ProjectionAuthorityReads(self).records(project_id, version_ids)
+
+    def current_source_contexts(self, project_id, record_ids, *, known_at=None):
+        from .source_contexts import SourceContexts
+        return SourceContexts(self).current_source_contexts(project_id, record_ids, known_at=known_at)
+
+    def source_identity_projection_readiness(self,project_id):
+        from .identity_readiness import source_identity_projection_readiness
+        return source_identity_projection_readiness(self,project_id)
+
+    def backfill_source_contexts(self, project_id, **options):
+        from .source_contexts import SourceContexts
+        return SourceContexts(self).backfill(project_id, **options)
+
+    def source_context_diagnostics(self, project_id):
+        from .source_contexts import SourceContexts
+        return SourceContexts(self).diagnostics(project_id)
 
     def distinct_applicability_values(self, project_id):
         """Return canonical values from current, non-deleted record versions."""
@@ -1546,15 +1600,16 @@ class Repository:
             ).fetchone()[0]
 
     # ------------------------------------------------------------------ 断言（转发到 AssertionStore）
-    def _create_assertion(self, project_id, item):
+    def _create_assertion(self, project_id, item, *, recorded_at=None):
         # 供 FormalFactWriter 等内部调用方在已有事务内直接落库（跳过公开方法的独立事务）
-        return self._assertions._create(project_id, item)
+        return self._assertions._create(project_id, item, recorded_at=recorded_at)
 
     def _transition_assertion(self, project_id, assertion_id, expected_version, status,
-                              reason, actor, canonical_record_id=None, reprocess=False):
+                              reason, actor, canonical_record_id=None, reprocess=False,
+                              recorded_at=None):
         return self._assertions._transition(
             project_id, assertion_id, expected_version, status, reason, actor,
-            canonical_record_id, reprocess)
+            canonical_record_id, reprocess, recorded_at=recorded_at)
 
     def create_assertion(self, project_id, item):
         return self._assertions.create(project_id, item)

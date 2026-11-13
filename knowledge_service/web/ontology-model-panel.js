@@ -1023,6 +1023,8 @@
     const box = el('div', 'om-detail-card');
     box.append(detailHead('实体类', 'cls', cls, cls.id));
     if (cls.description) box.append(el('p', 'om-detail-desc', cls.description));
+    if(window.OntologyIdentity)box.append(window.OntologyIdentity.classSection(cls,
+      {model:model(),project:activeProject,title:detailTitle}));
 
     if(window.OntologyAttributes)box.append(window.OntologyAttributes.classSection(cls,summary,
       {model:model(),project:activeProject,title:detailTitle}));
@@ -1349,7 +1351,8 @@
       && Number(latestOntology.metadata.version))
       || (versions.loaded ? versions.list.length : 0);
     const annotationOnly = ops.length > 0 && ops.every(o =>
-      o.action === 'add_annotation' || o.action === 'remove_annotation');
+      (o.action === 'add_annotation' || o.action === 'remove_annotation')
+      && !!window.OntologyIdentity && !window.OntologyIdentity?.isIdentityOperation(o));
     const nextVersion = annotationOnly ? Math.max(currentVersion, 1) : currentVersion + 1;
     const btnPub = el('button', 'om-btn primary',localTask?.kind==='publish'?localTask.message:
       versions.loaded

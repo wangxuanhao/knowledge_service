@@ -99,9 +99,11 @@ class ProvenanceStore:
                        assertion_id, assertion_event_id, created_at=None):
         with self.repo._transaction():
             self.repo.get_project(project_id)
-            return self._insert_mapping(
+            result = self._insert_mapping(
                 project_id, record_id, record_version_id, assertion_id,
                 assertion_event_id, created_at)
+            self.repo.projections.enqueue_source_context_changes(project_id, [record_id])
+            return result
 
     def list_mappings(self, project_id, *, record_version_id=None, assertion_id=None):
         self.repo.get_project(project_id)

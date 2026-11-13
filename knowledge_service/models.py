@@ -109,6 +109,7 @@ class Search(Scope):
     k_entities: int = Field(default=5, ge=0, le=50)
     k_chunks: int = Field(default=5, ge=0, le=50)
     k_relations: int = Field(default=5, ge=0, le=50)
+    k_attributes: int = Field(default=5, ge=0, le=50)
     k_per_platform: int = Field(default=5, ge=1, le=20)
     k_unknown: int = Field(default=3, ge=1, le=20)
     # 本体扩展（P0-1）：开启后顺着本体的父子关系补召回 —— 查询里出现类名（含业务标签）时，
@@ -145,6 +146,8 @@ class IngestSettings(Request):
     valid_until: str | None = None
     extraction_mode: Literal['ontology','discovery','documents'] = 'ontology'
     extract_attributes: bool = False
+    attribute_max_per_entity: int = Field(default=50, ge=1, le=500)
+    attribute_max_total: int = Field(default=500, ge=1, le=500)
     relation_constraint_mode: Literal['advisory','review','strict','off'] = 'review'
     ontology_id: str | None = None
     resolve_entities:bool=True

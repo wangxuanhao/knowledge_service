@@ -672,7 +672,7 @@
     request++;pager?.invalidate();clearTimeout(searchTimer);loading=false;host.setAttribute('aria-busy','false');
   });
   $('project').addEventListener('change',()=>{request++;pager?.invalidate();clearTimeout(searchTimer);rows=[];total=0;ontology=null;assertions=null;operations=[];duplicates=null;pendingLedgerFocus=null;reclassifyPlan=undefined;$('record-search').value='';syncKindSelect();if(!tab.classList.contains('hidden'))load();});
-  window.refreshKnowledgeLedger=async()=>visible()?(await load())!==false:true;
+  window.refreshKnowledgeLedger=async detail=>visible()?(await (detail?.preserveGovernance?loadPage():load()))!==false:true;
   document.addEventListener('records:created',event=>{if(!window.KnowledgeChanges&&event.detail?.projectId===current&&!tab.classList.contains('hidden'))void loadPage();});
   document.addEventListener('workspace:scope-changed',event=>{
     if(event.detail?.page==='records'&&!tab.classList.contains('hidden'))void load();

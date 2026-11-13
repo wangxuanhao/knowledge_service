@@ -63,6 +63,11 @@ _READ_ONLY_POST_PATTERNS = (
     r'^/api/projects/[^/]+/graph-sessions/[^/]+/page$',
     r'^/api/projects/[^/]+/graph-neighborhood$',
     r'^/api/projects/[^/]+/merge/preview$',
+    r'^/api/projects/[^/]+/duplicates/(scan|preview|sources)$',
+    r'^/api/projects/[^/]+/attribute-conflicts/[^/]+/read$',
+    r'^/api/projects/[^/]+/attribute-conflicts$',
+    r'^/api/projects/[^/]+/attribute-conflicts/[^/]+/members/[^/]+/(read|sources)$',
+    r'^/api/projects/[^/]+/entities/[^/]+/attributes(?:/[^/]+(?:/sources)?)?$',
     r'^/api/projects/[^/]+/sparql$',
     r'^/api/projects/[^/]+/ontology/validate$',
     # ── parity.py：各类只读视图与「预览/干跑」（不落库）──

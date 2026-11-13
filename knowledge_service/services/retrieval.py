@@ -16,7 +16,7 @@ LOG = logging.getLogger('knowledge_service.retrieval')
 
 # Native projection readers must explicitly opt into the schema they understand.
 # A missing cursor is deliberately stale; authority remains PostgreSQL.
-PROJECTION_SCHEMA_VERSIONS = {'milvus': 3, 'neo4j': 3}
+PROJECTION_SCHEMA_VERSIONS = {'milvus': 4, 'neo4j': 3}
 
 
 def has_vector(row):
@@ -222,6 +222,7 @@ class RetrievalEngine:
         if not target:
             return [], 0, True
         limit = min(self.MAX_NATIVE_LIMIT, max(16, target * 2))
+        from .retrieval_hits import qualified_hits
         rows_by_version, seen = {}, set()
         ranked = []
         for attempt in range(self.MAX_REFILLS):
@@ -229,20 +230,15 @@ class RetrievalEngine:
                 query_vector=vector, kinds=kinds, k=limit, scope=scope,
                 index_version=index['index_version'], catalog=catalog,
                 platform_match=platform_match)
-            fresh = [hit for hit in hits if hit.get('version_id') not in seen]
+            fresh = [hit for hit in hits if hit.get('vector_id',hit.get('version_id')) not in seen]
             ids = list(dict.fromkeys(hit['record_id'] for hit in fresh if hit.get('record_id')))
             if ids:
                 rows = ScopedReads(self.repository).by_ids(project,
                     {**pg_scope, '_platform_match': platform_match}, ids, kinds=kinds)
                 rows_by_version.update((row['version_id'], row) for row in rows)
-            seen.update(hit.get('version_id') for hit in fresh)
-            ranked = []
-            for hit in hits:
-                row = rows_by_version.get(hit.get('version_id'))
-                if row is not None:
-                    score = float(hit.get('score') or 0)
-                    ranked.append({**{key: value for key, value in row.items() if key != 'embedding'},
-                                   'score': score, **({'keyword_score': score} if mode == 'keyword' else {})})
+            seen.update(hit.get('vector_id',hit.get('version_id')) for hit in fresh)
+            ranked=qualified_hits(self.repository,project,{**pg_scope,'_platform_match':platform_match},list(rows_by_version.values()),hits)
+            if mode=='keyword':ranked=[{**row,'keyword_score':row['score']} for row in ranked]
             if len(ranked) >= target or len(hits) < limit:
                 return ranked[:target], len(seen), True
             if limit == self.MAX_NATIVE_LIMIT:
@@ -268,8 +264,8 @@ class RetrievalEngine:
         current_qa = (raw.get('_qa_current_snapshot') is True
                       and raw.get('_explicit_known_at') is False
                       and isinstance(expected_index, dict))
-        channels = list(content_channels or ['entity', 'relation', 'chunk'])
-        if any(kind not in {'entity', 'relation', 'chunk'} for kind in channels):
+        channels = list(content_channels or ['entity', 'relation', 'attribute', 'chunk'])
+        if any(kind not in {'entity', 'relation', 'attribute', 'chunk'} for kind in channels):
             raise ValueError('不支持的内容通道')
         if raw.get('kinds') is not None:
             channels = [kind for kind in channels if kind in raw['kinds']]
@@ -301,6 +297,8 @@ class RetrievalEngine:
             if self.milvus is None or not self.milvus.available:
                 raise RuntimeError('Milvus 索引不可用，请连接服务并在项目页面向量化')
             index, catalog = self._current_index(project_id, expected_index if current_qa else None)
+            if 'attribute' in channels and 'attributes_v1' not in index.get('search_capabilities',[]):
+                raise RuntimeError('当前索引尚未包含属性，请在项目页面重新向量化')
             native_scope = dict(page_scope)
             if native_scope.pop('_source_document_scope', None) is not None:
                 qualified_batches = True

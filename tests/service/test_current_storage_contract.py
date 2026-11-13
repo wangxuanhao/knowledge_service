@@ -9,7 +9,7 @@ from knowledge_service.repository import OntologyDraftStore, Repository
 from knowledge_service.repository.snapshot_validation import validate_restore_snapshot
 
 
-def full_snapshot(version=18):
+def full_snapshot(version=19):
     draft = {
         'id': 'draft', 'project_id': 'project', 'base_ontology_id': None,
         'source_kind': 'manual', 'status': 'pending', 'revision': 1,
@@ -38,6 +38,7 @@ def full_snapshot(version=18):
         'governance': {
             'assertions': [], 'assertion_events': [], 'fact_keys': [], 'ingest_runs': [],
             'resolution_reviews': [], 'merge_operations': [],
+            'attribute_conflict_sets':[],'attribute_conflict_members':[],
             'ontology': {'drafts': [draft], 'operations': [], 'decisions': [], 'publish_requests': []},
         },
         'provenance': {'activities': [], 'edges': [], 'record_version_assertions': []},
@@ -47,6 +48,13 @@ def full_snapshot(version=18):
 class CurrentStorageContractTests(unittest.TestCase):
     def validate(self, snapshot):
         return validate_restore_snapshot(snapshot)
+
+    def test_conflict_ledger_is_an_explicit_versioned_snapshot_section(self):
+        snapshot=full_snapshot()
+        snapshot['schema_version']=19
+        snapshot['governance']['attribute_conflict_sets']=[]
+        snapshot['governance']['attribute_conflict_members']=[]
+        self.assertTrue(self.validate(snapshot)['declared_full'])
 
     def test_current_full_snapshot_preserves_current_draft_and_record_fields(self):
         snapshot = full_snapshot()
@@ -78,11 +86,11 @@ class CurrentStorageContractTests(unittest.TestCase):
                        'list_provenance_activities', 'list_provenance_edges'):
             setattr(repository, method, lambda project: [])
         exported = repository.export_projection('project')
-        self.assertEqual(exported['schema_version'], 18)
+        self.assertEqual(exported['schema_version'], 19)
         self.assertTrue(self.validate(exported)['declared_full'])
 
     def test_old_snapshot_formats_are_rejected_for_full_and_lean_restores(self):
-        for version in (14, 15, 16, 17):
+        for version in (14, 15, 16, 17,18):
             for full in (False, True):
                 with self.subTest(version=version, full=full):
                     snapshot = full_snapshot(version)
@@ -92,7 +100,7 @@ class CurrentStorageContractTests(unittest.TestCase):
 
     def test_both_snapshot_modes_require_the_current_integer_format(self):
         for full in (False, True):
-            for version in (None, True, '18', 19):
+            for version in (None, True, '19', 20):
                 with self.subTest(full=full, version=version):
                     snapshot = full_snapshot()
                     snapshot['governance_history_included'] = full

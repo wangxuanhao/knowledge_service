@@ -8,7 +8,7 @@ from knowledge_service.integrations.milvus_store import COLLECTION, MilvusStore,
 
 
 class FlatMilvusStoreTests(unittest.TestCase):
-    def test_schema_has_21_columns_vector_pk_and_readable_index_names(self):
+    def test_schema_has_27_columns_vector_pk_and_readable_index_names(self):
         self.assertEqual(COLLECTION, 'knowledge_vectors')
         store = MilvusStore(dim=2)
         store._client = Mock()
@@ -17,7 +17,7 @@ class FlatMilvusStoreTests(unittest.TestCase):
         call = store._client.create_collection.call_args
         self.assertEqual(call.args[0], COLLECTION)
         schema = call.kwargs['schema']
-        self.assertEqual(len(schema.fields), 21)
+        self.assertEqual(len(schema.fields), 27)
         self.assertEqual([f.name for f in schema.fields if f.is_primary], ['vector_id'])
         self.assertFalse(schema.enable_dynamic_field)
         self.assertFalse(any(f.dtype == DataType.JSON for f in schema.fields))

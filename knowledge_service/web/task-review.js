@@ -29,6 +29,110 @@
     $('title').textContent='知识审核';$('scope').classList.add('hidden');reviews();
   };
   window.TaskReview={open:()=>reviewNav.click()};
+  // One knowledge-review surface owns multi-member conflict decisions. Graph
+  // readers supply only the set identity; the server reloads exact CAS members.
+  window.openAttributeConflictReview=async function(set,options={}) {
+    const p=options.projectId||current,base='/api/projects/'+encodeURIComponent(p);
+    if (!p || p!==current) throw new Error('项目已切换，请重新打开冲突审核。');
+    const actorId=window.Auth?.user?.()?.id;
+    const openedGeneration=generation,contextPage=window.WorkspaceContext?.page;
+    const contextTicket=contextPage?window.WorkspaceContext?.ticket?.(p,contextPage):null;
+    const scopeStamp=typeof scope==='function'?JSON.stringify(scope()):null;
+    const reviewScope={include_unknown:true,...(options.scope?.known_at?{known_at:options.scope.known_at}:{})};
+    const make=(tag,text)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n;};
+    const dialog=make('dialog');dialog.className='entity-governance-dialog attribute-conflict-review';
+    const title=make('h3','知识审核 · 属性冲突'),body=make('div'),feedback=make('p');feedback.setAttribute('role','status');
+    const close=make('button','稍后处理');close.type='button';close.className='secondary';close.onclick=()=>{dialog.close();dialog.remove();};
+    dialog.append(title,body,feedback,close);document.body.append(dialog);dialog.showModal();
+    let exact;
+    const active=()=>dialog.isConnected&&current===p&&generation===openedGeneration
+      &&(!contextTicket||window.WorkspaceContext.accepts(contextTicket,p,contextPage))
+      &&(scopeStamp===null||JSON.stringify(scope())===scopeStamp);
+    const load=async()=>{
+      body.textContent='正在读取冲突集合、版本和证据…';feedback.textContent='';
+      try {
+        // The sidebar filters are a navigation context. A decision must cover
+        // the complete ledger membership, including other periods/platforms.
+        await api(base+'/attribute-conflicts/'+encodeURIComponent(set.id)+'/read',options.scope||{});
+        if(!active())return;
+        exact=await api(base+'/attribute-conflicts/'+encodeURIComponent(set.id)+'/read',reviewScope);
+        if(!active())return;
+        body.replaceChildren(make('p',`属性 ${exact.predicate} · 集合修订 ${exact.version} · ${exact.state==='open'?'待审核':'已处理'}`),
+          make('p','完整冲突集合，包含不同时间/平台范围'));
+        const canReview=exact.state==='open'&&!options.scope?.known_at&&window.Auth?.isAdmin?.();
+        if(exact.owner_available===false)body.append(make('p','实体来源已撤回，仅可拒绝冲突值'));
+        const choices={},actions=make('div');actions.className='entity-governance-actions';
+        const reason=make('textarea');reason.rows=3;reason.maxLength=2000;reason.placeholder='必填：逐值核对与生效区间的审核理由';
+        for(const member of exact.members||[]) {
+          const card=make('fieldset'),legend=make('legend',`${member.record_id} · 修订 ${member.version}`);
+          const value=make('pre',typeof member.value_preview==='string'?member.value_preview:JSON.stringify(member.value_preview));
+          card.append(legend,value,make('p',`${member.datatype||''} · ${member.valid_from||'未知起点'} — ${member.valid_until||'未知终点'}`));
+          card.append(make('p','适用范围：'+['platforms','businesses','audiences'].map((key,index)=>{
+            const dimension=member.applicability?.[key];return ['平台','业务','受众'][index]+' '+
+              (dimension?.mode==='specific'?dimension.values.join('、'):dimension?.mode==='all'?'通用':'待确认');
+          }).join('；')));
+          const detail=make('button','查看完整值及原文来源');detail.type='button';detail.className='secondary';
+          detail.onclick=async()=>{
+            if(!active()||detail.disabled)return;
+            detail.disabled=true;
+            try {
+              const memberBase=base+'/attribute-conflicts/'+encodeURIComponent(set.id)+'/members/'+encodeURIComponent(member.record_id);
+              const request={...reviewScope,expected_version_id:member.version_id};
+              const full=await api(memberBase+'/read',request);
+              if(!active())return;value.textContent=typeof full.value==='string'?full.value:JSON.stringify(full.value);
+              const evidence=make('div');evidence.className='attribute-conflict-evidence';let cursor=null;
+              const more=make('button','读取来源');more.type='button';more.className='secondary';
+              const sources=async()=>{
+                if(!active()||more.disabled)return;
+                more.disabled=true;feedback.textContent='';
+                try {
+                  const page=await api(memberBase+'/sources',{...request,cursor,limit:10});
+                  if(!active())return;
+                  for(const source of page.sources||[]) {
+                    const frozen=make('article');frozen.append(make('b',source.document_title||source.document_id||'人工声明'),
+                      make('small',`文档版本 ${source.document_version_id||'无'} · 断言 ${source.assertion_id} · 决策 ${source.decision_version}`),make('pre',source.quote||'未提供原文引文'));
+                    if(source.quote_truncated)frozen.append(make('small','引文仅显示前2000字；可定位冻结原文查看完整证据。'));
+                    if(source.document_version_id&&window.SourceReader){const open=make('button','定位冻结原文');open.type='button';open.className='secondary';open.onclick=()=>window.SourceReader.open({projectId:p,versionId:source.document_version_id,location:source,focusText:source.quote,assertionId:source.assertion_id});frozen.append(open);}
+                    evidence.append(frozen);
+                  }
+                  cursor=page.next_cursor||null;more.hidden=!cursor;more.textContent='更多来源';
+                } catch(error){feedback.textContent=error.message;more.textContent='重试来源';}
+                finally{more.disabled=false;}
+              };
+              more.onclick=sources;
+              card.append(evidence,more);await sources();detail.hidden=true;
+            }catch(error){feedback.textContent=error.message;}finally{detail.disabled=false;}
+          };card.append(detail);
+          if(!canReview){body.append(card);continue;}
+          for(const [decision,label] of [['accept','接受此值'],['reject','拒绝此值']]) {
+            const field=make('label'),radio=make('input');radio.type='radio';radio.name='conflict-'+member.record_id;
+            radio.disabled=exact.state!=='open'||decision==='accept'&&exact.owner_available===false;
+            radio.onchange=()=>{choices[member.record_id]={...(choices[member.record_id]||{}),decision};};field.append(radio,make('span',label));card.append(field);
+          }
+          const ranges=make('details');ranges.append(make('summary','审核修正生效区间（可选）'));
+          for(const key of ['valid_from','valid_until']) {const label=make('label',key==='valid_from'?'生效起点':'失效终点'),input=make('input');input.type='datetime-local';
+            input.onchange=()=>{choices[member.record_id]={...(choices[member.record_id]||{}),[key]:input.value?new Date(input.value).toISOString():null};};label.append(input);ranges.append(label);}
+          card.append(ranges);body.append(card);
+        }
+        if(canReview){
+          const submit=make('button','提交集合审核');submit.type='button';submit.onclick=async()=>{
+            try {
+              if(!active())throw new Error('项目已切换，请重新打开冲突审核。');
+              if(!window.Auth?.isAdmin?.()||window.Auth?.user?.()?.id!==actorId)throw new Error('审核身份已变化，请重新打开冲突审核。');
+              const payload=window.EntityGovernance.conflictDecisionPayload(exact,choices,reason.value);submit.disabled=true;
+              const result=await api(base+'/attribute-conflicts/'+encodeURIComponent(exact.id)+'/resolve',payload);
+              if(!active())return;feedback.textContent='冲突集合已处理；正式知识和索引更新已进入事务队列。';
+              await window.KnowledgeChanges?.notify({projectId:p,records:result.records||[],kind:'attribute-conflict'});
+              dialog.close();dialog.remove();
+              if(typeof status==='function')status('属性冲突集合已处理；索引更新已进入持久队列。');
+              try{await options.onResolved?.(result);}catch(error){if(typeof status==='function')status('审核已提交；详情刷新失败，请刷新视图：'+error.message,true);}
+            }catch(error){feedback.textContent=error.message+'；如版本变化，请关闭后重新打开并核对。';}finally{submit.disabled=false;}
+          };actions.append(submit);body.append(reason,actions);
+        }
+      }catch(error){if(active()){body.replaceChildren(make('p','冲突集合读取失败：'+error.message));const retry=make('button','重试');retry.type='button';retry.onclick=load;body.append(retry);}}
+    };
+    await load();return dialog;
+  };
   $('review-ontology').onclick=()=>showTab('ontology-model');
   $('review-kind').onchange=()=>reviews();
   let reviewView='facts';
@@ -38,7 +142,8 @@
     if(!p){host.textContent='请先选择项目';return;}
     host.textContent='正在读取审核清单…';
     try{
-      const [data,ontology,health]=await Promise.all([api('/api/projects/'+encodeURIComponent(p)+'/reviews',undefined,'GET'),api('/api/projects/'+encodeURIComponent(p)+'/ontology',undefined,'GET').catch(()=>null),api('/api/health',undefined,'GET')]);
+      const [data,ontology,health,conflictPage]=await Promise.all([api('/api/projects/'+encodeURIComponent(p)+'/reviews',undefined,'GET'),api('/api/projects/'+encodeURIComponent(p)+'/ontology',undefined,'GET').catch(()=>null),api('/api/health',undefined,'GET'),
+        api('/api/projects/'+encodeURIComponent(p)+'/attribute-conflicts',{limit:20}).catch(error=>({error:error.message}))]);
       if(p!==current||serial!==generation)return;
       if(!health.capabilities?.includes('typed_reviews')){host.textContent='当前仍是旧版后端。请先重启 8100 服务，再刷新本页，启用实体、关系和属性审核。';return;}
       const filter=$('review-kind').value,all=data.reviews||[];
@@ -72,6 +177,23 @@
         return `<article class="review-item ${kind==='validation'?'validation-review':''}" data-review="${i}"><small>${labels[kind]}</small><h3>${heading}</h3><p>${esc(r.document_title)} · ${esc(r.reason)}</p>${validationDetails}${issues?`<p class="constraint-conflict">${esc(issues)}</p>`:''}${r.conflict?.code==='attribute_max_count_one'?`<p class="constraint-conflict">该属性为单值字段，候选值与当前正式属性冲突。${r.status==='contradicting'?'请选择保留旧值或接受新值。':'普通批准只会登记冲突，不会覆盖或写入候选值。'}</p>`:''}${changeState}<small>抽取本体 ${esc(r.ontology_id)} · 原文字符 ${r.start_char}–${r.end_char}</small>${r.blocked?'<p class="error">关联实体尚未入图或已删除，请先审核实体；拒绝实体不会自动拒绝这些依赖候选。</p>':''}<details><summary>查看原文证据</summary><pre>${esc(r.attribute_evidence||r.evidence)}</pre></details>${kind==='attribute'?`<details><summary>当前正式属性值</summary><pre>${esc(JSON.stringify(r.current_values||[],null,2))}</pre></details>`:''}${mapping}<label>审核理由（必填）<input class="review-note" maxlength="2000" placeholder="填写确认例外、整改或知识审核理由"></label><div class="review-actions">${actions}</div>${changeEditor}</article>`;
       }).join('');
       if(!pending.length)host.insertAdjacentHTML('beforeend','<p class="subtle">当前视图没有待处理事项。</p>');
+      if(reviewView==='facts'&&(!filter||filter==='attribute')){
+        const section=document.createElement('section');section.className='entity-review-card';host.append(section);
+        const add=(tag,text)=>{const node=document.createElement(tag);node.textContent=text;section.append(node);return node;};
+        add('h3','全项目属性冲突集合');let cursor=conflictPage.next_cursor||null;
+        const appendSets=page=>{
+          if(page.error){add('p','冲突集合读取失败：'+page.error+'；请刷新审核重试。');return;}
+          for(const set of page.conflict_sets||[]){
+            add('p',`${set.entity_id} · ${set.predicate} · ${set.members.length} 个冲突值 · 集合修订 ${set.version}`);
+            const open=add('button',window.Auth?.isAdmin?.()?'处理属性冲突集合':'查看属性冲突证据');open.type='button';open.className='secondary';
+            open.onclick=()=>{if(p!==current||serial!==generation)return;return window.openAttributeConflictReview(set,{projectId:p,onResolved:reviews});};
+          }
+        };appendSets(conflictPage);
+        const more=add('button','更多属性冲突集合');more.type='button';more.className='secondary';more.hidden=!cursor;
+        more.onclick=async()=>{more.disabled=true;try{const page=await api('/api/projects/'+encodeURIComponent(p)+'/attribute-conflicts',{limit:20,cursor});
+          if(p!==current||serial!==generation)return;appendSets(page);cursor=page.next_cursor||null;more.hidden=!cursor;
+        }catch(error){add('p','读取失败：'+error.message+'；可再次点击更多重试。');}finally{more.disabled=false;}};
+      }
       host.querySelectorAll('[data-review]').forEach(article=>{
         const r=pending[Number(article.dataset.review)];
         const operation=article.querySelector('.change-operation'),existingLabel=article.querySelector('.change-existing-label');

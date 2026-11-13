@@ -7,26 +7,28 @@ const vm=require('node:vm');
 const {frozenSourceDocument,attributeDetailsHtml}=require(path.resolve(
   __dirname,'../../knowledge_service/web/evidence-inspector.js'));
 
-async function renderEntity(attributes,details={}){
-  const elements=new Map();
+async function renderEntity(attributes,details={},withMounts=false,windowOverrides={}){
+  const elements=new Map(),mounts=[];
   const make=()=>({dataset:{},children:[],setAttribute(){},appendChild(node){this.children.push(node);},
     after(){},addEventListener(){},querySelector(){return make();},querySelectorAll(){return [];}});
   const get=id=>{if(!elements.has(id))elements.set(id,make());return elements.get(id);};
   const temporalFile=path.resolve(__dirname,'../../knowledge_service/web/temporal-scope.js');
-  const window={TemporalScope:fs.existsSync(temporalFile)?require(temporalFile):{}},context={window,current:'p',$:get,scope:()=>({}),endpoint:s=>s,
+  const shared={mount:(host,options)=>{mounts.push(options);return {dispose(){}};}};
+  const window={TemporalScope:fs.existsSync(temporalFile)?require(temporalFile):{},EntityAttributePanel:shared,...windowOverrides},context={window,EntityAttributePanel:shared,current:'p',$:get,scope:()=>({}),endpoint:s=>s,
     document:{createElement:make,body:make()},esc:value=>String(value??'').replaceAll('<','&lt;').replaceAll('>','&gt;'),
     labelOf:value=>value,term:value=>value,RecordVersionContext:{revision:()=>1,summary:()=>''},
     api:async url=>url==='/ontologies'?{versions:[]}:{documents:[],message:'没有来源'}};
   vm.runInNewContext(fs.readFileSync(path.resolve(__dirname,'../../knowledge_service/web/evidence-inspector.js'),'utf8'),context);
   await window.renderEvidenceInspector({id:'entity',kind:'entity',type:'urn:test:Thing',text:'事物',version:1,
     properties:{age:'raw metadata value'},attributes,...details},[]);
-  return get('graph-detail').innerHTML;
+  return withMounts?{html:get('graph-detail').innerHTML,mounts}:get('graph-detail').innerHTML;
 }
 
-test('raw properties never become a formal attribute section when canonical attributes are absent',async()=>{
+test('raw properties remain technical while entity properties always mount the scoped reader',async()=>{
   for(const attributes of [undefined,[]]){
     const html=await renderEntity(attributes);
-    assert.doesNotMatch(html,/<section class="evidence-attributes">|兼容属性/);
+    assert.match(html,/id="inspector-attribute-panel"/);
+    assert.doesNotMatch(html.split('<details class="evidence-technical">')[0],/raw metadata value|兼容属性/);
     assert.match(html,/<details class="evidence-technical">[\s\S]*raw metadata value/);
   }
 });
@@ -42,13 +44,21 @@ test('inspector separates unknown business boundaries, document publication and 
   assert.match(published,/<dt>原文发布日期<\/dt>/);assert.match(published,/<dt>系统记录<\/dt>/);
 });
 
-test('canonical attribute values stay visible while unrelated properties remain technical metadata',async()=>{
-  const html=await renderEntity([{predicate:'urn:test:age',label:'年龄',values:[
+test('entity inspector delegates paged values to the shared reader in the applied project scope',async()=>{
+  const {html,mounts}=await renderEntity([{predicate:'urn:test:age',label:'年龄',values:[
     {record_id:'age',value:20,datatype:'http://www.w3.org/2001/XMLSchema#integer',accepted_support_count:1,status:'accepted'},
-  ]}]);
+  ]}],{},true);
   const visible=html.split('<details class="evidence-technical">')[0];
-  assert.match(visible,/<section class="evidence-attributes">[\s\S]*年龄[\s\S]*20[\s\S]*1 条支撑/);
+  assert.equal(mounts.length,1);assert.equal(mounts[0].projectId,'p');assert.equal(mounts[0].entity.id,'entity');
+  assert.match(visible,/id="inspector-attribute-panel"/);
   assert.doesNotMatch(visible,/raw metadata value|兼容属性/);
+});
+test('a new property owner revision requests complete scoped authority before replacing inspector actions',async()=>{
+  const calls=[];
+  const {mounts}=await renderEntity([],{},true,{inspectKnowledgeRecord:async(...args)=>calls.push(args)});
+  await mounts[0].onEntityChange({id:'entity',text:'新名称',type:'urn:test:Thing',version:2,version_id:'entity-v2'});
+  assert.equal(calls.length,1);assert.equal(calls[0][0].version_id,'entity-v2');assert.equal(calls[0][0].kind,'entity');
+  assert.equal(calls[0][0].metadata,undefined);assert.equal(calls[0][1].qualify,'entity');assert.deepEqual(JSON.parse(JSON.stringify(calls[0][1].scope)),{});
 });
 
 test('graph detail uses the shared scoped creators for relationships and independent attributes',()=>{

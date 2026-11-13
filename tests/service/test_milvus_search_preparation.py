@@ -13,7 +13,7 @@ def prepared_store():
     calls = []
     catalog = default_catalog()
     columns = catalog.column_defs()
-    assert len(columns) == 21
+    assert len(columns) == 27
     assert not any(column.name.startswith('bf_') for column in columns)
     fields = []
     indexes = {'dense': {'field_name': 'embedding', 'index_type': 'HNSW',

@@ -49,6 +49,7 @@ from ..services.service import KnowledgeService
 from ..services.runtime_capabilities import RuntimeCapabilities
 from ..services.ontology_sync import OntologySync
 from ..services.projection_sync import ProjectionSync
+from ..services.retrieval import PROJECTION_SCHEMA_VERSIONS
 from ..services.projection_runtime import (
     MilvusProjectionAdapter,
     ProjectionWorker,
@@ -390,7 +391,7 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
 
         cleanup_handlers['milvus'] = cleanup_milvus
     projection_sync = ProjectionSync(
-        repository.projections, projection_adapters, schema_version=3)
+        repository.projections, projection_adapters, schema_version=PROJECTION_SCHEMA_VERSIONS)
     projection_worker = ProjectionWorker(
         repository, projection_sync, cleanup_handlers=cleanup_handlers,
         reconnect=(service.reconnect_vector_store

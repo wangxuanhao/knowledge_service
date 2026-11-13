@@ -8,6 +8,7 @@ FULL_TOP_LEVEL = {
 FULL_GOVERNANCE = {
     'assertions', 'assertion_events', 'fact_keys', 'ingest_runs',
     'resolution_reviews', 'merge_operations', 'ontology',
+    'attribute_conflict_sets','attribute_conflict_members',
 }
 FULL_ONTOLOGY = {'drafts', 'operations', 'decisions', 'publish_requests'}
 FULL_PROVENANCE = {'activities', 'edges', 'record_version_assertions'}
@@ -60,6 +61,13 @@ FULL_ROW_CONTRACTS = {
         'before_state', 'after_state', 'expected_versions', 'reversal_of',
         'created_at',
     }),
+    ('governance','attribute_conflict_sets'): _contract({
+        'project_id','id','entity_id','predicate','version','state','operation_id',
+        'created_at','resolved_at','reason','actor','decisions',
+    }),
+    ('governance','attribute_conflict_members'): _contract({
+        'project_id','set_id','record_id','version','version_id','assertion_versions',
+    }),
     ('governance', 'ontology', 'drafts'): _contract({
         'id', 'project_id', 'base_ontology_id', 'source_kind', 'status', 'revision',
         'title', 'summary', 'source_context', 'validation_report',
@@ -91,9 +99,9 @@ FULL_ROW_CONTRACTS = {
         'ordinal', 'payload', 'created_at',
     }),
 }
-# 快照线格式与数据库迁移编号分别管理。18 删除草案的旧工件关联列；
+# 快照线格式与数据库迁移编号分别管理。19 增加冻结冲突成员与集合决定；
 # 导出与恢复只使用这一种当前行形状。
-LATEST_FULL_SNAPSHOT_FORMAT = 18
+LATEST_FULL_SNAPSHOT_FORMAT = 19
 _RECORD_KINDS = {'document', 'entity', 'relation', 'attribute', 'chunk'}
 
 
@@ -165,6 +173,42 @@ def _validate_full_rows(snapshot):
                 _validate_record_envelope(row, row_label)
 
 
+def _validate_conflict_ledger(snapshot):
+    governance=snapshot['governance']
+    sets={row['id']:row for row in governance['attribute_conflict_sets']}
+    records={row['version_id']:row for row in snapshot['records']}
+    events={(row['assertion_id'],row['decision_version']):row for row in governance['assertion_events']}
+    operations={row['id'] for row in governance['merge_operations'] if row['operation']=='merge_rewrite'}
+    membership=set()
+    record_membership=set()
+    for member in governance['attribute_conflict_members']:
+        conflict=sets.get(member['set_id']);record=records.get(member['version_id'])
+        if (not conflict or not record or record['id']!=member['record_id'] or record['version']!=member['version']
+            or record.get('kind')!='attribute' or record.get('subject_id')!=conflict['entity_id']
+            or record.get('type')!=conflict['predicate'] or not record.get('metadata',{}).get('_quarantined')):
+            raise ValueError('完整治理备份冲突成员与冻结事实修订不一致')
+        if not isinstance(member['assertion_versions'],list) or not 1<=len(member['assertion_versions'])<=1000:
+            raise ValueError('完整治理备份冲突成员支撑列表无效')
+        for assertion in member['assertion_versions']:
+            if not isinstance(assertion,dict) or set(assertion)!={'id','version'} or type(assertion['version']) is not int:
+                raise ValueError('完整治理备份冲突支撑决定版本无效')
+            event=events.get((assertion['id'],assertion['version']))
+            if not event or event['to_status']!='contradicting' or event['canonical_record_id']!=record['id']:
+                raise ValueError('完整治理备份冲突成员与来源决定不一致')
+        membership.add((member['set_id'],member['version_id']))
+        record_membership.add((member['set_id'],member['record_id']))
+    for conflict in sets.values():
+        if (conflict['state'] not in {'open','resolved','reversed'} or type(conflict['version']) is not int
+            or conflict['version']!=(1 if conflict['state']=='open' else 2)
+            or (conflict['state']=='open')!=(conflict['resolved_at'] is None) or conflict['operation_id'] not in operations):
+            raise ValueError('完整治理备份冲突集合状态无效')
+        if sum(key[0]==conflict['id'] for key in membership)<2:raise ValueError('完整治理备份冲突集合缺少成员')
+    for record in snapshot['records']:
+        if record.get('metadata',{}).get('_quarantined') and not any(
+            (set_id,record['id']) in record_membership for set_id in record.get('metadata',{}).get('conflict_set_ids',[])):
+            raise ValueError('完整治理备份隔离事实缺少冲突集合')
+
+
 def validate_restore_snapshot(snapshot):
     """Validate snapshot shape, format and project ownership.
 
@@ -229,6 +273,9 @@ def validate_restore_snapshot(snapshot):
 
     if declared_full:
         _validate_full_rows(snapshot)
+        _validate_conflict_ledger(snapshot)
+    elif any(row.get('metadata',{}).get('_quarantined') for row in snapshot.get('records',[])):
+        raise ValueError('隔离属性需要完整治理备份，轻量备份不能恢复冲突事实')
 
     return {
         'declared_full': declared_full,

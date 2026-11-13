@@ -1,5 +1,6 @@
 """Isolated presentation and bounded-query tests; no PostgreSQL session needed."""
 from contextlib import nullcontext
+from inspect import signature
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -8,6 +9,7 @@ from knowledge_service.api import graph_sessions
 from knowledge_service.services import graph_workspace
 from knowledge_service.repository.scoped_reads import ScopedReads
 from knowledge_service.services.graph_neighborhood import present_neighborhood
+from knowledge_service.services.explorer import Explorer
 from knowledge_service.services.ontology import Ontology
 from knowledge_service.services import structure_pending
 
@@ -39,7 +41,7 @@ class LocalGraphPresentationTests(unittest.TestCase):
         self.assertEqual(reads.entity_attributes('project', {}, []), {'records': [], 'truncated': False})
         reads.repo._db.execute.assert_not_called()
 
-    def test_neighborhood_preserves_bound_release_hierarchy_and_formal_attribute_identity(self):
+    def test_neighborhood_preserves_bound_release_hierarchy_without_reading_attributes(self):
         entity = {'id': 'e', 'kind': 'entity', 'type': 'urn:Merchant', 'text': '商户', 'ontology_id': 'release-old'}
         unknown = {'id': 'unknown', 'kind': 'entity', 'type': 'urn:Unknown', 'text': '未绑定'}
         attribute = {'id': 'a', 'kind': 'attribute', 'subject_id': 'e', 'type': 'urn:amount',
@@ -61,20 +63,16 @@ class LocalGraphPresentationTests(unittest.TestCase):
         self.assertEqual(by_id['e'].get('class_label'), '商户旧版')
         self.assertEqual(by_id['e']['class_parents'][0]['id'], 'urn:Party')
         self.assertIsNone(by_id['unknown']['class_ontology_id'])
-        self.assertEqual(by_id['e']['attributes'][0]['values'][0]['record_id'], 'a')
-        virtual = [row for row in result['records'] if row['kind'] == 'attribute_value']
-        self.assertEqual(len(virtual), 1)
-        self.assertEqual(virtual[0]['record_id'], 'a')
-        self.assertEqual(virtual[0]['version_id'], 'a-v1')
-        self.assertTrue(result['attributes_truncated'])
-        self.assertEqual(result['attribute_count'], 1)
-        self.assertEqual(result['attribute_budget'], 200)
-        self.assertEqual(result['budget_semantics'], 'entities_relations_plus_separate_attributes')
-        reads.entity_attributes.assert_called_once()
-        self.assertEqual(reads.entity_attributes.call_args.args[1]['known_at'], '2025-01-01')
-        self.assertEqual(reads.entity_attributes.call_args.args[2], ['e', 'unknown'])
+        self.assertEqual(set(by_id), {'e', 'unknown', 'r'})
+        self.assertNotIn('attributes', by_id['e'])
+        self.assertEqual(result['attribute_mode'], 'summary')
+        self.assertEqual(result['attribute_display'], 'sidebar')
+        self.assertEqual(result['attribute_count'], 0)
+        self.assertEqual(result['attribute_budget'], 0)
+        self.assertEqual(result['budget_semantics'], 'entities_relations_only')
+        reads.entity_attributes.assert_not_called()
 
-    def test_neighborhood_keeps_pending_warnings_and_endpoint_derivation_on_formal_attributes(self):
+    def test_neighborhood_keeps_entity_and_relation_pending_warnings(self):
         ontology = Ontology('''@prefix owl: <http://www.w3.org/2002/07/owl#> .
             <urn:Known> a owl:Class . <urn:knows> a owl:ObjectProperty .
             <urn:amount> a owl:DatatypeProperty .''')
@@ -96,9 +94,119 @@ class LocalGraphPresentationTests(unittest.TestCase):
         by_id = {row['id']: row for row in result['records']}
         self.assertEqual(by_id['e'].get('structure_pending', {}).get('state'), 'pending')
         self.assertEqual(by_id['r']['structure_pending']['via'], ['e'])
-        self.assertEqual(by_id['e']['attributes'][0]['values'][0]['structure_pending']['via'], ['e'])
-        self.assertEqual(set(annotated), {'e', 'other', 'r', 'a'})
+        self.assertEqual(set(by_id), {'e', 'other', 'r'})
+        self.assertNotIn('attributes', by_id['e'])
+        self.assertEqual(set(annotated), {'e', 'other', 'r'})
         self.assertNotIn('embedding', by_id['e'])
+        reads.entity_attributes.assert_not_called()
+
+    def test_legacy_expanded_subgraph_uses_bounded_neighbors_and_shared_sidebar(self):
+        entity = {'id': 'e', 'kind': 'entity', 'type': 'urn:Known', 'text': '主体'}
+        reads = Mock()
+        reads.neighbors.return_value = {'records': [entity], 'truncated': True,
+                                        'continuation': {'reason': 'budget_exhausted'}}
+        repository = Mock()
+        repository.get_ontology.side_effect = KeyError('no ontology')
+        repository.list_assertions.return_value = []
+        repository.list_record_version_assertions.return_value = []
+        service = SimpleNamespace(repository=repository, scoped=Mock(return_value=[entity]),
+            annotate_structure_pending=Mock(), ontology_labels=lambda project: {},
+            record_family=lambda project, row: {})
+        scope = {'known_at': '2025-01-01', 'valid_at': '2024-01-01',
+                 'filters': {'field': 'metadata.region', 'op': 'eq', 'value': '华东'},
+                 'entity_type': 'urn:Known', 'predicate': 'urn:related'}
+        with patch('knowledge_service.repository.scoped_reads.ScopedReads', return_value=reads):
+            result = Explorer(service).graph('p', scope, 'e', hops=5, attribute_mode='expanded')
+        self.assertEqual([row['id'] for row in result['nodes']], ['e'])
+        self.assertEqual(result['edges'], [])
+        self.assertNotIn('attributes', result['nodes'][0])
+        self.assertEqual(result['attribute_mode'], 'summary')
+        self.assertEqual(result['attribute_display'], 'sidebar')
+        self.assertTrue(result['truncated'])
+        self.assertEqual(result['continuation'], {'reason': 'budget_exhausted'})
+        reads.neighbors.assert_called_once_with('p', {key: value for key, value in scope.items()
+            if key not in {'entity_type', 'predicate'}}, ['e'], hops=5, direction='both',
+            max_nodes=500, max_edges=1000, entity_type='urn:Known', predicate='urn:related')
+        reads.entity_attributes.assert_not_called()
+        service.scoped.assert_not_called()
+
+    def test_whole_subgraph_reads_only_real_network_kinds(self):
+        entity = {'id': 'e', 'kind': 'entity', 'type': 'urn:Known', 'text': '主体'}
+        repository = Mock()
+        repository.get_ontology.side_effect = KeyError('no ontology')
+        repository.list_assertions.return_value = []
+        repository.list_record_version_assertions.return_value = []
+        service = SimpleNamespace(repository=repository, scoped=Mock(return_value=[entity]),
+            annotate_structure_pending=Mock(), ontology_labels=lambda project: {},
+            record_family=lambda project, row: {})
+        result = Explorer(service).graph('p', {}, attribute_mode='summary')
+        self.assertEqual([row['id'] for row in result['nodes']], ['e'])
+        self.assertNotIn('attributes', result['nodes'][0])
+        service.scoped.assert_called_once_with('p', {'kinds': ['entity', 'relation']})
+        service.repository.list_assertions.assert_not_called()
+        service.repository.list_record_version_assertions.assert_not_called()
+
+    def test_seeded_subgraph_uses_authoritative_budget_even_with_ready_native_projection(self):
+        entity = {'id': 'e', 'kind': 'entity', 'type': 'urn:Known', 'text': '主体'}
+        reads = Mock()
+        reads.neighbors.return_value = {'records': [entity], 'truncated': False, 'continuation': None}
+        repository = Mock()
+        repository.current_records_by_version_ids.return_value = [entity]
+        projection = Mock()
+        projection.expand.return_value = ['e-v1']
+        service = SimpleNamespace(repository=repository, neo4j_projection=projection,
+            scoped=Mock(), annotate_structure_pending=Mock(), ontology_labels=lambda project: {},
+            record_family=lambda project, row: {})
+        with patch('knowledge_service.repository.scoped_reads.ScopedReads', return_value=reads):
+            result = Explorer(service).graph('p', {}, 'e')
+        self.assertEqual(result['backend'], 'postgres_bfs')
+        self.assertEqual(result['degraded_reason'], 'bounded_authority_neighborhood')
+        reads.neighbors.assert_called_once()
+        projection.expand.assert_not_called()
+        service.scoped.assert_not_called()
+
+    def test_seeded_subgraph_preserves_empty_legacy_type_controls(self):
+        entity = {'id': 'e', 'kind': 'entity', 'type': 'urn:Known', 'text': '主体'}
+        reads = Mock()
+        reads.neighbors.return_value = {'records': [entity], 'truncated': False, 'continuation': None}
+        service = SimpleNamespace(repository=Mock(), annotate_structure_pending=Mock(),
+            ontology_labels=lambda project: {}, record_family=lambda project, row: {})
+        with patch('knowledge_service.repository.scoped_reads.ScopedReads', return_value=reads):
+            Explorer(service).graph('p', {'entity_type': '', 'predicate': ''}, 'e')
+        self.assertIsNone(reads.neighbors.call_args.kwargs['entity_type'])
+        self.assertIsNone(reads.neighbors.call_args.kwargs['predicate'])
+
+    def test_native_graph_falls_back_for_source_qualified_identity_policy(self):
+        ontology = Ontology('''@prefix owl: <http://www.w3.org/2002/07/owl#> .
+            @prefix ks: <https://knowledge.local/schema/> .
+            <urn:Known> a owl:Class ; ks:identityPolicy "reference" .''')
+        projection = Mock()
+        projection.expand.return_value = ['v1']
+        repository = Mock()
+        repository.current_records_by_version_ids.return_value = [{'id': 'e'}]
+        service = SimpleNamespace(repository=repository, neo4j_projection=projection,
+                                  structure_pending_ontology=lambda project: ontology)
+        result = Explorer(service)._native_graph_rows('p', {}, 'e', 1, 'summary')
+        self.assertIsNone(result['rows'])
+        self.assertEqual(result['degraded_reason'], 'source_contexts_unsupported')
+        projection.expand.assert_not_called()
+
+    def test_neighbors_apply_entity_and_relation_types_independently(self):
+        database = Mock()
+        database.execute.return_value.fetchall.return_value = []
+        repository = SimpleNamespace(_db=database, _lock=nullcontext())
+        reads = ScopedReads(repository)
+        reads.by_ids = Mock(return_value=[{'id': 'e', 'kind': 'entity', 'version_id': 'e-v1'}])
+        reads._qualified = Mock(return_value=('qualified_scope', ['scope-value']))
+        self.assertIn('entity_type', signature(reads.neighbors).parameters)
+        result = reads.neighbors('p', {'known_at': '2025-01-01'}, ['e'],
+                                 entity_type='urn:Known', predicate='urn:related')
+        self.assertEqual([row['id'] for row in result['records']], ['e'])
+        self.assertEqual(reads.by_ids.call_args.args[1],
+                         {'known_at': '2025-01-01', '_type_iris': ['urn:Known']})
+        self.assertEqual(reads._qualified.call_args.args[1],
+                         {'known_at': '2025-01-01', '_type_iris': ['urn:related']})
+        self.assertEqual(reads._qualified.call_args.kwargs, {'kinds': ['relation'], 'keyset': True})
 
 
 if __name__ == '__main__':

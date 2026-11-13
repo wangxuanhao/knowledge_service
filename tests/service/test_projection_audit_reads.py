@@ -20,6 +20,10 @@ from knowledge_service.repository.projection_snapshot import CapturedProjectionI
 from knowledge_service.repository.projection_store import ProjectionGap
 from knowledge_service.services.projection_runtime import MilvusProjectionAdapter
 from knowledge_service.services.projection_sync import ProjectionSync
+from knowledge_service.services.retrieval import PROJECTION_SCHEMA_VERSIONS
+
+
+MILVUS_SCHEMA_VERSION = PROJECTION_SCHEMA_VERSIONS['milvus']
 
 
 def projection_row(index, *, project='project', index_version=2):
@@ -30,9 +34,9 @@ def projection_row(index, *, project='project', index_version=2):
 
 
 def capture_build(repo, project):
-    sync = ProjectionSync(repo.projections, {}, schema_version=3)
+    sync = ProjectionSync(repo.projections, {}, schema_version=MILVUS_SCHEMA_VERSION)
     return repo.projections.begin_rebuild(
-        project, 'milvus', 3, 'explicit-build', lease_guard=sync._rebuild_lease_guard,
+        project, 'milvus', MILVUS_SCHEMA_VERSION, 'explicit-build', lease_guard=sync._rebuild_lease_guard,
         embedding_model='test', dim=1)
 
 
@@ -96,7 +100,7 @@ def test_receipt_scan_uses_a_private_connection_and_does_not_block_business_read
 @pytest.mark.parametrize('unexpected_row', [False, True])
 def test_validation_reads_only_scanned_receipts_in_bounded_project_generation_batches(unexpected_row):
     rows = [projection_row(index) for index in range(600)]
-    expected = {row['record_id']: {'version_id': row['version_id'],
+    expected = {row['vector_id']: {'version_id': row['version_id'],
                                   'fingerprint': projection_fingerprint(row)} for row in rows}
     fetched = []
 
@@ -105,11 +109,14 @@ def test_validation_reads_only_scanned_receipts_in_bounded_project_generation_ba
             assert (project, generation) == ('project', 2)
             return len(expected)
 
-        def for_record_ids(self, project, generation, record_ids):
+        def for_vector_ids(self, project, generation, vector_ids):
             assert (project, generation) == ('project', 2)
-            assert len(record_ids) <= 512
-            fetched.append(list(record_ids))
-            return {record_id: expected[record_id] for record_id in record_ids if record_id in expected}
+            assert len(vector_ids) <= 512
+            fetched.append(list(vector_ids))
+            return {vector_id: expected[vector_id] for vector_id in vector_ids if vector_id in expected}
+
+        def for_record_ids(self, *args):
+            raise AssertionError('native validation must compare exact context/window vector receipts')
 
         def pages(self, *args):
             raise AssertionError('validation must not materialize the entire receipt manifest')
@@ -130,7 +137,7 @@ def test_validation_reads_only_scanned_receipts_in_bounded_project_generation_ba
         default_catalog(), expected=ReceiptManifest(Receipts(), 'project', 2))
     assert result == {'ok': not unexpected_row, 'count': len(rows), 'expected_count': 600}
     assert [len(page) for page in fetched] == [512, 89 if unexpected_row else 88]
-    assert [record_id for page in fetched for record_id in page] == [row['record_id'] for row in rows]
+    assert [vector_id for page in fetched for vector_id in page] == [row['vector_id'] for row in rows]
 
 
 def test_compact_manifest_preserves_deleted_falsies_and_audit_records(tmp_path):
@@ -186,6 +193,16 @@ def test_captured_build_reads_exact_versions_and_aborts_if_a_captured_body_disap
         return ()
 
     monkeypatch.setattr(ProjectionInputs, 'snapshot_versions', missing_body)
+    # New captures freeze the entire input, including owner/property labels and
+    # support decisions. They must not hydrate a later authority body.
+    assert list(CapturedProjectionInputs(repo, rebuild['claim'], batch_size=1)) == values
+    assert requests == []
+    # Legacy captures have only a version receipt and must fail closed when
+    # that exact immutable body can no longer be read.
+    with repo._transaction():
+        repo._db.execute('UPDATE projection_rebuild_snapshots SET projection_input=NULL '
+            'WHERE project_id=? AND target=? AND build_id=? AND version_id=?',
+            (project, 'milvus', rebuild['claim'].build_id, captured['version_id']))
     with pytest.raises(RuntimeError, match='captured projection version disappeared'):
         list(CapturedProjectionInputs(repo, rebuild['claim'], batch_size=1))
     assert requests == [[captured['version_id']]]
@@ -219,9 +236,9 @@ def test_build_activation_rechecks_project_watermark_before_publishing_the_gener
     repo.put_record(project, {'id': 'a', 'kind': 'entity', 'text': 'concurrent change'})
     before = repo.projections.cursor(project, 'milvus')
     with pytest.raises(ProjectionGap, match='activation is stale'):
-        with repo.projections.activation_guard(project, rebuild['claim'], 3) as watermark:
+        with repo.projections.activation_guard(project, rebuild['claim'], MILVUS_SCHEMA_VERSION) as watermark:
             assert watermark > captured_sequence
-            repo.projections.activate_index(rebuild['claim'], 3, captured_sequence, rebuild['state'])
+            repo.projections.activate_index(rebuild['claim'], MILVUS_SCHEMA_VERSION, captured_sequence, rebuild['state'])
     assert repo.projections.cursor(project, 'milvus') == before
     assert before['active_destination'] is None
     assert repo.projections.receipts.count(project, rebuild['state']['index_version']) == 0

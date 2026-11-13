@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from .ontology_operations import operation_fingerprint
+from .ontology_operations import operation_fingerprint, is_identity_annotation
 import hashlib
 import json
 
@@ -186,7 +186,8 @@ def is_annotation_only(operations) -> bool:
     items = [op for op in (operations or []) if isinstance(op, dict)]
     if not items:
         return False
-    return all(op.get('action') in ANNOTATION_ACTIONS for op in items)
+    return all(op.get('action') in ANNOTATION_ACTIONS
+               and not is_identity_annotation(op) for op in items)
 
 
 def _text(value, field):

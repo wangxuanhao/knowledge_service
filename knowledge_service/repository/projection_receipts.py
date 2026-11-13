@@ -16,15 +16,20 @@ class ReceiptManifest(Mapping):
     def lookup(self, record_ids):
         return self.receipts.for_record_ids(self.project_id, self.index_version, record_ids)
 
+    def lookup_vectors(self, vector_ids):
+        return self.receipts.for_vector_ids(self.project_id,self.index_version,vector_ids)
+
     def __len__(self):
         return self.receipts.count(self.project_id, self.index_version)
 
     def __iter__(self):
-        for page in self.receipts.pages(self.project_id, self.index_version):
+        pages=self.receipts.pages if self.receipts.single_row_records(self.project_id,self.index_version) else self.receipts.vector_pages
+        for page in pages(self.project_id, self.index_version):
             yield from page
 
     def __getitem__(self, record_id):
-        values = self.lookup([record_id])
+        values = self.lookup_vectors([record_id])
+        if record_id not in values:values=self.lookup([record_id])
         if record_id not in values:
             raise KeyError(record_id)
         return values[record_id]
@@ -65,21 +70,35 @@ class ProjectionReceipts:
                 self._db.execute('DELETE FROM milvus_projection_receipts '
                     'WHERE project_id=? AND index_version=? AND record_id=?',
                     (claimed.project_id, generation, envelope['record_id']))
-            elif envelope.get('row') is not None:
-                self._upsert(claimed.project_id, generation, [envelope['row']])
+                self._db.execute('DELETE FROM milvus_vector_receipts WHERE project_id=? AND index_version=? AND record_id=?',
+                    (claimed.project_id,generation,envelope['record_id']))
+            elif envelope.get('rows') is not None or envelope.get('row') is not None:
+                rows=envelope.get('rows')
+                if rows is None:rows=[envelope['row']]
+                if envelope.get('rows') is not None and envelope.get('record_id'):
+                    self._db.execute('DELETE FROM milvus_vector_receipts WHERE project_id=? AND index_version=? AND record_id=?',
+                        (claimed.project_id,generation,envelope['record_id']))
+                self._upsert(claimed.project_id,generation,rows)
 
     def _upsert(self, project_id, index_version, rows):
-        values = []
+        values = [];vectors=[]
         for row in rows:
             if row['project_id'] != project_id or row['index_version'] != index_version:
                 raise ValueError('receipt row does not match the claim scope')
             values.append((project_id, index_version, row['record_id'], row['version_id'],
                            projection_fingerprint(row)))
+            if row.get('vector_id'):
+                vectors.append((project_id,index_version,row['vector_id'],row['record_id'],row['version_id'],projection_fingerprint(row)))
         if values:
             self._db.executemany('''INSERT INTO milvus_projection_receipts
                 (project_id,index_version,record_id,version_id,fingerprint) VALUES (?,?,?,?,?)
                 ON CONFLICT(project_id,index_version,record_id) DO UPDATE SET
                 version_id=excluded.version_id,fingerprint=excluded.fingerprint''', values)
+        if vectors:
+            self._db.executemany('''INSERT INTO milvus_vector_receipts
+                (project_id,index_version,vector_id,record_id,version_id,fingerprint) VALUES (?,?,?,?,?,?)
+                ON CONFLICT(project_id,index_version,vector_id) DO UPDATE SET
+                record_id=excluded.record_id,version_id=excluded.version_id,fingerprint=excluded.fingerprint''',vectors)
 
     def replace_page(self, claimed, rows):
         if not isinstance(rows, (list, tuple)) or len(rows) > 512:
@@ -93,6 +112,19 @@ class ProjectionReceipts:
             generation = self._claimed_scope(claimed)
             self._db.execute('DELETE FROM milvus_projection_receipts '
                 'WHERE project_id=? AND index_version=?', (claimed.project_id, generation))
+            self._db.execute('DELETE FROM milvus_vector_receipts WHERE project_id=? AND index_version=?',
+                (claimed.project_id,generation))
+
+    def for_vector_ids(self,project_id,index_version,vector_ids):
+        self._scope(project_id,index_version)
+        if not isinstance(vector_ids,(list,tuple)) or len(vector_ids)>1000 or any(not isinstance(value,str) or not value for value in vector_ids):
+            raise ValueError('vector receipt lookup requires at most 1000 nonempty IDs')
+        if not vector_ids:return {}
+        with self.repository._lock:
+            rows=self._db.execute('''SELECT vector_id,version_id,fingerprint FROM milvus_vector_receipts
+                WHERE project_id=? AND index_version=? AND vector_id=ANY(?::text[])''',
+                (project_id,index_version,list(vector_ids))).fetchall()
+        return {row['vector_id']:{'version_id':row['version_id'],'fingerprint':row['fingerprint']} for row in rows}
 
     def for_record_ids(self, project_id, index_version, record_ids):
         self._scope(project_id, index_version)
@@ -111,9 +143,18 @@ class ProjectionReceipts:
     def count(self, project_id, index_version):
         self._scope(project_id, index_version)
         with self.repository._lock:
+            vectors=int(self._db.execute('SELECT count(*) FROM milvus_vector_receipts WHERE project_id=? AND index_version=?',
+                (project_id,index_version)).fetchone()[0])
+            if vectors:return vectors
             return int(self._db.execute('SELECT count(*) AS receipt_count '
                 'FROM milvus_projection_receipts WHERE project_id=? AND index_version=?',
                 (project_id, index_version)).fetchone()['receipt_count'])
+
+    def single_row_records(self,project_id,index_version):
+        with self.repository._lock:
+            row=self._db.execute('''SELECT count(*) total,count(DISTINCT record_id) records
+                FROM milvus_vector_receipts WHERE project_id=? AND index_version=?''',(project_id,index_version)).fetchone()
+        return row['total']==row['records']
 
     def pages(self, project_id, index_version, *, batch_size=512):
         self._scope(project_id, index_version)
@@ -131,6 +172,22 @@ class ProjectionReceipts:
                 yield {row['record_id']: {'version_id': row['version_id'], 'fingerprint': row['fingerprint']}
                        for row in rows}
                 after = rows[-1]['record_id']
+
+    def vector_pages(self,project_id,index_version,*,batch_size=512):
+        self._scope(project_id,index_version)
+        if type(batch_size) is not int or not 1<=batch_size<=512:raise ValueError('receipt page size must be 1..512')
+        any_vectors=False
+        with self.repository.independent_read_view() as reader:
+            after=''
+            while True:
+                rows=reader._db.execute('''SELECT vector_id,version_id,fingerprint FROM milvus_vector_receipts
+                    WHERE project_id=? AND index_version=? AND vector_id>? ORDER BY vector_id LIMIT ?''',
+                    (project_id,index_version,after,batch_size)).fetchall()
+                if not rows:break
+                any_vectors=True
+                yield {row['vector_id']:{'version_id':row['version_id'],'fingerprint':row['fingerprint']} for row in rows}
+                after=rows[-1]['vector_id']
+        if not any_vectors:yield from self.pages(project_id,index_version,batch_size=batch_size)
 
     def manifest(self, project_id, index_version):
         self._scope(project_id, index_version)

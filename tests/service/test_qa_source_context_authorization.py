@@ -48,7 +48,8 @@ def _system(monkeypatch, *, forge=False, platforms=None):
         records_at_knowledge_time=lambda *_: [doc],
         list_record_version_assertions=lambda *_a, **_kw: [{'assertion_id': 'a', 'assertion_event_id': 'accepted'}],
         get_assertion=lambda *_: assertion,
-        list_assertion_events=lambda *_: [{'id': 'accepted', 'created_at': common['recorded_at']}])
+        list_assertion_events=lambda *_: [{'id': 'accepted', 'created_at': common['recorded_at'],
+            'decision_version': 1, 'to_status': 'accepted', 'canonical_record_id': 'fact'}])
     def by_ids(_reader, _project, scope, ids, *, kinds=None):
         return [row for row in rows if row['id'] in ids and row['kind'] in kinds
                 and matches_filter(row, scope.get('filters')) and

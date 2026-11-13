@@ -84,6 +84,12 @@ SYSTEM_COLUMN_DEFS = (
     ColumnDef('type', 'varchar', nullable=True, max_length=800, index=True),
     ColumnDef('ontology_id', 'varchar', nullable=True, max_length=800, index=True),
     ColumnDef('text', 'varchar', max_length=65535),
+    ColumnDef('owner_id', 'varchar', nullable=True, max_length=800, index=True),
+    ColumnDef('support_context_id', 'varchar', nullable=True, max_length=800, index=True),
+    ColumnDef('support_context_version', 'int64', nullable=True),
+    ColumnDef('window_index', 'int64', nullable=True),
+    ColumnDef('window_start', 'int64', nullable=True),
+    ColumnDef('window_end', 'int64', nullable=True),
     ColumnDef('embedding', 'float_vector'),
     ColumnDef('sparse', 'sparse_float_vector'),
     *(column for name in ('platform', 'business', 'audience') for column in (

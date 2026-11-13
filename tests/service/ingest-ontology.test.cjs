@@ -1,6 +1,6 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {createController,releaseLabel,resultRelease}=require('../../knowledge_service/web/ingest-ontology.js');
+const {createController,releaseLabel,resultRelease,attributeExtractionHelp}=require('../../knowledge_service/web/ingest-ontology.js');
 
 const v1={id:'release-1',version:1,created_at:'2026-10-15T00:00:00Z'};
 const v3={id:'release-3',version:3,created_at:'2026-10-16T00:00:00Z'};
@@ -55,4 +55,18 @@ test('result uses assertion ownership over the submitted context and never guess
   assert.match(releaseLabel(missing),/版本号未知/);
   const mixed=await resultRelease('p',[{ontology_id:v1.id},{ontology_id:v3.id}],v3,read);
   assert.match(releaseLabel(mixed),/多个本体版本/);
+});
+test('attribute extraction help uses the displayed published definitions including paragraphs and review',()=>{
+  assert.equal(typeof attributeExtractionHelp,'function');
+  const help=attributeExtractionHelp({mode:'ontology',status:'ready',release:{id:'published',summary:{attributes:[{id:'amount'},{id:'description'},{id:'retired',active:false}]}}});
+  assert.match(help,/已发布.*2 项属性/);assert.match(help,/TTL/);assert.match(help,/段落/);assert.match(help,/默认关闭/);assert.match(help,/知识审核.*属性事实/);
+  assert.match(attributeExtractionHelp({mode:'documents'}),/仅文档.*不抽取/);
+  assert.doesNotMatch(attributeExtractionHelp({mode:'ontology',status:'loading'}),/0 项属性/);
+});
+test('upload attribute toggle is off by default and its help is not limited to scalar fields',()=>{
+  const fs=require('node:fs'),path=require('node:path');
+  const html=fs.readFileSync(path.resolve(__dirname,'../../knowledge_service/web/index.html'),'utf8');
+  const checkbox=html.match(/<input\b[^>]*id="parse-attributes"[^>]*>/)?.[0]||'';
+  assert.ok(checkbox);assert.doesNotMatch(checkbox,/\bchecked\b/);assert.match(checkbox,/aria-describedby="parse-attributes-help"/);
+  assert.match(html,/id="parse-attributes-help"/);assert.doesNotMatch(html,/数量、金额、日期、状态等标量字段/);
 });

@@ -55,14 +55,9 @@ def rank_qualified(engine, project, query, mode, kinds, target, native_scope,
     ids = list(dict.fromkeys(hit['record_id'] for hit in merged))
     rows = readers.by_ids(project, authoritative_scope, ids, kinds=kinds) if ids else []
     by_version = {row['version_id']: row for row in rows}
-    result = []
-    for hit in merged:
-        row = by_version.get(hit['version_id'])
-        if row is None or row['id'] != hit['record_id']:
-            continue
-        result.append({**{key: value for key, value in row.items() if key != 'embedding'},
-                       **{key: hit[key] for key in ('score', 'rrf_score', 'backend_ranks') if key in hit},
-                       **({'keyword_score': hit['score']} if mode == 'keyword' else {})})
+    from .retrieval_hits import qualified_hits
+    result=qualified_hits(engine.repository,project,authoritative_scope,rows,merged)
+    if mode=='keyword':result=[{**row,'keyword_score':row['score']} for row in result]
     return result[:target], candidates, len(result) == len(merged)
 
 

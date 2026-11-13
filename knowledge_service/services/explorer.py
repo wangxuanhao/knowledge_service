@@ -1,11 +1,8 @@
 """受限范围图探索、项目快照与确定性评估。"""
-from collections import Counter,defaultdict,deque
-import hashlib
-import json
+from collections import defaultdict
 import logging
 from time import perf_counter
 from uuid import uuid4
-from ..repository import OntologyNotPublished
 from ..utils.diagnostics import timed
 from .service import public
 from .governance import writable
@@ -21,118 +18,9 @@ class Explorer:
         self.service=service
         self.repo=service.repository
 
-    @staticmethod
-    def _virtual_id(prefix, identity, used):
-        """Return a deterministic response-only ID that cannot shadow a real node."""
-        encoded=json.dumps(identity,ensure_ascii=False,allow_nan=False,sort_keys=True,
-                           separators=(',',':')).encode('utf-8')
-        digest=hashlib.sha256(encoded).hexdigest()
-        candidate=f'__ks_{prefix}__:{digest}'
-        salt=0
-        while candidate in used:
-            salt+=1
-            candidate=f'__ks_{prefix}__:{digest}:{salt}'
-        used.add(candidate)
-        return candidate
-
-    def _entity_attributes(self,p,attributes,entity_ids,labels):
-        """Project current attributes and unresolved conflicts for graph entities."""
-        ontology_cache={}
-        try:
-            from .ontology import Ontology
-            current_ontology=self.repo.get_ontology(p)
-            ontology=Ontology(current_ontology['turtle'])
-            ontology_cache[current_ontology['id']]=ontology
-        except (KeyError,OntologyNotPublished):
-            ontology=None
-        def stable_predicate(value,ontology_id=None):
-            if value.startswith(('urn:','http://','https://')):return value
-            model=ontology
-            if ontology_id and ontology_id not in ontology_cache:
-                try:ontology_cache[ontology_id]=Ontology(self.repo.get_ontology(p,ontology_id)['turtle'])
-                except (KeyError,OntologyNotPublished):ontology_cache[ontology_id]=None
-            if ontology_id:model=ontology_cache.get(ontology_id) or model
-            if model is not None:
-                try:return str(model.resolve(value,model.attributes))
-                except ValueError:pass
-            return value
-        assertions=self.repo.list_assertions(p)
-        assertions_by_id={row['id']:row for row in assertions}
-        mappings=self.repo.list_record_version_assertions(p)
-        support_by_version=defaultdict(set)
-        for mapping in mappings:
-            assertion=assertions_by_id.get(mapping['assertion_id'])
-            if (assertion and assertion['status']=='accepted' and
-                    assertion.get('canonical_record_id')==mapping['record_id']):
-                support_by_version[mapping['record_version_id']].add(assertion['id'])
-
-        grouped=defaultdict(list)
-        for row in attributes:
-            if row.get('subject_id') not in entity_ids:
-                continue
-            predicate=stable_predicate(row['type'],row.get('ontology_id'))
-            grouped[(row['subject_id'],predicate)].append({
-                'record_id':row['id'],'assertion_id':None,'candidate_id':None,
-                'predicate':predicate,'type':predicate,'value':row['value'],
-                'datatype':row['datatype'],'valid_from':row.get('valid_from'),
-                'valid_until':row.get('valid_until'),
-                'accepted_support_count':len(support_by_version.get(row['version_id'],())),
-                'status':'accepted','conflict_state':'clear','conflict':None,
-            })
-
-        for assertion in assertions:
-            if assertion['kind']!='attribute' or assertion['status']!='contradicting':
-                continue
-            payload=assertion.get('payload',{})
-            subject_id=payload.get('subject_id') or payload.get('entity_id')
-            predicate=(payload.get('type') or payload.get('conflict_predicate') or
-                       payload.get('target_type') or payload.get('proposed_type'))
-            if subject_id not in entity_ids or not predicate or payload.get('value') is None:
-                continue
-            predicate=stable_predicate(predicate,payload.get('ontology_id'))
-            datatype=payload.get('datatype')
-            if not datatype:
-                from ..utils.attributes import primitive_datatype
-                try:datatype=primitive_datatype(payload['value'])
-                except ValueError:continue
-            grouped[(subject_id,predicate)].append({
-                'record_id':assertion.get('canonical_record_id'),
-                'assertion_id':assertion['id'],'candidate_id':assertion['id'],
-                'predicate':predicate,'type':predicate,'value':payload['value'],
-                'datatype':datatype,'valid_from':payload.get('valid_from'),
-                'valid_until':payload.get('valid_until'),'accepted_support_count':0,
-                'status':'contradicting','conflict_state':'contradicting',
-                'conflict':{
-                    'code':payload.get('conflict_code','attribute_conflict'),
-                    'reason':assertion.get('decision_reason'),
-                },
-                'provenance':{key:assertion.get(key) for key in (
-                    'document_id','document_version_id','chunk_id','source_hash',
-                    'start_char','end_char','quote')},
-            })
-
-        result=defaultdict(list)
-        for (subject_id,predicate),values in grouped.items():
-            conflicts=[value['candidate_id'] for value in values
-                       if value['status']=='contradicting']
-            for value in values:
-                if value['status']=='accepted' and conflicts:
-                    value['conflict_state']='contested'
-                    value['conflict']={'candidate_ids':conflicts}
-            values.sort(key=lambda value:(value['status']!='accepted',
-                value.get('record_id') or value.get('candidate_id') or ''))
-            result[subject_id].append({
-                'predicate':predicate,'type':predicate,
-                'label':labels.get(predicate,predicate),'values':values,
-                'conflict':bool(conflicts),'conflict_candidate_ids':conflicts,
-            })
-        for groups in result.values():
-            groups.sort(key=lambda group:(group['label'],group['predicate']))
-        return result
-
     def _native_graph_rows(self, project_id, scope, node_id, hops,
                            attribute_mode):
-        """Return a bounded native read decision and explicit fallback reason."""
+        """Legacy native decision; local views require a separately bounded read."""
         adapter=getattr(self.service,'neo4j_projection',None)
         readiness=getattr(self.repo,'projection_ready',None)
         reason=None
@@ -146,6 +34,13 @@ class Explorer:
         if reason:
             return {'rows':None,'backend':'postgres_bfs','degraded_reason':reason}
         try:
+            ontology_reader=getattr(self.service,'structure_pending_ontology',None)
+            if callable(ontology_reader):
+                ontology=ontology_reader(project_id)
+                policies=[ontology.identity_policy(str(class_iri)) for class_iri in ontology.classes]
+                if any(policy.mode=='reference' or policy.keys for policy in policies):
+                    return {'rows':None,'backend':'postgres_bfs',
+                            'degraded_reason':'source_contexts_unsupported'}
             if not callable(readiness) or not readiness(project_id,'neo4j',3):
                 return {'rows':None,'backend':'postgres_bfs',
                         'degraded_reason':'readiness_stale'}
@@ -166,98 +61,49 @@ class Explorer:
                     'degraded_reason':'neo4j_read_failed'}
 
     def graph(self,p,scope,node_id=None,hops=1,attribute_mode='summary'):
-        """返回以 ``node_id`` 为中心的局部子图（省略时返回整个范围）。
-
-        PERF：种子点只在读完整范围之后才收窄。带种子的请求只返回几 KB，
-        因此计时行显示扫描占主导、构图开销可忽略——不要把小的响应当作廉价请求。
-        下面的跳数循环每跳会重新扫描每条边一次，所以 `hops=3` 在扫描之外还要
-        多付出三次全量边的遍历。
-        """
+        """Read the entity/relation network; selected properties load on demand."""
+        from ..repository.scoped_reads import ScopedReads
+        from .graph_neighborhood import present_neighborhood
         started=perf_counter()
+        if attribute_mode not in {'none','summary','expanded'}:
+            raise ValueError('不支持的属性展示模式')
+        # Preserve old request values while retiring attribute canvas expansion.
+        attribute_mode='none' if attribute_mode=='none' else 'summary'
+        entity_type=scope.get('entity_type') or None
+        predicate=scope.get('predicate') or None
+        record_scope={key:value for key,value in scope.items()
+                      if key not in {'node_id','hops','attribute_mode','entity_type','predicate'}}
         with timed('图谱探索', seeded=bool(node_id), hops=hops) as record:
-            # 图始终读取实体和关系；属性模式开启时在同一次范围读取中追加正式属性。
-            # chunk/document 载荷仍不参与图谱响应。
-            if attribute_mode not in {'none','summary','expanded'}:
-                raise ValueError('不支持的属性展示模式')
-            entity_type=scope.get('entity_type')
-            predicate=scope.get('predicate')
-            record_scope={key:value for key,value in scope.items()
-                          if key not in {'node_id','hops','attribute_mode',
-                                         'entity_type','predicate'}}
-            graph_kinds=['entity','relation']
-            if attribute_mode!='none':graph_kinds.append('attribute')
-            native=self._native_graph_rows(
-                p,{**record_scope,'entity_type':entity_type,
-                   'predicate':predicate},node_id,hops,attribute_mode)
-            native_rows=native['rows']
-            rows=(native_rows if native_rows is not None else
-                  self.service.scoped(p,{**record_scope,'kinds':graph_kinds}))
-            record['backend']=native['backend']
-            record['rows']=len(rows)
-            nodes={r['id']:r for r in rows
-                   if r['kind']=='entity' and (not entity_type or r['type']==entity_type)}
-            edges=[r for r in rows
-                   if r['kind']=='relation' and (not predicate or r['type']==predicate)
-                   and r['subject_id'] in nodes and r['object_id'] in nodes]
-            attributes=[r for r in rows if r['kind']=='attribute' and r['subject_id'] in nodes]
-            record['graph_nodes']=len(nodes)
-            record['graph_edges']=len(edges)
+            # Neo4j V3 expansion has neither source-context eligibility nor an
+            # explicit result budget. Local views use the authoritative BFS.
+            backend={'backend':'postgres_bfs','degraded_reason':
+                     'bounded_authority_neighborhood' if node_id else 'unseeded_graph'}
+            reads=ScopedReads(self.repo)
             if node_id:
-                if node_id not in nodes: raise KeyError(node_id)
-                selected={node_id};frontier={node_id}
-                for _ in range(max(0,min(5,hops))):
-                    following={r[k] for r in edges if r['subject_id'] in frontier or r['object_id'] in frontier for k in ('subject_id','object_id')}
-                    frontier=following-selected;selected|=frontier
-                nodes={i:r for i,r in nodes.items() if i in selected}
-                edges=[r for r in edges if r['subject_id'] in selected and r['object_id'] in selected]
-                record['selected']=len(selected)
-                record['returned_nodes']=len(nodes)
-                record['returned_edges']=len(edges)
-            labels=self.service.ontology_labels(p) if attribute_mode!='none' else {}
-            grouped=(self._entity_attributes(p,attributes,set(nodes),labels)
-                     if attribute_mode!='none' else {})
-            # 每个实体都带上它所属类的**父类/祖先**（用户反馈："检索没看到有父类的信息"、
-            # "知识图谱也没父类相关的信息"）。实体节点本身没有父类 —— 层级在**类**之间，
-            # 所以这里给的是"这个实体的类型在本体里的上位类"，图上与详情里都靠它显示归属。
-            presented=[]
-            for row in nodes.values():
-                item=public(row)
-                if item.get('kind')=='entity':
-                    entry=self.service.record_family(p, row)
-                    item['class_label']=entry.get('label') or item.get('type_label') or ''
-                    item['class_parents']=entry.get('parents') or []
-                    item['class_ancestors']=entry.get('ancestors') or []
-                    item['class_ontology_id']=entry.get('ontology_id')
-                if attribute_mode!='none':item['attributes']=grouped.get(row['id'],[])
-                presented.append(item)
-            presented_edges=[public(r) for r in edges]
-            if attribute_mode=='expanded' and node_id in nodes:
-                used={row['id'] for row in presented}|{edge['id'] for edge in presented_edges}
-                for group in grouped.get(node_id,[]):
-                    for value in group['values']:
-                        identity=[node_id,group['predicate'],value['datatype'],value['value'],
-                                  value['status'],value.get('record_id'),value.get('candidate_id')]
-                        virtual_id=self._virtual_id('attribute',identity,used)
-                        virtual={**value,'id':virtual_id,'kind':'attribute_value',
-                                 'type':'KS_ATTRIBUTE_VALUE','virtual':True,
-                                 'subject_id':node_id,'predicate_label':group['label'],
-                                 'text':f"{group['label']}: {json.dumps(value['value'],ensure_ascii=False)}"}
-                        presented.append(virtual)
-                        edge_id=self._virtual_id('attribute_edge',[node_id,virtual_id],used)
-                        presented_edges.append({
-                            'id':edge_id,'kind':'attribute_edge','type':'KS_ATTRIBUTE',
-                            'type_label':group['label'],'text':group['label'],
-                            'subject_id':node_id,'object_id':virtual_id,'virtual':True,
-                            'predicate':group['predicate'],'status':value['status'],
-                        })
-            # 上报该字段以便浏览器在图谱摘要中区分服务端读取与客户端布局；
-            # 上面的日志行仍是权威数字（它还包括序列化）。调用方过去从这里读
-            # `timing_ms.total`，而 /subgraph 从不返回它，所以 renderGraph 中的该分支是死代码。
-            return {'nodes':presented,'edges':presented_edges,
-                    'attribute_mode':attribute_mode,'selected_node_id':node_id,
-                    'backend':native['backend'],
-                    'degraded_reason':native['degraded_reason'],
-                    'timing_ms':{'total':round((perf_counter()-started)*1000,1)}}
+                result=reads.neighbors(p,record_scope,[node_id],hops=hops,direction='both',
+                    max_nodes=500,max_edges=1000,entity_type=entity_type,predicate=predicate)
+            else:
+                rows=self.service.scoped(p,{**record_scope,'kinds':['entity','relation']})
+                nodes={row['id']:row for row in rows if row['kind']=='entity'
+                       and (not entity_type or row['type']==entity_type)}
+                edges=[row for row in rows if row['kind']=='relation'
+                       and (not predicate or row['type']==predicate)
+                       and row['subject_id'] in nodes and row['object_id'] in nodes]
+                result={'records':[*nodes.values(),*edges],'truncated':False,'continuation':None}
+            if node_id and not any(row['kind']=='entity' and row['id']==node_id
+                                   for row in result['records']):
+                raise KeyError(node_id)
+            presented=present_neighborhood(self.service,reads,p,record_scope,result,
+                                           [node_id] if node_id else [])
+            nodes=[row for row in presented['records'] if row['kind']=='entity']
+            edges=[row for row in presented['records'] if row['kind']=='relation']
+            record.update(backend=backend['backend'],rows=len(result['records']),
+                          graph_nodes=len(nodes),graph_edges=len(edges))
+            return {key:value for key,value in presented.items() if key!='records'} | {
+                'nodes':nodes,'edges':edges,'attribute_mode':attribute_mode,
+                'selected_node_id':node_id,**backend,
+                'budgets':{'max_nodes':500,'max_edges':1000} if node_id else None,
+                'timing_ms':{'total':round((perf_counter()-started)*1000,1)}}
 
     def dashboard(self,p,scope):
         from ..repository.page_reads import PageReads

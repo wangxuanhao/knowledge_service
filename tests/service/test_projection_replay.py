@@ -11,10 +11,12 @@ from knowledge_service.repository import Repository
 from knowledge_service.repository.projection_store import ProjectionLeaseLost
 from knowledge_service.services.projection_runtime import MilvusProjectionAdapter
 from knowledge_service.services.projection_sync import ProjectionSync
+from knowledge_service.services.retrieval import PROJECTION_SCHEMA_VERSIONS
 from test_projection_sync import Encoder, MemoryMilvus
 
 
 CATALOG = default_catalog()
+MILVUS_SCHEMA_VERSION = PROJECTION_SCHEMA_VERSIONS['milvus']
 
 
 class MilvusDestination(MemoryMilvus):
@@ -53,10 +55,10 @@ def active_system(tmp_path):
     project = repo.create_project('projection replay')['id']
     milvus, encoder = MilvusDestination(), Encoder()
     adapter = MilvusProjectionAdapter(milvus, encoder=encoder)
-    sync = ProjectionSync(repo.projections, {'milvus': adapter}, schema_version=3)
+    sync = ProjectionSync(repo.projections, {'milvus': adapter}, schema_version=MILVUS_SCHEMA_VERSION)
     built = sync.rebuild(project, 'milvus')
     assert built['indexed'] == built['applied_seq'] == 0
-    assert repo.projections.search_index(project, 3)['index_version'] == built['index_version']
+    assert repo.projections.search_index(project, MILVUS_SCHEMA_VERSION)['index_version'] == built['index_version']
     assert milvus.writes == []
     return repo, project, milvus, adapter, sync
 
@@ -68,12 +70,12 @@ def apply_claim(repo, adapter, claim):
         repo.projections.renew_claim(claim)
         assert adapter.apply(claim.project_id, item, fence=claim.token,
                              index_version=state['index_version'], catalog=CATALOG)
-    return repo.projections.ack_contiguous(claim, 3)
+    return repo.projections.ack_contiguous(claim, MILVUS_SCHEMA_VERSION)
 
 
 def test_partial_batch_failure_requires_explicit_rebuild_without_retry(tmp_path):
     repo, project, milvus, _adapter, sync = active_system(tmp_path)
-    generation = repo.projections.search_index(project, 3)['index_version']
+    generation = repo.projections.search_index(project, MILVUS_SCHEMA_VERSION)['index_version']
     for record_id in ('first', 'second'):
         repo.put_record(project, {'id': record_id, 'kind': 'chunk', 'text': record_id})
     milvus.fail_once = 2
@@ -86,9 +88,9 @@ def test_partial_batch_failure_requires_explicit_rebuild_without_retry(tmp_path)
     cursor = repo.projections.cursor(project, 'milvus')
     assert cursor['applied_seq'] == 0
     assert cursor['status'] == 'requires_rebuild'
-    assert not repo.projection_ready(project, 'milvus', 3)
+    assert not repo.projection_ready(project, 'milvus', MILVUS_SCHEMA_VERSION)
     with pytest.raises(RuntimeError, match='requires_rebuild'):
-        repo.projections.search_index(project, 3)
+        repo.projections.search_index(project, MILVUS_SCHEMA_VERSION)
     assert milvus.write_attempts == 2
     assert [row['record_id'] for row in milvus.writes] == ['first']
     assert {row['record_id'] for row in milvus.rows.values()} == {'first'}
@@ -117,11 +119,11 @@ def test_acknowledged_claim_cannot_replay_over_newer_record_and_receipt(tmp_path
     # reusing an acknowledged prefix, including after another revision arrives.
     repo, project, milvus, adapter, _sync = active_system(tmp_path)
     first = repo.put_record(project, {'id': 'record', 'kind': 'chunk', 'text': 'first'})
-    old_claim = repo.projections.claim_contiguous_batch(project, 'milvus', 3)
+    old_claim = repo.projections.claim_contiguous_batch(project, 'milvus', MILVUS_SCHEMA_VERSION)
     assert apply_claim(repo, adapter, old_claim) == 1
     newest = repo.put_record(project, {'id': 'record', 'kind': 'chunk', 'text': 'second'},
                              expected_version=first['version'])
-    new_claim = repo.projections.claim_contiguous_batch(project, 'milvus', 3)
+    new_claim = repo.projections.claim_contiguous_batch(project, 'milvus', MILVUS_SCHEMA_VERSION)
     assert [item['seq'] for item in new_claim.events] == [2, 3]
     assert apply_claim(repo, adapter, new_claim) == 3
     writes, rows = list(milvus.writes), dict(milvus.rows)
@@ -129,8 +131,8 @@ def test_acknowledged_claim_cannot_replay_over_newer_record_and_receipt(tmp_path
     with pytest.raises(ProjectionLeaseLost):
         apply_claim(repo, adapter, old_claim)
     with pytest.raises(ProjectionLeaseLost):
-        repo.projections.ack_contiguous(old_claim, 3)
-    generation = repo.projections.search_index(project, 3)['index_version']
+        repo.projections.ack_contiguous(old_claim, MILVUS_SCHEMA_VERSION)
+    generation = repo.projections.search_index(project, MILVUS_SCHEMA_VERSION)['index_version']
     receipt = repo.projections.receipts.for_record_ids(project, generation, ['record'])
     assert receipt['record']['version_id'] == newest['version_id']
     assert repo.projections.cursor(project, 'milvus')['applied_seq'] == 3
@@ -181,7 +183,7 @@ def test_explicit_rebuild_uses_new_generation_without_changing_previous_receipts
     newest = repo.put_record(project, {'id': 'record', 'kind': 'chunk', 'text': 'second'},
                              expected_version=first['version'])
     assert sync.drain_once(project, 'milvus').status == 'applied'
-    previous = repo.projections.search_index(project, 3)['index_version']
+    previous = repo.projections.search_index(project, MILVUS_SCHEMA_VERSION)['index_version']
     old_row = dict(milvus.rows[(project, previous, 'record')])
     old_receipts = repo.projections.receipts.for_record_ids(project, previous, ['record'])
 
@@ -190,8 +192,8 @@ def test_explicit_rebuild_uses_new_generation_without_changing_previous_receipts
     assert generation > previous
     assert rebuilt['indexed'] == 1
     assert rebuilt['applied_seq'] == repo.projections.project_watermark(project) == 3
-    assert repo.projections.search_index(project, 3)['index_version'] == generation
-    assert repo.projection_ready(project, 'milvus', 3)
+    assert repo.projections.search_index(project, MILVUS_SCHEMA_VERSION)['index_version'] == generation
+    assert repo.projection_ready(project, 'milvus', MILVUS_SCHEMA_VERSION)
     assert milvus.rows[(project, previous, 'record')] == old_row
     assert repo.projections.receipts.for_record_ids(project, previous, ['record']) == old_receipts
     assert milvus.rows[(project, generation, 'record')]['version_id'] == newest['version_id']

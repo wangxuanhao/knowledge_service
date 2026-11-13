@@ -26,11 +26,9 @@ class ProjectedRows:
         return self.count
 
     def __iter__(self):
-        from ..domain.search_projection import build_projection
+        from ..domain.search_projection import build_projections
         for value in self.inputs:
-            row = build_projection(value, self.catalog, index_version=self.index_version)
-            if row is not None:
-                yield row
+            yield from build_projections(value,self.catalog,index_version=self.index_version)
 
 
 class LeaseHeartbeat:
@@ -76,7 +74,7 @@ class LeaseHeartbeat:
 class MilvusProjectionAdapter:
     """Apply frozen PG projection envelopes to one project/build scope."""
 
-    INDEXED_KINDS = frozenset({'entity', 'relation', 'chunk'})
+    INDEXED_KINDS = frozenset({'entity', 'relation', 'attribute', 'chunk'})
 
     def __init__(self, store, *, fence_is_current=None, encoder=None):
         self._store_source = store
@@ -128,19 +126,21 @@ class MilvusProjectionAdapter:
                 self._store().delete_records([envelope['record_id']], project_id=project_id,
                                             index_version=index_version, catalog=catalog)
             elif event['operation'] == 'upsert':
-                row = envelope.get('row')
-                if row is None:
-                    return True
-                if row['project_id'] != project_id or row['index_version'] != index_version:
+                rows=envelope.get('rows')
+                if rows is None:rows=[envelope['row']] if envelope.get('row') is not None else []
+                if any(row['project_id']!=project_id or row['index_version']!=index_version for row in rows):
                     raise ValueError('outbox 投影项目范围不符')
                 # Missing/incompatible storage must fail before loading or
                 # invoking a potentially expensive semantic model.
                 self._store().check_collection(catalog=catalog)
                 current()
-                prepared = self._encode([row])
+                first=self._encode(rows[:64]) if rows else []
                 current()
-                self._store().upsert_rows(prepared, project_id=project_id,
-                                         index_version=index_version, catalog=catalog)
+                if envelope.get('rows') is not None and envelope.get('record_id'):
+                    self._store().delete_records([envelope['record_id']],project_id=project_id,index_version=index_version,catalog=catalog)
+                for start in range(0,len(rows),64):
+                    prepared=first if start==0 else self._encode(rows[start:start+64]);current()
+                    self._store().upsert_rows(prepared,project_id=project_id,index_version=index_version,catalog=catalog)
             else:
                 raise ValueError('unsupported projection operation')
             current()
@@ -158,7 +158,7 @@ class MilvusProjectionAdapter:
 
     def preflight(self, project_id, state, inputs):
         from ..domain.search_filter_catalog import default_catalog
-        from ..domain.search_projection import build_projection
+        from ..domain.search_projection import build_projections
         configuration = self.index_configuration()
         if any(key in state and state[key] != value for key, value in configuration.items()):
             raise MilvusSchemaMismatch('项目构建模型已改变，需要新构建版本重新向量化')
@@ -170,14 +170,15 @@ class MilvusProjectionAdapter:
             raise ValueError('构建输入需要可重复读取的 PG 快照页')
         count = 0
         for value in inputs:
-            row = build_projection(value, catalog, index_version=state['index_version'])
-            if row is not None:
+            for row in build_projections(value,catalog,index_version=state['index_version']):
                 if row_bytes(row) + int(self._store().dim) * 4 + 128 > 24 * 1024 * 1024:
                     raise ValueError('平铺投影单行超过 RPC 字节预算')
                 count += 1
         if self._encoder is None:
             raise RuntimeError('Milvus projection encoder is unavailable')
         state.update(catalog=catalog.to_dict(), **configuration, destination='knowledge_vectors')
+        state['search_capabilities']=['attributes_v1','attribute_windows_v1','source_contexts_v1',
+                                    'entity_source_contexts_v1','relation_source_contexts_v1','entity_fact_contexts_v1']
         # All type/capacity checks above complete before any encoder or write RPC.
         self._store().ensure_collection(project_id=project_id,
                                         index_version=state['index_version'], catalog=catalog)
@@ -209,6 +210,14 @@ class MilvusProjectionAdapter:
         return self._store().validate_projection(expected,
                   project_id=project_id, index_version=state['index_version'], catalog=catalog)
 
+    def validate_subset(self,project_id,state,catalog,*,expected):
+        return self._store().validate_projection_subset(expected,project_id=project_id,
+            index_version=state['index_version'],catalog=catalog)
+
+    def validate_count(self,project_id,state,catalog,*,expected_count):
+        return self._store().validate_projection_count(expected_count,project_id=project_id,
+            index_version=state['index_version'],catalog=catalog)
+
     def retire_versions(self, project_id, versions):
         return self._store().delete_versions(project_id, versions)
 
@@ -227,6 +236,7 @@ class ProjectionWorker:
         self.reconnect = reconnect
         self.audit_interval_seconds = float(audit_interval_seconds)
         self._next_audit = 0.0
+        self._milvus_audit_positions={}
         self.owner = f'projection-worker:{uuid4()}'
         self._stop = threading.Event()
         self._lock = threading.RLock()
@@ -258,11 +268,15 @@ class ProjectionWorker:
 
     def audit_project(self, project_id):
         for target, adapter in self.sync.adapters.items():
+            if target=='milvus':
+                self._audit_milvus(project_id,adapter)
+                continue
             audit = getattr(adapter, 'audit_authority', None)
             if audit is None:
                 continue
+            schema_version = self.sync.schema_for(target)
             claim = self.repository.projections.claim_maintenance(
-                project_id, target, self.sync.schema_version, self.owner)
+                project_id, target, schema_version, self.owner)
             if claim is None:
                 continue
             try:
@@ -290,12 +304,40 @@ class ProjectionWorker:
             except Exception as exc:
                 try:
                     self.repository.projections.mark_failed(
-                        claim, exc, self.sync.schema_version)
+                        claim, exc, schema_version)
                 except ProjectionLeaseLost:
                     pass
                 raise
             finally:
                 self.repository.projections.release_maintenance(claim)
+
+    def _audit_milvus(self,project_id,adapter):
+        from ..domain.search_filter_catalog import FilterCatalog
+        from .projection_audit import audit_milvus_authority
+        projections=self.repository.projections
+        schema_version=self.sync.schema_version
+        try:index=projections.search_index(project_id,schema_version)
+        except RuntimeError:return
+        sequence=index['watermark'];generation=index['index_version']
+        def current():
+            return not self._stop.is_set() and projections.search_index_is_current(
+                project_id,generation,schema_version,sequence)
+        try:
+            cursor=projections.cursor(project_id,'milvus') or {}
+            state=cursor.get('rebuild_state') or {}
+            if state.get('phase')!='ready' or not state.get('catalog') or not state.get('index_version'):return
+            position=self._milvus_audit_positions.get(project_id,{})
+            if position.get('signature')!=(generation,sequence):position={}
+            result=audit_milvus_authority(self.repository,project_id,state,FilterCatalog.from_dict(state['catalog']),adapter,current,
+                after=position.get('after'),previous_count=position.get('count',0),max_records=128)
+            if result is not None and not result['complete']:
+                self._milvus_audit_positions[project_id]={'signature':(generation,sequence),
+                    'after':result['after'],'count':result['authority_vectors']}
+            else:self._milvus_audit_positions.pop(project_id,None)
+        except Exception as exc:
+            if current():projections.flag_audit_failure(project_id,generation,schema_version,sequence,str(exc))
+            self._milvus_audit_positions.pop(project_id,None)
+            raise
 
     def run_once(self):
         delivered = 0
@@ -305,6 +347,8 @@ class ProjectionWorker:
             except Exception:
                 LOG.exception('Milvus 重连失败，后台循环稍后重试')
         projects = self.repository.list_project_directory()
+        retained={project['id'] for project in projects}
+        self._milvus_audit_positions={key:value for key,value in self._milvus_audit_positions.items() if key in retained}
         for project in projects:
             try:
                 delivered += self.drain_project(project['id'])

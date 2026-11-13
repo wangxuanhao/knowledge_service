@@ -118,12 +118,12 @@
     zoomAt(factor,x,y,w,h){const before=this.screenToWorld(x,y,w,h);this.scale=Math.max(.15,Math.min(1000,this.scale*factor));const after=this.screenToWorld(x,y,w,h);this.x+=before[0]-after[0];this.y+=before[1]-after[1];}
   }
   class Renderer{
-    constructor(host,{onSelect=()=>{},onError=()=>{}}={}){
-      this.host=host;this.dataset=new GraphDataset();this.typeFilter=null;this.typeProjection=null;this.explorationFocus=null;this.camera=new Camera();this.onSelect=onSelect;this.onError=onError;this.selected=-1;this.selectedEdge=-1;this.hovered=-1;this.showEdges=true;this.showLabels=true;this.destroyed=false;this.pendingFrame=0;this.durations=[];
+    constructor(host,{onSelect=()=>{},onError=()=>{},onHover=()=>null}={}){
+      this.host=host;this.dataset=new GraphDataset();this.typeFilter=null;this.typeProjection=null;this.explorationFocus=null;this.camera=new Camera();this.onSelect=onSelect;this.onError=onError;this.onHover=onHover;this.selected=-1;this.selectedEdge=-1;this.hovered=-1;this.showEdges=true;this.showLabels=true;this.destroyed=false;this.pendingFrame=0;this.durations=[];
       host.innerHTML='<canvas class="fg-gl" aria-label="全量实体图谱，可拖动平移和滚轮缩放；拖动实体调整位置" tabindex="0"></canvas><canvas class="fg-labels" aria-hidden="true"></canvas>';
       this.canvas=host.querySelector('.fg-gl');this.labels=host.querySelector('.fg-labels');this.labelContext=this.labels.getContext('2d');
       this.hoverCard=document.createElement('div');this.hoverCard.className='fg-hover-card';this.hoverCard.hidden=true;
-      this.hoverCard.innerHTML='<div class="fg-hover-meta"><span class="fg-hover-kind"></span><span class="fg-hover-links"></span></div><p class="fg-hover-name"></p><p class="fg-hover-id"></p>';host.append(this.hoverCard);
+      this.hoverCard.innerHTML='<div class="fg-hover-meta"><span class="fg-hover-kind"></span><span class="fg-hover-links"></span></div><p class="fg-hover-name"></p><div class="fg-hover-attributes"></div><p class="fg-hover-id"></p>';host.append(this.hoverCard);
       this.gl=this.canvas.getContext('webgl',{alpha:false,antialias:false,preserveDrawingBuffer:false,powerPreference:'high-performance'});
       if(!this.gl)throw new Error('当前浏览器无法创建 WebGL，全量模式不可用。可切回局部探索。');
       this.setupGL();this.abort=new AbortController();const signal=this.abort.signal;
@@ -175,6 +175,12 @@
         this.hoverCard.querySelector('.fg-hover-links').textContent=links+' 条关系';
         this.hoverCard.querySelector('.fg-hover-name').textContent=row.text||row.id;
         this.hoverCard.querySelector('.fg-hover-id').textContent=row.id;
+        const attributes=this.hoverCard.querySelector('.fg-hover-attributes');attributes.textContent='属性摘要读取中…';
+        const dataset=d;
+        Promise.resolve(this.onHover(row)).then(html=>{
+          if(this.destroyed||this.hovered!==index||this.displayDataset!==dataset||this.hoverCard.hidden)return;
+          attributes.innerHTML=html||'';
+        }).catch(()=>{if(this.hovered===index&&this.displayDataset===dataset)attributes.textContent='属性摘要暂不可用；点击查看详情';});
         if(this.smallSession)this.requestDraw();
       }
       const card=this.hoverCard;card.hidden=false;

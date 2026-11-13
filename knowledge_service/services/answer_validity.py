@@ -3,6 +3,14 @@ import re
 from ..core.time import normalize_time, utc_now
 from ..domain.applicability import matches_applicability, dimension_mode, dimension_values
 from ..utils.filters import matches_filter
+from ..domain.entity_identity import source_qualified
+
+
+def _scope_view(row):
+    context=row.get('matched_source_context')
+    if not source_qualified(row) or not isinstance(context,dict):return row
+    return {**row,'valid_from':context.get('valid_from'),'valid_until':context.get('valid_until'),
+            'metadata':{**(row.get('metadata') or {}),**(context.get('metadata') or {})}}
 from . import structure_pending
 
 
@@ -71,7 +79,7 @@ def visible(row, request, source_artifact=False):
         return False
     if not matches_filter(row, request.get('filters')):
         return False
-    if request.get('applicability') and not matches_applicability(row, request['applicability']):
+    if request.get('applicability') and not matches_applicability(_scope_view(row), request['applicability']):
         return False
     if request.get('ontology_scope') == 'ids' and row.get('ontology_id') not in (request.get('ontology_ids') or []):
         return False
@@ -89,15 +97,32 @@ def row_scope(row, request):
 
 def classify(service, project, row, request):
     request = row_scope(row, request)
+    contexts=None
+    if source_qualified(row) and hasattr(service.repository,'current_source_contexts'):
+        from ..repository.projection_contexts import ProjectionContexts
+        from ..domain.applicability import build_scope_predicate
+        cache=request.setdefault('_source_read_cache',{})
+        key=('identity_contexts',row['id'])
+        if key not in cache:
+            cache[key]=ProjectionContexts(service.repository).collect(project,[row],known_at=request.get('known_at')).get(row['id'],[])
+        contexts=cache[key]
+        eligible=[context for context in contexts if build_scope_predicate(request.get('applicability'),
+            request.get('valid_at'),request.get('include_unknown',True)).matches(context)]
+        if not eligible:return None
+        # Exact evidence must share the qualifying occurrence's time and scope;
+        # a broader document cannot authorize another occurrence of this owner.
+        contexts=eligible
+        matched=next((context for context in eligible if context['id']==(row.get('matched_source_context') or {}).get('id')),eligible[0])
+        row={**row,'matched_source_context':matched}
     if not visible(row, request):
         return None
     strict_time = (request.get('include_unknown', True) is False
                    and request.get('_explicit_valid_at', request.get('valid_at') is not None))
-    if strict_time and _unknown_start(row):
+    if strict_time and _unknown_start(_scope_view(row)):
         return None
     from ..domain.evidence_scope import source_scope
     source_request = source_scope(request, row)
-    status, basis = temporal(row, request['valid_at'])
+    status, basis = temporal(_scope_view(row), request['valid_at'])
     repo = service.repository
     source_cache = request.setdefault('_source_read_cache', {})
     occurrences = []
@@ -136,8 +161,11 @@ def classify(service, project, row, request):
         if doc:
             occurrences.append({'document': version, 'chunk': row.get('version_id'),
                                 'assertion': None, 'status': temporal(governance[version], request['valid_at'])[0]})
-    elif row.get('kind') in {'entity', 'relation'}:
-        for mapping in repo.list_record_version_assertions(project, record_version_id=row['version_id']):
+    elif row.get('kind') in {'entity', 'relation', 'attribute'}:
+        mappings=([{'assertion_id':context['assertion_id'],'assertion_event_id':context['id'],
+                    'record_id':context.get('support_fact_id') or row['id']} for context in contexts]
+                  if contexts is not None else repo.list_record_version_assertions(project, record_version_id=row['version_id']))
+        for mapping in mappings:
             if mapping.get('created_at', request['known_at']) > request['known_at']:
                 continue
             assertion = repo.get_assertion(project, mapping['assertion_id'])
@@ -146,9 +174,17 @@ def classify(service, project, row, request):
             assertion_id = mapping['assertion_id']
             if ('events', assertion_id) not in source_cache:
                 source_cache[('events', assertion_id)] = repo.list_assertion_events(project, assertion_id)
-            event = next((item for item in source_cache[('events', assertion_id)]
-                          if item['id'] == mapping.get('assertion_event_id')), None)
-            if not event or event.get('created_at', request['known_at']) > request['known_at']:
+            decision_key = ('latest_decision', assertion_id, request['known_at'])
+            if decision_key not in source_cache:
+                source_cache[decision_key] = max((item for item in source_cache[('events', assertion_id)]
+                    if item.get('created_at', request['known_at']) <= request['known_at']),
+                    key=lambda item: item.get('decision_version', 0), default=None)
+            event = source_cache[decision_key]
+            # A later withdrawal, reacceptance or canonical move closes this
+            # exact mapping. Future decisions must not erase historical support.
+            if (not event or event['id'] != mapping.get('assertion_event_id')
+                    or event.get('to_status') != 'accepted'
+                    or event.get('canonical_record_id') != mapping.get('record_id', row['id'])):
                 continue
             version = assertion.get('document_version_id')
             has_source = has_source or bool(version)
@@ -188,6 +224,9 @@ def classify(service, project, row, request):
     # Effective conclusions freeze only individually eligible occurrences.
     allowed = ([item for item in occurrences if item['status'] == 'effective'] if status == 'effective' else
                [item for item in occurrences if item['status'] in {'effective', 'unknown'}] if status == 'unknown' else occurrences)
+    if contexts is not None:
+        chosen=next((context for context in contexts if context.get('assertion_id') in {item['assertion'] for item in allowed}),None)
+        if chosen:row={**row,'matched_source_context':chosen}
     usage = 'effective_basis' if status == 'effective' else (
         'qualified_quote' if status == 'unknown' and row.get('kind') == 'chunk' and
         (allowed or not row.get('source_id')) else 'reference')
@@ -265,6 +304,25 @@ def apply_validity(service, project, context, request):
     strict_time = (request.get('include_unknown', True) is False
                    and request.get('_explicit_valid_at', request.get('valid_at') is not None))
     qualifications = {}
+    if hasattr(service.repository,'current_source_contexts'):
+        from ..repository.projection_contexts import ProjectionContexts
+        from ..domain.applicability import build_scope_predicate
+        owners={row['id']:row for container in [context,*context.get('platform_groups',[])]
+            for key in ('hits','evidence_rows','unknown_scope_rows') for row in container.get(key,[])
+            if source_qualified(row)}
+        rows=list(owners.values())
+        for start in range(0,len(rows),256):
+            selected=ProjectionContexts(service.repository).collect(project,rows[start:start+256],known_at=request.get('known_at'))
+            request['_source_read_cache'].update({('identity_contexts',id):values for id,values in selected.items()})
+        for container in [context,*context.get('platform_groups',[])]:
+            for key in ('hits','evidence_rows','unknown_scope_rows'):
+                for row in container.get(key,[]):
+                    if not source_qualified(row):continue
+                    selected=row_scope(row,request)
+                    predicate=build_scope_predicate(selected.get('applicability'),selected.get('valid_at'),selected.get('include_unknown',True))
+                    eligible=[item for item in request['_source_read_cache'].get(('identity_contexts',row['id']),[]) if predicate.matches(item)]
+                    if eligible:
+                        row['matched_source_context']=next((item for item in eligible if item['id']==(row.get('matched_source_context') or {}).get('id')),eligible[0])
 
     def qualify(row, selected):
         # The same occurrence can appear in several public retrieval arrays.
@@ -281,7 +339,7 @@ def apply_validity(service, project, context, request):
                 if (row.get('query_platform'), row.get('source_scope')) != (platform, mode):
                     continue
                 if mode in {'all', 'specific', 'unknown'} and dimension_mode(
-                        (row.get('metadata') or {}).get('applicability'), 'platforms') != mode:
+                        (_scope_view(row).get('metadata') or {}).get('applicability'), 'platforms') != mode:
                     continue
             if visible(row, row_scope(row, request)):
                 anchors[(row.get('id'), row.get('version_id'), row.get('query_platform'), row.get('source_scope'))] = row

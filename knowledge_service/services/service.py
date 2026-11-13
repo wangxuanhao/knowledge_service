@@ -34,6 +34,38 @@ SYSTEM = {'project_id', 'version', 'version_id', 'recorded_at', 'superseded_at',
 LOG = logging.getLogger('knowledge_service.service')
 
 
+def _withdrawn_conflict_owners(snapshot, conflict_actions):
+    """Prove withdrawn identities from the CAS-protected authority snapshot.
+
+    Only reject-only conflict closure may omit an identity that once had an
+    accepted declaration and now has no active accepted identity support.
+    Legacy direct declarations stay conservative; metadata flags prove nothing.
+    """
+    records = {row['id']: row for row in snapshot['records']}
+    rejected = {decision['attribute_id'] for action in conflict_actions or []
+                if action.get('kind') == 'conflict_set_resolve' and action.get('decisions')
+                and all(item.get('decision') == 'reject' for item in action['decisions'])
+                for decision in action['decisions']}
+    owners = {row['subject_id'] for record_id in rejected if (row := records.get(record_id))
+              and row.get('kind') == 'attribute' and row.get('metadata', {}).get('_quarantined')}
+    identity_assertions = {row['id']: row for row in snapshot.get('assertions', [])
+                           if row['kind'] == 'entity'}
+    historical = {event.get('canonical_record_id') for event in snapshot.get('assertion_events', [])
+                  if event['assertion_id'] in identity_assertions and event.get('to_status') == 'accepted'}
+    historical |= {mapping['record_id'] for mapping in snapshot.get('record_version_assertions', [])
+                   if mapping['assertion_id'] in identity_assertions}
+    active = set()
+    for assertion in identity_assertions.values():
+        if assertion['status'] != 'accepted':
+            continue
+        document_id = assertion.get('document_id')
+        document = records.get(document_id)
+        if document_id is None or (document and document['kind'] == 'document'
+                                    and not document.get('metadata', {}).get('_deleted')):
+            active.add(assertion.get('canonical_record_id'))
+    return owners & historical - active
+
+
 class OntologyValidationError(ValueError):
     """简洁的任务错误，结构化细节保留在文档收据上。"""
     def __init__(self, errors):
@@ -158,7 +190,7 @@ class KnowledgeService:
     def _latest(self, project_id):
         return self.repository.current_records(project_id)
 
-    def _timeline_check(self, project_id, version, prospective, relation_constraint_mode='strict'):
+    def _timeline_check(self, project_id, version, prospective, relation_constraint_mode='strict',*,quarantine_conflicts=None,before_graph=None):
         """对某个本体版本重算一次"时间一致性 + 结构待定"检查。
 
         返回 ``(ontology, relevant, own_unknown, pending_ids, report)``：
@@ -174,7 +206,7 @@ class KnowledgeService:
         那时用户没有任何办法判断谁对。所以两个调用点共用这一个函数。
         """
         ontology = Ontology(self.repository.get_ontology(project_id, version)['turtle'])
-        relevant = [r for r in prospective.values() if r.get('ontology_id') == version]
+        relevant = [r for r in prospective.values() if r.get('ontology_id') == version and not (r.get('metadata') or {}).get('_quarantined')]
         endpoint_ids = {r.get(k) for r in relevant if r['kind'] == 'relation'
                         for k in ('subject_id', 'object_id')}
         endpoint_ids |= {r.get('subject_id') for r in relevant if r['kind'] == 'attribute'}
@@ -196,8 +228,22 @@ class KnowledgeService:
             if any(row.get(key) in pending_ids for key in keys):
                 pending_ids.add(row['id'])
         checkable = [row for row in relevant if row['id'] not in pending_ids]
+        acknowledge=None
+        if quarantine_conflicts is not None:
+            from .attribute_conflicts import allow_quarantine_deficits
+            before_report=self._timeline_check(project_id,version,before_graph,relation_constraint_mode)[-1]
+            # Legacy facts may store a short published term, while SHACL paths
+            # are stable IRIs. Only unique declared paths grant an exemption;
+            # predicates from another ontology version grant no exemption here.
+            quarantine_paths=[]
+            for predicate in quarantine_conflicts.get('predicates',[]):
+                try:quarantine_paths.append(str(ontology.resolve(predicate,ontology.attributes)))
+                except UnknownOntologyTerm:continue
+            quarantine_context={**quarantine_conflicts,'predicates':quarantine_paths}
+            acknowledge=lambda report:allow_quarantine_deficits(report,before_report,quarantine_context)
         report = ontology.validate_timeline(
-            checkable, enforce_relationship_constraints=relation_constraint_mode == 'strict')
+            checkable, enforce_relationship_constraints=relation_constraint_mode == 'strict',
+            **({'acknowledge_report':acknowledge} if acknowledge is not None else {}))
         return ontology, relevant, own_unknown, pending_ids, report
 
     def write(self, project_id, records, expected_version=None, revision=False, completion=None, expected_versions=None,
@@ -205,13 +251,13 @@ class KnowledgeService:
               operation='manual_write', assertions=None, pending_assertions=None,
               assertion_decisions=None, resolution_reviews=None, ledger=None,
               resolution_decisions=None,suppress_auto_assertions=False, recorded_at=None,
-              defer_milvus_sync=False, operation_context=None):
+              defer_milvus_sync=False, operation_context=None,conflict_actions=None,quarantine_conflicts=None):
         event(f'等待写入锁 · 待写记录 {len(records)}', 85)
         with self.lock:
             event('校验知识结构、来源与关系端点 · 开始')
             self.repository.get_project(project_id)
             from .text_revision import try_entity_text_revision
-            scoped = try_entity_text_revision(
+            scoped = None if (conflict_actions or quarantine_conflicts) else try_entity_text_revision(
                 self, project_id, records, expected_version=expected_version,
                 revision=revision, completion=completion, expected_versions=expected_versions,
                 operation=operation, assertions=assertions, pending_assertions=pending_assertions,
@@ -240,6 +286,17 @@ class KnowledgeService:
                 if row['valid_from'] and row['valid_until'] and row['valid_from'] >= row['valid_until']:
                     raise ValueError('业务时间区间必须具有正时长')
                 is_new = row['id'] not in current
+                if ((row.get('metadata') or {}).get('_quarantined') or
+                        (current.get(row['id'],{}).get('metadata') or {}).get('_quarantined')):
+                    created_members={member for action in (conflict_actions or []) if action.get('kind')=='conflict_set_create'
+                                     for member in action.get('member_ids',[])}
+                    resolved_members={decision.get('attribute_id') for action in (conflict_actions or [])
+                                      if action.get('kind')=='conflict_set_resolve' for decision in action.get('decisions',[])}
+                    authorized=(operation=='merge_rewrite' and ledger and quarantine_conflicts and row['id'] in created_members
+                        or operation=='approve_review' and row['id'] in resolved_members
+                        or operation=='merge_reversal' and ledger and ledger.get('reversal_of')
+                        or operation=='retract_source' and ledger and (row.get('metadata') or {}).get('_deleted'))
+                    if not authorized:raise ValueError('隔离属性只能通过身份融合或统一冲突审核事务维护')
                 if row['kind'] in ('entity', 'relation', 'attribute'):
                     try:
                         ontology_version = self.repository.get_ontology(project_id, row.get('ontology_id'))
@@ -289,30 +346,65 @@ class KnowledgeService:
                                                 if k not in ('review_candidates','discovery_candidates')})
                     row['metadata'] = {**source_metadata, **row['metadata']}
                     row['metadata']['source_version_id'] = source.get('version_id')
+            endpoint_ontologies={}
             for row in prospective.values():
                 if row['kind'] not in {'relation', 'attribute'}:
                     continue
+                if (row.get('metadata') or {}).get('_quarantined'):continue
                 keys = ('subject_id', 'object_id') if row['kind'] == 'relation' else ('subject_id',)
                 for key in keys:
                     endpoint = prospective.get(row.get(key))
                     if not endpoint or endpoint['kind'] != 'entity':
                         raise ValueError(f'缺少实体端点 {row.get(key)}')
+                    from ..domain.entity_identity import policy_source_qualified, require_projection_ready
+                    endpoint_ontology_id=endpoint.get('ontology_id')
+                    if endpoint_ontology_id not in endpoint_ontologies:
+                        endpoint_ontologies[endpoint_ontology_id]=Ontology(self.repository.get_ontology(project_id,endpoint_ontology_id)['turtle'])
+                    endpoint_ontology=endpoint_ontologies[endpoint_ontology_id]
+                    if policy_source_qualified(endpoint,endpoint_ontology.identity_policy(endpoint.get('type'))):
+                        outside=(endpoint.get('valid_from') and (not row.get('valid_from') or row['valid_from']<endpoint['valid_from'])
+                            or endpoint.get('valid_until') and (not row.get('valid_until') or row['valid_until']>endpoint['valid_until']))
+                        if outside:require_projection_ready(self.repository,project_id)
+                        continue
                     if endpoint.get('valid_from') and (not row.get('valid_from') or row['valid_from'] < endpoint['valid_from']):
                         raise ValueError('关系有效区间必须在端点有效区间之内')
                     if endpoint.get('valid_until') and (not row.get('valid_until') or row['valid_until'] > endpoint['valid_until']):
                         raise ValueError('关系有效区间必须在端点有效区间之内')
-            versions = {r.get('ontology_id') for r in prepared
-                        if r['kind'] in ('entity', 'relation', 'attribute') and r['id'] in prospective}
+            # Deletion still changes the owner's required-property/cardinality
+            # constraints. Include both revisions and their endpoint ontologies.
+            changed_knowledge = [row for row in [*prepared, *[current[id] for id in ids if id in current]]
+                                 if row['kind'] in {'entity', 'relation', 'attribute'}]
+            versions = {row.get('ontology_id') for row in changed_knowledge}
+            changed_endpoints = {row.get(key) for row in changed_knowledge
+                                 for key in (('subject_id', 'object_id') if row['kind'] == 'relation'
+                                             else ('subject_id',) if row['kind'] == 'attribute' else ())}
+            versions |= {prospective[id].get('ontology_id') for id in changed_endpoints
+                         if id in prospective and prospective[id]['kind'] == 'entity'}
             # 在每个受影响的本体下重新校验预期图谱；端点类型变更不能静默使关系失效。
             versions |= {r.get('ontology_id') for r in prospective.values() if r['kind'] == 'relation'
                          and (r.get('subject_id') in ids or r.get('object_id') in ids)}
             versions |= {r.get('ontology_id') for r in prospective.values() if r['kind'] == 'attribute'
                          and r.get('subject_id') in ids}
+            validation_graph = prospective
+            if operation == 'approve_review' and suppress_auto_assertions and not assertions:
+                withdrawn = _withdrawn_conflict_owners(planning_snapshot, conflict_actions)
+                # A simultaneous identity write/acceptance must receive its
+                # normal validation, even if its previous support was withdrawn.
+                withdrawn -= {row['id'] for row in prepared if row['kind'] == 'entity'}
+                for decision in assertion_decisions or []:
+                    if decision.get('status') == 'accepted':
+                        withdrawn.discard(decision.get('canonical_record_id'))
+                if withdrawn:
+                    validation_graph = {id: row for id,row in prospective.items()
+                        if id not in withdrawn and not withdrawn.intersection(
+                            row.get(key) for key in (('subject_id', 'object_id') if row['kind'] == 'relation'
+                                                    else ('subject_id',) if row['kind'] == 'attribute' else ()))}
             shacl_reviews=[]
             for version in versions:
                 event(f'本体时间一致性校验 · 版本 {version}')
                 ontology, relevant, own_unknown, pending_ids, report = self._timeline_check(
-                    project_id, version, prospective, relation_constraint_mode)
+                    project_id, version, validation_graph, relation_constraint_mode,
+                    quarantine_conflicts=(quarantine_conflicts if operation=='merge_rewrite' and ledger else None),before_graph=current)
                 # 标记只打得进**本批次**的记录（别人的记录不在这次写入里，动不了）。
                 # 打不上标不等于看不见：读取侧的状态是推导的，收件箱/台账一样会显示它们是结构待定。
                 marked = 0
@@ -365,6 +457,7 @@ class KnowledgeService:
                  'pending_assertions': pending_assertions or [],
                  'assertion_decisions': assertion_decisions or [],
                  'resolution_decisions':resolution_decisions or [],
+                 'conflict_actions':conflict_actions or [],
                  'suppress_auto_assertions': suppress_auto_assertions}, recorded_at=recorded_at,
                 operation_context=operation_context, snapshot=planning_snapshot)
             accepted = result['accepted_records']
@@ -392,51 +485,28 @@ class KnowledgeService:
             LOG.warning('外部投影队列即时投递失败，后台任务将重试: %s', exc)
 
     def scoped(self, project_id, scope):
-        """解析请求可见的记录集；这是共享的成本中心。
-
-        PERF：对 ``Repository.query`` 的返回结果做三次全量遍历，外加扫描本身。
-        PostgreSQL 读取记录真值；向量检索由 Milvus 承担。
-        计时行报告漏斗各阶段，使主导遍历一目了然。
-        """
-        params = {k: scope.get(k) for k in ('filters', 'valid_at', 'known_at')}
-        params['include_unknown'] = scope.get('include_unknown', True)
-        params['applicability'] = scope.get('applicability')
-        requested_kinds = scope.get('kinds')
-        if requested_kinds is not None:
-            params['kinds'] = list(dict.fromkeys([
-                *requested_kinds, *(['entity'] if set(requested_kinds) & {'relation', 'attribute'} else [])]))
+        """Read source-qualified records in bounded pages of one authority snapshot."""
         if scope.get('_reference_mode'):
+            params = {key:scope.get(key) for key in ('filters','valid_at','known_at')}
             params.update(_reference_mode=True, _reference_limit=501,
                           kinds=scope.get('kinds'), applicability=scope.get('applicability'))
             if '_reference_terms' in scope:
                 params['_reference_terms'] = scope['_reference_terms']
-        # 向量已迁到 Milvus，PostgreSQL 不再读 vector 列；scoped 只做时态/元数据过滤
-        with timed('范围过滤', kinds=len(scope.get('kinds') or [])) as record:
-            rows = self.repository.query(project_id, **params)
-            record['raw'] = len(rows)
-            rows = [r for r in rows if not r.get('metadata',{}).get('_deleted') and not r.get('metadata',{}).get('_audit')]
-            applicability = scope.get('applicability')
-            if applicability is not None and any(normalize_applicability(applicability).values()):
-                rows = [r for r in rows if matches_applicability(r, applicability)]
-            ontology_scope = scope.get('ontology_scope', 'all')
-            if ontology_scope == 'ids':
-                ontology_ids = set(scope.get('ontology_ids') or [])
-                rows = [r for r in rows if r.get('ontology_id') in ontology_ids]
-            elif ontology_scope == 'unknown':
-                ontology_ids = {
-                    ontology['id']
-                    for ontology in self.repository.list_ontologies(project_id)
-                }
-                rows = [r for r in rows if r.get('ontology_id') not in ontology_ids]
-            entity_ids = {r['id'] for r in rows if r['kind'] == 'entity'}
-            rows = [r for r in rows if (
-                r['kind'] != 'relation' or
-                (r.get('subject_id') in entity_ids and r.get('object_id') in entity_ids)
-            ) and (r['kind'] != 'attribute' or r.get('subject_id') in entity_ids)]
-            record['live'] = len(rows)
-            kinds = scope.get('kinds')
-            result = [r for r in rows if kinds is None or r['kind'] in kinds]
-            record['kept'] = len(result)
+            result = self.repository.query(project_id, **params)
+        else:
+            from ..repository.scoped_reads import ScopedReads
+            result, cursor = [], None
+            # All pages share one authority snapshot; each SQL page qualifies
+            # correlated support before decoding and limiting records.
+            with self.repository.independent_read_view() as repository:
+                reads = ScopedReads(repository)
+                while True:
+                    page = reads.page(project_id, scope, kinds=scope.get('kinds'),
+                                      after=cursor, limit=1000, include_total=False)
+                    result.extend(page['records'])
+                    cursor = page['next_cursor']
+                    if cursor is None:
+                        break
         with timed('结构待定标记') as stage_record:
             stage_record['pending'] = self.annotate_structure_pending(project_id, result)
         return result
@@ -568,7 +638,7 @@ class KnowledgeService:
                for dimension in ('platforms', 'businesses', 'audiences')):
             scope['applicability'] = applicability
         if scope.get('kinds') is None:
-            scope['kinds'] = ['entity', 'relation', 'chunk']
+            scope['kinds'] = ['entity', 'relation', 'attribute', 'chunk']
         expansion = self.ontology_expansion(
             project_id, request.get('query', ''),
             request.get('ontology_expansion', False), scope=scope)
@@ -578,6 +648,7 @@ class KnowledgeService:
             'entity': request.get('k_entities', 5),
             'chunk': request.get('k_chunks', 5),
             'relation': request.get('k_relations', 5),
+            'attribute': request.get('k_attributes', 5),
         }
         engine = RetrievalEngine(self.repository, self.encoder, self.milvus_store)
         explicit_platform = dimension_mode(applicability, 'platforms') == 'specific'
@@ -633,7 +704,7 @@ class KnowledgeService:
             unrestricted = retrieve(common_scope)
             grouped_hits = {}
             for row in unrestricted.get('hits', []):
-                source = (row.get('metadata') or {}).get('applicability')
+                source = ((row.get('matched_source_context') or {}).get('metadata') or row.get('metadata') or {}).get('applicability')
                 mode = dimension_mode(source, 'platforms')
                 values = dimension_values(source, 'platforms') if mode == 'specific' else [None]
                 for platform in values:
@@ -728,6 +799,24 @@ class KnowledgeService:
                 if request.get('ontology_context', True) is not False else {})
         result['hits']=[{**row,'type_label':labels.get(row.get('type',''),row.get('type',''))}
                         for row in result['hits']]
+        attribute_hits=[row for row in result['hits'] if row.get('kind')=='attribute']
+        if attribute_hits:
+            from ..repository.scoped_reads import ScopedReads
+            owner_ids=sorted({row.get('subject_id') or row.get('owner_id') for row in attribute_hits if not row.get('owner_label')}-{None})
+            owners={row.get('owner_id') or row.get('subject_id'):row['owner_label'] for row in attribute_hits if row.get('owner_label')}
+            # Attribute qualification has already verified these exact endpoint
+            # identities; its output filter selects the fact rather than names.
+            owner_scope={'known_at':scope.get('known_at'),'_endpoint_identity':True}
+            for start in range(0,len(owner_ids),256):
+                owners.update({row['id']:row['text'] for row in ScopedReads(self.repository).by_ids(
+                    project_id,owner_scope,owner_ids[start:start+256],kinds=['entity'])})
+            for row in attribute_hits:
+                row['owner_id']=row.get('subject_id') or row.get('owner_id')
+                row['owner_label']=owners.get(row['owner_id'],row['owner_id'])
+                row['property_label']=row.get('property_label') or row['type_label']
+                actual=row.get('matched_value',row.get('value'))
+                text=actual if isinstance(actual,str) else json.dumps(actual,ensure_ascii=False)
+                row['text']=f"{str(row['owner_label'])[:2000]} → {row['property_label']}: {text}"
         if result.get('platform_groups'):
             by_id = {(row['id'], row.get('query_platform'), row.get('source_scope')): row
                      for row in result['hits']}
@@ -931,6 +1020,8 @@ class KnowledgeService:
                 extractor = SemanticaExtractor(
                     attribute_extractor=extract_attributes)
                 extractor.include_attributes=request.get('extract_attributes',False)
+                extractor.attribute_max_per_entity=request.get('attribute_max_per_entity',50)
+                extractor.attribute_max_total=request.get('attribute_max_total',500)
                 extractor.relation_constraint_mode=request.get('relation_constraint_mode','review')
                 ontology = Ontology(version['turtle'])
                 from .ontology_slice import OntologySliceSelector
@@ -1121,20 +1212,29 @@ class KnowledgeService:
                             error=ValueError('ontology changed during extraction')
                             error.code='ontology_version_changed'
                             raise error
-                expected_versions=None
-                if extraction_mode=='ontology' and request.get('resolve_entities',True):
-                    from .reconciliation import reconcile
-                    with stage(f"实体消歧融合 · 语义自动合并 {bool(request.get('auto_merge'))} · 阈值 {request.get('merge_threshold',.88)}",80):
-                        derived,revisions=reconcile(self,project_id,derived,request,receipt)
-                    event(f'融合完成 · 更新已有实体 {len(revisions)} 条')
-                    expected_versions={r['id']:revisions.get(r['id'],0) for r in derived}
-                shacl_reviews = []
-                committed = self.write(project_id, derived, completion=(document, current_document['version']),expected_versions=expected_versions,
-                    relation_constraint_mode=request.get('relation_constraint_mode','review'),
-                    shacl_mode='review', shacl_review_out=shacl_reviews,operation='extract',
-                    resolution_reviews=request.get('_resolution_reviews',[]),
-                    pending_assertions=pending_assertions,
-                    operation_context=operation_context)
+                from ..domain.entity_identity import IdentityResolutionStale
+                original_derived=deepcopy(derived)
+                original_reviews=deepcopy(request.get('_resolution_reviews',[]))
+                for identity_attempt in range(3):
+                    derived=deepcopy(original_derived)
+                    request['_resolution_reviews']=deepcopy(original_reviews)
+                    expected_versions=None
+                    if extraction_mode=='ontology' and request.get('resolve_entities',True):
+                        from .reconciliation import reconcile
+                        with stage(f"实体消歧融合 · 语义自动合并 {bool(request.get('auto_merge'))} · 阈值 {request.get('merge_threshold',.88)}",80):
+                            derived,revisions=reconcile(self,project_id,derived,request,receipt)
+                        expected_versions={r['id']:revisions.get(r['id'],0) for r in derived}
+                    shacl_reviews=[]
+                    try:
+                        committed=self.write(project_id,derived,completion=(document,current_document['version']),expected_versions=expected_versions,
+                            relation_constraint_mode=request.get('relation_constraint_mode','review'),
+                            shacl_mode='review',shacl_review_out=shacl_reviews,operation='extract',
+                            resolution_reviews=request.get('_resolution_reviews',[]),pending_assertions=pending_assertions,
+                            operation_context=operation_context)
+                        break
+                    except IdentityResolutionStale:
+                        if identity_attempt==2:raise
+                        event('实体身份候选在写入前发生变化，重新解析后重试')
                 completed, graph_saved = committed[0], committed[1:]
                 saved = [*saved_chunks, *graph_saved]
                 if shacl_reviews:
@@ -1265,7 +1365,7 @@ class KnowledgeService:
                     response = client.post(url+'/chat/completions', headers={'Authorization': f'Bearer {key}'}, json={
                         'model': model, 'messages': answer_messages(request['query'], material,
                             as_of=retrieval.get('as_of'), known_at=retrieval.get('known_at'),
-                            answer_purpose=retrieval.get('answer_purpose'))})
+                            answer_purpose=retrieval.get('answer_purpose'),attribute_conflicts=retrieval.get('attribute_conflicts'))})
                     response.raise_for_status()
                     try:
                         answer = response.json()['choices'][0]['message']['content']

@@ -133,7 +133,7 @@
         const mode=row.datatype?.startsWith(xsd)?row.datatype.slice(xsd.length):'';
         const knownMode=modes.some(([value])=>value===mode);
         if(!knownMode)modes.unshift([row.datatype||'unknown','原数据类型（请先选择受支持类型）']);
-        structured.innerHTML=`<div class="record-structured-heading"><h3>维护实体属性</h3><p>修改具体实体的属性值；类型取自该记录绑定的本体发布。</p></div><label>属性显示文本<input id="structured-record-text" value="${esc(row.text)}"></label><label>属性类型<select id="structured-record-type">${typeOptions}</select></label><input type="hidden" id="structured-subject" value="${esc(row.subject_id||'')}"><div id="structured-subject-picker"></div><label>数据类型<select id="structured-datatype">${modes.map(([id,label])=>option(id,label,knownMode?mode:row.datatype||'unknown')).join('')}</select></label><p class="subtle">实体可按名称或 ID 在服务端查询并翻页；原所属实体会保留。日期与 JSON 按字符串保存，数值按原生整数或浮点数保存。</p><label>属性值<input id="structured-value" value="${esc(String(row.value??''))}"></label><div class="record-time-fields"><label>业务生效时间<input id="structured-valid-from" value="${esc(row.valid_from||'')}" placeholder="YYYY-MM-DD 或带时区 ISO 时间"></label><label>业务失效时间<input id="structured-valid-until" value="${esc(row.valid_until||'')}" placeholder="可留空"></label></div><button id="save-structured-record">保存属性修改为新修订</button>`;
+        structured.innerHTML=`<div class="record-structured-heading"><h3>维护实体属性</h3><p>修改具体实体的属性值；类型取自该记录绑定的本体发布。</p></div><label>属性显示文本<input id="structured-record-text" value="${esc(row.text)}"></label><label>属性类型<select id="structured-record-type">${typeOptions}</select></label><input type="hidden" id="structured-subject" value="${esc(row.subject_id||'')}"><div id="structured-subject-picker"></div><label>数据类型<select id="structured-datatype">${modes.map(([id,label])=>option(id,label,knownMode?mode:row.datatype||'unknown')).join('')}</select></label><p class="subtle">实体可按名称或 ID 在服务端查询并翻页；原所属实体会保留。日期与 JSON 按字符串保存，数值按原生整数或浮点数保存。</p><label>属性值<textarea id="structured-value" rows="6" placeholder="可输入多段文字，换行会原样保存">${esc(String(row.value??''))}</textarea></label><div class="record-time-fields"><label>业务生效时间<input id="structured-valid-from" value="${esc(row.valid_from||'')}" placeholder="YYYY-MM-DD 或带时区 ISO 时间"></label><label>业务失效时间<input id="structured-valid-until" value="${esc(row.valid_until||'')}" placeholder="可留空"></label></div><button id="save-structured-record">保存属性修改为新修订</button>`;
       }else{
         const kindLabel=row.kind==='document'?'文档收据':'原文片段';
         const reason=row.kind==='document'
@@ -145,6 +145,7 @@
         structured.innerHTML=`<div class="record-structured-heading"><h3>${kindLabel}</h3><p>${reason}</p><p>${advice}</p><p class="subtle">下方「高级：编辑完整记录 JSON」保存后会创建 rN+1 新修订，旧修订保留可恢复。</p></div>`;
         return;
       }
+      if(row.kind==='attribute')$('structured-value').value=String(row.value??'');
       entityPickers.forEach(picker=>picker.invalidate());entityPickers=[];
       if(row.kind!=='entity'){
         if(!window.RecordCreate)throw Error('实体分页选择器未加载，请刷新页面');

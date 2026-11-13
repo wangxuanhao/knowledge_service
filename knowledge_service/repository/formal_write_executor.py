@@ -5,6 +5,7 @@ import json
 from uuid import uuid4
 
 from ..core.time import utc_now
+from ..domain.entity_identity import OperationContextStale
 
 
 class FormalWriteExecutor:
@@ -57,11 +58,11 @@ class FormalWriteExecutor:
             raise ValueError('断言重放与其版本支撑映射冲突')
         self.repository._insert_record_version_assertion(
             project_id, assertion['canonical_record_id'], record_version_id,
-            assertion['id'], event_id)
+            assertion['id'], event_id, created_at=None if replay else self.operation_time)
 
     def _execute_assertion_accept(self, project_id, action):
         created = self.repository._create_assertion(
-            project_id, action['assertion'])
+            project_id, action['assertion'], recorded_at=self.operation_time)
         mode = action['mode']
         if mode in {'create', 'pending'}:
             expected = action['resulting_version'] - 1
@@ -71,7 +72,7 @@ class FormalWriteExecutor:
             created = self.repository._transition_assertion(
                 project_id, created['id'], expected, 'accepted',
                 action['reason'], action['actor'],
-                action['canonical_record_id'])
+                action['canonical_record_id'], recorded_at=self.operation_time)
             replay = False
         elif mode == 'replay':
             if (created['status'] != 'accepted'
@@ -92,7 +93,7 @@ class FormalWriteExecutor:
         updated = self.repository._transition_assertion(
             project_id, action['id'], action['expected_version'],
             action['status'], action['reason'], action['actor'],
-            action.get('canonical_record_id'))
+            action.get('canonical_record_id'), recorded_at=self.operation_time)
         if updated['status'] == 'accepted':
             self._map_accepted_assertion(
                 project_id, updated,
@@ -109,7 +110,7 @@ class FormalWriteExecutor:
                 or row['decision_version'] != action['expected_version']):
             raise ValueError('版本冲突：合并后断言已变更')
         new_version = action['expected_version'] + 1
-        now = utc_now()
+        now = self.operation_time
         cursor = self.repository._db.execute(
             '''UPDATE assertions
                SET status=?,canonical_record_id=?,decision_version=?,
@@ -184,32 +185,70 @@ class FormalWriteExecutor:
 
     def execute(self, plan, operation_context):
         project_id = plan['project_id']
+        self.operation_time = operation_context.recorded_at
+        decision_ids = sorted(set(plan.get('identity_support_assertion_ids',[])) | {
+            (action['id'] if action['kind'] in {'assertion_move','assertion_transition'}
+             else action['assertion']['id'])
+            for action in plan['actions']
+            if action['kind'] in {'assertion_move','assertion_transition'}
+            or (action['kind']=='assertion_accept' and action['mode']!='replay')})
+        # Runs after the repository dependency/table locks and before any action.
+        # A long extraction may hold an older immutable operation context while
+        # a reviewer makes a newer assertion-only decision on the same record.
+        for offset in range(0,len(decision_ids),1000):
+            latest = self.repository._db.execute('''SELECT max(created_at) FROM assertion_events
+                WHERE project_id=? AND assertion_id=ANY(?::text[])''',
+                (project_id,decision_ids[offset:offset+1000])).fetchone()[0]
+            if latest is not None and latest>self.operation_time:
+                raise OperationContextStale('操作时间已早于新的断言决定；请重新发起抽取/写入以取得新的操作上下文')
         assertion_results = []
+        context_records = set()
+        entity_writes={action['record']['id'] for action in plan['actions']
+                       if action['kind']=='record_put' and action['record'].get('kind')=='entity'}
         for action in plan['actions']:
             kind = action.get('kind')
-            if kind == 'record_put':
+            if kind == 'source_identity_projection_gate':
+                from ..domain.entity_identity import require_projection_ready
+                require_projection_ready(self.repository, project_id)
+            elif kind == 'identity_key_release':
+                ids=action['record_ids']
+                if not isinstance(ids,list) or set(ids)!=entity_writes:
+                    raise ValueError('身份键释放只能覆盖本次事务正式重写的实体')
+                for offset in range(0,len(ids),1000):
+                    self.repository._db.execute('''DELETE FROM entity_identity_keys
+                        WHERE project_id=? AND record_id=ANY(?::text[])''',
+                        (project_id,ids[offset:offset+1000]))
+            elif kind == 'record_put':
                 saved = self.repository._put(
                     project_id, action['record'], action['expected_version'],
                     operation=operation_context)
                 self.tokens[action['token']] = saved
+                context_records.add(saved['id'])
             elif kind in {
                     'fact_key_insert', 'fact_key_retire', 'fact_key_retarget'}:
                 self._execute_fact_key(project_id, action)
             elif kind == 'assertion_accept':
                 updated = self._execute_assertion_accept(project_id, action)
+                context_records.add(action['canonical_record_id'])
                 if action['result']:
                     assertion_results.append(updated)
             elif kind == 'assertion_create':
                 created = self.repository._create_assertion(
-                    project_id, action['assertion'])
+                    project_id, action['assertion'], recorded_at=self.operation_time)
                 if action['result']:
                     assertion_results.append(created)
             elif kind == 'assertion_transition':
                 updated = self._execute_assertion_transition(project_id, action)
+                if updated.get('canonical_record_id'):
+                    context_records.add(updated['canonical_record_id'])
+                if action.get('canonical_record_id'):
+                    context_records.add(action['canonical_record_id'])
                 if action['result']:
                     assertion_results.append(updated)
             elif kind == 'assertion_move':
                 self._execute_assertion_move(project_id, action)
+                context_records.update(value for value in (
+                    action['canonical_before'], action['canonical_after']) if value)
             elif kind == 'resolution_review_create':
                 self.repository._create_resolution_review(
                     project_id, action['review'])
@@ -219,8 +258,13 @@ class FormalWriteExecutor:
                     action['decision'], action['reason'], action['actor'])
             elif kind == 'merge_ledger':
                 self._execute_merge_ledger(project_id, action)
+            elif kind in {'conflict_set_create','conflict_set_resolve','conflict_sets_reverse'}:
+                from .attribute_conflicts import execute_conflict_action
+                execute_conflict_action(self,project_id,action)
             else:
                 raise ValueError(f'正式写入计划包含未知动作：{kind!r}')
+        if context_records:
+            self.repository.projections.enqueue_source_context_changes(project_id, sorted(context_records))
         records = [
             self._record_for_ref(project_id, ref) for ref in plan['result_refs']]
         if ([row['id'] for row in assertion_results]

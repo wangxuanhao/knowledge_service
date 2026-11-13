@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from ..models import RecordWrite
 from ..domain.applicability import scope_identity
+from ..domain.entity_identity import (compatible_identity, require_projection_ready, source_boundary)
 from .service import public
 from ..core.time import utc_now
 
@@ -67,7 +68,8 @@ class Governance:
                 'backend':'milvus' if rows else 'exact+aliases'}
 
     def _commit(self,p,before,updates,operation,backend='service',redirects=None,reversal_of=None,
-                resolution_decisions=None,assertion_decisions=None,audit_extra=None,expected_dependencies=None):
+                resolution_decisions=None,assertion_decisions=None,audit_extra=None,expected_dependencies=None,
+                conflict_actions=None,quarantine_conflicts=None,defer_milvus_sync=False):
         op_id=str(uuid4())
         expected={**(expected_dependencies or {}), **{r['id']:r['version'] for r in before}}
         for row in updates:
@@ -85,9 +87,12 @@ class Governance:
         ledger={'id':op_id,'operation':formal_operation,'redirects':redirects or {},
                 'before_state':[public(r) for r in before],
                 'expected_versions':expected,'reversal_of':reversal_of}
+        for action in conflict_actions or []:
+            if action['kind']=='conflict_set_create':action['operation_id']=op_id
         saved=self.service.write(p,[*updates,audit],expected_versions=expected,
             operation=formal_operation,ledger=ledger,resolution_decisions=resolution_decisions,
-            assertion_decisions=assertion_decisions)
+            assertion_decisions=assertion_decisions,conflict_actions=conflict_actions,
+            quarantine_conflicts=quarantine_conflicts,defer_milvus_sync=defer_milvus_sync)
         return {'operation_id':op_id,'backend':backend,'records':[public(r) for r in saved if r['id']!=audit['id']]}
 
     @staticmethod
@@ -121,14 +126,17 @@ class Governance:
                 instants.insert(0,None)
             active_sets=set()
             for instant in instants:
-                active=frozenset(row['id'] for row in candidates if
+                active_rows=[row for row in candidates if
                     (instant is None and not row.get('valid_from')) or
                     (instant is not None and
                      (not row.get('valid_from') or row['valid_from']<=instant) and
-                     (not row.get('valid_until') or instant<row['valid_until'])))
-                if len(active)>1 and len({self._attribute_identity(by_id[record_id])
-                                          for record_id in active})>1:
-                    active_sets.add(active)
+                     (not row.get('valid_until') or instant<row['valid_until']))]
+                from ..domain.validation_scope import validation_contexts
+                for scoped,_ in validation_contexts(active_rows):
+                    active=frozenset(row['id'] for row in scoped)
+                    if len(active)>1 and len({self._attribute_identity(by_id[record_id])
+                                              for record_id in active})>1:
+                        active_sets.add(active)
             maximal=[group for group in active_sets
                      if not any(group<other for other in active_sets)]
             for group in sorted(maximal,key=lambda item:sorted(item)):
@@ -141,7 +149,8 @@ class Governance:
     def _merge_inputs(self,p,keep_id,drop_id,expected_versions):
         if keep_id==drop_id:
             raise ValueError('请选择两个不同的实体')
-        rows=self._rows(p)
+        from ..repository.duplicate_entities import DuplicateReads
+        rows=DuplicateReads(self.repo).merge_rows(p,[keep_id,drop_id])
         keep,drop=rows.get(keep_id),rows.get(drop_id)
         if not keep or not drop:
             raise KeyError(keep_id if not keep else drop_id)
@@ -151,13 +160,19 @@ class Governance:
             raise ValueError('版本冲突：请刷新实体版本')
         if keep['type']!=drop['type']:
             raise ValueError('合并要求相同的稳定类型 IRI')
-        if scope_identity((keep.get('metadata') or {}).get('applicability')) != scope_identity(
-                (drop.get('metadata') or {}).get('applicability')):
-            raise ValueError('合并要求相同的适用范围')
-        if any(keep.get(k)!=drop.get(k) for k in ('valid_from','valid_until')):
-            raise ValueError('合并要求相同的业务时间区间；请显式修正区间')
+        from .ontology import Ontology
+        ontology=Ontology(self.repo.get_ontology(p)['turtle'])
+        from .formal_writes import _published_identity_policy
+        policy=_published_identity_policy(ontology,keep['type'])
+        if not compatible_identity(keep,drop,policy):
+            raise ValueError('合并要求相同身份范围、无唯一键冲突及兼容的业务时间区间/适用范围')
+        if source_boundary(keep)!=source_boundary(drop):
+            require_projection_ready(self.repo,p)
+        if any(r.get('metadata',{}).get('_quarantined') and r.get('subject_id') in {keep_id,drop_id} for r in rows.values()):
+            raise ValueError('实体已有待审核属性冲突，请先处理冲突集合')
         attributes=[r for r in rows.values() if r['kind']=='attribute' and
                     not r.get('metadata',{}).get('_deleted') and
+                    not r.get('metadata',{}).get('_quarantined') and
                     r.get('subject_id') in {keep_id,drop_id}]
         return rows,keep,drop,attributes,self._attribute_conflicts(p,keep,attributes)
 
@@ -175,6 +190,8 @@ class Governance:
                  'relations':[public(row) for row in sorted(
                      self._affected_relations(rows,drop['id']),key=lambda r:r['id'])],
                  'conflicts':sorted(conflicts,key=lambda c:(c['predicate'],c['record_ids']))}
+        from ..repository.attribute_conflicts import ConflictReads
+        payload['assertions']=ConflictReads(self.repo).support_versions(p,[row['id'] for row in attributes])
         encoded=json.dumps(payload,ensure_ascii=False,allow_nan=False,sort_keys=True,separators=(',',':'))
         return hashlib.sha256(encoded.encode('utf-8')).hexdigest()
 
@@ -214,7 +231,8 @@ class Governance:
                     'attributes':[public(row) for row in attributes]}
 
     def merge(self,p,keep_id,drop_id,expected_versions,resolution_decision=None,
-              attribute_winners=None, actor='merge-governance',preview_fingerprint=None):
+              attribute_winners=None, actor='merge-governance',preview_fingerprint=None,
+              confirmed_identity=False,defer_milvus_sync=False):
         with self.service.lock:
             rows,keep,drop,attributes,conflicts=self._merge_inputs(
                 p,keep_id,drop_id,expected_versions)
@@ -222,6 +240,8 @@ class Governance:
             if preview_fingerprint is not None and preview_fingerprint!=fingerprint:
                 raise ValueError('融合预览已变化：属性、冲突或影响记录已更新，请重新预览并确认。')
             winners=list(attribute_winners or [])
+            if confirmed_identity and (not preview_fingerprint or winners):
+                raise ValueError('确认身份融合需要最新预览指纹，且不能同时指定属性胜出值')
             conflict_ids={record_id for conflict in conflicts
                           for record_id in conflict['record_ids']}
             unrelated=sorted(set(winners)-conflict_ids)
@@ -232,6 +252,7 @@ class Governance:
                 raise ValueError(f'属性胜出记录与冲突无关：{", ".join(unrelated)}；冲突详情：{details}')
             selected=[]
             for conflict in conflicts:
+                if confirmed_identity:continue
                 choices=[record_id for record_id in winners
                          if record_id in conflict['record_ids']]
                 if len(choices)!=1:
@@ -244,7 +265,7 @@ class Governance:
             operation=EntityMerger(preserve_provenance=True).merge_entity_group([
                 {'id':r['id'],'name':r['text'],'type':r['type'],'properties':r.get('properties',{})} for r in (keep,drop)],strategy='keep_first')
             updated=writable(keep)
-            # 将冲突的元数据/属性保留在原始不可变版本和 merged_sources 中；
+            # 将冲突的元数据/属性保留在原始不可变版本和断言事件中；
             # 选定的规范值优先。
             updated['properties']={**drop.get('properties',{}),**keep.get('properties',{})}
             aliases=[*keep.get('metadata',{}).get('aliases',[]),drop['text'],*drop.get('metadata',{}).get('aliases',[])]
@@ -253,9 +274,13 @@ class Governance:
                 *drop.get('metadata',{}).get('ontology_versions',[]),
                 keep.get('ontology_id'),drop.get('ontology_id')] if value))
             updated['metadata']={**keep.get('metadata',{}),'aliases':list(dict.fromkeys(aliases)),
-                'merged_sources':[*keep.get('metadata',{}).get('merged_sources',[]),public(drop)],
                 'ontology_versions':ontology_versions,
                 'merge_backend':'semantica.EntityMerger','merge_advice':operation.metadata}
+            from ..domain.entity_identity import merge_identity_keys
+            from .formal_writes import _published_identity_policy
+            from .ontology import Ontology
+            policy=_published_identity_policy(Ontology(self.repo.get_ontology(p)['turtle']),keep['type'])
+            updated['metadata']['identity_keys']=merge_identity_keys(keep,drop,policy)
             removed=writable(drop)
             removed['metadata']={**drop.get('metadata',{}),'_deleted':True,'merged_into':keep_id}
             before=[keep,drop]; updates=[updated,removed]
@@ -274,8 +299,23 @@ class Governance:
                     if self._attribute_identity(attribute_by_id[record_id])!=winner_value:
                         losing[record_id]=winner_id
             assertion_decisions=[]
+            conflict_actions=[]
+            if confirmed_identity:
+                by_predicate={}
+                for conflict in conflicts:by_predicate.setdefault(conflict['predicate'],set()).update(conflict['record_ids'])
+                for predicate,member_ids in sorted(by_predicate.items()):
+                    conflict_actions.append(dict(kind='conflict_set_create',id='conflict:'+str(uuid4()),
+                        entity_id=keep_id,predicate=predicate,member_ids=sorted(member_ids)))
             for row in attributes:
-                if row['id'] in losing:
+                if confirmed_identity and row['id'] in conflict_ids:
+                    before.append(row);candidate=writable(row);candidate['subject_id']=keep_id
+                    candidate['metadata']={**row.get('metadata',{}),'_quarantined':True,
+                        'conflict_set_ids':[a['id'] for a in conflict_actions if row['id'] in a['member_ids']]}
+                    updates.append(candidate)
+                    for assertion in self.repo.list_assertions(p,status='accepted',canonical_record_id=row['id']):
+                        assertion_decisions.append(dict(id=assertion['id'],expected_version=assertion['decision_version'],
+                            status='contradicting',reason='确认身份融合；单值属性全部保留并隔离，等待集合审核',actor=actor,canonical_record_id=row['id']))
+                elif row['id'] in losing:
                     before.append(row)
                     loser=writable(row)
                     loser['metadata']={**row.get('metadata',{}),'_deleted':True,
@@ -301,10 +341,18 @@ class Governance:
                     updates.append(attribute)
             decisions=[resolution_decision] if resolution_decision else None
             with self._merge_commit_guard(p,keep_id,drop_id,expected_versions,fingerprint):
-                return self._commit(p,before,updates,'merge','semantica',redirects={drop_id:keep_id},
+                result=self._commit(p,before,updates,'merge','semantica',redirects={drop_id:keep_id},
                     resolution_decisions=decisions,assertion_decisions=assertion_decisions,
                     expected_dependencies={row['id']:row['version'] for row in attributes},
-                    audit_extra={'actor': actor,'preview_fingerprint':fingerprint,'attribute_winners':winners})
+                    audit_extra={'actor': actor,'preview_fingerprint':fingerprint,'attribute_winners':winners},
+                    conflict_actions=conflict_actions,
+                    quarantine_conflicts=dict(entity_id=keep_id,predicates=[c['predicate'] for c in conflicts],
+                        member_ids=sorted(conflict_ids),preview_fingerprint=fingerprint) if confirmed_identity and conflicts else None,
+                    defer_milvus_sync=defer_milvus_sync)
+                if confirmed_identity:
+                    from ..repository.attribute_conflicts import ConflictReads
+                    result['conflict_sets']=[ConflictReads(self.repo).read(p,a['id'],{}) for a in conflict_actions]
+                return result
 
     def delete(self,p,record_id,expected_version):
         with self.service.lock:
@@ -352,6 +400,29 @@ class Governance:
         return [{'name':members[0]['text'],'type':key[1],'members':members}
                 for key,members in sorted(groups.items()) if len(members)>1]
 
+    def scan_duplicates(self,p,*,limit=20,cursor=None):
+        from ..repository.duplicate_entities import DuplicateReads
+        with self.repo.independent_read_view() as reader:
+            return DuplicateReads(reader).scan(p,limit=limit,cursor=cursor)
+
+    def preview_duplicate_group(self,p,key):
+        from .duplicate_governance import DuplicateGovernance
+        from copy import copy
+        with self.service.lock,self.repo.independent_read_view() as reader:
+            scoped=copy(self);scoped.repo=reader
+            return DuplicateGovernance(scoped).preview(p,key)
+
+    def duplicate_sources(self,p,key,preview_fingerprint,entity_id,expected_version_id,*,limit=10,cursor=None):
+        from .duplicate_governance import DuplicateGovernance
+        from copy import copy
+        with self.service.lock,self.repo.independent_read_view() as reader:
+            scoped=copy(self);scoped.repo=reader
+            return DuplicateGovernance(scoped).sources(p,key,preview_fingerprint,entity_id,expected_version_id,limit=limit,cursor=cursor)
+
+    def confirm_duplicate_groups(self,p,groups,*,actor):
+        from .duplicate_governance import DuplicateGovernance
+        return DuplicateGovernance(self).batch(p,groups,actor=actor)
+
     def undo_merge(self,p,operation_id):
         with self.service.lock:
             rows=self._rows(p)
@@ -361,7 +432,8 @@ class Governance:
             current=[rows[r['id']] for r in before]
             if any(r.get('metadata',{}).get('_operation_id')!=operation_id for r in current):
                 raise ValueError('版本冲突：受影响记录已变更；撤销会覆盖更新的编辑')
-            result=self._commit(p,current,[writable(r) for r in before],'undo',reversal_of=operation_id)
+            result=self._commit(p,current,[writable(r) for r in before],'undo',reversal_of=operation_id,
+                conflict_actions=[dict(kind='conflict_sets_reverse',operation_id=operation_id)])
             return {**result,'restored':len(before)}
 
     def restore(self,p,record_id,version,expected_version):

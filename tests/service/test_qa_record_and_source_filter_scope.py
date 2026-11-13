@@ -27,7 +27,8 @@ def _fixture():
         history=lambda _p, record_id: [doc if record_id == 'doc' else chunk],
         list_record_version_assertions=lambda *_a, **_kw: [{'assertion_id': 'a', 'assertion_event_id': 'accepted'}],
         get_assertion=lambda *_: assertion,
-        list_assertion_events=lambda *_: [{'id': 'accepted', 'created_at': common['recorded_at']}])
+        list_assertion_events=lambda *_: [{'id': 'accepted', 'created_at': common['recorded_at'],
+            'decision_version': 1, 'to_status': 'accepted', 'canonical_record_id': 'fact'}])
     return SimpleNamespace(repository=repo), fact, chunk, doc
 
 

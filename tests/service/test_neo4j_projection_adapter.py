@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -276,12 +277,8 @@ def test_authority_repair_bundle_restores_incident_relation_edges():
     assert relation_calls[-1]['rows'][0]['props']['id'] == 'relation-1'
 
 
-@pytest.mark.parametrize(
-    ('ready', 'backend', 'reason'),
-    [(True, 'neo4j_native', None),
-     (False, 'postgres_bfs', 'readiness_stale')])
-def test_graph_response_reports_native_backend_or_explicit_fallback(
-        ready, backend, reason):
+@pytest.mark.parametrize('ready', [True, False])
+def test_graph_response_uses_bounded_authority_until_native_supports_budgets(ready):
     entity = record(id='seed', version_id='v1', type='Thing')
 
     class Repository:
@@ -305,8 +302,18 @@ def test_graph_response_reports_native_backend_or_explicit_fallback(
         def record_family(self, *args):
             return {}
 
-    result = Explorer(Service()).graph(
-        'p', {}, node_id='seed', hops=1, attribute_mode='none')
+        def ontology_labels(self, *args):
+            return {}
 
-    assert result['backend'] == backend
-    assert result['degraded_reason'] == reason
+        def annotate_structure_pending(self, *args):
+            return None
+
+    reads = Mock()
+    reads.neighbors.return_value = {'records': [entity], 'truncated': False, 'continuation': None}
+    with patch('knowledge_service.repository.scoped_reads.ScopedReads', return_value=reads):
+        result = Explorer(Service()).graph(
+            'p', {}, node_id='seed', hops=1, attribute_mode='none')
+
+    assert result['backend'] == 'postgres_bfs'
+    assert result['degraded_reason'] == 'bounded_authority_neighborhood'
+    reads.neighbors.assert_called_once()

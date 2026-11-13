@@ -27,7 +27,7 @@ def test_project_catalog_does_not_scan_or_register_metadata():
         raise AssertionError('Fixed schema must not inspect project metadata')
         yield
     assert discover_page_catalog(unbounded_metadata()) == default_catalog()
-    assert len(default_catalog().column_defs()) == 21
+    assert len(default_catalog().column_defs()) == 27
     assert not default_catalog().fields
 
 

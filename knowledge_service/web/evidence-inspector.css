@@ -10,3 +10,6 @@
 .evidence-family__rows{display:grid;grid-template-columns:78px 1fr;gap:7px 10px;margin:0;padding:10px 11px;border-left:3px solid #4d896a;border-radius:0 8px 8px 0;background:#f5faf6;font-size:12px;line-height:1.7}
 .evidence-family__rows dt{color:#6b8177}
 .evidence-family__rows dd{margin:0;color:#14312a;overflow-wrap:anywhere}
+/* The shared reader owns the property heading and keeps paragraph values in the rail. */
+.evidence-attributes:has(#inspector-attribute-panel){overflow:visible}
+.evidence-attributes:has(#inspector-attribute-panel)>h4{display:none}

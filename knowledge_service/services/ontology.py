@@ -26,13 +26,20 @@ def editable_attribute_version(version):
     """Project editable text for old summaries without rewriting immutable versions."""
     summary = version.get('summary') or {}
     attributes = summary.get('attributes') or []
-    if all(isinstance(item.get('annotations'), list) for item in attributes):
+    classes = summary.get('classes') or []
+    if (all(isinstance(item.get('annotations'), list) for item in attributes)
+            and all(isinstance(item.get('identity_annotations'), list)
+                    and isinstance(item.get('identity_policy'), dict) for item in classes)):
         return version
     ontology = Ontology(version['turtle'])
     projected = [item if isinstance(item.get('annotations'), list) else {
         **item, **ontology.attribute_text_details(URIRef(item['id']))}
         for item in attributes]
-    return {**version, 'summary': {**summary, 'attributes': projected}}
+    projected_classes = [item if isinstance(item.get('identity_annotations'), list)
+                         and isinstance(item.get('identity_policy'), dict) else {
+        **item, **ontology.class_identity_details(URIRef(item['id']))} for item in classes]
+    return {**version, 'summary': {**summary, 'attributes': projected,
+                                 'classes': projected_classes}}
 
 
 class UnknownOntologyTerm(ValueError):
@@ -264,6 +271,29 @@ class Ontology:
         return {'annotations': annotations, 'description': comments[0]['value'] if comments else '',
                 'label_zh': labels[0]['value'] if labels else ''}
 
+    def class_identity_details(self, uri):
+        """Expose exact identity annotations for governed remove/add commands."""
+        from ..domain.entity_identity import IDENTITY_NAMESPACE
+        annotations = []
+        for name in ('identityPolicy', 'identityScope', 'identityKey'):
+            predicate = URIRef(IDENTITY_NAMESPACE + name)
+            for value in self.graph.objects(uri, predicate):
+                spec = {'predicate': str(predicate), 'value': str(value)}
+                if isinstance(value, URIRef):
+                    spec['type'] = 'iri'
+                elif isinstance(value, Literal):
+                    if value.language:
+                        spec['language'] = value.language
+                    if value.datatype:
+                        spec['datatype'] = str(value.datatype)
+                else:
+                    raise ValueError('实体身份字段不支持空白节点')
+                annotations.append(spec)
+        annotations.sort(key=lambda item: (item['predicate'], item['value'],
+                         item.get('language', ''), item.get('datatype', '')))
+        return {'identity_annotations': annotations,
+                'identity_policy': self.identity_policy(str(uri)).summary()}
+
     def summary(self, active_only=False):
         self._refresh_vocabulary()
 
@@ -287,7 +317,8 @@ class Ontology:
                     "active": record.active}
         visible = lambda values: [value for value in values
                                   if not active_only or self._governed_records[value].active]
-        return {"classes": [{**item(c), "parents": [str(p) for p in self.graph.objects(c, RDFS.subClassOf)]}
+        return {"classes": [{**item(c), **self.class_identity_details(c),
+                            "parents": [str(p) for p in self.graph.objects(c, RDFS.subClassOf)]}
                             for c in sorted(visible(self.classes))],
                 "relations": [{**item(p), "domain": [str(v) for v in self.constraint_types(p,RDFS.domain)],
                                "range": [str(v) for v in self.constraint_types(p,RDFS.range)]}
@@ -295,6 +326,10 @@ class Ontology:
                 "attributes": [{**item(p), **self.attribute_text_details(p), "domain": [str(v) for v in self.constraint_types(p,RDFS.domain)],
                                 "range": [str(v) for v in self.graph.objects(p, RDFS.range)]}
                                for p in sorted(visible(self.attributes))], "triples": len(self.graph)}
+
+    def identity_policy(self, class_iri):
+        from ..domain.entity_identity import class_policy
+        return class_policy(self, class_iri)
 
     def constraint_types(self,predicate,constraint):
         """展开用作允许端点集的命名类或 OWL 并集。"""
@@ -519,7 +554,7 @@ class Ontology:
                 errors.extend(violations or [{"record_id": None, "message": str(report)}])
         return {"conforms": not errors, "errors": errors, "violations":violations, "report": str(report)}
 
-    def validate_timeline(self, records, enforce_relationship_constraints=True):
+    def validate_timeline(self, records, enforce_relationship_constraints=True,*,acknowledge_report=None):
         """SHACL 只看到共存事实，在每个成员变化的区间各校验一次。"""
         from ..core.time import normalize_time, utc_now
         rows = [{**r, 'valid_from': normalize_time(r.get('valid_from')),
@@ -532,12 +567,33 @@ class Ontology:
                 instants.add(normalize_time(earliest - timedelta(microseconds=1)))
         else:
             instants.add(utc_now())
+        reference_ids = set()
+        from ..domain.entity_identity import policy_source_qualified
+        for row in rows:
+            if row.get('kind') == 'entity':
+                try:
+                    if policy_source_qualified(row, self.identity_policy(row['type'])):
+                        reference_ids.add(row['id'])
+                except UnknownOntologyTerm:
+                    pass
         for instant in sorted(instants):
             active = [r for r in rows if (not r['valid_from'] or r['valid_from'] <= instant)
                       and (not r['valid_until'] or instant < r['valid_until'])]
-            result = self.validate(active,enforce_relationship_constraints=enforce_relationship_constraints)
-            if not result['conforms']:
-                return {**result, 'valid_at': instant}
+            # A document's time is not the lifetime of a reference identity.
+            # Only facts active in this segment can require its endpoints;
+            # unrelated temporal entity constraints retain their old behavior.
+            endpoints = {row.get(key) for row in active
+                         if row.get('kind') in {'relation', 'attribute'}
+                         for key in (('subject_id','object_id') if row['kind']=='relation' else ('subject_id',))}
+            active_ids = {row['id'] for row in active}
+            active.extend(row for row in rows if row['id'] in endpoints & reference_ids - active_ids)
+            from ..domain.validation_scope import validation_contexts
+            for contextual,context in validation_contexts(active):
+                result = self.validate(contextual,enforce_relationship_constraints=enforce_relationship_constraints)
+                if not result['conforms']:
+                    report={**result, 'valid_at': instant,'applicability_context':context}
+                    if acknowledge_report is not None and acknowledge_report(report):continue
+                    return report
         return {'conforms': True, 'errors': [], 'violations':[], 'segments_checked': len(instants)}
 
     def query(self, records, query):

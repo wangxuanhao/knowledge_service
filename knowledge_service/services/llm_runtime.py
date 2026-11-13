@@ -45,14 +45,24 @@ def llm_stream(function=None, *, uses_llm=None):
                 yield 'event: error\ndata: ' + json.dumps({'detail': detail}, ensure_ascii=False) + '\n\n'
                 return
             iterator = operation(owner, *args, **kwargs)
+            advance, arguments = iterator.__next__, ()
             try:
                 while True:
                     with bound_llm(config):
                         try:
-                            item = next(iterator)
+                            item = advance(*arguments)
                         except StopIteration:
                             return
-                    yield item
+                    try:
+                        value = yield item
+                    except GeneratorExit:
+                        raise
+                    except BaseException as error:
+                        # Forward the original cancellation/exception at the
+                        # suspended inner yield, under the pinned model context.
+                        advance, arguments = iterator.throw, (error,)
+                    else:
+                        advance, arguments = iterator.send, (value,)
             finally:
                 with bound_llm(config):
                     iterator.close()

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+from knowledge_service.core.llm_config import environment_llm
 from knowledge_service.services import answers, provenance, service as facade
 from knowledge_service.repository.scoped_reads import ScopedReads
 
@@ -47,6 +48,12 @@ def facts(payload):
 
 
 class AnswerPromptGraphTests(unittest.TestCase):
+    def setUp(self):
+        models = patch('knowledge_service.services.llm_models.LLMModels',
+                       return_value=SimpleNamespace(resolve=environment_llm))
+        models.start()
+        self.addCleanup(models.stop)
+
     def test_default_platform_free_prepare_derives_real_occurrences_before_prompt_projection(self):
         """Use real search/grouping/qualification/freeze, with only I/O adapters.
 
@@ -54,7 +61,20 @@ class AnswerPromptGraphTests(unittest.TestCase):
         query_platform or source_scope. Those fields must come from production.
         """
         class Repository:
-            _db = object()
+            def __init__(self):
+                self._db = SimpleNamespace(execute=self._empty_conflicts)
+
+            @staticmethod
+            def _empty_conflicts(sql, _params):
+                assert 'FROM attribute_conflict_sets c WHERE' in sql
+                return SimpleNamespace(fetchall=lambda: [])
+
+            @contextmanager
+            def independent_read_view(self):
+                yield self
+
+            def get_project(self, project):
+                return {'id': project}
 
             def list_ontologies(self, _project):
                 return [{'id': 'ontology', 'turtle': '''
@@ -76,14 +96,19 @@ class AnswerPromptGraphTests(unittest.TestCase):
                                       'applicability': {'platforms': {'mode': 'all'}}}}]
 
             def list_record_version_assertions(self, _project, **_kwargs):
-                return [{'assertion_id': 'assertion', 'assertion_event_id': 'accepted'}]
+                record_id = _kwargs['record_version_id'].removesuffix(':v1')
+                return [{'assertion_id': 'assertion:' + record_id,
+                         'assertion_event_id': 'accepted:' + record_id}]
 
             def get_assertion(self, _project, _assertion):
                 return {'document_id': 'document', 'document_version_id': 'document:v1',
                         'chunk_id': 'chunk'}
 
             def list_assertion_events(self, _project, _assertion):
-                return [{'id': 'accepted'}]
+                record_id = _assertion.removeprefix('assertion:')
+                return [{'id': 'accepted:' + record_id, 'created_at': '2020-01-01',
+                         'decision_version': 1, 'to_status': 'accepted',
+                         'canonical_record_id': record_id}]
 
         class FrozenProvenance:
             def complete_retrieval(self, _project, _run, context, rows):

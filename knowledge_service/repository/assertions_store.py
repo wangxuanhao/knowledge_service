@@ -64,7 +64,7 @@ class AssertionStore:
             self.repo.get_project(project_id)
             return self._create(project_id, item)
 
-    def _create(self, project_id, item):
+    def _create(self, project_id, item, *, recorded_at=None):
         item = self._validate_assertion(item)
         old = self._db.execute(
             'SELECT * FROM assertions WHERE id=?', (item['id'],)
@@ -80,7 +80,7 @@ class AssertionStore:
             if existing['project_id'] == project_id and comparable == proposed:
                 return existing
             raise ValueError('断言出现 ID 冲突')
-        now = utc_now()
+        now = recorded_at or utc_now()
         values = (
             item['id'], project_id, item['kind'], item.get('document_id'),
             item.get('document_version_id'), item.get('chunk_id'), item.get('source_hash'),
@@ -186,7 +186,7 @@ class AssertionStore:
 
     # ------------------------------------------------------------------ 状态机
     def _transition(self, project_id, assertion_id, expected_version, status,
-                    reason, actor, canonical_record_id=None, reprocess=False):
+                    reason, actor, canonical_record_id=None, reprocess=False, *, recorded_at=None):
         if type(expected_version) is not int or expected_version < 1:
             raise ValueError('期望断言版本必须是正整数')
         if status not in ASSERTION_STATUSES:
@@ -216,7 +216,7 @@ class AssertionStore:
             raise ValueError('规范记录 ID 必须是非空字符串')
         if status == 'pending':
             canonical = None
-        now = utc_now()
+        now = recorded_at or utc_now()
         new_version = expected_version + 1
         cursor = self._db.execute(
             '''UPDATE assertions SET status=?,canonical_record_id=?,decision_reason=?,
@@ -240,13 +240,21 @@ class AssertionStore:
                    reason, actor, canonical_record_id=None):
         with self.repo._transaction():
             self.repo.get_project(project_id)
-            return self._transition(
+            previous = self.get(project_id, assertion_id)
+            result = self._transition(
                 project_id, assertion_id, expected_version, status, reason, actor,
                 canonical_record_id)
+            self.repo.projections.enqueue_source_context_changes(project_id, sorted({
+                value for value in [previous.get('canonical_record_id'), result.get('canonical_record_id')] if value}))
+            return result
 
     def reprocess(self, project_id, assertion_id, expected_version, reason, actor):
         with self.repo._transaction():
             self.repo.get_project(project_id)
-            return self._transition(
+            previous = self.get(project_id, assertion_id)
+            result = self._transition(
                 project_id, assertion_id, expected_version, 'pending', reason, actor,
                 reprocess=True)
+            if previous.get('canonical_record_id'):
+                self.repo.projections.enqueue_source_context_changes(project_id, [previous['canonical_record_id']])
+            return result

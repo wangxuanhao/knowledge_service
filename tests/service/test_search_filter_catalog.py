@@ -80,15 +80,16 @@ class SearchFilterCatalogTests(unittest.TestCase):
     def test_expansion_budget_comes_from_actual_native_columns(self):
         directory = catalog.default_catalog()
         columns = directory.column_defs()
-        self.assertEqual(len(columns), 21)
+        self.assertEqual(len(columns), 27)
         self.assertEqual({column.name for column in columns}, {
             'vector_id', 'index_version', 'version_id', 'project_id', 'record_id', 'kind', 'type', 'ontology_id',
             'text', 'embedding', 'sparse', 'platform_mode', 'platform_values',
             'business_mode', 'business_values', 'audience_mode', 'audience_values',
-            'valid_from_us', 'valid_until_us', 'chunk_owner_id', 'filter_present'})
+            'valid_from_us', 'valid_until_us', 'chunk_owner_id', 'filter_present',
+            'owner_id','support_context_id','support_context_version','window_index','window_start','window_end'})
         self.assertEqual(len({column.name for column in columns}), len(columns))
         self.assertFalse(any(column.field_type in {'json', 'dynamic'} for column in columns))
-        fields = [catalog.FieldSpec('metadata.f' + str(index), 'bool', column_name='test_field_' + str(index)) for index in range(235)]
+        fields = [catalog.FieldSpec('metadata.f' + str(index), 'bool', column_name='test_field_' + str(index)) for index in range(229)]
         self.assertEqual(len(catalog.FilterCatalog(1, fields).column_defs()), 256)
         with self.assertRaisesRegex(ValueError, '256'):
             catalog.FilterCatalog(1, fields + [catalog.FieldSpec('metadata.extra', 'bool', column_name='test_extra_bool')]).column_defs()

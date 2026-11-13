@@ -5,9 +5,10 @@ const fs=require('node:fs');
 const path=require('node:path');
 
 function fixture(reviewRows=[],options={}){
-  const nodes=new Map(),calls=[],created=[];
+  const nodes=new Map(),calls=[],created=[],requests=[];
   function element(){const buttons=new Map();const el={innerHTML:'',textContent:'',value:'',className:'',dataset:{},onclick:null,events:{},children:[],
-    append(child){this.children.push(child);},after(){},prepend(){throw Error('review must not be prepended to jobs');},
+    append(...children){this.children.push(...children);},replaceChildren(...children){this.children=children;},setAttribute(){},
+    isConnected:true,showModal(){this.open=true;},close(){this.open=false;},remove(){this.isConnected=false;},after(){},prepend(){throw Error('review must not be prepended to jobs');},
     insertAdjacentHTML(){},querySelector(){return element();},querySelectorAll(selector){
       if(selector!=='[data-open-discovery]')return [];
       return [...this.innerHTML.matchAll(/<button[^>]*data-open-discovery="([^"]*)"[^>]*>([^<]*)<\/button>/g)].map(([,index,text])=>{
@@ -27,10 +28,20 @@ function fixture(reviewRows=[],options={}){
   let actor={id:'admin-a',role:'admin'},writer=true;const opened=[],intake=[];
   const context=vm.createContext({window:{IngestResultSummary:require('../../knowledge_service/web/ingest-result-summary.js'),Auth:{user:()=>actor,isAdmin:()=>writer},
     KnowledgeNavigation:{open:async(target,args)=>{opened.push({target,...args});if(options.navigate)await options.navigate(context);}},OntologyIntake:{open:async args=>intake.push(args)}},current:'a',$:get,readParseSettings:()=>({chunk_size:1800}),showTab(){},
-    document:{createElement(){const e=element();created.push(e);return e;},querySelector:get,querySelectorAll:()=>[]},
+    document:{body:element(),createElement(tag){const e=element();e.tagName=tag;created.push(e);return e;},querySelector:get,querySelectorAll:()=>[]},
     esc:v=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'),
     status(){},jobList(){throw Error('old list must not be used');},bind:(id,fn)=>get(id).onclick=fn,
-    api:async url=>{calls.push(url);if(url.endsWith('/reviews'))return {reviews:reviewRows};
+    api:async (url,body)=>{calls.push(url);requests.push({url,body});
+      if(url.endsWith('/attribute-conflicts'))return {conflict_sets:options.conflictSet?[options.conflictSet]:[],next_cursor:null};
+      if(options.conflictRead&&url.endsWith('/attribute-conflicts/set/read'))return options.conflictRead(body);
+      if(options.conflictSet&&url.endsWith('/attribute-conflicts/set/read'))return options.conflictSet;
+      if(options.conflictSet&&url.endsWith('/attribute-conflicts/set/resolve'))return {id:'set',state:'resolved',records:[]};
+      if(options.conflictSources&&url.endsWith('/sources'))return options.conflictSources(body);
+      if(options.conflictSet&&url.includes('/attribute-conflicts/set/members/')){
+        const id=url.split('/members/')[1].split('/')[0],member=options.conflictSet.members.find(m=>m.record_id===id);
+        return url.endsWith('/sources')?{record_id:id,version_id:member.version_id,sources:[],next_cursor:null}:{id,version_id:member.version_id,value:member.value_preview};
+      }
+      if(url.endsWith('/reviews'))return {reviews:reviewRows};
       if(url.endsWith('/ontology-change-proposals'))return {proposals:[]};
       if(url==='/api/health')return {capabilities:['typed_reviews']};
       if(url.endsWith('/ontology')){if(options.noOntology)throw Error('本项目尚未发布本体。开放本体发现模式需先在本体发现中生成并发布草案。');return {id:'ont',summary:{relations:[],classes:[],attributes:[]}};}
@@ -39,8 +50,112 @@ function fixture(reviewRows=[],options={}){
       if(url==='/api/projects/b/jobs')return {jobs:[]};
       throw Error('Unexpected URL: '+url);}});
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../../knowledge_service/web/task-review.js'),'utf8'),context);
-  return {context,get,calls,created,opened,intake,setActor:value=>{actor=value;},setWriter:value=>{writer=value;}};
+  return {context,get,calls,requests,created,opened,intake,setActor:value=>{actor=value;},setWriter:value=>{writer=value;}};
 }
+
+test('unified conflict review reloads exact set and submits no winner until all values are reviewed',async()=>{
+  const set={id:'set',entity_id:'owner',predicate:'count',state:'open',version:4,members:[
+    {record_id:'a',version:2,version_id:'a2',value_preview:'1',assertion_versions:[{id:'s1',version:3}]},
+    {record_id:'b',version:5,version_id:'b5',value_preview:'2',assertion_versions:[{id:'s2',version:6}]}]};
+  const f=fixture([],{conflictSet:set});f.context.window.EntityGovernance=require('../../knowledge_service/web/entity-governance.js');
+  let resolved=0;await f.context.window.openAttributeConflictReview({id:'set'},{projectId:'a',onResolved:()=>{resolved++;}});
+  assert.ok(f.calls.includes('/api/projects/a/attribute-conflicts/set/read'));
+  const radios=f.created.filter(node=>node.type==='radio');assert.equal(radios.length,4);assert.ok(radios.every(node=>!node.checked));
+  const reason=f.created.find(node=>node.tagName==='textarea');reason.value='已核对';
+  const submit=f.created.find(node=>node.textContent==='提交集合审核');await submit.onclick();
+  assert.equal(f.requests.filter(r=>r.url.endsWith('/resolve')).length,0);
+  radios[0].onchange();radios[3].onchange();await submit.onclick();
+  const posted=f.requests.find(r=>r.url.endsWith('/resolve')).body;
+  assert.equal(posted.expected_version,4);assert.deepEqual(posted.expected_members,set.members);assert.equal(resolved,1);
+  assert.deepEqual(JSON.parse(JSON.stringify(posted.decisions)),[{attribute_id:'a',decision:'accept'},{attribute_id:'b',decision:'reject'}]);
+  assert.equal(f.created.find(node=>node.tagName==='dialog').isConnected,false);
+});
+
+test('viewer conflict reader keeps evidence available without decision controls',async()=>{
+  const f=fixture([],{conflictSet:{id:'set',state:'open',version:1,members:[{record_id:'a',version:1,version_id:'v',value_preview:'1'}]}});
+  f.setWriter(false);await f.context.window.openAttributeConflictReview({id:'set'},{projectId:'a'});
+  assert.ok(f.created.some(node=>node.textContent==='查看完整值及原文来源'));
+  assert.ok(!f.created.some(node=>node.textContent==='提交集合审核'));
+});
+
+test('conflict sources paginate and retry the failed cursor without duplicating evidence',async()=>{
+  let failed=false;
+  const set={id:'set',state:'open',version:1,members:[{record_id:'a',version:1,version_id:'a1',value_preview:'1'}]};
+  const f=fixture([],{conflictSet:set,conflictSources:body=>{
+    if(body.cursor&&!failed){failed=true;throw Error('分页网络失败');}
+    return {record_id:'a',version_id:'a1',sources:[{document_title:body.cursor?'第二页来源':'第一页来源'}],next_cursor:body.cursor?null:'next-page'};
+  }});
+  await f.context.window.openAttributeConflictReview(set,{projectId:'a'});
+  await f.created.find(node=>node.textContent==='查看完整值及原文来源').onclick();
+  const more=f.created.find(node=>node.textContent==='更多来源');await more.click();
+  assert.equal(f.requests.filter(request=>request.url.endsWith('/sources')).length,2);
+  assert.equal(more.textContent,'重试来源');await more.click();
+  assert.deepEqual(f.requests.filter(request=>request.url.endsWith('/sources')).map(request=>request.body.cursor),[null,'next-page','next-page']);
+  assert.equal(f.created.filter(node=>node.textContent==='第一页来源').length,1);
+  assert.equal(f.created.filter(node=>node.textContent==='第二页来源').length,1);assert.equal(more.hidden,true);
+});
+
+test('conflict source initial failure is retryable and stale drawers cannot request another page',async()=>{
+  let failed=false;
+  const set={id:'set',state:'open',version:1,members:[{record_id:'a',version:1,version_id:'a1',value_preview:'1'}]};
+  const f=fixture([],{conflictSet:set,conflictSources:()=>{
+    if(!failed){failed=true;throw Error('初次网络失败');}
+    return {record_id:'a',version_id:'a1',sources:[{document_title:'重试成功'}],next_cursor:'next-page'};
+  }});
+  await f.context.window.openAttributeConflictReview(set,{projectId:'a'});
+  await f.created.find(node=>node.textContent==='查看完整值及原文来源').onclick();
+  const retry=f.created.find(node=>node.textContent==='重试来源');await retry.click();
+  assert.equal(f.requests.filter(request=>request.url.endsWith('/sources')).length,2);
+  assert.equal(f.created.filter(node=>node.textContent==='重试成功').length,1);
+  f.context.current='b';f.get('project').onchange();await retry.click();
+  assert.equal(f.requests.filter(request=>request.url.endsWith('/sources')).length,2);
+});
+
+test('knowledge-review attribute queue opens the same conflict-set drawer',async()=>{
+  const f=fixture([],{conflictSet:{id:'set',state:'open',predicate:'count',version:1,members:[]}});
+  await f.get('refresh-reviews').onclick();
+  const entry=f.created.find(node=>node.textContent==='处理属性冲突集合');assert.ok(entry);
+  await entry.onclick();assert.ok(f.calls.includes('/api/projects/a/attribute-conflicts/set/read'));
+});
+
+test('pending conflict drawer cannot revive after A to B to A project changes',async()=>{
+  let release;const pending=new Promise(resolve=>{release=resolve;});
+  const f=fixture([],{conflictRead:()=>pending});
+  const opening=f.context.window.openAttributeConflictReview({id:'set'},{projectId:'a'});
+  f.context.current='b';f.get('project').onchange();f.context.current='a';f.get('project').onchange();
+  release({id:'set',state:'open',version:1,members:[]});await opening;
+  assert.ok(!f.created.some(node=>node.textContent==='提交集合审核'));
+});
+
+test('scoped conflict summary opens complete four-member set and submits all explicit decisions',async()=>{
+  const complete={id:'set',entity_id:'owner',predicate:'count',state:'open',version:1,members:
+    ['a','b','c','d'].map((id,index)=>({record_id:id,version:2,version_id:id+'2',value_preview:index+1,
+      applicability:{platforms:{mode:'specific',values:[index<2?'美团':'淘宝']}},assertion_versions:[{id:'s'+id,version:3}]}))};
+  const original={valid_at:'2026-01-01T00:00:00Z',applicability:{platforms:{mode:'specific',values:['美团']}}};
+  const f=fixture([],{conflictSet:complete,conflictRead:body=>body.applicability?{...complete,members:complete.members.slice(0,2)}:complete});
+  f.context.window.EntityGovernance=require('../../knowledge_service/web/entity-governance.js');
+  await f.context.window.openAttributeConflictReview({id:'set',members:complete.members.slice(0,2)},{projectId:'a',scope:original});
+  const radios=f.created.filter(n=>n.type==='radio');assert.equal(radios.length,8);
+  assert.ok(f.created.some(n=>n.textContent==='完整冲突集合，包含不同时间/平台范围'));
+  await f.created.filter(n=>n.textContent==='查看完整值及原文来源')[2].onclick();
+  const detail=f.requests.find(r=>r.url.endsWith('/members/c/read')).body;
+  assert.equal(detail.applicability,undefined);assert.equal(detail.valid_at,undefined);
+  const sources=f.requests.find(r=>r.url.endsWith('/members/c/sources')).body;assert.equal(sources.applicability,undefined);
+  f.created.find(n=>n.tagName==='textarea').value='分别核对两个平台';
+  for(const index of [0,3,4,7])radios[index].onchange();
+  await f.created.find(n=>n.textContent==='提交集合审核').onclick();
+  const posted=f.requests.find(r=>r.url.endsWith('/resolve')).body;
+  assert.equal(posted.expected_members.length,4);assert.equal(posted.decisions.length,4);
+});
+
+test('withdrawn owner conflict keeps evidence and rejection but disables acceptance',async()=>{
+  const f=fixture([],{conflictSet:{id:'set',owner_available:false,state:'open',version:1,
+    members:[{record_id:'a',version:1,version_id:'a1',value_preview:'1'}]}});
+  await f.context.window.openAttributeConflictReview({id:'set'},{projectId:'a'});
+  const radios=f.created.filter(n=>n.type==='radio');
+  assert.equal(radios[0].disabled,true);assert.equal(radios[1].disabled,false);
+  assert.ok(f.created.some(n=>n.textContent==='实体来源已撤回，仅可拒绝冲突值'));
+});
 
 test('refresh uses new project-scoped summary and preserves full logs collapsed',async()=>{
   const {get,calls}=fixture();

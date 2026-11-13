@@ -16,10 +16,10 @@ class SearchProjectionTests(unittest.TestCase):
         return build_projection(ProjectionInput(value or record()), catalog or default_catalog(),
                                 index_version=index_version)
 
-    def test_exact_21_column_contract_has_no_endpoint_or_control_copies(self):
+    def test_exact_manifest_has_source_window_identity_without_endpoint_copies(self):
         row = self.build()
         self.assertEqual(set(row), {c.name for c in default_catalog().column_defs()} - {'embedding', 'sparse'})
-        self.assertEqual(len(row), 19)
+        self.assertEqual(len(row), 25)
         self.assertTrue(all(not isinstance(v, dict) for v in row.values()))
         self.assertEqual(row['record_id'], 'r')
         self.assertEqual(row['text'], '正文')
@@ -36,7 +36,7 @@ class SearchProjectionTests(unittest.TestCase):
                 self.build(index_version=invalid)
 
     def test_only_current_searchable_visible_rows_are_projected(self):
-        for changes in ({'kind': 'attribute'}, {'kind': 'document'},
+        for changes in ({'kind': 'document'},
                         {'superseded_at': '2026-10-21T00:00:00Z'},
                         {'metadata': {'_deleted': 'yes'}}, {'metadata': {'_audit': True}}):
             with self.subTest(changes=changes):

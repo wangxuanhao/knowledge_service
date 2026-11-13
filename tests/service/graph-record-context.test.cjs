@@ -115,17 +115,17 @@ test('a stale qualified inspection cannot replace the inspector after owner revi
 });
 
 function searchHits(){
-  const calls=[],buttons=[],host={html:''};let live={known_at:null,filters:null,entity_type:'Person',predicate:'knows'};
+  const calls=[],buttons=[],attributeCalls=[],host={html:''};let live={known_at:null,filters:null,entity_type:'Person',predicate:'knows'};
   Object.defineProperty(host,'innerHTML',{set(value){this.html=value;buttons.length=0;
-    for(const match of value.matchAll(/<button\b([^>]*data-graph-view[^>]*)>/g)){
+    for(const match of value.matchAll(/<button\b([^>]*(?:data-graph-view|data-attribute-fact)[^>]*)>/g)){
       const button={dataset:{},closest:()=>({querySelectorAll:()=>buttons})};for(const attr of match[1].matchAll(/data-([\w-]+)="([^"]*)"/g))button.dataset[attr[1].replace(/-([a-z])/g,(_,letter)=>letter.toUpperCase())]=attr[2];buttons.push(button);
     }},get(){return this.html;}});
-  host.querySelectorAll=selector=>selector==='[data-graph-view]'?buttons:[];
-  const context={document:{activeElement:null},window:{openKnowledgeRecord:async value=>calls.push(value)},get:()=>host,scope:()=>live,graphScope:()=>live,
+  host.querySelectorAll=selector=>selector==='[data-graph-view]'?buttons.filter(button=>button.dataset.graphView):selector==='[data-attribute-fact]'?buttons.filter(button=>button.dataset.attributeFact):[];
+  const context={current:'p',document:{activeElement:null},window:{openKnowledgeRecord:async value=>calls.push(value),EntityAttributePanel:{open:value=>attributeCalls.push(value)}},get:()=>host,scope:()=>live,graphScope:()=>live,
     ontologyScope:()=>({ontology_scope:'all',ontology_ids:null}),readGraphHops:()=>1,localActionLabel:()=> '展开1跳邻域',esc:String,labelOf:String,platformGroupLabel:()=>'',status(){},historyFor(){}};
   vm.createContext(context);const source=fs.readFileSync(path.join(__dirname,'../../knowledge_service/web/workspace.js'),'utf8');
   vm.runInContext(source.slice(source.indexOf('  function renderHits('),source.indexOf('  // 检索和问答共用')),context);
-  return {calls,buttons,render:(result,scope)=>context.renderHits(result,scope),setLive:value=>live=value};
+  return {calls,buttons,attributeCalls,render:(result,scope)=>context.renderHits(result,scope),setLive:value=>live=value};
 }
 
 test('search navigation forwards hit revision and originating authority scope with current display restrictions',async()=>{
@@ -140,6 +140,18 @@ test('search navigation forwards hit revision and originating authority scope wi
 test('search navigation preserves a supplied numeric revision when no version ID was returned',async()=>{
   const h=searchHits();h.render({hits:[{id:'hit',kind:'relation',text:'命中关系',version:3}]},{known_at:null});await h.buttons[0].onclick();
   assert.equal(h.calls[0].version,3);assert.equal(h.calls[0].version_id,undefined);
+});
+
+test('attribute result navigation preserves the exact hit revision and frozen authority scope',async()=>{
+  for(const revision of [{version_id:'fact-v2',version:2},{version:3},{}]){
+    const h=searchHits(),fixed={known_at:'2025-01-01T00:00:00Z',filters:{field:'metadata.city',op:'eq',value:'origin'}};
+    h.render({hits:[{id:'fact',kind:'attribute',type:'amount',owner_id:'owner',value:5,...revision}]},fixed);
+    h.setLive({known_at:null});await h.buttons[0].onclick();const opened=h.attributeCalls[0];
+    assert.ok(opened.expectedFactVersion,'attribute navigation must supply a fact revision pin');
+    assert.deepEqual(JSON.parse(JSON.stringify(opened.expectedFactVersion)),revision);
+    assert.equal(opened.focusRecordId,'fact');assert.equal(opened.entity.id,'owner');
+    assert.deepEqual(JSON.parse(JSON.stringify(opened.scope)),fixed);
+  }
 });
 
 test('a visible full-projection record reuses the same authority scope despite its transient type chip',()=>{

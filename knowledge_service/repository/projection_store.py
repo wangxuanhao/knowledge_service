@@ -146,6 +146,13 @@ def _json(value):
                       separators=(',', ':'))
 
 
+def _frozen_projection_input(value):
+    from dataclasses import asdict
+    from ..utils.filters import encode_filter_json
+    body=asdict(value);body['source_contexts']=list(body.get('source_contexts') or [])
+    return encode_filter_json(body)
+
+
 def _decode_row(row):
     result = dict(row)
     # The shared row factory hides legacy internal ordering columns named seq.
@@ -234,7 +241,7 @@ class ProjectionStore:
 
     def _milvus_envelope(self, project_id, operation, version_id, payload):
         from ..domain.search_filter_catalog import FilterCatalog
-        from ..domain.search_projection import build_projection
+        from ..domain.search_projection import build_projections
         from .projection_inputs import ProjectionInputs
         cursor = self.cursor(project_id, 'milvus')
         if cursor is None or cursor.get('status') in {'failed', 'requires_rebuild'}:
@@ -256,8 +263,9 @@ class ProjectionStore:
             inputs = ProjectionInputs(self.repository).collect(project_id, version_ids=[version_id])
             if not inputs:
                 return {**envelope, 'row': None}
-            row = build_projection(inputs[0], catalog, index_version=state['index_version'])
-            return {**envelope, 'row': row}
+            rows = list(build_projections(inputs[0], catalog, index_version=state['index_version']))
+            return {**envelope, 'rows': rows, 'row': rows[0] if rows else None,
+                    'record_id': inputs[0].record['id']}
         except ValueError as exc:
             self._db.execute("""UPDATE projection_cursors SET status='requires_rebuild',
                 last_error=?,updated_at=? WHERE project_id=? AND target='milvus'""",
@@ -274,6 +282,34 @@ class ProjectionStore:
         if not any((new_record.get('metadata') or {}).get(key) for key in ('_deleted', '_audit')):
             sequences.append(self.enqueue(
                 project_id, 'upsert', new_record['version_id'], new_record))
+        return sequences
+
+    def enqueue_source_context_changes(self,project_id,record_ids):
+        """Freeze supported bodies only after the formal assertion actions finish."""
+        if not self._db.in_transaction:raise RuntimeError('source projection changes require repository transaction')
+        ids=sorted(set(record_ids))
+        if not ids:return []
+        sequences=[]
+        for start in range(0,len(ids),500):
+            selected=ids[start:start+500];after=''
+            while True:
+                rows=self._db.execute('''SELECT * FROM record_versions WHERE project_id=?
+                    AND superseded_at IS NULL AND id>? AND
+                    (id=ANY(?::text[]) OR (read_kind='attribute' AND read_subject_id=ANY(?::text[]))
+                    OR (read_kind='entity' AND EXISTS(SELECT 1 FROM record_versions changed
+                        WHERE changed.project_id=record_versions.project_id AND changed.id=ANY(?::text[])
+                        AND changed.superseded_at IS NULL AND changed.read_kind IN ('relation','attribute')
+                        AND (changed.read_subject_id=record_versions.id OR changed.read_object_id=record_versions.id))))
+                    ORDER BY id LIMIT 500''',(project_id,after,selected,selected,selected)).fetchall()
+                if not rows:break
+                for raw in rows:
+                    record=self.repository._record(raw)
+                    if record['kind'] not in {'entity','relation','attribute'}:continue
+                    sequences.append(self.enqueue(project_id,'tombstone',record['version_id'],
+                        {'record_id':record['id'],'version_id':record['version_id']}))
+                    if raw['read_visible']:
+                        sequences.append(self.enqueue(project_id,'upsert',record['version_id'],record))
+                after=rows[-1]['id']
         return sequences
 
     def project_watermark(self, project_id):
@@ -529,7 +565,7 @@ class ProjectionStore:
             catalog = FilterCatalog.from_dict(frozen['catalog'])
             return {'index_version': int(frozen['index_version']), 'catalog': catalog.to_dict(),
                     'embedding_model': frozen['embedding_model'], 'dim': int(frozen['dim']),
-                    'watermark': watermark}
+                    'watermark': watermark,'search_capabilities':list(frozen.get('search_capabilities') or [])}
 
     def search_index_is_current(self, project_id, index_version, schema_version, watermark):
         try:
@@ -537,6 +573,15 @@ class ProjectionStore:
         except RuntimeError:
             return False
         return selected['index_version'] == index_version and selected['watermark'] == watermark
+
+    def flag_audit_failure(self,project_id,index_version,schema_version,watermark,reason):
+        """Fence a read-only audit result without leasing the search generation."""
+        with self.repository._transaction():
+            return self._db.execute('''UPDATE projection_cursors SET status='requires_rebuild',last_error=?,updated_at=?
+                WHERE project_id=? AND target='milvus' AND schema_version=? AND applied_seq=?
+                  AND status='ready' AND claim_token IS NULL AND rebuild_state::jsonb->>'index_version'=?
+                  AND (SELECT projection_seq FROM project_projection_sequences WHERE project_id=?)=?''',
+                (reason,utc_now(),project_id,schema_version,watermark,str(index_version),project_id,watermark)).rowcount==1
 
     def claim_maintenance(self, project_id, target, schema_version, owner,
                           lease_seconds=60):
@@ -602,6 +647,10 @@ class ProjectionStore:
 
     def begin_rebuild(self, project_id, target, schema_version, owner, *, lease_guard,
                       embedding_model=None, dim=None):
+        if target=='milvus':
+            support=self.repository.source_context_diagnostics(project_id)
+            if support.get('missing_active',support.get('missing')) or support.get('invalid_active',support.get('invalid')):
+                raise ValueError('来源上下文尚未完成回填或有无效的当前支撑，请先按批次回填并核对诊断，再重新向量化')
         token = str(uuid4())
         with self.repository._transaction():
             self._db.execute('INSERT INTO project_projection_sequences(project_id,projection_seq) VALUES (?,0) ON CONFLICT(project_id) DO NOTHING', (project_id,))
@@ -615,6 +664,9 @@ class ProjectionStore:
             state = existing.get('rebuild_state') or {}
             unfinished = state.get('build_id') and state.get('phase') != 'ready'
             if target == 'milvus' and ((state.get('catalog') or {}).get('fields') or
+                    # An explicit schema upgrade needs a new frozen snapshot
+                    # and generation; the lease check below still fences owners.
+                    int(existing['schema_version']) != int(schema_version) or
                     state.get('uncertain_write') or state.get('requires_new_snapshot') or
                     (embedding_model is not None and state.get('embedding_model') != embedding_model) or
                     (dim is not None and state.get('dim') != dim) or
@@ -719,9 +771,10 @@ class ProjectionStore:
                 self._locked_claim(claimed)
                 self._db.executemany(
                     '''INSERT INTO projection_rebuild_snapshots
-                       (project_id,target,build_id,ordinal,version_id)
-                       VALUES (?,?,?,?,?)''',
-                    [(project_id, target, build_id, index, (row.record if hasattr(row, 'record') else row)['version_id'])
+                       (project_id,target,build_id,ordinal,version_id,projection_input)
+                       VALUES (?,?,?,?,?,?)''',
+                    [(project_id, target, build_id, index, (row.record if hasattr(row, 'record') else row)['version_id'],
+                        _frozen_projection_input(row) if hasattr(row,'record') else None)
                      for index, row in enumerate(page, offset)])
                 lease_is_current()
             offset += len(page)

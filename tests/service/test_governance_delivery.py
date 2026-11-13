@@ -30,7 +30,12 @@ class GovernanceDeliveryTests(unittest.TestCase):
                       ontology_id='release', metadata={})
                  for id, subject, value in [('age-a', 'keep', 20), ('age-b', 'drop', 30)]]
         repo = SimpleNamespace(current_records=lambda p: copy.deepcopy(rows),
-                               get_ontology=lambda p, ontology_id: {'turtle': TTL})
+                               get_ontology=lambda p, ontology_id=None: {'turtle': TTL})
+        bounded=patch('knowledge_service.repository.duplicate_entities.DuplicateReads.merge_rows',
+                      lambda reads,p,ids:{row['id']:copy.deepcopy(row) for row in rows})
+        supports=patch('knowledge_service.repository.attribute_conflicts.ConflictReads.support_versions',
+                       lambda reads,p,ids:[])
+        bounded.start();supports.start();self.addCleanup(bounded.stop);self.addCleanup(supports.stop)
         service = SimpleNamespace(repository=repo, lock=threading.RLock())
         return service, rows
 

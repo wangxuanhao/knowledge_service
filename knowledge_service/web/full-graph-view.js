@@ -140,7 +140,7 @@
       else{emptyNotice.hidden=true;targetNotice.hidden=true;stop();lastProgress=null;typePage=0;renderTypes(null,null);}
       const epoch=run,selected=options.projectId||project();if(!selected){message('请先选择项目。',true);return;}
       try{
-        if(!renderer)renderer=new window.FullGraph.Renderer(host,{onSelect:select,onError:text=>message(text,true)});
+        if(!renderer)renderer=new window.FullGraph.Renderer(host,{onSelect:select,onError:text=>message(text,true),onHover:row=>window.EntityAttributePanel?.hoverHtml(row,{projectId:loadedProject||project(),scope:fixed||scope()})});
         // Explicit global navigation stages its first validated batch while the
         // current local/full scene remains usable. Default entry keeps streaming.
         loader=new window.FullGraph.SessionLoader(staged?{setDataset(){},sync(){}}:renderer,{batchSize:options.batchSize||200});

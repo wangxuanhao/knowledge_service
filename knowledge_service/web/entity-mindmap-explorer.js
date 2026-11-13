@@ -16,6 +16,7 @@
     const traceStatus=get('mindmap-trace-status'),tracePath=get('mindmap-trace-path');
     const toggle=get('mindmap-toggle-overview'),overview=get('mindmap-overview'),map=get('mindmap-overview-map');
     const svgButton=get('mindmap-export-svg'),pngButton=get('mindmap-export-png'),exportStatus=get('mindmap-export-status');
+    const fitButton=get('mindmap-fit-view');
     const listeners=[];
     let index=null,generation=0,destroyed=false,frame=null,exporting=false,hasTrace=false;
     let overviewVisible=toggle?.getAttribute('aria-pressed')!=='false',mapTransform=null,matches=[],activeResult=-1;
@@ -56,6 +57,7 @@
     }
     function syncButtons(){
       const empty=!hasTree();
+      if(fitButton)fitButton.disabled=empty;
       if(search)search.disabled=empty;
       if(from)from.disabled=empty;if(to)to.disabled=empty;
       if(run)run.disabled=empty||!hasNode(from?.value)||!hasNode(to?.value);
@@ -208,6 +210,7 @@
       const move=moves[event.key];if(!move)return;event.preventDefault();view.pan(...move);scheduleOverview();
     });
     listen(svgButton,'click',()=>download('svg'));listen(pngButton,'click',()=>download('png'));
+    listen(fitButton,'click',()=>view.fit());
     const unsubscribe=view.subscribe(event=>{
       if(event?.type==='render'||event?.type==='clear')updateData();else scheduleOverview();
     });

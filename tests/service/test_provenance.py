@@ -99,7 +99,12 @@ def test_export_projection_includes_deterministic_project_scoped_provenance(prov
         'namespace', 'schema_version', 'project', 'records', 'ontologies',
         'artifacts', 'governance', 'provenance', 'governance_history_included'}
     assert exported['governance_history_included'] is True
-    assert set(exported['governance']) == {'assertions', 'assertion_events', 'fact_keys', 'ingest_runs', 'resolution_reviews', 'merge_operations', 'ontology'}
+    assert set(exported['governance']) == {
+        'assertions', 'assertion_events', 'fact_keys', 'ingest_runs',
+        'resolution_reviews', 'merge_operations', 'ontology',
+        'attribute_conflict_sets', 'attribute_conflict_members'}
+    assert exported['governance']['attribute_conflict_sets'] == []
+    assert exported['governance']['attribute_conflict_members'] == []
     assert exported['governance']['ontology'] == {
         'drafts': [], 'operations': [], 'decisions': [], 'publish_requests': []}
     assert [r['version'] for r in exported['records'] if r['id'] == record['id']] == [1, 2]
@@ -819,11 +824,12 @@ def _sse_item(raw):
 
 def _qa_stream(provenance, monkeypatch, *, empty=False, generate=False):
     from knowledge_service.services import answers
-    from test_production_projection_receipts import activate_legacy
+    from keyword_index_fixture import ready_keyword_index
     repo, _, project = provenance
     rows = [] if empty else [_source(repo, project)[1]]
     # Mocked retrieval still pins a ready generation through the real PG guard.
-    activate_legacy(repo, project, {}, watermark=repo.projections.project_watermark(project))
+    service = SimpleNamespace(repository=repo, milvus_store=None)
+    ready_keyword_index(service, project, monkeypatch)
     context = {'hits': rows, 'evidence_rows': rows, 'candidate_count': len(rows),
                'answer_purpose': 'rule_judgment', 'answer_label': '',
                'filter_stage': 'before_ranking', 'embedding_model': 'test', 'semantic': False,
@@ -831,7 +837,7 @@ def _qa_stream(provenance, monkeypatch, *, empty=False, generate=False):
                '_backend': 'local', 'retrieval_errors': {}, 'valid_at': None, 'known_at': None,
                'channels': {'entity': 0, 'chunk': len(rows), 'graph_evidence': 0}}
     monkeypatch.setattr(answers, 'question_context', lambda *args: dict(context))
-    stream = answers.stream_events(SimpleNamespace(repository=repo), project,
+    stream = answers.stream_events(service, project,
                                    {'query': 'evidence', 'retrieval_mode': 'keyword', 'generate': generate})
     return stream, context
 

@@ -15,11 +15,9 @@ def test_incremental_exact_fusion_retains_occurrence_and_source(monkeypatch,tmp_
         rows=client.post(base+'/records/page',json={}).json()['records']
         entities=[r for r in rows if r['kind']=='entity']
         assert len(entities)==1
-        assert len(entities[0]['metadata']['merged_sources'])==1
+        assert 'merged_sources' not in entities[0]['metadata']
         assert entities[0]['metadata']['merge_backend']=='semantica.EntityMerger'
         assert len([r for r in rows if r['kind']=='chunk'])==2
-        occurrence=entities[0]['metadata']['merged_sources'][0]
-        assert occurrence['source_version_id']
         assert len(client.get(base+'/records/'+entities[0]['id']+'/history').json()['versions'])==2
         evidence=client.post(base+'/records/'+entities[0]['id']+'/evidence',json={}).json()
         assert {doc['title'] for doc in evidence['documents']}=={'0','1'}
@@ -29,6 +27,8 @@ def test_incremental_exact_fusion_retains_occurrence_and_source(monkeypatch,tmp_
         assert len(accepted)==2
         assert len({item['document_id'] for item in accepted})==2
         assert all(item['document_version_id'] and item['chunk_id'] for item in accepted)
+        contexts=client.app.state.service.repository.current_source_contexts(p,[entities[0]['id']])
+        assert len(contexts[entities[0]['id']])==2
 
 
 def test_same_document_repeated_mentions_preserve_each_chunk_support(monkeypatch,tmp_path):

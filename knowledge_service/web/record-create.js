@@ -179,7 +179,7 @@
       }
       let mode,value;
       if(kind==='attribute'){
-        mode=field(form,'数据类型','select');mode.id='create-record-datatype';value=field(form,'属性值');value.id='create-record-value';
+        mode=field(form,'数据类型','select');mode.id='create-record-datatype';value=field(form,'属性值','textarea');value.id='create-record-value';value.rows=6;
       }
       const time=element('div','record-create-times');form.append(time);
       const from=field(time,'业务生效时间（可留空）'),until=field(time,'业务失效时间（可留空）');
@@ -191,7 +191,7 @@
       form.append(more);
       const actions=element('div','record-create-actions'),save=element('button','admin-only','创建正式记录');save.type='submit';save.id='save-created-record';
       actions.append(save,button('前往本体建模层',modeling));form.append(actions);
-      function setInput(){if(!mode)return;value.type=mode.value==='boolean'?'text':mode.value==='integer'||mode.value==='double'?'number':'text';value.step=mode.value==='integer'?'1':'any';value.placeholder=mode.value==='boolean'?'true 或 false':'';}
+      function setInput(){if(!mode)return;value.rows=mode.value==='string'?6:2;value.inputMode=mode.value==='integer'||mode.value==='double'?'decimal':'text';value.placeholder=mode.value==='boolean'?'true 或 false':mode.value==='string'?'可输入多段文字，换行会原样保存':'';}
       function setType(){const term=terms.find(item=>item.id===type.value),names=ids=>ids.map(id=>label(publication.summary.classes.find(item=>item.id===id)||{id})).join(' / ');
         constraint.textContent=kind==='entity'?'类型只取自当前已发布的可用类。':`允许主体：${term.domain.length?names(term.domain):'未限定'}${kind==='relation'?`；允许客体：${term.range.length?names(term.range):'未限定'}`:`；值域：${term.range.join(' / ')||'未限定（原生标量）'}`}`;
         if(mode){const available=attributeModes(term);mode.replaceChildren();for(const name of available){const option=element('option',null,{string:'字符串',boolean:'布尔值',integer:'整数',double:'浮点数'}[name]);option.value=name;mode.append(option);}save.disabled=!available.length;
