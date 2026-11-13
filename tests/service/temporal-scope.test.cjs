@@ -198,7 +198,7 @@ test('shared controls replace the duplicate QA date and time helper loads before
   for(const id of ['scope-time-mode','scope-valid-at-field','scope-include-unknown','scope-time-help','scope-time-applied'])assert.ok(html.includes('id="'+id+'"'),id);
   for(const [file,version] of [['workspace-context-ui.js','graph-workspace-20261105-1'],['workbench.js','unified-media-20261111-1'],['evidence-inspector.js','graph-maintenance-20261109-2']])assert.ok(html.includes('/assets/'+file+'?v='+version),file);
   assert.ok(html.includes('/assets/temporal-scope.js?v=unified-temporal-20261028-2'),'temporal helper DST preservation version');
-  assert.ok(html.includes('/assets/workspace.js?v=graph-maintenance-20261109-2'),'workspace includes concurrent graph updates');
+  assert.ok(html.includes('/assets/workspace.js?v=search-content-20261113-1'),'workspace includes concurrent graph updates');
   assert.ok(html.includes('/assets/workspace-context.css?v=unified-temporal-20261028-2'),'responsive scope styles version');
   for(const consumer of ['workbench.js','workspace-context-ui.js','workspace.js','evidence-inspector.js'])assert.ok(html.indexOf('/assets/temporal-scope.js?')<html.indexOf('/assets/'+consumer+'?'));
   assert.match(read('workspace.js'),/系统修订时间/);assert.doesNotMatch(read('workspace.js'),/知识时间/);

@@ -28,6 +28,12 @@ def test_library_search_enter_clear_and_mobile_layout(redesign_page, width, heig
     page.wait_for_function("document.querySelectorAll('#source-list .source-item').length===2")
     page.set_viewport_size({'width': width, 'height': height})
     search = page.get_by_role('searchbox', name='搜索资料')
+    assert not page.locator('#source-search-steps').is_visible()
+    assert not page.locator('.source-search__actions').is_visible()
+    if width >= 1000:
+        assert page.locator('#source-search-form').bounding_box()['height'] <= 45
+        toolbar = page.locator('.source-results-toolbar').bounding_box()
+        assert toolbar['height'] <= 65
     search.fill('退款')
     search.press('Enter')
     page.wait_for_function("document.querySelectorAll('#source-list .source-item').length===1")

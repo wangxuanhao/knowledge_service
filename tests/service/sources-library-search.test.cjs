@@ -4,6 +4,15 @@ const {setup,documentRow,settle}=require('./fixtures/sources-ui.cjs');
 const params=request=>new URL(request.url,'http://test').searchParams;
 async function search(ui,value){ui.get('source-search-input').value=value;ui.get('source-search-form').dispatch('submit');await settle();}
 
+test('idle search keeps progressive controls out of the content area',async()=>{
+  const ui=setup();await settle();
+  const steps=ui.get('source-search-steps'),actions=ui.document.querySelector('.source-search__actions');
+  assert.equal(steps.hidden,true);assert.equal(actions.hidden,true);
+  await search(ui,'two');assert.equal(steps.hidden,false);assert.equal(actions.hidden,false);
+  await ui.get('source-search-clear').click();await settle();
+  assert.equal(steps.hidden,true);assert.equal(actions.hidden,true);
+});
+
 test('search submits trimmed draft, scopes counts and preserves state/scope/refresh',async()=>{
   const ui=setup();await settle();
   const input=ui.get('source-search-input');assert.ok(input,'labeled search input exists');

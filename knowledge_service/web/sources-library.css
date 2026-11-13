@@ -1,14 +1,15 @@
 /* The library keeps its width; document details appear only in the drawer. */
 #tab-sources .source-layout{display:block;min-height:300px}
 #tab-sources #source-list{max-height:none;overflow:visible;padding:0;min-width:0}
-#tab-sources .source-summary{margin:16px 0 12px}
-#tab-sources .source-search{margin:0 0 14px;max-width:900px}
-#tab-sources .source-search>label{display:block;margin:0 0 7px;font-size:12px;font-weight:600;color:var(--ks-muted)}
-#tab-sources .source-search__controls{display:flex;align-items:center;gap:8px;min-width:0}
+#tab-sources .source-summary{margin:0;font-size:12px;line-height:1.6}
+#tab-sources .source-search{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px 12px;margin:12px 0;max-width:none}
+#tab-sources .source-search>label{display:block;margin:0;font-size:12px;font-weight:600;color:var(--ks-muted)}
+#tab-sources .source-search__controls{display:flex;align-items:center;gap:8px;min-width:0;grid-column:2/-1}
 #tab-sources .source-search input{flex:1;min-width:0;margin:0;min-height:36px}
 #tab-sources .source-search button{flex-shrink:0;margin:0;min-height:36px}
-#tab-sources .source-search__actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;min-width:0}
-#tab-sources .source-search__steps{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px;min-width:0;font-size:12px}
+#tab-sources .source-search__actions{display:flex;flex-wrap:wrap;gap:8px;grid-column:3;margin:0;min-width:0}
+#tab-sources .source-search__steps{display:flex;flex-wrap:wrap;align-items:center;gap:8px;grid-column:2;margin:0;min-width:0;font-size:12px}
+#tab-sources .source-search [hidden]{display:none!important}
 #tab-sources .source-search__step{display:inline-flex;align-items:center;gap:6px;max-width:100%;min-width:0;padding:4px 6px 4px 10px;border:1px solid var(--ks-line);border-radius:6px;background:var(--ks-sunken)}
 #tab-sources .source-search__step>span{min-width:0;overflow-wrap:anywhere;white-space:pre-wrap}
 #tab-sources .source-search__step>button{min-width:32px;min-height:32px;padding:3px 8px}
@@ -18,6 +19,7 @@
 #tab-sources .source-search input:focus-visible,#tab-sources .source-search select:focus-visible{outline:2px solid var(--ks-accent,#216952);outline-offset:2px}
 #tab-sources .source-empty>button{margin-top:12px}
 #tab-sources .source-empty>button[hidden]{display:none}
+@media(max-width:900px){#tab-sources .source-search{grid-template-columns:minmax(0,1fr)}#tab-sources .source-search__actions,#tab-sources .source-search__steps,#tab-sources .source-search__controls{grid-column:1}}
 @media(max-width:600px){#tab-sources .source-search__controls{flex-wrap:wrap}#tab-sources .source-search__mode{flex-basis:100%}#tab-sources .source-search input{flex-basis:100%;width:100%}}
 #tab-sources #source-list .source-item{display:grid;grid-template-columns:minmax(180px,1fr) minmax(112px,auto) 72px minmax(180px,auto) 54px;align-items:center;gap:16px;margin:0;border:0;border-bottom:1px solid var(--ks-line);border-radius:0;padding:17px 14px;min-height:76px;box-shadow:none}
 #tab-sources #source-list .source-item:first-child{border-top:1px solid var(--ks-line)}
@@ -31,7 +33,10 @@
 .source-item__counts,.source-item__open{font-size:11px;color:var(--ks-muted)}
 .source-item__counts{overflow-wrap:anywhere}
 .source-item__open{text-align:right;color:#216952;font-weight:600;white-space:nowrap}
-#tab-sources .source-filter-bar{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
+#tab-sources .source-results-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 16px;padding:0 0 10px;border-bottom:1px solid var(--ks-line)}
+#tab-sources .source-results-toolbar .source-filter-bar{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;background:transparent;border:0;border-radius:0}
+#tab-sources .source-layout{margin-top:0}
+#tab-sources .source-filter-btn{padding:5px 10px}
 #tab-sources .source-filter-btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;white-space:normal}
 #tab-sources .source-empty{min-height:300px}
 #source-detail-drawer{width:min(900px,calc(100vw - 56px))}

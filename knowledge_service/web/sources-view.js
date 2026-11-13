@@ -26,6 +26,8 @@
   function renderSearchSteps(){
     stepsUI.replaceChildren();
     const chain=[...searchSteps,...(appliedQuery?[{query:appliedQuery,retrieval_mode:retrievalMode}]:[])];
+    stepsUI.hidden=!chain.length&&!addingStep;
+    searchActions.hidden=!chain.length&&!addingStep;
     chain.forEach((step,index)=>{
       const chip=document.createElement('span');chip.className='source-search__step';
       const label=document.createElement('span');label.textContent=(index+1)+'. '+(step.retrieval_mode==='semantic'?'向量正文':'关键词')+'：'+step.query;
@@ -125,7 +127,8 @@
       <button type="button" class="source-filter-btn" data-filter="processing"><span class="filter-dot processing"></span>处理中 <span class="filter-count" id="processing-count">0</span></button>
       <button type="button" class="source-filter-btn" data-filter="failed"><span class="filter-dot failed"></span>失败 <span class="filter-count" id="failed-count">0</span></button>
       <button type="button" class="source-filter-btn active" data-filter="all">全部 <span class="filter-count" id="all-count">0</span></button>`;
-    layout.before(filterBar);
+    const resultToolbar=document.createElement('div');resultToolbar.className='source-results-toolbar';
+    layout.before(resultToolbar);resultToolbar.append(filterBar,summary);
     filterBar.querySelectorAll('.source-filter-btn').forEach(button=>{
       button.setAttribute('aria-pressed',String(button.dataset.filter===currentFilter));
       button.addEventListener('click',()=>{

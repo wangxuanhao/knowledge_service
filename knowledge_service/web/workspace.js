@@ -660,7 +660,10 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     // 单条命中条目：isSource 区分「命中知识的来源原文」与「原文全文匹配」。
     // 实体/关系明确区分局部邻域与全局概览；原文片段保留原文入口。
     const entry=(r,kind,isSource=false)=>{
-      const score=Number(r.score||r.keyword_score||0).toFixed(2);
+      // Provenance/context is not ranked; only display finite scores actually returned.
+      const scoreValue=[r.score,r.keyword_score].find(value=>typeof value==='number'&&Number.isFinite(value));
+      const scoreLabel={hybrid:'融合分',keyword:'关键词分',semantic:'语义分'}[result.active_mode]||'检索分';
+      const score=!isSource&&scoreValue!==undefined?` · ${scoreLabel} ${Number(scoreValue.toPrecision(5))}`:'';
       const tag=isSource?'命中知识的来源原文':(labelOf(r.type)||'原文');
       const identity=`data-graph-id="${esc(r.id)}" data-graph-kind="${esc(kind)}"${r.version_id?` data-graph-version-id="${esc(r.version_id)}"`:''}${r.version!=null?` data-graph-version="${esc(r.version)}"`:''}`;
       const btn=kind==='entity'||kind==='relation'
@@ -668,7 +671,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
         :(kind==='chunk'&&r.source_id?`<button data-source-record="${esc(r.source_id)}" class="secondary">查看原文</button>`:'');
       const applicability=window.ApplicabilityUI?.describe?.(r);
       const expansionLabel=isExpansion(r)?' · 类型扩展':'';
-      return `<article class="hit-entry${isSource?' hit-source':''}"><b>${esc((r.text||'').slice(0,80))}</b><span>${esc(tag)} · ${score}${applicability?' · '+esc(applicability):''}${expansionLabel}</span><p>${esc((r.text||'').slice(0,180))}</p>${btn?`<div class="row">${btn}</div>`:''}</article>`;
+      return `<article class="hit-entry${isSource?' hit-source':''}"><b>${esc((r.text||'').slice(0,80))}</b><span>${esc(tag)}${score}${applicability?' · '+esc(applicability):''}${expansionLabel}</span><p>${esc((r.text||'').slice(0,180))}</p>${btn?`<div class="row">${btn}</div>`:''}</article>`;
     };
     const entities=hits.filter(r=>r.kind==='entity');
     const relations=hits.filter(r=>r.kind==='relation');
