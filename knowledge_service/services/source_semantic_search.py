@@ -17,7 +17,9 @@ class SourceSemanticSearch:
         self.milvus=getattr(service,'milvus_store',None)
 
     @_snapshot_read
-    def search(self, project, scope, query, *, limit=50, cursor=None, state='all', _identity=None):
+    def search(self, project, scope, query, *, limit=50, cursor=None, state='all', _identity=None, retrieval_mode='semantic'):
+        if retrieval_mode not in {'semantic','hybrid'}:
+            raise ValueError('资料召回模式必须是 semantic 或 hybrid')
         if type(limit) is not int or not 1<=limit<=200:
             raise ValueError('资料目录分页上限必须在 1 到 200 之间')
         scope=dict(scope or {})
@@ -30,13 +32,13 @@ class SourceSemanticSearch:
             if cursor is not None:
                 raise ValueError('资料检索游标已失效，请重新搜索')
             return {'documents':[],'total':0,'counts':counts,'next_cursor':None,
-                'search_mode':'semantic','result_limit':100,'matched_chunk_count':0,
+                'search_mode':retrieval_mode,'result_limit':100,'matched_chunk_count':0,
                 'total_is_exact':False,'complete':True}
         engine=RetrievalEngine(self.repo,self.encoder,self.milvus)
         chunk_scope={key:scope[key] for key in ('valid_at','known_at','applicability','include_unknown') if key in scope}
         chunk_scope.update(filters=None,_source_document_scope=scope)
         # Even an empty recalled set must surface unavailable index/model errors.
-        result=engine.search(project,query,retrieval_mode='semantic',scope=chunk_scope,
+        result=engine.search(project,query,retrieval_mode=retrieval_mode,scope=chunk_scope,
             content_channels=['chunk'],k=100)
         chunks=result['hits']
         best={}
@@ -61,7 +63,7 @@ class SourceSemanticSearch:
             counts[category]+=1;counts['all']+=1
         # Bind every authoritative chunk version, parent version and score, so
         # source changes or a new ranking cannot silently shift later pages.
-        identity=[project,scope,query,'semantic',engine._index,state,
+        identity=[project,scope,query,retrieval_mode,engine._index,state,
             [(d['id'],d['version_id'],d['match']) for d in docs],
             [(c['id'],c['version_id'],c['score']) for c in chunks]]
         fingerprint=hashlib.sha256(encode_filter_json(identity).encode()).hexdigest()
@@ -83,6 +85,6 @@ class SourceSemanticSearch:
         next_cursor=(base64.urlsafe_b64encode(json.dumps({'fingerprint':fingerprint,'offset':following}).encode()).decode()
                      if following<len(selected) else None)
         return {'documents':page,'total':len(selected),'counts':counts,'next_cursor':next_cursor,
-            'search_mode':'semantic','result_limit':100,'matched_chunk_count':len(chunks),
+            'search_mode':retrieval_mode,'result_limit':100,'matched_chunk_count':len(chunks),
             'total_is_exact':False,'complete':complete,
             **({'incomplete_reason':result.get('incomplete_reason') or 'source_authority_changed'} if not complete else {})}

@@ -92,7 +92,7 @@ test('time helper is versioned and loaded before preview and saved-source consum
   const helper=html.indexOf('/assets/document-temporal-ui.js?v=document-time-20261110-1');
   assert.ok(helper>=0);
   for(const file of ['ingest-mode','workbench','sources-view','ingest-batches','library-workspace','ingest-results']){
-    const version=['ingest-mode','workbench'].includes(file)?'unified-media-20261111-1':file==='library-workspace'?'preparation-20261116-1':file==='sources-view'?'page-filters-20261116-1':'document-time-20261110-1';
+    const version=['ingest-mode','workbench'].includes(file)?'unified-media-20261111-1':file==='library-workspace'?'preparation-20261116-1':file==='sources-view'?'hybrid-sources-20261116-2':'document-time-20261110-1';
     const marker='/assets/'+file+'.js?v='+version;
     assert.ok(html.includes(marker),marker);
     if(['workbench','sources-view','ingest-results'].includes(file))assert.ok(helper<html.indexOf(marker));

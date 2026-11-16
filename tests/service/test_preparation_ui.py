@@ -59,7 +59,12 @@ def test_upload_configure_parse_and_publish_are_separate(tmp_path, width):
         assert not any(path.endswith('/parse') for _, path in calls)
         page.get_by_role('button', name='下一步：配置资料').click()
         page.get_by_role('button', name='设置', exact=True).click()
+        assert page.locator('.preparation-editor').evaluate("e => e.closest('.preparation-file')?.dataset.itemId") == 'a'
         page.locator('#preparation-edit-title').fill('美团规则')
+        page.get_by_role('button', name='设置', exact=True).click()
+        assert page.locator('.preparation-editor').is_hidden()
+        page.get_by_role('button', name='设置', exact=True).click()
+        assert page.locator('#preparation-edit-title').input_value() == '美团规则'
         page.get_by_role('button', name='保存设置').click()
         assert not any(path.endswith('/parse') for _, path in calls)
         page.get_by_role('button', name='开始解析（1 份）').click()
@@ -133,6 +138,7 @@ def test_native_same_name_files_and_mixed_platform_bulk_configuration(native_wor
     page.get_by_role('button', name='下一步：配置资料').click()
     page.get_by_role('button', name='批量设置所选文件').click()
     editor = page.locator('.preparation-editor')
+    assert editor.evaluate("e => !e.closest('.preparation-file') && Boolean(e.compareDocumentPosition(document.querySelector('[data-preparation-step=\"1\"] .preparation-files')) & Node.DOCUMENT_POSITION_FOLLOWING)")
     editor.get_by_role('checkbox', name='修改平台', exact=True).check()
     editor.get_by_label('平台范围', exact=True).select_option('specific')
     editor.get_by_label('平台值（逗号分隔）', exact=True).fill('美团')
@@ -142,6 +148,7 @@ def test_native_same_name_files_and_mixed_platform_bulk_configuration(native_wor
     editor.get_by_role('button', name='保存设置').click()
     editor.wait_for(state='hidden')
     page.get_by_role('button', name='设置', exact=True).nth(1).click()
+    assert editor.evaluate("e => e.closest('.preparation-file') === document.querySelectorAll('[data-preparation-step=\"1\"] .preparation-file')[1]")
     editor.get_by_label('平台值（逗号分隔）', exact=True).fill('抖音')
     editor.get_by_role('button', name='保存设置').click()
     editor.wait_for(state='hidden')

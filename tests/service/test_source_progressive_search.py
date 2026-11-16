@@ -57,10 +57,20 @@ def test_search_step_api_validation(tmp_path):
         assert client.post(url,json={'search_steps':[step('x')]},params={'query':'y'}).status_code==200
         assert client.post(url,json={'search_steps':[step('x')]*7},params={'query':'y'}).status_code==200
         assert client.post(url,json={'search_steps':[step('x')]}).status_code==422
-        for steps in ([step('')],[step(' ')],[step('x','hybrid')],[step('x'*2001)],[step('x')]*8):
+        for steps in ([step('')],[step(' ')],[step('x','invalid')],[step('x'*2001)],[step('x')]*8):
             assert client.post(url,json={'search_steps':steps}).status_code==422
         for key in ('_source_keyword_queries','_source_document_ids','_source_progressive_identity'):
             assert client.post(url,json={key:[]}).status_code==422
+
+
+def test_hybrid_steps_keep_document_scope_and_fuse_both_channels(tmp_path,monkeypatch):
+    repo,p,rows,explorer,calls=setup(tmp_path,monkeypatch)
+    result=explorer.sources(p,{},query='meaning',retrieval_mode='hybrid',
+        search_steps=[step('Title b'),step('meaning','hybrid')])
+    assert [doc['id'] for doc in result['documents']]==['b']
+    assert result['bounded_by_semantic'] and result['search_mode']=='hybrid'
+    assert {call['retrieval_mode'] for call in calls}=={'semantic','keyword'}
+    assert all(set(call['eligible_version_ids'])=={rows['b1']['version_id']} for call in calls)
 
 
 def test_semantic_prefix_reopens_sibling_chunks_in_same_snapshot(tmp_path, monkeypatch):

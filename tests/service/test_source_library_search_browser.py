@@ -53,7 +53,8 @@ def test_library_search_enter_clear_and_mobile_layout(redesign_page, width, heig
 
 
 @pytest.mark.parametrize('width,height', [(1440, 950), (390, 844)])
-def test_library_vector_mode_snippet_and_keyword_switch(redesign_page, width, height):
+@pytest.mark.parametrize('retrieval_mode', ['semantic','hybrid'])
+def test_library_vector_mode_snippet_and_keyword_switch(redesign_page, width, height, retrieval_mode):
     page, errors = redesign_page
     requests = []
     term = '为什么过了几天钱还没回来'
@@ -65,24 +66,24 @@ def test_library_vector_mode_snippet_and_keyword_switch(redesign_page, width, he
         mode = params.get('retrieval_mode', ['keyword'])[0]
         query = params.get('query', [''])[0]
         requests.append((mode, query))
-        semantic = mode == 'semantic' and bool(query)
+        semantic = mode in {'semantic','hybrid'} and bool(query)
         found = [{**doc, 'match': {'score': .87, 'chunk_id': 'chunk-refund',
             'chunk_version_id': 'chunk-version', 'text': snippet}}] if semantic else ([] if query else [doc])
         route.fulfill(json={'documents': found, 'total': len(found), 'next_cursor': None,
             'counts': {'all': len(found), 'ready': len(found), 'failed': 0, 'processing': 0},
-            **({'search_mode': 'semantic', 'result_limit': 100, 'matched_chunk_count': 2,
+            **({'search_mode': mode, 'result_limit': 100, 'matched_chunk_count': 2,
                 'total_is_exact': False, 'complete': True} if semantic else {})})
 
     page.route('**/api/projects/p/sources**', directory)
     page.click('[data-tab="sources"]')
     page.wait_for_function("document.querySelectorAll('#source-list .source-item').length===1")
     page.set_viewport_size({'width': width, 'height': height})
-    page.get_by_role('radio', name='向量正文', exact=True).click()
+    page.get_by_role('radio', name='混合检索' if retrieval_mode=='hybrid' else '向量检索', exact=True).click()
     search = page.get_by_role('searchbox', name='搜索资料')
     search.fill(term)
     search.press('Enter')
     page.wait_for_function("document.querySelector('#source-list')?.textContent.includes('三个工作日')")
-    assert requests[-1] == ('semantic', term)
+    assert requests[-1] == (retrieval_mode, term)
     assert snippet in page.locator('#source-list').inner_text()
     summary = page.locator('.source-summary').inner_text()
     assert '召回' in summary and '100' in summary
@@ -90,7 +91,7 @@ def test_library_vector_mode_snippet_and_keyword_switch(redesign_page, width, he
     assert page.locator('#source-search-form').evaluate('(el) => el.scrollWidth <= el.clientWidth + 1')
     folder = Path(__file__).resolve().parents[2] / '.benchmarks' / 'source-library-search'
     folder.mkdir(parents=True, exist_ok=True)
-    page.screenshot(path=str(folder / f'semantic-{width}.png'), full_page=True)
+    page.screenshot(path=str(folder / f'{retrieval_mode}-{width}.png'), full_page=True)
     page.get_by_role('radio', name='关键词', exact=True).click()
     page.wait_for_function("document.querySelectorAll('#source-list .source-item').length===0")
     assert requests[-1] == ('keyword', term)
@@ -132,7 +133,7 @@ def test_library_progressive_search_back_remove_and_mobile_layout(redesign_page,
     page.locator('#source-search-refine').click()
     assert search.input_value() == ''
     assert page.locator('#source-list .source-item').count() == 2
-    page.get_by_role('radio', name='向量正文', exact=True).click()
+    page.get_by_role('radio', name='向量检索', exact=True).click()
     assert page.locator('#source-list .source-item').count() == 2
     search.fill('多久到账')
     search.press('Enter')

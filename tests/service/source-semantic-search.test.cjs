@@ -6,6 +6,16 @@ async function mode(ui,value='semantic'){const select=ui.get('source-search-mode
 async function search(ui,value){ui.get('source-search-input').value=value;ui.get('source-search-form').dispatch('submit');await settle();}
 const response=(id,extra={})=>({documents:[documentRow(id)],total:1,counts:{all:1,ready:1,processing:0,failed:0},...extra});
 
+test('hybrid mode sends fusion request and keeps bounded recall messaging',async()=>{
+  const doc=documentRow('hybrid');doc.match={text:'标题与正文命中'};
+  const ui=setup({sourceRead:()=>Promise.resolve(response('hybrid',{documents:[doc],search_mode:'hybrid',result_limit:100}))});await settle();
+  ui.get('source-search-input').value='文档名称';await mode(ui,'hybrid');
+  assert.equal(params(ui.sourceRequests.at(-1)).get('retrieval_mode'),'hybrid');
+  assert.match(ui.document.querySelector('.source-summary').textContent,/混合检索/);
+  assert.equal(ui.rows()[0].querySelector('.source-item__match').textContent,'标题与正文命中');
+  await ui.get('source-search-clear').click();await settle();assert.equal(ui.get('source-search-mode').value,'hybrid');
+});
+
 test('mode switch applies current draft, invalidates cached and slow responses, binds pagination',async()=>{
   const pending=[],ui=setup({sourceRead:url=>new Promise(resolve=>pending.push({url,resolve}))});
   pending[0].resolve(response('directory'));await settle();
@@ -27,7 +37,7 @@ test('semantic recall shows bounded corpus counts and plain text snippet',async(
   const ui=setup({sourceRead:url=>Promise.resolve(response('hit',{documents:[doc],search_mode:'semantic',result_limit:100,matched_chunk_count:3,total_is_exact:false,complete:false}))});await settle();
   ui.get('source-search-input').value='concept';await mode(ui);
   const summary=ui.document.querySelector('.source-summary').textContent;
-  assert.match(summary,/向量正文召回/);assert.match(summary,/本次召回\s*1\s*份资料/);assert.match(summary,/最多\s*100\s*片段/);assert.match(summary,/不完整/);assert.doesNotMatch(summary,/当前范围共/);
+  assert.match(summary,/向量检索召回/);assert.match(summary,/本次召回\s*1\s*份资料/);assert.match(summary,/最多\s*100\s*片段/);assert.match(summary,/不完整/);assert.doesNotMatch(summary,/当前范围共/);
   const snippet=ui.rows()[0].querySelector('.source-item__match');assert.ok(snippet);assert.equal(snippet.textContent,doc.match.text);assert.equal(snippet.querySelector('img'),null);
   assert.match(ui.document.querySelector('.source-filter-bar').getAttribute('aria-label'),/本次召回/);
 });
@@ -42,7 +52,7 @@ test('empty query and clear retain mode but show ordinary directory; citations a
 
 test('semantic failure stays explicit, keeps mode on refresh and never falls back',async()=>{
   const ui=setup({sourceRead:url=>params({url}).get('retrieval_mode')==='semantic'&&params({url}).get('query')?Promise.reject(Error('Milvus unavailable')):Promise.resolve(response('one'))});await settle();
-  ui.get('source-search-input').value='concept';await mode(ui);assert.equal(ui.rows().length,0);assert.match(ui.document.querySelector('.source-empty').textContent,/Milvus unavailable/);assert.match(ui.document.querySelector('.source-summary').textContent,/向量正文.*失败/);
+  ui.get('source-search-input').value='concept';await mode(ui);assert.equal(ui.rows().length,0);assert.match(ui.document.querySelector('.source-empty').textContent,/Milvus unavailable/);assert.match(ui.document.querySelector('.source-summary').textContent,/向量检索.*失败/);
   const before=ui.sourceRequests.length;await ui.refresh.click();await settle();assert.equal(ui.sourceRequests.length,before+1);assert.equal(params(ui.sourceRequests.at(-1)).get('retrieval_mode'),'semantic');
 });
 

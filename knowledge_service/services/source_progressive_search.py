@@ -24,8 +24,8 @@ class SourceProgressiveSearch:
             term=step['query'];mode=step['retrieval_mode']
             if not isinstance(term,str) or not term.strip() or len(term)>2000:
                 raise ValueError('递进搜索词必须为 1 到 2000 字符')
-            if mode not in {'keyword','semantic'}:
-                raise ValueError('资料检索模式必须是 keyword 或 semantic')
+            if mode not in {'keyword','semantic','hybrid'}:
+                raise ValueError('资料检索模式必须是 keyword、semantic 或 hybrid')
             steps.append({'query':term.strip(),'retrieval_mode':mode})
         scoped=dict(scope or {})
         # The service and all nested reads share this decorator's repository.
@@ -39,7 +39,7 @@ class SourceProgressiveSearch:
                 scoped['_source_keyword_queries']=[*scoped.get('_source_keyword_queries',[]),step['query']]
             else:
                 result=semantic.search(project,scoped,step['query'],limit=100,
-                    state='all',_identity=identities)
+                    state='all',_identity=identities,retrieval_mode=step['retrieval_mode'])
                 complete=complete and result['complete']
                 if not result['complete']:
                     incomplete_reason=result.get('incomplete_reason')
@@ -48,12 +48,12 @@ class SourceProgressiveSearch:
                 scoped['_source_document_ids']=[d['id'] for d in result['documents']]
         scoped['_source_progressive_identity']=[steps,identities]
         final=steps[-1]
-        if final['retrieval_mode']=='semantic':
-            result=semantic.search(project,scoped,final['query'],limit=limit,cursor=cursor,state=state)
+        if final['retrieval_mode'] in {'semantic','hybrid'}:
+            result=semantic.search(project,scoped,final['query'],limit=limit,cursor=cursor,state=state,retrieval_mode=final['retrieval_mode'])
         else:
             result=PageReads(self.repo).sources(project,scoped,query=final['query'],
                 limit=limit,cursor=cursor,state=state,summary_only=summary_only)
-        bounded=any(step['retrieval_mode']=='semantic' for step in steps)
+        bounded=any(step['retrieval_mode'] in {'semantic','hybrid'} for step in steps)
         result['bounded_by_semantic']=bounded
         result['complete']=complete and result.get('complete',True)
         if bounded:

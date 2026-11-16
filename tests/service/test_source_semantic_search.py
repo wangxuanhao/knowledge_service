@@ -105,4 +105,18 @@ def test_public_scope_rejects_private_parent_gate(tmp_path):
         p=client.post('/api/projects',json={'name':'public'}).json()['id']
         url=f'/api/projects/{p}/sources'
         assert client.post(url,json={'_source_document_scope':{}}).status_code==422
-        assert client.post(url,json={},params={'retrieval_mode':'hybrid'}).status_code==422
+        assert client.post(url,json={},params={'retrieval_mode':'hybrid'}).status_code==200
+        assert client.post(url,json={},params={'retrieval_mode':'invalid'}).status_code==422
+
+
+def test_hybrid_sources_fuses_both_milvus_channels_and_binds_cursor_to_mode(tmp_path,monkeypatch):
+    repo,p,rows,explorer,calls=setup(tmp_path,monkeypatch)
+    scope={'filters':{'field':'metadata.region','op':'eq','value':'east'}}
+    result=explorer.sources(p,scope,query='meaning',retrieval_mode='hybrid',limit=1)
+    assert result['search_mode']=='hybrid'
+    assert result['documents'][0]['id']=='a'
+    assert {call['retrieval_mode'] for call in calls}=={'semantic','keyword'}
+    assert result['documents'][0]['match']['score']==pytest.approx(2/61)
+    assert set(calls[0]['eligible_version_ids'])=={rows[x]['version_id'] for x in ('a1','a2','b1')}
+    with pytest.raises(ValueError,match='游标'):
+        explorer.sources(p,scope,query='meaning',retrieval_mode='semantic',limit=1,cursor=result['next_cursor'])

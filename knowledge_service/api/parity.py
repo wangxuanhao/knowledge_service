@@ -16,7 +16,7 @@ from ..services.answers import stream_events
 
 class SourceSearchStep(Request):
     query: str = Field(min_length=1,max_length=2000)
-    retrieval_mode: Literal['keyword','semantic']
+    retrieval_mode: Literal['keyword','semantic','hybrid']
 
     @field_validator('query')
     @classmethod
@@ -335,7 +335,7 @@ def install(app,service):
     def sources(p:str,request:SourcesScope,limit:int=50,cursor:str|None=None,
                 summary_only:bool=False,state:str='all',document_id:str|None=None,
                 query:str=Query(default='',max_length=2000),
-                retrieval_mode:Literal['keyword','semantic']='keyword'):
+                retrieval_mode:Literal['keyword','semantic','hybrid']='keyword'):
         return explorer.sources(p,request.model_dump(exclude={'search_steps'}),limit=limit,cursor=cursor,
             summary_only=summary_only,state=state,document_id=document_id,query=query,
             retrieval_mode=retrieval_mode,search_steps=[step.model_dump() for step in request.search_steps])

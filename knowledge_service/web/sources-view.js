@@ -12,10 +12,12 @@
   let retrievalMode='keyword',loadedMode=null,pendingModeChange=false;
   let searchSteps=[],loadedSteps=null,addingStep=false,searchSucceeded=false,searchLoading=false,boundedBySemantic=false;
   const stepsStamp=()=>JSON.stringify(searchSteps);
-  const boundedSearch=()=>boundedBySemantic||semanticSearch()||searchSteps.some(step=>step.retrieval_mode==='semantic');
-  const semanticSearch=()=>retrievalMode==='semantic'&&Boolean(appliedQuery);
+  const rankedMode=value=>['semantic','hybrid'].includes(value);
+  const modeLabel=value=>({keyword:'关键词',semantic:'向量检索',hybrid:'混合检索'})[value];
+  const boundedSearch=()=>boundedBySemantic||semanticSearch()||searchSteps.some(step=>rankedMode(step.retrieval_mode));
+  const semanticSearch=()=>rankedMode(retrievalMode)&&Boolean(appliedQuery);
   const searchForm=document.createElement('form');searchForm.id='source-search-form';searchForm.className='source-search';searchForm.setAttribute('role','search');
-  searchForm.innerHTML='<label for="source-search-input" class="sr-only">搜索资料</label><label for="source-search-mode" class="sr-only">搜索方式</label><div class="source-search__row"><span class="source-search__seg" role="radiogroup" aria-label="搜索方式切换"><button type="button" role="radio" data-mode="keyword" aria-checked="true">关键词</button><button type="button" role="radio" data-mode="semantic" aria-checked="false">向量正文</button></span><select id="source-search-mode" class="source-search__mode-select" tabindex="-1"><option value="keyword">关键词</option><option value="semantic">向量正文</option></select><div class="source-search__field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="source-search-input" type="search" maxlength="2000" placeholder="搜索名称、文件名或正文" autocomplete="off"></div><button type="submit">搜索</button><button id="source-search-clear" type="button" class="secondary">清空</button></div>';
+  searchForm.innerHTML='<label for="source-search-input" class="sr-only">搜索资料</label><label for="source-search-mode" class="sr-only">搜索方式</label><div class="source-search__row"><span class="source-search__seg" role="radiogroup" aria-label="搜索方式切换"><button type="button" role="radio" data-mode="keyword" aria-checked="true">关键词</button><button type="button" role="radio" data-mode="semantic" aria-checked="false">向量检索</button><button type="button" role="radio" data-mode="hybrid" aria-checked="false">混合检索</button></span><select id="source-search-mode" class="source-search__mode-select" tabindex="-1"><option value="keyword">关键词</option><option value="semantic">向量检索</option><option value="hybrid">混合检索</option></select><div class="source-search__field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="source-search-input" type="search" maxlength="2000" placeholder="搜索名称、文件名或正文" autocomplete="off"></div><button type="submit">搜索</button><button id="source-search-clear" type="button" class="secondary">清空</button></div>';
   layout.before(searchForm);
   const searchInput=searchForm.querySelector('input');
   const searchMode=$('source-search-mode');searchMode.value=retrievalMode;
@@ -53,8 +55,8 @@
       const node=document.createElement('div');node.className='source-search__step-node';
       const card=document.createElement('div');card.className='source-search__step'+(index===chain.length-1?' source-search__step--current':'');
       const num=document.createElement('span');num.className='source-search__num';num.textContent=index+1;
-      const badge=document.createElement('span');badge.className='source-search__badge'+(step.retrieval_mode==='semantic'?' source-search__badge--semantic':'');
-      badge.textContent=step.retrieval_mode==='semantic'?'向量正文':'关键词';
+      const badge=document.createElement('span');badge.className='source-search__badge'+(rankedMode(step.retrieval_mode)?' source-search__badge--semantic':'');
+      badge.textContent=modeLabel(step.retrieval_mode);
       const term=document.createElement('span');term.className='source-search__term';term.textContent=step.query;
       const remove=document.createElement('button');remove.type='button';remove.className='source-search__remove';remove.textContent='×';remove.setAttribute('aria-label','删除第 '+(index+1)+' 步：'+step.query);
       remove.onclick=()=>replaySteps(chain.filter((_,position)=>position!==index));
@@ -90,9 +92,9 @@
     const term=searchInput.value.trim();
     if(addingStep){if(!term)return;searchSteps=[...searchSteps,{query:appliedQuery,retrieval_mode:loadedMode||retrievalMode}];addingStep=false;}
     if(!term&&searchSteps.length){searchInput.value=appliedQuery;searchMode.value=retrievalMode;renderSearchSteps();return;}
-    retrievalMode=searchMode.value==='semantic'?'semantic':'keyword';appliedQuery=term;searchInput.value=appliedQuery;return load();
+    retrievalMode=rankedMode(searchMode.value)?searchMode.value:'keyword';appliedQuery=term;searchInput.value=appliedQuery;return load();
   }
-  function clearSearch(){retrievalMode=searchMode.value==='semantic'?'semantic':'keyword';searchSteps=[];addingStep=false;boundedBySemantic=false;appliedQuery='';searchInput.value='';}
+  function clearSearch(){retrievalMode=rankedMode(searchMode.value)?searchMode.value:'keyword';searchSteps=[];addingStep=false;boundedBySemantic=false;appliedQuery='';searchInput.value='';}
   function resetSearch(){clearSearch();retrievalMode='keyword';searchMode.value='keyword';pendingModeChange=false;}
   function clearAndLoad(){clearSearch();searchInput.focus();return load();}
   $('source-search-clear').onclick=clearAndLoad;
@@ -497,11 +499,11 @@
     searchLoading=true;searchSucceeded=false;boundedBySemantic=false;renderSearchSteps();
     closeDetail();
     if(!append){loadedProject=null;loadedScope=null;loadedState=null;allDocuments=[];directoryCounts=null;nextCursor=null;updateCounts();
-      summary.textContent=semanticSearch()?'正在进行向量正文召回…':'正在读取当前项目的原文…';message('正在加载原文','加载完成后选择资料查看详情。');
+      summary.textContent=semanticSearch()?'正在进行'+modeLabel(mode)+'召回…':'正在读取当前项目的原文…';message('正在加载原文','加载完成后选择资料查看详情。');
       list.innerHTML='<div class="source-placeholder">正在加载文档目录…</div>';}
     refresh.disabled=true;loadMore.disabled=true;loadMore.hidden=!append;
     const promise=(async()=>{try{
-      const query='?limit=50&summary_only=true&state='+encodeURIComponent(state)+(term?'&query='+encodeURIComponent(term):'')+(mode==='semantic'?'&retrieval_mode=semantic':'')+(cursor?'&cursor='+encodeURIComponent(cursor):'');
+      const query='?limit=50&summary_only=true&state='+encodeURIComponent(state)+(term?'&query='+encodeURIComponent(term):'')+(rankedMode(mode)?'&retrieval_mode='+encodeURIComponent(mode):'')+(cursor?'&cursor='+encodeURIComponent(cursor):'');
       const result=await api('/api/projects/'+encodeURIComponent(project)+'/sources'+query,searchSteps.length?{...filter,search_steps:JSON.parse(chain)}:filter);
       if(!accepts())return false;
       loadedProject=project;loadedScope=stamp;loadedState=state;loadedQuery=term;loadedMode=mode;loadedSteps=chain;searchSucceeded=true;boundedBySemantic=result.bounded_by_semantic===true;
@@ -510,12 +512,12 @@
       summary.textContent=searchSteps.length&&boundedSearch()
         ?`召回范围内继续检索 · ${searchSteps.length+1} 步条件 · 已命中 ${directoryCounts?.all??total} 份 · 已加载 ${allDocuments.length} 份${result.complete===false?' · 召回不完整，请刷新重试':''}`
         :semanticSearch()
-        ?`向量正文召回 · “${term}” · 本次召回 ${directoryCounts?.all??total} 份资料（最多100片段）· 已加载 ${allDocuments.length} 份${result.complete===false?' · 召回不完整，请刷新重试':''}`
+        ?`${modeLabel(mode)}召回 · “${term}” · 本次召回 ${directoryCounts?.all??total} 份资料（最多100片段）· 已加载 ${allDocuments.length} 份${result.complete===false?' · 召回不完整，请刷新重试':''}`
         :(term?`搜索“${term}” · `:'')+`当前范围共 ${total} 篇 · 已加载 ${allDocuments.length} 篇 · 选择资料查看详情${result.complete===false?' · 结果不完整，请刷新重试':''}`;
       loadMore.hidden=!nextCursor;
       renderDocumentList();return true;
     }catch(error){
-      if(accepts()){summary.textContent=semanticSearch()?'向量正文召回失败':'原文加载失败';message(semanticSearch()?'暂时无法进行向量正文召回':'暂时无法读取原文',error.message+'；请点击右上角“刷新”重试。');}return false;
+      if(accepts()){summary.textContent=semanticSearch()?modeLabel(mode)+'召回失败':'原文加载失败';message(semanticSearch()?'暂时无法进行'+modeLabel(mode)+'召回':'暂时无法读取原文',error.message+'；请点击右上角“刷新”重试。');}return false;
     }finally{if(request===serial){searchLoading=false;renderSearchSteps();refresh.disabled=false;loadMore.disabled=false;if(inFlight?.serial===request)inFlight=null;}}
     })();
     inFlight={key,serial:request,promise};return promise;

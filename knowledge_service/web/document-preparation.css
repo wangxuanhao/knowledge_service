@@ -19,6 +19,8 @@
 .preparation-file-actions button,.preparation-toolbar button{font-size:12px;padding:6px 10px;min-height:32px}
 .preparation-select{display:flex!important;align-items:center;margin:0!important;padding:4px}.preparation-select input,.preparation-enable input{width:16px!important;height:16px;margin:0;accent-color:var(--ui-accent,#175c47)}
 .preparation-editor{margin:16px 0;padding:16px;border:1px solid #94b7a2;border-radius:8px;background:var(--ui-surface-2,#f6faf6)}
+.preparation-file>.preparation-editor{margin:14px 0 0;padding:16px 0 0;border:0;border-top:1px solid #c5dccf;border-radius:0;background:transparent}
+.preparation-file:has(>.preparation-editor:not([hidden])){border-color:var(--ui-accent,#175c47)}
 .preparation-editor h3{font-size:15px;line-height:1.7;margin:0 0 16px;overflow-wrap:anywhere}
 .preparation-editor-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .preparation-more{margin:12px 0;font-size:12px}.preparation-more>summary{cursor:pointer;margin-bottom:12px}

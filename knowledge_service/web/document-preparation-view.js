@@ -6,7 +6,7 @@
     const D=root.document,P=root.DocumentPreparation;
     const node=(tag,text,css)=>{const e=D.createElement(tag);if(text!==undefined)e.textContent=text;if(css)e.className=css;return e;};
     const makeButton=(text,fn,css='secondary')=>{const e=node('button',text,css);e.type='button';e.onclick=async()=>{const ticket=generation;e.disabled=true;try{await fn();}catch(error){if(ticket===generation)showError(error);}finally{e.disabled=false;if(e===next)updateFooter();}};return e;};
-    let session=null,viewData={items:[]},owner=null,step=0,active=false,timer=null,uploading=0,generation=0,editing=null,previewScope=null,busy=false,configurationVersion=0;
+    let session=null,viewData={items:[]},owner=null,step=0,active=false,timer=null,uploading=0,generation=0,editing=null,editorItemId=null,previewScope=null,busy=false,configurationVersion=0;
     const selected=new Set(),independent=new Set(),locals=new Map(),uploads=new Map();
     const container=node('section',undefined,'preparation-workflow');container.id='preparation-workflow';
     const notice=node('p',undefined,'preparation-notice');notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');notice.hidden=true;
@@ -26,9 +26,10 @@
     const all=makeButton('全选',()=>{items().filter(i=>i.status!=='published').forEach(i=>selected.add(i.id));render();});
     const none=makeButton('清除选择',()=>{selected.clear();render();});
     const bulk=makeButton('批量设置所选文件',()=>openEditor(null));configTools.append(all,none,bulk);
-    const configList=node('div',undefined,'preparation-files'),configSummary=node('p',undefined,'subtle');
-    stages[1].append(node('p','同一批可以包含不同平台、不同业务。勾选文件可批量设置，也可逐份修改。','subtle'),configTools,configSummary,configList);
-    const editor=node('section',undefined,'preparation-editor');editor.hidden=true;stages[1].append(editor);
+    const configList=node('div',undefined,'preparation-files'),configSummary=node('p',undefined,'subtle'),bulkEditorHost=node('div',undefined,'preparation-bulk-editor');
+    stages[1].append(node('p','同一批可以包含不同平台、不同业务。勾选文件可批量设置，也可逐份修改。','subtle'),configTools,configSummary,bulkEditorHost,configList);
+    const editor=node('section',undefined,'preparation-editor');editor.id='preparation-settings-editor';editor.hidden=true;bulkEditorHost.append(editor);
+    bulk.setAttribute('aria-controls',editor.id);bulk.setAttribute('aria-expanded','false');
     if(modeSlot)stages[1].append(modeSlot);
     if(advanced){
       stages[1].append(advanced);
@@ -137,7 +138,9 @@
       const actions=node('div',undefined,'preparation-file-actions');
       actions.append(makeButton('原件预览',()=>previewOriginal(item)));
       if(phase===0)actions.append(makeButton('移除',()=>run(()=>session.remove(item.id))));
-      if(phase===1&&item.status!=='published')actions.append(makeButton('设置',()=>openEditor(item)));
+      if(phase===1&&item.status!=='published'){
+        const settingsButton=makeButton('设置',()=>openEditor(item));settingsButton.classList.add('preparation-settings-toggle');settingsButton.setAttribute('aria-controls',editor.id);settingsButton.setAttribute('aria-expanded',String(Boolean(editing&&editorItemId===item.id)));actions.append(settingsButton);
+      }
       if(phase>=2&&ready(item))actions.append(makeButton('查看正文与切片',()=>previewResult(item)));
       if(phase===2&&['queued','running'].includes(item.status))actions.append(makeButton('取消解析',()=>run(()=>session.cancel([item.id]))));
       if(phase===2&&['failed','cancelled','stale'].includes(item.status))actions.append(makeButton(item.status==='stale'?'更新解析结果':'重试',()=>run(async()=>{if(item.status==='stale')await session.parse([item.id]);else await session.retry([item.id]);schedule();})));
@@ -149,8 +152,11 @@
       for(const item of items())if(item.status==='published')selected.delete(item.id);
       if(step===3)normalisePublication();
       editor.inert=busy;configTools.inert=busy;
+      if(!editing){editor.hidden=true;bulkEditorHost.append(editor);}
+      bulk.setAttribute('aria-expanded',String(Boolean(editing&&editorItemId===null&&!editor.hidden)));
       stages.forEach((e,i)=>e.hidden=step!==i);tabs.forEach((e,i)=>e.setAttribute('aria-current',step===i?'step':'false'));
       for(const [phase,list] of [[0,uploadList],[1,configList],[2,resultList],[3,publishList]]){
+        if(phase===1&&step===1&&editing)continue;
         list.replaceChildren();if(phase===step)for(const item of items())list.append(rowFor(item,phase));
       }
       if(step===0)for(const [file,entry] of uploads){
@@ -212,11 +218,24 @@
       if(type!=='select')input.type=type;input.value=value??'';input.setAttribute('aria-label',label);wrap.append(node('span',label),input);return {wrap,input};
     }
     function openEditor(item){
+      if(busy)throw Error('正在保存设置，请稍候。');
+      if(editing){
+        if(editorItemId===(item?.id||null)){
+          editor.hidden=!editor.hidden;
+          const control=item?[...configList.children].find(e=>e.dataset.itemId===item.id)?.querySelector('.preparation-settings-toggle'):bulk;
+          control?.setAttribute('aria-expanded',String(!editor.hidden));
+          if(!editor.hidden)editor.scrollIntoView?.({block:'nearest'});return;
+        }
+        throw Error('请先展开当前设置，保存或取消后再设置其他文件。');
+      }
       const ids=item?[item.id]:items().filter(i=>selected.has(i.id)).map(i=>i.id);
       const editorVersions=Object.fromEntries(items().filter(i=>ids.includes(i.id)).map(i=>[i.id,i.metadata_version]));
       if(!ids.length)throw Error('请先勾选要批量设置的文件。');
       if(items().some(i=>ids.includes(i.id)&&i.status==='published'))throw Error('已提交入库的资料请到资料库修订。');
-      editing=ids;editor.replaceChildren();editor.hidden=false;
+      editing=ids;editorItemId=item?.id||null;editor.replaceChildren();editor.hidden=false;
+      if(item){
+        const row=[...configList.children].find(e=>e.dataset.itemId===item.id);row.append(editor);row.querySelector('.preparation-settings-toggle').setAttribute('aria-expanded','true');
+      }else{bulkEditorHost.append(editor);bulk.setAttribute('aria-expanded','true');}
       editor.append(node('h3',item?'设置：'+item.original_name:`批量设置 ${ids.length} 份资料`));
       const options=item?.options||{},controls=[],grid=node('div',undefined,'preparation-editor-grid');
       const more=node('details',undefined,'preparation-more'),moreGrid=node('div',undefined,'preparation-editor-grid');more.append(node('summary','时间与识别、切片设置'),moreGrid);
@@ -250,14 +269,14 @@
       const bulkMode=field('应用方式',null,'select');
       for(const [value,label] of [['fill','只填未设置项'],['overwrite','覆盖所选文件的勾选字段']]){const o=node('option',label);o.value=value;bulkMode.input.append(o);}
       if(!item)editor.append(bulkMode.wrap,node('p','只修改勾选字段；覆盖操作会更新以上所选文件。','subtle'));
-      const tools=node('div',undefined,'preparation-toolbar');tools.append(makeButton('取消设置',()=>{editing=null;editor.hidden=true;}),makeButton('保存设置',()=>run(async(target,current)=>{
+      const tools=node('div',undefined,'preparation-toolbar');tools.append(makeButton('取消设置',()=>{editing=null;editorItemId=null;editor.hidden=true;render();}),makeButton('保存设置',()=>run(async(target,current)=>{
         const fields={};for(const control of controls)if(control.enable.checked){
           const value=control.read();if(control.key.startsWith('applicability.')){fields.applicability??={};fields.applicability[control.key.split('.')[1]]=value;}else fields[control.key]=value;
         }
         if(!Object.keys(fields).length)throw Error('请至少勾选一个要修改的字段。');
         if(item)await target.configure(item.id,P.applyFields(options,fields),item.metadata_version);else await target.bulk(ids,fields,bulkMode.input.value,editorVersions);
         if(!current())return;
-        editing=null;editor.hidden=true;message('设置已保存。修改平台或时间不会重新识别正文。');
+        editing=null;editorItemId=null;editor.hidden=true;message('设置已保存。修改平台或时间不会重新识别正文。');
       }),''));editor.append(tools);editor.scrollIntoView?.({block:'nearest'});
     }
     async function startParse(){
@@ -320,7 +339,7 @@
       if(!draftList.children.length)draftList.append(node('p','没有可恢复草稿。'));
     }
     function reset(){
-      clearTimeout(timer);session?.dispose();session=null;viewData={items:[]};owner=null;generation++;step=0;selected.clear();independent.clear();locals.clear();uploads.clear();uploading=0;busy=false;editing=null;editor.hidden=true;notice.hidden=true;previewScope?.dispose?.();previewScope=null;if(overlay.open)overlay.close();render();
+      clearTimeout(timer);session?.dispose();session=null;viewData={items:[]};owner=null;generation++;step=0;selected.clear();independent.clear();locals.clear();uploads.clear();uploading=0;busy=false;editing=null;editorItemId=null;editor.hidden=true;notice.hidden=true;previewScope?.dispose?.();previewScope=null;if(overlay.open)overlay.close();render();
     }
     function restoreSettings(){
       configurationVersion=session?.snapshot().settings_version||0;

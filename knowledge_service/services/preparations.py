@@ -486,7 +486,7 @@ class Preparations:
                     row=self.batches.store.add_item(project,batch['id'],item['original_name'],self.store.file(item['id']),item['file_sha256'],
                         'preparation:'+item['id'],self.batches.limits.max_batch_items,self.batches.limits.max_batch_bytes,options=config)
                     parsed=results[item['id']]
-                    source,mapping=self.sources.store.clone_version(project,parsed['source_version_id'],row['document_id'])
+                    source,mapping=self.sources.store.clone_version(project,parsed['source_version_id'],row['document_id'],original_name=item['original_name'])
                     def remap(value):
                         if isinstance(value,str):return mapping.get(value,value)
                         if isinstance(value,list):return [remap(part) for part in value]

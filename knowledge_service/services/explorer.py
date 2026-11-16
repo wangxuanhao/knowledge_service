@@ -116,14 +116,14 @@ class Explorer:
             return SourceProgressiveSearch(self.service).search(p,scope,query,
                 retrieval_mode=retrieval_mode,search_steps=search_steps,limit=limit,
                 cursor=cursor,summary_only=summary_only,state=state)
-        if retrieval_mode not in {'keyword','semantic'}:
-            raise ValueError('资料检索模式必须是 keyword 或 semantic')
+        if retrieval_mode not in {'keyword','semantic','hybrid'}:
+            raise ValueError('资料检索模式必须是 keyword、semantic 或 hybrid')
         if not isinstance(query,str) or len(query)>2000:
             raise ValueError('资料搜索词必须是最多 2000 字符的字符串')
-        if retrieval_mode=='semantic' and query.strip() and document_id is None:
+        if retrieval_mode in {'semantic','hybrid'} and query.strip() and document_id is None:
             from .source_semantic_search import SourceSemanticSearch
             return SourceSemanticSearch(self.service).search(p,scope,query.strip(),
-                limit=limit,cursor=cursor,state=state)
+                limit=limit,cursor=cursor,state=state,retrieval_mode=retrieval_mode)
         return PageReads(self.repo).sources(p,scope,limit=limit,cursor=cursor,
             summary_only=summary_only,state=state,document_id=document_id,
             query='' if document_id is not None else query)

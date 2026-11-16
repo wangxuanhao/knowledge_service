@@ -73,7 +73,7 @@ class SourceStore:
             result['chunks']=self._version_chunks(project_id,version_id)
             return result
 
-    def clone_version(self,project_id,version_id,document_id):
+    def clone_version(self,project_id,version_id,document_id,*,original_name=None):
         """Copy immutable reading/OCR/ASR receipts for one formal document.
 
         Object bytes remain shared; every source, block, asset and recognition ID
@@ -111,6 +111,9 @@ class SourceStore:
             version=copy_row(original)
             metadata=json.loads(version.get('parser_metadata') or '{}')
             metadata.pop('preparation_task_id',None)
+            if original_name is not None:
+                version['original_name']=original_name
+                metadata['source_file']=original_name
             version['parser_metadata']=encode(metadata)
             version.update(id=identifier,document_id=document_id,created_at=utc_now(),
                 version=self.repo._db.execute('SELECT COALESCE(MAX(version),0)+1 AS n FROM source_document_versions WHERE project_id=? AND document_id=?',(project_id,document_id)).fetchone()['n'])
