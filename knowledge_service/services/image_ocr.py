@@ -29,20 +29,36 @@ class ImageOCRService:
         return dict(min_confidence=self.min_confidence,min_average_confidence=self.min_average_confidence,max_low_confidence_ratio=self.max_low_confidence_ratio,min_text_chars=self.min_text_chars)
 
     def fingerprint(self,adapter_configuration):
-        return hashlib.sha256(json.dumps(dict(adapter=adapter_configuration,quality=self.quality_policy),sort_keys=True).encode()).hexdigest()
+        return hashlib.sha256(json.dumps(dict(adapter=adapter_configuration,quality=self.quality_policy,quality_version='accepted-blocks-v2'),sort_keys=True).encode()).hexdigest()
 
     def quality_check(self,output):
+        accepted,average,_=self._quality_check(output)
+        return accepted,average
+
+    def _quality_check(self,output):
         try:
             blocks=[OcrBlock.model_validate(b).model_dump() for b in output['blocks']]
         except Exception as exc:
-            raise OCRError('ocr_failed','Invalid OCR block output') from exc
+            raise OCRError('ocr_failed','图片识别返回了无效的文字或位置数据') from exc
         accepted=[b for b in blocks if b['confidence']>=self.min_confidence]
-        average=sum(b['confidence'] for b in blocks)/len(blocks) if blocks else 0
+        average=sum(b['confidence'] for b in accepted)/len(accepted) if accepted else 0
+        raw_average=sum(b['confidence'] for b in blocks)/len(blocks) if blocks else 0
         low_ratio=(len(blocks)-len(accepted))/len(blocks) if blocks else 1
         characters=sum(len(''.join(b['normalized_text'].split())) for b in accepted)
-        if not accepted or average<self.min_average_confidence or low_ratio>self.max_low_confidence_ratio or characters<self.min_text_chars:
-            raise OCRError('ocr_low_confidence','Image text does not meet OCR quality threshold')
-        return accepted,average
+        quality=dict(version='accepted-blocks-v2',total_blocks=len(blocks),accepted_blocks=len(accepted),
+            discarded_blocks=len(blocks)-len(accepted),accepted_characters=characters,
+            average_confidence=average,raw_average_confidence=raw_average,low_confidence_ratio=low_ratio,
+            review_recommended=low_ratio>self.max_low_confidence_ratio,policy=self.quality_policy)
+        message=None
+        if not blocks:message='图片未识别到文字，请核对原图；无文字图片可人工忽略。'
+        elif not accepted:message='图片文字置信度不足，未获得可靠文字，请核对原图。'
+        elif average<self.min_average_confidence:message='图片可用文字的平均识别置信度不足，请核对原图。'
+        elif characters<self.min_text_chars:message=f'图片识别到的可靠文字不足 {self.min_text_chars} 个字符，请人工核对。'
+        if message:
+            error=OCRError('ocr_low_confidence',message)
+            error.quality_details=quality
+            raise error
+        return accepted,average,quality
 
     def process_asset(self, project_id, version_id, asset_id, retry=False):
         # Serialize the entire check/recognize/receipt cycle, not only engine inference.
@@ -105,12 +121,14 @@ class ImageOCRService:
             run['processing_details']=details(output)
             raw_average=output.get('average_confidence')
             run.update(engine_version=output['engine_version'],preprocess_fingerprint=output['preprocess_fingerprint'],average_confidence=raw_average if isinstance(raw_average,(int,float)) and math.isfinite(raw_average) else None)
-            accepted,average=self.quality_check(output)
+            accepted,average,quality=self._quality_check(output)
+            run['processing_details']['quality']=quality
             run.update(engine_version=output['engine_version'],preprocess_fingerprint=output['preprocess_fingerprint'],average_confidence=average)
             text='\n'.join(b['normalized_text'] for b in accepted)
             run.update(status='completed',normalized_text=text,text_sha256=hashlib.sha256(text.encode()).hexdigest())
             blocks=evidence(accepted)
         except OCRError as exc:
+            if getattr(exc,'quality_details',None):run['processing_details']['quality']=exc.quality_details
             partial=getattr(exc,'partial_result',None)
             if partial:
                 accepted=[OcrBlock.model_validate(b).model_dump() for b in partial.get('blocks',[]) if b['confidence']>=self.min_confidence]

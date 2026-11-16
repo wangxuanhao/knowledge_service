@@ -155,3 +155,30 @@ def test_reader_can_switch_independent_video_locations_in_one_chunk(browser):
     page.wait_for_function('window.seeks.some(s=>s[0]==="v1"&&s[1]===40100)')
     assert page.get_by_role('button',name='定位视频 1',exact=False).is_visible()
     page.close()
+
+
+
+def test_reader_shows_filtered_ocr_as_completed_with_notice(browser):
+    from source_test_images import png
+    page=browser.new_page();page.set_default_timeout(5000)
+    asset=dict(id='image',kind='local',status='completed',original_path='photo.png',width=8,height=8,provenance={})
+    blocks=[dict(id='b'+str(i),text=text,normalized_text=text,confidence=.95,x=.1,y=.1,width=.5,height=.5)
+        for i,text in enumerate(['可靠文字','有效规则'])]
+    run=dict(id='run',status='completed',average_confidence=.95,blocks=blocks,
+        processing_details={'quality':{'accepted_blocks':2,'discarded_blocks':1,'review_recommended':True}})
+    doc=dict(original_name='rule.md',version=1,sha256='hash',assets=[asset],blocks=[],chunks=[])
+    def route(request):
+        path=request.request.url
+        if path.endswith('/rendered'):request.fulfill(content_type='text/html',body='<p>正文</p>')
+        elif path.endswith('/ocr'):request.fulfill(json={'run':run,'runs':[run],'blocks':blocks})
+        elif path.endswith('/assets/image'):request.fulfill(content_type='image/png',body=png())
+        elif '/source-documents/' in path:request.fulfill(json=doc)
+        else:request.fulfill(content_type='text/html',body='<body></body>')
+    page.route('http://test/**',route);page.goto('http://test/')
+    page.add_script_tag(path=str(WEB/'source-content.js'));page.add_script_tag(path=str(WEB/'source-reader.js'))
+    page.evaluate('SourceReader.open({projectId:"p",versionId:"v"})')
+    page.get_by_role('button',name='解析视图',exact=True).click()
+    page.get_by_text('OCR 状态：识别完成（部分模糊文字未采用）',exact=True).wait_for()
+    assert page.get_by_text('已采用 2 块可靠文字，1 块模糊文字未采用，请核对原图。',exact=True).is_visible()
+    assert page.get_by_role('button',name='重试 OCR',exact=True).count()==0
+    page.close()

@@ -28,7 +28,7 @@ class PreparationConflict(ValueError):
 
 def recognition_error(result):
     """Technical recognition failures block publication, including old caches."""
-    informational = {'ocr_disabled', 'asr_no_audio', 'asr_no_speech'}
+    informational = {'ocr_disabled', 'ocr_text_filtered', 'asr_no_audio', 'asr_no_speech'}
     return next((w for w in (result or {}).get('warnings', [])
         if isinstance(w, dict) and (str(w.get('code', '')).startswith(('ocr_', 'asr_'))
             or w.get('code') == 'source_asset_missing')

@@ -340,7 +340,7 @@
       previewTitle.textContent=(item.options?.title||item.original_name)+' · 正文与切片';previewContent.replaceChildren(node('p','读取结果…'));overlay.showModal();
       try{const result=await session.result(item.id);if(!overlay.open||previewScope!==marker)return;
         previewContent.replaceChildren(node('h4','解析正文'),node('pre',result.text||'未识别到正文'));
-        for(const warning of result.warnings||[])previewContent.append(node('p',typeof warning==='string'?warning:(warning.message||warning.code||'解析提示'),'preparation-error'));
+        for(const warning of result.warnings||[])previewContent.append(node('p',typeof warning==='string'?warning:(warning.message||warning.code||'解析提示'),warning?.severity==='warning'?'subtle':'preparation-error'));
         const chunks=result.chunks||[];previewContent.append(node('h4',`切片（${chunks.length}）`));
         chunks.forEach((chunk,i)=>{const detail=node('details'),location=P.sourceLabel(chunk),summary=node('summary',`片段 ${i+1} · ${(chunk.text||'').length} 字`+(location?' · '+location:''));detail.append(summary,node('pre',chunk.text||''));previewContent.append(detail);});
       }catch(error){if(overlay.open&&previewScope===marker){

@@ -650,3 +650,27 @@ def test_runtime_changed_result_is_stale_and_can_retry_directly(prep, monkeypatc
     assert updated['options'] == item['options']
     assert updated['parse_task_id'] != item['parse_task_id']
     assert client.app.state.preparations.store.task(item['parse_task_id'])['status'] == 'completed'
+
+
+
+def test_filtered_ocr_notice_allows_normal_publication(prep):
+    from source_test_images import png
+    import zipfile
+    client,root=prep
+    class Adapter:
+        engine='test';languages='ch';configuration_fingerprint='filtered-publish'
+        def recognize(self,data):
+            return dict(engine_version='1',preprocess_fingerprint='pre',width=8,height=8,blocks=[
+                dict(text=text,normalized_text=text,confidence=score,x=0,y=0,width=.5,height=.5)
+                for text,score in [('有效规则',.99),('可靠文字',.92),('noise',.47)]])
+    client.app.state.source_documents.image_ocr.adapter=Adapter()
+    stream=io.BytesIO()
+    with zipfile.ZipFile(stream,'w') as archive:
+        archive.writestr('rule.md','before ![](assets/a.png) after');archive.writestr('assets/a.png',png())
+    item=ready(client,root,upload(client,root,'filtered.zip',stream.getvalue()))
+    result=client.get(root+'/items/'+item['id']+'/result').json()
+    assert '可靠文字' in result['text'] and 'noise' not in result['text']
+    assert any(w.get('code')=='ocr_text_filtered' for w in result['warnings'])
+    response=client.post(root+'/publish',json={'item_ids':[item['id']],'versions':{item['id']:1},
+        'result_versions':{item['id']:item['chunk_version']},'idempotency_key':'filtered-publish'})
+    assert response.status_code==202,response.text

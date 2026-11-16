@@ -29,7 +29,10 @@
       return {...tile,index:tile.ordinal??tile.index??tile.tile_index??index,region:region&&boxStyle(region)?region:null,message:tile.error?.message||tile.public_error||''};
     });
     const incomplete=run.status!=='ignored'&&(run.status==='partial'||(total>0&&completed<total)||failed.length>0);
-    return {total,completed,failed,incomplete,label:run.status==='processing'?'识别中':run.status==='pending'?'待识别':incomplete?'部分完成':run.status==='completed'?'识别成功':null};
+    const quality=details.quality||{},filtered=run.status==='completed'&&quality.discarded_blocks>0;
+    const warning=filtered?`已采用 ${quality.accepted_blocks} 块可靠文字，${quality.discarded_blocks} 块模糊文字未采用，请核对原图。`:'';
+    const error=run.error_code==='ocr_low_confidence'&&run.public_error==='Image text does not meet OCR quality threshold'?'图片未获得足够可靠文字，请核对原图；无文字图片可人工忽略。':run.public_error||'';
+    return {total,completed,failed,incomplete,warning,error,label:run.status==='processing'?'识别中':run.status==='pending'?'待识别':incomplete?'部分完成':filtered?'识别完成（部分模糊文字未采用）':run.status==='completed'?'识别成功':null};
   }
   function pdfPage(doc,location){
     const firstPage=values=>values.map(Number).find(page=>Number.isInteger(page)&&page>0);
@@ -190,6 +193,7 @@
               const progress=ocrProgress(run),boxes=run.blocks||result.blocks||[];
               section.append(make('p','OCR 状态：'+(progress.label||labels[run.status]||run.status||'未处理')),make('p',(run.engine||'图片 OCR')+' '+(run.engine_version||'')+' · 平均置信度 '+(run.average_confidence??'未知')));
               section.append(make('p','单次 OCR 重试只更新识别结果；更新检索切片或图谱需在资料详情重新处理。','source-reader-note'));
+              if(progress.warning)section.append(make('p',progress.warning,'source-ocr-warning'));
               if(progress.total)section.append(make('p',`已处理 ${progress.completed} / 总计 ${progress.total}`,'source-ocr-progress'));
               if(progress.incomplete&&!['processing','pending'].includes(run.status))section.append(make('p','识别覆盖不完整；已保留成功区域的文字，请定位失败区域并重试。','source-ocr-warning'));
               const locateRegion=(region,text)=>{location={asset_id:asset.id,ocr_run_id:run.id,boxes:region?[{...region,text}]:[],tab:'reading'};show('reading');};
@@ -206,7 +210,7 @@
               }
               section.append(overlay(asset,boxes,projectId,versionId));
               if(run.status!=='processing'&&(progress.incomplete||['failed','low_confidence','needs_attention','pending'].includes(run.status)||run.error_code)){
-                section.append(make('p',run.public_error||'OCR 需要人工处理。'));
+                section.append(make('p',progress.error||'OCR 需要人工处理。'));
                 const retry=make('button',progress.incomplete?'重试未完成 OCR 区域':'重试 OCR','secondary');retry.type='button';retry.onclick=async()=>{retry.disabled=true;try{await api(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/ocr/retry'),{});if(accepts()){status('识别结果已更新；如需更新检索或图谱，请在资料详情重新处理');await show('parsed');}}catch(e){if(accepts()){retry.disabled=false;status(e.message,true);}}};
                 const ignore=make('button','该图片无知识文字，忽略并继续','secondary');ignore.onclick=async()=>{const reason=prompt('请输入忽略原因（将保存操作者与时间）');if(!reason?.trim())return;try{await api(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/ocr/ignore'),{reason});await show('parsed');}catch(e){status(e.message,true);}};section.append(retry,ignore);
               }

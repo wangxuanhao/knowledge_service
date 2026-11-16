@@ -65,6 +65,10 @@ def prepare_source_ingest(sources,project_id,source,options,*,ocr_semaphore=None
             run=getattr(exc,'partial_receipt',None)
             if not run or run.get('status')!='partial':return
         if run.get('status') not in {'completed','partial'}:return
+        quality=run.get('processing_details',{}).get('quality',{})
+        if quality.get('discarded_blocks',0):
+            warnings.append(dict(code='ocr_text_filtered',severity='warning',asset_id=asset['id'],
+                message=f"图片识别完成：已保留 {quality['accepted_blocks']} 块可靠文字，{quality['discarded_blocks']} 块模糊文字未采用，请核对原图。"))
         length=sum(len(block['normalized_text'])+1 for block in run.get('segments' if is_video else 'blocks',[]))
         if not length:return
         ocr_chunks=processor.chunks(run,max(1,length))

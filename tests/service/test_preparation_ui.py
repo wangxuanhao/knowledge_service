@@ -230,3 +230,26 @@ def test_reparse_recovers_expired_result_without_reupload(browser, entry):
         assert page.locator('.preparation-file[data-item-id="b"][data-status="completed"]').is_visible()
     assert not page.locator('#preparation-preview').is_visible()
     page.close()
+
+
+
+def test_filtered_ocr_notice_is_not_rendered_as_preparation_error(browser):
+    page=browser.new_page();page.set_default_timeout(5000)
+    web=Path(__file__).resolve().parents[2]/'knowledge_service'/'web'
+    item=dict(id='a',original_name='rule.zip',status='completed',result_ready=True,options={},metadata_version=1)
+    warning=dict(code='ocr_text_filtered',severity='warning',message='已保留 2 块可靠文字，1 块模糊文字未采用。')
+    def route(request):
+        if request.request.url.endswith('/result'):result=dict(text='可靠文字',chunks=[{'text':'可靠文字'}],warnings=[warning])
+        elif request.request.url.endswith('/capabilities'):result={}
+        else:result=dict(id='s',items=[item])
+        request.fulfill(json=result)
+    page.route('http://test/api/**',route)
+    page.route('http://test/',lambda r:r.fulfill(content_type='text/html',body='<div id="host"></div>'))
+    page.goto('http://test/');page.evaluate("localStorage.setItem('kg_preparation:local:p','s')")
+    page.add_script_tag(path=str(web/'document-preparation.js'));page.add_script_tag(path=str(web/'document-preparation-view.js'))
+    page.evaluate("PreparationView.mount(document.querySelector('#host'),{project:()=> 'p'}).open()")
+    page.get_by_role('button',name='查看正文与切片').click()
+    notice=page.get_by_text(warning['message'],exact=True)
+    notice.wait_for();assert 'preparation-error' not in (notice.get_attribute('class') or '')
+    assert page.get_by_role('button',name='重新解析此文件',exact=True).count()==0
+    page.close()

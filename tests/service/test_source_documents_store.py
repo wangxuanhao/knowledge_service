@@ -64,8 +64,9 @@ def test_ocr_receipt_reuse_failure_and_ignore(tmp_path):
     assert one['id']==two['id'] and one['blocks'][0]['id']==two['blocks'][0]['id']
     assert adapter.calls==1
     adapter.low=True
-    with pytest.raises(OCRError,match='quality'):
+    with pytest.raises(OCRError,match='可靠文字') as error:
         service.image_ocr.process_asset(project['id'],version['id'],asset['id'],retry=True)
+    assert error.value.code=='ocr_low_confidence'
     runs=service.store.ocr_runs(project['id'],version['id'],asset['id'])
     assert len(runs)==2 and runs[-1]['error_code']=='ocr_low_confidence'
     ignored=service.image_ocr.ignore(project['id'],version['id'],asset['id'],'actor','no knowledge')

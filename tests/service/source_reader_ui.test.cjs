@@ -83,3 +83,21 @@ for(const outcome of ['success','failure','stale'])test('OCR retry '+outcome+' r
     assert.deepEqual(messages,[['重试失败',true]]);assert.deepEqual(views,[]);assert.equal(context.retry.disabled,false);
   }else{assert.deepEqual(messages,[]);assert.deepEqual(views,[]);}
 });
+
+
+test('completed OCR with discarded noise is a warning and has no incomplete error',()=>{
+  const ui=require('../../knowledge_service/web/source-reader.js');
+  const progress=ui.ocrProgress({status:'completed',processing_details:{quality:{accepted_blocks:2,discarded_blocks:1,review_recommended:true}}});
+  assert.equal(progress.incomplete,false);
+  assert.match(progress.label,/识别完成/);
+  assert.match(progress.warning,/2.*1/);
+  assert.doesNotMatch(progress.label,/失败/);
+});
+
+
+test('historical OCR quality failure has a Chinese actionable message',()=>{
+ const ui=require('../../knowledge_service/web/source-reader.js');
+ const result=ui.ocrProgress({status:'failed',error_code:'ocr_low_confidence',public_error:'Image text does not meet OCR quality threshold'});
+ assert.match(result.error,/可靠文字/);
+ assert.doesNotMatch(result.error,/Image text/);
+});
