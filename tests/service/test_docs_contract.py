@@ -1,4 +1,4 @@
-"""Contracts for the current illustrated offline operation manual.
+"""Current workflow manual delivery and preserved historical technical contracts.
 
 These checks read docs and route source; business and capacity acceptance is separate.
 """
@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 README = ROOT / 'README.md'
 MANUAL = ROOT / 'docs/2026-10-20-知识平台完整操作手册.md'
 HTML_MANUAL = ROOT / 'docs/知识平台完整操作手册.html'
+CURRENT_MANUAL = ROOT / 'docs/知识平台操作手册.md'
 BUILDER = ROOT / 'scripts/verify_redesign_manual.py'
 
 
@@ -41,15 +42,17 @@ def test_current_manual_is_the_indexed_source_and_generated_output():
     for obsolete in ('2026-10-19-知识平台完整操作手册.md', '2026-10-01-本体工作台操作手册.md',
                      '2026-10-07-用户手册（登录·账号·权限）.md', '知识图谱操作手册.html'):
         assert obsolete not in readme, f'活动索引仍指向已替代的手册：{obsolete}'
+    assert 'docs/知识平台操作手册.md' in readme
+    alias = ROOT / 'docs/知识平台操作手册.html'
+    assert HTML_MANUAL.read_bytes() == alias.read_bytes(), '两个当前入口必须保持相同内容'
+    assert '历史技术参考说明' in MANUAL.read_text(encoding='utf-8')
     module = _builder()
     source = MANUAL.read_text(encoding='utf-8')
-    html = HTML_MANUAL.read_text(encoding='utf-8')
-    assert module.MARKDOWN == MANUAL and module.OUTPUT == HTML_MANUAL
-    assert html == module.build_html(source), 'Markdown 已改变，须重建离线 HTML'
-    assert not module.verify(source, html)
+    assert module.MARKDOWN == MANUAL and module.OUTPUT.name == '知识平台历史技术手册.html'
+    assert not module.verify(source, module.build_html(source))
 
 
-def test_all_29_chapters_explain_actions_results_and_recovery():
+def test_historical_29_chapters_keep_their_technical_coverage():
     module = _builder()
     _, chapters = module.split_chapters(MANUAL.read_text(encoding='utf-8'))
     assert [number for number, _, _ in chapters] == list(range(1, 30))
@@ -122,10 +125,10 @@ def test_supported_features_and_capacity_limits_are_not_removed_or_overclaimed()
             assert marker in body, (number, marker)
 
 
-def test_current_ui_images_are_local_real_capture_files_with_descriptions():
+def test_historical_images_remain_local_capture_files_with_descriptions():
     module = _builder()
     inventory = module.HtmlInventory()
-    inventory.feed(HTML_MANUAL.read_text(encoding='utf-8'))
+    inventory.feed(module.build_html(MANUAL.read_text(encoding='utf-8')))
     assert len(inventory.assets) >= 10 and not inventory.remote
     previous_captures = {
         '2026-10-19-people.png', '2026-10-20-projects.png', '2026-10-20-upload-drawer.png',
@@ -186,4 +189,31 @@ def test_manual_builder_renders_the_current_canonical_manual():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert module.OUTPUT == HTML_MANUAL
+    assert module.MARKDOWN == CURRENT_MANUAL
     assert module.render_manual() == HTML_MANUAL.read_text(encoding='utf-8')
+
+
+def test_current_manual_embeds_all_source_figures_without_changing_their_bytes():
+    import base64
+    from html.parser import HTMLParser
+
+    class Figures(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.images = []
+
+        def handle_starttag(self, tag, attrs):
+            data = dict(attrs)
+            if tag == 'img' and data.get('src'):
+                self.images.append((data['src'], data.get('alt', '')))
+
+    expected = re.findall(r'^!\[([^\]]+)\]\(([^)]+)\)$',
+                          CURRENT_MANUAL.read_text(encoding='utf-8'), re.M)
+    inventory = Figures()
+    inventory.feed(HTML_MANUAL.read_text(encoding='utf-8'))
+    assert expected and len(inventory.images) == len(expected)
+    for (alt, path), (embedded, rendered_alt) in zip(expected, inventory.images):
+        assert rendered_alt == alt
+        assert embedded.startswith('data:image/') and ';base64,' in embedded
+        payload = base64.b64decode(embedded.split(',', 1)[1], validate=True)
+        assert payload == (CURRENT_MANUAL.parent / path).read_bytes(), path

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-labelledby="title desc">
+<title id="title">解析后的三种后续处理示意图</title><desc id="desc">第二步选择处理方式，第三步检查解析，第四步按对应按钮确认处理。构建本体只生成候选，需进一步审核发布。</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10" fill="#65877f"/></marker></defs>
+<rect width="1200" height="600" rx="20" fill="#f5f7f4"/>
+<g font-family="Microsoft YaHei,Segoe UI,sans-serif" fill="#183e36">
+<text x="48" y="50" font-size="15" letter-spacing="2">处理方式与确认动作 · 示意图</text>
+<text x="48" y="96" font-size="30" font-weight="700">先核对正文与切片，再确认后续任务</text>
+<text x="48" y="132" font-size="18" fill="#526b64">第 2 步配置资料和处理方式 → 第 3 步解析与检查 → 第 4 步确认处理</text>
+<g fill="white" stroke="#ccdad3" stroke-width="2"><rect x="48" y="170" width="1104" height="100" rx="12"/><rect x="48" y="292" width="1104" height="100" rx="12"/><rect x="48" y="414" width="1104" height="100" rx="12"/></g>
+<text x="74" y="213" font-size="21" font-weight="700">仅文档检索</text><text x="74" y="244" font-size="17" fill="#526b64">先使用资料搜索与问答</text>
+<text x="356" y="230" font-size="21" font-weight="700">开始建立检索索引</text><text x="718" y="213" font-size="19">正式提交正文与切片，自动建索引</text><text x="718" y="244" font-size="17" fill="#526b64">不抽取实体、关系或属性</text>
+<text x="74" y="335" font-size="21" font-weight="700">开放发现</text><text x="74" y="366" font-size="17" fill="#526b64">尚未明确知识结构</text>
+<text x="356" y="352" font-size="21" font-weight="700">开始构建本体</text><text x="718" y="335" font-size="19">形成待确认的结构与事实候选</text><text x="718" y="366" font-size="17" fill="#526b64">仍须核对草案、审核与发布</text>
+<text x="74" y="457" font-size="21" font-weight="700">使用项目本体</text><text x="74" y="488" font-size="17" fill="#526b64">选用已发布的正式版本</text>
+<text x="356" y="474" font-size="21" font-weight="700">开始知识抽取</text><text x="718" y="457" font-size="19">按本体抽取和校验，核对审核结果</text><text x="718" y="488" font-size="17" fill="#526b64">正式知识变化后自动更新索引</text>
+<g stroke="#65877f" stroke-width="2" marker-end="url(#arrow)"><path d="M282 222H330"/><path d="M604 222H690"/><path d="M282 344H330"/><path d="M604 344H690"/><path d="M282 466H330"/><path d="M604 466H690"/></g>
+<text x="48" y="565" font-size="18" fill="#526b64">上传只暂存和校验；点击“开始解析”后才识别。草稿向量已准备，也不等于进入正式检索。</text>
+</g></svg>

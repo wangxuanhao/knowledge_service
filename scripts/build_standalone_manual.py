@@ -2,7 +2,7 @@
 """Build standalone, offline-readable HTML manuals from Markdown sources.
 
 Usage:
-    python scripts/build_standalone_manual.py docs/<name>.md [docs/<other>.md ...]
+    python scripts/build_standalone_manual.py [--embed-images] docs/<name>.md [...]
 
 Supports a Markdown subset: h1/h2/h3, paragraphs, tables, fenced code,
 ordered/unordered lists, images, links, bold and inline code. The builder
@@ -132,11 +132,19 @@ PARA_STOP = re.compile(r"^(#{1,3} |```|\||!\[|\d+\. |- )")
 
 
 def inline(text: str) -> str:
-    out = html.escape(text, quote=False)
-    out = re.sub(r"`([^`]+)`", lambda m: "<code>" + m.group(1) + "</code>", out)
+    code = []
+    marker = '\ue000manual-code'
+    while marker in text:
+        marker += '_'
+    def preserve(match):
+        code.append('<code>' + match.group(1) + '</code>')
+        return marker + str(len(code) - 1) + marker
+    out = re.sub(r"`([^`]+)`", preserve, html.escape(text, quote=False))
     out = re.sub(r"\*\*([^*]+)\*\*", lambda m: "<strong>" + m.group(1) + "</strong>", out)
     out = re.sub(r"\[([^\]]+)\]\(([^)]+)\)",
                  lambda m: '<a href="' + html.escape(m.group(2), quote=True) + '">' + m.group(1) + "</a>", out)
+    for index, value in enumerate(code):
+        out = out.replace(marker + str(index) + marker, value)
     return out
 
 
@@ -275,14 +283,14 @@ def build(markdown: Path, *, embed_images: bool = False) -> Path:
         raise SystemExit(1)
     if embed_images:
         def embed(match):
-            src = html.unescape(match.group(1))
+            src = html.unescape(match.group(2))
             if src.startswith(('http:', 'https:', 'data:')):
                 raise ValueError('Offline manuals require local images: ' + src)
             path = output.parent / src
             mime = mimetypes.guess_type(path.name)[0] or 'application/octet-stream'
             encoded = base64.b64encode(path.read_bytes()).decode('ascii')
-            return 'src="data:' + mime + ';base64,' + encoded + '"'
-        page = re.sub(r'src="([^"]+)"', embed, page)
+            return match.group(1) + 'data:' + mime + ';base64,' + encoded + match.group(3)
+        page = re.sub(r'(<img\b[^>]*\bsrc=")([^"]+)(")', embed, page)
     figures = len(re.findall(r"<figure>", page))
     tables = len(re.findall(r"<table>", page))
     output.write_text(page, encoding="utf-8", newline="\n")

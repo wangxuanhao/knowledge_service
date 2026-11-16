@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>平台规则资料上传与 ZIP 打包操作手册</title><style>
+:root{--ink:#203c35;--sub:#60726b;--line:#dce4dc;--accent:#25604f;--accent-soft:#edf3e9;--bg:#fffefa}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;font:15px/1.75 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:var(--bg)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code{background:#f2f6fb;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-family:Consolas,"Courier New",monospace;font-size:.92em}
+pre{background:#f7fafd;border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{background:none;border:none;padding:0;font-size:.88em;line-height:1.6}
+.sidebar{position:fixed;top:0;bottom:0;left:0;width:272px;border-right:1px solid var(--line);background:#f4f6ef;padding:24px 18px;overflow:auto}
+.brand small{display:block;color:var(--sub);letter-spacing:.12em;font-size:10px}
+.brand strong{font-size:19px;color:var(--accent)}
+.brand p{margin:4px 0 14px;color:var(--sub);font-size:12px}
+.search input{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;background:#fff}
+.search .hint{color:var(--sub);font-size:11px;margin:6px 0 12px}
+nav.toc a{display:block;padding:6px 10px;border-radius:7px;color:#33475b;font-size:13.5px;margin-bottom:2px}
+nav.toc a:hover{background:var(--accent-soft);text-decoration:none}
+nav.toc a.active{background:var(--accent-soft);color:var(--accent);font-weight:600}
+nav.toc a[hidden]{display:none}
+main{margin-left:272px;padding:48px 48px 90px;max-width:1280px;min-width:0}
+.cover h1{font-size:34px;line-height:1.25;margin:6px 0 4px}
+.cover .lead{color:var(--sub);border-bottom:1px solid var(--line);padding-bottom:22px}
+section.doc-sec{margin:38px 0;padding-bottom:10px}
+section.doc-sec[hidden]{display:none}
+h2.sec{font-size:24px;color:var(--ink);border-top:2px solid var(--accent);padding-top:18px;margin:0 0 18px;scroll-margin-top:24px}
+h3{font-size:18px;color:var(--accent);margin:28px 0 10px}
+figure{margin:18px 0}
+figure img{max-width:100%;border:1px solid var(--line);border-radius:10px;box-shadow:0 2px 10px rgba(31,78,121,.08)}
+figure figcaption{color:var(--sub);font-size:12.5px;margin-top:6px}
+.image-zoom{display:block;padding:0;width:100%;border:0;background:none;cursor:zoom-in;text-align:left}
+.image-zoom img{display:block;width:100%;height:auto}
+button:focus-visible,a:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid #b58235;outline-offset:3px}
+#m-toc summary{font-weight:600;padding:8px 0;cursor:pointer}
+.reader-tools{display:flex;gap:10px;margin:16px 0 0;align-items:center;font-size:12px;color:var(--sub)}
+.reader-tools button{border:1px solid var(--line);background:white;border-radius:6px;padding:6px 12px;color:var(--ink);cursor:pointer}
+.image-dialog{width:min(96vw,1800px);max-width:96vw;max-height:96vh;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+.image-dialog::backdrop{background:rgba(12,28,22,.78)}
+.image-dialog button{position:sticky;top:0;float:right;background:var(--accent);color:white;border:0;border-radius:6px;padding:8px 15px;cursor:pointer}
+.image-dialog img{display:block;width:100%;height:auto;margin-top:44px}
+.image-dialog p{font-size:13px;color:var(--sub);margin:8px 0}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:var(--accent-soft);color:#22415f;font-weight:600}
+tbody tr:nth-child(even){background:#fafcff}
+.table-scroll{overflow-x:auto}
+ul,ol{padding-left:24px}li{margin:4px 0}
+.tip{background:var(--accent-soft);border:1px solid #cfe3f6;border-radius:10px;padding:12px 16px;margin:14px 0}
+.to-top{position:fixed;right:26px;bottom:26px;background:var(--accent);color:#fff;border:none;border-radius:999px;padding:10px 14px;font-size:13px;cursor:pointer;box-shadow:0 4px 14px rgba(31,78,121,.28)}
+@media print{.sidebar,.to-top,.reader-tools,.image-dialog{display:none}main{margin:0;padding:0;max-width:none}body{font-size:11pt;background:white}figure{break-inside:avoid}figure img{box-shadow:none}h2,h3{break-after:avoid}section.doc-sec{break-inside:auto}section.doc-sec[hidden]{display:block}a{color:inherit}.table-scroll{overflow:visible}th,td{padding:6px}}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+@media (max-width:960px){.sidebar{position:static;width:auto;border-right:none;border-bottom:1px solid var(--line)}main{margin-left:0;padding:24px 18px}h1{overflow-wrap:anywhere}.cover h1{font-size:28px}table{min-width:540px}nav.toc{max-height:45vh;overflow:auto}}
+</style></head>
+<body>
+<aside class="sidebar">
+ <div class="brand"><small>KNOWLEDGE SERVICE MANUAL</small><strong>平台规则资料上传与 ZIP 打包操作手册</strong><p>图文操作说明 · 可离线阅读与打印</p></div>
+ <div class="search"><input id="m-search" type="search" placeholder="搜索章节，例如：上传 / 索引 / 备份" autocomplete="off"><p class="hint" id="m-status">输入关键词过滤章节，支持正文搜索</p></div>
+ <details id="m-toc" open><summary>章节目录</summary><nav class="toc" aria-label="目录"><a href="#sec-1">1. 先选上传方式</a>
+<a href="#sec-2">2. ZIP 怎样做到一包一份资料</a>
+<a href="#sec-3">3. 多张连续截图组成一份资料</a>
+<a href="#sec-4">4. 只打包选中的真实平台规则</a>
+<a href="#sec-5">5. 旧的多资料 ZIP 怎样迁移</a>
+<a href="#sec-6">6. 在页面上追加、预览和提交</a>
+<a href="#sec-7">7. 处理完成后看哪里</a>
+<a href="#sec-8">8. 文件和识别结果保存在哪里</a>
+<a href="#sec-9">9. 大小限制和常见问题</a>
+<a href="#sec-10">10. 样例目录与验收范围</a></nav></details>
+</aside>
+<main>
+<header class="cover"><h1>平台规则资料上传与 ZIP 打包操作手册</h1><div class="lead"><p>核对日期：2026-11-16。适用于独立图片、长图 OCR、文档媒体、视频 ASR 和单资料 ZIP 上传。<strong>流程为“上传核对 → 配置资料 → 解析与检查 → 确认处理”。上传只暂存和校验，明确开始解析后才识别；确认提交后自动维护检索索引。每个独立文件或 ZIP 对应一份资料。</strong></p></div><div class="reader-tools"><button id="m-print" type="button">打印 / 保存为 PDF</button><span>点击附图放大 · 按 / 搜索正文</span></div></header>
+<section class="doc-sec" id="sec-1"><h2 class="sec">1. 先选上传方式</h2>
+<div class="table-scroll"><table><thead><tr><th scope="col">手里的资料</th><th scope="col">上传方式</th><th scope="col">处理结果</th></tr></thead><tbody><tr><td>TXT、Markdown</td><td>直接选择 <code>.txt</code>、<code>.md</code></td><td>读取正文，生成切片和所选模式的处理结果</td></tr><tr><td>PDF</td><td>直接选择 <code>.pdf</code></td><td>解析原生文字、表格；扫描内容按文档 OCR 配置处理，保留 PDF 原件</td></tr><tr><td>Word</td><td>直接选择 <code>.docx</code></td><td>解析正文、表格，自动取出可提取的内嵌图片做 OCR</td></tr><tr><td>HTML</td><td>直接选择 <code>.html</code>、<code>.htm</code></td><td>解析网页文档；带本地附件时一起打包</td></tr><tr><td>图片、长截图</td><td>直接选择 <code>.png</code>、<code>.jpg</code>、<code>.jpeg</code>、<code>.webp</code></td><td>保存完整原图，开始解析后 OCR；长图自动分块识别，仍是一份资料</td></tr><tr><td>视频</td><td>直接选择 <code>.mp4</code>、<code>.webm</code></td><td>保存原件供播放，开始解析后通过 ASR 转写语音及时间段</td></tr><tr><td>一份 MD / HTML 及图片、视频附件</td><td>将一个主文件与引用的 <code>assets/</code> 打成一个 ZIP</td><td>普通包不需要 manifest.json，附件归属于该资料</td></tr><tr><td>同一规则的多张连续截图</td><td>在一个根目录 MD 中按顺序引用 assets 中各图后打 ZIP</td><td>作为同一资料识别；旧 document.pages 包只保留历史读取</td></tr><tr><td>多份互不相关的规则</td><td>多选独立文件，或每份规则分别打 ZIP 后多选</td><td>每个文件或 ZIP 各建一份资料，可统一提交</td></tr></tbody></table></div>
+<p>独立图片和图片合集只接收静态 PNG、JPEG、WebP。动画或多帧图片会被拒绝，请先导出静态图片；GIF、TIFF 不属于本轮独立图片上传格式。文件扩展名还必须与实际内容一致。</p>
+<p>单独上传 MD 只会上传该文件。引用本地图片、视频的 MD 应连同附件打包。Word 的内嵌图片会自动提取，无需先另存为 MD；复杂浮动图、文本框和精细排版不保证还原为 Word 原版式，核对时可下载原文件。视频只转写语音，<strong>不做视频帧 OCR</strong>。</p>
+</section>
+<section class="doc-sec" id="sec-2"><h2 class="sec">2. ZIP 怎样做到一包一份资料</h2>
+<h3>推荐：一个 MD / HTML，加上 assets，不需要清单</h3>
+<pre><code data-language="text">一份规则.zip
+├── 规则.md
+└── assets/
+    ├── 场景1.png
+    ├── 场景2.jpg
+    └── 规则讲解.mp4</code></pre>
+<p><code>规则.md</code> 可以这样写：</p>
+<pre><code data-language="markdown"># 规则说明
+
+发布日期：2026-01-01
+生效时间：2026-02-01
+
+这里是规则正文。
+
+![违规场景一](assets/场景1.png)
+![违规场景二](assets/场景2.jpg)
+
+[播放规则讲解](assets/规则讲解.mp4)</code></pre>
+<p><strong>普通包不需要 <code>manifest.json</code>。</strong> 系统识别唯一主文档，并按正文引用关联附件，不把每个附件当成另一份资料。PDF、Word、独立图片和视频直接上传，不必为了打包而添加 JSON。</p>
+<p>引用路径相对 <strong>MD / HTML 所在目录</strong>。HTML 可使用 <code>&lt;img src="assets/场景1.png" alt="违规场景一"&gt;</code> 和 <code>&lt;video src="assets/规则讲解.mp4" controls&gt;&lt;/video&gt;</code>。日期填写原文对应日期；平台、业务和适用对象在对应文件的资料设置中填写。所有文件外面仅多套一层文件夹时可归一化包根；不要放两个主文件或依靠文件名字母顺序自动拼接。</p>
+<h3>可选：兼容已有的 manifest.json</h3>
+<p><code>manifest.json</code> 是描述主文件入口、标题和可选 metadata 的清单，不是知识正文。现有采集程序的清单只有满足当前唯一根目录 MD / HTML 要求时才可用于新上传；普通 MD / HTML 与 assets 包不必手写它。有序图片页清单只供历史来源读取。</p>
+<pre><code data-language="json">{
+  &quot;schema_version&quot;: 2,
+  &quot;document&quot;: {
+    &quot;entry&quot;: &quot;规则.md&quot;,
+    &quot;title&quot;: &quot;规则说明&quot;,
+    &quot;metadata&quot;: {&quot;rule_id&quot;: &quot;rule-a&quot;}
+  }
+}</code></pre>
+<p>清单放在 ZIP 根目录，<code>entry</code> 相对包根且只指定一份主资料；例如上述结构需有根目录 <code>规则.md</code> 及相对引用的 <code>assets/</code>。即使有清单，也必须满足唯一根目录 MD / HTML 主文档。<code>title</code> 可省略，填写时非空且不超过 300 字符；<code>metadata</code> 是 JSON 对象。普通包优先用前面的无清单结构。<code>document.pages</code> 只保留已入库历史来源的读取，不支持新上传；旧的多资料 <code>documents</code> 包须拆开，并逐包满足当前根目录主文档要求。</p>
+<p>采集分类可保存在 metadata，但任意自定义字段不会自动成为图谱筛选条件。处理前仍应核对文件行中的实际标题、平台、业务、适用对象和时间。</p>
+<h3>手动压缩时检查</h3>
+<ol><li>将主文件、附件和可选清单整理好，清单放在包根，路径写完整。</li><li>在资源管理器中选中这些文件和文件夹，压缩为普通、未加密的 <code>.zip</code>。</li><li>打开 ZIP 核对层级、文件名和媒体引用；文本与清单使用 UTF-8 编码。</li></ol>
+<p>RAR、7z、ZIP 内再次嵌套的压缩包不作为主资料解析。包内只使用相对路径，不放磁盘绝对路径、符号链接或指向包外的路径。未引用文件会提示，但不会自动成为额外资料。</p>
+<h3>网络图片怎样变成本地附件</h3>
+<p>对 <code>![示例](https://example.com/images/a.png)</code>，先下载图片到 MD 同级的 <code>assets/a.png</code>，再改为 <code>![示例](assets/a.png)</code>，最后连同 MD 打包。</p>
+<p>脚本只收集实际引用的本地文件；网络图片地址会保留并写入报告警告。服务端可按远程图片配置尝试抓取，离线阅读前仍需核对是否已固化。网络视频标记为待固化，需提供本地视频附件。</p>
+</section>
+<section class="doc-sec" id="sec-3"><h2 class="sec">3. 多张连续截图组成一份资料</h2>
+<p>三张图属于同一份规则时，在根目录放一个 MD，按阅读顺序引用各图，再与 assets 一起压缩：</p>
+<pre><code data-language="text">规则截图.zip
+├── 规则截图.md
+└── assets/
+    ├── 01.png
+    ├── 02.png
+    └── 03.webp</code></pre>
+<pre><code data-language="markdown"># 规则截图
+
+![第一页](assets/01.png)
+![第二页](assets/02.png)
+![第三页](assets/03.webp)</code></pre>
+<p>这是一份主文档，图片按正文引用位置处理，不依靠文件名排序。直接多选三张独立图片会建立三份资料，不会自动合并。</p>
+<p><strong>历史兼容边界：</strong> 已入库的 <code>document.pages</code> 图片页来源仍可读取，但当前上传入口明确拒绝新的图片页清单包。旧脚本的 <code>--image</code> 模式可保留历史工具用途，不能把输出当成当前可直接上传的包；请改为上述 MD 引用图片的结构。PDF、Word、独立图片和视频仍分别直接上传。</p>
+<p>长图无需人为裁成多份。后台分块 OCR 并把文字框还原到完整原图位置；这是识别计算分块，不是资料拆分，也不同于知识切片。技术识别失败时先核对问题区域并重试，不能将部分文字当成完整解析。</p>
+</section>
+<section class="doc-sec" id="sec-4"><h2 class="sec">4. 只打包选中的真实平台规则</h2>
+<p>现有采集根目录为 <code>D:\workspace\知识图谱源数据\平台经济规则</code>。例如：</p>
+<pre><code data-language="text">平台经济规则/
+└── 抖音电商/
+    ├── 某条规则.md
+    └── assets/
+        └── 某张图片.png</code></pre>
+<p>脚本会保留相对于 <code>--root</code> 的路径。<strong>要让输出可用于当前上传，把主 MD 的直接父目录作为 <code>--root</code>，并用不带子目录的文件名选件。</strong> 若用上层采集总目录作为根，会得到“根 manifest＋平台子目录主文档”，不满足当前唯一根 MD 的要求。以下命令已按正确根目录写法整理；来源目录只读。</p>
+<h3>只选一份规则</h3>
+<p>在 PowerShell 运行：</p>
+<pre><code data-language="powershell">&amp; &#x27;D:\anaconda\envs\llm_model\python.exe&#x27; `
+  &#x27;D:\workspace\knowledge_service_v2\knowledge_service\scripts\package_rule_documents.py&#x27; `
+  --root &#x27;D:\workspace\知识图谱源数据\平台经济规则\抖音电商&#x27; `
+  --file &#x27;创作者管理_「违规营销：憋单」实施细则_aHsCBTFBK4YS.md&#x27; `
+  --output-dir &#x27;D:\workspace\knowledge_service_v2\outputs\unified-media-example\single-rule-packages&#x27;</code></pre>
+<p>运行成功后生成 <code>rule-documents-001.zip</code> 和 <code>packaging-report.json</code>。<code>--file</code> 可重复，选择两份 MD 就输出两个 ZIP。</p>
+<h3>从清单中只选一部分</h3>
+<p>先创建 UTF-8 文本文件 <code>D:\workspace\knowledge_service_v2\outputs\selected-rules.txt</code>，每行是相对该平台目录的根 MD 文件名，不带平台或其他子目录：</p>
+<pre><code data-language="text">创作者管理_「违规营销：憋单」实施细则_aHsCBTFBK4YS.md
+专题解读_生鲜和鲜花绿植虚假宣传规则白皮书_aJkzdMC7vZJy.md</code></pre>
+<p>再运行：</p>
+<pre><code data-language="powershell">&amp; &#x27;D:\anaconda\envs\llm_model\python.exe&#x27; `
+  &#x27;D:\workspace\knowledge_service_v2\knowledge_service\scripts\package_rule_documents.py&#x27; `
+  --root &#x27;D:\workspace\知识图谱源数据\平台经济规则\抖音电商&#x27; `
+  --list-file &#x27;D:\workspace\knowledge_service_v2\outputs\selected-rules.txt&#x27; `
+  --output-dir &#x27;D:\workspace\knowledge_service_v2\outputs\unified-media-example\packages&#x27;</code></pre>
+<p>空行和以 <code>#</code> 开头的行会忽略；清单可带 UTF-8 BOM。<code>--file</code> 与 <code>--list-file</code> 可重复混用，按命令中的选件顺序处理，重复路径只选一次。</p>
+<p><strong>现在每份 MD 各生成一个 ZIP，不再按每包 200 份 MD 合包。</strong> 两份规则会输出 <code>rule-documents-001.zip</code>、<code>rule-documents-002.zip</code>；十份规则输出十个包；确认每包都是根目录 MD 加引用资源后，可一起选中上传。附件在各自包中归属对应资料。</p>
+<p><code>--manifest</code> 也保留为选件入口：传入含 <code>documents</code> 的 JSON 可同时选择多份 MD，并保留每份标题与 metadata，输出仍是每份 MD 一个新版包；也可传入新版单资料清单。<code>--manifest</code> 不能与 <code>--file</code>、<code>--list-file</code> 同用。这里的<strong>脚本输入清单</strong>与<strong>上传 ZIP 内的清单</strong>用途不同，多项 <code>documents</code> 不能继续作为上传包清单。</p>
+<p>每次使用尚不存在的输出目录，且输出目录必须在 <code>--root</code> 外。脚本默认限制每包 24,000,000 字节；可用 <code>--max-zip-bytes</code> 指定不超过 25,000,000 的值。单份资料加附件超过上限会报错，不会拆成丢失上下文的小包。<code>--max-documents</code> 只是旧命令兼容参数，不再改变每包一份资料的规则。</p>
+<p>上传前打开 <code>packaging-report.json</code>，核对包列表、文件、字节数、SHA256 和外链警告。脚本会检查其生成结构与媒体可读性，但历史格式的打包成功不等于当前新上传校验通过。检查主文档是否在包根；不同父目录的资料分别以各自父目录为根生成。必要时去掉旧清单、把 MD 与其 assets 一起整理到包根后重压缩。脚本不执行 OCR、ASR，也不代表知识抽取已验收。</p>
+</section>
+<section class="doc-sec" id="sec-5"><h2 class="sec">5. 旧的多资料 ZIP 怎样迁移</h2>
+<div class="table-scroll"><table><thead><tr><th scope="col">旧包情况</th><th scope="col">新上传的行为</th><th scope="col">整理方法</th></tr></thead><tbody><tr><td>旧 manifest 的 <code>documents</code> 只有一项</td><td>只在满足当前唯一根 MD / HTML 及引用资源时可新上传</td><td>其他格式作为历史来源读取；新包按第 2 节重整</td></tr><tr><td><code>documents</code> 有两项或更多</td><td>明确拒绝，不再自动拆成多份资料</td><td>用新版脚本逐份生成 ZIP</td></tr><tr><td>无清单，含多个 MD 或多个主文件</td><td>明确拒绝</td><td>为每份资料分别打包；同一资料的连续截图用一个根 MD 按顺序引用</td></tr><tr><td>过去已成功入库的多资料包</td><td>历史记录及来源继续保留</td><td>无需为适配新规则重传或删除历史资料</td></tr></tbody></table></div>
+<p>拆分旧包时：</p>
+<ol><li>保留原 ZIP，解压一份副本到新的工作目录，核对正文与附件齐全。</li><li>若主 MD 都在同一目录，使用其直接父目录作为 <code>--root</code>，用不带子目录的 <code>--file</code> 或 <code>--list-file</code> 选件。分处不同目录的 MD 分别运行，输出目录各自放在源目录之外。</li><li>需要保留自定义标题和 metadata 时，可用选件 <code>--manifest</code>。若用解压总目录和旧清单拆包，脚本会保留嵌套路径；此类输出不能直接上传，还需将每份 MD 及其相对引用资源整理到各包根目录，更新或移除旧清单后重压缩。</li><li>核对报告及每包内容，确保每包是唯一根 MD / HTML 和引用资源，再在页面多选 ZIP，按四步流程操作。</li></ol>
+<p>脚本不会直接读取旧 ZIP 或自动解压。如果旧包主文件是 PDF、DOCX、独立图片或视频，应分别直接上传原文件；当前 ZIP 入口不接收这些格式作为主文件。只有 MD / HTML 引用本地资源时才按第 2 节打包。不要仅把旧清单从 <code>documents</code> 改名为 <code>document</code> 而继续期望导入多份正文。</p>
+</section>
+<section class="doc-sec" id="sec-6"><h2 class="sec">6. 在页面上追加、预览和提交</h2>
+<ol><li>选中项目，进入“资料库 → 添加文件”。当前是四步：“上传核对 → 配置资料 → 解析与检查 → 确认处理”。</li><li>第 1 步分次选择或拖入文件。这里只暂存和验证；点击对应文件行的“原件预览”检查原件，不在上传框内混放切片预览。DOCX 原版式不支持时下载核对。</li><li>第 2 步可逐文件点击“设置”，在该文件卡片下展开平台、业务、适用对象和时间配置；相同字段可勾选后“批量设置所选文件”，选择填补空值或覆盖。同批不要求一个平台或业务。选择本批后续处理方式，并按需在“高级解析设置”调整切片或属性提取选项；切片参数用“将切片设置应用到所选文件”明确应用。</li><li>点击“开始解析”后，第 3 步显示排队、文字识别、视频转写和切片向量准备状态。PDF、图片和视频等可能耗时较长，可离开后继续查看；只有真实可用的阶段数量才显示数量进度，不把心跳当成精确百分比。</li><li>解析完成后，逐文件“查看正文与切片”，核对 OCR/ASR 文字、来源位置和分段。技术识别失败或结果过期时，点该文件“重新解析”；也可用“重试失败或过期项”。</li><li>第 4 步选择已核对的成功文件，按下表确认后续任务。解析结果直接复用；确认提交后自动维护正式索引，草稿本身不能被搜索或问答引用。</li><li>已提交文件不再留在上传清单，去“处理批次”看后续进度。“继续未完成上传”只找回未提交的文件、配置和可复用解析，不是恢复已入库资料；关闭添加文件窗口不取消后台任务。未提交准备会话自创建起保留 7 天，访问不会续期；过期后未提交暂存会被清理，需要重传。此期限与切片向量缓存的 7 天有效期是两回事，已提交资料和批次另行保留。</li></ol>
+<div class="table-scroll"><table><thead><tr><th scope="col">处理方式</th><th scope="col">第 4 步按钮</th><th scope="col">本次任务与后续操作</th></tr></thead><tbody><tr><td>仅文档检索</td><td>开始建立检索索引</td><td>正式提交正文和切片，自动建立或更新索引；不抽取实体关系</td></tr><tr><td>开放发现</td><td>开始构建本体</td><td>生成待确认的类型及事实候选；仍需核对草案、审核、发布</td></tr><tr><td>使用项目本体</td><td>开始知识抽取</td><td>按已发布本体抽取与校验，核对正式事实及待审核项</td></tr></tbody></table></div>
+<p>解析把原文及媒体转换为可检查的正文，切片再按规则分段。<strong>图片 OCR 和视频 ASR 按正文引用位置合入统一文字流，再按长度、重叠和章节规则切片，不因附件身份强制单独成片。</strong> 不同片长及段落边界仍可能产生多片；各自的图片区域和视频时间段保留。</p>
+<p>时间和业务范围按每份资料核对；批量填写只适用于已选且确实相同的文件。发布时间、生效时间、失效时间和上传时间不能混用。向量预计算失败与解析失败分开：前者可在确认提交后由正式索引任务补算；正文识别技术失败则应先重新解析，不能确认提交。过滤少量低置信文字后仍有足够可靠内容的提示不一定阻断，需要人工核对正文。</p>
+<h3>已有资料怎样重新处理或构建图谱</h3>
+<p>可以先选择“仅文档检索”完成解析、OCR/ASR 和切片，先使用文档检索，之后再构建图谱。打开资料详情，找到“重新处理 / 构建图谱”，选择处理方式，再点击“创建处理任务”：</p>
+<div class="table-scroll"><table><thead><tr><th scope="col">详情中的处理方式</th><th scope="col">本次任务做什么</th></tr></thead><tbody><tr><td>仅文档检索</td><td>重新生成正文切片并更新项目检索输入，暂不抽取实体和关系</td></tr><tr><td>开放发现</td><td>产生本体与事实候选，经过本体审核和事实确认后才形成正式图谱结果</td></tr><tr><td>使用项目本体</td><td>按已发布的项目本体重新抽取并校验事实；尚未发布本体时，先完成发布</td></tr></tbody></table></div>
+<p>此入口复用固定来源和可复用的成功 OCR/ASR，不需要再次上传文件。资料 ID 保持不变，系统创建新的处理任务与处理代际，并保留处理历史。点击“查看处理任务”可进入后台任务查看进度，完成后仍需核对索引同步与图谱结果。已有未结束任务时，先完成或取消该任务；缺少固定原始来源的旧资料会提示重新上传，已有正文仍可阅读。</p>
+<p>“解析视图”中的“重试 OCR”或“重试未完成 OCR 区域”只更新该图片的识别结果。若希望新文字进入检索切片或图谱，回到资料详情执行整份重新处理，再核对索引和相应审核结果；单项 OCR 重试不会自动重建这些结果，历史记录继续保留。</p>
+<p>首次索引、旧索引重建与普通增量更新由后台自动处理。在资料库、检索图谱、问答或台账打开“检索索引”，查看切片与事实覆盖数量、进度和错误。普通失败会按间隔重试；管理员可手动“重建全部检索索引”。上传或重新处理完成不等于立即可检索，以“可检索”状态和实际结果为准。</p>
+</section>
+<section class="doc-sec" id="sec-7"><h2 class="sec">7. 处理完成后看哪里</h2>
+<div class="table-scroll"><table><thead><tr><th scope="col">想检查什么</th><th scope="col">页面入口及检查点</th></tr></thead><tbody><tr><td>正文、表格、完整长图、图片页序和视频</td><td>资料详情的“图文阅读”；图片可放大、按宽阅读或查看原始比例</td></tr><tr><td>PDF 原版页面</td><td>打开固定版本原文的“阅读视图”，使用上一页、下一页或页码输入；支持来源区域高亮、下载和新窗打开原件</td></tr><tr><td>已保存文字与切片</td><td>资料详情的“已保存正文”及切片结果</td></tr><tr><td>OCR 文字、文字框、分块进度和失败区域</td><td>“在原文中打开”里的“解析视图”</td></tr><tr><td>图片文字对应位置</td><td>从证据打开固定来源，核对原图上的对应区域与高亮</td></tr><tr><td>视频语音对应位置</td><td>点击解析视图的时间段与转写文字，跳到原视频位置</td></tr><tr><td>原文件或原始 ZIP</td><td>固定版本原文中的下载入口；按来源类型提供原件或原包</td></tr><tr><td>事实及证据</td><td>资料详情的“提取知识”，或“检索与图谱”中的来源入口</td></tr><tr><td>为什么停在需要处理</td><td>“处理批次”和资料的“处理记录”，核对 OCR/ASR 质量问题</td></tr><tr><td>以后补做解析、文档检索或图谱</td><td>资料详情的“重新处理 / 构建图谱”，选择模式后创建任务</td></tr></tbody></table></div>
+<p>OCR 与 ASR 成功后，文字进入知识处理输入及切片，并保留图片区域或视频时间段。上传成功、原件能打开、识别完成、索引就绪和事实已写入是不同状态，应分别检查。部分分块失败时，已有文字可保留，但不能当成完整识别；重试后仍需检查覆盖范围。</p>
+<p>“图文阅读”呈现固定来源的正文、表格与关联媒体；“已保存正文”查看系统用于切片及知识处理的保存文字，可能包含 OCR/ASR 补入内容，不能代替原文件排版。PDF 的固定版本阅读器通过本地渲染显示原版页图，不依赖浏览器 PDF 插件；页图有分辨率上限，精细核对可下载原 PDF。</p>
+<p>主检索关键词、语义和混合方式依赖项目 Milvus 索引就绪；首次建立和后续同步自动处理，资料库的字面关键词查询另行读取已保存资料。页面混合检索默认关键词候选语义排序，也可在检索设置改为双路融合；最低语义相似度默认 0.35，可调整。图谱默认保留全部历史业务时间；按当前或指定业务日期筛选时，还需核对生效、失效及未知日期项。</p>
+</section>
+<section class="doc-sec" id="sec-8"><h2 class="sec">8. 文件和识别结果保存在哪里</h2>
+<div class="table-scroll"><table><thead><tr><th scope="col">内容</th><th scope="col">保存位置</th></tr></thead><tbody><tr><td>独立上传原件、原始 ZIP、提取的图片与视频附件</td><td>MinIO 来源对象存储；相同媒体字节可按内容哈希复用</td></tr><tr><td>资料、metadata、来源版本、正文和解析块</td><td>PostgreSQL</td></tr><tr><td>OCR 运行、文字框、分块区域和进度、ASR 结果与时间段</td><td>PostgreSQL</td></tr><tr><td>切片与原文、图片区域、视频时间段的映射</td><td>PostgreSQL</td></tr><tr><td>本体、正式知识与来源断言</td><td>PostgreSQL</td></tr><tr><td>关键词和向量检索投影</td><td>Milvus</td></tr></tbody></table></div>
+<p>阅读器从服务端读取固定来源版本及关联媒体。长图 OCR 的裁切区域记录在运行中，完整原图保留；不需要把每个计算块当成新资料保存。</p>
+<p>ZIP 主文件保留在完整原包中；读取或下载时按固定入口定位并核验 SHA256，不要求另存一份重复主文件。PDF 分页 PNG 当前按需在本机生成并返回阅读器，不作为新的资料或知识记录写入；原 PDF 保持完整。</p>
+</section>
+<section class="doc-sec" id="sec-9"><h2 class="sec">9. 大小限制和常见问题</h2>
+<p>当前默认限制如下，页面还会读取服务能力；文件、图片和 ZIP 的各项检查都要满足。</p>
+<div class="table-scroll"><table><thead><tr><th scope="col">对象</th><th scope="col">限制</th></tr></thead><tbody><tr><td>单个上传文件或 ZIP</td><td>25,000,000 字节</td></tr><tr><td>单张图片，包括独立图片和图片页</td><td>10 MiB（10,485,760 字节），不超过 40,000,000 像素</td></tr><tr><td>单份资料的图片</td><td>最多 200 张，图片总字节不超过 100 MiB；仍受 ZIP 上传大小约束</td></tr><tr><td>一个批次</td><td>最多 1,000 份资料，总上传量不超过 1,000,000,000 字节</td></tr><tr><td>ZIP 安全检查</td><td>最多 5,000 个成员、解压总量 512 MiB、压缩比上限 200；禁止加密及符号链接</td></tr><tr><td>文本</td><td>非空，最多 1,000,000 字符</td></tr><tr><td>视频</td><td>不超过 600 秒；MP4 使用 H.264/AAC，WebM 使用 VP8、VP9、AV1 与 Opus/Vorbis</td></tr></tbody></table></div>
+<p>图片即使小于 25,000,000 字节，也可能超过更严格的 10 MiB 或总像素限制。多帧图片请逐帧导出为静态图片；确属同一资料时，用一个根 MD 按顺序引用后打包。OCR 耗时取决于图像尺寸、分块数、文字密度与机器负载，视频 ASR 还包含模型启动时间。</p>
+<div class="table-scroll"><table><thead><tr><th scope="col">页面或命令提示</th><th scope="col">检查和处理方法</th></tr></thead><tbody><tr><td>ZIP 必须只包含一份资料／要求拆分旧包</td><td>按第 5 节拆包；不要在一个 ZIP 放多份待导入正文</td></tr><tr><td>无清单包要求一个根主文件及 assets</td><td>将一个主文件放包根；连续图片改为一个根 MD 按顺序引用；不新传 pages 清单包</td></tr><tr><td>不支持的清单版本／需要一个 document</td><td>普通包可不带清单；使用清单时采用整数 <code>schema_version: 2</code>，单个 <code>document.entry</code> 指向根 MD / HTML；<code>pages</code> 仅供历史来源读取</td></tr><tr><td>主文档或引用资源缺失、路径错误</td><td>核对根主文档，以及正文中相对路径的大小写和实际文件；历史图片页来源另核对清单页序与重复路径</td></tr><tr><td>图片缺失或未引用文件提示</td><td>核对正文相对路径；补齐要用的附件，删除无关文件或补上引用</td></tr><tr><td>图片字节、像素、动画或格式被拒绝</td><td>按上述限制导出静态图片；扩展名须与图片实际格式一致</td></tr><tr><td>长图显示部分完成、识别失败或置信度不足</td><td>查看分块进度和问题区域；核对原图后重试。识别补全后，在资料详情重新处理，才会更新切片及检索/图谱输入</td></tr><tr><td>原图可见，但还没有切片文字</td><td>原件预览不跑 OCR；配置后点击“开始解析”，完成后“查看正文与切片”</td></tr><tr><td>视频可播放但没有转写</td><td>查看 ASR 进度、音轨与语音内容，核对本地模型；画面里的字幕不会自动做帧 OCR</td></tr><tr><td>网络媒体离线时打不开</td><td>下载到本地 assets、修改引用，重新打包并核对固化状态</td></tr><tr><td>metadata 的分类没有出现在筛选中</td><td>核对清单及字段映射；页面业务范围须使用对应控件</td></tr><tr><td>处理结束，图谱没有节点</td><td>核对处理模式、候选审核及正式事实写入；仅文档检索不会自动生成图谱事实</td></tr><tr><td>OCR 重试成功，检索结果仍未更新</td><td>单项重试只改识别结果；执行整份重新处理，并在“检索索引”检查自动更新是否就绪</td></tr><tr><td>资料重新处理提示已有未结束任务</td><td>先在后台任务完成或取消原任务，再创建新的处理任务</td></tr><tr><td>想补文件或不同文件配置不同平台</td><td>回“上传核对”追加；到“配置资料”逐文件设置或批量设置所选项</td></tr><tr><td>输出目录已存在／位于源目录内</td><td>为本次打包指定源目录之外的新目录</td></tr><tr><td>单份资料和附件超过包上限</td><td>减少无关附件，或将确属独立的资料分开；脚本不会自动把一份资料拆开</td></tr></tbody></table></div>
+</section>
+<section class="doc-sec" id="sec-10"><h2 class="sec">10. 样例目录与验收范围</h2>
+<p>准备本地输入时，可在 <code>tests/docs/</code> 分别放数字 PDF、扫描 PDF、DOCX、图片、视频及 MD / HTML 资源包。业务原件可能不随 Git 提交，不把本机文件列表当成新环境自带样例。建议至少核对以下三类：</p>
+<div class="table-scroll"><table><thead><tr><th scope="col">输入</th><th scope="col">原件检查</th><th scope="col">解析后检查</th></tr></thead><tbody><tr><td>可选中正文的数字 PDF</td><td>页码与正文是否一致</td><td>原生文字、表格和阅读定位</td></tr><tr><td>扫描 PDF 或只有页眉页脚可选中的混合扫描 PDF</td><td>整页扫描正文是否清晰</td><td>正文是否完整 OCR，来源区域是否对应，不能只看有没有可选文字</td></tr><tr><td>一个 MD / HTML 加 assets 的 ZIP</td><td>图片、视频相对引用可打开</td><td>媒体文字在正文中的位置、统一切片及来源定位</td></tr></tbody></table></div>
+<p>文件结构验证通过，只证明容器及格式可接受，不代表 OCR、ASR、抽取质量、索引就绪或问答正确。</p>
+<p>本轮新样例统一使用 <code>D:\workspace\knowledge_service_v2\outputs\unified-media-example\</code>，其中 <code>packages/</code> 是单资料 ZIP 的输出位置。先确认本机文件已经生成，再核对 <code>packaging-report.json</code> 并上传；本文给出的路径与命令本身不表示样例已运行通过。旧的多 MD 合包样例应先按第 5 节拆分，不能继续用来学习 ZIP 内文档切换。</p>
+<p>本机一次长图样本为 1080×20000 像素、24 px 字，分为 9 块，耗时约 54 秒，人工核对的 6 条关键行全部识别到。这是该样本的覆盖记录，不是所有长图的 OCR 准确率，也不代表复杂表格、小字或低清图的结果。</p>
+<p>本轮实测结果及页面截图见<a href="2026-11-11-统一媒体接入验收.md">统一媒体接入验收</a>。需要验证“导入、审核发布、检索、图谱展示”全过程时，参考<a href="../scripts/README.md">验收脚本与运行说明</a>。脚本会创建隔离验收项目并写入所选事实，使用前先核对用途。原有<a href="2026-11-11-平台规则导入与多媒体验收.md">平台规则多媒体小样本验收记录</a>保留历史测试条件，其中旧多资料 ZIP 的操作以本手册为准。小样本 OCR/ASR 结果不替代大规模容量和问答质量验收。</p>
+</section>
+</main>
+<dialog id="m-image" class="image-dialog" aria-label="附图放大"><button type="button">关闭附图</button><img alt=""><p></p></dialog>
+<script>
+(function(){
+ var q=document.getElementById('m-search'),status=document.getElementById('m-status');
+ var secs=[].slice.call(document.querySelectorAll('section.doc-sec'));
+ var tocs=[].slice.call(document.querySelectorAll('nav.toc a'));
+ function txt(e){return e.textContent||e.innerText||''}
+ function filter(){
+  var v=(q.value||'').trim().toLowerCase();
+  var hit=0;
+  secs.forEach(function(s,idx){
+   var match=!v||txt(s).toLowerCase().indexOf(v)>=0;
+   s.hidden=!match;if(match)hit++;
+   if(tocs[idx])tocs[idx].hidden=!match;
+  });
+  status.textContent=v?('命中 '+hit+' 个章节'):'输入关键词过滤章节，支持正文搜索';
+ }
+ q.addEventListener('input',filter);
+ document.addEventListener('keydown',function(e){if(e.key==='/'&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)){e.preventDefault();q.focus()}});
+ var toc=document.getElementById('m-toc');
+ if(window.matchMedia('(max-width:960px)').matches)toc.open=false;
+ document.getElementById('m-print').onclick=function(){window.print()};
+ var dialog=document.getElementById('m-image'),large=dialog.querySelector('img'),caption=dialog.querySelector('p');
+ document.querySelectorAll('.image-zoom').forEach(function(button){button.onclick=function(){var img=button.querySelector('img');large.src=img.src;large.alt=img.alt;caption.textContent=img.alt;dialog.showModal()}});
+ dialog.querySelector('button').onclick=function(){dialog.close()};
+ dialog.addEventListener('click',function(e){if(e.target===dialog){var r=dialog.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)dialog.close()}});
+ var io=new IntersectionObserver(function(entries){
+  entries.forEach(function(en){ if(en.isIntersecting){
+   tocs.forEach(function(a){a.classList.remove('active')});
+   var a=document.querySelector('nav.toc a[href="#'+en.target.id+'"]');
+   if(a){a.classList.add('active')}
+  }});
+ },{rootMargin:'-15% 0px -70% 0px'});
+ secs.forEach(function(s){io.observe(s)});
+ var top=document.createElement('button');top.className='to-top';top.textContent='回到顶部';
+ top.onclick=function(){window.scrollTo({top:0,behavior:'smooth'})};document.body.appendChild(top);
+})();
+</script>
+</body></html>

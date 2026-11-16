@@ -18,7 +18,7 @@ import struct
 
 ROOT = Path(__file__).resolve().parents[1]
 MARKDOWN = ROOT / "docs/2026-10-20-知识平台完整操作手册.md"
-OUTPUT = ROOT / "docs/知识平台完整操作手册.html"
+OUTPUT = ROOT / "docs/知识平台历史技术手册.html"
 EDITION = "2026.10.22 · 生产检索与统一写入版"
 FIELDS = ("场景", "为什么与何时", "前置身份与条件", "操作步骤", "正确结果", "失败与恢复", "下一步")
 ILLUSTRATED_CHAPTERS = (2, 3, 4, 6, 7, 9, 11, 13, 14, 15, 17, 18, 20, 21, 23, 24)

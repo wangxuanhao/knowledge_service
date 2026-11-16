@@ -1,18 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
-<title id="title">知识平台使用流程示意图</title><desc id="desc">已有本体、开放发现和仅文档检索三条路线；处理与审核后构建索引，开展检索图谱问答。</desc>
+<title id="title">知识平台使用流程示意图</title><desc id="desc">已有本体、开放发现和仅文档检索三条路线；上传配置后明确开始解析，核对并确认处理，后台自动更新索引，再开展检索图谱问答。</desc>
 <defs><marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10" fill="#65877f"/></marker></defs>
 <rect width="1200" height="720" rx="20" fill="#f5f7f4"/>
 <g font-family="Microsoft YaHei,Segoe UI,sans-serif" fill="#183e36">
-<text x="48" y="54" font-size="15" letter-spacing="3">操作流程 · 示意图</text><text x="48" y="99" font-size="32" font-weight="700">先选路线，再核对知识，最后建立检索</text>
+<text x="48" y="54" font-size="15" letter-spacing="3">操作流程 · 示意图</text><text x="48" y="99" font-size="32" font-weight="700">先确认解析和处理，索引在后台自动更新</text>
 <g fill="white" stroke="#ccdad3" stroke-width="2"><rect x="48" y="145" width="1104" height="78" rx="12"/></g>
 <text x="76" y="191" font-size="22" font-weight="700">01  登录并选中项目</text><text x="440" y="191" font-size="20" fill="#526b64">确认项目、角色，以及本次资料的范围和时间</text>
 <g fill="white" stroke="#ccdad3" stroke-width="2"><rect x="48" y="253" width="342" height="160" rx="12"/><rect x="429" y="253" width="342" height="160" rx="12"/><rect x="810" y="253" width="342" height="160" rx="12"/></g>
 <text x="74" y="288" font-size="19" font-weight="700">已有 TTL / 明确结构</text><text x="74" y="328" font-size="18">导入、核对、发布本体</text><text x="74" y="362" font-size="18">按项目本体处理资料</text><text x="74" y="392" font-size="15" fill="#526b64">需要属性时，开启本次属性提取</text>
 <text x="455" y="288" font-size="19" font-weight="700">尚无结构 / 开放发现</text><text x="455" y="328" font-size="18">少量资料发现候选</text><text x="455" y="362" font-size="18">核对结构、审核发布</text><text x="455" y="392" font-size="15" fill="#526b64">映射事实，后续按正式本体处理</text>
-<text x="836" y="288" font-size="19" font-weight="700">仅需文档检索</text><text x="836" y="328" font-size="18">解析正文与切片</text><text x="836" y="362" font-size="18">核对文字与来源</text><text x="836" y="392" font-size="15" fill="#526b64">不产生实体、关系和属性</text>
+<text x="836" y="288" font-size="19" font-weight="700">仅需文档检索</text><text x="836" y="328" font-size="18">开始解析，核对正文与切片</text><text x="836" y="362" font-size="18">确认提交后建立正式索引</text><text x="836" y="392" font-size="15" fill="#526b64">草稿不进入搜索，不产生实体关系</text>
 <g stroke="#65877f" stroke-width="2" fill="none" marker-end="url(#a)"><path d="M219 223V247"/><path d="M600 223V247"/><path d="M981 223V247"/><path d="M219 413V451"/><path d="M600 413V451"/><path d="M981 413V557"/></g>
 <rect x="48" y="457" width="723" height="76" rx="12" fill="#e6efdf"/><text x="74" y="489" font-size="19" font-weight="700">02  核对知识、统一身份、处理冲突</text><text x="74" y="518" font-size="17">先实体，再关系与属性；来源和时间分别保留</text>
 <path d="M410 533V557" stroke="#65877f" stroke-width="2" marker-end="url(#a)"/>
-<rect x="48" y="563" width="1104" height="72" rx="12" fill="#1e584a"/><text x="76" y="607" font-size="21" fill="white" font-weight="700">03  显式构建项目索引 → 就绪 → 搜索 / 图谱 / 脑图 / 问答</text>
+<rect x="48" y="563" width="1104" height="72" rx="12" fill="#1e584a"/><text x="76" y="607" font-size="21" fill="white" font-weight="700">03  后台自动更新索引 → 确认“可检索” → 搜索 / 图谱 / 脑图 / 问答</text>
 <text x="48" y="683" font-size="17" fill="#526b64">处理完成 ≠ 审核完成 ≠ 索引就绪。每一步都查看结果；新资料与修改同步后再检索核对。</text>
 </g></svg>

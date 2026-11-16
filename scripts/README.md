@@ -7,10 +7,10 @@
 | 要做什么 | 入口 | 条件与结果 |
 | --- | --- | --- |
 | 启动应用 | [start-service.ps1](start-service.ps1) 或 `python -m knowledge_service --port 8100` | 已有 conda 环境和基础设施；正常业务服务 |
-| 生成当前手册 | [build_knowledge_service_manual.py](build_knowledge_service_manual.py) | 不连接业务库；生成并静态校验当前 MD/HTML |
-| 打包部分平台规则与媒体 | [package_rule_documents.py](package_rule_documents.py) | 每份选中 MD 各生成一个 v2 单资料 ZIP，收集引用图片、视频；也可按顺序打包图片合集，输出清单和核对报告 |
+| 生成当前手册 | [build_knowledge_service_manual.py](build_knowledge_service_manual.py) | 不连接业务库；从「知识平台操作手册.md」生成图片内嵌的完整操作手册 HTML，同时保留原文件名入口 |
+| 打包部分平台规则与媒体 | [package_rule_documents.py](package_rule_documents.py) | 每份选中 MD 各生成一个 v2 单资料 ZIP，收集引用图片、视频；新上传须保证主 MD 在包根，输出清单和核对报告 |
 | 真实上传到图谱验收 | [verify_platform_rule_pipeline.py](verify_platform_rule_pipeline.py) | 创建隔离项目，通过真实 OCR/LLM、候选选择、本体审核发布、来源校验、索引、三类检索和图谱会话验证最小关系链，保存状态支持恢复 |
-| 静态校验当前手册 | [verify_redesign_manual.py](verify_redesign_manual.py) | 检查章节、路由、链接、图片；`--build` 可同时生成 |
+| 通用图文手册构建 | [build_standalone_manual.py](build_standalone_manual.py) | 校验相对链接和图片；加 `--embed-images` 可内嵌本地图片 |
 | 内容与权威数据差分 | [verify_production_content.py](verify_production_content.py) | 正常认证和真实服务；默认依赖保留的指定验收项目 ID，不是任意部署的通用 smoke |
 | 部署前后存储检查点 | [production_storage_checkpoint.py](production_storage_checkpoint.py) | 读取 PG 和 Milvus schema/计数/回执；`--output` 保存，`--compare` 对比 |
 | 真实账号权限专题 | [verify_auth_rbac.py](verify_auth_rbac.py) | 真实认证专题，需要指定服务和可用账号 |
@@ -19,15 +19,15 @@
 
 ### 平台规则单资料 ZIP 打包
 
-在仓库根目录运行 `python scripts/package_rule_documents.py --help` 查看当前参数。源目录只读，输出目录必须在源目录之外且尚不存在。**每个 ZIP 只上传为一份资料**；选择十份 MD 就生成十个 ZIP，不再按 200 份 MD 合包。连续截图可用有序图片合集生成一个 ZIP。
+在仓库根目录运行 `python scripts/package_rule_documents.py --help` 查看当前参数。源目录只读，输出目录必须在源目录之外且尚不存在。**每个 ZIP 只上传为一份资料**；选择十份 MD 就生成十个 ZIP，不再按 200 份 MD 合包。当前新上传须使用唯一根 MD / HTML 及引用资源；连续截图用一个根 MD 按顺序引用 assets 中各图。旧图片合集输出只供历史工具使用，不能直接新上传。
 
 | 参数 | 用法与约束 |
 | --- | --- |
-| `--root`、`--output-dir` | 必填；源文件根目录与本次新输出目录 |
-| `--file` | 相对根目录的 MD 路径，可重复 |
+| `--root`、`--output-dir` | 必填；源文件根目录与本次新输出目录；用于当前上传时，root 选 MD 的直接父目录 |
+| `--file` | 相对根目录的 MD 路径，可重复；用于当前上传时选不带子目录的文件名，不同父目录分别运行 |
 | `--list-file` | UTF-8/BOM 路径清单，可重复；空行和 `#` 注释忽略，可与 `--file` 按顺序混用 |
 | `--manifest` | JSON 选件清单，不能与 `--file` / `--list-file` 同用；可读旧 `documents` 多项或 v2 单资料，MD 仍逐份输出 ZIP 并保留 title、metadata |
-| `--image`、`--title` | 按阅读顺序重复 `--image`，组成一份 PNG/JPEG/WebP 图片资料；`--title` 只用于此模式，不能同时使用 MD 选件参数 |
+| `--image`、`--title` | 历史图片页打包模式，不能作为当前新上传包；新上传改用根 MD 引图。`--title` 只用于此模式，不能同时使用 MD 选件参数 |
 | `--max-zip-bytes` | 默认 24,000,000，最大 25,000,000；单份资料超限报错，不自动拆开 |
 | `--max-documents` | 已弃用的兼容参数，不能恢复多资料合包 |
 
@@ -35,20 +35,20 @@
 
 ```powershell
 & 'D:\anaconda\envs\llm_model\python.exe' scripts/package_rule_documents.py `
-  --root 'D:\workspace\知识图谱源数据\平台经济规则' `
-  --file '抖音电商/创作者管理_「违规营销：憋单」实施细则_aHsCBTFBK4YS.md' `
+  --root 'D:\workspace\知识图谱源数据\平台经济规则\抖音电商' `
+  --file '创作者管理_「违规营销：憋单」实施细则_aHsCBTFBK4YS.md' `
   --output-dir 'D:\workspace\knowledge_service_v2\outputs\unified-media-example\single-rule-packages'
 ```
 
-成功后检查 `rule-documents-001.zip` 和 `packaging-report.json`。报告包含每包资料/媒体路径、字节数、SHA256 和外链警告。脚本校验包结构及媒体，不执行 OCR/ASR。
+成功后检查 `rule-documents-001.zip` 和 `packaging-report.json`。报告包含每包资料/媒体路径、字节数、SHA256 和外链警告。脚本校验包结构及媒体，不执行 OCR/ASR；历史格式的脚本校验成功不等于当前新上传校验通过，仍需核对唯一根主文档。
 
-旧多资料包不能直接作为新上传：先保留原包并解压副本，再以解压目录为 `--root`、旧清单为 `--manifest`，或用 `--file` / `--list-file` 选择部分 MD，输出多个新版包。CLI 的多项输入清单仍可用，但生成的上传包必须使用 `schema_version: 2` 与一个 `document`。已入库历史来源保持原有读取方式。
+旧多资料包不能直接作为新上传：先保留原包并解压副本，再按各 MD 的直接父目录分别选件输出。CLI 的多项输入清单仍可用；若采用解压总目录和旧 `--manifest` 拆包，输出会保留子目录，须将各 MD 及其引用资源整理到各包根，更新或移除旧清单后重新压缩。PDF、Word、独立图片和视频分别直接上传。已入库历史来源保持原有读取方式。
 
-新版 ZIP 的 `document.entry` 指定一个主文件，或用 `document.pages` 明确图片页序；两个字段互斥。无清单包只允许一个根主文件及 `assets/` 附件，单个外层目录可归一化。独立图片/图片页限静态 PNG/JPEG/WebP，每张 10 MiB、4000 万像素；所有 ZIP 还受单文件 25,000,000 字节上限约束。
+新上传 ZIP 无需清单；若有清单，`document.entry` 也必须指向唯一根 MD / HTML。`document.pages` 仅保留历史来源读取，不接收新上传。单个统一外层目录可归一化。图片限静态 PNG/JPEG/WebP，每张 10 MiB、4000 万像素；所有 ZIP 还受单文件 25,000,000 字节上限约束。
 
-完整目录、两种 manifest、`--list-file` 与图片合集命令及错误处理见[资料上传与 ZIP 打包操作手册](../docs/平台规则资料上传与ZIP打包操作手册.md)。页面只在第 1 步显示完整上传区；第 2、3 步显示文件摘要，可点击“返回修改文件”回到第 1 步追加，队列保留。新样例输出统一放在 `D:\workspace\knowledge_service_v2\outputs\unified-media-example\packages\`；文件生成与验收结论须分别核对。
+完整目录、可选清单、`--list-file`、连续截图与历史包整理方法及错误处理见[资料上传与 ZIP 打包操作手册](../docs/平台规则资料上传与ZIP打包操作手册.md)。当前页面为上传核对、配置资料、解析与检查、确认处理四步；上传仅暂存，明确开始解析后才识别，解析完成后核对正文与切片再确认。新样例输出统一放在 `D:\workspace\knowledge_service_v2\outputs\unified-media-example\packages\`；文件生成与验收结论须分别核对。
 
-已上传资料可在详情的“重新处理 / 构建图谱”中选择“仅文档检索”“开放发现”或“使用项目本体”，复用固定来源创建新处理代际，不必重复打包上传；资料 ID 和处理历史保留。仅文档模式执行解析、OCR/ASR、切片与检索处理，暂不抽取实体关系。单项 OCR 重试只更新识别结果；需要更新切片、检索或图谱时执行整份重新处理。项目索引首次需显式构建，已有项目仍须核对增量同步就绪。
+已上传资料可在详情的“重新处理 / 构建图谱”中选择“仅文档检索”“开放发现”或“使用项目本体”，复用固定来源创建新处理代际，不必重复打包上传；资料 ID 和处理历史保留。仅文档模式执行解析、OCR/ASR、切片与检索处理，暂不抽取实体关系。单项 OCR 重试只更新识别结果；需要更新切片、检索或图谱时执行整份重新处理。项目首次索引、版本重建和增量同步均由后台自动处理；通过“检索索引”查看状态，必要时管理员手动重建。
 
 ### 真实规则链路验收
 
@@ -121,7 +121,7 @@ python scripts/migrate_source_objects.py --source-root data/sources --apply --ou
 - [verify_redesign_live_ui.py](verify_redesign_live_ui.py)：现行页面观察。
 - [verify_redesign_workflows.py](verify_redesign_workflows.py)：改造操作故事。
 
-手册/内部支持另有 4 个：[build_knowledge_service_manual.py](build_knowledge_service_manual.py)、[verify_redesign_manual.py](verify_redesign_manual.py)、[verify_redesign_manual_browser.py](verify_redesign_manual_browser.py)、[ontology_validation_helpers.py](ontology_validation_helpers.py)。最后一个是共用 helper，不是无用的空脚本。浏览器工具需要既有 Playwright 和可用浏览器。
+当前手册用 [build_knowledge_service_manual.py](build_knowledge_service_manual.py) 构建，通用渲染器是 [build_standalone_manual.py](build_standalone_manual.py)。[verify_redesign_manual.py](verify_redesign_manual.py) 和 [verify_redesign_manual_browser.py](verify_redesign_manual_browser.py) 只适配历史 29 章技术手册；前者 `--build` 生成「知识平台历史技术手册.html」，不会覆盖当前指南。旧浏览器工具需要既有 Playwright 和可用浏览器。[ontology_validation_helpers.py](ontology_validation_helpers.py) 是共用 helper。
 
 ## 保留但需适配的专项：17 个
 
