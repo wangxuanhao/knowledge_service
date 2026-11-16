@@ -5,7 +5,7 @@
   function mount(host,{project,settings=()=>({}),modeSlot,advanced,onPublished=()=>{}}){
     const D=root.document,P=root.DocumentPreparation;
     const node=(tag,text,css)=>{const e=D.createElement(tag);if(text!==undefined)e.textContent=text;if(css)e.className=css;return e;};
-    const makeButton=(text,fn,css='secondary')=>{const e=node('button',text,css);e.type='button';e.onclick=async()=>{const ticket=generation;e.disabled=true;try{await fn();}catch(error){if(ticket===generation)showError(error);}finally{e.disabled=false;if(e===next)updateFooter();}};return e;};
+    const makeButton=(text,fn,css='secondary')=>{const e=node('button',text,css);e.type='button';e.onclick=async()=>{const ticket=generation;e.disabled=true;try{await fn();}catch(error){if(ticket===generation)showError(error);}finally{e.disabled=false;if(e===next||e===retryAll)updateFooter();}};return e;};
     let session=null,viewData={items:[]},owner=null,step=0,active=false,timer=null,uploading=0,generation=0,editing=null,editorItemId=null,previewScope=null,busy=false,configurationVersion=0;
     const selected=new Set(),independent=new Set(),locals=new Map(),uploads=new Map();
     const container=node('section',undefined,'preparation-workflow');container.id='preparation-workflow';
@@ -44,7 +44,7 @@
     }
     const progressSummary=node('p',undefined,'preparation-counts');progressSummary.setAttribute('role','status');
     const resultList=node('div',undefined,'preparation-files');
-    const retryAll=makeButton('仅重试失败项',()=>run(async()=>{const ids=items().filter(i=>['failed','cancelled'].includes(i.status)).map(i=>i.id);if(!ids.length)throw Error('没有需要重试的文件。');await session.retry(ids);schedule();}));
+    const retryAll=makeButton('重试失败或过期项',()=>reparse(items().filter(retryable).map(i=>i.id)));
     stages[2].append(progressSummary,retryAll,resultList);
     const publishList=node('div',undefined,'preparation-files'),publicationSummary=node('p',undefined,'preparation-counts');
     stages[3].append(node('p','选择已核对的资料入库。解析结果将直接复用，知识处理与检索索引进度在处理批次中继续查看。','subtle'),publicationSummary,publishList);
@@ -66,6 +66,7 @@
     }));
     container.append(nav,notice,refreshTools,...stages,footer,overlay);host.append(container);
     const items=()=>viewData.items||[];
+    const retryable=item=>['failed','cancelled','stale'].includes(item.status);
     const ready=item=>['completed','reused'].includes(item.status)&&item.result_ready!==false;
     const sameContent=item=>item.file_sha256||item.id;
     const requiresIndependent=item=>{
@@ -144,7 +145,7 @@
       }
       if(phase>=2&&ready(item))actions.append(makeButton('查看正文与切片',()=>previewResult(item)));
       if(phase===2&&['queued','running'].includes(item.status))actions.append(makeButton('取消解析',()=>run(()=>session.cancel([item.id]))));
-      if(phase===2&&['failed','cancelled','stale'].includes(item.status))actions.append(makeButton(item.status==='stale'?'更新解析结果':'重试',()=>run(async()=>{if(item.status==='stale')await session.parse([item.id]);else await session.retry([item.id]);schedule();})));
+      if(phase>=1&&retryable(item))actions.append(makeButton('重新解析',()=>reparse([item.id])));
       if(item.batch_id)actions.append(makeButton('查看入库进度',()=>onPublished({batch_id:item.batch_id})));
       if(phase===3&&root.SourceReader)for(const original of item.existing_documents||[])if(original.source_version_id)actions.append(makeButton('查看已有资料：'+original.title,()=>{root.LibraryWorkspace?.close({restoreFocus:false});return root.SourceReader.open({projectId:owner,versionId:original.source_version_id});}));
       row.append(actions);return row;
@@ -168,7 +169,7 @@
         uploadList.append(row);
       }
       const count=states=>items().filter(i=>states.includes(i.status)).length;
-      progressSummary.textContent=`已完成 ${count(['completed','reused','published'])} / ${items().length} · 正在解析 ${count(['running'])} · 排队 ${count(['queued'])} · 失败 ${count(['failed'])}`;
+      progressSummary.textContent=`已完成 ${count(['completed','reused','published'])} / ${items().length} · 正在解析 ${count(['running'])} · 排队 ${count(['queued'])} · 失败 ${count(['failed'])} · 需重新解析 ${count(['stale'])}`;
       const publication=viewData.publication_settings||{};
       publicationSummary.textContent='处理方式：'+({documents:'仅文档检索',ontology:'按已发布本体抽取知识',discovery:'发现知识结构候选'}[publication.extraction_mode]||'尚未保存，请返回配置')+(publication.ontology_id?' · 本体版本：'+publication.ontology_id:'');
       updateFooter();
@@ -180,6 +181,8 @@
       const chosen=items().filter(i=>selected.has(i.id)&&i.status!=='published'),reusable=chosen.filter(i=>i.reusable).length,
         pending=chosen.filter(i=>!i.reusable&&['queued','running'].includes(i.existing_task_status||i.status)).length;
       configSummary.textContent=`已选 ${parseCount} 份 · 需要解析 ${parseCount-reusable-pending} 份 · 可复用 ${reusable} 份 · 已有运行任务 ${pending} 份`;
+      const retryCount=items().filter(retryable).length;
+      retryAll.textContent=`重试失败或过期项（${retryCount}）`;retryAll.disabled=busy||retryCount===0;
       const publishCount=items().filter(i=>selected.has(i.id)&&ready(i)).length;
       next.textContent=['下一步：配置资料',`开始解析（${parseCount} 份）`,'下一步：确认入库',`确认入库（${publishCount} 份）`][step];
       if(step===2)next.disabled=busy||!items().some(ready);
@@ -281,6 +284,15 @@
         editing=null;editorItemId=null;editor.hidden=true;message('设置已保存。修改平台或时间不会重新识别正文。');
       }),''));editor.append(tools);editor.scrollIntoView?.({block:'nearest'});
     }
+    async function reparse(ids){
+      if(!ids.length)throw Error('没有需要重新解析的文件。');
+      if(editing)throw Error('请先保存或取消当前设置。');
+      await run(async(target,current)=>{
+        await target.parse(ids);if(!current())return;
+        if(overlay.open)closePreview();
+        step=2;message('已提交重新解析，沿用原文件和资料配置；兼容的结果将直接复用。');schedule();
+      });
+    }
     async function startParse(){
       if(editing)throw Error('请先保存或取消当前设置。');
       await run(async(target,current)=>{
@@ -331,12 +343,15 @@
         for(const warning of result.warnings||[])previewContent.append(node('p',typeof warning==='string'?warning:(warning.message||warning.code||'解析提示'),'preparation-error'));
         const chunks=result.chunks||[];previewContent.append(node('h4',`切片（${chunks.length}）`));
         chunks.forEach((chunk,i)=>{const detail=node('details'),location=P.sourceLabel(chunk),summary=node('summary',`片段 ${i+1} · ${(chunk.text||'').length} 字`+(location?' · '+location:''));detail.append(summary,node('pre',chunk.text||''));previewContent.append(detail);});
-      }catch(error){if(overlay.open&&previewScope===marker)previewContent.replaceChildren(node('p',error.message,'preparation-error'));}
+      }catch(error){if(overlay.open&&previewScope===marker){
+        previewContent.replaceChildren(node('p',error.message,'preparation-error'));
+        if(error.status===409&&item.status!=='published')previewContent.append(makeButton('重新解析此文件',()=>reparse([item.id])));
+      }}
     }
     async function loadDrafts(){
       const p=owner,result=await P.request('/api/projects/'+encodeURIComponent(p)+'/preparations');if(owner!==p)return;
       draftList.replaceChildren();for(const draft of result.items||[]){draftList.append(makeButton(`恢复 ${draft.id.slice(0,8)} · ${draft.items?.length??draft.total_items??''} 份`,async()=>{
-        if(uploading||busy)throw Error('请等待当前操作完成。');const restored=attach(draft.id),ticket=generation;await restored.restore();if(ticket!==generation)return;restoreSettings();selected.clear();items().forEach(i=>selected.add(i.id));step=items().some(i=>['running','queued','completed','reused'].includes(i.status))?2:0;render();schedule();
+        if(uploading||busy)throw Error('请等待当前操作完成。');const restored=attach(draft.id),ticket=generation;await restored.restore();if(ticket!==generation)return;restoreSettings();selected.clear();items().forEach(i=>selected.add(i.id));step=items().some(i=>['running','queued','completed','reused','failed','stale','cancelled'].includes(i.status))?2:0;render();schedule();
       }));}
       if(!draftList.children.length)draftList.append(node('p','没有可恢复草稿。'));
     }
@@ -356,7 +371,7 @@
       async open(){
         active=true;if(owner!==project())reset();owner=project();
         if(!session){let old;try{old=root.localStorage?.getItem(key());}catch{}
-          if(old){const restored=attach(old),ticket=generation;try{await restored.restore();if(ticket!==generation)return;restoreSettings();items().forEach(i=>selected.add(i.id));step=items().some(i=>['queued','running','completed','reused','published'].includes(i.status))?2:0;}catch(error){if(ticket!==generation)return;if([403,404,410].includes(error.status)){try{root.localStorage.removeItem(key());}catch{}session.dispose();session=null;}else showError(error);}}
+          if(old){const restored=attach(old),ticket=generation;try{await restored.restore();if(ticket!==generation)return;restoreSettings();items().forEach(i=>selected.add(i.id));step=items().some(i=>['queued','running','completed','reused','published','failed','stale','cancelled'].includes(i.status))?2:0;}catch(error){if(ticket!==generation)return;if([403,404,410].includes(error.status)){try{root.localStorage.removeItem(key());}catch{}session.dispose();session=null;}else showError(error);}}
         }
         render();schedule();
       },

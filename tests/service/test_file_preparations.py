@@ -623,3 +623,26 @@ def test_retry_cancelled_item_preserves_shared_healthy_completed_cache(prep):
     task = client.app.state.preparations.store.task(first['parse_task_id'])
     assert task['status'] == 'completed' and task['result']
     assert client.get(root+'/items/'+first['id']+'/result').status_code == 200
+
+
+
+def test_runtime_changed_result_is_stale_and_can_retry_directly(prep, monkeypatch):
+    client, root = prep
+    item = ready(client, root, upload(client, root))
+    client.app.state.preparation_runner.close()
+    import knowledge_service.services.preparations as module
+    monkeypatch.setattr(module, 'fingerprint', lambda *args: 'updated-parser-runtime')
+    value = client.get(root).json()['items'][0]
+    assert value['status'] == 'stale', value
+    assert not value['result_ready'] and not value['reusable']
+    assert client.get(root+'/items/'+item['id']+'/result').status_code == 409
+    response = client.post(root+'/retry', json={'item_ids':[item['id']],
+        'versions':{item['id']:item['metadata_version']}, 'idempotency_key':'retry-updated-runtime'})
+    assert response.status_code == 202, response.text
+    updated = response.json()['items'][0]
+    assert updated['status'] == 'queued'
+    assert updated['parser_fingerprint'] == 'updated-parser-runtime'
+    assert updated['metadata_version'] == item['metadata_version']
+    assert updated['options'] == item['options']
+    assert updated['parse_task_id'] != item['parse_task_id']
+    assert client.app.state.preparations.store.task(item['parse_task_id'])['status'] == 'completed'

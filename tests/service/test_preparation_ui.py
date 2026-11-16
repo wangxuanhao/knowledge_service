@@ -183,3 +183,50 @@ def test_failed_preparation_cannot_advance_to_publication(browser):
     page.get_by_text('附件识别失败，请重试', exact=False).first.wait_for()
     assert page.get_by_role('button', name='下一步：确认入库').is_disabled()
     page.close()
+
+
+
+@pytest.mark.parametrize('entry', ['preview', 'row', 'batch'])
+def test_reparse_recovers_expired_result_without_reupload(browser, entry):
+    web = Path(__file__).resolve().parents[2] / 'knowledge_service' / 'web'
+    page = browser.new_page()
+    page.set_default_timeout(5000)
+    stale = dict(id='a', original_name='md-assets-no-manifest.zip', status='completed' if entry=='preview' else 'stale',
+        result_ready=entry=='preview', options={'title':'资料标题'}, metadata_version=7)
+    healthy = dict(id='b', original_name='other.md', status='completed', result_ready=True, options={}, metadata_version=2)
+    calls = []
+    def route(request):
+        path = request.request.url
+        result = dict(id='s', items=[stale] if entry=='row' else [stale, healthy])
+        if path.endswith('/capabilities'):
+            result = dict(supported_extensions=['.zip','.md'])
+        elif path.endswith('/result'):
+            request.fulfill(status=409, json={'detail':'解析器或模型已变化，请明确重新开始解析'})
+            return
+        elif path.endswith(('/parse', '/retry')):
+            calls.append(request.request.post_data_json)
+            stale.update(status='queued', result_ready=False)
+        request.fulfill(json=result)
+    page.route('http://test/api/**', route)
+    page.route('http://test/', lambda r:r.fulfill(body='<div id="host"></div>', content_type='text/html'))
+    page.goto('http://test/')
+    page.evaluate("localStorage.setItem('kg_preparation:local:p','s')")
+    page.add_script_tag(path=str(web/'document-preparation.js'))
+    page.add_script_tag(path=str(web/'document-preparation-view.js'))
+    page.evaluate("PreparationView.mount(document.querySelector('#host'),{project:()=> 'p'}).open()")
+    if entry=='preview':
+        page.locator('.preparation-file[data-item-id="a"]').get_by_role('button', name='查看正文与切片').click()
+        page.get_by_text('解析器或模型已变化', exact=False).wait_for()
+        page.get_by_role('button', name='重新解析此文件', exact=True).click()
+        assert not page.locator('#preparation-preview').is_visible()
+    elif entry=='row':
+        page.locator('.preparation-file[data-item-id="a"]').get_by_role('button', name='重新解析', exact=True).click()
+    else:
+        page.get_by_role('button', name='重试失败或过期项', exact=False).click()
+    page.locator('.preparation-file[data-item-id="a"][data-status="queued"]').wait_for()
+    assert len(calls)==1 and calls[0]['item_ids']==['a']
+    assert calls[0]['versions']=={'a':7}
+    if entry!='row':
+        assert page.locator('.preparation-file[data-item-id="b"][data-status="completed"]').is_visible()
+    assert not page.locator('#preparation-preview').is_visible()
+    page.close()

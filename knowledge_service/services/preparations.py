@@ -195,7 +195,7 @@ class Preparations:
                 heartbeat_at=str(task['heartbeat_at']) if task.get('heartbeat_at') else None,error=task.get('error'))
         if task and task.get('result') and task['fingerprint']==item['parser_fingerprint']:
             value['result_ready']=value['status'] in ('completed','reused','published')
-        value['reusable']=bool(task and task['status']=='completed')
+        value['reusable']=bool(task and task['status']=='completed' and task['fingerprint']==item['parser_fingerprint'])
         value['existing_documents']=self.store.existing_documents(item['project_id'],item['file_sha256']) if item.get('project_id') else []
         if item['status']=='cancelled' and item.get('cancelled_task_id'):
             cancelled=self.store.task(item['cancelled_task_id'])
@@ -209,6 +209,13 @@ class Preparations:
             value.update(result_ready=False,reusable=False)
             if item['status'] not in ('cancelled','stale','published'):
                 value.update(status='failed',stage='failed',error=error.get('message') or '附件识别未完成，请重试')
+        # Readiness must use the same current runtime check as result(). A saved
+        # completed task may belong to a parser/model version replaced since then.
+        if (value['status'] not in ('published','queued','running','cancelling','cancelled')
+                and (value['reusable'] or value['status'] in ('completed','reused','failed','stale'))
+                and fingerprint(item['file_sha256'],item['original_name'],item['options']['parse_config'])!=item['parser_fingerprint']):
+            value.update(status='stale',stage='stale',result_ready=False,reusable=False,
+                error='解析器或模型已变化，请重新解析此文件。')
         return value
 
     def public(self,session):
@@ -327,8 +334,8 @@ class Preparations:
             for item in selected:
                 if versions.get(item['id'])!=item['metadata_version']:
                     conflicts.append({'item_id':item['id'],'code':'configuration_conflict','actual_version':item['metadata_version']})
-                if retry and self.public_item(item)['status'] not in ('failed','cancelled'):
-                    conflicts.append({'item_id':item['id'],'code':'not_retryable','message':'仅可重试失败或取消的文件'})
+                if retry and self.public_item(item)['status'] not in ('failed','cancelled','stale'):
+                    conflicts.append({'item_id':item['id'],'code':'not_retryable','message':'仅可重试失败、取消或解析结果过期的文件'})
             if conflicts:raise PreparationConflict('所选文件需要刷新或修正，本次未启动解析',conflicts)
             for item in selected:
                 # A changed parser/model runtime is a new explicit parse request.
