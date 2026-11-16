@@ -214,7 +214,12 @@
         <span class="source-item__main"><span class="source-item__name"><b>${esc(documentTitle(doc))}</b><small>${esc(doc.metadata?.source_file||'已保存正文 · 原始文件名未记录')}</small></span>
         <span class="source-item__sub">${bits.length?esc(bits.join(' · ')):''}</span></span>
         <span class="source-item__side"><span class="source-state ${state.className}">${state.label}</span><span class="source-item__open" aria-hidden="true">查看 ›</span></span>`;
-      if(semanticSearch()&&doc.match?.text){const snippet=document.createElement('span');snippet.className='source-item__match';appendMatch(snippet,doc.match.text,appliedQuery);button.append(snippet);}
+      if(appliedQuery&&doc.match&&window.SourceMatchView){
+        const snippet=document.createElement('span');snippet.className='source-item__match';window.SourceMatchView.render(snippet,doc.match);button.append(snippet);
+        if(doc.match.mode==='keyword')for(const selector of ['.source-item__name b','.source-item__name small']){
+          const field=button.querySelector(selector),text=field.textContent;field.replaceChildren();window.SourceMatchView.appendText(field,text,doc.match.query,true);
+        }
+      }
       button.addEventListener('click',()=>openDocument(doc,button));list.append(button);
     }
   }
@@ -234,10 +239,20 @@
         textReads.set(key,read);read.finally(()=>{if(textReads.get(key)===read)textReads.delete(key);}).catch(()=>{});
       }
       const full=await read;if(!accepts())return;
-      doc={...doc,...full,metadata:{...doc.metadata,...full.metadata}};
+      const changed=doc.version_id&&full.version_id&&doc.version_id!==full.version_id;
+      doc={...doc,...full,metadata:{...doc.metadata,...full.metadata},...(changed?{match:null}:{})};
     }catch(error){if(accepts())body.textContent='原文读取失败：'+error.message;return;}
     title.textContent=documentTitle(doc);
     renderMeta(doc,buildState(doc));renderDetailTabs(doc,project);
+    if(doc.match&&window.SourceMatchView){
+      const explanation=detailNode('section',undefined,'source-match-explanation');
+      explanation.append(detailNode('h4','为什么找到这份资料'));window.SourceMatchView.render(explanation,doc.match,{detail:true});meta.prepend(explanation);
+      if(doc.match.chunk_version_id&&doc.metadata?.source_document_version_id&&window.SourceReader){
+        const locate=detailNode('button','定位相关片段','secondary');locate.type='button';explanation.append(locate);
+        locate.onclick=()=>{window.WorkspaceDrawers.close({restoreFocus:false});window.SourceReader.open({projectId:project,versionId:doc.metadata.source_document_version_id,
+          chunkVersionId:doc.match.chunk_version_id,matchKind:'semantic'});};
+      }
+    }
     if(doc.metadata?.source_document_version_id&&window.SourceReader){
       const open=document.createElement('button');open.type='button';open.className='secondary';open.textContent='在原文中打开';
       open.onclick=()=>{window.WorkspaceDrawers.close({restoreFocus:false});window.SourceReader.open({projectId:project,versionId:doc.metadata.source_document_version_id});};meta.append(open);

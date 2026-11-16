@@ -611,9 +611,10 @@ class MilvusStore:
             versions = list(dict.fromkeys(hit['version_id'] for hit in lexical if hit.get('version_id') and hit['score'] > 0))
             if not versions:
                 return []
-            return self.search(project_id, query, retrieval_mode='semantic', query_vector=query_vector,
+            ranked = self.search(project_id, query, retrieval_mode='semantic', query_vector=query_vector,
                 kinds=kinds, k=k, scope={**scope, **policy}, index_version=index_version,
                 catalog=catalog, platform_match=platform_match, eligible_version_ids=versions)
+            return [{**hit,'match_channels':['keyword','semantic']} for hit in ranked]
         if retrieval_mode == 'hybrid':
             # Milvus rejects radius range-search combined with group_by. Keep
             # grouped top-k, filter dense scores, then fuse the two rankings.
@@ -627,6 +628,7 @@ class MilvusStore:
                 for rank, hit in enumerate(ranking, 1):
                     key = (hit['record_id'], hit['version_id'])
                     if key not in scores:scores[key] = {**hit, 'score': 0.}
+                    scores[key]['match_channels']=sorted(set(scores[key].get('match_channels') or [])|set(hit.get('match_channels') or []))
                     scores[key]['score'] += 1. / (60 + rank)
             return sorted(scores.values(), key=lambda hit:(-hit['score'],hit['record_id'],hit['version_id']))[:k]
         compiled = compile_scope(project_id, scope, catalog, kinds=kinds,
@@ -651,7 +653,7 @@ class MilvusStore:
             hits = [hit for hit in hits if hit['score'] >= policy['min_semantic_score']]
         elif retrieval_mode == 'keyword':
             hits = [hit for hit in hits if hit['score'] > 0]
-        return hits
+        return [{**hit,'match_channels':[retrieval_mode]} for hit in hits]
 
     @staticmethod
     def _hits(result):

@@ -11,17 +11,18 @@
     for(const [page,selector] of [['search','.search-options-panel'],['qa','.qa-settings-panel'],['source','#source-search-form']]){
       const host=document.querySelector(selector);if(!host||document.getElementById(page+'-hybrid-strategy'))continue;
       const panel=document.createElement('div');panel.className='retrieval-relevance-controls';
-      const label=document.createElement('label');label.textContent='混合策略';
+      const label=document.createElement('label');label.textContent='混合检索方式';
       const select=document.createElement('select');select.id=page+'-hybrid-strategy';
-      for(const [value,text] of [['keyword_rerank','关键词筛选 → 语义排序'],['fusion','关键词＋语义分别召回后融合']]){
+      for(const [value,text] of [['keyword_rerank','限定关键词范围'],['fusion','扩展相近含义']]){
         const option=document.createElement('option');option.value=value;option.textContent=text;select.append(option);
       }label.append(select);
       const scoreLabel=document.createElement('label');scoreLabel.textContent='最低语义相似度';
       const input=document.createElement('input');input.id=page+'-min-semantic-score';input.type='number';input.min='-1';input.max='1';input.step='.05';input.value='.35';scoreLabel.append(input);
-      const hint=document.createElement('small');hint.textContent='仅影响语义召回；数值越高越严格。关键词候选最多 1000 条，余弦相似度不是命中概率。';hint.id=page+'-relevance-help';input.setAttribute('aria-describedby',hint.id);select.setAttribute('aria-describedby',hint.id);
+      const hint=document.createElement('small');hint.id=page+'-relevance-help';input.setAttribute('aria-describedby',hint.id);select.setAttribute('aria-describedby',hint.id);
+      const explain=()=>{hint.textContent=select.value==='keyword_rerank'?'混合检索时，只在关键词命中的内容中按相关程度排序。例如搜“退款”，没有命中关键词的“款项原路退回”不会加入。':'混合检索时，除了关键词命中，也查找意思相近的内容。例如搜“退款”，可能补充“款项原路退回”。';hint.textContent+=' 最低相似度越高，语义筛选越严格；相似度不是命中概率。';};select.addEventListener('change',explain);select.syncExplanation=explain;explain();
       panel.append(label,scoreLabel,hint);
       if(page==='source'){
-        const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='检索设置';details.className='source-relevance-settings';details.append(summary,panel);host.append(details);
+        const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='检索设置';details.className='source-relevance-settings';details.append(summary,panel);(host.querySelector('.source-search__row')||host).append(details);
         panel.addEventListener('change',()=>document.dispatchEvent(new CustomEvent('sources:relevance-changed')));
       }else host.prepend(panel);
     }
@@ -29,6 +30,7 @@
   function write(page,policy){
     const strategy=document.getElementById(page+'-hybrid-strategy'),threshold=document.getElementById(page+'-min-semantic-score');
     if(strategy)strategy.value=policy.hybrid_strategy||'fusion';
+    strategy?.syncExplanation?.();
     if(threshold)threshold.value=policy.min_semantic_score??.35;
   }
   root.SearchRelevance={read,write};

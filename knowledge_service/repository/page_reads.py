@@ -286,6 +286,10 @@ class PageReads:
         else:
             page=self._source_metadata_page(reads,project,selected,cursor,limit,query=query)
         docs=page['records']
+        if query and not summary_only:
+            from ..domain.search_match import explain_match
+            for doc in docs:
+                doc['match']=explain_match(doc,query,text=doc.get('text') or '',channels=['keyword'])
         self._source_derivatives(project,scope or {},docs)
         return {'documents':docs,'total':page['total'],'next_cursor':page['next_cursor'],'counts':counts}
 
@@ -330,10 +334,22 @@ class PageReads:
         ) SELECT r.project_id,r.id,r.version,r.version_id,
             r.recorded_at,r.superseded_at,jsonb_build_object('id',r.id,'kind','document',
                 'valid_from',r.body->'valid_from','valid_until',r.body->'valid_until',
-                'metadata',jsonb_strip_nulls(jsonb_build_object('''+metadata+''')))::text AS payload
-            FROM documents r''',
-            (project,ids)).fetchall()
-        by_id={row['version_id']:self.repo._record(row) for row in rows}
+                'metadata',jsonb_strip_nulls(jsonb_build_object('''+metadata+''')))::text AS payload,
+                CASE WHEN needle.q<>'' AND strpos(lower(COALESCE(r.body->>'text','')),lower(needle.q))>0
+                    THEN substring(r.body->>'text' FROM greatest(1,strpos(lower(r.body->>'text'),lower(needle.q))-60) FOR 260)
+                    ELSE '' END AS match_body,
+                EXISTS(SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(r.body#>'{metadata,aliases}')='array'
+                    THEN r.body#>'{metadata,aliases}' ELSE '[]'::jsonb END) a
+                    WHERE needle.q<>'' AND strpos(lower(a),lower(needle.q))>0) AS match_alias
+            FROM documents r CROSS JOIN (SELECT ?::text AS q) needle''',
+            (project,ids,query)).fetchall()
+        from ..domain.search_match import explain_match
+        by_id={}
+        for row in rows:
+            doc=self.repo._record(row)
+            if query:doc['match']=explain_match(doc,query,text=row['match_body'],channels=['keyword'],
+                extra_fields=(['body'] if row['match_body'] else [])+(['aliases'] if row['match_alias'] else []))
+            by_id[row['version_id']]=doc
         page['records']=[by_id[id] for id in ids]
         return page
 

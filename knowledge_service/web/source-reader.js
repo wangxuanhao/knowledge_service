@@ -107,7 +107,7 @@
     }
     return marks[0]||null;
   }
-  async function open({projectId,versionId,location=null,assertionId=null,chunkVersionId=null,focusText=null}){
+  async function open({projectId,versionId,location=null,assertionId=null,chunkVersionId=null,focusText=null,matchKind=null}){
     controller?.abort();clearContent();controller=new AbortController();const {signal}=controller,token=++serial;
     if(!dialog.open)returnFocus=document.activeElement;restoreFocus=true;body.textContent='正在加载固定版本原文…';note.textContent='';
     for(const button of Object.values(tabButtons))button.disabled=true;
@@ -129,7 +129,9 @@
         const accepts=()=>token===serial&&display===viewSerial&&selectedTab===tab&&dialog.open;
         const view=window.SourceContent.createSession({host:body,projectId,versionId,signal:documentSignal,isCurrent:accepts});content=view;
         const signal=view.signal;
-        body.textContent='正在加载…';note.textContent=versionNote;for(const [k,b] of Object.entries(tabButtons))b.setAttribute('aria-pressed',String(k===tab));
+        body.textContent='正在加载…';note.textContent=versionNote+(matchKind==='semantic'?' · 语义相关片段定位，非逐字命中':'');
+        if(matchKind==='semantic'&&location)location={...location,precision:'chunk'};
+        for(const [k,b] of Object.entries(tabButtons))b.setAttribute('aria-pressed',String(k===tab));
         try{
           if(tab==='raw'){
             const source=window.SourceContent.sourceInfo(doc),binary=source.binary;
@@ -251,7 +253,7 @@
             }
             firstFocus??=focus;
           }
-          if(firstFocus){note.textContent+=precise?' · 已定位证据文字':' · 已定位来源块（未保存精确文字范围）';firstFocus.scrollIntoView({block:'center'});}
+          if(firstFocus){note.textContent+=matchKind==='semantic'?' · 已框选相关来源片段':precise?' · 已定位证据文字':' · 已定位来源块（未保存精确文字范围）';firstFocus.scrollIntoView({block:'center'});}
           if(tab==='reading'&&location?.media_locations?.length>1){
             const controls=make('div','','source-downloads');
             location.media_locations.forEach((group,index)=>{

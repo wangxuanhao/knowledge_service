@@ -76,6 +76,9 @@
 #tab-sources .source-item__open{font-size:12px;font-weight:600;color:var(--ui-accent,#0e7c7b);white-space:nowrap}
 #tab-sources .source-item__match{grid-column:2/4;margin-top:2px;padding:9px 12px;border-left:3px solid var(--ui-warn,#ca8a04);border-radius:4px;background:var(--ui-warn-dim,#fbf0cf);color:var(--ks-ink-2,#3d5e5e);font-size:12.5px;line-height:1.8;text-align:left;white-space:pre-wrap;overflow-wrap:anywhere}
 #tab-sources .source-item__match mark{background:transparent;color:var(--ui-warn,#b45309);font-weight:700}
+#tab-sources .source-item__match{background:transparent;border-left-color:var(--ks-line,#d5e4e4)}
+#tab-sources .source-item__match[data-match-mode=semantic],#tab-sources .source-item__match[data-match-mode=hybrid]{border-left-color:#5680ab;background:#edf4fb;color:var(--ks-ink-2,#3d5e5e)}
+.source-match-labels{display:flex;flex-wrap:wrap;gap:6px;font-size:11px;margin-bottom:5px}.source-match-labels>span{padding:2px 7px;border:1px solid var(--ks-line,#d5e4e4);border-radius:4px;background:var(--ks-surface,#fff)}.source-match-text{display:block;white-space:pre-wrap;overflow-wrap:anywhere}.source-match-text strong{font-weight:500}.source-match-explanation{padding:12px;border:1px solid var(--ks-line,#d5e4e4);border-radius:6px;margin-bottom:12px}.source-match-explanation[data-match-mode=semantic],.source-match-explanation[data-match-mode=hybrid]{border-left:3px solid #5680ab}.source-item__name mark,.source-match-explanation mark{background:#fff1be;color:inherit}
 
 #tab-sources .source-empty>button{margin-top:12px}
 #tab-sources .source-empty>button[hidden]{display:none}

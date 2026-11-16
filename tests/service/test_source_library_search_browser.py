@@ -138,7 +138,8 @@ def test_library_progressive_search_back_remove_and_mobile_layout(redesign_page,
     search.fill('多久到账')
     search.press('Enter')
     page.wait_for_function("document.querySelector('#source-list')?.textContent.includes('三个工作日')")
-    assert requests[-1] == ([{'query': '退款', 'retrieval_mode': 'keyword'}], '多久到账', 'semantic')
+    assert requests[-1] == ([{'query': '退款', 'retrieval_mode': 'keyword',
+        'hybrid_strategy':'keyword_rerank','min_semantic_score':.35}], '多久到账', 'semantic')
     chain = page.locator('#source-search-steps')
     assert '退款' in chain.inner_text() and '多久到账' in chain.inner_text()
     assert '召回' in page.locator('.source-summary').inner_text()

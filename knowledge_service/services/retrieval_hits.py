@@ -33,7 +33,7 @@ def qualified_hits(repository, project, scope, rows, hits):
         score=float(hit.get('score') or 0)
         if not isfinite(score):raise RuntimeError('Milvus 返回无效的排名分数')
         value={key:val for key,val in row.items() if key!='embedding'}
-        value.update({key:hit[key] for key in ('rrf_score','backend_ranks') if key in hit},score=score)
+        value.update({key:hit[key] for key in ('rrf_score','backend_ranks','match_channels') if key in hit},score=score)
         if support is not None:
             value['matched_source_context']={key:support.get(key) for key in
                 ('id','version','assertion_id','document_id','document_version_id','record_version_id',

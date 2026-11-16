@@ -58,8 +58,11 @@ class SourceSemanticSearch:
         docs.sort(key=lambda doc:(-float(best[doc['id']]['score']),doc['id']))
         for doc in docs:
             chunk=best[doc['id']]
-            doc['match']={'score':float(chunk['score']),'chunk_id':chunk['id'],
-                'chunk_version_id':chunk['version_id'],'text':str(chunk.get('text') or '')[:280]}
+            from ..domain.search_match import explain_match
+            channels=chunk.get('match_channels') or (['semantic'] if retrieval_mode=='semantic' else [])
+            doc['match']={**explain_match(doc,query,text=str(chunk.get('text') or ''),mode=retrieval_mode,
+                channels=channels,strategy=(result.get('retrieval_policy') or {}).get('hybrid_strategy')),
+                'score':float(chunk['score']),'chunk_id':chunk['id'],'chunk_version_id':chunk['version_id']}
             status=doc.get('metadata',{}).get('status')
             category=status if status in {'processing','failed'} else 'ready'
             counts[category]+=1;counts['all']+=1

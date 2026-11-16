@@ -134,6 +134,9 @@ def rrf_fuse(rankings, limit, constant=60):
                 'score': 0.0, 'ranks': {}, 'best_rank': rank})
             entry['score'] += 1.0 / (constant + rank)
             entry['ranks'][backend] = rank
+            channels=set(entry['row'].get('match_channels') or [])|set(row.get('match_channels') or [])
+            if backend in {'semantic','keyword'}:channels.add(backend)
+            if channels:entry['row']['match_channels']=sorted(channels)
             entry['best_rank'] = min(entry['best_rank'], rank)
     ordered = sorted(fused.values(), key=lambda item: (-item['score'], item['best_rank'], item['row']['id']))
     return [{**item['row'], 'score': item['score'], 'rrf_score': item['score'],
