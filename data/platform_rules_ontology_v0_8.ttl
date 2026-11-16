@@ -1,0 +1,2052 @@
+# 跨平台规则内容本体 V0.8（规则文档 + 规则内容块）
+# 平台范围：京东、小红书、抖音电商、抖音生活服务、美团、拼多多、淘宝、淘宝闪购、天猫。
+# 文档结构仅保留两种实体类别：规则文档、规则内容块（兼容 URI：ont:文档片段）。
+# 章节、条款、正文、表格、变更对照由内容块的类型、标题及层级表达。
+# 保留除明确合并的文档结构术语外的所有历史业务实体、对象关系及 URI。
+# 7 个数据属性只用于规则名称、来源、内容块展示与检索；其他版本/时效/原文定位保存在索引。
+# 这是仅包含类、属性和语义关系的本体 Schema；没有真实规则实例、domain/range 或子类约束。
+
+@prefix ont: <urn:knowledge:ontology:2d1f9c59-ce80-473a-adc2-f62d538871fb:> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+
+# ===== 一、实体类型（文档结构 + 正文业务） =====
+
+ont:AI软件商品 a owl:Class ;
+    rdfs:label "AI软件商品"@zh ;
+    rdfs:comment "基于AIGC/LLM等提供的数字软件及配套服务交易产品。"@zh .
+
+ont:MCN机构 a owl:Class ;
+    rdfs:label "MCN机构"@zh ;
+    rdfs:comment "在巨量百应场景中为达人等提供运营服务的机构角色，不与生活服务商家直接混同。"@zh .
+
+ont:POI地址 a owl:Class ;
+    rdfs:label "POI地址"@zh ;
+    rdfs:comment "抖音平台上指向符合收录范围的线下门店的线上地址/兴趣点。"@zh .
+
+ont:POI认领 a owl:Class ;
+    rdfs:label "POI认领"@zh ;
+    rdfs:comment "申请主体提交资质或授权后申请特定POI管理权限的过程。"@zh .
+
+ont:POI门店 a owl:Class ;
+    rdfs:label "POI门店"@zh ;
+    rdfs:comment "认领后在平台展示线下门店及其团购商品信息的线上门店。"@zh .
+
+ont:上门取件 a owl:Class ;
+    rdfs:label "上门取件"@zh ;
+    rdfs:comment "按预约安排配送或快递服务人员上门取走退货、回收旧品的方式。"@zh .
+
+ont:专业号 a owl:Class ;
+    rdfs:label "专业号"@zh ;
+    rdfs:comment "小红书平台可用于商业活动的账号身份；不是普通店铺的同义词。"@zh .
+
+ont:专卖店 a owl:Class ;
+    rdfs:label "专卖店"@zh ;
+    rdfs:comment "依据平台定义以某品牌及授权范围经营的店铺类型；不同平台对授权链与命名规则的要求可能不同。"@zh .
+
+ont:专营店 a owl:Class ;
+    rdfs:label "专营店"@zh ;
+    rdfs:comment "按平台规定经营一个类目或多个品牌的店铺形式，跨平台细则不同。"@zh .
+
+ont:业务服务 a owl:Class ;
+    rdfs:label "业务服务"@zh ;
+    rdfs:comment "平台内对消费者提供的服务事项或服务产品，包括预约、履行及售后等环节；它描述服务对象本身，不等同于一次服务履约行为。"@zh .
+
+ont:业务订单 a owl:Class ;
+    rdfs:label "业务订单"@zh ;
+    rdfs:comment "消费者与商户就商品或服务形成的交易订单，是履约、配送、核销、结算及售后事项的关联载体；订单与商品或服务应区分。"@zh .
+
+ont:举证责任 a owl:Class ;
+    rdfs:label "举证责任"@zh ;
+    rdfs:comment "纠纷处理时由相关主体承担的证明责任，需随场景分配。"@zh .
+
+ont:买手 a owl:Class ;
+    rdfs:label "买手"@zh ;
+    rdfs:comment "通过选品、笔记或直播等方式推广商品的营销参与者角色；是否属于商户、达人或具体平台的买手身份取决于业务定义。"@zh .
+
+ont:交易导流 a owl:Class ;
+    rdfs:label "交易导流"@zh ;
+    rdfs:comment "引导用户离开平台到私域/站外等渠道交易的行为类别。"@zh .
+
+ont:交易服务费 a owl:Class ;
+    rdfs:label "交易服务费"@zh ;
+    rdfs:comment "平台根据交易、类目或合作协议向经营者收取的交易服务费用；与保证金、违约金、软件服务费并非同一费用。"@zh .
+
+ont:交易状态 a owl:Class ;
+    rdfs:label "交易状态"@zh ;
+    rdfs:comment "订单处于待付款、待发货、待收货或售后等流程阶段的状态；不同状态可能对应不同超时、取消和退款规则。"@zh .
+
+ont:交易纠纷 a owl:Class ;
+    rdfs:label "交易纠纷"@zh ;
+    rdfs:comment "商家与消费者因商品、价格、履约、售后或费用责任产生的争议事项；投诉发生不代表一方责任已被确认。"@zh .
+
+ont:交易评价 a owl:Class ;
+    rdfs:label "交易评价"@zh ;
+    rdfs:comment "基于真实订单形成的商品或服务交易评价；区别于只针对商品的商品评价。"@zh .
+
+ont:交易超时 a owl:Class ;
+    rdfs:label "交易超时"@zh ;
+    rdfs:comment "订单在特定交易状态下超过规则设定的操作期限而引发状态变化的情形；与发货超时或配送超时分开判断。"@zh .
+
+ont:以旧换新服务 a owl:Class ;
+    rdfs:label "以旧换新服务"@zh ;
+    rdfs:comment "将消费者旧物回收、估价及购买新品联动的交易服务流程；旧品质检与新品交易可能分别形成单据。"@zh .
+
+ont:价格欺诈 a owl:Class ;
+    rdfs:label "价格欺诈"@zh ;
+    rdfs:comment "商户通过虚构参考价、先提价后打折等方式误导价格认知的违规类型。"@zh .
+
+ont:优惠权益 a owl:Class ;
+    rdfs:label "优惠权益"@zh ;
+    rdfs:comment "交易或活动规则下给予消费者、商户等主体的优惠或保障利益，如券、积分兑换或服务保障；须区分获得资格与实际享有权益。"@zh .
+
+ont:会员积分 a owl:Class ;
+    rdfs:label "会员积分"@zh ;
+    rdfs:comment "交易或活动获取的会员专属积分奖励，区别淘宝信用积分。"@zh .
+
+ont:住宿服务供应商 a owl:Class ;
+    rdfs:label "住宿服务供应商"@zh ;
+    rdfs:comment "提供酒店或民宿房间并确认相关预订的供应商或代理商。"@zh .
+
+ont:住宿预订 a owl:Class ;
+    rdfs:label "住宿预订"@zh ;
+    rdfs:comment "消费者对预售券、日历房/票等住宿服务发起的预约或预订业务。"@zh .
+
+ont:体验补偿 a owl:Class ;
+    rdfs:label "体验补偿"@zh ;
+    rdfs:comment "因服务体验受损而约定或实施的补偿方式；与违约金、责任赔付不默认等价。"@zh .
+
+ont:保税仓 a owl:Class ;
+    rdfs:label "保税仓"@zh ;
+    rdfs:comment "跨境保税商品在监管仓储环节存放、出库和可能退回的仓储节点；不是所有跨境商品都必然使用该模式。"@zh .
+
+ont:保税商品 a owl:Class ;
+    rdfs:label "保税商品"@zh ;
+    rdfs:comment "在保税业务场景中发货、退货或二次入区的商品。"@zh .
+
+ont:保证金 a owl:Class ;
+    rdfs:label "保证金"@zh ;
+    rdfs:comment "商家经营中按规则约定缴存、退还、扣除的保证金事项。"@zh .
+
+ont:信用积分 a owl:Class ;
+    rdfs:label "信用积分"@zh ;
+    rdfs:comment "淘宝评价体系中的信用计分，和天猫会员可兑换的积分不等价。"@zh .
+
+ont:假货 a owl:Class ;
+    rdfs:label "假货"@zh ;
+    rdfs:comment "规则区分假冒商品与盗版商品；涉嫌售假与售假成立需区别处理。"@zh .
+
+ont:免责情形 a owl:Class ;
+    rdfs:label "免责情形"@zh ;
+    rdfs:comment "规则列明可免除或减轻特定责任的前提或例外场景；是否免责须结合适用条款、事实与证明材料判断。"@zh .
+
+ont:公示渠道 a owl:Class ;
+    rdfs:label "公示渠道"@zh ;
+    rdfs:comment "平台向用户或商户披露规则、评选结果、处罚信息等事项的发布途径；渠道与实际公示内容、受众应分别识别。"@zh .
+
+ont:共管业绩 a owl:Class ;
+    rdfs:label "共管业绩"@zh ;
+    rdfs:comment "共管商品在约定周期内符合返还规则的核算业绩对象，不是单个数值属性。"@zh .
+
+ont:共管门店 a owl:Class ;
+    rdfs:label "共管门店"@zh ;
+    rdfs:comment "共管业务中参与业绩核算的合作门店，区别于单纯自有门店。"@zh .
+
+ont:即送订单 a owl:Class ;
+    rdfs:label "即送订单"@zh ;
+    rdfs:comment "生活服务即时配送业务中需要商家接单、可能由骑手配送的订单；须区分即时单与预约单的处理时限。"@zh .
+
+ont:参考价 a owl:Class ;
+    rdfs:label "参考价"@zh ;
+    rdfs:comment "商品或团购页面用于对比优惠幅度的基准价格表达；应核实形成依据，与实际销售价格及最终成交价格区分。"@zh .
+
+ont:参选资格 a owl:Class ;
+    rdfs:label "参选资格"@zh ;
+    rdfs:comment "主体、店铺或商品取得某榜单、评选或活动参与资格所需满足的条件；有资格并不意味着已入选。"@zh .
+
+ont:发货时效要求 a owl:Class ;
+    rdfs:label "发货时效要求"@zh ;
+    rdfs:comment "订单或规则要求商家完成发货的期限约束；不是单纯日期数值。"@zh .
+
+ont:发货行为 a owl:Class ;
+    rdfs:label "发货行为"@zh ;
+    rdfs:comment "订单履行过程中的发货行为；是否合规需要结合适用规则。"@zh .
+
+ont:受让方 a owl:Class ;
+    rdfs:label "受让方"@zh ;
+    rdfs:comment "店铺经营主体变更中接受店铺经营权或入驻主体资格的一方；是否取得平台经营资格应依据变更审核结果。"@zh .
+
+ont:合作商品样品 a owl:Class ;
+    rdfs:label "合作商品样品"@zh ;
+    rdfs:comment "商家在直播推广、创作者合作中向合作方提供的商品样品；申请、领取、返还或买样返款属于不同阶段。"@zh .
+
+ont:合同协议 a owl:Class ;
+    rdfs:label "合同协议"@zh ;
+    rdfs:comment "交易参与方就服务、经营、授权、合作及责任分配达成的协议文本；与平台单方发布的规则制度不同。"@zh .
+
+ont:品牌 a owl:Class ;
+    rdfs:label "品牌"@zh ;
+    rdfs:comment "商品、店铺或商户经营活动中使用的品牌标识和对应品牌关系；品牌名称不能直接证明经营者持有商标权或取得授权。"@zh .
+
+ont:品牌授权文件 a owl:Class ;
+    rdfs:label "品牌授权文件"@zh ;
+    rdfs:comment "品牌权利人或合法授权方出具的品牌经营许可证明；应关注授权主体、商品范围和期限，不能仅依据品牌名称认定。"@zh .
+
+ont:品牌权利人 a owl:Class ;
+    rdfs:label "品牌权利人"@zh ;
+    rdfs:comment "对某品牌商标或其他授权事项具有合法权利的主体；是否有权向具体商家授予经营许可需结合授权链核实。"@zh .
+
+ont:品质指标 a owl:Class ;
+    rdfs:label "品质指标"@zh ;
+    rdfs:comment "用于衡量商品质量、履约服务或经营质量的评价维度与指标；指标定义不直接代表检测结果或评分结论。"@zh .
+
+ont:售卖价 a owl:Class ;
+    rdfs:label "售卖价"@zh ;
+    rdfs:comment "商品或服务在页面展示的售卖价格，可能受到活动折扣或优惠券影响；不直接等同消费者最终支付金额。"@zh .
+
+ont:售后响应时限 a owl:Class ;
+    rdfs:label "售后响应时限"@zh ;
+    rdfs:comment "买卖双方在退款换货维修等售后流程中处理申请的期限。"@zh .
+
+ont:售后服务单 a owl:Class ;
+    rdfs:label "售后服务单"@zh ;
+    rdfs:comment "消费者售后申请被平台登记或受理后形成的服务处理单据，可关联退款、退货或维修等不同处理路径。"@zh .
+
+ont:商品 a owl:Class ;
+    rdfs:label "商品"@zh ;
+    rdfs:comment "在平台被发布、推广或交易的实物或其他受平台规则管理的商品对象；要与商品详情、订单及服务权益分开。"@zh .
+
+ont:商品信息 a owl:Class ;
+    rdfs:label "商品信息"@zh ;
+    rdfs:comment "标题、价格、规格、详情、图片、宣传等对外展示的信息。"@zh .
+
+ont:商品分享权限 a owl:Class ;
+    rdfs:label "商品分享权限"@zh ;
+    rdfs:comment "创作者通过短视频、直播、橱窗展示或推广商品的功能准入资格；与具体类目的推广权限存在不同限制。"@zh .
+
+ont:商品投放计划 a owl:Class ;
+    rdfs:label "商品投放计划"@zh ;
+    rdfs:comment "商家在精选联盟等渠道建立的商品推广投放安排。"@zh .
+
+ont:商品抽检 a owl:Class ;
+    rdfs:label "商品抽检"@zh ;
+    rdfs:comment "平台或检验机构从商品中抽取样品开展质量、真伪或描述一致性检验的程序；抽检启动不代表检测不合格。"@zh .
+
+ont:商品描述不符 a owl:Class ;
+    rdfs:label "商品描述不符"@zh ;
+    rdfs:comment "消费者收到的商品在规格、质量、数量或其他承诺信息上与交易时所展示描述存在差异的情形；判定以页面承诺及证据为依据。"@zh .
+
+ont:商品橱窗 a owl:Class ;
+    rdfs:label "商品橱窗"@zh ;
+    rdfs:comment "创作者账号内可集中展示或挂载推广商品的功能入口；不直接表示橱窗商品已经产生销售订单。"@zh .
+
+ont:商品评价 a owl:Class ;
+    rdfs:label "商品评价"@zh ;
+    rdfs:comment "消费者围绕商品质量、描述或购买体验发表的评价内容；应与商户整体服务评价、店铺评分区分。"@zh .
+
+ont:商品详情页 a owl:Class ;
+    rdfs:label "商品详情页"@zh ;
+    rdfs:comment "消费者交易前查看商品、服务、价格与承诺事项的平台页面；页面展示内容可用于核对下单时承诺。"@zh .
+
+ont:商品质量问题 a owl:Class ;
+    rdfs:label "商品质量问题"@zh ;
+    rdfs:comment "涉及商品质量、功能、成分、安全或检验不合格等问题的业务概念；与商详描述不一致或单纯物流损坏区分。"@zh .
+
+ont:商品链接 a owl:Class ;
+    rdfs:label "商品链接"@zh ;
+    rdfs:comment "把推广内容、短视频或直播购物组件指向可访问商品页面的链接对象；挂链并不代表商品已成交。"@zh .
+
+ont:商户主体 a owl:Class ;
+    rdfs:label "商户主体"@zh ;
+    rdfs:comment "在平台开展商品或服务经营、承担经营与履约义务的企业或个体经营主体；不等同于账号、门店或店铺名称。"@zh .
+
+ont:商户变更 a owl:Class ;
+    rdfs:label "商户变更"@zh ;
+    rdfs:comment "商户经营主体、经营权或入驻主体发生调整的业务事项；与店铺改名、修改展示信息不是同一概念。"@zh .
+
+ont:商户状态 a owl:Class ;
+    rdfs:label "商户状态"@zh ;
+    rdfs:comment "平台规则中描述商户经营或准入状态的状态类别，例如正常经营、暂停或退出；各平台状态口径可能不同。"@zh .
+
+ont:商户评价 a owl:Class ;
+    rdfs:label "商户评价"@zh ;
+    rdfs:comment "对到店商户服务或门店体验的评价，可能进入商户评分与评价争议处理。"@zh .
+
+ont:商户诚信分 a owl:Class ;
+    rdfs:label "商户诚信分"@zh ;
+    rdfs:comment "评价诚信治理中用于累计违规处理的计分机制；不等同于店铺星级。"@zh .
+
+ont:回收报价 a owl:Class ;
+    rdfs:label "回收报价"@zh ;
+    rdfs:comment "基于旧品状况进行预估价或质检价判断的报价对象。"@zh .
+
+ont:团购券 a owl:Class ;
+    rdfs:label "团购券"@zh ;
+    rdfs:comment "消费者购买后用于团购服务核销的券码/凭证概念。"@zh .
+
+ont:团购商品 a owl:Class ;
+    rdfs:label "团购商品"@zh ;
+    rdfs:comment "平台上销售的到店或相关生活服务团购类商品及服务权益载体。"@zh .
+
+ont:团购套餐 a owl:Class ;
+    rdfs:label "团购套餐"@zh ;
+    rdfs:comment "面向到店履约的组合服务或商品套餐，不能简单当作邮寄商品。"@zh .
+
+ont:处理措施 a owl:Class ;
+    rdfs:label "处理措施"@zh ;
+    rdfs:comment "平台针对违规、履约异常或纠纷可采用的警告、限制、扣费、下架等具体方式；措施类型不等于已实际执行。"@zh .
+
+ont:处罚机制 a owl:Class ;
+    rdfs:label "处罚机制"@zh ;
+    rdfs:comment "规则对违规类型、认定条件、严重程度及可采取措施的制度安排；它是处罚规则，不表示处罚已经实际执行。"@zh .
+
+ont:处置通知 a owl:Class ;
+    rdfs:label "处置通知"@zh ;
+    rdfs:comment "平台将违规认定、权益限制或其他处理结果通知相关商家或账号主体的告知信息；通知发送不等于申诉期限已届满。"@zh .
+
+ont:套餐项目 a owl:Class ;
+    rdfs:label "套餐项目"@zh ;
+    rdfs:comment "团购套餐承诺提供的具体餐品、服务或商品构成项。"@zh .
+
+ont:宣传内容 a owl:Class ;
+    rdfs:label "宣传内容"@zh ;
+    rdfs:comment "商品/服务宣传中对功能、品牌、规格等作出的表达内容。"@zh .
+
+ont:履约凭证 a owl:Class ;
+    rdfs:label "履约凭证"@zh ;
+    rdfs:comment "视频、照片、消费小票、沟通记录、监控等用于证明服务履约情况的材料。"@zh .
+
+ont:带货内容 a owl:Class ;
+    rdfs:label "带货内容"@zh ;
+    rdfs:comment "与直播或笔记推广商品相关的文本、画面或介绍内容。"@zh .
+
+ont:带货笔记 a owl:Class ;
+    rdfs:label "带货笔记"@zh ;
+    rdfs:comment "用于商品推广的笔记场景；暂不声明为笔记的 OWL 子类。"@zh .
+
+ont:平台 a owl:Class ;
+    rdfs:label "平台"@zh ;
+    rdfs:comment "制定或实施交易、内容治理或生活服务规则的线上经营平台；用于区分不同平台对同一业务词语的适用口径。"@zh .
+
+ont:平台电子面单 a owl:Class ;
+    rdfs:label "平台电子面单"@zh ;
+    rdfs:comment "平台指定的电子面单发货方式及凭证，与普通物流单号不同。"@zh .
+
+ont:平台红包 a owl:Class ;
+    rdfs:label "平台红包"@zh ;
+    rdfs:comment "由平台规则支持发放、在满足门槛或有效期条件时抵扣交易的优惠凭证；不同于商家自主设定的店铺红包。"@zh .
+
+ont:平台规范 a owl:Class ;
+    rdfs:label "平台规范"@zh ;
+    rdfs:comment "平台发布的经营、交易、内容发布或服务行为要求；属于平台治理规范，不直接等同于国家法律法规。"@zh .
+
+ont:平台账号 a owl:Class ;
+    rdfs:label "平台账号"@zh ;
+    rdfs:comment "平台内用户账号，例如专业号规则涉及的普通账号与认证账号。"@zh .
+
+ont:广告禁用词 a owl:Class ;
+    rdfs:label "广告禁用词"@zh ;
+    rdfs:comment "平台广告或宣传规范明确限制使用的词语、措辞或表述类型；提及禁用词本身不必然构成已查实违规。"@zh .
+
+ont:店铺 a owl:Class ;
+    rdfs:label "店铺"@zh ;
+    rdfs:comment "商家在平台开展经营的店铺对象；文档区分企业店、个人店和个体工商户店。"@zh .
+
+ont:店铺名称 a owl:Class ;
+    rdfs:label "店铺名称"@zh ;
+    rdfs:comment "店铺展示的经营名称，命名受到店铺类型、品牌授权等要求约束。"@zh .
+
+ont:店铺星级 a owl:Class ;
+    rdfs:label "店铺星级"@zh ;
+    rdfs:comment "平台基于店铺评价或经营表现划分的星级等级体系；不是单笔订单评分，也不直接等于真实体验分。"@zh .
+
+ont:店铺清退 a owl:Class ;
+    rdfs:label "店铺清退"@zh ;
+    rdfs:comment "平台依据规定终止某店铺继续经营或入驻资格的处置；不应仅因店铺暂停营业或修改名称推断清退。"@zh .
+
+ont:店铺真实体验分 a owl:Class ;
+    rdfs:label "店铺真实体验分"@zh ;
+    rdfs:comment "平台综合商品质量、履约、物流和服务等信号形成的店铺体验指标；不能与单次交易评分或商户诚信分混同。"@zh .
+
+ont:店铺类型 a owl:Class ;
+    rdfs:label "店铺类型"@zh ;
+    rdfs:comment "旗舰店、专卖店、专营店、个人店等店铺组织分类的概念。"@zh .
+
+ont:店铺红包 a owl:Class ;
+    rdfs:label "店铺红包"@zh ;
+    rdfs:comment "商家设定并通常限定本店或指定商品使用的营销优惠凭证；不得直接与平台发放的红包合并。"@zh .
+
+ont:店铺评分 a owl:Class ;
+    rdfs:label "店铺评分"@zh ;
+    rdfs:comment "由成交后商品、服务和物流等评价形成的店铺评价指标；与店铺星级、平台诚信分和真实体验分的规则口径不同。"@zh .
+
+ont:延迟发货 a owl:Class ;
+    rdfs:label "延迟发货"@zh ;
+    rdfs:comment "发货时间超过交易约定或平台规则要求的时效所形成的履约异常；起算点与例外须依具体规则和订单类型识别。"@zh .
+
+ont:开票服务 a owl:Class ;
+    rdfs:label "开票服务"@zh ;
+    rdfs:comment "商家按照消费者交易及发票申请向其开具相应发票的服务承诺；须与已开票凭证和开票时限区分。"@zh .
+
+ont:抽检样本 a owl:Class ;
+    rdfs:label "抽检样本"@zh ;
+    rdfs:comment "用于商品真伪、质量或描述一致性判断的实物或其他样本。"@zh .
+
+ont:拒绝接待 a owl:Class ;
+    rdfs:label "拒绝接待"@zh ;
+    rdfs:comment "在规则明确的应履约场景中商家拒绝接待消费者的行为。"@zh .
+
+ont:拣货行为 a owl:Class ;
+    rdfs:label "拣货行为"@zh ;
+    rdfs:comment "商家按订单要求检查并准备品类、规格、数量及质量的履约准备环节；与接单或骑手取货分开。"@zh .
+
+ont:接单行为 a owl:Class ;
+    rdfs:label "接单行为"@zh ;
+    rdfs:comment "商家收到消费者订单后在规定时间内接受或确认履约的动作；接单并不意味着已经备货或配送完成。"@zh .
+
+ont:推广佣金 a owl:Class ;
+    rdfs:label "推广佣金"@zh ;
+    rdfs:comment "商家或合作机构依推广合作约定向达人、买手等推广方支付的报酬；与消费者补贴或平台服务费区分。"@zh .
+
+ont:收货人 a owl:Class ;
+    rdfs:label "收货人"@zh ;
+    rdfs:comment "订单指定的收货对象，可与下单消费者不同，暂不预设二者相同。"@zh .
+
+ont:数据作弊 a owl:Class ;
+    rdfs:label "数据作弊"@zh ;
+    rdfs:comment "通过虚构、操纵或异常方式干预销量、评价、流量、评选指标等平台数据的行为；是否属于特定违规类型应按条款判断。"@zh .
+
+ont:数据指标 a owl:Class ;
+    rdfs:label "数据指标"@zh ;
+    rdfs:comment "规则用于评估商户、服务、交易表现或活动资格的量化指标及口径；需与实际采集值、来源系统区分。"@zh .
+
+ont:数据来源 a owl:Class ;
+    rdfs:label "数据来源"@zh ;
+    rdfs:comment "为排名、评分、处罚或业务判断提供数据的系统、渠道或证据出处；来源的存在不等于数据真实有效。"@zh .
+
+ont:文档片段 a owl:Class ;
+    rdfs:label "规则内容块"@zh ;
+    rdfs:comment "规则文档内可独立定位的内容块，统一承载章节、条款、正文段落组合、列表、表格及规则变更对照等结构；通过块类型、块标题和父子关系还原层级，避免为每个章节和条款再创建不同实体类别。"@zh .
+
+ont:旅游线路 a owl:Class ;
+    rdfs:label "旅游线路"@zh ;
+    rdfs:comment "旅行社提供的线路游服务产品及其预约条件的承载对象。"@zh .
+
+ont:旅行社 a owl:Class ;
+    rdfs:label "旅行社"@zh ;
+    rdfs:comment "经营线路游等服务产品并承担预约、履约责任的商家角色。"@zh .
+
+ont:旗舰店 a owl:Class ;
+    rdfs:label "旗舰店"@zh ;
+    rdfs:comment "以品牌及对应授权入驻的品牌店铺形式；平台之间具体资格不同。"@zh .
+
+ont:无接触配送 a owl:Class ;
+    rdfs:label "无接触配送"@zh ;
+    rdfs:comment "经与用户约定，将外卖食品放置指定地点由用户领取的配送方式。"@zh .
+
+ont:无需退货退款 a owl:Class ;
+    rdfs:label "无需退货退款"@zh ;
+    rdfs:comment "已发货后无需退回商品而申请退款的流程，须与退货退款区别。"@zh .
+
+ont:旧品回收单 a owl:Class ;
+    rdfs:label "旧品回收单"@zh ;
+    rdfs:comment "消费者提交旧品信息并发起回收报价、回收服务的单据。"@zh .
+
+ont:旧品质检 a owl:Class ;
+    rdfs:label "旧品质检"@zh ;
+    rdfs:comment "回收服务商对旧品进行检测以确认成色和最终收购价格的环节。"@zh .
+
+ont:景区门票 a owl:Class ;
+    rdfs:label "景区门票"@zh ;
+    rdfs:comment "消费者购买后用于景区入场、预约或到场核销的服务产品或凭证；与快递配送商品的履约方式不同。"@zh .
+
+ont:智能取餐柜 a owl:Class ;
+    rdfs:label "智能取餐柜"@zh ;
+    rdfs:comment "外卖商品完成配送交接前后短时存放、供消费者自助领取的智能柜体；与配送站点和普通仓储区分。"@zh .
+
+ont:服务保障 a owl:Class ;
+    rdfs:label "服务保障"@zh ;
+    rdfs:comment "商家针对商品或交易提供的服务承诺，如特定赔付保障。"@zh .
+
+ont:服务商 a owl:Class ;
+    rdfs:label "服务商"@zh ;
+    rdfs:comment "为商家、达人等提供专业服务的合作主体；不同平台对其权限及责任规定不同。"@zh .
+
+ont:服务履约 a owl:Class ;
+    rdfs:label "服务履约"@zh ;
+    rdfs:comment "商家依照已销售的服务产品和预约约定实际提供服务的行为。"@zh .
+
+ont:服务异常 a owl:Class ;
+    rdfs:label "服务异常"@zh ;
+    rdfs:comment "安装、回收、延保等服务未履行、履行不完整或额外收费的异常。"@zh .
+
+ont:服务异常求助 a owl:Class ;
+    rdfs:label "服务异常求助"@zh ;
+    rdfs:comment "消费者通过一键求助等入口提出的服务异常处理请求。"@zh .
+
+ont:条件组合 a owl:Class ;
+    rdfs:label "条件组合"@zh ;
+    rdfs:comment "把同一条款中的多个判断条件按“且、或、非”等逻辑组合的结构；原文存在多层括号或并列选择时应保留嵌套结构，不允许推测未写明的逻辑。"@zh .
+
+ont:极速退款服务 a owl:Class ;
+    rdfs:label "极速退款服务"@zh ;
+    rdfs:comment "在开通及特定条件满足后可按较快流程完成退款的服务。"@zh .
+
+ont:样品履约 a owl:Class ;
+    rdfs:label "样品履约"@zh ;
+    rdfs:comment "创作者获得样品后按约定进行商品推广或其他交付行为。"@zh .
+
+ont:样品申请 a owl:Class ;
+    rdfs:label "样品申请"@zh ;
+    rdfs:comment "创作者向商家申请商品样品的行为或业务申请记录，不等同于购物订单。"@zh .
+
+ont:样品返款 a owl:Class ;
+    rdfs:label "样品返款"@zh ;
+    rdfs:comment "购买样品并满足约定交付要求后由商家返还样品购买费用的业务处理。"@zh .
+
+ont:核销行为 a owl:Class ;
+    rdfs:label "核销行为"@zh ;
+    rdfs:comment "门店或商家对已购券码进行核验并确认消费的业务行为。"@zh .
+
+ont:核销记录 a owl:Class ;
+    rdfs:label "核销记录"@zh ;
+    rdfs:comment "核销发生后的业务证据记录，须与未核销或提前核销等状态区别。"@zh .
+
+ont:检验机构 a owl:Class ;
+    rdfs:label "检验机构"@zh ;
+    rdfs:comment "执行商品抽检检测的自检主体或第三方检验机构。"@zh .
+
+ont:检验结论 a owl:Class ;
+    rdfs:label "检验结论"@zh ;
+    rdfs:comment "商品质量抽检据检测结果形成的符合或不符合平台规定的结论。"@zh .
+
+ont:榜单 a owl:Class ;
+    rdfs:label "榜单"@zh ;
+    rdfs:comment "平台根据一定评选标准对商家、商品或服务进行展示、排名或推荐的名单体系；应与某期具体榜单结果区别。"@zh .
+
+ont:榜单结果 a owl:Class ;
+    rdfs:label "榜单结果"@zh ;
+    rdfs:comment "某一榜单在具体评选周期内形成的入选、排名、下榜等结果；不能在没有周期或版本条件时跨期复用。"@zh .
+
+ont:榜单荣誉物料 a owl:Class ;
+    rdfs:label "榜单荣誉物料"@zh ;
+    rdfs:comment "平台向符合条件的上榜商户发放的可用于宣传的榜单荣誉素材。"@zh .
+
+ont:正品证明材料 a owl:Class ;
+    rdfs:label "正品证明材料"@zh ;
+    rdfs:comment "商家为证明商品正规进货渠道及真实正品而保存或提供的证据材料。"@zh .
+
+ont:法律法规 a owl:Class ;
+    rdfs:label "法律法规"@zh ;
+    rdfs:comment "作为平台治理、交易义务或消费者保护依据的法律及行政法规等规范文本；与平台自身制定的规则应分开索引。"@zh .
+
+ont:活动商品 a owl:Class ;
+    rdfs:label "活动商品"@zh ;
+    rdfs:comment "经平台审核后纳入指定活动范围的商品，须与普通商品概念区分。"@zh .
+
+ont:活动报名申请 a owl:Class ;
+    rdfs:label "活动报名申请"@zh ;
+    rdfs:comment "商家为参与活动提交的申请以及需满足的活动准入条件。"@zh .
+
+ont:消费者 a owl:Class ;
+    rdfs:label "消费者"@zh ;
+    rdfs:comment "在平台购买商品、接受服务、提交评价或提出售后要求的用户角色；不必然等于订单的实际收货人。"@zh .
+
+ont:激励奖励 a owl:Class ;
+    rdfs:label "激励奖励"@zh ;
+    rdfs:comment "满足活动规则后可能获得的金额、虚拟金等利益。"@zh .
+
+ont:激励政策 a owl:Class ;
+    rdfs:label "激励政策"@zh ;
+    rdfs:comment "平台针对特定商户、活动期间或经营指标制定的奖励规则；奖励资格、门槛和实际发放应分开核对。"@zh .
+
+ont:激励门槛 a owl:Class ;
+    rdfs:label "激励门槛"@zh ;
+    rdfs:comment "达到销售额、商品数量等要求才可获得激励的条件。"@zh .
+
+ont:物流凭证 a owl:Class ;
+    rdfs:label "物流凭证"@zh ;
+    rdfs:comment "面单、妥投记录、运输证明等用于核验物流履约的材料。"@zh .
+
+ont:物流单号 a owl:Class ;
+    rdfs:label "物流单号"@zh ;
+    rdfs:comment "货运物流的单号标识对象；后续是否实体化可按使用场景调整。"@zh .
+
+ont:物流承运人 a owl:Class ;
+    rdfs:label "物流承运人"@zh ;
+    rdfs:comment "接受寄递或配送任务、负责运输及提供揽收妥投等物流记录的承运服务主体；与下单消费者或商家不是同一角色。"@zh .
+
+ont:物流揽收记录 a owl:Class ;
+    rdfs:label "物流揽收记录"@zh ;
+    rdfs:comment "由物流承运方回传且可用于判断发货时间的揽件记录。"@zh .
+
+ont:物流轨迹异常 a owl:Class ;
+    rdfs:label "物流轨迹异常"@zh ;
+    rdfs:comment "承运物流的揽收、转运、派送或签收轨迹与订单发货状态存在异常的业务情形；异常需调查核实，不能自动认定虚假发货。"@zh .
+
+ont:申诉材料 a owl:Class ;
+    rdfs:label "申诉材料"@zh ;
+    rdfs:comment "申诉时提交的聊天记录、截图、面单、发票等证明材料。"@zh .
+
+ont:申诉结果 a owl:Class ;
+    rdfs:label "申诉结果"@zh ;
+    rdfs:comment "平台审核申诉材料后形成的维持、撤销或调整处理决定；结果应与原违规处理记录关联，而非仅视为投诉。"@zh .
+
+ont:电商创作者 a owl:Class ;
+    rdfs:label "电商创作者"@zh ;
+    rdfs:comment "开通商品分享功能并通过视频、直播等方式开展商品推广的主体；不默认等同于生活服务达人。"@zh .
+
+ont:直播人员 a owl:Class ;
+    rdfs:label "直播人员"@zh ;
+    rdfs:comment "直播规则所描述的主播及直播营销相关人员角色。"@zh .
+
+ont:直播带货 a owl:Class ;
+    rdfs:label "直播带货"@zh ;
+    rdfs:comment "主播或商家在直播过程中介绍、推荐并链接商品或服务的营销活动；直播内容合规和订单履约分别判断。"@zh .
+
+ont:直播间 a owl:Class ;
+    rdfs:label "直播间"@zh ;
+    rdfs:comment "平台内直播场景，用于商品推广、互动或违规内容识别。"@zh .
+
+ont:短视频 a owl:Class ;
+    rdfs:label "短视频"@zh ;
+    rdfs:comment "可以承载商品信息及推广内容的视频载体，区别于直播间。"@zh .
+
+ont:破损包退服务 a owl:Class ;
+    rdfs:label "破损包退服务"@zh ;
+    rdfs:comment "商品损坏等情形下根据承诺提供退款/退货退款保障的服务。"@zh .
+
+ont:私域信息 a owl:Class ;
+    rdfs:label "私域信息"@zh ;
+    rdfs:comment "社群、联系方式及其他可能被用作站外引流的信息。"@zh .
+
+ont:积分权益 a owl:Class ;
+    rdfs:label "积分权益"@zh ;
+    rdfs:comment "会员在满足积分使用条件后可兑换的礼券、折扣或其他会员利益；与积分余额或信用计分不同。"@zh .
+
+ont:积分账户 a owl:Class ;
+    rdfs:label "积分账户"@zh ;
+    rdfs:comment "用于记录会员积分获取、使用或兑换情况的账户载体；与淘宝信用评价计分账户不应混同。"@zh .
+
+ont:站外交易 a owl:Class ;
+    rdfs:label "站外交易"@zh ;
+    rdfs:comment "消费者在平台购买流程之外通过其他网站、私域或线下渠道完成的交易；单独存在不必然违反平台规则。"@zh .
+
+ont:笔记 a owl:Class ;
+    rdfs:label "笔记"@zh ;
+    rdfs:comment "平台内笔记形式的内容载体，可涉及商品推广或违规引流。"@zh .
+
+ont:签收行为 a owl:Class ;
+    rdfs:label "签收行为"@zh ;
+    rdfs:comment "订单收货环节对商品进行签收、拒签或异常收货的行为；须与物流系统显示“妥投”的状态区分。"@zh .
+
+ont:管理办法 a owl:Class ;
+    rdfs:label "管理办法"@zh ;
+    rdfs:comment "针对特定管理事项规定管理流程、资格、监督和处置方式的制度性文件；其适用对象与版本须根据原文确认。"@zh .
+
+ont:类目推广权限 a owl:Class ;
+    rdfs:label "类目推广权限"@zh ;
+    rdfs:comment "创作者推广限制类目商品所需取得的专门准入权限。"@zh .
+
+ont:线下交易 a owl:Class ;
+    rdfs:label "线下交易"@zh ;
+    rdfs:comment "通过到店现金、刷卡或其他非平台线上订单流程完成的交易行为；应与以规避平台交易为目的的飞单行为严格区分。"@zh .
+
+ont:线下门店 a owl:Class ;
+    rdfs:label "线下门店"@zh ;
+    rdfs:comment "实际开展服务经营的实体门店，与POI线上地址及网店区分。"@zh .
+
+ont:经营资质 a owl:Class ;
+    rdfs:label "经营资质"@zh ;
+    rdfs:comment "商家入驻或经营特定行业、商品类目时需提交的许可、登记或合规证明；是否有效应核验主体和期限。"@zh .
+
+ont:结算安排 a owl:Class ;
+    rdfs:label "结算安排"@zh ;
+    rdfs:comment "平台和商家关于订单货款结算周期、暂停、延期或支付条件的约定；需区分规则生效时间与订单结算日。"@zh .
+
+ont:维修服务 a owl:Class ;
+    rdfs:label "维修服务"@zh ;
+    rdfs:comment "商品质量或保修责任范围内提供的检查、修复、返修等售后服务；应与退款、换货等其他售后方式区别。"@zh .
+
+ont:缺货违规 a owl:Class ;
+    rdfs:label "缺货违规"@zh ;
+    rdfs:comment "商家无法发货、拒绝发货或超过时限仍未发货等相关违规情形。"@zh .
+
+ont:自配送 a owl:Class ;
+    rdfs:label "自配送"@zh ;
+    rdfs:comment "由商家自行提供配送服务的履约方式，与平台配送区分。"@zh .
+
+ont:营销活动 a owl:Class ;
+    rdfs:label "营销活动"@zh ;
+    rdfs:comment "由商家或平台组织、商品可参与的营销活动；具体百亿补贴等是活动名称而非新本体类。"@zh .
+
+ont:虚假交易 a owl:Class ;
+    rdfs:label "虚假交易"@zh ;
+    rdfs:comment "通过虚构交易、制造异常成交或其他不真实交易手段干扰平台交易秩序的行为类型；与仅发生物流异常的虚假发货不是同一判定口径。"@zh .
+
+ont:虚假发货 a owl:Class ;
+    rdfs:label "虚假发货"@zh ;
+    rdfs:comment "订单展示已发货但缺少真实发货依据、物流信息异常或存在规则列明的虚假履约表现的违规类型；不能仅凭单号异常直接认定。"@zh .
+
+ont:虚假宣传 a owl:Class ;
+    rdfs:label "虚假宣传"@zh ;
+    rdfs:comment "规则涉及的宣传内容不实或可能误导消费者的行为类别。"@zh .
+
+ont:行业类目 a owl:Class ;
+    rdfs:label "行业类目"@zh ;
+    rdfs:comment "平台对经营业态或商品、服务所属行业的分类单元；与店铺类型、具体商品不能混同。"@zh .
+
+ont:规则制度 a owl:Class ;
+    rdfs:label "规则制度"@zh ;
+    rdfs:comment "平台或机构制定的成体系的业务规范，用于规定适用范围、主体义务、禁止行为和处理措施；区别于单条具体条款。"@zh .
+
+ont:规则文档 a owl:Class ;
+    rdfs:label "规则文档"@zh ;
+    rdfs:comment "一份从平台规则中心或采集资料中获得的具体规则、公告、协议、解读或征求意见文件；同名不同历史版本可以是不同文档记录。其标题、发布主体、正文与时效应以该份原文为准，公告或草案不能自动当作现行正式规则。"@zh .
+
+ont:规则条件 a owl:Class ;
+    rdfs:label "规则条件"@zh ;
+    rdfs:comment "规则条款提出的适用或触发前提，可以涉及主体资格、交易金额、履约时间、违规次数等；它描述规定的判断条件，不表示某一订单实际满足条件。"@zh .
+
+ont:规则结果 a owl:Class ;
+    rdfs:label "规则结果"@zh ;
+    rdfs:comment "条款在特定条件下规定的规范性后果，例如结算安排、赔付义务、整改要求或激励权益；与平台已经执行的处理记录、实际赔付金额相区分。"@zh .
+
+ont:订单取消 a owl:Class ;
+    rdfs:label "订单取消"@zh ;
+    rdfs:comment "商家或平台将未完成订单取消的业务操作，需结合条件判责。"@zh .
+
+ont:订单快照 a owl:Class ;
+    rdfs:label "订单快照"@zh ;
+    rdfs:comment "消费者下单时约定的套餐和商品信息快照，可用于判断后续变更是否影响履约义务。"@zh .
+
+ont:评价争议 a owl:Class ;
+    rdfs:label "评价争议"@zh ;
+    rdfs:comment "商户或消费者就评价内容真实性、合规性或展示形成的争议。"@zh .
+
+ont:评价干预行为 a owl:Class ;
+    rdfs:label "评价干预行为"@zh ;
+    rdfs:comment "商户刷评、利益诱导、要求删除/修改评价等干扰评价秩序的行为。"@zh .
+
+ont:评价有礼活动 a owl:Class ;
+    rdfs:label "评价有礼活动"@zh ;
+    rdfs:comment "规则规定的以商家预算为基础向评价用户发券的活动；不能直接等同诱导好评违规。"@zh .
+
+ont:评价评审任务 a owl:Class ;
+    rdfs:label "评价评审任务"@zh ;
+    rdfs:comment "在评审团机制下由评审员对争议评价进行投票的任务。"@zh .
+
+ont:评选维度 a owl:Class ;
+    rdfs:label "评选维度"@zh ;
+    rdfs:comment "榜单、评级或评审过程中采用的评价方向，例如经营品质或服务表现；与某项具体指标或评选结论区分。"@zh .
+
+ont:账号权益 a owl:Class ;
+    rdfs:label "账号权益"@zh ;
+    rdfs:comment "认证账户拥有且可能被限制的权益，例如内容合作、私信通等。"@zh .
+
+ont:账号认证 a owl:Class ;
+    rdfs:label "账号认证"@zh ;
+    rdfs:comment "账号经平台审核取得或失去专业经营等认证身份的过程或状态；认证身份不等于店铺经营主体资格。"@zh .
+
+ont:质检报告 a owl:Class ;
+    rdfs:label "质检报告"@zh ;
+    rdfs:comment "商品检测机构出具的检验结果或质量证明文件；报告是否对应相关商品、批次及检验项目应分别核实。"@zh .
+
+ont:资费标准 a owl:Class ;
+    rdfs:label "资费标准"@zh ;
+    rdfs:comment "平台针对类目、店铺类型或服务项目规定的收费标准，可涉及保证金和服务费；应按版本、适用范围核对。"@zh .
+
+ont:赔付责任 a owl:Class ;
+    rdfs:label "赔付责任"@zh ;
+    rdfs:comment "商家、服务方或其他主体因约定违约、商品问题或权益受损需承担的赔偿义务；责任成立和金额应分别核验。"@zh .
+
+ont:赠品 a owl:Class ;
+    rdfs:label "赠品"@zh ;
+    rdfs:comment "作为购买交易商品的前提而获得的约定赠送物品或服务。"@zh .
+
+ont:跨境商家 a owl:Class ;
+    rdfs:label "跨境商家"@zh ;
+    rdfs:comment "从保税仓发货、开展跨境电商业务的经营主体角色。"@zh .
+
+ont:转让方 a owl:Class ;
+    rdfs:label "转让方"@zh ;
+    rdfs:comment "店铺经营主体变更过程中转出经营主体或相关权益的一方；其历史经营义务不能仅凭变更事件推定已全部转移。"@zh .
+
+ont:软件服务费 a owl:Class ;
+    rdfs:label "软件服务费"@zh ;
+    rdfs:comment "生活服务平台针对合作业务收取并可能按条件返还的软件服务费用。"@zh .
+
+ont:达人 a owl:Class ;
+    rdfs:label "达人"@zh ;
+    rdfs:comment "规则中承担商品或生活服务推广工作的主体角色；各平台具体准入定义可能不同。"@zh .
+
+ont:过期退保障 a owl:Class ;
+    rdfs:label "过期退保障"@zh ;
+    rdfs:comment "页面标记的到期后自动退款服务权益，须核对是否消费及适用条件。"@zh .
+
+ont:运费 a owl:Class ;
+    rdfs:label "运费"@zh ;
+    rdfs:comment "商品发货、退货、换货或取件等运输环节产生的费用；负担方随责任原因、保障服务和平台规则变化。"@zh .
+
+ont:运费险服务 a owl:Class ;
+    rdfs:label "运费险服务"@zh ;
+    rdfs:comment "针对退换货运费风险提供的保险保障服务，区分商家、创作者和消费者投保。"@zh .
+
+ont:违约金 a owl:Class ;
+    rdfs:label "违约金"@zh ;
+    rdfs:comment "规则或协议规定在特定违约成立时支付或扣收的金额义务；与行政罚款及对消费者赔付不直接等同。"@zh .
+
+ont:违规处理 a owl:Class ;
+    rdfs:label "违规处理"@zh ;
+    rdfs:comment "平台针对规则违背事项实施的处理过程或结果，可能包含警告、功能限制、下架、赔付等措施；不等同违规行为本身。"@zh .
+
+ont:违规情形 a owl:Class ;
+    rdfs:label "违规情形"@zh ;
+    rdfs:comment "规则中具备明确适用条件与行为特征的违规场景；需与实际是否认定成立及违规等级区分。"@zh .
+
+ont:违规申诉 a owl:Class ;
+    rdfs:label "违规申诉"@zh ;
+    rdfs:comment "商家或相关主体不服平台违规认定与处罚时提出的复核程序；与消费者就退款提出的售后申请区分。"@zh .
+
+ont:违规等级 a owl:Class ;
+    rdfs:label "违规等级"@zh ;
+    rdfs:comment "平台将经认定的违规按严重程度、次数或影响程度进行分级的分类；不同平台分级术语和门槛不能互换。"@zh .
+
+ont:违规营销 a owl:Class ;
+    rdfs:label "违规营销"@zh ;
+    rdfs:comment "平台对不符合内容推广或营销行为规范的活动行为所作的违规分类；要依据具体场景区分虚假宣传、导流等。"@zh .
+
+ont:违规行为 a owl:Class ;
+    rdfs:label "违规行为"@zh ;
+    rdfs:comment "被特定平台规则禁止或限制的经营、交易、内容或履约行为类型；出现行为线索并不意味着违规已被查实。"@zh .
+
+ont:连带责任 a owl:Class ;
+    rdfs:label "连带责任"@zh ;
+    rdfs:comment "规则明确规定相关主体在特定条件下共同承担的责任概念，是否适用必须结合原文条件。"@zh .
+
+ont:退款审核 a owl:Class ;
+    rdfs:label "退款审核"@zh ;
+    rdfs:comment "商家或平台针对退款申请进行审查与处理的业务环节。"@zh .
+
+ont:退款申诉 a owl:Class ;
+    rdfs:label "退款申诉"@zh ;
+    rdfs:comment "商家对核销后退款等平台退款处理提出异议、提交服务履约或沟通凭证请求复核的程序；不等同于消费者退款申请。"@zh .
+
+ont:退款申请 a owl:Class ;
+    rdfs:label "退款申请"@zh ;
+    rdfs:comment "消费者针对订单支付款项提出的退回请求，可能涉及未接单、已接单或已核销等不同交易状态；区别于商家提出的退款申诉。"@zh .
+
+ont:退货二次入区 a owl:Class ;
+    rdfs:label "退货二次入区"@zh ;
+    rdfs:comment "符合条件的未签收跨境退件经处理后再次进入保税仓的服务过程。"@zh .
+
+ont:退货宝权益 a owl:Class ;
+    rdfs:label "退货宝权益"@zh ;
+    rdfs:comment "退换货成功等条件下的运费保障权益，不等同运费险。"@zh .
+
+ont:退货退款 a owl:Class ;
+    rdfs:label "退货退款"@zh ;
+    rdfs:comment "消费者在售后环节请求退回商品并退还相应款项的事项；与仅退款、无需退货退款以及商家申诉区分。"@zh .
+
+ont:配送服务商 a owl:Class ;
+    rdfs:label "配送服务商"@zh ;
+    rdfs:comment "提供外卖即时配送服务的商户或第三方服务组织。"@zh .
+
+ont:配送站点 a owl:Class ;
+    rdfs:label "配送站点"@zh ;
+    rdfs:comment "为配送人员和站长提供调度、培训和物资场所的实体站点。"@zh .
+
+ont:配送箱 a owl:Class ;
+    rdfs:label "配送箱"@zh ;
+    rdfs:comment "配送骑手运输食品使用、需符合卫生和防护要求的配送容器。"@zh .
+
+ont:配送超时 a owl:Class ;
+    rdfs:label "配送超时"@zh ;
+    rdfs:comment "订单配送未在约定或平台规定时限内到达的异常情形。"@zh .
+
+ont:配送骑手 a owl:Class ;
+    rdfs:label "配送骑手"@zh ;
+    rdfs:comment "接受配送任务并负责将即送或外卖订单商品送至收货地点的人员；与商家自行拣货、确认接单的角色区分。"@zh .
+
+ont:酒店客房 a owl:Class ;
+    rdfs:label "酒店客房"@zh ;
+    rdfs:comment "住宿服务供应商在平台提供可预订的房间或房型服务资源；与订单所预定的实际入住时段及核销分开。"@zh .
+
+ont:鉴定凭证 a owl:Class ;
+    rdfs:label "鉴定凭证"@zh ;
+    rdfs:comment "对商品真伪等问题用于申请赔付、认定的证明材料。"@zh .
+
+ont:闲置物品 a owl:Class ;
+    rdfs:label "闲置物品"@zh ;
+    rdfs:comment "以旧换新或回收交易中消费者拟交付的旧商品、设备等物品；其回收报价可能随实物质检调整。"@zh .
+
+ont:随时退保障 a owl:Class ;
+    rdfs:label "随时退保障"@zh ;
+    rdfs:comment "页面标记的未消费随时退款服务权益，存在订单和条件限制。"@zh .
+
+ont:隐私包装 a owl:Class ;
+    rdfs:label "隐私包装"@zh ;
+    rdfs:comment "敏感商品在配送时使用不透明二次包装、隐藏商品信息的措施。"@zh .
+
+ont:非全新商品 a owl:Class ;
+    rdfs:label "非全新商品"@zh ;
+    rdfs:comment "存在二手、翻新、返修或其他非全新状态的商品类型。"@zh .
+
+ont:预售商品 a owl:Class ;
+    rdfs:label "预售商品"@zh ;
+    rdfs:comment "商品投放时存在预售交付方式及相关准入约束的商品。"@zh .
+
+ont:预约变更 a owl:Class ;
+    rdfs:label "预约变更"@zh ;
+    rdfs:comment "下单前后变更或增加既有预约条件的行为/事件。"@zh .
+
+ont:预约条件 a owl:Class ;
+    rdfs:label "预约条件"@zh ;
+    rdfs:comment "服务履约预约所要求的限制、规则或前提，须结合商品详情和交易阶段。"@zh .
+
+ont:预约申请 a owl:Class ;
+    rdfs:label "预约申请"@zh ;
+    rdfs:comment "消费者在使用团购或住宿等服务前发起的预约请求。"@zh .
+
+ont:预订席位 a owl:Class ;
+    rdfs:label "预订席位"@zh ;
+    rdfs:comment "餐饮预订订单中要求预留的大厅/包间等用餐接待资源。"@zh .
+
+ont:飞单行为 a owl:Class ;
+    rdfs:label "飞单行为"@zh ;
+    rdfs:comment "在消费者已购买或明确表达平台购买意向的情况下，商家引导其退款或改用平台外渠道完成交易的行为；普通线下交易不必然构成飞单。"@zh .
+
+ont:食品安全配送要求 a owl:Class ;
+    rdfs:label "食品安全配送要求"@zh ;
+    rdfs:comment "即时配送相关的清洁、容器卫生及食品安全防护要求。"@zh .
+
+ont:餐品缺失 a owl:Class ;
+    rdfs:label "餐品缺失"@zh ;
+    rdfs:comment "消费者实收餐品少于订单应提供餐品的投诉或履约异常。"@zh .
+
+ont:餐饮预订 a owl:Class ;
+    rdfs:label "餐饮预订"@zh ;
+    rdfs:comment "消费者通过到店餐饮业务预约商户预留用餐资源或服务的过程。"@zh .
+
+
+# ===== 二、对象关系（文档结构 + 正文语义） =====
+
+ont:AI软件商品披露商品信息 a owl:ObjectProperty ;
+    rdfs:label "AI软件商品披露商品信息"@zh ;
+    rdfs:comment "AI软件商品→商品信息；服务期限、模型名称与版本应在详情页明示。"@zh .
+
+ont:POI认领涉及门店 a owl:ObjectProperty ;
+    rdfs:label "POI认领涉及门店"@zh ;
+    rdfs:comment "POI认领→线下门店；申请认领的是具体线下门店对应POI。"@zh .
+
+ont:POI门店展示团购商品 a owl:ObjectProperty ;
+    rdfs:label "POI门店展示团购商品"@zh ;
+    rdfs:comment "POI门店→团购商品；平台允许在认领POI门店后发布展示团购信息。"@zh .
+
+ont:下单购买 a owl:ObjectProperty ;
+    rdfs:label "下单购买"@zh ;
+    rdfs:comment "表示消费者选购商品或服务并形成平台交易订单；下单完成与付款成功、商品签收是不同阶段。"@zh .
+
+ont:下架商品 a owl:ObjectProperty ;
+    rdfs:label "下架商品"@zh ;
+    rdfs:comment "表示平台或经营者将特定商品停止展示或销售的处置；下架可能因违规、资质或主动经营调整而发生。"@zh .
+
+ont:专业号绑定店铺 a owl:ObjectProperty ;
+    rdfs:label "专业号绑定店铺"@zh ;
+    rdfs:comment "专业号与店铺建立绑定关系；表示专业号→店铺。"@zh .
+
+ont:专业号解绑店铺 a owl:ObjectProperty ;
+    rdfs:label "专业号解绑店铺"@zh ;
+    rdfs:comment "专业号与店铺解除绑定关系；表示专业号→店铺。"@zh .
+
+ont:专卖店经营品牌 a owl:ObjectProperty ;
+    rdfs:label "专卖店经营品牌"@zh ;
+    rdfs:comment "连接专卖店与其根据平台入驻许可实际经营的品牌；不表示所有专卖店适用相同授权条件。"@zh .
+
+ont:专营店经营品牌 a owl:ObjectProperty ;
+    rdfs:label "专营店经营品牌"@zh ;
+    rdfs:comment "连接专营店与其依法或依平台授权经营的品牌；专营店可能经营多个品牌，具体数量和范围按平台准入规则确认。"@zh .
+
+ont:交易状态决定超时处理 a owl:ObjectProperty ;
+    rdfs:label "交易状态决定超时处理"@zh ;
+    rdfs:comment "交易状态→交易超时；不同状态采用不同超时规则。"@zh .
+
+ont:交易评价关联订单 a owl:ObjectProperty ;
+    rdfs:label "交易评价关联订单"@zh ;
+    rdfs:comment "交易评价→业务订单；评价依据真实有效交易订单。"@zh .
+
+ont:交易评价形成店铺评分 a owl:ObjectProperty ;
+    rdfs:label "交易评价形成店铺评分"@zh ;
+    rdfs:comment "交易评价→店铺评分；评价包含质量、服务、物流等指标评分。"@zh .
+
+ont:交易评价影响信用积分 a owl:ObjectProperty ;
+    rdfs:label "交易评价影响信用积分"@zh ;
+    rdfs:comment "交易评价→信用积分；买家评价与卖家信用计分逻辑关联。"@zh .
+
+ont:交易超时可关闭订单 a owl:ObjectProperty ;
+    rdfs:label "交易超时可关闭订单"@zh ;
+    rdfs:comment "交易超时→业务订单；等待买家付款超过期限可自动关闭。"@zh .
+
+ont:产生交易纠纷 a owl:ObjectProperty ;
+    rdfs:label "产生交易纠纷"@zh ;
+    rdfs:comment "连接订单或履约异常与由此发生的争议事项；争议的成立不等同违规已确认或赔付责任已产生。"@zh .
+
+ont:以旧换新回收闲置物品 a owl:ObjectProperty ;
+    rdfs:label "以旧换新回收闲置物品"@zh ;
+    rdfs:comment "以旧换新服务→闲置物品；服务包含旧物回收与新品购买。"@zh .
+
+ont:以旧换新提供优惠权益 a owl:ObjectProperty ;
+    rdfs:label "以旧换新提供优惠权益"@zh ;
+    rdfs:comment "以旧换新服务→优惠权益；回收红包及相关补贴需核对活动条件。"@zh .
+
+ont:会员积分兑换积分权益 a owl:ObjectProperty ;
+    rdfs:label "会员积分兑换积分权益"@zh ;
+    rdfs:comment "会员积分→积分权益；积分可兑换礼券或专属权益。"@zh .
+
+ont:会员获得会员积分 a owl:ObjectProperty ;
+    rdfs:label "会员获得会员积分"@zh ;
+    rdfs:comment "消费者→会员积分；符合要求的交易或活动可获得积分。"@zh .
+
+ont:传播私域信息 a owl:ObjectProperty ;
+    rdfs:label "传播私域信息"@zh ;
+    rdfs:comment "通过内容、消息等方式传播私域联系方式；表示载体/行为→私域信息。"@zh .
+
+ont:住宿供应商提供客房 a owl:ObjectProperty ;
+    rdfs:label "住宿供应商提供客房"@zh ;
+    rdfs:comment "住宿服务供应商→酒店客房；客房由住宿提供方或其代理供应。"@zh .
+
+ont:住宿预订对应预约申请 a owl:ObjectProperty ;
+    rdfs:label "住宿预订对应预约申请"@zh ;
+    rdfs:comment "住宿预订→预约申请；住宿预售券/日历票房等存在预约请求。"@zh .
+
+ont:住宿预订需要供应商确认 a owl:ObjectProperty ;
+    rdfs:label "住宿预订需要供应商确认"@zh ;
+    rdfs:comment "住宿预订→住宿服务供应商；预订订单经供应商确认后生效。"@zh .
+
+ont:使用品牌 a owl:ObjectProperty ;
+    rdfs:label "使用品牌"@zh ;
+    rdfs:comment "连接商品或商家宣传中标示的品牌；使用标识不自动证明已获得品牌权利人的正式授权。"@zh .
+
+ont:使用广告禁用词 a owl:ObjectProperty ;
+    rdfs:label "使用广告禁用词"@zh ;
+    rdfs:comment "商品宣传内容使用规则列示的禁用词；表示宣传内容→广告禁用词，不直接推导处罚。"@zh .
+
+ont:依据 a owl:ObjectProperty ;
+    rdfs:label "依据"@zh ;
+    rdfs:comment "表示某项规则、判断、处理或评价所援引的另一项规则、证据或标准；具体依据类型应从原文确认，不能混同处罚依据。"@zh .
+
+ont:依据考核指标 a owl:ObjectProperty ;
+    rdfs:label "依据考核指标"@zh ;
+    rdfs:comment "连接评级、资格审核或激励判断与采用的考核指标；指标口径和统计周期应依各平台规则确认。"@zh .
+
+ont:保税商品从保税仓发货 a owl:ObjectProperty ;
+    rdfs:label "保税商品从保税仓发货"@zh ;
+    rdfs:comment "保税商品→保税仓；对应从保税仓发货的适用范围。"@zh .
+
+ont:保障权益 a owl:ObjectProperty ;
+    rdfs:label "保障权益"@zh ;
+    rdfs:comment "表示某项规范、承诺或保障措施旨在保护某类主体权益；它表达保障目标，不自动证明权益已经实现。"@zh .
+
+ont:假货涉及商品 a owl:ObjectProperty ;
+    rdfs:label "假货涉及商品"@zh ;
+    rdfs:comment "假货→商品；仅在涉嫌或已查实的特定判定条件下使用。"@zh .
+
+ont:假货触发平台处理 a owl:ObjectProperty ;
+    rdfs:label "假货触发平台处理"@zh ;
+    rdfs:comment "假货→处理措施；不同涉嫌售假与认定售假阶段的措施不能混同。"@zh .
+
+ont:公告修订规则 a owl:ObjectProperty ;
+    rdfs:label "公告修订规则"@zh ;
+    rdfs:comment "修订公告明确指出所修订的规则；表示公告文档→目标规则文档。"@zh .
+
+ont:公告展示变更前片段 a owl:ObjectProperty ;
+    rdfs:label "公告展示变更前片段"@zh ;
+    rdfs:comment "规则变更公告明确展示旧条文时，连接该公告文档与“块类型=变更前内容”的内容块；保留表格原有的变更前/后列及对应关系，不能把旧内容当作现行要求。"@zh .
+
+ont:公告展示变更后片段 a owl:ObjectProperty ;
+    rdfs:label "公告展示变更后片段"@zh ;
+    rdfs:comment "规则变更公告明确展示拟修订或新发布条文时，连接该公告文档与“块类型=变更后内容”的内容块；仍需依据公告性质和生效日期判断它是否已实施。"@zh .
+
+ont:公示内容 a owl:ObjectProperty ;
+    rdfs:label "公示内容"@zh ;
+    rdfs:comment "表示公告、公示行为或发布渠道所公开的制度、结果或处理信息；若仅有纯文本内容，可交由文档索引保存。"@zh .
+
+ont:公示对象 a owl:ObjectProperty ;
+    rdfs:label "公示对象"@zh ;
+    rdfs:comment "表示规则、公告或处罚信息向哪些用户、商户或其他主体公开或告知；不要与被处罚主体混同。"@zh .
+
+ont:公示方式 a owl:ObjectProperty ;
+    rdfs:label "公示方式"@zh ;
+    rdfs:comment "表示公示事项采用何种展示、发布或通知形式；具体仅为文字格式时不必强制抽象成业务实体。"@zh .
+
+ont:共管门店计入共管业绩 a owl:ObjectProperty ;
+    rdfs:label "共管门店计入共管业绩"@zh ;
+    rdfs:comment "共管门店→共管业绩；共管商品业绩参与相应周期核算。"@zh .
+
+ont:关联物流单号 a owl:ObjectProperty ;
+    rdfs:label "关联物流单号"@zh ;
+    rdfs:comment "将订单或发货行为与承运物流系统使用的单号关联；单号存在并不能单独证明真实揽收。"@zh .
+
+ont:内容块列明免责情形 a owl:ObjectProperty ;
+    rdfs:label "内容块列明免责情形"@zh ;
+    rdfs:comment "内容块明确规定的免责、减责或不适用情形；须识别其针对的行为、责任和适用条件，不能仅凭出现“免责”一词认定。"@zh .
+
+ont:内容块列明条件 a owl:ObjectProperty ;
+    rdfs:label "内容块列明条件"@zh ;
+    rdfs:comment "内容块在原文中明确列出的资格、金额、时效、次数等适用或触发条件；它描述规范性条件，不代表实际订单已满足该条件。"@zh .
+
+ont:内容块列明条件组合 a owl:ObjectProperty ;
+    rdfs:label "内容块列明条件组合"@zh ;
+    rdfs:comment "内容块明确出现的多项条件及其“且、或、非”等组合关系；复杂条件只能按原文可确认的逻辑抽取，不补推未写明的条件。"@zh .
+
+ont:内容块包含子块 a owl:ObjectProperty ;
+    rdfs:label "内容块包含子块"@zh ;
+    rdfs:comment "表示内容块之间直接的父子层级；可表达“章→节→条款”或“章节→正文块”等结构，但只建实际存在的层级，不因为标题缺失而虚构章节。"@zh .
+
+ont:内容块引用内容块 a owl:ObjectProperty ;
+    rdfs:label "内容块引用内容块"@zh ;
+    rdfs:comment "一个内容块明确引用另一规则中的章、条或内容块时建立关联；引用对象需要结合所属文档和版本确定，不能仅凭“第三条”等编号跨文件连接。"@zh .
+
+ont:内容块引用规则 a owl:ObjectProperty ;
+    rdfs:label "内容块引用规则"@zh ;
+    rdfs:comment "内容块中的引用文字明确指向另一份规则、协议或管理规范时建立引用关系；仅出现相似标题不代表存在引用。"@zh .
+
+ont:内容块涉及业务实体 a owl:ObjectProperty ;
+    rdfs:label "内容块涉及业务实体"@zh ;
+    rdfs:comment "内容块与从该块正文中识别并经过核验的具体业务对象或概念实例之间的关联；仅出现关键词不应自动视为事实成立。"@zh .
+
+ont:内容块规定结果 a owl:ObjectProperty ;
+    rdfs:label "内容块规定结果"@zh ;
+    rdfs:comment "内容块对满足某种条件后的处理、赔付、结算、整改或激励作出的规定；不得把规范上的后果当作已经执行的事实。"@zh .
+
+ont:冻结资金 a owl:ObjectProperty ;
+    rdfs:label "冻结资金"@zh ;
+    rdfs:comment "表示平台按特定交易风险或规则要求临时限制资金使用；冻结与扣款、赔付、保证金没收不同。"@zh .
+
+ont:创作者履行样品义务 a owl:ObjectProperty ;
+    rdfs:label "创作者履行样品义务"@zh ;
+    rdfs:comment "电商创作者→样品履约；申请样品成功后按约定进行推广交付。"@zh .
+
+ont:创作者开通商品分享功能 a owl:ObjectProperty ;
+    rdfs:label "创作者开通商品分享功能"@zh ;
+    rdfs:comment "电商创作者→商品分享权限；规则将开通分享功能作为推广前提。"@zh .
+
+ont:创作者承担连带责任 a owl:ObjectProperty ;
+    rdfs:label "创作者承担连带责任"@zh ;
+    rdfs:comment "电商创作者→连带责任；仅在规则列举条件成立时可能承担。"@zh .
+
+ont:创作者投保运费险 a owl:ObjectProperty ;
+    rdfs:label "创作者投保运费险"@zh ;
+    rdfs:comment "电商创作者→运费险服务；独立于商家投保的适用条件。"@zh .
+
+ont:创作者推广商品 a owl:ObjectProperty ;
+    rdfs:label "创作者推广商品"@zh ;
+    rdfs:comment "电商创作者→商品；创作者通过视频直播推广商品。"@zh .
+
+ont:创作者推广预售商品 a owl:ObjectProperty ;
+    rdfs:label "创作者推广预售商品"@zh ;
+    rdfs:comment "电商创作者→预售商品；对预售商品推广设置准入要求。"@zh .
+
+ont:创作者申请样品 a owl:ObjectProperty ;
+    rdfs:label "创作者申请样品"@zh ;
+    rdfs:comment "电商创作者→样品申请；根据样品服务向商家申请商品样品。"@zh .
+
+ont:包含 a owl:ObjectProperty ;
+    rdfs:label "包含"@zh ;
+    rdfs:comment "表示一个规则、服务、订单、套餐或名单含有组成部分；属于宽泛的包含关系，不表示所有下级事项都属于它。"@zh .
+
+ont:即送订单交由骑手配送 a owl:ObjectProperty ;
+    rdfs:label "即送订单交由骑手配送"@zh ;
+    rdfs:comment "即送订单→配送骑手；即送订单中存在骑手接单、配送环节。"@zh .
+
+ont:参照执行 a owl:ObjectProperty ;
+    rdfs:label "参照执行"@zh ;
+    rdfs:comment "表示当前规范或事项明确要求参考另一规则、办法或标准实施；参照不等于两份规则内容完全一致。"@zh .
+
+ont:发布商品 a owl:ObjectProperty ;
+    rdfs:label "发布商品"@zh ;
+    rdfs:comment "表示经营者将商品及其描述、价格等信息发布到指定平台；发布不等于满足经营资质或宣传合规条件。"@zh .
+
+ont:发布笔记 a owl:ObjectProperty ;
+    rdfs:label "发布笔记"@zh ;
+    rdfs:comment "账号、商家或买手发布笔记；表示发布主体→笔记。"@zh .
+
+ont:发货关联揽收记录 a owl:ObjectProperty ;
+    rdfs:label "发货关联揽收记录"@zh ;
+    rdfs:comment "发货行为→物流揽收记录；可用于认定发货时间。"@zh .
+
+ont:发起售后申请 a owl:ObjectProperty ;
+    rdfs:label "发起售后申请"@zh ;
+    rdfs:comment "连接消费者与其就指定订单商品或服务提交的售后处理请求；申请不等于平台已经批准处理。"@zh .
+
+ont:发起违规申诉 a owl:ObjectProperty ;
+    rdfs:label "发起违规申诉"@zh ;
+    rdfs:comment "表示商家针对平台具体违规处理提交复核申请；与消费者投诉和普通售后请求不是同一流程。"@zh .
+
+ont:发送处置通知 a owl:ObjectProperty ;
+    rdfs:label "发送处置通知"@zh ;
+    rdfs:comment "平台向相关主体发送处置结果通知；表示平台→处置通知。"@zh .
+
+ont:变更经营主体 a owl:ObjectProperty ;
+    rdfs:label "变更经营主体"@zh ;
+    rdfs:comment "店铺经营主体发生变更的关联，不等于简单的名称变动。"@zh .
+
+ont:后续版本替代 a owl:ObjectProperty ;
+    rdfs:label "后续版本替代"@zh ;
+    rdfs:comment "仅当文件或平台公告明确存在替代关系时，关联较新的一份规则文档记录与它所替代的旧规则文档记录；相同标题或发布时间先后不能单独证明替代关系。"@zh .
+
+ont:售后申请受响应时限约束 a owl:ObjectProperty ;
+    rdfs:label "售后申请受响应时限约束"@zh ;
+    rdfs:comment "售后服务单→售后响应时限；卖家对换货/维修申请有时限要求。"@zh .
+
+ont:商品抽检形成检验结论 a owl:ObjectProperty ;
+    rdfs:label "商品抽检形成检验结论"@zh ;
+    rdfs:comment "商品抽检→检验结论；根据检测指标结果判定商品是否符合平台规定。"@zh .
+
+ont:商品抽检由检验机构执行 a owl:ObjectProperty ;
+    rdfs:label "商品抽检由检验机构执行"@zh ;
+    rdfs:comment "商品抽检→检验机构；平台自检或合格机构检测。"@zh .
+
+ont:商品描述不符涉及商品 a owl:ObjectProperty ;
+    rdfs:label "商品描述不符涉及商品"@zh ;
+    rdfs:comment "商品描述不符→商品；实际发货与页面描述或质量要求不一致。"@zh .
+
+ont:商品橱窗展示商品 a owl:ObjectProperty ;
+    rdfs:label "商品橱窗展示商品"@zh ;
+    rdfs:comment "商品橱窗→商品；商品可添加至创作者商品橱窗。"@zh .
+
+ont:商家使用电子面单 a owl:ObjectProperty ;
+    rdfs:label "商家使用电子面单"@zh ;
+    rdfs:comment "商户主体→平台电子面单；部分商家需改用平台电子面单发货。"@zh .
+
+ont:商家保留正品证明 a owl:ObjectProperty ;
+    rdfs:label "商家保留正品证明"@zh ;
+    rdfs:comment "商户主体→正品证明材料；保存能证明进货渠道与正品的凭据。"@zh .
+
+ont:商家共同承担连带责任 a owl:ObjectProperty ;
+    rdfs:label "商家共同承担连带责任"@zh ;
+    rdfs:comment "商户主体→连带责任；与创作者责任需结合条件一起认定。"@zh .
+
+ont:商家发布团购商品 a owl:ObjectProperty ;
+    rdfs:label "商家发布团购商品"@zh ;
+    rdfs:comment "商户主体→团购商品；在对应平台门店发布团购商品。"@zh .
+
+ont:商家取消订单 a owl:ObjectProperty ;
+    rdfs:label "商家取消订单"@zh ;
+    rdfs:comment "商户主体→订单取消；接单后擅自取消可能需赔付。"@zh .
+
+ont:商家变更预约条件 a owl:ObjectProperty ;
+    rdfs:label "商家变更预约条件"@zh ;
+    rdfs:comment "商户主体→预约变更；用户下单后变更原预约条件的行为。"@zh .
+
+ont:商家实施飞单 a owl:ObjectProperty ;
+    rdfs:label "商家实施飞单"@zh ;
+    rdfs:comment "商户主体→飞单行为；明示或暗示引导消费者离开平台交易。"@zh .
+
+ont:商家审核退款申请 a owl:ObjectProperty ;
+    rdfs:label "商家审核退款申请"@zh ;
+    rdfs:comment "商户主体→退款申请；商家在规则规定时限内审核退款请求。"@zh .
+
+ont:商家履行服务 a owl:ObjectProperty ;
+    rdfs:label "商家履行服务"@zh ;
+    rdfs:comment "商户主体→服务履约；商家对已售服务订单继续履约。"@zh .
+
+ont:商家建立投放计划 a owl:ObjectProperty ;
+    rdfs:label "商家建立投放计划"@zh ;
+    rdfs:comment "商户主体→商品投放计划；商家在精选联盟建立商品投放计划。"@zh .
+
+ont:商家开通极速退款服务 a owl:ObjectProperty ;
+    rdfs:label "商家开通极速退款服务"@zh ;
+    rdfs:comment "商户主体→极速退款服务；商家可自主申请开通。"@zh .
+
+ont:商家执行团购核销 a owl:ObjectProperty ;
+    rdfs:label "商家执行团购核销"@zh ;
+    rdfs:comment "商户主体→核销行为；门店对消费者已购券码办理核销。"@zh .
+
+ont:商家执行拣货行为 a owl:ObjectProperty ;
+    rdfs:label "商家执行拣货行为"@zh ;
+    rdfs:comment "连接商户主体与其为指定订单选择、检查商品规格和数量的拣货环节；与订单接单、骑手取货和签收分开。"@zh .
+
+ont:商家执行接单行为 a owl:ObjectProperty ;
+    rdfs:label "商家执行接单行为"@zh ;
+    rdfs:comment "连接商户主体与其接受消费者订单的接单步骤；需要结合平台规定时限和商户是否营业判断超时责任。"@zh .
+
+ont:商家承担举证责任 a owl:ObjectProperty ;
+    rdfs:label "商家承担举证责任"@zh ;
+    rdfs:comment "商户主体→举证责任；平台可根据争议分配举证义务。"@zh .
+
+ont:商家投保运费险 a owl:ObjectProperty ;
+    rdfs:label "商家投保运费险"@zh ;
+    rdfs:comment "商户主体→运费险服务；规则允许符合条件商家选择投保。"@zh .
+
+ont:商家拒绝接待 a owl:ObjectProperty ;
+    rdfs:label "商家拒绝接待"@zh ;
+    rdfs:comment "商户主体→拒绝接待；规则列举无法接待消费者的违规场景。"@zh .
+
+ont:商家提供体验补偿 a owl:ObjectProperty ;
+    rdfs:label "商家提供体验补偿"@zh ;
+    rdfs:comment "商户主体→体验补偿；规则将体验补偿作为处理措施之一。"@zh .
+
+ont:商家提供开票服务 a owl:ObjectProperty ;
+    rdfs:label "商家提供开票服务"@zh ;
+    rdfs:comment "商户主体→开票服务；商家加入支持开票服务后履行开票承诺。"@zh .
+
+ont:商家提供破损包退服务 a owl:ObjectProperty ;
+    rdfs:label "商家提供破损包退服务"@zh ;
+    rdfs:comment "商户主体→破损包退服务；参与服务的商家按规则履行售后承诺。"@zh .
+
+ont:商家提出退款申诉 a owl:ObjectProperty ;
+    rdfs:label "商家提出退款申诉"@zh ;
+    rdfs:comment "连接商户主体与其对平台退款处理提出复核的事项；通常需要提交履约或沟通证明，不等同消费者要求退款。"@zh .
+
+ont:商家申请POI认领 a owl:ObjectProperty ;
+    rdfs:label "商家申请POI认领"@zh ;
+    rdfs:comment "商户主体→POI认领；通过资质或授权申请管理权限。"@zh .
+
+ont:商家申请参与营销活动 a owl:ObjectProperty ;
+    rdfs:label "商家申请参与营销活动"@zh ;
+    rdfs:comment "商户主体→活动报名申请；商家按活动准入提交申请。"@zh .
+
+ont:商家经营线下门店 a owl:ObjectProperty ;
+    rdfs:label "商家经营线下门店"@zh ;
+    rdfs:comment "连接经营主体与其实际运营的线下到店服务门店；线上 POI 门店展示及 POI 认领关系另行识别。"@zh .
+
+ont:商家设定预约条件 a owl:ObjectProperty ;
+    rdfs:label "商家设定预约条件"@zh ;
+    rdfs:comment "商户主体→预约条件；商品详情或预约规则说明中应明确预约条件。"@zh .
+
+ont:商家退还样品款 a owl:ObjectProperty ;
+    rdfs:label "商家退还样品款"@zh ;
+    rdfs:comment "商户主体→样品返款；满足商家设置的返款条件后退还买样款。"@zh .
+
+ont:商家采用自配送 a owl:ObjectProperty ;
+    rdfs:label "商家采用自配送"@zh ;
+    rdfs:comment "表示商户自行组织配送而非使用平台运力完成订单履约；订单超时及责任认定需按自配送规则。"@zh .
+
+ont:商户为预订预留席位 a owl:ObjectProperty ;
+    rdfs:label "商户为预订预留席位"@zh ;
+    rdfs:comment "商户主体→预订席位；接单后按订单预留大厅或包间。"@zh .
+
+ont:商户使用榜单荣誉物料 a owl:ObjectProperty ;
+    rdfs:label "商户使用榜单荣誉物料"@zh ;
+    rdfs:comment "商户主体→榜单荣誉物料；使用官方物料须遵守宣传规范。"@zh .
+
+ont:商户干预交易评价 a owl:ObjectProperty ;
+    rdfs:label "商户干预交易评价"@zh ;
+    rdfs:comment "商户主体→评价干预行为；刷评、诱导好评或诱导删改评价。"@zh .
+
+ont:商户诚信分影响榜单资格 a owl:ObjectProperty ;
+    rdfs:label "商户诚信分影响榜单资格"@zh ;
+    rdfs:comment "商户诚信分→参选资格；累计处罚可能限制上榜。"@zh .
+
+ont:团购商品展示参考价 a owl:ObjectProperty ;
+    rdfs:label "团购商品展示参考价"@zh ;
+    rdfs:comment "团购商品→参考价；参考价用于比对优惠，必须真实有据。"@zh .
+
+ont:团购商品标示售卖价 a owl:ObjectProperty ;
+    rdfs:label "团购商品标示售卖价"@zh ;
+    rdfs:comment "团购商品→售卖价；售卖价体现平台拟成交价格。"@zh .
+
+ont:团购套餐包含项目 a owl:ObjectProperty ;
+    rdfs:label "团购套餐包含项目"@zh ;
+    rdfs:comment "团购套餐→套餐项目；组成项是套餐履约所要求交付的内容。"@zh .
+
+ont:团购订单关联券码 a owl:ObjectProperty ;
+    rdfs:label "团购订单关联券码"@zh ;
+    rdfs:comment "业务订单→团购券；消费者购买后持券码到店核销。"@zh .
+
+ont:处罚依据 a owl:ObjectProperty ;
+    rdfs:label "处罚依据"@zh ;
+    rdfs:comment "关联处罚或处置决定与其所适用的违规定义、处理条款或协议依据；应区分处罚事实与条文授权。"@zh .
+
+ont:套餐履约缺少项目 a owl:ObjectProperty ;
+    rdfs:label "套餐履约缺少项目"@zh ;
+    rdfs:comment "服务履约→套餐项目；仅在原文存在缺少应提供项目的情况使用。"@zh .
+
+ont:实施交易导流 a owl:ObjectProperty ;
+    rdfs:label "实施交易导流"@zh ;
+    rdfs:comment "把内容发布者、商户等主体与其引导用户离开平台交易的行为关联；仅出现联系方式不自动证明交易导流成立。"@zh .
+
+ont:实施违规行为 a owl:ObjectProperty ;
+    rdfs:label "实施违规行为"@zh ;
+    rdfs:comment "关联规则所涉及的主体与被指称实施的经营、宣传或履约违规行为；未经认定的行为不能直接记为查实违规。"@zh .
+
+ont:审核申诉材料 a owl:ObjectProperty ;
+    rdfs:label "审核申诉材料"@zh ;
+    rdfs:comment "表示平台或审核方针对申诉提交的证据完成真实性、相关性或充分性审查；不自动表明申诉被支持。"@zh .
+
+ont:宣传内容与商品不符 a owl:ObjectProperty ;
+    rdfs:label "宣传内容与商品不符"@zh ;
+    rdfs:comment "宣传/展示内容与实际商品不相关或不一致；表示宣传内容→商品，仅在原文支持时抽取。"@zh .
+
+ont:展示商品信息 a owl:ObjectProperty ;
+    rdfs:label "展示商品信息"@zh ;
+    rdfs:comment "连接商品详情页、宣传内容与所展示的商品描述；不保证展示内容与实际交付商品一致。"@zh .
+
+ont:属于类目 a owl:ObjectProperty ;
+    rdfs:label "属于类目"@zh ;
+    rdfs:comment "表示商品或服务归入平台的某一品类或经营类目；不同平台的同名类目不能默认编码相同。"@zh .
+
+ont:履行订单 a owl:ObjectProperty ;
+    rdfs:label "履行订单"@zh ;
+    rdfs:comment "表示经营者按订单承诺完成发货、预约、核销或提供服务等履约义务；实际是否履约完成仍须结合证据。"@zh .
+
+ont:带货内容宣传商品 a owl:ObjectProperty ;
+    rdfs:label "带货内容宣传商品"@zh ;
+    rdfs:comment "把笔记、直播或视频中的推广陈述与所宣传商品关联；商品功能、材质及效果是否真实需核对原文。"@zh .
+
+ont:平台发布规则 a owl:ObjectProperty ;
+    rdfs:label "平台发布规则"@zh ;
+    rdfs:comment "表示平台作为发布方与一份规则、公告或协议文档关联；与规则适用平台不同，不能据此推断所有业务主体适用。"@zh .
+
+ont:平台发放红包 a owl:ObjectProperty ;
+    rdfs:label "平台发放红包"@zh ;
+    rdfs:comment "连接平台与其依据营销规则发放的优惠红包；红包获得、可用范围和实际抵扣是不同业务环节。"@zh .
+
+ont:平台回收类目推广权限 a owl:ObjectProperty ;
+    rdfs:label "平台回收类目推广权限"@zh ;
+    rdfs:comment "平台→类目推广权限；规则明确存在权限被回收的情形。"@zh .
+
+ont:平台扣减商户诚信分 a owl:ObjectProperty ;
+    rdfs:label "平台扣减商户诚信分"@zh ;
+    rdfs:comment "表示平台根据规则列明的评价诚信违规情况扣减商家诚信积分；扣分不等同下架或清退措施。"@zh .
+
+ont:平台授予类目推广权限 a owl:ObjectProperty ;
+    rdfs:label "平台授予类目推广权限"@zh ;
+    rdfs:comment "平台→类目推广权限；部分商品类目需经前置申请才能推广。"@zh .
+
+ont:平台收取软件服务费 a owl:ObjectProperty ;
+    rdfs:label "平台收取软件服务费"@zh ;
+    rdfs:comment "平台→软件服务费；按规则计算收取软件服务费。"@zh .
+
+ont:平台红包抵扣订单 a owl:ObjectProperty ;
+    rdfs:label "平台红包抵扣订单"@zh ;
+    rdfs:comment "平台红包→业务订单；抵扣订单金额受门槛、场景等条件限制。"@zh .
+
+ont:平台调整店铺真实体验分 a owl:ObjectProperty ;
+    rdfs:label "平台调整店铺真实体验分"@zh ;
+    rdfs:comment "平台→店铺真实体验分；特定违规处罚可能影响店铺体验分。"@zh .
+
+ont:平台返还软件服务费 a owl:ObjectProperty ;
+    rdfs:label "平台返还软件服务费"@zh ;
+    rdfs:comment "平台→软件服务费；满足业务规则时存在软件服务费返还。"@zh .
+
+ont:平台采集抽检样本 a owl:ObjectProperty ;
+    rdfs:label "平台采集抽检样本"@zh ;
+    rdfs:comment "平台→抽检样本；通过购买、商家或品牌方提供获得样本。"@zh .
+
+ont:平台限制商品分享权限 a owl:ObjectProperty ;
+    rdfs:label "平台限制商品分享权限"@zh ;
+    rdfs:comment "平台→商品分享权限；违规等情形可关闭或停用功能。"@zh .
+
+ont:店铺使用店铺名称 a owl:ObjectProperty ;
+    rdfs:label "店铺使用店铺名称"@zh ;
+    rdfs:comment "店铺→店铺名称；平台对不同类型店铺命名规则不同。"@zh .
+
+ont:店铺归属店铺类型 a owl:ObjectProperty ;
+    rdfs:label "店铺归属店铺类型"@zh ;
+    rdfs:comment "店铺→店铺类型；店铺有旗舰店、专卖店等分类。"@zh .
+
+ont:店铺红包限定店铺 a owl:ObjectProperty ;
+    rdfs:label "店铺红包限定店铺"@zh ;
+    rdfs:comment "把由商家自主设立的优惠红包关联到其可使用的指定店铺；具体可用商品、门槛和时间需另核对。"@zh .
+
+ont:开展直播带货 a owl:ObjectProperty ;
+    rdfs:label "开展直播带货"@zh ;
+    rdfs:comment "直播人员或商家开展直播带货；表示主体→直播带货。"@zh .
+
+ont:开票服务关联订单 a owl:ObjectProperty ;
+    rdfs:label "开票服务关联订单"@zh ;
+    rdfs:comment "开票服务→业务订单；消费者交易产生开具发票的服务申请。"@zh .
+
+ont:开通专业号 a owl:ObjectProperty ;
+    rdfs:label "开通专业号"@zh ;
+    rdfs:comment "业务主体开通或取得专业号身份；表示主体→专业号。"@zh .
+
+ont:开通服务保障 a owl:ObjectProperty ;
+    rdfs:label "开通服务保障"@zh ;
+    rdfs:comment "商家/店铺开通对应的服务保障；表示商家/店铺→服务保障。"@zh .
+
+ont:引导站外交易 a owl:ObjectProperty ;
+    rdfs:label "引导站外交易"@zh ;
+    rdfs:comment "导流行为促使用户到站外交易；表示交易导流→站外交易。"@zh .
+
+ont:形成申诉结果 a owl:ObjectProperty ;
+    rdfs:label "形成申诉结果"@zh ;
+    rdfs:comment "表示平台对某次申诉审理形成维持、调整或撤销等结论；不得由仅提交申诉材料推定申诉成功。"@zh .
+
+ont:征集反馈指向规则文档 a owl:ObjectProperty ;
+    rdfs:label "征集反馈指向规则文档"@zh ;
+    rdfs:comment "意见征集或反馈类型的规则文档明确指向被征求意见的目标规则文档时建立该关联；反馈本身不代表该规则已正式生效。"@zh .
+
+ont:扣收违约金 a owl:ObjectProperty ;
+    rdfs:label "扣收违约金"@zh ;
+    rdfs:comment "表示平台依协议或规则对认定违约事项扣取违约金额；与赔付消费者或冻结资金的处置不同。"@zh .
+
+ont:扣除交易服务费 a owl:ObjectProperty ;
+    rdfs:label "扣除交易服务费"@zh ;
+    rdfs:comment "表示平台按费率、实际订单或合作协议从交易款项中收取服务费用；与违约金和佣金不同。"@zh .
+
+ont:执行发货 a owl:ObjectProperty ;
+    rdfs:label "执行发货"@zh ;
+    rdfs:comment "表示商家或履约主体对某个订单实施发货操作；应以真实物流交接和适用时效规则判定是否按时发货。"@zh .
+
+ont:承担赔付责任 a owl:ObjectProperty ;
+    rdfs:label "承担赔付责任"@zh ;
+    rdfs:comment "连接应承担赔偿义务的主体与相应赔付事项；需以规则、责任原因和证据确认，不能仅凭投诉自动生成。"@zh .
+
+ont:承担运费 a owl:ObjectProperty ;
+    rdfs:label "承担运费"@zh ;
+    rdfs:comment "规则确认的主体承担相应运费；需结合原因和例外。"@zh .
+
+ont:承诺服务 a owl:ObjectProperty ;
+    rdfs:label "承诺服务"@zh ;
+    rdfs:comment "表示商家在商品详情、订单或协议中对消费者作出的服务保障承诺；与实际完成服务的履约事实区分。"@zh .
+
+ont:承运人回传揽收记录 a owl:ObjectProperty ;
+    rdfs:label "承运人回传揽收记录"@zh ;
+    rdfs:comment "物流承运人→物流揽收记录；物流系统回传揽件记录。"@zh .
+
+ont:投放计划关联商品 a owl:ObjectProperty ;
+    rdfs:label "投放计划关联商品"@zh ;
+    rdfs:comment "把商家建立的商品推广投放计划与被投放商品关联；存在计划不代表该商品已经被达人实际推广。"@zh .
+
+ont:披露商品状态 a owl:ObjectProperty ;
+    rdfs:label "披露商品状态"@zh ;
+    rdfs:comment "表示商户在商品详情中告知二手、翻新、瑕疵或其他非全新状态；披露内容须与实际交付状况核对。"@zh .
+
+ont:抽检商品 a owl:ObjectProperty ;
+    rdfs:label "抽检商品"@zh ;
+    rdfs:comment "将一次平台抽检行为与被抽取或检验的商品关联；抽检结果需另行关联检验结论。"@zh .
+
+ont:抽检样本对应商品 a owl:ObjectProperty ;
+    rdfs:label "抽检样本对应商品"@zh ;
+    rdfs:comment "抽检样本→商品；样本用于核实某一商品或商品信息。"@zh .
+
+ont:拒绝接待阻碍核销 a owl:ObjectProperty ;
+    rdfs:label "拒绝接待阻碍核销"@zh ;
+    rdfs:comment "拒绝接待→核销行为；拒绝接待致使已购券码无法核销。"@zh .
+
+ont:拒绝签收商品 a owl:ObjectProperty ;
+    rdfs:label "拒绝签收商品"@zh ;
+    rdfs:comment "表示收货人对到达的商品拒签或拒收；拒收原因需另行核实，不能直接判定商户或用户责任。"@zh .
+
+ont:拣货对应业务订单 a owl:ObjectProperty ;
+    rdfs:label "拣货对应业务订单"@zh ;
+    rdfs:comment "拣货行为→业务订单；根据订单检查商品数量、规格和质量。"@zh .
+
+ont:授予品牌授权 a owl:ObjectProperty ;
+    rdfs:label "授予品牌授权"@zh ;
+    rdfs:comment "表示品牌权利人或具备转授权资格的主体向经营者提供品牌经营许可；应核对授权范围与有效期限。"@zh .
+
+ont:排除情形 a owl:ObjectProperty ;
+    rdfs:label "排除情形"@zh ;
+    rdfs:comment "表示一项规则、权益或处理机制明确不适用的例外场景；排除适用不必然意味着主体完全免责。"@zh .
+
+ont:提交申诉材料 a owl:ObjectProperty ;
+    rdfs:label "提交申诉材料"@zh ;
+    rdfs:comment "表示申诉主体向审核方提交物流、聊天记录、发票或履约凭证等材料；提交行为不代表证据已被采信。"@zh .
+
+ont:提交经营资质 a owl:ObjectProperty ;
+    rdfs:label "提交经营资质"@zh ;
+    rdfs:comment "连接申请入驻或经营的商户主体与平台要求的许可、登记或其他资质材料；提交不代表审核通过。"@zh .
+
+ont:提交质检报告 a owl:ObjectProperty ;
+    rdfs:label "提交质检报告"@zh ;
+    rdfs:comment "连接商户或检验方与商品检验报告；只有材料与对应产品批次、检验项目匹配时才有证明意义。"@zh .
+
+ont:提供合作样品 a owl:ObjectProperty ;
+    rdfs:label "提供合作样品"@zh ;
+    rdfs:comment "商家提供合作样品供直播人员拿样；表示商家→合作商品样品。"@zh .
+
+ont:提供服务 a owl:ObjectProperty ;
+    rdfs:label "提供服务"@zh ;
+    rdfs:comment "表示经营主体向消费者提供规则或订单约定的服务事项；仅体现服务提供关系，不自动说明服务已全部履约。"@zh .
+
+ont:提供物流证明 a owl:ObjectProperty ;
+    rdfs:label "提供物流证明"@zh ;
+    rdfs:comment "表示相关主体提供物流面单、揽收或妥投凭证来证明履约过程；需核对订单、时间与承运方记录。"@zh .
+
+ont:提供维修服务 a owl:ObjectProperty ;
+    rdfs:label "提供维修服务"@zh ;
+    rdfs:comment "连接承担售后义务的商家或服务方与维修事项；服务是否履约完成，应结合维修记录与交付结果。"@zh .
+
+ont:提供鉴定凭证 a owl:ObjectProperty ;
+    rdfs:label "提供鉴定凭证"@zh ;
+    rdfs:comment "消费者提交合法有效的鉴定材料；表示消费者→鉴定凭证。"@zh .
+
+ont:撤销账号认证 a owl:ObjectProperty ;
+    rdfs:label "撤销账号认证"@zh ;
+    rdfs:comment "平台针对账号/专业号撤销认证；表示平台→账号认证或专业号（需任务定义统一宾语）。"@zh .
+
+ont:撤销违规处理 a owl:ObjectProperty ;
+    rdfs:label "撤销违规处理"@zh ;
+    rdfs:comment "表示平台在违规申诉或复核后撤回已经作出的处理措施或认定；不能仅因提交申诉就推断处罚撤销。"@zh .
+
+ont:支付推广佣金 a owl:ObjectProperty ;
+    rdfs:label "支付推广佣金"@zh ;
+    rdfs:comment "商家按推广计划支付佣金；表示商家→推广佣金。"@zh .
+
+ont:敏感商品要求隐私包装 a owl:ObjectProperty ;
+    rdfs:label "敏感商品要求隐私包装"@zh ;
+    rdfs:comment "商品→隐私包装；规定部分类目商品应采用不透明包装防止信息外露。"@zh .
+
+ont:文档包含内容块 a owl:ObjectProperty ;
+    rdfs:label "文档包含内容块"@zh ;
+    rdfs:comment "连接一份具体规则文档与其直接下级的顶层内容块；在有章节结构时先连顶层章节，在无章节结构时可直接连接条款、段落或表格块，不默认连接所有后代。"@zh .
+
+ont:文档引用规则 a owl:ObjectProperty ;
+    rdfs:label "文档引用规则"@zh ;
+    rdfs:comment "正文中明确引用另一份规则或协议；表示当前文档→被引用规则。"@zh .
+
+ont:旅游线路设置预约条件 a owl:ObjectProperty ;
+    rdfs:label "旅游线路设置预约条件"@zh ;
+    rdfs:comment "旅游线路→预约条件；线路游商品详情承载条件。"@zh .
+
+ont:旅行社调整预约条件 a owl:ObjectProperty ;
+    rdfs:label "旅行社调整预约条件"@zh ;
+    rdfs:comment "旅行社→预约变更；旅行社线路游在下单后变更条件为规则关注场景。"@zh .
+
+ont:旗舰店经营品牌 a owl:ObjectProperty ;
+    rdfs:label "旗舰店经营品牌"@zh ;
+    rdfs:comment "旗舰店→品牌；旗舰店依品牌所有权或独占授权入驻。"@zh .
+
+ont:无需退货退款关联订单 a owl:ObjectProperty ;
+    rdfs:label "无需退货退款关联订单"@zh ;
+    rdfs:comment "无需退货退款→业务订单；已发货订单可申请无需退货退款。"@zh .
+
+ont:旧品回收单记录闲置物品 a owl:ObjectProperty ;
+    rdfs:label "旧品回收单记录闲置物品"@zh ;
+    rdfs:comment "将旧品回收申请单与消费者拟交付回收的具体旧品关联；所登记信息还需经回收方实物核验。"@zh .
+
+ont:旧品质检影响回收报价 a owl:ObjectProperty ;
+    rdfs:label "旧品质检影响回收报价"@zh ;
+    rdfs:comment "连接回收方对旧物成色和状况的质检结果与最终回收报价；初始预估价和实际质检价可能不同。"@zh .
+
+ont:景区门票需要核销 a owl:ObjectProperty ;
+    rdfs:label "景区门票需要核销"@zh ;
+    rdfs:comment "景区门票→核销行为；门票产品在用户到场后办理核销。"@zh .
+
+ont:智能取餐柜暂存订单商品 a owl:ObjectProperty ;
+    rdfs:label "智能取餐柜暂存订单商品"@zh ;
+    rdfs:comment "智能取餐柜→业务订单；用于外卖订单物品短时存放。"@zh .
+
+ont:服务商与达人合作 a owl:ObjectProperty ;
+    rdfs:label "服务商与达人合作"@zh ;
+    rdfs:comment "服务商→达人；与平台达人合作属于规则适用的业务事项。"@zh .
+
+ont:服务商执行旧品质检 a owl:ObjectProperty ;
+    rdfs:label "服务商执行旧品质检"@zh ;
+    rdfs:comment "表示回收服务商对旧品进行型号、外观、功能及成色检测的环节；质检结果可用于调整回收价。"@zh .
+
+ont:服务商提供代运营服务 a owl:ObjectProperty ;
+    rdfs:label "服务商提供代运营服务"@zh ;
+    rdfs:comment "服务商→商户主体；服务商向合作商家提供代运营等服务。"@zh .
+
+ont:服务商质检退货商品 a owl:ObjectProperty ;
+    rdfs:label "服务商质检退货商品"@zh ;
+    rdfs:comment "服务商→保税商品；服务商质检通过为二次入区条件之一。"@zh .
+
+ont:服务履约依据订单快照 a owl:ObjectProperty ;
+    rdfs:label "服务履约依据订单快照"@zh ;
+    rdfs:comment "服务履约→订单快照；商详调整前的已下单消费者仍按照原订单快照履约。"@zh .
+
+ont:服务异常引发求助 a owl:ObjectProperty ;
+    rdfs:label "服务异常引发求助"@zh ;
+    rdfs:comment "服务异常→服务异常求助；未履约、加收费用等异常可发起求助。"@zh .
+
+ont:机构分配达人分成 a owl:ObjectProperty ;
+    rdfs:label "机构分配达人分成"@zh ;
+    rdfs:comment "MCN机构→推广佣金；机构可以配置达人结算分成比例。"@zh .
+
+ont:机构绑定达人 a owl:ObjectProperty ;
+    rdfs:label "机构绑定达人"@zh ;
+    rdfs:comment "连接 MCN 机构与其在平台建立合作绑定关系的达人；绑定状态与合作分成、账号权限须分别处理。"@zh .
+
+ont:机构解除达人绑定 a owl:ObjectProperty ;
+    rdfs:label "机构解除达人绑定"@zh ;
+    rdfs:comment "MCN机构→达人；符合清退场景后解除机构达人关系绑定。"@zh .
+
+ont:条件组合包含子组合 a owl:ObjectProperty ;
+    rdfs:label "条件组合包含子组合"@zh ;
+    rdfs:comment "条件组合内部嵌套的另一组条件，用于准确表示“(A且B)或C”等多级逻辑；方向为外层条件组合→内层条件组合。"@zh .
+
+ont:条件组合包含条件 a owl:ObjectProperty ;
+    rdfs:label "条件组合包含条件"@zh ;
+    rdfs:comment "条件组合中的直接判断项，如金额阈值、店铺状态或累计次数等；与嵌套的子组合分开关联，方向为条件组合→规则条件。"@zh .
+
+ont:条件触发结果 a owl:ObjectProperty ;
+    rdfs:label "条件触发结果"@zh ;
+    rdfs:comment "规则中明确的单项条件或完整条件组合成立时所对应的规定结果；不能把未成立的条件理解为已触发处理，方向为条件（组）→规则结果。"@zh .
+
+ont:极速退款服务处理退款申请 a owl:ObjectProperty ;
+    rdfs:label "极速退款服务处理退款申请"@zh ;
+    rdfs:comment "极速退款服务→退款申请；只在商品、订单及提交时间等条件满足时适用。"@zh .
+
+ont:构成违规情形 a owl:ObjectProperty ;
+    rdfs:label "构成违规情形"@zh ;
+    rdfs:comment "表示经核对事实与适用条款后，特定行为满足某类违规的判定条件；不应仅凭文本中出现违规关键词就建立肯定关系。"@zh .
+
+ont:查实 a owl:ObjectProperty ;
+    rdfs:label "查实"@zh ;
+    rdfs:comment "表示平台或审核方经证据核查确认某行为或事实成立；单凭消费者投诉、异常指标不得直接标记查实。"@zh .
+
+ont:样品履约推广商品 a owl:ObjectProperty ;
+    rdfs:label "样品履约推广商品"@zh ;
+    rdfs:comment "样品履约→商品；交付过程包括样品商品的营销推广。"@zh .
+
+ont:样品申请涉及商品 a owl:ObjectProperty ;
+    rdfs:label "样品申请涉及商品"@zh ;
+    rdfs:comment "将创作者的拿样或买样申请与具体商品关联；申请是否通过及样品是否寄出应分开判断。"@zh .
+
+ont:核销使用团购券 a owl:ObjectProperty ;
+    rdfs:label "核销使用团购券"@zh ;
+    rdfs:comment "连接到店核销动作与消费者购买的具体团购券或券码；核销记录需核查有效性及是否已被重复使用。"@zh .
+
+ont:核销记录关联核销行为 a owl:ObjectProperty ;
+    rdfs:label "核销记录关联核销行为"@zh ;
+    rdfs:comment "核销记录→核销行为；核销数据和核销行为可用于履约核实。"@zh .
+
+ont:榜单发放荣誉物料 a owl:ObjectProperty ;
+    rdfs:label "榜单发放荣誉物料"@zh ;
+    rdfs:comment "榜单→榜单荣誉物料；符合季度规则的上榜商户获得官方宣传物料。"@zh .
+
+ont:活动商品对应商品 a owl:ObjectProperty ;
+    rdfs:label "活动商品对应商品"@zh ;
+    rdfs:comment "把参加平台营销活动的活动条目关联到具体商品；仅报名或进入活动池不意味着该商品已成交。"@zh .
+
+ont:消费者发布商户评价 a owl:ObjectProperty ;
+    rdfs:label "消费者发布商户评价"@zh ;
+    rdfs:comment "消费者→商户评价；商户评价基于消费体验或交易。"@zh .
+
+ont:消费者投保运费险 a owl:ObjectProperty ;
+    rdfs:label "消费者投保运费险"@zh ;
+    rdfs:comment "连接消费者与其选购或获赠的退货运费保障服务；是否生效和是否赔付由保险及平台条件决定。"@zh .
+
+ont:消费者提交旧品回收单 a owl:ObjectProperty ;
+    rdfs:label "消费者提交旧品回收单"@zh ;
+    rdfs:comment "表示消费者在以旧换新服务中填报拟回收旧品并提交回收申请；回收单提交不代表质检或实际回收已完成。"@zh .
+
+ont:消费者提交预约申请 a owl:ObjectProperty ;
+    rdfs:label "消费者提交预约申请"@zh ;
+    rdfs:comment "消费者→预约申请；约定到店/酒旅服务的预约申请。"@zh .
+
+ont:消费者提出服务异常求助 a owl:ObjectProperty ;
+    rdfs:label "消费者提出服务异常求助"@zh ;
+    rdfs:comment "消费者→服务异常求助；通过订单或服务详情入口申请帮助。"@zh .
+
+ont:消费者申请上门取件 a owl:ObjectProperty ;
+    rdfs:label "消费者申请上门取件"@zh ;
+    rdfs:comment "消费者→上门取件；消费者选择上门取件办理退货。"@zh .
+
+ont:消费者申请退款 a owl:ObjectProperty ;
+    rdfs:label "消费者申请退款"@zh ;
+    rdfs:comment "消费者→退款申请；消费者可根据订单履约状态发起退款。"@zh .
+
+ont:涉及主体 a owl:ObjectProperty ;
+    rdfs:label "涉及主体"@zh ;
+    rdfs:comment "将规则、事件或交易关联到参与其中的经营者、消费者或其他主体；主体的具体角色还需结合条款识别。"@zh .
+
+ont:涉及平台 a owl:ObjectProperty ;
+    rdfs:label "涉及平台"@zh ;
+    rdfs:comment "把规则、活动、交易或处理事项归属到相应平台；用于控制不同平台规则的混用。"@zh .
+
+ont:涉及服务 a owl:ObjectProperty ;
+    rdfs:label "涉及服务"@zh ;
+    rdfs:comment "把订单、经营活动、纠纷或规则要求关联到具体服务内容；不表示该服务一定已被交付。"@zh .
+
+ont:涉及权益 a owl:ObjectProperty ;
+    rdfs:label "涉及权益"@zh ;
+    rdfs:comment "将活动、规则、纠纷或处理结果与其影响的折扣、补贴、消费者保障等权益关联；不预设权益已兑现。"@zh .
+
+ont:涉及用户 a owl:ObjectProperty ;
+    rdfs:label "涉及用户"@zh ;
+    rdfs:comment "连接订单、投诉、营销、履约等事项与相关用户；具体是买家、收货人或其他角色需按原文区分。"@zh .
+
+ont:涉及订单 a owl:ObjectProperty ;
+    rdfs:label "涉及订单"@zh ;
+    rdfs:comment "连接发货、退款、处罚、物流等事项与其相关交易订单；不应由商品相同推断订单相同。"@zh .
+
+ont:涉及资源 a owl:ObjectProperty ;
+    rdfs:label "涉及资源"@zh ;
+    rdfs:comment "连接规则或服务事项与门店、预订席位、商品、仓储或其他业务资源；应优先使用语义更明确的专用关系。"@zh .
+
+ont:清退店铺 a owl:ObjectProperty ;
+    rdfs:label "清退店铺"@zh ;
+    rdfs:comment "连接平台清退处置与被终止经营资格的具体店铺；需基于明确清退决定，不把暂时停业归为清退。"@zh .
+
+ont:满足激励门槛 a owl:ObjectProperty ;
+    rdfs:label "满足激励门槛"@zh ;
+    rdfs:comment "连接经营者或店铺与达到的活动资格或业绩要求；门槛达成需核对期限、订单有效性及具体规则。"@zh .
+
+ont:申请账号认证 a owl:ObjectProperty ;
+    rdfs:label "申请账号认证"@zh ;
+    rdfs:comment "业务主体提交账号认证申请；表示主体→账号认证。"@zh .
+
+ont:申请退货退款 a owl:ObjectProperty ;
+    rdfs:label "申请退货退款"@zh ;
+    rdfs:comment "表示消费者针对商品交易申请退回商品并返还支付款项；不能将纯退款或申诉视为同一业务行为。"@zh .
+
+ont:直播间挂载商品 a owl:ObjectProperty ;
+    rdfs:label "直播间挂载商品"@zh ;
+    rdfs:comment "直播间→商品；规则明确购物车挂载商品的行为。"@zh .
+
+ont:直播间推广商品 a owl:ObjectProperty ;
+    rdfs:label "直播间推广商品"@zh ;
+    rdfs:comment "连接直播间及其介绍、展示或推荐的商品；主播口播承诺与商品详情是否一致应单独判断。"@zh .
+
+ont:短视频挂载商品 a owl:ObjectProperty ;
+    rdfs:label "短视频挂载商品"@zh ;
+    rdfs:comment "短视频→商品；通过功能组件将商品挂载至短视频。"@zh .
+
+ont:破损包退保障商品 a owl:ObjectProperty ;
+    rdfs:label "破损包退保障商品"@zh ;
+    rdfs:comment "破损包退服务→商品；仅对适用服务标识和条件的商品。"@zh .
+
+ont:积分账户登记会员积分 a owl:ObjectProperty ;
+    rdfs:label "积分账户登记会员积分"@zh ;
+    rdfs:comment "积分账户→会员积分；累计积分登记于会员账户。"@zh .
+
+ont:笔记挂载商品 a owl:ObjectProperty ;
+    rdfs:label "笔记挂载商品"@zh ;
+    rdfs:comment "带货笔记/笔记关联所推广的商品；表示笔记→商品。"@zh .
+
+ont:签收商品 a owl:ObjectProperty ;
+    rdfs:label "签收商品"@zh ;
+    rdfs:comment "表示收货人对订单对应商品确认收取的行为；与物流系统自动显示“已签收”不必然具有相同证据效力。"@zh .
+
+ont:签署合同协议 a owl:ObjectProperty ;
+    rdfs:label "签署合同协议"@zh ;
+    rdfs:comment "表示主体成为一份合同、授权或合作协议的签订方；应核查签署主体，不由经营关系自动推定已签约。"@zh .
+
+ont:签署方 a owl:ObjectProperty ;
+    rdfs:label "签署方"@zh ;
+    rdfs:comment "把协议文本与签署该协议的主体关联，可能存在多方签署；签署不自动代表所有权或实际履约完成。"@zh .
+
+ont:约定发货时效 a owl:ObjectProperty ;
+    rdfs:label "约定发货时效"@zh ;
+    rdfs:comment "连接订单、商品承诺或规则与具体发货期限要求；需明确起算节点、预售等特殊类型及免责例外。"@zh .
+
+ont:线下门店对应POI地址 a owl:ObjectProperty ;
+    rdfs:label "线下门店对应POI地址"@zh ;
+    rdfs:comment "线下门店→POI地址；POI是指向线下门店的线上地址。"@zh .
+
+ont:经营品牌 a owl:ObjectProperty ;
+    rdfs:label "经营品牌"@zh ;
+    rdfs:comment "连接经营者或店铺与其实际经营的品牌；不表示该经营者就是商标所有权人，品牌授权仍需单独核查。"@zh .
+
+ont:经营店铺 a owl:ObjectProperty ;
+    rdfs:label "经营店铺"@zh ;
+    rdfs:comment "商户主体与其经营店铺的关系；不意味着默认永久有效。"@zh .
+
+ont:经营类目 a owl:ObjectProperty ;
+    rdfs:label "经营类目"@zh ;
+    rdfs:comment "连接商家或店铺与其申请、获准或实际经营的商品服务分类；应区分经营资质准入与商品自身所属类目。"@zh .
+
+ont:缴纳保证金 a owl:ObjectProperty ;
+    rdfs:label "缴纳保证金"@zh ;
+    rdfs:comment "连接经营主体与其按照平台准入或经营规则缴纳的保证金事项；缴纳金额和到账状态要从交易记录核对。"@zh .
+
+ont:获得激励奖励 a owl:ObjectProperty ;
+    rdfs:label "获得激励奖励"@zh ;
+    rdfs:comment "将满足活动规则的主体与其获发的激励权益关联；应区分已达门槛、审核通过和奖励实际发放。"@zh .
+
+ont:营销活动纳入活动商品 a owl:ObjectProperty ;
+    rdfs:label "营销活动纳入活动商品"@zh ;
+    rdfs:comment "营销活动→活动商品；符合准入的商品参与活动。"@zh .
+
+ont:虚构参考价构成价格欺诈 a owl:ObjectProperty ;
+    rdfs:label "虚构参考价构成价格欺诈"@zh ;
+    rdfs:comment "参考价→价格欺诈；虚构或不真实参考价可能属于价格欺诈。"@zh .
+
+ont:规则结果对应处理措施 a owl:ObjectProperty ;
+    rdfs:label "规则结果对应处理措施"@zh ;
+    rdfs:comment "规则结果具体规定了限权、扣分、赔付、下架、清退等平台处理措施时建立关联；只表示规范中的措施，不等于真实处罚已作出，方向为规则结果→处理措施。"@zh .
+
+ont:解读对应规则 a owl:ObjectProperty ;
+    rdfs:label "解读对应规则"@zh ;
+    rdfs:comment "规则解读文档明确解释的规则；表示解读文档→原规则文档。"@zh .
+
+ont:触发 a owl:ObjectProperty ;
+    rdfs:label "触发"@zh ;
+    rdfs:comment "表示符合某一条件、行为或状态后，按规则可能启动处置、审核、退款等后续流程；条件触发不代表措施已执行。"@zh .
+
+ont:订单包含赠品 a owl:ObjectProperty ;
+    rdfs:label "订单包含赠品"@zh ;
+    rdfs:comment "业务订单→赠品；赠品可以单独形成赠品订单并按时发货。"@zh .
+
+ont:订单适用过期退保障 a owl:ObjectProperty ;
+    rdfs:label "订单适用过期退保障"@zh ;
+    rdfs:comment "业务订单→过期退保障；按页面标示和券码使用状态适用。"@zh .
+
+ont:订单适用随时退保障 a owl:ObjectProperty ;
+    rdfs:label "订单适用随时退保障"@zh ;
+    rdfs:comment "业务订单→随时退保障；仅在相关订单、页面与未消费条件下适用。"@zh .
+
+ont:订单选择无接触配送 a owl:ObjectProperty ;
+    rdfs:label "订单选择无接触配送"@zh ;
+    rdfs:comment "业务订单→无接触配送；需用户约定放置和自取方式。"@zh .
+
+ont:认定违规 a owl:ObjectProperty ;
+    rdfs:label "认定违规"@zh ;
+    rdfs:comment "表示审核或平台根据事实、证据和规则对违规是否成立作出判定；与商户被投诉、被怀疑违规不同。"@zh .
+
+ont:评价干预涉及评价 a owl:ObjectProperty ;
+    rdfs:label "评价干预涉及评价"@zh ;
+    rdfs:comment "评价干预行为→交易评价；干预内容包括评价发布、更改或删除。"@zh .
+
+ont:评价有礼关联交易评价 a owl:ObjectProperty ;
+    rdfs:label "评价有礼关联交易评价"@zh ;
+    rdfs:comment "评价有礼活动→交易评价；活动围绕真实商品订单评价。"@zh .
+
+ont:评价有礼发放优惠权益 a owl:ObjectProperty ;
+    rdfs:label "评价有礼发放优惠权益"@zh ;
+    rdfs:comment "评价有礼活动→优惠权益；按照活动预算发放优惠券。"@zh .
+
+ont:评定违规等级 a owl:ObjectProperty ;
+    rdfs:label "评定违规等级"@zh ;
+    rdfs:comment "表示平台按违规行为的次数、影响及条款条件划分处理级别；不同平台等级口径不可直接对齐。"@zh .
+
+ont:评审任务审核评价争议 a owl:ObjectProperty ;
+    rdfs:label "评审任务审核评价争议"@zh ;
+    rdfs:comment "评价评审任务→评价争议；评审团对争议任务投票判定。"@zh .
+
+ont:识别物流轨迹异常 a owl:ObjectProperty ;
+    rdfs:label "识别物流轨迹异常"@zh ;
+    rdfs:comment "平台→物流轨迹异常；平台规定物流轨迹异常的核查情形。"@zh .
+
+ont:调整店铺星级 a owl:ObjectProperty ;
+    rdfs:label "调整店铺星级"@zh ;
+    rdfs:comment "表示店铺依据经营评价和平台规则发生星级等级变化；不得仅凭某次差评直接推断最终星级调整。"@zh .
+
+ont:违反 a owl:ObjectProperty ;
+    rdfs:label "违反"@zh ;
+    rdfs:comment "表示某项行为与其不符合的具体规则义务或禁止性条款之间的关系；需核实行为事实和规则适用范围。"@zh .
+
+ont:退款申诉提供履约凭证 a owl:ObjectProperty ;
+    rdfs:label "退款申诉提供履约凭证"@zh ;
+    rdfs:comment "退款申诉→履约凭证；申诉可提供照片视频小票沟通记录等。"@zh .
+
+ont:退款申请对应订单 a owl:ObjectProperty ;
+    rdfs:label "退款申请对应订单"@zh ;
+    rdfs:comment "退款申请→业务订单；不同订单状态对应不同退款处理。"@zh .
+
+ont:退货二次入区涉及商品 a owl:ObjectProperty ;
+    rdfs:label "退货二次入区涉及商品"@zh ;
+    rdfs:comment "退货二次入区→保税商品；将符合条件未签收退件退回保税区。"@zh .
+
+ont:退货二次入区退回保税仓 a owl:ObjectProperty ;
+    rdfs:label "退货二次入区退回保税仓"@zh ;
+    rdfs:comment "退货二次入区→保税仓；符合条件的未签收退件退回保税仓。"@zh .
+
+ont:退货宝权益补偿运费 a owl:ObjectProperty ;
+    rdfs:label "退货宝权益补偿运费"@zh ;
+    rdfs:comment "退货宝权益→运费；支持取件费用抵扣或事后补偿。"@zh .
+
+ont:退还保证金 a owl:ObjectProperty ;
+    rdfs:label "退还保证金"@zh ;
+    rdfs:comment "表示在满足退出、结算或风险解除条件后对经营保证金进行退回；不得由申请退款直接推断已到账。"@zh .
+
+ont:适用对象 a owl:ObjectProperty ;
+    rdfs:label "适用对象"@zh ;
+    rdfs:comment "描述规则、权益、审核标准针对的商家、消费者、店铺或其他主体范围；适用不等于已符合全部资格条件。"@zh .
+
+ont:适用平台 a owl:ObjectProperty ;
+    rdfs:label "适用平台"@zh ;
+    rdfs:comment "表示某条规则、制度或活动在何平台生效或适用；同名业务在不同平台的约束不能直接等同。"@zh .
+
+ont:适用类目 a owl:ObjectProperty ;
+    rdfs:label "适用类目"@zh ;
+    rdfs:comment "表示规则、服务或活动针对的商品与服务分类范围；应避免用行业大类替代更细的商品类目限制。"@zh .
+
+ont:适用结算安排 a owl:ObjectProperty ;
+    rdfs:label "适用结算安排"@zh ;
+    rdfs:comment "连接商户或订单与其所受约束的货款结算周期和条件；需结合订单完成时间、经营状态等实际参数判断。"@zh .
+
+ont:适用行业 a owl:ObjectProperty ;
+    rdfs:label "适用行业"@zh ;
+    rdfs:comment "表示规定所覆盖的行业经营领域，例如餐饮、住宿或商品零售；与具体商品类目、商家身份分别建模。"@zh .
+
+ont:配送服务商设置站点 a owl:ObjectProperty ;
+    rdfs:label "配送服务商设置站点"@zh ;
+    rdfs:comment "连接即时配送服务机构与其用于调度、培训或物资管理的配送站点；设立站点不必然表示该站点参与某订单配送。"@zh .
+
+ont:配送箱符合食品安全要求 a owl:ObjectProperty ;
+    rdfs:label "配送箱符合食品安全要求"@zh ;
+    rdfs:comment "配送箱→食品安全配送要求；配送箱需清洁、密封与消毒。"@zh .
+
+ont:配送超时涉及订单 a owl:ObjectProperty ;
+    rdfs:label "配送超时涉及订单"@zh ;
+    rdfs:comment "配送超时→业务订单；特定自配送订单超时产生赔付条件。"@zh .
+
+ont:配送骑手使用配送箱 a owl:ObjectProperty ;
+    rdfs:label "配送骑手使用配送箱"@zh ;
+    rdfs:comment "配送骑手→配送箱；配送装备需符合食品卫生规范。"@zh .
+
+ont:采取处理措施 a owl:ObjectProperty ;
+    rdfs:label "采取处理措施"@zh ;
+    rdfs:comment "连接平台或审核结论与规则允许实施的具体处罚或整改方式；判断是否已执行需要相应处理记录。"@zh .
+
+ont:销售商品 a owl:ObjectProperty ;
+    rdfs:label "销售商品"@zh ;
+    rdfs:comment "连接商户、店铺与实际在售商品；只有同类目或品牌授权不必然证明已经上架该商品。"@zh .
+
+ont:限制账号权益 a owl:ObjectProperty ;
+    rdfs:label "限制账号权益"@zh ;
+    rdfs:comment "违规处置对账号可使用的权益进行关闭或暂停；表示处置措施→账号权益。"@zh .
+
+ont:预约变更涉及条件 a owl:ObjectProperty ;
+    rdfs:label "预约变更涉及条件"@zh ;
+    rdfs:comment "预约变更→预约条件；新增或改变原有条件限制用户预约。"@zh .
+
+ont:预约申请关联订单 a owl:ObjectProperty ;
+    rdfs:label "预约申请关联订单"@zh ;
+    rdfs:comment "预约申请→业务订单；已成交订单对应后续预约环节。"@zh .
+
+ont:飞单涉及商家订单 a owl:ObjectProperty ;
+    rdfs:label "飞单涉及商家订单"@zh ;
+    rdfs:comment "飞单行为→业务订单；可能涉及消费者已购买或有明确购买意向的订单，不能保证每次都有订单。"@zh .
+
+ont:飞单行为引导线下交易 a owl:ObjectProperty ;
+    rdfs:label "飞单行为引导线下交易"@zh ;
+    rdfs:comment "连接飞单行为与其促使消费者转向的平台外支付或交易过程；仅在存在平台购买意向及诱导行为时使用。"@zh .
+
+ont:餐品缺失涉及订单 a owl:ObjectProperty ;
+    rdfs:label "餐品缺失涉及订单"@zh ;
+    rdfs:comment "餐品缺失→业务订单；收到的餐品不全属于责任场景之一。"@zh .
+
+ont:餐饮预订关联订单 a owl:ObjectProperty ;
+    rdfs:label "餐饮预订关联订单"@zh ;
+    rdfs:comment "餐饮预订→业务订单；餐饮预订存在预订订单履约义务。"@zh .
+
+
+# ===== 三、精简数据属性（规则文档 + 规则内容块） =====
+
+ont:块内容 a owl:DatatypeProperty ;
+    rdfs:label "块内容"@zh ;
+    rdfs:comment "内容块的原始正文文本或 Markdown 片段；须保留否定词、数字、列表及表格行列结构，便于检索回显和证据复核。"@zh .
+
+ont:块标题 a owl:DatatypeProperty ;
+    rdfs:label "块标题"@zh ;
+    rdfs:comment "该内容块在原文中可辨认的标题或条款标识，如“第二章 发货管理”“第三条”或小节标题；普通正文、表格块无独立标题时可以为空。"@zh .
+
+ont:块类型 a owl:DatatypeProperty ;
+    rdfs:label "块类型"@zh ;
+    rdfs:comment "内容块的结构或载体类型，例如章节、条款、正文、列表、表格、图片引用、变更前内容、变更后内容；只是解析结果分类，不代表它们是独立实体类别。"@zh .
+
+ont:块顺序 a owl:DatatypeProperty ;
+    rdfs:label "块顺序"@zh ;
+    rdfs:comment "内容块相对于同一父级的出现顺序，用于还原文档目录和正文展示；不是全局唯一标识，也不代表法律效力优先级。"@zh .
+
+ont:来源文件路径 a owl:DatatypeProperty ;
+    rdfs:label "来源文件路径"@zh ;
+    rdfs:comment "采集资料在原始压缩包或存储系统中的相对路径，包含来源分类与文件名，便于排查重名文件和回溯版本。"@zh .
+
+ont:来源链接 a owl:DatatypeProperty ;
+    rdfs:label "来源链接"@zh ;
+    rdfs:comment "规则原文在平台规则中心或官方公告中的来源地址；用于回跳核查，不把文件中的任意外链当作本规则来源。"@zh .
+
+ont:规则名称 a owl:DatatypeProperty ;
+    rdfs:label "规则名称"@zh ;
+    rdfs:comment "规则文档的规范名称，用于把同一规则主题的多个版本归到一起；不能以名称作为跨平台或跨版本的唯一主键。"@zh .

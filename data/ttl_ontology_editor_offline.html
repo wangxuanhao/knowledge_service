@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<title>规则本体工作台 · TTL 可视化编辑器</title>
+<style>
+  :root{--bg:#f5f7fb;--panel:#fff;--text:#17233d;--sub:#61708a;--sub2:#8795a8;--line:#e4e9f2;--blue:#2854c5;--blue-dark:#183990;--blue-light:#eef3ff;--violet:#7a57c9;--green:#21816d;--amber:#b0761c;--red:#c64e4e;--shadow:0 10px 34px rgba(26,43,82,.065);--radius:16px}
+  *{box-sizing:border-box}html,body{height:100%}body{margin:0;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Arial,sans-serif;color:var(--text);background:var(--bg);font-size:14px}
+  button,input,textarea,select{font:inherit}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.42}a{color:var(--blue)}
+  .app{min-height:100vh;display:flex;flex-direction:column}
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:17px clamp(20px,3vw,42px);background:var(--panel);border-bottom:1px solid var(--line);gap:18px;position:sticky;top:0;z-index:10}
+  .brand{display:flex;align-items:center;gap:12px;min-width:225px}.brandmark{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,#2456ce,#6c79df);display:grid;place-items:center;color:white;font-weight:800;letter-spacing:-.03em;font-size:18px;box-shadow:0 7px 18px rgba(34,83,189,.19)}
+  .brandname{font-size:17px;font-weight:760;line-height:1.24;letter-spacing:-.02em}.brandcaption{font-size:11px;color:var(--sub);margin-top:3px}
+  .top-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end}.btn{display:inline-flex;gap:7px;align-items:center;justify-content:center;border:1px solid #d7dfec;border-radius:10px;background:white;color:#34435f;padding:9px 14px;min-height:38px;font-weight:650;font-size:13px;white-space:nowrap;transition:background .15s,border-color .15s}.btn:hover:not(:disabled){background:#f3f6fc;border-color:#b6c6e4}.btn.primary{background:var(--blue);color:#fff;border-color:var(--blue)}.btn.primary:hover{background:var(--blue-dark)}.btn.ghost{border-color:transparent;background:transparent}.btn.ghost:hover{background:#f4f6fb}.btn.danger{color:var(--red)}.btn.small{padding:7px 10px;min-height:32px;font-size:12px}.btn-icon{font-size:17px;font-weight:450;line-height:1}
+  .container{width:min(1500px,100%);margin:auto;padding:26px clamp(20px,3vw,42px) 38px;flex:1;display:flex;flex-direction:column;gap:18px}
+  .workspace-top{display:flex;justify-content:space-between;align-items:center;gap:16px}.eyebrow{text-transform:uppercase;letter-spacing:.10em;color:#7484a1;font-weight:800;font-size:10px}.workspace-title{font-weight:770;font-size:23px;letter-spacing:-.025em;margin:5px 0 6px}.workspace-sub{color:var(--sub);margin:0;font-size:13px;line-height:1.65}
+  .privacy{font-size:12px;color:#547161;background:#ecf7f0;border:1px solid #d4e9dc;padding:8px 12px;border-radius:8px;white-space:nowrap;display:flex;align-items:center;gap:8px}
+  .empty{margin-top:min(9vh,90px);display:flex;flex-direction:column;align-items:center;gap:22px}.upload-area{width:min(720px,100%);border:1.5px dashed #b7c7e8;border-radius:20px;padding:46px 28px 35px;text-align:center;background:radial-gradient(circle at top right,#eef3ff 0%,#fff 55%);box-shadow:var(--shadow);transition:.16s}.upload-area.dragover{border-color:#3d62c3;background:#eff4ff;transform:translateY(-2px)}.upload-icon{width:64px;height:64px;background:#ecf2ff;color:var(--blue);display:grid;place-items:center;margin:0 auto 20px;border-radius:20px;font-size:32px}.upload-title{font-size:22px;font-weight:760;margin:0 0 10px}.upload-desc{color:var(--sub);line-height:1.8;font-size:13px;margin:0 auto 22px;max-width:510px}.upload-hint{font-size:12px;color:#8190aa;margin-top:18px}.feature-grid{display:grid;grid-template-columns:repeat(3,1fr);width:min(720px,100%);gap:12px}.feature{background:rgba(255,255,255,.82);border:1px solid var(--line);border-radius:12px;padding:16px}.feature-icon{font-size:21px;margin-bottom:8px}.feature h3{font-size:13px;margin:0 0 5px}.feature p{color:var(--sub);font-size:11.5px;line-height:1.65;margin:0}
+  .workspace{display:none;flex-direction:column;gap:16px}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.stat{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:17px 19px;box-shadow:0 4px 14px rgba(26,43,82,.027)}.stat-label{font-size:11px;color:var(--sub);font-weight:620}.stat-number{font-size:25px;font-weight:800;letter-spacing:-.04em;margin:7px 0 1px;font-variant-numeric:tabular-nums}.stat-note{font-size:11px;color:#90a0b5}.stat:nth-child(2) .stat-number{color:var(--blue)}.stat:nth-child(3) .stat-number{color:var(--violet)}.stat:nth-child(4) .stat-number{color:var(--green)}
+  .file-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap;background:#f0f4fb;border:1px solid #dee6f3;border-radius:11px;padding:10px 14px;font-size:12px}.file-row b{font-weight:740;max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tag{font-size:10px;color:#577198;background:white;border:1px solid #dce5f2;border-radius:20px;padding:3px 8px}.file-row .spacer{flex:1}.dirtydot{color:#aa6f16;font-size:11px;display:none}.fineprint{color:var(--sub2);font-size:11px}
+  .main-layout{display:grid;grid-template-columns:minmax(340px,430px) minmax(0,1fr);align-items:stretch;gap:16px;min-height:620px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}.terms-pane{display:flex;flex-direction:column;min-height:600px;max-height:min(80vh,900px)}.pane-head{padding:21px 20px 12px;border-bottom:1px solid var(--line)}.pane-heading{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:15px}.pane-title{font-size:15px;font-weight:780}.search-wrap{position:relative}.search{width:100%;height:40px;border:1px solid #dce3ef;border-radius:9px;outline:none;background:#f9fbfe;padding:9px 14px 9px 37px;font-size:12.5px}.search:focus{border-color:#8fa6e0;box-shadow:0 0 0 3px #eef3ff}.search-icon{position:absolute;left:12px;top:11px;color:#92a0b5;font-size:16px}
+  .filters{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.filter{padding:7px 9px;background:#f6f8fc;border:1px solid #e6ebf3;border-radius:8px;color:#697891;font-size:11.5px;font-weight:680}.filter.active{color:#2353b5;background:#edf3ff;border-color:#b6c9ed}.filter .count{color:inherit;opacity:.63;margin-left:5px;font-weight:500}
+  .term-list{overflow-y:auto;flex:1}.term{display:block;border:0;width:100%;text-align:left;background:white;border-bottom:1px solid #f0f3f8;padding:14px 19px;transition:background .14s;cursor:pointer}.term:hover{background:#f7faff}.term.active{background:#f0f5ff;border-left:3px solid var(--blue);padding-left:16px}.term-top{display:flex;justify-content:space-between;align-items:center;gap:9px;margin-bottom:6px}.term-name{font-weight:730;color:#243350;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.kind{flex-shrink:0;font-size:10px;border-radius:6px;padding:3px 6px;font-weight:630;background:#ebf1ff;color:#4162aa}.kind.relationship{background:#f0eaff;color:#7752aa}.kind.property{background:#e7f7f1;color:#268773}.term-comment{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11.7px;color:#7d8ba0}.list-footer{font-size:11px;color:var(--sub2);padding:10px 18px;border-top:1px solid var(--line);background:#fbfcff}
+  .detail-pane{display:flex;flex-direction:column;min-width:0;min-height:600px;overflow:visible}.detail-head{padding:21px 25px 17px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;justify-content:space-between}.detail-head-left{min-width:0}.detailsub{color:var(--sub);font-size:12px;margin-top:5px}.detailsub strong{color:var(--text)}.mode-tabs{display:flex;gap:4px;padding:4px;background:#f0f3f9;border:1px solid #e5eaf3;border-radius:10px}.mode-tabs button{border:0;background:transparent;border-radius:7px;padding:8px 12px;font-weight:670;font-size:12px;color:#71819a}.mode-tabs button.active{color:#244caa;background:white;box-shadow:0 2px 8px rgba(28,48,79,.07)}
+  .detail-body{padding:26px;flex:1;display:flex;flex-direction:column;gap:20px}.section-title{font-size:12px;font-weight:800;color:#34435d;text-transform:none;margin-bottom:10px}.field{display:flex;flex-direction:column;gap:7px}.field label{font-size:12px;font-weight:740;color:#43516a}.field input,.field select,.field textarea{width:100%;border:1px solid #dce4f0;border-radius:10px;background:#fff;color:#263652;padding:11px 13px;outline:none;font-size:13px;line-height:1.6}.field input:focus,.field select:focus,.field textarea:focus{border-color:#90a9e6;box-shadow:0 0 0 3px #edf3ff}.field textarea{resize:vertical;min-height:132px}.field .help{font-size:11px;color:#93a0b3}.field .mono{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;font-size:11.5px;background:#f7f9fd;color:#5c6880;overflow:hidden;text-overflow:ellipsis}.readonly{background:#f7f9fd!important;color:#7b879b!important}
+  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:15px}.detail-bottom{margin-top:auto;border-top:1px solid var(--line);padding:15px 25px;display:flex;justify-content:space-between;gap:12px;align-items:center}.detail-empty{height:100%;min-height:500px;display:grid;place-items:center;color:#95a0b2;text-align:center;padding:40px}.detail-empty .circle{width:60px;height:60px;background:#f1f4f9;border-radius:18px;display:grid;place-items:center;font-size:27px;margin:0 auto 14px}.detail-empty b{font-size:15px;color:#53627c}.detail-empty p{font-size:12px;line-height:1.8}
+  .source-wrap{padding:23px;flex:1;display:flex;flex-direction:column;gap:13px;min-height:580px}.source-toolbar{display:flex;justify-content:space-between;align-items:center;gap:14px}.source-toolbar p{margin:0;color:var(--sub);font-size:12px;line-height:1.5}.source-editor{flex:1;width:100%;min-height:490px;resize:vertical;background:#17243b;color:#e4ebf7;border:1px solid #2c3c56;border-radius:11px;padding:19px;font:12.5px/1.75 ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;tab-size:2;white-space:pre;outline:0}.source-editor:focus{border-color:#527bd6}.notice{padding:10px 13px;background:#fff9ea;border:1px solid #f1dfb0;color:#986c2a;font-size:12px;border-radius:9px;line-height:1.65}
+  .overlay{position:fixed;inset:0;z-index:40;display:none;align-items:center;justify-content:center;background:rgba(21,33,56,.48);padding:16px}.modal{background:white;width:min(500px,100%);border-radius:18px;box-shadow:0 24px 74px rgba(18,29,50,.25);padding:24px;display:flex;flex-direction:column;gap:17px}.modal-title{font-size:18px;font-weight:800;margin:0}.modal-desc{font-size:12px;color:var(--sub);line-height:1.6;margin-top:5px}.modal-footer{display:flex;gap:9px;justify-content:flex-end}.toast{position:fixed;z-index:100;right:25px;bottom:24px;max-width:min(470px,calc(100vw - 35px));padding:13px 17px;background:#233251;color:#fff;box-shadow:0 12px 34px rgba(18,34,56,.2);border-radius:11px;display:none;line-height:1.6;font-size:12.5px}.toast.error{background:#aa3f42}.pill{display:inline-flex;align-items:center;gap:6px;border:1px solid #dde5f1;border-radius:20px;padding:5px 9px;font-size:11px;color:#6d7b8e;background:#fff}
+  .footer{text-align:center;color:#9aA6b7;font-size:11px;padding:10px 0 20px}.hidden{display:none!important}
+  @media(max-width:950px){.topbar{position:static;align-items:flex-start;flex-direction:column}.top-actions{justify-content:flex-start}.main-layout{grid-template-columns:1fr}.terms-pane{max-height:430px;min-height:350px}.detail-pane{min-height:520px}.privacy{display:none}.workspace-top{align-items:flex-start}.container{padding-top:20px}}
+  @media(max-width:600px){.topbar{padding:15px}.container{padding:14px}.stats{grid-template-columns:repeat(2,1fr)}.feature-grid{grid-template-columns:1fr}.upload-area{padding:33px 20px}.upload-title{font-size:19px}.detail-body{padding:18px}.detail-head{padding:15px 18px}.detail-bottom{padding:13px 18px}.form-grid{grid-template-columns:1fr}.workspace-title{font-size:20px}.mode-tabs button{padding:7px}.source-wrap{padding:13px}.privacy{display:none}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><div class="brandmark">知</div><div><div class="brandname">规则本体工作台</div><div class="brandcaption">TTL Ontology Studio · 离线审阅与编辑</div></div></div>
+    <div class="top-actions">
+      <span class="pill" title="本页面在浏览器本地处理文件，不上传服务器">◉ 本地处理 · 无需联网</span>
+      <button class="btn" id="topImport">↥ 导入 TTL</button>
+      <button class="btn" id="exportCSV" disabled>导出术语清单</button>
+      <button class="btn primary" id="exportTTL" disabled>↧ 导出 TTL</button>
+    </div>
+  </header>
+  <main class="container">
+    <div class="workspace-top">
+      <div><div class="eyebrow">KNOWLEDGE ONTOLOGY · REVIEW WORKSPACE</div><h1 class="workspace-title">本体词表审阅与协同编辑</h1><p class="workspace-sub">管理实体类别、对象关系和数据属性；修改名称与业务释义后，可导出为新的 Turtle（.ttl）文件。</p></div>
+      <div class="privacy">✓ 仅本地读取文件，不连接任何服务器</div>
+    </div>
+    <section class="empty" id="emptyState">
+      <div class="upload-area" id="dropArea" tabindex="0" role="button" aria-label="选择或拖入 TTL 文件">
+        <div class="upload-icon">⇧</div>
+        <h2 class="upload-title">导入 TTL，开始浏览本体</h2>
+        <p class="upload-desc">页面默认不包含任何本体数据。将 <strong>.ttl</strong> 文件拖到这里，或点击选择文件，即可查看类、关系、属性及其中文注释。</p>
+        <button class="btn primary" id="emptyImport">选择 TTL 文件</button>
+        <div class="upload-hint">支持 UTF-8 Turtle 文件 · 完全离线 · 不上传 · 无须安装软件</div>
+      </div>
+      <div class="feature-grid">
+        <div class="feature"><div class="feature-icon">⌕</div><h3>分类检索</h3><p>按实体、关系、属性分类，搜索中文名称、URI 与业务定义。</p></div>
+        <div class="feature"><div class="feature-icon">✎</div><h3>可视化编辑</h3><p>修改中文名称和 comment，新增或删除术语，支持源码编辑。</p></div>
+        <div class="feature"><div class="feature-icon">↧</div><h3>无损导出</h3><p>未修改的原始 TTL 文本和其他 RDF 声明原样保留。</p></div>
+      </div>
+    </section>
+    <section class="workspace" id="workspace">
+      <div class="file-row"><span style="color:#3963b8;font-size:16px">▤</span><b id="filename">—</b><span class="tag" id="sizeTag">—</span><span class="tag" id="prefixTag">—</span><span id="dirtyTag" class="dirtydot">● 有未导出的修改</span><span class="spacer"></span><span class="fineprint">关闭或刷新前请先导出 TTL</span></div>
+      <div class="stats">
+        <div class="stat"><div class="stat-label">本体术语总数</div><div class="stat-number" id="sTotal">0</div><div class="stat-note">已识别的 OWL 声明</div></div>
+        <div class="stat"><div class="stat-label">实体类别 · Class</div><div class="stat-number" id="sClass">0</div><div class="stat-note">可编辑定义与说明</div></div>
+        <div class="stat"><div class="stat-label">对象关系 · ObjectProperty</div><div class="stat-number" id="sObject">0</div><div class="stat-note">用于定义关系类型</div></div>
+        <div class="stat"><div class="stat-label">数据属性 · DatatypeProperty</div><div class="stat-number" id="sData">0</div><div class="stat-note">用于定义节点字段</div></div>
+      </div>
+      <div class="main-layout">
+        <section class="panel terms-pane">
+          <div class="pane-head">
+            <div class="pane-heading"><div class="pane-title">术语目录</div><button class="btn small" id="addTerm">＋ 新建术语</button></div>
+            <div class="search-wrap"><span class="search-icon">⌕</span><input class="search" id="searchBox" type="search" placeholder="搜索名称、URI 或业务注释…"></div>
+            <div class="filters" id="filters">
+              <button class="filter active" data-filter="all">全部 <span class="count" id="fAll">0</span></button>
+              <button class="filter" data-filter="Class">实体 <span class="count" id="fClass">0</span></button>
+              <button class="filter" data-filter="ObjectProperty">关系 <span class="count" id="fObject">0</span></button>
+              <button class="filter" data-filter="DatatypeProperty">属性 <span class="count" id="fData">0</span></button>
+            </div>
+          </div>
+          <div class="term-list" id="termList"></div>
+          <div class="list-footer" id="listFooter">—</div>
+        </section>
+        <section class="panel detail-pane">
+          <div class="detail-head"><div class="detail-head-left"><div class="pane-title">定义详情</div><div class="detailsub" id="detailSub">选择左侧术语进行查看和编辑</div></div><div class="mode-tabs"><button id="visualTab" class="active">可视化</button><button id="sourceTab">TTL 源码</button></div></div>
+          <div id="detailContent" style="display:flex;flex-direction:column;flex:1;min-width:0"></div>
+          <div id="sourceContent" class="hidden" style="display:none;flex-direction:column;flex:1;min-width:0"></div>
+        </section>
+      </div>
+      <p class="fineprint" style="margin:0 3px">说明：图谱本体 Schema 定义的是术语类型，并不自动生成业务实例或实体间的真实连接。页面编辑 Class、ObjectProperty、DatatypeProperty 的声明和注释，其他 RDF 内容尽量原样保留。</p>
+    </section>
+  </main>
+  <footer class="footer">TTL Ontology Studio · 单文件 HTML · 文件只在当前浏览器中处理</footer>
+</div>
+<input type="file" id="fileInput" accept=".ttl,.turtle,text/turtle,text/plain" hidden>
+<div class="overlay" id="addOverlay" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="addTitle">
+    <div><h2 class="modal-title" id="addTitle">新增本体术语</h2><p class="modal-desc">新增术语仅保存为 OWL Schema 声明，不生成业务实例。URI 一旦创建，建议保持稳定。</p></div>
+    <div class="field"><label for="newKind">术语类型</label><select id="newKind"><option value="Class">实体类别 · owl:Class</option><option value="ObjectProperty">对象关系 · owl:ObjectProperty</option><option value="DatatypeProperty">数据属性 · owl:DatatypeProperty</option></select></div>
+    <div class="field"><label for="newNamespace">命名空间</label><select id="newNamespace"></select></div>
+    <div class="field"><label for="newLocal">术语标识（URI 后缀）</label><input id="newLocal" placeholder="例如：售后责任" spellcheck="false"><div class="help">标识不可与现有 URI 重复，可用中文、英文或数字；建议不含空格。</div></div>
+    <div class="field"><label for="newLabel">中文名称</label><input id="newLabel" placeholder="例如：售后责任"></div>
+    <div class="field"><label for="newComment">业务释义 · rdfs:comment</label><textarea id="newComment" rows="3" placeholder="说明业务含义、语义边界，以及与相近概念的区别"></textarea></div>
+    <div class="modal-footer"><button class="btn" id="cancelAdd">取消</button><button class="btn primary" id="saveAdd">确认新增</button></div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script>
+'use strict';
+/* 独立离线页面：只支持本地文件导入；不调用任何网络、API 或本地存储。*/
+const RDF='http://www.w3.org/1999/02/22-rdf-syntax-ns#';
+const OWL='http://www.w3.org/2002/07/owl#';
+const RDFS='http://www.w3.org/2000/01/rdf-schema#';
+const TYPES={Class:'实体类别',ObjectProperty:'对象关系',DatatypeProperty:'数据属性'};
+const STYLES={Class:'',ObjectProperty:'relationship',DatatypeProperty:'property'};
+let doc=null, picked=null, selected=null, currentFilter='all', search='', mode='visual', dirty=false, rawDirty=false, rawDraft='';
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(message,error=false){const x=$('toast');x.textContent=message;x.classList.toggle('error',error);x.style.display='block';clearTimeout(toast.tid);toast.tid=setTimeout(()=>x.style.display='none',4700)}
+function askDiscard(){return !dirty&&!rawDirty || confirm('当前有未导出的修改。导入新文件会覆盖当前编辑内容，确定继续吗？')}
+function expand(term,prefixes){
+ if(!term)return '';
+ if(term==='a')return RDF+'type';
+ if(term.startsWith('<')&&term.endsWith('>'))return term.slice(1,-1);
+ const colon=term.indexOf(':');
+ if(colon>=0){const prefix=term.slice(0,colon);if(Object.prototype.hasOwnProperty.call(prefixes,prefix))return prefixes[prefix]+term.slice(colon+1)}
+ return term;
+}
+function findPrefixInfo(text){
+ const prefixes={rdf:RDF,rdfs:RDFS,owl:OWL};const declared=[];
+ const re=/(?:@prefix\s+([\w-]*):\s*<([^>]+)>\s*\.|\bPREFIX\s+([\w-]*):\s*<([^>]+)>)/gi;
+ for(const m of text.matchAll(re)){const p=m[1]??m[3],u=m[2]??m[4];prefixes[p]=u;declared.push({prefix:p,iri:u})}
+ return{prefixes,declared};
+}
+function scanStatements(text){
+ let start=0, quote=null, triple=false, iri=false, comment=false, sq=0,paren=0;const result=[];
+ for(let i=0;i<text.length;i++){
+  const c=text[i],n=text[i+1];
+  if(comment){if(c==='\n')comment=false;continue}
+  if(quote){
+   if(c==='\\'){i++;continue}
+   if(triple){if(c===quote&&text.substr(i,3)===quote.repeat(3)){quote=null;triple=false;i+=2}}
+   else if(c===quote)quote=null;
+   continue;
+  }
+  if(iri){if(c==='\\'){i++;continue}if(c==='>')iri=false;continue}
+  if(c==='#'){comment=true;continue}
+  if(c==='<'&&n!=='<'){iri=true;continue}
+  if(c==='"'||c==="'"){quote=c;triple=text.substr(i,3)===c.repeat(3);if(triple)i+=2;continue}
+  if(c==='[')sq++;if(c===']')sq=Math.max(0,sq-1);
+  if(c==='(')paren++;if(c===')')paren=Math.max(0,paren-1);
+  if(c==='.'&&sq===0&&paren===0&&(i===text.length-1||/[\s#]/.test(n))){
+   result.push({start,end:i+1,raw:text.slice(start,i+1)});start=i+1;
+  }
+ }
+ return {statements:result,tail:text.slice(start),balanced:!quote&&!iri&&sq===0&&paren===0};
+}
+function tokenize(text,startOffset){
+ const tok=[];let i=0;const push=(v,a,b,type)=>tok.push({text:v,start:startOffset+a,end:startOffset+b,type});
+ while(i<text.length){const c=text[i];if(/\s/.test(c)){i++;continue}
+  if(c==='#'){while(i<text.length&&text[i]!=='\n')i++;continue}
+  if(c==='<'){
+   const a=i; i++;
+   while(i<text.length){if(text[i]==='\\'){i+=2;continue}if(text[i++]==='>')break}
+   push(text.slice(a,i),a,i,'iri');continue;
+  }
+  if(c==='"'||c==="'"){
+   const a=i,q=c,triple=text.slice(i,i+3)===q.repeat(3);i+=triple?3:1;
+   while(i<text.length){if(text[i]==='\\'){i+=2;continue}if(triple&&text.slice(i,i+3)===q.repeat(3)){i+=3;break}if(!triple&&text[i]===q){i++;break}i++}
+   push(text.slice(a,i),a,i,'literal');continue;
+  }
+  if(';,.[](){}'.includes(c)){push(c,i,i+1,'punct');i++;continue}
+  let a=i;while(i<text.length&&!/\s/.test(text[i])&&!';,[](){}#'.includes(text[i])){
+   if(text[i]==='.'&&(i===text.length-1||/[\s#]/.test(text[i+1])))break;
+   if(text[i]==='<'||text[i]==='"'||text[i]==="'")break;
+   i++;
+  }
+  if(i>a){push(text.slice(a,i),a,i,'word');continue}
+  i++;
+ }
+ return tok;
+}
+function decodeTurtleQuoted(v){
+ const triple=v.startsWith('"""')||v.startsWith("'".repeat(3));const q=triple?3:1;
+ let content=v.slice(q,v.length-q);
+ return content.replace(/\\(U[0-9a-fA-F]{8}|u[0-9a-fA-F]{4}|[tbnrf"'\\])/g,(_,s)=>{
+  const d={t:'\t',b:'\b',n:'\n',r:'\r',f:'\f','"':'"',"'":"'",'\\':'\\'};
+  if(s[0]==='U'||s[0]==='u')try{return String.fromCodePoint(parseInt(s.slice(1),16))}catch(e){return ''}
+  return d[s]??s;
+ });
+}
+function encodeLiteral(x){return JSON.stringify(String(x??'')).replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029')}
+function parseTTL(source,name='导入文件.ttl'){
+ const {prefixes,declared}=findPrefixInfo(source);
+ const {statements,tail,balanced}=scanStatements(source);
+ const entries=[];const errors=[];
+ for(const s of statements){
+  const ts=tokenize(s.raw,s.start);if(ts.length<3)continue;
+  const uri=expand(ts[0].text,prefixes);
+  if(!uri.includes(':'))continue;
+  let kind=null,typeToken=null,labelCandidates=[],commentCandidates=[];
+  for(let i=1;i<ts.length-1;i++){
+   const current=expand(ts[i].text,prefixes);
+   if(current===RDF+'type' && ts[i+1]){
+    const x=expand(ts[i+1].text,prefixes);
+    for(const k of Object.keys(TYPES))if(x===OWL+k){kind=k;typeToken=ts[i+1];break}
+   }
+   if((current===RDFS+'label'||current===RDFS+'comment')&&ts[i+1]?.type==='literal'){
+    const following=ts[i+2]?.text??'';const lang=following.startsWith('@')?following.slice(1).toLowerCase():'';
+    (current===RDFS+'label'?labelCandidates:commentCandidates).push({token:ts[i+1],lang,text:decodeTurtleQuoted(ts[i+1].text)});
+   }
+  }
+  if(!kind)continue;
+  const best=a=>a.find(x=>x.lang.startsWith('zh'))??a[0]??null;
+  const label=best(labelCandidates),comment=best(commentCandidates);
+  let local=uri;for(const x of declared)if(uri.startsWith(x.iri)){local=decodeURIComponentSafe(uri.slice(x.iri.length));break}
+  entries.push({id:'t'+entries.length,uri,local,kind,label:label?.text??local,comment:comment?.text??'',origKind:kind,origLabel:label?.text??local,origComment:comment?.text??'',labelToken:label?.token??null,commentToken:comment?.token??null,typeToken,start:s.start,end:s.end,added:false,deleted:false});
+ }
+ if(!balanced)errors.push('检测到可能未闭合的字符串、IRI 或括号');
+ // For the V0.8 and similar OWL schema formats, every visible term is a typed definition.
+ return {source,name,entries,prefixes,declared,statements,tail,errors};
+}
+function decodeURIComponentSafe(s){try{return decodeURIComponent(s)}catch(e){return s}}
+function kindToken(kind){return '<'+OWL+kind+'>'}
+function propToken(local){return '<'+RDFS+local+'>'}
+function buildTTL(){
+ if(!doc)return '';
+ const edits=[];
+ for(const e of doc.entries){
+  if(e.added)continue;
+  if(e.deleted){edits.push({start:e.start,end:e.end,text:''});continue}
+  if(e.kind!==e.origKind&&e.typeToken)edits.push({start:e.typeToken.start,end:e.typeToken.end,text:kindToken(e.kind)});
+  if(e.label!==e.origLabel){
+   if(e.labelToken)edits.push({start:e.labelToken.start,end:e.labelToken.end,text:encodeLiteral(e.label)});
+   else if(e.label)edits.push({start:e.end-1,end:e.end-1,text:' ;\n    '+propToken('label')+' '+encodeLiteral(e.label)+'@zh'});
+  }
+  if(e.comment!==e.origComment){
+   if(e.commentToken)edits.push({start:e.commentToken.start,end:e.commentToken.end,text:encodeLiteral(e.comment)});
+   else if(e.comment)edits.push({start:e.end-1,end:e.end-1,text:' ;\n    '+propToken('comment')+' '+encodeLiteral(e.comment)+'@zh'});
+  }
+ }
+ // Inserts at the same point must be combined instead of sorting ambiguous overlapping edits.
+ const grouped=[];let sorted=edits.sort((a,b)=>a.start-b.start||a.end-b.end);
+ for(let e of sorted){if(grouped.length&&e.start===e.end&&grouped[grouped.length-1].start===e.start&&grouped[grouped.length-1].end===e.end){grouped[grouped.length-1].text+=e.text}else grouped.push({...e})}
+ let out=doc.source;
+ for(const x of grouped.sort((a,b)=>b.start-a.start||b.end-a.end))out=out.slice(0,x.start)+x.text+out.slice(x.end);
+ const newEntries=doc.entries.filter(e=>e.added&&!e.deleted);
+ if(newEntries.length){
+  out+='\n\n# ===== 通过本体工作台新增的术语 =====\n';
+  for(const e of newEntries){
+   const subject='<'+e.uri+'>';
+   out+=subject+' a '+kindToken(e.kind)+' ;\n    '+propToken('label')+' '+encodeLiteral(e.label)+'@zh';
+   if(e.comment)out+=' ;\n    '+propToken('comment')+' '+encodeLiteral(e.comment)+'@zh';
+   out+=' .\n\n';
+  }
+ }
+ return out;
+}
+function activeEntries(){return doc?doc.entries.filter(e=>!e.deleted):[]}
+function groupedCounts(){const a=activeEntries();return {all:a.length,Class:a.filter(e=>e.kind==='Class').length,ObjectProperty:a.filter(e=>e.kind==='ObjectProperty').length,DatatypeProperty:a.filter(e=>e.kind==='DatatypeProperty').length}}
+function updateCounts(){const x=groupedCounts();$('sTotal').textContent=x.all;$('sClass').textContent=x.Class;$('sObject').textContent=x.ObjectProperty;$('sData').textContent=x.DatatypeProperty;$('fAll').textContent=x.all;$('fClass').textContent=x.Class;$('fObject').textContent=x.ObjectProperty;$('fData').textContent=x.DatatypeProperty}
+function setDirty(){dirty=true;$('dirtyTag').style.display='inline';$('exportTTL').disabled=false;$('exportCSV').disabled=false}
+function renderList(){
+ if(!doc)return;
+ const q=search.trim().toLocaleLowerCase();let all=activeEntries().filter(e=>currentFilter==='all'||e.kind===currentFilter);
+ if(q)all=all.filter(e=>(e.label+' '+e.comment+' '+e.uri).toLocaleLowerCase().includes(q));
+ const list=$('termList');
+ if(!all.length){list.innerHTML='<div style="padding:35px 18px;text-align:center;color:#8794a9;font-size:12px">没有匹配的术语。请调整搜索或类别。</div>';}
+ else list.innerHTML=all.map(e=>`<button type="button" class="term ${e.id===selected?'active':''}" data-id="${esc(e.id)}"><div class="term-top"><span class="term-name" title="${esc(e.label)}">${esc(e.label)}</span><span class="kind ${STYLES[e.kind]}">${esc(TYPES[e.kind])}</span></div><div class="term-comment" title="${esc(e.comment)}">${esc(e.comment||e.uri)}</div></button>`).join('');
+ $('listFooter').textContent=`显示 ${all.length} / ${activeEntries().length} 个术语 · 点击查看详情`;
+}
+function updateTitle(){if(!doc)return;$('filename').textContent=doc.name;$('sizeTag').textContent=(new Blob([doc.source]).size/1024).toFixed(1)+' KB';$('prefixTag').textContent=doc.declared.length+' 个前缀';$('dirtyTag').style.display=(dirty||rawDirty)?'inline':'none'}
+function currentTerm(){return doc?.entries.find(e=>e.id===selected&&!e.deleted)??null}
+function renderDetails(){
+ if(mode==='source')return;
+ const e=currentTerm();
+ if(!e){$('detailSub').textContent='选择左侧术语进行查看和编辑';$('detailContent').innerHTML='<div class="detail-empty"><div><div class="circle">✎</div><b>选择术语以开始编辑</b><p>在左侧检索实体类别、对象关系和数据属性，<br>然后修改中文名称或业务释义。</p></div></div>';return}
+ $('detailSub').innerHTML=`当前：<strong>${esc(e.label)}</strong> · ${esc(TYPES[e.kind])}`;
+ $('detailContent').innerHTML=`<div class="detail-body"><div><div class="section-title">基础定义</div><div class="form-grid"><div class="field"><label for="editKind">术语类型</label><select id="editKind"><option value="Class" ${e.kind==='Class'?'selected':''}>实体类别 · Class</option><option value="ObjectProperty" ${e.kind==='ObjectProperty'?'selected':''}>对象关系 · ObjectProperty</option><option value="DatatypeProperty" ${e.kind==='DatatypeProperty'?'selected':''}>数据属性 · DatatypeProperty</option></select></div><div class="field"><label for="editLabel">中文名称 · rdfs:label</label><input id="editLabel" value="${esc(e.label)}" spellcheck="false"></div></div></div><div class="field"><label for="editURI">完整 URI / 本体标识</label><input id="editURI" class="mono readonly" readonly value="${esc(e.uri)}" title="为避免破坏其他 RDF 引用，已有术语 URI 不在可视化表单内修改"><div class="help">URI 作为术语唯一标识在表单中只读。需要调整 URI 时，请切换到 TTL 源码进行修改。</div></div><div class="field"><label for="editComment">业务释义 · rdfs:comment</label><textarea id="editComment" rows="7" spellcheck="false">${esc(e.comment)}</textarea><div class="help">建议写清术语所指业务对象、适用语境及容易混淆的语义边界；不建议使用通用模板。</div></div><div style="padding:13px;background:#f5f8fd;border-radius:10px;color:#6c7b94;font-size:12px;line-height:1.75">本体定义 ≠ 真实实例。这里修改的是 Schema 中术语的定义，不会自动改变导入文档里的规则正文。</div></div><div class="detail-bottom"><span class="fineprint">修改立即生效，点击右上角导出 TTL 保存文件</span><button class="btn small danger" id="deleteTerm">删除术语</button></div>`;
+ $('editLabel').addEventListener('input',ev=>{e.label=ev.target.value;setDirty();updateCounts();renderList();$('detailSub').innerHTML=`当前：<strong>${esc(e.label)}</strong> · ${esc(TYPES[e.kind])}`});
+ $('editComment').addEventListener('input',ev=>{e.comment=ev.target.value;setDirty();renderList()});
+ $('editKind').addEventListener('change',ev=>{e.kind=ev.target.value;setDirty();updateCounts();renderList();$('detailSub').innerHTML=`当前：<strong>${esc(e.label)}</strong> · ${esc(TYPES[e.kind])}`});
+ $('deleteTerm').addEventListener('click',()=>{if(!confirm(`确认删除术语「${e.label}」的声明？\n注意：不会自动删除文件内其他三元组对该 URI 的引用。`))return;e.deleted=true;selected=null;setDirty();updateCounts();renderList();renderDetails();toast('已从待导出版本中删除该术语。')});
+}
+function switchMode(next){
+ if(mode==='source'&&next==='visual'&&rawDirty){if(!confirm('源码有未应用的改动。返回可视化前是否应用源码改动？\n选择“取消”可以留在源码编辑页面。'))return;applySource();if(rawDirty)return}
+ mode=next;
+ $('visualTab').classList.toggle('active',mode==='visual');$('sourceTab').classList.toggle('active',mode==='source');
+ $('detailContent').style.display=mode==='visual'?'flex':'none';$('detailContent').classList.toggle('hidden',mode!=='visual');
+ $('sourceContent').style.display=mode==='source'?'flex':'none';$('sourceContent').classList.toggle('hidden',mode!=='source');
+ if(mode==='source'){showSource()}else{renderDetails()}
+}
+function showSource(){
+ const src=buildTTL();rawDraft=src;rawDirty=false;
+ $('detailSub').textContent='直接编辑原始 Turtle 文本，点击“应用源码”更新术语目录';
+ $('sourceContent').innerHTML=`<div class="source-wrap"><div class="source-toolbar"><p>保留全部前缀及其他 RDF 声明。<br>源码修改后先点击“应用源码”，再导出文件。</p><button class="btn primary small" id="applySource">✓ 应用源码</button></div><div class="notice">注意：源码编辑支持任意 Turtle 内容，但页面只执行基本结构检查，不替代专业 RDF 解析器的完整语法校验。</div><textarea id="codeEditor" class="source-editor" spellcheck="false" aria-label="TTL 源码编辑器"></textarea></div>`;
+ $('codeEditor').value=rawDraft;
+ $('codeEditor').addEventListener('input',ev=>{rawDraft=ev.target.value;rawDirty=true;updateTitle()});
+ $('applySource').addEventListener('click',applySource);
+}
+function applySource(){
+ if(!rawDirty)return true;
+ const s=rawDraft.replace(/^\uFEFF/,'');
+ const check=scanStatements(s);
+ if(!check.balanced){toast('源码中存在未闭合的引号、IRI 或括号，请检查后重试。',true);return false}
+ // A trailing remainder containing non-comment tokens normally indicates a missing closing dot.
+ const rem=check.tail.replace(/#[^\n]*/g,'').trim();
+ if(rem && !/^BASE\s+<[^>]+>$/i.test(rem)){toast('源码末尾可能缺少句号（.），请检查后再应用。',true);return false}
+ const next=parseTTL(s,doc?.name||'ontology.ttl');
+ if(!next.entries.length && doc?.entries?.some(e=>!e.deleted)){
+  if(!confirm('修改后的源码未识别到任何 OWL 类或属性声明，是否仍然应用？'))return false;
+ }
+ doc=next;selected=null;dirty=true;rawDirty=false;rawDraft='';updateCounts();renderList();updateTitle();toast(`源码已应用，识别到 ${doc.entries.length} 个本体术语。`);return true;
+}
+function validateBeforeExport(source){
+ const check=scanStatements(source);
+ if(!check.balanced)return '发现未闭合的字符串、IRI 或括号';
+ const rem=check.tail.replace(/#[^\n]*/g,'').trim();
+ if(rem&&!/^BASE\s+<[^>]+>$/i.test(rem))return '文件末尾可能存在未闭合语句（缺少“.”）';
+ return '';
+}
+function download(text,filename,type){
+ const blob=new Blob([text],{type:type||'text/turtle;charset=utf-8'});const url=URL.createObjectURL(blob);
+ const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),15000);
+}
+function safeFilename(s){return (s||'ontology').replace(/\.[^.]+$/,'').replace(/[^\w\-\.\u4e00-\u9fff]/g,'_').slice(0,90)||'ontology'}
+function exportTTL(){
+ if(!doc)return;
+ if(mode==='source'&&rawDirty){if(!applySource())return;}
+ const text=buildTTL();const issue=validateBeforeExport(text);if(issue){toast('暂时无法导出：'+issue,true);return}
+ download(text,safeFilename(doc.name)+'_edited.ttl');toast('已生成 TTL 下载文件。修改仅保存在导出文件中，原始文件未改变。');
+ dirty=false;updateTitle();
+}
+function exportCSV(){
+ if(!doc)return;
+ if(mode==='source'&&rawDirty){if(!applySource())return;}
+ const escapeCSV=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
+ const rows=[['术语类型','中文名称','完整 URI','业务释义'],...activeEntries().map(e=>[TYPES[e.kind],e.label,e.uri,e.comment])];
+ download('\uFEFF'+rows.map(x=>x.map(escapeCSV).join(',')).join('\r\n'),safeFilename(doc.name)+'_terms.csv','text/csv;charset=utf-8');toast('术语清单 CSV 已生成。');
+}
+async function loadFile(file){
+ if(!file)return;
+ if(!askDiscard())return;
+ try{
+  const content=(await file.text()).replace(/^\uFEFF/,'');
+  if(content.length>12*1024*1024){toast('文件超过 12MB，建议先使用较小的本体 Schema 文件。',true);return}
+  const parsed=parseTTL(content,file.name);
+  if(parsed.errors.length){toast(parsed.errors.join('；')+'。可尝试在源码页修复。',true)}
+  doc=parsed;selected=null;dirty=false;rawDirty=false;mode='visual';search='';currentFilter='all';$('searchBox').value='';$('emptyState').style.display='none';$('workspace').style.display='flex';$('exportTTL').disabled=false;$('exportCSV').disabled=false;
+  document.querySelectorAll('#filters .filter').forEach(x=>x.classList.toggle('active',x.dataset.filter==='all'));
+  updateTitle();updateCounts();renderList();switchMode('visual');
+  if(!doc.entries.length)toast('导入完成，但未找到 OWL Class / ObjectProperty / DatatypeProperty 声明。可在 TTL 源码页查看完整内容。',true);
+  else toast(`导入成功：识别 ${doc.entries.length} 个术语，可开始编辑。`);
+ }catch(err){toast('文件导入失败：'+(err?.message||String(err)),true)}
+}
+function showAddModal(){
+ if(!doc)return;
+ const d=doc.declared.filter(x=>!['rdf','rdfs','owl','xsd'].includes(x.prefix));
+ if(!d.length){toast('没有找到可用于新增术语的业务命名空间。可先在源码中声明 @prefix ont: <...> .',true);return}
+ $('newNamespace').innerHTML=d.map(x=>`<option value="${esc(x.prefix)}">${esc(x.prefix||':')} · ${esc(x.iri)}</option>`).join('');
+ $('newKind').value='Class';$('newLocal').value='';$('newLabel').value='';$('newComment').value='';$('addOverlay').style.display='flex';$('addOverlay').setAttribute('aria-hidden','false');$('newLocal').focus();
+}
+function hideAddModal(){$('addOverlay').style.display='none';$('addOverlay').setAttribute('aria-hidden','true')}
+function addNewTerm(){
+ const prefix=$('newNamespace').value,local=$('newLocal').value.trim(),kind=$('newKind').value,label=$('newLabel').value.trim(),comment=$('newComment').value.trim();
+ if(!local||!label){toast('请填写 URI 标识和中文名称。',true);return}
+ if(/[\s<>"{}|\\^`]/.test(local)){toast('URI 标识不能包含空格或特殊符号。',true);return}
+ const ns=doc.declared.find(x=>x.prefix===prefix)?.iri;
+ if(!ns){toast('命名空间不存在。',true);return}
+ const uri=ns+local;
+ if(activeEntries().some(e=>e.uri===uri)){toast('这个 URI 已存在，请使用不同的术语标识。',true);return}
+ const entry={id:'added'+(Date.now())+Math.floor(Math.random()*1000),uri,local,kind,label,comment,origKind:kind,origLabel:label,origComment:comment,added:true,deleted:false};
+ doc.entries.push(entry);selected=entry.id;currentFilter='all';search='';$('searchBox').value='';document.querySelectorAll('#filters .filter').forEach(x=>x.classList.toggle('active',x.dataset.filter==='all'));
+ hideAddModal();setDirty();updateCounts();renderList();renderDetails();toast('新术语已添加，导出 TTL 后才会保存为文件。');
+}
+$('topImport').addEventListener('click',()=>$('fileInput').click());
+$('emptyImport').addEventListener('click',e=>{e.stopPropagation();$('fileInput').click()});
+$('dropArea').addEventListener('click',e=>{if(!e.target.closest('button'))$('fileInput').click()});
+$('dropArea').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('fileInput').click()}});
+$('fileInput').addEventListener('change',async e=>{const f=e.target.files?.[0];await loadFile(f);e.target.value=''});
+for(const id of ['dropArea','workspace']){
+ const a=$(id);a.addEventListener('dragover',e=>{e.preventDefault();a.classList.add('dragover')});
+ a.addEventListener('dragleave',()=>a.classList.remove('dragover'));
+ a.addEventListener('drop',async e=>{e.preventDefault();a.classList.remove('dragover');const f=Array.from(e.dataTransfer?.files||[]).find(f=>/\.(ttl|turtle|txt)$/i.test(f.name));if(!f){toast('请拖入 .ttl 或 .turtle 文件。',true);return}await loadFile(f)})
+}
+$('exportTTL').addEventListener('click',exportTTL);$('exportCSV').addEventListener('click',exportCSV);
+$('termList').addEventListener('click',e=>{const t=e.target.closest('[data-id]');if(!t)return;selected=t.dataset.id;renderList();if(mode==='source')switchMode('visual');else renderDetails()});
+$('searchBox').addEventListener('input',e=>{search=e.target.value;renderList()});
+$('filters').addEventListener('click',e=>{const b=e.target.closest('button[data-filter]');if(!b)return;currentFilter=b.dataset.filter;document.querySelectorAll('#filters .filter').forEach(x=>x.classList.toggle('active',x===b));renderList()});
+$('visualTab').addEventListener('click',()=>switchMode('visual'));
+$('sourceTab').addEventListener('click',()=>switchMode('source'));
+$('addTerm').addEventListener('click',showAddModal);$('cancelAdd').addEventListener('click',hideAddModal);$('saveAdd').addEventListener('click',addNewTerm);
+$('addOverlay').addEventListener('click',e=>{if(e.target===$('addOverlay'))hideAddModal()});
+$('newLocal').addEventListener('input',e=>{if(!$('newLabel').value.trim()||$('newLabel').dataset.auto==='yes'){$('newLabel').value=e.target.value;$('newLabel').dataset.auto='yes'}});
+$('newLabel').addEventListener('input',()=>{$('newLabel').dataset.auto='no'});
+window.addEventListener('beforeunload',e=>{if(dirty||rawDirty){e.preventDefault();e.returnValue=''}});
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();if(doc)exportTTL()}if(e.key==='Escape')hideAddModal()});
+</script>
+</body>
+</html>

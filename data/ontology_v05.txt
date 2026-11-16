@@ -1,0 +1,2192 @@
+# 跨平台内容本体 v0.4；复用 v0.3 完整内容声明，并扩展抖音双业务。
+# 跨平台规则内容本体 v0.3：京东 + 小红书
+# 目标：支持两平台规则文档正文的实体/关系抽取，并与独立的标题/章节索引关联。
+# 历史兼容：复用用户原始 ontology-...ttl 的 namespace，不改 v0.2 已有术语 URI。
+# 来源：京东(1).zip、小红书(1).zip 的真实文档；术语是候选 Schema，不等于已经完成全量抽取。
+# 明确不包含 domain、range、DatatypeProperty、subClassOf、OWL 实例及具体业务事实。
+
+@prefix ont: <urn:knowledge:ontology:2d1f9c59-ce80-473a-adc2-f62d538871fb:> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# ========== 原京东内容词表 v0.2（IRI 保持兼容）==========
+# ========== A. 原始 TTL 保留的实体类别 ==========
+ont:业务服务 a owl:Class ;
+    rdfs:label "业务服务"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:业务订单 a owl:Class ;
+    rdfs:label "业务订单"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:优惠权益 a owl:Class ;
+    rdfs:label "优惠权益"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:免责情形 a owl:Class ;
+    rdfs:label "免责情形"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:公示渠道 a owl:Class ;
+    rdfs:label "公示渠道"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:参选资格 a owl:Class ;
+    rdfs:label "参选资格"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:合同协议 a owl:Class ;
+    rdfs:label "合同协议"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:品质指标 a owl:Class ;
+    rdfs:label "品质指标"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:商户主体 a owl:Class ;
+    rdfs:label "商户主体"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:商户变更 a owl:Class ;
+    rdfs:label "商户变更"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:商户状态 a owl:Class ;
+    rdfs:label "商户状态"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:处罚机制 a owl:Class ;
+    rdfs:label "处罚机制"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:平台 a owl:Class ;
+    rdfs:label "平台"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:平台规范 a owl:Class ;
+    rdfs:label "平台规范"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:数据作弊 a owl:Class ;
+    rdfs:label "数据作弊"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:数据指标 a owl:Class ;
+    rdfs:label "数据指标"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:数据来源 a owl:Class ;
+    rdfs:label "数据来源"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:榜单 a owl:Class ;
+    rdfs:label "榜单"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:榜单结果 a owl:Class ;
+    rdfs:label "榜单结果"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:法律法规 a owl:Class ;
+    rdfs:label "法律法规"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:管理办法 a owl:Class ;
+    rdfs:label "管理办法"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:行业类目 a owl:Class ;
+    rdfs:label "行业类目"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:规则制度 a owl:Class ;
+    rdfs:label "规则制度"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:规则条款 a owl:Class ;
+    rdfs:label "规则条款"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:评选维度 a owl:Class ;
+    rdfs:label "评选维度"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:违规行为 a owl:Class ;
+    rdfs:label "违规行为"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+
+# ========== A. 新增正文概念：主体与经营 ==========
+ont:店铺 a owl:Class ;
+    rdfs:label "店铺"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：商家在平台开展经营的店铺对象；文档区分企业店、个人店和个体工商户店。 需根据规则上下文确定适用情形。"@zh .
+
+ont:消费者 a owl:Class ;
+    rdfs:label "消费者"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：购买商品、接受服务、提出售后或投诉的一方。 需根据规则上下文确定适用情形。"@zh .
+
+ont:收货人 a owl:Class ;
+    rdfs:label "收货人"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：订单指定的收货对象，可与下单消费者不同，暂不预设二者相同。 需根据规则上下文确定适用情形。"@zh .
+
+ont:品牌 a owl:Class ;
+    rdfs:label "品牌"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：商家经营或商品相关的品牌。 需根据规则上下文确定适用情形。"@zh .
+
+ont:品牌权利人 a owl:Class ;
+    rdfs:label "品牌权利人"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：对商标或品牌授权具有相应权利的主体。 需根据规则上下文确定适用情形。"@zh .
+
+ont:物流承运人 a owl:Class ;
+    rdfs:label "物流承运人"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：承担商品配送运输的承运主体。 需根据规则上下文确定适用情形。"@zh .
+
+ont:转让方 a owl:Class ;
+    rdfs:label "转让方"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：店铺经营主体变更前的主体角色。 需根据规则上下文确定适用情形。"@zh .
+
+ont:受让方 a owl:Class ;
+    rdfs:label "受让方"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：店铺经营主体变更后的主体角色。 需根据规则上下文确定适用情形。"@zh .
+
+
+# ========== A. 新增正文概念：商品与信息 ==========
+ont:商品 a owl:Class ;
+    rdfs:label "商品"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：平台商家销售的具体商品或商品类型。 需根据规则上下文确定适用情形。"@zh .
+
+ont:商品信息 a owl:Class ;
+    rdfs:label "商品信息"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：标题、价格、规格、详情、图片、宣传等对外展示的信息。 需根据规则上下文确定适用情形。"@zh .
+
+ont:商品详情页 a owl:Class ;
+    rdfs:label "商品详情页"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：消费者查看商品展示信息的页面内容对象。 需根据规则上下文确定适用情形。"@zh .
+
+ont:商品评价 a owl:Class ;
+    rdfs:label "商品评价"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：与商品或购物体验相关的消费者评价。 需根据规则上下文确定适用情形。"@zh .
+
+ont:商品质量问题 a owl:Class ;
+    rdfs:label "商品质量问题"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：商品质量不合格、功能异常、缺陷等质量问题。 需根据规则上下文确定适用情形。"@zh .
+
+ont:非全新商品 a owl:Class ;
+    rdfs:label "非全新商品"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：存在二手、翻新、返修或其他非全新状态的商品类型。 需根据规则上下文确定适用情形。"@zh .
+
+ont:经营资质 a owl:Class ;
+    rdfs:label "经营资质"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：开展特定品类经营、入驻或服务所要求的资质。 需根据规则上下文确定适用情形。"@zh .
+
+ont:品牌授权文件 a owl:Class ;
+    rdfs:label "品牌授权文件"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：品牌权利人或有权主体提供的授权证明材料。 需根据规则上下文确定适用情形。"@zh .
+
+ont:质检报告 a owl:Class ;
+    rdfs:label "质检报告"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：产品质量检验、检测对应的报告或凭证。 需根据规则上下文确定适用情形。"@zh .
+
+ont:商品抽检 a owl:Class ;
+    rdfs:label "商品抽检"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：针对商品开展的抽样质量检查行为。 需根据规则上下文确定适用情形。"@zh .
+
+
+# ========== A. 新增正文概念：交易与履约 ==========
+ont:发货行为 a owl:Class ;
+    rdfs:label "发货行为"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：订单履行过程中的发货行为；是否合规需要结合适用规则。 需根据规则上下文确定适用情形。"@zh .
+
+ont:发货时效要求 a owl:Class ;
+    rdfs:label "发货时效要求"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：订单或规则要求商家完成发货的期限约束；不是单纯日期数值。 需根据规则上下文确定适用情形。"@zh .
+
+ont:物流单号 a owl:Class ;
+    rdfs:label "物流单号"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：货运物流的单号标识对象；后续是否实体化可按使用场景调整。 需根据规则上下文确定适用情形。"@zh .
+
+ont:物流凭证 a owl:Class ;
+    rdfs:label "物流凭证"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：面单、妥投记录、运输证明等用于核验物流履约的材料。 需根据规则上下文确定适用情形。"@zh .
+
+ont:签收行为 a owl:Class ;
+    rdfs:label "签收行为"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：商品签收或拒绝签收等收货行为。 需根据规则上下文确定适用情形。"@zh .
+
+ont:售后服务单 a owl:Class ;
+    rdfs:label "售后服务单"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：由售后申请形成的售后处理单据。 需根据规则上下文确定适用情形。"@zh .
+
+ont:退货退款 a owl:Class ;
+    rdfs:label "退货退款"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：交易售后中退货及退款的处理事项。 需根据规则上下文确定适用情形。"@zh .
+
+ont:维修服务 a owl:Class ;
+    rdfs:label "维修服务"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：质保或售后相关的维修服务事项。 需根据规则上下文确定适用情形。"@zh .
+
+ont:运费 a owl:Class ;
+    rdfs:label "运费"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：发货或退货配送产生的费用及其承担事项。 需根据规则上下文确定适用情形。"@zh .
+
+ont:结算安排 a owl:Class ;
+    rdfs:label "结算安排"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：交易货款结算周期、暂停和结算条件等安排。 需根据规则上下文确定适用情形。"@zh .
+
+
+# ========== A. 新增正文概念：违规与救济 ==========
+ont:违规情形 a owl:Class ;
+    rdfs:label "违规情形"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：具体规则定义的违规场景或判定情形。 需根据规则上下文确定适用情形。"@zh .
+
+ont:违规等级 a owl:Class ;
+    rdfs:label "违规等级"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：平台规则对违规严重程度作出的分级概念。 需根据规则上下文确定适用情形。"@zh .
+
+ont:虚假交易 a owl:Class ;
+    rdfs:label "虚假交易"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：通过虚构交易、虚假物流等方式形成的不真实交易行为类型。 需根据规则上下文确定适用情形。"@zh .
+
+ont:虚假发货 a owl:Class ;
+    rdfs:label "虚假发货"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：通过虚假物流、异常物流信息等手段表现的发货违规类型。 需根据规则上下文确定适用情形。"@zh .
+
+ont:延迟发货 a owl:Class ;
+    rdfs:label "延迟发货"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：超过适用约定或规则时效的发货行为类型。 需根据规则上下文确定适用情形。"@zh .
+
+ont:违规处理 a owl:Class ;
+    rdfs:label "违规处理"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：平台针对违规行为作出的处置过程或决定。 需根据规则上下文确定适用情形。"@zh .
+
+ont:处理措施 a owl:Class ;
+    rdfs:label "处理措施"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：违规处理或纠纷处理中具体采取的处理方式。 需根据规则上下文确定适用情形。"@zh .
+
+ont:违约金 a owl:Class ;
+    rdfs:label "违约金"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：规则或协议约定的违约责任费用事项。 需根据规则上下文确定适用情形。"@zh .
+
+ont:交易纠纷 a owl:Class ;
+    rdfs:label "交易纠纷"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：交易、履约、售后、运费等环节的争议事件。 需根据规则上下文确定适用情形。"@zh .
+
+ont:违规申诉 a owl:Class ;
+    rdfs:label "违规申诉"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：商家针对违规处理提出异议的申诉事项。 需根据规则上下文确定适用情形。"@zh .
+
+ont:申诉材料 a owl:Class ;
+    rdfs:label "申诉材料"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：申诉时提交的聊天记录、截图、面单、发票等证明材料。 需根据规则上下文确定适用情形。"@zh .
+
+ont:申诉结果 a owl:Class ;
+    rdfs:label "申诉结果"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：平台对违规申诉审核后给出的处理结论。 需根据规则上下文确定适用情形。"@zh .
+
+ont:店铺清退 a owl:Class ;
+    rdfs:label "店铺清退"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：平台依据规则终止店铺经营资格的处置事项。 需根据规则上下文确定适用情形。"@zh .
+
+ont:赔付责任 a owl:Class ;
+    rdfs:label "赔付责任"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：依据规则或约定需承担的赔付义务。 需根据规则上下文确定适用情形。"@zh .
+
+
+# ========== A. 新增正文概念：资金与激励 ==========
+ont:激励政策 a owl:Class ;
+    rdfs:label "激励政策"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：对符合条件的商家或店铺提供奖励的政策内容。 需根据规则上下文确定适用情形。"@zh .
+
+ont:激励门槛 a owl:Class ;
+    rdfs:label "激励门槛"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：达到销售额、商品数量等要求才可获得激励的条件。 需根据规则上下文确定适用情形。"@zh .
+
+ont:激励奖励 a owl:Class ;
+    rdfs:label "激励奖励"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：满足活动规则后可能获得的金额、虚拟金等利益。 需根据规则上下文确定适用情形。"@zh .
+
+ont:交易服务费 a owl:Class ;
+    rdfs:label "交易服务费"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：平台基于交易服务收取的费用事项。 需根据规则上下文确定适用情形。"@zh .
+
+ont:保证金 a owl:Class ;
+    rdfs:label "保证金"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：商家经营中按规则约定缴存、退还、扣除的保证金事项。 需根据规则上下文确定适用情形。"@zh .
+
+ont:店铺星级 a owl:Class ;
+    rdfs:label "店铺星级"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：店铺星级评价体系及其等级概念。 需根据规则上下文确定适用情形。"@zh .
+
+ont:资费标准 a owl:Class ;
+    rdfs:label "资费标准"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：类目服务费、保证金等经营费用标准。 需根据规则上下文确定适用情形。"@zh .
+
+
+# ========== B. 原始 TTL 保留的语义关系 ==========
+ont:依据 a owl:ObjectProperty ;
+    rdfs:label "依据"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:保障权益 a owl:ObjectProperty ;
+    rdfs:label "保障权益"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:公示内容 a owl:ObjectProperty ;
+    rdfs:label "公示内容"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:公示对象 a owl:ObjectProperty ;
+    rdfs:label "公示对象"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:公示方式 a owl:ObjectProperty ;
+    rdfs:label "公示方式"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:包含 a owl:ObjectProperty ;
+    rdfs:label "包含"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:参照执行 a owl:ObjectProperty ;
+    rdfs:label "参照执行"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:处罚依据 a owl:ObjectProperty ;
+    rdfs:label "处罚依据"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:排除情形 a owl:ObjectProperty ;
+    rdfs:label "排除情形"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:查实 a owl:ObjectProperty ;
+    rdfs:label "查实"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:涉及主体 a owl:ObjectProperty ;
+    rdfs:label "涉及主体"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:涉及平台 a owl:ObjectProperty ;
+    rdfs:label "涉及平台"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:涉及服务 a owl:ObjectProperty ;
+    rdfs:label "涉及服务"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:涉及权益 a owl:ObjectProperty ;
+    rdfs:label "涉及权益"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:涉及用户 a owl:ObjectProperty ;
+    rdfs:label "涉及用户"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:涉及订单 a owl:ObjectProperty ;
+    rdfs:label "涉及订单"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:涉及资源 a owl:ObjectProperty ;
+    rdfs:label "涉及资源"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:签署方 a owl:ObjectProperty ;
+    rdfs:label "签署方"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:触发 a owl:ObjectProperty ;
+    rdfs:label "触发"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:违反 a owl:ObjectProperty ;
+    rdfs:label "违反"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:适用对象 a owl:ObjectProperty ;
+    rdfs:label "适用对象"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:适用平台 a owl:ObjectProperty ;
+    rdfs:label "适用平台"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:适用类目 a owl:ObjectProperty ;
+    rdfs:label "适用类目"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+ont:适用行业 a owl:ObjectProperty ;
+    rdfs:label "适用行业"@zh ;
+    rdfs:comment "原始 TTL 中已经声明的候选概念；本次保留 URI 与术语，具体业务边界仍须结合原文审核。"@zh .
+
+
+# ========== B. 新增正文语义关系：经营与准入 ==========
+ont:经营店铺 a owl:ObjectProperty ;
+    rdfs:label "经营店铺"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：商户主体与其经营店铺的关系；不意味着默认永久有效。 需根据规则上下文确定适用情形。"@zh .
+
+ont:销售商品 a owl:ObjectProperty ;
+    rdfs:label "销售商品"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：商家或店铺与其销售商品的关系。 需根据规则上下文确定适用情形。"@zh .
+
+ont:提供服务 a owl:ObjectProperty ;
+    rdfs:label "提供服务"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：商家向消费者提供的服务。 需根据规则上下文确定适用情形。"@zh .
+
+ont:经营类目 a owl:ObjectProperty ;
+    rdfs:label "经营类目"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：店铺或商家实际经营的行业/商品类目关联。 需根据规则上下文确定适用情形。"@zh .
+
+ont:属于类目 a owl:ObjectProperty ;
+    rdfs:label "属于类目"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：商品归属某商品或行业类目。 需根据规则上下文确定适用情形。"@zh .
+
+ont:经营品牌 a owl:ObjectProperty ;
+    rdfs:label "经营品牌"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：商家或店铺经营的品牌。 需根据规则上下文确定适用情形。"@zh .
+
+ont:授予品牌授权 a owl:ObjectProperty ;
+    rdfs:label "授予品牌授权"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：有权主体向被授权主体提供品牌经营授权。 需根据规则上下文确定适用情形。"@zh .
+
+ont:提交经营资质 a owl:ObjectProperty ;
+    rdfs:label "提交经营资质"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：商家向平台提交入驻或经营所需资质。 需根据规则上下文确定适用情形。"@zh .
+
+ont:签署合同协议 a owl:ObjectProperty ;
+    rdfs:label "签署合同协议"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：主体与已签署协议之间的关联；不表示双方身份自动确定。 需根据规则上下文确定适用情形。"@zh .
+
+ont:变更经营主体 a owl:ObjectProperty ;
+    rdfs:label "变更经营主体"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：店铺经营主体发生变更的关联，不等于简单的名称变动。 需根据规则上下文确定适用情形。"@zh .
+
+
+# ========== B. 新增正文语义关系：商品与信息展示 ==========
+ont:发布商品 a owl:ObjectProperty ;
+    rdfs:label "发布商品"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：主体在平台上发布商品的行为关联。 需根据规则上下文确定适用情形。"@zh .
+
+ont:展示商品信息 a owl:ObjectProperty ;
+    rdfs:label "展示商品信息"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：商品或详情页展示商品说明等内容的关联。 需根据规则上下文确定适用情形。"@zh .
+
+ont:披露商品状态 a owl:ObjectProperty ;
+    rdfs:label "披露商品状态"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：商家对商品新旧、瑕疵、成色等状态进行说明。 需根据规则上下文确定适用情形。"@zh .
+
+ont:使用品牌 a owl:ObjectProperty ;
+    rdfs:label "使用品牌"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：商品与其标示品牌的关联。 需根据规则上下文确定适用情形。"@zh .
+
+ont:提交质检报告 a owl:ObjectProperty ;
+    rdfs:label "提交质检报告"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：主体对商品质量检查结果提交证明报告。 需根据规则上下文确定适用情形。"@zh .
+
+ont:抽检商品 a owl:ObjectProperty ;
+    rdfs:label "抽检商品"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：平台对商品进行抽查检验的关联。 需根据规则上下文确定适用情形。"@zh .
+
+ont:承诺服务 a owl:ObjectProperty ;
+    rdfs:label "承诺服务"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：商家对消费者承诺的服务事项。 需根据规则上下文确定适用情形。"@zh .
+
+
+# ========== B. 新增正文语义关系：履约与售后 ==========
+ont:下单购买 a owl:ObjectProperty ;
+    rdfs:label "下单购买"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：消费者购买商品并形成订单的行为关联。 需根据规则上下文确定适用情形。"@zh .
+
+ont:履行订单 a owl:ObjectProperty ;
+    rdfs:label "履行订单"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：商家执行订单履约义务。 需根据规则上下文确定适用情形。"@zh .
+
+ont:约定发货时效 a owl:ObjectProperty ;
+    rdfs:label "约定发货时效"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：订单、协商或规则中存在发货时效要求。 需根据规则上下文确定适用情形。"@zh .
+
+ont:执行发货 a owl:ObjectProperty ;
+    rdfs:label "执行发货"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：主体实施发货行为。 需根据规则上下文确定适用情形。"@zh .
+
+ont:关联物流单号 a owl:ObjectProperty ;
+    rdfs:label "关联物流单号"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：订单或发货行为使用的物流单号。 需根据规则上下文确定适用情形。"@zh .
+
+ont:提供物流证明 a owl:ObjectProperty ;
+    rdfs:label "提供物流证明"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：主体为物流或履约情况提交证明材料。 需根据规则上下文确定适用情形。"@zh .
+
+ont:签收商品 a owl:ObjectProperty ;
+    rdfs:label "签收商品"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：收货人对商品进行签收。 需根据规则上下文确定适用情形。"@zh .
+
+ont:拒绝签收商品 a owl:ObjectProperty ;
+    rdfs:label "拒绝签收商品"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：收货人拒绝签收商品；不预设责任归属。 需根据规则上下文确定适用情形。"@zh .
+
+ont:发起售后申请 a owl:ObjectProperty ;
+    rdfs:label "发起售后申请"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：消费者提出售后处理申请。 需根据规则上下文确定适用情形。"@zh .
+
+ont:申请退货退款 a owl:ObjectProperty ;
+    rdfs:label "申请退货退款"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：消费者提出退货退款请求。 需根据规则上下文确定适用情形。"@zh .
+
+ont:提供维修服务 a owl:ObjectProperty ;
+    rdfs:label "提供维修服务"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：商家为消费者提供维修服务。 需根据规则上下文确定适用情形。"@zh .
+
+ont:承担运费 a owl:ObjectProperty ;
+    rdfs:label "承担运费"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：规则确认的主体承担相应运费；需结合原因和例外。 需根据规则上下文确定适用情形。"@zh .
+
+ont:适用结算安排 a owl:ObjectProperty ;
+    rdfs:label "适用结算安排"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：订单或商家适用具体结算规则安排。 需根据规则上下文确定适用情形。"@zh .
+
+
+# ========== B. 新增正文语义关系：违规、申诉与处置 ==========
+ont:实施违规行为 a owl:ObjectProperty ;
+    rdfs:label "实施违规行为"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：业务主体实施具体违规行为。 需根据规则上下文确定适用情形。"@zh .
+
+ont:构成违规情形 a owl:ObjectProperty ;
+    rdfs:label "构成违规情形"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：事实或行为符合特定违规情形的判断关联；不得仅凭词面自动认定。 需根据规则上下文确定适用情形。"@zh .
+
+ont:认定违规 a owl:ObjectProperty ;
+    rdfs:label "认定违规"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：平台对违规行为或违约情形作出的审核认定。 需根据规则上下文确定适用情形。"@zh .
+
+ont:评定违规等级 a owl:ObjectProperty ;
+    rdfs:label "评定违规等级"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：违规行为或处置事项涉及的严重程度评定。 需根据规则上下文确定适用情形。"@zh .
+
+ont:采取处理措施 a owl:ObjectProperty ;
+    rdfs:label "采取处理措施"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：平台针对违规或纠纷采取对应处置措施。 需根据规则上下文确定适用情形。"@zh .
+
+ont:扣收违约金 a owl:ObjectProperty ;
+    rdfs:label "扣收违约金"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：平台依规则或协议扣收相关违约金。 需根据规则上下文确定适用情形。"@zh .
+
+ont:下架商品 a owl:ObjectProperty ;
+    rdfs:label "下架商品"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：平台对违规或不合规商品实施下架措施。 需根据规则上下文确定适用情形。"@zh .
+
+ont:清退店铺 a owl:ObjectProperty ;
+    rdfs:label "清退店铺"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：平台对店铺进行清退处理。 需根据规则上下文确定适用情形。"@zh .
+
+ont:冻结资金 a owl:ObjectProperty ;
+    rdfs:label "冻结资金"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：平台按照规则对账户资金实施冻结措施。 需根据规则上下文确定适用情形。"@zh .
+
+ont:发起违规申诉 a owl:ObjectProperty ;
+    rdfs:label "发起违规申诉"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：商家针对违规处理提交违规申诉。 需根据规则上下文确定适用情形。"@zh .
+
+ont:提交申诉材料 a owl:ObjectProperty ;
+    rdfs:label "提交申诉材料"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：主体对申诉提交证明材料。 需根据规则上下文确定适用情形。"@zh .
+
+ont:审核申诉材料 a owl:ObjectProperty ;
+    rdfs:label "审核申诉材料"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：平台审核商家提交的申诉证明材料。 需根据规则上下文确定适用情形。"@zh .
+
+ont:形成申诉结果 a owl:ObjectProperty ;
+    rdfs:label "形成申诉结果"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：申诉审核事项形成的处理结果。 需根据规则上下文确定适用情形。"@zh .
+
+ont:撤销违规处理 a owl:ObjectProperty ;
+    rdfs:label "撤销违规处理"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：申诉成功后对应的违规处理不成立的处置关系。 需根据规则上下文确定适用情形。"@zh .
+
+ont:产生交易纠纷 a owl:ObjectProperty ;
+    rdfs:label "产生交易纠纷"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：订单履行或售后问题可能引起的争议关联。 需根据规则上下文确定适用情形。"@zh .
+
+ont:承担赔付责任 a owl:ObjectProperty ;
+    rdfs:label "承担赔付责任"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：根据具体情形确认赔付义务由相应主体承担。 需根据规则上下文确定适用情形。"@zh .
+
+
+# ========== B. 新增正文语义关系：资金与激励 ==========
+ont:缴纳保证金 a owl:ObjectProperty ;
+    rdfs:label "缴纳保证金"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：商家按规定缴纳保证金。 需根据规则上下文确定适用情形。"@zh .
+
+ont:退还保证金 a owl:ObjectProperty ;
+    rdfs:label "退还保证金"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：平台或相应资金账户按规则退还保证金。 需根据规则上下文确定适用情形。"@zh .
+
+ont:扣除交易服务费 a owl:ObjectProperty ;
+    rdfs:label "扣除交易服务费"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：平台按照交易和费率规则扣除服务费用。 需根据规则上下文确定适用情形。"@zh .
+
+ont:满足激励门槛 a owl:ObjectProperty ;
+    rdfs:label "满足激励门槛"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：主体达到激励规则约定的资格或业绩门槛。 需根据规则上下文确定适用情形。"@zh .
+
+ont:获得激励奖励 a owl:ObjectProperty ;
+    rdfs:label "获得激励奖励"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：符合规则的主体获取对应的激励奖励。 需根据规则上下文确定适用情形。"@zh .
+
+ont:依据考核指标 a owl:ObjectProperty ;
+    rdfs:label "依据考核指标"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：评级、奖励、处理等活动引用业务指标。 需根据规则上下文确定适用情形。"@zh .
+
+ont:调整店铺星级 a owl:ObjectProperty ;
+    rdfs:label "调整店铺星级"@zh ;
+    rdfs:comment "从京东规则正文归纳的候选概念：根据店铺表现或违规情况调整店铺星级。 需根据规则上下文确定适用情形。"@zh .
+
+
+# ========== 小红书正文补充：实体类别（跨平台复用的候选）==========
+ont:平台账号 a owl:Class ;
+    rdfs:label "平台账号"@zh ;
+    rdfs:comment "候选：平台内用户账号，例如专业号规则涉及的普通账号与认证账号。 来源示例：专业号_小红书专业号和店铺的关系规则解读_2212.md。"@zh .
+
+ont:专业号 a owl:Class ;
+    rdfs:label "专业号"@zh ;
+    rdfs:comment "候选：小红书平台可用于商业活动的账号身份；不是普通店铺的同义词。 来源示例：专业号_小红书专业号和店铺的关系规则解读_2212.md。"@zh .
+
+ont:账号认证 a owl:Class ;
+    rdfs:label "账号认证"@zh ;
+    rdfs:comment "候选：账号取得或失去相应认证资格的业务过程。 来源示例：专业号_专业号违规处置规则总则_749.md。"@zh .
+
+ont:账号权益 a owl:Class ;
+    rdfs:label "账号权益"@zh ;
+    rdfs:comment "候选：认证账户拥有且可能被限制的权益，例如内容合作、私信通等。 来源示例：专业号_专业号违规处置规则总则_749.md。"@zh .
+
+ont:笔记 a owl:Class ;
+    rdfs:label "笔记"@zh ;
+    rdfs:comment "候选：平台内笔记形式的内容载体，可涉及商品推广或违规引流。 来源示例：内容发布_交易导流违规管理细则_3339.md。"@zh .
+
+ont:带货笔记 a owl:Class ;
+    rdfs:label "带货笔记"@zh ;
+    rdfs:comment "候选：用于商品推广的笔记场景；暂不声明为笔记的 OWL 子类。 来源示例：内容发布_「违规营销：带货内容不符」实施细则_3438.md。"@zh .
+
+ont:直播间 a owl:Class ;
+    rdfs:label "直播间"@zh ;
+    rdfs:comment "候选：平台内直播场景，用于商品推广、互动或违规内容识别。 来源示例：内容发布_交易导流违规管理细则_3339.md。"@zh .
+
+ont:直播带货 a owl:Class ;
+    rdfs:label "直播带货"@zh ;
+    rdfs:comment "候选：通过直播推荐或推广商品的业务行为与场景。 来源示例：内容发布_小红书直播带货管理规则_1168.md。"@zh .
+
+ont:直播人员 a owl:Class ;
+    rdfs:label "直播人员"@zh ;
+    rdfs:comment "候选：直播规则所描述的主播及直播营销相关人员角色。 来源示例：内容发布_小红书直播带货管理规则_1168.md。"@zh .
+
+ont:买手 a owl:Class ;
+    rdfs:label "买手"@zh ;
+    rdfs:comment "候选：规则中明确区分于商家的带货/推广参与角色。 来源示例：内容发布_「违规营销：带货内容不符」实施细则_3438.md。"@zh .
+
+ont:带货内容 a owl:Class ;
+    rdfs:label "带货内容"@zh ;
+    rdfs:comment "候选：与直播或笔记推广商品相关的文本、画面或介绍内容。 来源示例：内容发布_「违规营销：带货内容不符」实施细则_3438.md。"@zh .
+
+ont:宣传内容 a owl:Class ;
+    rdfs:label "宣传内容"@zh ;
+    rdfs:comment "候选：商品/服务宣传中对功能、品牌、规格等作出的表达内容。 来源示例：内容发布_【虚假宣传：广告禁用词】实施细则_2737.md。"@zh .
+
+ont:虚假宣传 a owl:Class ;
+    rdfs:label "虚假宣传"@zh ;
+    rdfs:comment "候选：规则涉及的宣传内容不实或可能误导消费者的行为类别。 来源示例：内容发布_【虚假宣传：广告禁用词】实施细则_2737.md。"@zh .
+
+ont:违规营销 a owl:Class ;
+    rdfs:label "违规营销"@zh ;
+    rdfs:comment "候选：规则对不符合营销规范的行为给出的业务概念。 来源示例：内容发布_「违规营销：带货内容不符」实施细则_3438.md。"@zh .
+
+ont:交易导流 a owl:Class ;
+    rdfs:label "交易导流"@zh ;
+    rdfs:comment "候选：引导用户离开平台到私域/站外等渠道交易的行为类别。 来源示例：内容发布_交易导流违规管理细则_3339.md。"@zh .
+
+ont:站外交易 a owl:Class ;
+    rdfs:label "站外交易"@zh ;
+    rdfs:comment "候选：与平台交易流程相对的站外交易行为/场景。 来源示例：内容发布_交易导流违规管理细则_3339.md。"@zh .
+
+ont:私域信息 a owl:Class ;
+    rdfs:label "私域信息"@zh ;
+    rdfs:comment "候选：社群、联系方式及其他可能被用作站外引流的信息。 来源示例：内容发布_交易导流违规管理细则_3339.md。"@zh .
+
+ont:广告禁用词 a owl:Class ;
+    rdfs:label "广告禁用词"@zh ;
+    rdfs:comment "候选：宣传规则中作为违规判定线索的词语或表达类别；不自动认定所有文本出现均违规。 来源示例：内容发布_【虚假宣传：广告禁用词】实施细则_2737.md。"@zh .
+
+ont:合作商品样品 a owl:Class ;
+    rdfs:label "合作商品样品"@zh ;
+    rdfs:comment "候选：商家向直播人员提供的合作商品样品。 来源示例：内容发布_小红书直播带货管理规则_1168.md。"@zh .
+
+ont:推广佣金 a owl:Class ;
+    rdfs:label "推广佣金"@zh ;
+    rdfs:comment "候选：商家按合作推广计划向直播人员支付的佣金。 来源示例：内容发布_小红书直播带货管理规则_1168.md。"@zh .
+
+ont:服务保障 a owl:Class ;
+    rdfs:label "服务保障"@zh ;
+    rdfs:comment "候选：商家针对商品或交易提供的服务承诺，如特定赔付保障。 来源示例：历史规则及协议_“假一赔四”服务条款_2816.md。"@zh .
+
+ont:鉴定凭证 a owl:Class ;
+    rdfs:label "鉴定凭证"@zh ;
+    rdfs:comment "候选：对商品真伪等问题用于申请赔付、认定的证明材料。 来源示例：历史规则及协议_“假一赔四”服务条款_2816.md。"@zh .
+
+ont:处置通知 a owl:Class ;
+    rdfs:label "处置通知"@zh ;
+    rdfs:comment "候选：平台就违规处置结果发送的通知。 来源示例：专业号_专业号违规处置规则总则_749.md。"@zh .
+
+ont:商品链接 a owl:Class ;
+    rdfs:label "商品链接"@zh ;
+    rdfs:comment "候选：带货内容中关联的可交易商品链接或挂链信息。 来源示例：内容发布_「违规营销：带货内容不符」实施细则_3438.md。"@zh .
+
+
+# ========== 小红书正文补充：语义关系（跨平台复用的候选）==========
+ont:开通专业号 a owl:ObjectProperty ;
+    rdfs:label "开通专业号"@zh ;
+    rdfs:comment "候选：业务主体开通或取得专业号身份；表示主体→专业号。 来源示例：专业号_小红书专业号和店铺的关系规则解读_2212.md。"@zh .
+
+ont:专业号绑定店铺 a owl:ObjectProperty ;
+    rdfs:label "专业号绑定店铺"@zh ;
+    rdfs:comment "候选：专业号与店铺建立绑定关系；表示专业号→店铺。 来源示例：专业号_小红书专业号和店铺的关系规则解读_2212.md。"@zh .
+
+ont:专业号解绑店铺 a owl:ObjectProperty ;
+    rdfs:label "专业号解绑店铺"@zh ;
+    rdfs:comment "候选：专业号与店铺解除绑定关系；表示专业号→店铺。 来源示例：专业号_小红书专业号和店铺的关系规则解读_2212.md。"@zh .
+
+ont:申请账号认证 a owl:ObjectProperty ;
+    rdfs:label "申请账号认证"@zh ;
+    rdfs:comment "候选：业务主体提交账号认证申请；表示主体→账号认证。 来源示例：专业号_小红书专业号和店铺的关系规则解读_2212.md。"@zh .
+
+ont:撤销账号认证 a owl:ObjectProperty ;
+    rdfs:label "撤销账号认证"@zh ;
+    rdfs:comment "候选：平台针对账号/专业号撤销认证；表示平台→账号认证或专业号（需任务定义统一宾语）。 来源示例：专业号_专业号违规处置规则总则_749.md。"@zh .
+
+ont:限制账号权益 a owl:ObjectProperty ;
+    rdfs:label "限制账号权益"@zh ;
+    rdfs:comment "候选：违规处置对账号可使用的权益进行关闭或暂停；表示处置措施→账号权益。 来源示例：专业号_专业号违规处置规则总则_749.md。"@zh .
+
+ont:发布笔记 a owl:ObjectProperty ;
+    rdfs:label "发布笔记"@zh ;
+    rdfs:comment "候选：账号、商家或买手发布笔记；表示发布主体→笔记。 来源示例：内容发布_交易导流违规管理细则_3339.md。"@zh .
+
+ont:开展直播带货 a owl:ObjectProperty ;
+    rdfs:label "开展直播带货"@zh ;
+    rdfs:comment "候选：直播人员或商家开展直播带货；表示主体→直播带货。 来源示例：内容发布_小红书直播带货管理规则_1168.md。"@zh .
+
+ont:笔记挂载商品 a owl:ObjectProperty ;
+    rdfs:label "笔记挂载商品"@zh ;
+    rdfs:comment "候选：带货笔记/笔记关联所推广的商品；表示笔记→商品。 来源示例：内容发布_「违规营销：带货内容不符」实施细则_3438.md。"@zh .
+
+ont:直播间推广商品 a owl:ObjectProperty ;
+    rdfs:label "直播间推广商品"@zh ;
+    rdfs:comment "候选：在直播间展示、推广商品；表示直播间→商品。 来源示例：内容发布_小红书直播带货管理规则_1168.md。"@zh .
+
+ont:带货内容宣传商品 a owl:ObjectProperty ;
+    rdfs:label "带货内容宣传商品"@zh ;
+    rdfs:comment "候选：带货内容宣传特定商品；表示带货内容→商品。 来源示例：内容发布_「违规营销：带货内容不符」实施细则_3438.md。"@zh .
+
+ont:宣传内容与商品不符 a owl:ObjectProperty ;
+    rdfs:label "宣传内容与商品不符"@zh ;
+    rdfs:comment "候选：宣传/展示内容与实际商品不相关或不一致；表示宣传内容→商品，仅在原文支持时抽取。 来源示例：内容发布_「违规营销：带货内容不符」实施细则_3438.md。"@zh .
+
+ont:使用广告禁用词 a owl:ObjectProperty ;
+    rdfs:label "使用广告禁用词"@zh ;
+    rdfs:comment "候选：商品宣传内容使用规则列示的禁用词；表示宣传内容→广告禁用词，不直接推导处罚。 来源示例：内容发布_【虚假宣传：广告禁用词】实施细则_2737.md。"@zh .
+
+ont:实施交易导流 a owl:ObjectProperty ;
+    rdfs:label "实施交易导流"@zh ;
+    rdfs:comment "候选：主体实施交易导流行为；表示主体→交易导流。 来源示例：内容发布_交易导流违规管理细则_3339.md。"@zh .
+
+ont:引导站外交易 a owl:ObjectProperty ;
+    rdfs:label "引导站外交易"@zh ;
+    rdfs:comment "候选：导流行为促使用户到站外交易；表示交易导流→站外交易。 来源示例：内容发布_交易导流违规管理细则_3339.md。"@zh .
+
+ont:传播私域信息 a owl:ObjectProperty ;
+    rdfs:label "传播私域信息"@zh ;
+    rdfs:comment "候选：通过内容、消息等方式传播私域联系方式；表示载体/行为→私域信息。 来源示例：内容发布_交易导流违规管理细则_3339.md。"@zh .
+
+ont:提供合作样品 a owl:ObjectProperty ;
+    rdfs:label "提供合作样品"@zh ;
+    rdfs:comment "候选：商家提供合作样品供直播人员拿样；表示商家→合作商品样品。 来源示例：内容发布_小红书直播带货管理规则_1168.md。"@zh .
+
+ont:支付推广佣金 a owl:ObjectProperty ;
+    rdfs:label "支付推广佣金"@zh ;
+    rdfs:comment "候选：商家按推广计划支付佣金；表示商家→推广佣金。 来源示例：内容发布_小红书直播带货管理规则_1168.md。"@zh .
+
+ont:开通服务保障 a owl:ObjectProperty ;
+    rdfs:label "开通服务保障"@zh ;
+    rdfs:comment "候选：商家/店铺开通对应的服务保障；表示商家/店铺→服务保障。 来源示例：历史规则及协议_“假一赔四”服务条款_2816.md。"@zh .
+
+ont:提供鉴定凭证 a owl:ObjectProperty ;
+    rdfs:label "提供鉴定凭证"@zh ;
+    rdfs:comment "候选：消费者提交合法有效的鉴定材料；表示消费者→鉴定凭证。 来源示例：历史规则及协议_“假一赔四”服务条款_2816.md。"@zh .
+
+ont:发送处置通知 a owl:ObjectProperty ;
+    rdfs:label "发送处置通知"@zh ;
+    rdfs:comment "候选：平台向相关主体发送处置结果通知；表示平台→处置通知。 来源示例：专业号_专业号违规处置规则总则_749.md。"@zh .
+
+
+# ========== v0.4 新增：抖音电商与生活服务正文概念 ==========
+
+
+# ===== 内容电商-角色 =====
+ont:电商创作者 a owl:Class ;
+    rdfs:label "电商创作者"@zh ;
+    rdfs:comment "候选；开通商品分享功能并通过视频、直播等方式开展商品推广的主体；不默认等同于生活服务达人。原文依据：E03:15-17；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 跨域-角色 =====
+ont:达人 a owl:Class ;
+    rdfs:label "达人"@zh ;
+    rdfs:comment "候选；规则中承担商品或生活服务推广工作的主体角色；各平台具体准入定义可能不同。原文依据：E06:25;L03:13-17；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 内容电商-角色 =====
+ont:MCN机构 a owl:Class ;
+    rdfs:label "MCN机构"@zh ;
+    rdfs:comment "候选；在巨量百应场景中为达人等提供运营服务的机构角色，不与生活服务商家直接混同。原文依据：E06:19-25；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 跨域-角色 =====
+ont:服务商 a owl:Class ;
+    rdfs:label "服务商"@zh ;
+    rdfs:comment "候选；为商家、达人等提供专业服务的合作主体；不同平台对其权限及责任规定不同。原文依据：L03:35-45;E08:21-23；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 内容电商-载体 =====
+ont:短视频 a owl:Class ;
+    rdfs:label "短视频"@zh ;
+    rdfs:comment "候选；可以承载商品信息及推广内容的视频载体，区别于直播间。原文依据：E03:15-17；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:商品橱窗 a owl:Class ;
+    rdfs:label "商品橱窗"@zh ;
+    rdfs:comment "候选；创作者使用的商品展示或挂载入口。原文依据：E03:15-17；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 内容电商-经营资格 =====
+ont:商品分享权限 a owl:Class ;
+    rdfs:label "商品分享权限"@zh ;
+    rdfs:comment "候选；创作者开展商品分享的权限或功能资格。原文依据：E03:11-17;E05:25-31；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:类目推广权限 a owl:Class ;
+    rdfs:label "类目推广权限"@zh ;
+    rdfs:comment "候选；创作者推广限制类目商品所需取得的专门准入权限。原文依据：E03:57-63；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 内容电商-营销 =====
+ont:商品投放计划 a owl:Class ;
+    rdfs:label "商品投放计划"@zh ;
+    rdfs:comment "候选；商家在精选联盟等渠道建立的商品推广投放安排。原文依据：E02:77-81；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 内容电商-样品 =====
+ont:样品申请 a owl:Class ;
+    rdfs:label "样品申请"@zh ;
+    rdfs:comment "候选；创作者向商家申请商品样品的行为或业务申请记录，不等同于购物订单。原文依据：E04:9-15；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:样品履约 a owl:Class ;
+    rdfs:label "样品履约"@zh ;
+    rdfs:comment "候选；创作者获得样品后按约定进行商品推广或其他交付行为。原文依据：E04:74-92；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:样品返款 a owl:Class ;
+    rdfs:label "样品返款"@zh ;
+    rdfs:comment "候选；购买样品并满足约定交付要求后由商家返还样品购买费用的业务处理。原文依据：E04:11;E04:74-76；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 内容电商-履约 =====
+ont:物流揽收记录 a owl:Class ;
+    rdfs:label "物流揽收记录"@zh ;
+    rdfs:comment "候选；由物流承运方回传且可用于判断发货时间的揽件记录。原文依据：E01:25-29；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:物流轨迹异常 a owl:Class ;
+    rdfs:label "物流轨迹异常"@zh ;
+    rdfs:comment "候选；物流单号、物流轨迹或收货事实存在异常的候选违规情形。原文依据：E01:75-81；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:缺货违规 a owl:Class ;
+    rdfs:label "缺货违规"@zh ;
+    rdfs:comment "候选；商家无法发货、拒绝发货或超过时限仍未发货等相关违规情形。原文依据：E01:69；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 内容电商-跨境 =====
+ont:保税仓 a owl:Class ;
+    rdfs:label "保税仓"@zh ;
+    rdfs:comment "候选；跨境保税商品发出或退回的保税区仓储节点。原文依据：E08:11;E08:21-27；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:保税商品 a owl:Class ;
+    rdfs:label "保税商品"@zh ;
+    rdfs:comment "候选；在保税业务场景中发货、退货或二次入区的商品。原文依据：E08:1;E08:21-27；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:退货二次入区 a owl:Class ;
+    rdfs:label "退货二次入区"@zh ;
+    rdfs:comment "候选；符合条件的未签收跨境退件经处理后再次进入保税仓的服务过程。原文依据：E08:21-39；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:跨境商家 a owl:Class ;
+    rdfs:label "跨境商家"@zh ;
+    rdfs:comment "候选；从保税仓发货、开展跨境电商业务的经营主体角色。原文依据：E08:11；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 内容电商-保障 =====
+ont:运费险服务 a owl:Class ;
+    rdfs:label "运费险服务"@zh ;
+    rdfs:comment "候选；针对退换货运费风险提供的保险保障服务，区分商家、创作者和消费者投保。原文依据：E07:7-35；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 内容电商-交易 =====
+ont:预售商品 a owl:Class ;
+    rdfs:label "预售商品"@zh ;
+    rdfs:comment "候选；商品投放时存在预售交付方式及相关准入约束的商品。原文依据：E03:65-67；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 跨域-责任 =====
+ont:连带责任 a owl:Class ;
+    rdfs:label "连带责任"@zh ;
+    rdfs:comment "候选；规则明确规定相关主体在特定条件下共同承担的责任概念，是否适用必须结合原文条件。原文依据：E05:33-47；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-场所 =====
+ont:线下门店 a owl:Class ;
+    rdfs:label "线下门店"@zh ;
+    rdfs:comment "候选；实际开展服务经营的实体门店，与POI线上地址及网店区分。原文依据：L10:17-25；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-线上位置 =====
+ont:POI地址 a owl:Class ;
+    rdfs:label "POI地址"@zh ;
+    rdfs:comment "候选；抖音平台上指向符合收录范围的线下门店的线上地址/兴趣点。原文依据：L10:17；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-经营授权 =====
+ont:POI认领 a owl:Class ;
+    rdfs:label "POI认领"@zh ;
+    rdfs:comment "候选；申请主体提交资质或授权后申请特定POI管理权限的过程。原文依据：L10:19；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-线上门店 =====
+ont:POI门店 a owl:Class ;
+    rdfs:label "POI门店"@zh ;
+    rdfs:comment "候选；认领后在平台展示线下门店及其团购商品信息的线上门店。原文依据：L10:25；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-商品 =====
+ont:团购商品 a owl:Class ;
+    rdfs:label "团购商品"@zh ;
+    rdfs:comment "候选；平台上销售的到店或相关生活服务团购类商品及服务权益载体。原文依据：L10:23-33;L01:15；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-交易凭证 =====
+ont:团购券 a owl:Class ;
+    rdfs:label "团购券"@zh ;
+    rdfs:comment "候选；消费者购买后用于团购服务核销的券码/凭证概念。原文依据：L01:55-77；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-商品 =====
+ont:团购套餐 a owl:Class ;
+    rdfs:label "团购套餐"@zh ;
+    rdfs:comment "候选；面向到店履约的组合服务或商品套餐，不能简单当作邮寄商品。原文依据：L15:7-11;L15:25-29；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:套餐项目 a owl:Class ;
+    rdfs:label "套餐项目"@zh ;
+    rdfs:comment "候选；团购套餐承诺提供的具体餐品、服务或商品构成项。原文依据：L15:9-11;L15:25-29；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-交易证据 =====
+ont:订单快照 a owl:Class ;
+    rdfs:label "订单快照"@zh ;
+    rdfs:comment "候选；消费者下单时约定的套餐和商品信息快照，可用于判断后续变更是否影响履约义务。原文依据：L15:25-29；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-履约 =====
+ont:核销行为 a owl:Class ;
+    rdfs:label "核销行为"@zh ;
+    rdfs:comment "候选；门店或商家对已购券码进行核验并确认消费的业务行为。原文依据：L01:59-77;L05:15-25；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:核销记录 a owl:Class ;
+    rdfs:label "核销记录"@zh ;
+    rdfs:comment "候选；核销发生后的业务证据记录，须与未核销或提前核销等状态区别。原文依据：L05:15-25;L13:17-21；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-预约 =====
+ont:预约申请 a owl:Class ;
+    rdfs:label "预约申请"@zh ;
+    rdfs:comment "候选；消费者在使用团购或住宿等服务前发起的预约请求。原文依据：L09:65-67；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:预约条件 a owl:Class ;
+    rdfs:label "预约条件"@zh ;
+    rdfs:comment "候选；服务履约预约所要求的限制、规则或前提，须结合商品详情和交易阶段。原文依据：L06:7-25；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:预约变更 a owl:Class ;
+    rdfs:label "预约变更"@zh ;
+    rdfs:comment "候选；下单前后变更或增加既有预约条件的行为/事件。原文依据：L06:7-25；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-履约 =====
+ont:服务履约 a owl:Class ;
+    rdfs:label "服务履约"@zh ;
+    rdfs:comment "候选；商家依照已销售的服务产品和预约约定实际提供服务的行为。原文依据：L01:43-47；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-履约异常 =====
+ont:拒绝接待 a owl:Class ;
+    rdfs:label "拒绝接待"@zh ;
+    rdfs:comment "候选；在规则明确的应履约场景中商家拒绝接待消费者的行为。原文依据：L01:53-77；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-经营违规 =====
+ont:飞单行为 a owl:Class ;
+    rdfs:label "飞单行为"@zh ;
+    rdfs:comment "候选；商家引导已购买或有明确购买意向的用户脱离平台交易的行为。原文依据：L02:21-35；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-交易 =====
+ont:线下交易 a owl:Class ;
+    rdfs:label "线下交易"@zh ;
+    rdfs:comment "候选；平台外通过现金、刷卡或其他线下渠道完成的交易行为；不天然等于违规。原文依据：L02:23-35；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-退款 =====
+ont:退款申请 a owl:Class ;
+    rdfs:label "退款申请"@zh ;
+    rdfs:comment "候选；消费者根据订单状态发起的退款请求，需与退货退款整体概念区分。原文依据：L11:25-49；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:退款审核 a owl:Class ;
+    rdfs:label "退款审核"@zh ;
+    rdfs:comment "候选；商家或平台针对退款申请进行审查与处理的业务环节。原文依据：L11:29-50；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-争议 =====
+ont:退款申诉 a owl:Class ;
+    rdfs:label "退款申诉"@zh ;
+    rdfs:comment "候选；商家对核销后退款等处理提出异议并提交证明材料的流程。原文依据：L05:7-29；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-证据 =====
+ont:履约凭证 a owl:Class ;
+    rdfs:label "履约凭证"@zh ;
+    rdfs:comment "候选；视频、照片、消费小票、沟通记录、监控等用于证明服务履约情况的材料。原文依据：L05:15-31；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-费用 =====
+ont:软件服务费 a owl:Class ;
+    rdfs:label "软件服务费"@zh ;
+    rdfs:comment "候选；生活服务平台针对合作业务收取并可能按条件返还的软件服务费用。原文依据：L13:9-13；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-合作 =====
+ont:共管门店 a owl:Class ;
+    rdfs:label "共管门店"@zh ;
+    rdfs:comment "候选；共管业务中参与业绩核算的合作门店，区别于单纯自有门店。原文依据：L13:19-29；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-结算 =====
+ont:共管业绩 a owl:Class ;
+    rdfs:label "共管业绩"@zh ;
+    rdfs:comment "候选；共管商品在约定周期内符合返还规则的核算业绩对象，不是单个数值属性。原文依据：L13:19-29；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-经营主体 =====
+ont:旅行社 a owl:Class ;
+    rdfs:label "旅行社"@zh ;
+    rdfs:comment "候选；经营线路游等服务产品并承担预约、履约责任的商家角色。原文依据：L06:7-25；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-旅游 =====
+ont:旅游线路 a owl:Class ;
+    rdfs:label "旅游线路"@zh ;
+    rdfs:comment "候选；旅行社提供的线路游服务产品及其预约条件的承载对象。原文依据：L06:7-25；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:景区门票 a owl:Class ;
+    rdfs:label "景区门票"@zh ;
+    rdfs:comment "候选；入场并需核销的景区门票类服务产品。原文依据：L07:7-29；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-酒旅 =====
+ont:住宿预订 a owl:Class ;
+    rdfs:label "住宿预订"@zh ;
+    rdfs:comment "候选；消费者对预售券、日历房/票等住宿服务发起的预约或预订业务。原文依据：L09:63-67；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-配送 =====
+ont:即送订单 a owl:Class ;
+    rdfs:label "即送订单"@zh ;
+    rdfs:comment "候选；生活服务即送业务中的即时单或预约单。原文依据：L11:25-46；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:配送骑手 a owl:Class ;
+    rdfs:label "配送骑手"@zh ;
+    rdfs:comment "候选；即送订单中接单与配送环节涉及的配送主体。原文依据：L11:43-48；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 跨域-责任 =====
+ont:体验补偿 a owl:Class ;
+    rdfs:label "体验补偿"@zh ;
+    rdfs:comment "候选；因服务体验受损而约定或实施的补偿方式；与违约金、责任赔付不默认等价。原文依据：L08:21-25；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+# ========== 新增候选对象关系 ==========
+
+# ===== 内容电商-经营 =====
+ont:创作者开通商品分享功能 a owl:ObjectProperty ;
+    rdfs:label "创作者开通商品分享功能"@zh ;
+    rdfs:comment "候选；电商创作者→商品分享权限；规则将开通分享功能作为推广前提。原文依据：E03:11-17；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:平台限制商品分享权限 a owl:ObjectProperty ;
+    rdfs:label "平台限制商品分享权限"@zh ;
+    rdfs:comment "候选；平台→商品分享权限；违规等情形可关闭或停用功能。原文依据：E05:25-31；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 内容电商-营销 =====
+ont:短视频挂载商品 a owl:ObjectProperty ;
+    rdfs:label "短视频挂载商品"@zh ;
+    rdfs:comment "候选；短视频→商品；通过功能组件将商品挂载至短视频。原文依据：E03:15-17；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:商品橱窗展示商品 a owl:ObjectProperty ;
+    rdfs:label "商品橱窗展示商品"@zh ;
+    rdfs:comment "候选；商品橱窗→商品；商品可添加至创作者商品橱窗。原文依据：E03:15-17；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:直播间挂载商品 a owl:ObjectProperty ;
+    rdfs:label "直播间挂载商品"@zh ;
+    rdfs:comment "候选；直播间→商品；规则明确购物车挂载商品的行为。原文依据：E03:15-17；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:创作者推广商品 a owl:ObjectProperty ;
+    rdfs:label "创作者推广商品"@zh ;
+    rdfs:comment "候选；电商创作者→商品；创作者通过视频直播推广商品。原文依据：E03:15-17；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:商家建立投放计划 a owl:ObjectProperty ;
+    rdfs:label "商家建立投放计划"@zh ;
+    rdfs:comment "候选；商户主体→商品投放计划；商家在精选联盟建立商品投放计划。原文依据：E02:77-81；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:投放计划关联商品 a owl:ObjectProperty ;
+    rdfs:label "投放计划关联商品"@zh ;
+    rdfs:comment "候选；商品投放计划→商品；投放计划针对投放商品。原文依据：E02:77-81；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 内容电商-样品 =====
+ont:创作者申请样品 a owl:ObjectProperty ;
+    rdfs:label "创作者申请样品"@zh ;
+    rdfs:comment "候选；电商创作者→样品申请；根据样品服务向商家申请商品样品。原文依据：E04:9-15；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:样品申请涉及商品 a owl:ObjectProperty ;
+    rdfs:label "样品申请涉及商品"@zh ;
+    rdfs:comment "候选；样品申请→商品；样品申请围绕被申请的商品。原文依据：E04:61-76；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:创作者履行样品义务 a owl:ObjectProperty ;
+    rdfs:label "创作者履行样品义务"@zh ;
+    rdfs:comment "候选；电商创作者→样品履约；申请样品成功后按约定进行推广交付。原文依据：E04:74-92；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:样品履约推广商品 a owl:ObjectProperty ;
+    rdfs:label "样品履约推广商品"@zh ;
+    rdfs:comment "候选；样品履约→商品；交付过程包括样品商品的营销推广。原文依据：E04:86-92；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:商家退还样品款 a owl:ObjectProperty ;
+    rdfs:label "商家退还样品款"@zh ;
+    rdfs:comment "候选；商户主体→样品返款；满足商家设置的返款条件后退还买样款。原文依据：E04:11;E04:74-76；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 内容电商-机构 =====
+ont:机构绑定达人 a owl:ObjectProperty ;
+    rdfs:label "机构绑定达人"@zh ;
+    rdfs:comment "候选；MCN机构→达人；机构与达人存在绑定关系。原文依据：E06:61-61;E06:95-105；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:机构解除达人绑定 a owl:ObjectProperty ;
+    rdfs:label "机构解除达人绑定"@zh ;
+    rdfs:comment "候选；MCN机构→达人；符合清退场景后解除机构达人关系绑定。原文依据：E06:103-105；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:机构分配达人分成 a owl:ObjectProperty ;
+    rdfs:label "机构分配达人分成"@zh ;
+    rdfs:comment "候选；MCN机构→推广佣金；机构可以配置达人结算分成比例。原文依据：E06:119-139；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 内容电商-权限 =====
+ont:平台授予类目推广权限 a owl:ObjectProperty ;
+    rdfs:label "平台授予类目推广权限"@zh ;
+    rdfs:comment "候选；平台→类目推广权限；部分商品类目需经前置申请才能推广。原文依据：E03:57-63；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:平台回收类目推广权限 a owl:ObjectProperty ;
+    rdfs:label "平台回收类目推广权限"@zh ;
+    rdfs:comment "候选；平台→类目推广权限；规则明确存在权限被回收的情形。原文依据：E03:57-59；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 内容电商-物流 =====
+ont:承运人回传揽收记录 a owl:ObjectProperty ;
+    rdfs:label "承运人回传揽收记录"@zh ;
+    rdfs:comment "候选；物流承运人→物流揽收记录；物流系统回传揽件记录。原文依据：E01:25-29；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:发货关联揽收记录 a owl:ObjectProperty ;
+    rdfs:label "发货关联揽收记录"@zh ;
+    rdfs:comment "候选；发货行为→物流揽收记录；可用于认定发货时间。原文依据：E01:25-29；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:识别物流轨迹异常 a owl:ObjectProperty ;
+    rdfs:label "识别物流轨迹异常"@zh ;
+    rdfs:comment "候选；平台→物流轨迹异常；平台规定物流轨迹异常的核查情形。原文依据：E01:75-81；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 内容电商-跨境 =====
+ont:保税商品从保税仓发货 a owl:ObjectProperty ;
+    rdfs:label "保税商品从保税仓发货"@zh ;
+    rdfs:comment "候选；保税商品→保税仓；对应从保税仓发货的适用范围。原文依据：E08:11-11；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:退货二次入区涉及商品 a owl:ObjectProperty ;
+    rdfs:label "退货二次入区涉及商品"@zh ;
+    rdfs:comment "候选；退货二次入区→保税商品；将符合条件未签收退件退回保税区。原文依据：E08:21-39；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:退货二次入区退回保税仓 a owl:ObjectProperty ;
+    rdfs:label "退货二次入区退回保税仓"@zh ;
+    rdfs:comment "候选；退货二次入区→保税仓；符合条件的未签收退件退回保税仓。原文依据：E08:21-39；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:服务商质检退货商品 a owl:ObjectProperty ;
+    rdfs:label "服务商质检退货商品"@zh ;
+    rdfs:comment "候选；服务商→保税商品；服务商质检通过为二次入区条件之一。原文依据：E08:23-39；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 内容电商-保障 =====
+ont:商家投保运费险 a owl:ObjectProperty ;
+    rdfs:label "商家投保运费险"@zh ;
+    rdfs:comment "候选；商户主体→运费险服务；规则允许符合条件商家选择投保。原文依据：E07:13-19；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:创作者投保运费险 a owl:ObjectProperty ;
+    rdfs:label "创作者投保运费险"@zh ;
+    rdfs:comment "候选；电商创作者→运费险服务；独立于商家投保的适用条件。原文依据：E07:21-25；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:消费者投保运费险 a owl:ObjectProperty ;
+    rdfs:label "消费者投保运费险"@zh ;
+    rdfs:comment "候选；消费者→运费险服务；有随单和月度投保路径。原文依据：E07:27-35；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 内容电商-预售 =====
+ont:创作者推广预售商品 a owl:ObjectProperty ;
+    rdfs:label "创作者推广预售商品"@zh ;
+    rdfs:comment "候选；电商创作者→预售商品；对预售商品推广设置准入要求。原文依据：E03:65-67；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 内容电商-责任 =====
+ont:创作者承担连带责任 a owl:ObjectProperty ;
+    rdfs:label "创作者承担连带责任"@zh ;
+    rdfs:comment "候选；电商创作者→连带责任；仅在规则列举条件成立时可能承担。原文依据：E05:33-47；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:商家共同承担连带责任 a owl:ObjectProperty ;
+    rdfs:label "商家共同承担连带责任"@zh ;
+    rdfs:comment "候选；商户主体→连带责任；与创作者责任需结合条件一起认定。原文依据：E05:33-35；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-经营 =====
+ont:商家经营线下门店 a owl:ObjectProperty ;
+    rdfs:label "商家经营线下门店"@zh ;
+    rdfs:comment "候选；商户主体→线下门店；对应实际经营线下门店。原文依据：L10:17-25；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-POI =====
+ont:线下门店对应POI地址 a owl:ObjectProperty ;
+    rdfs:label "线下门店对应POI地址"@zh ;
+    rdfs:comment "候选；线下门店→POI地址；POI是指向线下门店的线上地址。原文依据：L10:17-19；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:商家申请POI认领 a owl:ObjectProperty ;
+    rdfs:label "商家申请POI认领"@zh ;
+    rdfs:comment "候选；商户主体→POI认领；通过资质或授权申请管理权限。原文依据：L10:19-19；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:POI认领涉及门店 a owl:ObjectProperty ;
+    rdfs:label "POI认领涉及门店"@zh ;
+    rdfs:comment "候选；POI认领→线下门店；申请认领的是具体线下门店对应POI。原文依据：L10:19-25；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:POI门店展示团购商品 a owl:ObjectProperty ;
+    rdfs:label "POI门店展示团购商品"@zh ;
+    rdfs:comment "候选；POI门店→团购商品；平台允许在认领POI门店后发布展示团购信息。原文依据：L10:23-33；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-商品 =====
+ont:商家发布团购商品 a owl:ObjectProperty ;
+    rdfs:label "商家发布团购商品"@zh ;
+    rdfs:comment "候选；商户主体→团购商品；在对应平台门店发布团购商品。原文依据：L10:23-33；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:团购套餐包含项目 a owl:ObjectProperty ;
+    rdfs:label "团购套餐包含项目"@zh ;
+    rdfs:comment "候选；团购套餐→套餐项目；组成项是套餐履约所要求交付的内容。原文依据：L15:9-11;L15:25-29；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-交易 =====
+ont:团购订单关联券码 a owl:ObjectProperty ;
+    rdfs:label "团购订单关联券码"@zh ;
+    rdfs:comment "候选；业务订单→团购券；消费者购买后持券码到店核销。原文依据：L01:59-77；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-预约 =====
+ont:消费者提交预约申请 a owl:ObjectProperty ;
+    rdfs:label "消费者提交预约申请"@zh ;
+    rdfs:comment "候选；消费者→预约申请；约定到店/酒旅服务的预约申请。原文依据：L09:65-67；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:预约申请关联订单 a owl:ObjectProperty ;
+    rdfs:label "预约申请关联订单"@zh ;
+    rdfs:comment "候选；预约申请→业务订单；已成交订单对应后续预约环节。原文依据：L09:65-67；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:商家设定预约条件 a owl:ObjectProperty ;
+    rdfs:label "商家设定预约条件"@zh ;
+    rdfs:comment "候选；商户主体→预约条件；商品详情或预约规则说明中应明确预约条件。原文依据：L04:9-17;L06:19-25；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:商家变更预约条件 a owl:ObjectProperty ;
+    rdfs:label "商家变更预约条件"@zh ;
+    rdfs:comment "候选；商户主体→预约变更；用户下单后变更原预约条件的行为。原文依据：L06:7-25；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:预约变更涉及条件 a owl:ObjectProperty ;
+    rdfs:label "预约变更涉及条件"@zh ;
+    rdfs:comment "候选；预约变更→预约条件；新增或改变原有条件限制用户预约。原文依据：L06:7-25；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-核销 =====
+ont:商家执行团购核销 a owl:ObjectProperty ;
+    rdfs:label "商家执行团购核销"@zh ;
+    rdfs:comment "候选；商户主体→核销行为；门店对消费者已购券码办理核销。原文依据：L01:59-77；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:核销使用团购券 a owl:ObjectProperty ;
+    rdfs:label "核销使用团购券"@zh ;
+    rdfs:comment "候选；核销行为→团购券；核销以已购券码为凭证。原文依据：L01:59-77；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:核销记录关联核销行为 a owl:ObjectProperty ;
+    rdfs:label "核销记录关联核销行为"@zh ;
+    rdfs:comment "候选；核销记录→核销行为；核销数据和核销行为可用于履约核实。原文依据：L05:15-25;L13:17-21；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-履约 =====
+ont:商家履行服务 a owl:ObjectProperty ;
+    rdfs:label "商家履行服务"@zh ;
+    rdfs:comment "候选；商户主体→服务履约；商家对已售服务订单继续履约。原文依据：L01:43-47；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:服务履约依据订单快照 a owl:ObjectProperty ;
+    rdfs:label "服务履约依据订单快照"@zh ;
+    rdfs:comment "候选；服务履约→订单快照；商详调整前的已下单消费者仍按照原订单快照履约。原文依据：L15:27-29；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-履约异常 =====
+ont:套餐履约缺少项目 a owl:ObjectProperty ;
+    rdfs:label "套餐履约缺少项目"@zh ;
+    rdfs:comment "候选；服务履约→套餐项目；仅在原文存在缺少应提供项目的情况使用。原文依据：L15:7-15；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:商家拒绝接待 a owl:ObjectProperty ;
+    rdfs:label "商家拒绝接待"@zh ;
+    rdfs:comment "候选；商户主体→拒绝接待；规则列举无法接待消费者的违规场景。原文依据：L01:53-77；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:拒绝接待阻碍核销 a owl:ObjectProperty ;
+    rdfs:label "拒绝接待阻碍核销"@zh ;
+    rdfs:comment "候选；拒绝接待→核销行为；拒绝接待致使已购券码无法核销。原文依据：L01:59-77；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-飞单 =====
+ont:商家实施飞单 a owl:ObjectProperty ;
+    rdfs:label "商家实施飞单"@zh ;
+    rdfs:comment "候选；商户主体→飞单行为；明示或暗示引导消费者离开平台交易。原文依据：L02:21-35；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:飞单行为引导线下交易 a owl:ObjectProperty ;
+    rdfs:label "飞单行为引导线下交易"@zh ;
+    rdfs:comment "候选；飞单行为→线下交易；飞单可引导现金刷卡等平台外交易。原文依据：L02:23-35；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:飞单涉及商家订单 a owl:ObjectProperty ;
+    rdfs:label "飞单涉及商家订单"@zh ;
+    rdfs:comment "候选；飞单行为→业务订单；可能涉及消费者已购买或有明确购买意向的订单，不能保证每次都有订单。原文依据：L02:23-35；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-退款 =====
+ont:消费者申请退款 a owl:ObjectProperty ;
+    rdfs:label "消费者申请退款"@zh ;
+    rdfs:comment "候选；消费者→退款申请；消费者可根据订单履约状态发起退款。原文依据：L11:25-49；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:退款申请对应订单 a owl:ObjectProperty ;
+    rdfs:label "退款申请对应订单"@zh ;
+    rdfs:comment "候选；退款申请→业务订单；不同订单状态对应不同退款处理。原文依据：L11:41-50；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:商家审核退款申请 a owl:ObjectProperty ;
+    rdfs:label "商家审核退款申请"@zh ;
+    rdfs:comment "候选；商户主体→退款申请；商家在规则规定时限内审核退款请求。原文依据：L11:29-49；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-申诉 =====
+ont:商家提出退款申诉 a owl:ObjectProperty ;
+    rdfs:label "商家提出退款申诉"@zh ;
+    rdfs:comment "候选；商户主体→退款申诉；核销后退款争议可申诉。原文依据：L05:7-15；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-证据 =====
+ont:退款申诉提供履约凭证 a owl:ObjectProperty ;
+    rdfs:label "退款申诉提供履约凭证"@zh ;
+    rdfs:comment "候选；退款申诉→履约凭证；申诉可提供照片视频小票沟通记录等。原文依据：L05:15-31；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-合作 =====
+ont:服务商提供代运营服务 a owl:ObjectProperty ;
+    rdfs:label "服务商提供代运营服务"@zh ;
+    rdfs:comment "候选；服务商→商户主体；服务商向合作商家提供代运营等服务。原文依据：L03:35-45；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:服务商与达人合作 a owl:ObjectProperty ;
+    rdfs:label "服务商与达人合作"@zh ;
+    rdfs:comment "候选；服务商→达人；与平台达人合作属于规则适用的业务事项。原文依据：L03:17-17；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-旅游 =====
+ont:旅行社调整预约条件 a owl:ObjectProperty ;
+    rdfs:label "旅行社调整预约条件"@zh ;
+    rdfs:comment "候选；旅行社→预约变更；旅行社线路游在下单后变更条件为规则关注场景。原文依据：L06:7-25；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:旅游线路设置预约条件 a owl:ObjectProperty ;
+    rdfs:label "旅游线路设置预约条件"@zh ;
+    rdfs:comment "候选；旅游线路→预约条件；线路游商品详情承载条件。原文依据：L06:7-25；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:景区门票需要核销 a owl:ObjectProperty ;
+    rdfs:label "景区门票需要核销"@zh ;
+    rdfs:comment "候选；景区门票→核销行为；门票产品在用户到场后办理核销。原文依据：L07:7-29；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-酒旅 =====
+ont:住宿预订对应预约申请 a owl:ObjectProperty ;
+    rdfs:label "住宿预订对应预约申请"@zh ;
+    rdfs:comment "候选；住宿预订→预约申请；住宿预售券/日历票房等存在预约请求。原文依据：L09:63-67；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-配送 =====
+ont:即送订单交由骑手配送 a owl:ObjectProperty ;
+    rdfs:label "即送订单交由骑手配送"@zh ;
+    rdfs:comment "候选；即送订单→配送骑手；即送订单中存在骑手接单、配送环节。原文依据：L11:43-48；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-费用 =====
+ont:平台收取软件服务费 a owl:ObjectProperty ;
+    rdfs:label "平台收取软件服务费"@zh ;
+    rdfs:comment "候选；平台→软件服务费；按规则计算收取软件服务费。原文依据：L13:9-13；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+ont:平台返还软件服务费 a owl:ObjectProperty ;
+    rdfs:label "平台返还软件服务费"@zh ;
+    rdfs:comment "候选；平台→软件服务费；满足业务规则时存在软件服务费返还。原文依据：L13:9-13；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-结算 =====
+ont:共管门店计入共管业绩 a owl:ObjectProperty ;
+    rdfs:label "共管门店计入共管业绩"@zh ;
+    rdfs:comment "候选；共管门店→共管业绩；共管商品业绩参与相应周期核算。原文依据：L13:19-29；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ===== 生活服务-补偿 =====
+ont:商家提供体验补偿 a owl:ObjectProperty ;
+    rdfs:label "商家提供体验补偿"@zh ;
+    rdfs:comment "候选；商户主体→体验补偿；规则将体验补偿作为处理措施之一。原文依据：L08:21-25；实际抽取必须绑定规则标题、平台和原文片段。"@zh .
+
+
+# ====== V0.5 新增：美团、拼多多、淘宝、淘宝闪购、天猫正文语义 ======
+
+# 多平台规则 Schema v0.5 增量；只定义候选 Class / ObjectProperty。
+# 原始本体命名空间及 V0.4 全部声明保持兼容；无 domain/range、数据属性、实例或事实断言。
+@prefix ont: <urn:knowledge:ontology:2d1f9c59-ce80-473a-adc2-f62d538871fb:> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# ========== v0.5 新增业务语义实体类 ==========
+ont:交易评价 a owl:Class ;
+    rdfs:label "交易评价"@zh ;
+    rdfs:comment "候选；基于真实订单形成的商品或服务交易评价；区别于只针对商品的商品评价。原文依据：M02:24-42;P04:15-23。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商户评价 a owl:Class ;
+    rdfs:label "商户评价"@zh ;
+    rdfs:comment "候选；对到店商户服务或门店体验的评价，可能进入商户评分与评价争议处理。原文依据：M01:14-18;M09:12-26。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:评价争议 a owl:Class ;
+    rdfs:label "评价争议"@zh ;
+    rdfs:comment "候选；商户或消费者就评价内容真实性、合规性或展示形成的争议。原文依据：M09:24-39。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:评价干预行为 a owl:Class ;
+    rdfs:label "评价干预行为"@zh ;
+    rdfs:comment "候选；商户刷评、利益诱导、要求删除/修改评价等干扰评价秩序的行为。原文依据：M01:26-40。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商户诚信分 a owl:Class ;
+    rdfs:label "商户诚信分"@zh ;
+    rdfs:comment "候选；评价诚信治理中用于累计违规处理的计分机制；不等同于店铺星级。原文依据：M01:43-59。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:评价评审任务 a owl:Class ;
+    rdfs:label "评价评审任务"@zh ;
+    rdfs:comment "候选；在评审团机制下由评审员对争议评价进行投票的任务。原文依据：M09:29-61。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:榜单荣誉物料 a owl:Class ;
+    rdfs:label "榜单荣誉物料"@zh ;
+    rdfs:comment "候选；平台向符合条件的上榜商户发放的可用于宣传的榜单荣誉素材。原文依据：M03:35-56。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:餐饮预订 a owl:Class ;
+    rdfs:label "餐饮预订"@zh ;
+    rdfs:comment "候选；消费者通过到店餐饮业务预约商户预留用餐资源或服务的过程。原文依据：M04:14-24。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:预订席位 a owl:Class ;
+    rdfs:label "预订席位"@zh ;
+    rdfs:comment "候选；餐饮预订订单中要求预留的大厅/包间等用餐接待资源。原文依据：M04:20-24。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:酒店客房 a owl:Class ;
+    rdfs:label "酒店客房"@zh ;
+    rdfs:comment "候选；平台展示并由住宿服务供应商提供的客房产品。原文依据：M07:14-23。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:住宿服务供应商 a owl:Class ;
+    rdfs:label "住宿服务供应商"@zh ;
+    rdfs:comment "候选；提供酒店或民宿房间并确认相关预订的供应商或代理商。原文依据：M07:14-21。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:参考价 a owl:Class ;
+    rdfs:label "参考价"@zh ;
+    rdfs:comment "候选；展示的基准对比价格；与实际售卖价不同，需核实真实性。原文依据：M08:30-34。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:售卖价 a owl:Class ;
+    rdfs:label "售卖价"@zh ;
+    rdfs:comment "候选；平台上展示或拟成交的商品/服务销售价格。原文依据：M08:44-48。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:价格欺诈 a owl:Class ;
+    rdfs:label "价格欺诈"@zh ;
+    rdfs:comment "候选；商户通过虚构参考价、先提价后打折等方式误导价格认知的违规类型。原文依据：M08:68-76。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:随时退保障 a owl:Class ;
+    rdfs:label "随时退保障"@zh ;
+    rdfs:comment "候选；页面标记的未消费随时退款服务权益，存在订单和条件限制。原文依据：M06:34-58。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:过期退保障 a owl:Class ;
+    rdfs:label "过期退保障"@zh ;
+    rdfs:comment "候选；页面标记的到期后自动退款服务权益，须核对是否消费及适用条件。原文依据：M06:63-74。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:假货 a owl:Class ;
+    rdfs:label "假货"@zh ;
+    rdfs:comment "候选；规则区分假冒商品与盗版商品；涉嫌售假与售假成立需区别处理。原文依据：P01:11-15;P01:39-73。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:正品证明材料 a owl:Class ;
+    rdfs:label "正品证明材料"@zh ;
+    rdfs:comment "候选；商家为证明商品正规进货渠道及真实正品而保存或提供的证据材料。原文依据：P01:17-19。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:抽检样本 a owl:Class ;
+    rdfs:label "抽检样本"@zh ;
+    rdfs:comment "候选；用于商品真伪、质量或描述一致性判断的实物或其他样本。原文依据：P01:21-37;H07:29-35。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:营销活动 a owl:Class ;
+    rdfs:label "营销活动"@zh ;
+    rdfs:comment "候选；由商家或平台组织、商品可参与的营销活动；具体百亿补贴等是活动名称而非新本体类。原文依据：P02:9-21;H09:17-25。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:活动商品 a owl:Class ;
+    rdfs:label "活动商品"@zh ;
+    rdfs:comment "候选；经平台审核后纳入指定活动范围的商品，须与普通商品概念区分。原文依据：P02:19-21。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:活动报名申请 a owl:Class ;
+    rdfs:label "活动报名申请"@zh ;
+    rdfs:comment "候选；商家为参与活动提交的申请以及需满足的活动准入条件。原文依据：P02:27-43。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:店铺类型 a owl:Class ;
+    rdfs:label "店铺类型"@zh ;
+    rdfs:comment "候选；旗舰店、专卖店、专营店、个人店等店铺组织分类的概念。原文依据：P09:15-19;H05:29-55。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:店铺名称 a owl:Class ;
+    rdfs:label "店铺名称"@zh ;
+    rdfs:comment "候选；店铺展示的经营名称，命名受到店铺类型、品牌授权等要求约束。原文依据：P09:11-29。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:赠品 a owl:Class ;
+    rdfs:label "赠品"@zh ;
+    rdfs:comment "候选；作为购买交易商品的前提而获得的约定赠送物品或服务。原文依据：P03:15-21。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:平台电子面单 a owl:Class ;
+    rdfs:label "平台电子面单"@zh ;
+    rdfs:comment "候选；平台指定的电子面单发货方式及凭证，与普通物流单号不同。原文依据：P07:11-15。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:评价有礼活动 a owl:Class ;
+    rdfs:label "评价有礼活动"@zh ;
+    rdfs:comment "候选；规则规定的以商家预算为基础向评价用户发券的活动；不能直接等同诱导好评违规。原文依据：P05:27-35。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:极速退款服务 a owl:Class ;
+    rdfs:label "极速退款服务"@zh ;
+    rdfs:comment "候选；在开通及特定条件满足后可按较快流程完成退款的服务。原文依据：P06:15-35。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:无需退货退款 a owl:Class ;
+    rdfs:label "无需退货退款"@zh ;
+    rdfs:comment "候选；已发货后无需退回商品而申请退款的流程，须与退货退款区别。原文依据：P10:37-55。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商品描述不符 a owl:Class ;
+    rdfs:label "商品描述不符"@zh ;
+    rdfs:comment "候选；实际商品与商品描述或平台质量标准存在差异的情形。原文依据：P08:23-35。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:交易状态 a owl:Class ;
+    rdfs:label "交易状态"@zh ;
+    rdfs:comment "候选；等待付款、等待发货、等待确认收货等交易过程状态。原文依据：T02:24-33。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:交易超时 a owl:Class ;
+    rdfs:label "交易超时"@zh ;
+    rdfs:comment "候选；某一交易/售后状态下的处理期限届满，可能触发状态流转或自动处理。原文依据：T02:26-33;T08:18-38。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:售后响应时限 a owl:Class ;
+    rdfs:label "售后响应时限"@zh ;
+    rdfs:comment "候选；买卖双方在退款换货维修等售后流程中处理申请的期限。原文依据：T08:18-38。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:开票服务 a owl:Class ;
+    rdfs:label "开票服务"@zh ;
+    rdfs:comment "候选；面向符合条件订单提供的开具发票服务及承诺。原文依据：T03:9-22。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:信用积分 a owl:Class ;
+    rdfs:label "信用积分"@zh ;
+    rdfs:comment "候选；淘宝评价体系中的信用计分，和天猫会员可兑换的积分不等价。原文依据：T04:13-22。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:店铺评分 a owl:Class ;
+    rdfs:label "店铺评分"@zh ;
+    rdfs:comment "候选；交易评价形成的店铺服务质量/物流等评分，不能与店铺星级或诚信分混为一谈。原文依据：P04:19-23;T04:19-22。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:平台红包 a owl:Class ;
+    rdfs:label "平台红包"@zh ;
+    rdfs:comment "候选；由平台发放、按规则抵扣订单金额等费用的营销工具。原文依据：F01:13-25。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:店铺红包 a owl:Class ;
+    rdfs:label "店铺红包"@zh ;
+    rdfs:comment "候选；商家自行设定并仅在其店铺使用的红包，区别平台红包。原文依据：F01:15-17。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:配送服务商 a owl:Class ;
+    rdfs:label "配送服务商"@zh ;
+    rdfs:comment "候选；提供外卖即时配送服务的商户或第三方服务组织。原文依据：F03:17-25。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:配送站点 a owl:Class ;
+    rdfs:label "配送站点"@zh ;
+    rdfs:comment "候选；为配送人员和站长提供调度、培训和物资场所的实体站点。原文依据：F03:27-29。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:无接触配送 a owl:Class ;
+    rdfs:label "无接触配送"@zh ;
+    rdfs:comment "候选；经与用户约定，将外卖食品放置指定地点由用户领取的配送方式。原文依据：F03:31-33。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:智能取餐柜 a owl:Class ;
+    rdfs:label "智能取餐柜"@zh ;
+    rdfs:comment "候选；提供外卖订单短时存放及自助领取的智能终端。原文依据：F03:35-37。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:配送箱 a owl:Class ;
+    rdfs:label "配送箱"@zh ;
+    rdfs:comment "候选；配送骑手运输食品使用、需符合卫生和防护要求的配送容器。原文依据：F03:65-79。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:自配送 a owl:Class ;
+    rdfs:label "自配送"@zh ;
+    rdfs:comment "候选；由商家自行提供配送服务的履约方式，与平台配送区分。原文依据：F06:23-25。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:接单行为 a owl:Class ;
+    rdfs:label "接单行为"@zh ;
+    rdfs:comment "候选；商家接收消费者下单并确认订单的业务环节。原文依据：F06:59-67。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:拣货行为 a owl:Class ;
+    rdfs:label "拣货行为"@zh ;
+    rdfs:comment "候选；商家根据订单准备、检查及拣选商品的环节。原文依据：F08:13-20;F06:69-79。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:订单取消 a owl:Class ;
+    rdfs:label "订单取消"@zh ;
+    rdfs:comment "候选；商家或平台将未完成订单取消的业务操作，需结合条件判责。原文依据：F02:19-22;F06:63-67。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:配送超时 a owl:Class ;
+    rdfs:label "配送超时"@zh ;
+    rdfs:comment "候选；订单配送未在约定或平台规定时限内到达的异常情形。原文依据：F02:26-29。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:餐品缺失 a owl:Class ;
+    rdfs:label "餐品缺失"@zh ;
+    rdfs:comment "候选；消费者实收餐品少于订单应提供餐品的投诉或履约异常。原文依据：F02:24-25。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:隐私包装 a owl:Class ;
+    rdfs:label "隐私包装"@zh ;
+    rdfs:comment "候选；敏感商品在配送时使用不透明二次包装、隐藏商品信息的措施。原文依据：F06:81-87。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:举证责任 a owl:Class ;
+    rdfs:label "举证责任"@zh ;
+    rdfs:comment "候选；纠纷处理时由相关主体承担的证明责任，需随场景分配。原文依据：F02:14-17。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:食品安全配送要求 a owl:Class ;
+    rdfs:label "食品安全配送要求"@zh ;
+    rdfs:comment "候选；即时配送相关的清洁、容器卫生及食品安全防护要求。原文依据：F03:39-49;F03:65-75。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:会员积分 a owl:Class ;
+    rdfs:label "会员积分"@zh ;
+    rdfs:comment "候选；交易或活动获取的会员专属积分奖励，区别淘宝信用积分。原文依据：H01:11-25。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:积分账户 a owl:Class ;
+    rdfs:label "积分账户"@zh ;
+    rdfs:comment "候选；记录会员积分并承载积分权益的账户对象。原文依据：H01:15-25。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:积分权益 a owl:Class ;
+    rdfs:label "积分权益"@zh ;
+    rdfs:comment "候选；会员利用积分获得的折扣、礼券兑换等权益。原文依据：H01:23-25;H01:61-67。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:服务异常 a owl:Class ;
+    rdfs:label "服务异常"@zh ;
+    rdfs:comment "候选；安装、回收、延保等服务未履行、履行不完整或额外收费的异常。原文依据：H02:23-25。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:服务异常求助 a owl:Class ;
+    rdfs:label "服务异常求助"@zh ;
+    rdfs:comment "候选；消费者通过一键求助等入口提出的服务异常处理请求。原文依据：H02:11-29。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:以旧换新服务 a owl:Class ;
+    rdfs:label "以旧换新服务"@zh ;
+    rdfs:comment "候选；旧物回收与购买新品组合的服务流程。原文依据：H03:11-15。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:闲置物品 a owl:Class ;
+    rdfs:label "闲置物品"@zh ;
+    rdfs:comment "候选；以旧换新业务中被回收的旧品或闲置设备。原文依据：H03:11-17。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:旧品回收单 a owl:Class ;
+    rdfs:label "旧品回收单"@zh ;
+    rdfs:comment "候选；消费者提交旧品信息并发起回收报价、回收服务的单据。原文依据：H03:11-13。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:回收报价 a owl:Class ;
+    rdfs:label "回收报价"@zh ;
+    rdfs:comment "候选；基于旧品状况进行预估价或质检价判断的报价对象。原文依据：H03:35-37。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:旧品质检 a owl:Class ;
+    rdfs:label "旧品质检"@zh ;
+    rdfs:comment "候选；回收服务商对旧品进行检测以确认成色和最终收购价格的环节。原文依据：H03:15-17;H03:49-55。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:破损包退服务 a owl:Class ;
+    rdfs:label "破损包退服务"@zh ;
+    rdfs:comment "候选；商品损坏等情形下根据承诺提供退款/退货退款保障的服务。原文依据：H04:13-35。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:退货宝权益 a owl:Class ;
+    rdfs:label "退货宝权益"@zh ;
+    rdfs:comment "候选；退换货成功等条件下的运费保障权益，不等同运费险。原文依据：H08:15-40。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:上门取件 a owl:Class ;
+    rdfs:label "上门取件"@zh ;
+    rdfs:comment "候选；按预约安排配送或快递服务人员上门取走退货、回收旧品的方式。原文依据：H08:25-31;H03:49-53。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:旗舰店 a owl:Class ;
+    rdfs:label "旗舰店"@zh ;
+    rdfs:comment "候选；以品牌及对应授权入驻的品牌店铺形式；平台之间具体资格不同。原文依据：P09:17-31;H05:29-43。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:专卖店 a owl:Class ;
+    rdfs:label "专卖店"@zh ;
+    rdfs:comment "候选；商家以授权或自有品牌经营的特定店铺形式。原文依据：P09:33-47;H05:45-53。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:专营店 a owl:Class ;
+    rdfs:label "专营店"@zh ;
+    rdfs:comment "候选；按平台规定经营一个类目或多个品牌的店铺形式，跨平台细则不同。原文依据：P09:49-55;H05:55-57。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:店铺真实体验分 a owl:Class ;
+    rdfs:label "店铺真实体验分"@zh ;
+    rdfs:comment "候选；平台综合订单、商品质量、物流、服务等维度构成的店铺体验指标。原文依据：H11:15-24。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:检验机构 a owl:Class ;
+    rdfs:label "检验机构"@zh ;
+    rdfs:comment "候选；执行商品抽检检测的自检主体或第三方检验机构。原文依据：H07:47-49。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:检验结论 a owl:Class ;
+    rdfs:label "检验结论"@zh ;
+    rdfs:comment "候选；商品质量抽检据检测结果形成的符合或不符合平台规定的结论。原文依据：H07:79-85。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:AI软件商品 a owl:Class ;
+    rdfs:label "AI软件商品"@zh ;
+    rdfs:comment "候选；基于AIGC/LLM等提供的数字软件及配套服务交易产品。原文依据：H06:9-21。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+# ========== v0.5 新增业务语义对象关系 ==========
+ont:交易评价关联订单 a owl:ObjectProperty ;
+    rdfs:label "交易评价关联订单"@zh ;
+    rdfs:comment "候选；交易评价→业务订单；评价依据真实有效交易订单。原文依据：M02:24-42;P04:15-23。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:消费者发布商户评价 a owl:ObjectProperty ;
+    rdfs:label "消费者发布商户评价"@zh ;
+    rdfs:comment "候选；消费者→商户评价；商户评价基于消费体验或交易。原文依据：M01:14-18;M09:12-20。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商户干预交易评价 a owl:ObjectProperty ;
+    rdfs:label "商户干预交易评价"@zh ;
+    rdfs:comment "候选；商户主体→评价干预行为；刷评、诱导好评或诱导删改评价。原文依据：M01:26-40。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:评价干预涉及评价 a owl:ObjectProperty ;
+    rdfs:label "评价干预涉及评价"@zh ;
+    rdfs:comment "候选；评价干预行为→交易评价；干预内容包括评价发布、更改或删除。原文依据：M01:29-37。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:平台扣减商户诚信分 a owl:ObjectProperty ;
+    rdfs:label "平台扣减商户诚信分"@zh ;
+    rdfs:comment "候选；平台→商户诚信分；按评价诚信违规情况扣分。原文依据：M01:43-54。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商户诚信分影响榜单资格 a owl:ObjectProperty ;
+    rdfs:label "商户诚信分影响榜单资格"@zh ;
+    rdfs:comment "候选；商户诚信分→参选资格；累计处罚可能限制上榜。原文依据：M01:47-54;M03:59-72。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:榜单发放荣誉物料 a owl:ObjectProperty ;
+    rdfs:label "榜单发放荣誉物料"@zh ;
+    rdfs:comment "候选；榜单→榜单荣誉物料；符合季度规则的上榜商户获得官方宣传物料。原文依据：M03:35-44。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商户使用榜单荣誉物料 a owl:ObjectProperty ;
+    rdfs:label "商户使用榜单荣誉物料"@zh ;
+    rdfs:comment "候选；商户主体→榜单荣誉物料；使用官方物料须遵守宣传规范。原文依据：M03:44-56。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:评审任务审核评价争议 a owl:ObjectProperty ;
+    rdfs:label "评审任务审核评价争议"@zh ;
+    rdfs:comment "候选；评价评审任务→评价争议；评审团对争议任务投票判定。原文依据：M09:29-57。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:餐饮预订关联订单 a owl:ObjectProperty ;
+    rdfs:label "餐饮预订关联订单"@zh ;
+    rdfs:comment "候选；餐饮预订→业务订单；餐饮预订存在预订订单履约义务。原文依据：M04:18-24。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商户为预订预留席位 a owl:ObjectProperty ;
+    rdfs:label "商户为预订预留席位"@zh ;
+    rdfs:comment "候选；商户主体→预订席位；接单后按订单预留大厅或包间。原文依据：M04:20-24。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:住宿供应商提供客房 a owl:ObjectProperty ;
+    rdfs:label "住宿供应商提供客房"@zh ;
+    rdfs:comment "候选；住宿服务供应商→酒店客房；客房由住宿提供方或其代理供应。原文依据：M07:14-20。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:住宿预订需要供应商确认 a owl:ObjectProperty ;
+    rdfs:label "住宿预订需要供应商确认"@zh ;
+    rdfs:comment "候选；住宿预订→住宿服务供应商；预订订单经供应商确认后生效。原文依据：M07:18-23。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:团购商品展示参考价 a owl:ObjectProperty ;
+    rdfs:label "团购商品展示参考价"@zh ;
+    rdfs:comment "候选；团购商品→参考价；参考价用于比对优惠，必须真实有据。原文依据：M08:30-34;M08:66-74。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:团购商品标示售卖价 a owl:ObjectProperty ;
+    rdfs:label "团购商品标示售卖价"@zh ;
+    rdfs:comment "候选；团购商品→售卖价；售卖价体现平台拟成交价格。原文依据：M08:44-48。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:虚构参考价构成价格欺诈 a owl:ObjectProperty ;
+    rdfs:label "虚构参考价构成价格欺诈"@zh ;
+    rdfs:comment "候选；参考价→价格欺诈；虚构或不真实参考价可能属于价格欺诈。原文依据：M08:68-74。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:订单适用随时退保障 a owl:ObjectProperty ;
+    rdfs:label "订单适用随时退保障"@zh ;
+    rdfs:comment "候选；业务订单→随时退保障；仅在相关订单、页面与未消费条件下适用。原文依据：M06:34-38;M06:51-59。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:订单适用过期退保障 a owl:ObjectProperty ;
+    rdfs:label "订单适用过期退保障"@zh ;
+    rdfs:comment "候选；业务订单→过期退保障；按页面标示和券码使用状态适用。原文依据：M06:63-74。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:假货涉及商品 a owl:ObjectProperty ;
+    rdfs:label "假货涉及商品"@zh ;
+    rdfs:comment "候选；假货→商品；仅在涉嫌或已查实的特定判定条件下使用。原文依据：P01:11-15;P01:39-73。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商家保留正品证明 a owl:ObjectProperty ;
+    rdfs:label "商家保留正品证明"@zh ;
+    rdfs:comment "候选；商户主体→正品证明材料；保存能证明进货渠道与正品的凭据。原文依据：P01:17-19。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:平台采集抽检样本 a owl:ObjectProperty ;
+    rdfs:label "平台采集抽检样本"@zh ;
+    rdfs:comment "候选；平台→抽检样本；通过购买、商家或品牌方提供获得样本。原文依据：P01:21-35。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:抽检样本对应商品 a owl:ObjectProperty ;
+    rdfs:label "抽检样本对应商品"@zh ;
+    rdfs:comment "候选；抽检样本→商品；样本用于核实某一商品或商品信息。原文依据：P01:23-33。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:假货触发平台处理 a owl:ObjectProperty ;
+    rdfs:label "假货触发平台处理"@zh ;
+    rdfs:comment "候选；假货→处理措施；不同涉嫌售假与认定售假阶段的措施不能混同。原文依据：P01:39-87。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商家申请参与营销活动 a owl:ObjectProperty ;
+    rdfs:label "商家申请参与营销活动"@zh ;
+    rdfs:comment "候选；商户主体→活动报名申请；商家按活动准入提交申请。原文依据：P02:27-43。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:营销活动纳入活动商品 a owl:ObjectProperty ;
+    rdfs:label "营销活动纳入活动商品"@zh ;
+    rdfs:comment "候选；营销活动→活动商品；符合准入的商品参与活动。原文依据：P02:19-43。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:活动商品对应商品 a owl:ObjectProperty ;
+    rdfs:label "活动商品对应商品"@zh ;
+    rdfs:comment "候选；活动商品→商品；以具体商品ID参与活动。原文依据：P02:19-23。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:订单包含赠品 a owl:ObjectProperty ;
+    rdfs:label "订单包含赠品"@zh ;
+    rdfs:comment "候选；业务订单→赠品；赠品可以单独形成赠品订单并按时发货。原文依据：P03:15-21。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商家使用电子面单 a owl:ObjectProperty ;
+    rdfs:label "商家使用电子面单"@zh ;
+    rdfs:comment "候选；商户主体→平台电子面单；部分商家需改用平台电子面单发货。原文依据：P07:11-15。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:店铺使用店铺名称 a owl:ObjectProperty ;
+    rdfs:label "店铺使用店铺名称"@zh ;
+    rdfs:comment "候选；店铺→店铺名称；平台对不同类型店铺命名规则不同。原文依据：P09:11-29。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:店铺归属店铺类型 a owl:ObjectProperty ;
+    rdfs:label "店铺归属店铺类型"@zh ;
+    rdfs:comment "候选；店铺→店铺类型；店铺有旗舰店、专卖店等分类。原文依据：P09:15-59。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:评价有礼发放优惠权益 a owl:ObjectProperty ;
+    rdfs:label "评价有礼发放优惠权益"@zh ;
+    rdfs:comment "候选；评价有礼活动→优惠权益；按照活动预算发放优惠券。原文依据：P05:27-35。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:评价有礼关联交易评价 a owl:ObjectProperty ;
+    rdfs:label "评价有礼关联交易评价"@zh ;
+    rdfs:comment "候选；评价有礼活动→交易评价；活动围绕真实商品订单评价。原文依据：P05:27-31。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商家开通极速退款服务 a owl:ObjectProperty ;
+    rdfs:label "商家开通极速退款服务"@zh ;
+    rdfs:comment "候选；商户主体→极速退款服务；商家可自主申请开通。原文依据：P06:15-35。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:极速退款服务处理退款申请 a owl:ObjectProperty ;
+    rdfs:label "极速退款服务处理退款申请"@zh ;
+    rdfs:comment "候选；极速退款服务→退款申请；只在商品、订单及提交时间等条件满足时适用。原文依据：P06:17-29。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:无需退货退款关联订单 a owl:ObjectProperty ;
+    rdfs:label "无需退货退款关联订单"@zh ;
+    rdfs:comment "候选；无需退货退款→业务订单；已发货订单可申请无需退货退款。原文依据：P10:37-55。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商品描述不符涉及商品 a owl:ObjectProperty ;
+    rdfs:label "商品描述不符涉及商品"@zh ;
+    rdfs:comment "候选；商品描述不符→商品；实际发货与页面描述或质量要求不一致。原文依据：P08:11-35。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:交易状态决定超时处理 a owl:ObjectProperty ;
+    rdfs:label "交易状态决定超时处理"@zh ;
+    rdfs:comment "候选；交易状态→交易超时；不同状态采用不同超时规则。原文依据：T02:24-33。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:交易超时可关闭订单 a owl:ObjectProperty ;
+    rdfs:label "交易超时可关闭订单"@zh ;
+    rdfs:comment "候选；交易超时→业务订单；等待买家付款超过期限可自动关闭。原文依据：T02:26-32。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:售后申请受响应时限约束 a owl:ObjectProperty ;
+    rdfs:label "售后申请受响应时限约束"@zh ;
+    rdfs:comment "候选；售后服务单→售后响应时限；卖家对换货/维修申请有时限要求。原文依据：T08:18-35。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商家提供开票服务 a owl:ObjectProperty ;
+    rdfs:label "商家提供开票服务"@zh ;
+    rdfs:comment "候选；商户主体→开票服务；商家加入支持开票服务后履行开票承诺。原文依据：T03:9-22。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:开票服务关联订单 a owl:ObjectProperty ;
+    rdfs:label "开票服务关联订单"@zh ;
+    rdfs:comment "候选；开票服务→业务订单；消费者交易产生开具发票的服务申请。原文依据：T03:13-22。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:交易评价影响信用积分 a owl:ObjectProperty ;
+    rdfs:label "交易评价影响信用积分"@zh ;
+    rdfs:comment "候选；交易评价→信用积分；买家评价与卖家信用计分逻辑关联。原文依据：T04:13-22。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:交易评价形成店铺评分 a owl:ObjectProperty ;
+    rdfs:label "交易评价形成店铺评分"@zh ;
+    rdfs:comment "候选；交易评价→店铺评分；评价包含质量、服务、物流等指标评分。原文依据：P04:19-23;T04:19-22。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:平台发放红包 a owl:ObjectProperty ;
+    rdfs:label "平台发放红包"@zh ;
+    rdfs:comment "候选；平台→平台红包；平台根据营销规则发放红包。原文依据：F01:21-41。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:平台红包抵扣订单 a owl:ObjectProperty ;
+    rdfs:label "平台红包抵扣订单"@zh ;
+    rdfs:comment "候选；平台红包→业务订单；抵扣订单金额受门槛、场景等条件限制。原文依据：F01:49-81。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:店铺红包限定店铺 a owl:ObjectProperty ;
+    rdfs:label "店铺红包限定店铺"@zh ;
+    rdfs:comment "候选；店铺红包→店铺；商家自行设定并限店内使用。原文依据：F01:15-17。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:配送服务商设置站点 a owl:ObjectProperty ;
+    rdfs:label "配送服务商设置站点"@zh ;
+    rdfs:comment "候选；配送服务商→配送站点；组织配送工作并设立调度/培训站点的候选关系。原文依据：F03:19-29。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:订单选择无接触配送 a owl:ObjectProperty ;
+    rdfs:label "订单选择无接触配送"@zh ;
+    rdfs:comment "候选；业务订单→无接触配送；需用户约定放置和自取方式。原文依据：F03:31-33。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:智能取餐柜暂存订单商品 a owl:ObjectProperty ;
+    rdfs:label "智能取餐柜暂存订单商品"@zh ;
+    rdfs:comment "候选；智能取餐柜→业务订单；用于外卖订单物品短时存放。原文依据：F03:35-37。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:配送骑手使用配送箱 a owl:ObjectProperty ;
+    rdfs:label "配送骑手使用配送箱"@zh ;
+    rdfs:comment "候选；配送骑手→配送箱；配送装备需符合食品卫生规范。原文依据：F03:51-75。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商家采用自配送 a owl:ObjectProperty ;
+    rdfs:label "商家采用自配送"@zh ;
+    rdfs:comment "候选；商户主体→自配送；由商户自行提供配送服务。原文依据：F06:19-25。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商家执行接单行为 a owl:ObjectProperty ;
+    rdfs:label "商家执行接单行为"@zh ;
+    rdfs:comment "候选；商户主体→接单行为；应按规定时间接受订单。原文依据：F06:59-67。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商家执行拣货行为 a owl:ObjectProperty ;
+    rdfs:label "商家执行拣货行为"@zh ;
+    rdfs:comment "候选；商户主体→拣货行为；订单处理包括拣货备货。原文依据：F08:13-20。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:拣货对应业务订单 a owl:ObjectProperty ;
+    rdfs:label "拣货对应业务订单"@zh ;
+    rdfs:comment "候选；拣货行为→业务订单；根据订单检查商品数量、规格和质量。原文依据：F06:69-79;F08:15-20。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商家取消订单 a owl:ObjectProperty ;
+    rdfs:label "商家取消订单"@zh ;
+    rdfs:comment "候选；商户主体→订单取消；接单后擅自取消可能需赔付。原文依据：F02:19-22。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:配送超时涉及订单 a owl:ObjectProperty ;
+    rdfs:label "配送超时涉及订单"@zh ;
+    rdfs:comment "候选；配送超时→业务订单；特定自配送订单超时产生赔付条件。原文依据：F02:26-29。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:餐品缺失涉及订单 a owl:ObjectProperty ;
+    rdfs:label "餐品缺失涉及订单"@zh ;
+    rdfs:comment "候选；餐品缺失→业务订单；收到的餐品不全属于责任场景之一。原文依据：F02:24-25。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商家承担举证责任 a owl:ObjectProperty ;
+    rdfs:label "商家承担举证责任"@zh ;
+    rdfs:comment "候选；商户主体→举证责任；平台可根据争议分配举证义务。原文依据：F02:14-17。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:敏感商品要求隐私包装 a owl:ObjectProperty ;
+    rdfs:label "敏感商品要求隐私包装"@zh ;
+    rdfs:comment "候选；商品→隐私包装；规定部分类目商品应采用不透明包装防止信息外露。原文依据：F06:81-87。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:配送箱符合食品安全要求 a owl:ObjectProperty ;
+    rdfs:label "配送箱符合食品安全要求"@zh ;
+    rdfs:comment "候选；配送箱→食品安全配送要求；配送箱需清洁、密封与消毒。原文依据：F03:65-75。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:会员获得会员积分 a owl:ObjectProperty ;
+    rdfs:label "会员获得会员积分"@zh ;
+    rdfs:comment "候选；消费者→会员积分；符合要求的交易或活动可获得积分。原文依据：H01:11-25;H01:41-45。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:积分账户登记会员积分 a owl:ObjectProperty ;
+    rdfs:label "积分账户登记会员积分"@zh ;
+    rdfs:comment "候选；积分账户→会员积分；累计积分登记于会员账户。原文依据：H01:17-25。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:会员积分兑换积分权益 a owl:ObjectProperty ;
+    rdfs:label "会员积分兑换积分权益"@zh ;
+    rdfs:comment "候选；会员积分→积分权益；积分可兑换礼券或专属权益。原文依据：H01:61-67。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:服务异常引发求助 a owl:ObjectProperty ;
+    rdfs:label "服务异常引发求助"@zh ;
+    rdfs:comment "候选；服务异常→服务异常求助；未履约、加收费用等异常可发起求助。原文依据：H02:23-29。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:消费者提出服务异常求助 a owl:ObjectProperty ;
+    rdfs:label "消费者提出服务异常求助"@zh ;
+    rdfs:comment "候选；消费者→服务异常求助；通过订单或服务详情入口申请帮助。原文依据：H02:11-29;H02:41-43。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:以旧换新回收闲置物品 a owl:ObjectProperty ;
+    rdfs:label "以旧换新回收闲置物品"@zh ;
+    rdfs:comment "候选；以旧换新服务→闲置物品；服务包含旧物回收与新品购买。原文依据：H03:11-17。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:消费者提交旧品回收单 a owl:ObjectProperty ;
+    rdfs:label "消费者提交旧品回收单"@zh ;
+    rdfs:comment "候选；消费者→旧品回收单；通过线上提交回收单。原文依据：H03:11-13。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:旧品回收单记录闲置物品 a owl:ObjectProperty ;
+    rdfs:label "旧品回收单记录闲置物品"@zh ;
+    rdfs:comment "候选；旧品回收单→闲置物品；记录待回收物品信息。原文依据：H03:11-13。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:服务商执行旧品质检 a owl:ObjectProperty ;
+    rdfs:label "服务商执行旧品质检"@zh ;
+    rdfs:comment "候选；服务商→旧品质检；回收商质检影响最终报价。原文依据：H03:15-17;H03:49-55。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:旧品质检影响回收报价 a owl:ObjectProperty ;
+    rdfs:label "旧品质检影响回收报价"@zh ;
+    rdfs:comment "候选；旧品质检→回收报价；预估价与质检价需区分。原文依据：H03:35-37。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:以旧换新提供优惠权益 a owl:ObjectProperty ;
+    rdfs:label "以旧换新提供优惠权益"@zh ;
+    rdfs:comment "候选；以旧换新服务→优惠权益；回收红包及相关补贴需核对活动条件。原文依据：H03:13-23。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商家提供破损包退服务 a owl:ObjectProperty ;
+    rdfs:label "商家提供破损包退服务"@zh ;
+    rdfs:comment "候选；商户主体→破损包退服务；参与服务的商家按规则履行售后承诺。原文依据：H04:13-35。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:破损包退保障商品 a owl:ObjectProperty ;
+    rdfs:label "破损包退保障商品"@zh ;
+    rdfs:comment "候选；破损包退服务→商品；仅对适用服务标识和条件的商品。原文依据：H04:13-25。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:退货宝权益补偿运费 a owl:ObjectProperty ;
+    rdfs:label "退货宝权益补偿运费"@zh ;
+    rdfs:comment "候选；退货宝权益→运费；支持取件费用抵扣或事后补偿。原文依据：H08:15-40。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:消费者申请上门取件 a owl:ObjectProperty ;
+    rdfs:label "消费者申请上门取件"@zh ;
+    rdfs:comment "候选；消费者→上门取件；消费者选择上门取件办理退货。原文依据：H08:25-31。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:旗舰店经营品牌 a owl:ObjectProperty ;
+    rdfs:label "旗舰店经营品牌"@zh ;
+    rdfs:comment "候选；旗舰店→品牌；旗舰店依品牌所有权或独占授权入驻。原文依据：H05:29-43。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:专卖店经营品牌 a owl:ObjectProperty ;
+    rdfs:label "专卖店经营品牌"@zh ;
+    rdfs:comment "候选；专卖店→品牌；专卖店依据品牌授权入驻。原文依据：H05:45-53。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:专营店经营品牌 a owl:ObjectProperty ;
+    rdfs:label "专营店经营品牌"@zh ;
+    rdfs:comment "候选；专营店→品牌；一个经营大类经营多个品牌。原文依据：H05:55-57。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商品抽检由检验机构执行 a owl:ObjectProperty ;
+    rdfs:label "商品抽检由检验机构执行"@zh ;
+    rdfs:comment "候选；商品抽检→检验机构；平台自检或合格机构检测。原文依据：H07:29-49。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:商品抽检形成检验结论 a owl:ObjectProperty ;
+    rdfs:label "商品抽检形成检验结论"@zh ;
+    rdfs:comment "候选；商品抽检→检验结论；根据检测指标结果判定商品是否符合平台规定。原文依据：H07:79-85。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:平台调整店铺真实体验分 a owl:ObjectProperty ;
+    rdfs:label "平台调整店铺真实体验分"@zh ;
+    rdfs:comment "候选；平台→店铺真实体验分；特定违规处罚可能影响店铺体验分。原文依据：H11:15-24。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:AI软件商品披露商品信息 a owl:ObjectProperty ;
+    rdfs:label "AI软件商品披露商品信息"@zh ;
+    rdfs:comment "候选；AI软件商品→商品信息；服务期限、模型名称与版本应在详情页明示。原文依据：H06:27-39。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+
+# ====== 文档结构辅助 Schema ======
+
+# v0.4 沿用 v0.3 最小规则文档/章节/条款/文档片段检索结构。
+# 跨平台规则内容本体 v0.3：京东 + 小红书
+# 目标：支持两平台规则文档正文的实体/关系抽取，并与独立的标题/章节索引关联。
+# 历史兼容：复用用户原始 ontology-...ttl 的 namespace，不改 v0.2 已有术语 URI。
+# 来源：京东(1).zip、小红书(1).zip 的真实文档；术语是候选 Schema，不等于已经完成全量抽取。
+# 明确不包含 domain、range、DatatypeProperty、subClassOf、OWL 实例及具体业务事实。
+
+@prefix ont: <urn:knowledge:ontology:2d1f9c59-ce80-473a-adc2-f62d538871fb:> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+
+# ========== 最小检索结构：类（不把规则标题定义为类）==========
+ont:规则文档 a owl:Class ;
+    rdfs:label "规则文档"@zh ;
+    rdfs:comment "候选：一份可定位的规则/协议/公告/解读资料；检索索引为具体版本记录title、平台、来源链接、状态等，不把标题声明为OWL类。 "@zh .
+
+ont:规则章节 a owl:Class ;
+    rdfs:label "规则章节"@zh ;
+    rdfs:comment "候选：文档中具有阅读或业务语义作用的章节/小节，包括加粗写的标题，而不限于Markdown # 层级。 "@zh .
+
+ont:文档片段 a owl:Class ;
+    rdfs:label "文档片段"@zh ;
+    rdfs:comment "候选：可检索的正文片段；保留标题路径与源文件位置，表格片段等由索引block_type区分。 "@zh .
+
+
+# ========== 最小检索结构：对象关系（不指定 domain/range）==========
+ont:平台发布规则 a owl:ObjectProperty ;
+    rdfs:label "平台发布规则"@zh ;
+    rdfs:comment "候选：平台发布一份规则文档；表示平台→规则文档，具体平台依据来源核实。 "@zh .
+
+ont:文档包含章节 a owl:ObjectProperty ;
+    rdfs:label "文档包含章节"@zh ;
+    rdfs:comment "候选：规则文档包含规则章节；表示规则文档→规则章节。 "@zh .
+
+ont:文档包含条款 a owl:ObjectProperty ;
+    rdfs:label "文档包含条款"@zh ;
+    rdfs:comment "候选：无显式章/节时可直接包含规则条款；表示规则文档→规则条款。 "@zh .
+
+ont:章节包含条款 a owl:ObjectProperty ;
+    rdfs:label "章节包含条款"@zh ;
+    rdfs:comment "候选：章节包含其下规则条款；表示规则章节→规则条款。 "@zh .
+
+ont:章节包含片段 a owl:ObjectProperty ;
+    rdfs:label "章节包含片段"@zh ;
+    rdfs:comment "候选：章节包含正文片段；表示规则章节→文档片段。 "@zh .
+
+ont:条款对应片段 a owl:ObjectProperty ;
+    rdfs:label "条款对应片段"@zh ;
+    rdfs:comment "候选：条款对应可定位的原文片段；表示规则条款→文档片段。 "@zh .
+
+ont:文档引用规则 a owl:ObjectProperty ;
+    rdfs:label "文档引用规则"@zh ;
+    rdfs:comment "候选：正文中明确引用另一份规则或协议；表示当前文档→被引用规则。 "@zh .
+
+ont:公告修订规则 a owl:ObjectProperty ;
+    rdfs:label "公告修订规则"@zh ;
+    rdfs:comment "候选：修订公告明确指出所修订的规则；表示公告文档→目标规则文档。 "@zh .
+
+ont:解读对应规则 a owl:ObjectProperty ;
+    rdfs:label "解读对应规则"@zh ;
+    rdfs:comment "候选：规则解读文档明确解释的规则；表示解读文档→原规则文档。 "@zh .
+
+ont:后续版本替代 a owl:ObjectProperty ;
+    rdfs:label "后续版本替代"@zh ;
+    rdfs:comment "候选：新版本明确替代旧版本时使用；表示新文档→旧文档，单凭同标题不可自动生成。 "@zh .
+
+
+# ====== V0.5 新增：规则变更对照与意见征集反馈 ======
+
+# 多平台规则 Schema v0.5 增量；只定义候选 Class / ObjectProperty。
+# 原始本体命名空间及 V0.4 全部声明保持兼容；无 domain/range、数据属性、实例或事实断言。
+@prefix ont: <urn:knowledge:ontology:2d1f9c59-ce80-473a-adc2-f62d538871fb:> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# ========== v0.5 检索结构增量类 ==========
+ont:规则变更对照片段 a owl:Class ;
+    rdfs:label "规则变更对照片段"@zh ;
+    rdfs:comment "候选；文档中的变更前/变更后规则片段，须保留对应列、顺序和对照关系。原文依据：T02:19-48;T04:17-27。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:意见征集反馈文档 a owl:Class ;
+    rdfs:label "意见征集反馈文档"@zh ;
+    rdfs:comment "候选；用于记录规则意见征集结果的资料，与正式规则版本不能混同。原文依据：T07:7-15。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+# ========== v0.5 检索结构增量关系 ==========
+ont:公告展示变更前片段 a owl:ObjectProperty ;
+    rdfs:label "公告展示变更前片段"@zh ;
+    rdfs:comment "候选；规则文档→规则变更对照片段；公告明确列出变更前文本。原文依据：T02:19-33;T04:19-22。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:公告展示变更后片段 a owl:ObjectProperty ;
+    rdfs:label "公告展示变更后片段"@zh ;
+    rdfs:comment "候选；规则文档→规则变更对照片段；公告明确列出变更后文本。原文依据：T02:35-49;T04:19-22。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
+
+ont:征集反馈指向规则文档 a owl:ObjectProperty ;
+    rdfs:label "征集反馈指向规则文档"@zh ;
+    rdfs:comment "候选；意见征集反馈文档→规则文档；反馈明确指向被征求意见的规则。原文依据：T07:7-11。源文件映射见术语证据索引；仅用于文本概念和关系抽取，不代表规则当前有效或已生成业务事实。"@zh .
