@@ -547,3 +547,79 @@ def test_preparation_owner_project_and_expiry_are_enforced_for_all_reads(prep):
     assert client.get(root).status_code==404
     assert client.get(root+'/items/'+item['id']+'/original').status_code==404
     assert client.get(root+'/items/'+item['id']+'/result').status_code==404
+
+
+@pytest.mark.parametrize('code', ['asr_runtime_error', 'asr_timeout', 'ocr_failed', 'source_asset_missing'])
+def test_partial_recognition_error_fails_preparation(prep, monkeypatch, code):
+    client, root = prep
+    import knowledge_service.services.preparation_runner as runner
+    monkeypatch.setattr(runner, 'prepare_source_ingest', lambda *a, **k:
+        ([], '正文仍然存在', [dict(code=code, message='附件识别失败')]))
+    item = upload(client, root)
+    response = client.post(root+'/parse', json={'item_ids':[item['id']],
+        'versions':{item['id']:1}, 'idempotency_key':'partial'})
+    assert response.status_code == 202
+    for _ in range(150):
+        value = client.get(root).json()['items'][0]
+        if value['status'] in ('failed', 'completed'): break
+        time.sleep(.03)
+    assert value['status'] == 'failed', value
+    assert not value['result_ready']
+
+
+def test_legacy_completed_result_with_media_error_cannot_publish(prep):
+    client, root = prep
+    item = ready(client, root, upload(client, root))
+    store = client.app.state.preparations.store
+    task = store.task(item['parse_task_id'])
+    task['result']['warnings'] = [dict(code='asr_runtime_error', message='附件识别失败')]
+    from knowledge_service.repository.preparation_store import encoded
+    with store.repo._transaction():
+        store.db.execute('UPDATE preparation_tasks SET result=?::jsonb WHERE id=?',
+            (encoded(task['result']), task['id']))
+    value = client.get(root).json()['items'][0]
+    assert value['status'] == 'failed'
+    assert not value['result_ready'] and not value['reusable']
+    response = client.post(root+'/publish', json={'item_ids':[item['id']],
+        'versions':{item['id']:1}, 'result_versions':{item['id']:item['chunk_version']},
+        'idempotency_key':'blocked-partial'})
+    assert response.status_code == 409, response.text
+
+
+def test_retry_invalid_completed_cache_requeues_same_task(prep):
+    client, root = prep
+    item = ready(client, root, upload(client, root))
+    client.app.state.preparation_runner.close()
+    store = client.app.state.preparations.store
+    task = store.task(item['parse_task_id'])
+    task['result']['warnings'] = [dict(code='asr_runtime_error', message='附件识别失败')]
+    from knowledge_service.repository.preparation_store import encoded
+    with store.repo._transaction():
+        store.db.execute('UPDATE preparation_tasks SET result=?::jsonb WHERE id=?',
+            (encoded(task['result']), task['id']))
+    response = client.post(root+'/retry', json={'item_ids':[item['id']],
+        'versions':{item['id']:1}, 'idempotency_key':'retry-invalid-cache'})
+    assert response.status_code == 202, response.text
+    value = response.json()['items'][0]
+    assert value['status'] == 'queued', value
+    assert value['parse_task_id'] == task['id']
+    assert store.task(task['id'])['result'] is None
+
+
+
+def test_retry_cancelled_item_preserves_shared_healthy_completed_cache(prep):
+    client, root = prep
+    first = ready(client, root, upload(client, root))
+    second = upload(client, root, key='second')
+    response = client.post(root+'/parse', json={'item_ids':[second['id']],
+        'versions':{second['id']:1}, 'idempotency_key':'reuse-shared'})
+    assert response.status_code == 202
+    client.app.state.preparation_runner.close()
+    assert client.post(root+'/cancel', json={'item_ids':[second['id']]}).status_code == 200
+    response = client.post(root+'/retry', json={'item_ids':[second['id']],
+        'versions':{second['id']:1}, 'idempotency_key':'retry-shared'})
+    assert response.status_code == 202, response.text
+    assert response.json()['items'][1]['status'] == 'reused'
+    task = client.app.state.preparations.store.task(first['parse_task_id'])
+    assert task['status'] == 'completed' and task['result']
+    assert client.get(root+'/items/'+first['id']+'/result').status_code == 200

@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import time
+import wave
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -160,7 +161,7 @@ class FunASRAdapter:
         config = dict(models=identities, runtime=runtime, device='cpu', ncpu=2, sample_rate=16000,
                       channels=1, vad_max_segment_ms=30000, language=self.language, use_itn=True,
                       ban_emo_unk=True, batch_size_s=30, disable_update=True, disable_pbar=True,
-                      trust_remote_code=False, preprocess_version='ffmpeg-pcm16-mono-v1', max_duration=self.max_duration)
+                      trust_remote_code=False, preprocess_version='ffmpeg-pcm16-mono-v2', timeline_tail_tolerance_ms=100, max_duration=self.max_duration)
         return hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
 
     def available(self):
@@ -205,8 +206,24 @@ class FunASRAdapter:
                         code = output['error_code'] if output['error_code'] in {'asr_no_speech', 'asr_engine_unavailable'} else 'asr_runtime_error'
                         raise ASRError(code, '视频中没有可识别语音' if code == 'asr_no_speech' else '本地视频识别失败')
                     segments = [ASRSegment.model_validate(item).model_dump() for item in output['segments']]
-                    if completed.returncode or not segments or any(s['end_ms'] > details['duration_ms'] for s in segments):
+                    if completed.returncode or not segments:
                         raise ValueError('Invalid worker result')
+                    # AAC/Opus decoding can retain a few trailing codec samples.
+                    # Accept only a small tail verified against decoded PCM, then
+                    # keep every published timestamp inside the video timeline.
+                    with wave.open(str(audio), 'rb') as wav:
+                        audio_duration_ms = math.ceil(wav.getnframes()*1000/wav.getframerate())
+                    previous_end = 0
+                    for segment in segments:
+                        if (segment['start_ms'] < previous_end or
+                                segment['end_ms'] > audio_duration_ms or
+                                segment['end_ms'] > details['duration_ms']+100):
+                            raise ValueError('Invalid speech timeline')
+                        previous_end = segment['end_ms']
+                        segment['end_ms'] = min(segment['end_ms'], details['duration_ms'])
+                    segments = [s for s in segments if s['start_ms'] < s['end_ms']]
+                    if not segments:
+                        raise ValueError('No speech within video timeline')
                     return dict(engine_version=output['engine_version'], duration_ms=details['duration_ms'], segments=segments,
                                 normalized_text='\n'.join(s['normalized_text'] for s in segments), configuration_fingerprint=fingerprint)
                 except ASRError:

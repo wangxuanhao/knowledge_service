@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from ..integrations.document_parser import DocumentParser
 from ..integrations.document_package import SingleDocumentPackageReader
-from .preparations import fingerprint
+from .preparations import fingerprint, recognition_error
 from .source_ingest import prepare_source_ingest
 from .ingest_retry import classify_error
 
@@ -129,11 +129,15 @@ class PreparationRunner:
             parse_options['title']=parse_options.get('title') or task['original_name']
             parse_options['parse_config']={'ocr_mode':mode}
             # Preparation produces reviewable content regardless of the later
-            # knowledge extraction mode. Partial recognition remains a warning.
+            # knowledge extraction mode. Recognition failures block publication.
             parse_options['extraction_mode']='documents'
             chunks,text,warnings=prepare_source_ingest(sources,task['project_id'],source,parse_options,
-                ocr_semaphore=self.ocr_semaphore,progress=progress)
+                ocr_semaphore=self.ocr_semaphore,progress=progress,strict_media=True)
             self._guard(task,'saving_result')
+            error=recognition_error({'warnings':warnings})
+            if error:
+                from ..integrations.document_parser import DocumentParseError
+                raise DocumentParseError(error['code'],error.get('message') or '附件识别未完成，请重试')
             if not text.strip():
                 from ..integrations.document_parser import DocumentParseError
                 error=next((w for w in warnings if isinstance(w,dict) and w.get('code','').startswith(('ocr_','asr_')) and w.get('code')!='ocr_disabled'),None)
@@ -151,6 +155,9 @@ class PreparationRunner:
             message=public.message
             from ..integrations.document_parser import DocumentParseError
             if isinstance(exc,DocumentParseError):message=exc.message
+            from ..integrations.image_ocr import OCRError
+            from ..integrations.video_asr import ASRError
+            if isinstance(exc,(OCRError,ASRError)):message=str(exc)
             if isinstance(exc,ValueError) and '未识别' in str(exc):message=str(exc)
             self.store.update(task,'failed','failed',error=message)
 

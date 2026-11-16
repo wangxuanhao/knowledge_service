@@ -42,7 +42,7 @@ def _split_block_fragment(block,start,end,options,*,heading=False):
     return chunks,text
 
 
-def prepare_source_ingest(sources,project_id,source,options,*,ocr_semaphore=None,progress=None,cached_only=False):
+def prepare_source_ingest(sources,project_id,source,options,*,ocr_semaphore=None,progress=None,cached_only=False,strict_media=False):
     chunks,text=[],''
     warnings=list(source.get('parser_metadata',{}).get('warnings',[]))
     def append(rows,body):
@@ -70,7 +70,8 @@ def prepare_source_ingest(sources,project_id,source,options,*,ocr_semaphore=None
                 with ocr_semaphore if ocr_semaphore is not None and not is_video else nullcontext():
                     run=processor.process_asset(project_id,source['id'],asset['id'])
         except (OCRError,ASRError) as exc:
-            if options.get('extraction_mode')!='documents':raise
+            if (options.get('extraction_mode')!='documents' or
+                    strict_media and exc.code not in {'asr_no_audio','asr_no_speech'}):raise
             warnings.append(dict(code=exc.code,asset_id=asset['id'],message=str(exc)))
             run=getattr(exc,'partial_receipt',None)
             if not run or run.get('status')!='partial':return

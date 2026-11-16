@@ -305,3 +305,39 @@ def test_standalone_video_special_filename_keeps_one_playable_asset(tmp_path,vid
     preview,warnings=source_preview(parsed_source_entry(parsed))
     assert len(preview['images'])==1 and preview['images'][0]['status']=='available'
     repo.close()
+
+
+@pytest.mark.parametrize('end_ms,valid', [(1010, True), (5000, False)])
+def test_adapter_clamps_only_small_codec_tail(adapter_models, video, monkeypatch, end_ms, valid):
+    from pathlib import Path
+    from knowledge_service.integrations.video_asr import ASRError
+    original = subprocess.run
+    def run(args, **kwargs):
+        if '-m' not in args:
+            return original(args, **kwargs)
+        request = json.loads(Path(args[-1]).read_text(encoding='utf-8'))
+        Path(request['result']).write_text(json.dumps(dict(engine_version='test', segments=[
+            dict(start_ms=0, end_ms=end_ms, text='hello', normalized_text='hello')])), encoding='utf-8')
+        return subprocess.CompletedProcess(args, 0)
+    monkeypatch.setattr(subprocess, 'run', run)
+    if valid:
+        result = adapter_models.recognize(video.read_bytes())
+        assert result['segments'][0]['end_ms'] == result['duration_ms'] == 1000
+    else:
+        with pytest.raises(ASRError):
+            adapter_models.recognize(video.read_bytes())
+
+
+
+def test_strict_preparation_rejects_media_error_before_warning_limit():
+    from types import SimpleNamespace
+    from knowledge_service.integrations.video_asr import ASRError
+    from knowledge_service.services.source_ingest import prepare_source_ingest
+    def fail(*args):
+        raise ASRError('asr_runtime_error', '视频识别失败')
+    sources = SimpleNamespace(video_asr=SimpleNamespace(process_asset=fail))
+    source = dict(id='source', blocks=[], source_text='正文',
+        parser_metadata={'warnings':['非阻断提示']*100},
+        assets=[dict(id='video', kind='local', status='available', provenance={'media_type':'video'})])
+    with pytest.raises(ASRError):
+        prepare_source_ingest(sources, 'project', source, {'extraction_mode':'documents'}, strict_media=True)

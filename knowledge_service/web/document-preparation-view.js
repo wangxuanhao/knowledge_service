@@ -101,6 +101,7 @@
       if(busy)throw Error('正在保存操作，请稍候。');
       if(value>0&&!items().length){showError(Error('请先上传有效文件。'));return;}
       if(value>=2&&!items().some(i=>!['staged','cancelled'].includes(i.status))){showError(Error('请先完成配置并开始解析。'));return;}
+      if(value===3&&!items().some(ready)){showError(Error('没有解析完整的资料，请先重试失败项。'));return;}
       if(editing){showError(Error('请先保存或取消当前设置。'));return;}
       const ticket=generation;if(step===1&&value>1)await run(async(target,current)=>{await target.configureSettings(settings(),configurationVersion);if(current())configurationVersion=target.snapshot().settings_version||0;});if(ticket!==generation)return;
       if(value===1)configurationVersion=session.snapshot().settings_version||0;
@@ -181,6 +182,7 @@
       configSummary.textContent=`已选 ${parseCount} 份 · 需要解析 ${parseCount-reusable-pending} 份 · 可复用 ${reusable} 份 · 已有运行任务 ${pending} 份`;
       const publishCount=items().filter(i=>selected.has(i.id)&&ready(i)).length;
       next.textContent=['下一步：配置资料',`开始解析（${parseCount} 份）`,'下一步：确认入库',`确认入库（${publishCount} 份）`][step];
+      if(step===2)next.disabled=busy||!items().some(ready);
       if(step===3)next.disabled=busy||publishCount===0;
     }
     async function uploadOne(file,old){
@@ -326,7 +328,7 @@
       previewTitle.textContent=(item.options?.title||item.original_name)+' · 正文与切片';previewContent.replaceChildren(node('p','读取结果…'));overlay.showModal();
       try{const result=await session.result(item.id);if(!overlay.open||previewScope!==marker)return;
         previewContent.replaceChildren(node('h4','解析正文'),node('pre',result.text||'未识别到正文'));
-        for(const warning of result.warnings||[])previewContent.append(node('p',typeof warning==='string'?warning:JSON.stringify(warning),'preparation-error'));
+        for(const warning of result.warnings||[])previewContent.append(node('p',typeof warning==='string'?warning:(warning.message||warning.code||'解析提示'),'preparation-error'));
         const chunks=result.chunks||[];previewContent.append(node('h4',`切片（${chunks.length}）`));
         chunks.forEach((chunk,i)=>{const detail=node('details'),location=P.sourceLabel(chunk),summary=node('summary',`片段 ${i+1} · ${(chunk.text||'').length} 字`+(location?' · '+location:''));detail.append(summary,node('pre',chunk.text||''));previewContent.append(detail);});
       }catch(error){if(overlay.open&&previewScope===marker)previewContent.replaceChildren(node('p',error.message,'preparation-error'));}

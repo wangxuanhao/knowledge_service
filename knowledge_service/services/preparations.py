@@ -26,6 +26,15 @@ class PreparationConflict(ValueError):
         self.items=items or []
 
 
+def recognition_error(result):
+    """Technical recognition failures block publication, including old caches."""
+    informational = {'ocr_disabled', 'asr_no_audio', 'asr_no_speech'}
+    return next((w for w in (result or {}).get('warnings', [])
+        if isinstance(w, dict) and (str(w.get('code', '')).startswith(('ocr_', 'asr_'))
+            or w.get('code') == 'source_asset_missing')
+        and w['code'] not in informational), None)
+
+
 def validate_file(data,name):
     """Container checks only; never extract text, render pages or run models."""
     suffix=Path(name).suffix.lower()
@@ -193,8 +202,13 @@ class Preparations:
             if cancelled and cancelled['status']=='cancelling':value.update(status='cancelling',stage='cancelling')
         if not task and item.get('project_id'):
             cached=self.store.find_task(item['project_id'],item['parser_fingerprint'])
-            value['reusable']=bool(cached and cached['status']=='completed')
+            value['reusable']=bool(cached and cached['status']=='completed' and not recognition_error(cached.get('result')))
             value['existing_task_status']=cached['status'] if cached else None
+        error=recognition_error(task.get('result')) if task else None
+        if error:
+            value.update(result_ready=False,reusable=False)
+            if item['status'] not in ('cancelled','stale','published'):
+                value.update(status='failed',stage='failed',error=error.get('message') or '附件识别未完成，请重试')
         return value
 
     def public(self,session):
@@ -320,7 +334,10 @@ class Preparations:
                 # A changed parser/model runtime is a new explicit parse request.
                 item['parser_fingerprint']=fingerprint(item['file_sha256'],item['original_name'],item['options']['parse_config'])
                 item['chunk_version']=chunk_version(item)
-                self.store.attach(project,item,retry=retry)
+                # A cancelled item can share a healthy completed task. Reset
+                # only invalid cached results, never its neighbours' good work.
+                cached=self.store.find_task(project,item['parser_fingerprint'])
+                self.store.attach(project,item,retry=bool(cached and recognition_error(cached.get('result'))))
                 item.pop('cancelled_task_id',None)
             session['operations'][token]={'digest':digest}
             self.store.save(session)
@@ -346,6 +363,8 @@ class Preparations:
             raise PreparationConflict('解析结果尚未就绪或已过期')
         if fingerprint(item['file_sha256'],item['original_name'],item['options']['parse_config'])!=item['parser_fingerprint']:
             raise PreparationConflict('解析器或模型已变化，请明确重新开始解析')
+        error=recognition_error(task.get('result'))
+        if error:raise PreparationConflict('附件识别未完成，不能入库：'+(error.get('message') or error['code']))
         result=deepcopy(task['result'])
         source=self.sources.get(project,result['source_version_id'])
         # Rechunk from immutable native blocks and saved media receipts only.

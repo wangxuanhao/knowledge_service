@@ -109,7 +109,7 @@ class PreparationStore:
         row=self.db.execute('SELECT id FROM preparation_tasks WHERE project_id=? AND fingerprint=?',(project,item['parser_fingerprint'])).fetchone()
         if row:
             task=self.task(row['id'])
-            if task['status'] in ('failed','cancelled'):
+            if task['status'] in ('failed','cancelled') or (retry and task['status']=='completed'):
                 self.db.execute("UPDATE preparation_tasks SET status='queued',stage='queued',error=NULL,result=NULL,lease_token=NULL,lease_until=NULL,started_at=NULL,heartbeat_at=NULL,file_id=?,original_name=?,options=?::jsonb WHERE id=?",(item['id'],item['original_name'],encoded(item['options']),task['id']))
                 task=self.task(task['id'])
             elif task['status']=='cancelling':

@@ -156,3 +156,30 @@ def test_native_same_name_files_and_mixed_platform_bulk_configuration(native_wor
     assert '平台：美团' in scopes[0] and '业务：到店' in scopes[0]
     assert '平台：抖音' in scopes[1] and '业务：到店' in scopes[1]
     assert not any(url.endswith('/parse') for url in calls)
+
+
+
+def test_failed_preparation_cannot_advance_to_publication(browser):
+    web = Path(__file__).resolve().parents[2] / 'knowledge_service' / 'web'
+    page = browser.new_page()
+    item = dict(id='a', original_name='rule.md', status='staged', options={}, metadata_version=1)
+    def route(request):
+        path = request.request.url
+        result = dict(id='s', items=[item])
+        if path.endswith('/capabilities'): result = dict(supported_extensions=['.md'])
+        elif path.endswith('/files'): result = item
+        elif path.endswith('/parse'):
+            item.update(status='failed', result_ready=False, error='附件识别失败，请重试')
+        request.fulfill(json=result)
+    page.route('http://test/api/**', route)
+    page.route('http://test/', lambda r:r.fulfill(body='<div id="host"></div>', content_type='text/html'))
+    page.goto('http://test/')
+    page.add_script_tag(path=str(web/'document-preparation.js'))
+    page.add_script_tag(path=str(web/'document-preparation-view.js'))
+    page.evaluate("PreparationView.mount(document.querySelector('#host'),{project:()=> 'p'}).open()")
+    page.locator('#preparation-files').set_input_files(dict(name='rule.md', mimeType='text/markdown', buffer=b'# rule'))
+    page.get_by_role('button', name='下一步：配置资料').click()
+    page.get_by_role('button', name='开始解析（1 份）').click()
+    page.get_by_text('附件识别失败，请重试', exact=False).first.wait_for()
+    assert page.get_by_role('button', name='下一步：确认入库').is_disabled()
+    page.close()
