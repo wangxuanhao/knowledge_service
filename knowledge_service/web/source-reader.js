@@ -39,6 +39,9 @@
     const pages=value=>value?[value.page_number,value.page_no,value.page,...(Array.isArray(value.source_locations)?value.source_locations.flatMap(item=>[item.page_number,item.page_no,item.page]):[])]:[];
     // Evidence spans are already clipped by locate; their native-page mapping
     // must win over a chunk-wide page list or a less specific image location.
+    const explicit=firstPage(pages(location));if(explicit)return explicit;
+    const focused=(doc.assets||[]).find(item=>item.id===location?.asset_id)?.provenance;
+    const focusedPage=firstPage([...pages(focused),...(focused?.locations||[]).flatMap(pages)]);if(focusedPage)return focusedPage;
     const spans=location?.spans||location?.locations||[],targets=[...spans,location].filter(Boolean);
     for(const target of targets){
       const block=(doc.blocks||[]).find(item=>(item.block_id||item.id)===target.block_id);
@@ -257,7 +260,7 @@
               button.onclick=()=>{if(!accepts())return;location={...location,...group};void show('reading');};controls.append(button);
             });body.prepend(controls);
           }
-          if(location?.asset_id&&tab==='reading'){
+          if(location?.asset_id&&tab==='reading'&&!window.SourceContent.isPdfSource(doc)){
             const asset=(doc.assets||[]).find(a=>a.id===location.asset_id);
             if(asset&&asset.provenance?.media_type!=='video'){
               const boxes=location.boxes||location.ocr_blocks||[],figure=overlay(asset,boxes,projectId,versionId);
@@ -272,7 +275,7 @@
             }
           }
           view.hydrateImages();
-          if(tab==='reading'&&location?.asset_id&&!Number.isFinite(location.start_ms))view.focusRegion(location.asset_id,location.boxes||location.ocr_blocks||[]);
+          if(tab==='reading'&&location?.asset_id&&!Number.isFinite(location.start_ms)&&!window.SourceContent.isPdfSource(doc))view.focusRegion(location.asset_id,location.boxes||location.ocr_blocks||[]);
           if(tab==='reading'&&location?.asset_id&&Number.isFinite(location.start_ms))view.seekVideo(location.asset_id,location.start_ms);
         }catch(e){if(e.name!=='AbortError'&&accepts()){view.dispose();body.textContent=e.message;}}
       }

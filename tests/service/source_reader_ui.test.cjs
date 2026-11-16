@@ -101,3 +101,10 @@ test('historical OCR quality failure has a Chinese actionable message',()=>{
  assert.match(result.error,/可靠文字/);
  assert.doesNotMatch(result.error,/Image text/);
 });
+
+
+test('explicit PDF media focus overrides native text on another page of the same chunk',()=>{
+ const doc={assets:[{id:'scan',provenance:{page_no:2}}],blocks:[{block_id:'body',payload:{source_locations:[{page_no:1}]}}]};
+ assert.equal(ui.pdfPage(doc,{asset_id:'scan',spans:[{block_id:'body'}]}),2);
+ assert.equal(ui.pdfPage(doc,{spans:[{block_id:'body'}]}),1);
+});

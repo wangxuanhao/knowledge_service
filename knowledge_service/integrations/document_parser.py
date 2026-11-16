@@ -170,6 +170,9 @@ class DocumentParser:
             options.generate_parsed_pages = True
             options.enable_remote_services = False
             if extension=='.pdf':
+                # The common OCR service consumes these rasters again. 72-DPI
+                # crops make agreement text only a few pixels tall.
+                options.images_scale=3.0
                 root=document_artifacts_path(require_ocr=options.do_ocr)
                 options.artifacts_path=root
                 if options.do_ocr:
@@ -191,7 +194,7 @@ class DocumentParser:
                 document=conversion.document
                 result={'document':document,'total_pages':len(document.pages),'pages':list(document.pages.values()),
                         'tables':document.tables,'warnings':[str(error) for error in conversion.errors],
-                        'scanned_pages':[page.page_no for page in conversion.pages if not any(cell.text.strip() and not cell.from_ocr for cell in page.cells)] if path.suffix.lower()=='.pdf' else [],
+                        'scanned_pages':_scanned_pdf_pages(conversion.pages) if path.suffix.lower()=='.pdf' else [],
                         'ocr_regions':[dict(page_no=page.page_no,text=cell.text,bbox=cell.to_bounding_box().model_dump(mode='json')) for page in conversion.pages for cell in page.cells if cell.from_ocr],
                         'digital_regions':[dict(page_no=page.page_no,text=cell.text,bbox=cell.to_bounding_box().model_dump(mode='json')) for page in conversion.pages for cell in page.cells if not cell.from_ocr]}
             else:
@@ -261,6 +264,16 @@ class DocumentParser:
             'image_count':len(assets),
             'warnings': [str(item)[:500] for item in [*warnings,*media_warnings][:100]],
         },assets,provenance
+
+
+def _scanned_pdf_pages(pages):
+    """Native print headers do not turn a predominantly scanned page digital."""
+    scanned=[]
+    for page in pages:
+        native=sum(len(''.join(cell.text.split())) for cell in page.cells if not cell.from_ocr)
+        raster=sum(len(''.join(cell.text.split())) for cell in page.cells if cell.from_ocr)
+        if not native or raster>=max(64,4*native):scanned.append(page.page_no)
+    return scanned
 
 
 def document_artifacts_path(*,require_ocr=False):

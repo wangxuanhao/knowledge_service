@@ -11,7 +11,7 @@
     const container=node('section',undefined,'preparation-workflow');container.id='preparation-workflow';
     const notice=node('p',undefined,'preparation-notice');notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');notice.hidden=true;
     const nav=node('nav',undefined,'library-upload-steps');nav.setAttribute('aria-label','添加文件步骤');
-    const titles=['上传核对','配置资料','解析与检查','确认入库'];
+    const titles=['上传核对','配置资料','解析与检查','确认处理'];
     const tabs=titles.map((text,i)=>{const b=makeButton(`${i+1}  ${text}`,()=>go(i));nav.append(b);return b;});
     const stages=titles.map((_,i)=>{const e=node('section',undefined,'preparation-stage');e.dataset.preparationStep=i;return e;});
     const instruction=node('p','上传仅暂存和校验。配置完成并点击“开始解析”后，才运行文字识别或视频转写。','subtle');
@@ -19,8 +19,8 @@
     const drop=node('label',undefined,'preparation-drop');drop.htmlFor=input.id;
     drop.append(node('strong','选择文件，或拖放到这里'),node('span','每个文件一份资料；ZIP 仅用于一个 MD / HTML 及关联资源。'),input);
     const limits=node('p',undefined,'subtle'),uploadList=node('div',undefined,'preparation-files');
-    const drafts=node('details',undefined,'preparation-drafts');drafts.append(node('summary','恢复已上传的草稿'));
-    const draftList=node('div');drafts.append(draftList);drafts.ontoggle=()=>{if(drafts.open)loadDrafts().catch(showError);};
+    const drafts=node('details',undefined,'preparation-drafts');drafts.append(node('summary','继续未完成上传'));
+    const draftList=node('div');drafts.append(node('p','未提交的文件会保留，关闭页面后可在这里继续；已提交任务请到“处理批次”查看。','subtle'),draftList);drafts.ontoggle=()=>{if(drafts.open)loadDrafts().catch(showError);};
     stages[0].append(instruction,drop,limits,uploadList,drafts);
     const configTools=node('div',undefined,'preparation-toolbar');
     const all=makeButton('全选',()=>{items().filter(i=>i.status!=='published').forEach(i=>selected.add(i.id));render();});
@@ -47,7 +47,7 @@
     const retryAll=makeButton('重试失败或过期项',()=>reparse(items().filter(retryable).map(i=>i.id)));
     stages[2].append(progressSummary,retryAll,resultList);
     const publishList=node('div',undefined,'preparation-files'),publicationSummary=node('p',undefined,'preparation-counts');
-    stages[3].append(node('p','选择已核对的资料入库。解析结果将直接复用，知识处理与检索索引进度在处理批次中继续查看。','subtle'),publicationSummary,publishList);
+    const confirmationIntro=node('p',undefined,'subtle');stages[3].append(confirmationIntro,publicationSummary,publishList);
     const footer=node('div',undefined,'library-wizard-navigation');
     const previous=makeButton('上一步',()=>go(step-1));
     const next=makeButton('下一步：配置资料',async()=>{
@@ -60,12 +60,13 @@
     const previewTitle=node('h3'),previewContent=node('div',undefined,'preparation-preview-body');
     const closePreview=()=>{previewScope?.dispose?.();previewScope=null;overlay.close();previewContent.replaceChildren();};
     overlay.append(previewTitle,makeButton('关闭预览',closePreview),previewContent);overlay.addEventListener('cancel',event=>{event.preventDefault();closePreview();});
-    const refreshTools=node('div',undefined,'preparation-toolbar');refreshTools.append(makeButton('刷新草稿状态',async()=>{
+    const refreshTools=node('div',undefined,'preparation-toolbar');refreshTools.append(makeButton('刷新未完成文件',async()=>{
       if(editing||busy||uploading)throw Error('请先完成当前上传或保存设置。');
-      if(!session)return;const target=session,ticket=generation;await target.restore();if(ticket!==generation)return;restoreSettings();render();schedule();message('已读取最新草稿，请核对设置后继续。');
+      if(!session)return;const target=session,ticket=generation;await target.restore();if(ticket!==generation)return;const finished=clearSubmittedSession(target);if(!finished)restoreSettings();render();schedule();message(finished?'文件均已提交，可继续添加新文件；进度请到“处理批次”查看。':'已刷新未完成文件，请核对设置后继续。');
     }));
     container.append(nav,notice,refreshTools,...stages,footer,overlay);host.append(container);
-    const items=()=>viewData.items||[];
+    const items=()=>(viewData.items||[]).filter(item=>item.status!=='published');
+    const processing=()=>P.processingCopy(viewData.publication_settings?.extraction_mode||D.getElementById('extraction-mode')?.value||'documents');
     const retryable=item=>['failed','cancelled','stale'].includes(item.status);
     const ready=item=>['completed','reused'].includes(item.status)&&item.result_ready!==false;
     const sameContent=item=>item.file_sha256||item.id;
@@ -146,12 +147,12 @@
       if(phase>=2&&ready(item))actions.append(makeButton('查看正文与切片',()=>previewResult(item)));
       if(phase===2&&['queued','running'].includes(item.status))actions.append(makeButton('取消解析',()=>run(()=>session.cancel([item.id]))));
       if(phase>=1&&retryable(item))actions.append(makeButton('重新解析',()=>reparse([item.id])));
-      if(item.batch_id)actions.append(makeButton('查看入库进度',()=>onPublished({batch_id:item.batch_id})));
+      if(item.batch_id)actions.append(makeButton('查看处理进度',()=>onPublished({batch_id:item.batch_id})));
       if(phase===3&&root.SourceReader)for(const original of item.existing_documents||[])if(original.source_version_id)actions.append(makeButton('查看已有资料：'+original.title,()=>{root.LibraryWorkspace?.close({restoreFocus:false});return root.SourceReader.open({projectId:owner,versionId:original.source_version_id});}));
       row.append(actions);return row;
     }
     function render(){
-      for(const item of items())if(item.status==='published')selected.delete(item.id);
+      for(const item of viewData.items||[])if(item.status==='published')selected.delete(item.id);
       if(step===3)normalisePublication();
       editor.inert=busy;configTools.inert=busy;
       if(!editing){editor.hidden=true;bulkEditorHost.append(editor);}
@@ -171,7 +172,8 @@
       const count=states=>items().filter(i=>states.includes(i.status)).length;
       progressSummary.textContent=`已完成 ${count(['completed','reused','published'])} / ${items().length} · 正在解析 ${count(['running'])} · 排队 ${count(['queued'])} · 失败 ${count(['failed'])} · 需重新解析 ${count(['stale'])}`;
       const publication=viewData.publication_settings||{};
-      publicationSummary.textContent='处理方式：'+({documents:'仅文档检索',ontology:'按已发布本体抽取知识',discovery:'发现知识结构候选'}[publication.extraction_mode]||'尚未保存，请返回配置')+(publication.ontology_id?' · 本体版本：'+publication.ontology_id:'');
+      confirmationIntro.textContent=processing().description+' 解析结果直接复用，提交后在“处理批次”查看进度。';
+      publicationSummary.textContent='处理方式：'+processing().label+(publication.ontology_id?' · 本体版本：'+publication.ontology_id:'');
       updateFooter();
     }
     function updateFooter(){
@@ -184,9 +186,9 @@
       const retryCount=items().filter(retryable).length;
       retryAll.textContent=`重试失败或过期项（${retryCount}）`;retryAll.disabled=busy||retryCount===0;
       const publishCount=items().filter(i=>selected.has(i.id)&&ready(i)).length;
-      next.textContent=['下一步：配置资料',`开始解析（${parseCount} 份）`,'下一步：确认入库',`确认入库（${publishCount} 份）`][step];
-      if(step===2)next.disabled=busy||!items().some(ready);
-      if(step===3)next.disabled=busy||publishCount===0;
+      next.textContent=['下一步：配置资料',`开始解析（${parseCount} 份）`,'下一步：确认处理',`${processing().action}（${publishCount} 份）`][step];
+      if(step===2)next.disabled=busy||uploading>0||!items().some(ready);
+      if(step===3)next.disabled=busy||uploading>0||publishCount===0;
     }
     async function uploadOne(file,old){
       const ticket=generation,target=session,entry=old||{key:root.crypto?.randomUUID?.()||Date.now().toString(36)+Math.random().toString(36).slice(2),loaded:0,total:0};
@@ -303,10 +305,15 @@
       });
     }
     async function publish(){
+      let sent=null;
       await run(async(target,current)=>{
         const ids=items().filter(i=>selected.has(i.id)&&ready(i)).map(i=>i.id);if(!ids.length)throw Error('请选择已核对、解析完成的文件。');
-        const result=await target.publish(ids,{},ids.filter(id=>independent.has(id)));if(!current())return;message('已提交入库，解析结果将直接复用。');onPublished(result);
+        const result=await target.publish(ids,{},ids.filter(id=>independent.has(id)));if(!current())return;
+        sent={target,result,copy:processing()};
       });
+      if(!sent||session!==sent.target)return;
+      const finished=clearSubmittedSession(sent.target);if(!finished)step=items().length?2:0;
+      message(sent.copy.done+'，请到“处理批次”查看进度。');render();onPublished(sent.result);
     }
     function schedule(){
       clearTimeout(timer);if(!active||!session||!items().some(i=>['queued','running','cancelling'].includes(i.status)))return;
@@ -350,10 +357,17 @@
     }
     async function loadDrafts(){
       const p=owner,result=await P.request('/api/projects/'+encodeURIComponent(p)+'/preparations');if(owner!==p)return;
-      draftList.replaceChildren();for(const draft of result.items||[]){draftList.append(makeButton(`恢复 ${draft.id.slice(0,8)} · ${draft.items?.length??draft.total_items??''} 份`,async()=>{
-        if(uploading||busy)throw Error('请等待当前操作完成。');const restored=attach(draft.id),ticket=generation;await restored.restore();if(ticket!==generation)return;restoreSettings();selected.clear();items().forEach(i=>selected.add(i.id));step=items().some(i=>['running','queued','completed','reused','failed','stale','cancelled'].includes(i.status))?2:0;render();schedule();
+      draftList.replaceChildren();for(const draft of result.items||[]){const unfinished=(draft.items||[]).filter(i=>i.status!=='published');if(!unfinished.length)continue;draftList.append(makeButton(`继续上传 · ${unfinished.length} 份 · ${unfinished[0].original_name}`,async()=>{
+        if(uploading||busy)throw Error('请等待当前操作完成。');const restored=attach(draft.id),ticket=generation;await restored.restore();if(ticket!==generation)return;if(clearSubmittedSession(restored)){render();message('这些文件已提交，请到“处理批次”查看进度。');return;}restoreSettings();selected.clear();items().forEach(i=>selected.add(i.id));step=items().some(i=>['running','queued','completed','reused','failed','stale','cancelled'].includes(i.status))?2:0;render();schedule();
       }));}
-      if(!draftList.children.length)draftList.append(node('p','没有可恢复草稿。'));
+      if(!draftList.children.length)draftList.append(node('p','没有未完成的上传。'));
+    }
+    function clearSubmittedSession(target=session){
+      if(!target||target!==session||!viewData.items?.length||items().length||uploading>0||uploads.size>0)return false;
+      clearTimeout(timer);target.dispose();session=null;viewData={items:[]};step=0;configurationVersion=0;
+      selected.clear();independent.clear();locals.clear();uploads.clear();editing=null;editorItemId=null;editor.hidden=true;
+      try{root.localStorage?.removeItem(key());}catch{}
+      return true;
     }
     function reset(){
       clearTimeout(timer);session?.dispose();session=null;viewData={items:[]};owner=null;generation++;step=0;selected.clear();independent.clear();locals.clear();uploads.clear();uploading=0;busy=false;editing=null;editorItemId=null;editor.hidden=true;notice.hidden=true;previewScope?.dispose?.();previewScope=null;if(overlay.open)overlay.close();render();
@@ -371,7 +385,7 @@
       async open(){
         active=true;if(owner!==project())reset();owner=project();
         if(!session){let old;try{old=root.localStorage?.getItem(key());}catch{}
-          if(old){const restored=attach(old),ticket=generation;try{await restored.restore();if(ticket!==generation)return;restoreSettings();items().forEach(i=>selected.add(i.id));step=items().some(i=>['queued','running','completed','reused','published','failed','stale','cancelled'].includes(i.status))?2:0;}catch(error){if(ticket!==generation)return;if([403,404,410].includes(error.status)){try{root.localStorage.removeItem(key());}catch{}session.dispose();session=null;}else showError(error);}}
+          if(old){const restored=attach(old),ticket=generation;try{await restored.restore();if(ticket!==generation)return;if(clearSubmittedSession(restored)){render();return;}restoreSettings();items().forEach(i=>selected.add(i.id));step=items().some(i=>['queued','running','completed','reused','published','failed','stale','cancelled'].includes(i.status))?2:0;}catch(error){if(ticket!==generation)return;if([403,404,410].includes(error.status)){try{root.localStorage.removeItem(key());}catch{}session.dispose();session=null;}else showError(error);}}
         }
         render();schedule();
       },

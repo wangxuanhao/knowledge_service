@@ -182,3 +182,31 @@ def test_reader_shows_filtered_ocr_as_completed_with_notice(browser):
     assert page.get_by_text('已采用 2 块可靠文字，1 块模糊文字未采用，请核对原图。',exact=True).is_visible()
     assert page.get_by_role('button',name='重试 OCR',exact=True).count()==0
     page.close()
+
+
+
+def test_pdf_ocr_focus_uses_original_page_without_duplicate_scan(browser):
+    import io,base64
+    from PIL import Image
+    page=browser.new_page();page.set_default_timeout(5000)
+    data=io.BytesIO();Image.new('RGB',(300,400),'white').save(data,format='PNG')
+    asset=dict(id='scan',kind='local',status='completed',width=1800,height=2400,original_path='assets/page-1.png',
+        provenance={'kind':'scanned_page','page_no':1,'locations':[{'page_no':1,'bbox':{'l':0,'t':0,'r':600,'b':800,'coord_origin':'TOPLEFT'}}]})
+    doc=dict(original_name='agreement.pdf',format='pdf',mime_type='application/pdf',version=1,sha256='hash',assets=[asset],blocks=[],chunks=[])
+    box=dict(id='b',asset_id='scan',x=.1,y=.2,width=.3,height=.1,text='协议正文')
+    def route(request):
+        path=request.request.url
+        if '/pdf-preview?' in path:request.fulfill(json={'page_number':1,'page_count':2,'page_width':600,'page_height':800,'width':300,'height':400,'mime_type':'image/png','image_base64':base64.b64encode(data.getvalue()).decode()})
+        elif path.endswith('/ocr'):request.fulfill(json={'run':{'status':'completed','blocks':[box]},'blocks':[box]})
+        elif '/assets/' in path:request.fulfill(content_type='image/png',body=data.getvalue())
+        elif '/source-documents/' in path:request.fulfill(json=doc)
+        else:request.fulfill(content_type='text/html',body='<body></body>')
+    page.route('http://test/**',route);page.goto('http://test/')
+    page.add_style_tag(path=str(WEB/'source-reader.css'))
+    page.add_script_tag(path=str(WEB/'source-content.js'));page.add_script_tag(path=str(WEB/'source-reader.js'))
+    page.evaluate('location=>SourceReader.open({projectId:"p",versionId:"v",location})',{'status':'available','asset_id':'scan','boxes':[box]})
+    marker=page.locator('.source-pdf-page .source-region-focus');marker.wait_for()
+    assert marker.evaluate('e=>e.style.width')=='30%'
+    assert marker.evaluate('e=>e.style.height')=='10%'
+    assert page.locator('.source-reader-body figure.source-reader-image').count()==0
+    page.close()

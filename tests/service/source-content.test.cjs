@@ -97,3 +97,12 @@ test('entrypoint loads the shared content renderer before both reader entry poin
   assert.ok(html.indexOf('source-content.js')<html.indexOf('source-reader.js'));
   assert.ok(html.indexOf('source-content.js')<html.indexOf('sources-view.js'));
 });
+
+
+test('PDF OCR evidence projects its text box rather than highlighting the entire scan',()=>{
+ const {pdfRegions}=content();
+ const doc={blocks:[],assets:[{id:'scan',provenance:{locations:[{page_no:1,bbox:{l:0,t:0,r:600,b:800,coord_origin:'TOPLEFT'}}]}}]};
+ const result=pdfRegions(doc,{asset_id:'scan',boxes:[{id:'box',asset_id:'scan',x:.1,y:.2,width:.3,height:.1}]},
+   {page_number:1,page_width:600,page_height:800});
+ assert.deepEqual(result,[{x:.1,y:.2,width:.3,height:.1}]);
+});

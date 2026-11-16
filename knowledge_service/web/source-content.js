@@ -89,24 +89,36 @@
   function pdfRegions(doc,location,page){
     const width=page?.page_width,height=page?.page_height;
     if(!Number.isFinite(width)||!Number.isFinite(height)||width<=0||height<=0)return [];
-    const targets=[...(location?.spans||location?.locations||[]),location].filter(Boolean),regions=[];
+    const regionFor=native=>{
+      if(Number(native.page_no??native.page_number)!==page.page_number)return null;
+      const {l,r,t,b,coord_origin:origin}=native.bbox||{};
+      if(![l,r,t,b].every(Number.isFinite)||l<0||r>width||l>=r||Math.min(t,b)<0||Math.max(t,b)>height)return null;
+      if(!['TOPLEFT','BOTTOMLEFT'].includes(origin)||(origin==='TOPLEFT'?t>=b:t<=b))return null;
+      return {x:l/width,y:(origin==='BOTTOMLEFT'?height-t:t)/height,width:(r-l)/width,height:Math.abs(b-t)/height};
+    };
+    const projected=new Set(),regions=[];
+    for(const box of location?.boxes||location?.ocr_blocks||[]){
+      if(!['x','y','width','height'].every(key=>Number.isFinite(box[key])&&box[key]>=0&&box[key]<=1)||box.width<=0||box.height<=0||box.x+box.width>1.000001||box.y+box.height>1.000001)continue;
+      const asset=(doc.assets||[]).find(item=>item.id===(box.asset_id||location.asset_id));
+      for(const native of asset?.provenance?.locations||[]){
+        const outer=regionFor(native);if(!outer)continue;
+        regions.push({x:outer.x+box.x*outer.width,y:outer.y+box.y*outer.height,width:box.width*outer.width,height:box.height*outer.height});
+        projected.add(asset.id);if(regions.length>=50)return regions;
+      }
+    }
+    const targets=[...(location?.spans||location?.locations||[]),location].filter(Boolean);
     for(const target of targets){
       const block=(doc.blocks||[]).find(item=>(item.block_id||item.id)===target.block_id);
       const asset=(doc.assets||[]).find(item=>item.id===target.asset_id);
-      const locations=target.payload?.source_locations||target.source_locations||block?.payload?.source_locations||asset?.provenance?.locations||[];
+      const locations=target.payload?.source_locations||target.source_locations||block?.payload?.source_locations||(projected.has(asset?.id)?[]:asset?.provenance?.locations)||[];
       for(const native of locations){
-        if(Number(native.page_no??native.page_number)!==page.page_number)continue;
-        const box=native.bbox;if(!box)continue;
-        const {l,r,t,b,coord_origin:origin}=box;
-        if(![l,r,t,b].every(Number.isFinite)||l<0||r>width||l>=r||Math.min(t,b)<0||Math.max(t,b)>height)continue;
-        if(!['TOPLEFT','BOTTOMLEFT'].includes(origin)||(origin==='TOPLEFT'?t>=b:t<=b))continue;
-        // Coordinates refer to the full original PDF page, never an OCR crop.
-        regions.push({x:l/width,y:(origin==='BOTTOMLEFT'?height-t:t)/height,width:(r-l)/width,height:Math.abs(b-t)/height});
-        if(regions.length>=50)return regions;
+        const region=regionFor(native);if(!region)continue;
+        regions.push(region);if(regions.length>=50)return regions;
       }
     }
     return regions;
   }
+
   function createSession({host,projectId,versionId,...options}){
     const document=host.ownerDocument,scope=createResourceScope(options),seen=new WeakSet(),images=new Set(),videos=new Set(),pendingSeeks=new Map();
     const make=(tag,text,css='')=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(css)node.className=css;return node;};

@@ -59,6 +59,7 @@ def test_pdf_options_use_explicit_local_models_and_really_disable_ocr(tmp_path,m
     parser=DocumentParser(ocr_mode='disabled')._new_docling_parser('.pdf')
     options=parser._converter.format_to_options[InputFormat.PDF].pipeline_options
     assert not options.do_ocr and options.generate_picture_images
+    assert options.images_scale>=3
     assert options.artifacts_path.is_absolute()
     assert options.artifacts_path==tmp_path
 
@@ -227,3 +228,30 @@ def test_uncaptioned_native_image_does_not_invent_searchable_image_word():
     captioned.add_picture(image=ImageRef.from_pil(Image.new('RGB',(20,20),'red'),dpi=72),caption=caption)
     text,assets,_,_=normalize_docling_document(captioned)
     assert 'Actual caption' in text and assets[0]['alt']=='Actual caption'
+
+
+
+def test_pdf_with_native_headers_and_scanned_body_uses_full_page_ocr(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from docling_core.types.doc import DoclingDocument,DocItemLabel,ImageRef,Size,ProvenanceItem,BoundingBox,CoordOrigin
+    document=DoclingDocument(name='hybrid-scan')
+    converted=[]
+    for number,native,ocr in [(1,'2026 page header','扫描协议正文'*100),(2,'Digital article '*100,'42')]:
+        document.add_page(page_no=number,size=Size(width=100,height=100),
+            image=ImageRef.from_pil(Image.new('RGB',(300,300),'white'),dpi=216))
+        cells=[]
+        for index,(text,from_ocr) in enumerate([(native,False),(ocr,True)]):
+            box=BoundingBox(l=0,t=index*40,r=95,b=index*40+30,coord_origin=CoordOrigin.TOPLEFT)
+            document.add_text(label=DocItemLabel.PARAGRAPH,text=text,
+                prov=ProvenanceItem(page_no=number,bbox=box,charspan=(0,len(text))))
+            cells.append(SimpleNamespace(text=text,from_ocr=from_ocr,to_bounding_box=lambda box=box:box))
+        converted.append(SimpleNamespace(page_no=number,cells=cells))
+    result=SimpleNamespace(document=document,pages=converted,errors=[])
+    monkeypatch.setattr(DocumentParser,'_new_docling_parser',lambda *a:SimpleNamespace(_converter=SimpleNamespace(convert=lambda path:result)))
+    path=tmp_path/'hybrid.pdf';path.write_bytes(b'fixture')
+    parsed=DocumentParser(ocr_mode='auto').parse(path,path.name)
+    assert parsed.provenance['scanned_pages']==[1]
+    scans=[a for a in parsed.assets if a['provenance'].get('kind')=='scanned_page']
+    assert len(scans)==1 and scans[0]['width']==300 and scans[0]['height']==300
+    assert 'Digital article' in parsed.text
+    assert '扫描协议正文' not in parsed.text

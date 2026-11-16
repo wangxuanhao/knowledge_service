@@ -6,13 +6,20 @@
 })(typeof window==='object'?window:globalThis,root=>{
   const clone=value=>JSON.parse(JSON.stringify(value));
   const id=()=>root.crypto?.randomUUID?.()||Date.now().toString(36)+Math.random().toString(36).slice(2);
-  const labels={staged:'待解析',queued:'排队中',running:'正在解析',completed:'解析完成',reused:'已复用解析',failed:'解析失败',cancelling:'正在取消',cancelled:'已取消',stale:'需要重新解析',published:'已提交入库',uploading:'正在上传'};
+  const labels={staged:'待解析',queued:'排队中',running:'正在解析',completed:'解析完成',reused:'已复用解析',failed:'解析失败',cancelling:'正在取消',cancelled:'已取消',stale:'需要重新解析',published:'已提交处理',uploading:'正在上传'};
   const stages={parsing:'解析正文',parse:'解析正文',ocr:'文字识别',asr:'语音转写',transcribing:'语音转写',chunking:'生成切片',preparing:'准备文件',preparing_source:'整理原件',preparing_text:'整理正文',saving_result:'保存解析结果',completed:'完成',failed:'失败',queued:'等待执行'};
   function progressLabel(item){
     const p=item.progress;
     const stageLabel=stages[item.stage]||({recovered:'恢复任务',interrupted:'等待恢复',timeout:'处理超时'})[item.stage];
     return [labels[item.status]||'处理中',['running','queued','cancelling'].includes(item.status)?stageLabel:'',
       p&&Number.isFinite(p.completed)&&p.total>0?`${p.completed} / ${p.total} ${p.unit||''}`:''].filter(Boolean).join(' · ');
+  }
+  function processingCopy(mode){
+    return ({
+      discovery:{label:'本体构建',action:'开始构建本体',done:'已提交本体构建任务',description:'发现知识结构，生成待确认的本体候选；后续在本体治理中确认草案。'},
+      ontology:{label:'知识抽取',action:'开始知识抽取',done:'已提交知识抽取任务',description:'按已发布本体抽取实体、关系和属性。'},
+      documents:{label:'文档检索',action:'开始建立检索索引',done:'已提交检索索引任务',description:'为资料建立关键词和语义检索索引。'}
+    })[mode]||{label:'提交处理',action:'开始处理',done:'已提交处理任务',description:'按所选方式处理资料。'};
   }
   function sourceLabel(chunk){
     const metadata=chunk.metadata||{},payloads=(chunk.source_spans||[]).map(span=>span.payload||{});
@@ -108,5 +115,5 @@
       dispose(){disposed=true;data={id:null,items:[]};},
     };
   }
-  return {createSession,progressLabel,sourceLabel,applyFields,uploadRequest,labels,request};
+  return {createSession,progressLabel,sourceLabel,processingCopy,applyFields,uploadRequest,labels,request};
 });
