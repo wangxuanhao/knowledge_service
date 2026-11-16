@@ -42,7 +42,7 @@ def _split_block_fragment(block,start,end,options,*,heading=False):
     return chunks,text
 
 
-def prepare_source_ingest(sources,project_id,source,options,*,ocr_semaphore=None,progress=None):
+def prepare_source_ingest(sources,project_id,source,options,*,ocr_semaphore=None,progress=None,cached_only=False):
     chunks,text=[],''
     warnings=list(source.get('parser_metadata',{}).get('warnings',[]))
     def append(rows,body):
@@ -58,10 +58,17 @@ def prepare_source_ingest(sources,project_id,source,options,*,ocr_semaphore=None
         if asset['kind'] not in {'local','base64'} or asset['status']=='ignored':return
         if progress:progress()
         is_video=asset.get('provenance',{}).get('media_type')=='video'
+        if not is_video and options.get('parse_config',{}).get('ocr_mode')=='disabled':
+            warnings.append(dict(code='ocr_disabled',asset_id=asset['id'],message='已按解析设置禁用图片文字识别'))
+            return
         processor=sources.video_asr if is_video else sources.image_ocr
         try:
-            with ocr_semaphore if ocr_semaphore is not None and not is_video else nullcontext():
-                run=processor.process_asset(project_id,source['id'],asset['id'])
+            if cached_only:
+                receipt=sources.asr(project_id,source['id'],asset['id']) if is_video else sources.ocr(project_id,source['id'],asset['id'])
+                run=receipt.get('run') or {'status':'pending'}
+            else:
+                with ocr_semaphore if ocr_semaphore is not None and not is_video else nullcontext():
+                    run=processor.process_asset(project_id,source['id'],asset['id'])
         except (OCRError,ASRError) as exc:
             if options.get('extraction_mode')!='documents':raise
             warnings.append(dict(code=exc.code,asset_id=asset['id'],message=str(exc)))

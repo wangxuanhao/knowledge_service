@@ -79,7 +79,7 @@ def browser():
 
 
 @pytest.fixture
-def workbench(browser, tmp_path):
+def native_workbench(browser, tmp_path):
     app = create_app(tmp_path / 'preview-drawer.sqlite', HashingEncoder())
     repository = app.state.service.repository
     project_id = _project(repository, '切片预览抽屉')
@@ -111,8 +111,7 @@ def workbench(browser, tmp_path):
         page.locator('#tab-sources').wait_for(state='visible')
         page.click('#upload-source')
         page.locator('#tab-ingest').wait_for(state='visible')
-        # 文件在第 1 步选择；预览入口位于第 3 步、切片设置之后。
-        page.locator('#tab-ingest .document-upload-panel').wait_for(state='visible')
+        page.locator('#preparation-workflow').wait_for(state='visible')
         yield SimpleNamespace(page=page, project=project_id)
     finally:
         try:
@@ -126,6 +125,24 @@ def workbench(browser, tmp_path):
                 server.should_exit = True
                 thread.join(timeout=10)
                 assert not thread.is_alive(), 'The ephemeral preview-drawer server did not stop'
+
+
+@pytest.fixture
+def workbench(native_workbench):
+    """Isolate the retained synchronous preview renderer from the new file wizard.
+
+    These tests exercise its caching, content safety and focus behavior. Actual
+    file entry and its explicit parse/publication boundaries use native_workbench
+    in test_preparation_ui.py.
+    """
+    native_workbench.page.evaluate("""() => {
+      const host=document.querySelector('.library-preparation-host');host.hidden=true;
+      const panel=document.querySelector('.document-upload-panel');panel.hidden=false;
+      const stages=panel.querySelectorAll('.library-upload-stage');
+      stages[1].prepend(document.getElementById('ingest-mode-slot'));
+      stages[2].insertBefore(document.querySelector('.parse-settings'),stages[2].querySelector('.document-preview-actions'));
+    }""")
+    return native_workbench
 
 
 def _preview_result(*texts):
@@ -234,8 +251,7 @@ def test_real_single_document_zip_preview_keeps_media_and_switches_uploaded_file
     page.set_viewport_size({'width': width, 'height': 960})
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w') as archive:
-        archive.writestr('manifest.json', json.dumps({'schema_version': 2, 'document': {
-            'entry': 'platform/a.md', 'title': '第一份规则'}}, ensure_ascii=False))
+        # A normal resource ZIP has one common outer folder and needs no manifest.
         archive.writestr('platform/a.md', '# 第一份规则\n\n生效日期：2026年9月2日\n\n'
                          '<table><tr><td>图片案例</td><td><img src="assets/a.png"></td></tr></table>\n\n'
                          '第一份独立正文\n\n'

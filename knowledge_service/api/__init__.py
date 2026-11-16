@@ -269,11 +269,13 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
         projection_worker.start()
         app.state.jobs.start()
         app.state.ingest_batch_runner.start()
+        app.state.preparation_runner.start()
         yield
         ontology_sync.close()
         projection_worker.close()
         app.state.jobs.close()
         app.state.ingest_batch_runner.close()
+        app.state.preparation_runner.close()
         app.state.neo4j.close()
         repository.close()
 
@@ -335,6 +337,8 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
     install_source_documents(app, service)
     from .parity import install
     install(app, service)
+    from .preparations import install as install_preparations
+    install_preparations(app, service)
     from .document_reprocessing import install as install_document_reprocessing
     install_document_reprocessing(app, service)
     install_neo4j(app, service)

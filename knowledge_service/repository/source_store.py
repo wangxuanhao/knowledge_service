@@ -73,6 +73,53 @@ class SourceStore:
             result['chunks']=self._version_chunks(project_id,version_id)
             return result
 
+    def clone_version(self,project_id,version_id,document_id):
+        """Copy immutable reading/OCR/ASR receipts for one formal document.
+
+        Object bytes remain shared; every source, block, asset and recognition ID
+        is remapped so document ownership and evidence foreign keys stay exact.
+        No parser, decoder or recognition adapter participates in this operation.
+        """
+        tables=[('parsed_blocks','block_id'),('source_assets','id'),
+                ('source_asset_ocr_runs','id'),('source_asset_ocr_blocks','id'),
+                ('source_asset_asr_runs','id'),('source_asset_asr_segments','id')]
+        json_fields={'payload','provenance','parser_metadata','processing_details','heading_path'}
+        with self.publication_guard():
+            self.repo._db.execute('SELECT pg_advisory_xact_lock(hashtextextended(?,0))',('source:'+project_id+':'+document_id,))
+            original=self.repo._db.execute('SELECT * FROM source_document_versions WHERE project_id=? AND id=?',(project_id,version_id)).fetchone()
+            if original is None:raise KeyError('Source version not found')
+            original=dict(original)
+            identifier=str(uuid4())
+            mapping={version_id:identifier,original['document_id']:document_id}
+            copies={}
+            for table,key in tables:
+                copies[table]=[dict(row) for row in self.repo._db.execute(
+                    f'SELECT * FROM {table} WHERE project_id=? AND document_version_id=?',(project_id,version_id))]
+                mapping.update({row[key]:str(uuid4()) for row in copies[table]})
+            def remap(value):
+                if isinstance(value,str):return mapping.get(value,value)
+                if isinstance(value,list):return [remap(item) for item in value]
+                if isinstance(value,dict):return {key:remap(item) for key,item in value.items()}
+                return value
+            def copy_row(row):
+                result={}
+                for key,value in row.items():
+                    if key in json_fields and isinstance(value,str):result[key]=encode(remap(json.loads(value)))
+                    elif key in {'id','block_id','document_id','document_version_id','asset_id','ocr_run_id','asr_run_id'}:result[key]=remap(value)
+                    else:result[key]=value
+                return result
+            version=copy_row(original)
+            metadata=json.loads(version.get('parser_metadata') or '{}')
+            metadata.pop('preparation_task_id',None)
+            version['parser_metadata']=encode(metadata)
+            version.update(id=identifier,document_id=document_id,created_at=utc_now(),
+                version=self.repo._db.execute('SELECT COALESCE(MAX(version),0)+1 AS n FROM source_document_versions WHERE project_id=? AND document_id=?',(project_id,document_id)).fetchone()['n'])
+            for before,after in mapping.items():version['rendered_html']=version['rendered_html'].replace(before,after)
+            self._insert('source_document_versions',version)
+            for table,key in tables:
+                for row in copies[table]:self._insert(table,copy_row(row))
+            return self.get_version(project_id,identifier),mapping
+
     def _version_chunks(self,project_id,version_id):
         """Read the immutable mapped record version; never substitute a current revision."""
         rows=self.repo._db.execute('''SELECT s.*,r.id AS record_id,r.payload AS record_payload

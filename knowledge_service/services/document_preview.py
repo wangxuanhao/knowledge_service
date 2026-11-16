@@ -98,6 +98,7 @@ def preview_upload(uploads, upload, options, limits, package_path=None, preview_
                 result.update(source_preview=article, warnings=warnings)
             return result
         try:
+            SingleDocumentPackageReader(parser=uploads.parser).validate_upload(staged.path.read_bytes())
             package = SingleDocumentPackageReader(parser=uploads.parser).read(
                 staged.path.read_bytes(), staged.original_name)
         except (ValueError, zipfile.BadZipFile, RuntimeError, NotImplementedError) as exc:

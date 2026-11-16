@@ -1,0 +1,572 @@
+{
+  "scope": "Structural and current parser checks only; no full-PDF OCR, ASR, upload or indexing.",
+  "files": [
+    {
+      "path": "tests/docs/cases/assets/page-01.png",
+      "bytes": 36413,
+      "sha256": "25b50b626c18247344083a7b27f19d339eb87cfcc41cf48f88b3cd8e01ac3c19",
+      "status": "document_parser_passed",
+      "text_chars": 0,
+      "asset_count": 1
+    },
+    {
+      "path": "tests/docs/cases/assets/page-02.png",
+      "bytes": 36812,
+      "sha256": "a6eb2f8bab3d36b0b642246a8ef09043e7303686c886a1d768de2b99250259eb",
+      "status": "document_parser_passed",
+      "text_chars": 0,
+      "asset_count": 1
+    },
+    {
+      "path": "tests/docs/cases/html-assets-no-manifest.zip",
+      "bytes": 29945,
+      "sha256": "2621f253938f0cbc6e4a27f9239f37c98026ca03a8e869225fd864872fc34b83",
+      "status": "package_parser_passed",
+      "has_manifest": false,
+      "document_count": 1,
+      "main": "index.html",
+      "asset_count": 1,
+      "warning_count": 0
+    },
+    {
+      "path": "tests/docs/cases/html-with-image.html",
+      "bytes": 340,
+      "sha256": "0e241292cffef7974ae07e9557579ab756152377456c10861ecb88b4a22b35f6",
+      "status": "utf8_html_readable",
+      "text_chars": 268,
+      "note": "Full HTML/media parsing is validated through the matching resource ZIP."
+    },
+    {
+      "path": "tests/docs/cases/invalid/fake.pdf",
+      "bytes": 55,
+      "sha256": "ff48445835cbbef79747c5947c52905b14b6ad475be6cf99804812116f10458a",
+      "status": "expected_rejection",
+      "error_code": "FileDataError",
+      "reason": "Failed to open file 'D:\\\\workspace\\\\knowledge_service_v2\\\\knowledge_service\\\\tests\\\\docs\\\\cases\\\\invalid\\\\fake.pdf'.",
+      "unexpected": false
+    },
+    {
+      "path": "tests/docs/cases/invalid/two-main-documents.zip",
+      "bytes": 246,
+      "sha256": "9d3d883a86eea5337e72338bb4d35facb95c80a88131bae0c6d7357844436dd6",
+      "status": "expected_rejection",
+      "error_code": "ValueError",
+      "reason": "A ZIP without a manifest requires one root main file and assets/ attachments; use document.pages for ordered images",
+      "unexpected": false
+    },
+    {
+      "path": "tests/docs/cases/markdown-with-image.md",
+      "bytes": 146,
+      "sha256": "b7c6e4d5581ebe81f140b7efa2787dc490a38ba00ae4bfd50bb668cd4ca68e86",
+      "status": "document_parser_passed",
+      "text_chars": 80,
+      "asset_count": 0
+    },
+    {
+      "path": "tests/docs/cases/md-assets-no-manifest.zip",
+      "bytes": 29807,
+      "sha256": "1f49817be4e29ef37f0c6dc7f5805e33db35479b47ff165581f1ee5d5097e443",
+      "status": "package_parser_passed",
+      "has_manifest": false,
+      "document_count": 1,
+      "main": "正文.md",
+      "asset_count": 1,
+      "warning_count": 0
+    },
+    {
+      "path": "tests/docs/cases/md-assets-outer-folder.zip",
+      "bytes": 29835,
+      "sha256": "1b84b929b4719fb7926560b0900f4d2859825042da2ce5e6a9fae1a22a7783c0",
+      "status": "package_parser_passed",
+      "has_manifest": false,
+      "document_count": 1,
+      "main": "正文.md",
+      "asset_count": 1,
+      "warning_count": 0
+    },
+    {
+      "path": "tests/docs/cases/md-video-assets-no-manifest.zip",
+      "bytes": 82338,
+      "sha256": "3d57269bdebca1a38280ba9d47e510d06ce94266e58adaac2fefb510a28fd853",
+      "status": "package_parser_passed",
+      "has_manifest": false,
+      "document_count": 1,
+      "main": "正文.md",
+      "asset_count": 1,
+      "warning_count": 0
+    },
+    {
+      "path": "tests/docs/cases/plain-text.txt",
+      "bytes": 75,
+      "sha256": "438764cf0db5b80989422f3e9d5a8832a3af48f339ff26aa9c736b326451f5ef",
+      "status": "document_parser_passed",
+      "text_chars": 35,
+      "asset_count": 0
+    },
+    {
+      "path": "tests/docs/cases/spoken-video.mp4",
+      "bytes": 87714,
+      "sha256": "af4e901bb1999f58f40e114d06cb5a02b28dcdbc42f0b261f7191cb07f00cbd7",
+      "status": "media_probe_passed",
+      "mime_type": "video/mp4",
+      "width": 1100,
+      "height": 720,
+      "duration_ms": 8000,
+      "has_audio": true
+    },
+    {
+      "path": "tests/docs/d93666a3-7122-42df-ba64-446df1ddd29c.pdf",
+      "bytes": 2554841,
+      "sha256": "65a3ce5d85781dbe383ff739d27ad3dfe6fb731bb34b7b038c8899f0de65d895",
+      "status": "structurally_readable",
+      "pages": 30,
+      "text_chars": 19971,
+      "ocr_candidate_pages": [
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30
+      ],
+      "page_checks": [
+        {
+          "page": 1,
+          "text_chars": 1688,
+          "largest_image_coverage": 0.013,
+          "images": 1,
+          "nonrepeated_text_chars": 1688,
+          "ocr_candidate": false
+        },
+        {
+          "page": 2,
+          "text_chars": 1615,
+          "largest_image_coverage": 0.0,
+          "images": 1,
+          "nonrepeated_text_chars": 1615,
+          "ocr_candidate": false
+        },
+        {
+          "page": 3,
+          "text_chars": 1598,
+          "largest_image_coverage": 0.0,
+          "images": 1,
+          "nonrepeated_text_chars": 1598,
+          "ocr_candidate": false
+        },
+        {
+          "page": 4,
+          "text_chars": 704,
+          "largest_image_coverage": 0.027,
+          "images": 2,
+          "nonrepeated_text_chars": 704,
+          "ocr_candidate": false
+        },
+        {
+          "page": 5,
+          "text_chars": 925,
+          "largest_image_coverage": 0.0,
+          "images": 1,
+          "nonrepeated_text_chars": 925,
+          "ocr_candidate": false
+        },
+        {
+          "page": 6,
+          "text_chars": 932,
+          "largest_image_coverage": 0.0,
+          "images": 1,
+          "nonrepeated_text_chars": 932,
+          "ocr_candidate": false
+        },
+        {
+          "page": 7,
+          "text_chars": 1052,
+          "largest_image_coverage": 0.0,
+          "images": 1,
+          "nonrepeated_text_chars": 1052,
+          "ocr_candidate": false
+        },
+        {
+          "page": 8,
+          "text_chars": 593,
+          "largest_image_coverage": 0.0,
+          "images": 1,
+          "nonrepeated_text_chars": 593,
+          "ocr_candidate": false
+        },
+        {
+          "page": 9,
+          "text_chars": 1060,
+          "largest_image_coverage": 0.0,
+          "images": 1,
+          "nonrepeated_text_chars": 1060,
+          "ocr_candidate": false
+        },
+        {
+          "page": 10,
+          "text_chars": 488,
+          "largest_image_coverage": 0.0,
+          "images": 1,
+          "nonrepeated_text_chars": 488,
+          "ocr_candidate": false
+        },
+        {
+          "page": 11,
+          "text_chars": 745,
+          "largest_image_coverage": 0.0,
+          "images": 1,
+          "nonrepeated_text_chars": 745,
+          "ocr_candidate": false
+        },
+        {
+          "page": 12,
+          "text_chars": 902,
+          "largest_image_coverage": 0.0,
+          "images": 1,
+          "nonrepeated_text_chars": 902,
+          "ocr_candidate": false
+        },
+        {
+          "page": 13,
+          "text_chars": 761,
+          "largest_image_coverage": 0.0,
+          "images": 1,
+          "nonrepeated_text_chars": 761,
+          "ocr_candidate": false
+        },
+        {
+          "page": 14,
+          "text_chars": 903,
+          "largest_image_coverage": 0.027,
+          "images": 2,
+          "nonrepeated_text_chars": 903,
+          "ocr_candidate": false
+        },
+        {
+          "page": 15,
+          "text_chars": 931,
+          "largest_image_coverage": 0.0,
+          "images": 1,
+          "nonrepeated_text_chars": 931,
+          "ocr_candidate": false
+        },
+        {
+          "page": 16,
+          "text_chars": 782,
+          "largest_image_coverage": 0.027,
+          "images": 2,
+          "nonrepeated_text_chars": 782,
+          "ocr_candidate": false
+        },
+        {
+          "page": 17,
+          "text_chars": 477,
+          "largest_image_coverage": 0.027,
+          "images": 2,
+          "nonrepeated_text_chars": 477,
+          "ocr_candidate": false
+        },
+        {
+          "page": 18,
+          "text_chars": 711,
+          "largest_image_coverage": 0.0,
+          "images": 1,
+          "nonrepeated_text_chars": 711,
+          "ocr_candidate": false
+        },
+        {
+          "page": 19,
+          "text_chars": 631,
+          "largest_image_coverage": 0.0,
+          "images": 1,
+          "nonrepeated_text_chars": 631,
+          "ocr_candidate": false
+        },
+        {
+          "page": 20,
+          "text_chars": 576,
+          "largest_image_coverage": 0.0,
+          "images": 1,
+          "nonrepeated_text_chars": 576,
+          "ocr_candidate": false
+        },
+        {
+          "page": 21,
+          "text_chars": 524,
+          "largest_image_coverage": 0.0,
+          "images": 1,
+          "nonrepeated_text_chars": 524,
+          "ocr_candidate": false
+        },
+        {
+          "page": 22,
+          "text_chars": 571,
+          "largest_image_coverage": 0.027,
+          "images": 2,
+          "nonrepeated_text_chars": 571,
+          "ocr_candidate": false
+        },
+        {
+          "page": 23,
+          "text_chars": 802,
+          "largest_image_coverage": 0.027,
+          "images": 6,
+          "nonrepeated_text_chars": 802,
+          "ocr_candidate": false
+        },
+        {
+          "page": 24,
+          "text_chars": 0,
+          "largest_image_coverage": 0.394,
+          "images": 2,
+          "nonrepeated_text_chars": 0,
+          "ocr_candidate": true
+        },
+        {
+          "page": 25,
+          "text_chars": 0,
+          "largest_image_coverage": 0.545,
+          "images": 2,
+          "nonrepeated_text_chars": 0,
+          "ocr_candidate": true
+        },
+        {
+          "page": 26,
+          "text_chars": 0,
+          "largest_image_coverage": 0.64,
+          "images": 2,
+          "nonrepeated_text_chars": 0,
+          "ocr_candidate": true
+        },
+        {
+          "page": 27,
+          "text_chars": 0,
+          "largest_image_coverage": 0.64,
+          "images": 2,
+          "nonrepeated_text_chars": 0,
+          "ocr_candidate": true
+        },
+        {
+          "page": 28,
+          "text_chars": 0,
+          "largest_image_coverage": 0.64,
+          "images": 2,
+          "nonrepeated_text_chars": 0,
+          "ocr_candidate": true
+        },
+        {
+          "page": 29,
+          "text_chars": 0,
+          "largest_image_coverage": 0.64,
+          "images": 2,
+          "nonrepeated_text_chars": 0,
+          "ocr_candidate": true
+        },
+        {
+          "page": 30,
+          "text_chars": 0,
+          "largest_image_coverage": 0.64,
+          "images": 2,
+          "nonrepeated_text_chars": 0,
+          "ocr_candidate": true
+        }
+      ]
+    },
+    {
+      "path": "tests/docs/技术交底书模板.doc",
+      "bytes": 40828,
+      "sha256": "7331ad35de54682eff23c714729d4c6a6a64196c984bef83f49b6fc7787aed20",
+      "has_word_stream": true,
+      "status": "expected_rejection",
+      "error_code": "unsupported_format",
+      "reason": "仅支持 TXT、Markdown、PDF、DOCX、HTML、PNG、JPEG、WebP、MP4、WebM 文件",
+      "unexpected": false,
+      "note": "Valid legacy Word container; current product supports DOCX, not DOC."
+    },
+    {
+      "path": "tests/docs/附件3-全家享礼包基础版及承诺抵消-业务协议.pdf",
+      "bytes": 14332076,
+      "sha256": "9287ec6c91035df967e36b63bb4bbbbf5a7bc201f846544ee28d6634019c86fa",
+      "status": "structurally_readable",
+      "pages": 19,
+      "text_chars": 2441,
+      "ocr_candidate_pages": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19
+      ],
+      "page_checks": [
+        {
+          "page": 1,
+          "text_chars": 127,
+          "largest_image_coverage": 0.445,
+          "images": 1,
+          "nonrepeated_text_chars": 4,
+          "ocr_candidate": true
+        },
+        {
+          "page": 2,
+          "text_chars": 127,
+          "largest_image_coverage": 0.445,
+          "images": 1,
+          "nonrepeated_text_chars": 4,
+          "ocr_candidate": true
+        },
+        {
+          "page": 3,
+          "text_chars": 127,
+          "largest_image_coverage": 0.445,
+          "images": 1,
+          "nonrepeated_text_chars": 4,
+          "ocr_candidate": true
+        },
+        {
+          "page": 4,
+          "text_chars": 127,
+          "largest_image_coverage": 0.445,
+          "images": 1,
+          "nonrepeated_text_chars": 4,
+          "ocr_candidate": true
+        },
+        {
+          "page": 5,
+          "text_chars": 127,
+          "largest_image_coverage": 0.445,
+          "images": 1,
+          "nonrepeated_text_chars": 4,
+          "ocr_candidate": true
+        },
+        {
+          "page": 6,
+          "text_chars": 127,
+          "largest_image_coverage": 0.445,
+          "images": 1,
+          "nonrepeated_text_chars": 4,
+          "ocr_candidate": true
+        },
+        {
+          "page": 7,
+          "text_chars": 127,
+          "largest_image_coverage": 0.445,
+          "images": 1,
+          "nonrepeated_text_chars": 4,
+          "ocr_candidate": true
+        },
+        {
+          "page": 8,
+          "text_chars": 127,
+          "largest_image_coverage": 0.445,
+          "images": 1,
+          "nonrepeated_text_chars": 4,
+          "ocr_candidate": true
+        },
+        {
+          "page": 9,
+          "text_chars": 127,
+          "largest_image_coverage": 0.445,
+          "images": 1,
+          "nonrepeated_text_chars": 4,
+          "ocr_candidate": true
+        },
+        {
+          "page": 10,
+          "text_chars": 128,
+          "largest_image_coverage": 0.445,
+          "images": 1,
+          "nonrepeated_text_chars": 5,
+          "ocr_candidate": true
+        },
+        {
+          "page": 11,
+          "text_chars": 128,
+          "largest_image_coverage": 0.445,
+          "images": 1,
+          "nonrepeated_text_chars": 5,
+          "ocr_candidate": true
+        },
+        {
+          "page": 12,
+          "text_chars": 128,
+          "largest_image_coverage": 0.445,
+          "images": 1,
+          "nonrepeated_text_chars": 5,
+          "ocr_candidate": true
+        },
+        {
+          "page": 13,
+          "text_chars": 128,
+          "largest_image_coverage": 0.445,
+          "images": 1,
+          "nonrepeated_text_chars": 5,
+          "ocr_candidate": true
+        },
+        {
+          "page": 14,
+          "text_chars": 128,
+          "largest_image_coverage": 0.445,
+          "images": 1,
+          "nonrepeated_text_chars": 5,
+          "ocr_candidate": true
+        },
+        {
+          "page": 15,
+          "text_chars": 128,
+          "largest_image_coverage": 0.445,
+          "images": 1,
+          "nonrepeated_text_chars": 5,
+          "ocr_candidate": true
+        },
+        {
+          "page": 16,
+          "text_chars": 128,
+          "largest_image_coverage": 0.445,
+          "images": 1,
+          "nonrepeated_text_chars": 5,
+          "ocr_candidate": true
+        },
+        {
+          "page": 17,
+          "text_chars": 128,
+          "largest_image_coverage": 0.445,
+          "images": 1,
+          "nonrepeated_text_chars": 5,
+          "ocr_candidate": true
+        },
+        {
+          "page": 18,
+          "text_chars": 146,
+          "largest_image_coverage": 0.445,
+          "images": 1,
+          "nonrepeated_text_chars": 23,
+          "ocr_candidate": true
+        },
+        {
+          "page": 19,
+          "text_chars": 128,
+          "largest_image_coverage": 0.276,
+          "images": 2,
+          "nonrepeated_text_chars": 5,
+          "ocr_candidate": true
+        }
+      ]
+    }
+  ],
+  "unexpected_failures": 0
+}

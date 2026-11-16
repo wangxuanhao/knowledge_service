@@ -27,6 +27,7 @@
   }
   function init(){
     const document=root.document,get=id=>document.getElementById(id),host=get('tab-ingest');
+    let preparation=null,preparationHost=null;
     const node=(tag,css,text)=>{const e=document.createElement(tag);if(css)e.className=css;if(text!==undefined)e.textContent=text;return e;};
     const button=(text,fn,css='secondary')=>{const e=node('button',css,text);e.type='button';e.onclick=fn;return e;};
     const project=()=>typeof current==='string'?current:'';
@@ -43,7 +44,7 @@
     const initialBatch=get('batch').value;
     const shell=root.WorkspaceDrawers.create({id:'library-workspace-drawer',title:'添加文件',
       description:'关闭后保留本页未提交内容；已提交的处理批次继续运行。',content:host,dismissOnBackdrop:false,
-      onClose(){if(typeof closeChunkPreview==='function')closeChunkPreview();state.close();host.classList.add('hidden');root.IngestBatches?.visibilityChanged();notice.textContent='';}});
+      onClose(){if(typeof closeChunkPreview==='function')closeChunkPreview();preparation?.close();state.close();host.classList.add('hidden');root.IngestBatches?.visibilityChanged();notice.textContent='';}});
     const title=get('library-workspace-drawer-title');
     const nav=node('nav','library-workspace-nav');nav.setAttribute('aria-label','资料操作');
     const sections={upload:node('section','library-operation'),batches:node('section','library-operation'),structured:node('section','library-operation')};
@@ -128,6 +129,7 @@
         title.textContent={upload:'添加文件',batches:'处理批次',structured:'结构化记录导入'}[mode];
         context.textContent='当前项目：'+(get('project').selectedOptions?.[0]?.textContent||view.project);
         notice.textContent='';host.classList.remove('hidden');shell.open({trigger});if(mode==='upload')setStep(view.step);
+        if(preparation){if(mode==='upload')void preparation.open();else preparation.close();}
         root.IngestBatches?.visibilityChanged();
         if(mode==='upload'){void root.IngestBatches?.loadCapabilities();void root.loadApplicabilityVocabulary?.();void root.IngestOntology?.refresh();}
         if(mode==='batches')root.IngestBatches?.loadRecent();return true;
@@ -141,8 +143,17 @@
       if(!shell.dialog.open)return;notice.textContent=get('status').textContent;
       notice.classList.toggle('error',get('status').classList.contains('error'));
     }).observe(get('status'),{childList:true,subtree:true,characterData:true});
+    if(root.PreparationView){
+      preparationHost=node('div','library-preparation-host');
+      sections.upload.prepend(preparationHost);
+      const slot=get('ingest-mode-slot');
+      preparation=root.PreparationView.mount(preparationHost,{project,modeSlot:slot,advanced,
+        settings(){const p=project(),mode=get('extraction-mode').value;return {...readParseSettings(),...root.IngestOntology.settings(p,mode),extraction_mode:mode};},
+        onPublished(result){if(!result.batch_id)return;open('batches');root.IngestBatches.monitor(project(),{id:result.batch_id});}});
+      panel.hidden=true;
+    }
     setStep(0);
-    return {open,close:options=>shell.close(options),projectChanged(id){shell.close({restoreFocus:false});state.projectChanged(id);get('ingest').disabled=false;},
+    return {open,close:options=>shell.close(options),projectChanged(id){shell.close({restoreFocus:false});preparation?.projectChanged();state.projectChanged(id);get('ingest').disabled=false;},
       ticket:()=>state.ticket(),
       accepts:(ticket,id)=>state.accepts(ticket,id)&&project()===id,
       queueChanged(){const view=state.snapshot();if(view.active&&view.mode==='upload'){updateSelection();if(view.step===2)updateSummary();}},

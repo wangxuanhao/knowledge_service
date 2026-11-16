@@ -76,6 +76,7 @@ class IngestBatches:
         digest=hashlib.sha256(data).hexdigest()
         if Path(name).suffix.lower()=='.zip':
             from ..integrations.document_package import SingleDocumentPackageReader
+            SingleDocumentPackageReader().validate_upload(bytes(data))
             package=SingleDocumentPackageReader().read(bytes(data),name)
             prepared=[]
             # Validate every member before publishing any source metadata or bytes.

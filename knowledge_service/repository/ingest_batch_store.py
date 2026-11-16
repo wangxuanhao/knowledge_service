@@ -396,7 +396,7 @@ class IngestBatchStore:
                     if latest is not None and latest > row['document_generation']:
                         raise ValueError('此处理任务已被更新的处理取代，请查看最新批次')
                 if mode=='restart_document':
-                    self.db.execute('UPDATE ingest_batch_items SET document_generation=document_generation+1,source_restart_of=source_version_id,source_version_id=NULL WHERE id=?',(row['id'],))
+                    self.db.execute('UPDATE ingest_batch_items SET document_generation=document_generation+1,source_restart_of=source_version_id,source_version_id=NULL,prepared_result=NULL WHERE id=?',(row['id'],))
                 self.db.execute("UPDATE ingest_batch_items SET status='pending',retry_mode=?,stage='queued',progress=0,error_code=NULL,error_message=NULL,public_error=NULL,auto_retry_count=0,next_retry_at=NULL,completed_at=NULL,updated_at=clock_timestamp() WHERE id=?",(mode,row['id']))
             if rows:
                 self.db.execute("UPDATE ingest_batches SET status='running',completed_at=NULL,updated_at=clock_timestamp() WHERE id=?",(batch_id,))

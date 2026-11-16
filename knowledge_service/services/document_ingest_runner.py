@@ -1,5 +1,5 @@
 """One leased document, immutable source and raw slice receipts."""
-from contextlib import contextmanager
+from contextlib import contextmanager,nullcontext
 import hashlib
 import os
 from pathlib import Path
@@ -143,8 +143,17 @@ class DocumentIngestRunner:
                 and existing.get('metadata',{}).get('document_generation',0)==item.get('document_generation',0)):
             return {'document':existing,'records':[],'replayed':True}
         from .source_ingest import prepare_source_ingest
-        chunks,text,warnings=prepare_source_ingest(self.sources,item['project_id'],source,options,
-            ocr_semaphore=self.ocr_semaphore,progress=lambda:self.store.update_progress(item['id'],owner,item['lease_token'],stage='ocr',progress=8))
+        prepared=item.get('prepared_result')
+        if isinstance(prepared,str):
+            import json
+            prepared=json.loads(prepared)
+        if prepared:
+            if prepared['source_version_id']!=source['id']:
+                raise ValueError('Prepared source version mismatch')
+            chunks,text,warnings=prepared['chunks'],prepared['text'],prepared['warnings']
+        else:
+            chunks,text,warnings=prepare_source_ingest(self.sources,item['project_id'],source,options,
+                ocr_semaphore=self.ocr_semaphore,progress=lambda:self.store.update_progress(item['id'],owner,item['lease_token'],stage='ocr',progress=8))
         metadata = {**options.pop('metadata', {}),**{k:v for k,v in source.get('parser_metadata',{}).items() if k!='provenance'},'warnings':warnings,'source_document_version_id':source['id'],
                     'batch_id':item['batch_id'], 'batch_item_id':item['id'], 'file_sha256':item['file_sha256'],
                     'document_generation':item.get('document_generation',0)}
@@ -215,7 +224,10 @@ class DocumentIngestRunner:
         with tempfile.TemporaryDirectory(prefix='knowledge-batch-') as directory:
             path=Path(directory)/('document'+Path(item['original_name']).suffix)
             path.write_bytes(data)
-            parsed=DocumentParser(max_upload_bytes=self.file_limit).parse(path,item['original_name'])
+            parser=DocumentParser(max_upload_bytes=self.file_limit)
+            slot=self.ocr_semaphore if path.suffix.lower()=='.pdf' and parser.ocr_mode=='auto' and self.ocr_semaphore is not None else nullcontext()
+            with slot:
+                parsed=parser.parse(path,item['original_name'])
         return self.sources.persist(item['project_id'],item['document_id'],data,
             item['original_name'],text=parsed.text,assets=parsed.assets,metadata=parsed.metadata,provenance=parsed.provenance)
 

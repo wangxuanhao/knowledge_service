@@ -1,0 +1,4 @@
+# User-provided originals stay local; share only synthetic cases/ fixtures.
+/*.pdf
+/*.doc
+/*.docx

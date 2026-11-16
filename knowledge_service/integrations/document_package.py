@@ -54,6 +54,27 @@ class SingleDocumentPackageReader:
         self.max_uncompressed_bytes = max_uncompressed_bytes
         self.max_ratio = max_ratio
 
+    def validate_upload(self, data):
+        """Validate new resource packages without parsing images, OCR or ASR.
+
+        The default historical reader deliberately retains its broader formats.
+        """
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            files, prefix = self._members(archive)
+            manifest = json.loads(archive.read(files['manifest.json']).decode('utf-8-sig')) if 'manifest.json' in files else {}
+            try:
+                entry = self._select(manifest, files, has_manifest='manifest.json' in files)
+            except ValueError as exc:
+                raise ValueError('ZIP 需要一个 MD/HTML 主文档及相对资源，多份主文档请分别上传：'+str(exc).split(';')[0]) from exc
+            if 'pages' in entry or PurePosixPath(entry.get('entry', '')).suffix.lower() not in {'.md', '.html', '.htm'}:
+                raise ValueError('ZIP 仅支持一个 MD/HTML 主文档及相对资源；PDF、Word、图片、视频请独立上传')
+            mains=[path for path in files if '/' not in path and PurePosixPath(path).suffix.lower() in {'.md','.html','.htm'}]
+            if len(mains)!=1 or entry['entry']!=mains[0]:
+                raise ValueError('ZIP 需要一个根目录 MD/HTML 主文档，多份主文档请分别上传；允许统一外层目录')
+            primary = archive.read(files[entry['entry']])
+            self._decode(primary)
+            return dict(entry=entry['entry'], root_prefix=prefix)
+
     def read(self, data, filename='package.zip'):
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             files, root_prefix = self._members(archive)
