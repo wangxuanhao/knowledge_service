@@ -65,3 +65,18 @@ def test_canonical_table_header_and_ocr_text_are_not_repeated():
     ocr_rows, ocr_text = split_mapped_chunks([dict(text='x' * 160)], dict(chunk_size=100, chunk_overlap=20), return_text=True)
     assert len(ocr_text) == 160
     assert [row['start_char'] for row in ocr_rows] == [0, 80]
+
+
+
+def test_mixed_chunk_keeps_ocr_extraction_caution(monkeypatch):
+    from types import SimpleNamespace
+    import knowledge_service.services.service as module
+    seen=[]
+    monkeypatch.setattr(module,'current_llm',lambda:SimpleNamespace(model='test',base_url='test',max_tokens=1,public_identity=lambda:{}))
+    context=SimpleNamespace(chunks=[{'metadata':{'source_kind':'mixed','source_kinds':['markdown','image_ocr'], 'ocr_block_ids':['box']}}],
+        guard=lambda:None,file_hash='hash',ontology_fingerprint='ontology',expected_active_ontology=None,item={},
+        execute=lambda ordinal,fingerprint,extract:extract())
+    extractor=SimpleNamespace(extract=lambda text,ontology:seen.append(text) or [])
+    service=object.__new__(module.KnowledgeService)
+    service.extract_ingest_chunk(extractor,'正文和识别文字',checkpoint_context=context)
+    assert 'OCR' in seen[0] and seen[0].endswith('正文和识别文字')

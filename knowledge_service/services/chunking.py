@@ -78,12 +78,35 @@ def split_mapped_chunks(chunks, options, return_text=False):
         paths = [metadata['heading_path'] for metadata in intersecting if metadata.get('heading_path')]
         if paths:
             current_metadata['heading_paths'] = paths
-        if current_metadata.get('source_kind') == 'image_ocr':
-            current_metadata['ocr_block_ids'] = list(dict.fromkeys(s['ocr_block_id'] for s in mapped))
-        if current_metadata.get('source_kind') == 'video_asr':
-            current_metadata['asr_segment_ids'] = list(dict.fromkeys(s['asr_segment_id'] for s in mapped))
-            current_metadata['start_ms'] = min(s['payload']['start_ms'] for s in mapped)
-            current_metadata['end_ms'] = max(s['payload']['end_ms'] for s in mapped)
+        kinds=list(dict.fromkeys('image_ocr' if s.get('ocr_block_id') else
+            'video_asr' if s.get('asr_segment_id') else 'markdown' for s in mapped))
+        if kinds:
+            current_metadata['source_kind']='mixed' if len(kinds)>1 else kinds[0]
+            current_metadata['source_kinds']=kinds
+        # A mixed window cannot inherit one attachment's identity/confidence.
+        media_fields=('source_asset_id','ocr_run_id','asr_run_id','ocr_block_ids','asr_segment_ids',
+            'average_confidence','ocr_configuration_fingerprint','asr_configuration_fingerprint','start_ms','end_ms')
+        assets=list(dict.fromkeys(s.get('payload',{}).get('asset_id') for s in mapped if s.get('payload',{}).get('asset_id')))
+        if len(kinds)>1 or len(assets)>1:
+            for key in media_fields:current_metadata.pop(key,None)
+        if assets:
+            current_metadata['source_asset_ids']=assets
+            if len(assets)==1:current_metadata['source_asset_id']=assets[0]
+        for key,field,run_key in (('ocr_block_id','ocr_block_ids','ocr_run_id'),('asr_segment_id','asr_segment_ids','asr_run_id')):
+            relevant=[s for s in mapped if s.get(key)]
+            if not relevant:continue
+            current_metadata[field]=list(dict.fromkeys(s[key] for s in relevant))
+            runs=list(dict.fromkeys(s.get('payload',{}).get(run_key) for s in relevant if s.get('payload',{}).get(run_key)))
+            if runs:
+                current_metadata[run_key+'s']=runs
+                if len(runs)==1:current_metadata[run_key]=runs[0]
+        speech=[s for s in mapped if s.get('asr_segment_id') and 'start_ms' in s.get('payload',{})]
+        speech_assets={s.get('payload',{}).get('asset_id') for s in speech}
+        if speech and len(speech_assets)==1:
+            current_metadata['start_ms']=min(s['payload']['start_ms'] for s in speech)
+            current_metadata['end_ms']=max(s['payload']['end_ms'] for s in speech)
+        if any(metadata.get('source_incomplete') for metadata in intersecting):
+            current_metadata['source_incomplete']=True
         rows.append({**row, 'source_spans': mapped, 'metadata': current_metadata})
     return (rows, text) if return_text else rows
 

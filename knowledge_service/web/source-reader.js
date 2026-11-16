@@ -114,6 +114,7 @@
         location=await get(sourceUrl(projectId,versionId,'locate')+'?'+query,signal);
       }
       if(token!==serial||!dialog.open)return;
+      if(location?.media_locations?.length&&!location.asset_id)location={...location,...location.media_locations[0]};
       const documentSignal=signal;
       let parsed=doc.blocks||null,rendered=null,raw=null;
       async function show(tab){
@@ -148,7 +149,7 @@
               part.dataset.chunkVersionId=chunk.version_id;
               part.append(make('summary','模型片段 · '+chunk.id+' · 固定版本 '+chunk.version_id));
               const kind=chunk.metadata?.source_kind;
-              part.append(make('p',kind==='video_asr'?'视频语音转写；点击下方语音时段定位原视频。':kind==='image_ocr'?'图片 OCR 文字；抽取时会附加识别误差提醒。':'Markdown / 文档正文片段'),make('pre',chunk.text));
+              part.append(make('p',kind==='mixed'?'正文与附件识别文字统一切片；来源位置分别保留。':kind==='video_asr'?'视频语音转写；点击下方语音时段定位原视频。':kind==='image_ocr'?'图片 OCR 文字；抽取时会附加识别误差提醒。':'Markdown / 文档正文片段'),make('pre',chunk.text));
               part.append(make('small','来源块：'+(chunk.spans||[]).map(s=>s.block_id||s.ocr_block_id||s.asr_segment_id).filter(Boolean).join('、')));
               body.append(part);
             }
@@ -244,6 +245,14 @@
             firstFocus??=focus;
           }
           if(firstFocus){note.textContent+=precise?' · 已定位证据文字':' · 已定位来源块（未保存精确文字范围）';firstFocus.scrollIntoView({block:'center'});}
+          if(tab==='reading'&&location?.media_locations?.length>1){
+            const controls=make('div','','source-downloads');
+            location.media_locations.forEach((group,index)=>{
+              const asset=(doc.assets||[]).find(a=>a.id===group.asset_id),video=group.source_kind==='video_asr';
+              const button=make('button',`定位${video?'视频':'图片'} ${index+1}`+(asset?.original_path?' · '+asset.original_path:''),'secondary');button.type='button';
+              button.onclick=()=>{if(!accepts())return;location={...location,...group};void show('reading');};controls.append(button);
+            });body.prepend(controls);
+          }
           if(location?.asset_id&&tab==='reading'){
             const asset=(doc.assets||[]).find(a=>a.id===location.asset_id);
             if(asset&&asset.provenance?.media_type!=='video'){

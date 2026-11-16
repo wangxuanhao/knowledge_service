@@ -124,19 +124,11 @@ def _clip_source_location(resolution):
         spans.append({**span, 'chunk_start_char': left, 'chunk_end_char': right,
                       'block_start_char': block_start + left - a,
                       'block_end_char': block_start + right - a})
-    resolution['source_location'] = {
-        **source, 'spans': spans or source.get('spans', []), 'precision': 'evidence' if spans else 'chunk',
-        'block_id': next((span['block_id'] for span in spans if span.get('block_id')), source.get('block_id')),
-    }
-    if spans and source.get('segments'):
-        segment_ids={span.get('asr_segment_id') for span in spans}
-        segments=[segment for segment in source['segments'] if segment['id'] in segment_ids]
-        resolution['source_location'].update(
-            segments=segments,asset_id=segments[0]['asset_id'] if segments else None,
-            asr_run_id=segments[0]['asr_run_id'] if segments else None,
-            asr_segment_id=segments[0]['id'] if segments else None,
-            start_ms=min((segment['start_ms'] for segment in segments),default=None),
-            end_ms=max((segment['end_ms'] for segment in segments),default=None))
+    if spans:
+        from ..utils.source_locations import focus_source_location
+        resolution['source_location']=focus_source_location({**source,'precision':'evidence'},spans=spans)
+    else:
+        resolution['source_location']={**source,'precision':'chunk'}
 
 
 def _apply_hash_integrity(resolution, document, chunk_complete):

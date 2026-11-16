@@ -855,8 +855,9 @@ class KnowledgeService:
             with semaphore:
                 if checkpoint_context:checkpoint_context.guard()
                 input_text=text
-                if checkpoint_context and checkpoint_context.chunks[ordinal].get('metadata',{}).get('source_kind')=='image_ocr':
-                    input_text='以下文字来自图片 OCR，可能存在识别错误；仅使用下方原文提供的证据。\n\n'+text
+                metadata=checkpoint_context.chunks[ordinal].get('metadata',{}) if checkpoint_context else {}
+                if metadata.get('source_kind')=='image_ocr' or metadata.get('ocr_block_ids'):
+                    input_text='以下内容包含图片 OCR 识别文字，可能存在识别错误；仅使用下方原文提供的证据。\n\n'+text
                 records=(extractor.discover(input_text,**discovery_options) if discovery_options is not None
                          else extractor.extract(input_text,ontology))
             return {'records':deepcopy(records),

@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+from test_chunk_preview_ui import browser
 
 WEB = Path(__file__).resolve().parents[2] / 'knowledge_service' / 'web'
 
@@ -122,3 +123,35 @@ if __name__ == '__main__':
     output.mkdir(parents=True, exist_ok=True)
     test_reader_locates_entity_without_painting_whole_blocks(output)
     print(json.dumps({'source_reader_entity_location': 'passed'}))
+
+
+
+def test_reader_can_switch_independent_video_locations_in_one_chunk(browser):
+    page=browser.new_page()
+    page.set_default_timeout(5000)
+    assets=[dict(id='v'+str(i),kind='local',status='available',original_path='clip'+str(i)+'.mp4',
+        provenance={'media_type':'video'}) for i in range(2)]
+    doc=dict(original_name='mixed.md',version=1,sha256='hash',assets=assets,blocks=[],chunks=[])
+    def route(request):
+        path=request.request.url
+        if path.endswith('/rendered'):
+            request.fulfill(content_type='text/html',body=''.join('<video controls data-asset-id="'+a['id']+'" data-asset-url="/api/projects/p/source-documents/v/assets/'+a['id']+'"></video>' for a in assets))
+        elif '/assets/' in path:request.fulfill(content_type='video/mp4',body=b'')
+        elif '/source-documents/' in path:request.fulfill(json=doc)
+        else:request.fulfill(content_type='text/html',body='<body></body>')
+    page.route('http://test/**',route);page.goto('http://test/')
+    page.add_script_tag(path=str(WEB/'source-content.js'))
+    page.add_script_tag(path=str(WEB/'source-reader.js'))
+    page.evaluate("""() => {
+      window.seeks=[];const create=SourceContent.createSession;
+      SourceContent.createSession=options=>{const session=create(options),seek=session.seekVideo;
+        session.seekVideo=(...args)=>{window.seeks.push(args);return seek(...args);};return session;};
+    }""")
+    groups=[dict(source_kind='video_asr',asset_id='v'+str(i),asr_run_id='r'+str(i),
+        start_ms=100+i*40000,end_ms=900+i*40000,boxes=[],segments=[]) for i in range(2)]
+    page.evaluate('location=>SourceReader.open({projectId:"p",versionId:"v",location})',
+        dict(status='available',spans=[],asset_id=None,media_locations=groups))
+    page.get_by_role('button',name='定位视频 2',exact=False).click()
+    page.wait_for_function('window.seeks.some(s=>s[0]==="v1"&&s[1]===40100)')
+    assert page.get_by_role('button',name='定位视频 1',exact=False).is_visible()
+    page.close()

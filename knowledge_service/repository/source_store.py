@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from uuid import uuid4
 from pathlib import PurePosixPath
 from ..core.time import utc_now
+from ..utils.source_locations import focus_source_location
 
 
 def encode(value):
@@ -187,15 +188,15 @@ class SourceStore:
             if not chunk_version_id: return dict(status='mapping_unavailable',code='source_mapping_unavailable',document_version_id=version_id,spans=[])
             spans=[dict(s) for s in self.repo._db.execute('SELECT * FROM chunk_source_spans WHERE project_id=? AND document_version_id=? AND chunk_version_id=? ORDER BY ordinal',(project_id,version_id,chunk_version_id)).fetchall()]
             for s in spans: s['payload']=json.loads(s['payload'])
-            boxes=[]; asset_id=None;segments=[]
+            boxes=[];segments=[]
             for s in spans:
                 if s['ocr_block_id']:
                     row=self.repo._db.execute('SELECT b.*,r.asset_id FROM source_asset_ocr_blocks b JOIN source_asset_ocr_runs r ON r.id=b.ocr_run_id WHERE b.project_id=? AND b.document_version_id=? AND b.id=?',(project_id,version_id,s['ocr_block_id'])).fetchone()
-                    if row: boxes.append(dict(row)); asset_id=row['asset_id']
+                    if row: boxes.append(dict(row))
                 if s.get('asr_segment_id'):
                     row=self.repo._db.execute('SELECT s.*,r.asset_id FROM source_asset_asr_segments s JOIN source_asset_asr_runs r ON r.id=s.asr_run_id AND r.project_id=s.project_id AND r.document_version_id=s.document_version_id WHERE s.project_id=? AND s.document_version_id=? AND s.id=?',(project_id,version_id,s['asr_segment_id'])).fetchone()
-                    if row:segments.append(dict(row));asset_id=row['asset_id']
-            return dict(status='available' if spans else 'mapping_unavailable',code=None if spans else 'source_mapping_unavailable',document_version_id=version_id,spans=spans,blocks=version['blocks'],block_id=next((s['block_id'] for s in spans if s['block_id']),None),asset_id=asset_id,boxes=boxes,segments=segments,start_ms=min((s['start_ms'] for s in segments),default=None),end_ms=max((s['end_ms'] for s in segments),default=None),asr_run_id=segments[0]['asr_run_id'] if segments else None,asr_segment_id=segments[0]['id'] if segments else None,tab='reading')
+                    if row:segments.append(dict(row))
+            return focus_source_location(dict(status='available' if spans else 'mapping_unavailable',code=None if spans else 'source_mapping_unavailable',document_version_id=version_id,spans=spans,blocks=version['blocks'],tab='reading'),boxes=boxes,segments=segments)
 
     def asr_runs(self, project_id, version_id, asset_id):
         self.get_asset(project_id,version_id,asset_id)

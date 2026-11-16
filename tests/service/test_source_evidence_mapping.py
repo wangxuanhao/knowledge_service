@@ -82,3 +82,64 @@ def test_exact_asr_quote_recomputes_video_time_from_only_intersecting_segments()
     assert mapped['segments']==[segments[1]]
     assert mapped['asr_segment_id']=='second' and mapped['asr_run_id']=='run'
     assert mapped['start_ms']==600 and mapped['end_ms']==900 and mapped['asset_id']=='asset'
+
+
+
+def test_exact_ocr_quote_in_mixed_chunk_focuses_only_its_image():
+    from knowledge_service.services.evidence import _clip_source_location
+    spans=[dict(block_id='body',chunk_start_char=0,chunk_end_char=4,block_start_char=0,block_end_char=4),
+        dict(ocr_block_id='box',chunk_start_char=6,chunk_end_char=10,block_start_char=0,block_end_char=4),
+        dict(asr_segment_id='speech',chunk_start_char=12,chunk_end_char=16,block_start_char=0,block_end_char=4)]
+    box=dict(id='box',asset_id='image',ocr_run_id='ocr-run')
+    segment=dict(id='speech',asset_id='video',asr_run_id='asr-run',start_ms=100,end_ms=900)
+    resolution=dict(location=dict(mode='exact',start_char=6,end_char=10),chunk={'start_char':0},
+        source_location=dict(status='available',spans=spans,boxes=[box],segments=[segment],asset_id='video',
+            block_id='body',start_ms=100,end_ms=900,asr_run_id='asr-run'))
+    _clip_source_location(resolution)
+    focused=resolution['source_location']
+    assert focused['asset_id']=='image'
+    assert focused['boxes']==[box] and focused['segments']==[]
+    assert focused['block_id'] is None and focused['start_ms'] is None
+
+
+
+def test_mixed_video_location_keeps_independent_asset_time_groups():
+    import json, threading
+    from types import SimpleNamespace
+    from knowledge_service.repository.source_store import SourceStore
+    spans=[dict(block_id=None,ocr_block_id=None,asr_segment_id='s'+str(i),payload='{}',
+        chunk_start_char=i*6,chunk_end_char=i*6+4,block_start_char=0,block_end_char=4) for i in range(2)]
+    segments={str(i):dict(id='s'+str(i),asset_id='v'+str(i),asr_run_id='r'+str(i),
+        start_ms=i*40000+100,end_ms=i*40000+900) for i in range(2)}
+    class DB:
+        def execute(self, query, params):
+            if query.startswith('SELECT * FROM chunk_source_spans'):
+                return SimpleNamespace(fetchall=lambda:spans)
+            return SimpleNamespace(fetchone=lambda:segments[params[-1][-1]])
+    store=SourceStore(SimpleNamespace(_lock=threading.RLock(),_db=DB()))
+    store.get_version=lambda *args: {'blocks':[]}
+    result=store.locate('p','v','chunk')
+    assert result['asset_id'] is None and result['start_ms'] is None
+    assert [(g['asset_id'],g['start_ms'],g['end_ms']) for g in result['media_locations']]==[
+        ('v0',100,900),('v1',40100,40900)]
+    from knowledge_service.services.evidence import _clip_source_location
+    resolution=dict(location=dict(mode='exact',start_char=6,end_char=10),chunk={'start_char':0},source_location=result)
+    _clip_source_location(resolution)
+    focused=resolution['source_location']
+    assert focused['asset_id']=='v1' and focused['start_ms']==40100
+    assert len(focused['media_locations'])==1
+
+
+
+def test_exact_quotes_choose_each_image_in_a_two_image_chunk():
+    from knowledge_service.services.evidence import _clip_source_location
+    spans=[dict(ocr_block_id='b'+str(i),chunk_start_char=i*6,chunk_end_char=i*6+4,
+        block_start_char=0,block_end_char=4) for i in range(2)]
+    boxes=[dict(id='b'+str(i),asset_id='image'+str(i),ocr_run_id='run'+str(i)) for i in range(2)]
+    for index in range(2):
+        resolution=dict(location=dict(mode='exact',start_char=index*6,end_char=index*6+4),chunk={'start_char':0},
+            source_location=dict(status='available',spans=spans,boxes=boxes,asset_id='image1'))
+        _clip_source_location(resolution)
+        focused=resolution['source_location']
+        assert focused['asset_id']=='image'+str(index) and focused['boxes']==[boxes[index]]
+        assert len(focused['media_locations'])==1

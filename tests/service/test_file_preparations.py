@@ -360,6 +360,7 @@ def test_publication_clones_shared_source_media_receipts_without_recognition(pre
     two=parsed.json()['items'][1]
     assert image_adapter.calls==1 and asr_adapter.calls==1
     original=client.get(root+'/items/'+one['id']+'/result').json()
+    assert len(original['chunks'])==1 and original['chunks'][0]['metadata']['source_kind']=='mixed'
     monkeypatch.setattr(sources.image_ocr,'process_asset',lambda *a,**k:pytest.fail('publish repeated OCR'))
     monkeypatch.setattr(sources.video_asr,'process_asset',lambda *a,**k:pytest.fail('publish repeated ASR'))
     ids=[one['id'],two['id']]
@@ -384,7 +385,10 @@ def test_publication_clones_shared_source_media_receipts_without_recognition(pre
             assert receipt['run']['document_version_id']==source['id']
             assert receipt['run']['asset_id']==asset['id']
             assert receipt['run']['status']=='completed'
-        assert source['chunks']
+        assert len(source['chunks'])==1
+        location=sources.locate(one['project_id'],source['id'],source['chunks'][0]['version_id'])
+        assert len(location['media_locations'])==2
+        assert {group['asset_id'] for group in location['media_locations']}=={a['id'] for a in source['assets']}
     assert len(source_objects)==1
 
 def test_cancel_between_result_and_publish_prevents_any_formal_write(prep,monkeypatch):
