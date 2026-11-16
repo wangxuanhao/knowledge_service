@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>知识平台操作手册</title><style>
+:root{--ink:#1c2833;--sub:#5b6b7a;--line:#dce6f2;--accent:#2f6fb3;--accent-soft:#eef5fc;--bg:#ffffff}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;font:15px/1.75 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:var(--bg)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code{background:#f2f6fb;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-family:Consolas,"Courier New",monospace;font-size:.92em}
+pre{background:#f7fafd;border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{background:none;border:none;padding:0;font-size:.88em;line-height:1.6}
+.sidebar{position:fixed;top:0;bottom:0;left:0;width:272px;border-right:1px solid var(--line);background:#fbfdff;padding:20px 18px;overflow:auto}
+.brand small{display:block;color:var(--sub);letter-spacing:.12em;font-size:10px}
+.brand strong{font-size:19px;color:var(--accent)}
+.brand p{margin:4px 0 14px;color:var(--sub);font-size:12px}
+.search input{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;background:#fff}
+.search .hint{color:var(--sub);font-size:11px;margin:6px 0 12px}
+nav.toc a{display:block;padding:6px 10px;border-radius:7px;color:#33475b;font-size:13.5px;margin-bottom:2px}
+nav.toc a:hover{background:var(--accent-soft);text-decoration:none}
+nav.toc a.active{background:var(--accent-soft);color:var(--accent);font-weight:600}
+nav.toc a[hidden]{display:none}
+main{margin-left:272px;padding:38px 46px 90px;max-width:940px}
+.cover h1{font-size:34px;line-height:1.25;margin:6px 0 4px}
+.cover .lead{color:var(--sub);border-bottom:1px solid var(--line);padding-bottom:22px}
+section.doc-sec{margin:38px 0;padding-bottom:10px}
+section.doc-sec[hidden]{display:none}
+h2.sec{font-size:22px;color:#17324e;border-left:5px solid var(--accent);padding-left:12px;margin:0 0 14px}
+h3{font-size:17px;color:#25476b;margin:22px 0 8px}
+figure{margin:18px 0}
+figure img{max-width:100%;border:1px solid var(--line);border-radius:10px;box-shadow:0 2px 10px rgba(31,78,121,.08)}
+figure figcaption{color:var(--sub);font-size:12.5px;margin-top:6px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:var(--accent-soft);color:#22415f;font-weight:600}
+tbody tr:nth-child(even){background:#fafcff}
+.table-scroll{overflow-x:auto}
+ul,ol{padding-left:24px}li{margin:4px 0}
+.tip{background:var(--accent-soft);border:1px solid #cfe3f6;border-radius:10px;padding:12px 16px;margin:14px 0}
+.to-top{position:fixed;right:26px;bottom:26px;background:var(--accent);color:#fff;border:none;border-radius:999px;padding:10px 14px;font-size:13px;cursor:pointer;box-shadow:0 4px 14px rgba(31,78,121,.28)}
+@media print{.sidebar,.to-top{display:none}main{margin:0;padding:0}figure img{box-shadow:none}section.doc-sec{page-break-inside:avoid}}
+@media (max-width:960px){.sidebar{position:static;width:auto;border-right:none;border-bottom:1px solid var(--line)}main{margin-left:0;padding:24px}}
+</style></head>
+<body>
+<aside class="sidebar">
+ <div class="brand"><small>KNOWLEDGE SERVICE MANUAL</small><strong>知识平台操作手册</strong><p>图文操作说明 · 可离线阅读与打印</p></div>
+ <div class="search"><input id="m-search" type="search" placeholder="搜索章节，例如：上传 / 索引 / 备份" autocomplete="off"><p class="hint" id="m-status">输入关键词过滤章节，支持正文搜索</p></div>
+ <nav class="toc" aria-label="目录"><a href="#sec-1">0. 三分钟看懂这个系统</a>
+<a href="#sec-2">1. 登录和第一次进入</a>
+<a href="#sec-3">2. 界面导览：每个区域是干什么的</a>
+<a href="#sec-4">3. 新建一个项目</a>
+<a href="#sec-5">4. 上传资料（核心操作，三步走）</a>
+<a href="#sec-6">5. 看进度：处理批次和失败恢复</a>
+<a href="#sec-7">6. 资料库：找到资料、搜索、重新处理</a>
+<a href="#sec-8">7. 阅读原文：固定版本、图文、解析视图</a>
+<a href="#sec-9">8. 从资料到知识：候选与审核</a>
+<a href="#sec-10">9. 本体建模层：定义知识的类型</a>
+<a href="#sec-11">10. 知识台账：每一条知识在这里</a>
+<a href="#sec-12">11. 检索与证据</a>
+<a href="#sec-13">12. 图谱和实体脑图</a>
+<a href="#sec-14">13. 知识问答</a>
+<a href="#sec-15">14. 构建与任务、质量评测</a>
+<a href="#sec-16">15. 备份与导出</a>
+<a href="#sec-17">16. 人员管理和模型管理</a>
+<a href="#sec-18">17. 常见问题速查</a>
+<a href="#sec-19">18. 术语小词典</a></nav>
+</aside>
+<main>
+<header class="cover"><h1>知识平台操作手册</h1><div class="lead"><p>适用版本：2026-11-13（截图取自当日实际运行的系统，项目"案例演示 · 平台规则知识图谱"）。工作台地址：<code>http://127.0.0.1:8100/</code>。系统怎么装、怎么启动、怎么维护，见配套的<a href="服务启动及运维手册.md">服务启动及运维手册</a>；图片、视频和 ZIP 怎么打包上传，深入细节见<a href="平台规则资料上传与ZIP打包操作手册.md">资料上传与 ZIP 打包操作手册</a>。</p>
+<p>这本手册写给<strong>第一次使用本系统、不懂技术的人</strong>：按"登录 → 建项目 → 传资料 → 看资料 → 出知识 → 查和问 → 日常维护"的真实顺序讲解，每一步都配<strong>当前系统实际界面</strong>的截图，告诉你点什么、填什么、怎么确认成功、失败了怎么办。</p></div></header>
+<section class="doc-sec" id="sec-1"><h2 class="sec">0. 三分钟看懂这个系统</h2>
+<p>一句话：把资料（文档、图片、PDF、视频）传进来，系统帮你解析成文字、整理成"知识"，然后你可以<strong>搜索</strong>、<strong>提问</strong>、<strong>看关系图</strong>，并且每个答案都能点开看到它来自原文的哪一页、哪一段。</p>
+<div class="table-scroll"><table><thead><tr><th scope="col">你想做的事</th><th scope="col">去哪个菜单</th><th scope="col">需要的角色</th></tr></thead><tbody><tr><td>上传资料、建知识</td><td>管理资料 → 资料库</td><td>管理员</td></tr><tr><td>看资料原文、OCR 结果</td><td>管理资料 → 资料库</td><td>管理员</td></tr><tr><td>整理知识的"类型"结构</td><td>管理资料 → 本体建模层</td><td>管理员</td></tr><tr><td>查看、修改每条知识</td><td>管理资料 → 知识台账</td><td>管理员</td></tr><tr><td>搜索知识、看关系图</td><td>使用知识 → 检索与图谱</td><td>所有角色（含只读）</td></tr><tr><td>向系统提问</td><td>使用知识 → 知识问答</td><td>所有角色（含只读）</td></tr><tr><td>看一个实体的关系网</td><td>使用知识 → 实体脑图</td><td>所有角色（含只读）</td></tr><tr><td>看处理进度、建索引、备份</td><td>运行与质量 → 构建与任务</td><td>管理员</td></tr><tr><td>测抽取质量</td><td>运行与质量 → 质量评测</td><td>管理员</td></tr><tr><td>建项目、管账号</td><td>管理 → 项目管理 / 人员管理</td><td>管理员</td></tr><tr><td>配置大模型</td><td>管理 → 模型管理</td><td>超级管理员</td></tr></tbody></table></div>
+<p>角色一共三档：<strong>超级管理员</strong>（系统之根，能配模型）、<strong>管理员</strong>（上传、建模、审核、管普通账号）、<strong>只读用户</strong>（只能检索、问答、看脑图，看不到管理类菜单）。</p>
+<p>资料变成知识的全过程（知道流程，出了问题才知道卡在哪一步）：</p>
+<pre><code data-language="text">上传文件/ZIP → 解析(文字/PDF/Word) → 图片OCR / 视频ASR → 切片(分段)
+→ 按所选模式抽取 → 候选(待审核) → 本体审核 + 事实确认 → 正式知识
+→ 建索引(Milvus) → 检索 / 问答 / 图谱</code></pre>
+<p>重要观念：<strong>"处理完成"≠"能搜到"</strong>。资料处理完只是第一步；项目第一次需要管理员<strong>显式构建索引</strong>后，语义/混合检索才可用。同理，"仅文档检索"模式只出文字不出实体，图谱里没有节点是正常的。</p>
+</section>
+<section class="doc-sec" id="sec-2"><h2 class="sec">1. 登录和第一次进入</h2>
+<figure><img loading="lazy" src="manual-current/2026-11-13-login.png" alt="登录页：输入用户名与口令，登录后进入工作台"><figcaption>登录页：输入用户名与口令，登录后进入工作台</figcaption></figure>
+<ol><li>浏览器打开 <code>http://127.0.0.1:8100/</code>，进入登录页"欢迎回来"。</li><li>输入用户名和口令。系统第一次部署时自动创建的初始账号是 <code>admin</code>，默认口令 <code>admin123</code>（启动日志会反复提醒你尽快修改）。</li><li>点"登录工作台"。登录成功后进入工作台，默认停在"检索与图谱"页。左侧是你的菜单，左上角是<strong>当前知识项目</strong>选择器。</li></ol>
+<p>登录后第一件事：改掉默认口令。管理员在「管理 → 人员管理」里可以修改任何账号的口令和角色。页面底部写着"还没有账号？请联系管理员开通"——本系统不开放自助注册。</p>
+<p>注意：口令错误会有明确提示；如果所有人都登不上，联系维护人员检查服务是否启动（见运维手册的"状态检查"）。</p>
+</section>
+<section class="doc-sec" id="sec-3"><h2 class="sec">2. 界面导览：每个区域是干什么的</h2>
+<figure><img loading="lazy" src="manual-current/2026-11-13-workspace-search.png" alt="检索与图谱（当前工作区）：左侧按用途分组的菜单，顶部是项目选择、筛选与检索栏"><figcaption>检索与图谱（当前工作区）：左侧按用途分组的菜单，顶部是项目选择、筛选与检索栏</figcaption></figure>
+<p>整个工作台分四块：</p>
+<ul><li>左侧菜单按用途分四组：<strong>使用知识</strong>（知识问答、检索与图谱、实体脑图）、<strong>管理资料</strong>（资料库、知识台账、本体建模层）、<strong>运行与质量</strong>（构建与任务、质量评测）、<strong>管理</strong>（项目管理、人员管理、模型管理）。只读用户只能看到"使用知识"组，管理类菜单不显示。</li><li>左上角"当前知识项目"下拉框：<strong>所有操作都在某个项目内进行</strong>，切换项目后页面数据跟着切换；标题右侧会提示"项目已切换"。</li><li>"筛选"按钮：给当前页设置范围（平台、业务、适用对象、业务时间等）。资料库和知识台账的筛选入口与操作按钮同排，知识问答的筛选入口位于页面标题栏。各页独立保存范围；切换页面后，在目标页检查并应用所需条件。</li><li>顶部标题下的状态条：操作的成功/失败提示都出现在这里，做完操作先看它。右上角徽章"双时态 · 项目本体 · 来源追踪"概括了系统的三个核心能力。</li></ul>
+</section>
+<section class="doc-sec" id="sec-4"><h2 class="sec">3. 新建一个项目</h2>
+<p>知识按项目隔离：不同业务线、不同资料集建议分项目存放。</p>
+<figure><img loading="lazy" src="manual-current/2026-11-13-projects.png" alt="项目管理（当前界面）：项目卡片，可创建、进入、改名与删除"><figcaption>项目管理（当前界面）：项目卡片，可创建、进入、改名与删除</figcaption></figure>
+<ol><li>进入「管理 → 项目管理」。</li><li>填写项目名称（必填）和说明（选填），点击创建。</li><li>回到任意页面，在左上角"当前知识项目"里选中新项目，之后所有上传、检索都在这个项目里。</li><li>项目卡片上可以看到项目概览和操作入口；重命名、删除也在项目卡片上操作。<strong>删除项目会连带删除它的知识，操作前想清楚。</strong></li></ol>
+<p>新项目是空的：还没有本体（知识类型的目录）。第一次建议用"开放发现"模式上传一小份资料，让系统先给你攒候选（见第 4、8、9 章）。</p>
+</section>
+<section class="doc-sec" id="sec-5"><h2 class="sec">4. 上传资料（核心操作，三步走）</h2>
+<p>入口：进入「管理资料 → 资料库」，点右上角「添加文件」。</p>
+<figure><img loading="lazy" src="manual-current/2026-11-13-upload-step1.png" alt="添加文件第 1 步「选择文件」（当前界面）：拖放上传区、支持格式与单文件 25 MB 提示"><figcaption>添加文件第 1 步「选择文件」（当前界面）：拖放上传区、支持格式与单文件 25 MB 提示</figcaption></figure>
+<p>上传页按三个编号区组织操作：<strong>01 选择文件 → 02 文件清单 → 03 处理选项</strong>。</p>
+<p><strong>01 选择文件。</strong> 把文件拖进上传区（写着"拖放文件到这里 / 或点击浏览本地文件"），或点击选择本地文件。页面会显示支持格式和"单文件 25 MB"的大小提示。可以<strong>分多次追加</strong>，最后统一提交；<strong>每个独立文件或一个 ZIP 对应一份资料</strong>。</p>
+<div class="table-scroll"><table><thead><tr><th scope="col">手里的资料</th><th scope="col">怎么传</th><th scope="col">系统会做什么</th></tr></thead><tbody><tr><td>TXT、Markdown</td><td>直接选文件</td><td>读取正文，生成切片</td></tr><tr><td>PDF</td><td>直接选文件</td><td>提取原生文字和表格；扫描页走 OCR；原件保留可下载</td></tr><tr><td>Word（.docx）</td><td>直接选文件</td><td>解析正文表格，内嵌图片自动取出做 OCR</td></tr><tr><td>HTML</td><td>直接选文件</td><td>解析网页文档</td></tr><tr><td>图片、长截图</td><td>直接选 <code>.png/.jpg/.jpeg/.webp</code></td><td>保留原图；正式处理时 OCR；长图自动分块识别，仍算一份资料</td></tr><tr><td>视频</td><td>直接选 <code>.mp4/.webm</code></td><td>保留原件供播放；正式处理时把语音转成文字（不做画面 OCR）</td></tr><tr><td>一份文档 + 图片/视频附件</td><td>打成一个 ZIP</td><td>建立一份资料，附件归属该资料</td></tr><tr><td>同一规则的多张连续截图</td><td>ZIP 清单里用 <code>pages</code> 指定顺序</td><td>建立一份按页排序的图片资料</td></tr></tbody></table></div>
+<p>在 01 区可以点「预览原文」核对正文、表格、图片和视频，点「预览切片」看文字分段。预览不跑 OCR/ASR，所以图片和视频这时还没有文字，属正常。</p>
+<p><strong>02 文件清单。</strong> 显示已选文件、数量和状态；失败的可以"重试失败"，也可以"清空"重选。发现少传了文件，回到 01 继续追加即可，已选队列保留。</p>
+<p><strong>03 处理选项。</strong> 填写自定义标题（单文件选填）、适用平台/业务/对象（每项可选"暂不确定 / 指定范围 / 全部适用"）、时间信息，并选择<strong>处理模式</strong>。随后点提交开始处理。</p>
+<p>三种处理模式怎么选：</p>
+<div class="table-scroll"><table><thead><tr><th scope="col">处理模式</th><th scope="col">什么时候选</th><th scope="col">出来什么</th></tr></thead><tbody><tr><td>仅文档检索</td><td>只想把资料存下来、能搜、能看</td><td>正文和切片，能检索；<strong>不产生实体关系</strong></td></tr><tr><td>开放发现</td><td>第一次梳理一类新资料，还不知道有什么类型</td><td>类型候选 + 事实候选，等你在第 8、9 章审核</td></tr><tr><td>使用项目本体</td><td>项目已有正式本体，按它继续抽取</td><td>按已发布类型抽取的实体和关系</td></tr></tbody></table></div>
+<p>大小限制速记（超了会被拒绝，页面提示为准）：单个文件或 ZIP ≤ 25 MB；单张图片 ≤ 10 MiB 且 ≤ 4000 万像素；一份资料的图片最多 200 张、共 100 MiB；一个批次最多 1000 份资料、1 GB；视频 ≤ 10 分钟且 ≤ 25 MB；GIF 等动画图要先导出成静态图。</p>
+</section>
+<section class="doc-sec" id="sec-6"><h2 class="sec">5. 看进度：处理批次和失败恢复</h2>
+<p>提交后到「运行与质量 → 构建与任务 → 后台任务」看每份资料的进度。</p>
+<figure><img loading="lazy" src="manual-current/2026-11-13-runtime-jobs.png" alt="后台任务（当前界面）：逐任务查看状态、阶段、日志，可取消、重试、重新排队"><figcaption>后台任务（当前界面）：逐任务查看状态、阶段、日志，可取消、重试、重新排队</figcaption></figure>
+<ol><li>逐份资料看状态：排队、解析、OCR/ASR、切片、抽取各阶段，完成、失败一目了然；日志默认折叠，展开后在卡片内滚动。</li><li>失败的资料点开看错误信息和失败在哪一步：认证/模型问题找管理员；文件损坏就修文件；OCR 识别质量差先核对原图清晰度。</li><li>恢复方式按需选：<strong>从断点继续</strong>（成功部分保留，只补后面的）、<strong>只重试失败切片</strong>、<strong>整份重新处理</strong>（模型或规则变过时用）。</li><li>任务可以取消、重试、重新排队；取消在检查点生效，已经写进去的知识不会丢。服务重启后，持久任务会按租约机制自动恢复领取。</li></ol>
+</section>
+<section class="doc-sec" id="sec-7"><h2 class="sec">6. 资料库：找到资料、搜索、重新处理</h2>
+<p>进入「管理资料 → 资料库」。左侧是资料列表，每条显示名称、处理状态、格式、字数与派生知识数量；点击一条，右侧打开详情抽屉。</p>
+<figure><img loading="lazy" src="manual-current/2026-11-13-source-detail.png" alt="资料库（当前界面）：左侧资料列表，右侧详情抽屉分「原文 / 提取知识 / 处理记录 / 修订记录」"><figcaption>资料库（当前界面）：左侧资料列表，右侧详情抽屉分「原文 / 提取知识 / 处理记录 / 修订记录」</figcaption></figure>
+<p>详情抽屉里看四块内容：<strong>原文</strong>（图文阅读）、<strong>提取知识</strong>（这份资料抽出了哪些事实）、<strong>处理记录</strong>（每一步的执行历史）、<strong>修订记录</strong>（这份资料本身的版本变化）。抽屉里还有<strong>「在原文中打开」</strong>（进入固定版本阅读器，见第 7 章）和<strong>「重新处理 / 构建图谱」</strong>。</p>
+<p><strong>在资料库里搜索：</strong></p>
+<ul><li>搜索方式两种：<strong>关键词</strong>（按字面匹配资料名称、原文件名和已保存正文，不需要任何模型）和<strong>向量正文</strong>（按语义找相关正文片段，适合用一句话描述来找；需要项目已建索引）。</li><li><strong>在结果中继续检索</strong>：搜完一次后可以继续叠加条件（每步都能分别选关键词或向量，最多八步），用来在同一份资料的不同位置逐步缩小范围；"退回上一步"撤销最后一个条件。</li><li>向量搜索依赖向量模型、Milvus 和项目索引；缺了会明确报错，不会偷偷换成关键词。没建索引先看第 14 章。</li></ul>
+<p><strong>重新处理（不用重新上传）：</strong></p>
+<figure><img loading="lazy" src="manual-current/2026-11-13-source-reprocess.png" alt="详情抽屉里的「重新处理 / 构建图谱」（当前界面）：选处理方式后创建处理任务"><figcaption>详情抽屉里的「重新处理 / 构建图谱」（当前界面）：选处理方式后创建处理任务</figcaption></figure>
+<p>资料详情里有「重新处理 / 构建图谱」。选一种方式后点「创建处理任务」，系统复用已上传的原始文件，生成新一次处理并保留历史。三种方式：</p>
+<div class="table-scroll"><table><thead><tr><th scope="col">方式</th><th scope="col">本次做什么</th></tr></thead><tbody><tr><td>仅文档检索</td><td>重新生成正文切片、更新检索，不抽实体关系</td></tr><tr><td>开放发现</td><td>产生候选，等审核（第 8、9 章）</td></tr><tr><td>使用项目本体</td><td>按已发布本体重新抽取并校验</td></tr></tbody></table></div>
+<p>注意：解析视图里的"重试 OCR"只更新那张图的识别结果；要让新文字进入检索或图谱，必须回到这里做<strong>整份重新处理</strong>。</p>
+</section>
+<section class="doc-sec" id="sec-8"><h2 class="sec">7. 阅读原文：固定版本、图文、解析视图</h2>
+<p>在资料详情点「在原文中打开」，进入<strong>固定版本原文阅读器</strong>。</p>
+<figure><img loading="lazy" src="manual-current/2026-11-13-source-reader.png" alt="固定版本原文阅读器（当前界面）：阅读视图 / 解析视图 / 原始视图三个页签"><figcaption>固定版本原文阅读器（当前界面）：阅读视图 / 解析视图 / 原始视图三个页签</figcaption></figure>
+<ul><li><strong>阅读视图</strong>：正文、表格、图片按原顺序展示；图片可放大、按宽阅读、看原始比例；视频直接播放。</li><li><strong>解析视图</strong>：看 OCR 文字框、置信度、长图分块进度、视频转写时间段；识别质量差可以在这里单项重试。</li><li><strong>原始视图</strong>：只读查看或下载固定版本原文件（原件、原 ZIP），下载内容与当初上传的完全一致。</li></ul>
+<p>不同资料类型的看点：</p>
+<ul><li>PDF：阅读器用本地渲染的分页图片显示原版页面，可上一页/下一页、输入页码；来源区域高亮；精细核对就下载原 PDF。不依赖浏览器 PDF 插件。</li><li>长图：点击 OCR 出来的文字，页面自动滚动到原图对应位置并高亮，方便逐条核对；分块失败时保留已识别部分，并提示覆盖不完整。</li><li>视频：播放原件；点击转写时间段跳到对应画面。只转语音，画面里的字幕不会被识别。</li></ul>
+<p>"已保存正文"是系统实际用于切片和检索的文字（含 OCR/ASR 补进去的内容），和原文件排版不完全一样，属正常。</p>
+</section>
+<section class="doc-sec" id="sec-9"><h2 class="sec">8. 从资料到知识：候选与审核</h2>
+<p>用"开放发现"或"使用项目本体"模式处理资料后，会得到<strong>候选</strong>。候选还不是正式知识，必须审核：</p>
+<ol><li><strong>结构候选</strong>（新类型、新关系）：在资料详情的"完善本体结构"抽屉或「本体建模层」里核对。可以先<strong>预演</strong>看影响（预演只读、不写库），确认没问题再"加入本轮修改"进草案；如果类型其实已经存在，选"仅复用正式术语"直接写事实，不必建草案。</li><li><strong>事实候选</strong>（某个实体有什么属性、谁和谁有什么关系）：在知识台账点「知识审核」逐条确认或驳回，通过后写入正式知识并记录来源。</li><li>审核通过的事实可以在"提取知识"和台账里看到，每条都带<strong>来源断言</strong>（来自哪份资料、哪个片段）。</li></ol>
+<p>观念：<strong>预演 ≠ 保存</strong>；"加入草案"也只是进了本轮修改，还要走第 9 章的审核发布，才成为正式结构。</p>
+</section>
+<section class="doc-sec" id="sec-10"><h2 class="sec">9. 本体建模层：定义知识的类型</h2>
+<p>"本体"就是知识的类型目录：有哪些实体类型（商户、平台、商品）、类型之间什么关系（商户入驻平台）、各有什么属性。进入「管理资料 → 本体建模层」。</p>
+<figure><img loading="lazy" src="manual-current/2026-11-13-ontology-model.png" alt="本体建模层（当前界面）：左侧候选待办与术语目录、中间画布、顶部版本与视图切换"><figcaption>本体建模层（当前界面）：左侧候选待办与术语目录、中间画布、顶部版本与视图切换</figcaption></figure>
+<p>当前这个项目已发布正式本体 v1，共 83 个术语。界面分三块：</p>
+<ul><li><strong>左侧</strong>：候选待办面板 + 本体目录（可按术语检索、筛选）；顶部可切换 类型卡片 / 继承层级 / 术语卡片 / 属性卡片 四种视图。</li><li><strong>中间画布</strong>：图形化展示类型之间的继承和关系，可拖动、缩放。</li><li><strong>右侧/检查器</strong>：编辑当前选中术语的名称、说明、父类、属性约束等。</li></ul>
+<p>常用按钮：<strong>新增定义</strong>（新建类型/关系/属性）、<strong>定义详情</strong>、<strong>发现父类</strong>（系统建议上下级）、<strong>版本历史</strong>。</p>
+<p><strong>新建一个类型：</strong> 点"新增定义" → 填名称（建议中文，系统会自动生成唯一标识 IRI）→ 选父类（可不选）→ 加属性和说明 → 保存。所有改动先进<strong>工作草案</strong>（顶部显示"草案变更 N"）。</p>
+<p><strong>发布：</strong> 草案攒齐一轮修改后，先"校验"（检查重名、循环、约束问题），再提交审核，逐项批准后<strong>发布</strong>成正式版本。发布后新知识才能按这套类型写入。版本管理里可以看到每次发布的记录；历史版本只读。</p>
+<p><strong>类型重复或不合适时：</strong></p>
+<div class="table-scroll"><table><thead><tr><th scope="col">情况</th><th scope="col">操作</th></tr></thead><tbody><tr><td>只是名称写得不好</td><td>编辑术语名称和说明再发布，实例身份不变</td></tr><tr><td>个别实体分错类型</td><td>在台账里编辑那条实体，产生新修订</td></tr><tr><td>两个类型其实是同一个</td><td>类型详情 → "合并到已有类型"：预览影响 → 加入草案 → 审核发布 → 发布后"受控重分类"把旧知识迁移过来</td></tr><tr><td>类型不再用</td><td>术语详情 → "停用这个术语"，可选替代术语；实体和历史保留不删</td></tr></tbody></table></div>
+<p>类型合并停的是类型，不等于把两个具体的人/物合并；实体级的合并看第 10 章。</p>
+</section>
+<section class="doc-sec" id="sec-11"><h2 class="sec">10. 知识台账：每一条知识在这里</h2>
+<p>进入「管理资料 → 知识台账」。</p>
+<figure><img loading="lazy" src="manual-current/2026-11-13-records.png" alt="知识台账（当前界面）：实体 / 关系 / 属性 / 原文片段 四视角，顶部有统计和维护入口"><figcaption>知识台账（当前界面）：实体 / 关系 / 属性 / 原文片段 四视角，顶部有统计和维护入口</figcaption></figure>
+<ul><li><strong>顶部四视角页签</strong>：实体、关系、属性、原文片段。每个视角按对应列展示（名称/本体类型/本体归属/知识修订/关联断言/操作等）。</li><li><strong>顶部统计</strong>：当前范围匹配的实体、关系、属性、原文片段数量（本示例：实体 86、关系 69、属性 0、原文片段 4）。</li><li><strong>点"刷新记录"</strong>重新查询；上方筛选可限定范围。</li><li><strong>点开一条记录</strong>：看它的属性、来源、版本历史；"编辑"修改后保存会生成<strong>新修订</strong>——系统不覆盖旧值，历史永远可查。</li><li><strong>软删除</strong>：给记录打删除标记（含它派生的知识），保留历史、可恢复，不是物理删除。</li></ul>
+<p><strong>维护入口</strong>（台账顶部）：<strong>新增实体 / 新增关系 / 新增属性</strong>、<strong>知识审核</strong>（处理待审事实）、<strong>检查本体归属</strong>（看哪些知识还挂在旧本体版本上）。</p>
+<p><strong>手动新增实体</strong>（不经上传抽取，直接写）：</p>
+<figure><img loading="lazy" src="manual-current/2026-11-13-create-entity.png" alt="新增实体弹窗（当前界面）：选本体类型、填名称与业务有效期，创建正式记录"><figcaption>新增实体弹窗（当前界面）：选本体类型、填名称与业务有效期，创建正式记录</figcaption></figure>
+<ol><li>点"新增实体" → 在弹窗里选<strong>本体类型</strong>（类型只取自当前已发布的可用类）→ 填实体名称、业务生效/失效时间（可留空）→ 需要时展开"更多：元数据与高级 JSON"。</li><li>点"创建正式记录"立即成为正式知识；若当前没有合适的类型，点"前往本体建模层"先去建类型。</li><li>新增关系同理：选关系类型 → 选两端实体 → 保存。手动新增同样走校验：类型必须是已发布的。</li></ol>
+<p><strong>实体消歧与融合</strong>（同一个商户被抽成两条记录时）：在台账的治理操作区输入名称"查重"，确认后填"保留实体 ID"和"待合并 ID"执行合并，可加别名；"看可撤销的操作"里可以撤销。合并的是两个实例的身份，和类型合并不是一回事。</p>
+</section>
+<section class="doc-sec" id="sec-12"><h2 class="sec">11. 检索与证据</h2>
+<p>进入「使用知识 → 检索与图谱」。</p>
+<figure><img loading="lazy" src="manual-current/2026-11-13-search-results.png" alt="检索（当前界面）：关键词&quot;平台&quot;检索，左侧匹配证据带统计与实体卡片，右侧交互图谱"><figcaption>检索（当前界面）：关键词"平台"检索，左侧匹配证据带统计与实体卡片，右侧交互图谱</figcaption></figure>
+<ol><li>输入关键词或问题，选检索方式：<strong>关键词</strong>（精确匹配）、<strong>语义向量</strong>（按意思找）、<strong>混合检索</strong>（两者结合，默认）。</li><li>结果出现在"匹配证据"面板：先给统计（例如"19 条候选 · 14 条命中 · 995ms"），再按范围分组，然后逐条列出命中的实体/关系，带类型、关键词分、平台、生效时间等信息。</li><li><strong>本体扩展</strong>开关：打开后，搜实体名会顺带召回它所属类型的相关内容（比如搜"某商户"也带出"入驻平台"的规则），只是多召回，不改变范围。</li><li>点结果里的来源，可以直接跳到原文对应位置核验。</li><li>语义/混合检索需要项目索引就绪；没建过索引（状态条提示"项目向量索引不可用: requires_rebuild"），管理员在"检索设置"里点<strong>构建语义索引</strong>（只需首次，之后自动增量同步）。</li></ol>
+</section>
+<section class="doc-sec" id="sec-13"><h2 class="sec">12. 图谱和实体脑图</h2>
+<p><strong>交互图谱</strong>（检索与图谱页右侧）：选一个实体，设"扩展跳数"，点"展开所选节点"画局部关系图；图谱设置里可以限定只看某些实体类型/关系类型、开关标签显示。拖动、滚轮缩放、双击空白适应画布；点节点或连线在右侧详情栏看来源、版本、有效期。</p>
+<p><strong>全量大图</strong>：项目知识多时切换全图，系统<strong>渐进加载</strong>（先显示一部分，可暂停/继续），避免一次画完卡死。</p>
+<figure><img loading="lazy" src="manual-current/2026-11-13-full-graph.png" alt="全量大图（当前界面）：整个项目的实体与关系网络"><figcaption>全量大图（当前界面）：整个项目的实体与关系网络</figcaption></figure>
+<p><strong>实体脑图</strong>（「使用知识 → 实体脑图」）：选一个"根实体"，设展开深度（0–5），生成以它为中心的关系脑图。</p>
+<figure><img loading="lazy" src="manual-current/2026-11-13-mindmap.png" alt="实体脑图（当前界面）：以根实体为中心逐层展开的关系结构"><figcaption>实体脑图（当前界面）：以根实体为中心逐层展开的关系结构</figcaption></figure>
+<p>可以搜索本图节点、用小地图定位、<strong>追踪两个节点之间的关系路径</strong>、导出 SVG/PNG。适合做汇报材料。</p>
+</section>
+<section class="doc-sec" id="sec-14"><h2 class="sec">13. 知识问答</h2>
+<p>进入「使用知识 → 知识问答」。</p>
+<figure><img loading="lazy" src="manual-current/2026-11-13-qa.png" alt="知识问答（当前界面）：左侧会话记录，主区域提问并显示回答与证据引用"><figcaption>知识问答（当前界面）：左侧会话记录，主区域提问并显示回答与证据引用</figcaption></figure>
+<ol><li>左侧"会话记录"：可以新建会话、搜索会话；会话仅自己可见、跨设备同步；也可以导入本机旧记录。</li><li>直接输入问题提问。回答会附带<strong>证据引用</strong>：引用了哪些知识条目和原文片段。</li><li><strong>核验答案</strong>：点开引用，看原文出处、时间范围。系统只在有有效依据时作答，依据不足会明确说"无法回答"，不会编。</li><li>在知识问答页面标题栏点"筛选"，设置并应用本页范围，下一题只在这个范围里找依据。问答与资料库、检索、台账各自保存筛选；切换页面不会自动带入其他页的条件。已有回答保留生成时的范围。</li><li>生成回答需要已配置大模型（见第 16 章和运维手册）；检索本身不依赖大模型。</li></ol>
+</section>
+<section class="doc-sec" id="sec-15"><h2 class="sec">14. 构建与任务、质量评测</h2>
+<p><strong>构建与任务</strong>（运行与质量）：</p>
+<figure><img loading="lazy" src="manual-current/2026-11-13-runtime-overview.png" alt="构建与任务（当前界面）：项目概览展示已解析文档、实体、关系、原文片段统计"><figcaption>构建与任务（当前界面）：项目概览展示已解析文档、实体、关系、原文片段统计</figcaption></figure>
+<ul><li><strong>项目概览</strong>：已解析文档、实体、关系、原文片段统计卡片，以及实体类型、关系类型列表，一眼看清项目规模。</li><li><strong>后台任务</strong>：所有批处理任务（解析、抽取、索引、同步）的状态、日志（第 5 章）；可取消/重试/重新排队。</li><li><strong>知识备份</strong>：见第 15 章。</li></ul>
+<p><strong>质量评测</strong>（运行与质量）：</p>
+<figure><img loading="lazy" src="manual-current/2026-11-13-quality.png" alt="质量评测（当前界面）：知识备份与抽取质量评测"><figcaption>质量评测（当前界面）：知识备份与抽取质量评测</figcaption></figure>
+<ul><li><strong>抽取质量评测</strong>：准备一份"标准答案" JSON（实体名列表 + 关系三元组），执行后得到 precision / recall / F1 和漏项清单，用来量化抽取质量。只读操作，不改数据。</li><li>想深入研究"图关系、本体辅助有没有用"，用"检索与问答消融"做对照实验（高级用法，按界面提示配置固定题集即可）。</li></ul>
+</section>
+<section class="doc-sec" id="sec-16"><h2 class="sec">15. 备份与导出</h2>
+<p>在「构建与任务 → 知识备份」或项目设置里：</p>
+<figure><img loading="lazy" src="manual-current/2026-11-13-knowledge-backup.png" alt="知识备份（当前界面）：保存快照、刷新、导出项目 JSON"><figcaption>知识备份（当前界面）：保存快照、刷新、导出项目 JSON</figcaption></figure>
+<ol><li>填名称，点<strong>保存快照</strong>：保存当前项目的全部知识记录。</li><li><strong>恢复</strong>：选一个快照确认恢复；系统会先自动建一份"恢复前自动备份"，再把快照内容恢复成<strong>新的修订</strong>，历史不丢。</li><li><strong>导出项目 JSON</strong>：把项目知识导出成文件离线留存。导出内容以实际清单为准，不包含所有原始文件和运行配置。</li></ol>
+<p>注意：快照只保知识记录，<strong>不包含</strong>原始文件、向量索引和 Docker 数据卷；完整备份要按运维手册第 9 章做。</p>
+</section>
+<section class="doc-sec" id="sec-17"><h2 class="sec">16. 人员管理和模型管理</h2>
+<p><strong>人员管理</strong>（管理 → 人员管理）：</p>
+<figure><img loading="lazy" src="manual-current/2026-11-13-user-admin.png" alt="人员管理（当前界面）：账号、名称、角色与状态，右上角&quot;添加人员&quot;"><figcaption>人员管理（当前界面）：账号、名称、角色与状态，右上角"添加人员"</figcaption></figure>
+<ul><li>创建账号、设置角色（超级管理员/管理员/只读用户）、停用账号、重置口令；可以搜索人员、按状态筛选。</li><li>每个账号显示名称（如"系统管理员"）、角色（如"只读用户"）、状态（启用）；当前账号有"当前账号"标记。</li><li>离职或调岗：把账号停用即可，不要删除，历史操作记录需要保留操作人。</li></ul>
+<p><strong>模型管理</strong>（管理 → 模型管理，仅超级管理员可见）：</p>
+<figure><img loading="lazy" src="manual-current/2026-11-13-llm-models.png" alt="模型管理（当前界面）：保存 OpenAI 兼容模型配置，可新增、测试连接、设为默认"><figcaption>模型管理（当前界面）：保存 OpenAI 兼容模型配置，可新增、测试连接、设为默认</figcaption></figure>
+<ol><li>点"新增模型"，填配置名称、Base URL、模型名、API key（OpenAI 兼容接口），保存。</li><li>点<strong>测试连接</strong>确认能通，再点<strong>设为默认</strong>。平台的抽取、问答、本体建议都会用当前默认模型。</li><li>切换默认后，<strong>新开始</strong>的任务用新模型；正在运行的任务继续用启动时的配置，不会中途串。</li><li>没在这里配模型时，系统沿用服务器 <code>.env</code> 里的 LLM 配置。</li></ol>
+</section>
+<section class="doc-sec" id="sec-18"><h2 class="sec">17. 常见问题速查</h2>
+<div class="table-scroll"><table><thead><tr><th scope="col">现象</th><th scope="col">原因</th><th scope="col">怎么办</th></tr></thead><tbody><tr><td>登录不上</td><td>服务没启动 / 账号口令错</td><td>看运维手册状态检查；找管理员核对口令</td></tr><tr><td>上传被拒：ZIP 必须只包含一份资料</td><td>包里有多份正文或旧格式清单</td><td>按上传手册第 2、5 节拆包重传</td></tr><tr><td>图片被拒</td><td>超 10 MiB / 4000 万像素，或是 GIF 动图</td><td>导出静态图、压缩后再传</td></tr><tr><td>处理完了，图谱没节点</td><td>选了"仅文档检索"</td><td>正常；在资料详情用"重新处理/构建图谱"选开放发现或使用项目本体</td></tr><tr><td>状态条提示"项目向量索引不可用: requires_rebuild"</td><td>数据库升级或索引与知识水位不一致，需要重新向量化</td><td>管理员在检索页"构建语义索引"；等状态条消失后再查</td></tr><tr><td>语义/混合检索报错或没结果</td><td>项目没建索引 / 模型或 Milvus 不可用</td><td>先"构建语义索引"；仍失败看运维手册排错</td></tr><tr><td>向量搜索资料库里没有某份资料</td><td>该资料未索引或还没有可检索文字</td><td>确认处理完成、索引就绪；图片/视频要正式处理后才出文字</td></tr><tr><td>问答说无法回答</td><td>范围里没有有效依据</td><td>核对筛选范围、时间；这是如实作答，不是故障</td></tr><tr><td>编辑保存时提示冲突（409）</td><td>别人（或你另开的窗口）先改了</td><td>刷新看最新版本，重新编辑后保存</td></tr><tr><td>视频能放但没有转写</td><td>ASR 模型/FFmpeg 未就绪或视频无语音</td><td>看运维手册模型准备章节</td></tr><tr><td>长图显示"部分完成"</td><td>有分块 OCR 失败</td><td>在解析视图重试；补全后整份重新处理</td></tr><tr><td>找不到某条知识</td><td>筛选范围、时间点、候选未审核</td><td>先清筛选再查；候选要先通过审核</td></tr><tr><td>想撤销刚才的合并/操作</td><td>融合支持撤销</td><td>台账"看可撤销的操作"里执行</td></tr></tbody></table></div>
+</section>
+<section class="doc-sec" id="sec-19"><h2 class="sec">18. 术语小词典</h2>
+<div class="table-scroll"><table><thead><tr><th scope="col">词</th><th scope="col">白话解释</th></tr></thead><tbody><tr><td>资料（来源）</td><td>你上传的一份文件或 ZIP；系统给它固定版本，原文永远可追溯</td></tr><tr><td>切片</td><td>正文按规则切成的分段，检索的最小单位</td></tr><tr><td>候选</td><td>系统抽取出来、等你审核的结果；审核通过前不算正式知识</td></tr><tr><td>本体</td><td>知识的类型目录：类型、关系、属性的定义集</td></tr><tr><td>术语 / IRI</td><td>一个类型在系统里的正式名称和唯一编号</td></tr><tr><td>草案</td><td>一轮本体修改的草稿，审核发布后才生效</td></tr><tr><td>事实 / 断言</td><td>一条正式知识（某实体的属性或两个实体的关系）及其来源声明</td></tr><tr><td>修订（rN）</td><td>一条记录的第 N 个版本；系统从不覆盖历史</td></tr><tr><td>软删除</td><td>打删除标记、保留历史、可恢复</td></tr><tr><td>Metadata</td><td>资料上的业务标签（平台、业务、适用对象等），用于筛选</td></tr><tr><td>业务时间 / 系统历史</td><td>业务时间 = 规则本身的有效期；系统历史 = 记录何时写入</td></tr><tr><td>索引（Milvus）</td><td>支撑语义检索的向量库；项目首次需显式构建</td></tr><tr><td>快照</td><td>项目知识在某一刻的备份，恢复时生成新修订</td></tr></tbody></table></div>
+<p>&gt; AI生成</p>
+</section>
+</main>
+<script>
+(function(){
+ var q=document.getElementById('m-search'),status=document.getElementById('m-status');
+ var secs=[].slice.call(document.querySelectorAll('section.doc-sec'));
+ var tocs=[].slice.call(document.querySelectorAll('nav.toc a'));
+ function txt(e){return e.textContent||e.innerText||''}
+ function filter(){
+  var v=(q.value||'').trim().toLowerCase();
+  var hit=0;
+  secs.forEach(function(s,idx){
+   var match=!v||txt(s).toLowerCase().indexOf(v)>=0;
+   s.hidden=!match;if(match)hit++;
+   if(tocs[idx])tocs[idx].hidden=!match;
+  });
+  status.textContent=v?('命中 '+hit+' 个章节'):'输入关键词过滤章节，支持正文搜索';
+ }
+ q.addEventListener('input',filter);
+ document.addEventListener('keydown',function(e){if(e.key==='/'&&document.activeElement!==q){e.preventDefault();q.focus()}});
+ var io=new IntersectionObserver(function(entries){
+  entries.forEach(function(en){ if(en.isIntersecting){
+   tocs.forEach(function(a){a.classList.remove('active')});
+   var a=document.querySelector('nav.toc a[href="#'+en.target.id+'"]');
+   if(a){a.classList.add('active')}
+  }});
+ },{rootMargin:'-15% 0px -70% 0px'});
+ secs.forEach(function(s){io.observe(s)});
+ var top=document.createElement('button');top.className='to-top';top.textContent='回到顶部';
+ top.onclick=function(){window.scrollTo({top:0,behavior:'smooth'})};document.body.appendChild(top);
+})();
+</script>
+</body></html>

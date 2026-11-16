@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>服务启动及运维手册</title><style>
+:root{--ink:#1c2833;--sub:#5b6b7a;--line:#dce6f2;--accent:#2f6fb3;--accent-soft:#eef5fc;--bg:#ffffff}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;font:15px/1.75 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:var(--bg)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code{background:#f2f6fb;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-family:Consolas,"Courier New",monospace;font-size:.92em}
+pre{background:#f7fafd;border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto}
+pre code{background:none;border:none;padding:0;font-size:.88em;line-height:1.6}
+.sidebar{position:fixed;top:0;bottom:0;left:0;width:272px;border-right:1px solid var(--line);background:#fbfdff;padding:20px 18px;overflow:auto}
+.brand small{display:block;color:var(--sub);letter-spacing:.12em;font-size:10px}
+.brand strong{font-size:19px;color:var(--accent)}
+.brand p{margin:4px 0 14px;color:var(--sub);font-size:12px}
+.search input{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;background:#fff}
+.search .hint{color:var(--sub);font-size:11px;margin:6px 0 12px}
+nav.toc a{display:block;padding:6px 10px;border-radius:7px;color:#33475b;font-size:13.5px;margin-bottom:2px}
+nav.toc a:hover{background:var(--accent-soft);text-decoration:none}
+nav.toc a.active{background:var(--accent-soft);color:var(--accent);font-weight:600}
+nav.toc a[hidden]{display:none}
+main{margin-left:272px;padding:38px 46px 90px;max-width:940px}
+.cover h1{font-size:34px;line-height:1.25;margin:6px 0 4px}
+.cover .lead{color:var(--sub);border-bottom:1px solid var(--line);padding-bottom:22px}
+section.doc-sec{margin:38px 0;padding-bottom:10px}
+section.doc-sec[hidden]{display:none}
+h2.sec{font-size:22px;color:#17324e;border-left:5px solid var(--accent);padding-left:12px;margin:0 0 14px}
+h3{font-size:17px;color:#25476b;margin:22px 0 8px}
+figure{margin:18px 0}
+figure img{max-width:100%;border:1px solid var(--line);border-radius:10px;box-shadow:0 2px 10px rgba(31,78,121,.08)}
+figure figcaption{color:var(--sub);font-size:12.5px;margin-top:6px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:var(--accent-soft);color:#22415f;font-weight:600}
+tbody tr:nth-child(even){background:#fafcff}
+.table-scroll{overflow-x:auto}
+ul,ol{padding-left:24px}li{margin:4px 0}
+.tip{background:var(--accent-soft);border:1px solid #cfe3f6;border-radius:10px;padding:12px 16px;margin:14px 0}
+.to-top{position:fixed;right:26px;bottom:26px;background:var(--accent);color:#fff;border:none;border-radius:999px;padding:10px 14px;font-size:13px;cursor:pointer;box-shadow:0 4px 14px rgba(31,78,121,.28)}
+@media print{.sidebar,.to-top{display:none}main{margin:0;padding:0}figure img{box-shadow:none}section.doc-sec{page-break-inside:avoid}}
+@media (max-width:960px){.sidebar{position:static;width:auto;border-right:none;border-bottom:1px solid var(--line)}main{margin-left:0;padding:24px}}
+</style></head>
+<body>
+<aside class="sidebar">
+ <div class="brand"><small>KNOWLEDGE SERVICE MANUAL</small><strong>服务启动及运维手册</strong><p>图文操作说明 · 可离线阅读与打印</p></div>
+ <div class="search"><input id="m-search" type="search" placeholder="搜索章节，例如：上传 / 索引 / 备份" autocomplete="off"><p class="hint" id="m-status">输入关键词过滤章节，支持正文搜索</p></div>
+ <nav class="toc" aria-label="目录"><a href="#sec-1">1. 系统架构总览</a>
+<a href="#sec-2">2. 环境要求</a>
+<a href="#sec-3">3. 首次部署（从零到能登录）</a>
+<a href="#sec-4">4. 日常启动与停止</a>
+<a href="#sec-5">5. 状态检查与日志</a>
+<a href="#sec-6">6. 配置速查（.env）</a>
+<a href="#sec-7">7. 本地模型准备</a>
+<a href="#sec-8">8. 数据存储与数据卷</a>
+<a href="#sec-9">9. 备份与恢复</a>
+<a href="#sec-10">10. 升级与变更流程</a>
+<a href="#sec-11">11. 故障排查速查</a>
+<a href="#sec-12">12. 安全清单</a>
+<a href="#sec-13">13. 运维脚本索引</a>
+<a href="#sec-14">14. 地址与端口速查</a></nav>
+</aside>
+<main>
+<header class="cover"><h1>服务启动及运维手册</h1><div class="lead"><p>适用版本：2026-11-13。本手册面向<strong>负责部署、启动、维护这套系统的人</strong>；日常界面怎么用见<a href="知识平台操作手册.md">知识平台操作手册</a>。所有命令默认在仓库根目录 <code>knowledge_service/</code> 下执行。</p></div></header>
+<section class="doc-sec" id="sec-1"><h2 class="sec">1. 系统架构总览</h2>
+<p>系统 = 一个 Python 应用（FastAPI）+ 一组 Docker 基础设施。<strong>PostgreSQL 是唯一权威数据库</strong>，没有 SQLite 回退；Milvus 只做检索投影，Neo4j 是可选副本。</p>
+<div class="table-scroll"><table><thead><tr><th scope="col">组件</th><th scope="col">容器名</th><th scope="col">地址（默认只绑本机）</th><th scope="col">职责</th></tr></thead><tbody><tr><td>应用服务</td><td>—（宿主机进程）</td><td><code>http://127.0.0.1:8100</code></td><td>界面、API、任务编排</td></tr><tr><td>PostgreSQL</td><td>knowledge-postgres</td><td>127.0.0.1:5432</td><td>记录、修订、本体、断言、来源、任务、审计</td></tr><tr><td>Milvus</td><td>milvus-standalone</td><td>127.0.0.1:19530（gRPC）/ 9091（指标）</td><td>向量检索投影，共享 collection <code>knowledge_vectors</code>，按项目与构建代际隔离</td></tr><tr><td>etcd</td><td>milvus-etcd</td><td>127.0.0.1:2379</td><td>Milvus 元数据</td></tr><tr><td>MinIO</td><td>milvus-minio</td><td>127.0.0.1:9000 / 9001（控制台）</td><td>Milvus 内部文件 + 业务原件/图片/视频（分 bucket）</td></tr><tr><td>Attu</td><td>attu</td><td>127.0.0.1:30001</td><td>Milvus 可视化管理台（无状态）</td></tr><tr><td>Neo4j（可选）</td><td>—</td><td>neo4j://127.0.0.1:7687</td><td>图谱只读副本，不影响权威数据</td></tr></tbody></table></div>
+<p>数据流一句话：文件进来 → 解析/OCR/ASR → 切片 → 抽取 → 审核后写入 PostgreSQL → 同步投影到 Milvus（检索）和 Neo4j（可选图副本）。</p>
+</section>
+<section class="doc-sec" id="sec-2"><h2 class="sec">2. 环境要求</h2>
+<div class="table-scroll"><table><thead><tr><th scope="col">项目</th><th scope="col">要求</th></tr></thead><tbody><tr><td>操作系统</td><td>Windows 10/11（PowerShell）或 Linux；当前部署在 Windows</td></tr><tr><td>Python</td><td>3.12，使用既有 conda 环境 <code>llm_model</code>，<strong>不要另建 .venv</strong></td></tr><tr><td>Docker</td><td>Docker Desktop，可运行 <code>docker compose</code></td></tr><tr><td>磁盘</td><td>数据库、向量、原件都随使用增长；模型另需数 GB（BGE-M3 约 2 GB、OCR 数百 MB、ASR 约 1 GB、Docling 数 GB）</td></tr><tr><td>FFmpeg</td><td>启用视频转写时，<code>ffmpeg</code> / <code>ffprobe</code> 必须在 PATH</td></tr><tr><td>网络</td><td>LLM 走 OpenAI 兼容接口需要出网；本地模型全部离线运行</td></tr></tbody></table></div>
+</section>
+<section class="doc-sec" id="sec-3"><h2 class="sec">3. 首次部署（从零到能登录）</h2>
+<p>按顺序执行，每步做完再做下一步：</p>
+<pre><code data-language="powershell"># 0. 进入仓库根目录
+cd D:\workspace\knowledge_service_v2\knowledge_service
+conda activate llm_model
+
+# 1. 准备配置：复制样例并按本机情况修改
+copy .env.example .env
+
+# 2. 新环境安装依赖（已有环境跳过）
+python -m pip install -e &quot;.[local-export,milvus,neo4j,ocr,asr,semantica-runtime,test]&quot;
+
+# 3. 启动基础设施（PostgreSQL/Milvus/etcd/MinIO/Attu）并等待健康检查
+docker compose up -d --wait
+
+# 4. 初始化/升级数据库结构（使用独立迁移凭据，应用账号不做 DDL）
+python -m knowledge_service.repository.migrate
+
+# 5. 放好本地 BGE-M3 后，首次或更换权重时准备 ONNX 制品（只做一次）
+python scripts/prepare_embedding_runtime.py --model-dir data/model/embedding/bge-m3
+
+# 6. 启动应用
+python -u -m knowledge_service --port 8100
+#    或：powershell -File scripts/start-service.ps1 -Port 8100</code></pre>
+<p>部署后核对三件事：</p>
+<ol><li>浏览器打开 <code>http://127.0.0.1:8100/</code> 能看到登录页；API 文档在 <code>/docs</code>。</li><li>就绪探针 <code>http://127.0.0.1:8100/readyz</code> 返回 200（本地 embedding 启动时后台预热，就绪前语义检索会明确提示初始化中；<strong>不要只看进程活着</strong>）。</li><li>用初始账号登录：<code>admin</code> / <code>admin123</code>（首次启动库为空时自动播种超级管理员，可用 <code>KG_SEED_ADMIN_USERNAME</code> / <code>KG_SEED_ADMIN_PASSWORD</code> 覆盖），<strong>登录后立即在「人员管理」改掉默认口令</strong>——默认口令还在用时每次启动日志都会告警。</li></ol>
+</section>
+<section class="doc-sec" id="sec-4"><h2 class="sec">4. 日常启动与停止</h2>
+<div class="table-scroll"><table><thead><tr><th scope="col">要做什么</th><th scope="col">命令</th></tr></thead><tbody><tr><td>启动基础设施</td><td><code>docker compose up -d --wait</code></td></tr><tr><td>启动应用</td><td><code>python -u -m knowledge_service --port 8100</code>（或 <code>scripts/start-service.ps1</code>）</td></tr><tr><td>停止应用</td><td>在应用窗口 Ctrl+C（持久任务会由租约机制在重启后恢复领取）</td></tr><tr><td>停止基础设施</td><td><code>docker compose down</code>（<strong>不带 <code>-v</code></strong>；<code>-v</code> 会删除数据卷，等于清库）</td></tr><tr><td>只重启某个容器</td><td><code>docker compose restart milvus</code>（或 postgres / etcd / minio / attu）</td></tr></tbody></table></div>
+<p>重启后注意三点：任务按租约自动恢复，不代表中间输出都已提交；embedding 重新预热，等 <code>/readyz</code>；改了后端代码必须重启服务，只刷新页面无效。</p>
+</section>
+<section class="doc-sec" id="sec-5"><h2 class="sec">5. 状态检查与日志</h2>
+<div class="table-scroll"><table><thead><tr><th scope="col">检查</th><th scope="col">入口</th><th scope="col">说明</th></tr></thead><tbody><tr><td>应用是否活着</td><td><code>curl http://127.0.0.1:8100/livez</code></td><td>进程存活</td></tr><tr><td>应用是否就绪</td><td><code>curl http://127.0.0.1:8100/readyz</code></td><td>数据库、模型、依赖全部可用才是 200，<strong>部署探针用它</strong></td></tr><tr><td>匿名健康</td><td><code>curl http://127.0.0.1:8100/api/health</code></td><td>不需要登录</td></tr><tr><td>容器状态</td><td><code>docker compose ps</code></td><td>五个容器都应为 running/healthy</td></tr><tr><td>容器日志</td><td><code>docker compose logs -f milvus</code></td><td>postgres / etcd / minio / attu 同理</td></tr><tr><td>应用日志</td><td>启动终端</td><td>终端按 <code>KG_LOG_LEVEL</code>（默认 INFO），文件日志恒为 DEBUG</td></tr><tr><td>慢查询定位</td><td><code>KG_SLOW_MS=200</code></td><td>只打印慢于该毫秒数的读路径阶段</td></tr></tbody></table></div>
+<figure><img loading="lazy" src="manual-redesign/2026-10-19-runtime.png" alt="构建与任务页：概览、后台任务与索引状态（运维核对的业务侧入口）"><figcaption>构建与任务页：概览、后台任务与索引状态（运维核对的业务侧入口）</figcaption></figure>
+<p>健康检查通过<strong>不等于</strong>功能验收通过；上传、检索、问答要按操作手册各章的实际回执核对。</p>
+</section>
+<section class="doc-sec" id="sec-6"><h2 class="sec">6. 配置速查（.env）</h2>
+<p>完整清单见 <code>.env.example</code>（复制为 <code>.env</code> 后填写；<strong>凭据不要提交到 Git</strong>）。常用分组：</p>
+<div class="table-scroll"><table><thead><tr><th scope="col">分组</th><th scope="col">关键配置</th><th scope="col">说明</th></tr></thead><tbody><tr><td>数据库</td><td><code>POSTGRES_DB / POSTGRES_APP_USER / POSTGRES_APP_PASSWORD</code>；<code>KG_DATABASE_URL</code></td><td>应用用最小权限账号连接；<code>KG_MIGRATION_DATABASE_URL</code> 仅供迁移器建表用</td></tr><tr><td>认证</td><td><code>KG_JWT_SECRET</code>、<code>KG_JWT_TTL_SECONDS</code>（默认 12 小时）</td><td><strong>生产必填固定 JWT 密钥</strong>：留空则每次重启所有人都得重新登录</td></tr><tr><td>初始账号</td><td><code>KG_SEED_ADMIN_USERNAME / KG_SEED_ADMIN_PASSWORD</code></td><td>空库首次启动播种超级管理员；默认 admin/admin123</td></tr><tr><td>LLM</td><td><code>KG_LLM_BASE_URL / KG_LLM_MODEL / KG_LLM_API_KEY</code>、<code>KG_LLM_PROXY</code></td><td>OpenAI 兼容接口；代理留空=直连（应用不继承系统代理）</td></tr><tr><td>LLM 加密</td><td><code>KG_LLM_ENCRYPTION_KEY</code> 或 <code>KG_LLM_KEY_FILE</code></td><td>加密模型管理里保存的密钥；留空则首次生成 <code>data/runtime/llm.key</code>，<strong>必须与数据库一起备份，多实例共用同一密钥</strong></td></tr><tr><td>向量编码</td><td><code>KG_EMBEDDING_BACKEND=local</code>、<code>KG_EMBEDDING_PATH=data/model/embedding/bge-m3</code>、<code>KG_LOCAL_EMBEDDING_RUNTIME=auto</code></td><td><code>auto</code> 优先用已验证的 ONNX 制品；<code>onnx</code> 强制；<code>sentence-transformers</code> 回退原运行时</td></tr><tr><td>Milvus</td><td><code>KG_VECTOR_BACKEND=milvus</code>、<code>KG_MILVUS_HOST/PORT</code>、<code>KG_MILVUS_DIM</code></td><td>维度以编码器声明为准，<code>KG_MILVUS_DIM</code> 只做旧配置校验</td></tr><tr><td>文档解析</td><td><code>KG_DOCUMENT_OCR_MODE=auto</code>、<code>KG_DOCUMENT_ARTIFACTS_PATH</code></td><td>PDF 需要 Docling 本地模型；<code>disabled</code> 关闭 PDF OCR</td></tr><tr><td>图片 OCR</td><td><code>KG_IMAGE_OCR_BACKEND=rapidocr</code>、<code>KG_IMAGE_OCR_MODEL_ROOT</code> 等</td><td>质量阈值 <code>KG_IMAGE_OCR_MIN_CONFIDENCE</code> 等参与复核指纹</td></tr><tr><td>视频 ASR</td><td><code>KG_VIDEO_ASR_MODEL_ROOT / KG_VIDEO_ASR_VAD_ROOT</code>、<code>KG_VIDEO_ASR_MAX_DURATION_SECONDS=600</code></td><td>需 <code>asr</code> extra 和 FFmpeg；Worker 禁网、单任务独立进程</td></tr><tr><td>来源存储</td><td><code>KG_SOURCE_OBJECT_BACKEND=local</code>（默认）或 <code>s3</code> + <code>KG_SOURCE_S3_*</code></td><td>S3 用独立业务 bucket <code>knowledge-sources</code>，不复用 Milvus 的 bucket</td></tr><tr><td>批量限额</td><td><code>KNOWLEDGE_INGEST_MAX_ITEMS=1000</code>、<code>KNOWLEDGE_INGEST_MAX_FILE_BYTES=25000000</code>、并发项</td><td>页面从 <code>/api/ingest/capabilities</code> 读取</td></tr><tr><td>日志</td><td><code>KG_LOG_LEVEL</code>、<code>KG_SLOW_MS</code></td><td>见第 5 章</td></tr><tr><td>Neo4j（可选）</td><td><code>KG_NEO4J_URI / USERNAME / PASSWORD / DATABASE</code></td><td>只读投影，按项目手动同步</td></tr></tbody></table></div>
+<p>测试专用：测试套件使用隔离库 <code>knowledge_test</code>，并自动设置 <code>KG_SKIP_DOTENV=1</code>；生产<strong>绝不</strong>设置 <code>KG_AUTH_DISABLED</code>（会关闭全部接口认证）。</p>
+</section>
+<section class="doc-sec" id="sec-7"><h2 class="sec">7. 本地模型准备</h2>
+<p>模型不随 Git 提交，迁机器必须单独复制整个目录（不能只拷权重文件，词表和配置要一起）。</p>
+<div class="table-scroll"><table><thead><tr><th scope="col">模型</th><th scope="col">目录</th><th scope="col">准备方式</th></tr></thead><tbody><tr><td>向量编码 BGE-M3</td><td><code>data/model/embedding/bge-m3</code></td><td>放好原模型后运行一次 <code>python scripts/prepare_embedding_runtime.py --model-dir data/model/embedding/bge-m3</code>（校验分词/向量对照后原子启用 ONNX，保留原权重）</td></tr><tr><td>图片 OCR（RapidOCR）</td><td><code>data/model/ocr/pp-ocr-v6-small</code></td><td><code>python scripts/install_ocr_models.py</code>；布局整理 <code>prepare_model_layout.py</code></td></tr><tr><td>PDF 解析（Docling）</td><td><code>data/model/document-parser/docling</code></td><td><code>python scripts/prepare_document_models.py</code>，部署后用 <code>--check</code> 校验；缺失时 PDF 明确返回 <code>model_unavailable</code>，DOCX/TXT 不受影响</td></tr><tr><td>视频语音（FunASR）</td><td><code>data/model/asr/SenseVoiceSmall</code> 与 <code>data/model/asr/speech_fsmn_vad_zh-cn-16k-common-pytorch</code></td><td>完整复制两个模型目录（Apache-2.0，保留许可文件）；确保 FFmpeg 在 PATH；改路径后重启，并先看 <code>/api/ingest/capabilities</code> 的 <code>asr_available</code>，再传一段真实视频验证</td></tr></tbody></table></div>
+<p>LLM 不需要本地模型：超级管理员在「管理 → 模型管理」新增 OpenAI 兼容配置 → <strong>测试连接</strong> → <strong>设为默认</strong>即可；未启用平台模型时回退 <code>.env</code> 的 <code>KG_LLM_*</code>。切换默认模型只影响新任务，运行中任务沿用启动时配置。</p>
+</section>
+<section class="doc-sec" id="sec-8"><h2 class="sec">8. 数据存储与数据卷</h2>
+<p>Docker 运行数据使用 Linux 命名卷（<code>docker volume ls</code> 可见）：</p>
+<div class="table-scroll"><table><thead><tr><th scope="col">数据卷</th><th scope="col">保存内容</th></tr></thead><tbody><tr><td><code>knowledge_service_postgres_data</code></td><td>PostgreSQL 权威数据库</td></tr><tr><td><code>knowledge_service_etcd_data</code></td><td>Milvus 元数据</td></tr><tr><td><code>knowledge_service_minio_data</code></td><td>Milvus 持久段与索引对象</td></tr><tr><td><code>knowledge_service_milvus_data</code></td><td>Milvus RocksMQ 日志与运行文件</td></tr></tbody></table></div>
+<p>业务原件（上传的文件、图片、视频、ZIP）按 <code>KG_SOURCE_OBJECT_BACKEND</code> 存放在 <code>data/sources</code>（local）或 MinIO 业务 bucket（s3）。<code>data/model</code> 是本地模型，<code>data/runtime/llm.key</code> 是 LLM 加密密钥。</p>
+<p>三条铁律：</p>
+<ol><li><strong>绝不执行 <code>docker compose down -v</code></strong>——它删除上述全部数据卷。</li><li>迁移、复制数据先停写，按<a href="2026-10-19-Docker-Linux-volume-migration.md">数据卷迁移指南</a>操作；挂新空卷不会自动带入旧数据。</li><li>页面里的"知识备份"不包含这些数据卷；基础设施级备份见下一章。日常维护细节另见<a href="2026-10-01-Docker基础设施维护手册.md">2026-10-01-Docker基础设施维护手册</a>。</li></ol>
+</section>
+<section class="doc-sec" id="sec-9"><h2 class="sec">9. 备份与恢复</h2>
+<p>正确备份 = 三样一起备，缺一样都恢复不全：</p>
+<div class="table-scroll"><table><thead><tr><th scope="col">备什么</th><th scope="col">怎么备</th><th scope="col">丢了会怎样</th></tr></thead><tbody><tr><td>PostgreSQL 数据卷（或 <code>pg_dump</code>）</td><td>停写后复制命名卷，或 pg_dump 全库</td><td>全部记录、本体、审计丢失</td></tr><tr><td>MinIO 业务 bucket（原件、图片、视频）</td><td>停写后复制 <code>knowledge_service_minio_data</code> 卷（含业务 bucket）或用 MinIO 工具导出</td><td>原文无法下载和核验，只剩数据库文字</td></tr><tr><td><code>data/runtime/llm.key</code>（或记录 <code>KG_LLM_ENCRYPTION_KEY</code>）</td><td>与数据库一起保存</td><td>已保存的模型配置和任务快照无法解密，只能重配</td></tr></tbody></table></div>
+<p>恢复后按对象清单核对大小和 SHA-256，并打开一份资料下载原件比对。项目级"知识备份/快照"只是业务级留档，<strong>不能替代</strong>本章的基础设施备份。</p>
+</section>
+<section class="doc-sec" id="sec-10"><h2 class="sec">10. 升级与变更流程</h2>
+<pre><code data-language="powershell">git pull                                  # 拉取新代码
+python -m pip install -e &quot;.[...]&quot;         # 依赖变化时（对照 pyproject）
+docker compose up -d --wait               # 基础设施镜像/配置变化时
+python -m knowledge_service.repository.migrate   # 应用编号迁移 SQL
+# 重启应用，等待 /readyz，再按操作手册抽查上传/检索/问答</code></pre>
+<p>注意：不要删除或修改已应用的编号迁移 SQL；更换向量模型或维度前先读第 6 章 Milvus 配置说明，并显式重建索引；升级后用 <code>python scripts/production_storage_checkpoint.py --output &lt;file&gt;</code> 前后对比存储检查点。</p>
+<p><strong>本次升级：Milvus 投影 schema 从 4 升到 5。</strong> 新投影把资料标题和原文件名加入正文切片的检索文本。升级代码并重启后，管理员需要逐个项目在“检索与图谱 → 检索设置”中显式执行“构建语义索引”，等待任务完成并确认索引就绪后再使用检索与问答。旧 schema 4 索引会提示需要重建；增量同步不能完成这次版本升级，无需重新上传资料或删除 collection。PostgreSQL 权威记录不受影响。</p>
+</section>
+<section class="doc-sec" id="sec-11"><h2 class="sec">11. 故障排查速查</h2>
+<div class="table-scroll"><table><thead><tr><th scope="col">现象</th><th scope="col">先查什么</th><th scope="col">处理</th></tr></thead><tbody><tr><td>应用起不来</td><td>终端第一行报错：DSN 缺失 / 依赖缺失 / 端口占用</td><td>按提示补 <code>.env</code>、装依赖；<code>netstat -ano | findstr 8100</code> 查端口</td></tr><tr><td><code>/readyz</code> 一直不就绪</td><td>embedding 预热中；PG/Milvus 连接失败</td><td>看日志等待；<code>docker compose ps</code> 核对容器</td></tr><tr><td>检索报索引未就绪</td><td>项目是否构建过索引、索引 schema 是否与当前代码一致</td><td>首次或 schema 版本升级时由管理员在检索页“构建语义索引”；同版本正常更新才走增量同步</td></tr><tr><td>维度不一致报错</td><td><code>KG_MILVUS_DIM</code> 与编码器声明</td><td>按报错把 <code>KG_MILVUS_DIM</code> 改成编码器维度，重建 collection</td></tr><tr><td>PDF 报 <code>model_unavailable</code></td><td>Docling 制品缺失</td><td><code>python scripts/prepare_document_models.py --check</code> 后重新准备</td></tr><tr><td>视频无转写、<code>asr_available</code> 为否</td><td>ASR 模型目录、FFmpeg PATH、配置路径</td><td>核对第 7 章；改完重启并用真实视频验证</td></tr><tr><td>图片 OCR 大量失败/低置信</td><td>原图清晰度、质量阈值</td><td>核对原图；必要时与业务确认阈值（<code>KG_IMAGE_OCR_MIN_CONFIDENCE</code> 等）</td></tr><tr><td>模型管理配置无法解密</td><td><code>llm.key</code> 是否换过/丢失</td><td>用配套备份恢复；没有备份只能删除配置重录</td></tr><tr><td>重启后所有人要重新登录</td><td><code>KG_JWT_SECRET</code> 是否固定</td><td><code>.env</code> 设置固定长随机串后重启</td></tr><tr><td>容器重建后数据"空了"</td><td>挂载的卷名、数据库名</td><td>停止写入，按迁移指南核对卷与配置，不要重复上传掩盖</td></tr><tr><td>忘记 admin 口令</td><td>是否还有其他超级/管理员</td><td>由其他管理员在人员管理重置；唯一超管丢失需按种子提升规则谨慎处理</td></tr><tr><td>磁盘增长快</td><td><code>docker system df</code>、volumes、<code>data/</code></td><td>清理前逐项确认归属；绝不动四个命名卷</td></tr><tr><td>测试连不上库</td><td>测试专用 DSN、compose 是否在跑</td><td>测试用隔离库 <code>knowledge_test</code>，与生产库无关；详见 tests/README</td></tr></tbody></table></div>
+</section>
+<section class="doc-sec" id="sec-12"><h2 class="sec">12. 安全清单</h2>
+<ul><li>服务默认只监听 <code>127.0.0.1</code>，不要随意改成 <code>0.0.0.0</code> 暴露到外网；确需外部访问应加反向代理和认证。</li><li>生产保持认证开启，<strong>绝不</strong>设置 <code>KG_AUTH_DISABLED</code>。</li><li><code>.env</code> 含口令密钥，不提交、不截图、不粘贴到工单。</li><li>固定 <code>KG_JWT_SECRET</code>；初始 <code>admin/admin123</code> 登录后立即修改。</li><li>不要执行 <code>docker compose down -v</code>；不要删除 MinIO 业务 bucket 或数据卷。</li><li>诊断与工单只提供脱敏后的错误信息，不要带口令、令牌或完整连接串。</li></ul>
+</section>
+<section class="doc-sec" id="sec-13"><h2 class="sec">13. 运维脚本索引</h2>
+<p>脚本详情、参数与边界见 <a href="../scripts/README.md">scripts/README.md</a>（<strong>先读再用</strong>；多为手动工具，不属于自动回归）。</p>
+<div class="table-scroll"><table><thead><tr><th scope="col">用途</th><th scope="col">脚本</th></tr></thead><tbody><tr><td>启动应用</td><td><code>scripts/start-service.ps1</code></td></tr><tr><td>数据库迁移</td><td><code>python -m knowledge_service.repository.migrate</code></td></tr><tr><td>模型准备</td><td><code>prepare_embedding_runtime.py</code>、<code>prepare_document_models.py</code>、<code>install_ocr_models.py</code>、<code>prepare_model_layout.py</code></td></tr><tr><td>规则打包（一包一资料 ZIP）</td><td><code>package_rule_documents.py</code></td></tr><tr><td>全链路验收（隔离项目）</td><td><code>verify_platform_rule_pipeline.py</code></td></tr><tr><td>权限专题 / 内容差分</td><td><code>verify_auth_rbac.py</code>、<code>verify_production_content.py</code></td></tr><tr><td>存储检查点</td><td><code>production_storage_checkpoint.py</code></td></tr><tr><td>来源对象迁移（local → S3）</td><td><code>migrate_source_objects.py</code>（默认只读盘点，<code>--apply</code> 才执行）</td></tr><tr><td>数据卷归档/迁移</td><td><code>archive_windows_docker_bind.py</code>、<code>copy_stopped_docker_volume.sh</code>、<code>migrate_docker_storage.py</code></td></tr><tr><td>手册构建</td><td><code>build_knowledge_service_manual.py</code>、<code>verify_redesign_manual.py</code></td></tr></tbody></table></div>
+</section>
+<section class="doc-sec" id="sec-14"><h2 class="sec">14. 地址与端口速查</h2>
+<div class="table-scroll"><table><thead><tr><th scope="col">用途</th><th scope="col">地址</th></tr></thead><tbody><tr><td>工作台</td><td><code>http://127.0.0.1:8100/</code></td></tr><tr><td>API 文档</td><td><code>http://127.0.0.1:8100/docs</code></td></tr><tr><td>就绪探针</td><td><code>http://127.0.0.1:8100/readyz</code></td></tr><tr><td>存活探针</td><td><code>http://127.0.0.1:8100/livez</code></td></tr><tr><td>匿名健康</td><td><code>http://127.0.0.1:8100/api/health</code></td></tr><tr><td>Attu（Milvus 管理台）</td><td><code>http://127.0.0.1:30001</code></td></tr><tr><td>MinIO 控制台</td><td><code>http://127.0.0.1:9001</code></td></tr><tr><td>PostgreSQL</td><td><code>127.0.0.1:5432</code></td></tr><tr><td>Milvus gRPC</td><td><code>127.0.0.1:19530</code></td></tr></tbody></table></div>
+<p>&gt; AI生成</p>
+</section>
+</main>
+<script>
+(function(){
+ var q=document.getElementById('m-search'),status=document.getElementById('m-status');
+ var secs=[].slice.call(document.querySelectorAll('section.doc-sec'));
+ var tocs=[].slice.call(document.querySelectorAll('nav.toc a'));
+ function txt(e){return e.textContent||e.innerText||''}
+ function filter(){
+  var v=(q.value||'').trim().toLowerCase();
+  var hit=0;
+  secs.forEach(function(s,idx){
+   var match=!v||txt(s).toLowerCase().indexOf(v)>=0;
+   s.hidden=!match;if(match)hit++;
+   if(tocs[idx])tocs[idx].hidden=!match;
+  });
+  status.textContent=v?('命中 '+hit+' 个章节'):'输入关键词过滤章节，支持正文搜索';
+ }
+ q.addEventListener('input',filter);
+ document.addEventListener('keydown',function(e){if(e.key==='/'&&document.activeElement!==q){e.preventDefault();q.focus()}});
+ var io=new IntersectionObserver(function(entries){
+  entries.forEach(function(en){ if(en.isIntersecting){
+   tocs.forEach(function(a){a.classList.remove('active')});
+   var a=document.querySelector('nav.toc a[href="#'+en.target.id+'"]');
+   if(a){a.classList.add('active')}
+  }});
+ },{rootMargin:'-15% 0px -70% 0px'});
+ secs.forEach(function(s){io.observe(s)});
+ var top=document.createElement('button');top.className='to-top';top.textContent='回到顶部';
+ top.onclick=function(){window.scrollTo({top:0,behavior:'smooth'})};document.body.appendChild(top);
+})();
+</script>
+</body></html>
