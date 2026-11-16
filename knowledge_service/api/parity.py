@@ -4,7 +4,7 @@ from pydantic import Field, field_validator
 from fastapi import APIRouter, File, Form, Header, Query, UploadFile, Request as HttpRequest
 from .audit_identity import audit_actor
 from fastapi.responses import StreamingResponse, FileResponse
-from ..models import Request, Scope, Ingest, Question
+from ..models import Request, Scope, Ingest, Question, RetrievalOptions
 from ..services.explorer import Explorer
 from ..services.governance import Governance
 from ..services.jobs import Jobs
@@ -14,7 +14,7 @@ from ..services.answers import stream_events
 
 
 
-class SourceSearchStep(Request):
+class SourceSearchStep(RetrievalOptions):
     query: str = Field(min_length=1,max_length=2000)
     retrieval_mode: Literal['keyword','semantic','hybrid']
 
@@ -26,7 +26,7 @@ class SourceSearchStep(Request):
         return value.strip()
 
 
-class SourcesScope(Scope):
+class SourcesScope(Scope, RetrievalOptions):
     search_steps: list[SourceSearchStep] = Field(default_factory=list,max_length=7)
 
 

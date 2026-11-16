@@ -17,6 +17,11 @@ class ProjectionFieldMismatch(ValueError):
     requires_rebuild = True
 
 
+def document_heading(title, filename):
+    label = f'{title}（{filename}）' if title and filename and title != filename else title or filename or ''
+    return label[:300]
+
+
 @dataclass(frozen=True)
 class ProjectionInput:
     """Canonical raw PG row and its single ontology existence predicate."""

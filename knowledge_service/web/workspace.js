@@ -678,7 +678,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     const entry=(r,kind,isSource=false)=>{
       // Provenance/context is not ranked; only display finite scores actually returned.
       const scoreValue=[r.score,r.keyword_score].find(value=>typeof value==='number'&&Number.isFinite(value));
-      const scoreLabel={hybrid:'融合分',keyword:'关键词分',semantic:'语义分'}[result.active_mode]||'检索分';
+      const scoreLabel=result.retrieval_policy?.hybrid_strategy==='keyword_rerank'&&result.active_mode==='hybrid'?'语义分':{hybrid:'融合分',keyword:'关键词分',semantic:'语义分'}[result.active_mode]||'检索分';
       const score=!isSource&&scoreValue!==undefined?` · ${scoreLabel} ${Number(scoreValue.toPrecision(5))}`:'';
       const tag=isSource?'命中知识的来源原文':(labelOf(r.type)||'原文');
       const identity=`data-graph-id="${esc(r.id)}" data-graph-kind="${esc(kind)}"${r.version_id?` data-graph-version-id="${esc(r.version_id)}"`:''}${r.version!=null?` data-graph-version="${esc(r.version)}"`:''}`;
@@ -778,7 +778,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
   async function runSearch(){
     if(!current)return;
     const serial=++ui.request,p=current,started=performance.now(),scopeTicket=window.WorkspaceContext?.ticket(current,'search');
-    const body={...scope(),query:get('query').value,retrieval_mode:get('search-mode').value,
+    const body={...scope(),query:get('query').value,retrieval_mode:get('search-mode').value,...window.SearchRelevance?.read('search'),
       // 默认关闭；命中实体名、别名或类名后，沿所属类型及子类补充相关内容。
       // 它只补召回，不放宽可见范围（权限/时态仍由 scope 决定）；关闭时读路径与旧行为一致。
       ontology_expansion:Boolean(get('ontology-expansion')?.checked),

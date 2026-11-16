@@ -260,6 +260,8 @@ class RetrievalEngine:
         if type(k) is not int or not 1 <= k <= 100:
             raise ValueError('搜索结果数量必须在 1 到 100 之间')
         raw = dict(scope or {})
+        from ..domain.retrieval_policy import retrieval_policy
+        policy = retrieval_policy(raw)
         expected_index = raw.get('_qa_index_snapshot')
         current_qa = (raw.get('_qa_current_snapshot') is True
                       and raw.get('_explicit_known_at') is False
@@ -277,6 +279,12 @@ class RetrievalEngine:
         page_scope = {key: value for key, value in raw.items() if key in self.PAGE_SCOPE}
         validate_filter(page_scope.get('filters'))
         expansion = raw.get('_ontology_expansion')
+        strict_keywords = retrieval_mode == 'hybrid' and policy['hybrid_strategy'] == 'keyword_rerank'
+        expansion_suppressed = bool(expansion and strict_keywords)
+        if strict_keywords:
+            # An explicit keyword boundary also constrains optional type/name
+            # expansion; supplemental channels cannot bypass that boundary.
+            expansion = None
         entity_guided = bool((expansion or {}).get('entity_matches'))
         terms = [term for term in (expansion or {}).get('labels', [])
                  if term and term.casefold() not in query.casefold()]
@@ -314,6 +322,7 @@ class RetrievalEngine:
                 native_scope['filters'] = None
             compiled = compile_scope(project_id, native_scope, catalog, kinds=channels,
                                      platform_match=platform_match)
+            native_scope.update(policy)
             pg_scope = (page_scope if qualified_batches else
                         {**page_scope, 'filters': compiled.canonical_filter})
             vector = None
@@ -406,8 +415,12 @@ class RetrievalEngine:
             'filter_stage': 'before_ranking', 'requested_mode': retrieval_mode,
             'active_mode': retrieval_mode, 'degraded': False, '_backend': backend,
             'complete': complete, 'content_channels': channels, 'channel_quotas': quotas,
-            'ranking_strategy': ('milvus_scoped_batches' if qualified_batches else
-                                 'milvus_native_rrf' if retrieval_mode == 'hybrid' else backend),
+            'ranking_strategy': ('keyword_candidates_semantic_order' if retrieval_mode == 'hybrid' and policy['hybrid_strategy'] == 'keyword_rerank' else
+                                 'milvus_scoped_batches' if qualified_batches else
+                                 'milvus_grouped_rrf' if retrieval_mode == 'hybrid' else backend),
+            'retrieval_policy': policy,
+            'ontology_expansion_suppressed': expansion_suppressed,
+            'keyword_candidate_limit': 1000 if retrieval_mode == 'hybrid' and policy['hybrid_strategy'] == 'keyword_rerank' else None,
             'keyword_backend': ('milvus_bm25' if backend == 'milvus' else 'postgres_history')
                                if retrieval_mode in {'keyword', 'hybrid'} else None,
             'valid_at': page_scope.get('valid_at'), 'known_at': page_scope.get('known_at'),

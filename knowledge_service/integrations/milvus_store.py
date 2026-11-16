@@ -8,8 +8,8 @@ from threading import RLock
 from time import monotonic, sleep
 
 import numpy as np
-from pymilvus import (AnnSearchRequest, CollectionSchema, DataType, FieldSchema,
-                      Function, FunctionType, MilvusClient, RRFRanker)
+from pymilvus import (CollectionSchema, DataType, FieldSchema,
+                      Function, FunctionType, MilvusClient)
 from pymilvus.milvus_client.index import IndexParams
 
 from ..domain.search_filter_catalog import FilterCatalog, INT64_MAX
@@ -599,7 +599,37 @@ class MilvusStore:
                 raise ValueError('PG 资格批次必须是不超过 1000 项的非空版本 ID 列表')
             if not eligible_version_ids:
                 return []
-        compiled = compile_scope(project_id, scope or {}, catalog, kinds=kinds,
+        from ..domain.retrieval_policy import retrieval_policy
+        policy = retrieval_policy(scope)
+        scope = {key: value for key, value in (scope or {}).items() if key not in policy}
+        if retrieval_mode == 'hybrid' and policy['hybrid_strategy'] == 'keyword_rerank':
+            # Each PG eligibility batch contains at most 1000 versions. For a
+            # native-only query this remains an explicit bounded lexical pool.
+            lexical = self.search(project_id, query, retrieval_mode='keyword', kinds=kinds,
+                k=1000, scope=scope, index_version=index_version, catalog=catalog,
+                platform_match=platform_match, eligible_version_ids=eligible_version_ids)
+            versions = list(dict.fromkeys(hit['version_id'] for hit in lexical if hit.get('version_id') and hit['score'] > 0))
+            if not versions:
+                return []
+            return self.search(project_id, query, retrieval_mode='semantic', query_vector=query_vector,
+                kinds=kinds, k=k, scope={**scope, **policy}, index_version=index_version,
+                catalog=catalog, platform_match=platform_match, eligible_version_ids=versions)
+        if retrieval_mode == 'hybrid':
+            # Milvus rejects radius range-search combined with group_by. Keep
+            # grouped top-k, filter dense scores, then fuse the two rankings.
+            rankings = [self.search(project_id, query, retrieval_mode=mode,
+                query_vector=query_vector if mode == 'semantic' else None,
+                kinds=kinds, k=k, scope={**scope, **policy}, index_version=index_version,
+                catalog=catalog, platform_match=platform_match, eligible_version_ids=eligible_version_ids)
+                for mode in ('semantic','keyword')]
+            scores = {}
+            for ranking in rankings:
+                for rank, hit in enumerate(ranking, 1):
+                    key = (hit['record_id'], hit['version_id'])
+                    if key not in scores:scores[key] = {**hit, 'score': 0.}
+                    scores[key]['score'] += 1. / (60 + rank)
+            return sorted(scores.values(), key=lambda hit:(-hit['score'],hit['record_id'],hit['version_id']))[:k]
+        compiled = compile_scope(project_id, scope, catalog, kinds=kinds,
                                  platform_match=platform_match)
         expression = '(' + compiled.expr + ') and index_version == {index_version}'
         params = dict(compiled.filter_params, index_version=index_version)
@@ -609,23 +639,19 @@ class MilvusStore:
         self._load_if_needed(catalog=catalog)
         outputs = ['record_id','version_id','kind','type','text','owner_id',
                    'support_context_id','support_context_version','window_index','window_start','window_end']
-        if retrieval_mode == 'hybrid':
-            requests = [AnnSearchRequest(data=self._query_vector(query_vector), anns_field='embedding',
-                            param={'metric_type': 'COSINE'}, limit=k, expr=expression, expr_params=params),
-                        AnnSearchRequest(data=[query], anns_field='sparse', param={'metric_type': 'BM25'},
-                            limit=k, expr=expression, expr_params=params)]
-            result = self._search_rpc(self._client.hybrid_search, collection_name=COLLECTION,
-                               reqs=requests, ranker=RRFRanker(), limit=k,
-                               output_fields=outputs,consistency_level='Strong',group_by_field='record_id',group_size=1)
-        else:
-            dense = retrieval_mode == 'semantic'
-            result = self._search_rpc(self._client.search, collection_name=COLLECTION,
-                         data=self._query_vector(query_vector) if dense else [query],
-                         anns_field='embedding' if dense else 'sparse', filter=expression,
-                         filter_params=params, limit=k,
-                         search_params={'metric_type': 'COSINE' if dense else 'BM25'},
-                         output_fields=outputs,consistency_level='Strong',group_by_field='record_id',group_size=1)
-        return self._hits(result)
+        dense = retrieval_mode == 'semantic'
+        result = self._search_rpc(self._client.search, collection_name=COLLECTION,
+                     data=self._query_vector(query_vector) if dense else [query],
+                     anns_field='embedding' if dense else 'sparse', filter=expression,
+                     filter_params=params, limit=k,
+                     search_params={'metric_type': 'COSINE' if dense else 'BM25'},
+                     output_fields=outputs,consistency_level='Strong',group_by_field='record_id',group_size=1)
+        hits = self._hits(result)
+        if retrieval_mode == 'semantic':
+            hits = [hit for hit in hits if hit['score'] >= policy['min_semantic_score']]
+        elif retrieval_mode == 'keyword':
+            hits = [hit for hit in hits if hit['score'] > 0]
+        return hits
 
     @staticmethod
     def _hits(result):

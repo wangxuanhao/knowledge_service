@@ -37,6 +37,8 @@ class SourceSemanticSearch:
         engine=RetrievalEngine(self.repo,self.encoder,self.milvus)
         chunk_scope={key:scope[key] for key in ('valid_at','known_at','applicability','include_unknown') if key in scope}
         chunk_scope.update(filters=None,_source_document_scope=scope)
+        from ..domain.retrieval_policy import retrieval_policy
+        chunk_scope.update(retrieval_policy(scope))
         # Even an empty recalled set must surface unavailable index/model errors.
         result=engine.search(project,query,retrieval_mode=retrieval_mode,scope=chunk_scope,
             content_channels=['chunk'],k=100)

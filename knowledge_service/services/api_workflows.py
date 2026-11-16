@@ -57,9 +57,24 @@ class ApplicationData:
         state = milvus_delivery_state(cursor, projection_sync.schema_version)
         if state in {'available', 'leased'}:
             state = 'ready' if cursor['applied_seq'] == watermark else 'building'
+        rebuild = (cursor or {}).get('rebuild_state') or {}
+        adapter = projection_sync.adapters.get('milvus')
+        encoder = getattr(adapter, '_encoder', None)
+        if encoder and rebuild.get('embedding_model') and rebuild['embedding_model'] != encoder.identity:
+            state = 'requires_rebuild'
+        details = self.__repository.projections.index_summary(project_id, rebuild.get('index_version'))
+        job = details.get('job')
+        if job and job['status'] in {'queued','running','retry_wait'}:
+            state = 'building'
+        from ..utils.diagnostics import redact
         return {'project_id': project_id, 'state': state,
-                'last_error': (cursor or {}).get('last_error'),
-                'collection': (cursor or {}).get('active_destination')}
+                'last_error': redact((cursor or {}).get('last_error') or (job or {}).get('error') or ''),
+                'collection': (cursor or {}).get('active_destination'),
+                'automatic': adapter is not None, 'watermark': watermark,
+                'applied_seq': (cursor or {}).get('applied_seq', 0),
+                'index_version': rebuild.get('index_version'),
+                'embedding_model': rebuild.get('embedding_model'),
+                **details}
 
     def insert_if_absent(self, project_id, record):
         return self.__repository.insert_if_absent(project_id, record)

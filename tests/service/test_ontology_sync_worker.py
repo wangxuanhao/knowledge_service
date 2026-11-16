@@ -7,6 +7,9 @@ from knowledge_service.services.ontology_sync import OntologySync
 from knowledge_service.services.projection_runtime import MilvusProjectionAdapter, ProjectionWorker
 from knowledge_service.services.projection_sync import ProjectionSync
 from knowledge_service.integrations.embeddings import HashingEncoder
+from knowledge_service.services.retrieval import PROJECTION_SCHEMA_VERSIONS
+
+SCHEMA = PROJECTION_SCHEMA_VERSIONS["milvus"]
 
 
 def system(tmp_path):
@@ -47,15 +50,15 @@ def test_index_is_ready_only_after_successful_worker_write(tmp_path):
     repo, service, project = system(tmp_path)
     # Incremental delivery reconnects a previously built generation; it never
     # builds a never-indexed project as a side effect of an authority write.
-    fixture_sync = ProjectionSync(repo.projections, {}, schema_version=3)
-    rebuild = repo.projections.begin_rebuild(project, 'milvus', 3, 'existing-empty-index',
+    fixture_sync = ProjectionSync(repo.projections, {}, schema_version=SCHEMA)
+    rebuild = repo.projections.begin_rebuild(project, 'milvus', SCHEMA, 'existing-empty-index',
         lease_guard=fixture_sync._rebuild_lease_guard,
         embedding_model=service.encoder.identity, dim=service.encoder.dimension)
     state = {**rebuild['state'], 'catalog': default_catalog().to_dict()}
-    with repo.projections.activation_guard(project, rebuild['claim'], 3) as watermark:
+    with repo.projections.activation_guard(project, rebuild['claim'], SCHEMA) as watermark:
         assert watermark == rebuild['snapshot_seq']
-        repo.projections.activate_index(rebuild['claim'], 3, watermark, state)
-    index = repo.projections.search_index(project, 3)
+        repo.projections.activate_index(rebuild['claim'], SCHEMA, watermark, state)
+    index = repo.projections.search_index(project, SCHEMA)
     assert index['embedding_model'] == service.encoder.identity
     assert index['dim'] == service.encoder.dimension
     assert repo.projections.receipts.count(project, index['index_version']) == 0
@@ -79,21 +82,31 @@ def test_index_is_ready_only_after_successful_worker_write(tmp_path):
             written.extend(dict(row) for row in rows)
             return len(rows)
 
+        def delete_records(self, ids, **options):
+            return 0
+
     # Startup failed, but the next durable attempt can establish a connection.
     service.vector_connector = Store
     adapter = MilvusProjectionAdapter(
         lambda: service.milvus_store, encoder=service.encoder)
     service.projection_worker = ProjectionWorker(
-        repo, ProjectionSync(repo.projections, {'milvus': adapter}, schema_version=3),
+        repo, ProjectionSync(repo.projections, {'milvus': adapter}, schema_version=SCHEMA),
         cleanup_handlers={})
     repo.put_record(project, {'id': 'chunk', 'kind': 'chunk', 'text': '原文'})
     worker = OntologySync(service, configured=True)
     task = worker.repair(project)
     assert service.milvus_store is None
-    assert not repo.projection_ready(project, 'milvus', 3)
+    assert not repo.projection_ready(project, 'milvus', SCHEMA)
     assert not worker.reconcile(project)['ready']
     assert worker.run_once()
     assert service.milvus_store is not None
+    waiting = repo.get_artifact('ontology_sync_job', task['id'])
+    assert waiting['status']=='retry_wait' and waiting['stage']=='waiting_index'
+    assert waiting['attempts']==0 and not written
+    service.projection_worker.drain_project(project)
+    assert repo.projection_ready(project,'milvus',SCHEMA),repo.projections.cursor(project,'milvus')
+    repo.save_artifact('ontology_sync_job',{**waiting,'next_attempt_at':''})
+    assert worker.run_once()
     result = repo.get_artifact('ontology_sync_job', task['id'])
     assert result['status'] == 'completed', result
     assert [r['record_id'] for r in written] == ['chunk']
@@ -108,11 +121,11 @@ def test_index_is_ready_only_after_successful_worker_write(tmp_path):
     assert repo.projections.receipts.for_record_ids(project, index['index_version'], ['chunk']) == {
         'chunk': {'version_id': written[0]['version_id'],
                   'fingerprint': projection_fingerprint(written[0])}}
-    assert repo.projection_ready(project, 'milvus', 3)
+    assert repo.projection_ready(project, 'milvus', SCHEMA)
     assert worker.reconcile(project)['ready']
     repo.put_record(project, {'id': 'chunk', 'kind': 'chunk', 'text': 'new source'},
                     expected_version=1)
-    assert not repo.projection_ready(project, 'milvus', 3)
+    assert not repo.projection_ready(project, 'milvus', SCHEMA)
     assert not worker.reconcile(project)['ready']
 
 
@@ -124,9 +137,10 @@ def test_worker_return_without_reaching_projection_watermark_cannot_complete(tmp
         available = True
 
     class IncompleteWorker:
-        def drain_project(self, project_id):
+        from types import SimpleNamespace
+        sync = SimpleNamespace(schema_for=lambda target:5)
+        def wake(self, project_id):
             drained.append(project_id)
-            return 0
 
     service.vector_connector = Store
     service.projection_worker = IncompleteWorker()
@@ -139,6 +153,12 @@ def test_worker_return_without_reaching_projection_watermark_cannot_complete(tmp
     result = repo.get_artifact('ontology_sync_job', task['id'])
     assert drained == [project]
     assert result['status'] == 'retry_wait'
-    assert 'watermark' in result['error']
-    assert not repo.projection_ready(project, 'milvus', 3)
+    assert result['error'] is None and result['stage']=='waiting_index'
+    assert result['attempts']==0
+    for _ in range(6):
+        repo.save_artifact('ontology_sync_job',{**result,'next_attempt_at':''})
+        assert worker.run_once()
+        result=repo.get_artifact('ontology_sync_job',task['id'])
+        assert result['status']=='retry_wait' and result['attempts']==0
+    assert not repo.projection_ready(project, 'milvus', SCHEMA)
     assert not worker.reconcile(project)['ready']

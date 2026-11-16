@@ -225,9 +225,9 @@ class ProjectionSync:
                 kwargs['lease_is_current'] = current
             return operation(*args, **kwargs)
 
-    def rebuild(self, project_id, target):
+    def rebuild(self, project_id, target, *, progress=None):
         if target == 'milvus':
-            return self._rebuild_milvus(project_id)
+            return self._rebuild_milvus(project_id, progress=progress)
         adapter = self._adapter(target)
         schema_version = self.schema_for(target)
         claimed = None
@@ -431,7 +431,7 @@ class ProjectionSync:
             elif envelope.get('row') is not None:
                 expected.update(cls._milvus_manifest([envelope['row']]))
 
-    def _rebuild_milvus(self, project_id):
+    def _rebuild_milvus(self, project_id, *, progress=None):
         adapter = self._adapter('milvus')
         schema_version = self.schema_for('milvus')
         claimed = None
@@ -455,9 +455,16 @@ class ProjectionSync:
                 self._rebuild_external(claimed, adapter._store().delete_records, None,
                     project_id=project_id, index_version=state['index_version'], catalog=catalog)
                 self._rebuild_external(claimed, self.store.receipts.reset, claimed)
+                loaded = 0
+                def receipt_page(page):
+                    nonlocal loaded
+                    self.store.receipts.replace_page(claimed, page)
+                    loaded += len(page)
+                    if progress:
+                        progress(f'编码与索引写入 {loaded}/{len(rows)} 条', 15 + int(70 * loaded / max(1, len(rows))))
                 indexed = self._rebuild_external(claimed, adapter.load_rows,
                     project_id, rows, state, catalog, _with_lease_check=True,
-                    receipt_page=lambda page: self.store.receipts.replace_page(claimed, page))
+                    receipt_page=receipt_page)
                 state.update(phase='catchup', applied_seq=rebuild['snapshot_seq'],
                              indexed=indexed)
                 state.pop('expected_projection', None)

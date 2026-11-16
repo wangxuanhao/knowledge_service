@@ -145,6 +145,28 @@ class PreparationRunner:
                 raise ValueError('未识别到可审核的正文，请检查原件或识别模型')
             result=dict(text=text,chunks=chunks,warnings=warnings,source_version_id=source['id'],
                 chunk_settings={k:parse_options[k] for k in ('chunk_size','chunk_overlap','chunk_strategy')})
+            encoder = getattr(self.operations.service, 'document_encoder', None)
+            if encoder is not None and getattr(encoder, 'semantic', False):
+                from ..domain.search_projection import document_heading
+                # Publication clones source_file to the uploaded container name,
+                # including ZIP; use that same heading for reusable vectors.
+                heading = document_heading(parse_options['title'], task['original_name'])
+                try:
+                    for start in range(0, len(chunks), 64):
+                        self._guard(task, 'vectorizing')
+                        encoder.encode([heading + '\n' + chunk['text'] for chunk in chunks[start:start + 64]])
+                    result['vectorization'] = {'status': 'ready', 'model': encoder.identity,
+                        'chunks': len(chunks), 'heading': heading}
+                except InterruptedError:
+                    raise
+                except Exception as exc:
+                    from ..utils.diagnostics import redact
+                    result['vectorization'] = {'status': 'failed', 'model': encoder.identity,
+                        'error': redact(exc)}
+                    LOG.warning('切片向量预计算失败，提交后由索引任务重试: %s', redact(exc))
+            else:
+                result['vectorization'] = {'status': 'unavailable'}
+            self._guard(task, 'saving_result')
             self.store.update(task,'completed','completed',result=result)
         except InterruptedError:
             self.store.acknowledge_cancel(task)

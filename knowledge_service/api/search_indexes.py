@@ -1,4 +1,4 @@
-"""Project vectorization uses the existing explicit task entry point."""
+"""Automatic project search indexes with a shared manual recovery endpoint."""
 
 
 def install(app, service):
@@ -9,4 +9,4 @@ def install(app, service):
     @app.post('/api/projects/{p}/indexes/rebuild', status_code=202)
     def rebuild(p: str):
         service.data.get_project(p)
-        return app.state.jobs.enqueue('semantic_index', {'rebuild': True}, p)
+        return app.state.jobs.enqueue_index(p)

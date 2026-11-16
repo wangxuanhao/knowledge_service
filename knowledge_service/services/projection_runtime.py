@@ -239,6 +239,8 @@ class ProjectionWorker:
         self._milvus_audit_positions={}
         self.owner = f'projection-worker:{uuid4()}'
         self._stop = threading.Event()
+        self._wake = threading.Event()
+        self.auto_rebuild = None
         self._lock = threading.RLock()
         self.thread = None
 
@@ -253,8 +255,8 @@ class ProjectionWorker:
                 try:
                     result = self.sync.drain_once(project_id, target)
                 except (ProjectionRebuildRequired, MilvusSchemaMismatch):
-                    LOG.warning('投影需要在项目页面显式重建，项目=%s，目标=%s',
-                                project_id, target)
+                    log = LOG.debug if callable(self.auto_rebuild) else LOG.warning
+                    log('检索索引等待后台重建，项目=%s，目标=%s', project_id, target)
                     break
                 except Exception:
                     if self.reconnect is not None:
@@ -265,6 +267,10 @@ class ProjectionWorker:
                 if count == 0:
                     break
         return delivered
+
+    def wake(self, project_id=None):
+        """Writers only signal; encoding always executes outside their thread."""
+        self._wake.set()
 
     def audit_project(self, project_id):
         for target, adapter in self.sync.adapters.items():
@@ -351,6 +357,14 @@ class ProjectionWorker:
         self._milvus_audit_positions={key:value for key,value in self._milvus_audit_positions.items() if key in retained}
         for project in projects:
             try:
+                if callable(self.auto_rebuild) and 'milvus' in self.targets:
+                    state = self.repository.projections.delivery_state(project['id'], 'milvus', self.sync.schema_for('milvus'))
+                    cursor = self.repository.projections.cursor(project['id'], 'milvus') or {}
+                    model = (cursor.get('rebuild_state') or {}).get('embedding_model')
+                    adapter = self.sync.adapters['milvus']
+                    changed = model and model != adapter._encoder.identity
+                    if state in {'not_built','requires_rebuild'} or (changed and state != 'building'):
+                        self.auto_rebuild(project['id'])
                 delivered += self.drain_project(project['id'])
             except Exception:
                 LOG.exception('投影投递失败，项目=%s', project['id'])
@@ -379,7 +393,11 @@ class ProjectionWorker:
         return {'delivered': delivered, 'cleanup': cleanup}
 
     def _run(self):
-        while not self._stop.wait(self.interval_seconds):
+        while not self._stop.is_set():
+            self._wake.wait(self.interval_seconds)
+            self._wake.clear()
+            if self._stop.is_set():
+                break
             try:
                 self.run_once()
             except Exception:
@@ -400,6 +418,7 @@ class ProjectionWorker:
             if thread is None:
                 return
             self._stop.set()
+            self._wake.set()
         thread.join(timeout=max(1.0, min(self.interval_seconds + 1.0, 5.0)))
         with self._lock:
             if self.thread is thread:

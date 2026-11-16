@@ -66,6 +66,16 @@ class Jobs:
             raise ValueError('旧任务缺少持久参数，需重新提交')
         return self.repo.control_task('job', job_id, action)
 
+    def enqueue_index(self, project_id, *, automatic=False):
+        job = dict(id=str(uuid4()), kind='semantic_index', project_id=project_id,
+            payload={'rebuild': True}, status='queued', progress=0,
+            logs=['自动建立检索索引' if automatic else '已提交检索索引重建'],
+            created_at=utc_now(), attempts=0)
+        result = self.repo.projections.enqueue_index_job(job, automatic=automatic)
+        if result is not None:
+            self.start()
+        return result
+
     def _consume(self):
         while not self.stopped.is_set():
             if getattr(self.repo, 'closed', False):

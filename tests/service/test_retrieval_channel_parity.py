@@ -6,6 +6,7 @@ import pytest
 
 from knowledge_service.domain.search_filter_catalog import default_catalog
 from knowledge_service.repository.scoped_reads import ScopedReads
+from knowledge_service.repository import Repository
 from knowledge_service.services.retrieval import RetrievalEngine
 from test_rule_document_oag import _ready_keyword_index
 
@@ -21,7 +22,8 @@ class Encoder:
 
 def _ready_repository(*, embedding_model=Encoder.identity):
     index = {'index_version': 1, 'watermark': 9, 'dim': 2,
-             'embedding_model': embedding_model, 'catalog': default_catalog().to_dict()}
+             'embedding_model': embedding_model, 'catalog': default_catalog().to_dict(),
+             'search_capabilities':['attributes_v1']}
     return SimpleNamespace(projections=SimpleNamespace(
         search_index=lambda *_: dict(index),
         search_index_is_current=lambda _project, version, _schema, watermark:
@@ -54,6 +56,7 @@ def test_native_explicit_channel_budgets_are_independent_of_total_k(monkeypatch)
     store = SimpleNamespace(available=True, search=search)
     result = RetrievalEngine(_ready_repository(), Encoder(), store).search(
             'p', '退款', retrieval_mode='keyword', k=1,
+        content_channels=['entity','relation','chunk'],
             content_k={'entity': 2, 'relation': 1, 'chunk': 2})
 
     assert {kind: sum(row['kind'] == kind for row in result['hits'])
@@ -332,23 +335,24 @@ def test_advanced_vector_scope_streams_all_candidates_before_global_ranking(monk
     assert result['ranking_strategy'] == 'milvus_scoped_batches'
 
 
-def test_native_hybrid_uses_rrf_by_default():
+def test_grouped_hybrid_fuses_two_scoped_rankings_by_default():
     from knowledge_service.integrations.milvus_store import MilvusStore
-    captured = {}
+    captured = []
     store = MilvusStore(dim=2)
-    store._client = SimpleNamespace(hybrid_search=object())
+    store._client = SimpleNamespace(search=object())
     store._load_if_needed = lambda **_kwargs: None
     def rpc(*args, **kwargs):
-        captured.update(kwargs)
+        captured.append(kwargs)
         return [[]]
     store._search_rpc = rpc
     store.search('p', '退款', retrieval_mode='hybrid', query_vector=[1., 0.],
                  kinds=['chunk'], index_version=7, catalog=default_catalog())
-    assert type(captured['ranker']).__name__ == 'RRFRanker'
-    assert len(captured['reqs']) == 2
-    for request in captured['reqs']:
-        assert 'project_id ==' in request.expr and 'index_version ==' in request.expr
-        assert 'p' in request.expr_params.values() and 7 in request.expr_params.values()
+    assert len(captured) == 2
+    assert {call['anns_field'] for call in captured}=={'embedding','sparse'}
+    for call in captured:
+        assert call['group_by_field']=='record_id'
+        assert 'project_id ==' in call['filter'] and 'index_version ==' in call['filter']
+        assert 'p' in call['filter_params'].values() and 7 in call['filter_params'].values()
 
 
 def test_large_bounded_neighbors_batch_exact_endpoint_reads(monkeypatch):
@@ -514,7 +518,7 @@ def test_ablation_flags_skip_assistance_and_keep_structure_governance(tmp_path, 
     assert {row['kind'] for row in document_only['hits']} == {'chunk'}
 
 
-def test_service_does_not_drop_explicit_per_kind_budgets_at_flattening(monkeypatch):
+def test_service_does_not_drop_explicit_per_kind_budgets_at_flattening(monkeypatch,tmp_path):
     from knowledge_service.services.service import KnowledgeService
     import knowledge_service.services.retrieval_context as context
     rows = [{'id': f'{kind}{index}', 'version_id': f'{kind}{index}v1', 'kind': kind,
@@ -524,8 +528,10 @@ def test_service_does_not_drop_explicit_per_kind_budgets_at_flattening(monkeypat
         'hits': rows, 'candidate_count': 150, 'active_mode': 'semantic',
         'degraded': False, '_backend': 'milvus', 'backends': {}})
     monkeypatch.setattr(context, 'enrich_source_context', lambda *args: None)
-    service = KnowledgeService(SimpleNamespace(), Encoder())
-    result = service.search('p', {'query': '退款', 'retrieval_mode': 'semantic',
+    repo=Repository(tmp_path/'channel-budgets')
+    project=repo.create_project('budgets')['id']
+    service = KnowledgeService(repo, Encoder())
+    result = service.search(project, {'query': '退款', 'retrieval_mode': 'semantic',
         'ontology_context': False, 'k_entities': 50, 'k_chunks': 50, 'k_relations': 50})
     assert len(result['hits']) == 150
     assert all(sum(row['kind'] == kind for row in result['hits']) == 50

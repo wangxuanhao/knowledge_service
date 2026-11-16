@@ -18,15 +18,17 @@ class SourceProgressiveSearch:
         if not isinstance(search_steps, list) or len(search_steps)>7:
             raise ValueError('此前检索条件最多 7 个')
         steps=[]
-        for step in [*search_steps, {'query':query,'retrieval_mode':retrieval_mode}]:
-            if not isinstance(step,dict) or set(step)!={'query','retrieval_mode'}:
+        from ..domain.retrieval_policy import retrieval_policy
+        for step in [*search_steps, {'query':query,'retrieval_mode':retrieval_mode,**retrieval_policy(scope)}]:
+            if (not isinstance(step,dict) or not {'query','retrieval_mode'} <= set(step)
+                    or set(step)-{'query','retrieval_mode','hybrid_strategy','min_semantic_score'}):
                 raise ValueError('无效的递进检索条件')
             term=step['query'];mode=step['retrieval_mode']
             if not isinstance(term,str) or not term.strip() or len(term)>2000:
                 raise ValueError('递进搜索词必须为 1 到 2000 字符')
             if mode not in {'keyword','semantic','hybrid'}:
                 raise ValueError('资料检索模式必须是 keyword、semantic 或 hybrid')
-            steps.append({'query':term.strip(),'retrieval_mode':mode})
+            steps.append({'query':term.strip(),'retrieval_mode':mode,**retrieval_policy(step)})
         scoped=dict(scope or {})
         # The service and all nested reads share this decorator's repository.
         semantic=SourceSemanticSearch(SimpleNamespace(repository=self.repo,
@@ -38,7 +40,7 @@ class SourceProgressiveSearch:
             if step['retrieval_mode']=='keyword':
                 scoped['_source_keyword_queries']=[*scoped.get('_source_keyword_queries',[]),step['query']]
             else:
-                result=semantic.search(project,scoped,step['query'],limit=100,
+                result=semantic.search(project,{**scoped,**retrieval_policy(step)},step['query'],limit=100,
                     state='all',_identity=identities,retrieval_mode=step['retrieval_mode'])
                 complete=complete and result['complete']
                 if not result['complete']:
@@ -49,7 +51,7 @@ class SourceProgressiveSearch:
         scoped['_source_progressive_identity']=[steps,identities]
         final=steps[-1]
         if final['retrieval_mode'] in {'semantic','hybrid'}:
-            result=semantic.search(project,scoped,final['query'],limit=limit,cursor=cursor,state=state,retrieval_mode=final['retrieval_mode'])
+            result=semantic.search(project,{**scoped,**retrieval_policy(scope)},final['query'],limit=limit,cursor=cursor,state=state,retrieval_mode=final['retrieval_mode'])
         else:
             result=PageReads(self.repo).sources(project,scoped,query=final['query'],
                 limit=limit,cursor=cursor,state=state,summary_only=summary_only)

@@ -7,11 +7,12 @@
   const clone=value=>JSON.parse(JSON.stringify(value));
   const id=()=>root.crypto?.randomUUID?.()||Date.now().toString(36)+Math.random().toString(36).slice(2);
   const labels={staged:'待解析',queued:'排队中',running:'正在解析',completed:'解析完成',reused:'已复用解析',failed:'解析失败',cancelling:'正在取消',cancelled:'已取消',stale:'需要重新解析',published:'已提交处理',uploading:'正在上传'};
-  const stages={parsing:'解析正文',parse:'解析正文',ocr:'文字识别',asr:'语音转写',transcribing:'语音转写',chunking:'生成切片',preparing:'准备文件',preparing_source:'整理原件',preparing_text:'整理正文',saving_result:'保存解析结果',completed:'完成',failed:'失败',queued:'等待执行'};
+  const stages={parsing:'解析正文',parse:'解析正文',ocr:'文字识别',asr:'语音转写',transcribing:'语音转写',chunking:'生成切片',preparing:'准备文件',preparing_source:'整理原件',preparing_text:'整理正文',vectorizing:'计算切片向量',saving_result:'保存解析结果',completed:'完成',failed:'失败',queued:'等待执行'};
   function progressLabel(item){
     const p=item.progress;
     const stageLabel=stages[item.stage]||({recovered:'恢复任务',interrupted:'等待恢复',timeout:'处理超时'})[item.stage];
     return [labels[item.status]||'处理中',['running','queued','cancelling'].includes(item.status)?stageLabel:'',
+      item.vectorization?.status==='ready'?'切片向量已准备':item.vectorization?.status==='failed'?'向量待重试（提交后自动处理）':item.vectorization?.status==='pending'?'向量待更新（提交后自动处理）':'',
       p&&Number.isFinite(p.completed)&&p.total>0?`${p.completed} / ${p.total} ${p.unit||''}`:''].filter(Boolean).join(' · ');
   }
   function processingCopy(mode){

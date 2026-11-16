@@ -1198,7 +1198,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     const query=input.value.trim();if(!query)return;
     const submittedScope=JSON.parse(JSON.stringify(scope()));
     const body={...submittedScope,include_references:$c('qa-include-references')?.checked??true,
-      query,generate:$c('generate').checked,retrieval_mode:$c('qa-mode')?.value||'hybrid',
+      ...window.SearchRelevance?.read('qa'),query,generate:$c('generate').checked,retrieval_mode:$c('qa-mode')?.value||'hybrid',
       ontology_expansion:$c('qa-ontology-expansion')?.checked??false,k_entities:5,k_chunks:5};
     try{window.ScopeFields.requireRetrievalScope(body);}
     catch(error){summary.textContent=error.message;progress.textContent='';return;}

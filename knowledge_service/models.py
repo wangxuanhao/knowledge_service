@@ -102,7 +102,12 @@ class Scope(Request):
         return self
 
 
-class Search(Scope):
+class RetrievalOptions(Request):
+    min_semantic_score: float = Field(default=.35, ge=-1, le=1, allow_inf_nan=False)
+    hybrid_strategy: Literal['fusion', 'keyword_rerank'] = 'fusion'
+
+
+class Search(Scope, RetrievalOptions):
     query: str = Field(min_length=1, max_length=10000)
     k: int = Field(default=10, ge=1, le=100)
     retrieval_mode: Literal['hybrid', 'semantic', 'keyword'] = 'hybrid'

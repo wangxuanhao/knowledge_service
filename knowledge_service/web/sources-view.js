@@ -9,7 +9,7 @@
   refresh.textContent='刷新';refresh.classList.add('secondary');
   let serial=0,detailSerial=0,citationSerial=0,selected=null,activeTab='text',loadedProject=null,loadedScope=null,loadedState=null,allDocuments=[],currentFilter='all';
   let inFlight=null,nextCursor=null,total=0,directoryCounts=null,appliedQuery='',loadedQuery=null,composing=false;
-  let retrievalMode='keyword',loadedMode=null,pendingModeChange=false;
+  let retrievalMode='keyword',loadedMode=null,pendingModeChange=false,loadedRelevance=null;
   let searchSteps=[],loadedSteps=null,addingStep=false,searchSucceeded=false,searchLoading=false,boundedBySemantic=false;
   const stepsStamp=()=>JSON.stringify(searchSteps);
   const rankedMode=value=>['semantic','hybrid'].includes(value);
@@ -36,7 +36,7 @@
   const back=document.createElement('button');back.id='source-search-back';back.type='button';back.className='secondary';searchActions.append(back);
   function renderSearchSteps(){
     stepsUI.replaceChildren();syncSeg();
-    const chain=[...searchSteps,...(appliedQuery?[{query:appliedQuery,retrieval_mode:retrievalMode}]:[])];
+    const chain=[...searchSteps,...(appliedQuery?[{query:appliedQuery,retrieval_mode:retrievalMode,...(loadedRelevance?JSON.parse(loadedRelevance):window.SearchRelevance?.read('source'))}]:[])];
     stepsUI.hidden=!chain.length&&!addingStep;
     searchActions.hidden=!chain.length&&!addingStep;
     refine.disabled=addingStep||searchLoading||!searchSucceeded||!appliedQuery||!allDocuments.length||chain.length>=8;
@@ -72,6 +72,7 @@
   }
   function replaySteps(chain){
     addingStep=false;const last=chain.at(-1);searchSteps=chain.slice(0,-1);appliedQuery=last?.query||'';
+    if(last)window.SearchRelevance?.write('source',last);
     if(last)retrievalMode=last.retrieval_mode;searchMode.value=retrievalMode;searchInput.value=appliedQuery;return load();
   }
   refine.onclick=()=>{if(refine.disabled)return;addingStep=true;searchInput.value='';renderSearchSteps();searchInput.focus();};
@@ -81,6 +82,7 @@
     if(addingStep&&!searchInput.value.trim()){syncSeg();return;}
     return applySearch();
   });
+  document.addEventListener('sources:relevance-changed',()=>{if(!addingStep)return load();});
   searchInput.addEventListener('compositionstart',()=>{composing=true;});
   searchInput.addEventListener('compositionend',()=>{composing=false;if(pendingModeChange){pendingModeChange=false;if(addingStep&&!searchInput.value.trim())return;return applySearch();}});
   searchInput.addEventListener('keydown',event=>{
@@ -90,7 +92,7 @@
   searchForm.addEventListener('submit',event=>{event.preventDefault();if(!composing)applySearch();});
   function applySearch(){
     const term=searchInput.value.trim();
-    if(addingStep){if(!term)return;searchSteps=[...searchSteps,{query:appliedQuery,retrieval_mode:loadedMode||retrievalMode}];addingStep=false;}
+    if(addingStep){if(!term)return;searchSteps=[...searchSteps,{query:appliedQuery,retrieval_mode:loadedMode||retrievalMode,...(loadedRelevance?JSON.parse(loadedRelevance):window.SearchRelevance?.read('source'))}];addingStep=false;}
     if(!term&&searchSteps.length){searchInput.value=appliedQuery;searchMode.value=retrievalMode;renderSearchSteps();return;}
     retrievalMode=rankedMode(searchMode.value)?searchMode.value:'keyword';appliedQuery=term;searchInput.value=appliedQuery;return load();
   }
@@ -490,12 +492,12 @@
   function load({append=false,reuse=false}={}){
     const project=current,ticket=window.WorkspaceContext?.ticket(project,'sources');
     if(!project){searchSucceeded=false;searchLoading=false;renderSearchSteps();refresh.disabled=false;summary.textContent='尚未选择项目';message('选择项目后自动展示原文','请在左侧选择已有项目。');return false;}
-    let filter,stamp;
-    try{filter=scope();stamp=JSON.stringify(filter);}catch(error){searchSucceeded=false;searchLoading=false;renderSearchSteps();refresh.disabled=false;message('筛选条件不正确',error.message);return false;}
-    const state=currentFilter,term=appliedQuery,mode=retrievalMode,chain=stepsStamp(),cursor=append?nextCursor:null,key=JSON.stringify([project,stamp,state,term,mode,chain,cursor]);
+    let filter,stamp,relevance,relevanceStamp;
+    try{filter=scope();stamp=JSON.stringify(filter);relevance=window.SearchRelevance?.read('source')||{};relevanceStamp=JSON.stringify(relevance);}catch(error){searchSucceeded=false;searchLoading=false;renderSearchSteps();refresh.disabled=false;message('筛选条件不正确',error.message);return false;}
+    const state=currentFilter,term=appliedQuery,mode=retrievalMode,chain=stepsStamp(),cursor=append?nextCursor:null,key=JSON.stringify([project,stamp,state,term,mode,chain,cursor,relevanceStamp]);
     if(inFlight?.key===key&&inFlight.serial===serial)return inFlight.promise;
-    if(reuse&&loadedProject===project&&loadedScope===stamp&&loadedState===state&&loadedQuery===term&&loadedMode===mode&&loadedSteps===chain)return Promise.resolve(true);
-    const request=++serial,accepts=()=>request===serial&&sameContext(project,stamp,ticket)&&currentFilter===state&&appliedQuery===term&&retrievalMode===mode&&stepsStamp()===chain;
+    if(reuse&&loadedProject===project&&loadedScope===stamp&&loadedState===state&&loadedQuery===term&&loadedMode===mode&&loadedSteps===chain&&loadedRelevance===relevanceStamp)return Promise.resolve(true);
+    const request=++serial,accepts=()=>request===serial&&sameContext(project,stamp,ticket)&&currentFilter===state&&appliedQuery===term&&retrievalMode===mode&&stepsStamp()===chain&&JSON.stringify(window.SearchRelevance?.read('source')||{})===relevanceStamp;
     searchLoading=true;searchSucceeded=false;boundedBySemantic=false;renderSearchSteps();
     closeDetail();
     if(!append){loadedProject=null;loadedScope=null;loadedState=null;allDocuments=[];directoryCounts=null;nextCursor=null;updateCounts();
@@ -504,9 +506,9 @@
     refresh.disabled=true;loadMore.disabled=true;loadMore.hidden=!append;
     const promise=(async()=>{try{
       const query='?limit=50&summary_only=true&state='+encodeURIComponent(state)+(term?'&query='+encodeURIComponent(term):'')+(rankedMode(mode)?'&retrieval_mode='+encodeURIComponent(mode):'')+(cursor?'&cursor='+encodeURIComponent(cursor):'');
-      const result=await api('/api/projects/'+encodeURIComponent(project)+'/sources'+query,searchSteps.length?{...filter,search_steps:JSON.parse(chain)}:filter);
+      const result=await api('/api/projects/'+encodeURIComponent(project)+'/sources'+query,searchSteps.length?{...filter,...relevance,search_steps:JSON.parse(chain)}:{...filter,...relevance});
       if(!accepts())return false;
-      loadedProject=project;loadedScope=stamp;loadedState=state;loadedQuery=term;loadedMode=mode;loadedSteps=chain;searchSucceeded=true;boundedBySemantic=result.bounded_by_semantic===true;
+      loadedProject=project;loadedScope=stamp;loadedState=state;loadedQuery=term;loadedMode=mode;loadedSteps=chain;loadedRelevance=relevanceStamp;searchSucceeded=true;boundedBySemantic=result.bounded_by_semantic===true;
       allDocuments=[...new Map([...(append?allDocuments:[]),...(result.documents||[])].map(doc=>[doc.id,doc])).values()];
       nextCursor=result.next_cursor||null;total=result.total??allDocuments.length;directoryCounts=result.counts||null;
       summary.textContent=searchSteps.length&&boundedSearch()

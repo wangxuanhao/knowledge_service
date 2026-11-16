@@ -261,7 +261,7 @@ def test_semantic_search_applies_quotas_before_channels_can_crowd_each_other(tmp
                 'entity': 1, 'chunk': 1, 'relation': 1}
     assert result['channel_quotas'] == {'entity': 1, 'chunk': 1, 'relation': 1}
     assert [call[2] for call in calls] == [['entity'], ['chunk'], ['relation']]
-    assert all(call[0:2] == (project_id, '退款') and call[4] == {} for call in calls)
+    assert all(call[0:2] == (project_id, '退款') and call[4] == {'hybrid_strategy':'fusion','min_semantic_score':.35} for call in calls)
     assert all(1 <= call[3] <= RetrievalEngine.MAX_NATIVE_LIMIT for call in calls)
     assert all(call[5]['retrieval_mode'] == 'semantic'
                and call[5]['query_vector'] == [1., 0.]

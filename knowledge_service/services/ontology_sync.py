@@ -25,7 +25,9 @@ class OntologySync:
     def start(self):
         if self.configured:
             for task in self.repo.list_artifacts('ontology_sync_job'):
-                if task.get('status') == 'disabled':
+                legacy_wait = (task.get('status')=='failed'
+                    and task.get('error')=='Milvus projection has not reached its watermark')
+                if task.get('status') == 'disabled' or legacy_wait:
                     self.repo.control_task('ontology_sync_job', task['id'], 'retry')
         self.thread = threading.Thread(target=self._loop,
             name='ontology-outbox', daemon=True)
@@ -81,18 +83,26 @@ class OntologySync:
                 raise RuntimeError('索引重建中，发布同步等待重建完成')
             ontology = self.repo.get_ontology(task['project_id'])
             rows = [r for r in self.repo.current_records(task['project_id'])
-                    if r['kind'] in {'entity','relation','chunk'}
+                    if r['kind'] in {'entity','relation','attribute','chunk'}
                     and not r.get('metadata', {}).get('_deleted')]
             signature = self._signature(rows)
             worker = getattr(self.service, 'projection_worker', None)
             if worker is None:
                 raise RuntimeError('Milvus projection worker is unavailable')
-            worker.drain_project(task['project_id'])
-            if not self.repo.projection_ready(task['project_id'], 'milvus', 3):
-                raise RuntimeError('Milvus projection has not reached its watermark')
+            worker.wake(task['project_id'])
+            schema = worker.sync.schema_for('milvus')
+            if not self.repo.projection_ready(task['project_id'], 'milvus', schema):
+                # A long, healthy build is waiting work rather than a failed
+                # attempt. It must not exhaust the five-error retry budget.
+                self.repo.update_task('ontology_sync_job', task, {
+                    'status':'retry_wait', 'stage':'waiting_index', 'error':None,
+                    'attempts':max(0,task['attempts']-1),
+                    'next_attempt_at':(datetime.now(timezone.utc)+timedelta(seconds=5)).isoformat(
+                        timespec='microseconds').replace('+00:00','Z')})
+                return True
             current = self.repo.get_ontology(task['project_id'])
             latest_rows = [r for r in self.repo.current_records(task['project_id'])
-                          if r['kind'] in {'entity','relation','chunk'}
+                          if r['kind'] in {'entity','relation','attribute','chunk'}
                           and not r.get('metadata', {}).get('_deleted')]
             if (current['id'] != ontology['id']
                     or self._signature(latest_rows) != signature):
@@ -140,7 +150,7 @@ class OntologySync:
         except KeyError:
             index = None
         rows = [r for r in self.repo.current_records(project_id)
-                if r['kind'] in {'entity','relation','chunk'}
+                if r['kind'] in {'entity','relation','attribute','chunk'}
                 and not r.get('metadata', {}).get('_deleted')]
         ready = bool(self.configured and self.service.milvus_store is not None
                      and self.service.milvus_store.available

@@ -82,11 +82,8 @@ def _record(row, prefix=''):
 
 def _document_label(title, file):
     """Compose a bounded source heading so vector recall can also hit title/file."""
-    if title and file and title != file:
-        label = f'{title}（{file}）'
-    else:
-        label = title or file or ''
-    return label[:300]
+    from ..domain.search_projection import document_heading
+    return document_heading(title, file)
 
 
 def _input(row):

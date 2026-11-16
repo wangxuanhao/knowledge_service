@@ -143,12 +143,8 @@ def test_pg_eligibility_batch_is_parameterized_inside_native_scope(mode):
     hostile = 'v\" or project_id != \"p'
     store.search('p', 'text', retrieval_mode=mode, query_vector=[1., 0.],
         index_version=2, catalog=default_catalog(), eligible_version_ids=[hostile, 'v2'])
-    if mode == 'hybrid':
-        requests = store._client.hybrid_search.call_args.kwargs['reqs']
-        scopes = [(request.expr, request.expr_params) for request in requests]
-    else:
-        kwargs = store._client.search.call_args.kwargs
-        scopes = [(kwargs['filter'], kwargs['filter_params'])]
+    scopes = [(call.kwargs['filter'], call.kwargs['filter_params']) for call in store._client.search.call_args_list]
+    assert len(scopes)==(2 if mode=='hybrid' else 1)
     for expression, params in scopes:
         assert 'project_id ==' in expression and 'index_version ==' in expression
         assert 'version_id in' in expression

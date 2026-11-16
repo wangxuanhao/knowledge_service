@@ -80,15 +80,12 @@ class FlatMilvusStoreTests(unittest.TestCase):
             store._load_if_needed = Mock()
             store.search('p', 'query', retrieval_mode=mode, query_vector=[1., 0.],
                          index_version=7, catalog=default_catalog())
-            if mode == 'hybrid':
-                requests = store._client.hybrid_search.call_args.kwargs['reqs']
-                for request in requests:
-                    self.assertIn('index_version ==', request.expr)
-                    self.assertIn(7, request.expr_params.values())
-            else:
-                kwargs = store._client.search.call_args.kwargs
+            for call in store._client.search.call_args_list:
+                kwargs = call.kwargs
                 self.assertIn('index_version ==', kwargs['filter'])
                 self.assertIn(7, kwargs['filter_params'].values())
+            self.assertEqual(store._client.search.call_count, 2 if mode=='hybrid' else 1)
+            store._client.hybrid_search.assert_not_called()
 
 
 if __name__ == '__main__':

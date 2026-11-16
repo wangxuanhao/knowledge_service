@@ -230,6 +230,9 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
     milvus_errors = []
     milvus_store = _build_milvus_store(encoder, diagnostics=milvus_errors)
     service = KnowledgeService(repository, encoder, milvus_store=milvus_store)
+    from ..integrations.embedding_cache import CachedDocumentEncoder
+    service.document_encoder = CachedDocumentEncoder(encoder,
+        (Path(upload_temp) if upload_temp else ROOT / 'data' / 'cache') / 'embeddings' / repository.storage_namespace)
     service.vector_connector = lambda: _build_milvus_store(encoder)
     service.runtime_capabilities = RuntimeCapabilities(
         encoder=encoder,
@@ -385,7 +388,7 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
 
         projection_adapters['milvus'] = MilvusProjectionAdapter(
             lambda: service.milvus_store, fence_is_current=fence_is_current,
-            encoder=service.encoder)
+            encoder=service.document_encoder)
 
         def cleanup_milvus(project_id):
             store = service.milvus_store
@@ -400,11 +403,13 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
         repository, projection_sync, cleanup_handlers=cleanup_handlers,
         reconnect=(service.reconnect_vector_store
                    if 'milvus' in projection_adapters else None))
-    service.projection_drain = projection_worker.drain_project
+    service.projection_drain = projection_worker.wake
     service.projection_sync = projection_sync
     service.projection_worker = projection_worker
     app.state.projection_sync = projection_sync
     app.state.projection_worker = projection_worker
+    if 'milvus' in projection_adapters:
+        projection_worker.auto_rebuild = lambda project: app.state.jobs.enqueue_index(project, automatic=True)
     from .workspace import install as install_workspace
     install_workspace(app, service)
     from .search_indexes import install as install_search_indexes

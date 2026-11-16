@@ -195,6 +195,14 @@ class Preparations:
                 heartbeat_at=str(task['heartbeat_at']) if task.get('heartbeat_at') else None,error=task.get('error'))
         if task and task.get('result') and task['fingerprint']==item['parser_fingerprint']:
             value['result_ready']=value['status'] in ('completed','reused','published')
+            value['vectorization'] = deepcopy(task['result'].get('vectorization'))
+            if value['vectorization'] and value['vectorization']['status']=='ready':
+                from ..domain.search_projection import document_heading
+                heading=document_heading(item['options'].get('title') or item['original_name'],item['original_name'])
+                if (value['vectorization'].get('heading')!=heading or
+                        task['result'].get('chunk_settings')!={k:item['options'][k] for k in ('chunk_size','chunk_overlap','chunk_strategy')} or
+                        value['vectorization'].get('model')!=self.service.encoder.identity):
+                    value['vectorization']['status']='pending'
         value['reusable']=bool(task and task['status']=='completed' and task['fingerprint']==item['parser_fingerprint'])
         value['existing_documents']=self.store.existing_documents(item['project_id'],item['file_sha256']) if item.get('project_id') else []
         if item['status']=='cancelled' and item.get('cancelled_task_id'):

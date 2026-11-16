@@ -170,6 +170,68 @@ class ProjectionStore:
         self.repository = repository
         self._db = repository._db
 
+    def index_summary(self, project_id, index_version):
+        with self.repository._lock:
+            counts = self._db.execute("""SELECT read_kind AS kind,count(*) AS count FROM record_versions
+                WHERE project_id=? AND superseded_at IS NULL AND read_kind IN ('chunk','entity','relation','attribute')
+                AND COALESCE(payload::jsonb#>>'{metadata,_deleted}','false')<>'true'
+                AND COALESCE(payload::jsonb#>>'{metadata,_quarantined}','false')<>'true'
+                AND COALESCE(payload::jsonb#>>'{metadata,_audit}','false')<>'true' GROUP BY read_kind""", (project_id,)).fetchall()
+            indexed = [] if not index_version else self._db.execute("""SELECT r.read_kind AS kind,
+                count(DISTINCT m.record_id) AS count FROM milvus_projection_receipts m
+                JOIN record_versions r ON r.project_id=m.project_id AND r.version_id=m.version_id
+                WHERE m.project_id=? AND m.index_version=? GROUP BY r.read_kind""", (project_id,index_version)).fetchall()
+            row = self._db.execute("""SELECT payload FROM artifacts WHERE kind='job' AND project_id=?
+                AND payload::jsonb->>'kind'='semantic_index'
+                ORDER BY CASE WHEN payload::jsonb->>'status' IN ('queued','running','retry_wait') THEN 0 ELSE 1 END,
+                payload::jsonb->>'created_at' DESC,id DESC LIMIT 1""", (project_id,)).fetchone()
+            job = json.loads(row['payload']) if row and isinstance(row['payload'],str) else row['payload'] if row else None
+        if job:
+            from ..utils.diagnostics import redact
+            job = {key: job[key] for key in ('id','status','stage','progress','error','created_at','updated_at') if key in job}
+            if job.get('error'):job['error']=redact(job['error'])
+        return {'record_counts':{r['kind']:r['count'] for r in counts},
+                'indexed_record_counts':{r['kind']:r['count'] for r in indexed},'job':job}
+
+    def enqueue_index_job(self, job, *, automatic=False):
+        """Serialize manual/automatic rebuild requests and persist retry backoff."""
+        project = job['project_id']
+        with self.repository._transaction():
+            self.repository.get_project(project)
+            self._db.execute('SELECT pg_advisory_xact_lock(hashtextextended(?,0))',
+                             ('search-index-job:' + project,))
+            row = self._db.execute("""SELECT payload FROM artifacts WHERE kind='job'
+                AND project_id=? AND payload::jsonb->>'kind'='semantic_index'
+                ORDER BY CASE WHEN payload::jsonb->>'status' IN ('queued','running','retry_wait') THEN 0 ELSE 1 END,
+                payload::jsonb->>'created_at' DESC,id DESC LIMIT 1""", (project,)).fetchone()
+            previous = json.loads(row['payload']) if row and isinstance(row['payload'],str) else row['payload'] if row else {}
+            if previous.get('status') in {'queued','running','retry_wait'}:
+                return previous
+            job['payload']['watermark'] = self.project_watermark(project)
+            if automatic:
+                exists = self._db.execute("""SELECT 1 FROM record_versions WHERE project_id=?
+                    AND superseded_at IS NULL AND read_kind IN ('chunk','entity','relation','attribute')
+                    AND COALESCE(payload::jsonb#>>'{metadata,_deleted}','false')<>'true'
+                    AND COALESCE(payload::jsonb#>>'{metadata,_quarantined}','false')<>'true'
+                    AND COALESCE(payload::jsonb#>>'{metadata,_audit}','false')<>'true' LIMIT 1""", (project,)).fetchone()
+                cursor = self.cursor(project, 'milvus') or {}
+                if not exists and not (cursor.get('rebuild_state') or {}).get('index_version'):
+                    return None
+                if previous.get('status')=='cancelled' and (previous.get('payload') or {}).get('watermark')==job['payload']['watermark']:
+                    return None
+                attempt = int((previous.get('payload') or {}).get('automatic_attempt', 0))
+                if previous.get('status') in {'failed','cancelled','interrupted'}:
+                    stamp = previous.get('updated_at') or previous.get('created_at')
+                    elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(stamp.replace('Z', '+00:00'))).total_seconds()
+                    if elapsed < min(300, 5 * 2 ** min(attempt, 6)):
+                        return None
+                    attempt += 1
+                else:
+                    attempt = 0
+                job['payload'].update(automatic=True, automatic_attempt=attempt)
+            self.repository.save_artifact('job', job)
+            return job
+
     @property
     def receipts(self):
         from .projection_receipts import ProjectionReceipts

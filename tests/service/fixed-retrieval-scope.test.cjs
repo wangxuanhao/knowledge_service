@@ -78,8 +78,8 @@ test('UI keeps explicit graph purpose and bumps each changed runtime resource',(
   assert.ok(html.includes('id="scope-compatibility"'),'scope incompatibility remains visible');
   assert.ok(html.includes('#scope [hidden]{display:none!important}'),'page-owned filter controls stay hidden despite existing grid/flex CSS');
   assert.ok(html.includes('/assets/scope-fields.js?v=authority-retrieval-20261021-2'),'scope-fields.js version');
-  for(const [file,version] of [['workspace-context-ui.js','page-filters-20261116-1'],['workbench.js','unified-media-20261111-1']])assert.ok(html.includes('/assets/'+file+'?v='+version),file+' version');
-  for(const [file,version] of [['workspace.js','entity-properties-20261113-2'],['entity-attribute-panel.js','entity-properties-20261113-3'],['task-review.js','conflict-governance-20261113-3']])assert.ok(html.includes('/assets/'+file+'?v='+version),file+' version');
+  for(const [file,version] of [['workspace-context-ui.js','page-filters-20261116-1'],['workbench.js','automatic-index-20261116-2']])assert.ok(html.includes('/assets/'+file+'?v='+version),file+' version');
+  for(const [file,version] of [['workspace.js','automatic-index-20261116-2'],['entity-attribute-panel.js','entity-properties-20261113-3'],['task-review.js','conflict-governance-20261113-3']])assert.ok(html.includes('/assets/'+file+'?v='+version),file+' version');
 });
 
 test('applying the shared editor preserves dedicated ontology/kind scope and original metadata AST',()=>{

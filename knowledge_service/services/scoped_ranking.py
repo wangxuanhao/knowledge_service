@@ -29,7 +29,8 @@ def rank_qualified(engine, project, query, mode, kinds, target, native_scope,
     if not target:
         return [], 0, True
     depth = min(1000, max(50, target * 5))
-    modes = ('semantic', 'keyword') if mode == 'hybrid' else (mode,)
+    rerank = mode == 'hybrid' and native_scope.get('hybrid_strategy') == 'keyword_rerank'
+    modes = ('semantic', 'keyword') if mode == 'hybrid' and not rerank else (mode,)
     rankings = {backend: [] for backend in modes}
     readers = ScopedReads(engine.repository)
     authoritative_scope = {**pg_scope, '_platform_match': platform_match}
@@ -41,13 +42,13 @@ def rank_qualified(engine, project, query, mode, kinds, target, native_scope,
         eligible = set(versions)
         for backend in modes:
             hits = engine.milvus.search(project, query, retrieval_mode=backend,
-                query_vector=vector if backend == 'semantic' else None, kinds=kinds,
+                query_vector=vector if backend != 'keyword' else None, kinds=kinds,
                 k=depth, scope=native_scope, index_version=index['index_version'],
                 catalog=catalog, platform_match=platform_match, eligible_version_ids=versions)
             if any(hit.get('version_id') not in eligible or not hit.get('record_id') for hit in hits):
                 raise RuntimeError('Milvus 返回了资格门禁以外的版本')
             rankings[backend] = _best([*rankings[backend], *hits], depth)
-    if mode == 'hybrid':
+    if mode == 'hybrid' and not rerank:
         merged = rrf_fuse({backend: [{**hit, 'id': hit['record_id']} for hit in hits]
                            for backend, hits in rankings.items()}, depth * 2)
     else:

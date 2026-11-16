@@ -64,8 +64,8 @@ def job_handlers(service, uploads):
             raise RuntimeError('未配置或无法连接 Milvus，索引未建立')
         if not hasattr(service, 'projection_sync'):
             raise RuntimeError('Milvus projection coordinator is unavailable')
-        progress('校验所选项目并向量化当前记录', 10)
-        result = service.projection_sync.rebuild(project_id, 'milvus')
+        progress('校验当前资料并建立关键词与语义索引', 10)
+        result = service.projection_sync.rebuild(project_id, 'milvus', progress=progress)
         total = int(result['indexed'])
         progress('已激活所选项目向量索引', 98)
         return {'indexed': total, 'backend': 'milvus', 'total': total,
