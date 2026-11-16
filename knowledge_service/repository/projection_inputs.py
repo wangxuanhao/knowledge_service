@@ -39,6 +39,7 @@ def _selection(values, limit):
 def _statement(where):
     return f"""SELECT r.*, (o.id IS NOT NULL) AS ontology_known,
           owner.label AS owner_label, property.label AS property_label,
+          doc.document_title AS document_title, doc.document_file AS document_file,
           COALESCE(support.contexts,'[]'::json) AS source_contexts
         FROM record_versions r
         LEFT JOIN ontologies o ON o.project_id=r.project_id AND o.id=r.payload::jsonb->>'ontology_id'
@@ -48,6 +49,13 @@ def _statement(where):
         LEFT JOIN LATERAL (SELECT COALESCE(NULLIF(item->>'label_zh',''),NULLIF(item->>'label',''),item->>'name') AS label
             FROM jsonb_array_elements(COALESCE(o.summary::jsonb->'attributes','[]'::jsonb)) item
             WHERE r.read_kind='attribute' AND (item->>'id'=r.read_type OR item->>'name'=r.read_type) LIMIT 1) property ON TRUE
+        LEFT JOIN LATERAL (SELECT d.payload::jsonb#>>'{{metadata,title}}' AS document_title,
+                d.payload::jsonb#>>'{{metadata,source_file}}' AS document_file
+            FROM record_versions d
+            WHERE r.read_kind='chunk' AND d.project_id=r.project_id
+              AND d.id=r.payload::jsonb->>'source_id'
+              AND d.read_kind='document' AND d.superseded_at IS NULL
+              AND d.read_visible AND NOT d.read_quarantined LIMIT 1) doc ON TRUE
         LEFT JOIN LATERAL (SELECT json_agg(c.context ORDER BY c.id) AS contexts FROM (
             SELECT s.id,json_build_object('id',s.id,'version',s.decision_version,
                 'valid_from',s.valid_from,'valid_until',s.valid_until,
@@ -72,6 +80,15 @@ def _record(row, prefix=''):
     return {**value, **{key: row[prefix + key] for key in _ENVELOPE}}
 
 
+def _document_label(title, file):
+    """Compose a bounded source heading so vector recall can also hit title/file."""
+    if title and file and title != file:
+        label = f'{title}（{file}）'
+    else:
+        label = title or file or ''
+    return label[:300]
+
+
 def _input(row):
     contexts=row.get('source_contexts') or []
     if isinstance(contexts,str):
@@ -79,7 +96,9 @@ def _input(row):
         contexts=json.loads(contexts)
     if len(contexts)>10000:raise ValueError('单条记录的来源上下文超过投影预算，请检查来源并分批维护')
     return ProjectionInput(record=_record(row), ontology_known=row['ontology_known'],
-        owner_label=row.get('owner_label') or '',property_label=row.get('property_label') or '',source_contexts=tuple(contexts))
+        owner_label=row.get('owner_label') or '',property_label=row.get('property_label') or '',
+        document_label=_document_label(row.get('document_title'),row.get('document_file')),
+        source_contexts=tuple(contexts))
 
 
 class ProjectionInputs:

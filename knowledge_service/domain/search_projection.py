@@ -24,6 +24,7 @@ class ProjectionInput:
     ontology_known: bool = False
     owner_label: str = ''
     property_label: str = ''
+    document_label: str = ''
     source_contexts: tuple = ()
 
 
@@ -177,7 +178,13 @@ def build_projections(value, catalog, *, index_version):
     else:
         body='' if record.get('text') is None else record['text']
         if not isinstance(body,str):raise ValueError('投影正文必须是字符串')
-        prefix='';windows=((0,len(body),body),)
+        # Chunk vectors also carry the owning document title/file heading, so a
+        # semantic query can match on the title even though chunks only store
+        # sliced prose (mirrors the attribute owner/property prefix pattern).
+        prefix=''
+        if record['kind']=='chunk' and value.document_label:
+            prefix=value.document_label+'\n'
+        windows=((0,len(body),body),)
     count=max(1,len(value.source_contexts))
     if count*len(windows)>20000 or count*sum(len((prefix+text).encode('utf-8'))+1024 for _,_,text in windows)>16*1024*1024:
         raise ValueError('单条事实的来源与文本窗口超过投影预算，请减少单次来源支持或拆分属性正文')

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import json
 
 from knowledge_service.repository.scoped_reads import ScopedReads
+from knowledge_service.services.retrieval import PROJECTION_SCHEMA_VERSIONS
 from test_production_projection_receipts import activate_legacy
 
 
@@ -39,9 +40,10 @@ def install_keyword_store(service, monkeypatch):
 def activate_keyword_index(repo, project):
     """Activate this test's written data at its actual current watermark."""
     activate_legacy(repo, project, {}, watermark=repo.projections.project_watermark(project))
-    repo._db.execute("""UPDATE projection_cursors SET schema_version=4,
+    repo._db.execute(f"""UPDATE projection_cursors SET schema_version=?,
         rebuild_state=(rebuild_state::jsonb || ?::jsonb) WHERE project_id=? AND target='milvus'""",
-        (json.dumps({'search_capabilities':['attributes_v1','attribute_windows_v1','source_contexts_v1',
+        (PROJECTION_SCHEMA_VERSIONS['milvus'],
+         json.dumps({'search_capabilities':['attributes_v1','attribute_windows_v1','source_contexts_v1',
                     'entity_source_contexts_v1','relation_source_contexts_v1','entity_fact_contexts_v1']}),project))
 
 

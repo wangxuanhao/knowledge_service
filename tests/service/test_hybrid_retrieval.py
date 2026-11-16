@@ -7,7 +7,7 @@ from knowledge_service.domain.search_filter_catalog import default_catalog
 from knowledge_service.repository import Repository
 from knowledge_service.repository.scoped_reads import ScopedReads
 from knowledge_service.services.projection_sync import ProjectionSync
-from knowledge_service.services.retrieval import RetrievalEngine, rrf_fuse
+from knowledge_service.services.retrieval import PROJECTION_SCHEMA_VERSIONS, RetrievalEngine, rrf_fuse
 
 
 class Encoder:
@@ -25,22 +25,23 @@ def keyword_engine(repo, project, monkeypatch):
 
 
 def activate_semantic_index(repo, project):
-    sync = ProjectionSync(repo.projections, {}, schema_version=3)
+    version = PROJECTION_SCHEMA_VERSIONS['milvus']
+    sync = ProjectionSync(repo.projections, {}, schema_version=version)
     rebuild = repo.projections.begin_rebuild(
-        project, 'milvus', 3, 'semantic-quota-fixture',
+        project, 'milvus', version, 'semantic-quota-fixture',
         lease_guard=sync._rebuild_lease_guard, embedding_model=Encoder.identity, dim=2)
     state = {**rebuild['state'], 'catalog': default_catalog().to_dict()}
-    with repo.projections.activation_guard(project, rebuild['claim'], 3) as watermark:
+    with repo.projections.activation_guard(project, rebuild['claim'], version) as watermark:
         assert watermark == rebuild['snapshot_seq']
-        repo.projections.activate_index(rebuild['claim'], 3, watermark, state)
+        repo.projections.activate_index(rebuild['claim'], version, watermark, state)
     cursor = repo.projections.cursor(project, 'milvus')
     assert cursor['status'] == 'ready'
-    assert cursor['schema_version'] == 3
+    assert cursor['schema_version'] == version
     assert cursor['applied_seq'] == repo.projections.project_watermark(project)
     assert cursor['rebuild_state']['embedding_model'] == Encoder.identity
     assert cursor['rebuild_state']['dim'] == 2
     assert cursor['rebuild_state']['catalog'] == default_catalog().to_dict()
-    index = repo.projections.search_index(project, 3)
+    index = repo.projections.search_index(project, version)
     assert (index['embedding_model'], index['dim'], index['watermark']) == (
         Encoder.identity, 2, watermark)
     return index

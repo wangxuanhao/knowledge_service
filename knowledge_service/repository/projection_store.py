@@ -282,7 +282,29 @@ class ProjectionStore:
         if not any((new_record.get('metadata') or {}).get(key) for key in ('_deleted', '_audit')):
             sequences.append(self.enqueue(
                 project_id, 'upsert', new_record['version_id'], new_record))
+        if new_record.get('kind') == 'document':
+            old_metadata = (old_record or {}).get('metadata') or {}
+            new_metadata = new_record.get('metadata') or {}
+            heading_fields = ('title', 'source_file', '_deleted', '_audit', '_quarantined')
+            if any(old_metadata.get(key) != new_metadata.get(key) for key in heading_fields):
+                sequences.extend(self._enqueue_document_chunk_changes(project_id, new_record['id']))
         return sequences
+
+    def _enqueue_document_chunk_changes(self, project_id, document_id):
+        """Refresh derived headings without revising the authoritative chunks."""
+        sequences, after = [], ''
+        while True:
+            rows = self._db.execute('''SELECT * FROM record_versions WHERE project_id=?
+                AND superseded_at IS NULL AND read_kind='chunk'
+                AND payload::jsonb->>'source_id'=? AND id>?
+                AND read_visible AND NOT read_quarantined ORDER BY id LIMIT 500''',
+                (project_id, document_id, after)).fetchall()
+            if not rows:
+                return sequences
+            for raw in rows:
+                record = self.repository._record(raw)
+                sequences.extend(self.enqueue_record_change(project_id, record, record))
+            after = rows[-1]['id']
 
     def enqueue_source_context_changes(self,project_id,record_ids):
         """Freeze supported bodies only after the formal assertion actions finish."""

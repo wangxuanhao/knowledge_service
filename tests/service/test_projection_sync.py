@@ -567,7 +567,7 @@ def test_begin_rebuild_exception_is_handled_without_unbound_claim_error():
 
 
 class ProjectionTargetSchemaTests(unittest.TestCase):
-    def test_api_drains_milvus_four_and_neo4j_three_without_cross_target_schema_changes(self):
+    def test_api_drains_milvus_five_and_neo4j_three_without_cross_target_schema_changes(self):
         import knowledge_service.api as api
 
         acknowledged = []
@@ -613,12 +613,12 @@ class ProjectionTargetSchemaTests(unittest.TestCase):
         sync.adapters['milvus'] = FakeAdapter()
         worker = ProjectionWorker(SimpleNamespace(), sync, cleanup_handlers={}, max_batches_per_project=1)
         self.assertEqual(worker.drain_project('project'), 2)
-        self.assertEqual(acknowledged, [('neo4j', 3), ('milvus', 4)])
+        self.assertEqual(acknowledged, [('neo4j', 3), ('milvus', 5)])
         self.assertEqual(store.activated_tokens, [])
-        self.assertEqual(store.schema_version, 4)
-        self.assertEqual(sync.schema_for('milvus'), 4)
+        self.assertEqual(store.schema_version, 5)
+        self.assertEqual(sync.schema_for('milvus'), 5)
         self.assertEqual(sync.schema_for('neo4j'), 3)
-        self.assertEqual(sync.schema_version, 4)
+        self.assertEqual(sync.schema_version, 5)
         self.assertEqual(store.receipts.count('project', 1), 1)
         self.assertEqual(len(graph.applied), 1)
 

@@ -16,7 +16,7 @@ LOG = logging.getLogger('knowledge_service.retrieval')
 
 # Native projection readers must explicitly opt into the schema they understand.
 # A missing cursor is deliberately stale; authority remains PostgreSQL.
-PROJECTION_SCHEMA_VERSIONS = {'milvus': 4, 'neo4j': 3}
+PROJECTION_SCHEMA_VERSIONS = {'milvus': 5, 'neo4j': 3}
 
 
 def has_vector(row):
