@@ -75,9 +75,13 @@ async function api(path,body,method='POST',options){
     const text=await response.text();let result;
     try{result=text?JSON.parse(text):{};}catch{throw Error(response.ok?'服务返回了无法解析的数据':`服务请求失败（HTTP ${response.status}）：${text.slice(0,180)||'无错误详情'}`);}
     if(!response.ok){
-      const error=Error(typeof result.detail==='string'?result.detail:JSON.stringify(result.detail));
+      const detail=result.detail;
+      const message=typeof detail==='string'?detail:typeof detail?.message==='string'?detail.message:
+        typeof result.message==='string'?result.message:JSON.stringify(detail??result);
+      const error=Error(message||`服务请求失败（HTTP ${response.status}）`);
       error.status=response.status;
       if(typeof result.code==='string')error.code=result.code;
+      else if(typeof detail?.code==='string')error.code=detail.code;
       throw error;
     }
     return result;
@@ -86,7 +90,7 @@ async function api(path,body,method='POST',options){
 }
 function endpoint(suffix){if(!current)throw Error('请先选择或创建项目');return '/api/projects/'+encodeURIComponent(current)+suffix;}
 function scope(){return window.WorkspaceContext?WorkspaceContext.read(current):{known_at:iso('known-at'),filters:json('filters'),include_unknown:true};}
-function bind(id,fn){let sequence=0;$(id).onclick=async()=>{const ticket=++sequence,project=current,button=$(id);button.disabled=true;status('处理中…');try{await fn();if(ticket===sequence&&project===current&&$('status').textContent==='处理中…')status('完成');}catch(error){if(ticket===sequence&&project===current)status(error.message,true);}finally{if(ticket===sequence)button.disabled=false;}};}
+function bind(id,fn){let sequence=0;$(id).onclick=async()=>{const ticket=++sequence,project=current,button=$(id);button.disabled=true;status('处理中…');try{await fn();if(ticket===sequence&&project===current&&$('status').textContent==='处理中…')status('完成');}catch(error){if(ticket===sequence&&project===current)status(error.message,true);}finally{if(ticket===sequence){button.disabled=false;if(id==='preview-source'||id==='preview-chunks')window.LibraryWorkspace?.queueChanged?.();}}};}
 async function projects(){const result=await api('/api/projects?include_counts=false',undefined,'GET');$('project').innerHTML='<option value="">选择项目</option>'+result.projects.map(p=>`<option value="${esc(p.id)}" data-ontology-mode="${esc(p.metadata?.ontology_mode||'ontology')}">${esc(p.name)}</option>`).join('');if(current)$('project').value=current;}
 $('project').onchange=()=>{window.WorkspaceDrawers?.close({restoreFocus:false});window.RecordCreate?.close({restoreFocus:false});current=$('project').value;window.LibraryWorkspace?.projectChanged(current);window.IngestBatches?.projectChanged();for(const id of ['hits','records','history','search-summary'])$(id).textContent='';window.clearKnowledgeChat?.({notify:true});for(const id of ['revision','revision-id'])$(id).value='';$('revision-version').value=1;status('项目已切换');};
 function activateTab(name,button=null){

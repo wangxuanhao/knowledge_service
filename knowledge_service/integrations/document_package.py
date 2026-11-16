@@ -132,7 +132,9 @@ class SingleDocumentPackageReader:
                 if not isinstance(entries, list):
                     raise ValueError('manifest.documents must be a list')
                 if len(entries) != 1:
-                    raise ValueError('A ZIP must contain a single document; split legacy multi-document packages with the packaging script')
+                    if not entries:
+                        raise ValueError('ZIP 清单中没有资料，请添加一份主文档后重新打包。')
+                    raise ValueError(f'此 ZIP 是旧版多文档包，包含 {len(entries)} 份独立资料。当前要求一包一份资料，请拆分为 {len(entries)} 个 ZIP 后一起选择上传；可使用 scripts/package_rule_documents.py 重新打包。')
                 old = entries[0]
                 if isinstance(old, str):
                     entry = {'entry': old}

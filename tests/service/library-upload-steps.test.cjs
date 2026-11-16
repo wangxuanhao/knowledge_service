@@ -28,7 +28,9 @@ function setup(){
   const host=make('section','tab-ingest');make('h2',null,null,host);
   const panel=make('div',null,'document-upload-panel',host),workspace=make('div',null,'document-upload-workspace',panel),main=make('div',null,'document-upload-main',workspace);
   const zone=make('section',null,'document-upload-zone',main),drop=make('label','doc-dropzone','document-dropzone',zone);make('input','doc-file',null,drop);
-  for(const id of ['doc-upload-formats','doc-upload-extensions','doc-upload-limits','doc-upload-package-help','preview-source','preview-chunks'])make('span',id,null,zone);
+  for(const id of ['doc-upload-formats','doc-upload-extensions','doc-upload-limits','doc-upload-package-help'])make('span',id,null,zone);
+  const previews=make('div',null,'document-preview-actions',zone);
+  for(const id of ['preview-source','preview-chunks'])make('button',id,null,previews);
   const list=make('section',null,'document-queue',main);
   for(const id of ['doc-upload-summary','doc-file-list','doc-batch-help','doc-submit-results','doc-retry-files','doc-clear-files'])make('div',id,null,list);
   const options=make('section',null,'document-options',workspace),metaLabel=make('label',null,null,options);make('input','doc-meta',null,metaLabel);make('p','doc-meta-help',null,options);
@@ -45,6 +47,20 @@ function setup(){
   const file=name=>({name,size:10,lastModified:1});
   return {context,get,visible,file,steps:()=>document.body.querySelectorAll('[data-upload-step]'),go(index){this.steps()[index].onclick();}};
 }
+
+test('preview actions follow confirmed files and parsing settings instead of the dropzone',()=>{
+  const env=setup();env.context.LibraryWorkspace.open('upload');
+  for(const id of ['preview-source','preview-chunks']){
+    assert.equal(Boolean(env.get(id).disabled),true,'empty queues cannot preview');
+    assert.equal(env.visible(env.get(id)),false,'step one is file selection');
+  }
+  env.context.DocumentUploadQueue.add([env.file('rules.md')]);env.go(2);
+  for(const id of ['preview-source','preview-chunks']){
+    assert.equal(env.visible(env.get(id)),true);assert.equal(env.get(id).disabled,false);
+  }
+  env.context.DocumentUploadQueue.clear();
+  assert.equal(env.get('preview-source').disabled,true);assert.equal(env.get('preview-chunks').disabled,true);
+});
 
 test('only step one shows upload controls; later steps show a compact selection and return without clearing appendable files',()=>{
   const env=setup(),queue=env.context.DocumentUploadQueue,first=env.file('first.pdf');

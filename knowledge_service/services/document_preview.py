@@ -1,4 +1,4 @@
-"""Read-only upload previews, including individually selectable Markdown ZIP members."""
+"""Read-only upload previews, including one document and its assets per ZIP."""
 import base64
 import hashlib
 from html import escape
@@ -101,7 +101,7 @@ def preview_upload(uploads, upload, options, limits, package_path=None, preview_
             package = SingleDocumentPackageReader(parser=uploads.parser).read(
                 staged.path.read_bytes(), staged.original_name)
         except (ValueError, zipfile.BadZipFile, RuntimeError, NotImplementedError) as exc:
-            raise DocumentParseError('invalid_package', 'ZIP 知识包无法解析，请检查目录、manifest 和文件编码。' + str(exc)) from exc
+            raise DocumentParseError('invalid_package', 'ZIP 知识包无法解析：' + str(exc)) from exc
         documents = package['documents']
         for entry in documents:
             if len(entry['text']) > MAX_TEXT_CHARS or len(entry['text'].encode('utf-8')) > limits.max_file_bytes:

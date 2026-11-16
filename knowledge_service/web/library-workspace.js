@@ -67,7 +67,13 @@
     workspace.append(...stages);
     stages[0].append(fileMain);stages[1].append(get('ingest-mode-slot'),options);
     const summary=node('div','library-upload-confirm');summary.id='library-upload-confirm';summary.setAttribute('aria-live','polite');
-    stages[2].append(node('h3',null,'确认本批处理'),summary,advanced,actions);
+    const previews=get('preview-source').closest('.document-preview-actions');
+    stages[2].append(node('h3',null,'确认本批处理'),summary,advanced);
+    if(previews){
+      const hint=node('p','subtle','使用上方切片设置预览已选文件；ZIP 需一包一份资料。预览不会提交或保存文件。');
+      stages[2].append(hint,previews);
+    }
+    stages[2].append(actions);
     const metadata=node('details','library-upload-metadata');metadata.append(node('summary',null,'更多资料字段（Metadata）'));
     const metadataLabel=get('doc-meta').closest('label');metadata.append(metadataLabel,get('doc-meta-help'));options.append(metadata);
     const steps=node('nav','library-upload-steps');steps.setAttribute('aria-label','添加文件步骤');
@@ -90,6 +96,9 @@
     get('open-ingest-results').addEventListener('click',()=>shell.close({restoreFocus:false}),true);
     function updateSelection(){
       const rows=root.DocumentUploadQueue?.items?.()||[],names=rows.slice(0,3).map(item=>item.file.name);
+      for(const id of ['preview-source','preview-chunks']){
+        const control=get(id);if(control)control.disabled=!rows.length||!project();
+      }
       selectionCount.textContent=rows.length+' 份资料';
       selectionNames.textContent=names.length?names.join('、')+(rows.length>3?'；另 '+(rows.length-3)+' 份':''):'尚未选择文件';
     }

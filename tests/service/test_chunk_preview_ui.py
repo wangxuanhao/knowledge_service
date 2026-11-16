@@ -111,7 +111,7 @@ def workbench(browser, tmp_path):
         page.locator('#tab-sources').wait_for(state='visible')
         page.click('#upload-source')
         page.locator('#tab-ingest').wait_for(state='visible')
-        # 完整文件选择、追加和预览入口只在第 1 步；后续步骤保留精简摘要。
+        # 文件在第 1 步选择；预览入口位于第 3 步、切片设置之后。
         page.locator('#tab-ingest .document-upload-panel').wait_for(state='visible')
         yield SimpleNamespace(page=page, project=project_id)
     finally:
@@ -168,6 +168,7 @@ def _choose_text(page, title='预览规则', text='待切片的正文'):
 
 
 def _request_preview(page, path_suffix='/documents/upload/preview', button='preview-chunks'):
+    page.locator('[data-upload-step="2"]').click()
     with page.expect_response(lambda response: response.url.endswith(path_suffix)):
         page.click('#'+button)
     page.wait_for_function("() => document.getElementById('chunk-preview-content').getAttribute('aria-busy') === 'false'")
@@ -176,6 +177,8 @@ def _request_preview(page, path_suffix='/documents/upload/preview', button='prev
 def test_upload_controls_are_only_in_step_one_and_returning_preserves_appendable_files(workbench):
     page = workbench.page
     assert page.locator('#doc-dropzone').is_visible()
+    assert page.locator('#preview-source').is_disabled()
+    assert page.locator('#preview-chunks').is_disabled()
     page.evaluate("""() => {
       const files = new DataTransfer();
       files.items.add(new File(['第一份正文'], 'first.txt', {type:'text/plain'}));
@@ -200,14 +203,17 @@ def test_upload_controls_are_only_in_step_one_and_returning_preserves_appendable
       document.getElementById('doc-dropzone').dispatchEvent(new DragEvent('drop', {bubbles:true,cancelable:true,dataTransfer:files}));
     }""")
     page.wait_for_function("window.DocumentUploadQueue.items().length===2")
-    assert page.locator('#preview-source').is_visible()
-    assert page.locator('#preview-chunks').is_visible()
+    assert page.locator('#preview-source').is_hidden()
+    assert page.locator('#preview-chunks').is_hidden()
     page.click('[data-upload-step="2"]')
     assert '2 份资料' in page.locator('#library-upload-confirm').inner_text()
     assert 'first.txt' in page.locator('#library-upload-selection').inner_text()
     assert 'second.txt' in page.locator('#library-upload-selection').inner_text()
-    assert page.locator('#preview-source').is_hidden()
-    assert page.locator('#preview-chunks').is_hidden()
+    assert page.locator('#preview-source').is_visible()
+    assert page.locator('#preview-chunks').is_visible()
+    advanced = page.locator('#tab-ingest .parse-settings').bounding_box()
+    preview = page.locator('#preview-chunks').bounding_box()
+    assert preview['y'] >= advanced['y'] + advanced['height']
 
 
 def test_invalid_drop_has_visible_feedback_on_the_file_selection_step(workbench):
@@ -249,6 +255,7 @@ def test_real_single_document_zip_preview_keeps_media_and_switches_uploaded_file
         {'name': 'rules.zip', 'mimeType': 'application/zip', 'buffer': buffer.getvalue()},
         {'name': 'second.txt', 'mimeType': 'text/plain', 'buffer': '第二份独立正文'.encode('utf-8')},
     ])
+    page.wait_for_function('window.DocumentUploadQueue.items().length === 2')
     assert 'ZIP' in page.locator('#doc-upload-formats').inner_text()
     assert '.zip' in page.locator('#doc-file').get_attribute('accept')
     assert page.locator('#preview-chunks').inner_text() == '预览切片'

@@ -62,6 +62,6 @@ test('model page is wired into versioned management navigation',()=>{
  const web=path.resolve(__dirname,'../../knowledge_service/web');const html=fs.readFileSync(path.join(web,'index.html'),'utf8');
  assert.match(html,/<button data-tab="llm-models"[^>]*hidden[^>]*>模型管理<\/button>/);
  assert.match(html,/id="tab-llm-models"/);assert.match(html,/llm-models\.js\?v=platform-models-20261111-1/);assert.match(html,/llm-models\.css\?v=platform-models-20261111-1/);
- assert.match(html,/app\.js\?v=platform-models-20261111-1/);assert.match(html,/menu-hierarchy\.js\?v=platform-models-20261111-1/);
+ assert.match(html,/app\.js\?v=upload-preview-20261116-1/);assert.match(html,/menu-hierarchy\.js\?v=platform-models-20261111-1/);
  assert.match(fs.readFileSync(path.join(web,'menu-hierarchy.js'),'utf8'),/\['projects','useradmin','llm-models'\]/);
 });

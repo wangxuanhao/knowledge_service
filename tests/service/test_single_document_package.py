@@ -101,6 +101,13 @@ def test_legacy_single_entry_is_accepted_but_multiple_entries_are_rejected():
         reader().read(package({'a.md': '# A', 'b.md': '# B'}, {'documents': ['a.md', 'b.md']}))
 
 
+def test_multi_document_error_explains_package_count_and_recovery():
+    with pytest.raises(ValueError) as error:
+        reader().read(package({'a.md': '# A', 'b.md': '# B'}, {'documents': ['a.md', 'b.md']}))
+    message = str(error.value)
+    assert '2' in message and '一包一份' in message and '拆分' in message
+
+
 @pytest.mark.parametrize('manifest', [
     {'schema_version': 99, 'document': {'entry': 'a.md'}},
     v2(entry='a.md', pages=['assets/1.png']),
