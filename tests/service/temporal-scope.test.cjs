@@ -106,7 +106,7 @@ test('shared editor preserves combined scope on invalid dates, restores, copies 
   e.get('scope-time-mode').value='current';e.get('scope-include-unknown').checked=false;e.apply();
   const current=e.store.read('p','search');assert.equal(current.valid_at,'2026-10-28T01:02:03.456Z');assert.equal(current.include_unknown,false);
   assert.deepEqual(current.filters,original.filters);assert.deepEqual(current.ontology_ids,['ontology']);assert.deepEqual(current.kinds,['entity']);
-  e.get('scope-to-qa').onclick();assert.deepEqual(e.store.read('p','qa'),current);
+  e.store.copy('p','search','qa');e.page('qa');assert.deepEqual(e.store.read('p','qa'),current);
   for(const page of ['sources','qa','search','records']){e.store.copy('p','qa',page);e.page(page);assert.equal(e.get('scope-time-mode').value,'at');assert.equal(e.get('scope-include-unknown').checked,false);}
   e.reset();assert.deepEqual(e.store.read('p','records'),{known_at:null,valid_at:null,filters:null,include_unknown:true});
   e.get('scope-time-mode').value='all';e.get('scope-include-unknown').checked=false;e.apply();assert.equal(e.store.read('p','records').include_unknown,true);
@@ -196,10 +196,10 @@ test('actual extracted time provenance requires matching current boundaries and 
 test('shared controls replace the duplicate QA date and time helper loads before all consumers with new versions',()=>{
   const html=read('index.html');assert.equal(html.includes('id="qa-as-of"'),false,'QA duplicate business date is removed');
   for(const id of ['scope-time-mode','scope-valid-at-field','scope-include-unknown','scope-time-help','scope-time-applied'])assert.ok(html.includes('id="'+id+'"'),id);
-  for(const [file,version] of [['workspace-context-ui.js','graph-workspace-20261105-1'],['workbench.js','unified-media-20261111-1'],['evidence-inspector.js','entity-properties-20261113-2']])assert.ok(html.includes('/assets/'+file+'?v='+version),file);
+  for(const [file,version] of [['workspace-context-ui.js','page-filters-20261116-1'],['workbench.js','unified-media-20261111-1'],['evidence-inspector.js','entity-properties-20261113-2']])assert.ok(html.includes('/assets/'+file+'?v='+version),file);
   assert.ok(html.includes('/assets/temporal-scope.js?v=unified-temporal-20261028-2'),'temporal helper DST preservation version');
   assert.ok(html.includes('/assets/workspace.js?v=entity-properties-20261113-2'),'workspace includes concurrent graph updates');
-  assert.ok(html.includes('/assets/workspace-context.css?v=unified-temporal-20261028-2'),'responsive scope styles version');
+  assert.ok(html.includes('/assets/workspace-context.css?v=page-filters-20261116-1'),'responsive scope styles version');
   for(const consumer of ['workbench.js','workspace-context-ui.js','workspace.js','evidence-inspector.js'])assert.ok(html.indexOf('/assets/temporal-scope.js?')<html.indexOf('/assets/'+consumer+'?'));
   assert.match(read('workspace.js'),/系统修订时间/);assert.doesNotMatch(read('workspace.js'),/知识时间/);
   assert.match(read('evidence-inspector.js'),/未设结束时间|TemporalScope|temporal\.interval/);

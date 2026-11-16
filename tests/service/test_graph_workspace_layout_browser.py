@@ -43,7 +43,7 @@ def test_unified_header_owns_existing_query_and_unique_page_scope(redesign_page)
     assert 100 <= header['height'] <= 190
     assert page.locator('#graph-workspace-header > .retrieval-page-heading').is_visible()
     assert _bounds(page, '#scope')['y'] >= _bounds(page, '.retrieval-query-panel')['y'] + _bounds(page, '.retrieval-query-panel')['height']
-    for selector in ['#query', '#search', '#scope-toggle', '#scope-to-qa']:
+    for selector in ['#query', '#search', '#scope-toggle']:
         assert _within(_bounds(page, selector), header), selector
     assert not page.locator('#graph-workspace-panel').is_visible()
     page.click('#scope-toggle')
@@ -120,7 +120,7 @@ def test_responsive_panel_and_filter_controls_stay_inside_viewport(redesign_page
         assert pane['height'] <= 900 * .42 + 1
         assert pane['y'] >= canvas['y'] + canvas['height'] - 1
     assert page.evaluate('() => document.documentElement.scrollWidth <= innerWidth + 1')
-    for selector in ['#query', '#search', '#scope-toggle', '#scope-to-qa', '#detail-drawer-close']:
+    for selector in ['#query', '#search', '#scope-toggle', '#detail-drawer-close']:
         assert page.locator(selector).is_visible(), selector
         box = _bounds(page, selector)
         assert box['x'] >= 0 and box['x'] + box['width'] <= width + 1, selector

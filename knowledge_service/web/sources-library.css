@@ -2,43 +2,100 @@
 #tab-sources .source-layout{display:block;min-height:300px}
 #tab-sources #source-list{max-height:none;overflow:visible;padding:0;min-width:0}
 #tab-sources .source-summary{margin:0;font-size:12px;line-height:1.6}
-#tab-sources .source-search{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px 12px;margin:12px 0;max-width:none}
-#tab-sources .source-search>label{display:block;margin:0;font-size:12px;font-weight:600;color:var(--ks-muted)}
-#tab-sources .source-search__controls{display:flex;align-items:center;gap:8px;min-width:0;grid-column:2/-1}
-#tab-sources .source-search input{flex:1;min-width:0;margin:0;min-height:36px}
-#tab-sources .source-search button{flex-shrink:0;margin:0;min-height:36px}
-#tab-sources .source-search__actions{display:flex;flex-wrap:wrap;gap:8px;grid-column:3;margin:0;min-width:0}
-#tab-sources .source-search__steps{display:flex;flex-wrap:wrap;align-items:center;gap:8px;grid-column:2;margin:0;min-width:0;font-size:12px}
+
+/* —— 面板操作行（主标题在全局页头已有，这里不再重复大标题）—— */
+#tab-sources .source-actions-row{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin:0 0 14px}
+
+/* —— 搜索区：拍平的单行 [关键词|向量正文] [输入框] [搜索] [清空] —— */
+#tab-sources .source-search{display:block;margin:0 0 14px}
+#tab-sources .source-search__row{display:flex;align-items:center;gap:8px;min-width:0}
 #tab-sources .source-search [hidden]{display:none!important}
-#tab-sources .source-search__step{display:inline-flex;align-items:center;gap:6px;max-width:100%;min-width:0;padding:4px 6px 4px 10px;border:1px solid var(--ks-line);border-radius:6px;background:var(--ks-sunken)}
-#tab-sources .source-search__step>span{min-width:0;overflow-wrap:anywhere;white-space:pre-wrap}
-#tab-sources .source-search__step>button{min-width:32px;min-height:32px;padding:3px 8px}
-#tab-sources .source-search__actions button{max-width:100%;white-space:normal;overflow-wrap:anywhere}
-#tab-sources .source-search__mode{display:flex;align-items:center;gap:8px;flex-shrink:0;font-size:12px;color:var(--ks-muted);white-space:nowrap}
-#tab-sources .source-search__mode select{width:auto;min-width:100px;min-height:36px;margin:0;color:var(--ui-ink)}
-#tab-sources .source-search input:focus-visible,#tab-sources .source-search select:focus-visible{outline:2px solid var(--ks-accent,#216952);outline-offset:2px}
+#tab-sources .source-search__seg{display:inline-flex;flex:none;border:1px solid var(--ks-line-strong,#8fb0b0);border-radius:8px;overflow:hidden;background:var(--ks-surface,#fff)}
+#tab-sources .source-search__seg button{border:0;background:transparent;font:inherit;font-size:12px;color:var(--ks-muted,#688585);padding:0 13px;min-height:36px;cursor:pointer;white-space:nowrap}
+#tab-sources .source-search__seg button+button{border-left:1px solid var(--ks-line,#d5e4e4)}
+#tab-sources .source-search__seg button.active{background:var(--ks-accent-soft,#dceceb);color:var(--ks-accent,#0e7c7b);font-weight:600}
+#tab-sources .source-search__seg button:focus-visible{outline:2px solid var(--ui-accent,#0e7c7b);outline-offset:-2px}
+#tab-sources .source-search__mode-select{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+#tab-sources .source-search__field{flex:1;display:flex;align-items:center;gap:7px;background:var(--ks-surface,#fff);border:1px solid var(--ks-line-2,#bccfcf);border-radius:8px;padding:0 11px;min-height:36px;min-width:0}
+#tab-sources .source-search__field svg{width:15px;height:15px;color:var(--ks-muted,#688585);flex:none}
+#tab-sources .source-search__field input{flex:1;min-width:0;margin:0;border:0;background:transparent;color:var(--ks-ink,#124242);font:inherit;font-size:13px;min-height:34px}
+#tab-sources .source-search__field input::placeholder{color:var(--ks-muted,#688585)}
+#tab-sources .source-search__field:focus-within{border-color:var(--ui-accent,#0e7c7b);box-shadow:0 0 0 3px rgba(20,184,166,.16)}
+#tab-sources .source-search__row>button{margin:0;flex-shrink:0}
+#tab-sources .source-search__row>button:focus-visible{outline:2px solid var(--ui-accent,#0e7c7b);outline-offset:2px}
+#tab-sources .source-search__field input:focus{outline:none;box-shadow:none}
+
+/* —— 多次搜索：仅在已检索时出现的步骤卡片 —— */
+#tab-sources .source-search__steps{display:grid;gap:10px;margin-top:10px;padding:11px 12px;background:var(--ks-sunken,#eef5f5);border:1px solid var(--ks-line,#d5e4e4);border-radius:8px;min-width:0;font-size:12px}
+#tab-sources .source-search__head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+#tab-sources .source-search__head-title{font-size:12px;font-weight:600;color:var(--ks-ink-2,#3d5e5e)}
+#tab-sources .source-search__progress{display:flex;align-items:center;gap:8px;color:var(--ks-muted,#688585);font-size:11px}
+#tab-sources .source-search__bar{width:92px;height:4px;border-radius:99px;background:var(--ks-line,#d5e4e4);overflow:hidden}
+#tab-sources .source-search__bar i{display:block;height:100%;background:var(--ui-accent,#0e7c7b);border-radius:99px}
+#tab-sources .source-search__chain{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+#tab-sources .source-search__step-node{display:flex;align-items:center;min-width:0}
+#tab-sources .source-search__step{display:inline-flex;align-items:center;gap:8px;padding:5px 10px;background:var(--ks-surface,#fff);border:1px solid var(--ks-line-2,#bccfcf);border-radius:8px;min-width:0}
+#tab-sources .source-search__step--current{border-color:var(--ui-accent,#0e7c7b);background:var(--ks-accent-soft,#dceceb)}
+#tab-sources .source-search__num{width:18px;height:18px;border-radius:99px;background:var(--ui-accent,#0e7c7b);color:#fff;font-size:11px;font-weight:700;display:grid;place-items:center;flex:none}
+#tab-sources .source-search__badge{font-size:11px;padding:1px 7px;border-radius:99px;font-weight:600;background:var(--ks-accent-soft,#dceceb);color:var(--ui-accent,#0e7c7b);flex:none;white-space:nowrap}
+#tab-sources .source-search__badge--semantic{background:var(--ui-violet-dim,#ece4fb);color:var(--ui-violet,#7c3aed)}
+#tab-sources .source-search__term{min-width:0;overflow-wrap:anywhere;color:var(--ks-ink,#124242)}
+#tab-sources .source-search__remove{border:0;background:transparent;color:var(--ks-muted,#688585);font-size:15px;line-height:1;cursor:pointer;padding:1px 4px;flex:none;min-width:0;min-height:0}
+#tab-sources .source-search__remove:hover{color:var(--ui-danger,#be123c)}
+#tab-sources .source-search__arrow{color:var(--ks-muted,#688585);padding:0 3px;font-size:15px;flex:none}
+#tab-sources .source-search__actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+#tab-sources .source-search__actions button{margin:0;min-height:34px;flex-shrink:0}
+#tab-sources .source-search__hint{font-size:11px;color:var(--ks-muted,#688585)}
+
+/* —— 结果工具栏：筛选胶囊 —— */
+#tab-sources .source-results-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 14px;padding:0 0 10px;border-bottom:1px solid var(--ks-line,#d5e4e4)}
+#tab-sources .source-results-toolbar .source-filter-bar{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;background:transparent;border:0;border-radius:0}
+#tab-sources .source-filter-btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:5px 12px;border-radius:99px;white-space:nowrap}
+#tab-sources .source-filter-btn.active{background:var(--ui-accent-strong,#124242);border-color:var(--ui-accent-strong,#124242);color:#fff}
+#tab-sources .source-filter-btn .filter-dot{width:7px;height:7px;border-radius:99px;background:currentColor;opacity:.7}
+#tab-sources .source-filter-btn .filter-count{font-size:11px;font-weight:600;background:rgba(0,0,0,.08);border-radius:99px;padding:0 6px;line-height:16px}
+#tab-sources .source-filter-btn.active .filter-count{background:rgba(255,255,255,.18)}
+#tab-sources .source-layout{margin-top:0}
+
+/* —— 资料卡片列表 —— */
+#tab-sources #source-list{display:grid;gap:10px;margin-top:12px}
+#tab-sources #source-list .source-item{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;width:100%;margin:0;padding:13px 15px;border:1px solid var(--ks-line,#d5e4e4);border-radius:10px;background:var(--ks-surface,#fff);box-shadow:none;text-align:left}
+#tab-sources #source-list .source-item:hover{border-color:var(--ui-accent,#0e7c7b);background:var(--ks-surface,#fff);box-shadow:0 4px 14px rgba(18,66,66,.14)}
+#tab-sources #source-list .source-item:focus-visible{outline:2px solid #0e7c7b;outline-offset:-2px}
+#tab-sources #source-list .source-item[aria-current=true]{background:var(--ks-sunken,#eef5f5);box-shadow:inset 3px 0 #0e7c7b}
+#tab-sources .source-item__icon{width:38px;height:38px;border-radius:8px;background:var(--ks-accent-soft,#dceceb);color:var(--ui-accent,#0e7c7b);display:grid;place-items:center;flex:none}
+#tab-sources .source-item__icon--pdf{background:var(--ui-danger-dim,#fbe0e7);color:var(--ui-danger,#be123c)}
+#tab-sources .source-item__icon--md,#tab-sources .source-item__icon--markdown{background:var(--ui-violet-dim,#ece4fb);color:var(--ui-violet,#7c3aed)}
+#tab-sources .source-item__icon--html,#tab-sources .source-item__icon--htm{background:var(--ui-warn-dim,#fbf0cf);color:var(--ui-warn,#ca8a04)}
+#tab-sources .source-item__icon svg{width:20px;height:20px}
+#tab-sources .source-item__main{min-width:0;display:grid;gap:1px}
+#tab-sources .source-item__name b{display:block;font-size:14px;font-weight:600;line-height:1.5;color:var(--ks-ink,#124242);overflow-wrap:anywhere}
+#tab-sources .source-item__name small{display:block;margin-top:1px;color:var(--ks-muted,#688585);font-size:11px;line-height:1.5;overflow-wrap:anywhere}
+#tab-sources .source-item__sub{margin-top:3px;font-size:11px;color:var(--ks-muted,#688585);line-height:1.5;overflow-wrap:anywhere}
+#tab-sources .source-item__side{display:flex;align-items:center;gap:12px;flex:none}
+#tab-sources .source-item__open{font-size:12px;font-weight:600;color:var(--ui-accent,#0e7c7b);white-space:nowrap}
+#tab-sources .source-item__match{grid-column:2/4;margin-top:2px;padding:9px 12px;border-left:3px solid var(--ui-warn,#ca8a04);border-radius:4px;background:var(--ui-warn-dim,#fbf0cf);color:var(--ks-ink-2,#3d5e5e);font-size:12.5px;line-height:1.8;text-align:left;white-space:pre-wrap;overflow-wrap:anywhere}
+#tab-sources .source-item__match mark{background:transparent;color:var(--ui-warn,#b45309);font-weight:700}
+
 #tab-sources .source-empty>button{margin-top:12px}
 #tab-sources .source-empty>button[hidden]{display:none}
-@media(max-width:900px){#tab-sources .source-search{grid-template-columns:minmax(0,1fr)}#tab-sources .source-search__actions,#tab-sources .source-search__steps,#tab-sources .source-search__controls{grid-column:1}}
-@media(max-width:600px){#tab-sources .source-search__controls{flex-wrap:wrap}#tab-sources .source-search__mode{flex-basis:100%}#tab-sources .source-search input{flex-basis:100%;width:100%}}
-#tab-sources #source-list .source-item{display:grid;grid-template-columns:minmax(180px,1fr) minmax(112px,auto) 72px minmax(180px,auto) 54px;align-items:center;gap:16px;margin:0;border:0;border-bottom:1px solid var(--ks-line);border-radius:0;padding:17px 14px;min-height:76px;box-shadow:none}
-#tab-sources #source-list .source-item:first-child{border-top:1px solid var(--ks-line)}
-#tab-sources #source-list .source-item:hover{background:var(--ks-sunken)}
-#tab-sources #source-list .source-item:focus-visible{outline:2px solid #216952;outline-offset:-2px}
-#tab-sources #source-list .source-item[aria-current=true]{background:var(--ks-sunken);box-shadow:inset 3px 0 #216952}
-#tab-sources #source-list .source-item b{font-size:13px;font-weight:600;line-height:1.6}
-#tab-sources #source-list .source-item small{margin:3px 0 0;color:var(--ks-muted);font-size:11px;line-height:1.5}
-.source-item__name{min-width:0;overflow-wrap:anywhere}
-#tab-sources .source-item__match{grid-column:1/-1;padding:10px 12px;border-left:2px solid var(--ks-accent,#216952);background:var(--ks-sunken);color:var(--ui-ink-2,var(--ks-muted));font-size:12px;line-height:1.8;text-align:left;white-space:pre-wrap;overflow-wrap:anywhere}
-.source-item__counts,.source-item__open{font-size:11px;color:var(--ks-muted)}
-.source-item__counts{overflow-wrap:anywhere}
-.source-item__open{text-align:right;color:#216952;font-weight:600;white-space:nowrap}
-#tab-sources .source-results-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 16px;padding:0 0 10px;border-bottom:1px solid var(--ks-line)}
-#tab-sources .source-results-toolbar .source-filter-bar{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;background:transparent;border:0;border-radius:0}
-#tab-sources .source-layout{margin-top:0}
-#tab-sources .source-filter-btn{padding:5px 10px}
-#tab-sources .source-filter-btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;white-space:normal}
 #tab-sources .source-empty{min-height:300px}
+
+/* —— 响应式 —— */
+@media(max-width:640px){
+  #tab-sources>.panel{padding:16px}
+  #tab-sources .source-search__row{flex-wrap:wrap}
+  #tab-sources .source-search__field{flex-basis:100%}
+  #tab-sources .source-search__seg button{min-height:34px}
+  #tab-sources #source-list .source-item{grid-template-columns:auto minmax(0,1fr);padding:12px 12px;gap:10px}
+  #tab-sources .source-item__side{grid-column:2;justify-self:start}
+  #tab-sources .source-item__open{display:none}
+  #tab-sources .source-item__match{grid-column:2}
+  #tab-sources .source-filter-btn{font-size:11px;padding:6px 9px}
+}
+@media(max-width:1100px){#tab-sources .source-item__side{flex-wrap:wrap;gap:6px}#tab-sources .source-item__side .source-state{white-space:nowrap}}
+
+/* —— 详情抽屉（原文/提取知识/处理/修订）—— */
 #source-detail-drawer{width:min(900px,calc(100vw - 56px))}
 #source-detail-drawer article{min-width:0;padding:0;border:0;border-radius:0;background:transparent}
 #source-detail-drawer #source-title{margin:0;font-size:18px;line-height:1.5;overflow-wrap:anywhere}
@@ -84,8 +141,7 @@
 #source-detail-drawer .source-raw-data>summary{margin:0;color:var(--ks-muted);font-size:12px;cursor:pointer}
 #source-detail-drawer .source-raw-data pre{max-height:360px;margin:12px 0 0;overflow:auto;overscroll-behavior:contain;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.7 Consolas,"Microsoft YaHei",monospace}
 @media(max-width:600px){#source-detail-drawer .source-activity{padding:13px 12px}#source-detail-drawer .source-run-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}#source-detail-drawer .source-technical dl{grid-template-columns:1fr;gap:3px}#source-detail-drawer .source-technical dd{margin-bottom:6px}}
-@media(max-width:1100px){#tab-sources #source-list .source-item{grid-template-columns:minmax(160px,1fr) minmax(108px,auto) 64px;gap:8px 14px}#tab-sources .source-item__counts{grid-column:1/3}#tab-sources .source-item__open{grid-column:3}}
-@media(max-width:700px){#tab-sources>.panel{padding:16px}#tab-sources #source-list .source-item{grid-template-columns:minmax(0,1fr) auto;padding:14px 8px;gap:8px 12px}#tab-sources .source-item__name{grid-column:1/-1}#tab-sources .source-item__type{justify-self:end}#tab-sources .source-item__counts{grid-column:1}#tab-sources .source-item__open{grid-column:2}#tab-sources .source-filter-bar{gap:6px}#tab-sources .source-filter-btn{font-size:11px;padding:7px 9px}#source-detail-drawer{width:100vw;max-width:100vw}#source-detail-drawer .source-meta{padding:12px}}
+@media(max-width:700px){#source-detail-drawer{width:100vw;max-width:100vw}#source-detail-drawer .source-meta{padding:12px}}
 #source-detail-drawer #source-body.source-rich-content{font-family:inherit;font-size:14px;white-space:normal;margin:0;padding:4px 0;background:transparent;border:0;border-radius:0;line-height:1.95}
 #source-detail-drawer .source-reading-controls{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
 #source-detail-drawer .source-reading-controls[hidden]{display:none}

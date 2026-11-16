@@ -15,28 +15,58 @@
   const boundedSearch=()=>boundedBySemantic||semanticSearch()||searchSteps.some(step=>step.retrieval_mode==='semantic');
   const semanticSearch=()=>retrievalMode==='semantic'&&Boolean(appliedQuery);
   const searchForm=document.createElement('form');searchForm.id='source-search-form';searchForm.className='source-search';searchForm.setAttribute('role','search');
-  searchForm.innerHTML='<label for="source-search-input">搜索资料</label><div class="source-search__controls"><div class="source-search__mode"><label for="source-search-mode">搜索方式</label><select id="source-search-mode"><option value="keyword">关键词</option><option value="semantic">向量正文</option></select></div><input id="source-search-input" type="search" maxlength="2000" placeholder="搜索名称、文件名或正文" autocomplete="off"><button type="submit">搜索</button><button id="source-search-clear" type="button" class="secondary">清空</button></div>';
+  searchForm.innerHTML='<label for="source-search-input" class="sr-only">搜索资料</label><label for="source-search-mode" class="sr-only">搜索方式</label><div class="source-search__row"><span class="source-search__seg" role="radiogroup" aria-label="搜索方式切换"><button type="button" role="radio" data-mode="keyword" aria-checked="true">关键词</button><button type="button" role="radio" data-mode="semantic" aria-checked="false">向量正文</button></span><select id="source-search-mode" class="source-search__mode-select" tabindex="-1"><option value="keyword">关键词</option><option value="semantic">向量正文</option></select><div class="source-search__field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="source-search-input" type="search" maxlength="2000" placeholder="搜索名称、文件名或正文" autocomplete="off"></div><button type="submit">搜索</button><button id="source-search-clear" type="button" class="secondary">清空</button></div>';
   layout.before(searchForm);
   const searchInput=searchForm.querySelector('input');
   const searchMode=$('source-search-mode');searchMode.value=retrievalMode;
+  const seg=searchForm.querySelector('.source-search__seg');
+  const segButtons=[...seg.querySelectorAll('button')];
+  function syncSeg(){segButtons.forEach(btn=>{const on=btn.dataset.mode===searchMode.value;btn.classList.toggle('active',on);btn.setAttribute('aria-checked',String(on));});}
+  segButtons.forEach(btn=>btn.addEventListener('click',()=>{
+    if(composing){pendingModeChange=true;searchMode.value=btn.dataset.mode;syncSeg();return;}
+    if(addingStep&&!searchInput.value.trim()){searchMode.value=btn.dataset.mode;syncSeg();return;}
+    searchMode.value=btn.dataset.mode;syncSeg();searchMode.dispatchEvent(new Event('change',{bubbles:true}));
+  }));
+  syncSeg();
   const stepsUI=document.createElement('div');stepsUI.id='source-search-steps';stepsUI.className='source-search__steps';stepsUI.setAttribute('aria-label','检索条件链');searchForm.append(stepsUI);
   const searchActions=document.createElement('div');searchActions.className='source-search__actions';searchForm.append(searchActions);
   const refine=document.createElement('button');refine.id='source-search-refine';refine.type='button';refine.className='secondary';refine.textContent='在结果中继续检索';searchActions.append(refine);
   const back=document.createElement('button');back.id='source-search-back';back.type='button';back.className='secondary';searchActions.append(back);
   function renderSearchSteps(){
-    stepsUI.replaceChildren();
+    stepsUI.replaceChildren();syncSeg();
     const chain=[...searchSteps,...(appliedQuery?[{query:appliedQuery,retrieval_mode:retrievalMode}]:[])];
     stepsUI.hidden=!chain.length&&!addingStep;
     searchActions.hidden=!chain.length&&!addingStep;
-    chain.forEach((step,index)=>{
-      const chip=document.createElement('span');chip.className='source-search__step';
-      const label=document.createElement('span');label.textContent=(index+1)+'. '+(step.retrieval_mode==='semantic'?'向量正文':'关键词')+'：'+step.query;
-      const remove=document.createElement('button');remove.type='button';remove.className='secondary';remove.textContent='×';remove.setAttribute('aria-label','删除第 '+(index+1)+' 步：'+step.query);
-      remove.onclick=()=>replaySteps(chain.filter((_,position)=>position!==index));chip.append(label,remove);stepsUI.append(chip);
-    });
-    const hint=document.createElement('span');hint.className='subtle';hint.textContent=addingStep?'正在追加条件：在上一步命中资料的全部正文中检索；最多8步。':'最多8步';stepsUI.append(hint);
     refine.disabled=addingStep||searchLoading||!searchSucceeded||!appliedQuery||!allDocuments.length||chain.length>=8;
     back.textContent=addingStep?'取消继续检索':'退回上一步';back.disabled=!addingStep&&!chain.length;
+    if(!chain.length&&!addingStep)return;
+    const head=document.createElement('div');head.className='source-search__head';
+    const headTitle=document.createElement('span');headTitle.className='source-search__head-title';
+    headTitle.textContent=addingStep?'正在追加条件：在上一步命中的全部正文中检索':'检索步骤';
+    const progress=document.createElement('span');progress.className='source-search__progress';
+    const bar=document.createElement('span');bar.className='source-search__bar';
+    const pct=Math.min(100,chain.length/8*100)+'%';const barFill=document.createElement('i');barFill.setAttribute('style','width:'+pct);bar.append(barFill);
+    const count=document.createElement('b');count.textContent=chain.length+' / 8 步';
+    progress.append(bar,count);head.append(headTitle,progress);stepsUI.append(head);
+    const trail=document.createElement('div');trail.className='source-search__chain';
+    chain.forEach((step,index)=>{
+      const node=document.createElement('div');node.className='source-search__step-node';
+      const card=document.createElement('div');card.className='source-search__step'+(index===chain.length-1?' source-search__step--current':'');
+      const num=document.createElement('span');num.className='source-search__num';num.textContent=index+1;
+      const badge=document.createElement('span');badge.className='source-search__badge'+(step.retrieval_mode==='semantic'?' source-search__badge--semantic':'');
+      badge.textContent=step.retrieval_mode==='semantic'?'向量正文':'关键词';
+      const term=document.createElement('span');term.className='source-search__term';term.textContent=step.query;
+      const remove=document.createElement('button');remove.type='button';remove.className='source-search__remove';remove.textContent='×';remove.setAttribute('aria-label','删除第 '+(index+1)+' 步：'+step.query);
+      remove.onclick=()=>replaySteps(chain.filter((_,position)=>position!==index));
+      card.append(num,badge,term,remove);node.append(card);
+      if(index<chain.length-1){const arrow=document.createElement('span');arrow.className='source-search__arrow';arrow.setAttribute('aria-hidden','true');arrow.textContent='›';node.append(arrow);}
+      trail.append(node);
+    });
+    stepsUI.append(trail);
+    searchActions.replaceChildren(refine,back);
+    stepsUI.append(searchActions);
+    const hint=document.createElement('span');hint.className='source-search__hint subtle';hint.textContent=addingStep?'正在继续推进：最多8步。':'最多8步';
+    stepsUI.append(hint);
   }
   function replaySteps(chain){
     addingStep=false;const last=chain.at(-1);searchSteps=chain.slice(0,-1);appliedQuery=last?.query||'';
@@ -46,7 +76,7 @@
   back.onclick=()=>{if(addingStep){addingStep=false;searchInput.value=appliedQuery;searchMode.value=retrievalMode;renderSearchSteps();return;}return replaySteps(searchSteps);};
   searchMode.addEventListener('change',()=>{
     if(composing){pendingModeChange=true;return;}
-    if(addingStep&&!searchInput.value.trim())return;
+    if(addingStep&&!searchInput.value.trim()){syncSeg();return;}
     return applySearch();
   });
   searchInput.addEventListener('compositionstart',()=>{composing=true;});
@@ -158,14 +188,29 @@
       message('当前筛选无结果',`没有${labels[currentFilter]}的文档。`);return;
     }
     layout.classList.remove('is-empty');empty.hidden=true;list.replaceChildren();
+    const appendMatch=(node,text,term)=>{
+      const t=String(term||'');if(!t){node.textContent=text;return;}
+      const lowered=t.toLocaleLowerCase();let i=0;
+      while(i<text.length){
+        const idx=text.toLocaleLowerCase().indexOf(lowered,i);
+        if(idx<0){const rest=document.createElement('span');rest.textContent=text.slice(i);node.append(rest);break;}
+        if(idx>i){const pre=document.createElement('span');pre.textContent=text.slice(i,idx);node.append(pre);}
+        const hit=document.createElement('mark');hit.textContent=text.slice(idx,idx+t.length);node.append(hit);i=idx+t.length;
+      }
+    };
     for(const [index,doc] of allDocuments.entries()){
       if(currentFilter!=='all'&&buildState(doc).className!==currentFilter)continue;
       const state=buildState(doc),button=document.createElement('button');button.type='button';button.className='source-item';
       button.dataset.source=String(index);button.setAttribute('aria-haspopup','dialog');button.setAttribute('aria-controls','source-detail-drawer');button.setAttribute('aria-current','false');
-      button.innerHTML=`<span class="source-item__name"><b>${esc(documentTitle(doc))}</b><small>${esc(doc.metadata?.source_file||'已保存正文 · 原始文件名未记录')}</small></span>
-        <span class="source-state ${state.className}">${state.label}</span><span class="source-item__type source-format">${esc(formatLabel(doc.metadata?.source_format))}</span>
-        <span class="source-item__counts">${doc.text_length==null?'正文按需读取':esc(doc.text_length)+' 字'} · 派生摘要 ${esc(doc.derived_count??'待核验')} 条</span><span class="source-item__open" aria-hidden="true">查看 ›</span>`;
-      if(semanticSearch()&&doc.match?.text){const snippet=document.createElement('span');snippet.className='source-item__match';snippet.textContent=doc.match.text;button.append(snippet);}
+      const format=String(doc.metadata?.source_format||'').toLowerCase();
+      const bits=[formatLabel(doc.metadata?.source_format),doc.metadata?.source_size_bytes!=null?sizeLabel(doc.metadata.source_size_bytes):'',
+        doc.metadata?.page_count?doc.metadata.page_count+' 页':'',doc.text_length==null?'正文按需读取':doc.text_length+' 字',
+        doc.derived_count!=null?'派生摘要 '+doc.derived_count+' 条':''].filter(Boolean);
+      button.innerHTML=`<span class="source-item__icon source-item__icon--${esc(format||'doc')}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg></span>
+        <span class="source-item__main"><span class="source-item__name"><b>${esc(documentTitle(doc))}</b><small>${esc(doc.metadata?.source_file||'已保存正文 · 原始文件名未记录')}</small></span>
+        <span class="source-item__sub">${bits.length?esc(bits.join(' · ')):''}</span></span>
+        <span class="source-item__side"><span class="source-state ${state.className}">${state.label}</span><span class="source-item__open" aria-hidden="true">查看 ›</span></span>`;
+      if(semanticSearch()&&doc.match?.text){const snippet=document.createElement('span');snippet.className='source-item__match';appendMatch(snippet,doc.match.text,appliedQuery);button.append(snippet);}
       button.addEventListener('click',()=>openDocument(doc,button));list.append(button);
     }
   }
@@ -463,10 +508,10 @@
       allDocuments=[...new Map([...(append?allDocuments:[]),...(result.documents||[])].map(doc=>[doc.id,doc])).values()];
       nextCursor=result.next_cursor||null;total=result.total??allDocuments.length;directoryCounts=result.counts||null;
       summary.textContent=searchSteps.length&&boundedSearch()
-        ?`召回范围内继续检索 · ${searchSteps.length+1} 步条件 · 当前状态 ${total} 份资料 · 已加载 ${allDocuments.length} 份 · 状态计数仅指本次召回集${result.complete===false?' · 召回不完整，请刷新重试':''}`
+        ?`召回范围内继续检索 · ${searchSteps.length+1} 步条件 · 已命中 ${directoryCounts?.all??total} 份 · 已加载 ${allDocuments.length} 份${result.complete===false?' · 召回不完整，请刷新重试':''}`
         :semanticSearch()
-        ?`向量正文召回 · 搜索“${term}” · 本次召回 ${directoryCounts?.all??total} 份资料 / 最多100片段 · 当前状态 ${total} 份 · 已加载 ${allDocuments.length} 份 · 状态计数仅指本次召回集${result.complete===false?' · 召回不完整，请刷新重试':''}`
-        :(term?`搜索“${term}” · `:'')+`当前范围共 ${total} 篇文档 · 已加载 ${allDocuments.length} 篇 · 选择资料查看详情${result.complete===false?' · 结果不完整，请刷新重试':''}`;
+        ?`向量正文召回 · “${term}” · 本次召回 ${directoryCounts?.all??total} 份资料（最多100片段）· 已加载 ${allDocuments.length} 份${result.complete===false?' · 召回不完整，请刷新重试':''}`
+        :(term?`搜索“${term}” · `:'')+`当前范围共 ${total} 篇 · 已加载 ${allDocuments.length} 篇 · 选择资料查看详情${result.complete===false?' · 结果不完整，请刷新重试':''}`;
       loadMore.hidden=!nextCursor;
       renderDocumentList();return true;
     }catch(error){

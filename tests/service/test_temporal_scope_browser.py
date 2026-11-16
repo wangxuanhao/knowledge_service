@@ -47,13 +47,23 @@ def test_temporal_filters_apply_to_search_and_frozen_qa_turns(redesign_page):
     assert searches[-1]['valid_at'] == applied['valid_at']
     assert searches[-1]['include_unknown'] is False
 
-    page.click('#scope-to-qa')
+    page.click('[data-tab="qa"]')
+    # QA now owns its filter entry; apply the same temporal scope in place.
+    page.click('#scope-toggle')
+    page.fill('#query-platforms', '问答筛选平台')
+    page.select_option('#scope-time-mode', 'current')
+    page.uncheck('#scope-include-unknown')
+    page.click('#apply-scope')
+    qa_scope = page.evaluate("WorkspaceContext.read('p','qa')")
+    assert qa_scope['valid_at'] == applied['valid_at']
+    assert qa_scope['include_unknown'] is False
     assert page.locator('#qa-as-of').count() == 0
     page.fill('#qa-query', '退款是什么')
     page.click('#qa')
     page.wait_for_selector('.qa-turn-assistant[data-state="done"]')
     assert questions[-1]['valid_at'] == applied['valid_at']
     assert questions[-1]['include_unknown'] is False
+    assert questions[-1]['applicability']['platforms']['values'] == ['问答筛选平台']
     first_note = page.locator('.qa-submitted-scope').first.inner_text()
 
     page.click('#scope-toggle')

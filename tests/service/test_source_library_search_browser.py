@@ -77,8 +77,7 @@ def test_library_vector_mode_snippet_and_keyword_switch(redesign_page, width, he
     page.click('[data-tab="sources"]')
     page.wait_for_function("document.querySelectorAll('#source-list .source-item').length===1")
     page.set_viewport_size({'width': width, 'height': height})
-    mode = page.get_by_label('搜索方式', exact=True)
-    mode.select_option('semantic')
+    page.get_by_role('radio', name='向量正文', exact=True).click()
     search = page.get_by_role('searchbox', name='搜索资料')
     search.fill(term)
     search.press('Enter')
@@ -92,7 +91,7 @@ def test_library_vector_mode_snippet_and_keyword_switch(redesign_page, width, he
     folder = Path(__file__).resolve().parents[2] / '.benchmarks' / 'source-library-search'
     folder.mkdir(parents=True, exist_ok=True)
     page.screenshot(path=str(folder / f'semantic-{width}.png'), full_page=True)
-    mode.select_option('keyword')
+    page.get_by_role('radio', name='关键词', exact=True).click()
     page.wait_for_function("document.querySelectorAll('#source-list .source-item').length===0")
     assert requests[-1] == ('keyword', term)
     assert search.input_value() == term
@@ -133,7 +132,7 @@ def test_library_progressive_search_back_remove_and_mobile_layout(redesign_page,
     page.locator('#source-search-refine').click()
     assert search.input_value() == ''
     assert page.locator('#source-list .source-item').count() == 2
-    page.get_by_label('搜索方式', exact=True).select_option('semantic')
+    page.get_by_role('radio', name='向量正文', exact=True).click()
     assert page.locator('#source-list .source-item').count() == 2
     search.fill('多久到账')
     search.press('Enter')

@@ -14,7 +14,7 @@ def test_unified_workspace_keeps_original_controls_and_handlers(redesign_page):
     assert page.locator('#graph-workspace-header > .retrieval-page-heading').is_visible()
     assert page.locator('#graph-workspace-header > .retrieval-query-panel #query').is_visible()
     assert page.locator('#graph-workspace-header > #scope #scope-toggle').is_visible()
-    for selector in ['#search-mode', '#ontology-expansion-toggle', '.search-options > summary', '#scope-to-qa']:
+    for selector in ['#search-mode', '#ontology-expansion-toggle', '.search-options > summary']:
         assert page.locator(selector).is_visible(), selector
     page.click('#ontology-expansion-toggle')
     assert page.locator('#ontology-expansion').is_checked()
