@@ -33,7 +33,9 @@ def test_workbench_has_all_control_targets_and_no_native_dialogs():
     assert "...WorkspaceContext.read(current,'search'),known_at:value||null" in timeline
     assert "WorkspaceContext.store.apply(current,'search')" in timeline
     assert "get('valid-at').value=" not in timeline
-    assert 'window.clearGraphWorkspace({preserveSearchResults:true})' in timeline
+    # 时间轴切换不再各处直清图谱：统一发 scope-changed，检索页自己的刷新链路处理
+    # （refreshOwnedScope 里清空图谱工作区，有检索词时按新时间点自动重查）。
+    assert "dispatchEvent(new CustomEvent('workspace:scope-changed'" in timeline
     assert 'tl-density' not in workspace and 'startPlayback' not in workspace
     assert 'ontology-term-create' not in workspace and "endpoint('/ontology/terms')" not in workspace
     model=(ROOT/'ontology-model.js').read_text(encoding='utf-8')
@@ -52,7 +54,9 @@ def test_workbench_has_all_control_targets_and_no_native_dialogs():
     assert all(text in creator for text in ('创建正式记录','起点实体','终点实体','只有管理员可以创建知识记录'))
     assert 'selected:subject' in creator and 'catalog(publication)[kind]' in creator
     assert 'await session.submit(record)' in creator
-    assert "return read('/records',{records:[record]})" in creator
+    # 正式写入直接用 POST /records，结果随响应返回（result.records），不再额外回读。
+    assert "await request(base+'/records',{records:[record]},'POST')" in creator
+    assert 'records:result.records||[]' in creator
     assert "new CustomEvent('records:created'" in creator
     for js in (evidence,creator):
         assert not re.search(r'\b(?:prompt|confirm|alert)\s*\(',js)
@@ -71,7 +75,8 @@ def test_workbench_has_all_control_targets_and_no_native_dialogs():
     assert "['使用知识',['qa','search','mindmap']]" in menu
     assert "['管理资料',['sources','records','ontology-model']]" in menu
     assert "['运行与质量',['runtime','quality']]" in menu
-    assert "['projects','useradmin']" in menu
+    # 管理层数组会演进（已加入 llm-models），不锁数组字面量；钉住 useradmin 入口在层级里。
+    assert "'useradmin'" in menu
     assert all(asset in html for asset in ('candidate-mindmap.js','menu-hierarchy.js','candidate-mindmap.css','menu-hierarchy.css'))
     assert '/assets/workbench.css' in html and '/assets/workbench.js' in html
 
@@ -100,7 +105,8 @@ def test_search_and_graph_share_one_workspace_with_single_mode_and_hop_controls(
     local_graph=workspace[workspace.index('window.drawGraph=async('):workspace.index('window.clearGraphWorkspace=')]
     assert re.search(r'if\(!id\)\{[^}]*return null;\}',local_graph)
     assert local_graph.index('if(!id)') < local_graph.index("'/graph-neighborhood'")
-    assert 'seeds:[id]' in local_graph and 'hops:Number(hops)' in local_graph
+    # 局部图谱请求：种子默认是当前选中实体（可被显式 seeds 覆盖），跳数经同一校验转换。
+    assert 'seeds:options.seeds||[id]' in local_graph and 'hops:Number(hops)' in local_graph
     assert 'Number(hops)>10' in local_graph and 'Number.isInteger(Number(hops))' in local_graph
     assert all(control in local_graph for control in ('graph-direction','graph-max-nodes','graph-max-edges'))
     assert 'max_nodes:' in local_graph and 'max_edges:' in local_graph
@@ -111,7 +117,7 @@ def test_search_and_graph_share_one_workspace_with_single_mode_and_hop_controls(
     full_graph=(ROOT/'full-graph.js').read_text(encoding='utf-8')
     assert html.index('/assets/full-graph.js') < html.index('/assets/full-graph-view.js')
     assert 'data-fg-mode="full"' in full_view and "mode='local'" in full_view
-    assert 'new window.FullGraph.SessionLoader' in full_view and 'loader.begin(selected,fixed)' in full_view
+    assert 'new window.FullGraph.SessionLoader' in full_view and 'ownedLoader.begin(selected,authorityScope)' in full_view
     assert "'/graph-sessions'" in full_graph and "kind==='connected'" in full_graph
     assert 'this.cursor=page.next_cursor' in full_graph and 'this.resume()' in full_graph
     assert all(action in full_view for action in ('data-fg="next"','data-fg="auto"','data-fg="pause"','data-fg="restart"'))
@@ -175,10 +181,18 @@ def test_knowledge_chat_shell_is_a_focused_one_shot_conversation():
 
 def test_timeline_change_clears_graph_without_reloading_and_preserves_search_results():
     workspace=(ROOT/'workspace.js').read_text(encoding='utf-8')
-    timeline=workspace[workspace.index('function applyTimelinePoint'):workspace.index('function moveTimeline')]
+    timeline=workspace[workspace.index('function applyTimelinePoint('):workspace.index('function moveTimeline(')]
 
-    assert "window.clearGraphWorkspace({preserveSearchResults:true})" in timeline
-    assert 'drawGraph(' not in timeline
+    # 时间轴切换本身不碰图谱：统一发 scope-changed，由检索页自己的刷新链路处理，
+    # 不整页 reload、不在时间轴代码里各处直清直画。
+    assert "dispatchEvent(new CustomEvent('workspace:scope-changed'" in timeline
+    assert 'drawGraph(' not in timeline and 'clearGraphWorkspace' not in timeline
+    scope_refresh=workspace[workspace.index('async function refreshOwnedScope('):
+                             workspace.index("document.addEventListener('workspace:scope-changed'")]
+    # 检索页统一链路：清空图谱工作区后，有检索词时按新时间点自动重查——
+    # 切换系统修订后检索结果必须反映新时间点，保留旧结果反而是错的。
+    assert "window.clearGraphWorkspace()" in scope_refresh
+    assert "await runSearch()" in scope_refresh
 
 
 def test_graph_reset_has_one_workspace_owner_and_preserves_request_invalidation():
@@ -195,7 +209,11 @@ def test_graph_reset_has_one_workspace_owner_and_preserves_request_invalidation(
     assert 'graphRequests.invalidate()' in reset
     assert 'ui.graph=null' in reset and 'wb.nodes.clear()' in reset
     assert "get('graph-summary').textContent='从左侧检索结果选择实体或关系'" in reset
-    assert project_change.index('window.clearGraphWorkspace()') < project_change.index('autoLoadGraph')
+    # 项目切换由唯一 owner 清空图谱工作区并复位时间轴；
+    # 全图补画等 tab 点击时 autoLoadGraph 处理——切换即补画会多一次请求并冲掉刚选中的实体。
+    assert 'window.clearGraphWorkspace()' in project_change
+    assert 'resetTimeline()' in project_change
+    assert 'autoLoadGraph' not in project_change
 
 
 def test_knowledge_history_excludes_document_receipts_and_sources_show_build_state():
@@ -215,7 +233,8 @@ def test_knowledge_history_excludes_document_receipts_and_sources_show_build_sta
     assert "query:$('record-search').value.trim()" in criteria
     assert "window.RecordCreate.createPager(body=>api('/api/projects/'+encodeURIComponent(current)+'/records/page',body))" in records
     assert "direction==='next'?pager.next():direction==='previous'?pager.previous():pager.load(criteria)" in records
-    assert 'rows=result.records;total=result.total;page=result.page' in records
+    # 服务端游标分页三件套：行、总数、页码都来自 pager 结果本体。
+    assert all(fragment in records for fragment in ('rows=result.records','total=result.total','page=result.page'))
     creator=(ROOT/'record-create.js').read_text(encoding='utf-8')
     assert 'cursor:cursors[index],limit:50' in creator
     assert 'criteria=clone(next);cursors=[null]' in creator

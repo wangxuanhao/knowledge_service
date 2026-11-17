@@ -27,7 +27,7 @@
   }
   function init(){
     const document=root.document,get=id=>document.getElementById(id),host=get('tab-ingest');
-    let preparation=null,preparationHost=null;
+    let preparation=null,preparationHost=null,noticeTimer=null;
     const node=(tag,css,text)=>{const e=document.createElement(tag);if(css)e.className=css;if(text!==undefined)e.textContent=text;return e;};
     const button=(text,fn,css='secondary')=>{const e=node('button',css,text);e.type='button';e.onclick=fn;return e;};
     const project=()=>typeof current==='string'?current:'';
@@ -83,7 +83,7 @@
     });
     const selection=node('section','library-upload-selection');selection.id='library-upload-selection';selection.setAttribute('aria-label','本批资料');selection.setAttribute('aria-live','polite');
     const selectionInfo=node('div','library-upload-selection-info'),selectionCount=node('strong'),selectionNames=node('span','library-upload-selection-names');
-    const editFiles=button('返回修改文件',()=>{setStep(0);get('doc-dropzone')?.focus();});
+    const editFiles=button('返回修改文件',()=>{setStep(0);(get('preparation-files')||get('doc-dropzone'))?.focus();});
     selectionInfo.append(selectionCount,selectionNames);selection.append(selectionInfo,editFiles);
     workspace.replaceChildren(...stages);panel.append(steps,selection,workspace);
     const footer=node('div','library-wizard-navigation'),previous=button('上一步',()=>setStep(state.snapshot().step-1)),next=button('下一步：资料与处理方式',()=>setStep(state.snapshot().step+1),'');
@@ -128,7 +128,7 @@
         for(const [key,b] of Object.entries(tabs))b.setAttribute('aria-pressed',String(key===mode));
         title.textContent={upload:'添加文件',batches:'处理批次',structured:'结构化记录导入'}[mode];
         context.textContent='当前项目：'+(get('project').selectedOptions?.[0]?.textContent||view.project);
-        notice.textContent='';host.classList.remove('hidden');shell.open({trigger});if(mode==='upload')setStep(view.step);
+        notice.textContent='';clearTimeout(noticeTimer);host.classList.remove('hidden');shell.open({trigger});if(mode==='upload')setStep(view.step);
         if(preparation){if(mode==='upload')void preparation.open();else preparation.close();}
         root.IngestBatches?.visibilityChanged();
         if(mode==='upload'){void root.IngestBatches?.loadCapabilities();void root.loadApplicabilityVocabulary?.();void root.IngestOntology?.refresh();}
@@ -140,8 +140,13 @@
     controls.append(batchesButton);
     get('upload-source').onclick=()=>open(undefined,{trigger:get('upload-source')});
     if(root.MutationObserver)new root.MutationObserver(()=>{
-      if(!shell.dialog.open)return;notice.textContent=get('status').textContent;
-      notice.classList.toggle('error',get('status').classList.contains('error'));
+      if(!shell.dialog.open)return;
+      const source=get('status'),text=source.textContent.trim();
+      clearTimeout(noticeTimer);
+      if(!text){notice.textContent='';notice.classList.remove('error');return;}
+      notice.textContent=text;notice.classList.toggle('error',source.classList.contains('error'));
+      // 抽屉内的状态镜像同样自动收起，否则旧提示会一直霸占位置。
+      noticeTimer=setTimeout(()=>{notice.textContent='';notice.classList.remove('error');},source.classList.contains('error')?9000:5000);
     }).observe(get('status'),{childList:true,subtree:true,characterData:true});
     if(root.PreparationView){
       preparationHost=node('div','library-preparation-host');
@@ -151,6 +156,9 @@
         settings(){const p=project(),mode=get('extraction-mode').value;return {...readParseSettings(),...root.IngestOntology.settings(p,mode),extraction_mode:mode};},
         onPublished(result){if(!result.batch_id)return;open('batches');root.IngestBatches.monitor(project(),{id:result.batch_id});}});
       panel.hidden=true;
+      // 拖放只在"添加文件"抽屉内生效：资料库页面级的全屏拖放提示、自动切换页签
+      // 已按下述结论移除——拖到页面其它位置是浏览器自身的文件拖放行为差异
+      // （Chrome 与 Edge 表现不同），不做页面级兜底；需要上传时打开本抽屉即可。
     }
     setStep(0);
     return {open,close:options=>shell.close(options),projectChanged(id){shell.close({restoreFocus:false});preparation?.projectChanged();state.projectChanged(id);get('ingest').disabled=false;},

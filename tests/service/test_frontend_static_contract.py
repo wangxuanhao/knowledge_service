@@ -210,7 +210,7 @@ def test_document_upload_workspace_contract():
                    '@media(max-width:850px)', ':focus-visible'):
         assert marker in css, marker
     assert '/assets/workbench.css?v=split-previews-20261110-1' in html
-    assert '/assets/ingest-mode.js?v=split-previews-20261110-2' in html
+    assert '/assets/ingest-mode.js?v=unified-media-20261111-1' in html
     assert 'max_batch_items' in js and 'max_batch_bytes' in js
     assert re.search(r'/assets/workbench\.js\?v=[\w.-]+', html)
 
@@ -912,7 +912,9 @@ def test_session_buttons_do_not_reuse_login_form_ids():
     # 入口由 menu-hierarchy.js 生成并带 admin-only —— 这里钉住它的新位置，
     # 免得有人又把它塞回会话区（那里只该有改口令 / 退出登录）。
     hierarchy = read('menu-hierarchy.js')
-    assert "['projects','useradmin']" in hierarchy and 'admin-only' in hierarchy, \
+    # 管理层数组会演进（曾加入 llm-models），不锁数组字面量；
+    # 钉住的是契约本身：useradmin 在层级文件里、管理组挂在 system 层、按 admin-only 隐藏。
+    assert "'useradmin'" in hierarchy and "dataset.layer='system'" in hierarchy and 'admin-only' in hierarchy, \
         '「用户与权限」入口必须在侧栏系统层里且对只读用户隐藏'
     assert 'id="auth-open-users"' not in js, '会话区不该再出现用户管理入口'
     assert "'auth-password'" not in js.split('function renderSession')[1].split('function notice')[0], \

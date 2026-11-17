@@ -919,106 +919,13 @@ def test_library_is_list_first_and_details_are_docked_and_closed_with_focus(rede
     assert errors==[]
 
 
-def test_upload_steps_preserve_original_inputs_but_direct_project_switch_cleans_them(redesign_page):
-    page,errors=redesign_page
-    page.click('[data-tab="sources"]');page.click('#upload-source')
-    page.locator('#doc-file').set_input_files({'name':'drawer-check.txt','mimeType':'text/plain','buffer':b'drawer verification'})
-    page.locator('[data-upload-step="1"]').click()
-    assert page.locator('#doc-dropzone').is_hidden()
-    assert 'drawer-check.txt' in page.locator('#library-upload-selection').inner_text()
-    page.locator('#doc-title').fill('未提交资料')
-    page.locator('[data-upload-step="2"]').click()
-    assert page.locator('#doc-file-list').is_hidden()
-    assert '1 份资料' in page.locator('#library-upload-selection').inner_text()
-    assert 'drawer-check.txt' in page.locator('#doc-file-list').text_content()
-    page.keyboard.press('Escape');page.click('#upload-source')
-    assert page.locator('#doc-title').input_value()=='未提交资料'
-    assert page.locator('#library-upload-confirm').is_visible()
-    page.evaluate("""()=>{const s=document.getElementById('project'),o=new Option('第二个项目','q');s.add(o);s.value='q';s.onchange();}""")
-    assert not page.locator('#library-workspace-drawer').evaluate('(e)=>e.open')
-    assert page.locator('#doc-title').input_value()==''
-    assert page.locator('#doc-file-list .document-queue-row').count()==0
-    assert errors==[]
-
-
-def test_first_step_retry_returns_to_confirmation_without_submitting(redesign_page):
-    page,errors=redesign_page
-    writes=[]
-    page.on('request',lambda request:writes.append(request.url) if request.method=='POST' and '/ingest-batches' in request.url else None)
-    page.click('[data-tab="sources"]');page.click('#upload-source')
-    page.locator('#doc-file').set_input_files({'name':'confirmation.txt','mimeType':'text/plain','buffer':b'pending'})
-    page.locator('#doc-retry-files').click()
-    assert page.locator('#library-upload-confirm').is_visible()
-    assert writes==[]
-    assert errors==[]
-
-
-def test_preview_late_response_and_direct_project_change_cannot_leave_inert_background(redesign_page):
-    page,errors=redesign_page
-    pending=[]
-    page.route('**/documents/upload/preview',lambda route:pending.append(route))
-    page.click('[data-tab="sources"]');page.click('#upload-source')
-    page.locator('#doc-file').set_input_files({'name':'preview.txt','mimeType':'text/plain','buffer':b'preview content'})
-    page.locator('[data-upload-step="2"]').click()
-    assert page.locator('#preview-chunks').is_hidden()
-    page.locator('#library-upload-selection').get_by_role('button',name='返回修改文件').click()
-    assert page.locator('#preview-chunks').is_visible()
-    with page.expect_request('**/documents/upload/preview') as first_request:
-        page.click('#preview-chunks')
-    page.wait_for_function('chunkPreviewState.session?.pending.has(0)')
-    assert first_request.value.method == 'POST'
-    assert len(pending) == 1
-    before = page.evaluate('''()=>{
-      window.__heldParentPreview=chunkPreviewState.session.pending.get(0);
-      return {ticket:LibraryWorkspace.ticket(),snapshot:LibraryWorkspace.snapshot()};
-    }''')
-    assert before['snapshot']['active'] is True
-    assert page.evaluate("ticket=>LibraryWorkspace.accepts(ticket,'p')", before['ticket'])
-    assert page.locator('#chunk-preview').is_visible()
-    assert page.locator('body>main').evaluate('(e)=>e.inert')
-    # The child overlay deliberately blocks parent pointer clicks. Exercise the
-    # parent's published close lifecycle while its actual preview fetch is held.
-    page.evaluate('()=>LibraryWorkspace.close({restoreFocus:false})')
-    assert not page.locator('#library-workspace-drawer').evaluate('(e)=>e.open')
-    closed = page.evaluate('LibraryWorkspace.snapshot()')
-    assert closed['active'] is False and closed['generation'] > before['snapshot']['generation']
-    assert not page.evaluate("ticket=>LibraryWorkspace.accepts(ticket,'p')", before['ticket'])
-    assert page.locator('#chunk-preview').evaluate('(e)=>e.hidden')
-    assert not page.locator('body>main').evaluate('(e)=>e.inert')
-    assert not page.locator('body>aside').evaluate('(e)=>e.inert')
-    assert page.locator('#doc-file-list .document-queue-row').count() == 1
-    pending.pop(0).fulfill(json={'chunks':[{'text':'preview content','start_char':0,'end_char':15}],'total':1})
-    # This is the existing API Promise, not a replacement transport or a timer.
-    page.evaluate('()=>window.__heldParentPreview')
-    assert page.locator('#chunk-preview').evaluate('(e)=>e.hidden')
-    assert page.locator('#chunk-preview-list button').count() == 0
-    assert page.locator('#chunk-preview-content pre').count() == 0
-    assert not page.locator('body>main').evaluate('(e)=>e.inert')
-    assert not page.locator('html').evaluate('(e)=>e.classList.contains("chunk-preview-open")')
-    assert not page.locator('body').evaluate('(e)=>e.classList.contains("chunk-preview-open")')
-    page.click('#upload-source')
-    assert page.locator('#doc-file-list .document-queue-row').count() == 1
-    with page.expect_request('**/documents/upload/preview') as second_request:
-        page.click('#preview-chunks')
-    page.wait_for_function('chunkPreviewState.session?.pending.has(0)')
-    assert second_request.value.method == 'POST'
-    assert len(pending) == 1
-    page.evaluate('()=>{window.__renderedParentPreview=chunkPreviewState.session.pending.get(0);}')
-    pending.pop(0).fulfill(json={'chunks':[{'text':'preview content','start_char':0,'end_char':15}],'total':1})
-    page.evaluate('()=>window.__renderedParentPreview')
-    page.wait_for_selector('#chunk-preview:not([hidden])')
-    assert page.locator('#chunk-preview-content pre').inner_text() == 'preview content'
-    assert page.locator('body>main').evaluate('(e)=>e.inert')
-    page.evaluate("()=>{const s=document.getElementById('project');s.add(new Option('第二项目','q'));s.value='q';s.onchange();}")
-    assert not page.locator('#library-workspace-drawer').evaluate('(e)=>e.open')
-    assert page.locator('#chunk-preview').evaluate('(e)=>e.hidden')
-    assert not page.locator('body>main').evaluate('(e)=>e.inert')
-    assert not page.locator('body>aside').evaluate('(e)=>e.inert')
-    assert not page.locator('html').evaluate('(e)=>e.classList.contains("chunk-preview-open")')
-    assert not page.locator('body').evaluate('(e)=>e.classList.contains("chunk-preview-open")')
-    assert page.locator('#doc-file-list .document-queue-row').count() == 0
-    assert page.evaluate('LibraryWorkspace.snapshot().project') == 'q'
-    assert errors==[]
+# 旧版三步上传面板（#doc-file / [data-upload-step] / #doc-retry-files）已由 PreparationView
+# 四步流程取代（panel.hidden=true 后不可交互）。三个旧 UI 测试自那时起必然失败，已删除：
+#   - 步骤间保留输入、项目切换清空 → 新流程的会话草稿机制，见 test_preparation_ui.py
+#     test_project_switch_resets_pending_upload_list；
+#   - 第一步重试失败文件不提交 → 见 test_submitting_good_file_keeps_failed_upload_available_for_retry；
+#   - 预览慢响应/项目切换不留 inert 背景 → 新流程 previewScope/竞态票据在
+#     previewOriginal/previewResult 内部维护，项目切换关闭弹层由 reset() 承担。
 
 
 def test_direct_project_switch_closes_the_independent_record_create_drawer(redesign_page):

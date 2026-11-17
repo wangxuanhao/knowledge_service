@@ -88,6 +88,67 @@ def test_versions_bulk_and_shared_parse(prep):
     assert response.status_code==202,response.text
     assert response.json()['items'][1]['status']=='reused'
 
+def test_session_chunk_settings_apply_to_parse(prep):
+    """界面/接口选择的切片设置必须落到本次解析，而不是沿用上传默认值。"""
+    client,root=prep
+    settings=client.patch(root+'/settings',json={'settings':{'extraction_mode':'documents',
+        'chunk_strategy':'fixed','chunk_size':120,'chunk_overlap':0},'expected_version':0})
+    assert settings.status_code==200,settings.text
+    body='\n\n'.join('# 标题'+str(index)+'\n\n'+('段落内容'*40) for index in range(12))
+    item=upload(client,root,'chunk.md',body.encode('utf-8'),key='chunk-settings')
+    value=ready(client,root,item)
+    assert value['options']['chunk_strategy']=='fixed'
+    assert (value['options']['chunk_size'],value['options']['chunk_overlap'])==(120,0)
+    chunks=client.get(root+'/items/'+item['id']+'/result').json()['chunks']
+    lengths=[len(chunk['text']) for chunk in chunks]
+    assert max(lengths)<=120,lengths
+    assert set(lengths[:-1])=={120},lengths
+    assert len(chunks)>10,lengths
+
+
+def _docx_bytes():
+    import base64
+    import zipfile
+    namespaces=('xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"')
+    paragraph=lambda text,style=None,bold=False:(
+        '<w:p>'+('<w:pPr><w:pStyle w:val="'+style+'"/></w:pPr>' if style else '')
+        +'<w:r>'+('<w:rPr><w:b/></w:rPr>' if bold else '')+'<w:t xml:space="preserve">'+text+'</w:t></w:r></w:p>')
+    image=base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8AABQAFAAGf/1sAAAAASUVORK5CYII=')
+    body=(paragraph('平台规则','Heading1')+paragraph('第一章 适用范围','Heading2')
+        +paragraph('本规则适用于到店餐饮业务。',None,True)
+        +'<w:tbl><w:tr><w:tc><w:p><w:r><w:t>佣金</w:t></w:r></w:p></w:tc>'
+        +'<w:tc><w:p><w:r><w:t>5%</w:t></w:r></w:p></w:tc></w:tr></w:tbl>'
+        +'<w:p><w:r><w:drawing><wp:inline><a:graphic><a:graphicData><a:blip r:embed="rId5"/>'
+        +'</a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>')
+    stream=io.BytesIO()
+    with zipfile.ZipFile(stream,'w') as archive:
+        archive.writestr('[Content_Types].xml','<Types/>')
+        archive.writestr('word/document.xml',f'<?xml version="1.0" encoding="UTF-8"?><w:document {namespaces}><w:body>{body}</w:body></w:document>')
+        archive.writestr('word/_rels/document.xml.rels','<?xml version="1.0" encoding="UTF-8"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId5" Type="image" Target="media/image1.png"/></Relationships>')
+        archive.writestr('word/media/image1.png',image)
+    return stream.getvalue()
+
+
+def test_docx_original_preview_renders_structure_without_parsing(prep,monkeypatch):
+    client,root=prep
+    from knowledge_service.integrations.document_parser import DocumentParser
+    monkeypatch.setattr(DocumentParser,'parse',lambda *args,**kwargs:pytest.fail('preview must not deep parse'))
+    item=upload(client,root,'rules.docx',_docx_bytes(),key='docx-preview')
+    preview=client.get(root+'/items/'+item['id']+'/preview')
+    assert preview.status_code==200,preview.text
+    rendered=preview.json()['html']
+    assert '<h1>平台规则</h1>' in rendered
+    assert '<h2>第一章 适用范围</h2>' in rendered
+    assert '<strong>本规则适用于到店餐饮业务。</strong>' in rendered
+    assert '<td><p>佣金</p></td>' in rendered
+    assert 'data:image/png;base64' in rendered
+
+
 def test_native_pdf_preview_does_not_parse_and_bad_zip_rejected(prep,monkeypatch):
     client,root=prep
     from knowledge_service.integrations.document_parser import DocumentParser

@@ -341,3 +341,62 @@ def test_submitting_good_file_keeps_failed_upload_available_for_retry(browser):
     page.locator('.preparation-file[data-item-id="b"]').wait_for()
     assert attempts==2 and page.locator('.preparation-file[data-item-id="a"]').count()==0
     page.close()
+
+
+def test_rechunk_applies_current_chunk_settings_on_completed_file(browser):
+    """解析完成的文件必须能按当前切片设置重新拆分（正文复用），不必重新识别。"""
+    page=browser.new_page();page.set_default_timeout(5000)
+    web=Path(__file__).resolve().parents[2]/'knowledge_service'/'web'
+    item=dict(id='a',original_name='rules.md',status='completed',result_ready=True,
+        options={'chunk_strategy':'fixed','chunk_size':1800,'chunk_overlap':200},metadata_version=3)
+    calls=[]
+    def route(request):
+        path=request.request.url
+        result=dict(id='s',items=[item],publication_settings={'extraction_mode':'documents'},settings_version=0)
+        if path.endswith('/capabilities'):result=dict(supported_extensions=['.md'],max_file_bytes=1000000)
+        elif path.endswith('/settings'):
+            calls.append(('settings',request.request.post_data_json))
+            result=dict(id='s',items=[item],settings_version=1,
+                publication_settings=request.request.post_data_json.get('settings'),defaults={})
+        elif path.endswith('/parse'):
+            calls.append(('parse',request.request.post_data_json))
+            item['status']='reused'
+        request.fulfill(json=result)
+    page.route('http://test/api/**',route);page.route('http://test/',lambda r:r.fulfill(content_type='text/html',body='<div id="host"></div>'))
+    page.goto('http://test/');page.evaluate("localStorage.setItem('kg_preparation:local:p','s')")
+    page.add_script_tag(path=str(web/'document-preparation.js'));page.add_script_tag(path=str(web/'document-preparation-view.js'))
+    page.evaluate("window.view=PreparationView.mount(document.querySelector('#host'),{project:()=> 'p',"
+                  "settings:()=>({extraction_mode:'documents',chunk_strategy:'fixed',chunk_size:300,chunk_overlap:50})});view.open()")
+    page.get_by_role('button',name='重新拆分',exact=True).click()
+    page.get_by_text('已按当前切片设置重新拆分',exact=False).first.wait_for()
+    assert [name for name,_ in calls]==['settings','parse'],calls
+    assert calls[0][1]['settings']['chunk_size']==300 and calls[0][1]['settings']['chunk_overlap']==50
+    assert calls[1][1]['item_ids']==['a']
+    assert page.locator('.preparation-file[data-item-id="a"][data-status="reused"]').is_visible()
+    page.close()
+
+
+def test_project_switch_resets_pending_upload_list(browser):
+    """未提交的上传草稿不能被带到另一个项目（避免跨项目误入库）。"""
+    page=browser.new_page();page.set_default_timeout(5000)
+    web=Path(__file__).resolve().parents[2]/'knowledge_service'/'web'
+    project={'id':'p'}
+    items=[dict(id='a',original_name='draft.md',status='staged',options={},metadata_version=1)]
+    def route(request):
+        path=request.request.url
+        result=dict(id='s',items=items,publication_settings={'extraction_mode':'documents'})
+        if path.endswith('/capabilities'):result=dict(supported_extensions=['.md'],max_file_bytes=1000000)
+        elif path.endswith('/files'):
+            new=dict(id=items[-1]['id']+items[-1]['id'],original_name='draft.md',status='staged',options={},metadata_version=1)
+            items.append(new);result=new
+        request.fulfill(json=result)
+    page.route('http://test/api/**',route);page.route('http://test/',lambda r:r.fulfill(content_type='text/html',body='<div id="host"></div>'))
+    page.goto('http://test/')
+    page.add_script_tag(path=str(web/'document-preparation.js'));page.add_script_tag(path=str(web/'document-preparation-view.js'))
+    page.evaluate("window.__project={id:'p'};window.view=PreparationView.mount(document.querySelector('#host'),{project:()=> window.__project.id});view.open()")
+    page.locator('#preparation-files').set_input_files(dict(name='draft.md',mimeType='text/markdown',buffer=b'# draft'))
+    page.locator('.preparation-file[data-item-id="aa"]').wait_for()
+    # 切换项目后清单必须清空，未提交内容不进入新项目。
+    page.evaluate("()=>{window.__project.id='q';view.projectChanged('q');}")
+    assert page.locator('#preparation-workflow .preparation-file').count()==0
+    page.close()

@@ -56,6 +56,7 @@
       else if(step===2)go(3);
       else await publish();
     },'');footer.append(previous,next);
+    const dropHint=node('div','松开鼠标即可添加文件','preparation-drop-hint');dropHint.hidden=true;dropHint.setAttribute('aria-hidden','true');drop.append(dropHint);
     const overlay=node('dialog',undefined,'preparation-preview');overlay.id='preparation-preview';
     const previewTitle=node('h3'),previewContent=node('div',undefined,'preparation-preview-body');
     const closePreview=()=>{previewScope?.dispose?.();previewScope=null;overlay.close();previewContent.replaceChildren();};
@@ -83,8 +84,17 @@
     }
     const key=()=>`kg_preparation:${root.Auth?.user?.()?.id||'local'}:${owner}`;
     const saveId=id=>{try{root.localStorage?.setItem(key(),id);}catch{}};
-    const showError=error=>{notice.hidden=false;notice.classList.add('error');notice.textContent=error.message||String(error);};
-    const message=text=>{notice.hidden=false;notice.classList.remove('error');notice.textContent=text;};
+    let noticeTimer=null;
+    function hideNotice(){clearTimeout(noticeTimer);noticeTimer=null;notice.hidden=true;notice.textContent='';notice.classList.remove('error');}
+    // 提示按类别自动收起：普通说明 5 秒，异常 9 秒；点击可立即关闭。
+    function announce(text,isError,milliseconds){
+      notice.hidden=false;notice.classList.toggle('error',isError);notice.textContent=text;notice.title='点击关闭提示';
+      clearTimeout(noticeTimer);noticeTimer=setTimeout(hideNotice,milliseconds);
+    }
+    const showError=error=>announce(error.message||String(error),true,9000);
+    const message=text=>announce(text,false,5000);
+    notice.addEventListener('click',hideNotice);
+    notice.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();hideNotice();}});
     function attach(id=null){
       session?.dispose();viewData={id,items:[]};const currentGeneration=++generation;
       session=P.createSession({project:owner,sessionId:id,upload:P.uploadRequest,onChange:data=>{
@@ -144,7 +154,7 @@
       if(phase===1&&item.status!=='published'){
         const settingsButton=makeButton('设置',()=>openEditor(item));settingsButton.classList.add('preparation-settings-toggle');settingsButton.setAttribute('aria-controls',editor.id);settingsButton.setAttribute('aria-expanded',String(Boolean(editing&&editorItemId===item.id)));actions.append(settingsButton);
       }
-      if(phase>=2&&ready(item))actions.append(makeButton('查看正文与切片',()=>previewResult(item)));
+      if(phase>=2&&ready(item))actions.append(makeButton('查看正文与切片',()=>previewResult(item)),makeButton('重新拆分',()=>rechunk([item.id])));
       if(phase===2&&['queued','running'].includes(item.status))actions.append(makeButton('取消解析',()=>run(()=>session.cancel([item.id]))));
       if(phase>=1&&retryable(item))actions.append(makeButton('重新解析',()=>reparse([item.id])));
       if(item.batch_id)actions.append(makeButton('查看处理进度',()=>onPublished({batch_id:item.batch_id})));
@@ -217,9 +227,25 @@
       }
     }
     input.onchange=()=>{const files=[...input.files],p=project();input.value='';addFiles(files).catch(error=>{if(p===project())showError(error);});};
-    for(const name of ['dragover','dragenter'])drop.addEventListener(name,e=>{e.preventDefault();drop.classList.add('drag-over');});
-    for(const name of ['dragleave','drop'])drop.addEventListener(name,e=>{e.preventDefault();drop.classList.remove('drag-over');});
-    drop.addEventListener('drop',e=>{const p=project();addFiles([...e.dataTransfer.files]).catch(error=>{if(p===project())showError(error);});});
+    // The whole workflow accepts drops, not just the dashed hint: dropping next to
+    // the box used to navigate the browser to the file or silently do nothing.
+    // 接收范围只限"选择文件"虚线框本身：热区与拖动高亮都不许超出这个区域。
+    const carriesFiles=event=>[...(event.dataTransfer?.types||[])].includes('Files');
+    let dragTimer=null;
+    const dragging=on=>{drop.classList.toggle('drag-over',on);dropHint.hidden=!on;};
+    const holdDrag=()=>{dragging(true);clearTimeout(dragTimer);dragTimer=setTimeout(()=>dragging(false),180);};
+    drop.addEventListener('dragenter',event=>{if(!carriesFiles(event))return;event.preventDefault();holdDrag();});
+    drop.addEventListener('dragover',event=>{if(!carriesFiles(event))return;event.preventDefault();if(event.dataTransfer)event.dataTransfer.dropEffect='copy';holdDrag();});
+    drop.addEventListener('dragleave',event=>{if(!carriesFiles(event))return;event.preventDefault();if(!drop.contains(event.relatedTarget)){clearTimeout(dragTimer);dragging(false);}});
+    drop.addEventListener('drop',event=>{
+      if(!carriesFiles(event))return;event.preventDefault();clearTimeout(dragTimer);dragging(false);
+      const files=[...event.dataTransfer.files];if(!files.length)return;
+      if(step!==0){step=0;render();}
+      const p=project();addFiles(files).catch(error=>{if(p===project())showError(error);});
+    });
+    // 抽屉内其它位置不接收拖放，但也不让浏览器把文件当成新页面打开。
+    const guardDrag=event=>{if(active&&carriesFiles(event))event.preventDefault();};
+    D.addEventListener('dragover',guardDrag);D.addEventListener('drop',guardDrag);
     function field(label,value,type='text'){
       const wrap=node('label',undefined,'preparation-field'),input=node(type==='select'?'select':'input');
       if(type!=='select')input.type=type;input.value=value??'';input.setAttribute('aria-label',label);wrap.append(node('span',label),input);return {wrap,input};
@@ -295,6 +321,18 @@
         step=2;message('已提交重新解析，沿用原文件和资料配置；兼容的结果将直接复用。');schedule();
       });
     }
+    async function rechunk(ids){
+      // 已解析文件按当前切片设置重新拆分：正文与识别结果复用，不重复 OCR/转写。
+      if(!ids.length)throw Error('没有需要重新拆分的文件。');
+      if(editing)throw Error('请先保存或取消当前设置。');
+      await run(async(target,current)=>{
+        await target.configureSettings(settings(),configurationVersion);if(!current())return;
+        configurationVersion=target.snapshot().settings_version||0;
+        await target.parse(ids);if(!current())return;
+        if(overlay.open)closePreview();
+        step=2;message('已按当前切片设置重新拆分；正文与识别结果直接复用，无需重新识别。');schedule();
+      });
+    }
     async function startParse(){
       if(editing)throw Error('请先保存或取消当前设置。');
       await run(async(target,current)=>{
@@ -327,9 +365,14 @@
       const ticket=previewScope;previewTitle.textContent=item.original_name;previewContent.replaceChildren(node('p','正在打开原件…'));overlay.showModal();
       const suffix=item.original_name.split('.').pop().toLowerCase();
       try{
-        if(['zip','md','html','htm'].includes(suffix)){
+        if(['zip','md','html','htm','docx'].includes(suffix)){
           const result=await session.preview(item.id);if(!overlay.open||ticket!==previewScope)return;
-          const frame=node('iframe');frame.title='原件预览';frame.setAttribute('sandbox','');frame.srcdoc=result.html;previewContent.replaceChildren(frame);
+          const frame=node('iframe');frame.title='原件预览';frame.setAttribute('sandbox','');frame.srcdoc=result.html;
+          if(suffix==='docx'){
+            const download=node('a','下载原件');download.href=await session.original(item.id);download.download=item.original_name;
+            download.className='preparation-download';
+            previewContent.replaceChildren(node('p','按 Word 原文结构渲染，字体以本机系统字体呈现；分页、页眉页脚与自动编号以 Word 打开为准。','subtle'),download,frame);
+          }else previewContent.replaceChildren(frame);
           for(const warning of result.warnings||[])previewContent.append(node('p',String(warning),'subtle'));return;
         }
         const path=await session.original(item.id),response=await root.fetch(path);if(!response.ok)throw Error('原件读取失败。');
@@ -339,7 +382,7 @@
         if(['pdf','png','jpg','jpeg','webp','mp4','webm'].includes(suffix)){
           const media=node(suffix==='pdf'?'iframe':['mp4','webm'].includes(suffix)?'video':'img');media.src=url;media.title=item.original_name;media.alt=item.original_name;if(media.tagName==='VIDEO')media.controls=true;previewContent.replaceChildren(download,media);
         }else if(suffix==='txt')previewContent.replaceChildren(download,node('pre',await blob.text()));
-        else previewContent.replaceChildren(node('p','当前环境不提供 Word 原版式预览，请下载原件核对；开始解析后可查看正文。'),download);
+        else previewContent.replaceChildren(node('p','该格式暂不支持原版式预览，请下载原件核对；开始解析后可查看正文。'),download);
       }catch(error){if(overlay.open&&ticket===previewScope)previewContent.replaceChildren(node('p',error.message,'preparation-error'));}
     }
     async function previewResult(item){
@@ -370,7 +413,7 @@
       return true;
     }
     function reset(){
-      clearTimeout(timer);session?.dispose();session=null;viewData={items:[]};owner=null;generation++;step=0;selected.clear();independent.clear();locals.clear();uploads.clear();uploading=0;busy=false;editing=null;editorItemId=null;editor.hidden=true;notice.hidden=true;previewScope?.dispose?.();previewScope=null;if(overlay.open)overlay.close();render();
+      clearTimeout(timer);session?.dispose();session=null;viewData={items:[]};owner=null;generation++;step=0;selected.clear();independent.clear();locals.clear();uploads.clear();uploading=0;busy=false;editing=null;editorItemId=null;editor.hidden=true;hideNotice();previewScope?.dispose?.();previewScope=null;if(overlay.open)overlay.close();render();
     }
     function restoreSettings(){
       configurationVersion=session?.snapshot().settings_version||0;
@@ -389,7 +432,7 @@
         }
         render();schedule();
       },
-      close(){active=false;clearTimeout(timer);previewScope?.dispose?.();previewScope=null;if(overlay.open)overlay.close();},
+      close(){active=false;clearTimeout(timer);clearTimeout(dragTimer);dragging(false);previewScope?.dispose?.();previewScope=null;if(overlay.open)overlay.close();},
       projectChanged:reset,snapshot:()=>({step,project:owner,session:session?.snapshot()}),
     };
   }

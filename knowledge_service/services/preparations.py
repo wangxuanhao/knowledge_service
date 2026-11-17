@@ -345,7 +345,13 @@ class Preparations:
                 if retry and self.public_item(item)['status'] not in ('failed','cancelled','stale'):
                     conflicts.append({'item_id':item['id'],'code':'not_retryable','message':'仅可重试失败、取消或解析结果过期的文件'})
             if conflicts:raise PreparationConflict('所选文件需要刷新或修正，本次未启动解析',conflicts)
+            # 界面上的切片设置属于本会话入库设置；开始解析时必须落到每个文件，
+            # 否则任务会用上传时的默认值切片，与用户选择不一致。
+            configured=session.get('publication_settings') or {}
+            chunk={key:configured[key] for key in ('chunk_strategy','chunk_size','chunk_overlap') if configured.get(key) is not None}
             for item in selected:
+                if chunk and any(item['options'].get(key)!=value for key,value in chunk.items()):
+                    self._change(item,chunk)
                 # A changed parser/model runtime is a new explicit parse request.
                 item['parser_fingerprint']=fingerprint(item['file_sha256'],item['original_name'],item['options']['parse_config'])
                 item['chunk_version']=chunk_version(item)
@@ -414,7 +420,12 @@ class Preparations:
                 package_files,_=reader._members(archive)
                 text=archive.read(package_files[profile['entry']]).decode('utf-8-sig')
         elif suffix in ('.md','.txt','.html','.htm'):text=data.decode('utf-8-sig')
-        else:raise ValueError('该格式请打开原件预览；DOCX 可下载原件，原版式转换尚未就绪')
+        elif suffix=='.docx':
+            # Word 原版式预览直接读取 OOXML，不触发解析模型与切片。
+            from ..integrations.docx_preview import docx_html
+            rendered=docx_html(data)
+            return dict(html=rendered['html'],warnings=(rendered['warnings']+warnings)[:100])
+        else:raise ValueError('该格式请打开原件预览；可下载原件核对版式')
         parsed=parse_markdown(text,uuid4().hex)
         rendered=parsed['rendered_html']
         images=parsed.get('images',[])
