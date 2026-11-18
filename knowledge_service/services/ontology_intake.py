@@ -78,6 +78,36 @@ def prepare_intake_facts(repository, project_id, records, candidates):
 
 
 KINDS = {'entity': 'class', 'relation': 'relation', 'attribute': 'attribute'}
+
+# Immutable discovery runs keep the response only so an idempotent retry can
+# return the original receipt. The live response also carries the full draft
+# (including every effective operation) and the whole candidate snapshot; both
+# are already stored separately on the run and must not be duplicated into
+# ``intake_result`` — a 578-candidate run was 51 MB, and every subsequent
+# inventory/preview/confirm re-read and re-decoded it.
+_REPLAY_RESULT_DROP = frozenset({'associated_fact_scope'})
+_REPLAY_DRAFT_KEYS = ('id', 'project_id', 'status', 'revision', 'title',
+                      'base_ontology_id', 'published_ontology_id', 'source_kind',
+                      'created_at', 'updated_at', 'submitted_at', 'validated_at')
+
+
+def _replay_result(result):
+    """Return a compact copy of the intake response suitable for persistence.
+
+    The first (non-replay) call still returns the full response; only the stored
+    copy is trimmed so reading runs stays cheap.
+    """
+    if not isinstance(result, dict):
+        return result
+    slim = {key: value for key, value in result.items()
+            if key not in _REPLAY_RESULT_DROP}
+    draft = slim.get('draft')
+    if isinstance(draft, dict):
+        slim['draft'] = {key: draft.get(key) for key in _REPLAY_DRAFT_KEYS
+                         if key in draft}
+    return slim
+
+
 RDF_KINDS = {'class': OWL.Class, 'relation': OWL.ObjectProperty,
              'attribute': OWL.DatatypeProperty}
 MAPPING_GROUPS = {'entity': 'entity_types', 'relation': 'relation_types',
@@ -576,10 +606,10 @@ class OntologyIntake:
             'materialized_candidate_ids': sorted(processed & set(result['candidate_ids'])),
             'status': 'draft_created' if draft_id else 'ready_to_finalize',
             'unified_draft_id': draft_id, 'intake_request_hash': request_hash,
-            'intake_receipt': receipt, 'intake_result': response,
+            'intake_receipt': receipt, 'intake_result': _replay_result(response),
             'assertion_snapshots': assertions, 'source_documents': frozen_sources}
 
-    def add(self, p, request, *, actor, actor_identity=None):
+    def add(self, p, request, *, actor, actor_identity=None, compact_response=False):
         run_id, request_hash = self._request_identity(p, request, actor, 'add', actor_identity)
         with self.repository.intake_transaction():
             if replay := self._replay(p, run_id, request_hash):
@@ -615,9 +645,40 @@ class OntologyIntake:
             # The draft guards every accumulated source, but new operations are
             # attributed only to this explicitly confirmed selection.
             source_draft = {**draft, 'source_kind': 'discovery', 'source_context': new_context}
-            compiled = self.drafts._compile_intake_commands(p, source_draft, [
-                {**suggestion, 'reason': '明确选择资料候选加入本轮修改'}
-                for suggestion in suggestions], Ontology(working))
+            # Scope each operation's evidence to the candidates bound to its
+            # target term instead of attaching the entire confirmed batch to
+            # every operation. The batch-wide list is still authoritative; this
+            # only narrows which subset each operation declares.
+            bindings_by_target = {}
+            for binding in [*result['new'], *result['reused']]:
+                bindings_by_target.setdefault(binding['target_iri'], []).append(
+                    binding['candidate_id'])
+            candidates_by_id = {candidate['id']: candidate
+                                for candidate in result['associated_fact_scope']}
+            authoritative = self.drafts._authoritative_evidence(source_draft, {})
+
+            def scoped_evidence(candidate_ids):
+                keep = {f'candidate:{candidate_id}' for candidate_id in candidate_ids}
+                documents = {candidates_by_id[candidate_id].get('document_id')
+                             for candidate_id in candidate_ids
+                             if candidate_id in candidates_by_id
+                             and candidates_by_id[candidate_id].get('document_id')}
+                return [reference for reference in authoritative
+                        if reference in keep or (
+                            isinstance(reference, str)
+                            and reference.startswith('document-version:')
+                            and reference.split(':', 2)[1] in documents)]
+
+            commands = []
+            for suggestion in suggestions:
+                command = {**suggestion, 'reason': '明确选择资料候选加入本轮修改'}
+                candidate_ids = bindings_by_target.get(suggestion.get('target_iri'))
+                if candidate_ids:
+                    evidence_refs = scoped_evidence(candidate_ids)
+                    if evidence_refs:
+                        command['evidence_refs'] = evidence_refs
+                commands.append(command)
+            compiled = self.drafts._compile_intake_commands(p, source_draft, commands, Ontology(working))
             saved = self.drafts.store.append_operations(p, draft['id'], compiled)
             all_operations = [*previous, *saved]
             bindings = deepcopy([*result['new'], *result['reused']])
@@ -633,7 +694,15 @@ class OntologyIntake:
             updated = self.drafts._cas(p, draft['id'], draft['revision'], {
                 'source_context': context, 'validation_report': None,
                 'validation_fingerprint': None, 'validated_at': None, 'submitted_at': None})
-            current = self.drafts._preview(p, updated)
+            # The intake client only needs the draft identity from this response
+            # and reloads the full draft afterwards. Building the complete
+            # preview here reapplied every accumulated operation (≈7s and ~49MB
+            # for a 578-candidate batch), so the transport layer may request a
+            # compact draft. Service callers keep the full preview by default.
+            if compact_response:
+                current = {**updated, 'draft': updated, 'operations': saved}
+            else:
+                current = self.drafts._preview(p, updated)
             receipt = {'request_id': run_id, 'draft_id': draft['id'], 'revision': updated['revision'],
                 'run_id': run_id, 'structure': {'added': len(saved), 'reused': sum(
                     not any(x['target_iri'] == b['target_iri'] and x['action'] == 'create_term' for x in saved)

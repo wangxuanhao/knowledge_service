@@ -676,7 +676,7 @@ class DiscoveryRunStore:
                 _validate_binding_operations(
                     run,
                     self.repo._ontology_drafts.effective_operations(
-                        project_id, run['unified_draft_id']),
+                        project_id, run['unified_draft_id'], with_evidence=False),
                 )
             try:
                 self._db.execute(

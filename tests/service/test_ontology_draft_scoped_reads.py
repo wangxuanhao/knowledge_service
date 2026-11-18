@@ -102,12 +102,13 @@ def fixture():
 def service_class(extra=None):
     namespace = {'Ontology': lambda turtle: SimpleNamespace(summary=lambda: {'turtle': turtle}),
                  '_semantic_operation': lambda row: row,
-                 'apply_operations': lambda turtle, rows: turtle + ':' + ','.join(
+                 'apply_operations': lambda turtle, rows, verify=True: turtle + ':' + ','.join(
                      row['id'] for row in rows),
                  'PENDING_STATES': {'pending'}, 'FINAL_STATES': {'accepted', 'rejected'},
                  '_STATUS_LABEL': {}, '_STATUS_COPY': {}, **(extra or {})}
     return load_class('knowledge_service/services/ontology_drafts.py', 'OntologyDrafts',
-                      namespace, {'_history', '_effective_operations', '_active_operations',
+                      namespace, {'_history', '_effective_operations', '_effective_from_history',
+                                  '_active_operations',
                                   '_effective_decisions', '_ontology_for_draft', '_preview',
                                   'get', 'stage_state', '_next_action', '_compute_validation',
                                   '_require_validation'})

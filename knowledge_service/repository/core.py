@@ -943,7 +943,8 @@ class Repository:
         if expected_version is not None and (type(expected_version) is not int or expected_version < 0):
             raise ValueError('期望版本必须是非负整数')
         old = self._db.execute(
-            '''SELECT version,recorded_at,id,version_id,payload
+            '''SELECT version,recorded_at,id,version_id,
+                      payload::jsonb->'metadata' AS metadata
                FROM record_versions
                WHERE project_id=? AND id=? AND superseded_at IS NULL''',
             (project_id, record['id'])).fetchone()
@@ -987,13 +988,23 @@ class Repository:
         saved = {**record, 'project_id': project_id, 'version': version + 1, 'version_id': version_id, 'recorded_at': now, 'superseded_at': None}
         old_record = None
         if old is not None:
+            # 投影消费方只需要旧版的 identity 与 metadata（文档标题类字段比较），
+            # 不需要旧版正文；不再为每次写入反序列化整条旧记录。
+            # 兼容未提供 metadata 列的读取形状：缺失时视为无元数据。
+            raw_metadata = old['metadata'] if 'metadata' in old.keys() else None
+            try:
+                old_metadata = json.loads(raw_metadata) if raw_metadata else {}
+            except (TypeError, ValueError):
+                old_metadata = {}
+            if not isinstance(old_metadata, dict):
+                old_metadata = {}
             old_record = {
-                **json.loads(old['payload']),
-                'project_id': project_id,
-                'version': old['version'],
-                'version_id': old['version_id'],
+                'id': old['id'],
                 'recorded_at': old['recorded_at'],
                 'superseded_at': now,
+                'version': old['version'],
+                'version_id': old['version_id'],
+                'metadata': old_metadata,
             }
         self.projections.enqueue_record_change(project_id, old_record, saved)
         if embedding is not None:
@@ -1474,16 +1485,20 @@ class Repository:
         if type(limit) is not int or not 1 <= limit <= 200:
             raise ValueError('时间线事件数量上限必须在 1 到 200 之间')
         with self._lock:
-            total = self._db.execute(
-                'SELECT COUNT(DISTINCT recorded_at) FROM record_versions WHERE project_id=?',
-                (project_id,)).fetchone()[0]
             rows = self._db.execute('''
                 SELECT recorded_at, COUNT(*) AS changed,
                        SUM(CASE WHEN version=1 THEN 1 ELSE 0 END) AS created,
                        SUM(CASE WHEN version>1 THEN 1 ELSE 0 END) AS revised
                 FROM record_versions WHERE project_id=?
                 GROUP BY recorded_at ORDER BY recorded_at DESC LIMIT ?
-            ''', (project_id, limit)).fetchall()
+            ''', (project_id, limit + 1)).fetchall()
+            # 只有确实被截断时才需要精确总数；常见项目远少于 limit 个
+            # 时间点，此时 COUNT(DISTINCT) 是一次纯浪费的全表聚合。
+            truncated = len(rows) > limit
+            rows = rows[:limit]
+            total = (self._db.execute(
+                'SELECT COUNT(DISTINCT recorded_at) FROM record_versions WHERE project_id=?',
+                (project_id,)).fetchone()[0] if truncated else len(rows))
         events = [{'known_at': row['recorded_at'], 'changed': row['changed'],
                    'created': row['created'], 'revised': row['revised']} for row in reversed(rows)]
         return {'events': events, 'total': total, 'truncated': total > len(events)}
@@ -1785,6 +1800,50 @@ class Repository:
             (project_id,)).fetchall()
         return self._parse_ontology_versions(rows)
 
+    @staticmethod
+    def _parse_ontology_version_meta(rows):
+        """按与列表相同的稳定发布顺序计算版本号，不读取 turtle/summary。"""
+        items, seen_versions = [], set()
+        for index, row in enumerate(rows, start=1):
+            try:
+                metadata = json.loads(row['metadata'] or '{}')
+            except (TypeError, json.JSONDecodeError):
+                metadata = {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+            stored = metadata.get('version')
+            version = stored if (
+                isinstance(stored, int) and not isinstance(stored, bool) and stored > 0
+            ) else index
+            items.append({'id': row['id'], 'version': version,
+                          'version_reused': version in seen_versions})
+            seen_versions.add(version)
+        return items
+
+    def _ontology_version_meta(self, project_id):
+        """版本号解析只依赖 id/metadata；历史 turtle 文本不参与计算。"""
+        rows = self._db.execute(
+            'SELECT id,metadata FROM ontologies WHERE project_id=? ORDER BY created_at,id',
+            (project_id,)).fetchall()
+        return self._parse_ontology_version_meta(rows)
+
+    def ontology_version_signature(self, project_id):
+        """稳定发布顺序的版本 ID 序列，供服务层缓存失效判断。
+
+        同一项目每次读取/检索都要判断「本体是否换了」；此前用完整
+        list_ontologies（含全部历史版本 Turtle）来取签名，等于为一次比对
+        读回整段本体文本。签名只需要 ID 列表。
+        """
+        self.get_project(project_id)
+        rows = self._db.execute(
+            'SELECT id FROM ontologies WHERE project_id=? ORDER BY created_at,id',
+            (project_id,)).fetchall()
+        return tuple(row['id'] for row in rows)
+
+    def current_ontology_id(self, project_id):
+        self.get_project(project_id)
+        return self._latest_ontology_id(project_id)
+
     def _latest_ontology_id(self, project_id):
         """按与历史列表相同的稳定发布顺序读取当前本体 ID。"""
         row = self._db.execute(
@@ -1795,7 +1854,7 @@ class Repository:
 
     def _current_ontology_version(self, project_id) -> int:
         """项目当前的本体版本号，与历史列表共用同一解析规则。"""
-        versions = self._ordered_ontology_versions(project_id)
+        versions = self._ontology_version_meta(project_id)
         return versions[-1]['version'] if versions else 0
 
     def _insert_ontology_version(self, project_id, turtle, summary, metadata=None,
@@ -2013,7 +2072,7 @@ class Repository:
         self._recheck_ontology_publish_source(project_id, draft)
 
         operations = [row for row in self._ontology_drafts.effective_operations(
-            project_id, draft_id)
+            project_id, draft_id, with_evidence=False)
             if row['action'] != 'withdraw_operation'
             and not (row.get('validation') or {}).get('withdrawn')]
         decisions = {
@@ -2417,13 +2476,36 @@ class Repository:
             return self._ordered_ontology_versions(project_id)
 
     def get_ontology(self, project_id, ontology_id=None):
-        items = self.list_ontologies(project_id)
-        for item in reversed(items):
-            if ontology_id is None or item['id'] == ontology_id:
-                return item
-        if ontology_id is None:
-            raise OntologyNotPublished(project_id)
-        raise KeyError(ontology_id)
+        """读取单个本体版本：只取目标行，版本号仍按全项目发布顺序解析。
+
+        旧实现为取一条本体而全量读取该项目**所有历史版本**的完整 Turtle
+        文本，版本越多越慢；这里改为单行读取目标本体（最新或指定 ID），
+        版本号与复用标记由轻量元数据序列计算，语义与列表完全一致。
+        """
+        self.get_project(project_id)
+        with self._lock:
+            if ontology_id is None:
+                row = self._db.execute(
+                    '''SELECT id,project_id,turtle,summary,created_at,metadata
+                       FROM ontologies WHERE project_id=?
+                       ORDER BY created_at DESC,id DESC LIMIT 1''',
+                    (project_id,)).fetchone()
+                if row is None:
+                    raise OntologyNotPublished(project_id)
+            else:
+                row = self._db.execute(
+                    '''SELECT id,project_id,turtle,summary,created_at,metadata
+                       FROM ontologies WHERE project_id=? AND id=?''',
+                    (project_id, ontology_id)).fetchone()
+                if row is None:
+                    raise KeyError(ontology_id)
+            meta = self._ontology_version_meta(project_id)
+        item = self._parse_ontology_versions([row])[0]
+        entry = next((value for value in meta if value['id'] == row['id']), None)
+        if entry is not None:
+            item['version'] = entry['version']
+            item['version_reused'] = entry['version_reused']
+        return item
 
     def save_artifact(self, kind, item):
         if kind == 'ontology_discovery_run':

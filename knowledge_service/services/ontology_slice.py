@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from rdflib import RDFS, URIRef
 
-from .ontology_vocabulary import local_name
-
 
 class OntologySliceSelector:
     def __init__(self, *, roots=(), selector_version='ontology-slice-v1'):
@@ -26,10 +24,9 @@ class OntologySliceSelector:
             return True
 
         needle = str(text or '').casefold()
-        for term in sorted(terms, key=str):
-            labels = [str(value).strip() for value in graph.objects(term, RDFS.label)
-                      if str(value).strip()]
-            labels.append(local_name(term))
+        # 术语排序与标签收集与文本无关，由 Ontology 按图修订号缓存；
+        # 每个片段只做子串匹配本身。
+        for term, labels in ontology.term_surfaces():
             matches = sorted({label for label in labels
                               if label and label.casefold() in needle},
                              key=lambda value: (-len(value), value))

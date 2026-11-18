@@ -63,7 +63,10 @@ def test_zip_documents_ocr_spans_and_package_are_fixed(tmp_path):
         source_id=item['source_version_id']
         document=item['result']['document']
         assert document['metadata']['source_document_version_id']==source_id
-        ocr_chunk=next(row for row in item['result']['records'] if row['metadata'].get('source_kind')=='image_ocr')
+        # 内联图片的 OCR 文字会与正文合并在同一检索切片（source_kind=mixed），
+        # 但 OCR 证据身份（ocr_block_ids / ocr_run_id）必须保留且可精确定位。
+        ocr_chunk=next(row for row in item['result']['records']
+                       if row['metadata'].get('ocr_block_ids') or row['metadata'].get('ocr_run_id'))
         locate=app.state.source_documents.locate(project,source_id,ocr_chunk['version_id'])
         assert locate['status']=='available' and locate['boxes'] and locate['asset_id']
         assert client.get(f'/api/projects/{project}/source-documents/{source_id}/package').content==raw

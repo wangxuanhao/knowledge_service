@@ -55,7 +55,8 @@ def install(app, service):
     @router.post('/add-selection')
     def add_selection(p: str, request: ConfirmSelectionRequest, http_request: HttpRequest):
         return intake.add(p, request.model_dump(), actor=audit_actor(http_request),
-                          actor_identity=audit_identity(http_request)['id'])
+                          actor_identity=audit_identity(http_request)['id'],
+                          compact_response=True)
 
     @router.post('/confirm-reuse')
     def confirm_reuse(p: str, request: ConfirmSelectionRequest, http_request: HttpRequest):

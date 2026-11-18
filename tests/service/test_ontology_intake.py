@@ -302,7 +302,11 @@ def test_two_selected_batches_preserve_manual_operations_and_retry(tmp_path):
         current = second['draft']
         assert current['id'] == manual['id']
         assert current['source_kind'] == 'manual'
-        assert manual['operations'][0]['id'] in {x['id'] for x in current['operations']}
+        # The transport response carries only this batch's newly appended
+        # operations; the accumulated draft (including the manual operation)
+        # is read from the draft store.
+        assert manual['operations'][0]['id'] in {
+            x['id'] for x in drafts._effective_operations(p, manual['id'])}
         assert len(current['source_context']['intake_bindings']) == 2
         assert len(repo.list_discovery_runs(p)) == 2
         assert len(app.state.ontology_drafts.store.list(p)) == 1

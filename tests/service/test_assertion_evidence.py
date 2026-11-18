@@ -62,6 +62,24 @@ def _assertion(repo, project_id, document, chunk, *, assertion_id='assertion-1',
     })
 
 
+def _accept_assertion(repo, project_id, assertion, reason='accepted'):
+    """按正式写入契约接受断言：状态推进 + 版本支撑映射。
+
+    低层 transition 只推进状态机；读取资格要求 record_version_assertions
+    映射存在（正式流程由 FormalFactWriter 建立），映射插入会触发来源支持
+    重算，缺了它记录会被资格谓词过滤掉。
+    """
+    repo.transition_assertion(project_id, assertion['id'], 1, 'accepted',
+                              reason, 'test', canonical_record_id='entity-1')
+    record = repo.get_record(project_id, 'entity-1')
+    event = repo._db.execute(
+        "SELECT id FROM assertion_events WHERE project_id=? AND assertion_id=? "
+        "AND to_status='accepted' ORDER BY decision_version DESC LIMIT 1",
+        (project_id, assertion['id'])).fetchone()
+    repo.add_record_version_assertion(project_id, 'entity-1', record['version_id'],
+                        assertion['id'], event['id'])
+
+
 def _warning_codes(result):
     return [warning['code'] for warning in result['integrity']['warnings']]
 
@@ -351,9 +369,7 @@ def test_formal_and_assertion_evidence_share_pinned_version_and_location_mode(ev
         payload={'text': 'Alpha', 'evidence': 'Alpha', 'evidence_status': 'exact'})
     repo.put_record(project_id, {
         'id': 'entity-1', 'kind': 'entity', 'text': 'Alpha', 'metadata': {}})
-    repo.transition_assertion(
-        project_id, assertion['id'], 1, 'accepted', 'accepted for parity', 'test',
-        canonical_record_id='entity-1')
+    _accept_assertion(repo, project_id, assertion, 'accepted for parity')
 
     direct = resolve_assertion_evidence(repo, project_id, assertion['id'])
     formal = evidence_module.evidence(service, project_id, 'entity-1', {})['documents'][0]
@@ -372,9 +388,7 @@ def test_formal_chunk_mode_does_not_present_whole_chunk_as_highlight(evidence_re
         payload={'text': 'Alpha'})
     repo.put_record(project_id, {
         'id': 'entity-1', 'kind': 'entity', 'text': 'Alpha', 'metadata': {}})
-    repo.transition_assertion(
-        project_id, assertion['id'], 1, 'accepted', 'accepted chunk evidence',
-        'test', canonical_record_id='entity-1')
+    _accept_assertion(repo, project_id, assertion, 'accepted chunk evidence')
 
     formal = evidence_module.evidence(service, project_id, 'entity-1', {})['documents'][0]
 
@@ -394,9 +408,7 @@ def test_formal_serializer_reuses_trusted_pinned_document(
         payload={'text': 'Alpha'})
     repo.put_record(project_id, {
         'id': 'entity-1', 'kind': 'entity', 'text': 'Alpha', 'metadata': {}})
-    repo.transition_assertion(
-        project_id, assertion['id'], 1, 'accepted', 'accepted trusted source',
-        'test', canonical_record_id='entity-1')
+    _accept_assertion(repo, project_id, assertion, 'accepted trusted source')
     original = repo.get_record_version
     calls = []
 
@@ -425,9 +437,7 @@ def test_formal_evidence_does_not_expose_text_from_mismatched_document_version(
         (second['version_id'], project_id, assertion['id']))
     repo.put_record(project_id, {
         'id': 'entity-1', 'kind': 'entity', 'text': 'Alpha', 'metadata': {}})
-    repo.transition_assertion(
-        project_id, assertion['id'], 1, 'accepted', 'accepted for mismatch test',
-        'test', canonical_record_id='entity-1')
+    _accept_assertion(repo, project_id, assertion, 'accepted for mismatch test')
 
     formal = evidence_module.evidence(service, project_id, 'entity-1', {})['documents'][0]
 
@@ -462,9 +472,7 @@ def test_mismatched_assertion_does_not_hide_valid_assertion_for_same_version(
     repo.put_record(project_id, {
         'id': 'entity-1', 'kind': 'entity', 'text': 'Beta', 'metadata': {}})
     for assertion in (bad, good):
-        repo.transition_assertion(
-            project_id, assertion['id'], 1, 'accepted', 'accepted for dedup test',
-            'test', canonical_record_id='entity-1')
+        _accept_assertion(repo, project_id, assertion, 'accepted for dedup test')
 
     documents = evidence_module.evidence(
         service, project_id, 'entity-1', {})['documents']
@@ -490,9 +498,7 @@ def test_hash_mismatched_assertion_does_not_hide_valid_same_version_evidence(
     repo.put_record(project_id, {
         'id': 'entity-1', 'kind': 'entity', 'text': 'Alpha', 'metadata': {}})
     for assertion in (bad, good):
-        repo.transition_assertion(
-            project_id, assertion['id'], 1, 'accepted', 'accepted ranking test',
-            'test', canonical_record_id='entity-1')
+        _accept_assertion(repo, project_id, assertion, 'accepted ranking test')
 
     documents = evidence_module.evidence(
         service, project_id, 'entity-1', {})['documents']
@@ -522,9 +528,7 @@ def test_formal_evidence_caps_documents_after_ranking_all_assertions(
     repo.put_record(project_id, {
         'id': 'entity-1', 'kind': 'entity', 'text': 'Alpha', 'metadata': {}})
     for assertion in [*assertions, good]:
-        repo.transition_assertion(
-            project_id, assertion['id'], 1, 'accepted', 'accepted cap test',
-            'test', canonical_record_id='entity-1')
+        _accept_assertion(repo, project_id, assertion, 'accepted cap test')
 
     documents = evidence_module.evidence(
         service, project_id, 'entity-1', {})['documents']
@@ -556,9 +560,7 @@ def test_formal_evidence_ranks_resolutions_before_document_cap(evidence_repo):
     repo.put_record(project_id, {
         'id': 'entity-1', 'kind': 'entity', 'text': 'Alpha', 'metadata': {}})
     for assertion in [*unresolved, good]:
-        repo.transition_assertion(
-            project_id, assertion['id'], 1, 'accepted', 'accepted rank test',
-            'test', canonical_record_id='entity-1')
+        _accept_assertion(repo, project_id, assertion, 'accepted rank test')
 
     documents = evidence_module.evidence(
         service, project_id, 'entity-1', {})['documents']

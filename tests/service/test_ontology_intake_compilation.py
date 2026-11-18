@@ -74,11 +74,20 @@ def test_add_matches_sequential_commands_with_bounded_graph_and_record_work(tmp_
         measured.setattr(drafts.store, 'append_operations', append)
         actual = intake.add(project, request, actor='author')
     operations = actual['draft']['operations']
-    assert compiled == expected
-    stored_fields = ('action', 'target_iri', 'before', 'after', 'fingerprint',
-                     'evidence', 'risk', 'validation', 'impact', 'reason')
+    # Evidence is intentionally scoped per target term, so an operation's
+    # evidence (and the fingerprint derived from it) differs from a full-batch
+    # sequential compile. Compare the semantic payload, then assert each
+    # operation carries a non-empty subset of the batch's authoritative refs.
+    stored_fields = ('action', 'target_iri', 'before', 'after',
+                     'risk', 'validation', 'impact', 'reason')
+    assert [{key: item[key] for key in stored_fields} for item in compiled] == [
+        {key: item[key] for key in stored_fields} for item in expected]
     assert [{key: item[key] for key in stored_fields} for item in operations] == [
         {key: item[key] for key in stored_fields} for item in expected]
+    authoritative = set(drafts._authoritative_evidence(source_draft, {}))
+    for operation in operations:
+        assert operation['evidence']
+        assert set(operation['evidence']) <= authoritative
     assert actual['suggestions'] == selected
     assert isomorphic(Ontology(actual['draft']['turtle']).graph, Ontology(turtle).graph)
     assert all(operation['evidence'] for operation in operations)

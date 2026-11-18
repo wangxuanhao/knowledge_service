@@ -57,8 +57,36 @@ class IngestBatchStore:
         limit, offset = self._page(limit, offset)
         with self.repo._transaction():
             total = self.db.execute('SELECT COUNT(*) FROM ingest_batches WHERE project_id=?', (project_id,)).fetchone()[0]
-            ids = [row[0] for row in self.db.execute('SELECT id FROM ingest_batches WHERE project_id=? ORDER BY created_at DESC,id LIMIT ? OFFSET ?', (project_id,limit,offset))]
-            return {'items': [self.get_batch(project_id, value) for value in ids], 'total': total, 'limit': limit, 'offset': offset}
+            batches = [_row(row) for row in self.db.execute(
+                'SELECT * FROM ingest_batches WHERE project_id=? ORDER BY created_at DESC,id LIMIT ? OFFSET ?',
+                (project_id, limit, offset))]
+            if not batches:
+                return {'items': [], 'total': total, 'limit': limit, 'offset': offset}
+            ids = [batch['id'] for batch in batches]
+            placeholders = ','.join('?' * len(ids))
+            # 原先每批再查 3 次（行、状态计数、总量），一页 50 批 = 150+ 次往返。
+            # 整页的聚合各用一条 GROUP BY 取回即可。
+            counts_by_batch = {value: {} for value in ids}
+            for row in self.db.execute(
+                    'SELECT batch_id,status,COUNT(*) AS count FROM ingest_batch_items '
+                    'WHERE batch_id IN (' + placeholders + ') GROUP BY batch_id,status',
+                    tuple(ids)).fetchall():
+                counts_by_batch[row['batch_id']][row['status']] = row['count']
+            totals_by_batch = {
+                row['batch_id']: (row['total'], row['total_bytes'])
+                for row in self.db.execute(
+                    'SELECT batch_id,COUNT(*) AS total,COALESCE(SUM(size_bytes),0) AS total_bytes '
+                    'FROM ingest_batch_items WHERE batch_id IN (' + placeholders + ') GROUP BY batch_id',
+                    tuple(ids)).fetchall()}
+        items = []
+        for batch in batches:
+            counts = {status: 0 for status in
+                      ('pending','running','retry_wait','succeeded','failed','cancelled','interrupted')}
+            counts.update(counts_by_batch.get(batch['id'], {}))
+            batch_total, batch_bytes = totals_by_batch.get(batch['id'], (0, 0))
+            batch.update(counts=counts, total=batch_total, total_bytes=batch_bytes)
+            items.append(batch)
+        return {'items': items, 'total': total, 'limit': limit, 'offset': offset}
 
     @staticmethod
     def _page(limit, offset):

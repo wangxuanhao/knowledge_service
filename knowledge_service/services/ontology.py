@@ -218,6 +218,27 @@ class Ontology:
             target.update(record.node for record in records if kind in record.kinds)
         self._indexed_graph_revision = self.graph.revision
 
+    def term_surfaces(self):
+        """排序后的 (术语, 标签列表) 序列，按图修订号缓存。
+
+        切片选择要为每个文本片段扫描全部术语与标签；标签查询走 RDFLib
+        对象索引，与文本无关。同一本体实例在整篇文档的每个片段上重复做
+        相同的排序与标签收集，纯属浪费。缓存只在图内容变化时失效。
+        """
+        self._refresh_vocabulary()
+        cached = getattr(self, '_term_surfaces_cache', None)
+        if cached is not None and cached[0] == self._indexed_graph_revision:
+            return cached[1]
+        terms = self.classes | self.relations | self.attributes
+        pairs = []
+        for term in sorted(terms, key=str):
+            labels = [str(value).strip() for value in self.graph.objects(term, RDFS.label)
+                      if str(value).strip()]
+            labels.append(local_name(term))
+            pairs.append((term, tuple(labels)))
+        self._term_surfaces_cache = (self._indexed_graph_revision, tuple(pairs))
+        return self._term_surfaces_cache[1]
+
     def _resolve_current(self, name: str, allowed):
         matches = [uri for uri in allowed if str(uri) == name or local_name(uri) == name]
         if len(matches) != 1:

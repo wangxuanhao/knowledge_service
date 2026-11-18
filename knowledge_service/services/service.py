@@ -7,6 +7,7 @@ import logging
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from uuid import uuid4
 from contextlib import contextmanager, nullcontext
 from copy import copy, deepcopy
@@ -32,6 +33,27 @@ from .api_workflows import ApplicationData
 SYSTEM = {'project_id', 'version', 'version_id', 'recorded_at', 'superseded_at', 'embedding', 'embedding_model'}
 
 LOG = logging.getLogger('knowledge_service.service')
+
+# 源码文件指纹缓存：checkpoint 指纹在每片抽取时都要参与计算，但源码文件在
+# 进程生命周期内不会变。原先每片都 read_bytes 三个整文件并 sha256，切片越多
+# 纯 IO 越线性放大。缓存键带 mtime_ns + size，文件变化立即失效。
+_SOURCE_FILE_FINGERPRINTS = {}
+_SOURCE_FILE_FINGERPRINTS_LOCK = threading.Lock()
+
+
+def _source_file_fingerprint(path):
+    path = Path(path)
+    stat = path.stat()
+    key = (str(path), stat.st_mtime_ns, stat.st_size)
+    with _SOURCE_FILE_FINGERPRINTS_LOCK:
+        cached = _SOURCE_FILE_FINGERPRINTS.get(key)
+    if cached is not None:
+        return cached
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    with _SOURCE_FILE_FINGERPRINTS_LOCK:
+        _SOURCE_FILE_FINGERPRINTS[key] = digest
+    return digest
+
 
 
 def _withdrawn_conflict_owners(snapshot, conflict_actions):
@@ -157,14 +179,19 @@ class KnowledgeService:
         为什么要缓存：``scoped`` 是共享的成本中心，每个请求都会路过；
         本体是整段 Turtle，重复解析会把"顺手标一下"变成性能问题。
         为什么只认当前本体：概念一进本体就要自动解除待定，判据只能盯当前的那一版。
+        签名只用版本 ID 列表，不必为一次比对读回全部历史 Turtle。
         """
-        versions = self.repository.list_ontologies(project_id)
-        signature = tuple(version['id'] for version in versions)
+        signature = self.repository.ontology_version_signature(project_id)
         with self._ontology_cache_lock:
             cached = self._structure_pending_cache.get(project_id)
             if cached and cached[0] == signature:
                 return cached[1]
-        ontology = Ontology(versions[-1]['turtle']) if versions else Ontology('')
+        from ..repository import OntologyNotPublished
+        try:
+            ontology = (Ontology(self.repository.get_ontology(project_id)['turtle'])
+                        if signature else Ontology(''))
+        except OntologyNotPublished:
+            ontology = Ontology('')
         with self._ontology_cache_lock:
             self._structure_pending_cache[project_id] = (signature, ontology)
         return ontology
@@ -361,7 +388,14 @@ class KnowledgeService:
                     if endpoint_ontology_id not in endpoint_ontologies:
                         endpoint_ontologies[endpoint_ontology_id]=Ontology(self.repository.get_ontology(project_id,endpoint_ontology_id)['turtle'])
                     endpoint_ontology=endpoint_ontologies[endpoint_ontology_id]
-                    if policy_source_qualified(endpoint,endpoint_ontology.identity_policy(endpoint.get('type'))):
+                    # 端点术语尚未进入本体时，关系正是"结构待定"的对象；
+                    # 这里不能因为身份策略解析不了就硬拒绝整批写入，
+                    # 否则待定机制永远走不到标注那一步。
+                    try:
+                        endpoint_policy=endpoint_ontology.identity_policy(endpoint.get('type'))
+                    except UnknownOntologyTerm:
+                        endpoint_policy=None
+                    if endpoint_policy is not None and policy_source_qualified(endpoint,endpoint_policy):
                         outside=(endpoint.get('valid_from') and (not row.get('valid_from') or row['valid_from']<endpoint['valid_from'])
                             or endpoint.get('valid_until') and (not row.get('valid_until') or row['valid_until']>endpoint['valid_until']))
                         if outside:require_projection_ready(self.repository,project_id)
@@ -513,14 +547,13 @@ class KnowledgeService:
 
     def ontology_labels(self, project_id):
         """在保留的各本体版本间，将稳定类型 IRI 解析为业务标签。"""
-        versions = self.repository.list_ontologies(project_id)
-        signature = tuple(version['id'] for version in versions)
+        signature = self.repository.ontology_version_signature(project_id)
         with self._ontology_cache_lock:
             cached = self._ontology_label_cache.get(project_id)
             if cached and cached[0] == signature:
                 return dict(cached[1])
         labels={}
-        for version in versions:
+        for version in self.repository.list_ontologies(project_id):
             summary=Ontology(version['turtle']).summary()
             for item in summary['classes']+summary['relations']+summary['attributes']:
                 label=item.get('label_zh') or (item.get('label') if item.get('label')!=item.get('name') else '') or item.get('label_en') or {'name':'名称'}.get(item.get('name')) or item.get('name')
@@ -547,6 +580,7 @@ class KnowledgeService:
 
         Record consumers use record_family so unknown bindings never fall back.
         Explicit releases are immutable and can reuse their cache without a query.
+        Cache validation only needs the current release ID, not every Turtle.
         """
         cache_key = (project_id, ontology_id)
         if ontology_id is not None:
@@ -554,16 +588,16 @@ class KnowledgeService:
                 cached = self._ontology_family_cache.get(cache_key)
                 if cached:
                     return dict(cached[1])
-        versions = self.repository.list_ontologies(project_id)
-        selected = next((version for version in reversed(versions)
-                         if ontology_id is None or version['id'] == ontology_id), None)
-        if ontology_id is not None and selected is None:
-            raise KeyError(ontology_id)
-        signature = selected['id'] if selected else None
+        latest_id = self.repository.current_ontology_id(project_id)
+        signature = ontology_id or latest_id
         with self._ontology_cache_lock:
             cached = self._ontology_family_cache.get(cache_key)
             if cached and cached[0] == signature:
                 return dict(cached[1])
+        selected = (self.repository.get_ontology(project_id, ontology_id)
+                    if signature else None)
+        if ontology_id is not None and selected is None:
+            raise KeyError(ontology_id)
         index = (Ontology(selected['turtle']).expansion_index()
                  if selected else {'labels': {}, 'parents': {}, 'ancestors': {}})
         labels, direct = index['labels'], index.get('parents', {})
@@ -609,14 +643,19 @@ class KnowledgeService:
         """
         if not enabled:
             return None
-        versions = self.repository.list_ontologies(project_id)
-        signature = tuple(version['id'] for version in versions)
+        signature = self.repository.ontology_version_signature(project_id)
         with self._ontology_cache_lock:
             cached = self._ontology_expansion_cache.get(project_id)
             index = cached[1] if cached and cached[0] == signature else None
         if index is None:
-            index = (Ontology(versions[-1]['turtle']).expansion_index()
-                     if versions else {'surfaces': [], 'labels': {}, 'ancestors': {}})
+            from ..repository import OntologyNotPublished
+            try:
+                latest = (self.repository.get_ontology(project_id)['turtle']
+                          if signature else '')
+            except OntologyNotPublished:
+                latest = ''
+            index = (Ontology(latest).expansion_index()
+                     if latest else {'surfaces': [], 'labels': {}, 'ancestors': {}})
             with self._ontology_cache_lock:
                 self._ontology_expansion_cache[project_id] = (signature, index)
         # Ontology-only callers retain the literal class helper contract. Search
@@ -871,12 +910,12 @@ class KnowledgeService:
                 text_hash=hashlib.sha256(text.encode()).hexdigest(),mode='discovery' if discovery_options is not None else 'ontology',
                 ontology=ontology.turtle if hasattr(ontology,'turtle') else checkpoint_context.ontology_fingerprint,
                 model=current_llm().model,base_url=current_llm().base_url,
-                prompt_version='semantica-v1',extractor_version=hashlib.sha256(
-                    (__import__('pathlib').Path(__file__).resolve().parents[1]/'integrations/semantica_adapter.py').read_bytes()).hexdigest(),
-                parser_version=hashlib.sha256(
-                    (__import__('pathlib').Path(__file__).resolve().parents[1]/'integrations/markdown_parser.py').read_bytes()).hexdigest(),
-                chunk_version=hashlib.sha256(
-                    (__import__('pathlib').Path(__file__).resolve().parent/'chunking.py').read_bytes()).hexdigest(),
+                prompt_version='semantica-v1',extractor_version=_source_file_fingerprint(
+                    __import__('pathlib').Path(__file__).resolve().parents[1]/'integrations/semantica_adapter.py'),
+                parser_version=_source_file_fingerprint(
+                    __import__('pathlib').Path(__file__).resolve().parents[1]/'integrations/markdown_parser.py'),
+                chunk_version=_source_file_fingerprint(
+                    __import__('pathlib').Path(__file__).resolve().parent/'chunking.py'),
                 max_tokens=str(current_llm().max_tokens),active_ontology=checkpoint_context.expected_active_ontology,
                 chunk_metadata=checkpoint_context.chunks[ordinal].get('metadata',{}),document_generation=checkpoint_context.item.get('document_generation',0),settings=settings)
             result=checkpoint_context.execute(ordinal,fingerprint,extract)
@@ -1030,6 +1069,10 @@ class KnowledgeService:
                     roots=request.get('ontology_slice_roots') or ())
                 full_summary = ontology.summary()
                 event(f"本体已加载 · 版本 {version['id']} · 实体类 {len(ontology.classes)} · 关系类 {len(ontology.relations)}",15)
+                # 与切片无关的哈希只算一次：正文哈希原先在候选循环内每条重算，
+                # 一张文档有数百候选时等于把整篇正文编码数百遍。
+                source_text_hash = hashlib.sha256(request['text'].encode('utf-8')).hexdigest()
+                ontology_turtle_hash = hashlib.sha256(version['turtle'].encode('utf-8')).hexdigest()
                 # 每文档稳定 ID 保留证据，而不是合并不同来源的事实。
                 for index, chunk in enumerate(chunk_records):
                     slice_receipt = slice_selector.select_terms(
@@ -1059,7 +1102,7 @@ class KnowledgeService:
                         extracted = self.extract_ingest_chunk(extractor,chunk['text'],ontology=ontology,
                             checkpoint_context=checkpoint_context,ordinal=index,settings={
                                 **{k:v for k,v in request.items() if not k.startswith('_') and k not in ('title','text','metadata')},
-                                'ontology_id':version['id'],'ontology_hash':hashlib.sha256(version['turtle'].encode()).hexdigest(),
+                                'ontology_id':version['id'],'ontology_hash':ontology_turtle_hash,
                                 'slice':slice_receipt})
                     processed_chunks += 1
                     event(f"片段 {index+1}/{len(chunks)} 结果 · 实体 {sum(r['kind']=='entity' for r in extracted)} · 关系 {sum(r['kind']=='relation' for r in extracted)}",15+int(60*(index+1)/len(chunks)))
@@ -1084,7 +1127,7 @@ class KnowledgeService:
                         review_candidates.append({**candidate,'id':str(uuid4()),'status':'pending',
                             'ontology_id':version['id'],'chunk_id':chunk['id'],
                             'start_char':candidate_start,'end_char':candidate_end,
-                            'source_hash':hashlib.sha256(request['text'].encode('utf-8')).hexdigest(),
+                            'source_hash':source_text_hash,
                             'evidence':candidate_evidence,'source_version_id':receipt['version_id'],
                             'valid_from':request.get('valid_from'),'valid_until':request.get('valid_until'),
                             'applicability':metadata['applicability'],
@@ -1239,8 +1282,7 @@ class KnowledgeService:
                 completed, graph_saved = committed[0], committed[1:]
                 saved = [*saved_chunks, *graph_saved]
                 if shacl_reviews:
-                    import hashlib as _hashlib
-                    source_hash = _hashlib.sha256(request['text'].encode('utf-8')).hexdigest()
+                    source_hash = extracted_source_hash
                     derived_by_id = {r['id']: r for r in derived}
                     seen=set()
                     for violation in shacl_reviews:

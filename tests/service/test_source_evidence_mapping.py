@@ -115,7 +115,10 @@ def test_mixed_video_location_keeps_independent_asset_time_groups():
         def execute(self, query, params):
             if query.startswith('SELECT * FROM chunk_source_spans'):
                 return SimpleNamespace(fetchall=lambda:spans)
-            return SimpleNamespace(fetchone=lambda:segments[params[-1][-1]])
+            # 证据块按整批 ID 取回（批量语义与逐条查询等价）。
+            ids = params[2:]
+            by_id = {value['id']: value for value in segments.values()}
+            return SimpleNamespace(fetchall=lambda: [by_id[i] for i in ids if i in by_id])
     store=SourceStore(SimpleNamespace(_lock=threading.RLock(),_db=DB()))
     store.get_version=lambda *args: {'blocks':[]}
     result=store.locate('p','v','chunk')

@@ -1,6 +1,7 @@
 """PostgreSQL preparation drafts, immutable bytes and fenced parse leases."""
 from contextlib import contextmanager
 import json
+from time import monotonic
 from uuid import uuid4
 
 
@@ -13,9 +14,14 @@ def decoded(value):
 
 
 class PreparationStore:
+    # 过期租约回收是幂等的全局扫描；分发线程每 0.25s 认领一次，没必要每轮
+    # 都扫两遍任务表。1 秒一次即可把恢复延迟控制在无感范围内。
+    RECOVERY_INTERVAL_SECONDS = 1.0
+
     def __init__(self,repo):
         self.repo=repo
         self.db=repo._db
+        self._last_recovery=0.0
 
     @contextmanager
     def guard(self,project):
@@ -141,8 +147,11 @@ class PreparationStore:
     def claim(self,lease_seconds=120):
         with self.repo._transaction():
             # Expired workers cannot publish late results after this token changes.
-            self.db.execute("UPDATE preparation_tasks SET status='queued',stage='recovered',lease_token=NULL WHERE status='running' AND lease_until<now()")
-            self.db.execute("UPDATE preparation_tasks SET status='cancelled',stage='cancelled',lease_token=NULL WHERE status='cancelling' AND lease_until<now()")
+            now=monotonic()
+            if now-self._last_recovery>=self.RECOVERY_INTERVAL_SECONDS:
+                self.db.execute("UPDATE preparation_tasks SET status='queued',stage='recovered',lease_token=NULL WHERE status='running' AND lease_until<now()")
+                self.db.execute("UPDATE preparation_tasks SET status='cancelled',stage='cancelled',lease_token=NULL WHERE status='cancelling' AND lease_until<now()")
+                self._last_recovery=now
             row=self.db.execute("SELECT id FROM preparation_tasks WHERE status='queued' AND file_id IS NOT NULL ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1").fetchone()
             if not row:return None
             token=uuid4().hex

@@ -100,14 +100,18 @@ class OntologyDrafts(
                     'current_revision': draft['revision'],
                 })
 
-    def _history(self, project_id, draft_id):
-        return self.store.history(project_id, draft_id)
+    def _history(self, project_id, draft_id, *, with_evidence=True):
+        return self.store.history(project_id, draft_id, with_evidence=with_evidence)
 
-    def _effective_operations(self, project_id, draft_id):
-        """Return current operations in stable logical, not append, order."""
-        history, _ = self._history(project_id, draft_id)
-        current_ids = {
-            row['id'] for row in self.store.effective_operations(project_id, draft_id)}
+    @staticmethod
+    def _effective_from_history(history):
+        """Project effective operations from an already-read history.
+
+        Equivalent to the store's ``NOT EXISTS`` effective query, but avoids a
+        second full read of the (evidence-heavy) operation rows.
+        """
+        superseded = {row['supersedes_operation_id'] for row in history
+                      if row.get('supersedes_operation_id')}
         by_id = {row['id']: row for row in history}
         positions = {row['id']: index for index, row in enumerate(history)}
 
@@ -122,10 +126,15 @@ class OntologyDrafts(
                 current = by_id[parent_id]
             return positions[current['id']]
 
-        effective = [row for row in history if row['id'] in current_ids]
+        effective = [row for row in history if row['id'] not in superseded]
         effective.sort(key=lambda row: (logical_position(row), positions[row['id']]))
         return [row for row in effective
                 if not (row.get('validation') or {}).get('withdrawn')]
+
+    def _effective_operations(self, project_id, draft_id):
+        """Return current operations in stable logical, not append, order."""
+        history, _ = self._history(project_id, draft_id)
+        return self._effective_from_history(history)
 
     @staticmethod
     def _effective_decisions(all_decisions):
@@ -154,19 +163,33 @@ class OntologyDrafts(
             turtle = apply_operations(turtle, map(_semantic_operation, applicable))
         return turtle, operations
 
-    def _preview(self, project_id, draft):
-        _, all_decisions = self._history(project_id, draft['id'])
-        effective = self._effective_operations(project_id, draft['id'])
+    def _preview(self, project_id, draft, *, with_evidence=True, verify=True):
+        if with_evidence:
+            history, all_decisions = self._history(project_id, draft['id'])
+        else:
+            history, all_decisions = self._history(
+                project_id, draft['id'], with_evidence=False)
+        effective = self._effective_from_history(history)
         effective_ids = {row['id'] for row in effective}
+        fingerprints = {row['id']: row.get('fingerprint') for row in effective}
         decisions = [row for row in self._effective_decisions(all_decisions)
                      if row['operation_id'] in effective_ids
-                     and row['operation_fingerprint'] == next(
-                         (op['fingerprint'] for op in effective
-                          if op['id'] == row['operation_id']), None)]
+                     and row['operation_fingerprint'] == fingerprints.get(
+                         row['operation_id'])]
+        # Apply the same semantics as _ontology_for_draft/_active_operations,
+        # but on the operations already in memory instead of re-reading them.
+        applicable = [row for row in effective
+                      if (row.get('validation') or {}).get('rebase_status')
+                      not in {'no-op', 'conflict'}
+                      and not (row.get('validation') or {}).get('errors')]
         try:
-            turtle, _ = self._ontology_for_draft(project_id, draft)
+            turtle = self._base_turtle(project_id, draft.get('base_ontology_id'))
+            if applicable:
+                operations = map(_semantic_operation, applicable)
+                turtle = (apply_operations(turtle, operations, verify=False)
+                          if not verify else apply_operations(turtle, operations))
         except ValueError:
-            turtle = self._base_turtle(project_id, draft['base_ontology_id'])
+            turtle = self._base_turtle(project_id, draft.get('base_ontology_id'))
         batches = []
         context = draft.get('source_context') or {}
         for binding in context.get('intake_bindings') or []:
@@ -548,7 +571,11 @@ class OntologyDrafts(
 
     def get(self, project_id, draft_id, *, canvas=False):
         """Return a draft with its current operations, decisions and preview."""
-        result = self._preview(project_id, self.store.get(project_id, draft_id))
+        # The canvas projection drops evidence and only needs the rendered
+        # structure, so read without evidence and skip fingerprint re-hashing
+        # on this display path (writes still verify).
+        result = self._preview(project_id, self.store.get(project_id, draft_id),
+                               with_evidence=not canvas, verify=not canvas)
         if canvas:
             result = {key: value for key, value in result.items()
                       if key not in {'source_context', 'draft', 'turtle'}}

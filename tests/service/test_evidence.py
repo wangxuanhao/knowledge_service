@@ -26,6 +26,13 @@ def test_evidence_pins_assertion_source_version_and_scopes_records(tmp_path):
         'payload': {'text': '商户', 'evidence': '商户规则', 'evidence_status': 'exact'}})
     repo.transition_assertion(project, assertion['id'], 1, 'accepted',
                               'verified', 'test', canonical_record_id='e')
+    # 正式写入在接受断言时同时建立版本支撑映射；证据读取依赖这份映射。
+    record = repo.get_record(project, 'e')
+    event = repo._db.execute(
+        "SELECT id FROM assertion_events WHERE project_id=? AND assertion_id=? "
+        "AND to_status='accepted' ORDER BY decision_version DESC LIMIT 1",
+        (project, assertion['id'])).fetchone()
+    repo.add_record_version_assertion(project, 'e', record['version_id'], assertion['id'], event['id'])
     repo.put_record(project, {'id': 'doc', 'kind': 'document', 'text': '已经变更的原文'})
 
     result = evidence(service, project, 'e', {})['documents'][0]

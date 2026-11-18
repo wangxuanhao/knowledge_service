@@ -576,14 +576,21 @@ def _validate_identity_annotations(graph: Graph, class_nodes: set) -> None:
                     raise ValueError('实体身份策略必须唯一且为 reference/scoped')
 
 
-def apply_operations(base_turtle: str, operations: Iterable[dict]) -> str:
-    """The only mutation entry point: apply ordered operations to one RDF graph."""
+def apply_operations(base_turtle: str, operations: Iterable[dict], *,
+                     verify: bool = True) -> str:
+    """The only mutation entry point: apply ordered operations to one RDF graph.
+
+    ``verify=False`` skips re-hashing each operation's fingerprint. Read-only
+    display paths use it when they intentionally omit the (fingerprint-covered)
+    evidence payload; write paths keep full verification.
+    """
     ontology = Ontology(base_turtle)
-    _apply_operations(ontology, operations)
+    _apply_operations(ontology, operations, verify=verify)
     return ontology.graph.serialize(format='turtle')
 
 
-def _apply_operations(ontology: Ontology, operations: Iterable[dict]) -> None:
+def _apply_operations(ontology: Ontology, operations: Iterable[dict], *,
+                      verify: bool = True) -> None:
     """Mutate request-owned state using the string API's exact rules and checks.
 
     An error may leave this working graph changed; callers must own it and
@@ -594,7 +601,7 @@ def _apply_operations(ontology: Ontology, operations: Iterable[dict]) -> None:
         if not isinstance(operation, dict):
             raise ValueError('本体操作必须是对象')
         fingerprint = operation.get('fingerprint')
-        if fingerprint and fingerprint != operation_fingerprint(operation):
+        if verify and fingerprint and fingerprint != operation_fingerprint(operation):
             raise ValueError('本体操作 fingerprint 指纹与内容不一致')
         action = _ACTION_ALIASES.get(operation.get('action'), operation.get('action'))
         target_iri = operation.get('target_iri', '')

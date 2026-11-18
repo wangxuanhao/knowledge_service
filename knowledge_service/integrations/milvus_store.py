@@ -586,7 +586,7 @@ class MilvusStore:
 
     def search(self, project_id, query, *, retrieval_mode, query_vector=None,
                kinds=None, k=10, scope=None, index_version, catalog, platform_match=None,
-               eligible_version_ids=None):
+               eligible_version_ids=None, lexical_outputs=None):
         self._scope(project_id, index_version)
         if retrieval_mode not in {'keyword', 'semantic', 'hybrid'}:
             raise ValueError('不支持的检索模式')
@@ -605,9 +605,13 @@ class MilvusStore:
         if retrieval_mode == 'hybrid' and policy['hybrid_strategy'] == 'keyword_rerank':
             # Each PG eligibility batch contains at most 1000 versions. For a
             # native-only query this remains an explicit bounded lexical pool.
+            # The inner pool only feeds version IDs into the semantic stage, so
+            # it asks for identity columns alone: the previous call pulled the
+            # BM25 text column for up to 1000 rows per channel and discarded it.
             lexical = self.search(project_id, query, retrieval_mode='keyword', kinds=kinds,
                 k=1000, scope=scope, index_version=index_version, catalog=catalog,
-                platform_match=platform_match, eligible_version_ids=eligible_version_ids)
+                platform_match=platform_match, eligible_version_ids=eligible_version_ids,
+                lexical_outputs={'record_id', 'version_id', 'kind'})
             versions = list(dict.fromkeys(hit['version_id'] for hit in lexical if hit.get('version_id') and hit['score'] > 0))
             if not versions:
                 return []
@@ -641,6 +645,11 @@ class MilvusStore:
         self._load_if_needed(catalog=catalog)
         outputs = ['record_id','version_id','kind','type','text','owner_id',
                    'support_context_id','support_context_version','window_index','window_start','window_end']
+        if lexical_outputs is not None:
+            # Internal candidate pools may only need identity/score columns;
+            # dropping text here avoids transferring and decoding chunk bodies
+            # that the caller never reads.
+            outputs = [name for name in outputs if name in lexical_outputs]
         dense = retrieval_mode == 'semantic'
         result = self._search_rpc(self._client.search, collection_name=COLLECTION,
                      data=self._query_vector(query_vector) if dense else [query],

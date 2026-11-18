@@ -26,6 +26,18 @@ class ReadRepository:
     def list_ontologies(self, project):
         return [{'id': 'release', 'turtle': TURTLE}]
 
+    # 服务层缓存只用轻量签名判断失效；替身与真实仓储保持同一组读取契约。
+    def ontology_version_signature(self, project):
+        return ('release',)
+
+    def current_ontology_id(self, project):
+        return 'release'
+
+    def get_ontology(self, project, ontology_id=None):
+        if ontology_id not in (None, 'release'):
+            raise KeyError(ontology_id)
+        return {'id': 'release', 'turtle': TURTLE}
+
 
 class Reads:
     def __init__(self, repository):
@@ -44,9 +56,17 @@ class Reads:
         return {'records': [], 'truncated': False}
 
 
+class NullLLMModels:
+    """LLM 配置持久化与本用例无关；装配时用空端口隔离数据库依赖。"""
+
+    def __init__(self, repository):
+        self.repository = repository
+
+
 class OntologyCacheLockTests(unittest.TestCase):
     def setUp(self):
-        self.service = KnowledgeService(ReadRepository(), encoder=None)
+        with patch('knowledge_service.services.llm_models.LLMModels', NullLLMModels):
+            self.service = KnowledgeService(ReadRepository(), encoder=None)
 
     def while_writer_locked(self, operation):
         blocked = False

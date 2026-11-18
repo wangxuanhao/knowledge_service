@@ -113,11 +113,16 @@ class OntologyDraftStore:
         return item
 
     @staticmethod
-    def _operation(row):
+    def _operation(row, with_evidence=True):
         item = dict(row)
         item['before'] = json.loads(item.pop('before_json'))
         item['after'] = json.loads(item.pop('after_json'))
-        item['evidence'] = json.loads(item.pop('evidence_json'))
+        if 'evidence_json' in item:
+            item['evidence'] = json.loads(item.pop('evidence_json'))
+        else:
+            # Light reads omit the evidence column. Only display paths that
+            # skip fingerprint re-verification may use them.
+            item['evidence'] = []
         item['impact'] = json.loads(item.pop('impact_json'))
         item['validation'] = json.loads(item.pop('validation_json'))
         return item
@@ -397,11 +402,24 @@ class OntologyDraftStore:
                     (decision['id'],)).fetchone()))
         return saved
 
-    def effective_operations(self, project_id, draft_id):
+    def effective_operations(self, project_id, draft_id, *, with_evidence=True):
+        """当前有效操作；校验/指纹类消费方可关闭 evidence 大列读取。"""
         self.get(project_id, draft_id)
+        columns = 'operation.*'
+        if not with_evidence:
+            # 发布复核与绑定校验只用 id/action/fingerprint/target_iri 等字段。
+            # evidence_json 往往内嵌数十条证据，是草案里最大的列；为校验读回
+            # 整个 evidence 纯属浪费。
+            columns = ('operation.id,operation.project_id,operation.draft_id,'
+                       'operation.action,operation.target_iri,'
+                       'operation.before_json,operation.after_json,'
+                       'operation.impact_json,operation.validation_json,'
+                       'operation.risk,operation.fingerprint,operation.reason,'
+                       'operation.supersedes_operation_id,operation.created_at,'
+                       'operation.seq')
         with self._lock:
             rows = self._db.execute(
-                '''SELECT operation.* FROM ontology_operations AS operation
+                '''SELECT ''' + columns + ''' FROM ontology_operations AS operation
                    WHERE operation.project_id=? AND operation.draft_id=?
                      AND NOT EXISTS (
                        SELECT 1 FROM ontology_operations AS replacement
@@ -410,7 +428,7 @@ class OntologyDraftStore:
                          AND replacement.supersedes_operation_id=operation.id)
                    ORDER BY operation.created_at,operation.seq''',
                 (project_id, draft_id)).fetchall()
-        return [self._operation(row) for row in rows]
+        return [self._operation(row, with_evidence=with_evidence) for row in rows]
 
     def effective_decisions(self, project_id, draft_id):
         self.get(project_id, draft_id)
@@ -427,23 +445,32 @@ class OntologyDraftStore:
                 (project_id, draft_id)).fetchall()
         return [self._decision(row) for row in rows]
 
-    def history(self, project_id, draft_id):
+    def history(self, project_id, draft_id, *, with_evidence=True):
         """Read one draft's full audit chains in their original append order.
 
         Superseded operations and decisions remain necessary for logical ordering
         and current-decision projection; do not replace these with effective rows.
+
+        ``with_evidence=False`` omits the evidence column. A large intake draft
+        can carry tens of MB of per-operation evidence; only a display path that
+        also skips fingerprint verification may request this light form.
         """
         self.get(project_id, draft_id)
+        columns = ('*' if with_evidence else
+                   'id, project_id, draft_id, action, target_iri, '
+                   'before_json, after_json, impact_json, validation_json, '
+                   'risk, fingerprint, reason, supersedes_operation_id, '
+                   'created_at, seq')
         with self._lock:
             operations = self._db.execute(
-                '''SELECT * FROM ontology_operations
-                   WHERE project_id=? AND draft_id=? ORDER BY seq''',
+                f'''SELECT {columns} FROM ontology_operations
+                    WHERE project_id=? AND draft_id=? ORDER BY seq''',
                 (project_id, draft_id)).fetchall()
             decisions = self._db.execute(
                 '''SELECT * FROM ontology_review_decisions
                    WHERE project_id=? AND draft_id=? ORDER BY seq''',
                 (project_id, draft_id)).fetchall()
-        return ([self._operation(row) for row in operations],
+        return ([self._operation(row, with_evidence) for row in operations],
                 [self._decision(row) for row in decisions])
 
     def export(self, project_id):

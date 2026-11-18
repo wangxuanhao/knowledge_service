@@ -303,9 +303,8 @@ class IntakeAggregateValidationTests(unittest.TestCase):
     def test_preview_counts_only_explicit_intake_bindings(self):
         drafts_module = importlib.import_module(PACKAGE + '.services.ontology_drafts')
         drafts = object.__new__(drafts_module.OntologyDrafts)
-        drafts._history = lambda *_: ([], [])
-        drafts._effective_operations = lambda *_: []
-        drafts._ontology_for_draft = lambda *_: ('', [])
+        drafts._history = lambda *_, **__: ([], [])
+        drafts._base_turtle = lambda *_: ''
         result = drafts._preview('p', {'id': 'draft', 'source_context': {
             'intake_bindings': [{'discovery_run_id': 'current', 'selected_candidate_ids': ['a', 'b']}],
             'publication_effects': {'kind': 'discovery', 'discovery_run_id': 'old',

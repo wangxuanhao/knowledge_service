@@ -162,12 +162,20 @@ class SourceStore:
             return result
 
     def add_spans(self, project_id, version_id, chunk_version_id, spans):
-        self.get_version(project_id,version_id)
+        # 只校验版本存在：切片写入不需要 blocks/assets/chunks 这些大对象。
+        # 摄取时每个切片都会调用一次，全量读取会变成 O(切片数 × 全文)。
+        with self.repo._lock:
+            exists = self.repo._db.execute(
+                'SELECT 1 FROM source_document_versions WHERE project_id=? AND id=?',
+                (project_id, version_id)).fetchone()
+        if exists is None:
+            raise KeyError('Source version not found')
         with self.repo.unit_of_work():
+            # 同一 chunk 的片段共用一把锁，提到循环外即可，不必每片段重复加锁。
+            self.repo._db.execute('SELECT pg_advisory_xact_lock(hashtextextended(?,0))',('source-span:'+project_id+':'+version_id+':'+chunk_version_id,))
             for ordinal, span in enumerate(spans):
                 s=dict(span)
                 value=dict(id=str(uuid4()),project_id=project_id,document_version_id=version_id,chunk_version_id=chunk_version_id,block_id=s.get('block_id'),ocr_block_id=s.get('ocr_block_id'),asr_segment_id=s.get('asr_segment_id'),ordinal=ordinal,chunk_start_char=s.get('chunk_start_char',0),chunk_end_char=s.get('chunk_end_char',0),block_start_char=s.get('block_start_char',0),block_end_char=s.get('block_end_char',0),payload=encode(s.get('payload',{})))
-                self.repo._db.execute('SELECT pg_advisory_xact_lock(hashtextextended(?,0))',('source-span:'+project_id+':'+version_id+':'+chunk_version_id,))
                 existing=self.repo._db.execute('SELECT * FROM chunk_source_spans WHERE project_id=? AND document_version_id=? AND chunk_version_id=? AND ordinal=?',(project_id,version_id,chunk_version_id,ordinal)).fetchone()
                 if existing:
                     for key in value:
@@ -188,14 +196,25 @@ class SourceStore:
             if not chunk_version_id: return dict(status='mapping_unavailable',code='source_mapping_unavailable',document_version_id=version_id,spans=[])
             spans=[dict(s) for s in self.repo._db.execute('SELECT * FROM chunk_source_spans WHERE project_id=? AND document_version_id=? AND chunk_version_id=? ORDER BY ordinal',(project_id,version_id,chunk_version_id)).fetchall()]
             for s in spans: s['payload']=json.loads(s['payload'])
-            boxes=[];segments=[]
-            for s in spans:
-                if s['ocr_block_id']:
-                    row=self.repo._db.execute('SELECT b.*,r.asset_id FROM source_asset_ocr_blocks b JOIN source_asset_ocr_runs r ON r.id=b.ocr_run_id WHERE b.project_id=? AND b.document_version_id=? AND b.id=?',(project_id,version_id,s['ocr_block_id'])).fetchone()
-                    if row: boxes.append(dict(row))
-                if s.get('asr_segment_id'):
-                    row=self.repo._db.execute('SELECT s.*,r.asset_id FROM source_asset_asr_segments s JOIN source_asset_asr_runs r ON r.id=s.asr_run_id AND r.project_id=s.project_id AND r.document_version_id=s.document_version_id WHERE s.project_id=? AND s.document_version_id=? AND s.id=?',(project_id,version_id,s['asr_segment_id'])).fetchone()
-                    if row:segments.append(dict(row))
+            # 证据定位在一次点击里发生，按 span 逐条取块会在几十个片段上
+            # 变成几十次往返；整批 ID 一次取回再按 span 顺序还原。
+            boxes_by_id={};segments_by_id={}
+            ocr_ids=list(dict.fromkeys(s['ocr_block_id'] for s in spans if s['ocr_block_id']))
+            if ocr_ids:
+                placeholders=','.join('?'*len(ocr_ids))
+                for row in self.repo._db.execute(
+                        'SELECT b.*,r.asset_id FROM source_asset_ocr_blocks b JOIN source_asset_ocr_runs r ON r.id=b.ocr_run_id WHERE b.project_id=? AND b.document_version_id=? AND b.id IN ('+placeholders+')',
+                        (project_id,version_id,*ocr_ids)).fetchall():
+                    boxes_by_id[row['id']]=dict(row)
+            asr_ids=list(dict.fromkeys(s['asr_segment_id'] for s in spans if s.get('asr_segment_id')))
+            if asr_ids:
+                placeholders=','.join('?'*len(asr_ids))
+                for row in self.repo._db.execute(
+                        'SELECT s.*,r.asset_id FROM source_asset_asr_segments s JOIN source_asset_asr_runs r ON r.id=s.asr_run_id AND r.project_id=s.project_id AND r.document_version_id=s.document_version_id WHERE s.project_id=? AND s.document_version_id=? AND s.id IN ('+placeholders+')',
+                        (project_id,version_id,*asr_ids)).fetchall():
+                    segments_by_id[row['id']]=dict(row)
+            boxes=[boxes_by_id[s['ocr_block_id']] for s in spans if s['ocr_block_id'] in boxes_by_id]
+            segments=[segments_by_id[s['asr_segment_id']] for s in spans if s.get('asr_segment_id') in segments_by_id]
             return focus_source_location(dict(status='available' if spans else 'mapping_unavailable',code=None if spans else 'source_mapping_unavailable',document_version_id=version_id,spans=spans,blocks=version['blocks'],tab='reading'),boxes=boxes,segments=segments)
 
     def asr_runs(self, project_id, version_id, asset_id):

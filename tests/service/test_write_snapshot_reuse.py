@@ -55,17 +55,30 @@ class SnapshotRepository:
                                      if action['kind'] == 'record_put']}
 
 
+class NullLLMModels:
+    """LLM 配置持久化与本用例无关；装配时用空端口隔离数据库依赖。"""
+
+    def __init__(self, repository):
+        self.repository = repository
+
+
+def make_service(repository, encoder):
+    with patch('knowledge_service.services.llm_models.LLMModels', NullLLMModels):
+        return KnowledgeService(repository, encoder)
+
+
 class WriteSnapshotReuseTests(unittest.TestCase):
     def test_service_uses_one_planning_snapshot_and_preserves_nested_input(self):
         state = snapshot()
-        state['records'] = [{'id': 'old', 'kind': 'entity', 'version': 3, 'version_id': 'old-v3',
+        state['records'] = [{'id': 'old', 'kind': 'entity', 'type': 'http://ex/Person',
+                             'version': 3, 'version_id': 'old-v3',
                              'text': 'old', 'metadata': {'nested': {'labels': ['keep']}},
                              'valid_until': '2020-01-01T00:00:00Z', 'ontology_id': 'ont'}]
         before = copy.deepcopy(state)
         repo = SnapshotRepository(state)
-        service = KnowledgeService(repo, SimpleNamespace(identity='test', encode=lambda rows: [[1.0] for _ in rows]))
+        service = make_service(repo, SimpleNamespace(identity='test', encode=lambda rows: [[1.0] for _ in rows]))
         service.annotate_structure_pending = lambda *_args: 0
-        service._timeline_check = lambda project, version, rows, mode: (
+        service._timeline_check = lambda project, version, rows, mode, **kwargs: (
             None, list(rows.values()), {}, set(), {'conforms': True})
         raw = {'id': 'new', 'kind': 'entity', 'type': 'http://ex/Person', 'text': 'new',
                'metadata': {'nested': {'labels': ['input']}}}
@@ -82,7 +95,7 @@ class WriteSnapshotReuseTests(unittest.TestCase):
         state['records'] = [{'id': 'removed', 'kind': 'entity', 'version': 4,
                              'version_id': 'removed-v4', 'metadata': {'_deleted': True}}]
         repo = SnapshotRepository(state)
-        service = KnowledgeService(repo, SimpleNamespace())
+        service = make_service(repo, SimpleNamespace())
         with self.assertRaisesRegex(ValueError, '版本冲突'):
             service.write('p', [{'id': 'removed', 'kind': 'entity', 'text': 'new'}])
         self.assertEqual(repo.reads, 1)
@@ -96,9 +109,9 @@ class WriteSnapshotReuseTests(unittest.TestCase):
                                  'nested': {'labels': ['source']}}}]
         before = copy.deepcopy(state)
         repo = SnapshotRepository(state)
-        service = KnowledgeService(repo, SimpleNamespace(identity='test', encode=lambda rows: [[1.0] for _ in rows]))
+        service = make_service(repo, SimpleNamespace(identity='test', encode=lambda rows: [[1.0] for _ in rows]))
         service.annotate_structure_pending = lambda *_args: 0
-        service._timeline_check = lambda project, version, rows, mode: (
+        service._timeline_check = lambda project, version, rows, mode, **kwargs: (
             None, list(rows.values()), {'source': [], 'child': ['urn:test:Missing']},
             {'child'}, {'conforms': True})
         raw = {'id': 'child', 'kind': 'entity', 'type': 'urn:test:Missing',
@@ -189,3 +202,4 @@ class WriteSnapshotReuseTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
