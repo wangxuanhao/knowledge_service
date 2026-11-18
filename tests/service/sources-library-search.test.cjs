@@ -62,6 +62,6 @@ test('citation outside the loaded page uses an unsearched point lookup',async()=
 
 test('failed search keeps its applied term for refresh and clears stale counts',async()=>{
   let fail=false;const ui=setup({sourceRead:url=>fail?Promise.reject(Error('search offline')):Promise.resolve({documents:[documentRow('one')],counts:{all:1,ready:1,failed:0,processing:0}})});await settle();fail=true;
-  await search(ui,'failed-term');assert.equal(ui.rows().length,0);assert.equal(ui.get('all-count').textContent,'0');assert.match(ui.document.querySelector('.source-empty').textContent,/search offline/);
+  await search(ui,'failed-term');assert.equal(ui.rows().length,0);assert.equal(ui.get('all-count').textContent,'—');assert.match(ui.document.querySelector('.source-empty').textContent,/search offline/);
   fail=false;await ui.refresh.click();await settle();assert.equal(params(ui.sourceRequests.at(-1)).get('query'),'failed-term');assert.equal(ui.rows().length,1);
 });

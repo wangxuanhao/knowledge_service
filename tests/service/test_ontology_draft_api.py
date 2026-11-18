@@ -947,3 +947,55 @@ def test_terminal_draft_beside_editable_draft_still_locks_design(workbench):
     assert unselected['stages']['design']['allowed'] is True
 
 
+def test_definition_send_back_returns_draft_to_editing(workbench):
+    """按定义审核的「退回继续编辑」：草案仍待处理，校验与提交作废。
+
+    审核不通过后要能改：退回不是拒绝，也不发布，只把整份草案放回可编辑态，
+    改完重新校验并提交即可再次审核。
+    """
+    client, project_id, ontology = workbench
+    draft = create_draft(client, project_id, ontology)
+    draft = command(client, project_id, draft, {
+        'action': 'add_annotation',
+        'target_iri': 'https://example.test/ns#Child',
+        'predicate': 'http://www.w3.org/2000/01/rdf-schema#comment',
+        'value': 'Send back definition', 'language': 'en',
+    })
+    validated = client.post(
+        f"/api/projects/{project_id}/ontology-drafts/{draft['id']}/validate",
+        json={'expected_revision': draft['revision']}).json()
+    submitted = client.post(
+        f"/api/projects/{project_id}/ontology-drafts/{draft['id']}/submit",
+        json={'expected_revision': validated['revision']}).json()
+
+    response = client.post(
+        f"/api/projects/{project_id}/ontology-drafts/{draft['id']}/decisions/by-definition",
+        json={
+            'expected_revision': submitted['revision'],
+            'expected_ontology_id': ontology['id'],
+            'validation_fingerprint': submitted['validation_fingerprint'],
+            'acknowledged_warning_codes': [],
+            'target_iri': 'https://example.test/ns#Child',
+            'action': 'request_changes',
+            'reason': '先退回补充定义再审核',
+        })
+    assert response.status_code == 200, response.text
+    body = response.json()
+    sent_back = body.get('draft') or body
+    assert sent_back['status'] == 'pending'
+    assert sent_back['submitted_at'] is None
+    assert sent_back['validation_report'] is None
+    assert body['definition']['action'] == 'request_changes'
+    assert body['definition']['decided'] == 1
+
+    # 退回后可以继续编辑（revision 递增），不需要新开一份草案。
+    edited = command(client, project_id, sent_back, {
+        'action': 'add_annotation',
+        'target_iri': 'https://example.test/ns#Child',
+        'predicate': 'http://www.w3.org/2000/01/rdf-schema#label',
+        'value': 'Child adjusted', 'language': 'en',
+    })
+    assert edited['revision'] == sent_back['revision'] + 1
+
+
+

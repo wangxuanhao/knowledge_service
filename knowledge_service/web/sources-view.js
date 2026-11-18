@@ -153,6 +153,12 @@
     if(!directoryCounts)allDocuments.forEach(doc=>counts[buildState(doc).className]++);
     for(const name of Object.keys(counts))$(name+'-count').textContent=counts[name];
   }
+  // 检索进行中计数用“—”占位，而不是先归零：否则“全部 0”会让用户以为已经搜完且没有结果。
+  function setCountsLoading(loading){
+    const bar=page.querySelector('.source-filter-bar');
+    if(bar){bar.setAttribute('aria-busy',String(loading));bar.classList.toggle('is-loading',loading);}
+    if(loading)for(const name of ['ready','processing','failed','all']){const el=$(name+'-count');if(el)el.textContent='—';}
+  }
   function createFilterUI(){
     const filterBar=document.createElement('div');filterBar.className='source-filter-bar';
     filterBar.setAttribute('aria-label','资料处理状态');
@@ -515,9 +521,11 @@
     const request=++serial,accepts=()=>request===serial&&sameContext(project,stamp,ticket)&&currentFilter===state&&appliedQuery===term&&retrievalMode===mode&&stepsStamp()===chain&&JSON.stringify(window.SearchRelevance?.read('source')||{})===relevanceStamp;
     searchLoading=true;searchSucceeded=false;boundedBySemantic=false;renderSearchSteps();
     closeDetail();
-    if(!append){loadedProject=null;loadedScope=null;loadedState=null;allDocuments=[];directoryCounts=null;nextCursor=null;updateCounts();
-      summary.textContent=semanticSearch()?'正在进行'+modeLabel(mode)+'召回…':'正在读取当前项目的原文…';message('正在加载原文','加载完成后选择资料查看详情。');
-      list.innerHTML='<div class="source-placeholder">正在加载文档目录…</div>';}
+    if(!append){loadedProject=null;loadedScope=null;loadedState=null;allDocuments=[];directoryCounts=null;nextCursor=null;setCountsLoading(true);
+      summary.textContent=semanticSearch()?'正在进行'+modeLabel(mode)+'召回…':'正在读取当前项目的原文…';
+      // 检索进行中不显示空状态卡片，只保留列表占位，避免先呈现一张“没有结果”样式的卡片。
+      empty.hidden=true;layout.classList.remove('is-empty');
+      list.innerHTML='<div class="source-placeholder">'+(semanticSearch()?modeLabel(mode)+'召回中，首次查询需要编码，请稍候…':'正在加载文档目录…')+'</div>';}
     refresh.disabled=true;loadMore.disabled=true;loadMore.hidden=!append;
     const promise=(async()=>{try{
       const query='?limit=50&summary_only=true&state='+encodeURIComponent(state)+(term?'&query='+encodeURIComponent(term):'')+(rankedMode(mode)?'&retrieval_mode='+encodeURIComponent(mode):'')+(cursor?'&cursor='+encodeURIComponent(cursor):'');
@@ -535,7 +543,7 @@
       renderDocumentList();return true;
     }catch(error){
       if(accepts()){summary.textContent=semanticSearch()?modeLabel(mode)+'召回失败':'原文加载失败';message(semanticSearch()?'暂时无法进行'+modeLabel(mode)+'召回':'暂时无法读取原文',error.message+'；请点击右上角“刷新”重试。');}return false;
-    }finally{if(request===serial){searchLoading=false;renderSearchSteps();refresh.disabled=false;loadMore.disabled=false;if(inFlight?.serial===request)inFlight=null;}}
+    }finally{if(request===serial){searchLoading=false;setCountsLoading(false);renderSearchSteps();refresh.disabled=false;loadMore.disabled=false;if(inFlight?.serial===request)inFlight=null;}}
     })();
     inFlight={key,serial:request,promise};return promise;
   }

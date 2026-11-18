@@ -309,5 +309,7 @@ test('a failed refresh leaves a retry state with no previous detail or status co
   const env=setup();await settle();await env.rows()[0].click();env.context.api=async()=>{throw Error('offline');};await env.refresh.click();
   assert.equal(env.drawers[0].dialog.open,false);assert.equal(env.body.textContent,'');assert.equal(env.rows().length,0);assert.equal(env.refresh.disabled,false);
   assert.match(env.document.querySelector('.source-empty').textContent,/暂时无法读取原文.*offline/);
-  for(const name of ['ready','processing','failed','all'])assert.equal(String(env.get(name+'-count').textContent),'0');
+  // 读取失败时计数保持“未知”占位，不残留旧值，也不伪装成 0 条结果。
+  for(const name of ['ready','processing','failed','all'])assert.equal(String(env.get(name+'-count').textContent),'—');
+  assert.equal(env.document.querySelector('.source-filter-bar').getAttribute('aria-busy'),'false');
 });

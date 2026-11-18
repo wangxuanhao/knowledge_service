@@ -257,7 +257,13 @@ def test_request_changes_returns_to_editing_and_all_rejected_closes(tmp_path):
         second['validation_fingerprint'], [{
             'operation_id': op['id'], 'operation_fingerprint': op['fingerprint'],
             'action': 'reject', 'reason': 'not useful'}], [], 'reviewer')
-    assert rejected['status'] == 'rejected'
+    # 全部不批准不再自动进入终态：草案保持待处理，审核人可以退回继续编辑，
+    # 或显式「关闭草案」把它记为已驳回。
+    assert rejected['status'] == 'pending'
+    assert service.pending_phase(project_id, rejected) == 'settled'
+    dismissed = service.close(
+        project_id, second['id'], rejected['revision'], 'author', 'not useful')
+    assert dismissed['status'] == 'rejected'
 
 
 def test_batch_approval_is_capped_and_low_risk_only(tmp_path):
@@ -1431,7 +1437,8 @@ def test_blocking_operation_is_reviewable_but_cannot_be_approved(tmp_path):
             'operation_id': operation['id'],
             'operation_fingerprint': operation['fingerprint'],
             'action': 'reject', 'reason': 'blocked'}], [], 'reviewer')
-    assert rejected['status'] == 'rejected'
+    # 阻断项可以拒绝，但全部拒绝不再自动终结草案：仍可退回编辑或显式关闭。
+    assert rejected['status'] == 'pending'
 
 
 def test_retire_impact_keeps_dependency_details_not_only_counts(tmp_path):

@@ -483,14 +483,19 @@
           row.append(node('small','oi-row-status',item.materialized?'已入库 · 依赖复用':awaitingDraft(item)?'已加入草案 · 待发布':s.mappings[item.id]?'已确认类型':'待核对'));content.append(row);
         }
         if(s.documentErrors[id])content.append(node('p','oi-error',s.documentErrors[id]));
-        if(allLoaded.length<document.total){const more=button(s.documentErrors[id]?'重试读取本资料':allLoaded.length?'继续读取本资料':'读取本资料候选',()=>controller.loadDocument(id));more.disabled=locked;content.append(more);}
+        // 只有一个资料时，列表底部的「加载下一页候选」已覆盖同一动作，
+        // 资料内不再重复出现第二个读取按钮；仅保留读取失败后的重试入口。
+        if((s.documents.length>1&&allLoaded.length<document.total)||s.documentErrors[id]){const more=button(s.documentErrors[id]?'重试读取本资料':allLoaded.length?'继续读取本资料':'读取本资料候选',()=>controller.loadDocument(id));more.disabled=locked;content.append(more);}
         if(!group.length)content.append(node('p','subtle',allLoaded.length?'本资料已加载内容没有匹配当前筛选的候选。':'展开资料后按需读取候选，选择只作用于已加载内容。'));
       }
       if(!visible.length&&s.items.length)list.append(node('p','subtle',(s.filters.status||'pending')==='pending'?'当前筛选没有待核对候选。已加入草案的内容可切换到「已加入草案 · 待发布」查看。':'当前筛选没有匹配候选，可调整上方筛选。'));
+      // 翻页属于候选列表自身：放在列表滚动区底部（滚到底自然出现），
+      // 不再悬在左右两栏与「选择处理方式」之间，与资料内加载形成两套翻页观感。
+      if(s.offset<s.total){const more=button(`加载下一页候选（已加载 ${s.items.length} / ${s.total}）`,()=>controller.more());more.classList.add('oi-load-more');more.disabled=locked;list.append(more);}
+      else if(s.items.length)list.append(node('p','oi-list-complete','已加载全部候选'));
       layout.append(list,renderDetail(active,s,locked));host.append(layout);list.scrollTop=oldScroll;
       if(!s.items.length){host.append(node('p','subtle',s.busy?'正在读取候选…':'当前范围没有可处理的发现候选。结构待定统计还可能包含旧知识，请核对其类型或手动补充定义。'));
         if(!s.busy)host.append(button('回到建模页新增定义',()=>{drawer.close();const menu=doc.getElementById('om-definition-menu');if(menu){menu.open=true;menu.querySelector('summary')?.focus();}}));}
-      if(s.offset<s.total){const more=button('读取下一页候选',()=>controller.more());more.disabled=locked;host.append(more);}
       renderGoals(s,locked);
       const reusedDependencies=draftDependencies(s).length;
       if(reusedDependencies)host.append(node('p','oi-dependency-note',`将复用所选草案中已有的 ${reusedDependencies} 条关联实体，与本次选择一起核对；不会重复创建实体。`));

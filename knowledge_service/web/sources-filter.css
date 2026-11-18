@@ -80,6 +80,12 @@
     background: #f1f5f9;
 }
 
+/* 检索进行中：计数显示占位符并降透明度，避免“全部 0”被误读为已搜完无结果。 */
+.source-filter-bar.is-loading .filter-count {
+    opacity: .55;
+    font-variant-numeric: tabular-nums;
+}
+
 .source-state {
     display: inline-block;
     font-size: 11px;

@@ -36,7 +36,7 @@
     });
   }
   function createController({getContext,request,onSaved=()=>{},onChange=()=>{}}){
-    const state={draft:null,plan:null,stage:null,groups:[],activeIri:null,filter:'pending',busy:false,loading:false,uncertain:false,error:''};
+    const state={draft:null,plan:null,stage:null,groups:[],activeIri:null,filter:'pending',busy:false,loading:false,uncertain:false,error:'',sentBack:false};
     let closed=false,epoch=0,stamp=null;
     const copyContext=()=>({...getContext()});
     const same=(a,b)=>!!a&&!!b&&a.projectId===b.projectId&&a.draftId===b.draftId&&a.revision===b.revision&&!b.preview;
@@ -97,6 +97,11 @@
         if(result.draft.status!=='pending'){
           terminal(result.draft);return;
         }
+        if(!result.draft.submitted_at){
+          // 退回继续编辑：本轮校验与提交已作废，工作区转为只读提示，等待关闭。
+          state.sentBack=true;state.plan=null;state.groups=[];state.stage=null;
+          state.busy=false;notify();return;
+        }
         state.busy=false;await load();
         if(closed||!same(stamp,getContext())||state.uncertain)return;
         if(next){
@@ -110,9 +115,15 @@
       }finally{if(!closed){state.busy=false;notify();}}
     }
     async function decide(action,{reason='',acknowledged=[],next=false}={}){
-      if(!['approve','reject'].includes(action))throw Error('无效审核操作');
+      if(!['approve','reject','request_changes'].includes(action))throw Error('无效审核操作');
       if(state.uncertain)throw Error('请先重新读取审核结果。');
-      const group=state.groups.find(g=>g.iri===state.activeIri);if(!group?.pending.length)return;
+      const group=state.groups.find(g=>g.iri===state.activeIri);if(!group)return;
+      if(action==='request_changes'){
+        if(!reason.trim())throw Error('请填写退回原因。');
+        await save('/decisions/by-definition',{target_iri:group.iri,action,reason:reason.trim(),acknowledged_warning_codes:[]},false);
+        return;
+      }
+      if(!group.pending.length)return;
       if(action==='approve'&&group.blocked)throw Error('此定义有校验阻断，请先修正后再批准。');
       if(!reason.trim()&&(action==='reject'||group.requiresReason))throw Error('请填写处理理由。');
       const codes=[...new Set([...(state.plan.warnings||[]),...group.pending.flatMap(item=>item.warnings||[])].map(w=>w.code).filter(Boolean))];
@@ -152,8 +163,11 @@
     const approveNext=button('批准并下一项',()=>{void execute(()=>controller.decide('approve',{reason:reasonValue,acknowledged:[...acknowledged],next:true}));},'om-btn primary');
     const reject=button('不批准此定义',()=>{void execute(()=>controller.decide('reject',{reason:reasonValue,acknowledged:[...acknowledged]}));});
     const rejectNext=button('不批准并下一项',()=>{void execute(()=>controller.decide('reject',{reason:reasonValue,acknowledged:[...acknowledged],next:true}));});
+    // 退回继续编辑：不批准之外的第三条路——不改任何定义，只把整份草案退回
+    // 可编辑状态并作废本轮校验，便于改完重新校验提交。理由必填。
+    const sendBack=button('退回继续编辑',()=>{void execute(()=>controller.decide('request_changes',{reason:reasonValue}));});
     const position=el('span','odr-position'),navigation=el('div','odr-navigation'),decisions=el('div','odr-decisions');
-    navigation.append(previous,position,following);decisions.append(reject,rejectNext,approve,approveNext);footer.append(navigation,decisions);
+    navigation.append(previous,position,following);decisions.append(reject,rejectNext,approve,approveNext,sendBack);footer.append(navigation,decisions);
     function display(value,draft){
       if(value==null)return '—';if(Array.isArray(value))return value.map(v=>display(v,draft)).join('、')||'—';
       if(typeof value==='object')return Object.entries(value).filter(([k])=>!['fingerprint','operation_fingerprint'].includes(k)).map(([k,v])=>`${fields[k]||k}：${display(v,draft)}`).join('；')||'—';
@@ -165,6 +179,18 @@
       affected_records:'受影响记录',affected_assertions:'受影响断言',dependencies:'依赖',dependency_count:'依赖数量',record_count:'记录数量',assertion_count:'断言数量',count:'数量',descendants:'子类',references:'引用',entity_count:'实体数量',relation_count:'关系数量',attribute_count:'属性数量'};
     function render(state){
       const locked=state.busy||state.loading||state.uncertain,groups=controller.visible(),active=state.groups.find(g=>g.iri===state.activeIri);
+      if(state.sentBack){
+        // 退回后本轮校验已作废，草案回到可编辑态：这里只给明确出口，不再渲染审核项。
+        dialog.setAttribute('aria-busy','false');
+        summary.textContent='已退回继续编辑：本轮校验与提交已作废，草案回到可编辑状态。';
+        feedback.textContent='关闭本窗口回编辑台修改；改完重新「校验并审核」再发布。';
+        feedback.classList.remove('is-error');
+        list.replaceChildren();
+        detail.replaceChildren(el('div','odr-empty','已退回继续编辑。请关闭本窗口，在编辑台修改后重新校验并审核。'));
+        bulk.disabled=true;retry.disabled=true;filter.disabled=true;
+        approve.disabled=approveNext.disabled=reject.disabled=rejectNext.disabled=sendBack.disabled=true;
+        return;
+      }
       const pending=state.groups.filter(g=>g.pending.length).length,total=state.plan?.items.length||0,done=state.plan?.items.filter(finalDecision).length||0;
       const eligible=state.plan?.items.filter(i=>!i.decision&&i.auto_approvable===true).length||0;
       dialog.setAttribute('aria-busy',String(state.busy||state.loading));
@@ -182,6 +208,8 @@
       position.textContent=groups.length?`${groups.findIndex(g=>g.iri===state.activeIri)+1} / ${groups.length}`:'0 / 0';
       approve.disabled=approveNext.disabled=locked||!active?.pending.length||active.blocked||state.stage?.stages?.review?.allowed!==true;
       reject.disabled=rejectNext.disabled=locked||!active?.pending.length||state.stage?.stages?.review?.allowed!==true;
+      // 退回编辑不要求还有待审核操作：已批准/已拒绝的定义同样可以退回重做。
+      sendBack.disabled=locked||!active||state.stage?.stages?.review?.allowed!==true;
       if(shownIri!==state.activeIri||shownRevision!==state.draft?.revision){reasonValue='';acknowledged=new Set();shownIri=state.activeIri;shownRevision=state.draft?.revision;}
       detail.replaceChildren();
       if(!active){detail.append(el('div','odr-empty',state.loading?'正在加载定义…':state.error?'读取失败，点击「重新读取」重试。':'当前范围没有待处理的定义，可切换范围查看已完成内容。'));return;}
@@ -191,6 +219,17 @@
         operation_warning:'此操作有警告，请确认影响',draft_warning_requires_acknowledgement:'草案有警告，需要逐项确认并填写理由',requires_review:'需要人工核对'};
       const riskReasons=[...new Set(active.items.flatMap(i=>i.reason_codes||[]))].filter(code=>code!=='low_risk_no_warning');
       if(riskReasons.length)detail.append(el('p','odr-risk-reasons',riskReasons.map(code=>reasonLabels[code]||code).join('；')+'。'));
+      // 校验明细：把服务端校验报告里与本定义相关的错误与警告原样列出，
+      // 审核人不必只凭“有阻断/有警告”的标签猜测具体问题。
+      const errorDetails=[...new Set(active.items.flatMap(item=>(item.errors||[]).map(error=>`${error.code?error.code+'：':''}${error.message||error.code||''}`)).filter(Boolean))];
+      const warningDetails=[...new Set([...(state.plan.warnings||[]),...active.items.flatMap(item=>item.warnings||[])].map(warning=>`${warning.code?warning.code+'：':''}${warning.message||warning.code||''}`).filter(Boolean))];
+      if(errorDetails.length||warningDetails.length){
+        const checks=el('section','odr-checks');
+        checks.append(el('h4',null,`校验结果：${errorDetails.length} 项错误 · ${warningDetails.length} 项警告`));
+        for(const text of errorDetails)checks.append(el('p','odr-check is-error',text));
+        for(const text of warningDetails)checks.append(el('p','odr-check is-warning',text));
+        detail.append(checks);
+      }
       const warnings=new Map();
       for(const warning of [...(state.plan.warnings||[]),...active.items.flatMap(i=>i.warnings||[])]){
         const key=warning.code||warning.message;

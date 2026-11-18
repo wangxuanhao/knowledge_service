@@ -1217,28 +1217,18 @@ class OntologyDrafts(
             combined.update({
                 row['operation_id']: row for row in saved
                 if row['action'] in {'approve', 'reject'}})
-            # A3：决定不再把状态在 editing/submitted/reviewed 之间推来推去，只有
-            # **一种决定会改状态**：每条变更都被驳回 → 这份请求就是「已驳回」（终态）。
-            # 其余（退回继续编辑、部分决定、全部决定完待收下）都还是「待处理」，
-            # 到底处在哪一步由 pending_phase() 按决定实时推出来。
+            # 决定不再把状态在 editing/submitted/reviewed 之间推来推去，只有
+            # **一种决定会改状态**：退回继续编辑（下面是 request_changes）。
+            # 审核不通过（全部不批准）不再自动进入终态：审核人应当能把这轮
+            # 决定退回编辑继续修改，只有显式「关闭草案」才标记为已驳回。
+            # 否则「全部不批准」等于把草案锁死，用户只能重开一份新草案。
             request_changes = any(row['action'] == 'request_changes' for row in saved)
-            if request_changes:
-                status = 'pending'
-            elif all(op_id in combined for op_id in operations) and all(
-                    combined[op_id]['action'] == 'reject' for op_id in operations):
-                status = 'rejected'
-            else:
-                status = 'pending'
             updated = self._cas(project_id, draft_id, expected_revision, {
-                'status': status,
+                'status': 'pending',
                 # 退回继续编辑＝这一轮的校验作废（改了东西就不能拿旧报告去发布）
                 **({'validation_report': None, 'validation_fingerprint': None,
                     'submitted_at': None} if request_changes else {}),
             })
-            if status == 'rejected':
-                from .ontology_intake import close_intake_runs
-                close_intake_runs(self.repository, project_id,
-                                  updated.get('source_context') or {})
         return self._preview(project_id, updated)
 
     def close(self, project_id, draft_id, expected_revision, actor, reason):

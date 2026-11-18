@@ -116,3 +116,9 @@
 .ontology-intake .oi-document-loaded{font-size:10px;color:var(--oi-muted)}
 .ontology-intake .oi-document-body>.subtle{padding:0 12px;margin:4px 0}
 @media(max-width:700px){.ontology-intake .oi-source-heading{display:block;padding:8px 10px}.ontology-intake .oi-source-heading small{display:block;padding-left:22px}.ontology-intake .oi-document-toggle{width:100%}.ontology-intake .oi-document-summary{font-size:14px}.ontology-intake .oi-bulk-tools{gap:4px;margin:8px 0}.ontology-intake .oi-bulk-tools .om-btn{padding:6px}.ontology-intake .oi-filter-note{font-size:10px}.ontology-intake .oi-scope{margin-bottom:8px}}
+
+/* 候选列表的“加载更多”属于列表自身：贴着滚动区底部，滚到底自然出现，
+   不再作为独立按钮悬在左右两栏与「选择处理方式」之间。 */
+.ontology-intake .oi-list-pane>.oi-load-more{display:block;width:calc(100% - 16px);margin:8px;padding:8px 10px;font-size:11px;line-height:1.7;text-align:center;color:#285a47;background:#f6faf7;border:1px dashed #b8cfc1;border-radius:6px}
+.ontology-intake .oi-list-pane>.oi-load-more:hover{background:#eef6f0;border-color:#6d9e88}
+.ontology-intake .oi-list-complete{margin:0;padding:11px 12px;text-align:center;font-size:10px;color:var(--oi-muted);border-top:1px solid #eef3ee}

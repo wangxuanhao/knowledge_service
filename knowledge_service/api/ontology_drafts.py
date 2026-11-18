@@ -65,7 +65,8 @@ class BatchApproveRequest(RevisionRequest):
 
 class DefinitionDecisionRequest(BatchApproveRequest):
     target_iri: str = Field(min_length=1)
-    action: Literal['approve', 'reject']
+    # request_changes = 退回继续编辑：作废本轮校验与提交，草案回到可编辑状态。
+    action: Literal['approve', 'reject', 'request_changes']
     reason: str | None = None
 
 

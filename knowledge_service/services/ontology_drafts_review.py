@@ -665,7 +665,7 @@ class DraftReviewPublishMixin:
         """
         target_iri = _text(target_iri, 'target_iri')
         actor = _text(actor, 'actor')
-        if action not in {'approve', 'reject'}:
+        if action not in {'approve', 'reject', 'request_changes'}:
             raise ValueError('unsupported definition decision action')
         with self.repository.unit_of_work():
             draft = self.store.get(project_id, draft_id)
@@ -691,12 +691,16 @@ class DraftReviewPublishMixin:
                                and decision.get('action') in {'approve', 'reject'}
                                and decision.get('operation_fingerprint')
                                == operation['fingerprint'])]
-            if pending:
+            # 「退回继续编辑」作用于该定义的全部当前操作：即使其中一些已经批准/
+            # 拒绝，也要把整份草案退回可编辑态并作废本轮校验；内容没变的操作在
+            # 重新提交后仍保留原决定，改过的操作指纹变化、旧决定自动失效。
+            targets = operations if action == 'request_changes' else pending
+            if targets:
                 decisions = [{
                     'operation_id': operation['id'],
                     'operation_fingerprint': operation['fingerprint'],
                     'action': action, 'reason': reason,
-                } for operation in pending]
+                } for operation in targets]
                 updated = self._decide(
                     project_id, draft_id, expected_revision, expected_ontology_id,
                     validation_fingerprint, decisions, acknowledged_warning_codes,
@@ -705,8 +709,8 @@ class DraftReviewPublishMixin:
                 updated = self._preview(project_id, draft)
             return {'draft': updated, 'definition': {
                 'target_iri': target_iri, 'action': action,
-                'decided': len(pending), 'already_decided': not pending,
-                'operation_ids': [operation['id'] for operation in pending],
+                'decided': len(targets), 'already_decided': not targets,
+                'operation_ids': [operation['id'] for operation in targets],
             }}
 
     def batch_approve(self, project_id, draft_id, expected_revision,

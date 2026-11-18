@@ -32,7 +32,16 @@
 .odr-navigation,.odr-decisions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.odr-position{font-size:12px;color:#627970;min-width:45px;text-align:center}
 .odr-empty{padding:36px 10px;color:#627970;line-height:1.8}
 .odr-risk-reasons{font-size:13px;line-height:1.7;color:#775e2a;background:#fbf7ec;border-left:3px solid #d7bc78;padding:10px 12px}
+/* 校验明细：审核人可以直接看到具体错误/警告，而不是只有“有阻断/有警告”的标签。 */
+.odr-checks{background:#f7faf8;border:1px solid #dce8e1;border-radius:8px;padding:12px 14px;margin:0 0 16px}
+.odr-checks h4{font-size:13px;margin:0 0 8px;color:#173e38}
+.odr-check{font-size:12px;line-height:1.7;margin:0;padding:5px 0;border-top:1px dashed #e4ece7;overflow-wrap:anywhere}
+.odr-check:first-of-type{border-top:0}
+.odr-check.is-error{color:#a12d3b}
+.odr-check.is-warning{color:#775e2a}
 .odr-impact{font-size:12px;line-height:1.7;color:#627970}.odr-evidence{font-size:12px;line-height:1.7;margin:8px 0;padding:8px 12px;border-left:2px solid #9cc4b1;background:#f3f8f5;color:#57756e}
 .om-definition-review button:focus-visible,.om-definition-review select:focus-visible,.om-definition-review textarea:focus-visible{outline:2px solid #268164;outline-offset:3px}
+/* 退回编辑或校验阻断时按钮会禁用：降透明度，避免绿色主按钮仍显得可点。 */
+.om-definition-review button:disabled{opacity:.42;cursor:not-allowed}
 @media(max-width:700px){#tab-ontology-model .om-definition-review{width:calc(100vw - 16px);height:calc(100dvh - 16px);max-height:calc(100dvh - 16px);border-radius:10px}.odr-header{padding:14px 16px 6px}.odr-summary{margin:4px 16px 10px}.odr-toolbar{padding:0 16px 10px;gap:6px}.odr-feedback{padding:8px 16px}.odr-body{grid-template-columns:1fr;grid-template-rows:105px minmax(0,1fr)}.odr-list{flex-direction:row;border-right:0;border-bottom:1px solid #deebe5}.odr-list .odr-row{width:165px;min-width:165px;padding:9px}.odr-detail{padding:16px}.odr-detail h3{font-size:19px}.odr-footer{padding:10px 12px;flex-wrap:wrap;gap:8px}.odr-navigation{width:100%;justify-content:space-between}.odr-decisions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.odr-decisions .om-btn{font-size:12px;padding:6px 8px;width:100%;min-width:0}}
 @media(prefers-reduced-motion:reduce){.om-definition-review *{scroll-behavior:auto}.om-definition-review[aria-busy=true] .odr-feedback::before{animation:none}}
