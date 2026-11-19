@@ -1,11 +1,14 @@
 """Exact, release-bound source types and audited canonical reclassification."""
 from collections import defaultdict
 
+from rdflib import URIRef
+
+from ..domain.formal_facts import PUBLICATION_RELEASE
 from .ontology import UnknownOntologyTerm
 
 
 class IdentityTypeLineage:
-    def __init__(self, snapshot, ontology, actions):
+    def __init__(self, snapshot, ontology, actions, *, publication_ontology=None):
         self.snapshot=snapshot
         self.ontology=ontology
         self.aliases={}
@@ -85,7 +88,16 @@ class IdentityTypeLineage:
             if (record is None or record.get('kind')!='entity'
                     or record['id']!=action.get('canonical_record_id')):continue
             release=record.get('ontology_id') or snapshot.get('ontology_id')
-            published=self._published_type(record.get('type'),release)
+            if release == PUBLICATION_RELEASE:
+                # Only this planned version may use the publication vocabulary.
+                # The source payload and persisted bindings retain their releases.
+                published = record['type']
+                if ('token' not in ref or publication_ontology is None
+                        or URIRef(published) not in publication_ontology.classes
+                        or not publication_ontology.is_active_term(published)):
+                    raise ValueError('实体审核的待发布映射缺少获批的活动类 IRI')
+            else:
+                published=self._published_type(record.get('type'),release)
             if published:
                 self.prospective_types[(assertion_id,record['id'])].add((published,release))
         for action in actions:

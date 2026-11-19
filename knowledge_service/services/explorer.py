@@ -1,6 +1,7 @@
 """受限范围图探索、项目快照与确定性评估。"""
 from collections import defaultdict
 import logging
+import re
 from time import perf_counter
 from uuid import uuid4
 from ..utils.diagnostics import timed
@@ -9,8 +10,30 @@ from .governance import writable
 from .retrieval import RetrievalEngine
 from ..core.time import utc_now
 
+from .ontology_vocabulary import local_name
+
 
 LOG = logging.getLogger('knowledge_service.explorer')
+_IRI_SCHEME = re.compile(r'^[A-Za-z][A-Za-z0-9+.-]*:')
+
+
+def _predicate_aliases(predicates, terms, gold):
+    """Index predicate identities, not facts. Never reinterpret a qualified IRI."""
+    aliases = defaultdict(set)
+
+    def add(predicate, *labels):
+        for alias in (local_name(predicate), predicate, *labels):
+            if alias and not _IRI_SCHEME.match(alias):
+                aliases[alias].add(predicate)
+
+    for term in terms:
+        add(term['id'], term.get('label'), term.get('label_zh'), term.get('label_en'))
+    for predicate in predicates:
+        add(predicate)
+    for _, predicate, _ in gold:
+        if _IRI_SCHEME.match(predicate):
+            add(predicate)
+    return aliases
 
 
 class Explorer:
@@ -187,15 +210,53 @@ class Explorer:
             return {'restored':len(saved),'recovery_snapshot_id':backup['id'],'recovery_snapshot_name':backup['name']}
 
     def evaluate(self,p,scope,entities,relations):
-        graph=self.graph(p,scope,attribute_mode='none')
-        names={r['id']:r['text'] for r in graph['nodes']}
-        actual_entities=set(names.values())
-        actual_relations={(names[r['subject_id']],r['type'].rsplit('#',1)[-1].rsplit('/',1)[-1],names[r['object_id']]) for r in graph['edges']}
-        def score(actual,gold):
-            tp=len(actual&gold);precision=tp/len(actual) if actual else int(not gold);recall=tp/len(gold) if gold else int(not actual)
+        from ..repository.scoped_reads import ScopedReads
+
+        # Read exact entity names and predicate identities directly, bypassing
+        # graph presentation and Turtle parsing. One snapshot keeps facts and
+        # vocabulary in agreement if a publication finishes during evaluation.
+        scope = {key: value for key, value in scope.items() if key not in {'entities', 'relations'}}
+        names, edges = {}, []
+        with self.repo.independent_read_view() as repository:
+            reads = ScopedReads(repository)
+            cursor = None
+            while True:
+                page = reads.page(p, scope, kinds=['entity', 'relation'], after=cursor, include_total=False)
+                for row in page['records']:
+                    if row['kind'] == 'entity':
+                        names[row['id']] = row['text']
+                    else:
+                        edges.append((row['subject_id'], row['type'], row['object_id']))
+                cursor = page['next_cursor']
+                if cursor is None:
+                    break
+            terms = [] if scope.get('ontology_scope') == 'unknown' else repository.ontology_relation_terms(
+                p, ontology_ids=scope.get('ontology_ids'), known_at=scope.get('known_at'))
+
+        actual_entities = set(names.values())
+        declared_aliases = _predicate_aliases((), terms, ())
+        def stored_predicate(predicate):
+            # Historical writes could persist a short name even with a published IRI.
+            candidates = declared_aliases.get(predicate)
+            return next(iter(candidates)) if candidates and len(candidates) == 1 else predicate
+        actual_relations = {(names[s], stored_predicate(predicate), names[o])
+                            for s, predicate, o in edges if s in names and o in names}
+        aliases = _predicate_aliases({predicate for _, predicate, _ in actual_relations}, terms, relations)
+        gold_relations, ambiguous = set(), set()
+        for subject, predicate, obj in relations:
+            candidates = aliases.get(predicate)
+            if candidates and len(candidates) > 1:
+                ambiguous.add((subject, predicate, obj))
+            else:
+                gold_relations.add((subject, next(iter(candidates)) if candidates else predicate, obj))
+
+        def score(actual,gold,ambiguous=frozenset()):
+            hits=(actual&gold)-ambiguous
+            tp=len(hits);precision=tp/len(actual) if actual else int(not gold);recall=tp/len(gold) if gold else int(not actual)
             return {'precision':precision,'recall':recall,'f1':2*precision*recall/(precision+recall) if precision+recall else 0,
-                    'true_positive':tp,'predicted':len(actual),'gold':len(gold),'missing':list(gold-actual),'extra':list(actual-gold)}
-        return {'entities':score(actual_entities,set(entities)),'relations':score(actual_relations,{tuple(x) for x in relations})}
+                    'true_positive':tp,'predicted':len(actual),'gold':len(gold),'missing':sorted(gold-hits),'extra':sorted(actual-hits)}
+        return {'entities':score(actual_entities,set(entities)),
+                'relations':score(actual_relations,gold_relations|ambiguous,ambiguous)}
 
     def linked_explore(self, p, request):
         """工作台链接探索：检索 + 实体子图收窄（原 api.workspace.explore）。

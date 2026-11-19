@@ -388,18 +388,19 @@ class OntologyDraftStore:
                 _required_text(decision, 'id')
                 if decision['supersedes_decision_id'] == decision['id']:
                     raise ValueError('本体审核决定不能替代自身')
-                self._db.execute(
+                # Project the inserted immutable row directly, keeping the
+                # database's normalization and all per-decision guards.
+                row = self._db.execute(
                     '''INSERT INTO ontology_review_decisions
                        (id,project_id,draft_id,operation_id,operation_fingerprint,
                         action,reason,actor,supersedes_decision_id,created_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,?)''',
+                       VALUES (?,?,?,?,?,?,?,?,?,?)
+                       RETURNING *''',
                     (decision['id'], project_id, draft_id, decision['operation_id'],
                      decision['operation_fingerprint'], action, decision['reason'],
                      decision['actor'], decision['supersedes_decision_id'],
-                     decision['created_at']))
-                saved.append(self._decision(self._db.execute(
-                    'SELECT * FROM ontology_review_decisions WHERE id=?',
-                    (decision['id'],)).fetchone()))
+                     decision['created_at'])).fetchone()
+                saved.append(self._decision(row))
         return saved
 
     def effective_operations(self, project_id, draft_id, *, with_evidence=True):

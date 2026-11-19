@@ -999,6 +999,8 @@ class KnowledgeService:
             discovery_candidates = []
             # 重叠段落保留来源偏移，并继承文档元数据/有效性。
             from .chunking import split_document
+            if checkpoint_context:
+                checkpoint_context.update_progress('chunking', 10)
             with stage(f"切片 · 策略 {request.get('chunk_strategy','fixed')} · 长度 {request.get('chunk_size',1800)} · 重叠 {request.get('chunk_overlap',200)}",10):
                 chunks=request['_prepared_chunks'] if '_prepared_chunks' in request else split_document(request['text'], request)
             event(f'切片完成 · 共 {len(chunks)} 片',12)
@@ -1053,6 +1055,8 @@ class KnowledgeService:
             run=self.repository.update_ingest_run(project_id,run['id'],run['version'],active_stage='extraction',
                 readiness_patch={'keyword_ready':True,'semantic_ready':True})
             event(f'文档检索已就绪 · 切片 {len(saved_chunks)} 条 · 图谱抽取继续',14)
+            if checkpoint_context and extraction_mode in ('ontology', 'discovery'):
+                checkpoint_context.update_progress('extracting', 15)
             if extraction_mode == 'ontology':
                 from ..integrations.semantica_adapter import SemanticaExtractor
                 from .attribute_extraction import extract_attributes
@@ -1149,6 +1153,23 @@ class KnowledgeService:
                                                'degraded': slice_receipt['degraded'],
                                                'fallback': slice_receipt.get('fallback'),
                                            }}
+                        if row['kind'] == 'attribute':
+                            # A literal is not necessarily at the start of the chunk (nor
+                            # is the display text necessarily the extracted quotation).
+                            meta = row['metadata']
+                            quote = (meta.get('attribute_evidence') or meta.get('passage')
+                                     or meta.get('evidence') or row.get('text'))
+                            if quote:
+                                meta['passage'] = quote
+                            offset = chunk['text'].find(quote) if isinstance(quote, str) and quote else -1
+                            start = chunk['metadata']['start_char'] + offset
+                            if (offset >= 0 and chunk['text'].find(quote, offset + 1) < 0
+                                    and request['text'][start:start + len(quote)] == quote):
+                                meta.update(start_char=start, end_char=start + len(quote))
+                            else:
+                                # Keep the frozen source/quote but never invent an exact location.
+                                meta.pop('start_char', None)
+                                meta.pop('end_char', None)
                     derived.extend(extracted)
             elif extraction_mode == 'discovery':
                 from ..integrations.semantica_adapter import SemanticaExtractor
@@ -1245,6 +1266,12 @@ class KnowledgeService:
                     'start_char':start,'end_char':end,'quote':candidate.get('evidence'),
                     'payload':candidate,'actor':'extractor'})
             event('抽取阶段结束；等待融合／写入锁',78)
+            should_reconcile = extraction_mode == 'ontology' and request.get('resolve_entities', True)
+            if checkpoint_context:
+                if should_reconcile:
+                    checkpoint_context.update_progress('merging', 78)
+                else:
+                    checkpoint_context.update_progress('committing', 85)
             with self.lock:
                 if checkpoint_context:
                     checkpoint_context.guard()
@@ -1263,11 +1290,15 @@ class KnowledgeService:
                     derived=deepcopy(original_derived)
                     request['_resolution_reviews']=deepcopy(original_reviews)
                     expected_versions=None
-                    if extraction_mode=='ontology' and request.get('resolve_entities',True):
+                    if should_reconcile:
+                        if checkpoint_context:
+                            checkpoint_context.update_progress('merging', 80)
                         from .reconciliation import reconcile
                         with stage(f"实体消歧融合 · 语义自动合并 {bool(request.get('auto_merge'))} · 阈值 {request.get('merge_threshold',.88)}",80):
                             derived,revisions=reconcile(self,project_id,derived,request,receipt)
                         expected_versions={r['id']:revisions.get(r['id'],0) for r in derived}
+                        if checkpoint_context:
+                            checkpoint_context.update_progress('committing', 85)
                     shacl_reviews=[]
                     try:
                         committed=self.write(project_id,derived,completion=(document,current_document['version']),expected_versions=expected_versions,

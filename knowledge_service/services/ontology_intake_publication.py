@@ -89,14 +89,16 @@ def composite_plan(drafts, project_id, draft, turtle, approved):
         if record.get('kind') in {'entity', 'relation', 'attribute'}]
     existing = drafts.repository.current_records(
         project_id, kinds=['entity', 'relation', 'attribute'])
-    report = Ontology(turtle).validate_timeline(materialization_context(records, existing))
+    approved_ontology = Ontology(turtle)
+    report = approved_ontology.validate_timeline(materialization_context(records, existing))
     if not report['conforms']:
         raise ValidationFailed(
             '关联事实与现有知识合并后未通过最终获批本体校验，请核对批次和冲突事实',
             details={'report': report})
     candidates = [candidate for run_id in intake_run_ids(context)
                   for candidate in drafts.repository.get_discovery_run(project_id, run_id)['candidate_snapshot']]
-    formal = prepare_intake_facts(drafts.repository, project_id, records, candidates)
+    formal = prepare_intake_facts(drafts.repository, project_id, records, candidates,
+                                  publication_ontology=approved_ontology)
     created = {action['record']['id'] for action in formal['actions'] if action['kind'] == 'record_put'}
     counted = set()
     for batch in batches:

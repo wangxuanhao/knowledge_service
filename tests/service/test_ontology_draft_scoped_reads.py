@@ -108,7 +108,7 @@ def service_class(extra=None):
                  '_STATUS_LABEL': {}, '_STATUS_COPY': {}, **(extra or {})}
     return load_class('knowledge_service/services/ontology_drafts.py', 'OntologyDrafts',
                       namespace, {'_history', '_effective_operations', '_effective_from_history',
-                                  '_active_operations',
+                                  '_active_operations', '_active_from_history',
                                   '_effective_decisions', '_ontology_for_draft', '_preview',
                                   'get', 'stage_state', '_next_action', '_compute_validation',
                                   '_require_validation'})
@@ -239,7 +239,7 @@ class ScopedDraftReadTests(unittest.TestCase):
         service._warning_codes = lambda report: set()
         current = {'fingerprint': 'validated', 'calls': 0}
 
-        def compute(*args):
+        def compute(*args, operations=None):
             current['calls'] += 1
             return {'conforms': True}, current['fingerprint'], 'turtle'
 

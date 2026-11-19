@@ -50,15 +50,14 @@ from __future__ import annotations
 
 import os
 import threading
-from pathlib import Path
+from uuid import uuid4
 
 import psycopg
+from psycopg import sql
 
 from knowledge_service.repository.migrate import apply_migrations
 
-ROOT = Path(__file__).resolve().parents[2]
-
-TEST_DB = os.environ.get('KG_TEST_POSTGRES_DB', 'knowledge_test')
+TEST_DB = os.environ.get('KG_TEST_POSTGRES_DB') or f'knowledge_test_{uuid4().hex}'
 POOL_SIZE = 4      # 单个测试内可能同时需要的库数量；绝大多数测试只用 1 个
 
 # 迁移台账：属于"环境"而不是"测试数据"，重置时必须保留。
@@ -67,6 +66,7 @@ _BOOKKEEPING_TABLES = frozenset({'schema_migrations'})
 _lock = threading.RLock()
 _dsn_cache: dict[str, str] = {}
 _admin_conn = None
+_owned_database: tuple[str, int, psycopg.Connection] | None = None  # name, OID, maintenance connection
 _slots: dict[int, tuple[str, list[str]]] = {}   # 槽位号 -> (schema, 表名)
 _binding: dict[str, int] = {}                   # 本次测试内 路径 -> 槽位号
 _ensured = False
@@ -75,8 +75,7 @@ _ensured = False
 def available() -> tuple[bool, str]:
     """测试基建是否可用。返回 `(是否可用, 不可用原因)`。
 
-    不依赖显式环境变量：`admin_dsn()` 会从仓库 `.env` 取管理员凭据，并指向
-    **独立的测试库**（`KG_TEST_POSTGRES_DB`，默认 knowledge_test），不会碰业务库。
+    只使用显式配置的测试实例，不读取仓库 `.env`。测试库必须由本进程新建。
     """
     try:
         ensure_test_database()
@@ -91,26 +90,30 @@ def admin_dsn(dbname: str | None = None) -> str:
     测试要建库/建 schema/重置，这些都是 DDL，应用角色 `knowledge_app` 没有权限，
     因此这里用管理员凭据 —— 仅限测试进程，不进应用运行路径。
     """
-    key = dbname or TEST_DB
+    if dbname is not None:
+        return psycopg.conninfo.make_conninfo(admin_dsn(), dbname=dbname)
+    key = TEST_DB
     cached = _dsn_cache.get(key)
     if cached:
         return cached
     explicit = os.environ.get('KG_TEST_POSTGRES_ADMIN_DSN')
-    if explicit and dbname is None:
-        _dsn_cache[key] = explicit
-        return explicit
-    from knowledge_service.core.config import POSTGRES_ADMIN_KEYS, load_environment
-    # 只要连接信息，不要业务开关：测试套件被 KG_SKIP_DOTENV 密闭（不让本机 .env
-    # 改变业务行为），但数据库凭据属于基础设施，必须拿到。显式给出 keys 即可
-    # 绕过密闭，同时不会把 KG_VECTOR_BACKEND 之类业务开关带进测试进程。
-    load_environment(keys=POSTGRES_ADMIN_KEYS | {'KG_DATABASE_HOST', 'KG_DATABASE_PORT'})
-    value = psycopg.conninfo.make_conninfo(
-        host=os.environ.get('KG_DATABASE_HOST', '127.0.0.1'),
-        port=os.environ.get('KG_DATABASE_PORT', '5432'),
-        dbname=key,
-        user=os.environ['POSTGRES_USER'],
-        password=os.environ['POSTGRES_PASSWORD'],
-    )
+    if explicit:
+        params = psycopg.conninfo.conninfo_to_dict(explicit)
+        if not ((params.get('host') or params.get('hostaddr')) and params.get('port')):
+            raise RuntimeError('KG_TEST_POSTGRES_ADMIN_DSN must specify the test host and port')
+        configured = os.environ.get('KG_TEST_POSTGRES_DB')
+        if configured and params.get('dbname') not in (None, configured):
+            raise RuntimeError('KG_TEST_POSTGRES_DB conflicts with KG_TEST_POSTGRES_ADMIN_DSN')
+        params['dbname'] = params.get('dbname') or TEST_DB
+    else:
+        keys = dict(host='KG_DATABASE_HOST', port='KG_DATABASE_PORT',
+                    user='POSTGRES_USER', password='POSTGRES_PASSWORD')
+        if not all(os.environ.get(key) for key in keys.values()):
+            raise RuntimeError('Configure a dedicated PostgreSQL test host, port and credentials, '
+                               'or set KG_TEST_POSTGRES_ADMIN_DSN')
+        params = {option: os.environ[key] for option, key in keys.items()}
+        params['dbname'] = TEST_DB
+    value = psycopg.conninfo.make_conninfo(**params)
     _dsn_cache[key] = value
     return value
 
@@ -119,34 +122,61 @@ def _conn():
     """复用的管理连接（建一条连接约 15ms，不值得每次重开）。"""
     global _admin_conn
     if _admin_conn is None or _admin_conn.closed:
-        _admin_conn = psycopg.connect(admin_dsn(), autocommit=True)
+        if _owned_database is None:
+            raise RuntimeError('No test database created by this process')
+        name, oid, _ = _owned_database
+        conn = psycopg.connect(admin_dsn(), autocommit=True)
+        try:
+            if conn.info.dbname != name or _database_oid(conn, name) != oid:
+                raise RuntimeError('Test DSN no longer points to the created database')
+        except BaseException:
+            conn.close()
+            raise
+        _admin_conn = conn
     return _admin_conn
 
 
+def _database_oid(conn, name):
+    row = conn.execute('SELECT oid FROM pg_database WHERE datname = %s', (name,)).fetchone()
+    return row[0] if row else None
+
+
 def ensure_test_database() -> None:
-    """建测试库、装 pg_trgm、关掉同步提交（幂等）。"""
-    global _ensured
-    if _ensured:
-        return
-    with psycopg.connect(admin_dsn('postgres'), autocommit=True) as conn:
-        if not conn.execute('SELECT 1 FROM pg_database WHERE datname = %s',
-                            (TEST_DB,)).fetchone():
-            conn.execute(f'CREATE DATABASE "{TEST_DB}"')
-    # 操作符类必须落在 search_path 可见的 schema 里；放 public 最省事。
-    _conn().execute('CREATE EXTENSION IF NOT EXISTS pg_trgm')
-    # 0013 uses digest(); installing pgcrypto inside the first slot would make
-    # it invisible to every other slot's search_path (slot, public).
-    _conn().execute('CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public')
-    # 测试库是一次性的，没必要为每次提交付 fsync；顺带让测试里的写入更快。
-    with psycopg.connect(admin_dsn('postgres'), autocommit=True) as admin:
-        admin.execute(f'ALTER DATABASE "{TEST_DB}" SET synchronous_commit = off')
-    _ensured = True
+    """Never adopt an existing database, even if its name looks like a test DB."""
+    global _ensured, _owned_database
+    with _lock:
+        if _ensured:
+            return
+        if _owned_database is None:
+            name = psycopg.conninfo.conninfo_to_dict(admin_dsn())['dbname']
+            if not 0 < len(name.encode('utf-8')) <= 63:
+                raise ValueError('Test database name must fit in a PostgreSQL identifier')
+            admin = psycopg.connect(admin_dsn('postgres'), autocommit=True)
+            try:
+                try:
+                    admin.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(name)))
+                except psycopg.errors.DuplicateDatabase as exc:
+                    raise RuntimeError('Test database already exists; choose an unused name') from exc
+                oid = _database_oid(admin, name)
+                if oid is None:
+                    raise RuntimeError('Could not verify identity of created test database')
+                # Track ownership even if setup fails. Never reconnect to a
+                # fallback maintenance endpoint during cleanup.
+                _owned_database = name, oid, admin
+            except BaseException:
+                admin.close()
+                raise
+        name, _, admin = _owned_database
+        # Both extensions must be visible from every slot's search_path.
+        _conn().execute('CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public')
+        _conn().execute('CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public')
+        admin.execute(sql.SQL('ALTER DATABASE {} SET synchronous_commit = off').format(sql.Identifier(name)))
+        _ensured = True
 
 
 def _create_slot(index: int) -> tuple[str, list[str]]:
     schema = f'kgtest_{index:02d}'
     conn = _conn()
-    conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
     conn.execute(f'CREATE SCHEMA "{schema}"')
     # 用**同一个迁移器**建表，而不是自己重放 DDL：建表逻辑只有一处，
     # 新迁移会自动进入测试环境，不会再出现"测试环境少一个迁移"。
@@ -223,20 +253,22 @@ def begin_test() -> None:
 
 
 def teardown() -> None:
-    """会话结束：删掉所有槽位 schema 与测试库。"""
-    global _admin_conn, _ensured
+    """Drop only a database this process created and can still identify."""
+    global _admin_conn, _ensured, _owned_database
     with _lock:
+        owned = _owned_database
         try:
-            conn = _conn()
-            for schema, _ in _slots.values():
-                conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
-            with psycopg.connect(admin_dsn('postgres'), autocommit=True) as admin:
-                admin.execute(f'DROP DATABASE IF EXISTS "{TEST_DB}" WITH (FORCE)')
-        except psycopg.Error:
-            pass
-        finally:
             if _admin_conn is not None and not _admin_conn.closed:
                 _admin_conn.close()
+            if owned is not None:
+                name, oid, admin = owned
+                if _database_oid(admin, name) == oid:
+                    # Report leaked clients instead of force-disconnecting them.
+                    admin.execute(sql.SQL('DROP DATABASE {}').format(sql.Identifier(name)))
+        finally:
+            if owned is not None:
+                owned[2].close()
+            _owned_database = None
             _admin_conn = None
             _slots.clear()
             _binding.clear()

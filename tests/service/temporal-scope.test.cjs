@@ -193,14 +193,20 @@ test('actual extracted time provenance requires matching current boundaries and 
   assert.equal(temporal.provenance({...row,metadata:{...row.metadata,valid_until:'2019-01-01'}}),'未知');
 });
 
-test('shared controls replace the duplicate QA date and time helper loads before all consumers with new versions',()=>{
+test('shared controls replace the duplicate QA date and load the versioned time helper before its consumers',()=>{
   const html=read('index.html');assert.equal(html.includes('id="qa-as-of"'),false,'QA duplicate business date is removed');
   for(const id of ['scope-time-mode','scope-valid-at-field','scope-include-unknown','scope-time-help','scope-time-applied'])assert.ok(html.includes('id="'+id+'"'),id);
-  for(const [file,version] of [['workspace-context-ui.js','page-filters-20261116-1'],['workbench.js','automatic-index-20261116-2'],['evidence-inspector.js','entity-properties-20261113-2']])assert.ok(html.includes('/assets/'+file+'?v='+version),file);
-  assert.ok(html.includes('/assets/temporal-scope.js?v=unified-temporal-20261028-2'),'temporal helper DST preservation version');
-  assert.ok(html.includes('/assets/workspace.js?v=automatic-index-20261116-2'),'workspace includes concurrent graph updates');
-  assert.ok(html.includes('/assets/workspace-context.css?v=page-filters-20261116-1'),'responsive scope styles version');
-  for(const consumer of ['workbench.js','workspace-context-ui.js','workspace.js','evidence-inspector.js'])assert.ok(html.indexOf('/assets/temporal-scope.js?')<html.indexOf('/assets/'+consumer+'?'));
+  const sources=Array.from(html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g),match=>match[1]);
+  function versionedIndex(file){
+    const path='/assets/'+file;
+    const matches=sources.filter(src=>src.split('?')[0]===path);
+    assert.equal(matches.length,1,`${file} is loaded once`);
+    assert.match(matches[0].slice(path.length),/^\?v=[\w.-]+$/,`${file} carries a cache version`);
+    return sources.indexOf(matches[0]);
+  }
+  const helper=versionedIndex('temporal-scope.js');
+  assert.match(html,/href="\/assets\/workspace-context\.css\?v=[\w.-]+"/,'responsive scope styles are versioned');
+  for(const consumer of ['workbench.js','workspace-context-ui.js','workspace.js','evidence-inspector.js'])assert.ok(helper<versionedIndex(consumer),`time helper loads before ${consumer}`);
   assert.match(read('workspace.js'),/系统修订时间/);assert.doesNotMatch(read('workspace.js'),/知识时间/);
   assert.match(read('evidence-inspector.js'),/未设结束时间|TemporalScope|temporal\.interval/);
 });

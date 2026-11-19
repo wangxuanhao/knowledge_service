@@ -10,7 +10,7 @@ test('saved source offers three explicit reprocessing modes and explains the OCR
   assert.deepEqual(modes.map(option=>option.value),['documents','discovery','ontology']);
   assert.match(panel.textContent,/仅文档检索/);assert.match(panel.textContent,/开放发现/);assert.match(panel.textContent,/使用项目本体/);
   assert.match(panel.textContent,/OCR.*重新处理.*切片.*索引/);
-  assert.match(panel.textContent,/开放发现.*不会直接.*图谱/);
+  assert.match(panel.textContent,/开放发现生成待核对候选.*确认复用正式术语.*草案审核发布/);
   assert.match(panel.textContent,/模式切换.*不会直接清空图谱/);
   const start=panel.querySelector('button');const pending=start.click();await settle();
   const request=env.requests.at(-1);assert.match(request.url,/\/projects\/project-one\/documents\/one\/reprocess$/);

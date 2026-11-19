@@ -92,15 +92,26 @@ def test_review_plan_marks_low_risk_manual_edits_as_safe(tmp_path):
     assert first['revision'] < submitted['revision']
 
 
-def test_review_plan_is_read_only_and_keeps_a_stable_fingerprint(tmp_path):
+def test_review_plan_is_read_only_and_keeps_a_stable_fingerprint(tmp_path, monkeypatch):
     """只读投影：重复读取不推进修订号，指纹稳定（前端可放心轮询）。"""
-    _, service, project_id, base = setup_service(tmp_path)
+    repo, service, project_id, base = setup_service(tmp_path)
     draft = service.create(project_id, base['id'], 'manual', '只读', 'author')
     add_label(service, project_id, draft, 'A')
+    history_calls = []
+    read_history = service._history
+
+    def watched_history(*args, **kwargs):
+        history_calls.append(repo._db.in_transaction)
+        return read_history(*args, **kwargs)
+
+    monkeypatch.setattr(service, '_history', watched_history)
     submitted = service.submit(project_id, draft['id'], draft['revision'] + 1)
+    assert history_calls == [True, False]  # validation/write, then response preview
+    history_calls.clear()
 
     first = service.review_plan(project_id, draft['id'])
     second = service.review_plan(project_id, draft['id'])
+    assert history_calls == [True, True]  # one consistent input read per plan
 
     assert first['revision'] == second['revision'] == submitted['revision']
     assert first['fingerprint'] == second['fingerprint']

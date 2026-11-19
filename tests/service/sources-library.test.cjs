@@ -15,6 +15,29 @@ test('a versioned document defaults to rich fixed content with an explicit saved
   assert.match(env.get('source-meta').querySelector('.source-downloads').querySelector('a').href,/version-one\/source$/);
 });
 
+test('the library shows the configured platform on the document row and in its details',async()=>{
+  const doc=documentRow('one');
+  doc.metadata.applicability={platforms:{mode:'specific',values:['美团','京东']}};
+  const env=setup({documents:[doc]});
+  await settle();
+  assert.match(env.rows()[0].textContent,/适用平台 美团、京东/);
+  await env.rows()[0].click();
+  assert.match(env.get('source-meta').querySelector('.source-platform').textContent,/适用平台\s*美团、京东/);
+});
+
+test('document details group missing image paths in one collapsed notice',async()=>{
+  const doc=documentRow('one');
+  doc.metadata.warnings=['a.png','b.png','a.png'].map(path=>({code:'source_asset_missing',severity:'warning',path}));
+  const env=setup({documents:[doc]});
+  await settle();await env.rows()[0].click();
+  const notice=env.get('source-meta').querySelector('.source-asset-warning');
+  assert.equal(notice?.tagName,'DETAILS');
+  assert.equal(notice.open,false);
+  assert.equal(notice.querySelector('summary').textContent,'已跳过 2 张缺失图片');
+  assert.deepEqual(notice.querySelectorAll('li').map(item=>item.textContent),['a.png','b.png']);
+  assert.equal(env.body.textContent,'原文 one');
+});
+
 test('missing fixed rendering clearly falls back to saved text and legacy documents avoid the rich endpoint',async()=>{
   for(const response of [{ok:false,status:404},{ok:true,text:async()=>'   '}]){
     const env=setup({rendered:async()=>response});await settle();await env.rows()[0].click();

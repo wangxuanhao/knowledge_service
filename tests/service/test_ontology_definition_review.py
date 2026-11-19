@@ -152,9 +152,26 @@ def test_definition_rejection_requires_reason_for_the_atomic_group(workbench):
     result = response.json()
     assert result['definition']['decided'] == 2
     assert result['draft']['revision'] == submitted['revision'] + 1
-    assert result['draft']['status'] == 'rejected'
+    # Definition decisions are not the explicit close command. A settled draft
+    # with no approvals may be returned to editing but must not be published.
+    assert result['draft']['status'] == 'pending'
+    assert len(result['draft']['decisions']) == 2
     assert all(row['action'] == 'reject' and row['reason'] == 'not needed'
                for row in result['draft']['decisions'])
+    client, project_id, _ = workbench
+    url = f"/api/projects/{project_id}/ontology-drafts/{submitted['id']}"
+    readiness = client.get(f'{url}/publish-readiness')
+    assert readiness.status_code == 200, readiness.text
+    assert readiness.json()['ready'] is False
+    assert readiness.json()['approval_counts'] == {'approved': 0, 'pending': 0, 'total': 2}
+    assert 'no_approval' in {item['code'] for item in readiness.json()['items']}
+    returned = decide_definition(workbench, result['draft'], action='request_changes',
+                                 reason='revise the definition')
+    assert returned.status_code == 200, returned.text
+    reopened = returned.json()['draft']
+    assert reopened['status'] == 'pending'
+    assert reopened['submitted_at'] is None
+    assert reopened['validation_fingerprint'] is None
 
 
 def test_definition_decisions_preserve_submission_and_final_status_guards(workbench):
@@ -170,7 +187,20 @@ def test_definition_decisions_preserve_submission_and_final_status_guards(workbe
     submitted = submit(client, project_id, unsubmitted)
     rejected = decide_definition(workbench, submitted, action='reject', reason='not needed')
     assert rejected.status_code == 200, rejected.text
-    final = rejected.json()['draft']
+    settled = rejected.json()['draft']
+    assert settled['status'] == 'pending'
+    repeat = decide_definition(workbench, settled, action='reject', reason='again')
+    assert repeat.status_code == 200, repeat.text
+    assert repeat.json()['definition']['already_decided'] is True
+    assert repeat.json()['definition']['decided'] == 0
+    assert_unchanged(workbench, settled)
+    closed = client.post(
+        f"/api/projects/{project_id}/ontology-drafts/{settled['id']}/close",
+        json={'expected_revision': settled['revision'], 'reason': 'close rejected draft'})
+    assert closed.status_code == 200, closed.text
+    final = current_draft(workbench, settled)
+    assert final['status'] == 'rejected'
+    assert final['revision'] == settled['revision'] + 1
     repeat = decide_definition(workbench, final, action='reject', reason='again')
     assert repeat.status_code == 422, repeat.text
     assert repeat.json()['code'] == 'draft_immutable'

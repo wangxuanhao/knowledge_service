@@ -5,6 +5,7 @@ import json
 from uuid import uuid4
 
 from ..core.time import utc_now
+from ..domain.formal_facts import PUBLICATION_RELEASE
 from ..domain.entity_identity import OperationContextStale
 
 
@@ -183,7 +184,7 @@ class FormalWriteExecutor:
                         sort_keys=True),
              action.get('reversal_of'), utc_now()))
 
-    def execute(self, plan, operation_context):
+    def execute(self, plan, operation_context, *, publication_id=None):
         project_id = plan['project_id']
         self.operation_time = operation_context.recorded_at
         decision_ids = sorted(set(plan.get('identity_support_assertion_ids',[])) | {
@@ -219,8 +220,14 @@ class FormalWriteExecutor:
                         WHERE project_id=? AND record_id=ANY(?::text[])''',
                         (project_id,ids[offset:offset+1000]))
             elif kind == 'record_put':
+                record = action['record']
+                if record.get('ontology_id') == PUBLICATION_RELEASE:
+                    if publication_id is None:
+                        raise ValueError('待发布本体只能在发布事务中绑定')
+                    # Never rewrite matching strings in assertion payloads, quotes or fact values.
+                    record = {**record, 'ontology_id': publication_id}
                 saved = self.repository._put(
-                    project_id, action['record'], action['expected_version'],
+                    project_id, record, action['expected_version'],
                     operation=operation_context)
                 self.tokens[action['token']] = saved
                 context_records.add(saved['id'])

@@ -180,7 +180,7 @@ MOCKS = r"""() => {
         : body.ontology_scope==='unknown'
           ? records.filter(row=>!row.ontology_id||!['o1','o2','o2-note'].includes(row.ontology_id))
           : records;
-      filtered=filtered.filter(row=>(!body.kinds?.length||body.kinds.includes(row.kind))&&(!body.query||(row.id+' '+row.text).includes(body.query)));
+      filtered=filtered.filter(row=>(!body.record_ids?.length||body.record_ids.includes(row.id))&&(!body.kinds?.length||body.kinds.includes(row.kind))&&(!body.query||(row.id+' '+row.text).includes(body.query)));
       const offset=Number(body.cursor||0),limit=body.limit||50;
       return payload({total:filtered.length,records:filtered.slice(offset,offset+limit),next_cursor:offset+limit<filtered.length?String(offset+limit):null});
     }
@@ -645,3 +645,28 @@ def test_focus_ledger_record_locates_and_highlights_the_row(page):
     assert page.evaluate("() => document.querySelector('[data-record-id=e2]')") is not None
     # 定位要清掉上一次搜索，否则目标行可能被过滤掉、找不到。
     assert page.input_value('#record-search') == 'e2'
+    assert page.evaluate("() => window.recordQueryBodies.some(b => b.kinds?.[0]==='entity' && b.limit===50 && b.record_ids?.[0]==='e2' && !b.query)")
+    assert not page.evaluate("() => window.recordQueryBodies.some(b => b.kinds?.[0]!=='entity' && b.record_ids?.includes('e2') && b.limit===1)")
+
+
+def test_category_switch_clears_exact_location_but_keeps_user_search(page):
+    page.evaluate("() => window.focusLedgerRecord({id:'e2',kind:'entity'})")
+    page.wait_for_selector('tr.ledger-row-located[data-record-id="e2"]')
+    select_view(page, 'relation')
+    page.wait_for_selector('table.ledger-relation tr[data-record-id="r1"]')
+    assert page.input_value('#record-search') == ''
+    page.fill('#record-search', '价格说明')
+    select_view(page, 'entity')
+    assert page.input_value('#record-search') == '价格说明'
+
+
+@pytest.mark.parametrize('kind,target', [('relation', 'e1'), ('relation', 'e2'), ('attribute', 'e1')])
+def test_ledger_endpoint_links_open_exact_owner_even_with_duplicate_names(page, kind, target):
+    select_view(page, kind)
+    button = page.locator(f'.record-library [data-ledger-entity="{target}"]')
+    assert button.count() == 1
+    button.click()
+    page.wait_for_selector(f'table.ledger-entity tr.ledger-row-located[data-record-id="{target}"]')
+    assert page.locator('table.ledger-entity tbody tr').count() == 1
+    page.fill('#record-search', '价格说明')
+    page.wait_for_function("() => document.querySelectorAll('table.ledger-entity tbody tr').length===2")

@@ -279,11 +279,7 @@
   // 读阶段门禁（服务端唯一出处）+ 发布清单。拿不到就置空 —— 子模块据此显示"读不到"，
   // 而不是自己推规则（skill：门禁只有一处出处，前端不自己算）。
   function readGate(route) {
-    const request=api(endpoint(route),undefined,'GET');
-    if(typeof setTimeout!=='function')return request;
-    let timer;
-    const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('审核条件读取超时')),15000);});
-    return Promise.race([request,deadline]).finally(()=>clearTimeout(timer));
+    return api(endpoint(route),undefined,'GET',{timeoutMs:15000,message:'等待超过 15 秒'});
   }
 
   function refreshGatesInBackground() {
@@ -308,33 +304,40 @@
     // stage-availability 是**项目级**路由，草案用 draft_id 查询参数指定；
     // 写成 /{draft_id}/stage-availability 会 404，还会被 catch 吞掉 —— 门禁永远为空、按钮永远禁用。
     const isCurrent=()=>epoch===gateEpoch&&current===project&&S.draft?.id===draftId&&S.draft?.revision===revision;
-    const stageTask=readGate(`/ontology-drafts/stage-availability?draft_id=${encodeURIComponent(draftId)}`).catch(()=>null).then(stage=>{
+    const problems=new Map();
+    const failed=(part,error)=>{
+      const message=error?.message||'服务未返回结果';
+      problems.set(part,`${part}读取失败：${error?.status?'HTTP '+error.status+' · ':''}${message}`);
+      return null;
+    };
+    const stageTask=readGate(`/ontology-drafts/stage-availability?draft_id=${encodeURIComponent(draftId)}`).catch(e=>failed('阶段条件',e)).then(stage=>{
       if(!isCurrent())return;
       S.stageAvailability=stage;S.reviewGateLoading=false;
-      if(!stage)S.reviewLoadError='审核条件读取失败，请重试。';
+      if(!stage)S.reviewLoadError=problems.get('阶段条件')||'阶段条件读取失败，请重试。';
       emit('stage:changed',{stageAvailability:stage,readiness:S.readiness});
     });
-    const planTask=S.draft.submitted_at?readGate(base+'/review-plan').catch(()=>null).then(plan=>{
+    const planTask=S.draft.submitted_at?readGate(base+'/review-plan').catch(e=>failed('审核计划',e)).then(plan=>{
       if(!isCurrent())return;
       S.reviewPlan=plan?.revision===revision?plan:null;S.reviewPlanLoading=false;
-      if(!S.reviewPlan)S.reviewLoadError='审核计划读取失败或修订已变化，请重新读取。';
+      if(!S.reviewPlan){S.reviewLoadError=problems.get('审核计划')||'审核计划修订已变化，请重新读取。';problems.set('审核计划',S.reviewLoadError);}
       emit('stage:changed',{stageAvailability:S.stageAvailability,readiness:S.readiness});
     }):Promise.resolve();
     const [, , editingReadiness] = await Promise.all([
       stageTask,planTask,
-      readGate(base + '/publish-readiness?view=editing').catch(() => null),
+      readGate(base + '/publish-readiness?view=editing').catch(e=>failed('编辑阶段发布清单',e)),
     ]);
     if(!isCurrent())return;
     let readiness=editingReadiness;
     // Only the server decides when a fresh full validation can unlock publish.
     // Editing projections never count as a completed publication validation.
     if(editingReadiness?.requires_full_validation===true){
-      readiness=await readGate(base+'/publish-readiness').catch(()=>null);
+      readiness=await readGate(base+'/publish-readiness').catch(e=>failed('完整发布清单',e));
       if(!isCurrent())return;
     }
     S.readiness = readiness;
     S.gatesLoading = false;
-    S.gateLoadError=S.stageAvailability&&readiness&&!S.reviewLoadError?null:'未能在限定时间内读取完整审核条件，请重试；草案内容已保留。';
+    S.gateLoadError=S.stageAvailability&&readiness&&!S.reviewLoadError?null:
+      `${[...problems.values()].join('；')||'审核条件返回不完整'}。可重试读取；草案内容已保留。`;
     emit('stage:changed', { stageAvailability: S.stageAvailability, readiness: S.readiness });
   }
 
@@ -402,18 +405,36 @@
   }
 
   // 发一条命令到当前草案：自动建草案 → 带乐观锁 revision → 返回更新后的草案并刷新
-  async function sendCommand(command) {
+  async function sendCommand(command, source) {
     if (S.preview) throw new Error('历史版本只读：请先回到最新，或从版本管理创建新草案。');
     const project = current;
-    const draft = await ensureDraft();
+    if (source) {
+      const visibleDraft = S.showingDraft ? S.draft : null;
+      if (source.project !== project || (source.ontologyId ?? null) !== (S.ontologyId ?? null) ||
+          (source.draftId ?? null) !== (visibleDraft?.id ?? null) ||
+          (source.draftId && (visibleDraft.revision !== source.revision || !OPEN_STATES.includes(visibleDraft.status)))) {
+        throw new Error('项目、草案或修订已变化，请关闭后重新读取源码。');
+      }
+    }
+    const newSourceDraft = !!source && !source.draftId;
+    const draft = source ? S.draft : await ensureDraft();
     if (current !== project) throw new Error('项目已切换，已停止原项目编辑。');
     if (S.preview) throw new Error('历史版本只读：已停止编辑。');
-    const updated = await draftApi(endpoint(`/ontology-drafts/${draft.id}/commands`), {
-      expected_revision: draft.revision, command,
-    }, 'POST');
+    // The source is a complete Turtle snapshot tied to its original base.
+    // An unbound editor must not adopt a newly discovered pending draft.
+    const updated = newSourceDraft
+      ? await draftApi(endpoint('/ontology-drafts'), {
+          base_ontology_id: source.ontologyId ?? null, title: 'Turtle 源码编辑', initial_command: command,
+        }, 'POST')
+      : await draftApi(endpoint(`/ontology-drafts/${draft.id}/commands`), {
+          expected_revision: draft.revision, command,
+        }, 'POST');
     if (current !== project) throw new Error('项目已切换，请重新读取当前项目。');
-    if(S.preview||S.draft?.id!==draft.id||S.draft?.revision!==draft.revision)
-      throw new Error(`修改已保存到原草案 ${draft.id}，当前查看目标已变化；请返回原草案核对，避免重复提交。`);
+    const draftChanged = newSourceDraft
+      ? S.draft !== draft || (source.ontologyId ?? null) !== (S.ontologyId ?? null)
+      : S.draft?.id !== draft.id || S.draft?.revision !== draft.revision;
+    if(S.preview||draftChanged)
+      throw new Error(`修改已保存到原草案 ${updated?.id || draft?.id}，当前查看目标已变化；请返回原草案核对，避免重复提交。`);
     S.draft = updated;
     emit('draft:changed', { draft: updated });
     await refresh();

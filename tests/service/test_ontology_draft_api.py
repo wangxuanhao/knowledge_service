@@ -50,6 +50,23 @@ def command(client, project_id, draft, payload):
     return response.json()
 
 
+def test_turtle_create_is_atomic_and_preserves_the_other_open_draft(workbench):
+    client, project_id, ontology = workbench
+    other = create_draft(client, project_id, ontology)
+    path = f'/api/projects/{project_id}/ontology-drafts'
+    body = {'base_ontology_id': ontology['id'], 'title': 'Turtle import'}
+    invalid = client.post(path, json={**body, 'initial_command': {
+        'action': 'diff_turtle', 'edited_turtle': '@prefix invalid'}})
+    assert invalid.status_code == 422, invalid.text
+    assert client.get(path).json()['total'] == 1
+
+    imported = create_draft(client, project_id, ontology, initial_command={
+        'action': 'diff_turtle', 'edited_turtle': BASE + '\nex:Extra a owl:Class .'})
+    assert imported['id'] != other['id']
+    assert any(item['id'].endswith('#Extra') for item in imported['ontology']['classes'])
+    assert client.get(f"{path}/{other['id']}").json()['revision'] == other['revision']
+
+
 def test_canvas_read_excludes_audit_payload_and_keeps_structure_and_revision(workbench):
     client, project_id, ontology = workbench
     draft = create_draft(client, project_id, ontology,

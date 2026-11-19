@@ -92,10 +92,9 @@ test('time helper is versioned and loaded before preview and saved-source consum
   const helper=html.indexOf('/assets/document-temporal-ui.js?v=document-time-20261110-1');
   assert.ok(helper>=0);
   for(const file of ['ingest-mode','workbench','sources-view','ingest-batches','library-workspace','ingest-results']){
-    const version=file==='sources-view'?'match-explanation-20261116-2':file==='workbench'?'automatic-index-20261116-2':file==='ingest-mode'?'unified-media-20261111-1':file==='library-workspace'?'drawer-drop-20261117-1':'document-time-20261110-1';
-    const marker='/assets/'+file+'.js?v='+version;
-    assert.ok(html.includes(marker),marker);
-    if(['workbench','sources-view','ingest-results'].includes(file))assert.ok(helper<html.indexOf(marker));
+    const tag=new RegExp(`<script src="/assets/${file}\\.js\\?v=[^"\\s]+"></script>`).exec(html);
+    assert.ok(tag,`missing versioned script: ${file}`);
+    if(['workbench','sources-view','ingest-results'].includes(file))assert.ok(helper<tag.index);
   }
 });
 

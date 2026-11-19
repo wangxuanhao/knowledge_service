@@ -66,7 +66,7 @@ node --test tests/service/*.test.cjs
 ## 陷阱清单（每条都真实踩过）
 
 1. **`pytest` 必须密闭运行**：直接 `python -m pytest`，**绝不要 `source .env`**。`conftest` 靠 `KG_SKIP_DOTENV` 隔离；一旦 source 过 `.env`，`KG_VECTOR_BACKEND=milvus` / `KG_MILVUS_DIM=1024` / `KG_EMBEDDING_BACKEND=local` 会渗进测试进程，与测试用的 **256 维 demo 哈希编码器**错配，表现为十几个「向量维度 256 != 预期 1024」的**假失败**。补救：`unset KG_VECTOR_BACKEND KG_EMBEDDING_BACKEND KG_MILVUS_DIM KG_MILVUS_HOST KG_MILVUS_PORT KG_EMBEDDING_MODEL KG_EMBEDDING_BASE_URL` 再跑。
-2. **切勿并行开两个 `pytest` 会话**：`pg_support.teardown` 会 `DROP DATABASE knowledge_test`，两个会话互相删库。
+2. **运行 PostgreSQL 测试前配置独立测试实例**：见 [测试使用指南](tests/README.md#运行约束)。检查测试摘要中的跳过原因。
 3. **改前端文件必须同步 bump `index.html` 里该文件的 `?v=` 版本号**（如 `workspace.js?v=fix32-inbox-only-1`），否则浏览器一直用缓存的旧 JS。**注意：部分 `.cjs` 契约测试把具体版本号字符串写死了**（例如 `evidence-inspector-frozen-source.test.cjs` 断言 `index.html` 含 `/assets/provenance-drawer.js?v=3`）——版本号一改，必须手动同步这些断言，它们不会自动跟随。
 4. **`node --test` 不能用目录形式**：`node --test tests/service/` 在 Node 26 下会报 `Cannot find module`。必须用显式 glob `node --test tests/service/*.test.cjs`。
 5. **`.env` 里的值是真实密钥，绝不打印**：只打印键名。连接串一律经 `knowledge_service.utils.diagnostics.redact()` 脱敏（它同时掩蔽 URL 形式和 libpq 关键字形式）——手写切片会泄漏。

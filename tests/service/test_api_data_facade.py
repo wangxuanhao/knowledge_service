@@ -1,4 +1,5 @@
 """Application data operations preserve the HTTP payloads they support."""
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -16,7 +17,8 @@ def active_cursor(**changes):
             'rebuild_state': {'index_version': 1, 'phase': 'ready'}, **changes}
 
 
-def index_app(cursor, watermark=5, *, projection_sync=SimpleNamespace(schema_version=3)):
+def index_app(cursor, watermark=5, *,
+              projection_sync=SimpleNamespace(schema_version=3, adapters={})):
     calls = []
 
     def get_project(project):
@@ -33,40 +35,51 @@ def index_app(cursor, watermark=5, *, projection_sync=SimpleNamespace(schema_ver
         calls.append(('watermark', project))
         return watermark
 
-    def enqueue(kind, payload, project):
-        calls.append(('enqueue', kind, payload, project))
-        return {'id': 'queued-job', 'project_id': project, 'kind': kind}
+    def read_summary(project, index_version):
+        calls.append(('index_summary', project, index_version))
+        return {'record_counts': {}, 'indexed_record_counts': {}, 'job': None}
+
+    def enqueue_index(project):
+        calls.append(('enqueue_index', project))
+        return {'id': 'queued-job', 'project_id': project, 'kind': 'semantic_index'}
 
     repository = SimpleNamespace(get_project=get_project, projections=SimpleNamespace(
-        cursor=read_cursor, project_watermark=read_watermark))
+        cursor=read_cursor, project_watermark=read_watermark, index_summary=read_summary))
+    repository.independent_read_view = lambda: nullcontext(repository)
     service = SimpleNamespace(data=ApplicationData(repository), projection_sync=projection_sync)
     app = FastAPI()
-    app.state.jobs = SimpleNamespace(enqueue=enqueue)
+    app.state.jobs = SimpleNamespace(enqueue_index=enqueue_index)
     install(app, service)
     return app, calls
 
 
 @pytest.mark.parametrize(('cursor', 'state', 'last_error', 'collection'), [
-    (None, 'not_built', None, None),
-    (active_cursor(), 'ready', None, 'generation-1'),
-    (active_cursor(applied_seq=4), 'building', None, 'generation-1'),
+    (None, 'not_built', '', None),
+    (active_cursor(), 'ready', '', 'generation-1'),
+    (active_cursor(status='pending'), 'building', '', 'generation-1'),
+    (active_cursor(applied_seq=4), 'building', '', 'generation-1'),
     (active_cursor(claim_token='live', claim_until='2999-01-01T00:00:00Z'),
-     'ready', None, 'generation-1'),
+     'building', '', 'generation-1'),
     (active_cursor(applied_seq=4, claim_token='live', claim_until='2999-01-01T00:00:00Z'),
-     'building', None, 'generation-1'),
+     'building', '', 'generation-1'),
     (active_cursor(status='failed', last_error='delivery failed'),
      'requires_rebuild', 'delivery failed', 'generation-1'),
-    (active_cursor(schema_version=2), 'requires_rebuild', None, 'generation-1'),
+    (active_cursor(schema_version=2), 'requires_rebuild', '', 'generation-1'),
 ])
 def test_index_status_preserves_delivery_payload(cursor, state, last_error, collection):
     app, calls = index_app(cursor)
     with TestClient(app) as client:
         response = client.get('/api/projects/selected/indexes/status')
     assert response.status_code == 200, response.text
+    index_version = (cursor or {}).get('rebuild_state', {}).get('index_version')
     assert response.json() == {'project_id': 'selected', 'state': state,
-                               'last_error': last_error, 'collection': collection}
+                               'last_error': last_error, 'collection': collection,
+                               'automatic': False, 'watermark': 5,
+                               'applied_seq': (cursor or {}).get('applied_seq', 0),
+                               'index_version': index_version, 'embedding_model': None,
+                               'record_counts': {}, 'indexed_record_counts': {}, 'job': None}
     assert calls == [('get_project', 'selected'), ('cursor', 'selected', 'milvus'),
-                     ('watermark', 'selected')]
+                     ('watermark', 'selected'), ('index_summary', 'selected', index_version)]
 
 
 def test_index_rebuild_preserves_selected_project_job():
@@ -76,8 +89,7 @@ def test_index_rebuild_preserves_selected_project_job():
     assert response.status_code == 202, response.text
     assert response.json() == {'id': 'queued-job', 'project_id': 'selected',
                                'kind': 'semantic_index'}
-    assert calls == [('get_project', 'selected'),
-                     ('enqueue', 'semantic_index', {'rebuild': True}, 'selected')]
+    assert calls == [('get_project', 'selected'), ('enqueue_index', 'selected')]
 
 
 @pytest.mark.parametrize(('method', 'endpoint'), [('get', 'status'), ('post', 'rebuild')])

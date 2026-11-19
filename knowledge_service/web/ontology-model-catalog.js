@@ -2,6 +2,7 @@
 (() => {
   const KINDS={class:'实体类',relation:'关系',attribute:'属性'};
   const label = term => term.label_zh || term.label || term.name || term.id;
+  const datatype = term => (term.range||[]).map(value=>String(value).split(/[#/]/).pop().replace(/^xsd:/,'')).join(' | ');
   const summaryIndexes=new WeakMap();
   function summaryIndex(summary) {
     if(!summary||typeof summary!=='object')return {entries:[],byId:new Map(),classes:new Map(),attributes:new Map(),relations:new Map(),cards:new Map()};
@@ -27,7 +28,7 @@
     const ancestorIds=new Set(),byId=index.classes;
     const visit=id=>{if(id===item.id||ancestorIds.has(id))return;ancestorIds.add(id);for(const p of byId.get(id)?.parents||[])visit(p);};
     for(const parent of item.parents||[])visit(parent);
-    const property=attr=>({...attr,datatype:(attr.range||[]).map(value=>String(value).split(/[#/]/).pop().replace(/^xsd:/,'')).join(' | ')||'未声明',
+    const property=attr=>({...attr,datatype:datatype(attr)||'未限定',
       required:attr.required===true||Number(attr.min_count??attr.minCount??0)>0});
     const attributes=[...new Map([...ancestorIds].flatMap(id=>index.attributes.get(id)||[]).map(attr=>[attr.id,attr])).values()];
     const card={...item, parents:[...(item.parents||[])],
@@ -35,7 +36,9 @@
       inheritedAttributes:attributes.filter(attr=>!(attr.domain||[]).includes(item.id))
         .map(attr=>({...property(attr),inheritedFrom:(attr.domain||[]).filter(id=>ancestorIds.has(id))})),
       relations:index.relations.get(item.id)||[],
-      endpointText:`${names(item.domain)||'未指定主体'} → ${names(item.range)||'未指定客体'}`};
+      endpointText:item.kind==='attribute'
+        ? `${names(item.domain)||'未指定适用类型'} · ${datatype(item)||'未限定值类型'}`
+        : `${names(item.domain)||'未指定主体'} → ${names(item.range)||'未指定客体'}`};
     index.cards.set(item.id,card);return card;
   }
   // A secondary parent gets an addressable reference. Path checks also expose malformed cycles safely.
@@ -82,20 +85,25 @@
     });
   }
   const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
-  let side=null,cards=null,ctx=null,list=null,search=null,kind=null,active=null,summaryLine=null,drafts=null,work=null,changes=null,draftError=null;
+  let side=null,cards=null,ctx=null,list=null,search=null,kind=null,active=null,summaryLine=null,drafts=null,work=null,changes=null,draftError=null,initialImport=null;
   let projectKey='';
   const project=()=>typeof current==='undefined'?'':current;
+  const canEditSource=()=>!!window.Auth?.isAdmin?.();
   const button=(text,action,cls='om-btn ghost')=>{const node=el('button',cls,text);node.type='button';node.addEventListener('click',action);return node;};
   const run=action=>Promise.resolve().then(action).catch(error=>ctx.status(error.message,true));
   function renderEntries(state) {
     if(!list||!cards)return;
     const entries=catalogEntries(state.summary,{query:search.value,kind:kind.value,activeOnly:active.checked});
-    summaryLine.textContent=state.loading?'正在读取本体与草案…':`${entries.length} 个术语 · ${state.preview?'历史只读':state.showingDraft?'草案未发布':state.ontologyId?'已发布':'尚未发布本体'}`;
+    const unassigned=entries.filter(term=>term.kind==='attribute'&&term.active!==false&&!term.domain?.length).length;
+    const source=state.preview?'历史只读':state.showingDraft?'草案未发布':state.ontologyId?'已发布':'尚未发布本体';
+    summaryLine.textContent=state.loading?'正在读取本体与草案…':`${entries.length} 个术语 · ${source}`+
+      (unassigned?` · ${unassigned} 项属性未指定适用类型`:'');
     list.replaceChildren();cards.replaceChildren();
     const changes=state.view==='cards'?new Map(draftDefinitionGroups(state.draft,state.summary).map(group=>[group.target,group])):new Map();
     for(const entry of entries){
       const pick=button(label(entry),()=>ctx.select(entry.id),'om-catalog-item'+(state.selected===entry.id?' is-selected':''));
-      pick.append(el('small',null,`${KINDS[entry.kind]}${entry.active===false?' · 已停用':''}`));
+      const suffix=entry.active===false?' · 已停用':entry.kind==='attribute'&&!entry.domain?.length?' · 未指定适用类型':'';
+      pick.append(el('small',null,KINDS[entry.kind]+suffix));
       pick.title=entry.id;pick.setAttribute('aria-pressed',String(state.selected===entry.id));list.append(pick);
       if(state.view!=='cards')continue;
       const model=typeCard(entry,state.summary),card=el('article','om-type-card om-type-'+entry.kind+(state.selected===entry.id?' is-selected':''));
@@ -115,7 +123,7 @@
         card.append(parents);
       }else{
         const endpoints=el('div','om-type-members');
-        endpoints.append(el('small','om-type-section-label',entry.kind==='relation'?'主体类型 → 客体类型':'适用类型 → 值类型'),el('p','om-type-endpoints',model.endpointText));
+        endpoints.append(el('small','om-type-section-label',entry.kind==='relation'?'主体类型 → 客体类型':'适用类型 / 值类型'),el('p','om-type-endpoints',model.endpointText));
         card.append(endpoints);
       }
       const footer=el('div','om-type-card-footer');
@@ -138,7 +146,8 @@
     drafts.title=state.draftLoadError||'';
     if(draftError)draftError.textContent=state.draftLoadError||'';
   }
-  async function showSource() {
+  async function showSource(startEditing=false) {
+    if(startEditing&&!canEditSource())return;
     const p=project(),state=ctx.S;
     const snapshot=()=>({project:project(),draftId:ctx.S.showingDraft?ctx.S.draft?.id:null,
       revision:ctx.S.showingDraft?ctx.S.draft?.revision:null,ontologyId:ctx.S.ontologyId,preview:!!ctx.S.preview});
@@ -146,35 +155,66 @@
     try{
       const url=state.preview?`/ontology?ontology_id=${encodeURIComponent(state.preview.id)}`
         :state.showingDraft&&state.draft?`/ontology-drafts/${encodeURIComponent(state.draft.id)}`:'/ontology';
-      const data=await api(endpoint(url),undefined,'GET');if(p!==project())return;
+      const data=await api(endpoint(url),undefined,'GET').catch(error=>{
+        if(url==='/ontology'&&error.status===404&&error.code==='ontology_not_published')return {turtle:'',initial:true};
+        throw error;
+      });
+      if(p!==project())return;
       const dialog=el('dialog','om-source-dialog');
-      dialog.append(el('h3',null,'RDF / Turtle 原始定义'),el('p',null,'保留原始图与尚未图形化的 RDF 表达。历史版本只读；编辑会将差异加入草案，审核发布后生效。'),el('pre',null,data.turtle||'（空本体）'));
-      if(!opened.preview){
-        const editor=el('textarea','om-source-editor');editor.value=data.turtle||'';editor.rows=18;editor.hidden=true;
+      const actions=el('div'),source=el('pre',null,data.turtle||'（空本体）');
+      const editable=!opened.preview&&canEditSource();
+      const editing=editable&&(startEditing||data.initial);
+      source.hidden=!!editing;
+      dialog.append(el('h3',null,'RDF / Turtle 原始定义'),
+        el('p',null,editable?'选择 Turtle 文件或编辑源码，保存到草案。通过审核并发布后生效。':'可查看或导出本体源码。'),actions);
+      if(editable){
+        const editor=el('textarea','om-source-editor');editor.value=data.turtle||'';editor.rows=18;editor.hidden=!editing;
         editor.setAttribute('aria-label','编辑 Turtle 原始定义');
         const feedback=el('p');feedback.setAttribute('role','status');
+        const file=el('input');file.type='file';file.accept='.ttl,text/turtle';file.hidden=!editing;
+        file.setAttribute('aria-label','选择 Turtle 文件');
         const save=button('把源码差异加入草案',async()=>{
+          if(!editor.value.trim()&&data.initial){feedback.textContent='请选择 Turtle 文件或输入本体源码。';return;}
           save.disabled=true;
+          file.disabled=true;
+          feedback.textContent='正在生成草案差异…';
           try{
-            if(!sourceWriteAllowed(opened,snapshot())||(opened.draftId&&data.revision!==opened.revision))
+            if(!canEditSource())throw new Error('当前账号没有本体编辑权限。');
+            const sameSource=opened.draftId
+              ? data.id===opened.draftId&&data.revision===opened.revision
+              : (data.initial?null:data.id)===(opened.ontologyId??null);
+            if(!sameSource||!sourceWriteAllowed(opened,snapshot()))
               throw new Error('项目、草案或修订已变化，请关闭后重新读取源码。');
-            await ctx.sendCommand({action:'diff_turtle',edited_turtle:editor.value,reason:'源码编辑：编译差异进入草案审核'});
+            await ctx.sendCommand({action:'diff_turtle',edited_turtle:editor.value,reason:'源码编辑：编译差异进入草案审核'},opened);
             feedback.textContent='源码差异已加入草案，仍需校验、逐项审核和发布。';
-          }catch(error){feedback.textContent=error.message;save.disabled=false;}
-        });save.hidden=true;
-        const edit=button('编辑 Turtle',()=>{editor.hidden=false;save.hidden=false;edit.hidden=true;editor.focus();});
-        dialog.append(edit,editor,save,feedback);
+          }catch(error){feedback.textContent=error.message;save.disabled=false;file.disabled=false;}
+        });save.hidden=!editing;
+        file.onchange=async()=>{
+          const selected=file.files?.[0];if(!selected||!canEditSource())return;
+          save.disabled=true;file.disabled=true;
+          try{
+            editor.value=await selected.text();
+            feedback.textContent='已读取 '+selected.name+'，可核对后加入草案。';
+          }catch(error){feedback.textContent='读取文件失败：'+error.message;}
+          finally{save.disabled=false;file.disabled=false;}
+        };
+        const edit=button('编辑 Turtle',()=>{file.hidden=false;editor.hidden=false;save.hidden=false;source.hidden=true;edit.hidden=true;editor.focus();});
+        edit.hidden=!!editing;
+        actions.append(edit,save);
+        dialog.append(file,feedback,editor);
       }
       const download=button('导出 Turtle',()=>{
         const blob=new Blob([data.turtle||''],{type:'text/turtle;charset=utf-8'}),url=URL.createObjectURL(blob),link=el('a');
         link.href=url;link.download=`ontology-${data.id||state.draft?.id||'draft'}.ttl`;link.click();URL.revokeObjectURL(url);
       });
-      const queryArea=el('details','om-source-query');queryArea.append(el('summary',null,'高级查询 · SPARQL（只读）'),el('p',null,'查询当前项目的已发布本体与知识；历史本体按本窗口所选发布读取，未发布草案源码不参与。不会继承其他页面隐藏的 Metadata 条件。'));
+      download.hidden=!!data.initial;
+      const queryArea=el('details','om-source-query');queryArea.hidden=!opened.ontologyId&&!opened.preview;queryArea.append(el('summary',null,'高级查询 · SPARQL（只读）'),el('p',null,'查询当前项目的已发布本体与知识；历史本体按本窗口所选发布读取，未发布草案源码不参与。不会继承其他页面隐藏的 Metadata 条件。'));
       const query=el('textarea');query.rows=4;query.value='SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 20';query.setAttribute('aria-label','SPARQL 查询');
       const queryResult=el('pre');queryResult.setAttribute('role','status');
       const queryButton=button('运行只读查询',async()=>{queryButton.disabled=true;try{if(p!==project())throw new Error('项目已变化，请重新打开查询窗口。');const body=sparqlRequest({ontologyId:opened.preview?state.preview.id:opened.ontologyId},query.value);const result=await api(endpoint('/sparql'),body);if(p!==project())return;queryResult.textContent=JSON.stringify(result,null,2);}catch(error){queryResult.textContent=error.message;}finally{queryButton.disabled=false;}});
       queryArea.append(query,queryButton,queryResult);
-      const close=button('关闭',()=>{dialog.close();dialog.remove();});dialog.append(download,queryArea,close);document.body.append(dialog);dialog.showModal();
+      const close=button('关闭',()=>{dialog.close();dialog.remove();});actions.append(download,close);
+      dialog.append(source,queryArea);document.body.append(dialog);dialog.showModal();
       dialog.addEventListener('cancel',()=>dialog.remove());
     }catch(error){ctx.status('源码读取失败：'+error.message,true);}
   }
@@ -188,9 +228,10 @@
     active=el('input');active.type='checkbox';const activeLabel=el('label','om-catalog-active');activeLabel.append(active,el('span',null,'只看有效术语'));
     summaryLine=el('p','om-catalog-count');list=el('div','om-catalog-list');
     drafts=el('select','om-catalog-drafts');drafts.setAttribute('aria-label','选择草案');drafts.addEventListener('change',()=>{if(drafts.value)void run(()=>ctx.selectDraft(drafts.value));});
+    initialImport=button('导入 Turtle 本体',()=>void showSource(true),'om-btn ghost admin-only');
     const advanced=el('details','om-catalog-governance');
     advanced.append(el('summary',null,'高级'),button('RDF 源码 / 导出',()=>void showSource()));
-    side.append(search,kind,activeLabel,summaryLine,list,advanced);
+    side.append(search,kind,activeLabel,initialImport,summaryLine,list,advanced);
     work=document.getElementById?.('om-work-changes-host');
     if(work){
       work.replaceChildren();const management=el('details','om-draft-management');management.append(el('summary',null,'草案管理'));
@@ -207,6 +248,7 @@
   function render(state) {
     if(!side||!ctx)return;
     if(projectKey!==project()){projectKey=project();search.value='';kind.value='';active.checked=false;}
+    initialImport.hidden=!canEditSource()||!project()||state.loading||!!state.ontologyId||!!state.preview;
     side.querySelectorAll('[data-ontology-write]').forEach(node=>node.disabled=!!state.preview);
     work?.querySelectorAll('[data-ontology-write]').forEach(node=>node.disabled=!!state.preview);
     if(changes){changes.replaceChildren();const draft=state.draft?.status==='pending'?state.draft:null;

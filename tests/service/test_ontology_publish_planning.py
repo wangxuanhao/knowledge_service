@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import pytest
 
 from knowledge_service.repository import Repository
+from knowledge_service.services.ontology_drafts import OntologyDrafts
 from knowledge_service.services.ontology_drafts_review import (
     DraftReviewPublishMixin,
 )
@@ -63,13 +64,12 @@ class PublishPlanner(DraftReviewPublishMixin):
         return None
 
     def _require_validation(self, *_args, **_kwargs):
-        return {'errors': [], 'warnings': []}, 'validation-fingerprint', None
+        return {'conforms': True, 'errors': [], 'warnings': []}, 'validation-fingerprint', BASE
 
-    def _active_operations(self, *_args):
-        return [copy.deepcopy(self.operation)]
+    _active_from_history = staticmethod(OntologyDrafts._active_from_history)
 
     def _history(self, *_args):
-        return [], [{
+        return [copy.deepcopy(self.operation)], [{
             'operation_id': self.operation['id'],
             'operation_fingerprint': self.operation['fingerprint'],
             'action': 'approve',
@@ -101,6 +101,23 @@ def test_preflight_hashes_summary_and_service_owned_reuse_decision():
         if key not in {'draft', 'validation_report', 'request_hash'}
     }
     assert plan['request_hash'] == Repository._publish_fingerprint(hashed)
+
+
+def test_all_approved_preflight_uses_one_history_and_validated_overlay(monkeypatch):
+    planner = PublishPlanner()
+    original = planner._history
+    calls = []
+
+    def history(*args):
+        calls.append(args)
+        return original(*args)
+
+    monkeypatch.setattr(planner, '_history', history)
+    monkeypatch.setattr(planner, '_base_turtle', lambda *_: pytest.fail('rebuilt validated overlay'))
+    plan = planner.publish_preflight('project-1', 'draft-1', 4, 'ontology-1',
+        'validation-fingerprint', [], 'once', 'publisher', 'one history')
+    assert calls == [('project-1', 'draft-1')]
+    assert plan['turtle'] == BASE
 
 
 @pytest.mark.parametrize(('field', 'tampered'), [

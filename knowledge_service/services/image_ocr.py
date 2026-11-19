@@ -69,7 +69,7 @@ class ImageOCRService:
         asset=self.store.get_asset(project_id,version_id,asset_id)
         if asset['status']=='ignored': return dict(status='ignored',blocks=[])
         if asset['kind'] in {'external','unsafe'}: return dict(status=asset['status'],blocks=[])
-        if not asset.get('storage_key'): raise OCRError('source_asset_missing','Local image is missing')
+        if not asset.get('storage_key'): raise OCRError('source_asset_missing','本地图片缺失')
         # Include quality policy in reuse identity, so changed gates cannot reuse unchecked output.
         configuration_error=None
         try:
@@ -114,7 +114,10 @@ class ImageOCRService:
                          ocr_run_id=run['id'],ordinal=i) for i,b in enumerate(accepted)]
         try:
             if configuration_error: raise configuration_error
-            raw=self.object_store.read(asset['storage_key'])
+            try:
+                raw = self.object_store.read(asset['storage_key'])
+            except FileNotFoundError as exc:
+                raise OCRError('source_asset_missing', '本地图片缺失') from exc
             if hasattr(self.adapter,'recognize_with_progress'):
                 output=self.adapter.recognize_with_progress(raw,resume_tiles=resume,on_tile=progress)
             else:output=self.adapter.recognize(raw)

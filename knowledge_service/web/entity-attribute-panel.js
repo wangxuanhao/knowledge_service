@@ -189,6 +189,14 @@
       for(const event of ['workspace:scope-changed','workspace:page-changed','graph-workspace:invalidated'])root.document.addEventListener(event,()=>{if(drawer.open)drawer.close();});
       root.document.getElementById('project')?.addEventListener('change',()=>{if(drawer.open)drawer.close();});
     }
+    const header=drawer.querySelector('.attribute-drawer-heading');
+    header.querySelector('[data-attribute-ledger]')?.remove();
+    if(typeof options.onLocateLedger==='function'){
+      const action=root.document.createElement('button');action.type='button';action.className='secondary';
+      action.dataset.attributeLedger='';action.textContent='在台账查看';
+      action.onclick=()=>{if(!drawer.open||options.accepts?.()===false)return;drawer.close();options.onLocateLedger(options.entity.id);};
+      header.insertBefore(action,header.lastElementChild);
+    }
     drawer.querySelector('h3').textContent=options.entity.text||options.entity.id;
     if(!drawer.open){drawerTrigger=root.document.activeElement;drawer.show();}return mount(drawer.querySelector('.attribute-drawer-body'),{...options,accepts:()=>drawer.open&&(!options.accepts||options.accepts())});
   }

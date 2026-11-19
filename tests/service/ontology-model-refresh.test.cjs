@@ -15,8 +15,10 @@ function fixture(options = {}) {
   if(options.canvas)window.OntologyCanvas=options.canvas;
   if(options.navigation)window.KnowledgeNavigation={open:options.navigation};
   window.OntologyWorkspace={mount(){},render(){},close(){},open:tab=>workspaceCalls.push(tab)};
-  const api = async (url, body, method = 'POST') => {
+  const api = async (url, body, method = 'POST', deadline) => {
+    if(deadline && options.gateTimers)return window.RequestDeadline.run(signal=>{options.captureSignal?.(url,signal);return api(url,body,method);},deadline);
     calls.push({ url, method, body });
+    if(options.readinessError && url.includes('/publish-readiness'))throw options.readinessError;
     if(url.includes('/stage-availability')){if(options.waitForStage)await options.waitForStage;return options.stageAvailability||{stages:{review:{allowed:true}}};}
     if(url.endsWith('/review-plan')){if(options.waitForPlan)await options.waitForPlan;if(options.failPlan)throw Error('unavailable');return options.reviewPlan||{revision:2,items:[]};}
     if (options.manualDraft && method === 'POST' && url === '/p/ontology-drafts') return {id:'manual',status:'pending',revision:1};
@@ -61,6 +63,11 @@ function fixture(options = {}) {
     status: (message, error) => notices.push({ message, error }), console,
     ...(options.gateTimers || {}),
   };
+  if(options.gateTimers){
+    context.AbortController=AbortController;
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../knowledge_service/web/request-deadline.js'),'utf8'),context);
+    window.RequestDeadline=context.RequestDeadline;
+  }
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../knowledge_service/web/ontology-model.js'), 'utf8'), context);
   return { model: window.OntologyModel, calls, notices, root, sidebar, tasks, taskButtons, workspaceCalls, rootClasses,
     switchProject: value => { context.current = value; } };
@@ -239,6 +246,24 @@ test('a failed draft list read cannot prepare an accidental new draft',async()=>
   const f=fixture({draftListError:true});
   await assert.rejects(f.model.ensureDraft(),/草案列表读取失败/);
   assert.ok(!f.calls.some(call=>call.method==='POST'));
+});
+test('a Turtle import opened from the published base creates its own draft with the source change',async()=>{
+  const f=fixture({manualDraft:true});
+  f.model.S.ontologyId='published';
+  const command={action:'diff_turtle',edited_turtle:'@prefix ex: <urn:ex:> .'};
+  await f.model.sendCommand(command,{project:'p',ontologyId:'published',draftId:null});
+  const writes=f.calls.filter(call=>call.method==='POST');
+  assert.deepEqual(writes.map(call=>call.url),['/p/ontology-drafts']);
+  assert.equal(writes[0].body.base_ontology_id,'published');
+  assert.deepEqual(writes[0].body.initial_command,command);
+});
+
+test('a Turtle editor cannot switch to an updated draft revision when saving',async()=>{
+  const f=fixture();
+  Object.assign(f.model.S,{ontologyId:'published',showingDraft:true,draft:{id:'new',revision:3,status:'pending'}});
+  await assert.rejects(f.model.sendCommand({action:'diff_turtle'},
+    {project:'p',ontologyId:'published',draftId:'new',revision:2}),/修订已变化/);
+  assert.equal(f.calls.length,0);
 });
 test('a completed command cannot replace a different draft selected during the write',async()=>{
   let release;const f=fixture({waitForCommands:new Promise(done=>{release=done;})});
@@ -427,8 +452,15 @@ test('editing readiness never triggers full validation unless the server request
   assert.equal(eligible.model.S.readiness.validation_checked,true);
 });
 
+test('HTTP rejection identifies the failing gate without claiming a timeout',async()=>{
+  const f=fixture({readinessError:Object.assign(Error('类型冲突'),{status:422})});
+  f.model.S.draft={id:'new',status:'pending',revision:2};await f.model.refreshDraftState();
+  assert.match(f.model.S.gateLoadError,/编辑阶段发布清单.*422.*类型冲突/);
+  assert.doesNotMatch(f.model.S.gateLoadError,/超时|限定时间/);assert.equal(f.model.S.readiness,null);
+});
+
 test('a stalled gate read exits loading, preserves canvas and exposes a retryable error',async()=>{
-  let release;const timers=new Set();const f=fixture({waitForReadiness:new Promise(resolve=>release=resolve),gateTimers:{
+  let release,signal;const timers=new Set();const f=fixture({captureSignal:(url,s)=>{if(url.includes('publish-readiness'))signal=s;},waitForReadiness:new Promise(resolve=>release=resolve),gateTimers:{
     setTimeout(fn){timers.add(fn);return fn;},clearTimeout(fn){timers.delete(fn);}}});
   const refreshing=f.model.refresh();
   try{
@@ -438,7 +470,8 @@ test('a stalled gate read exits loading, preserves canvas and exposes a retryabl
     for(const timer of [...timers])timer();
     for(let i=0;i<30;i++)await Promise.resolve();
     assert.equal(f.model.S.gatesLoading,false);
-    assert.match(f.model.S.gateLoadError,/重试|未能|超时/);
+    assert.match(f.model.S.gateLoadError,/编辑阶段发布清单.*15 秒/);
+    assert.equal(signal.aborted,true);
     assert.notEqual(f.model.S.readiness?.ready,true);
   }finally{release();await refreshing;for(let i=0;i<30;i++)await Promise.resolve();}
 });

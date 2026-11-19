@@ -262,23 +262,44 @@ def test_publication_uses_processing_mode_and_clears_submitted_files(browser,mod
     web=Path(__file__).resolve().parents[2]/'knowledge_service'/'web'
     items=[dict(id='a',original_name='pending.md',status='completed',result_ready=True,metadata_version=1,options={}),
         dict(id='b',original_name='submitted.md',status='published',metadata_version=1,options={})]
-    calls=[]
+    calls=[];pending=[]
     def route(request):
         path=request.request.url;result=dict(id='s',items=items,publication_settings={'extraction_mode':mode})
         if path.endswith('/capabilities'):result={}
         elif path.endswith('/publish'):
-            calls.append(request.request.post_data_json);items[0]['status']='published'
-            result={'batch_id':'batch','session':result}
+            calls.append(request.request.post_data_json)
+            pending.append((request,result))
+            page.evaluate('window.publishRequests = (window.publishRequests || 0) + 1')
+            return
         request.fulfill(json=result)
     page.route('http://test/api/**',route)
     page.route('http://test/',lambda r:r.fulfill(content_type='text/html',body='<div id="host"></div>'))
     page.goto('http://test/');page.evaluate("localStorage.setItem('kg_preparation:local:p','s')")
     page.add_script_tag(path=str(web/'document-preparation.js'));page.add_script_tag(path=str(web/'document-preparation-view.js'))
-    page.evaluate("window.view=PreparationView.mount(document.querySelector('#host'),{project:()=> 'p'});view.open()")
+    page.evaluate("window.view=PreparationView.mount(document.querySelector('#host'),{project:()=> 'p',onPublished:r=>window.openedBatch=r.batch_id});view.open()")
     assert page.locator('.preparation-file[data-item-id="b"]').count()==0
     page.get_by_role('button',name='下一步：确认处理',exact=True).click()
-    page.get_by_role('button',name=button+'（1 份）',exact=True).click()
+    submit=page.get_by_role('button',name=button+'（1 份）',exact=True)
+    status=page.locator('.preparation-submit-status')
+    submit.click()
+    status.wait_for()
+    assert '正在创建处理批次' in status.inner_text()
+    assert page.get_by_role('button',name='正在提交…',exact=True).is_disabled()
+    assert page.evaluate('view.snapshot().step===3 && !window.openedBatch')
+    page.wait_for_function('window.publishRequests===1')
+    if mode=='discovery':
+        pending.pop(0)[0].fulfill(status=409,json={'detail':'提交失败，请重试'})
+        page.get_by_text('提交失败，请重试',exact=True).wait_for()
+        assert status.is_hidden() and submit.is_enabled()
+        submit.click()
+        status.wait_for()
+        page.wait_for_function('window.publishRequests===2')
+    request,result=pending.pop(0)
+    items[0]['status']='published'
+    request.fulfill(json={'batch_id':'batch','session':result})
     page.wait_for_function('view.snapshot().step===0')
+    assert page.evaluate('window.openedBatch')=='batch'
+    assert status.is_hidden()
     assert page.locator('.preparation-file').count()==0
     assert page.evaluate("localStorage.getItem('kg_preparation:local:p')") is None
     assert calls[0]['item_ids']==['a']

@@ -191,20 +191,21 @@ test('draft footer distinguishes definitions and facts and exposes every server 
   assert.ok(all(f.actions).some(node=>String(node.textContent).includes('按定义审核')));
 });
 
-test('validation shows immediate local progress, rejects duplicate clicks and reports a long request',async()=>{
-  let finish;const f=actionFixture({request:async url=>url.endsWith('/validate')?new Promise(resolve=>finish=resolve):url.endsWith('/decisions/batch-approve')?{draft:f.state.draft,batch:{approved:1}}:f.state.draft});
+test('review validates in the submit request, prevents duplicate clicks and reports a long request',async()=>{
+  let finish;const f=actionFixture({request:async url=>url.endsWith('/submit')?new Promise(resolve=>finish=resolve):url.endsWith('/decisions/batch-approve')?{draft:f.state.draft,batch:{approved:1}}:f.state.draft});
   const initial=f.find('校验并审核'),pending=initial.listeners.click();
-  const loading=all(f.actions).find(node=>node.tag==='button'&&node.textContent==='正在校验草案…');assert.ok(loading);assert.equal(loading.disabled,true);assert.equal(f.actions['aria-busy'],'true');
-  await initial.listeners.click();assert.equal(f.calls.filter(call=>call.url.endsWith('/validate')).length,1);
+  const loading=all(f.actions).find(node=>node.tag==='button'&&node.textContent==='正在校验并提交草案…');assert.ok(loading);assert.equal(loading.disabled,true);assert.equal(f.actions['aria-busy'],'true');
+  await initial.listeners.click();assert.equal(f.calls.filter(call=>call.url.endsWith('/submit')).length,1);
   f.timers[0]();assert.ok(all(f.actions).some(node=>String(node.textContent).includes('仍在处理')));
   finish(f.state.draft);await pending;assert.equal(f.actions['aria-busy'],'false');assert.ok(f.find('校验并审核'));
+  assert.deepEqual(f.calls.filter(call=>call.method==='POST').map(call=>call.url.split('/').at(-1)),['submit','batch-approve']);
 });
 
-test('validation never submits or mutates another project after its pending request completes',async()=>{
-  let finish;const f=actionFixture({request:async url=>url.endsWith('/validate')?new Promise(resolve=>finish=resolve):{}});
+test('submission never approves another project after its pending request completes',async()=>{
+  let finish;const f=actionFixture({request:async url=>url.endsWith('/submit')?new Promise(resolve=>finish=resolve):{}});
   const pending=f.find('校验并审核').listeners.click();f.context.current='q';f.state.draft={id:'q-draft',revision:5,status:'pending'};f.panel.render(f.state);
   finish({id:'draft',revision:2,validation_fingerprint:'fp'});await pending;
-  assert.equal(f.state.draft.id,'q-draft');assert.ok(!f.calls.some(call=>/\/(submit|decisions\/batch-approve)$/.test(call.url)));
+  assert.equal(f.state.draft.id,'q-draft');assert.ok(!f.calls.some(call=>call.url.endsWith('/decisions/batch-approve')));
 });
 
 test('publication locks locally before its first read and preserves the fingerprint and idempotency payload',async()=>{

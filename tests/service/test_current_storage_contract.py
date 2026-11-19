@@ -74,7 +74,7 @@ class CurrentStorageContractTests(unittest.TestCase):
     def test_export_stamps_current_format_and_validates_as_a_complete_snapshot(self):
         snapshot = full_snapshot()
         repository = Repository.__new__(Repository)
-        repository._transaction = nullcontext
+        repository._transaction = lambda **kwargs: nullcontext()
         repository.get_project = lambda project: snapshot['project']
         repository._db = SimpleNamespace(execute=lambda *args: SimpleNamespace(
             fetchone=lambda: ('namespace',), fetchall=lambda: []))

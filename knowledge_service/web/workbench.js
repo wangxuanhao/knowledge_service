@@ -25,7 +25,13 @@ function showTab(name){document.querySelector(`[data-tab="${name}"]`).click();}
 // 但仍需要一个把用户送到那儿的入口（例如文档提交成功 → 直接看任务日志）。
 function showRuntimeView(view){window.RuntimeView?.show(view,{load:false});showTab('runtime');}
 function controlsProject(){if(!current)throw Error('请先选择项目');return current;}
-async function scopedRead(path,extra={}){const p=controlsProject(),epoch=wb.epoch,page=window.WorkspaceContext?.page,ticket=window.WorkspaceContext?.ticket(p);const result=await api('/api/projects/'+encodeURIComponent(p)+path,{...scope(),...extra});if(p!==current||epoch!==wb.epoch||(ticket&&!window.WorkspaceContext.accepts(ticket,current,page)))throw Error('项目已切换，旧响应已忽略');return result;}
+async function scopedRead(path,extra={}, {inheritScope=true}={}){
+  const p=controlsProject(),epoch=wb.epoch,page=window.WorkspaceContext?.page,ticket=window.WorkspaceContext?.ticket(p);
+  const body=inheritScope?{...scope(),...extra}:extra;
+  const result=await api('/api/projects/'+encodeURIComponent(p)+path,body);
+  if(p!==current||epoch!==wb.epoch||(ticket&&!window.WorkspaceContext.accepts(ticket,current,page)))throw Error('项目已切换，旧响应已忽略');
+  return result;
+}
 function discoveryHintHost(canvasId){const canvas=$(canvasId);if(!canvas||!canvas.parentNode)return null;let host=$(canvasId+'-discovery-hint');if(!host){host=document.createElement('div');host.id=canvasId+'-discovery-hint';host.className='discovery-hint';host.hidden=true;canvas.parentNode.insertBefore(host,canvas.parentNode.firstChild);}return host;}
 let discoveryHintRequest=0;
 async function renderDiscoveryHint(){
@@ -49,7 +55,7 @@ async function renderDiscoveryHint(){
   hosts.forEach(host=>{if(!host)return;if(pending>0){host.hidden=false;host.innerHTML=`<span>开放本体发现：还有 <b>${pending}</b> 条候选待审核或未通过校验。它们仍保留在候选区，不需要重新上传原文。</span><button data-goto-discovery>前往本体建模层 ↗</button>`;host.querySelector('[data-goto-discovery]').onclick=()=>showTab('ontology-model');}else host.hidden=true;});
 }
 for(const tab of ['graph','search','mindmap'])document.querySelector(`[data-tab="${tab}"]`)?.addEventListener('click',()=>renderDiscoveryHint().catch(()=>{}));
-let snapshotGeneration=0,snapshotRequest=0;
+let snapshotGeneration=0,snapshotRequest=0,snapshotRenderedRequest=0;
 function snapshotViewVisible(){
   const visible=id=>{const panel=document.getElementById(id);return !!panel&&!panel.hidden&&!panel.classList.contains('hidden');};
   return window.RuntimeView?.current==='snapshots'&&visible('tab-runtime')&&visible('tab-evaluation');
@@ -622,15 +628,20 @@ async function snapshots(){
   const project=controlsProject(),generation=snapshotGeneration,request=++snapshotRequest;
   const sameProject=()=>project===current&&generation===snapshotGeneration;
   const accepts=()=>sameProject()&&request===snapshotRequest;
+  const container=$('snapshot-cards');
+  container.inert=true;
+  container.setAttribute?.('aria-busy','true');
   let result;
   try{result=await api('/api/projects/'+encodeURIComponent(project)+'/snapshots',undefined,'GET');}
   catch(error){if(accepts())throw error;return;}
+  finally{if(accepts()){container.inert=false;container.removeAttribute?.('aria-busy');}}
   if(!accepts())return;
-  const container=$('snapshot-cards'),r=result;
+  snapshotRenderedRequest=request;
+  const r=result;
   if(!r.snapshots.length){container.innerHTML='<div class="eval-snapshot-empty"><p>📋</p><p>还没有快照，先保存一个快照</p></div>';return;}
   const items=r.snapshots.map(s=>{const isAuto=s.kind==='auto'||s.name.startsWith('Before restoring ')||s.name.startsWith('恢复前自动备份 · ');let displayName=s.name;if(isAuto)displayName=s.name.replace(/^Before restoring /,'').replace(/^恢复前自动备份 · /,'');return{s,isAuto,displayName};});const nameCounts={};items.forEach(i=>{nameCounts[i.displayName]=(nameCounts[i.displayName]||0)+1;});items.sort((a,b)=>{if(a.isAuto!==b.isAuto)return a.isAuto?1:-1;return new Date(b.s.created_at)-new Date(a.s.created_at);});container.innerHTML='<div class="eval-snapshot-cards">'+items.map(({s,isAuto,displayName})=>{const dt=new Date(s.created_at);const dateStr=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0')+' '+String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0');const diffMs=Date.now()-dt.getTime();let rel='';if(diffMs>=0&&diffMs<60000)rel='刚刚';else if(diffMs<3600000)rel=Math.floor(diffMs/60000)+' 分钟前';else if(diffMs<86400000)rel=Math.floor(diffMs/3600000)+' 小时前';else if(diffMs<2592000000)rel=Math.floor(diffMs/86400000)+' 天前';const badge=isAuto?'<span class="eval-snapshot-badge auto">自动备份</span>':'<span class="eval-snapshot-badge manual">手动快照</span>';const recordCount=s.record_count!=null?'<span class="eval-snapshot-records">· '+s.record_count+' 条记录</span>':'';const idSuffix=nameCounts[displayName]>1?'<span class="eval-snapshot-id">#'+esc(s.id.slice(0,6))+'</span>':'';return '<div class="eval-snapshot-card" data-id="'+esc(s.id)+'"><div class="eval-snapshot-header"><span class="eval-snapshot-name">'+esc(displayName)+'</span>'+badge+'</div><div class="eval-snapshot-meta">'+esc(dateStr)+(rel?' · '+esc(rel):'')+idSuffix+recordCount+'</div><div class="eval-snapshot-actions"><button data-snapshot-restore="'+esc(s.id)+'" class="secondary">恢复</button></div></div>';}).join('')+'</div>';
   const requireContext=()=>{
-    if(accepts())return true;
+    if(sameProject()&&snapshotRenderedRequest===request&&!container.inert)return true;
     status('项目或备份列表已变化，请在当前项目重新选择快照。',true);return false;
   };
   container.querySelectorAll('[data-snapshot-restore]').forEach(button=>{
@@ -640,7 +651,7 @@ async function snapshots(){
       if(card.querySelector('.eval-restore-confirm'))return;
       const snap=items.find(item=>item.s.id===id),displayName=snap?snap.displayName:'';
       const warning=document.createElement('div');warning.className='eval-restore-confirm';
-      warning.innerHTML='<p>确定恢复到此快照？<br><span class="subtle">恢复前会自动创建恢复点，可随时撤销。</span></p><div class="eval-confirm-actions"><button class="eval-confirm-yes">确认恢复</button><button class="eval-confirm-no secondary">取消</button></div>';
+      warning.innerHTML='<p>确定按此快照恢复知识记录？<br><span class="subtle">恢复会创建记录新修订，先保存恢复点；不回滚本体发布、原件或索引。</span></p><div class="eval-confirm-actions"><button class="eval-confirm-yes">确认恢复</button><button class="eval-confirm-no secondary">取消</button></div>';
       card.appendChild(warning);warning.scrollIntoView({behavior:'smooth',block:'nearest'});actions.style.display='none';
       warning.querySelector('.eval-confirm-yes').onclick=async()=>{
         if(!requireContext())return;
@@ -652,7 +663,7 @@ async function snapshots(){
           const refreshNote=refreshFailed?' 部分视图刷新失败，请重试刷新。':'';
           if(!sameProject())return;
           warning.textContent='已恢复，正在刷新备份列表…';
-          status('已恢复到「'+displayName+'」；恢复前状态已存为「'+(restored.recovery_snapshot_name||'恢复前自动备份')+'」'+refreshNote);
+          status('已按「'+displayName+'」恢复知识记录；恢复前的记录已保存到「'+(restored.recovery_snapshot_name||'恢复前自动备份')+'」'+refreshNote);
           await snapshots().catch(error=>{
             if(!sameProject())return;
             warning.textContent='已恢复；备份列表刷新失败，请点击“刷新”重试。';
@@ -671,8 +682,27 @@ async function snapshots(){
 // （原来要先点一下「刷新」才看得到——合并后的规则是「进这一屏，就把这一屏该给的数据给出来」）。
 window.RuntimeView?.on('snapshots',()=>snapshots().catch(e=>status(e.message,true)));
 bind('load-snapshots',snapshots);bind('save-snapshot',async()=>{await api(endpoint('/snapshots'),{name:$('snapshot-name').value||'手动快照'});$('snapshot-name').value='';await snapshots();status('项目快照已保存。');});
-bind('run-evaluation',async()=>{const input=$('gold-json').value.trim();if(!input)throw Error('请输入标准答案 JSON');let parsed;try{parsed=JSON.parse(input);}catch(e){throw Error('JSON 格式错误：'+e.message);}if(!parsed.entities||!Array.isArray(parsed.entities))throw Error('JSON 缺少 entities 数组');if(!parsed.relations||!Array.isArray(parsed.relations))throw Error('JSON 缺少 relations 数组');$('gold-json-error').textContent='';const r=await scopedRead('/evaluate',{...json('gold-json'),known_at:null,valid_at:null,filters:null,applicability:null});$('evaluation-result').innerHTML=renderEvalResult(r);});
-bind('export-project',async()=>{status('正在导出…');const r=await api(endpoint('/export'),undefined,'GET');const blob=new Blob([JSON.stringify(r,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=(current||'knowledge-project')+'.json';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);status('项目 JSON 已导出为文件。');});
+bind('run-evaluation',async()=>{
+  const input=$('gold-json').value.trim();
+  if(!input)throw Error('请输入标准答案 JSON');
+  let parsed;
+  try{parsed=JSON.parse(input);}catch(error){throw Error('JSON 格式错误：'+error.message);}
+  if(!Array.isArray(parsed?.entities))throw Error('JSON 缺少 entities 数组');
+  if(!Array.isArray(parsed?.relations))throw Error('JSON 缺少 relations 数组');
+  $('gold-json-error').textContent='';
+  const result=await scopedRead('/evaluate',parsed,{inheritScope:false});
+  $('evaluation-result').innerHTML=renderEvalResult(result);
+});
+bind('export-project',async()=>{
+  const project=controlsProject(),generation=snapshotGeneration;
+  status('正在导出项目逻辑数据…');
+  const r=await api('/api/projects/'+encodeURIComponent(project)+'/export',undefined,'GET');
+  if(project!==current||generation!==snapshotGeneration)return;
+  const blob=new Blob([JSON.stringify(r,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download=project+'.json';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+  status('项目逻辑 JSON 已导出。不含原件，不能用于完整灾备恢复。');
+});
 $('eval-load-example').onclick=()=>{$('gold-json').value=JSON.stringify({entities:["商户","平台","监管部门"],relations:[["商户","onboards","平台"],["商户","complies_with","监管部门"],["平台","oversees","商户"]]},null,2);$('gold-json-error').textContent='';status('已载入示例标准答案。');};
 function renderEvalResult(r){function metricCard(title,data){const p=typeof data.precision==='number'?data.precision:0;const rl=typeof data.recall==='number'?data.recall:0;const f1=typeof data.f1==='number'?data.f1:0;const pp=Math.round(p*100),rp=Math.round(rl*100),fp=Math.round(f1*100);const cls=v=>v>=80?'':v>=50?' mid':' low';const formatItem=item=>{if(Array.isArray(item))return esc(item.join(' → '));return esc(String(item));};let html='<div class="eval-metric-group"><h3>'+esc(title)+'</h3>';html+='<div class="eval-metric-row">';html+='<div class="eval-metric"><div class="eval-metric-value'+cls(pp)+'">'+pp+'%</div><div class="eval-metric-label">Precision</div><div class="eval-metric-sub">'+(data.predicted||0)+' 中 '+data.true_positive+' 准确</div></div>';html+='<div class="eval-metric"><div class="eval-metric-value'+cls(rp)+'">'+rp+'%</div><div class="eval-metric-label">Recall</div><div class="eval-metric-sub">'+(data.gold||0)+' 中 '+data.true_positive+' 命中</div></div>';html+='<div class="eval-metric"><div class="eval-metric-value'+cls(fp)+'">'+fp+'%</div><div class="eval-metric-label">F1</div></div>';html+='</div>';html+='<div class="eval-progress"><div class="eval-progress-fill'+cls(fp)+'" style="width:'+fp+'%"></div></div>';if(data.missing&&data.missing.length){html+='<div class="eval-list-section"><div class="eval-list-label">漏项 ('+data.missing.length+')</div><div class="eval-list">'+data.missing.map(i=>'<div class="eval-list-item">'+formatItem(i)+'</div>').join('')+'</div></div>';}else{html+='<div class="eval-list-section"><div class="eval-list-label">漏项</div><div class="eval-list-empty">无</div></div>';}if(data.extra&&data.extra.length){html+='<div class="eval-list-section"><div class="eval-list-label">多余 ('+data.extra.length+')</div><div class="eval-list">'+data.extra.map(i=>'<div class="eval-list-item">'+formatItem(i)+'</div>').join('')+'</div></div>';}else{html+='<div class="eval-list-section"><div class="eval-list-label">多余</div><div class="eval-list-empty">无</div></div>';}html+='</div>';return html;}let html='<div class="eval-metrics">'+metricCard('实体',r.entities||{})+metricCard('关系',r.relations||{})+'</div>';html+='<details class="eval-raw-json"><summary>原始 JSON</summary><pre>'+esc(JSON.stringify(r,null,2))+'</pre></details>';return html;}
 /* Knowledge chat: one independent request per turn, decoupled from the search workspace. */

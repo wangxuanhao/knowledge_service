@@ -56,8 +56,12 @@ def class_policy(ontology, class_iri):
 
 
 def source_boundary(record):
+    metadata = record.get('metadata') or {}
+    # Pending review assertions freeze applicability at the payload root.
+    # Canonical records and ordinary assertions store it in metadata.
+    applicability = metadata.get('applicability', record.get('applicability'))
     return (normalize_time(record.get('valid_from')), normalize_time(record.get('valid_until')),
-            scope_identity((record.get('metadata') or {}).get('applicability')))
+            scope_identity(applicability))
 
 
 def identity_scope(record, policy):

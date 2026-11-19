@@ -57,7 +57,7 @@ test('identity semantics are detected on either side and excluded from label-onl
   assert.match(panel,/OntologyIdentity\??\.classSection/);
   assert.match(panel,/!window\.OntologyIdentity\??\.isIdentityOperation\(o\)/);
   const html=fs.readFileSync(path.resolve(__dirname,'../../knowledge_service/web/index.html'),'utf8');
-  assert.match(html,/ontology-model-identity\.js\?v=identity-policy-20261113-3/);
+  assert.match(html,/ontology-model-identity\.js\?v=identity-guidance-20261119-1/);
 });
 
 function fixture(overrides={}){

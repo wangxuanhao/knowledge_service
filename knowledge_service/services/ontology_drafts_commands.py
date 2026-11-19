@@ -3,13 +3,15 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
+
 from .ontology_drafts_core import (
     EDITABLE_STATES, _status_guard, _canonical_json, _fingerprint, _semantic_operation,
 )
 from .ontology import Ontology
 from .ontology import local_name
-from .ontology import term_impact
 from .ontology_operations import _apply_operations, apply_operations
+from .ontology_operations import _TurtleOperationReplay
 from .ontology_operations import build_operation
 from .ontology_operations import build_restore_operation
 from .ontology_operations import canonical_turtle_diff
@@ -23,6 +25,83 @@ from rdflib.plugins.serializers.turtle import TurtleSerializer
 import json
 from .llm_runtime import llm_operation
 
+
+
+_TURTLE_ACTIONS = {'turtle', 'replace_turtle', 'diff_turtle'}
+
+
+class _TurtleRecordImpacts:
+    """Index the request's one records snapshot, preserving direct/linked order."""
+
+    def __init__(self, records):
+        self._records = records
+        self._direct = defaultdict(list)
+        self._linked = defaultdict(set)
+        self._candidates = defaultdict(list)
+        self._cache = {}
+        for position, row in enumerate(records):
+            keys = set(row.get('properties') or {})
+            if row.get('type'):
+                keys.add(row['type'])
+            for key in keys:
+                self._direct[key].append(position)
+            if row.get('kind') == 'relation':
+                for endpoint in (row.get('subject_id'), row.get('object_id')):
+                    self._linked[endpoint].add(position)
+            metadata = row.get('metadata') or {}
+            for field in ('review_candidates', 'discovery_candidates'):
+                for candidate in metadata.get(field) or []:
+                    if candidate.get('status') == 'pending':
+                        for key in {candidate.get('target_type'), candidate.get('proposed_type'),
+                                    candidate.get('predicate')} - {None}:
+                            self._candidates[key].append(candidate)
+
+    def for_term(self, iri):
+        if iri in self._cache:
+            return self._cache[iri]
+        direct = [self._records[pos] for pos in self._direct.get(iri, ())]
+        direct_ids = {row['id'] for row in direct}
+        positions = set()
+        for record_id in direct_ids:
+            positions.update(self._linked.get(record_id, ()))
+        linked = [self._records[pos] for pos in sorted(positions)
+                  if self._records[pos]['id'] not in direct_ids]
+        counts = dict(entity=0, relation=0, attribute=0)
+        preview = []
+        for rows, via in ((direct, 'type'), (linked, 'endpoint')):
+            for row in rows:
+                kind = row.get('kind')
+                if kind in counts:
+                    counts[kind] += 1
+                if len(preview) < 50:
+                    preview.append({'id': row['id'], 'kind': kind, 'via': via,
+                                    'text': (row.get('text') or '').strip()})
+        pending_ids = {candidate.get('id') or _fingerprint(candidate)
+                       for name in {iri, local_name(iri)}
+                       for candidate in self._candidates.get(name, ())}
+        result = ([row['id'] for row in (*direct, *linked)], pending_ids, {
+            'record_preview': preview, 'kind_counts': counts,
+            'linked_relation_count': len(linked),
+        })
+        self._cache[iri] = result
+        return result
+
+
+def _named_turtle_incoming(graph, incoming):
+    """Use the named-subject subsequence of Turtle order without a graph scan."""
+    classes = TurtleSerializer.topClasses
+    predicates = TurtleSerializer.predicateOrder
+    owners = {}
+    for subject, _ in incoming:
+        if subject not in owners:
+            rank = next((i for i, kind in enumerate(classes)
+                         if (subject, RDF.type, kind) in graph), len(classes))
+            refs = (sum(1 for _ in graph.triples((None, None, subject)))
+                    if rank == len(classes) else 0)
+            owners[subject] = (rank, refs, subject)
+    return sorted(incoming, key=lambda pair: (
+        owners[pair[0]], predicates.index(pair[1]) if pair[1] in predicates else len(predicates),
+        pair[1]))
 
 
 class DraftCommandMixin:
@@ -281,8 +360,13 @@ class DraftCommandMixin:
         evidence = self._authoritative_evidence(draft, command)
         confidence = command.get('confidence')
         rebuilt = []
-        working = (ontology if _intake_in_place
-                   else Ontology(ontology.graph.serialize(format='turtle')))
+        turtle_command = command.get('action') in _TURTLE_ACTIONS
+        initial = None if _intake_in_place else ontology.graph.serialize(format='turtle')
+        replay = _TurtleOperationReplay(initial, rebuild=True) if turtle_command and operations else None
+        record_impacts = (_TurtleRecordImpacts(self.repository.current_records(project_id))
+                          if replay is not None else None)
+        working = (replay.ontology if replay is not None else
+                   ontology if _intake_in_place else Ontology(initial))
         for raw in operations:
             action = raw['action']
             target = raw['target_iri']
@@ -291,6 +375,9 @@ class DraftCommandMixin:
                 impact_context['records'] = _intake_records
             if _intake_in_place:
                 impact_context['_turtle_order'] = True
+            if replay is not None:
+                impact_context['_record_impacts'] = record_impacts
+                impact_context['_named_turtle_order'] = replay.named
             impact = {
                 **self._impact(project_id, target, **impact_context),
                 **(raw.get('impact') or {}),
@@ -323,12 +410,21 @@ class DraftCommandMixin:
             if _intake_in_place:
                 _apply_operations(working, [item])
                 continue
+            if replay is not None:
+                try:
+                    replay.apply(item)
+                except ValueError:
+                    continue
+                working = replay.ontology
+                continue
             try:
                 applied = apply_operations(
                     working.graph.serialize(format='turtle'), [item])
             except ValueError:
                 continue
             working = Ontology(applied)
+        if replay is not None:
+            replay.finish()
         return rebuilt
 
     def _compile_intake_commands(self, project_id, draft, commands, ontology):
@@ -405,7 +501,7 @@ class DraftCommandMixin:
                     working.graph.serialize(format='turtle'), operations))
                 compiled.extend(operations)
             return compiled
-        if action in {'turtle', 'replace_turtle', 'diff_turtle'}:
+        if action in _TURTLE_ACTIONS:
             edited = command.get('edited_turtle', command.get('turtle'))
             if not isinstance(edited, str):
                 raise ValueError('Turtle command requires edited_turtle')
@@ -453,7 +549,7 @@ class DraftCommandMixin:
             _intake_in_place=_intake_in_place)
 
     def _impact(self, project_id, target_iri, *, ontology=None, records=None,
-                _turtle_order=False):
+                _turtle_order=False, _named_turtle_order=False, _record_impacts=None):
         ontology = ontology or Ontology(
             self._base_turtle(project_id, self._latest_id(project_id)))
         target = URIRef(target_iri)
@@ -462,24 +558,17 @@ class DraftCommandMixin:
         while pending_nodes:
             parent = pending_nodes.pop()
             for child in ontology.graph.subjects(RDFS.subClassOf, parent):
-                if child not in descendants and ontology.is_active_term(child):
+                if child not in descendants and (_named_turtle_order or ontology.is_active_term(child)):
                     descendants.add(child)
                     pending_nodes.append(child)
-        references = term_impact(self, project_id, target_iri, ontology, records=records)
-        records = records if records is not None else self.repository.current_records(project_id)
-        direct = [
-            row for row in records
-            if row.get('type') == target_iri
-            or target_iri in (row.get('properties') or {})]
-        direct_ids = {row['id'] for row in direct}
-        linked = [
-            row for row in records
-            if row.get('kind') == 'relation' and row['id'] not in direct_ids
-            and (row.get('subject_id') in direct_ids
-                 or row.get('object_id') in direct_ids)]
-        affected_records = [*direct, *linked]
+        if _record_impacts is None:
+            records = records if records is not None else self.repository.current_records(project_id)
+            _record_impacts = _TurtleRecordImpacts(records)
+        record_ids, pending_ids, references = _record_impacts.for_term(target_iri)
         incoming = list(ontology.graph.subject_predicates(target))
-        if _turtle_order and len(incoming) > 1:
+        if _named_turtle_order and len(incoming) > 1:
+            incoming = _named_turtle_incoming(ontology.graph, incoming)
+        elif _turtle_order and len(incoming) > 1:
             # Match the named-subject/predicate order of the legacy Turtle
             # round trip without serializing or reparsing the working graph.
             serializer = TurtleSerializer(ontology.graph)
@@ -494,20 +583,7 @@ class DraftCommandMixin:
             'subject': str(subject), 'predicate': str(predicate),
         } for subject, predicate in incoming]
         constraints = len(constraint_details)
-        formal_records = len(affected_records)
-        pending_ids = set()
-        target_names = {target_iri, local_name(target_iri)}
-        for row in records:
-            metadata = row.get('metadata') or {}
-            candidates = [*(metadata.get('review_candidates') or []),
-                          *(metadata.get('discovery_candidates') or [])]
-            for candidate in candidates:
-                referenced_names = {
-                    candidate.get(key)
-                    for key in ('target_type', 'proposed_type', 'predicate')}
-                if (candidate.get('status') == 'pending'
-                        and target_names & referenced_names):
-                    pending_ids.add(candidate.get('id') or _fingerprint(candidate))
+        formal_records = len(record_ids)
         pending = len(pending_ids)
         referenced = bool(descendants or constraints or formal_records or pending)
         return {
@@ -517,7 +593,7 @@ class DraftCommandMixin:
             'constraints': constraints,
             'leaf': not descendants,
             'referenced': referenced,
-            'record_ids': [row['id'] for row in affected_records],
+            'record_ids': record_ids,
             'record_ids_truncated': False,
             'record_preview': references['record_preview'],
             'kind_counts': references['kind_counts'],
@@ -597,15 +673,21 @@ class DraftCommandMixin:
                 candidate_operations.extend(compiled)
 
             working = self._base_turtle(project_id, draft['base_ontology_id'])
+            replay = (_TurtleOperationReplay(working)
+                      if action in _TURTLE_ACTIONS and candidate_operations else None)
+            compiled_ids = {id(operation) for operation in compiled}
             for operation in candidate_operations:
                 validation = operation.get('validation') or {}
                 if validation.get('errors') or validation.get('withdrawn'):
                     continue
                 try:
-                    working = apply_operations(
-                        working, [_semantic_operation(operation)])
+                    semantic = _semantic_operation(operation)
+                    if replay is not None:
+                        replay.apply(semantic)
+                    else:
+                        working = apply_operations(working, [semantic])
                 except ValueError as exc:
-                    if operation not in compiled:
+                    if id(operation) not in compiled_ids:
                         raise
                     issue = {
                         'code': 'operation_blocked', 'severity': 'error',
@@ -617,6 +699,8 @@ class DraftCommandMixin:
                         'errors': [*(validation.get('errors') or []), issue],
                     }
                     operation['fingerprint'] = operation_fingerprint(operation)
+            if replay is not None:
+                replay.finish()
             self.store.append_operations(project_id, draft_id, compiled)
             # 改了变更集合 = 这一轮的提交失效：请求回到「还没提交」，
             # 必须重新提交并校验（旧决定也会因为 operation_fingerprint 变化而失效）。

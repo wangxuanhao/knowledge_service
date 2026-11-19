@@ -735,3 +735,59 @@ def test_filtered_ocr_notice_allows_normal_publication(prep):
     response=client.post(root+'/publish',json={'item_ids':[item['id']],'versions':{item['id']:1},
         'result_versions':{item['id']:item['chunk_version']},'idempotency_key':'filtered-publish'})
     assert response.status_code==202,response.text
+
+
+@pytest.mark.parametrize('packaged', [False, True])
+def test_preparation_publishes_with_missing_local_image(prep, packaged):
+    import zipfile
+    from source_test_images import png
+
+    class Adapter:
+        engine = 'test'
+        configuration_fingerprint = 'missing-image-test'
+
+        def recognize(self, data):
+            assert data == png()
+            return dict(engine_version='test', preprocess_fingerprint='pre', width=8, height=8,
+                        blocks=[dict(text='Other image text', normalized_text='Other image text',
+                                     confidence=.99, x=0, y=0, width=.5, height=.5)])
+
+    client, root = prep
+    client.app.state.source_documents.image_ocr.adapter = Adapter()
+    markdown = b'Before ![image label](assets/missing.png) after.'
+    name, data = 'rule.md', markdown
+    if packaged:
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, 'w') as archive:
+            archive.writestr('rule.md', markdown + b' ![](assets/available.png)')
+            archive.writestr('assets/available.png', png())
+        name, data = 'rule.zip', stream.getvalue()
+
+    item = ready(client, root, upload(client, root, name, data))
+    response = client.get(root+'/items/'+item['id']+'/result')
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert 'Before' in result['text'] and 'after.' in result['text']
+    assert 'image label' not in result['text'] and 'missing.png' not in result['text']
+    if packaged:
+        assert 'Other image text' in result['text']
+    warnings = [w for w in result['warnings'] if isinstance(w, dict) and w.get('code') == 'source_asset_missing']
+    assert len(warnings) == 1
+    assert warnings[0]['severity'] == 'warning' and 'assets/missing.png' in warnings[0]['message']
+    response = client.post(root+'/publish', json={'item_ids': [item['id']],
+        'versions': {item['id']: item['metadata_version']},
+        'result_versions': {item['id']: item['chunk_version']}, 'idempotency_key': 'missing-image-publish'})
+    assert response.status_code == 202, response.text
+    project_root = root.split('/preparations')[0]
+    batch_root = project_root+'/ingest-batches/'+response.json()['batch_id']
+    for _ in range(150):
+        batch = client.get(batch_root).json()
+        if batch['status'].startswith('completed'):
+            break
+        time.sleep(.03)
+    assert batch['status'] == 'completed', batch
+    published_item = client.get(batch_root+'/items').json()['items'][0]
+    document = client.get(project_root+'/records/'+published_item['document_id']).json()
+    assert document['metadata']['status'] == 'ready'
+    assert any(isinstance(w, dict) and w.get('message') == warnings[0]['message']
+               for w in document['metadata']['warnings'])

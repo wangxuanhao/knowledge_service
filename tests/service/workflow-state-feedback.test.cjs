@@ -22,7 +22,7 @@ test('ledger only offers supported kinds and initializes/switches/resets to the 
 });
 
 function snapshotFixture(){
-  const nodes=new Map(),calls=[],messages=[],reads=[],cards=[];
+  const nodes=new Map(),calls=[],messages=[],reads=[],cards=[],downloads=[];
   let restoreResponse=()=>({recovery_snapshot_name:'恢复点'});
   class Element{
     constructor(){this.value='';this.children=[];this.dataset={};this.style={};this.className='';this.hidden=false;this.textContent='';this.classList={add(){},remove(){},contains:name=>this.className.split(' ').includes(name)};}
@@ -40,19 +40,33 @@ function snapshotFixture(){
     querySelector(selector){return this.controls?.[selector]??(this.controls??={})[selector]??((this.controls??={})[selector]=new Element());}
     querySelectorAll(){return this===get('snapshot-cards')?cards.map(item=>item.button):[];}
     appendChild(child){this.children.push(child);}scrollIntoView(){}remove(){this.removed=true;}
+    click(){downloads.push(this.download);}
   }
   const get=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);};
   get('project').onchange=()=>{context.current=get('project').value;};get('project').value='A';
   get('tab-runtime').className='hidden';get('tab-evaluation').className='hidden';
-  const document={createElement:()=>new Element(),getElementById:get,querySelector:()=>null,dispatchEvent(){}};
+  const document={body:new Element(),createElement:()=>new Element(),getElementById:get,querySelector:()=>null,dispatchEvent(){}};
   const context=vm.createContext({window:{RuntimeView:{current:'overview',on(){}}},document,$:get,current:'A',scope:()=>({}),CustomEvent:class{},
+    Blob,URL:{createObjectURL:()=> 'blob:project',revokeObjectURL(){}},
     endpoint:suffix=>'/api/projects/'+context.current+suffix,status:(...args)=>messages.push(args),bind:(id,fn)=>{get(id).onclick=fn;},
     esc:value=>String(value),api:async(url,body,method)=>{calls.push({url,body,method});if(method==='GET'){const result=deferred();reads.push(result);return result.promise;}return restoreResponse();}});
-  vm.runInContext(workbench.slice(0,workbench.indexOf('let dashboardRequest='))+workbench.slice(workbench.indexOf('async function snapshots('),workbench.indexOf("bind('run-evaluation'")),context);
-  return {context,get,calls,messages,reads,cards,load:()=>context.snapshots(),respondRestore(fn){restoreResponse=fn;},
+  vm.runInContext(workbench.slice(0,workbench.indexOf('let dashboardRequest='))+workbench.slice(workbench.indexOf('async function snapshots('),workbench.indexOf("$('eval-load-example').onclick")),context);
+  return {context,get,calls,messages,reads,cards,downloads,load:()=>context.snapshots(),respondRestore(fn){restoreResponse=fn;},
     switch(project,visible=false){get('tab-runtime').className=visible?'':'hidden';get('tab-evaluation').className=visible?'':'hidden';context.window.RuntimeView.current=visible?'snapshots':'overview';get('project').value=project;get('project').onchange();},
     resolve(index,name){reads[index].resolve({snapshots:[{id:name,name,created_at:'2026-11-01T12:00:00Z'}]});}};
 }
+
+test('logical export reports its scope and drops stale project responses',async()=>{
+  const env=snapshotFixture(),download=()=>env.get('export-project').onclick();
+  const old=download();env.switch('B');env.switch('A');
+  env.reads[0].resolve({project:{id:'A'}});await old;
+  assert.deepEqual(env.downloads,[]);
+  env.switch('B');const fresh=download();
+  assert.equal(env.calls[1].url,'/api/projects/B/export');
+  env.reads[1].resolve({project:{id:'B'}});await fresh;
+  assert.deepEqual(env.downloads,['B.json']);
+  assert.match(env.messages.at(-1)[0],/不含原件，不能用于完整灾备恢复/);
+});
 
 test('project switch clears snapshot cards immediately and does not read a hidden backup view',async()=>{
   const env=snapshotFixture();const loading=env.load();env.resolve(0,'old-A');await loading;
@@ -88,9 +102,12 @@ test('restore confirmation checks its original generation again before any POST'
 test('explicit current restore posts to its captured project and then refreshes',async()=>{
   const env=snapshotFixture(),loading=env.load();env.resolve(0,'saved');await loading;
   const item=env.cards[0];await item.button.onclick();
-  const restoring=item.card.children[0].querySelector('.eval-confirm-yes').onclick();await settle();
+  const warning=item.card.children[0];
+  assert.match(warning.innerHTML,/记录新修订.*不回滚本体发布、原件或索引/);
+  assert.doesNotMatch(warning.innerHTML,/随时撤销/);
+  const restoring=warning.querySelector('.eval-confirm-yes').onclick();await settle();
   assert.equal(env.calls[1].url,'/api/projects/A/snapshots/saved/restore');assert.deepEqual(Object.keys(env.calls[1].body),[]);
-  env.resolve(1,'after-restore');await restoring;assert.match(env.messages[0][0],/已恢复/);
+  env.resolve(1,'after-restore');await restoring;assert.match(env.messages[0][0],/已按.*恢复知识记录/);
 });
 
 test('successful restore reports a failed list refresh without suggesting that restoration failed',async()=>{
@@ -111,7 +128,7 @@ test('a same-project list refresh during restoration does not discard its succes
   const restoring=item.card.children[0].querySelector('.eval-confirm-yes').onclick();
   const refreshed=env.load();env.resolve(1,'intermediate-list');await refreshed;
   gate.resolve({recovery_snapshot_name:'原项目恢复点'});await settle();
-  const receipt=env.messages.find(([text])=>/已恢复到/.test(text));
+  const receipt=env.messages.find(([text])=>/已按.*恢复知识记录/.test(text));
   if(env.reads[2])env.resolve(2,'after-restoration');await restoring;
   assert.ok(receipt,'completed same-project restoration must still report its receipt');assert.match(receipt[0],/原项目恢复点/);
   assert.match(env.get('snapshot-cards').innerHTML,/after-restoration/);assert.equal(env.calls.filter(call=>call.body).length,1);
@@ -131,6 +148,20 @@ test('refreshing the list before restore confirmation still rejects the outdated
   const item=env.cards[0];item.button.onclick();const confirm=item.card.children[0].querySelector('.eval-confirm-yes');
   const refreshed=env.load();await confirm.onclick();env.resolve(1,'fresh-list');await refreshed;
   assert.equal(env.calls.filter(call=>call.body).length,0);
+});
+
+test('a pending backup refresh blocks stale cards and a failed refresh releases them',async()=>{
+  const env=snapshotFixture(),loading=env.load();env.resolve(0,'saved');await loading;
+  const item=env.cards[0],container=env.get('snapshot-cards');
+  const refreshed=env.load();
+  assert.equal(container.inert,true);
+  item.button.onclick();
+  assert.equal(item.card.children.length,0);
+  env.reads[1].reject(Error('暂时不可用'));
+  await assert.rejects(refreshed,/暂时不可用/);
+  assert.equal(container.inert,false);
+  item.button.onclick();
+  assert.equal(item.card.children.length,1);
 });
 
 test('a completed restore never updates a different project generation after an A to B to A round trip',async()=>{

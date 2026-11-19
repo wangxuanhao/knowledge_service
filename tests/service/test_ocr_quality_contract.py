@@ -74,6 +74,40 @@ def test_filtered_receipt_is_completed_and_warning_does_not_block_preparation(tm
     finally:repo.close()
 
 
+def test_deleted_image_object_is_skipped_in_strict_ingest(tmp_path):
+    from source_test_images import png
+    from knowledge_service.integrations.source_object_store import SourceObjectStore
+    from knowledge_service.models import UploadOptions
+    from knowledge_service.repository import Repository
+    from knowledge_service.services.source_documents import SourceDocumentService
+    from knowledge_service.services.source_ingest import prepare_source_ingest
+
+    class Adapter:
+        engine = 'test'
+        configuration_fingerprint = 'missing-object-test'
+
+        def recognize(self, data):
+            pytest.fail('a missing image has no bytes to recognize')
+
+    repo = Repository(tmp_path/'missing-object')
+    project = repo.create_project('missing object')['id']
+    objects = SourceObjectStore(tmp_path/'objects')
+    sources = SourceDocumentService(repo, objects, Adapter())
+    source = sources.persist(project, 'doc', b'before ![](lost.png) after', 'rule.md', assets=[
+        dict(kind='local', status='available', original_path='lost.png', data=png())])
+    asset_id = source['assets'][0]['id']
+    asset = sources.store.get_asset(project, source['id'], asset_id)
+    (objects.root / asset['storage_key']).unlink()
+    options = UploadOptions(title='Rule', extraction_mode='discovery').model_dump()
+
+    for cached in (False, True):
+        chunks, text, warnings = prepare_source_ingest(sources, project, source, options, cached_only=cached)
+        assert chunks and text.split() == ['before', 'after']
+        assert len(warnings) == 1 and warnings[0]['severity'] == 'warning'
+        assert warnings[0]['code'] == 'source_asset_missing' and 'lost.png' in warnings[0]['message']
+        assert not any(span.get('ocr_block_id') for chunk in chunks for span in chunk['source_spans'])
+
+
 def test_preprocess_fingerprint_captures_limits():
     from knowledge_service.integrations.image_ocr import RapidOCRAdapter
     assert RapidOCRAdapter(max_side=1000).preprocess_fingerprint != RapidOCRAdapter(max_side=2000).preprocess_fingerprint

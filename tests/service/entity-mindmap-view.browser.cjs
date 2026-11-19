@@ -97,7 +97,13 @@ test('mindmap cards inspect canonical entities while branches still collapse and
   await clickEntity('d');assert.equal(await page.evaluate(()=>inspectedEntities.at(-1).id),'d');
   await clickEntity('b');assert.equal(await page.evaluate(()=>inspectedEntities.at(-1).id),'b');
   assert.match(await page.locator('#mindmap-summary').innerText(),/已显示 3 \/ 4/);
-  assert.equal(await page.evaluate(()=>inspectedEntities.length),2);await page.close();
+  assert.equal(await page.evaluate(()=>inspectedEntities.length),2);
+  // Collapse a root with multiple visible descendant levels, not just one leaf.
+  await clickEntity('b');
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await clickEntity('a');assert.match(await page.locator('#mindmap-summary').innerText(),/已显示 1 \/ 4/);
+  await clickEntity('a');assert.match(await page.locator('#mindmap-summary').innerText(),/已显示 4 \/ 4/);
+  assert.deepEqual(errors,[]);await page.close();
 });
 
 async function assertFitted(page){

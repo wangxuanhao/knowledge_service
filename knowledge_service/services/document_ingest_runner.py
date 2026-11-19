@@ -24,6 +24,8 @@ class DocumentCheckpointContext:
         self.ontology_checked=False
         self.mode=mode
         self.runtime_identity=self._runtime_identity()
+        self._progress = item.get('progress') or 0
+        self._stage = None
 
     def _runtime_identity(self):
         root=Path(__file__).resolve().parents[1]
@@ -48,6 +50,14 @@ class DocumentCheckpointContext:
 
     def commit_guard(self):
         return self.store.commit_guard(self.item['id'], self.owner, self.item['lease_token'])
+
+    def update_progress(self, stage, progress):
+        progress = max(self._progress, progress)
+        if stage == self._stage and progress == self._progress:
+            return
+        self.store.update_progress(self.item['id'], self.owner, self.item['lease_token'],
+                                   stage=stage, progress=progress)
+        self._stage, self._progress = stage, progress
 
     @contextmanager
     def formal_guard(self):
@@ -80,6 +90,8 @@ class DocumentCheckpointContext:
             error=ValueError('未完成的切片需要从检查点继续')
             error.code='checkpoint_pending'
             raise error
+        # Report the work already completed before blocking on the model.
+        self.update_progress('extracting', 15 + 60 * ordinal / len(self.chunks))
         try:
             output = extract()
         except Exception as exc:
@@ -93,8 +105,7 @@ class DocumentCheckpointContext:
                 document_generation=self.item.get('document_generation',0),
                 chunk_sha256=hashlib.sha256(self.chunks[ordinal]['text'].encode()).hexdigest())
             if self.store.lease_valid(self.item['id'],self.owner,self.item['lease_token']):
-                self.store.update_progress(self.item['id'], self.owner, self.item['lease_token'],
-                    stage='extracting', progress=15 + 60 * (ordinal + 1) / len(self.chunks))
+                self.update_progress('extracting', 15 + 60 * (ordinal + 1) / len(self.chunks))
         from copy import deepcopy
         return deepcopy(output)
 
@@ -119,7 +130,8 @@ class DocumentIngestRunner:
             (item.get('options') or {}).get('extraction_mode', settings.get('extraction_mode', 'ontology')) != 'documents')
     def run(self, item, settings, owner):
         if self.halt is not None and self.halt.is_set():raise InterruptedError('ingest worker shutdown')
-        self.store.update_progress(item['id'], owner, item['lease_token'], stage='parsing', progress=3)
+        self.store.update_progress(item['id'], owner, item['lease_token'],
+                                   stage='parsing', progress=max(item.get('progress') or 0, 3))
         options = {**settings, **(item.get('options') or {})}
         options.pop('requested_concurrency', None)
         title = options.pop('title', None) or item['original_name']
@@ -153,7 +165,8 @@ class DocumentIngestRunner:
             chunks,text,warnings=prepared['chunks'],prepared['text'],prepared['warnings']
         else:
             chunks,text,warnings=prepare_source_ingest(self.sources,item['project_id'],source,options,
-                ocr_semaphore=self.ocr_semaphore,progress=lambda:self.store.update_progress(item['id'],owner,item['lease_token'],stage='ocr',progress=8))
+                ocr_semaphore=self.ocr_semaphore, progress=lambda:self.store.update_progress(
+                    item['id'], owner, item['lease_token'], stage='ocr', progress=max(item.get('progress') or 0, 8)))
         metadata = {**options.pop('metadata', {}),**{k:v for k,v in source.get('parser_metadata',{}).items() if k!='provenance'},'warnings':warnings,'source_document_version_id':source['id'],
                     'batch_id':item['batch_id'], 'batch_item_id':item['id'], 'file_sha256':item['file_sha256'],
                     'document_generation':item.get('document_generation',0)}

@@ -304,11 +304,11 @@ class DraftReviewPublishMixin:
                     'warning_codes': [REVERT_WARNING],
                     'revert_from': revert_from,
                     'message': '发布回退草案前需要确认：这之后发布的版本里的结构改动不会留在当前版本里。'})
-        report, fingerprint, _ = self._require_validation(
+        history, decision_rows = self._history(project_id, draft_id)
+        operations = self._active_from_history(history)
+        report, fingerprint, validated_turtle = self._require_validation(
             project_id, draft, validation_fingerprint,
-            acknowledged_warning_codes, allow_errors=True)
-        operations = self._active_operations(project_id, draft_id)
-        _, decision_rows = self._history(project_id, draft_id)
+            acknowledged_warning_codes, allow_errors=True, operations=operations)
         decisions = {row['operation_id']: row
                      for row in self._effective_decisions(decision_rows)}
         invalid = [
@@ -332,9 +332,14 @@ class DraftReviewPublishMixin:
             # 发布的全部内容。代价由 revert 警告的勾选确认担起来（见上方那段）。
             raise ValidationFailed('publish requires at least one current approval')
         try:
-            approved_turtle = apply_operations(
-                self._base_turtle(project_id, draft['base_ontology_id']),
-                map(_semantic_operation, approved))
+            # Validation applied exactly these operations only for a clean,
+            # entirely approved draft. A rejected/invalid subset must be rebuilt.
+            if len(approved) == len(operations) and report['conforms']:
+                approved_turtle = validated_turtle
+            else:
+                approved_turtle = apply_operations(
+                    self._base_turtle(project_id, draft['base_ontology_id']),
+                    map(_semantic_operation, approved))
         except ValueError as exc:
             raise ValidationFailed(
                 'approved operation subset failed validation',
@@ -374,17 +379,24 @@ class DraftReviewPublishMixin:
         （规则唯一出处是 ``ontology_operations.operation_risk`` /
         ``is_batch_eligible``，本方法只是把结论整理成可渲染的行）。
         """
-        draft = self.store.get(project_id, draft_id)
-        if draft['status'] in FINAL_STATES:
-            raise ValueError('已终结的草案没有审查计划')
-        operations = self._active_operations(project_id, draft_id)
+        # Fetch one consistent plan input; do not hold the read transaction
+        # while replaying the graph or building the response.
+        with self.repository.read_snapshot():
+            draft = self.store.get(project_id, draft_id)
+            if draft['status'] in FINAL_STATES:
+                raise ValueError('已终结的草案没有审查计划')
+            history, decision_rows = self._history(project_id, draft_id)
+            try:
+                base = self._base_turtle(project_id, draft['base_ontology_id'])
+            except ValueError:
+                base = None
+        operations = self._active_from_history(history)
         try:
             # 草案叠加图用于判断"注释指向了停用术语"这类需要本体语境的资格
-            turtle, _ = self._ontology_for_draft(project_id, draft)
+            turtle = None if base is None else self._apply_active_overlay(base, operations)
         except ValueError:
             turtle = None
         report = draft.get('validation_report') or {}
-        _, decision_rows = self._history(project_id, draft_id)
         decisions = {
             row['operation_id']: row
             for row in self._effective_decisions(decision_rows)}
@@ -544,19 +556,20 @@ class DraftReviewPublishMixin:
         elif draft['base_ontology_id'] != latest:
             add('base_outdated', '草案基线已不是项目当前本体版本',
                 remediation='重新基线（rebase）并重新校验')
+        source_snapshot = None
         if not editing and (draft['source_kind'] in {'discovery', 'candidate'}
                             or (draft.get('source_context') or {}).get('intake_bindings')):
             try:
-                self._source_snapshot(project_id, draft)
+                source_snapshot = self._source_snapshot(project_id, draft)
             except StaleSource as exc:
                 add('stale_source', str(exc) or '来源快照已变化',
                     remediation='刷新来源快照并重新校验')
-        operations = self._active_operations(project_id, draft_id)
+        history, decision_rows = self._history(project_id, draft_id)
+        operations = self._active_from_history(history)
         if not operations and not revert_from:
             # 回退草案没有操作是正常的（它的内容就是那一版），别在这里报"没有有效变更"。
             add('no_operation', '草案没有有效变更',
                 remediation='补充变更或关闭草案')
-        _, decision_rows = self._history(project_id, draft_id)
         decisions = {
             row['operation_id']: row
             for row in self._effective_decisions(decision_rows)}
@@ -578,7 +591,7 @@ class DraftReviewPublishMixin:
                 == operation['fingerprint'])]
         if operations and not pending and not approved:
             add('no_approval', '没有任何变更被收下',
-                remediation='至少收下一条变更，或关闭草案')
+                remediation='退回继续编辑后重新提交，或关闭草案')
         fingerprint = draft.get('validation_fingerprint')
         report = None
         if editing:
@@ -593,7 +606,8 @@ class DraftReviewPublishMixin:
                 severity='info', remediation='完成变更审核后读取完整发布清单')
         else:
             try:
-                report, fingerprint, _ = self._compute_validation(project_id, draft)
+                report, fingerprint, _ = self._compute_validation(
+                    project_id, draft, operations=operations, source_snapshot=source_snapshot)
             except Exception as exc:  # 防御性边界：校验本身不可用时也不能抛给前端
                 add('validation_unavailable', '无法计算校验快照：%s' % exc,
                     remediation='修复本体/数据问题后重试')
@@ -612,7 +626,7 @@ class DraftReviewPublishMixin:
                     '发布前需要确认校验警告：' + ', '.join(warning_codes),
                     severity='warning',
                     remediation='在发布面板逐项勾选确认')
-        if approved and report is not None and not (report.get('errors') or []):
+        if approved and len(approved) < len(operations) and report is not None and not report['errors']:
             try:
                 apply_operations(
                     self._base_turtle(project_id, draft['base_ontology_id']),
@@ -667,6 +681,8 @@ class DraftReviewPublishMixin:
         actor = _text(actor, 'actor')
         if action not in {'approve', 'reject', 'request_changes'}:
             raise ValueError('unsupported definition decision action')
+        # The nested _decide also validates under this outer transaction.
+        quality_engine = self._prepare_quality_engine()
         with self.repository.unit_of_work():
             draft = self.store.get(project_id, draft_id)
             self._assert_revision(draft, expected_revision)
@@ -677,7 +693,7 @@ class DraftReviewPublishMixin:
                 expected_ontology_id=expected_ontology_id)
             self._require_validation(
                 project_id, draft, validation_fingerprint,
-                acknowledged_warning_codes, allow_errors=True)
+                acknowledged_warning_codes, allow_errors=True, quality_engine=quality_engine)
             operations = [
                 operation for operation in self._active_operations(project_id, draft_id)
                 if operation.get('target_iri') == target_iri]
@@ -704,7 +720,7 @@ class DraftReviewPublishMixin:
                 updated = self._decide(
                     project_id, draft_id, expected_revision, expected_ontology_id,
                     validation_fingerprint, decisions, acknowledged_warning_codes,
-                    actor, trusted_definition=True)
+                    actor, trusted_definition=True, quality_engine=quality_engine)
             else:
                 updated = self._preview(project_id, draft)
             return {'draft': updated, 'definition': {
@@ -732,9 +748,10 @@ class DraftReviewPublishMixin:
         所以走不到批量写入。
         """
         plan = self.review_plan(project_id, draft_id)
-        pending = [item for item in plan['items'] if item.get('decision') is None]
-        target = [item for item in pending if item.get('auto_approvable')]
-        skipped = [item for item in pending if item not in target]
+        target, skipped = [], []
+        for item in plan['items']:
+            if item.get('decision') is None:
+                (target if item.get('auto_approvable') else skipped).append(item)
         reasons = {}
         for item in skipped:
             code = (item.get('reason_codes') or ['requires_review'])[0]

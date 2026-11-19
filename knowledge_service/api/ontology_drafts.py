@@ -29,6 +29,7 @@ class DraftCreate(_Request):
     title: str
     source_context: dict[str, Any] = Field(default_factory=dict)
     summary: str = ''
+    initial_command: dict[str, Any] | None = None
 
 
 class RevisionRequest(_Request):
@@ -93,12 +94,17 @@ def install(app, service):
     @router.post('', status_code=201)
     def create(p: str, request: DraftCreate, http_request: Request,
                view: DraftResponseView = Query('full')):
-        result = drafts.create(
-            p, request.base_ontology_id, request.source_kind,
-            request.title, audit_actor(http_request),
-            source_context={**request.source_context,
-                            'audit_identity': audit_identity(http_request)},
-            summary=request.summary)
+        args = (p, request.base_ontology_id, request.source_kind,
+                request.title, audit_actor(http_request))
+        options = {
+            'source_context': {**request.source_context,
+                               'audit_identity': audit_identity(http_request)},
+            'summary': request.summary,
+        }
+        if request.initial_command is None:
+            result = drafts.create(*args, **options)
+        else:
+            result = drafts.create_with_command(*args, **options, command=request.initial_command)
         return drafts.project_response(result, view=view)
 
     @router.get('')

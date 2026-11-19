@@ -279,8 +279,12 @@
       if(!mindmapView){mindmapView=EntityMindmapView.create({chart:wb.tree,host:get('mindmap-canvas'),
         summary:get('mindmap-summary'),empty:get('mindmap-empty'),zoomLabel:get('mindmap-zoom-level'),
         buttons:{in:get('mindmap-zoom-in'),out:get('mindmap-zoom-out'),reset:get('mindmap-reset-view')},
-        onInspect:row=>window.EntityAttributePanel?.open({entity:row,projectId:current,
-          scope:{...window.WorkspaceContext?.read(current,'search')||scope(),...ontologyScope()}}),
+        onInspect:row=>{
+          const projectId=current,accepts=()=>current===projectId;
+          window.EntityAttributePanel?.open({entity:row,projectId,accepts,
+            scope:{...window.WorkspaceContext?.read(projectId,'search')||scope(),...ontologyScope()},
+            onLocateLedger:id=>{if(accepts())return window.focusLedgerRecord?.({id,kind:'entity'});}});
+        },
         onHover:row=>window.EntityAttributePanel?.hoverHtml(row,{projectId:current,
           scope:{...window.WorkspaceContext?.read(current,'search')||scope(),...ontologyScope()}}),
         labelOf,colorFor:type=>GraphPalette.colorFor(type)});
@@ -291,7 +295,11 @@
     }});
   window.openEntityMindmap=row=>{mindmapView?.clear();return mindmap.open(row,get('mindmap-depth').value).catch(error=>status(error.message,true));};
   act('draw-mindmap',()=>{mindmapView?.clear();return mindmap.draw(select.value,get('mindmap-depth').value);});
-  select.onchange=()=>{ui.mindmapRootId=select.value;mindmap.invalidate();mindmapView?.clear();};
+  select.onchange=()=>{
+    ui.mindmapRootId=select.value;mindmap.invalidate();
+    if(select.value)return get('draw-mindmap').onclick();
+    mindmapView?.clear();
+  };
   function choices(){
     for(const [selectId,filterId] of [['mindmap-root','mindmap-filter'],['graph-entity-choice','graph-entity-filter']]){
       const element=get(selectId),previous=element.value;
@@ -307,7 +315,7 @@
       // 同名同类型重复实体显示来源文档，方便区分（比 ID 更友好）
       const counts=new Map();
       rows.forEach(r=>{const key=r.text+'|'+labelOf(r.type);counts.set(key,(counts.get(key)||0)+1);});
-      element.innerHTML='<option value="">'+(selectId==='graph-entity-choice'?'选择实体':'选择根实体')+'</option>'+rows.map(r=>{const key=r.text+'|'+labelOf(r.type);const dup=(counts.get(key)||0)>1;const src=r.source?(' · '+String(r.source).replace(/\.(md|txt|docx?)$/i,'').slice(0,16)):'';return `<option value="${esc(r.id)}" title="${esc(term(r.type))}">${esc(r.text)} · ${esc(labelOf(r.type))}${dup?esc(src):''}</option>`;}).join('');
+      element.innerHTML='<option value="">'+(selectId==='graph-entity-choice'?'选择实体':'选择根实体')+'</option>'+rows.map(r=>{const key=r.text+'|'+labelOf(r.type);const dup=(counts.get(key)||0)>1;const src=r.source?(' · '+String(r.source).replace(/\.(md|txt|docx?)$/i,'').slice(0,16)):'';return `<option value="${esc(r.id)}" title="${esc(term(r.type))}">${esc(r.text)} · ${esc(labelOf(r.type))}${dup?esc(src+(selectId==='mindmap-root'?' · ID '+r.id:'')):''}</option>`;}).join('');
       if(rows.some(r=>r.id===committedId))element.value=committedId;
       else if(rows.some(r=>r.id===previous))element.value=previous;
       if(selectId==='graph-entity-choice'&&pendingEntityId&&element.value!==pendingEntityId)invalidatePendingDetail();
@@ -428,7 +436,13 @@
     }
     if(row.kind==='attribute')return window.openKnowledgeRecord({id:row.subject_id,kind:'entity',projectId:project,scope:effective,view,hops});
     if(!['entity','relation'].includes(row.kind))throw Error('当前记录没有可显示的正式图谱对象');
-    window.suppressNextAutoGraph?.();if(get('tab-search').classList.contains('hidden'))window.KnowledgeTabs.open('search');
+    window.suppressNextAutoGraph?.();
+    if(get('tab-search').classList.contains('hidden')){
+      // A linked record may have kept its ID but changed endpoints while the graph was hidden.
+      // Don't reveal a stale inspector between opening the page and drawing the new record.
+      const inspector=get('graph-detail');inspector.textContent='正在定位知识记录…';delete inspector.dataset.recordId;
+      window.KnowledgeTabs.open('search');
+    }
     if(!isCurrent())return null;
     const context={projectId:project,scope:effective};
     if(!localIntent&&window.FullGraphView?.hasRecord?.(row,context)){
@@ -1264,7 +1278,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
    .then(()=>projects()).then(()=>{const saved=sessionStorage.getItem('knowledge-project');if(saved&&[...get('project').options].some(o=>o.value===saved))get('project').value=saved;else if(get('project').options.length>1)get('project').selectedIndex=1;if(get('project').value)get('project').onchange();}).catch(e=>status(e.message,true));
 })();
 
-/* Open ontology discovery: schema-free candidates stay separate until a draft is published. */
+/* Upload mode selector and extraction guidance. */
 (()=>{
   const get=id=>document.getElementById(id);
   const oldToggle=get('extract'),mode=document.createElement('select');mode.id='extraction-mode';
@@ -1278,7 +1292,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
   else{oldToggle.closest('label').before(modeLabel,help);}
   window.IngestOntology.mount(mode,help);
   oldToggle.closest('label').classList.add('hidden');
-  const descriptions={ontology:'按当前项目本体抽取、校验和实体融合，合法知识进入正式图谱。',discovery:'不要求预设本体；Semantica 自由抽取并持续累计候选，不直接写入正式图谱。',documents:'只保存原文、切片和向量，不抽取实体、关系或属性。'};
+  const descriptions={ontology:'按当前项目本体抽取、校验和实体融合，合法知识进入正式图谱。',discovery:'从资料生成待核对候选。抽取时只参考已发布的类型名称，项目只有草案时也可运行。确认复用或审核发布后，符合条件的候选可入图。',documents:'只保存原文、切片和向量，不抽取实体、关系或属性。'};
   mode.onchange=()=>{
     help.textContent=descriptions[mode.value];oldToggle.checked=mode.value!=='documents';
     window.IngestOntology.refresh();

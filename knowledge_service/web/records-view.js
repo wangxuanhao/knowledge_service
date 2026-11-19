@@ -15,7 +15,7 @@
   let ontology=null,assertions=null,operations=[],duplicates=null;
   // 图谱里点「在台账查看」→ 跳回台账定位到那一行。跨页签跳转要先记下目标，等 load() 把
   // 数据取回来再滚动高亮（rows 在 load 完成前是空的，立刻定位会扑空）。
-  let pendingLedgerFocus=null;
+  let pendingLedgerFocus=null,exactLedgerId=null;
   const node=(tag,cls,text)=>{const item=document.createElement(tag);if(cls)item.className=cls;if(text!==undefined)item.textContent=text;return item;};
   const libraryPanel=host.closest('.panel'),libraryDetails=document.createElement('details'),librarySummary=document.createElement('summary');
   libraryDetails.className='record-section record-library-section';libraryDetails.open=true;
@@ -304,6 +304,7 @@
   }
   function setView(key){
     if(!VIEW_ORDER.includes(key)){syncKindSelect();return;}
+    if(key!==view&&exactLedgerId){pendingLedgerFocus=exactLedgerId=null;$('record-search').value='';}
     view=key;syncKindSelect();renderTabs();return loadPage();
   }
   function actionsCell(row,index){
@@ -392,6 +393,13 @@
   const excerptObserver=window.ResizeObserver?new window.ResizeObserver(syncExcerptVisibility):null;
   excerptObserver?.observe(host);
   function cells(row){
+    const entityLink=id=>{
+      if(!id)return node('span',null,'未关联实体');
+      const link=node('button','secondary',nameOf(id));link.type='button';
+      link.dataset.ledgerEntity=id;link.title='在台账查看实体：'+id;
+      link.onclick=()=>window.focusLedgerRecord({id,kind:'entity'});
+      return link;
+    };
     const ownershipCell=()=>{const cell=node('td');const label=node('b',null,ownership(row));label.title=ownershipDetail(row);cell.append(label);return cell;};
     const supportCell=()=>{const cell=node('td'),summary=supportBreakdown(row);
       if(summary===null){cell.textContent=assertions?'关联断言读取失败；可刷新重试':'读取中…';return cell;}
@@ -433,14 +441,15 @@
       first.append(detail);
       const badge=pendingBadge(row);if(badge)first.append(badge);
       const subject=node('td');
-      const subjectText=node('div','record-excerpt');subjectText.append(node('b',null,nameOf(row.subject_id)));
+      const subjectText=node('div','record-excerpt');subjectText.append(entityLink(row.subject_id));
       appendExcerpt(subject,subjectText);subject.append(node('small',null,'所属实体'));
       return [first,subject,ownershipCell(),versionCell(),supportCell()];
     }
     const first=node('td');
     if(view==='relation'){
       const excerpt=node('div','record-excerpt');
-      excerpt.innerHTML=`<b>${esc(nameOf(row.subject_id))}</b> —[${typeHint(row.type)}]→ <b>${esc(nameOf(row.object_id))}</b>`;
+      const predicate=node('span');predicate.innerHTML=typeHint(row.type);
+      excerpt.append(entityLink(row.subject_id),' —[',predicate,']→ ',entityLink(row.object_id));
       appendExcerpt(first,excerpt);
       const detail=document.createElement('details');detail.append(node('summary',null,'原文上下文'),node('small',null,String(row.text||'')));
       first.append(detail);
@@ -543,7 +552,8 @@
         +'它们能查、能用，只是类型还是旧结构。要不要搬，去「本体建模层」发布新版本那一步处理（迁移可整批撤销）。'));
   }
 
-  const readCriteria=()=>({...scope(),...versionFields(),kinds:[view],query:$('record-search').value.trim()});
+  const readCriteria=()=>({...scope(),...versionFields(),kinds:[view],...(exactLedgerId
+    ? {record_ids:[exactLedgerId]} : {query:$('record-search').value.trim()})});
   function guard(serial,p,stamp,ticket){return visible()&&serial===request&&p===current&&stamp===JSON.stringify(readCriteria())
     &&(!ticket||window.WorkspaceContext.accepts(ticket,p,'records'));}
   async function pageAssertions(p,visible,accepts){
@@ -586,13 +596,15 @@
       if(!direction){pageCounts.clear();rows=[];assertions=null;host.innerHTML='<div class="record-empty" role="status">正在读取服务端分页…</div>';}
       const result=await (direction==='next'?pager.next():direction==='previous'?pager.previous():pager.load(criteria));
       if(!guard(serial,p,stamp,ticket)||!result)return;
-      rows=result.records;const {kinds,query,...recordScope}=criteria;loadedScope=JSON.parse(JSON.stringify(recordScope));total=result.total;page=result.page;pageCounts.set(view,total);assertions=null;
+      rows=result.records;const {kinds,query,record_ids,...recordScope}=criteria;loadedScope=JSON.parse(JSON.stringify(recordScope));total=result.total;page=result.page;pageCounts.set(view,total);assertions=null;
+      // Exact navigation pins a globally unique record ID to its known kind.
+      if(record_ids)for(const kind of VIEW_ORDER)if(kind!==view)pageCounts.set(kind,0);
       // Keep only bounded visible records in the ledger cache; other readers may own node caches separately.
       wb.records=new Map(rows.map(row=>[row.id,row]));loading=false;renderTabs();syncKindSelect();render();
       const accepts=()=>guard(serial,p,stamp,ticket);
       if(!accepts())return;
       const versionsRequest=!ontology?api('/api/projects/'+encodeURIComponent(p)+'/ontologies',undefined,'GET').catch(()=>null):Promise.resolve(null);
-      const countsRequest=direction?Promise.resolve([]):Promise.all(VIEW_ORDER.filter(kind=>kind!==view).map(async kind=>{
+      const countsRequest=direction||record_ids?Promise.resolve([]):Promise.all(VIEW_ORDER.filter(kind=>kind!==view).map(async kind=>{
         try{const count=await api('/api/projects/'+encodeURIComponent(p)+'/records/page',{...criteria,kinds:[kind],cursor:null,limit:1});return [kind,count.total];}catch{return [kind,null];}
       }));
       const [versions,lineage,counts,references]=await Promise.all([versionsRequest,pageAssertions(p,rows,accepts),countsRequest,pageReferences(p,rows,criteria,accepts)]);
@@ -637,7 +649,7 @@
     const id=typeof record==='string'?record:record?.id;if(!id)return;
     const p=current;let kind=typeof record==='string'?null:record.kind;
     if(!kind){try{const row=await api('/api/projects/'+encodeURIComponent(p)+'/records/'+encodeURIComponent(id),undefined,'GET');if(p!==current)return;kind=row.kind;}catch(error){status('定位失败：'+error.message,true);return;}}
-    if(!VIEW_ORDER.includes(kind))return;view=kind;syncKindSelect();renderTabs();pendingLedgerFocus=id;
+    if(!VIEW_ORDER.includes(kind))return;view=kind;syncKindSelect();renderTabs();pendingLedgerFocus=exactLedgerId=id;
     $('record-search').value=id;document.querySelector('[data-tab="records"]')?.click();
   };
   function locateLedgerRow(id){
@@ -646,7 +658,7 @@
       tr.scrollIntoView({block:'center',behavior:'smooth'});tr.classList.add('ledger-row-located');window.setTimeout(()=>tr.classList.remove('ledger-row-located'),1800);}));
   }
   $('record-search-submit').onclick=()=>loadPage();
-  $('record-search').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>void loadPage(),350);};
+  $('record-search').oninput=()=>{pendingLedgerFocus=exactLedgerId=null;clearTimeout(searchTimer);searchTimer=setTimeout(()=>void loadPage(),350);};
   $('record-search').onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();void loadPage();}};
   $('record-kind').onchange=()=>setView($('record-kind').value);
   $('record-ontology').onchange=()=>{
@@ -671,7 +683,7 @@
     // before the old response finishes or navigation without a menu click.
     request++;pager?.invalidate();clearTimeout(searchTimer);loading=false;host.setAttribute('aria-busy','false');
   });
-  $('project').addEventListener('change',()=>{request++;pager?.invalidate();clearTimeout(searchTimer);rows=[];total=0;ontology=null;assertions=null;operations=[];duplicates=null;pendingLedgerFocus=null;reclassifyPlan=undefined;$('record-search').value='';syncKindSelect();if(!tab.classList.contains('hidden'))load();});
+  $('project').addEventListener('change',()=>{request++;pager?.invalidate();clearTimeout(searchTimer);rows=[];total=0;ontology=null;assertions=null;operations=[];duplicates=null;pendingLedgerFocus=exactLedgerId=null;reclassifyPlan=undefined;$('record-search').value='';syncKindSelect();if(!tab.classList.contains('hidden'))load();});
   window.refreshKnowledgeLedger=async detail=>visible()?(await (detail?.preserveGovernance?loadPage():load()))!==false:true;
   document.addEventListener('records:created',event=>{if(!window.KnowledgeChanges&&event.detail?.projectId===current&&!tab.classList.contains('hidden'))void loadPage();});
   document.addEventListener('workspace:scope-changed',event=>{

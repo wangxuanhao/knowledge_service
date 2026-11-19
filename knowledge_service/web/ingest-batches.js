@@ -32,7 +32,7 @@
   const helpers={pool,retryLabels,failureCsv,assertSessionSettings,queueLease};
   if(typeof module!=='undefined')module.exports=helpers;
   if(typeof window==='undefined')return;
-  const states={draft:'待上传',uploading:'上传中',staged:'已上传',queued:'排队',running:'处理中',parsing:'解析',parse:'解析',chunking:'切片',extracting:'抽取',extraction:'抽取',merging:'融合',validating:'校验',committing:'写入',commit:'写入',completed:'完成',completed_with_errors:'部分失败',retry_wait:'等待自动重试',needs_attention:'需要处理',interrupted:'已中断',paused:'已暂停',skipped:'已跳过',cancelled:'已取消'};
+  const states={draft:'待上传',uploading:'上传中',staged:'已上传',pending:'排队',queued:'排队',running:'处理中',parsing:'解析',parse:'解析',ocr:'图像识别',asr:'语音转写',chunking:'切片',extracting:'抽取',extraction:'抽取',merging:'融合',validating:'校验',committing:'写入',commit:'写入',completed:'完成',completed_with_errors:'部分失败',retry_wait:'等待自动重试',needs_attention:'需要处理',interrupted:'已中断',paused:'已暂停',skipped:'已跳过',cancelled:'已取消'};
   const pauseReasons={llm_timeout:'多个文件遇到模型超时，检查模型连接后继续。',llm_rate_limited:'模型持续限流，稍后检查连接并继续。',llm_unavailable:'模型服务暂时不可用，检查服务后继续。',llm_auth_failed:'模型认证失败，请修正服务配置后继续。',llm_model_not_found:'配置的模型不存在，请修正配置后继续。'};
   const root=document.getElementById('ingest-batches');
   let capabilities=null,capabilityError=null,capabilityRead=null;
@@ -122,7 +122,7 @@
     detail.append(node('h4','批次操作','batch-controls-heading'),parallel,error,actions,fileToolbar,rows,pages);
     if(![...(listHost?.children||[])].includes(card))listHost?.prepend(card);
     function requireWriter(){if(project!==currentProject())throw Error('项目已变化，请重新打开当前项目批次');if(!window.Auth?.isAdmin?.())throw Error('只有管理员可以更改处理批次');}
-    async function action(name,body={}){requireWriter();await request(url+'/'+name,body);await refresh();}
+    async function action(name,body={}){requireWriter();await request(url+'/'+name,body);await reload();}
     const start=button('开始处理',()=>action('start')),pause=button('暂停',()=>action('pause')),resume=button('继续',()=>action('resume'));
     const retry=button('重试全部失败',()=>action('retry-failed',{mode:'resume_checkpoint'})),cancel=button('取消未开始文件',()=>action('cancel')),download=button('下载失败明细',async()=>{
       allFailures=[];let c='';do{const r=await request(url+'/items?status=needs_attention&limit=100'+(c?'&cursor='+encodeURIComponent(c):''));allFailures.push(...(r.items||[]));c=r.next_cursor;}while(c);
@@ -135,7 +135,7 @@
     });review.classList.add('admin-only');review.hidden=batch.settings?.extraction_mode!=='discovery';
     actions.append(start,pause,resume,retry,cancel,download,review);
     for(const control of [start,pause,resume,retry,cancel])control.classList.add('admin-only');
-    filter.onchange=()=>{cursor='';refresh();};
+    filter.onchange=()=>{cursor='';reload();};
     const visible=()=>active&&expanded&&project===currentProject()&&batchesVisible();
     function refresh(){
       clearTimeout(timer);
@@ -146,9 +146,10 @@
       const accepts=()=>read===inFlight&&read.generation===generation&&visible();
       inFlight=read;
       read.promise=(async()=>{try{
-        const detail=await request(url,undefined,{},read.controller?.signal);
+        const signal=read.controller?.signal;
+        const detail=await request(url,undefined,{},signal);
         if(!accepts())return;
-        const list=await request(url+'/items?limit=50&status='+encodeURIComponent(filter.value)+(cursor?'&cursor='+encodeURIComponent(cursor):''),undefined,{},read.controller?.signal);
+        const list=await request(url+'/items?limit=50&status='+encodeURIComponent(filter.value)+(cursor?'&cursor='+encodeURIComponent(cursor):''),undefined,{},signal);
         if(!accepts())return;
         batch=detail;
         view.update(batch);
@@ -157,18 +158,21 @@
         review.hidden=batch.settings?.extraction_mode!=='discovery';review.disabled=!(counts.completed||counts.succeeded);
         parallel.textContent='并发设置：'+(batch.requested_concurrency==='auto'?'自动推荐':batch.requested_concurrency)+' · 当前并发 '+batch.effective_concurrency;
         const failures=(counts.needs_attention||0)+(counts.interrupted||0);
-        const pending=['draft','uploading','staged','queued','retry_wait'].some(s=>counts[s]>0);
+        const pending=['draft','uploading','staged','pending','queued','retry_wait'].some(s=>counts[s]>0);
         for(const [b,enabled] of [[start,['draft','uploading','queued'].includes(batch.status)],[pause,batch.status==='running'],[resume,batch.status==='paused'],[retry,failures>0],[cancel,pending],[download,counts.needs_attention>0]]){b.dataset.inactive=String(!enabled);b.disabled=!enabled;}
         error.textContent=batch.status==='paused'?(pauseReasons[batch.paused_reason]||batch.paused_reason||''):'';rows.replaceChildren();
         for(const item of list.items||[]){
           const row=node('article','','batch-item');row.dataset.status=item.status;
           row.append(node('strong',item.original_name),node('span',states[item.status]||item.status));
-          if(item.stage&&!item.error_code)row.append(node('p','当前阶段：'+(states[item.stage]||item.stage),'batch-file-stage'));
+          if(item.stage&&!item.error_code){
+            const percent=item.status==='running'&&Number.isFinite(item.progress)?' · '+Math.round(item.progress)+'%':'';
+            row.append(node('p','当前阶段：'+(states[item.stage]||item.stage)+percent,'batch-file-stage'));
+          }
           const rowActions=node('div','','batch-item-actions');
           if(item.source_version_id)rowActions.append(button('查看原文与 OCR',()=>{window.WorkspaceDrawers?.close({restoreFocus:false});return window.SourceReader?.open({projectId:project,versionId:item.source_version_id});}));
           if(item.error_code){const diagnostics=node('details','','batch-item-details');diagnostics.open=true;
             diagnostics.append(node('summary','错误与重试'),node('p',`${states[item.stage]||item.stage||'处理'}${item.failed_chunk_ordinal!=null?' · 切片 '+item.failed_chunk_ordinal:''} · ${item.public_error||item.error_code}`,'batch-error'),node('small','自动重试 '+(item.auto_retry_count||0)+' 次'+(item.next_retry_at?' · 下次 '+new Date(item.next_retry_at).toLocaleString():'')));
-            const tools=node('div','','batch-actions admin-only');for(const [mode,label] of Object.entries(retryLabels))tools.append(button(label,()=>{requireWriter();return request(url+'/items/'+encodeURIComponent(item.id)+'/retry',{mode}).then(refresh);}));diagnostics.append(tools);row.append(diagnostics);
+            const tools=node('div','','batch-actions admin-only');for(const [mode,label] of Object.entries(retryLabels))tools.append(button(label,()=>{requireWriter();return request(url+'/items/'+encodeURIComponent(item.id)+'/retry',{mode}).then(reload);}));diagnostics.append(tools);row.append(diagnostics);
           }
           const documentId=item.document_id||item.result?.document?.id||item.result?.document_id;
           if(item.status==='completed'&&documentId){
@@ -187,12 +191,14 @@
           if(rowActions.childElementCount)row.append(rowActions);
           rows.append(row);
         }
-        nextCursor=list.next_cursor;pages.replaceChildren();if(cursor)pages.append(button('回到首页',()=>{cursor='';return refresh();}));if(nextCursor)pages.append(button('下一页',()=>{cursor=nextCursor;return refresh();}));
+        nextCursor=list.next_cursor;pages.replaceChildren();if(cursor)pages.append(button('回到首页',()=>{cursor='';return reload();}));if(nextCursor)pages.append(button('下一页',()=>{cursor=nextCursor;return reload();}));
       }catch(e){if(accepts()&&e.name!=='AbortError')error.textContent='批次更新失败：'+(e.message==='Failed to fetch'?'无法连接服务，请检查连接后重试。':e.message);}
       finally{if(read===inFlight){inFlight=null;if(visible()&&pollingStates.has(batch.status))timer=setTimeout(refresh,2000);}}
       })();return read.promise;
     }
-    function suspend(){active=false;generation++;clearTimeout(timer);inFlight?.controller?.abort();inFlight=null;}
+    function abortRead(){generation++;clearTimeout(timer);inFlight?.controller?.abort();inFlight=null;}
+    function reload(){abortRead();return refresh();}
+    function suspend(){active=false;abortRead();}
     function hide(){suspend();card.hidden=true;}
     const control={card,refresh,get expanded(){return expanded;},
       show(){for(const other of mounted.values())if(other!==control)other.collapse();

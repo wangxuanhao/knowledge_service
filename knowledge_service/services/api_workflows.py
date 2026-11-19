@@ -50,23 +50,27 @@ class ApplicationData:
 
     def projection_status(self, project_id, projection_sync):
         """Selected-project index delivery state and active collection."""
-        from ..repository.projection_store import milvus_delivery_state
-        self.__repository.get_project(project_id)
-        cursor = self.__repository.projections.cursor(project_id, 'milvus')
-        watermark = self.__repository.projections.project_watermark(project_id)
-        state = milvus_delivery_state(cursor, projection_sync.schema_version)
-        if state in {'available', 'leased'}:
-            state = 'ready' if cursor['applied_seq'] == watermark else 'building'
-        rebuild = (cursor or {}).get('rebuild_state') or {}
+        from ..repository.projection_store import milvus_delivery_state, projection_is_ready
+        from ..utils.diagnostics import redact
+        with self.__repository.independent_read_view() as reader:
+            reader.get_project(project_id)
+            cursor = reader.projections.cursor(project_id, 'milvus')
+            watermark = reader.projections.project_watermark(project_id)
+            rebuild = (cursor or {}).get('rebuild_state') or {}
+            details = reader.projections.index_summary(project_id, rebuild.get('index_version'))
+        schema_version = projection_sync.schema_version
+        state = milvus_delivery_state(cursor, schema_version)
+        if state == 'leased':
+            state = 'building'
+        elif state == 'available':
+            state = 'ready' if projection_is_ready(watermark, cursor, schema_version) else 'building'
         adapter = projection_sync.adapters.get('milvus')
         encoder = getattr(adapter, '_encoder', None)
         if encoder and rebuild.get('embedding_model') and rebuild['embedding_model'] != encoder.identity:
             state = 'requires_rebuild'
-        details = self.__repository.projections.index_summary(project_id, rebuild.get('index_version'))
         job = details.get('job')
         if job and job['status'] in {'queued','running','retry_wait'}:
             state = 'building'
-        from ..utils.diagnostics import redact
         return {'project_id': project_id, 'state': state,
                 'last_error': redact((cursor or {}).get('last_error') or (job or {}).get('error') or ''),
                 'collection': (cursor or {}).get('active_destination'),

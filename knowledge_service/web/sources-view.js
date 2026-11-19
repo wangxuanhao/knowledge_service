@@ -133,6 +133,12 @@
     if(state==='completed'||state==='ready'||state==='succeeded')return {label:'处理完成',className:'ready',detail:'处理任务已完成；检索与派生索引状态应分别核验。'};
     return {label:'状态待核验',className:'ready',detail:'已保存原文；未获得完整处理或索引就绪状态。'};
   }
+  function platformLabel(doc){
+    const platforms=doc.metadata?.applicability?.platforms;
+    if(platforms?.mode==='all')return '全部平台';
+    if(platforms?.mode==='specific'&&Array.isArray(platforms.values))return platforms.values.join('、');
+    return '';
+  }
   function renderMeta(doc,state){
     const metadata=doc.metadata||{},parser=metadata.document_parser||'';
     const parserLabel=parser==='builtin-text'?'纯文本读取':['docling','semantica-docling'].includes(parser)?'文档转换解析':parser;
@@ -143,9 +149,20 @@
       <span class="source-meta__file">${esc(metadata.source_file||metadata.title||'已保存的资料正文')}</span>
       ${stats.length?`<span class="source-meta__stats">${esc(stats.join(' · '))}</span>`:''}
     </div>${missing?'<p class="source-meta__missing">未记录原始文件信息；可以阅读已保存正文，资料编号见下方来源信息。</p>':''}
+    <p class="source-platform"><strong>适用平台</strong> <span>${esc(platformLabel(doc)||'未配置')}</span></p>
     <div class="source-meta__mapping"><h4>资料状态</h4><p>${esc(state.detail)}</p></div>
     ${window.DocumentTemporalUI?.render(doc)||''}
     <details class="source-technical"><summary>资料标识与来源信息</summary><dl><dt>资料编号</dt><dd>${esc(doc.id)}</dd>${metadata.source_document_version_id?`<dt>原始文件版本编号</dt><dd>${esc(metadata.source_document_version_id)}</dd>`:''}${parser?`<dt>解析器</dt><dd>${esc(parser)}</dd>`:''}</dl></details>`;
+    const warnings=Array.isArray(metadata.warnings)?metadata.warnings:[];
+    const paths=[...new Set(warnings.filter(w=>w?.code==='source_asset_missing'&&w.severity==='warning')
+      .map(w=>w.path||w.message||'未记录图片路径'))];
+    if(paths.length){
+      const notice=detailNode('details',undefined,'source-asset-warning');
+      const files=detailNode('ul');
+      for(const path of paths)files.append(detailNode('li',path));
+      notice.append(detailNode('summary',`已跳过 ${paths.length} 张缺失图片`),files);
+      meta.append(notice);
+    }
   }
   function updateCounts(){
     page.querySelector('.source-filter-bar')?.setAttribute('aria-label',boundedSearch()?'本次召回资料处理状态（最多100片段）':'资料处理状态');
@@ -213,7 +230,8 @@
       const state=buildState(doc),button=document.createElement('button');button.type='button';button.className='source-item';
       button.dataset.source=String(index);button.setAttribute('aria-haspopup','dialog');button.setAttribute('aria-controls','source-detail-drawer');button.setAttribute('aria-current','false');
       const format=String(doc.metadata?.source_format||'').toLowerCase();
-      const bits=[formatLabel(doc.metadata?.source_format),doc.metadata?.source_size_bytes!=null?sizeLabel(doc.metadata.source_size_bytes):'',
+      const platform=platformLabel(doc);
+      const bits=[platform?'适用平台 '+platform:'',formatLabel(doc.metadata?.source_format),doc.metadata?.source_size_bytes!=null?sizeLabel(doc.metadata.source_size_bytes):'',
         doc.metadata?.page_count?doc.metadata.page_count+' 页':'',doc.text_length==null?'正文按需读取':doc.text_length+' 字',
         doc.derived_count!=null?'派生摘要 '+doc.derived_count+' 条':''].filter(Boolean);
       button.innerHTML=`<span class="source-item__icon source-item__icon--${esc(format||'doc')}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg></span>
@@ -285,7 +303,7 @@
       const option=detailNode('option',text);option.value=value;select.append(option);
     }
     select.value='documents';label.append(select);panel.append(label);
-    panel.append(detailNode('p','仅文档检索：重建正文切片与检索；开放发现：生成候选，不会直接发布图谱，需审核本体与确认事实；使用项目本体：按已发布的项目本体重新抽取并校验事实，未发布本体时会提示先发布。'));
+    panel.append(detailNode('p','仅文档检索会重建正文切片与检索。开放发现生成待核对候选，可在核对后确认复用正式术语，或把新定义加入草案审核发布。使用项目本体需要先发布本体，再按正式定义重新抽取并校验事实。'));
     panel.append(detailNode('p','重新处理会更新当前切片与候选；新候选仍需审核。模式切换不会直接清空图谱，已审核事实保留原来源版本和审核历史。'));
     const status=detailNode('p','','source-reprocess-status');status.setAttribute('role','status');
     const start=detailNode('button','创建处理任务','secondary');start.type='button';panel.append(start,status);

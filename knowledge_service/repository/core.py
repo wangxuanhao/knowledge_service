@@ -277,8 +277,10 @@ class Repository:
                 + '。请先执行迁移。')
 
     def export_projection(self, project_id):
-        """一致性的权威快照，包含完整治理、来源与记录历史。"""
-        with self._transaction():
+        """Export project data from one committed SQL snapshot; no source files."""
+        # All sections must see the same committed state even when a writer
+        # commits between the records and assertion/artifact queries.
+        with self._transaction(repeatable_read_only=True, require_outermost=True):
             project = self.get_project(project_id)
             namespace = self._db.execute('SELECT value FROM service_settings WHERE key=?', ('storage_namespace',)).fetchone()[0]
             rows = self._db.execute('SELECT * FROM record_versions WHERE project_id=? ORDER BY id,version', (project_id,)).fetchall()
@@ -444,9 +446,13 @@ class Repository:
             self._transaction_state.depth = depth
 
     @contextmanager
-    def _transaction(self, *, repeatable_read_only=False, serializable=False):
+    def _transaction(self, *, repeatable_read_only=False, serializable=False,
+                     require_outermost=False):
         with self._lock, self._db.transaction_scope(), self._transaction_owner():
             if self._db.in_transaction:
+                if require_outermost:
+                    # A savepoint inherits the caller's isolation and uncommitted writes.
+                    raise RuntimeError('This operation requires a top-level transaction')
                 if serializable and not getattr(self._transaction_state, 'serializable', False):
                     raise RuntimeError(
                         'serializable transaction must be the outer transaction')
@@ -2216,10 +2222,11 @@ class Repository:
                             or self._publish_fingerprint(run) != child['expected_run_fingerprint']
                             or current_versions != [tuple(x) for x in child['expected_record_versions']]):
                         raise OntologyPublicationConflict('stale_source', '复合来源依赖已变化')
-            formal = self._bind_published_ontology_id(plan['formal_write_plan'], ontology['id'])
+            formal = plan['formal_write_plan']
             from .formal_write_executor import FormalWriteExecutor
             operation = self._reserve_record_operation(prepared['project_id'])
-            written = FormalWriteExecutor(self).execute(formal, operation_context=operation)
+            written = FormalWriteExecutor(self).execute(
+                formal, operation_context=operation, publication_id=ontology['id'])
             record_ids = [row['id'] for row in written['accepted_records']]
             for entry in entries:
                 context = {**(draft.get('source_context') or {}),
@@ -2474,6 +2481,20 @@ class Repository:
         self.get_project(project_id)
         with self._lock:
             return self._ordered_ontology_versions(project_id)
+
+    def ontology_relation_terms(self, project_id, *, ontology_ids=None, known_at=None):
+        """Read the predicate vocabulary from the selected published versions."""
+        statement = "SELECT (summary::jsonb->'relations')::text AS relations FROM ontologies WHERE project_id=?"
+        params = [project_id]
+        if ontology_ids is not None:
+            statement += ' AND id=ANY(?::text[])'
+            params.append(list(ontology_ids))
+        if known_at is not None:
+            statement += ' AND created_at<=?'
+            params.append(normalize_time(known_at))
+        with self._lock:
+            rows = self._db.execute(statement, params).fetchall()
+        return [term for row in rows for term in (json.loads(row['relations'] or 'null') or [])]
 
     def get_ontology(self, project_id, ontology_id=None):
         """读取单个本体版本：只取目标行，版本号仍按全项目发布顺序解析。

@@ -98,8 +98,10 @@ def test_dashboard_historical_assertion_decisions_and_record_revisions(tmp_path)
 def test_source_directory_pages_metadata_and_counts_all_states(tmp_path, monkeypatch):
     repo = Repository(tmp_path/'sources')
     p = repo.create_project('sources')['id']
+    platforms = {'mode':'specific','values':['美团']}
     for id, status in [('a','completed'), ('b','failed'), ('c','processing')]:
-        record(repo,p,id,metadata={'status':status,'title':id,'discovery_candidates':[{'text':'large'}]})
+        record(repo,p,id,metadata={'status':status,'title':id,'discovery_candidates':[{'text':'large'}],
+                                  'applicability':{'platforms':platforms}})
     service=KnowledgeService(repo,HashingEncoder())
     monkeypatch.setattr(service,'scoped',lambda *a,**k:pytest.fail('directory scanned whole project'))
     explorer=Explorer(service)
@@ -108,6 +110,10 @@ def test_source_directory_pages_metadata_and_counts_all_states(tmp_path, monkeyp
     assert first['counts']=={'all':3,'ready':1,'failed':1,'processing':1}
     assert 'text' not in first['documents'][0]
     assert 'discovery_candidates' not in first['documents'][0]['metadata']
+    assert first['documents'][0]['metadata']['applicability']['platforms']==platforms
+    from knowledge_service.repository.page_reads import PageReads
+    hydrated = PageReads(repo).source_summaries(p, {}, ['a'])
+    assert hydrated[0]['metadata']['applicability']['platforms']==platforms
     second=explorer.sources(p,{},limit=1,summary_only=True,cursor=first['next_cursor'])
     assert second['documents'][0]['id']!=first['documents'][0]['id']
     failed=explorer.sources(p,{},summary_only=True,state='failed')

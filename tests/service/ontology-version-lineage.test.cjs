@@ -46,7 +46,7 @@ function fixture({ actions = false, syncActions } = {}) {
     api: async (url, body, method = 'GET') => {
       calls.push({ url, body, method });
       if (url.endsWith('/ontologies')) return new Promise(resolve => requests.push({ url, resolve }));
-      if (url.endsWith('/validate')) return new Promise(resolve => { context.finishValidation = resolve; });
+      if (url.endsWith('/submit')) return new Promise(resolve => { context.finishValidation = resolve; });
       if (url.endsWith('/decisions/batch-approve')) return { draft: state.draft, batch: {} };
       return method === 'GET' ? {} : state.draft;
     },
@@ -182,13 +182,14 @@ test('workspace receives the actual controls after mount, background gates and d
   assert.equal(f.footer.children[0], observed[1]);
   const review = f.find('校验并审核'), pending = review.listeners.click();
   assert.ok(observed.length >= 3, 'beginAction renders directly and must replace the footer controls');
-  assert.equal(all(f.footer).find(node => node.tag === 'button' && node.textContent === '正在校验草案…').disabled, true);
+  assert.equal(all(f.footer).find(node => node.tag === 'button' && node.textContent === '正在校验并提交草案…').disabled, true);
   assert.equal(f.actionHost.attrs['aria-busy'], 'true');
   f.context.finishValidation(f.state.draft); await pending;
   assert.equal(f.actionHost.attrs['aria-busy'], 'false');
   assert.ok(f.find('校验并审核'));
   assert.equal(all(f.root).filter(node => node.className === 'om-ab-actions').length, 1);
-  assert.equal(f.calls.filter(call => call.url.endsWith('/validate')).length, 1);
+  assert.equal(f.calls.filter(call => call.url.endsWith('/submit')).length, 1);
+  assert.ok(!f.calls.some(call => call.url.endsWith('/validate')));
   f.requests[0].resolve({ versions: [] }); await Promise.resolve(); await Promise.resolve();
 });
 

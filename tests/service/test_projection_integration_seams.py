@@ -5,13 +5,13 @@ import threading
 import pytest
 
 from knowledge_service.repository.core import Repository
-from knowledge_service.repository.projection_store import ProjectionStore
+
 from knowledge_service.domain.search_filter_catalog import default_catalog
 from knowledge_service.domain.search_projection import ProjectionInput, build_projection
 from knowledge_service.repository.scoped_reads import ScopedReads
 from knowledge_service.services.projection_runtime import MilvusProjectionAdapter
 from knowledge_service.services.projection_sync import ProjectionSync
-from knowledge_service.services.retrieval import RetrievalEngine
+from knowledge_service.services.retrieval import PROJECTION_SCHEMA_VERSIONS, RetrievalEngine
 from test_projection_sync import MemoryMilvus
 
 
@@ -92,6 +92,8 @@ class Encoder:
 
 
 class RecordingMilvus(MemoryMilvus):
+    """In-memory projection sink and hit stub, not Milvus ranking/filtering."""
+
     available = True
     dim = Encoder.dimension
 
@@ -106,22 +108,35 @@ class RecordingMilvus(MemoryMilvus):
                 if key[:2] == (project_id, index_version) and row['kind'] in kinds][:k]
 
 
-def active_search_system(tmp_path):
+MILVUS_SCHEMA_VERSION = PROJECTION_SCHEMA_VERSIONS['milvus']
+
+
+def active_search_system(tmp_path, *, schema_version=MILVUS_SCHEMA_VERSION):
     repository = Repository(tmp_path / 'ready-search')
     project = repository.create_project('ready search')['id']
     milvus = RecordingMilvus()
     encoder = Encoder()
     sync = ProjectionSync(repository.projections, {'milvus': MilvusProjectionAdapter(
-        milvus, encoder=encoder)}, schema_version=3)
+        milvus, encoder=encoder)}, schema_version=schema_version)
     built = sync.rebuild(project, 'milvus')
     assert built['indexed'] == built['applied_seq'] == 0
-    index = repository.projections.search_index(project, 3)
+    index = repository.projections.search_index(project, schema_version)
     assert (index['embedding_model'], index['dim'], index['watermark']) == ('test-v1', 2, 0)
     return repository, project, milvus, encoder, sync
 
 
 def reject_broad_query(*args, **kwargs):
     raise AssertionError('current native retrieval must use bounded authority hydration')
+
+
+def test_old_milvus_schema_requires_rebuild_before_search(tmp_path):
+    repository, project, milvus, encoder, _ = active_search_system(
+        tmp_path, schema_version=MILVUS_SCHEMA_VERSION - 1)
+    engine = RetrievalEngine(repository, encoder, milvus)
+
+    with pytest.raises(RuntimeError, match='requires_rebuild'):
+        engine.search(project, '规则', retrieval_mode='semantic', content_channels=['chunk'])
+    assert milvus.calls == encoder.encoded == []
 
 
 def test_new_authoritative_write_blocks_milvus_until_projection_catches_up(tmp_path, monkeypatch):
@@ -141,7 +156,7 @@ def test_new_authoritative_write_blocks_milvus_until_projection_catches_up(tmp_p
     assert len(milvus.calls) == 1
     assert ready['_backend'] == 'milvus'
     assert ready['hits'][0]['version_id'] == first['version_id']
-    assert repository.projection_ready(project, 'milvus', 3)
+    assert repository.projection_ready(project, 'milvus', MILVUS_SCHEMA_VERSION)
     repository.put_record(project, {'id': 'rule', 'kind': 'chunk', 'text': 'new source'},
                           expected_version=first['version'])
     with pytest.raises(RuntimeError, match='追平'):
@@ -180,6 +195,7 @@ def test_current_keyword_rejects_stale_projection_and_reapplies_authority_id_sco
     monkeypatch.setattr(ScopedReads, 'by_ids', hydrate)
     monkeypatch.setattr(milvus, 'search', offered)
     only_authority = {'field': 'id', 'op': 'eq', 'value': 'authority'}
+    encoded_before_search = encoder.encoded.copy()
 
     result = engine.search(
         project, '规则', retrieval_mode='keyword', content_channels=['chunk'],
@@ -188,6 +204,8 @@ def test_current_keyword_rejects_stale_projection_and_reapplies_authority_id_sco
     assert [row['id'] for row in result['hits']] == ['authority']
     assert result['hits'][0]['version_id'] == authority['version_id']
     assert len(milvus.calls) == len(hydrated) == 1
+    assert milvus.calls[0][2]['retrieval_mode'] == 'keyword'
+    assert encoder.encoded == encoded_before_search
     assert hydrated[0][0] == project
     assert hydrated[0][1]['filters'] == only_authority
     assert hydrated[0][2:] == (['authority', 'outside-explicit-scope'], ['chunk'])
@@ -381,86 +399,44 @@ def test_background_cleanup_drain_acks_success_and_releases_failure():
     assert repository.released[0][:4] == ('p2', 'neo4j', 'worker', 'two')
 
 
-def test_repository_put_keeps_vectors_out_of_pg_and_encodes_at_projection_boundary():
-    class OutboxDatabase:
-        in_transaction = True
-
-        def __init__(self):
-            self.record_payload = None
-            self.projection_seq = 0
-            self.outbox = []
-
-        def execute(self, statement, params=()):
-            normalized = ' '.join(statement.split())
-            if normalized.startswith('SELECT version,recorded_at'):
-                return Cursor({
-                    'id': 'rule', 'version': 1, 'version_id': 'old-version',
-                    'recorded_at': '2026-01-01T00:00:00Z',
-                    'payload': json.dumps({
-                        'id': 'rule', 'kind': 'entity', 'text': 'old',
-                        'embedding_model': 'test-v1',
-                    }),
-                })
-            if normalized.startswith('INSERT INTO record_versions'):
-                self.record_payload = params[4]
-                return Cursor()
-            if normalized.startswith(
-                    'SELECT projection_seq FROM project_projection_sequences'):
-                return Cursor({'projection_seq': self.projection_seq})
-            if normalized.startswith(
-                    'UPDATE project_projection_sequences SET projection_seq='):
-                self.projection_seq = params[0]
-                return Cursor()
-            if normalized.startswith('INSERT INTO projection_outbox'):
-                self.outbox.append({
-                    'project_id': params[0], 'seq': params[1],
-                    'operation': params[2], 'version_id': params[3],
-                    'payload': params[4],
-                })
-                return Cursor()
-            if normalized.startswith(
-                    'SELECT payload FROM projection_outbox'):
-                return Cursor({'payload': self.outbox[-1]['payload']})
-            return Cursor()
-
-    repository = Repository.__new__(Repository)
-    repository._db = OutboxDatabase()
-    repository._validate_record = lambda record: dict(record)
-    repository._refresh_fts_record = lambda project_id, record: None
-    repository.projections = ProjectionStore(repository)
-
-    saved = repository._put('project', {
+def test_repository_put_keeps_vectors_out_of_pg_and_encodes_at_projection_boundary(tmp_path):
+    repository = Repository(tmp_path / 'vector-boundary')
+    project = repository.create_project('vector boundary')['id']
+    old = repository.put_record(project, {'id': 'rule', 'kind': 'entity', 'text': 'old'})
+    saved = repository.put_record(project, {
         'id': 'rule', 'kind': 'entity', 'text': 'new',
         'embedding': [0.25, 0.75], 'embedding_model': 'test-v1',
-    }, expected_version=1, recorded_at='2026-01-02T00:00:00Z')
+    }, expected_version=old['version'])
 
-    record_payload = json.loads(repository._db.record_payload)
-    outbox_row = repository._db.execute(
-        'SELECT payload FROM projection_outbox ORDER BY seq DESC LIMIT 1').fetchone()
-    event_payload = json.loads(outbox_row['payload'])
-
-    assert 'embedding' not in record_payload
+    record_payload = repository._db.execute(
+        'SELECT payload FROM record_versions WHERE project_id=? AND version_id=?',
+        (project, saved['version_id'])).fetchone()['payload']
+    events = repository._db.execute(
+        'SELECT seq AS event_no,operation,version_id,payload FROM projection_outbox '
+        'WHERE project_id=? ORDER BY seq', (project,)).fetchall()
+    assert [(e['operation'], e['version_id']) for e in events] == [
+        ('upsert', old['version_id']), ('tombstone', old['version_id']),
+        ('upsert', saved['version_id'])]
+    assert all('embedding' not in json.loads(e['payload']) for e in events)
+    assert 'embedding' not in json.loads(record_payload)
     assert saved['embedding'] == [0.25, 0.75]
-    assert [row['operation'] for row in repository._db.outbox] == [
-        'tombstone', 'upsert']
-    assert 'embedding' not in json.loads(repository._db.outbox[0]['payload'])
-    assert 'embedding' not in event_payload
+    event_payload = json.loads(events[-1]['payload'])
     assert event_payload['embedding_model'] == 'test-v1'
     assert event_payload['version_id'] == saved['version_id']
 
     # The external write derives its vector from text under the frozen model;
     # the caller's transient vector is never restored from a PG payload.
     catalog = default_catalog()
-    row = build_projection(ProjectionInput(saved), catalog, index_version=1)
+    row = build_projection(ProjectionInput(event_payload), catalog, index_version=1)
     assert row is not None and 'embedding' not in row
-    frozen = {'seq': repository._db.outbox[-1]['seq'], 'operation': 'upsert', 'payload': {
+    frozen = {'seq': events[-1]['event_no'], 'operation': 'upsert', 'payload': {
         '_milvus_projection': {'index_version': 1, 'catalog_fingerprint': catalog.fingerprint,
                               'embedding_model': Encoder.identity, 'row': row}}}
     external, encoder = RecordingMilvus(), Encoder()
     adapter = MilvusProjectionAdapter(external, encoder=encoder,
                                      fence_is_current=lambda *args: True)
-    assert adapter.apply('project', frozen, fence='lease', index_version=1, catalog=catalog)
+    assert adapter.apply(project, frozen, fence='lease', index_version=1, catalog=catalog)
     assert encoder.encoded == ['new']
-    projected = external.rows[('project', 1, 'rule')]
+    projected = external.rows[(project, 1, 'rule')]
     assert projected['version_id'] == saved['version_id']
     assert projected['embedding'] == [1.0, 0.0]

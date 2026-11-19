@@ -37,7 +37,7 @@ def materialized_records(repository, project_id):
             'discovery_candidate_ids': by_record.get(record['id'], [])}} for record in records]
 
 
-def prepare_intake_facts(repository, project_id, records, candidates):
+def prepare_intake_facts(repository, project_id, records, candidates, *, publication_ontology=None):
     """Prepare canonical facts and original source assertion acceptances once."""
     from .formal_writes import FormalFactWriter
     snapshot = repository.formal_write_snapshot(project_id)
@@ -74,7 +74,8 @@ def prepare_intake_facts(repository, project_id, records, candidates):
     new = [record for id, record in unique.items() if id not in existing]
     return FormalFactWriter(repository).prepare('adopt_discovery', project_id,
         explicit, {x['id']: 0 for x in new},
-        {'records': new, 'suppress_auto_assertions': True}, snapshot=snapshot)
+        {'records': new, 'suppress_auto_assertions': True}, snapshot=snapshot,
+        publication_ontology=publication_ontology)
 
 
 KINDS = {'entity': 'class', 'relation': 'relation', 'attribute': 'attribute'}

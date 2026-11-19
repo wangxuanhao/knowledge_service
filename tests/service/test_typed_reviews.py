@@ -26,7 +26,8 @@ TTL_TWO_SINGLE=TTL_MAX_ONE+'''\n:score a owl:DatatypeProperty ; rdfs:domain :Per
   sh:property [ sh:path :score ; sh:maxCount 1 ] .'''
 
 
-def test_entity_relation_attribute_dependency_and_version_lifecycle(tmp_path,monkeypatch):
+@pytest.mark.parametrize('scoped', [False, True])
+def test_entity_relation_attribute_dependency_and_version_lifecycle(tmp_path,monkeypatch,scoped):
     def extract(self,text,ontology):
         self.review_candidates=[
             dict(kind='entity',record_id='a',text='甲',proposed_type='NewPerson',confidence=.9),
@@ -39,7 +40,9 @@ def test_entity_relation_attribute_dependency_and_version_lifecycle(tmp_path,mon
         p=c.post('/api/projects',json={'name':'typed','use_default_ontology':False}).json()['id']
         base='/api/projects/'+p;repo=app.state.service.repository
         assert bool(seed_project_ontology(c, base+'', TTL)['id'])
-        result=c.post(base+'/documents',json={'title':'样例','text':'甲认识乙，数量2','resolve_entities':False})
+        applicability={'platforms':{'mode':'specific','values':['美团']}}
+        boundary={'applicability':applicability,'valid_from':'2026-01-01','valid_until':'2027-01-01'} if scoped else {}
+        result=c.post(base+'/documents',json={'title':'样例','text':'甲认识乙，数量2','resolve_entities':False,**boundary})
         assert result.status_code==201,result.text
         assert result.json()['pending_reviews']==3
         def candidates():return c.get(base+'/reviews').json()['reviews']
@@ -78,6 +81,12 @@ def test_entity_relation_attribute_dependency_and_version_lifecycle(tmp_path,mon
         assert assertion['canonical_record_id']==attribute['id']
         assert repo.get_assertion(p,entity_candidate_id)['payload']==entity_assertion['payload']
         assert all(r['status']=='approved' for r in candidates())
+        if scoped:
+            for row in repo.current_records(p):
+                if row['kind'] in {'entity','relation','attribute'}:
+                    assert row['metadata']['applicability']['platforms']==applicability['platforms']
+                    assert row['valid_from'].startswith('2026-01-01')
+                    assert row['valid_until'].startswith('2027-01-01')
 
 
 def test_adapter_queues_unknown_entity_and_dependent_known_relation(monkeypatch):

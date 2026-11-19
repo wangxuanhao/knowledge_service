@@ -44,3 +44,27 @@ def test_projection_tables_allow_configured_app_dml_without_ddl():
             ).fetchone()[0]
         finally:
             admin.rollback()
+
+
+def test_application_role_can_enqueue_and_rollback(tmp_path):
+    import pytest
+    from knowledge_service.repository import Repository
+
+    repo = Repository(tmp_path / 'restricted-enqueue')
+    project = repo.create_project('restricted enqueue')['id']
+    role = 'kgtest_projection_' + uuid4().hex
+    db = repo._db
+    with pytest.raises(RuntimeError, match='^abort enqueue$'):
+        with repo._transaction():
+            db.execute(f'CREATE ROLE {role} NOLOGIN')
+            schema = sql.Identifier(db.execute('SELECT current_schema()').fetchone()[0]).as_string()
+            db.execute(f'GRANT USAGE ON SCHEMA {schema} TO {role}')
+            db.execute("SELECT set_config('knowledge_service.app_role', ?, true)", (role,))
+            db.execute((MIGRATIONS_DIR / '0018_projection_application_permissions.sql').read_text(encoding='utf-8'))
+            db.execute(f'SET LOCAL ROLE {role}')
+            assert db.execute('SELECT current_user').fetchone()[0] == role
+            for n in (1, 2):
+                assert repo.projections.enqueue(project, 'tombstone', str(n), {'record_id': 'r'}) == n
+            raise RuntimeError('abort enqueue')
+    assert repo.projections.project_watermark(project) == 0
+    assert db.execute('SELECT count(*) FROM projection_outbox WHERE project_id=?', (project,)).fetchone()[0] == 0

@@ -111,7 +111,106 @@ def check_relations(page, width):
     return {'width':width,'checks':'current endpoints, preselection, closed spacing, recommendation counts, folded evidence, explicit draft commands, history'}
 
 
-def check(width=1600, inheritance_only=False, relations_only=False):
+def check_canvas_link(page, width):
+    button = page.get_by_role('button', name='新增关联关系', exact=True)
+    button.scroll_into_view_if_needed()
+    stage = page.locator('.om-canvas-stage')
+    page.evaluate('''() => {
+      OntologyModel.select(null);
+      OntologyModel.setInspector(false);
+      const cy=OntologyCanvas.__cy(), rect=cy.container().getBoundingClientRect();
+      const hit=[...document.querySelectorAll('.om-canvas-bar button')]
+        .find(button=>button.textContent==='新增关联关系').getBoundingClientRect();
+      cy.stop(true,false);cy.zoom(1);cy.pan({x:0,y:0});
+      for(const [id, x, y] of [['urn:person',.31,.25],['urn:org',.71,.42],
+        ['urn:thing',.18,-.4],['urn:staff',.35,-.4]])
+        cy.$id(id).position({x:rect.width*x,y:rect.height*y});
+      cy.$id('urn:notice').position({x:hit.left+hit.width/2-rect.left,y:hit.top+hit.height/2-rect.top});
+      window.linkTaps=[];
+      cy.on('tap', 'node', event=>linkTaps.push(event.target.id()));
+    }''')
+    camera = "(() => {const cy=OntologyCanvas.__cy();return {pan:cy.pan(),zoom:cy.zoom()};})()"
+    before = page.evaluate(camera)
+    button.click()
+    assert page.evaluate('linkTaps') == [], 'using the toolbar must not tap the class under the button'
+    assert page.evaluate('OntologyModel.S.selected') is None, 'launching relation creation must not select a class'
+    assert page.evaluate(camera) == before, 'launching relation creation must preserve the canvas view'
+
+    confirm = stage.locator('.om-canvas-confirm')
+    assert confirm.is_visible() and '点选起点' in confirm.inner_text()
+    assert int(confirm.locator('h3').evaluate('e=>parseFloat(getComputedStyle(e).fontSize)')) >= 16
+
+    def tap(iri):
+        pos = page.evaluate('iri=>OntologyCanvas.__cy().$id(iri).renderedPosition()', iri)
+        box = stage.bounding_box()
+        page.mouse.click(box['x'] + pos['x'], box['y'] + pos['y'])
+
+    tap('urn:person')
+    assert '人员' in confirm.inner_text() and '点选终点' in confirm.inner_text()
+    assert page.evaluate("OntologyCanvas.__cy().nodes('.is-focus').map(n=>n.id())") == ['urn:person']
+    tap('urn:org')
+    assert '组织' in confirm.inner_text()
+    assert set(page.evaluate("OntologyCanvas.__cy().nodes('.is-focus').map(n=>n.id())")) == {'urn:person','urn:org'}
+    assert page.evaluate(camera) == before
+    assert page.evaluate('OntologyModel.S.selected') is None
+    field = confirm.get_by_role('textbox', name='关系名')
+    assert field.bounding_box()['height'] >= 40
+    assert field.evaluate('e=>parseFloat(getComputedStyle(e).fontSize)') >= 14
+    assert confirm.evaluate('e=>e.scrollWidth<=e.clientWidth+1')
+    field.fill('隶属于')
+    assert page.evaluate('linkTaps') == ['urn:person','urn:org']
+    page.evaluate('() => {writes.length=0; OntologyModel.createTerm=async spec=>writes.push(spec);}')
+    OUTPUT.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(OUTPUT / f'new-relation-{width}.png'))
+    confirm.get_by_role('button', name='确认建关系', exact=True).click()
+    writes = page.evaluate('writes')
+    assert writes == [{
+        'kind':'relation', 'label':'隶属于', 'label_zh':'隶属于',
+        'domains':['urn:person'], 'ranges':['urn:org']}], writes
+    assert not confirm.is_visible()
+    assert page.evaluate(camera) == before
+    return {'width':width, 'checks':'toolbar isolation, explicit endpoints, readable form, stationary camera'}
+
+
+def check_attributes(page, width):
+    catalog = page.locator('.om-catalog-list')
+    page.evaluate('''() => {
+      const summary=structuredClone(fixtureSummary);
+      summary.attributes.push({id:'urn:source',label_zh:'来源链接',domain:[],range:[]});
+      OntologyModel.S.summary=summary;
+      OntologyModel.select('urn:person');
+    }''')
+    assert '1 项属性未指定适用类型' in page.locator('.om-catalog-count').inner_text()
+    assert '未指定适用类型' in catalog.get_by_role('button', name=re.compile('来源链接')).inner_text()
+    inspector = page.locator('#om-detail-host')
+    sections = inspector.locator('.om-attributes, .om-identity-policy')
+    assert sections.first.evaluate("e=>e.classList.contains('om-attributes')")
+    assert '适用平台' in sections.last.inner_text() and '筛选' in sections.last.inner_text()
+    picker = inspector.locator('.om-attribute-picker')
+    picker.locator('summary').click()
+    picker.get_by_role('searchbox', name='搜索已有属性').fill('来源链接')
+    picker.get_by_role('checkbox', name=re.compile('来源链接')).check()
+    assert page.evaluate('writes.length') == 0
+    picker.get_by_role('button', name='应用关联', exact=True).click()
+    page.wait_for_function('writes.length===1')
+    assert page.evaluate('writes[0]') == {'action':'batch', 'commands':[
+        {'action':'add_domain', 'target_iri':'urn:source', 'value':'urn:person'}]}
+    page.evaluate('''() => {
+      const summary=structuredClone(OntologyModel.S.summary);
+      summary.attributes.at(-1).domain=['urn:person'];
+      OntologyModel.S.summary=summary;
+      OntologyModel.select('urn:staff');
+    }''')
+    assert '来源链接' in inspector.locator('.om-inherited-attributes').inner_text()
+    assert '人员' in inspector.locator('.om-inherited-attributes').inner_text()
+    assert '未指定适用类型' not in page.locator('.om-catalog-count').inner_text()
+    assert inspector.evaluate('e=>e.scrollWidth<=e.clientWidth+1')
+    OUTPUT.mkdir(parents=True, exist_ok=True)
+    page.locator('.om-inspector-shell').screenshot(path=str(OUTPUT / f'attribute-identity-{width}.png'))
+    return {'width':width, 'checks':'unassigned attributes, association command, inherited attributes, identity guidance'}
+
+
+def check(width=1600, inheritance_only=False, relations_only=False, link_only=False, attributes_only=False):
     html = re.sub(r'<script\b[^>]*>[\s\S]*?</script>', '',
                   (WEB / 'index.html').read_text(encoding='utf-8'), flags=re.I)
 
@@ -147,7 +246,8 @@ def check(width=1600, inheritance_only=False, relations_only=False):
           window.api=async url=>url.includes('relation-usage')?{declared:{domain:[],range:[]},inferred:{domain:[],range:[]},missing:{}}:
             url.endsWith('/ontologies')?{versions:[]}:{};
         }''')
-        for name in ['vendor/cytoscape.min.js', 'ontology-model-catalog.js', 'ontology-model.js', 'ontology-model-canvas.js', 'ontology-model-panel.js']:
+        for name in ['vendor/cytoscape.min.js', 'ontology-model-catalog.js', 'ontology-model-attributes.js',
+                     'ontology-model-identity.js', 'ontology-model.js', 'ontology-model-canvas.js', 'ontology-model-panel.js']:
             page.add_script_tag(content=(WEB / name).read_text(encoding='utf-8'))
         page.evaluate('''() => {
           Object.assign(OntologyModel.S,{summary:fixtureSummary,ontologyId:'published',view:'types'});
@@ -161,6 +261,16 @@ def check(width=1600, inheritance_only=False, relations_only=False):
             return result
         if relations_only:
             result = check_relations(page, width)
+            assert not errors, errors
+            browser.close()
+            return result
+        if link_only:
+            result = check_canvas_link(page, width)
+            assert not errors, errors
+            browser.close()
+            return result
+        if attributes_only:
+            result = check_attributes(page, width)
             assert not errors, errors
             browser.close()
             return result
@@ -265,6 +375,9 @@ if __name__ == '__main__':
     import sys
     parent_mode = '--parents' in sys.argv
     relation_mode = '--relations' in sys.argv
-    sizes = [int(arg) for arg in sys.argv[1:] if arg not in ('--parents', '--relations')] or [1600, 1280, 390]
+    link_mode = '--link' in sys.argv
+    attribute_mode = '--attributes' in sys.argv
+    sizes = [int(arg) for arg in sys.argv[1:] if arg not in ('--parents', '--relations', '--link', '--attributes')] or [1600, 1280, 390]
     for viewport in sizes:
-        print(json.dumps(check(viewport, inheritance_only=parent_mode, relations_only=relation_mode), ensure_ascii=False), flush=True)
+        print(json.dumps(check(viewport, inheritance_only=parent_mode, relations_only=relation_mode,
+                               link_only=link_mode, attributes_only=attribute_mode), ensure_ascii=False), flush=True)

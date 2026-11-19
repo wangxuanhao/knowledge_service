@@ -99,10 +99,12 @@
         lineStyle:{width:1.6*zoom},emphasis:{lineStyle:{width:2*zoom}}}]});
       syncTools();
     }
-    function draw(keepView=false,animate=true){
+    function draw(keepView=false,animate=true,topologyChanged=false){
       if(!tree||!host.clientWidth||!host.clientHeight)return;
       const prior=keepView?chart.getOption().series?.[0]:null;
       const zoom=prior?.zoom||1;styledZoom=zoom;
+      // Rebuild both ends of removed edges when collapsing several levels at once.
+      if(topologyChanged)chart.clear();
       chart.resize();
       const geometry=layout(tree,host.clientWidth,host.clientHeight);
       chart.setOption({animation:animate,animationDuration:220,animationDurationUpdate:220,animationEasingUpdate:'cubicOut',
@@ -132,7 +134,7 @@
       const node=nodes.get(event.data?.id);if(!node)return;
       onInspect({id:node.entityId,text:node.name,type:node.type});
       if(!node.children.length)return;
-      node.collapsed=!node.collapsed;draw(true,!autoFit);if(autoFit)fit();
+      node.collapsed=!node.collapsed;draw(true,!autoFit,true);if(autoFit)fit();
     }
     function onRoam(){
       syncTools();

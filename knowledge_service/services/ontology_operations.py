@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import defaultdict
 from collections.abc import Iterable
 
 from rdflib import BNode, Graph, Literal, RDF, RDFS, URIRef
@@ -597,6 +598,78 @@ def _apply_operations(ontology: Ontology, operations: Iterable[dict], *,
     discard it on failure. Each call validates its complete operation prefix.
     """
     graph = ontology.graph
+    _mutate_operations(graph, operations, verify=verify)
+    _validate_supported_bnodes(graph)
+    _validate_definition_graph(graph, ontology=ontology)
+
+
+class _TurtleOperationReplay:
+    """Isolated prefix replay for the draft Turtle compiler and its append check.
+
+    In a validated named graph, the common atom handlers already check every
+    affected definition locally, *before* mutation. Other atoms keep the old
+    copy/apply/whole-graph-validate behavior, including discarding partial writes.
+    """
+
+    def __init__(self, turtle: str, *, rebuild: bool = False):
+        self.ontology = Ontology(turtle)
+        self._rebuild = rebuild
+        graph = self.ontology.graph
+        self.named = not any(
+            isinstance(subject, BNode) or isinstance(value, BNode)
+            or predicate in {OWL.deprecated, OWL.unionOf, DCTERMS.isReplacedBy}
+            or str(predicate).startswith(str(SH))
+            for subject, predicate, value in graph)
+        if self.named:
+            try:
+                _apply_operations(self.ontology, [])
+            except ValueError:
+                # An invalid starting graph may be repaired by the next atom.
+                self.named = False
+        self._turtle = turtle
+
+    def _locally_checked(self, operation: dict) -> bool:
+        action = operation['action']
+        if action in {'create_term', 'add_parent', 'remove_parent'}:
+            # No retirement or SHACL dependencies; parent insertion checks the
+            # full path back to the child, and removal cannot introduce a cycle.
+            return True
+        if action in {'add_annotation', 'remove_annotation'}:
+            spec = (operation.get('after' if action == 'add_annotation' else 'before')
+                    or {})
+            predicate = URIRef(spec.get('predicate') or '')
+            # Identity has a whole-definition check; union metadata can change
+            # the interpretation of an otherwise untouched constraint owner.
+            return (_is_annotation_predicate(predicate)
+                    and predicate not in IDENTITY_PREDICATES
+                    and predicate != OWL.unionOf)
+        if action in {'add_domain', 'remove_domain', 'add_range', 'remove_range', 'set_datatype'}:
+            predicate = RDFS.domain if action.endswith('domain') else RDFS.range
+            values = list(self.ontology.graph.objects(URIRef(operation['target_iri']), predicate))
+            # Keep named single-value edits local; leave union construction and
+            # its potentially shared list nodes to the complete validator.
+            return len(values) <= (0 if action.startswith('add_') else 1)
+        return False
+
+    def apply(self, operation: dict) -> None:
+        if self.named and self._locally_checked(operation):
+            _mutate_operations(self.ontology.graph, [operation], verify=True)
+            self._turtle = None
+            return
+        if self._rebuild or self._turtle is None:
+            self._turtle = self.ontology.graph.serialize(format='turtle')
+        # On failure retain the prior graph and its impact context.
+        applied = apply_operations(self._turtle, [operation])
+        self.ontology = Ontology(applied)
+        self._turtle = applied
+        self.named = False
+
+    def finish(self) -> None:
+        if self.named:
+            _apply_operations(self.ontology, [])
+
+
+def _mutate_operations(graph: Graph, operations: Iterable[dict], *, verify: bool) -> None:
     for operation in operations:
         if not isinstance(operation, dict):
             raise ValueError('本体操作必须是对象')
@@ -753,8 +826,6 @@ def _apply_operations(ontology: Ontology, operations: Iterable[dict], *,
             _apply_scoped_shacl_patch(graph, target, before, after)
         else:
             raise ValueError(f'不支持的本体操作：{action}')
-    _validate_supported_bnodes(graph)
-    _validate_definition_graph(graph, ontology=ontology)
 
 
 def _issue(code: str, severity: str, message: str, term_iris,
@@ -792,8 +863,8 @@ def operation_dependency_warnings(ontology: Ontology | str | None, action: str,
         return []
     source = URIRef(target_iri)
     referenced = URIRef(spec.get('value', ''))
-    declared = ontology.classes | ontology.relations | ontology.attributes
-    if (source not in declared or referenced not in declared
+    if (_graph_term_kind(ontology.graph, source) is None
+            or _graph_term_kind(ontology.graph, referenced) is None
             or not ontology.is_active_term(source)
             or ontology.is_active_term(referenced)):
         return []
@@ -1130,23 +1201,27 @@ def _term_annotations(graph: Graph, term: URIRef) -> set[tuple]:
 
 
 def _ordered_new_terms(graph: Graph, added: set[URIRef]) -> list[URIRef]:
-    remaining = set(added)
+    children = defaultdict(list)
+    indegree = {}
+    for term in added:
+        parents = set(graph.objects(term, RDFS.subClassOf)) & added
+        indegree[term] = len(parents)
+        for parent in parents:
+            children[parent].append(term)
     ordered = []
-    while remaining:
-        ready = []
-        for term in remaining:
-            dependencies = {
-                parent for parent in graph.objects(term, RDFS.subClassOf)
-                if parent in remaining
-            }
-            if not dependencies:
-                ready.append(term)
-        if not ready:
-            raise ValueError('新增类声明包含循环（cycle）')
+    ready = [term for term, count in indegree.items() if not count]
+    while ready:
         ready.sort(key=str)
+        ordered.extend(ready)
+        next_ready = []
         for term in ready:
-            ordered.append(term)
-            remaining.remove(term)
+            for child in children[term]:
+                indegree[child] -= 1
+                if not indegree[child]:
+                    next_ready.append(child)
+        ready = next_ready
+    if len(ordered) != len(added):
+        raise ValueError('新增类声明包含循环（cycle）')
     return ordered
 
 

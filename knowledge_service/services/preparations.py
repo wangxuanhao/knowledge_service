@@ -32,6 +32,7 @@ def recognition_error(result):
     return next((w for w in (result or {}).get('warnings', [])
         if isinstance(w, dict) and (str(w.get('code', '')).startswith(('ocr_', 'asr_'))
             or w.get('code') == 'source_asset_missing')
+        and not (w['code'] == 'source_asset_missing' and w.get('severity') == 'warning')
         and w['code'] not in informational), None)
 
 

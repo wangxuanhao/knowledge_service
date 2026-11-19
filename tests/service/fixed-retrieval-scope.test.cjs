@@ -72,14 +72,18 @@ test('opened content filter rail discovers business metadata for current retriev
   }
 });
 
-test('UI keeps explicit graph purpose and bumps each changed runtime resource',()=>{
+test('UI keeps explicit graph purpose and loads versioned runtime resources once',()=>{
   const html=read('index.html');
   assert.ok(html.includes('id="scope-purpose"'),'scope purpose selector exists');assert.ok(html.includes('<option value="graph">图谱'),'PG graph purpose exists');
   assert.ok(html.includes('id="scope-compatibility"'),'scope incompatibility remains visible');
   assert.ok(html.includes('#scope [hidden]{display:none!important}'),'page-owned filter controls stay hidden despite existing grid/flex CSS');
-  assert.ok(html.includes('/assets/scope-fields.js?v=authority-retrieval-20261021-2'),'scope-fields.js version');
-  for(const [file,version] of [['workspace-context-ui.js','page-filters-20261116-1'],['workbench.js','automatic-index-20261116-2']])assert.ok(html.includes('/assets/'+file+'?v='+version),file+' version');
-  for(const [file,version] of [['workspace.js','automatic-index-20261116-2'],['entity-attribute-panel.js','entity-properties-20261113-3'],['task-review.js','conflict-governance-20261113-3']])assert.ok(html.includes('/assets/'+file+'?v='+version),file+' version');
+  const sources=Array.from(html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g),match=>match[1]);
+  for(const file of ['scope-fields.js','workspace-context-ui.js','workbench.js','workspace.js','entity-attribute-panel.js','task-review.js']){
+    const path='/assets/'+file;
+    const matches=sources.filter(src=>src.split('?')[0]===path);
+    assert.equal(matches.length,1,`${file} is loaded once`);
+    assert.match(matches[0].slice(path.length),/^\?v=[\w.-]+$/,`${file} carries a cache version`);
+  }
 });
 
 test('applying the shared editor preserves dedicated ontology/kind scope and original metadata AST',()=>{

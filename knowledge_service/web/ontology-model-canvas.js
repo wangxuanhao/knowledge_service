@@ -108,16 +108,24 @@
   const xml = value => String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
   const trimText = (value,max) => {const chars=Array.from(String(value??''));return chars.length>max?chars.slice(0,max-1).join('')+'…':chars.join('');};
   function classCard(node) {
-    const attrs=node.attributes||[],rows=attrs.slice(0,4),inherited=node.inheritedAttributes||[];
-    const height=76+Math.max(1,rows.length)*21+(attrs.length>4?18:0);
+    const attrs=node.attributes||[],inherited=node.inheritedAttributes||[];
+    const rows=[...attrs.slice(0,4),...inherited.slice(0,Math.max(0,4-attrs.length))];
+    const more=attrs.length+inherited.length-rows.length;
+    const height=76+Math.max(1,rows.length)*21+(more?18:0);
     const color=node.state==='pending'?C.amber:(node.parents||[]).length?C.teal:C.cyan;
     const text=(x,y,value,size=11,fill='#567263',anchor='start')=>`<text x="${x}" y="${y}" font-size="${size}" fill="${fill}" text-anchor="${anchor}">${xml(value)}</text>`;
     let svg=`<svg xmlns="${NS}" width="${NODE_W}" height="${height}" viewBox="0 0 ${NODE_W} ${height}"><rect width="${NODE_W}" height="${height}" rx="7" fill="#ffffff"/><path d="M7 1.5H${NODE_W-7}" stroke="${color}" stroke-width="3"/><g font-family="Microsoft YaHei, Segoe UI, sans-serif">`;
     svg+=text(11,25,'◇',17,color)+text(32,24,trimText(node.label||shortIri(node.id),11),13,C.ink);
     svg+=`<path d="M0 37H${NODE_W}" stroke="#e6ece6"/>`;
-    rows.forEach((attr,i)=>{const y=56+i*21;svg+=text(11,y,trimText(attr.label_zh||attr.label||attr.id,8)+(attr.required?' *':''));svg+=text(NODE_W-10,y,trimText(attr.datatype||attr.dtype||'未声明',12),10,'#7c9182','end');});
-    if(!rows.length)svg+=text(11,57,node.state==='pending'?'待纳入本体的候选':'尚未声明直属属性',10,'#8c9c90');
-    if(attrs.length>4)svg+=text(11,56+rows.length*21,`另有 ${attrs.length-4} 项直属属性`,10,'#8c9c90');
+    rows.forEach((attr,i)=>{
+      const y=56+i*21,datatype=attr.datatype||attr.dtype||'未限定';
+      const inheritedRow=i>=attrs.length;
+      svg+=text(11,y,trimText(attr.label_zh||attr.label||attr.id,inheritedRow?7:8)+(attr.required?' *':''));
+      const detail=inheritedRow?'继承 · '+trimText(datatype,8):trimText(datatype,12);
+      svg+=text(NODE_W-10,y,detail,10,'#657e70','end');
+    });
+    if(!rows.length)svg+=text(11,57,node.state==='pending'?'待纳入本体的候选':'未声明适用本类的属性',11,'#657e70');
+    if(more)svg+=text(11,56+rows.length*21,`另有 ${more} 项属性`,10,'#657e70');
     const parents=(node.parents||[]).length;
     svg+=text(11,height-13,inherited.length?`继承 ${inherited.length} 项属性 · ${parents} 个父类`:parents?`${parents} 个父类 · 无继承属性`:'顶层类',10,'#8c9c90');
     return {image:'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg+'</g></svg>'),height};
@@ -659,11 +667,14 @@
       if (!M.linkFrom) {
         M.linkFrom = iri;
         status(`已选起点「${labelOf(iri)}」：请点终点（range）卡片。`);
+        traceSelection(M.selected);
+        renderConfirm();
         updateBar();
         return;
       }
       if (M.linkFrom === iri) { status('起点和终点不能是同一个类。', true); return; }
       M.pending = { type: 'relation', domain: M.linkFrom, range: iri };
+      traceSelection(M.selected);
       renderConfirm();
       updateBar();
       return;
@@ -708,6 +719,8 @@
     M.mode = 'relation';
     M.linkFrom = null;
     M.pending = null;
+    M.cy?.stop(true, false);
+    traceSelection(M.selected);
     renderConfirm();
     updateBar();
     status('连线中：先点「起点（domain）」的类，再点「终点（range）」的类。');
@@ -718,6 +731,7 @@
     M.mode = '';
     M.linkFrom = null;
     M.pending = null;
+    traceSelection(M.selected);
     renderConfirm();
     updateBar();
   }
@@ -727,28 +741,44 @@
     const host = M.els.confirm;
     if (!host) return;
     host.replaceChildren();
-    if (!M.pending) { host.hidden = true; return; }
+    const linkingRelation = M.mode === 'relation';
+    host.classList.toggle('is-link-relation', linkingRelation);
+    if (!M.pending && !linkingRelation) { host.hidden = true; return; }
     host.hidden = false;
 
-    if (M.pending.type === 'parent') {
+    if (M.pending?.type === 'parent') {
       host.appendChild(mkEl('span', 'om-canvas-confirm-copy',
         `建立父子关系：${labelOf(M.pending.parent)}（父类） ⊑ ${labelOf(M.pending.child)}（子类）`));
       host.appendChild(mkButton('确认建立父级', confirmParent, 'primary'));
       host.appendChild(mkButton('取消', cancelLink));
       return;
     }
-    // 关系：需要名字，给一个输入框（默认空，提示示例）。
-    host.appendChild(mkEl('span', 'om-canvas-confirm-copy',
-      `建立关系：${labelOf(M.pending.domain)} → ${labelOf(M.pending.range)}`));
+    const heading = mkEl('div', 'om-canvas-link-heading');
+    heading.append(mkEl('h3', null, '新增关联关系'), mkButton('取消', cancelLink));
+    const endpoints = mkEl('div', 'om-canvas-link-endpoints');
+    for (const [label, iri] of [['起点', M.linkFrom], ['终点', M.pending?.range]]) {
+      const endpoint = mkEl('div', 'om-canvas-link-endpoint');
+      endpoint.append(mkEl('span', null, label),
+        mkEl('strong', null, iri ? labelOf(iri) : '在画布点选' + label));
+      endpoints.appendChild(endpoint);
+    }
+    host.append(heading, endpoints);
+    if (!M.pending) return;
+
+    const pending = M.pending;
+    const form = mkEl('div', 'om-canvas-link-name');
     const input = mkEl('input', 'om-canvas-confirm-input');
     input.type = 'text';
     input.placeholder = '关系名（如：属于）';
     input.setAttribute('aria-label', '关系名');
-    host.appendChild(input);
-    host.appendChild(mkButton('确认建关系', () => confirmRelation(input.value), 'primary'));
-    host.appendChild(mkButton('取消', cancelLink));
-    const focusIt = () => { try { input.focus(); } catch (e) { /* 忽略 */ } };
-    setTimeout(focusIt, 0);
+    const save = mkButton('确认建关系', async () => {
+      save.disabled = true;
+      try { await confirmRelation(input.value); }
+      finally { save.disabled = false; }
+    }, 'primary');
+    form.append(input, save);
+    host.appendChild(form);
+    setTimeout(() => { if (M.pending === pending) input.focus?.({preventScroll:true}); }, 0);
   }
 
   async function confirmParent() {
@@ -778,9 +808,9 @@
       status(`已新增关系类型「${label}」：${labelOf(p.domain)} → ${labelOf(p.range)}（写入草案，待审核）。`);
     } catch (e) {
       status(`建立关系失败：${e && e.message ? e.message : e}`, true);
+      return;
     }
-    M.pending = null; M.mode = ''; M.linkFrom = null;
-    renderConfirm(); updateBar();
+    if (M.pending === p) cancelLink();
   }
 
   async function createRelation(labelZh, domainIri, rangeIri) {
@@ -801,7 +831,7 @@
     // 「新建类」是 P1 重写时漏掉的入口：以前整页只有「改父类（连线）」，而它要求先选中
     // 一个**已存在**的类 —— 于是空本体上"想加个父类"根本无从下手（用户原话："现在父类也加不了"）。
     const btnParent = mkButton('编辑继承（连线）', startParentLink, '', BAR_TITLES.parent);
-    const btnRelation = mkButton('新增关联关系', startRelationLink, '', BAR_TITLES.relation);
+    const btnRelation = mkButton('新增关联关系', startRelationLink, 'om-canvas-add-relation', BAR_TITLES.relation);
     const btnFit = mkButton('适应画布', fitAll, '',
       '缩放和平移以显示全部节点，保留手动摆放的位置。');
     const btnLayout = mkButton('重新布局', runLayout, '',
@@ -900,15 +930,15 @@
     //（灰按钮不解释原因，用户只会以为页面坏了）。
     const locked = !!(M.ctx && M.ctx.S && M.ctx.S.preview);
     if (locked) hint = '历史版本（只读）：要点顶栏「回到最新」，或用「版本管理」→「回到这一版」开一份新草案才能改。';
-    else if (M.pending) hint = '确认后才写进草案（待审核）。';
+    else if (M.pending?.type === 'parent') hint = '确认后才写进草案（待审核）。';
     else if (M.mode === 'parent') hint = `连线中：点目标卡片设为「${labelOf(M.linkFrom)}」的父类`;
-    else if (M.mode === 'relation') hint = M.linkFrom ? '连线中：点终点（range）卡片' : '连线中：先点起点（domain）卡片';
     e.hint.textContent = hint;
     e.btnParent.disabled = locked || !M.selected;
     e.btnRelation.disabled = locked || !nodes.length;
+    e.btnRelation.setAttribute('aria-pressed', String(M.mode === 'relation'));
     e.btnParent.title = locked ? BAR_TITLES.locked : BAR_TITLES.parent;
     e.btnRelation.title = locked ? BAR_TITLES.locked : BAR_TITLES.relation;
-    e.btnCancel.hidden = !(M.mode || M.pending);
+    e.btnCancel.hidden = M.mode === 'relation' || !(M.mode || M.pending);
     // 窄栏时工具条会换行，确认条始终放在实际工具条上方。
     if (e.confirm) e.confirm.style.bottom = ((e.bar.offsetHeight || 40) + 22) + 'px';
   }
@@ -919,7 +949,7 @@
     cy.on('tapstart', 'node', () => { M.dragged = false; });
     cy.on('drag', 'node', () => { M.dragged = true; });
     cy.on('tap', 'node', onNodeTap);
-    cy.on('tap', 'edge', evt => {const iri=evt.target.data('termIri');if(iri&&M.ctx&&typeof M.ctx.select==='function')M.ctx.select(iri);});
+    cy.on('tap', 'edge', evt => {const iri=evt.target.data('termIri');if(M.mode!=='relation'&&iri&&M.ctx&&typeof M.ctx.select==='function')M.ctx.select(iri);});
     cy.on('tap', evt => { if (evt.target === cy) onBackgroundTap(); });
     // 双击空白 = 适应画布（双击节点不触发，避免误操作）。
     cy.on('dblclick', evt => { if (evt.target === cy) fitAll(); });
@@ -943,8 +973,10 @@
 
     const cyto = CY();
     if (cyto) {
+      const surface = mkEl('div', 'om-canvas-surface');
+      stage.appendChild(surface);
       M.cy = cyto({
-        container: stage,
+        container: surface,
         wheelSensitivity: 0.2,
         minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM,
         boxSelectionEnabled: false,
@@ -958,7 +990,7 @@
       bindCyEvents();
     }
 
-    // 覆盖层与工具条都建在 stage 上（Cytoscape 的 canvas 在其下方）。
+    // Controls are siblings of the renderer so their pointer events never hit its canvas.
     const svg = svgEl('svg');
     svg.setAttribute('class', 'om-canvas-bands');
     svg.setAttribute('aria-hidden', 'true');
@@ -1063,6 +1095,14 @@
   function traceSelection(iri) {
     const cy = M.cy;
     if (!cy) return null;
+    if (M.mode === 'relation') {
+      cy.batch(() => {
+        cy.elements().removeClass('is-focus is-neighbor is-traced is-muted');
+        if (M.linkFrom) cy.getElementById(M.linkFrom).addClass('is-focus');
+        if (M.pending?.range) cy.getElementById(M.pending.range).addClass('is-focus');
+      });
+      return null;
+    }
     const node = iri ? cy.getElementById(iri).filter('node') : cy.collection();
     let edges = iri ? cy.edges().filter(edge => edge.data('termIri') === iri) : cy.collection();
     let anchors = node;
@@ -1085,7 +1125,7 @@
 
   function focus(iri) {
     const cy = M.cy;
-    if (!cy || !iri || M.suspended) return;
+    if (!cy || !iri || M.suspended || M.mode === 'relation') return;
     const anchors = traceSelection(iri);
     if (!anchors?.length) return;
     cy.stop(true, false);

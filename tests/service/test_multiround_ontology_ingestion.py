@@ -220,7 +220,11 @@ def test_four_ingestion_rounds_keep_multiple_parents_attributes_and_history(tmp_
             if n in (1, 3):
                 assert preview['can_add'], preview
                 result = checked(client.post(path + '/add-selection', json=frozen_request))
-                draft = result['draft']
+                # The intake receipt lists only operations added by this request.
+                # Read the authoritative draft before checking older operations.
+                draft_ref = result['draft']
+                draft = checked(client.get(base + f"/ontology-drafts/{draft_ref['id']}"))
+                assert draft['revision'] == draft_ref['revision']
                 if n == 1:
                     merchant_candidate = next(item['id'] for item in candidates
                                               if item['kind'] == 'entity' and item['proposed_type'] == 'Merchant')
@@ -404,7 +408,7 @@ def test_browser_repeated_parent_and_attribute_edits_use_real_api(tmp_path, monk
             page.locator('#om-side [data-sel="' + iri + '"]').click()
 
         def open_constraint_editor():
-            editor = page.locator('.om-constraint-edit')
+            editor = page.locator('.om-constraint-edit').filter(has=page.locator('.om-type-picker'))
             if not editor.evaluate('(node) => node.open'):
                 editor.locator(':scope > summary').click()
             return editor

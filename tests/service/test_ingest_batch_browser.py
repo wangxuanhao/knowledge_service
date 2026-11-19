@@ -85,10 +85,12 @@ def test_batch_card_paginates_and_uses_selected_retry_mode(tmp_path):
             elif '/items?' in path:
                 route.fulfill(json={'items': [{'id': 'i', 'status': 'needs_attention', 'original_name': '<img onerror=alert(1)>.md',
                     'stage': 'extracting', 'error_code': 'llm_timeout', 'public_error': '模型超时', 'failed_chunk_ordinal': 28,
-                    'auto_retry_count': 5}], 'next_cursor': None if 'cursor=' in path else 'next'})
+                    'auto_retry_count': 5},
+                    {'id': 'working', 'status': 'running', 'original_name': '运行中.md',
+                     'stage': 'extracting', 'progress': 45}], 'next_cursor': None if 'cursor=' in path else 'next'})
             elif path.startswith('/api/'):
                 route.fulfill(json={'id': 'b', 'status': 'completed_with_errors', 'requested_concurrency': 8,
-                    'effective_concurrency': 4, 'counts': {'completed': 999, 'needs_attention': 1}})
+                    'effective_concurrency': 4, 'counts': {'completed': 998, 'needs_attention': 1, 'running': 1}})
             else:
                 route.fulfill(content_type='text/html', body='<select id="project"><option value="p">p</option></select><select id="ingest-concurrency"></select><div id="ingest-batches"></div>')
         page.route('http://browser.test/**', respond)
@@ -101,6 +103,7 @@ def test_batch_card_paginates_and_uses_selected_retry_mode(tmp_path):
         concurrency = page.locator('.ingest-batch-card').inner_text()
         assert '并发设置：8' in concurrency
         assert '当前并发 4' in concurrency
+        assert '当前阶段：抽取 · 45%' in concurrency
         assert page.locator('.batch-item img').count() == 0
         page.get_by_role('button', name='下一页').click()
         page.get_by_role('button', name='回到首页').wait_for()

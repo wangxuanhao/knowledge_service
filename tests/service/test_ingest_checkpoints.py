@@ -45,3 +45,48 @@ def test_execution_configuration_changes_are_fenced_before_formal_commit(monkeyp
     monkeypatch.setenv('KG_LLM_MODEL','changed-model')
     with pytest.raises(ValueError) as error:context.guard()
     assert error.value.code=='checkpoint_incompatible'
+
+
+def test_extraction_progress_is_visible_before_provider_and_reuses_checkpoints():
+    from contextlib import nullcontext
+    from unittest.mock import Mock, call
+    from knowledge_service.services.document_ingest_runner import DocumentCheckpointContext
+
+    store = Mock()
+    store.lease_valid.return_value = True
+    store.checkpoint_guard.return_value = nullcontext()
+    checkpoints = Mock()
+    checkpoints.get.return_value = None
+    checkpoints.has_other_configuration.return_value = False
+    item = dict(id='item', file_sha256='hash', lease_token='lease', document_id='document', attempt=1)
+    chunks = [{'text': 'first'}, {'text': 'second'}]
+    context = DocumentCheckpointContext(store, checkpoints, item, 'worker', None, chunks)
+    output = {'records': [], 'review_candidates': [], 'diagnostics': {}}
+
+    def first_extract():
+        store.update_progress.assert_called_once_with('item', 'worker', 'lease', stage='extracting', progress=15)
+        checkpoints.put.assert_not_called()
+        return output
+
+    context.execute(0, 'first', first_extract)
+    store.update_progress.assert_called_with('item', 'worker', 'lease', stage='extracting', progress=45)
+    checkpoints.put.assert_called_once()
+
+    store.reset_mock()
+    resumed = DocumentCheckpointContext(store, checkpoints, {**item, 'attempt': 2, 'progress': 45}, 'worker', None, chunks)
+    resumed.update_progress('chunking', 10)
+    resumed.update_progress('extracting', 15)
+    checkpoints.get.side_effect = [{'output': output}, None]
+    unexpected_extract = Mock(side_effect=AssertionError('saved checkpoint must be reused'))
+    assert resumed.execute(0, 'first', unexpected_extract) == output
+    unexpected_extract.assert_not_called()
+
+    def second_extract():
+        assert store.update_progress.call_args_list == [
+            call('item', 'worker', 'lease', stage='chunking', progress=45),
+            call('item', 'worker', 'lease', stage='extracting', progress=45),
+        ]
+        return output
+
+    resumed.execute(1, 'second', second_extract)
+    store.update_progress.assert_called_with('item', 'worker', 'lease', stage='extracting', progress=75)

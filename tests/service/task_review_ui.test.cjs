@@ -160,7 +160,9 @@ test('withdrawn owner conflict keeps evidence and rejection but disables accepta
 test('refresh uses new project-scoped summary and preserves full logs collapsed',async()=>{
   const {get,calls}=fixture();
   await get('load-jobs').onclick();
-  const html=get('tasks').innerHTML,summary=html.split('<details')[0];
+  const html=get('tasks').innerHTML,summary=html.split('</details>')[0];
+  assert.doesNotMatch(html.split('<details')[0],/实体抽取返回 · 3 个/);
+  assert.match(summary,/阶段记录/);
   assert.match(html,/job-a/);assert.doesNotMatch(html,/job-b/);
   assert.match(summary,/实体抽取返回 · 3 个/);
   assert.doesNotMatch(summary,/实体抽取返回 · 2 个|仍在等待当前步骤/);

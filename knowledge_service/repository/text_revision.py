@@ -137,12 +137,15 @@ class EntityTextRevision:
         actions = plan['actions']
         puts = [item for item in actions if item['kind'] == 'record_put']
         accepts = [item for item in actions if item['kind'] == 'assertion_accept']
+        release = {'kind': 'identity_key_release', 'record_ids': [self.record_id]}
         if (self._snapshot is None or plan['project_id'] != self.project_id
                 or plan['operation'] != 'manual_write'
                 or plan['recorded_at'] is not None
                 or plan['operation_context'] is not None
                 or plan['review_items']
-                or len(actions) != 2 or len(puts) != 1 or len(accepts) != 1
+                # The planner releases keys before rewriting an entity. The
+                # bounded session authorizes the claim release for this ID only.
+                or len(actions) != 3 or actions[0] != release or len(puts) != 1 or len(accepts) != 1
                 or puts[0]['record'] != self._candidate
                 or puts[0]['expected_version'] != self.expected_version
                 or accepts[0]['assertion']['id'] != self._assertion_id

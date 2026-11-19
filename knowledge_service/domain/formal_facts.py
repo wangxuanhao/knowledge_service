@@ -7,6 +7,9 @@ import json
 from .applicability import scope_identity
 
 
+# Bound to the actual release only inside the governed publication transaction.
+PUBLICATION_RELEASE = '__PUBLISHED_ONTOLOGY_ID__'
+
 FORMAL_OPERATIONS = frozenset({
     'extract', 'manual_write', 'approve_review',
     'adopt_discovery', 'publish_discovery_draft', 'ontology_publish',

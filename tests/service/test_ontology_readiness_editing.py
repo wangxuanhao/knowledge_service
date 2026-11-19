@@ -54,13 +54,14 @@ class EditingReadinessTests(unittest.TestCase):
         review = load_methods('knowledge_service/services/ontology_drafts_review.py',
                               'DraftReviewPublishMixin', {'publish_readiness'}, namespace)
         helpers = load_methods('knowledge_service/services/ontology_drafts.py',
-                               'OntologyDrafts', {'_effective_decisions', '_operation_issues'}, {})
+                               'OntologyDrafts', {'_effective_decisions', '_operation_issues',
+                                                  '_active_from_history', '_effective_from_history'}, {})
         self.service = type('ReadinessService', (review, helpers), {})()
         self.service.store = SimpleNamespace(get=lambda *args: self.draft)
         self.service._latest_id = lambda *args: self.latest
         self.service._revert_base = lambda *args: self.revert
         self.service._version_number = lambda *args: 1
-        self.service._active_operations = lambda *args: self.operations
+
         self.service._history = lambda *args: (self.operations, self.decisions)
         self.service._warning_codes = lambda report: {
             item['code'] for item in report.get('warnings', [])}
@@ -72,13 +73,15 @@ class EditingReadinessTests(unittest.TestCase):
                 raise StaleSource('source changed')
             return []
 
-        def compute(*args):
+        def compute(*args, operations, source_snapshot):
+            self.assertEqual(operations, self.operations)
             self.calls['full_validation'] += 1
             # Model the heavy dependencies behind the actual validation boundary;
             # the scoped-read suite separately executes the real computation.
             self.calls['quality'] += 1
             self.calls['current_records'] += 1
-            snapshot(*args)
+            if source_snapshot is None:
+                snapshot(*args)
             return self.report, self.fingerprint, 'draft turtle'
 
         self.service._source_snapshot = snapshot
@@ -159,7 +162,16 @@ class EditingReadinessTests(unittest.TestCase):
         self.assertEqual(result.get('validation_state'), 'evaluated')
         self.assertIs(result.get('requires_full_validation'), False)
         self.assertEqual(self.calls, {'full_validation': 1, 'quality': 1, 'current_records': 1,
-                                     'source_snapshot': 2, 'approved_replay': 1})
+                                     'source_snapshot': 1})
+
+    def test_partial_approval_replays_only_approved_subset(self):
+        self.approve()
+        self.operations.append({'id': 'other', 'fingerprint': 'other-fp', 'validation': {}})
+        self.decisions.append({'id': 'no', 'operation_id': 'other', 'action': 'reject',
+                               'operation_fingerprint': 'other-fp'})
+        result = self.service.publish_readiness('p', 'd')
+        self.assertTrue(result['ready'])
+        self.assertEqual(self.calls['approved_replay'], 1)
 
     def test_default_full_still_detects_changed_fingerprints_and_validation_errors(self):
         self.approve()

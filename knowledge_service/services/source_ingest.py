@@ -43,10 +43,25 @@ def prepare_source_ingest(sources,project_id,source,options,*,ocr_semaphore=None
             chunk['id']='source-'+str(len(chunks));chunk['ordinal']=len(chunks)
             chunks.append(chunk)
         text=text+'\n\n'+body if text else body
+    def warn_missing_image(asset):
+        path = asset.get('resolved_path') or asset.get('original_path')
+        warning = dict(code='source_asset_missing', severity='warning', asset_id=asset['id'],
+                       message='本地图片缺失，已跳过。')
+        if path:
+            # Replace the package parser's generic warning for this reference.
+            warnings[:] = [w for w in warnings if not (isinstance(w, dict)
+                and w.get('code') == 'source_asset_missing' and w.get('path') == path
+                and not w.get('asset_id'))]
+            warning.update(path=path, message=f'本地图片缺失，已跳过「{path[:300]}」。')
+        warnings.append(warning)
+
     def media(asset,heading_path=None):
         if asset['kind'] not in {'local','base64'} or asset['status']=='ignored':return
-        if progress:progress()
         is_video=asset.get('provenance',{}).get('media_type')=='video'
+        if not is_video and asset['status'] == 'missing':
+            warn_missing_image(asset)
+            return
+        if progress:progress()
         if not is_video and options.get('parse_config',{}).get('ocr_mode')=='disabled':
             warnings.append(dict(code='ocr_disabled',asset_id=asset['id'],message='已按解析设置禁用图片文字识别'))
             return
@@ -59,11 +74,17 @@ def prepare_source_ingest(sources,project_id,source,options,*,ocr_semaphore=None
                 with ocr_semaphore if ocr_semaphore is not None and not is_video else nullcontext():
                     run=processor.process_asset(project_id,source['id'],asset['id'])
         except (OCRError,ASRError) as exc:
+            if not is_video and exc.code == 'source_asset_missing':
+                warn_missing_image(asset)
+                return
             if (options.get('extraction_mode')!='documents' or
                     strict_media and exc.code not in {'asr_no_audio','asr_no_speech'}):raise
             warnings.append(dict(code=exc.code,asset_id=asset['id'],message=str(exc)))
             run=getattr(exc,'partial_receipt',None)
             if not run or run.get('status')!='partial':return
+        if not is_video and run.get('error_code') == 'source_asset_missing':
+            warn_missing_image(asset)
+            return
         if run.get('status') not in {'completed','partial'}:return
         quality=run.get('processing_details',{}).get('quality',{})
         if quality.get('discarded_blocks',0):

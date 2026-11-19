@@ -12,7 +12,7 @@ import hashlib
 import json
 
 from ..domain.formal_facts import (
-    FORMAL_OPERATIONS, SOURCE_METADATA, canonical_attribute_key,
+    FORMAL_OPERATIONS, PUBLICATION_RELEASE, SOURCE_METADATA, canonical_attribute_key,
     canonical_relation_key, manual_assertion_id, typed_value_identity)
 from ..utils.assertions import ALLOWED_TRANSITIONS, occurrence_id
 from .ontology import Ontology, UnknownOntologyTerm
@@ -49,10 +49,11 @@ def _published_identity_policy(ontology, class_iri):
 
 
 class _Planner:
-    def __init__(self, snapshot, operation, assertions, expected, policy):
+    def __init__(self, snapshot, operation, assertions, expected, policy, *, publication_ontology=None):
         # Repository snapshots are detached. Treat corpus rows as read-only;
         # changed records/assertions are copied before replacing their entries.
         self.snapshot = snapshot
+        self.publication_ontology = publication_ontology
         self.ontology = Ontology(snapshot['ontology']['turtle']) if snapshot.get('ontology') else None
         self.operation = operation
         self.expected = expected
@@ -718,7 +719,8 @@ class _Planner:
         original identity without preserving an abandoned key on the survivor.
         """
         from .identity_type_lineage import IdentityTypeLineage
-        lineage=IdentityTypeLineage(self.snapshot,self.ontology,self.actions)
+        lineage=IdentityTypeLineage(self.snapshot,self.ontology,self.actions,
+                                    publication_ontology=self.publication_ontology)
         touched={action['record']['id'] for action in self.actions
                  if action['kind']=='record_put' and action['record'].get('kind')=='entity'}
         new_bindings=set()
@@ -743,7 +745,9 @@ class _Planner:
                 if any(assertion['id'] in new_bindings for assertion in assertions):
                     raise ValueError('已停用的实体不能接受新的身份支撑')
                 continue
-            policy=_published_identity_policy(self.ontology,target['type'])
+            vocabulary = (self.publication_ontology if target.get('ontology_id') == PUBLICATION_RELEASE
+                          else self.ontology)
+            policy=_published_identity_policy(vocabulary,target['type'])
             canonical_type=lineage.normalize(target['type'],target.get('ontology_id'))
             effective=_writable(target)
             effective['metadata']=copy.deepcopy(target.get('metadata',{}))
@@ -753,6 +757,13 @@ class _Planner:
                 if payload.get('kind') not in (None,'entity'):
                     raise ValueError('实体断言载荷类型与规范身份不一致')
                 source={**payload,'kind':'entity','type':lineage.source_type(assertion,target)}
+                # A new, unversioned canonical record may have used the current
+                # release to classify an untyped occurrence. Persist that release
+                # on the planned version, not on its immutable source assertion.
+                if (not payload.get('type') and not effective.get('ontology_id')
+                        and 'token' in self.record_refs[record_id]
+                        and (assertion['id'], record_id) in lineage.prospective_types):
+                    effective['ontology_id'] = self.snapshot.get('ontology_id')
                 if source['type']!=canonical_type:
                     raise ValueError('实体断言与规范实体的稳定类型 IRI 不一致')
                 if identity_scope(source,policy)!=identity_scope(target,policy):
@@ -859,7 +870,9 @@ class FormalFactWriter:
         }
 
     def prepare(self, operation, project_id, assertions, expected, policy,
-                recorded_at=None, operation_context=None, *, snapshot=None):
+                recorded_at=None, operation_context=None, *, snapshot=None, publication_ontology=None):
+        if publication_ontology is not None and operation != 'adopt_discovery':
+            raise ValueError('仅草案摄取计划可绑定待发布本体')
         if operation not in FORMAL_OPERATIONS:
             raise ValueError('不支持的正式操作')
         if not isinstance(expected, dict) or any(
@@ -882,11 +895,16 @@ class FormalFactWriter:
             if _published_identity_policy(ontology,row['type']).declared:
                 identity_pool[record_id]={**row,'type':str(ontology.resolve(row['type'],ontology.classes))}
         for record in frozen_policy.get('records', []):
-            self._reject_deprecated_write_term(record, ontology, operation)
+            vocabulary = ontology
+            if record.get('ontology_id') == PUBLICATION_RELEASE:
+                if publication_ontology is None:
+                    raise ValueError('待发布记录缺少获批本体')
+                vocabulary = publication_ontology
+            self._reject_deprecated_write_term(record, vocabulary, operation)
             if record.get('kind') == 'entity':
-                identity = _published_identity_policy(ontology,record['type'])
+                identity = _published_identity_policy(vocabulary,record['type'])
                 if identity.declared:
-                    record['type'] = str(ontology.resolve(record['type'], ontology.classes))
+                    record['type'] = str(vocabulary.resolve(record['type'], vocabulary.classes))
                     record.setdefault('metadata', {}).update({
                         'identity_policy': identity.mode,
                         'identity_key_fields': list(identity.keys),
@@ -931,7 +949,8 @@ class FormalFactWriter:
             if source_boundary(source) != source_boundary(target):
                 cross_source.append([source_id, target_id])
         planner = _Planner(
-            snapshot, operation, assertions, expected, frozen_policy)
+            snapshot, operation, assertions, expected, frozen_policy,
+            publication_ontology=publication_ontology)
         actions, result_refs, assertion_result_ids = planner.build()
         cross_source.extend(planner.identity_gate_bindings)
         if cross_source:

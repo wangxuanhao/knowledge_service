@@ -13,14 +13,20 @@ from knowledge_service.services.document_ingest_runner import DocumentIngestRunn
 from knowledge_service.models import IngestBatchSettings
 
 
+class UnreadableImageOCR:
+    engine = 'test'
+    languages = 'en'
+    configuration_fingerprint = 'test'
+
+    def recognize(self, data):
+        raise OCRError('ocr_low_confidence', 'no readable text')
+
+
 def test_batch_documents_tolerates_failed_ocr_but_strict_mode_does_not(tmp_path):
     from knowledge_service.repository import Repository
     from knowledge_service.services.service import KnowledgeService
-    class Adapter:
-        engine='test';languages='en';configuration_fingerprint='test'
-        def recognize(self,data): raise OCRError('ocr_low_confidence','no readable text')
     repo=Repository(tmp_path/'reading.sqlite');project=repo.create_project('reading')['id']
-    service=KnowledgeService(repo,HashingEncoder());sources=SourceDocumentService(repo,SourceObjectStore(tmp_path/'objects'),Adapter())
+    service=KnowledgeService(repo,HashingEncoder());sources=SourceDocumentService(repo,SourceObjectStore(tmp_path/'objects'),UnreadableImageOCR())
     for mode in ['documents','discovery']:
         settings=IngestBatchSettings(extraction_mode=mode).model_dump();batch=repo.ingest_batches.create_batch(project,settings)
         row=repo.ingest_batches.add_item(project,batch['id'],'a.md',b'Article text\n\n![image](x.png)','hash',mode,100,10000)
@@ -122,9 +128,9 @@ def test_strict_ocr_failure_marks_retained_upload_failed(tmp_path,task_id,mode):
     from knowledge_service.models import UploadOptions
     from hashlib import sha256
     class Parser:
-        def parse(self,*a,**k):return ParsedDocument('Article\n\n![](missing.png)',{},[dict(kind='local',status='missing',original_path='missing.png')])
+        def parse(self,*a,**k):return ParsedDocument('Article\n\n![](image.png)',{},[dict(kind='local',status='available',original_path='image.png',data=png())])
     repo=Repository(tmp_path/'failed-ocr.sqlite');project=repo.create_project('failed OCR')['id']
-    service=KnowledgeService(repo,HashingEncoder());sources=SourceDocumentService(repo,SourceObjectStore(tmp_path/'objects'))
+    service=KnowledgeService(repo,HashingEncoder());sources=SourceDocumentService(repo,SourceObjectStore(tmp_path/'objects'),UnreadableImageOCR())
     path=tmp_path/'a.md';path.write_bytes(b'Article')
     uploads=DocumentUploads(tmp_path,Parser())
     with pytest.raises(OCRError):
@@ -132,8 +138,8 @@ def test_strict_ocr_failure_marks_retained_upload_failed(tmp_path,task_id,mode):
             UploadOptions(extraction_mode=mode),task_id=task_id,sources=sources)
     document=repo.current_records(project,kinds=['document'])[0]
     assert document['metadata']['status']=='failed'
-    assert document['metadata']['active_stage']=='parse'
-    assert document['metadata']['error_code']=='source_asset_missing'
+    assert document['metadata']['active_stage']=='ocr'
+    assert document['metadata']['error_code']=='ocr_low_confidence'
     assert document['metadata']['public_error']
     assert sources.get(project,document['metadata']['source_document_version_id'])['source_text']
 
@@ -146,9 +152,9 @@ def test_durable_upload_retry_reuses_source_and_ready_replay_needs_no_staged_fil
     from knowledge_service.models import UploadOptions
     from hashlib import sha256
     class Parser:
-        def parse(self,*a,**k):return ParsedDocument('Article\n\n![](image.png)',{},[dict(kind='local',status='missing',original_path='image.png')])
+        def parse(self,*a,**k):return ParsedDocument('Article\n\n![](image.png)',{},[dict(kind='local',status='available',original_path='image.png',data=png())])
     repo=Repository(tmp_path/'retry.sqlite');project=repo.create_project('retry')['id']
-    service=KnowledgeService(repo,HashingEncoder());sources=SourceDocumentService(repo,SourceObjectStore(tmp_path/'objects'))
+    service=KnowledgeService(repo,HashingEncoder());sources=SourceDocumentService(repo,SourceObjectStore(tmp_path/'objects'),UnreadableImageOCR())
     path=tmp_path/'a.md';path.write_bytes(b'Article')
     upload=DocumentUploads(tmp_path,Parser());staged=StagedUpload(path,'a.md',7,sha256(b'Article').hexdigest())
     with pytest.raises(OCRError):upload.ingest(service,project,staged,UploadOptions(extraction_mode='discovery'),task_id='task',sources=sources)

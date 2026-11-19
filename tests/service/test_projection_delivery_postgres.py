@@ -1,7 +1,45 @@
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+
+import pytest
+
 from knowledge_service.repository import Repository
 from knowledge_service.services.projection_runtime import MilvusProjectionAdapter
 from knowledge_service.services.projection_sync import ProjectionSync
 from test_projection_sync import Encoder, MemoryMilvus
+
+
+def test_project_sequence_is_gapless_across_rollback_and_competing_writers(tmp_path):
+    left = Repository(tmp_path / 'sequence')
+    right = Repository(tmp_path / 'sequence')
+    project = left.create_project('competing writers')['id']
+
+    def enqueue(repo, version):
+        return repo.projections.enqueue(project, 'tombstone', version,
+                                        {'record_id': 'r', 'version_id': version})
+
+    with pytest.raises(RuntimeError, match='abort'):
+        with left._transaction():
+            assert enqueue(left, 'discard') == 1
+            raise RuntimeError('abort')
+    assert right.projections.project_watermark(project) == 0
+
+    start = Barrier(2)
+
+    def writer(repo, label):
+        with repo._transaction():
+            start.wait(timeout=10)
+            return [(enqueue(repo, label + suffix), label + suffix) for suffix in ('1', '2')]
+
+    with ThreadPoolExecutor(2) as pool:
+        first = pool.submit(writer, left, 'a')
+        second = pool.submit(writer, right, 'b')
+        a, b = first.result(timeout=15), second.result(timeout=15)
+    rows = left._db.execute('SELECT seq AS n,version_id FROM projection_outbox '
+                            'WHERE project_id=? ORDER BY seq', (project,)).fetchall()
+    assert [tuple(row) for row in rows] == sorted(a + b)
+    assert sorted([[n for n, _ in a], [n for n, _ in b]]) == [[1, 2], [3, 4]]
+    assert left.projections.project_watermark(project) == 4
 
 
 def test_outbox_sequence_survives_public_row_filter_and_acknowledges_revisions(tmp_path):

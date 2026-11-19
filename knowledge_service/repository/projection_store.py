@@ -280,16 +280,14 @@ class ProjectionStore:
             raise ValueError('projection operation must be upsert or tombstone')
         if not self._db.in_transaction:
             raise RuntimeError('projection outbox writes require repository transaction')
-        self._db.execute(
-            '''INSERT INTO project_projection_sequences(project_id,projection_seq)
-               VALUES (?,0) ON CONFLICT(project_id) DO NOTHING''', (project_id,))
+        # Keep allocation transactional: rolling back the outbox event must also
+        # roll back its number. The upsert serializes writers on the project row.
         row = self._db.execute(
-            '''SELECT projection_seq FROM project_projection_sequences
-               WHERE project_id=? FOR UPDATE''', (project_id,)).fetchone()
-        seq = int(row['projection_seq']) + 1
-        self._db.execute(
-            '''UPDATE project_projection_sequences SET projection_seq=?
-               WHERE project_id=?''', (seq, project_id))
+            '''INSERT INTO project_projection_sequences(project_id,projection_seq)
+               VALUES (?,1) ON CONFLICT(project_id) DO UPDATE
+               SET projection_seq=project_projection_sequences.projection_seq+1
+               RETURNING projection_seq''', (project_id,)).fetchone()
+        seq = int(row['projection_seq'])
         payload = {key: value for key, value in payload.items() if key != 'embedding'}
         envelope = self._milvus_envelope(project_id, operation, version_id, payload)
         if envelope is not None:

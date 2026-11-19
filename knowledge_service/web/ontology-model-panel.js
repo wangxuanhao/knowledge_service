@@ -6,7 +6,7 @@
  * 职责（B4/B6/B7/B8）：
  *   · 右栏详情：按 S.selected 显示该术语的定义（类的属性/允许的关系/适用规则/相关对象；
  *     关系显示 domain/range；属性显示 domain/datatype）。
- *   · 底栏动作条：状态摘要 + 「校验并审核」(validate→submit→batch-approve) + 「发布为 vN+1」。
+ *   · 底栏动作条：状态摘要 + 「校验并审核」(submit→batch-approve) + 「发布为 vN+1」。
  *   · 版本管理抽屉：列出已发布版本（GET /ontologies）与发布记录，可查看某一版（只读）、
  *     也可以回到某一版（以它为基线开 revert 草案）；Turtle/SPARQL 指路到档案页。
  *   · 候选收下/忽略：S.candidates 里待收下的概念 → sendCommand(create_term) 建进草案，或本地记下不建。
@@ -1010,7 +1010,7 @@
         linkRow('客体类型', term.range, 'add_range', 'remove_range'));
     } else if (kind === 'attribute') {
       body.append(
-        linkRow('所属类型', term.domain, 'add_domain', 'remove_domain'),
+        linkRow('适用类型', term.domain, 'add_domain', 'remove_domain'),
         datatypeRow());
     } else {
       body.append(linkRow('父类（继承）', term.parents, 'add_parent', 'remove_parent'));
@@ -1023,9 +1023,6 @@
     const box = el('div', 'om-detail-card');
     box.append(detailHead('实体类', 'cls', cls, cls.id));
     if (cls.description) box.append(el('p', 'om-detail-desc', cls.description));
-    if(window.OntologyIdentity)box.append(window.OntologyIdentity.classSection(cls,
-      {model:model(),project:activeProject,title:detailTitle}));
-
     if(window.OntologyAttributes)box.append(window.OntologyAttributes.classSection(cls,summary,
       {model:model(),project:activeProject,title:detailTitle}));
     else {
@@ -1033,6 +1030,8 @@
       box.append(section('属性',own.length,own.map(a=>termRow('attr',help().label(a),dtypeLabel(a),a.id)),
         '此类直接声明的属性及数据类型。点击属性名称可查看或编辑。'));
     }
+    if(window.OntologyIdentity)box.append(window.OntologyIdentity.classSection(cls,
+      {model:model(),project:activeProject,title:detailTitle}));
 
     const rels = relations.filter(r => (r.domain || []).includes(cls.id));
     box.append(section('允许的关系', rels.length,
@@ -1093,9 +1092,9 @@
     if(metadata)box.append(metadata);
 
     const dom = attr.domain || [];
-    box.append(section('所属类型', dom.length,
+    box.append(section('适用类型', dom.length,
       dom.map(d => termRow('cls', labelOfIri(d, summary), null, d)),
-      '此属性所属的实体类型（domain）。'));
+      '定义此属性适用的实体类型（domain）。可以在下方编辑，也可以从类详情关联。'));
 
     box.append(section('数据类型', 1,
       [termRow('attr', dtypeLabel(attr), help().dtypeOf(attr) || '未限定')],
@@ -1587,24 +1586,23 @@
       },
     });
   }
-  /* ---- 「校验并审核」：validate → submit → batch-approve ------------------- */
+  /* ---- 「校验并审核」：校验并提交 → batch-approve ------------------- */
   async function validateAndReview() {
     const M = model();
     if (!M) return;
     let draft = M.S && M.S.draft;
     if (!draft || !draft.id) { status('还没有草案：先在画布上新增或调整术语，草案会自动建立。', true); return; }
     if(M.S.preview)return;
-    const task=beginAction('review',draft,draft.submitted_at?'正在批量批准变更…':'正在校验草案…');if(!task)return;
+    const needsSubmit=!draft.submitted_at||!draft.validation_fingerprint;
+    const task=beginAction('review',draft,needsSubmit?'正在校验并提交草案…':'正在批量批准变更…');if(!task)return;
     const id = draft.id;
     const project=activeProject(),revision=draft.revision,projectBase=endpoint('');
     const stillCurrent=()=>activeProject()===project&&M.S.draft?.id===id&&M.S.draft.revision===revision&&!M.S.preview;
     const assertCurrent=()=>{if(!stillCurrent())throw new Error('项目、草案或修订已变化，已停止后续审核步骤，请重新核对。');};
     const base = `/ontology-drafts/${encodeURIComponent(id)}`;
     try {
-      if(!draft.submitted_at||!draft.validation_fingerprint){
-        actionPhase(task,'正在校验草案…');
-        draft = await draftApi(projectBase+base+'/validate', { expected_revision: draft.revision }, 'POST');assertCurrent();
-        actionPhase(task,'正在提交审核…');
+      if(needsSubmit){
+        // Submit validates and freezes its own report and fingerprint.
         draft = await draftApi(projectBase+base+'/submit', { expected_revision: draft.revision }, 'POST');assertCurrent();
       }
       actionPhase(task,'正在批量批准变更…');

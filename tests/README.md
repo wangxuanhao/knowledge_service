@@ -4,7 +4,7 @@
 
 ## 默认回归
 
-在仓库根目录、既有 `llm_model` 环境执行，Python 和 Node 分开运行：
+在仓库根目录使用现有的 `llm_model` 环境。先按下文配置 PostgreSQL 测试实例，再分别运行 Python 和 Node 测试。
 
 ```powershell
 python -m pytest -q
@@ -39,9 +39,9 @@ python -m unittest discover -s tests/scripts -p "test_*.py"
 
 ## 运行约束
 
-- **只能有一个 pytest 会话。** `pg_support` 使用并清理独立的 `knowledge_test` 库，并行会互相删库。不要连接正常业务库。
-- pytest 已通过 `KG_SKIP_DOTENV` 隔离本机配置，运行前不要把生产 `.env` 导入进程。应用真实服务与密闭测试使用不同配置。
-- PG 不可用时，当前全局 fixture 会 skip 包括脚本安全测试在内的依赖用例。看见 skip 需要记录原因，不能当作验证成功。
+- 在测试进程设置 `KG_TEST_POSTGRES_ADMIN_DSN`，填写独立测试实例的主机、端口和管理员凭据。测试需要新建数据库、安装扩展和清理表数据。
+- 省略 DSN 中的数据库名和 `KG_TEST_POSTGRES_DB` 时，每次会话会新建唯一的 `knowledge_test_<随机标识>`，结束时只清理本次创建的库。手动指定库名时，请使用尚未创建的名称。
+- pytest 通过 `KG_SKIP_DOTENV` 隔离应用配置。PostgreSQL 不可用时，全局测试夹具可能跳过整套 Python 测试。请核对测试摘要和跳过原因。
 - strict xfail 用于明确记录尚未修复的缺陷，例如来源读取的 MVCC 一致性问题；不属于可删除的历史垃圾。
 - 测试文件之间存在共享导入和 `runpy` 依赖，不能直接按功能批量搬目录。
 - 截图和临时验收输出写入被 Git 忽略的 `.benchmarks/`；当前手册使用的正式截图在 `docs/manual-redesign/`。

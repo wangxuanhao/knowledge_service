@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readFileSync } = require('node:fs');
+const vm = require('node:vm');
 const catalog = require('../../knowledge_service/web/ontology-model-catalog.js');
 const summary = { classes:[{id:'urn:A',label_zh:'订单',parents:['urn:P','urn:Q']},{id:'urn:old',label:'历史类',active:false}],
   relations:[{id:'urn:r',label:'关联',domain:[],range:[]}], attributes:[{id:'urn:a',label:'金额',domain:['urn:A'],range:['xsd:decimal']}] };
@@ -16,12 +18,56 @@ test('type cards expose all parents and independently addressable properties and
   assert.equal(model.attributes[0].id,'urn:a');
   assert.equal(catalog.typeCard(summary.relations[0],summary).endpointText,'未指定主体 → 未指定客体');
 });
+test('attribute cards show applicable classes and value types, including unassigned definitions',()=>{
+  const unassigned={id:'unassigned',label:'来源链接'};
+  const data={...summary,attributes:[...summary.attributes,unassigned]};
+  assert.equal(catalog.typeCard(summary.attributes[0],data).endpointText,'订单 · decimal');
+  assert.equal(catalog.typeCard(unassigned,data).endpointText,'未指定适用类型 · 未限定值类型');
+});
 test('RDF editing rejects stale project, draft revision or read-only snapshot', () => {
   const opened={project:'p',draftId:'draft',revision:2,ontologyId:'release'};
   assert.equal(catalog.sourceWriteAllowed(opened,{...opened}),true);
   assert.equal(catalog.sourceWriteAllowed(opened,{...opened,revision:3}),false);
   assert.equal(catalog.sourceWriteAllowed(opened,{...opened,preview:true}),false);
   assert.equal(catalog.sourceWriteAllowed(opened,{...opened,project:'other'}),false);
+});
+
+test('Turtle import and editing follow write permissions while viewers can read and export', async () => {
+  const nodes=[],writes=[];
+  let canWrite=false;
+  const element=tag=>{
+    const node={tag,children:[],events:{},hidden:false,value:'',
+      append(...children){this.children.push(...children);},replaceChildren(){this.children=[];},
+      addEventListener(name,handler){this.events[name]=handler;},setAttribute(){},querySelectorAll(){return [];},showModal(){}};
+    nodes.push(node);
+    return node;
+  };
+  const context={window:{Auth:{isAdmin:()=>canWrite}},current:'p',document:{createElement:element,body:element('body')},
+    endpoint:route=>route,api:async()=>({turtle:'@prefix ex: <urn:ex:> .',id:'release'})};
+  vm.runInNewContext(readFileSync(require.resolve('../../knowledge_service/web/ontology-model-catalog.js'),'utf8'),context);
+  const controller={S:{},status(message){assert.fail(message);},sendCommand:async command=>writes.push(command)};
+  const catalog=context.window.OntologyCatalog;
+  catalog.mount(element('aside'),element('main'),controller);
+  const find=(label)=>nodes.find(node=>node.textContent===label);
+  assert.equal(find('导入 Turtle 本体').hidden,true);
+  controller.S.ontologyId='release';
+  catalog.render(controller.S);
+  find('RDF 源码 / 导出').events.click();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(find('导出 Turtle').hidden,false);
+  assert.equal(find('编辑 Turtle'),undefined);
+
+  canWrite=true;
+  controller.S.ontologyId=null;
+  catalog.render(controller.S);
+  assert.equal(find('导入 Turtle 本体').hidden,false);
+  find('导入 Turtle 本体').events.click();
+  await new Promise(resolve=>setImmediate(resolve));
+  const save=find('把源码差异加入草案');
+  assert.equal(save.hidden,false);
+  canWrite=false;
+  await save.events.click();
+  assert.deepEqual(writes,[]);
 });
 
 test('class card summaries preserve direct datatypes, declared required flags and inherited properties', () => {

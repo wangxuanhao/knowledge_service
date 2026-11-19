@@ -150,18 +150,27 @@ class OntologyDrafts(
         return list(by_operation.values())
 
     def _active_operations(self, project_id, draft_id):
-        return [row for row in self._effective_operations(project_id, draft_id)
+        history, _ = self._history(project_id, draft_id)
+        return self._active_from_history(history)
+
+    @classmethod
+    def _active_from_history(cls, history):
+        return [row for row in cls._effective_from_history(history)
                 if (row.get('validation') or {}).get('rebase_status') != 'no-op']
 
     def _ontology_for_draft(self, project_id, draft):
         operations = self._active_operations(project_id, draft['id'])
+        turtle = self._base_turtle(project_id, draft['base_ontology_id'])
+        return self._apply_active_overlay(turtle, operations), operations
+
+    @staticmethod
+    def _apply_active_overlay(turtle, operations):
         applicable = [row for row in operations
                       if (row.get('validation') or {}).get('rebase_status') != 'conflict'
                       and not (row.get('validation') or {}).get('errors')]
-        turtle = self._base_turtle(project_id, draft['base_ontology_id'])
         if applicable:
             turtle = apply_operations(turtle, map(_semantic_operation, applicable))
-        return turtle, operations
+        return turtle
 
     def _preview(self, project_id, draft, *, with_evidence=True, verify=True):
         if with_evidence:
@@ -893,8 +902,19 @@ class OntologyDrafts(
                 target.append(item)
                 existing.add(encoded)
 
-    def _compute_validation(self, project_id, draft):
-        operations = self._active_operations(project_id, draft['id'])
+    def _prepare_quality_engine(self):
+        # Only initialize the runtime here; never read draft data or run a check.
+        # Carry an unavailable engine into the normal validation report, without
+        # retrying its import inside the transaction or caching failures across requests.
+        try:
+            return self.quality_engine or SemanticaOntologyQuality()
+        except QualityEngineUnavailable as exc:
+            return exc
+
+    def _compute_validation(self, project_id, draft, *, operations=None, source_snapshot=None,
+                            quality_engine=None):
+        if operations is None:
+            operations = self._active_operations(project_id, draft['id'])
         errors, warnings, info = self._operation_issues(operations)
         candidate_turtle = self._base_turtle(project_id, draft['base_ontology_id'])
         graph_report = {'conforms': True, 'errors': []}
@@ -915,7 +935,10 @@ class OntologyDrafts(
             self._extend_unique(warnings, overlay_warnings)
             self._extend_unique(info, overlay_info)
             try:
-                quality_engine = self.quality_engine or SemanticaOntologyQuality()
+                if quality_engine is None:
+                    quality_engine = self.quality_engine or SemanticaOntologyQuality()
+                if isinstance(quality_engine, QualityEngineUnavailable):
+                    raise quality_engine
                 semantica_quality = quality_engine.check(
                     ontology_payload(candidate_ontology))
             except QualityEngineUnavailable as exc:
@@ -973,7 +996,8 @@ class OntologyDrafts(
             'conforms': not errors,
             'semantica_quality': semantica_quality,
         }
-        source_snapshot = self._source_snapshot(project_id, draft)
+        if source_snapshot is None:
+            source_snapshot = self._source_snapshot(project_id, draft)
         fingerprint = _fingerprint({
             'rule_version': self.validation_rule_version,
             'base_ontology_id': draft['base_ontology_id'],
@@ -988,11 +1012,13 @@ class OntologyDrafts(
         self._assert_revision(draft, expected_revision)
         _status_guard(draft, OPEN_STATES, '重新校验')
         self._check_current(project_id, draft, expected_revision)
+        quality_engine = self._prepare_quality_engine()
         with self.repository.unit_of_work():
             draft = self.store.get(project_id, draft_id)
             self._assert_revision(draft, expected_revision)
             self._check_current(project_id, draft, expected_revision)
-            report, fingerprint, _ = self._compute_validation(project_id, draft)
+            report, fingerprint, _ = self._compute_validation(
+                project_id, draft, quality_engine=quality_engine)
             # validated_at＝“校验通过”的落点（迁移 0004）：待处理的草案、校验无阻断错误才写入。
             # A3 之前这里认 submitted（状态里的一档）；现在 submitted 并进 pending，
             # 判据自然变成「待处理」—— 也就是说"提交过没有"由 validated_at 与
@@ -1010,14 +1036,14 @@ class OntologyDrafts(
         self._assert_revision(draft, expected_revision)
         _status_guard(draft, EDITABLE_STATES, '提交审核')
         self._check_current(project_id, draft, expected_revision)
+        quality_engine = self._prepare_quality_engine()
         with self.repository.unit_of_work():
             draft = self.store.get(project_id, draft_id)
             self._assert_revision(draft, expected_revision)
             _status_guard(draft, EDITABLE_STATES, '提交审核')
             self._check_current(project_id, draft, expected_revision)
-            operations = self._active_operations(project_id, draft_id)
-            active = [row for row in operations
-                      if (row.get('validation') or {}).get('rebase_status') != 'no-op']
+            history, decision_rows = self._history(project_id, draft_id)
+            active = self._active_from_history(history)
             # 回退草案可以**零变更**：它的内容就是那一版的结构，"回退"本身就是这次提交的
             # 全部意图（与 git revert 同构：产生一个新版本，而树等于旧版本）。
             # 下方那条门禁防的是"提交一份什么都没做的草案"；回退不需要再另外改一笔，
@@ -1025,9 +1051,9 @@ class OntologyDrafts(
             if not active and not self._revert_base(project_id, draft):
                 raise ValidationFailed(
                     'a draft must contain at least one effective operation')
-            report, fingerprint, _ = self._compute_validation(project_id, draft)
+            report, fingerprint, _ = self._compute_validation(
+                project_id, draft, operations=active, quality_engine=quality_engine)
             current_ids = {row['id'] for row in active}
-            _, decision_rows = self._history(project_id, draft_id)
             retained = {
                 row['operation_id']: row
                 for row in self._effective_decisions(decision_rows)
@@ -1057,8 +1083,10 @@ class OntologyDrafts(
                 if row.get('code')}
 
     def _require_validation(self, project_id, draft, supplied_fingerprint,
-                            acknowledged_warning_codes, *, allow_errors=False):
-        report, current, turtle = self._compute_validation(project_id, draft)
+                            acknowledged_warning_codes, *, allow_errors=False,
+                            **validation_inputs):
+        report, current, turtle = self._compute_validation(
+            project_id, draft, **validation_inputs)
         if (not supplied_fingerprint
                 or supplied_fingerprint != current
                 or draft.get('validation_fingerprint') != current):
@@ -1086,7 +1114,7 @@ class OntologyDrafts(
     def _decide(self, project_id, draft_id, expected_revision,
                 expected_ontology_id, validation_fingerprint, decisions,
                 acknowledged_warning_codes, actor, *, assisted_batch=False,
-                trusted_definition=False):
+                trusted_definition=False, quality_engine=None):
         draft = self.store.get(project_id, draft_id)
         self._assert_revision(draft, expected_revision)
         _status_guard(draft, REVIEW_STATES, '做审核决定')
@@ -1103,9 +1131,11 @@ class OntologyDrafts(
         if not proposed or (not assisted_batch and not trusted_definition
                             and len(proposed) > 100):
             raise BatchNotAllowed('a decision request must contain 1..100 decisions')
+        if quality_engine is None:
+            quality_engine = self._prepare_quality_engine()
         report, _, turtle = self._require_validation(
             project_id, draft, validation_fingerprint,
-            acknowledged_warning_codes, allow_errors=True)
+            acknowledged_warning_codes, allow_errors=True, quality_engine=quality_engine)
         operations = {row['id']: row for row in self._active_operations(
             project_id, draft_id)}
         _, previous_rows = self._history(project_id, draft_id)
@@ -1190,7 +1220,7 @@ class OntologyDrafts(
                 expected_ontology_id=expected_ontology_id)
             self._require_validation(
                 project_id, locked, validation_fingerprint,
-                acknowledged_warning_codes, allow_errors=True)
+                acknowledged_warning_codes, allow_errors=True, quality_engine=quality_engine)
             # A3：这条保护以前挂在 reviewed 状态上（"已审核的草案不能再改决定，要重审先要求调整"）。
             # 状态收窄成三种之后由**推导**承担：每条活跃变更都已有当前决定 ＝ 这份请求已经
             # 可以收下了，此时再改决定必须先「退回继续编辑」（request_changes），否则就是

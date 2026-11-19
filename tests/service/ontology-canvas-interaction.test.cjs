@@ -68,7 +68,11 @@ test('two-click relation creation delegates both endpoints to the canonical atom
     ctx: { S: { ontologyId: 'current-release' }, createTerm: async spec => calls.push(JSON.parse(JSON.stringify(spec))) } });
   t.after(() => f.canvas.destroy());
   f.button('新增关联关系').listeners.click();
-  f.cy.$id('a').emit('tapstart').emit('tap'); f.cy.$id('b').emit('tapstart').emit('tap');
+  assert.equal(f.cy.nodes('.is-focus').length,0);
+  f.cy.$id('a').emit('tapstart').emit('tap');
+  assert.deepEqual(f.cy.nodes('.is-focus').map(n=>n.id()),['a']);
+  f.cy.$id('b').emit('tapstart').emit('tap');
+  assert.deepEqual(f.cy.nodes('.is-focus').map(n=>n.id()),['a','b']);
   const all = node => [node, ...node.children.flatMap(all)];
   all(f.host).find(x => x.tag === 'input').value = '属于';
   await f.button('确认建关系').listeners.click();
@@ -282,7 +286,9 @@ test('drag cannot select a node or advance the two-click relation workflow', t =
   a.emit('tapstart'); a.emit('drag'); a.emit('tap');
   f.cy.$id('b').emit('tapstart').emit('tap');
   const confirm = f.host.children[0].children.find(x => x.className === 'om-canvas-confirm');
-  assert.equal(confirm.hidden, true, 'B must be the first endpoint after dragging A');
+  assert.equal(confirm.hidden, false);
+  assert.equal(f.button('确认建关系'), undefined, 'B must be the first endpoint after dragging A');
+  assert.deepEqual(f.cy.nodes('.is-focus').map(n=>n.id()),['b']);
   assert.deepEqual(f.commands, []);
 });
 
@@ -382,12 +388,14 @@ test('link confirmation clears a wrapped toolbar', t => {
 
 test('connected class cards encode safe property rows and switch independently of hierarchy layout', t => {
   const f=fixture('hierarchy',{nodes:[{id:'a',label:'订单 <&>',attributes:[{label:'金额 <&>',datatype:'decimal',required:true}],
-    inheritedAttributes:[{id:'name',label:'名称'}],parents:['root']}],edges:[]});
+    inheritedAttributes:[{id:'name',label:'名称',datatype:'string'}],parents:['root']}],edges:[]});
   t.after(()=>f.canvas.destroy());
   const node=f.cy.$id('a'),data=node.data();
   assert.ok(data.cardImage,'connected nodes carry an SVG class card');
   const svg=decodeURIComponent(data.cardImage.split(',')[1]);
   assert.match(svg,/金额 &lt;&amp;&gt;/);
+  assert.match(svg,/名称/);
+  assert.match(svg,/继承 · string/);
   assert.match(svg,/decimal/);
   assert.match(svg,/继承 1 项属性/);
   assert.doesNotMatch(svg,/<script|订单 <&>/);

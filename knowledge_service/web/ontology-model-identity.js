@@ -59,12 +59,13 @@
     const control=typeof document.getElementById==='function'?document.getElementById('project'):null;
     if(control&&projectControl!==control){projectControl=control;control.addEventListener('change',()=>{epoch++;});}
     const st=options.model.S,policy=policyState(cls),box=el('section','om-detail-sec om-identity-policy');
-    box.append(options.title('实体身份策略','由本体版本固定的识别规则。修改写入草案，经人工审核发布后用于后续识别。'));
+    box.append(options.title('实体身份策略','判断不同资料里的记录是否指向同一个实体。设置随本体版本发布，用于后续识别。'));
     const source=st.preview?'历史版本 · 只读':st.showingDraft?'工作草案 · 待审核发布':'正式版本';
     const mode=modes.find(([id])=>id===policy.mode)?.[1]||'策略无法识别';
     box.append(el('p','om-detail-note',source+'：'+mode),el('p','om-detail-note',
-      policy.mode==='reference'?'同类型、身份范围与身份键相容时，可识别跨资料的同一实体；来源时间与适用条件保留在各条知识中。':
-        '默认按来源时间和适用条件区分实体；已登记的相容身份键可提供更强的识别依据。'));
+      policy.mode==='reference'?'可跨资料识别同一长期对象，匹配时会核对类型、身份范围及身份键。各来源保留自己的有效期和适用范围。':
+        '按区间识别时会比较来源有效期和适用范围。已登记且匹配的身份键也可作为识别依据。'));
+    box.append(el('p','om-detail-note','适用平台随知识记录保存，在知识图谱和检索中用于筛选。'));
     if(policy.scope)box.append(el('p','om-detail-note','身份范围：'+policy.scope));
     if(policy.keys.length)box.append(el('p','om-detail-note','身份键：'+policy.keys.join('、')));
     const key=cacheKey(cls,options),stamp=baseline(cls),cached=caches.get(key);

@@ -45,13 +45,10 @@ os.environ['KG_AUTH_DISABLED'] = '1'
 
 @pytest.fixture(scope='session', autouse=True)
 def _postgres_session():
-    """会话结束清理：删掉槽位 schema 与测试库。"""
+    """会话结束时只清理由本进程创建的测试库。"""
     yield
-    try:
-        import pg_support
-        pg_support.teardown()
-    except Exception:
-        pass
+    if 'pg_support' in sys.modules:
+        sys.modules['pg_support'].teardown()
 
 
 @pytest.fixture(autouse=True)
