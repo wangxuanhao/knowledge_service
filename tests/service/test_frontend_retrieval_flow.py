@@ -387,22 +387,22 @@ def test_ontology_context_strip_knowledge_context_and_ledger_navigation(workbenc
     page.click('#om-history')
     page.wait_for_selector('#om-history-overlay:not([hidden])')
     page.wait_for_function("document.querySelectorAll('.om-history-row').length === 3")
-    history_text = page.locator('#om-history-body').inner_text()
-    assert history_text.count('v2') >= 2
-    assert '标注修订' in history_text
-    assert 'ontology-' in history_text
+    history = page.locator('#om-history-overlay')
+    assert history.locator('.om-history-group-title').all_inner_texts() == ['v2', 'v1']
+    assert history.get_by_role('button', name=re.compile('^v2 标注修订 1')).is_visible()
+    assert 'ontology-' not in history.locator('.om-history-nav').inner_text()
 
-    page.locator('.om-history-row').filter(has_text='v1').click()
-    page.locator('.om-history-item.sel .om-history-knowledge > summary').click()
+    history.get_by_role('button', name=re.compile('^v1 首次发布')).click()
+    history.get_by_role('tab', name='关联知识').click()
     page.wait_for_function(
-        "document.querySelector('.om-history-item.sel .om-knowledge-context')?.dataset.state === 'ready'")
+        "document.querySelector('.om-knowledge-context')?.dataset.state === 'ready'")
     detail = page.locator(
-        '.om-history-item.sel .om-knowledge-context').inner_text()
+        '.om-knowledge-context').inner_text()
     for expected in ('当前关联', '6 条', '实体 3', '关系 2', '属性 1',
                      '待迁移', '4', '迁移阻塞', '2', '历史修订', '9', '已迁出 1'):
         assert expected in detail
 
-    page.locator('.om-history-item.sel').get_by_role(
+    history.get_by_role(
         'button', name='查看这一版（只读）').click()
     page.wait_for_function(
         "document.querySelector('#om-version-context')?.textContent.includes('正在查看：v1（历史·只读）')")
@@ -410,10 +410,10 @@ def test_ontology_context_strip_knowledge_context_and_ledger_navigation(workbenc
 
     page.click('#om-history')
     page.wait_for_selector('#om-history-overlay:not([hidden])')
-    page.locator('.om-history-item.sel .om-history-knowledge > summary').click()
+    history.get_by_role('tab', name='关联知识').click()
     page.wait_for_function(
-        "document.querySelector('.om-history-item.sel .om-knowledge-context')?.dataset.state === 'ready'")
-    page.locator('.om-history-item.sel').get_by_role(
+        "document.querySelector('.om-knowledge-context')?.dataset.state === 'ready'")
+    history.get_by_role(
         'button', name='在知识台账查看').click()
     assert page.locator('#tab-records').is_visible()
     assert page.evaluate('window.wb.versionContext') == {
@@ -424,13 +424,12 @@ def test_ontology_context_strip_knowledge_context_and_ledger_navigation(workbenc
     page.evaluate("showTab('ontology-model')")
     page.click('#om-history')
     context_state['error'] = True
-    page.locator('.om-history-row').filter(has_text='v2').first.evaluate(
-        'button => button.click()')
-    page.locator('.om-history-item.sel .om-history-knowledge > summary').click()
+    history.get_by_role('button', name=re.compile('^v2 标注修订 1')).click()
+    history.get_by_role('tab', name='关联知识').click()
     page.wait_for_function(
-        "document.querySelector('.om-history-item.sel .om-knowledge-context')?.dataset.state === 'error'")
+        "document.querySelector('.om-knowledge-context')?.dataset.state === 'error'")
     error_text = page.locator(
-        '.om-history-item.sel .om-knowledge-context').inner_text()
+        '.om-knowledge-context').inner_text()
     assert '读不到关联知识' in error_text
     assert '—' in error_text
 

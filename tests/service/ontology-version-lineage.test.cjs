@@ -58,12 +58,13 @@ function fixture({ actions = false, syncActions } = {}) {
   mount();
   return { root, actionHost, footer, requests, calls, opened, events, messages, state, model, context, panel, mount,
     find: text => all(root).find(node => node.textContent === text),
-    selected: () => all(root).find(node => node.className === 'om-history-item sel'),
+    selected: () => all(root).find(node => node.className === 'om-history-detail'),
+    rows: () => all(root).filter(node => node.className === 'om-history-row'),
   };
 }
 const releases = [
-  { id: 'release-a', version: 3, metadata: { publication: { draft_id: 'draft-a' } } },
-  { id: 'release-b', version: 3, metadata: { publication: { draft_id: 'draft-b' } } },
+  { id: 'release-a', version: 3, note: '首次发布说明', metadata: { publication: { draft_id: 'draft-a' } } },
+  { id: 'release-b', version: 3, version_reused: true, note: '修订发布说明', metadata: { publication: { draft_id: 'draft-b' } } },
 ];
 async function open(f, id, versions = releases) {
   const pending = f.panel.openHistory(id);
@@ -73,6 +74,12 @@ async function open(f, id, versions = releases) {
 
 test('version links select the exact ontology ID even when publications share a display version', async () => {
   const f = fixture(); await open(f, 'release-a');
+  const groupHeadings = all(f.root).filter(node => node.className === 'om-history-group-title');
+  assert.deepEqual(groupHeadings.map(node => node.textContent), ['v3']);
+  assert.deepEqual(f.rows().map(row => row.attrs['aria-pressed']), ['false', 'true']);
+  assert.ok(all(f.rows()[0]).some(node => node.textContent === '标注修订 1'));
+  assert.ok(f.find('首次发布说明'));
+  assert.equal(f.find('修订发布说明'), undefined);
   assert.ok(all(f.selected()).some(node => node.textContent === 'release-a'));
   assert.ok(!all(f.selected()).some(node => node.textContent === 'release-b'));
   assert.ok(f.find('来源草案'));
@@ -111,8 +118,7 @@ test('retained source controls cannot route after selection, project change, clo
   const f = fixture(); await open(f, 'release-b');
   let stale = f.find('查看来源草案');
   assert.ok(stale);
-  const other = all(f.root).find(node => node.className === 'om-history-item');
-  other.children[0].listeners.click();
+  f.rows()[1].listeners.click();
   await stale.listeners.click();
   assert.deepEqual(f.opened, []);
   stale = f.find('查看来源草案');
@@ -138,19 +144,22 @@ test('the latest pending exact-ID navigation wins and the no-argument entry pres
 test('a newer list selection is not overwritten by an older pending exact-ID open', async () => {
   const f = fixture(); await open(f, 'release-a');
   const pending = f.panel.openHistory('release-a');
-  const newerSelection = all(f.root).find(node => node.className === 'om-history-item');
-  newerSelection.children[0].listeners.click();
+  const newerSelection = f.rows()[0];
+  newerSelection.listeners.click();
   f.requests.at(-1).resolve({ versions: releases }); await pending;
+  assert.equal(f.rows()[0], newerSelection);
   assert.ok(all(f.selected()).some(node => node.textContent === 'release-b'));
 });
 
 test('closing a pending history open prevents delayed detail reads and focus', async () => {
   const f = fixture(), pending = f.panel.openHistory('release-a');
   const overlay = all(f.root).find(node => node.className === 'om-history');
+  const close = all(overlay).find(node => node.attrs['aria-label'] === '关闭版本管理');
+  assert.equal(close.focusCount, 1);
   f.panel.closeHistory(); f.requests[0].resolve({ versions: releases }); await pending;
   assert.equal(overlay.attrs.hidden, '');
   assert.equal(f.calls.filter(call => call.url.includes('/knowledge-context')).length, 0);
-  assert.ok(all(overlay).every(node => !node.focusCount));
+  assert.equal(close.focusCount, 1);
 });
 
 test('project A to B to A cannot apply an obsolete requested publication', async () => {

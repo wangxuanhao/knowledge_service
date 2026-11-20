@@ -129,7 +129,7 @@ def test_commands_merge_attribute_domains_using_governed_union_shape():
 
 def test_four_ingestion_rounds_keep_multiple_parents_attributes_and_history(tmp_path, monkeypatch):
     """Four document batches interleaved with six governed ontology releases."""
-    def discover(self, text, include_attributes=False, *, reserved_class_names=()):
+    def discover(self, text, include_attributes=False, **guidance):
         n = int(text.split('batch=')[1].split()[0])
         merchant, rule = f'Merchant-{n}', f'Rule-{n}'
         return [

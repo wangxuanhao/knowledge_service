@@ -105,13 +105,15 @@ def test_discovery_exceptions_are_separate_from_normal_counts_and_views():
     assert mindmap['summary']['exception_count']==1
 
 
-def test_open_discovery_reserves_active_and_retired_baseline_classes(tmp_path, monkeypatch):
+def test_open_discovery_guides_with_active_published_terms_and_reserves_retired_class_names(
+        tmp_path, monkeypatch):
     from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
 
     reservations = []
 
-    def discover(self, text, include_attributes=False, *, reserved_class_names=()):
-        reservations.append(reserved_class_names)
+    def discover(self, text, include_attributes=False, *, reserved_class_names=(),
+                 ontology_summary=None, detailed_iris=None):
+        reservations.append((reserved_class_names, ontology_summary))
         return []
 
     monkeypatch.setattr(SemanticaExtractor, 'discover', discover)
@@ -137,10 +139,11 @@ def test_open_discovery_reserves_active_and_retired_baseline_classes(tmp_path, m
 
     assert response.status_code == 201, response.text
     assert len(reservations) > 1
-    assert all(isinstance(item, frozenset) for item in reservations)
-    assert all(item is reservations[0] for item in reservations)
-    assert reservations[0] == frozenset({
-        'ActiveClass', '活跃类', 'RetiredClass', '退役类'})
+    expected = frozenset({'ActiveClass', '活跃类', 'RetiredClass', '退役类'})
+    for reserved, summary in reservations:
+        assert reserved == expected
+        assert [item['label'] for item in summary['classes']] == ['活跃类']
+        assert summary is reservations[0][1]
 
 
 @pytest.mark.parametrize(('ontology_id', 'expected_detail'), [
@@ -153,7 +156,7 @@ def test_open_discovery_invalid_explicit_ontology_has_no_ingestion_side_effects(
 
     called = False
 
-    def discover(self, text, include_attributes=False, *, reserved_class_names=()):
+    def discover(self, text, include_attributes=False, **guidance):
         nonlocal called
         called = True
         return []
@@ -366,7 +369,7 @@ def test_candidate_mindmap_sorts_and_truncates_lightweight_sources():
 def test_missing_ontology_reports_clear_state_without_project_id(tmp_path,monkeypatch):
     from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
 
-    def discover(self,text,include_attributes=False,*,reserved_class_names=()):
+    def discover(self,text,include_attributes=False,**guidance):
         return [{'id':'merchant','kind':'entity','text':'测试商户','proposed_type':'Merchant','confidence':.93}]
 
     monkeypatch.setattr(SemanticaExtractor,'discover',discover)
@@ -440,7 +443,7 @@ def test_discovery_assertions_pin_document_hash_and_source_receipt(tmp_path, mon
     import hashlib
     from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
 
-    def discover(self, text, include_attributes=False, *, reserved_class_names=()):
+    def discover(self, text, include_attributes=False, **guidance):
         return [{'id': 'platform', 'kind': 'entity', 'text': '平台',
                  'proposed_type': '平台', 'evidence': '平台'}]
 

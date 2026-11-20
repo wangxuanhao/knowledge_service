@@ -898,8 +898,25 @@ def test_sources_uses_the_existing_three_mode_upload_and_mobile_navigation(redes
     assert page.locator('#library-workspace-drawer').evaluate('(node)=>node.open')
     page.locator('#library-workspace-drawer .workspace-drawer-close').click()
     page.set_viewport_size({'width':390,'height':844})
-    assert page.locator('[data-tab="sources"]').is_visible()
+    menu=page.get_by_role('button',name='工作区菜单',exact=True)
+    assert menu.is_visible()
+    assert not page.locator('[data-tab="sources"]').is_visible()
+    assert page.locator('#project').evaluate("""e=>{
+      const s=getComputedStyle(e);
+      return e.clientHeight-parseFloat(s.paddingTop)-parseFloat(s.paddingBottom)>=parseFloat(s.fontSize)+2;
+    }""")
+    menu.click()
+    navigation=page.locator('#workspace-navigation')
+    assert navigation.evaluate('e=>e.scrollWidth<=e.clientWidth+1')
     assert page.locator('.nav-management [data-tab="projects"]').is_visible()
+    page.locator('[data-tab="runtime"]').click()
+    assert menu.get_attribute('aria-expanded')=='false'
+    assert page.locator('#tab-runtime').is_visible()
+    assert page.locator('body>aside').bounding_box()['height']<110
+    menu.click()
+    page.keyboard.press('Escape')
+    assert menu.get_attribute('aria-expanded')=='false'
+    assert menu.evaluate('e=>e===document.activeElement')
     assert errors == []
 
 

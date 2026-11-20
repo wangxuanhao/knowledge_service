@@ -17,7 +17,7 @@
   }
   function processingCopy(mode){
     return ({
-      discovery:{label:'本体构建',action:'开始构建本体',done:'已提交本体构建任务',description:'发现知识结构，生成待确认的本体候选；后续在本体治理中确认草案。'},
+      discovery:{label:'开放发现',action:'开始发现候选',done:'已提交候选发现任务',description:'抽取结果先进入候选核对。确认复用或补充本体定义后，符合条件的知识可入图。'},
       ontology:{label:'知识抽取',action:'开始知识抽取',done:'已提交知识抽取任务',description:'按已发布本体抽取实体、关系和属性。'},
       documents:{label:'文档检索',action:'开始建立检索索引',done:'已提交检索索引任务',description:'为资料建立关键词和语义检索索引。'}
     })[mode]||{label:'提交处理',action:'开始处理',done:'已提交处理任务',description:'按所选方式处理资料。'};

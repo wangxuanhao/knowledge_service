@@ -279,7 +279,8 @@
     // newest line only when the reader was already at the bottom.
     const scrollState={};
     $('tasks').querySelectorAll('details[data-key]').forEach(d=>{const pre=d.querySelector('pre');if(pre)scrollState[d.dataset.key]={top:pre.scrollTop,atBottom:pre.scrollHeight-pre.scrollTop-pre.clientHeight<8};});
-    const jobs=scoped.jobs;
+    const statusPriority={running:0,queued:1};
+    const jobs=[...scoped.jobs].sort((a,b)=>(statusPriority[a.status]??2)-(statusPriority[b.status]??2));
     const followups=jobs.map(discoveryFollowup);
     $('tasks').innerHTML=jobs.map((j,index)=>{
       const logs=j.logs||[],last={};

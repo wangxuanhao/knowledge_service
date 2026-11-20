@@ -99,8 +99,6 @@
   let historyProject = '', versionsRequest = 0, historyOpening = 0;
   const versionLabel = version => version === undefined || version === null
     ? '版本未标注' : `v${version}`;
-  const hasVersionCollision = version => versions.list.filter(
-    item => item.version === version).length > 1;
   // 发布幂等键：同一轮发布（同一草案 + 同一校验指纹）在重试之间复用同一个键；
   // 换一轮/发布成功后再生成新的。键用 ctx.uid()（主控提供），读不到才退回随机。
   let publishKey = { sig: '', key: '' };
@@ -1787,9 +1785,8 @@
     overlay.setAttribute('aria-label', '版本管理');
     const backdrop = el('div', 'om-history-backdrop');
     const panel = el('section', 'om-history-panel');
-    const head = el('header', 'om-history-head');
-    head.append(el('b', null, '版本管理'));
-    head.append(el('span', 'om-history-sub', '每一版：谁、什么时候、为什么发（可查看 / 可回到）'));
+    const head = el('div', 'om-history-head');
+    head.append(el('h2', null, '版本管理'));
     const close = el('button', 'om-btn ghost', '×');
     close.type = 'button';
     close.setAttribute('aria-label', '关闭版本管理');
@@ -1801,52 +1798,114 @@
     panel.append(head, body);
     overlay.append(backdrop, panel);
     backdrop.addEventListener('click', closeHistory);
-    overlay.addEventListener('keydown', event => { if (event.key === 'Escape') closeHistory(); });
+    overlay.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeHistory();
+      }
+      if (event.key !== 'Tab') return;
+      const controls = [...overlay.querySelectorAll('button:not(:disabled), summary, [tabindex="0"]')]
+        .filter(node => node.tabIndex >= 0 && node.getClientRects().length);
+      const first = controls[0], last = controls.at(-1);
+      if (event.shiftKey ? document.activeElement === first : document.activeElement === last) {
+        event.preventDefault();
+        (event.shiftKey ? last : first)?.focus();
+      }
+    });
     root.append(overlay);
-    drawer = { overlay, body };
+    drawer = { overlay, body, close, opener: null };
     return drawer;
   }
 
-  function renderHistory() {
+  function renderHistory({ scrollToSelection = false } = {}) {
     if (!drawer) return;
     const body = drawer.body;
     const project = activeProject();
     if (!project) { put(body, el('p', 'om-history-empty', '请先在左上角选择知识项目。')); return; }
     if (!versions.list.length) {
-      put(body, el('p', 'om-history-empty',
-        '这个项目还没有已发布的本体版本。每发布一次，这里就多一条不可变的记录。'));
+      const message = el('div', 'om-history-empty');
+      const text = versions.loaded ? '这个项目还没有发布本体。' : versions.loading
+        ? '正在读取发布记录…' : '暂时无法读取发布记录。';
+      message.append(el('p', null, text));
+      message.setAttribute('role', 'status');
+      if (!versions.loaded && !versions.loading) {
+        const retry = el('button', 'om-btn', '重试');
+        retry.type = 'button';
+        retry.addEventListener('click', () => {
+          retry.disabled = true;
+          return openHistory();
+        });
+        message.append(retry);
+      }
+      put(body, message);
       return;
     }
     const st = S();
+    const layout = el('div', 'om-history-layout');
+    const nav = el('div', 'om-history-nav');
+    nav.setAttribute('role', 'navigation');
+    nav.setAttribute('aria-label', '发布记录');
+    nav.append(el('h3', 'om-history-nav-title', '发布记录'));
     const list = el('ol', 'om-history-list');
-    const ordered = versions.list.map((v, index) => ({ v, index })).reverse(); // 最新在前
-    if (!ui.selectedVersion || !versions.list.some(v => v.id === ui.selectedVersion)) {
-      ui.selectedVersion = ordered[0].v.id;
+    const detail = el('div', 'om-history-content');
+    const latest = versions.list.at(-1);
+    const groups = new Map(), releases = new Map();
+    for (const [index, release] of versions.list.entries()) {
+      const version = versionLabel(release.version);
+      if (!groups.has(version)) groups.set(version, []);
+      const group = groups.get(version);
+      const revision = group.length;
+      const label = release.version_reused && revision ? `标注修订 ${revision}`
+        : revision ? `第 ${revision + 1} 次发布` : '首次发布';
+      const entry = { release, version, label, index };
+      group.push(entry);
+      releases.set(release.id, entry);
     }
-    ordered.forEach(({ v, index }) => {
-      const li = el('li', 'om-history-item' + (v.id === ui.selectedVersion ? ' sel' : ''));
-      const row = el('button', 'om-history-row');
-      row.type = 'button';
-      const label = versionLabel(v.version)
-        + (hasVersionCollision(v.version) ? ` · ${shortId(v.id)}` : '');
-      row.append(el('b', null, label));
-      if (v.version_reused) row.append(el('span', 'om-history-reused', '标注修订'));
-      row.append(el('span', 'om-history-time', fmtTime(v.created_at)));
-      if (v.actor) row.append(el('span', 'om-history-actor', v.actor));
-      const sum = v.summary || {};
-      row.append(el('span', 'om-history-counts',
-        `${(sum.classes || []).length} 类 · ${(sum.relations || []).length} 关系 · ${(sum.attributes || []).length} 属性`));
-      if (index === versions.list.length - 1) row.append(el('span', 'om-history-cur', '正在生效'));
-      if (st.preview && st.preview.id === v.id) row.append(el('span', 'om-history-viewing', '正在查看'));
-      row.addEventListener('click', () => { ++historyOpening; ui.selectedVersion = v.id; renderHistory(); });
-      li.append(row);
-      // 列表行直接带上发布说明：版本列表的第一用途就是"扫一眼每版为什么发"，
-      // 点开才看得到的话，一屏版本多起来就没人愿意看了。
-      if (v.note) li.append(el('p', 'om-history-line-note', v.note));
-      if (v.id === ui.selectedVersion) li.append(renderVersionDetail(v, index));
-      list.append(li);
-    });
-    put(body, list);
+    const showRelease = id => {
+      ui.selectedVersion = id;
+      for (const [releaseId, entry] of releases) {
+        entry.row.setAttribute('aria-pressed', String(releaseId === id));
+      }
+      put(detail, renderVersionDetail(releases.get(id)));
+      detail.scrollTop = 0;
+    };
+    for (const [version, entries] of [...groups].sort((a, b) => b[1].at(-1).index - a[1].at(-1).index)) {
+      const group = el('li', 'om-history-group');
+      const heading = el('div', 'om-history-group-head');
+      heading.append(el('h4', 'om-history-group-title', version));
+      if (entries.length > 1) heading.append(el('span', null, `${entries.length} 条记录`));
+      const rows = el('ul', 'om-history-releases');
+      for (const entry of [...entries].reverse()) {
+        const { release, label } = entry;
+        const item = el('li');
+        const row = entry.row = el('button', 'om-history-row');
+        row.type = 'button';
+        const date = fmtTime(release.created_at);
+        const title = el('span', 'om-history-row-title');
+        title.append(el('b', null, label));
+        if (release.id === latest.id) title.append(el('span', 'om-history-cur', '正在生效'));
+        if (st.preview?.id === release.id) title.append(el('span', 'om-history-viewing', '正在查看'));
+        row.setAttribute('aria-label', `${version} ${label} ${date}`
+          + (release.id === latest.id ? '，正在生效' : '')
+          + (st.preview?.id === release.id ? '，正在查看' : ''));
+        row.append(title, el('span', 'om-history-time', date));
+        row.addEventListener('click', () => {
+          if (!ui.historyOpen || !row.isConnected) return;
+          if (ui.selectedVersion === release.id) return;
+          ++historyOpening;
+          showRelease(release.id);
+        });
+        item.append(row);
+        rows.append(item);
+      }
+      group.append(heading, rows);
+      list.append(group);
+    }
+    nav.append(list);
+    layout.append(nav, detail);
+    put(body, layout);
+    showRelease(releases.has(ui.selectedVersion) ? ui.selectedVersion : latest.id);
+    if (scrollToSelection) releases.get(ui.selectedVersion).row.scrollIntoView?.({ block: 'nearest' });
   }
 
   function loadKnowledgeContext(host, v, isCurrent=()=>true) {
@@ -1858,8 +1917,6 @@
         host.dataset.state = 'ready';
         const heading = el('div', 'om-knowledge-context-head');
         heading.append(el('b', null, '关联知识'));
-        heading.append(el('span', null, data.ontology && data.ontology.is_current
-          ? '当前本体' : '历史本体'));
         const grid = el('div', 'om-knowledge-context-grid');
         const metric = (label, value, hint) => {
           const item = el('div', 'om-knowledge-context-metric');
@@ -1905,36 +1962,47 @@
       });
   }
 
-  function renderVersionDetail(v, index) {
-    const box = el('div', 'om-history-detail');
+  function renderVersionDetail({ release: v, version, label }) {
+    const box = el('article', 'om-history-detail');
     const project = activeProject(), opened = drawer, opening = historyOpening, controller = model();
     const sum = v.summary || {};
     const pub = (v.metadata && v.metadata.publication) || {};
     const stillCurrent=()=>activeProject()===project&&drawer===opened&&historyOpening===opening&&ui.historyOpen&&ui.selectedVersion===v.id&&box.isConnected;
-    const technical=el('details','om-history-technical');technical.append(el('summary',null,'版本身份与技术信息'));
-    const facts = el('div', 'om-history-facts');
+    const overview = el('section', 'om-history-overview');
+    const technical = el('section', 'om-history-technical');
     const fact = (k, value) => {
       const f = el('div', 'om-history-fact');
       f.append(el('span', null, k));
       f.append(el('b', null, value === undefined || value === null ? '—' : String(value)));
       return f;
     };
-    facts.append(fact('版本', versionLabel(v.version)
-      + (v.version_reused ? ' · 标注修订' : '')));
-    technical.append(fact('版本 ID', shortId(v.id)));
-    facts.append(fact('发布时间', fmtTime(v.created_at)));
+    technical.append(fact('版本 ID', v.id));
     const writePath = pub.write_path || (v.metadata && v.metadata.write_path);
     if (writePath) technical.append(fact('写入路径', writePath));
     const actor = v.actor || pub.actor;
-    if (actor) facts.append(fact('发布人', actor));
     if (pub.source_kind) technical.append(fact('来源', pub.source_kind));
-    technical.append(fact('规模', `${sum.triples || 0} 三元组`));
-    box.append(facts);
+    if (sum.triples != null) technical.append(fact('规模', `${sum.triples} 三元组`));
+
+    const header = el('div', 'om-history-detail-head');
+    const heading = el('h3', null, version + (label === '首次发布' ? '' : ` · ${label}`));
+    const st = S();
+    const meta = el('p', 'om-history-meta');
+    meta.append(el('span', 'om-history-time', fmtTime(v.created_at)));
+    if (actor) meta.append(el('span', null, actor));
+    if (v.id === versions.list.at(-1)?.id) meta.append(el('span', 'om-history-cur', '正在生效'));
+    if (st.preview?.id === v.id) meta.append(el('span', 'om-history-viewing', '正在查看'));
+    header.append(heading, meta);
+    box.append(header);
+
+    const note = el('div', 'om-history-pub-note');
+    note.append(el('h4', null, '发布说明'), el('p', null, v.note || '未记录发布说明'));
+    overview.append(note);
+    if (v.summary) overview.append(el('p', 'om-history-counts',
+      `${(sum.classes || []).length} 类 · ${(sum.relations || []).length} 关系 · ${(sum.attributes || []).length} 属性`));
 
     const source = el('div', 'om-history-source-draft');
     if (pub.draft_id) {
-      const sourceFact = fact('来源草案', shortId(pub.draft_id));
-      sourceFact.title = String(pub.draft_id);
+      const sourceFact = fact('来源草案', pub.draft_id);
       const sourceBtn = el('button', 'om-btn', '查看来源草案');
       sourceBtn.type = 'button';
       sourceBtn.addEventListener('click', () => {
@@ -1947,17 +2015,10 @@
         closeHistory();
         return controller.openDraftHistory(pub.draft_id);
       });
-      technical.append(sourceFact);source.append(el('span',null,'来源草案'),sourceBtn);
+      technical.append(sourceFact);
+      source.append(sourceBtn);
     } else source.append(el('p', 'om-history-note', '未记录来源草案'));
-    box.append(source);
-
-    // 发布说明：版本管理的主角。老版本（本功能之前发布的）没有说明，如实说"没有"，
-    // 不补一句编出来的话。
-    const note = el('p', 'om-history-pub-note');
-    note.append(el('b', null, '发布说明：'));
-    note.append(el('span', null, v.note || '（这一版发布于发布说明功能上线之前，没有留下说明）'));
-    box.append(note);
-    const primaryActions=el('div','om-history-actions');box.append(primaryActions);
+    overview.append(source);
 
     if(pub.receipt){
       const receipt=pub.receipt,scope=el('section','om-publication-receipt');
@@ -1987,7 +2048,7 @@
       if(actual.selected===0)scope.append(el('p','om-history-note','本次仅处理结构，没有关联候选事实。'));
       const index=receipt.index||{};
       technical.append(el('p','om-history-note',`发布回执记录的索引状态：${index.status||'未记录'}${index.task_id?' · '+index.task_id:''}。这是发布时的快照，当前进度请在构建与任务中核对。`));
-      box.append(scope);
+      overview.append(scope);
     }
 
     const top = (sum.classes || []).slice(0, 8)
@@ -1997,23 +2058,21 @@
     const knowledge = el('div', 'om-knowledge-context');
     knowledge.setAttribute('role', 'region');
     knowledge.setAttribute('aria-label', '关联知识');
-    const knowledgeDetails=el('details','om-history-knowledge');knowledgeDetails.append(el('summary',null,'当前关联知识与迁移状态'),knowledge);box.append(knowledgeDetails,technical);
-    knowledgeDetails.addEventListener('toggle',()=>{
-      if(knowledgeDetails.open&&!knowledge.dataset.state&&stillCurrent())loadKnowledgeContext(knowledge,v,stillCurrent);
-    });
+    const knowledgePanel = el('section', 'om-history-knowledge');
+    knowledgePanel.append(knowledge);
 
     // 两个动作，语义必须分清（这是版本管理唯一容易出事的地方）：
     //   查看这一版 = 只读预览，不写任何数据；
     //   回到这一版 = 以它为基线开一份**新草案** → 审核 → 发布成新版本。历史不改写。
-    const st = S();
-    const actions = primaryActions;
+    const actions = el('div', 'om-history-actions');
     const viewBtn = el('button', 'om-btn', '查看这一版（只读）');
     viewBtn.type = 'button';
-    viewBtn.title = '做什么：把画布切到这一版看结构，不写任何数据、不影响当前版本。不做什么：不会切换生产版本，也不能在这一版上直接编辑。';
+    viewBtn.title = '在画布上只读查看这一版的结构';
     const alreadyViewing = !!(st.preview && st.preview.id === v.id);
     viewBtn.disabled = alreadyViewing;
     viewBtn.textContent = alreadyViewing ? '正在查看这一版' : '查看这一版（只读）';
     viewBtn.addEventListener('click', async () => {
+      if (!stillCurrent()) return;
       const M = model();
       if (!M || typeof M.previewVersion !== 'function') { status('主控未就绪，暂时无法查看历史版本。', true); return; }
       closeHistory();
@@ -2023,8 +2082,9 @@
 
     const backBtn = el('button', 'om-btn primary', '回到这一版');
     backBtn.type = 'button';
-    backBtn.title = '做什么：以这一版为基础开一份新草案，改完审核发布后成为新版本。不做什么：不删掉后面的版本、不改写历史——"回到"等于"再发一版"。';
+    backBtn.title = '以这一版为基础创建新草案';
     backBtn.addEventListener('click', async () => {
+      if (!stillCurrent()) return;
       const M = model();
       if (!M || typeof M.forkFrom !== 'function') { status('主控未就绪，暂时无法回到历史版本。', true); return; }
       backBtn.disabled = true;
@@ -2039,26 +2099,74 @@
       }
     });
     actions.append(viewBtn, backBtn);
-
-    technical.append(el('p', 'om-history-note',
-      '做什么：查看任意已发布版本；把某一版作为基础开一份新草案。'
-      + '不做什么：不改写历史——「回到这一版」不是删掉后面的版本，而是发布一条以它为基础的新版本，'
-      + '所以每一次结构变化在版本列表里都留得住。'));
+    header.append(actions);
+    const tabList = el('div', 'om-history-tabs');
+    tabList.setAttribute('role', 'tablist');
+    tabList.setAttribute('aria-label', '发布记录详情');
+    const tabs = [
+      ['overview', '发布详情', overview],
+      ['knowledge', '关联知识', knowledgePanel],
+      ['technical', '技术信息', technical],
+    ].map(([key, title, section]) => {
+      const button = el('button', 'om-history-tab', title);
+      button.type = 'button';
+      button.id = `om-history-tab-${key}`;
+      section.id = `om-history-section-${key}`;
+      section.tabIndex = 0;
+      button.setAttribute('role', 'tab');
+      button.setAttribute('aria-controls', section.id);
+      section.setAttribute('role', 'tabpanel');
+      section.setAttribute('aria-labelledby', button.id);
+      tabList.append(button);
+      return { button, section };
+    });
+    const selectTab = selected => {
+      for (const { button, section } of tabs) {
+        const active = section === selected;
+        button.tabIndex = active ? 0 : -1;
+        button.setAttribute('aria-selected', String(active));
+        section.hidden = !active;
+      }
+      if (selected === knowledgePanel && !knowledge.dataset.state && stillCurrent()) {
+        loadKnowledgeContext(knowledge, v, stillCurrent);
+      }
+    };
+    tabs.forEach(({ button, section }, index) => {
+      button.addEventListener('click', () => selectTab(section));
+      button.addEventListener('keydown', event => {
+        const next = {
+          ArrowLeft: (index + tabs.length - 1) % tabs.length,
+          ArrowRight: (index + 1) % tabs.length,
+          Home: 0,
+          End: tabs.length - 1,
+        }[event.key];
+        if (next === undefined) return;
+        event.preventDefault();
+        selectTab(tabs[next].section);
+        tabs[next].button.focus();
+      });
+    });
+    selectTab(overview);
+    box.append(tabList, ...tabs.map(({ section }) => section));
     return box;
   }
 
   async function openHistory(ontologyId) {
-    ensureDrawer();
-    const opened = drawer, project = activeProject(), opening = ++historyOpening;
-    opened.overlay.removeAttribute('hidden');
-    ui.historyOpen = true;
+    const opened = ensureDrawer(), project = activeProject(), opening = ++historyOpening;
+    if (!ui.historyOpen) {
+      opened.opener = document.activeElement;
+      opened.overlay.removeAttribute('hidden');
+      ui.historyOpen = true;
+      opened.close.focus();
+    }
+    const refreshed = ensureVersions(true);
     if (ontologyId && !versions.list.some(v => v.id === ontologyId)) {
       put(opened.body, el('p', 'om-history-empty', '正在读取目标版本…'));
     } else {
       if (ontologyId) ui.selectedVersion = ontologyId;
-      renderHistory();         // 先用缓存画一帧
+      renderHistory({ scrollToSelection: true });
     }
-    await ensureVersions(true); // 等这次读取结束（含在途请求），再无条件重画一次
+    await refreshed;
     if (activeProject() !== project || drawer !== opened || opening !== historyOpening
       || !ui.historyOpen || !opened.overlay.isConnected) return;
     if (ontologyId && !versions.list.some(v => v.id === ontologyId)) {
@@ -2067,16 +2175,17 @@
         : '暂时无法读取这条版本记录，请稍后重新打开版本管理。'));
     } else {
       if (ontologyId) ui.selectedVersion = ontologyId;
-      renderHistory();
+      renderHistory({ scrollToSelection: true });
     }
-    const closeBtn = drawer.overlay.querySelector('button');
-    if (closeBtn) closeBtn.focus();
   }
   function closeHistory() {
     ++historyOpening;
-    if (!drawer) return;
+    if (!drawer || !ui.historyOpen) return;
     drawer.overlay.setAttribute('hidden', '');
     ui.historyOpen = false;
+    const opener = drawer.opener;
+    drawer.opener = null;
+    if (opener?.isConnected) opener.focus();
   }
 
   /* ==========================================================================

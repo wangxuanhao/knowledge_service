@@ -97,6 +97,8 @@ def test_native_file_entry_uses_staged_api_and_documents_mode(native_workbench, 
     page.get_by_role('button', name='关闭预览').click()
     assert not any(url.endswith('/parse') for url in calls)
     page.get_by_role('button', name='下一步：配置资料').click()
+    page.select_option('#extraction-mode', 'discovery')
+    assert '优先复用已发布的类、关系和属性' in page.locator('#extraction-mode-help').inner_text()
     page.select_option('#extraction-mode', 'documents')
     artifacts = Path('.benchmarks/preparation-ui')
     artifacts.mkdir(parents=True, exist_ok=True)
@@ -256,7 +258,7 @@ def test_filtered_ocr_notice_is_not_rendered_as_preparation_error(browser):
 
 
 
-@pytest.mark.parametrize('mode,button',[('documents','开始建立检索索引'),('ontology','开始知识抽取'),('discovery','开始构建本体')])
+@pytest.mark.parametrize('mode,button',[('documents','开始建立检索索引'),('ontology','开始知识抽取'),('discovery','开始发现候选')])
 def test_publication_uses_processing_mode_and_clears_submitted_files(browser,mode,button):
     page=browser.new_page();page.set_default_timeout(5000)
     web=Path(__file__).resolve().parents[2]/'knowledge_service'/'web'
@@ -274,7 +276,8 @@ def test_publication_uses_processing_mode_and_clears_submitted_files(browser,mod
         request.fulfill(json=result)
     page.route('http://test/api/**',route)
     page.route('http://test/',lambda r:r.fulfill(content_type='text/html',body='<div id="host"></div>'))
-    page.goto('http://test/');page.evaluate("localStorage.setItem('kg_preparation:local:p','s')")
+    page.goto('http://test/', wait_until='domcontentloaded', timeout=20000)
+    page.evaluate("localStorage.setItem('kg_preparation:local:p','s')")
     page.add_script_tag(path=str(web/'document-preparation.js'));page.add_script_tag(path=str(web/'document-preparation-view.js'))
     page.evaluate("window.view=PreparationView.mount(document.querySelector('#host'),{project:()=> 'p',onPublished:r=>window.openedBatch=r.batch_id});view.open()")
     assert page.locator('.preparation-file[data-item-id="b"]').count()==0

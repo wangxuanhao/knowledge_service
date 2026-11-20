@@ -1292,7 +1292,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
   else{oldToggle.closest('label').before(modeLabel,help);}
   window.IngestOntology.mount(mode,help);
   oldToggle.closest('label').classList.add('hidden');
-  const descriptions={ontology:'按当前项目本体抽取、校验和实体融合，合法知识进入正式图谱。',discovery:'从资料生成待核对候选。抽取时只参考已发布的类型名称，项目只有草案时也可运行。确认复用或审核发布后，符合条件的候选可入图。',documents:'只保存原文、切片和向量，不抽取实体、关系或属性。'};
+  const descriptions={ontology:'按当前项目本体抽取、校验和实体融合，合法知识进入正式图谱。',discovery:'优先复用已发布的类、关系和属性，只为重要且无法归类的内容提出新定义。没有已发布版本时，也可以从资料发现首批候选。候选经确认复用或审核发布后，符合条件的知识可入图。',documents:'只保存原文、切片和向量，不抽取实体、关系或属性。'};
   mode.onchange=()=>{
     help.textContent=descriptions[mode.value];oldToggle.checked=mode.value!=='documents';
     window.IngestOntology.refresh();

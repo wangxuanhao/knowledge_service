@@ -682,17 +682,61 @@ async function snapshots(){
 // （原来要先点一下「刷新」才看得到——合并后的规则是「进这一屏，就把这一屏该给的数据给出来」）。
 window.RuntimeView?.on('snapshots',()=>snapshots().catch(e=>status(e.message,true)));
 bind('load-snapshots',snapshots);bind('save-snapshot',async()=>{await api(endpoint('/snapshots'),{name:$('snapshot-name').value||'手动快照'});$('snapshot-name').value='';await snapshots();status('项目快照已保存。');});
-bind('run-evaluation',async()=>{
-  const input=$('gold-json').value.trim();
-  if(!input)throw Error('请输入标准答案 JSON');
-  let parsed;
-  try{parsed=JSON.parse(input);}catch(error){throw Error('JSON 格式错误：'+error.message);}
-  if(!Array.isArray(parsed?.entities))throw Error('JSON 缺少 entities 数组');
-  if(!Array.isArray(parsed?.relations))throw Error('JSON 缺少 relations 数组');
-  $('gold-json-error').textContent='';
-  const result=await scopedRead('/evaluate',parsed,{inheritScope:false});
-  $('evaluation-result').innerHTML=renderEvalResult(result);
-});
+const evaluationInput=$('gold-json'),evaluationError=$('gold-json-error');
+const evaluationButton=$('run-evaluation'),evaluationResult=$('evaluation-result');
+let evaluationRevision=0;
+function evaluationInputChanged(){
+  evaluationRevision++;
+  evaluationError.textContent='';
+  evaluationInput.removeAttribute('aria-invalid');
+  evaluationResult.replaceChildren();
+}
+function evaluationRunContext(gold){
+  const scope=[];
+  for(const [key,label] of [['platforms','平台'],['businesses','业务'],['audiences','受众']]){
+    const dimension=gold.applicability?.[key];
+    if(dimension?.mode==='specific'&&Array.isArray(dimension.values))scope.push(label+'：'+dimension.values.join('、'));
+  }
+  if(gold.ontology_scope==='ids')scope.push('本体版本：'+(gold.ontology_ids||[]).join('、'));
+  if(gold.ontology_scope==='unknown')scope.push('本体版本：未知');
+  if(gold.valid_at)scope.push('业务时间：'+gold.valid_at+(gold.include_unknown===false?' · 排除未知起始时间':''));
+  if(gold.known_at)scope.push('系统时间：'+gold.known_at);
+  if(gold.filters)scope.push('已应用 Metadata 条件');
+  return ['标准答案：实体 '+gold.entities.length+' 项、关系 '+gold.relations.length+' 项',
+    ...(scope.length?scope:['当前项目全部知识'])].join(' · ');
+}
+evaluationInput.oninput=evaluationInputChanged;
+evaluationButton.onclick=async()=>{
+  if(evaluationButton.disabled)return;
+  evaluationInputChanged();
+  const input=evaluationInput.value.trim(),revision=evaluationRevision,project=current;
+  const context=window.WorkspaceContext,page=context?.page,ticket=context?.ticket(project);
+  const accepts=()=>project===current&&revision===evaluationRevision&&input===evaluationInput.value.trim()&&
+    (!ticket||context.accepts(ticket,project,page));
+  let validating=true;
+  try{
+    if(!input)throw Error('请输入标准答案 JSON');
+    let parsed;
+    try{parsed=JSON.parse(input);}catch(error){throw Error('JSON 格式错误：'+error.message);}
+    if(!Array.isArray(parsed?.entities))throw Error('JSON 缺少 entities 数组');
+    if(!Array.isArray(parsed?.relations))throw Error('JSON 缺少 relations 数组');
+    validating=false;
+    evaluationButton.disabled=true;
+    evaluationButton.textContent='正在评测…';
+    evaluationButton.setAttribute('aria-busy','true');
+    const result=await scopedRead('/evaluate',parsed,{inheritScope:false});
+    if(!accepts())return;
+    evaluationResult.innerHTML='<p class="subtle">'+esc(evaluationRunContext(parsed))+'</p>'+renderEvalResult(result);
+  }catch(error){
+    if(!accepts())return;
+    evaluationError.textContent=error.message;
+    if(validating||error.status===422)evaluationInput.setAttribute('aria-invalid','true');
+  }finally{
+    evaluationButton.disabled=false;
+    evaluationButton.textContent='执行评测';
+    evaluationButton.removeAttribute('aria-busy');
+  }
+};
 bind('export-project',async()=>{
   const project=controlsProject(),generation=snapshotGeneration;
   status('正在导出项目逻辑数据…');
@@ -703,8 +747,8 @@ bind('export-project',async()=>{
   a.href=url;a.download=project+'.json';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
   status('项目逻辑 JSON 已导出。不含原件，不能用于完整灾备恢复。');
 });
-$('eval-load-example').onclick=()=>{$('gold-json').value=JSON.stringify({entities:["商户","平台","监管部门"],relations:[["商户","onboards","平台"],["商户","complies_with","监管部门"],["平台","oversees","商户"]]},null,2);$('gold-json-error').textContent='';status('已载入示例标准答案。');};
-function renderEvalResult(r){function metricCard(title,data){const p=typeof data.precision==='number'?data.precision:0;const rl=typeof data.recall==='number'?data.recall:0;const f1=typeof data.f1==='number'?data.f1:0;const pp=Math.round(p*100),rp=Math.round(rl*100),fp=Math.round(f1*100);const cls=v=>v>=80?'':v>=50?' mid':' low';const formatItem=item=>{if(Array.isArray(item))return esc(item.join(' → '));return esc(String(item));};let html='<div class="eval-metric-group"><h3>'+esc(title)+'</h3>';html+='<div class="eval-metric-row">';html+='<div class="eval-metric"><div class="eval-metric-value'+cls(pp)+'">'+pp+'%</div><div class="eval-metric-label">Precision</div><div class="eval-metric-sub">'+(data.predicted||0)+' 中 '+data.true_positive+' 准确</div></div>';html+='<div class="eval-metric"><div class="eval-metric-value'+cls(rp)+'">'+rp+'%</div><div class="eval-metric-label">Recall</div><div class="eval-metric-sub">'+(data.gold||0)+' 中 '+data.true_positive+' 命中</div></div>';html+='<div class="eval-metric"><div class="eval-metric-value'+cls(fp)+'">'+fp+'%</div><div class="eval-metric-label">F1</div></div>';html+='</div>';html+='<div class="eval-progress"><div class="eval-progress-fill'+cls(fp)+'" style="width:'+fp+'%"></div></div>';if(data.missing&&data.missing.length){html+='<div class="eval-list-section"><div class="eval-list-label">漏项 ('+data.missing.length+')</div><div class="eval-list">'+data.missing.map(i=>'<div class="eval-list-item">'+formatItem(i)+'</div>').join('')+'</div></div>';}else{html+='<div class="eval-list-section"><div class="eval-list-label">漏项</div><div class="eval-list-empty">无</div></div>';}if(data.extra&&data.extra.length){html+='<div class="eval-list-section"><div class="eval-list-label">多余 ('+data.extra.length+')</div><div class="eval-list">'+data.extra.map(i=>'<div class="eval-list-item">'+formatItem(i)+'</div>').join('')+'</div></div>';}else{html+='<div class="eval-list-section"><div class="eval-list-label">多余</div><div class="eval-list-empty">无</div></div>';}html+='</div>';return html;}let html='<div class="eval-metrics">'+metricCard('实体',r.entities||{})+metricCard('关系',r.relations||{})+'</div>';html+='<details class="eval-raw-json"><summary>原始 JSON</summary><pre>'+esc(JSON.stringify(r,null,2))+'</pre></details>';return html;}
+$('eval-load-example').onclick=()=>{evaluationInput.value=JSON.stringify({entities:["商户","平台","监管部门"],relations:[["商户","onboards","平台"],["商户","complies_with","监管部门"],["平台","oversees","商户"]]},null,2);evaluationInputChanged();status('已载入示例标准答案。');};
+function renderEvalResult(r){function metricCard(title,data){const p=typeof data.precision==='number'?data.precision:0;const rl=typeof data.recall==='number'?data.recall:0;const f1=typeof data.f1==='number'?data.f1:0;const pp=Math.round(p*100),rp=Math.round(rl*100),fp=Math.round(f1*100);const cls=v=>v>=80?'':v>=50?' mid':' low';const formatItem=item=>{if(Array.isArray(item))return esc(item.join(' → '));return esc(String(item));};let html='<div class="eval-metric-group"><h3>'+esc(title)+'</h3>';html+='<div class="eval-metric-row">';html+='<div class="eval-metric"><div class="eval-metric-value'+cls(pp)+'">'+pp+'%</div><div class="eval-metric-label">精确率</div><div class="eval-metric-sub">'+(data.predicted||0)+' 中 '+data.true_positive+' 准确</div></div>';html+='<div class="eval-metric"><div class="eval-metric-value'+cls(rp)+'">'+rp+'%</div><div class="eval-metric-label">召回率</div><div class="eval-metric-sub">'+(data.gold||0)+' 中 '+data.true_positive+' 命中</div></div>';html+='<div class="eval-metric"><div class="eval-metric-value'+cls(fp)+'">'+fp+'%</div><div class="eval-metric-label">F1</div></div>';html+='</div>';html+='<div class="eval-progress"><div class="eval-progress-fill'+cls(fp)+'" style="width:'+fp+'%"></div></div>';if(data.missing&&data.missing.length){html+='<div class="eval-list-section"><div class="eval-list-label">漏项 ('+data.missing.length+')</div><div class="eval-list">'+data.missing.map(i=>'<div class="eval-list-item">'+formatItem(i)+'</div>').join('')+'</div></div>';}else{html+='<div class="eval-list-section"><div class="eval-list-label">漏项</div><div class="eval-list-empty">无</div></div>';}if(data.extra&&data.extra.length){html+='<div class="eval-list-section"><div class="eval-list-label">多余 ('+data.extra.length+')</div><div class="eval-list">'+data.extra.map(i=>'<div class="eval-list-item">'+formatItem(i)+'</div>').join('')+'</div></div>';}else{html+='<div class="eval-list-section"><div class="eval-list-label">多余</div><div class="eval-list-empty">无</div></div>';}html+='</div>';return html;}let html='<div class="eval-metrics">'+metricCard('实体',r.entities||{})+metricCard('关系',r.relations||{})+'</div>';html+='<details class="eval-raw-json"><summary>原始 JSON</summary><pre>'+esc(JSON.stringify(r,null,2))+'</pre></details>';return html;}
 /* Knowledge chat: one independent request per turn, decoupled from the search workspace. */
 (()=>{
   const chat=window.KnowledgeChat={};
@@ -1360,11 +1404,21 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     if(composing||event.isComposing||event.keyCode===229)return;
     event.preventDefault();submit();
   });
-  $c('qa-app-menu-toggle')?.addEventListener('click',event=>{
-    const button=event.currentTarget,expanded=button.getAttribute('aria-expanded')!=='true';
-    button.setAttribute('aria-expanded',String(expanded));
-    button.closest('aside')?.classList.toggle('qa-nav-open',expanded);
+  const workspaceMenu=$c('qa-app-menu-toggle');
+  function setWorkspaceMenu(expanded){
+    workspaceMenu.setAttribute('aria-expanded',String(expanded));
+    workspaceMenu.closest('aside')?.classList.toggle('qa-nav-open',expanded);
     fit();
+  }
+  workspaceMenu?.addEventListener('click',()=>setWorkspaceMenu(workspaceMenu.getAttribute('aria-expanded')!=='true'));
+  function closeWorkspaceMenu(){
+    if(workspaceMenu?.getAttribute('aria-expanded')!=='true')return;
+    setWorkspaceMenu(false);
+    workspaceMenu.focus({preventScroll:true});
+  }
+  document.addEventListener('workspace:page-changed',closeWorkspaceMenu);
+  document.addEventListener('keydown',event=>{
+    if(event.key==='Escape'&&!event.defaultPrevented&&!document.querySelector('dialog[open]'))closeWorkspaceMenu();
   });
   // Keep the composer inside the viewport at every width and above a soft keyboard.
   function fit(){

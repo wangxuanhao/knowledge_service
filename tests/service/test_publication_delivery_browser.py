@@ -36,11 +36,11 @@ def check_publication_delivery(width, output=None):
           window.fixtureDraft={id:'draft',revision:6,status:'pending',submitted_at:'now',validation_fingerprint:'fp',base_ontology_id:null,ontology:fixtureSummary,
             operations:Array.from({length:188},(_,i)=>({id:'op-'+i,action:'add_annotation',target_iri:'urn:Type:'+i%34,after:{value:'定义说明'}})),decisions:[],associated_knowledge:{selected:118}};
           window.fixtureVersion={id:'v1',version:1,created_at:'2026-10-26T04:00:00Z',summary:fixtureSummary,note:'确认本轮定义与知识',metadata:{version:1,publication:{draft_id:'draft',note:'确认本轮定义与知识',actor:'审核人',write_path:'governed_publish',receipt:{facts:{selected:118,added:118,reused:0,skipped:0,per_batch:[{run_id:'frozen-source-run',selected:118,added:118,reused:0,skipped:0,candidate_outcomes:Array.from({length:118},(_,i)=>({candidate_id:'candidate-'+i,status:'materialized',reason_code:'materialized'}))}]},index:{status:'pending',task_id:'background-index'}}}}};
-          window.fixtureCalls=[];window.saved=false;window.waitSync=true;window.failSync=false;window.syncResolvers=[];
+          window.fixtureCalls=[];window.priorVersions=[];window.saved=false;window.waitSync=true;window.failSync=false;window.syncResolvers=[];
           window.finishSync=()=>{waitSync=false;syncResolvers.splice(0).forEach(resolve=>resolve());};
           window.api=async(url,body,method='GET')=>{
             fixtureCalls.push({url,body,method});url=url.replace('?view=review','').replace('&view=review','');
-            if(url.endsWith('/ontologies'))return {versions:saved?[fixtureVersion]:[]};
+            if(url.endsWith('/ontologies'))return {versions:saved?[...priorVersions,fixtureVersion]:[]};
             if(url.endsWith('/publish-readiness'))return {ready:true,revision:6,validation_fingerprint:'fp',approval_counts:{approved:188},items:[]};
             if(url.endsWith('/publish'))return new Promise(resolve=>window.finishPublish=()=>{saved=true;fixtureDraft={...fixtureDraft,status:'accepted',revision:7,published_ontology_id:'v1'};resolve(structuredClone(fixtureVersion));});
             if(saved&&(url.endsWith('/ontology')||url.endsWith('/ontology-drafts'))){if(waitSync)await new Promise(resolve=>syncResolvers.push(resolve));if(failSync)throw Error('模拟页面同步读取失败');}
@@ -76,12 +76,32 @@ def check_publication_delivery(width, output=None):
         if output:
             output.mkdir(parents=True,exist_ok=True)
             page.locator('#tab-ontology-model').screenshot(path=str(output/f'{width}-saved.png'))
-        banner.get_by_role('button',name='查看发布记录',exact=True).click()
+        page.evaluate('''() => {
+          priorVersions.push({...fixtureVersion,id:'prior-release',created_at:'2026-10-25T04:00:00Z',note:'首次发布说明'});
+          fixtureVersion.version_reused=true;
+        }''')
+        history_opener=banner.get_by_role('button',name='查看发布记录',exact=True)
+        history_opener.click()
         history=page.locator('[aria-label="版本管理"]')
         history.get_by_text('本次发布实际处理的关联知识',exact=True).wait_for()
+        assert history.locator('.om-history-group-title').all_inner_texts()==['v1']
+        assert history.locator('.om-history-row').count()==2
+        title=history.get_by_role('heading',name='v1 · 标注修订 1',exact=True)
+        assert title.bounding_box()['height'] < 38
+        list_heading=history.get_by_role('heading',name='发布记录',exact=True).bounding_box()
+        first_group=history.locator('.om-history-group-title').first.bounding_box()
+        assert first_group['y'] - list_heading['y'] - list_heading['height'] < 24
+        first_release=history.get_by_role('button',name=re.compile('^v1 首次发布'))
+        first_release.click()
+        assert first_release.evaluate('e => e === document.activeElement')
+        assert history.get_by_text('首次发布说明',exact=True).is_visible()
+        assert not history.get_by_text('确认本轮定义与知识',exact=True).count()
+        history.get_by_role('button',name=re.compile('^v1 标注修订 1')).click()
+        assert history.get_by_text('确认本轮定义与知识',exact=True).is_visible()
         assert history.locator('.om-publication-outcome').count()==0
         assert not page.evaluate("fixtureCalls.some(c=>c.url.includes('knowledge-context'))")
-        assert not history.locator('.om-history-technical').evaluate('e=>e.open')
+        assert history.get_by_role('tab',name='发布详情').get_attribute('aria-selected')=='true'
+        assert not history.locator('.om-history-technical').is_visible()
         assert history.locator('.om-history-actions').evaluate('e=>{const b=e.getBoundingClientRect();return b.bottom<innerHeight&&b.top>=0}')
         assert history.locator('.om-history-panel').evaluate('e=>e.scrollWidth<=e.clientWidth+1')
         if output:
@@ -89,9 +109,16 @@ def check_publication_delivery(width, output=None):
         history.locator('.om-publication-batch>summary').click()
         assert history.locator('.om-publication-outcome').count()==118
         assert history.locator('.om-publication-outcomes').evaluate('e=>e.clientHeight<=281&&e.scrollHeight>e.clientHeight')
-        history.locator('.om-history-knowledge>summary').click()
+        history.get_by_role('tab',name='发布详情').focus()
+        page.keyboard.press('ArrowRight')
+        assert history.get_by_role('tab',name='关联知识').get_attribute('aria-selected')=='true'
         history.get_by_text('当前关联',exact=True).wait_for()
-        history.get_by_role('button',name='关闭版本管理',exact=True).click()
+        assert page.evaluate("fixtureCalls.filter(c=>c.url.endsWith('/ontologies/v1/knowledge-context')).length")==1
+        page.keyboard.press('ArrowRight')
+        assert history.get_by_role('tabpanel',name='技术信息').get_by_text('版本 ID').is_visible()
+        page.keyboard.press('Escape')
+        assert not history.is_visible()
+        assert history_opener.evaluate('e => e === document.activeElement')
         page.evaluate('failSync=true;finishSync()')
         banner.get_by_role('button',name='重试页面同步',exact=True).wait_for()
         assert '已发布为 v1' in banner.inner_text()

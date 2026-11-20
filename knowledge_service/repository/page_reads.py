@@ -304,7 +304,7 @@ class PageReads:
         self.repo.get_project(project)
         sql,params=ScopedReads(self.repo)._qualified(project,scope,kinds=['document'])
         fields=('title','source_file','source_format','source_size_bytes','document_parser',
-                'page_count','source_document_version_id','status')
+                'page_count','source_document_version_id','status','applicability')
         metadata=','.join("'"+key+"',r.body#>'{metadata,"+key+"}'" for key in fields)
         rows=self.repo._db.execute('''WITH documents AS MATERIALIZED (
             SELECT r.project_id,r.id,r.version,r.version_id,r.recorded_at,r.superseded_at,
@@ -324,7 +324,7 @@ class PageReads:
             page['records']=[]
             return page
         fields=('title','source_file','source_format','source_size_bytes','document_parser',
-                'page_count','source_document_version_id','status')
+                'page_count','source_document_version_id','status','applicability')
         metadata=','.join("'"+key+"',r.body#>'{metadata,"+key+"}'" for key in fields)
         # MATERIALIZED fences expression inlining: parse/decompress each large
         # document once, rather than once per projected metadata field.

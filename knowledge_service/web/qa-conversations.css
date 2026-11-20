@@ -166,19 +166,7 @@ body main #tab-qa .qa-example:hover{background:#f6f8f3;border-color:#d6dfd2}
   .qa-composer-hint{font-size:11px}
 }
 
-/* Keep project selection and every workspace destination available on phones. */
-#qa-app-menu-toggle{display:none}
 @media(max-width:740px){
   body:has(#tab-qa:not(.hidden)){display:flex;flex-direction:column}
   body:has(#tab-qa:not(.hidden))>main{flex:1 1 0;min-height:0;height:auto}
-  body:has(#tab-qa:not(.hidden))>aside{position:relative;inset:auto;display:grid;grid-template-columns:36px minmax(0,1fr);flex:none;align-items:center;gap:12px;width:100%;height:auto;padding:10px 13px;background:#163f35}
-  body:has(#tab-qa:not(.hidden))>aside>#qa-app-menu-toggle{display:grid;place-items:center;width:34px;height:36px;margin:0;padding:7px;border:0;border-radius:8px;background:transparent;color:#d1ded7;box-shadow:none}
-  #qa-app-menu-toggle svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round}
-  body:has(#tab-qa:not(.hidden))>aside>label{margin:0;font-size:11px}
-  body:has(#tab-qa:not(.hidden))>aside>label select{margin:3px 0 0;height:32px;padding:5px 10px;font-size:12px}
-  body:has(#tab-qa:not(.hidden))>aside:not(.qa-nav-open)>:not(#qa-app-menu-toggle):not(label){display:none}
-  body:has(#tab-qa:not(.hidden))>aside.qa-nav-open>:not(#qa-app-menu-toggle):not(label){grid-column:1/-1}
-  body:has(#tab-qa:not(.hidden))>aside.qa-nav-open>.brand{display:none}
-  body:has(#tab-qa:not(.hidden))>aside.qa-nav-open nav{margin-top:4px;min-height:0;max-height:210px}
-  body:has(#tab-qa:not(.hidden))>aside.qa-nav-open .nav-management{padding:10px 0 2px}
 }

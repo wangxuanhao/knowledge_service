@@ -113,18 +113,8 @@ body main #tab-search #graph-workspace-surface.is-graph-fullscreen-workspace #gr
 @media(max-width:580px){
  body main #tab-search #graph-workspace-state{padding:6px 10px}
  body main #tab-search #graph-workspace-surface:has(>#graph-stage)[data-panel="results"],body main #tab-search #graph-workspace-surface:has(>#graph-stage)[data-panel="detail"]{grid-template-rows:minmax(0,1fr) minmax(150px,28%)}
- /* Reuse the existing workspace menu, leaving the graph an operable phone view. */
  body:has(#tab-search:not(.hidden)){display:flex;flex-direction:column}
  body:has(#tab-search:not(.hidden))>main{flex:1 1 0;min-height:0;height:auto}
- body:has(#tab-search:not(.hidden))>aside{position:relative;inset:auto;display:grid;grid-template-columns:36px minmax(0,1fr);flex:none;align-items:center;gap:12px;width:100%;height:auto;padding:10px 13px;background:#163f35}
- body:has(#tab-search:not(.hidden))>aside>#qa-app-menu-toggle{display:grid;place-items:center;width:34px;height:36px;margin:0;padding:7px;border:0;border-radius:8px;background:transparent;color:#d1ded7;box-shadow:none}
- body:has(#tab-search:not(.hidden))>aside>label{margin:0;font-size:11px}
- body:has(#tab-search:not(.hidden))>aside>label select{margin:3px 0 0;height:32px;padding:5px 10px;font-size:12px}
- body:has(#tab-search:not(.hidden))>aside:not(.qa-nav-open)>:not(#qa-app-menu-toggle):not(label){display:none}
- body:has(#tab-search:not(.hidden))>aside.qa-nav-open>:not(#qa-app-menu-toggle):not(label){grid-column:1/-1}
- body:has(#tab-search:not(.hidden))>aside.qa-nav-open>.brand{display:none}
- body:has(#tab-search:not(.hidden))>aside.qa-nav-open nav{margin-top:4px;min-height:0;max-height:210px}
- body:has(#tab-search:not(.hidden))>aside.qa-nav-open .nav-management{padding:10px 0 2px}
  body main #tab-search #graph-workspace-header{gap:6px;min-height:0;padding:4px 0}
  body main #tab-search #graph-workspace-header>h2{flex:1 1 100%;font-size:15px}
  body main #tab-search #graph-workspace-header #scope{order:2;flex:1 1 100%;max-width:none}

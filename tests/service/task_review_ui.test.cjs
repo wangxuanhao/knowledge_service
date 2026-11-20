@@ -46,7 +46,7 @@ function fixture(reviewRows=[],options={}){
       if(url==='/api/health')return {capabilities:['typed_reviews']};
       if(url.endsWith('/ontology')){if(options.noOntology)throw Error('本项目尚未发布本体。开放本体发现模式需先在本体发现中生成并发布草案。');return {id:'ont',summary:{relations:[],classes:[],attributes:[]}};}
       if(url==='/api/jobs')return {jobs:[job,{...job,id:'job-b',project_id:'b'}]};
-      if(url==='/api/projects/a/jobs')return {jobs:[job]};
+      if(url==='/api/projects/a/jobs')return {jobs:options.jobs||[job]};
       if(url==='/api/projects/b/jobs')return {jobs:[]};
       throw Error('Unexpected URL: '+url);}});
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../../knowledge_service/web/task-review.js'),'utf8'),context);
@@ -348,4 +348,15 @@ test('pending single-value conflict must be registered before replacement',async
   assert.match(html,/普通批准只会登记冲突/);
   assert.match(html,/批准并写入/);
   assert.doesNotMatch(html,/data-action="approve_replace"/);
+});
+
+test('active tasks are shown before history while preserving the order within each group',async()=>{
+  const jobs=[['recent-failed','failed'],['next-queued','queued'],['recent-completed','completed'],
+    ['first-running','running'],['second-running','running'],['old-cancelled','cancelled']]
+    .map(([id,status])=>({id,status,kind:'ingest',progress:0}));
+  const {get}=fixture([],{jobs});
+  await get('load-jobs').onclick();
+  const html=get('tasks').innerHTML;
+  const order=[...html.matchAll(/data-key="([a-z-]+)-stages"/g)].map(([,id])=>id);
+  assert.deepEqual(order,['first-running','second-running','next-queued','recent-failed','recent-completed','old-cancelled']);
 });

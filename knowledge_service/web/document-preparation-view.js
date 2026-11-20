@@ -6,7 +6,7 @@
     const D=root.document,P=root.DocumentPreparation;
     const node=(tag,text,css)=>{const e=D.createElement(tag);if(text!==undefined)e.textContent=text;if(css)e.className=css;return e;};
     const makeButton=(text,fn,css='secondary')=>{const e=node('button',text,css);e.type='button';e.onclick=async()=>{const ticket=generation;e.disabled=true;try{await fn();}catch(error){if(ticket===generation)showError(error);}finally{e.disabled=false;if(e===next||e===retryAll)updateFooter();}};return e;};
-    let session=null,viewData={items:[]},owner=null,step=0,active=false,timer=null,uploading=0,generation=0,editing=null,editorItemId=null,previewScope=null,busy=false,configurationVersion=0;
+    let session=null,viewData={items:[]},owner=null,step=0,active=false,timer=null,uploading=0,generation=0,editing=null,editorItemId=null,previewScope=null,busy=null,configurationVersion=0;
     const selected=new Set(),independent=new Set(),locals=new Map(),uploads=new Map();
     const container=node('section',undefined,'preparation-workflow');container.id='preparation-workflow';
     const notice=node('p',undefined,'preparation-notice');notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');notice.hidden=true;
@@ -49,13 +49,14 @@
     const publishList=node('div',undefined,'preparation-files'),publicationSummary=node('p',undefined,'preparation-counts');
     const confirmationIntro=node('p',undefined,'subtle');stages[3].append(confirmationIntro,publicationSummary,publishList);
     const footer=node('div',undefined,'library-wizard-navigation');
+    const submitStatus=node('p',undefined,'preparation-submit-status');submitStatus.setAttribute('role','status');
     const previous=makeButton('上一步',()=>go(step-1));
     const next=makeButton('下一步：配置资料',async()=>{
       if(step===0){if(uploading)throw Error('文件正在上传，请稍候。');if(!items().length)throw Error('请先上传有效文件。');await go(1);}
       else if(step===1)await startParse();
       else if(step===2)go(3);
       else await publish();
-    },'');footer.append(previous,next);
+    },'');footer.append(previous,submitStatus,next);
     const dropHint=node('div','松开鼠标即可添加文件','preparation-drop-hint');dropHint.hidden=true;dropHint.setAttribute('aria-hidden','true');drop.append(dropHint);
     const overlay=node('dialog',undefined,'preparation-preview');overlay.id='preparation-preview';
     const previewTitle=node('h3'),previewContent=node('div',undefined,'preparation-preview-body');
@@ -105,9 +106,9 @@
       if(owner!==project())reset();owner=project();if(!owner)throw Error('请先选择项目。');
       if(!session)attach();return session.ensure();
     }
-    async function run(fn){
-      if(busy)throw Error('正在保存操作，请稍候。');const ticket=generation,target=session;busy=true;render();
-      try{return await fn(target,()=>ticket===generation&&target===session);}finally{if(ticket===generation){busy=false;render();}}
+    async function run(fn,operation='save'){
+      if(busy)throw Error('正在保存操作，请稍候。');const ticket=generation,target=session;busy=operation;render();
+      try{return await fn(target,()=>ticket===generation&&target===session);}finally{if(ticket===generation){busy=null;render();}}
     }
     async function go(value){
       if(busy)throw Error('正在保存操作，请稍候。');
@@ -164,7 +165,7 @@
     function render(){
       for(const item of viewData.items||[])if(item.status==='published')selected.delete(item.id);
       if(step===3)normalisePublication();
-      editor.inert=busy;configTools.inert=busy;
+      editor.inert=Boolean(busy);configTools.inert=Boolean(busy);publishList.inert=busy==='publish';
       if(!editing){editor.hidden=true;bulkEditorHost.append(editor);}
       bulk.setAttribute('aria-expanded',String(Boolean(editing&&editorItemId===null&&!editor.hidden)));
       stages.forEach((e,i)=>e.hidden=step!==i);tabs.forEach((e,i)=>e.setAttribute('aria-current',step===i?'step':'false'));
@@ -187,18 +188,22 @@
       updateFooter();
     }
     function updateFooter(){
-      tabs.forEach(e=>e.disabled=busy);
-      previous.hidden=step===0;next.disabled=busy||uploading>0;
+      const blocked=Boolean(busy),submitting=busy==='publish';
+      tabs.forEach(e=>e.disabled=blocked);
+      previous.hidden=step===0;previous.disabled=blocked;next.disabled=blocked||uploading>0;
+      submitStatus.hidden=!submitting;
+      submitStatus.textContent=submitting?'正在创建处理批次，提交成功后将自动打开进度。':'';
+      next.setAttribute('aria-busy',String(submitting));
       const parseCount=items().filter(i=>selected.has(i.id)&&i.status!=='published').length;
       const chosen=items().filter(i=>selected.has(i.id)&&i.status!=='published'),reusable=chosen.filter(i=>i.reusable).length,
         pending=chosen.filter(i=>!i.reusable&&['queued','running'].includes(i.existing_task_status||i.status)).length;
       configSummary.textContent=`已选 ${parseCount} 份 · 需要解析 ${parseCount-reusable-pending} 份 · 可复用 ${reusable} 份 · 已有运行任务 ${pending} 份`;
       const retryCount=items().filter(retryable).length;
-      retryAll.textContent=`重试失败或过期项（${retryCount}）`;retryAll.disabled=busy||retryCount===0;
+      retryAll.textContent=`重试失败或过期项（${retryCount}）`;retryAll.disabled=blocked||retryCount===0;
       const publishCount=items().filter(i=>selected.has(i.id)&&ready(i)).length;
-      next.textContent=['下一步：配置资料',`开始解析（${parseCount} 份）`,'下一步：确认处理',`${processing().action}（${publishCount} 份）`][step];
-      if(step===2)next.disabled=busy||uploading>0||!items().some(ready);
-      if(step===3)next.disabled=busy||uploading>0||publishCount===0;
+      next.textContent=submitting?'正在提交…':['下一步：配置资料',`开始解析（${parseCount} 份）`,'下一步：确认处理',`${processing().action}（${publishCount} 份）`][step];
+      if(step===2)next.disabled=blocked||uploading>0||!items().some(ready);
+      if(step===3)next.disabled=blocked||uploading>0||publishCount===0;
     }
     async function uploadOne(file,old){
       const ticket=generation,target=session,entry=old||{key:root.crypto?.randomUUID?.()||Date.now().toString(36)+Math.random().toString(36).slice(2),loaded:0,total:0};
@@ -348,7 +353,7 @@
         const ids=items().filter(i=>selected.has(i.id)&&ready(i)).map(i=>i.id);if(!ids.length)throw Error('请选择已核对、解析完成的文件。');
         const result=await target.publish(ids,{},ids.filter(id=>independent.has(id)));if(!current())return;
         sent={target,result,copy:processing()};
-      });
+      },'publish');
       if(!sent||session!==sent.target)return;
       const finished=clearSubmittedSession(sent.target);if(!finished)step=items().length?2:0;
       message(sent.copy.done+'，请到“处理批次”查看进度。');render();onPublished(sent.result);
@@ -413,7 +418,7 @@
       return true;
     }
     function reset(){
-      clearTimeout(timer);session?.dispose();session=null;viewData={items:[]};owner=null;generation++;step=0;selected.clear();independent.clear();locals.clear();uploads.clear();uploading=0;busy=false;editing=null;editorItemId=null;editor.hidden=true;hideNotice();previewScope?.dispose?.();previewScope=null;if(overlay.open)overlay.close();render();
+      clearTimeout(timer);session?.dispose();session=null;viewData={items:[]};owner=null;generation++;step=0;selected.clear();independent.clear();locals.clear();uploads.clear();uploading=0;busy=null;editing=null;editorItemId=null;editor.hidden=true;hideNotice();previewScope?.dispose?.();previewScope=null;if(overlay.open)overlay.close();render();
     }
     function restoreSettings(){
       configurationVersion=session?.snapshot().settings_version||0;

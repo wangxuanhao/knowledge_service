@@ -1174,6 +1174,7 @@ class KnowledgeService:
             elif extraction_mode == 'discovery':
                 from ..integrations.semantica_adapter import SemanticaExtractor
                 from ..repository import OntologyNotPublished
+                from .ontology_slice import OntologySliceSelector
                 from .ontology_vocabulary import index_governed_vocabulary
                 extractor=SemanticaExtractor()
                 baseline_version=selected_ontology_version
@@ -1183,9 +1184,12 @@ class KnowledgeService:
                     except OntologyNotPublished:
                         pass
                 if baseline_version is None:
+                    baseline_summary = None
                     baseline_class_names=frozenset()
                 else:
                     baseline_ontology=Ontology(baseline_version['turtle'])
+                    baseline_summary=baseline_ontology.summary(active_only=True)
+                    slice_selector=OntologySliceSelector()
                     baseline_class_names=frozenset(
                         name
                         for record in index_governed_vocabulary(baseline_ontology.graph)
@@ -1196,9 +1200,15 @@ class KnowledgeService:
                 discovery_source_hash = hashlib.sha256(request['text'].encode('utf-8')).hexdigest()
                 for index,chunk in enumerate(chunk_records):
                     with stage(f"开放发现片段 {index+1}/{len(chunks)} · 位置 {chunk['metadata']['start_char']}–{chunk['metadata']['end_char']}",15+int(60*index/len(chunks))):
+                        detailed_iris = set()
+                        if baseline_version is not None:
+                            slice_receipt = slice_selector.select_terms(
+                                chunk['text'], baseline_ontology, ontology_id=baseline_version['id'])
+                            detailed_iris = {item['term_iri'] for item in slice_receipt['terms']}
                         candidates=self.extract_ingest_chunk(extractor,chunk['text'],discovery_options={
                             'include_attributes':request.get('extract_attributes',False),
-                            'reserved_class_names':baseline_class_names},checkpoint_context=checkpoint_context,
+                            'reserved_class_names':baseline_class_names,
+                            'ontology_summary':baseline_summary,'detailed_iris':detailed_iris},checkpoint_context=checkpoint_context,
                             ordinal=index,settings={**{k:v for k,v in request.items() if not k.startswith('_') and k not in ('title','text','metadata')},
                                 'baseline':baseline_version['id'] if baseline_version else None})
                     processed_chunks += 1

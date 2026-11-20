@@ -5,6 +5,22 @@ body>aside :is(button[data-tab],.nav-group)[hidden]{display:none!important}
 body>aside button[data-tab]>.workspace-icon{margin-right:10px}
 body>aside button[data-tab]>.workspace-nav-label{vertical-align:middle}
 body>aside button[data-tab]:focus-visible,body>aside .workspace-rail-control:focus-visible{outline:2px solid #5eead4;outline-offset:3px}
+#qa-app-menu-toggle{display:none}
+@media(max-width:740px){
+  body{display:block}
+  body>main{width:100%;margin-left:0}
+  body>aside{position:relative;inset:auto;display:grid;grid-template-columns:44px minmax(0,1fr);flex:none;align-items:center;gap:10px;width:100%;height:auto;padding:10px 13px;background:#163f35}
+  body>aside>#qa-app-menu-toggle{display:grid;place-items:center;width:44px;height:44px;margin:0;padding:7px;border:0;border-radius:8px;background:transparent;color:#d1ded7;box-shadow:none}
+  #qa-app-menu-toggle svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round}
+  body>aside>label{margin:0;font-size:11px}
+  body>aside>label>#project{margin:3px 0 0;height:32px;padding:5px 44px 5px 10px;font-size:12px}
+  body>aside:not(.qa-nav-open)>:not(#qa-app-menu-toggle):not(label),body>aside.qa-nav-open>.brand{display:none}
+  body>aside.qa-nav-open>:not(#qa-app-menu-toggle):not(label){grid-column:1/-1}
+  body>aside.qa-nav-open>#workspace-navigation{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;min-height:0;max-height:min(50dvh,280px);overflow:auto;padding:4px 0}
+  body>aside.qa-nav-open>#workspace-navigation .nav-group{min-width:0}
+  body>aside.qa-nav-open .nav-management{flex-wrap:wrap;padding:10px 0 2px}
+  body>aside.qa-nav-open button[data-tab]{white-space:normal;overflow-wrap:anywhere}
+}
 @media(min-width:741px){
   body>aside{overflow:visible}
   body>aside #workspace-nav-collapse{display:grid;place-items:center;position:absolute;top:21px;right:9px;width:28px;height:28px;padding:5px;border:1px solid #ffffff26;background:#164643;color:#d5e8e4;border-radius:7px;z-index:2}

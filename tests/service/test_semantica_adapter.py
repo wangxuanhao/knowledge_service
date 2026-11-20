@@ -292,8 +292,60 @@ def test_open_fact_prompt_contains_normalized_reserved_names(monkeypatch):
     assert 'RESERVED_CLASS_NAMES' in captured['prompt']
     assert '"reserved_class_names": ["rule class", "账号"]' in captured['prompt']
     assert '"classify_relations_and_attributes": true' in captured['prompt']
-    assert '"include_attributes"' not in captured['prompt']
-    assert 'Always return both relation and attribute candidates' in captured['prompt']
+    assert '"include_attributes": false' in captured['prompt']
+    assert 'Omit scalar attributes when INCLUDE_ATTRIBUTES is false' in captured['prompt']
+    assert 'Do not aim for exhaustive coverage' in captured['prompt']
+
+
+def test_open_discovery_reuses_published_names_and_deduplicates_aliases(monkeypatch):
+    import json
+    from knowledge_service.services.ontology import Ontology
+
+    mod = adapter()
+    providers = pytest.importorskip('semantica.semantic_extract.providers')
+    for key, value in [('KG_LLM_API_KEY', 'test-key'), ('KG_LLM_BASE_URL', 'http://localhost:1/v1'),
+                       ('KG_LLM_MODEL', 'test')]:
+        monkeypatch.setenv(key, value)
+    ontology = Ontology('''
+        @prefix ex: <https://test/> .
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+        ex:Merchant a owl:Class ; rdfs:label "商户"@zh ; rdfs:comment "经营门店的主体" .
+        ex:Service a owl:Class ; rdfs:label "服务"@zh .
+        ex:Retired a owl:Class ; owl:deprecated true .
+        ex:offers a owl:ObjectProperty ; rdfs:label "提供"@zh ; rdfs:domain ex:Merchant ; rdfs:range ex:Service .
+        ex:limit a owl:DatatypeProperty ; rdfs:label "次数上限"@zh .
+    ''')
+    source = '甲商铺提供上门维修，核销凭证是售后审核凭据。'
+    prompts = []
+
+    class FakeProvider:
+        def generate_typed(self, prompt, schema, **kwargs):
+            prompts.append((prompt, json.loads(prompt.split('INPUT_JSON:\n', 1)[1])))
+            if schema is mod._OpenEntities:
+                return schema(entities=[dict(text='甲商铺', type='Merchant'), dict(text='甲商铺', type='商户'),
+                                        dict(text='上门维修', type='服务'), dict(text='核销凭证', type='审核凭据')])
+            fact = dict(subject='甲商铺', object='上门维修', fact_kind='relation', evidence='甲商铺提供上门维修')
+            return schema(facts=[dict(fact, predicate='offers'), dict(fact, predicate='提供')])
+
+    monkeypatch.setattr(providers, 'create_provider', lambda *a, **k: FakeProvider())
+    result = mod.SemanticaExtractor().discover(
+        source, ontology_summary=ontology.summary(active_only=True),
+        detailed_iris={'https://test/Merchant'})
+
+    assert [(item['kind'], item['proposed_type']) for item in result] == [
+        ('entity', '商户'), ('entity', '服务'), ('entity', '审核凭据'), ('relation', '提供')]
+    entity_prompt, entity_data = prompts[0]
+    assert entity_data['source_document'] == source
+    assert 'reuse its exact name' in entity_prompt
+    assert entity_data['published_class_guidance'][0] == {
+        'name': '商户', 'aliases': ['Merchant'], 'description': '经营门店的主体'}
+    assert all(item['name'] != 'Retired' for item in entity_data['published_class_guidance'])
+    fact_prompt, fact_data = prompts[1]
+    assert fact_data['published_relation_guidance'][0] == {
+        'name': '提供', 'aliases': ['offers'], 'domain': ['商户'], 'range': ['服务']}
+    assert not fact_data['published_attribute_guidance']
+    assert 'compatible published predicate' in fact_prompt
 
 
 def test_guided_entities_receive_definitions_without_source_contamination(monkeypatch):
@@ -313,6 +365,7 @@ def test_guided_entities_receive_definitions_without_source_contamination(monkey
         'provider':'openai','llm_model':'test','api_key':'test','base_url':'http://test'})
     assert [(x.text,x.label) for x in entities]==[('测试商户','Merchant')]
     assert 'ONTOLOGY_ENTITY_GUIDANCE' in captured['prompt']
+    assert 'Use only the allowed types. Omit an entity if none fits.' in captured['prompt']
     assert '提供商品或服务的经营主体' in captured['prompt']
     assert entities[0].metadata['extraction_method']=='llm_typed_guided'
 
@@ -358,6 +411,7 @@ def test_guided_relations_map_temporal_fields_into_metadata(monkeypatch):
     assert meta['extraction_method']=='llm_typed_guided'
     assert 'temporal_source_text' in captured['prompt']
     assert 'valid_from' in captured['prompt']
+    assert 'Use only an allowed relation type' in captured['prompt']
 
 
 def test_extracted_validity_promotes_iso_and_guards_phrases_and_intervals():

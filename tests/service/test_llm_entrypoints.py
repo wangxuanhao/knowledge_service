@@ -75,7 +75,7 @@ def test_extraction_adapter_and_hierarchy_receive_bound_platform_profile(selecti
     service, repo, project, manager, first, second = selections
     observed = []
 
-    def extract(text, config, exceptions=None):
+    def extract(text, config, exceptions=None, **_guidance):
         observed.append(config)
         manager.activate(second['id'])
         return []
