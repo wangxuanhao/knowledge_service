@@ -3,6 +3,7 @@ from ontology_seed import seed_ontology
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
+from time import monotonic, sleep
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -405,6 +406,119 @@ def test_composite_publication_applies_only_selected_approved_batches(tmp_path):
         assert source['derived_breakdown']['entity'] == 1
 
 
+def test_composite_publication_ignores_current_tombstones(tmp_path):
+    app, repo, p, path = _setup(tmp_path)
+    baseline = seed_ontology(repo, p,
+        '@prefix owl: <http://www.w3.org/2002/07/owl#> .\n<urn:OldType> a owl:Class .', {})
+    tombstone = repo.put_record(p, {
+        'id': 'deleted-entity', 'kind': 'entity', 'type': 'urn:OldType', 'text': '已删除实体',
+        'ontology_id': baseline['id'], 'metadata': {'_deleted': True},
+    })
+
+    with TestClient(app) as client:
+        added, _ = _add(client, path, _request(expected_ontology_id=baseline['id']), 'new-type')
+        published = _publish(app.state.ontology_drafts, repo, p, added['draft'])
+        assert published['metadata']['publication']['receipt']['facts']['added'] == 1
+        assert len(repo.list_ontologies(p)) == 2
+        deleted = repo.get_record(p, tombstone['id'])
+        assert deleted['version_id'] == tombstone['version_id']
+        assert deleted['metadata']['_deleted'] is True
+
+
+@pytest.mark.parametrize('mode', ['first_version', 'next_version', 'reuse'])
+def test_uploaded_markdown_candidates_reach_the_formal_knowledge_ledger(tmp_path, monkeypatch, mode):
+    from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
+
+    names = {'示例客户甲': '企业客户'}
+    if mode == 'next_version':
+        names['示例门店乙'] = '专营门店'
+
+    def discover(self, text, include_attributes=False, **guidance):
+        return [{'id': f'candidate-{index}', 'kind': 'entity', 'text': name,
+                 'proposed_type': proposed_type, 'evidence': name}
+                for index, (name, proposed_type) in enumerate(names.items()) if name in text]
+
+    monkeypatch.setattr(SemanticaExtractor, 'discover', discover)
+    app = create_app(tmp_path / 'uploaded-intake.sqlite', HashingEncoder(), upload_temp=tmp_path / 'uploads')
+    app.state.ontology_drafts.quality_engine = _DeterministicQualityEngine()
+    repo = app.state.service.data
+    customer_iri = 'urn:test:UploadedCustomer'
+    original = ('# 客户资料\n\n' + '、'.join(names) + '均出现在登记资料中。').encode('utf-8')
+
+    with TestClient(app) as client:
+        response = client.post('/api/projects', json={
+            'name': '资料上传至正式知识', 'use_default_ontology': False, 'ontology_mode': 'discovery'})
+        assert response.status_code == 201, response.text
+        project = response.json()['id']
+        base = f'/api/projects/{project}'
+        path = base + '/ontology-discovery'
+        ontology_id = None
+        if mode != 'first_version':
+            ontology_id = seed_ontology(repo, project, f'''
+                @prefix owl: <http://www.w3.org/2002/07/owl#> .
+                @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+                <{customer_iri}> a owl:Class ; rdfs:label "企业客户"@zh .
+            ''', {})['id']
+        response = client.post(base + '/ingest-batches', json={'settings': {
+            'extraction_mode': 'discovery', 'resolve_entities': False}})
+        assert response.status_code == 201, response.text
+        batch_id = response.json()['id']
+        batch = base + f'/ingest-batches/{batch_id}'
+        upload = client.post(batch + '/files', files={'file': ('客户资料.md', original, 'text/markdown')})
+        assert upload.status_code == 201, upload.text
+        started = client.post(batch + '/start')
+        assert started.status_code == 202, started.text
+        deadline = monotonic() + 20
+        while True:
+            item = client.get(batch + '/items').json()['items'][0]
+            if item['status'] in {'completed', 'needs_attention'} or monotonic() >= deadline:
+                break
+            sleep(.1)
+        assert item['status'] == 'completed', item
+        source_id = item['source_version_id']
+        assert app.state.source_documents.source(project, source_id)['data'] == original
+        inventory = client.get(path + '/candidates', params={'batch_id': batch_id}).json()
+        candidates = {row['text']: row for row in inventory['items']}
+        assert set(candidates) == set(names)
+        assert not repo.current_records(project, kinds=['entity'])
+        assert all(repo.get_assertion(project, row['id'])['status'] == 'pending'
+                   for row in candidates.values())
+        confirmed_mappings = {candidates['示例客户甲']['id']: customer_iri} if ontology_id is not None else {}
+        selection = {'candidate_ids': [row['id'] for row in candidates.values()],
+                     'expected_ontology_id': ontology_id, 'create_new_draft': mode != 'reuse',
+                     'confirmed_mappings': confirmed_mappings}
+        response = client.post(path + '/selection-preview', json=selection)
+        assert response.status_code == 200, response.text
+        preview = response.json()
+        action = 'confirm-reuse' if mode == 'reuse' else 'add-selection'
+        assert preview['can_confirm_reuse' if mode == 'reuse' else 'can_add'], preview
+        response = client.post(path + '/' + action, json={**selection, 'idempotency_key': 'confirm-upload',
+            'source_fingerprint': preview['source_fingerprint'], 'preview_fingerprint': preview['preview_fingerprint']})
+        assert response.status_code == 200, response.text
+        result = response.json()
+        if mode == 'reuse':
+            assert not app.state.ontology_drafts.store.list(project)
+            published_id = ontology_id
+        else:
+            assert not repo.current_records(project, kinds=['entity'])
+            published = _publish(app.state.ontology_drafts, repo, project, result['draft'])
+            published_id = published['id']
+            assert published_id != ontology_id
+        assert len(repo.list_ontologies(project)) == (2 if mode == 'next_version' else 1)
+        facts = {row['text']: row for row in repo.current_records(project, kinds=['entity'])}
+        assert set(facts) == set(names)
+        assert all(fact['ontology_id'] == published_id for fact in facts.values())
+        if confirmed_mappings:
+            assert facts['示例客户甲']['type'] == customer_iri
+        for name, row in candidates.items():
+            assertion = repo.get_assertion(project, row['id'])
+            assert assertion['status'] == 'accepted'
+            assert assertion['canonical_record_id'] == facts[name]['id']
+            evidence = client.get(base + f'/assertions/{row["id"]}/evidence')
+            assert evidence.status_code == 200, evidence.text
+            assert evidence.json()['integrity']['source_hash_status'] == 'matched'
+
+
 def test_appending_same_draft_dependencies_publishes_each_entity_once(tmp_path):
     app, repo, p, path = _setup(tmp_path)
     document = repo.get_record(p, 'doc-1')
@@ -423,7 +537,11 @@ def test_appending_same_draft_dependencies_publishes_each_entity_once(tmp_path):
         second, frozen = _add(client, path, request, 'append-with-owner')
         replay = client.post(path + '/add-selection', json=frozen)
         assert replay.status_code == 200, replay.text
-        assert replay.json() == second
+        recovered = replay.json()
+        assert recovered['receipt'] == second['receipt']
+        assert (recovered['draft']['id'], recovered['draft']['revision']) == (
+            second['draft']['id'], second['draft']['revision'])
+        assert 'associated_fact_scope' not in recovered
         assert len(app.state.ontology_drafts.store.list(p)) == 1
         _publish(app.state.ontology_drafts, repo, p, second['draft'])
         facts = repo.current_records(p, kinds=['entity', 'relation'])
@@ -616,7 +734,12 @@ def test_all_rejected_draft_closes_attached_run_without_writing_facts(tmp_path):
                 submitted['validation_fingerprint'], [{'operation_id': x['id'],
                 'operation_fingerprint': x['fingerprint'], 'action': 'reject',
                 'reason': '本轮不采纳'}], warnings, 'reviewer')
-        assert rejected['status'] == 'rejected'
+        assert rejected['status'] == 'pending'
+        assert drafts.pending_phase(p, rejected) == 'settled'
+        assert not drafts.publish_readiness(p, rejected['id'])['ready']
+        assert {x['status'] for x in repo.list_discovery_runs(p)} == {'draft_created'}
+        closed = drafts.close(p, rejected['id'], rejected['revision'], 'author', '结束本轮审核')
+        assert closed['status'] == 'rejected'
         assert {x['status'] for x in repo.list_discovery_runs(p)} == {'closed'}
         assert not repo.current_records(p, kinds=['entity'])
 

@@ -139,13 +139,15 @@ test('normal draft action bar reports its exact linked knowledge scope',()=>{
 
 function actionFixture(options={}){
   const actions=element('actions'),calls=[],messages=[],timers=[],events=[];
+  const stored=options.storage||new Map();
   const state={summary:{classes:[{id:'urn:Customer',label_zh:'客户'}],relations:[],attributes:[]},ontologyId:'release',
     draft:{id:'draft',status:'pending',revision:2,base_ontology_id:'release',operations:[{action:'create_term',target_iri:'urn:Customer',after:{kind:'class'}}],
       associated_knowledge:{selected:3,per_batch:[{run_id:'source-run',candidate_ids:['a','b','c'],selected:3}]},...options.draft},
     stageAvailability:{stages:{review:{allowed:true}}},readiness:options.readiness||{ready:true,approval_counts:{approved:1},items:[]},preview:null};
   Object.assign(state,options.state||{});
-  const model={S:state,status:(message,error)=>messages.push({message,error}),uid:()=> 'publish-key',refresh:async()=>{}};
-  const context={window:{OntologyModel:model},current:'p',console,CustomEvent:function(type,init){this.type=type;this.detail=init.detail;},
+  const model={S:state,status:(message,error)=>messages.push({message,error}),uid:options.uid||(()=> 'publish-key'),refresh:async()=>{}};
+  const sessionStorage={getItem:key=>stored.get(key)||null,setItem:(key,value)=>stored.set(key,value),removeItem:key=>stored.delete(key)};
+  const context={window:{OntologyModel:model,sessionStorage,Auth:{user:()=>({id:options.actor||'reviewer'}),isAdmin:()=>true}},current:options.project||'p',console,CustomEvent:function(type,init){this.type=type;this.detail=init.detail;},
     document:{createElement:element,dispatchEvent(event){events.push(event);}},endpoint:suffix=>'/api/projects/'+context.current+suffix,
     setTimeout(fn){timers.push(fn);return timers.length;},clearTimeout(){},
     api:async(url,body,method='GET')=>{calls.push({url,body,method});if(url.endsWith('/ontologies'))return {versions:[]};
@@ -270,6 +272,7 @@ test('uncertain publication preserves the original body and key even when the no
   let posts=0;const f=actionFixture({draft:{submitted_at:'now',validation_fingerprint:'fp'},request:async(url,body,method)=>{
     if(url.endsWith('/publish-readiness'))return {ready:true,revision:2,validation_fingerprint:'fp'};
     if(url.endsWith('/publish')){posts++;if(posts===1)throw Error('response lost');return {id:'saved',metadata:{version:1}};}
+    if(url.endsWith('/publish-requests/publish-key'))return {status:'unconfirmed',draft_status:'pending',revision:2};
     return f.state.draft;
   }});
   const input=all(f.actions).find(n=>n.className==='om-pub-note');input.value='original note';input.listeners.input();
@@ -280,6 +283,97 @@ test('uncertain publication preserves the original body and key even when the no
   await f.find('核对发布结果').listeners.click();assert.equal(posts,1);
   await f.find('重试原发布请求').listeners.click();assert.equal(posts,2);
   const bodies=f.calls.filter(c=>c.url.endsWith('/publish')).map(c=>c.body);assert.equal(bodies[1],first);assert.equal(bodies[1].note,'original note');
+});
+
+test('a lost publication reply survives reload, even after the committed draft closes',async()=>{
+  const storage=new Map();
+  const first=actionFixture({storage,draft:{submitted_at:'now',validation_fingerprint:'fp'},request:async url=>{
+    if(url.endsWith('/publish-readiness'))return {ready:true,revision:2,validation_fingerprint:'fp'};
+    if(url.endsWith('/publish'))throw Error('response lost');
+  }});
+  const note=all(first.actions).find(node=>node.className==='om-pub-note');note.value='original note';note.listeners.input();
+  await all(first.actions).find(node=>node.tag==='button'&&/^发布/.test(node.textContent)).listeners.click();
+  for(const scope of [{actor:'another user'},{project:'another project'}]){
+    const other=actionFixture({storage,state:{draft:null},...scope});
+    assert.equal(other.find('核对发布结果'),undefined);
+  }
+  const reloaded=actionFixture({storage,state:{draft:null},request:async url=>{
+    assert.equal(url,'/api/projects/p/ontology-drafts/draft/publish-requests/publish-key');
+    return {status:'committed',ontology:{id:'saved',metadata:{version:2}}};
+  }});
+  assert.ok(reloaded.find('核对发布结果'));
+  assert.equal(reloaded.calls.filter(call=>call.method==='POST').length,0);
+  await reloaded.find('核对发布结果').listeners.click();
+  assert.equal(reloaded.events.find(event=>event.type==='ontology-model:published').detail.versionId,'saved');
+  assert.ok(reloaded.messages.some(({message})=>message.includes('已发布为 v2')));
+  assert.equal(reloaded.find('核对发布结果'),undefined);
+});
+
+test('a different publication of the draft cannot settle the original request as successful',async()=>{
+  const f=actionFixture({draft:{submitted_at:'now',validation_fingerprint:'fp'},request:async url=>{
+    if(url.endsWith('/publish-readiness'))return {ready:true,revision:2,validation_fingerprint:'fp'};
+    if(url.endsWith('/publish'))throw Error('response lost');
+    if(url.endsWith('/publish-requests/publish-key'))return {status:'unconfirmed',draft_status:'accepted',revision:3};
+    return {status:'accepted',published_ontology_id:'another-release'};
+  }});
+  const note=all(f.actions).find(node=>node.className==='om-pub-note');note.value='original note';note.listeners.input();
+  await all(f.actions).find(node=>node.tag==='button'&&/^发布/.test(node.textContent)).listeners.click();
+  await f.find('核对发布结果').listeners.click();
+  assert.ok(!f.events.some(event=>event.type==='ontology-model:published'));
+  assert.ok(f.messages.some(({message})=>message.includes('版本管理')));
+  assert.equal(f.find('重试原发布请求'),undefined);
+});
+
+test('reload rechecks pending publication before sending its exact original body',async()=>{
+  const storage=new Map(),draft={submitted_at:'now',validation_fingerprint:'fp'};
+  const first=actionFixture({storage,draft,request:async url=>{
+    if(url.endsWith('/publish-readiness'))return {ready:true,revision:2,validation_fingerprint:'fp'};
+    if(url.endsWith('/publish'))throw Object.assign(new Error('登录状态已变化'),{status:401});
+  }});
+  const note=all(first.actions).find(node=>node.className==='om-pub-note');note.value='original note';note.listeners.input();
+  await all(first.actions).find(node=>node.tag==='button'&&/^发布/.test(node.textContent)).listeners.click();
+  const sent=first.calls.find(call=>call.method==='POST').body;
+  const restored=actionFixture({storage,draft,uid:()=>assert.fail('a new identity must not be generated'),request:async(url,body)=>{
+    if(url.endsWith('/publish-requests/publish-key'))return {status:'unconfirmed',draft_status:'pending',revision:2};
+    if(url.endsWith('/publish')){
+      assert.equal(JSON.stringify(body),JSON.stringify(sent));
+      return {id:'saved',metadata:{version:2}};
+    }
+    assert.fail('unexpected publication request '+url);
+  }});
+  assert.equal(restored.find('重试原发布请求'),undefined);
+  await restored.find('核对发布结果').listeners.click();
+  assert.equal(restored.calls.filter(call=>call.method==='POST').length,0);
+  await restored.find('重试原发布请求').listeners.click();
+  assert.equal(restored.calls.filter(call=>call.method==='POST').length,1);
+  assert.equal(storage.size,0);
+});
+
+test('publication requires enough session storage to recover an interrupted reply',async()=>{
+  const f=actionFixture({draft:{submitted_at:'now',validation_fingerprint:'fp'},request:async url=>{
+    if(url.endsWith('/publish-readiness'))return {ready:true,revision:2,validation_fingerprint:'fp'};
+  }});
+  f.context.window.sessionStorage.setItem=()=>{throw Error('storage denied');};
+  const note=all(f.actions).find(node=>node.className==='om-pub-note');note.value='original note';note.listeners.input();
+  await all(f.actions).find(node=>node.tag==='button'&&/^发布/.test(node.textContent)).listeners.click();
+  assert.equal(f.calls.filter(call=>call.method==='POST').length,0);
+  assert.ok(f.messages.some(({message,error})=>error&&message.includes('允许会话存储')));
+  assert.equal(f.find('核对发布结果'),undefined);
+});
+
+test('a rejected publication explains recovery, keeps the draft and allows a new identity',async()=>{
+  let key=0;const storage=new Map();const f=actionFixture({storage,uid:()=>`publish-key-${++key}`,
+    draft:{submitted_at:'now',validation_fingerprint:'fp'},request:async url=>{
+      if(url.endsWith('/publish-readiness'))return {ready:true,revision:2,validation_fingerprint:'fp'};
+      if(url.endsWith('/publish'))throw Object.assign(new Error('复合来源依赖已变化'),{status:409,code:'stale_source'});
+    }});
+  const note=all(f.actions).find(node=>node.className==='om-pub-note');note.value='original note';note.listeners.input();
+  await all(f.actions).find(node=>node.tag==='button'&&/^发布/.test(node.textContent)).listeners.click();
+  assert.equal(f.state.draft.status,'pending');
+  assert.ok(f.messages.some(({message,error})=>error&&message.includes('当前未发布')&&message.includes('刷新来源')));
+  assert.equal(f.find('核对发布结果'),undefined);
+  await all(f.actions).find(node=>node.tag==='button'&&/^发布/.test(node.textContent)).listeners.click();
+  assert.deepEqual(f.calls.filter(call=>call.method==='POST').map(call=>call.body.idempotency_key),['publish-key-1','publish-key-2']);
 });
 
 test('confirmed publication still invalidates dependent caches after another draft is selected',async()=>{

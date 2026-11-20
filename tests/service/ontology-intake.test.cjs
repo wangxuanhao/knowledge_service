@@ -285,6 +285,46 @@ test('dependency diagnostics map exact source IDs to readable fact descriptions'
   const items=[{id:'entity-a',kind:'entity',text:'张三',proposed_type:'客户'},{id:'rel',kind:'relation',subject:'张三',object:'订单甲',proposed_type:'拥有'}];
   const text=intake.diagnosticText({candidate_id:'entity-a',required_by:'rel',message:'请选择同批实体'},items);
   assert.match(text,/张三.*客户/);assert.match(text,/张三.*拥有.*订单甲/);assert.match(text,/请选择同批实体/);
+  assert.doesNotMatch(text,/entity-a|\(rel\)|（rel）/);
+});
+test('bulk mapping reports the count and can show adopted and remaining selections',async()=>{
+  const candidates=[{id:'a',kind:'entity',text:'张三',proposed_type:'客户',document_id:'doc',suggested_mapping:{target_iri:'urn:Customer'}},
+    {id:'b',kind:'entity',text:'李四',proposed_type:'经销商',document_id:'doc'}];
+  const f=uiFixture({candidates,terms:[{iri:'urn:Customer',kind:'class',label:'客户'}]});
+  await f.ui.open({projectId:'p'});await f.find('选择当前列表（2 条）').onclick();
+  await f.find('批量采用已有类型建议（1 条）').onclick();
+  assert.ok(f.find('本次确认 1 条复用映射'));
+  assert.ok(f.find('已选 2 条 · 已确认复用 1 条 · 待核对 1 条'));
+  await f.find('已确认复用 1 条').onclick();
+  assert.ok(f.find('张三 · 客户'));assert.ok(!f.find('李四 · 经销商'));
+  await f.find('待核对 1 条').onclick();
+  assert.ok(f.find('李四 · 经销商'));assert.ok(!f.find('张三 · 客户'));
+  assert.deepEqual(Array.from(f.ui.state.selected),['a','b']);
+  assert.equal(f.calls.filter(call=>call.method==='POST').length,0);
+});
+
+test('preview explains both sides of a mapping conflict and opens the exact candidate',async()=>{
+  const candidates=[{id:'raw-a',kind:'entity',text:'张三',proposed_type:'客户',document_id:'doc',document_title:'甲资料'},
+    {id:'raw-b',kind:'entity',text:'李四',proposed_type:'客户',document_id:'doc',document_title:'甲资料'}];
+  const conflict={code:'mapping_conflict',candidate_id:'raw-a',other_candidate_id:'raw-b',target_iri:'urn:Customer',other_target_iri:'urn:Dealer'};
+  const f=uiFixture({candidates,terms:[{iri:'urn:Customer',kind:'class',label:'客户'},{iri:'urn:Dealer',kind:'class',label:'经销商'}],
+    previewResponse:{can_add:false,conflicts:[conflict]}});
+  await f.ui.open({projectId:'p'});await f.find('选择当前列表（2 条）').onclick();await f.find('预览选中内容（只读）').onclick();
+  assert.ok(f.find('同名候选映射不一致'));
+  assert.ok(f.find('张三 · 客户 → 客户（实体类）'));
+  assert.ok(f.find('李四 · 客户 → 经销商（实体类）'));
+  assert.equal(f.find('确认加入草案，等待发布').disabled,true);
+  await f.find('查看另一条候选').onclick();
+  assert.equal(f.ui.state.detailId,'raw-b');assert.deepEqual(Array.from(f.ui.state.selected),['raw-a','raw-b']);
+});
+
+test('preview shows the established and incoming values behind a constraint conflict',async()=>{
+  const validation_details=[{focus:{label:'平台账号'},field_label:'状态',constraint:'MaxCountConstraintComponent',
+    related:[{label:'状态 = 启用',existing:true},{label:'状态 = 停用',candidate_ids:['a']}]}];
+  const f=uiFixture({previewResponse:{can_add:false,conflicts:[{code:'ontology_validation_failed',validation_details}]}});
+  await f.ui.open({projectId:'p'});await f.find('选择当前列表（1 条）').onclick();await f.find('预览选中内容（只读）').onclick();
+  assert.ok(f.find('平台账号 · 状态 · 数量超过上限'));
+  assert.ok(f.find('已入库 · 状态 = 启用'));assert.ok(f.find('本次候选 · 状态 = 停用'));
 });
 test('fact preview shows the actual selected value with its server-predicted outcome and reason',async()=>{
   const f=uiFixture({candidates:[{id:'a',kind:'entity',text:'张三',proposed_type:'客户'},

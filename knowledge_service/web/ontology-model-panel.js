@@ -99,9 +99,6 @@
   let historyProject = '', versionsRequest = 0, historyOpening = 0;
   const versionLabel = version => version === undefined || version === null
     ? '版本未标注' : `v${version}`;
-  // 发布幂等键：同一轮发布（同一草案 + 同一校验指纹）在重试之间复用同一个键；
-  // 换一轮/发布成功后再生成新的。键用 ctx.uid()（主控提供），读不到才退回随机。
-  let publishKey = { sig: '', key: '' };
   // 发布说明（必填）：与「停用原因」同一套做法 —— 输入留在界面上，发布成功后清空。
   // 服务端（PublishRequest.note）也强制必填，界面这层只是让"没写就不让点"更早可见。
   let publishNote = '';
@@ -185,14 +182,12 @@
     if (M && typeof M.status === 'function') M.status(msg, err);
     else if (typeof console !== 'undefined') console.log(msg);
   }
-  // 幂等键：优先用主控 ctx.uid()；同一签名（草案+指纹）在重试间复用同一把键。
-  function nextIdempotencyKey(sig) {
-    if (publishKey.key && publishKey.sig === sig) return publishKey.key;
+  // 已提交请求的幂等键随冻结的请求一起保存。修正后的新请求使用新键。
+  function nextIdempotencyKey() {
     const M = model();
     let key = (M && typeof M.uid === 'function') ? M.uid() : '';
     if (!key && globalThis.crypto && globalThis.crypto.randomUUID) key = globalThis.crypto.randomUUID();
     if (!key) key = `publish-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    publishKey = { sig, key };
     return key;
   }
   function labelOfIri(iri, summary) {
@@ -1238,6 +1233,7 @@
       ? `${documentCount===null?'资料数量待核对':`来自 ${documentCount} 份资料`}，共 ${pending} 条候选内容待核对。候选包括实体、关系和属性；选择、预览并确认加入草案后，继续审核发布。`
       : (included ? `${included} 个候选已纳入草案，请加载草案后校验、审核并发布。`
         : pending===null?'待核对候选数量尚未读取；可按资料核对候选，或重新读取项目状态。':'当前没有待处理候选，可使用顶部「新增定义」手动建模，或在资料库添加文件做开放抽取。')));
+    renderPublicationRecoveries(st,bar);
     put(actionsHost, bar);
   }
 
@@ -1458,18 +1454,7 @@
     manualReview.title = '按类型、关系或属性集中核对，支持批准并查看下一项；先提交当前草案。';
     manualReview.addEventListener('click', openManualReview);
     opRow.append(btnReview, manualReview, noteInput, btnPub);
-    const attempt=pendingPublication();
-    if(attempt&&attempt.phase!=='sending'){
-      const recovery=el('div','om-publication-recovery');
-      recovery.append(el('p',null,'发布结果尚未确认。原发布说明：'+attempt.body.note));
-      const check=el('button','om-btn','核对发布结果');check.type='button';check.disabled=busy||previewing;
-      check.addEventListener('click',()=>reconcilePublication(attempt));recovery.append(check);
-      if(attempt.phase==='retryable'){
-        const retry=el('button','om-btn','重试原发布请求');retry.type='button';retry.disabled=busy||previewing;
-        retry.addEventListener('click',()=>retryPublication(attempt));recovery.append(retry);
-      }
-      bar.append(recovery);
-    }
+    renderPublicationRecoveries(st,bar);
     const reviewHelp=el('p','om-ab-note',(submitted?'':'将校验并提交审核，然后')
       +'仅批量批准服务端允许的变更；其余变更仍需「按定义审核」。此操作不发布本体。');
     reviewHelp.id='om-review-action-help';
@@ -1634,25 +1619,101 @@
   /* ---- 「发布」：POST /{draft_id}/publish（要指纹 + 幂等键 + 说明） --------- */
   const publicationAttempts=new Map();
   const draftApi=(...args)=>window.OntologyDraftData?window.OntologyDraftData.request(...args):api(...args);
-  function pendingPublication(){return publicationAttempts.get(actionKey(activeProject(),S().draft?.id));}
+  const publicationActor=()=>{
+    const user=window.Auth?.user?.();
+    const identity=user?.id??user?.username;
+    if(identity!=null)return String(identity);
+    return window.Auth?.isAdmin?.()===false?'':'system:auth-disabled';
+  };
+  const publicationStoreKey=(project,actor)=>'knowledge:ontology-publish:pending:v1:'+JSON.stringify([actor,project]);
+  const publicationBase=(project,draftId)=>`/api/projects/${encodeURIComponent(project)}/ontology-drafts/${encodeURIComponent(draftId)}`;
+  const publicationScope=attempt=>activeProject()===attempt.project&&publicationActor()===attempt.actor;
+  const freezePublication=body=>Object.freeze({...body,acknowledged_warning_codes:Object.freeze([...body.acknowledged_warning_codes])});
+  function projectPublicationAttempts(project=activeProject(),actor=publicationActor()){
+    if(!project||!actor)return new Map();
+    const key=publicationStoreKey(project,actor);
+    if(publicationAttempts.has(key))return publicationAttempts.get(key);
+    const attempts=new Map();
+    try{
+      const saved=JSON.parse(window.sessionStorage?.getItem(key)||'[]');
+      for(const entry of Array.isArray(saved)?saved:[]){
+        const body=entry?.body;
+        if(typeof entry?.draftId!=='string'||!entry.draftId||!Number.isInteger(body?.expected_revision)
+          ||typeof body.idempotency_key!=='string'||!body.idempotency_key||typeof body.validation_fingerprint!=='string'
+          ||typeof body.note!=='string'||!Array.isArray(body.acknowledged_warning_codes))continue;
+        attempts.set(entry.draftId,{project,actor,draftId:entry.draftId,revision:body.expected_revision,
+          base:publicationBase(project,entry.draftId),phase:'uncertain',body:freezePublication(body)});
+      }
+    }catch{/* Publishing checks that the original request can be saved before sending it. */}
+    publicationAttempts.set(key,attempts);
+    return attempts;
+  }
+  const activePublicationAttempt=attempt=>publicationScope(attempt)&&projectPublicationAttempts().get(attempt.draftId)===attempt;
+  function pendingPublication(){return projectPublicationAttempts().get(S().draft?.id);}
+  function persistPublicationAttempts(attempt,attempts){
+    const key=publicationStoreKey(attempt.project,attempt.actor);
+    if(attempts.size)window.sessionStorage.setItem(key,JSON.stringify([...attempts.values()].map(({draftId,body})=>({draftId,body}))));
+    else window.sessionStorage.removeItem(key);
+  }
+  function rememberPublication(attempt){
+    const attempts=projectPublicationAttempts(attempt.project,attempt.actor);
+    attempts.set(attempt.draftId,attempt);
+    try{persistPublicationAttempts(attempt,attempts);}
+    catch{
+      attempts.delete(attempt.draftId);
+      throw Error('当前未发布。浏览器无法保存本次请求，请允许会话存储后重试。');
+    }
+  }
+  function forgetPublication(attempt){
+    const attempts=projectPublicationAttempts(attempt.project,attempt.actor);
+    if(attempts.get(attempt.draftId)!==attempt)return;
+    attempts.delete(attempt.draftId);
+    try{persistPublicationAttempts(attempt,attempts);}catch{/* A surviving request can safely be checked again. */}
+  }
+  function renderPublicationRecoveries(st,host){
+    for(const attempt of projectPublicationAttempts().values()){
+      if(attempt.phase==='sending')continue;
+      const recovery=el('div','om-publication-recovery');
+      const checking=attempt.phase==='checking';
+      recovery.setAttribute('aria-busy',String(checking));
+      const originalOpen=st.draft?.id===attempt.draftId&&st.draft.revision===attempt.revision;
+      const disabled=checking||!!st.preview||!!currentAction(st);
+      const text=attempt.phase==='retryable'?'原发布请求可以重试。':'发布结果尚未确认。';
+      recovery.append(el('p',null,text+'原发布说明：'+attempt.body.note));
+      const check=el('button','om-btn',checking?'正在核对发布结果…':'核对发布结果');
+      check.type='button';check.disabled=disabled;
+      check.addEventListener('click',()=>reconcilePublication(attempt));recovery.append(check);
+      if(attempt.phase==='retryable'&&window.Auth?.isAdmin?.()!==false){
+        const next=el('button','om-btn',originalOpen?'重试原发布请求':'打开原草案');
+        next.type='button';next.disabled=disabled;
+        next.addEventListener('click',async()=>{
+          if(!activePublicationAttempt(attempt)||S().preview)return;
+          if(originalOpen)return retryPublication(attempt);
+          try{await model()?.selectDraft(attempt.draftId);}
+          catch(error){if(publicationScope(attempt))status(error.message||'无法打开原草案，请重新核对发布结果。',true);}
+        });
+        recovery.append(next);
+      }
+      host.append(recovery);
+    }
+  }
   function publicationSummary(version){
     const meta=version.metadata||{},facts=meta.publication?.receipt?.facts;
     return `已发布为 ${versionLabel(version.version??meta.version)}。发布时间：${fmtTime(version.created_at)}。`
       +(facts?`知识新增 ${facts.added??'待核对'} / 复用 ${facts.reused??'待核对'} / 跳过 ${facts.skipped??'待核对'}。`:'')
       +'正式版本已生效，页面同步单独进行。';
   }
-  function completePublication(attempt,version,M){
+  function completePublication(attempt,version,M,recovered=false){
     if(!version?.id)throw Error('发布响应缺少版本身份，请先核对结果。');
-    attempt.phase='confirmed';publicationAttempts.delete(attempt.key);
-    if(publishKey.key===attempt.body.idempotency_key)publishKey={sig:'',key:''};
-    if(activeProject()!==attempt.project)return;
+    forgetPublication(attempt);
+    if(!publicationScope(attempt))return;
     const meta=version.metadata||{};
     const listed={...version,version:version.version??meta.version,version_reused:version.version_reused??meta.version_reused,
       note:version.note??meta.publication?.note??attempt.body.note,actor:version.actor??meta.publication?.actor};
     if(versions.key===attempt.project){const index=versions.list.findIndex(item=>item.id===version.id);if(index<0)versions.list.push(listed);else versions.list[index]=listed;}
     const matches=M.S.draft?.id===attempt.draftId&&M.S.draft?.revision===attempt.revision&&!M.S.preview;
     const broadcast=()=>document.dispatchEvent(new CustomEvent('ontology-model:published',{detail:{versionId:version.id,projectId:attempt.project,draftId:attempt.draftId}}));
-    if(!matches){broadcast();return;}
+    if(!matches){if(recovered)status(publicationSummary(version));broadcast();return;}
     publishNote='';
     if(typeof M.acceptPublication==='function'){
       const receipt=M.acceptPublication(version,{projectId:attempt.project,draftId:attempt.draftId,revision:attempt.revision});
@@ -1667,60 +1728,85 @@
     broadcast();
   }
   async function sendPublication(attempt,M,task){
+    const retry=attempt.phase==='retryable';
     attempt.phase='sending';actionPhase(task,'正在校验并保存正式版本…');
     try{
-      const version=await api(attempt.base+'/publish',attempt.body,'POST');
+      const version=await api(attempt.base+'/publish',attempt.body,'POST',{
+        timeoutMs:90000,message:'等待发布回执超时。'});
       completePublication(attempt,version,M);
     }catch(error){
-      const definite=error.status>=400&&error.status<500&&error.status!==408;
-      if(definite)publicationAttempts.delete(attempt.key);else attempt.phase='uncertain';
-      if(actionVisible(task))status(definite?(error.message||'发布请求被拒绝'):
-        '发布结果尚未确认：'+(error.message||error)+'。请先核对发布结果，勿重复提交。',true);
+      const definite=error.status>=400&&error.status<500&&![401,408].includes(error.status)
+        && !(retry&&(error.status===403||error.code==='idempotency_conflict'));
+      if(definite)forgetPublication(attempt);else attempt.phase='uncertain';
+      if(actionVisible(task)&&publicationScope(attempt)){
+        status(definite?publicationRejected(error,M.S.draft):
+          `发布结果尚未确认。请先点击「核对发布结果」。${error.message?' '+error.message:''}`,true);
+        if(definite&&['stale_base','stale_source','validation_changed'].includes(error.code))
+          void M.refreshDraftState?.().catch(()=>{});
+      }
     }
   }
+  function publicationRejected(error,draft){
+    const steps={
+      stale_base:'先点击「重新基线」，再校验和审核。',
+      revision_conflict:'重新读取草案，核对最新修订和审核结果。',
+      draft_immutable:'查看草案状态和「版本管理」中的正式版本。',
+      idempotency_conflict:'核对草案状态和「版本管理」，再提交新的发布请求。',
+    };
+    const next=error.status===403?'请使用有发布权限的账号重新打开草案。':steps[error.code]||readinessNextStep(error,draft);
+    return `当前未发布。${error.message||'发布请求被拒绝'}。${next}`;
+  }
   async function reconcilePublication(attempt){
-    const M=model();if(!M||activeProject()!==attempt.project||S().draft?.id!==attempt.draftId||S().preview)return;
-    const task=beginAction('publish',S().draft,'正在核对发布结果…');if(!task)return;
+    const M=model();if(!M||!activePublicationAttempt(attempt)||S().preview||attempt.phase==='sending'||attempt.phase==='checking')return;
+    attempt.phase='checking';renderActions();
     try{
-      const fresh=await api(attempt.base+'?view=canvas',undefined,'GET');
-      if(!actionVisible(task)||S().preview)return;
-      if(fresh.status==='accepted'&&fresh.published_ontology_id){
-        const version=await api(attempt.projectBase+'/ontology?ontology_id='+encodeURIComponent(fresh.published_ontology_id),undefined,'GET');
-        if(!actionVisible(task)||S().preview)return;
-        completePublication(attempt,version,M);
-      }else if(fresh.status!=='pending'||fresh.revision!==attempt.revision){
-        publicationAttempts.delete(attempt.key);
-        status('草案状态或修订已变化，原发布请求已失效。请刷新草案并重新核对。',true);
-      }else{attempt.phase='retryable';status('尚未查到已完成的发布记录；可重试原发布请求，使用原说明和同一请求身份。');}
-    }catch(error){attempt.phase='uncertain';if(actionVisible(task))status('无法核对发布结果，请稍后重试读取：'+error.message,true);}
-    finally{finishAction(task);}
+      const result=await api(attempt.base+'/publish-requests/'+encodeURIComponent(attempt.body.idempotency_key),undefined,'GET',{
+        timeoutMs:30000,message:'读取发布回执超时。'});
+      if(!publicationScope(attempt)||S().preview){attempt.phase='uncertain';return;}
+      if(result.status==='committed')completePublication(attempt,result.ontology,M,true);
+      else if(result.status!=='unconfirmed')throw Error('服务暂未提供可识别的发布回执。');
+      else if(result.draft_status==='pending'&&result.revision===attempt.revision){
+        attempt.phase='retryable';status('尚未查到原请求的发布回执，可使用原说明和同一请求身份重试。');
+      }else{
+        forgetPublication(attempt);
+        status('原请求没有发布回执，草案状态或修订已变化。请在「版本管理」核对正式版本，再重新打开草案。',true);
+      }
+    }catch(error){attempt.phase='uncertain';if(publicationScope(attempt)&&!S().preview)status('无法核对发布结果，请稍后重试读取。'+error.message,true);}
+    finally{if(publicationScope(attempt))renderActions();}
   }
   async function retryPublication(attempt){
-    const M=model();if(!M||attempt.phase!=='retryable'||activeProject()!==attempt.project||S().draft?.id!==attempt.draftId||S().preview)return;
+    const M=model();if(!M||attempt.phase!=='retryable'||!activePublicationAttempt(attempt)||S().draft?.id!==attempt.draftId
+      ||S().draft?.revision!==attempt.revision||S().preview||window.Auth?.isAdmin?.()===false)return;
     const task=beginAction('publish',S().draft,'正在重试原发布请求…');if(!task)return;
     try{await sendPublication(attempt,M,task);}finally{finishAction(task);}
   }
   async function publishDraft() {
     const M=model(),draft=M?.S.draft;if(!draft?.id){status('还没有可发布的草案。',true);return;}
+    if(window.Auth?.isAdmin?.()===false)return;
     const note=String(publishNote||'').trim();if(!note){status('先写发布说明再发布：版本记录要能回答这一版改了什么、为什么发。',true);return;}
     if(M.S.preview||pendingPublication())return;
     const task=beginAction('publish',draft,'正在确认发布条件…');if(!task)return;
-    const project=activeProject(),id=draft.id,revision=draft.revision,projectBase=endpoint(''),base=projectBase+`/ontology-drafts/${encodeURIComponent(id)}`;
-    const stillCurrent=()=>activeProject()===project&&M.S.draft?.id===id&&M.S.draft.revision===revision&&!M.S.preview;
+    const project=activeProject(),actor=publicationActor(),id=draft.id,revision=draft.revision,base=publicationBase(project,id);
+    const stillCurrent=()=>activeProject()===project&&publicationActor()===actor&&M.S.draft?.id===id&&M.S.draft.revision===revision&&!M.S.preview;
     try{
-      const readiness=await api(base+'/publish-readiness',undefined,'GET');
+      const readiness=await api(base+'/publish-readiness',undefined,'GET',{timeoutMs:30000,message:'读取发布条件超时。'});
       if(!stillCurrent())throw Error('项目、草案或修订已变化，请重新核对发布。');
       if(readiness.ready!==true){M.S.readiness=readiness;const blocker=(readiness.items||[]).find(item=>item.severity==='error');throw Error('还不能发布：'+(blocker?.message||blocker?.code||'服务端判定未就绪'));}
       if(readiness.revision!=null&&readiness.revision!==revision)throw Error('草案修订已变化，请重新核对审核与发布。');
       if(readiness.validation_fingerprint&&draft.validation_fingerprint&&readiness.validation_fingerprint!==draft.validation_fingerprint)throw Error('校验快照已变化，请重新校验并核对。');
       const fingerprint=readiness.validation_fingerprint||draft.validation_fingerprint;
-      const key=nextIdempotencyKey(`${id}@${fingerprint||revision}@${note}`);
-      const attempt={key:actionKey(project,id),project,projectBase,base,draftId:id,revision,phase:'sending',body:{
+      const key=nextIdempotencyKey();
+      const attempt={project,actor,base,draftId:id,revision,phase:'sending',body:freezePublication({
         expected_revision:revision,expected_ontology_id:M.S.ontologyId||draft.base_ontology_id,
         validation_fingerprint:fingerprint,acknowledged_warning_codes:[...new Set([
-          ...(draft.validation_report?.warnings||[]).map(w=>w.code).filter(Boolean),...ackWarnings.codes])],idempotency_key:key,note}};
-      publicationAttempts.set(attempt.key,attempt);await sendPublication(attempt,M,task);
-    }catch(error){if(actionVisible(task))status(error.message||'无法核对发布条件',true);}
+          ...(draft.validation_report?.warnings||[]).map(w=>w.code).filter(Boolean),...ackWarnings.codes])],idempotency_key:key,note})};
+      rememberPublication(attempt);await sendPublication(attempt,M,task);
+    }catch(error){
+      if(actionVisible(task)&&publicationActor()===actor){
+        const message=error.message||'无法核对发布条件。';
+        status(message.startsWith('当前未发布')?message:'当前未发布。'+message,true);
+      }
+    }
     finally{finishAction(task);}
   }
   /* ==========================================================================

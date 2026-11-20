@@ -25,7 +25,8 @@ def check_publication_delivery(width, output=None):
         errors=[]
         page.on('pageerror',lambda error:errors.append(str(error)))
         page.route('**/*',lambda route:route.abort())
-        page.set_content(html,wait_until='domcontentloaded')
+        page.route('http://publication.test/', lambda route: route.fulfill(content_type='text/html', body=html))
+        page.goto('http://publication.test/',wait_until='domcontentloaded')
         page.evaluate('''() => {
           window.current='p';window.endpoint=suffix=>'/api/projects/'+current+suffix;window.status=()=>{};
           window.wb={clearVersionContext(){},setVersionContext(){}};

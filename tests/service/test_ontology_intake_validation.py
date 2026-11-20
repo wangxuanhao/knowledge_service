@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 
 # Keep the real service modules and SHACL engine, while avoiding the application
@@ -177,6 +178,37 @@ def intake_with_existing():
 
 
 class IntakeAggregateValidationTests(unittest.TestCase):
+    def test_preview_without_shapes_does_not_start_shacl_inference(self):
+        intake, repository, request = intake_with_existing()
+        repository.turtle = TURTLE.split('\n<urn:Shape>')[0]
+        from pyshacl import validate
+        with patch('pyshacl.validate', wraps=validate) as shacl_validate:
+            preview = intake.preview('p', request)
+        self.assertTrue(preview['can_confirm_reuse'])
+        shacl_validate.assert_not_called()
+
+    def test_preview_enforces_implicitly_declared_shacl_shapes(self):
+        intake, repository, request = intake_with_existing()
+        repository.turtle = TURTLE.replace('a sh:NodeShape ; ', '')
+        preview = intake.preview('p', request)
+        self.assertFalse(preview['can_confirm_reuse'])
+        self.assertEqual(preview['conflicts'][0]['report']['errors'][0]['constraint'],
+                         'MaxCountConstraintComponent')
+
+    def test_preview_identifies_both_candidates_in_a_same_name_mapping_conflict(self):
+        intake, repository, request = intake_with_existing()
+        repository.records = []
+        repository.turtle += '\n<urn:B> a owl:DatatypeProperty ; rdfs:label "Secondary code" .'
+        request['candidate_ids'] = ['shared', 'first', 'second']
+        request['confirmed_mappings'].update({'first': 'urn:A', 'second': 'urn:B'})
+
+        preview = intake.preview('p', request)
+
+        issue = next(item for item in preview['conflicts'] if item['code'] == 'mapping_conflict')
+        self.assertEqual((issue['candidate_id'], issue['target_iri']), ('second', 'urn:B'))
+        self.assertEqual((issue['other_candidate_id'], issue['other_target_iri']), ('first', 'urn:A'))
+        self.assertFalse(preview['can_confirm_reuse'])
+
     def composite(self, child_records, existing=()):
         plans = {str(index): {'kind': 'discovery', 'mode': 'run', 'run_id': str(index),
                  'records': records, 'accepted_records': records,
@@ -214,6 +246,12 @@ class IntakeAggregateValidationTests(unittest.TestCase):
                             for item in preview['conflicts']))
         self.assertNotEqual({item['candidate_id']: item['outcome']
                              for item in preview['fact_outcomes']}['second'], 'add')
+        issue = next(item for item in preview['conflicts'] if item['code'] == 'ontology_validation_failed')
+        result = issue['validation_details'][0]
+        self.assertEqual(result['focus']['label'], 'Shared')
+        self.assertEqual(result['field_label'], 'Code')
+        self.assertEqual({(row['label'], row['existing']) for row in result['related']},
+                         {('Shared · Code = "one"', True), ('Shared · Code = "two"', False)})
         self.assertEqual(repository.writes, [])
 
     def test_reuse_conflict_leaves_facts_runs_and_outbox_untouched(self):

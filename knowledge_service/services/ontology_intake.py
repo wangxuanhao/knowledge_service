@@ -172,6 +172,66 @@ def materialization_context(records, existing):
     return [record for key, record in by_id.items() if key in included]
 
 
+def validation_details(ontology, report, records, existing):
+    """Describe the records and field behind each failed preview constraint."""
+    from ..core.time import normalize_time
+    from ..domain.applicability import normalize_applicability
+
+    by_id = {record['id']: record for record in records}
+    existing_ids = {record['id'] for record in existing}
+    instant, context = report.get('valid_at'), report.get('applicability_context') or {}
+
+    def reference(record):
+        return {'label': record.get('text') or '未命名知识', 'existing': record['id'] in existing_ids,
+                'candidate_ids': sorted(_materialized_candidate_ids([record]))}
+
+    def label(iri):
+        return str(ontology.graph.value(URIRef(iri), RDFS.label) or '') if iri else ''
+
+    def in_context(record):
+        start = normalize_time(record.get('valid_from'))
+        end = normalize_time(record.get('valid_until'))
+        if instant and ((start and instant < start) or (end and instant >= end)):
+            return False
+        scope = normalize_applicability((record.get('metadata') or {}).get('applicability'))
+        return all(scope[key]['mode'] != 'specific' or value in scope[key]['values']
+                   for key, value in context.items())
+
+    details = []
+    for error in report.get('errors') or []:
+        focus = by_id.get(error.get('record_id'))
+        path = error.get('path')
+        row = {'focus': reference(focus) if focus else None,
+               'field_label': label(path) or error.get('path_label') or label(focus.get('type') if focus else None),
+               'constraint': error.get('constraint'), 'related': []}
+        if path and focus:
+            row['related'] = [reference(record) for record in records if record.get('type') == path
+                              and record.get('subject_id') == focus['id'] and in_context(record)]
+            if not row['related'] and path in (focus.get('properties') or {}):
+                value = focus['properties'][path]
+                row['related'] = [{**reference(focus), 'label': f'{row["field_label"]} = {value}'}]
+        if not row['constraint'] and focus:
+            message = error.get('message') or ''
+            for key, predicate, endpoint in (('subject_id', RDFS.domain, '起点' if focus['kind'] == 'relation' else '所属实体'),
+                                             ('object_id', RDFS.range, '终点')):
+                if message.startswith(f'{key} 类型 '):
+                    entity = by_id.get(focus.get(key), {})
+                    expected = [label(value) for value in ontology.constraint_types(URIRef(focus['type']), predicate)]
+                    row['message'] = f'{endpoint}「{entity.get("text") or "未命名实体"}」的类型为「{label(entity.get("type")) or "未命名类型"}」'
+                    if names := '、'.join(name for name in expected if name):
+                        row['message'] += f'，定义要求「{names}」'
+                    break
+            else:
+                if error.get('code') == 'unknown_term':
+                    row['message'] = '对应的本体术语不可用'
+                elif message.startswith(('属性值类型', '属性 datatype')):
+                    row['message'] = '属性值的数据类型不符合定义'
+                elif message.startswith(('缺少关系端点', '缺少属性主体')):
+                    row['message'] = '找不到关联实体'
+        details.append(row)
+    return details
+
+
 def published_terms(turtle):
     ontology = Ontology(turtle)
     result = []
@@ -388,6 +448,8 @@ class OntologyIntake:
                 'message': '本次所选候选均已加入目标草案，可继续编辑现有变更，无需重复加入',
                 'draft_id': target_id})
         map_groups = {group: {} for group in MAPPING_GROUPS.values()}
+        mapping_candidates = {}
+        definition_candidates = {}
         datatypes = {}
         visible_candidates = _materialized_candidate_ids(inputs['materialized'])
         for candidate in selected:
@@ -410,7 +472,7 @@ class OntologyIntake:
             if iri:
                 if iri not in formal or formal[iri]['kind'] != kind:
                     conflicts.append({'candidate_id': candidate['id'], 'code': 'invalid_published_mapping',
-                                      'message': '映射必须指向当前已发布且启用的同类术语'})
+                                      'message': '映射必须指向当前已发布且启用的同类术语', 'target_iri': iri})
                     continue
                 binding_kind = 'existing'
             else:
@@ -426,46 +488,68 @@ class OntologyIntake:
                 other_kinds = [k for k, rdf in RDF_KINDS.items()
                                if (node, RDF.type, rdf) in graph and k != kind]
                 if other_kinds:
+                    other_candidate = next((definition_candidates[iri, other_kind] for other_kind in other_kinds
+                                            if (iri, other_kind) in definition_candidates), None)
                     conflicts.append({'candidate_id': candidate['id'], 'code': 'term_kind_conflict',
-                                      'message': '同一术语身份不能属于不同定义种类'})
+                                      'message': '同一术语身份不能属于不同定义种类', 'target_iri': iri,
+                                      'target_label': str(graph.value(node, RDFS.label) or label),
+                                      'other_candidate_id': other_candidate,
+                                      'definition_source': ('selection' if other_candidate else
+                                                            'published' if iri in formal or not target_id else 'draft'),
+                                      'existing_kinds': other_kinds})
                     continue
                 if (node, RDF.type, RDF_KINDS[kind]) not in graph:
                     graph.add((node, RDF.type, RDF_KINDS[kind]))
                     graph.add((node, RDFS.label, Literal(label, lang='zh')))
                     graph.add((node, RDFS.comment, Literal(f'由所选资料候选提出的{label}；发布前核对适用范围。', lang='zh')))
+                    definition_candidates[iri, kind] = candidate['id']
                 elif not overlay_ontology.is_active_term(node):
                     conflicts.append({'candidate_id': candidate['id'], 'code': 'draft_term_retired',
-                                      'message': '目标定义已停用，需明确恢复后再加入'})
+                                      'message': '目标定义已停用，需明确恢复后再加入', 'target_iri': iri,
+                                      'target_label': str(graph.value(node, RDFS.label) or label)})
             group = map_groups[MAPPING_GROUPS[candidate['kind']]]
             mapping_name = candidate['proposed_type']
+            mapping_key = (kind, mapping_name)
             if mapping_name in group and group[mapping_name] != iri:
                 conflicts.append({'candidate_id': candidate['id'], 'code': 'mapping_conflict',
-                                  'message': '同名候选在本次确认中映射至不同身份'})
+                                  'message': '同名候选在本次确认中映射至不同身份',
+                                  'target_iri': iri, 'target_label': label,
+                                  'other_candidate_id': mapping_candidates[mapping_key],
+                                  'other_target_iri': group[mapping_name], 'other_target_label': label})
             group[mapping_name] = iri
+            mapping_candidates[mapping_key] = candidate['id']
             bindings.append({'candidate_id': candidate['id'], 'target_iri': iri,
                 'target_kind': kind, 'binding_kind': binding_kind,
                 'required_operation_ids': [], 'optional_operation_ids': []})
-            required_ids = ([candidate.get('subject_id'), candidate.get('object_id')]
-                if kind == 'relation' else [candidate.get('entity_id')] if kind == 'attribute' else [])
-            for endpoint in required_ids:
+            roles = ('subject', 'object') if kind == 'relation' else ('entity',) if kind == 'attribute' else ()
+            for role in roles:
+                endpoint = candidate.get(role + '_id')
+                related = by_id.get(endpoint, {})
+                reference = {key: related.get(key) for key in ('id', 'kind', 'text', 'proposed_type', 'document_id', 'document_title')} if related else None
+                issue = {'candidate_id': endpoint or '', 'required_by': candidate['id'],
+                         'endpoint_role': role, 'related_candidate': reference}
                 if not endpoint or endpoint not in ids or by_id.get(endpoint, {}).get('kind') != 'entity':
-                    dependencies.append({'candidate_id': endpoint or '',
-                        'required_by': candidate['id'], 'message': '请明确选择同批关联实体候选'})
+                    dependencies.append({**issue, 'code': 'dependency_missing', 'message': '请明确选择同批关联实体候选'})
                 elif by_id[endpoint].get('document_version_id') != candidate.get('document_version_id'):
-                    dependencies.append({'candidate_id': endpoint, 'required_by': candidate['id'],
-                        'message': '关联实体候选必须属于同一来源文档版本'})
+                    dependencies.append({**issue, 'code': 'dependency_source_mismatch',
+                                         'message': '关联实体候选必须属于同一来源文档版本'})
             if kind == 'attribute' and binding_kind == 'proposed':
                 try:
                     datatype = primitive_datatype(candidate.get('value'))
                 except ValueError as exc:
                     conflicts.append({'candidate_id': candidate['id'], 'code': 'invalid_datatype', 'message': str(exc)})
                     continue
-                if iri in datatypes and datatypes[iri] != datatype:
-                    conflicts.append({'candidate_id': candidate['id'], 'code': 'datatype_conflict', 'message': '所选属性值需要不同数据类型'})
-                datatypes[iri] = datatype
+                previous = datatypes.get(iri)
+                datatypes[iri] = (datatype, candidate['id'])
                 existing = list(graph.objects(URIRef(iri), RDFS.range))
-                if existing and existing != [URIRef(datatype)]:
-                    conflicts.append({'candidate_id': candidate['id'], 'code': 'datatype_conflict', 'message': '属性数据类型与草案定义不同'})
+                if previous and previous[0] != datatype:
+                    conflicts.append({'candidate_id': candidate['id'], 'code': 'datatype_conflict',
+                                      'message': '所选属性值需要不同数据类型', 'datatype': datatype,
+                                      'other_candidate_id': previous[1], 'expected_datatypes': [previous[0]]})
+                elif existing and existing != [URIRef(datatype)]:
+                    conflicts.append({'candidate_id': candidate['id'], 'code': 'datatype_conflict',
+                                      'message': '属性数据类型与已有定义不同', 'datatype': datatype,
+                                      'expected_datatypes': sorted(map(str, existing))})
                 elif not existing:
                     graph.add((URIRef(iri), RDFS.range, URIRef(datatype)))
         for candidate in selected:
@@ -496,7 +580,9 @@ class OntologyIntake:
                 binding = binding_by_id.get(candidate_id)
                 if binding and record.get('type') != binding['target_iri']:
                     conflicts.append({'candidate_id': candidate_id, 'code': 'materialized_mapping_changed',
-                        'message': '此候选已有不同映射的正式事实；不能通过再次确认隐式改写'})
+                        'message': '此候选已有不同映射的正式事实；不能通过再次确认隐式改写',
+                        'target_iri': binding['target_iri'], 'other_target_iri': record.get('type'),
+                        'existing_fact_label': record.get('text')})
         fact_outcomes = []
         if conflicts or dependencies:
             for candidate in selected:
@@ -513,11 +599,12 @@ class OntologyIntake:
             # validating the entity prefix would drop a valid complete selection.
             accepted = records
             fact_context = materialization_context(accepted, existing)
-            report = Ontology(desired).validate_timeline(fact_context)
+            ontology = Ontology(desired)
+            report = ontology.validate_timeline(fact_context)
             if not report['conforms']:
                 conflicts.append({'code': 'ontology_validation_failed',
                     'message': '所选事实与现有知识合并后未通过本体校验，请核对约束和冲突事实',
-                    'report': report})
+                    'report': report, 'validation_details': validation_details(ontology, report, fact_context, existing)})
             accepted_ids = _materialized_candidate_ids(accepted)
             for candidate in selected:
                 candidate_id = candidate['id']

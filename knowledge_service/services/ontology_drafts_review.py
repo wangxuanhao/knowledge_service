@@ -788,6 +788,17 @@ class DraftReviewPublishMixin:
         """
         return is_annotation_only(operations)
 
+    def publication_result(self, project_id, draft_id, idempotency_key):
+        """Read the committed result for one request and the current retry context."""
+        with self.repository.read_snapshot():
+            request = self.store.get_publish_request(project_id, draft_id, idempotency_key)
+            if request and request['result_ontology_id']:
+                return {'status': 'committed', 'ontology': self.repository.get_ontology(
+                    project_id, request['result_ontology_id'])}
+            draft = self.store.get(project_id, draft_id)
+            return {'status': 'unconfirmed', 'draft_status': draft['status'],
+                    'revision': draft['revision']}
+
     def publish(self, project_id, draft_id, expected_revision,
                 expected_ontology_id, validation_fingerprint,
                 acknowledged_warning_codes, idempotency_key, actor, note=''):

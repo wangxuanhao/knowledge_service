@@ -21,6 +21,7 @@
 from ontology_seed import seed_project_ontology
 from ontology_seed import seed_ontology
 import json
+from urllib.parse import quote
 
 from fastapi.testclient import TestClient
 
@@ -101,6 +102,40 @@ def publish(client, base, draft, note, key='vm-publish', extra_codes=()):
 
 def versions(client, base):
     return client.get(base + '/ontologies').json()['versions']
+
+
+def test_publish_result_is_exact_and_rejection_is_only_audited(tmp_path, caplog, request):
+    client, _, p, base, first = setup(tmp_path)
+    request.addfinalizer(lambda: client.__exit__(None, None, None))
+    draft = add_class(client, base, new_draft(client, base, first['id'], '发布结果核对'),
+                      'https://test/Receipt', '回执')
+    draft = review(client, base, draft)
+    result_url = base + f"/ontology-drafts/{draft['id']}/publish-requests/"
+    rejected_key = f"invalid-{draft['id']}"
+    committed_key = quote(f"valid/回执-{draft['id']}", safe='')
+    expected = {'status': 'unconfirmed', 'draft_status': 'pending', 'revision': draft['revision']}
+    assert client.get(result_url + rejected_key).json() == expected
+
+    rejected = publish(client, base, {**draft, 'revision': draft['revision'] + 1},
+                       '这个发布说明不应出现在运维失败日志里', key='invalid')
+    assert rejected.status_code == 409, rejected.text
+    assert rejected.json()['code'] == 'revision_conflict'
+    assert client.get(result_url + rejected_key).json() == expected
+    assert [item['id'] for item in versions(client, base)] == [first['id']]
+    warning = next(record.getMessage() for record in caplog.records
+                   if 'ontology publication rejected' in record.getMessage())
+    assert p in warning and draft['id'] in warning and 'revision_conflict' in warning
+    assert '这个发布说明' not in warning and rejected_key not in warning
+
+    committed = publish(client, base, draft, '新增回执实体类型', key='valid/回执')
+    assert committed.status_code == 200, committed.text
+    exact = client.get(result_url + committed_key).json()
+    assert exact['status'] == 'committed'
+    assert exact['ontology']['id'] == committed.json()['id']
+    assert client.get(result_url + rejected_key).json()['status'] == 'unconfirmed'
+    assert client.get(result_url + rejected_key).json()['draft_status'] == 'accepted'
+    assert publish(client, base, draft, '新增回执实体类型', key='valid/回执').json()['id'] == exact['ontology']['id']
+    assert len(versions(client, base)) == 2
 
 
 def insert_out_of_order_version_history(repository, project_id):

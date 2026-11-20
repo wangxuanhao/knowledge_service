@@ -7,17 +7,21 @@ owner of draft state transitions and DAG projections.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Literal
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from .audit_identity import audit_actor, audit_identity
 
+from ..repository.core import OntologyPublicationConflict
 from ..services.ontology_drafts import OntologyDrafts
+from ..services.ontology_drafts_core import OntologyDraftError
 
 
 DraftResponseView = Literal['full', 'review']
+LOG = logging.getLogger(__name__)
 
 
 class _Request(BaseModel):
@@ -241,13 +245,34 @@ def install(app, service):
             request.acknowledged_warning_codes, audit_actor(http_request))
         return drafts.project_response(result, view=view, envelope=True)
 
+    @router.get('/{draft_id}/publish-requests/{idempotency_key:path}')
+    def publication_result(p: str, draft_id: str, idempotency_key: str, response: Response):
+        response.headers['Cache-Control'] = 'no-store'
+        return drafts.publication_result(p, draft_id, idempotency_key)
+
     @router.post('/{draft_id}/publish')
     def publish(p: str, draft_id: str, request: PublishRequest, http_request: Request):
-        return drafts.publish(
-            p, draft_id, request.expected_revision,
-            request.expected_ontology_id, request.validation_fingerprint,
-            request.acknowledged_warning_codes, request.idempotency_key,
-            audit_actor(http_request), request.note)
+        actor = audit_actor(http_request)
+        actor_id = audit_identity(http_request)['id']
+        try:
+            return drafts.publish(
+                p, draft_id, request.expected_revision,
+                request.expected_ontology_id, request.validation_fingerprint,
+                request.acknowledged_warning_codes, request.idempotency_key,
+                actor, request.note)
+        except (OntologyDraftError, OntologyPublicationConflict) as exc:
+            LOG.warning('ontology publication rejected project=%r draft=%r revision=%d actor=%r code=%s',
+                        p, draft_id, request.expected_revision, actor_id, exc.code)
+            raise
+        except (KeyError, ValueError) as exc:
+            code = 'not_found' if isinstance(exc, KeyError) else 'invalid_request'
+            LOG.warning('ontology publication rejected project=%r draft=%r revision=%d actor=%r code=%s',
+                        p, draft_id, request.expected_revision, actor_id, code)
+            raise
+        except Exception as exc:
+            LOG.error('ontology publication outcome unconfirmed project=%r draft=%r revision=%d actor=%r error_type=%s',
+                      p, draft_id, request.expected_revision, actor_id, type(exc).__name__)
+            raise
 
     app.include_router(router)
 

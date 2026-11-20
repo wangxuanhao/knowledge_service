@@ -567,12 +567,24 @@ class Ontology:
                 errors.append({"record_id": r['id'], "message": str(exc)})
         report = ''
         if shacl and not errors:
-            from pyshacl import validate
-            conforms, results_graph, report = validate(self.dataset(records), shacl_graph=self.graph,
-                                          inference='rdfs', advanced=False, do_owl_imports=False)
-            if not conforms:
-                violations=_shacl_violations(results_graph)
-                errors.extend(violations or [{"record_id": None, "message": str(report)}])
+            # Checking predicates and objects covers both explicit shape types
+            # and implicit declarations such as sh:targetClass.
+            shacl_namespace = str(SH)
+            has_shacl_terms = any(
+                isinstance(term, URIRef) and term.startswith(shacl_namespace)
+                for _, predicate, value in self.graph for term in (predicate, value)
+            )
+            if has_shacl_terms:
+                from pyshacl import validate
+                conforms, results_graph, report = validate(
+                    self.dataset(records), shacl_graph=self.graph,
+                    inference='rdfs', advanced=False, do_owl_imports=False,
+                )
+                if not conforms:
+                    violations = _shacl_violations(results_graph)
+                    errors.extend(violations or [{"record_id": None, "message": str(report)}])
+            else:
+                report = 'Validation Report\nConforms: True\n'
         return {"conforms": not errors, "errors": errors, "violations":violations, "report": str(report)}
 
     def validate_timeline(self, records, enforce_relationship_constraints=True,*,acknowledge_report=None):

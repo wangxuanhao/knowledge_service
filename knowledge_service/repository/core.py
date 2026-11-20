@@ -2212,7 +2212,9 @@ class Repository:
                 raise OntologyPublicationConflict('stale_source', '复合来源绑定集合已变化')
             current = self.current_records(prepared['project_id'],
                 kinds=['entity', 'relation', 'attribute'])
-            current_versions = sorted((x['id'], x['version_id']) for x in current)
+            # The discovery plan fingerprints only materialized, non-deleted facts.
+            current_versions = sorted((x['id'], x['version_id']) for x in current
+                                      if not x.get('metadata', {}).get('_deleted'))
             # Validate every dependency against the same pre-write snapshot.
             for entry in entries:
                 child = entry['plan']

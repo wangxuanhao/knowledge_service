@@ -40,7 +40,7 @@
   }
   function createController({getContext,request,uid,canWrite=()=>true,getActor=()=> 'system:auth-disabled',storage=null,requireDurable=false,onChange=()=>{},onSaved=async()=>{}}){
     const state={open:false,scope:{},items:[],terms:[],selected:[],mappings:{},target:'',targetRevision:null,draftDestination:'',existingTarget:'',existingRevision:null,total:0,offset:0,
-      ontologyId:null,preview:null,receipt:null,receiptSummary:null,pending:null,busy:false,activity:null,error:null,filters:{status:'pending',document:'',kind:'',type:''},detailId:null,scopeNote:null,documents:[],documentsComplete:false,expandedDocuments:{},documentOffsets:{},documentErrors:{}};
+      ontologyId:null,preview:null,receipt:null,receiptSummary:null,pending:null,busy:false,activity:null,error:null,bulkMapped:null,filters:{status:'pending',document:'',kind:'',type:''},detailId:null,scopeNote:null,documents:[],documentsComplete:false,expandedDocuments:{},documentOffsets:{},documentErrors:{}};
     let generation=0,previewContext=null,sessionReady=false,activeSessionKey=null;
     const pendingByProject=new Map();
     const sessions=new Map();
@@ -64,7 +64,7 @@
     function forget(record){const key=recoveryKey(record.project,record.actor);pendingByProject.delete(key);try{storage?.removeItem(key);}catch{/* A retained receipt can be safely replayed with the original identity. */}}
     const changed=()=>onChange(state);
     const editable=()=>{if(state.busy)throw Error('正在处理，请稍候。');if(state.pending)throw Error('上次请求结果尚未确认，请先重试原请求。');};
-    const invalidate=()=>{state.preview=null;state.receipt=null;previewContext=null;state.error=null;};
+    const invalidate=()=>{state.preview=null;state.receipt=null;previewContext=null;state.error=null;state.bulkMapped=null;};
     function assertScope(snapshot){
       const now=getContext();
       if(now.preview)throw Error('历史版本只读，请回到当前工作区。');
@@ -130,7 +130,7 @@
         if(pending){state.pending=pending;state.scope={...pending.scope};state.open=true;state.error=null;state.ontologyId=pending.body.expected_ontology_id;changed();return state;}
         const saved=sessions.get(sessionKey(scope)),serial=++generation;
         Object.assign(state,{open:true,scope:{...scope},items:[],terms:[],selected:[],mappings:{},
-          target:context.draftId||'',targetRevision:context.revision??null,draftDestination:context.draftId?'existing':'',existingTarget:context.draftId||'',existingRevision:context.revision??null,total:0,offset:0,documents:[],documentsComplete:false,documentOffsets:{},documentErrors:{},expandedDocuments:clone(saved?.expandedDocuments||{}),preview:null,receipt:null,receiptSummary:null,pending:null,error:null});
+          target:context.draftId||'',targetRevision:context.revision??null,draftDestination:context.draftId?'existing':'',existingTarget:context.draftId||'',existingRevision:context.revision??null,total:0,offset:0,documents:[],documentsComplete:false,documentOffsets:{},documentErrors:{},expandedDocuments:clone(saved?.expandedDocuments||{}),preview:null,receipt:null,receiptSummary:null,pending:null,error:null,bulkMapped:null});
         state.filters=saved?.filters||{status:'pending',document:'',kind:'',type:''};state.detailId=saved?.detailId||null;state.scopeNote=null;
         previewContext=null;await work(async()=>{
           await list();
@@ -171,11 +171,11 @@
         const next=on?[...new Set([...state.selected,...ids])]:state.selected.filter(id=>!ids.includes(id));
         if(next.length>10000)throw Error('一次最多处理 10000 条候选，请缩小范围。');
         state.selected=next;if(!on)for(const id of ids)delete state.mappings[id];invalidate();changed();},
-      useSuggestedMappings(ids=state.selected){editable();
+      useSuggestedMappings(ids=state.selected){editable();let count=0;
         for(const item of state.items){if(!ids.includes(item.id)||!state.selected.includes(item.id)||state.mappings[item.id])continue;
           const iri=item.suggested_mapping?.target_iri;
-          if(iri&&state.terms.filter(term=>term.iri===iri&&term.kind===termKind(item)).length===1)state.mappings[item.id]=iri;
-        }invalidate();changed();},
+          if(iri&&state.terms.filter(term=>term.iri===iri&&term.kind===termKind(item)).length===1){state.mappings[item.id]=iri;count++;}
+        }invalidate();state.bulkMapped=count;changed();},
       mapping(id,iri){editable();if(iri&&!state.terms.some(term=>term.iri===iri))throw Error('只能明确映射到当前正式发布的术语。');
         if(iri&&!state.terms.some(term=>term.iri===iri&&term.kind===termKind(state.items.find(item=>item.id===id))))throw Error('候选与正式术语的种类不匹配，请选择对应类型。');
         if(iri)state.mappings[id]=iri;else delete state.mappings[id];invalidate();changed();},
@@ -235,15 +235,15 @@
   }
   function describeCandidate(item){
     if(!item)return '未知候选';
-    if(item.kind==='relation')return `${item.subject||item.subject_id||'?'} → ${item.proposed_type||'关系'} → ${item.object||item.object_id||'?'}`;
-    if(item.kind==='attribute')return `${item.subject||item.entity_id||'?'} · ${item.proposed_type||'属性'} = ${JSON.stringify(item.value)??'未提供值'}`;
-    return `${item.text||item.id} · ${item.proposed_type||'类型待核对'}`;
+    if(item.kind==='relation')return `${item.subject||'起点实体'} → ${item.proposed_type||'关系'} → ${item.object||'终点实体'}`;
+    if(item.kind==='attribute')return `${item.subject||'所属实体'} · ${item.proposed_type||'属性'} = ${JSON.stringify(item.value)??'未提供值'}`;
+    return `${item.text||'未命名实体'} · ${item.proposed_type||'类型待核对'}`;
   }
   function diagnosticText(message,items){
     if(typeof message==='string')return message;
     const byId=new Map(items.map(item=>[item.id,item]));
-    const label=id=>byId.has(id)?`${describeCandidate(byId.get(id))}（${id}）`:`${id||'缺失身份'}（未在当前已读范围，请读取下一页或回来源核对）`;
-    return [message.message||message.reason||message.code||'需核对',message.candidate_id?'候选：'+label(message.candidate_id):'',message.required_by?'被以下事实依赖：'+label(message.required_by):''].filter(Boolean).join(' · ');
+    const label=id=>byId.has(id)?describeCandidate(byId.get(id)):'未在当前已读范围';
+    return [message.message||message.reason||'需核对',message.candidate_id?'候选：'+label(message.candidate_id):'',message.required_by?'被以下事实依赖：'+label(message.required_by):''].filter(Boolean).join(' · ');
   }
   const kindLabels={entity:'实体',class:'实体类',relation:'关系',attribute:'属性'};
   const valueLabels={'http://www.w3.org/2000/01/rdf-schema#label':'名称','http://www.w3.org/2000/01/rdf-schema#comment':'说明',
@@ -314,7 +314,8 @@
       drawer.dialog.classList.add('ontology-intake-drawer');
     }
     const sourceName=item=>item.document_title&&item.document_title!==item.document_id?item.document_title:'未命名资料';
-    const visibleItems=s=>s.items.filter(item=>((s.filters.status||'pending')==='all'||awaitingDraft(item)===((s.filters.status||'pending')==='draft'))&&(!s.filters.document||item.document_id===s.filters.document)&&(!s.filters.kind||item.kind===s.filters.kind)&&(!s.filters.type||item.proposed_type===s.filters.type));
+    const visibleItems=s=>s.items.filter(item=>((s.filters.status||'pending')==='all'||awaitingDraft(item)===((s.filters.status||'pending')==='draft'))&&(!s.filters.document||item.document_id===s.filters.document)&&(!s.filters.kind||item.kind===s.filters.kind)&&(!s.filters.type||item.proposed_type===s.filters.type)&&
+      (!s.filters.mapping||s.selected.includes(item.id)&&(s.filters.mapping==='confirmed')===Boolean(s.mappings[item.id])));
     const compatible=(s,item)=>s.terms.filter(term=>term.iri===item.suggested_mapping?.target_iri&&term.kind===termKind(item)).length===1;
     function renderGoals(s,locked){
       const target=node('section','oi-target');target.append(node('h3',null,'02 选择处理方式'));
@@ -364,7 +365,7 @@
       }host.append(filters,node('p','oi-filter-note','种类、建议类型筛选和批量选择仅作用于已读取候选；来源资料目录覆盖当前范围。'));
     }
     function renderDetail(item,s,locked){
-      const detail=node('section','oi-detail');detail.setAttribute('aria-label','候选详情');detail.append(node('h4',null,'候选详情'));
+      const detail=node('section','oi-detail');detail.id='oi-detail-inspector';detail.tabIndex=-1;detail.setAttribute('aria-label','候选详情');detail.append(node('h4',null,'候选详情'));
       if(!item){detail.append(node('p','subtle','选择列表中的候选查看证据与类型映射。'));return detail;}
       detail.append(node('strong','oi-detail-name',describeCandidate(item)),node('p','oi-source','来源：'+sourceName(item)));
       if(item.materialized)detail.append(node('p','oi-dependency-note','已写入正式知识 · 本次可明确选择为依赖并复用，仍需确认准确正式术语映射。'));
@@ -379,11 +380,111 @@
         const blank=node('option',null,'选择对应的已发布类型');blank.value='';mapping.append(blank);
         for(const term of s.terms.filter(term=>term.kind===termKind(item))){const option=node('option',null,term.label||term.iri);option.value=term.iri;mapping.append(option);}
         mapping.value=s.mappings[item.id]||'';mapping.disabled=locked;mapping.onchange=()=>run(()=>controller.mapping(item.id,mapping.value));label.append(mapping);detail.append(label);
-        if(item.suggested_mapping)detail.append(node('p','subtle','建议对应：'+(item.suggested_mapping.label||item.suggested_mapping.target_iri)+'。批量采用或手动选择后才计入确认。'));
+        if(s.mappings[item.id])detail.append(node('p','oi-mapping-confirmed','已确认复用 '+termName(s,s.mappings[item.id])));
+        else if(item.suggested_mapping)detail.append(node('p','subtle','建议复用 '+termName(s,item.suggested_mapping.target_iri,item.suggested_mapping.label)+'。采用建议或手动选择后计入确认。'));
       }
       if(item.document_id)detail.append(button('返回来源文档',async()=>{const project=context().project;drawer.close();await root.KnowledgeNavigation.open('sources',{projectId:project});if(context().project===project)await root.selectSource(item.document_id);}));
       const technical=node('details','oi-technical');technical.append(node('summary',null,'技术信息'),node('code','oi-candidate-id','候选：'+item.id),node('code','oi-candidate-id','来源修订：'+(item.document_version_id||'未记录')));
       if(links.length)technical.append(node('pre',null,JSON.stringify(links,null,2)));detail.append(technical);return detail;
+    }
+    function termName(s,iri,label,kind){
+      const term=s.terms.find(item=>item.iri===iri);
+      const name=term?.label||label||valueLabels[iri];
+      const readable=name&&!/^(?:urn:|https?:\/\/)/i.test(name)?name:'未命名术语';
+      const type=kindLabels[term?.kind||kind];
+      return type?`${readable}（${type}）`:readable;
+    }
+    function locateCandidate(s,id){
+      const item=s.items.find(row=>row.id===id);if(!item)return;
+      s.detailId=id;s.filters={status:'all',document:item.document_id||'',kind:'',type:''};
+      s.expandedDocuments[item.document_id||'']=true;
+      controller.back();
+      const detail=doc.getElementById('oi-detail-inspector');
+      detail?.focus({preventScroll:true});revealInDrawer(detail);
+    }
+    function renderIssue(s,issue,items,bindings){
+      if(typeof issue==='string')issue={message:issue};
+      const candidate=items.get(issue.required_by||issue.candidate_id);
+      const targetIri=issue.target_iri||bindings.get(candidate?.id)||s.mappings[candidate?.id];
+      let other=items.get(issue.required_by?issue.candidate_id:issue.other_candidate_id)||issue.related_candidate;
+      if(!other&&candidate&&issue.code==='mapping_conflict'){
+        other=s.items.find(item=>item.id!==candidate.id&&item.kind===candidate.kind&&item.proposed_type===candidate.proposed_type&&
+          bindings.has(item.id)&&bindings.get(item.id)!==targetIri);
+      }
+      const card=node('article','oi-issue');
+      let title='候选需要核对',explanation=issue.message;
+      let left=candidate&&describeCandidate(candidate),right=null;
+      const target=termName(s,targetIri,issue.target_label||candidate?.proposed_type);
+      switch(issue.code){
+        case 'mapping_confirmation_required':
+          title='待确认复用';explanation='核对这条候选是否应复用对应的已发布术语。';
+          right='已发布术语 · '+termName(s,issue.suggested_iri,issue.suggested_label);break;
+        case 'mapping_conflict':
+          title='同名候选映射不一致';explanation='核对同名候选应统一映射，还是需要按不同含义分批处理。';
+          if(left&&targetIri)left+=' → '+target;
+          if(issue.other_target_iri||other)right=(other?describeCandidate(other)+' → ':'另一条候选 → ')+termName(s,issue.other_target_iri||bindings.get(other?.id),issue.other_target_label||other?.proposed_type);
+          break;
+        case 'invalid_published_mapping':
+          title='已选映射不可用';right='所选术语 · '+target;break;
+        case 'term_kind_conflict': {
+          title='同名定义的种类冲突';
+          if(left)left+='（'+(kindLabels[candidate.kind]||'候选')+'）';
+          const source=({selection:'本批候选',published:'正式本体',draft:'目标草案'})[issue.definition_source]||'已有定义';
+          right=source+' · '+(other?describeCandidate(other):issue.target_label||target)+(issue.existing_kinds?.length?'（'+issue.existing_kinds.map(kind=>kindLabels[kind]||'其他种类').join('、')+'）':'');break;
+        }
+        case 'draft_term_retired':
+          title='定义已停用';right='目标定义 · '+target;break;
+        case 'datatype_conflict':
+          title='属性值类型不一致';
+          if(left&&valueLabels[issue.datatype])left+='（'+valueLabels[issue.datatype]+'）';
+          right=(other?describeCandidate(other):'定义要求')+(issue.expected_datatypes?.length?' · '+issue.expected_datatypes.map(value=>valueLabels[value]||'其他数据类型').join('、'):'');break;
+        case 'materialized_mapping_changed':
+          title='与已入库事实的类型不一致';
+          if(left&&targetIri)left+=' → '+target;
+          if(issue.other_target_iri)right='已入库事实 · '+(issue.existing_fact_label?issue.existing_fact_label+' → ':'')+termName(s,issue.other_target_iri,issue.other_target_label);break;
+        case 'candidate_bound_to_other_draft':
+        case 'candidate_already_bound': {
+          title='候选已关联草案';
+          const draft=drafts.find(item=>item.id===issue.draft_id);
+          right=draft?.title?'关联草案 · '+draft.title:null;break;
+        }
+        case 'ontology_validation_failed': title='与本体约束冲突';break;
+        default:
+          if(issue.required_by){
+            title=issue.code==='dependency_source_mismatch'?'关联实体来源不一致':'需要核对关联实体';
+            const role=({subject:'起点实体',object:'终点实体',entity:'所属实体'})[issue.endpoint_role]||'关联实体';
+            right=role+' · '+(other?describeCandidate(other):'未选中或未加载');
+          }
+      }
+      card.append(node('h4',null,title));
+      for(const [description,record] of [[left,candidate],[right,other]]){
+        if(!description)continue;
+        const line=node('div','oi-issue-side');line.append(node('strong',null,description));
+        if(record?.document_title&&record.document_title!==record.document_id)line.append(node('small',null,sourceName(record)));
+        card.append(line);
+      }
+      if(explanation)card.append(node('p',null,explanation));
+      const relatedIds=new Set([candidate?.id,other?.id]);
+      const validations=issue.validation_details||issue.report?.errors?.map(row=>({constraint:row.constraint,field_label:row.path_label}))||[];
+      for(const failure of validations){
+        const check=node('div','oi-issue-check');
+        const labels={MaxCountConstraintComponent:'数量超过上限',MinCountConstraintComponent:'缺少必填值',DatatypeConstraintComponent:'数据类型不符',ClassConstraintComponent:'关联实体类型不符'};
+        const constraint=labels[failure.constraint]||(failure.constraint?'约束校验未通过':failure.message||'规则校验未通过');
+        check.append(node('strong',null,[failure.focus?.label,failure.field_label,constraint].filter(Boolean).join(' · ')));
+        for(const fact of failure.related||[])check.append(node('p',null,`${fact.existing?'已入库':'本次候选'} · ${fact.label}`));
+        for(const fact of [failure.focus,...failure.related||[]])for(const id of fact?.candidate_ids||[])relatedIds.add(id);
+        card.append(check);
+      }
+      const actions=node('div','oi-issue-actions');
+      for(const id of relatedIds){
+        if(!s.items.some(item=>item.id===id))continue;
+        const action=id===candidate?.id?'查看候选详情':id===other?.id?'查看另一条候选':'查看 · '+describeCandidate(items.get(id));
+        actions.append(button(action,()=>locateCandidate(s,id)));
+      }
+      if(actions.children.length)card.append(actions);
+      const technical=node('details','oi-technical');
+      technical.append(node('summary',null,'技术信息'),node('pre',null,JSON.stringify(issue,null,2)));card.append(technical);
+      return card;
     }
     function renderPreview(s,locked){const p=s.preview,stats=previewSummary(p),box=node('section','oi-preview');box.id='oi-selection-preview';box.append(node('h3',null,'03 核对预览并确认'),node('p',null,`${s.target==='reuse'?'确认后写入所选知识':s.target==='new'?'确认后新建草案，等待审核发布':'确认后加入所选草案，等待审核发布'} · 关联知识 ${(p.associated_fact_scope||[]).length} 条`),node('p','oi-preview-definition-summary',`新增定义：实体类型 ${stats.newClasses} 个 · 关系类型 ${stats.newRelations} 个 · 属性 ${stats.newAttributes} 个`),node('p','oi-preview-fact-summary',`候选知识 ${stats.selected} 条：实体 ${stats.entities} 条 · 关系 ${stats.relations} 条 · 属性 ${stats.attributes} 条`),node('p','subtle','定义是类型与字段的规则；候选知识是从原文抽出的实体、关系或属性陈述，均不是段落数。'));
         const reusedDependencies=draftDependencies(s).length;
@@ -398,19 +499,32 @@
         const outcomes=new Map((p.fact_outcomes||[]).map(item=>[item.candidate_id,item]));
         const outcomeLabels={add:'预计新增',reuse:'预计复用',skip:'预计跳过',pending:'等待结构获批',blocked:'暂不能处理'};
         const counts={};for(const outcome of outcomes.values())counts[outcome.outcome]=(counts[outcome.outcome]||0)+1;
-        box.append(node('p','oi-outcome-summary',Object.entries(counts).map(([key,count])=>(outcomeLabels[key]||'待核对')+' '+count+' 条').join(' · ')));
+        if(p.reused?.length)box.append(node('p','oi-mapping-confirmed',`复用已发布术语的候选 ${p.reused.length} 条`));
+        const blocking=[...p.conflicts||[],...p.missing_dependencies||[]];
+        if(blocking.length){
+          const byId=new Map(items.map(item=>[item.id,item])),section=node('section','oi-issues');
+          const bindings=new Map([...p.new||[],...p.reused||[]].map(item=>[item.candidate_id,item.target_iri]));
+          section.append(node('h4',null,`待处理问题（${blocking.length} 项）`),node('p','subtle','处理以下问题后可重新预览本批候选。'));
+          for(const issue of blocking.slice(0,5))section.append(renderIssue(s,issue,byId,bindings));
+          if(blocking.length>5){
+            const more=node('details','oi-more-issues');more.append(node('summary',null,`查看其余 ${blocking.length-5} 项`));
+            for(const issue of blocking.slice(5))more.append(renderIssue(s,issue,byId,bindings));
+            section.append(more);
+          }
+          box.append(section);
+        }else box.append(node('p','oi-outcome-summary',Object.entries(counts).map(([key,count])=>(outcomeLabels[key]||'待核对')+' '+count+' 条').join(' · ')));
         const factSection=node('details','oi-fact-preview');factSection.open=facts.length<=10;factSection.append(node('summary',null,'逐条关联知识预期结果'));
+        if(blocking.length)factSection.open=false;
         for(const fact of facts){
           const outcome=outcomes.get(fact.id),row=node('article','oi-fact-row');
           row.append(node('strong',null,describeCandidate(fact)),
             node('p',outcome?.outcome==='skip'||outcome?.outcome==='blocked'?'oi-error':'oi-fact-outcome',
-              outcome?`${outcomeLabels[outcome.outcome]||'未判定'} · ${outcome.message||outcome.reason_code||'未提供判定原因'}`:'服务尚未提供此事实的预期结果，请重新预览。'));
-          if(outcome?.reason_code)row.append(node('small','subtle','原因代码：'+outcome.reason_code));
+              outcome?`${outcomeLabels[outcome.outcome]||'未判定'} · ${outcome.message||'未提供判定原因'}`:'服务尚未提供此事实的预期结果，请重新预览。'));
           factSection.append(row);
         }box.append(factSection);
         const expectedIds=selectionIds(s),completeFacts=facts.length===expectedIds.length&&expectedIds.every(id=>facts.some(item=>item.id===id)&&outcomeLabels[outcomes.get(id)?.outcome]);
         if(!completeFacts)box.append(node('p','oi-error','逐条事实范围或预期结果不完整，暂不能确认。请重新读取并预览。'));
-        for(const key of ['conflicts','warnings','missing_dependencies'])for(const message of p[key]||[])box.append(node('p',key==='warnings'?'oi-warning':'oi-error',diagnosticText(message,items)));
+        for(const message of p.warnings||[])box.append(node('p','oi-warning',diagnosticText(message,items)));
         const reuse=s.target==='reuse',apply=button(reuse?'确认写入所选知识':'确认加入草案，等待发布',()=>controller.apply(reuse?'reuse':'add'));apply.classList.add('primary');apply.disabled=locked||!completeFacts||!(reuse?p.can_confirm_reuse:p.can_add);const footer=node('div','oi-confirmbar'),back=button('返回调整选择',()=>controller.back());back.disabled=locked;footer.append(back,node('span',null,reuse?'确认后写入所选知识':'本次只加入草案，知识仍待审核发布'),apply);box.append(footer);host.append(box);
       }
     function progressCard(title,description){
@@ -461,18 +575,39 @@
       const dependencies=s.items.filter(item=>item.kind==='entity'&&!awaitingDraft(item)&&!s.selected.includes(item.id)&&(item.required_by||[]).some(id=>s.selected.includes(id)));
       if(dependencies.length){const supplement=button(`补选关联实体（${dependencies.length} 条）`,()=>controller.selectMany(dependencies.map(item=>item.id),true));supplement.disabled=locked;tools.append(supplement);}
       host.append(tools);
+      const confirmed=s.selected.filter(id=>s.mappings[id]).length,missing=s.selected.length-confirmed;
+      const mappingSummary=node('div','oi-mapping-summary');
+      const feedback=node('p','oi-mapping-confirmed',s.bulkMapped===null?'':`本次确认 ${s.bulkMapped} 条复用映射`);
+      feedback.setAttribute('role','status');mappingSummary.append(feedback);
+      if(s.selected.length||s.filters.mapping){
+        const views=node('div','oi-mapping-views');views.setAttribute('role','group');views.setAttribute('aria-label','查看所选候选的复用状态');
+        for(const [key,label] of [['','全部候选'],['confirmed',`已确认复用 ${confirmed} 条`],['unconfirmed',`待核对 ${missing} 条`]]){
+          const view=button(label,()=>{
+            s.filters={status:s.filters.status==='draft'?'all':s.filters.status,document:'',kind:'',type:'',mapping:key};
+            if(key)for(const item of visibleItems(s))s.expandedDocuments[item.document_id||'']=true;
+            render();doc.getElementById(view.id)?.focus({preventScroll:true});
+          });
+          view.id='oi-mapping-view-'+(key||'all');view.setAttribute('aria-pressed',String((s.filters.mapping||'')===key));view.disabled=locked;views.append(view);
+        }
+        mappingSummary.append(views);
+      }
+      host.append(mappingSummary);
       const layout=node('div','oi-work-layout'),list=node('div','oi-list-pane');list.setAttribute('aria-label','候选列表');
       const directoryTools=node('div','oi-directory-tools');
       for(const [label,on] of [['全部展开',true],['全部收起',false]]){const action=button(label,()=>controller.expandDocuments(on));action.disabled=locked;directoryTools.append(action);}host.append(directoryTools);
-      const active=s.items.find(item=>item.id===s.detailId)||visible[0];if(active)s.detailId=active.id;
+      const active=visible.find(item=>item.id===s.detailId)||visible[0];if(active)s.detailId=active.id;
       for(const document of s.documents.filter(item=>!s.filters.document||item.document_id===s.filters.document)){
         const id=document.document_id,group=visible.filter(item=>(item.document_id||'')===id),allLoaded=s.items.filter(item=>(item.document_id||'')===id);
+        if(s.filters.mapping&&!group.length)continue;
         const expanded=!!s.expandedDocuments[id],container=node('section','oi-document-group'),heading=node('div','oi-source-heading');
         const toggle=button('',()=>controller.toggleDocument(id));toggle.className='oi-document-toggle';toggle.id='oi-document-toggle-'+encodeURIComponent(id);toggle.setAttribute('aria-expanded',String(expanded));toggle.setAttribute('aria-controls','oi-document-body-'+encodeURIComponent(id));
-        toggle.append(node('span','oi-document-chevron',expanded?'⌄':'›'),node('strong',null,sourceName(document)));
-        const status=s.filters.status||'pending',count=s.filters.kind||s.filters.type?group.length:status==='draft'?document.draft_count:status==='all'?document.total:document.pending_count;
-        const selected=s.items.filter(item=>(item.document_id||'')===id&&s.selected.includes(item.id)).length;
-        heading.append(toggle,node('small',null,`${s.filters.kind||s.filters.type?'已加载匹配':status==='draft'?'已加入草案':status==='all'?'候选':'待核对'} ${count} 条 · 已选 ${selected} 条`));container.append(heading);
+        const chevron=node('span','oi-document-chevron');chevron.setAttribute('aria-hidden','true');
+        toggle.append(chevron,node('strong',null,sourceName(document)));
+        const filtered=s.filters.kind||s.filters.type||s.filters.mapping;
+        const status=s.filters.status||'pending',count=filtered?group.length:status==='draft'?document.draft_count:status==='all'?document.total:document.pending_count;
+        const selected=allLoaded.filter(item=>s.selected.includes(item.id));
+        const mapped=selected.filter(item=>s.mappings[item.id]).length;
+        heading.append(toggle,node('small',null,`${filtered?'已加载匹配':status==='draft'?'已加入草案':status==='all'?'候选':'待核对'} ${count} 条 · 已选 ${selected.length} 条${mapped?' · 已确认复用 '+mapped+' 条':''}`));container.append(heading);
         const content=node('div','oi-document-body');content.id='oi-document-body-'+encodeURIComponent(id);content.hidden=!expanded;content.setAttribute('role','region');content.setAttribute('aria-labelledby',toggle.id);container.append(content);list.append(container);
         if(!expanded)continue;
         const candidates=group.filter(item=>!awaitingDraft(item)),allSelected=candidates.length>0&&candidates.every(item=>s.selected.includes(item.id)),pick=button(allSelected?`取消本资料已加载候选（${candidates.length} 条）`:`选择本资料已加载候选（${candidates.length} 条）`,()=>controller.selectMany(candidates.map(item=>item.id),!allSelected));pick.disabled=locked||!candidates.length;content.append(pick,node('small','oi-document-loaded',`已加载 ${allLoaded.length} / ${document.total} 条`));
@@ -480,7 +615,7 @@
         for(const item of group){const row=node('article','oi-candidate'+(s.selected.includes(item.id)?' is-selected':'')),label=node('label','oi-candidate-select'),input=node('input');input.type='checkbox';input.checked=s.selected.includes(item.id);input.disabled=locked||awaitingDraft(item);input.id='oi-pick-'+s.items.indexOf(item);input.setAttribute('aria-label','选择候选：'+describeCandidate(item));
           input.onchange=()=>run(()=>controller.select(item.id,input.checked));label.append(input,node('span','sr-only','选择候选'));row.append(label);
           const open=button(describeCandidate(item),()=>{s.detailId=item.id;render();});open.className='oi-open-detail';open.id='oi-detail-'+s.items.indexOf(item);open.setAttribute('aria-pressed',String(s.detailId===item.id));row.append(open,node('small','oi-kind',kindLabels[item.kind]||'候选'));
-          row.append(node('small','oi-row-status',item.materialized?'已入库 · 依赖复用':awaitingDraft(item)?'已加入草案 · 待发布':s.mappings[item.id]?'已确认类型':'待核对'));content.append(row);
+          row.append(node('small','oi-row-status'+(s.mappings[item.id]?' oi-row-mapped':''),s.mappings[item.id]?'复用 · '+termName(s,s.mappings[item.id]):item.materialized?'已入库 · 依赖复用':awaitingDraft(item)?'已加入草案 · 待发布':'待核对'));content.append(row);
         }
         if(s.documentErrors[id])content.append(node('p','oi-error',s.documentErrors[id]));
         // 只有一个资料时，列表底部的「加载下一页候选」已覆盖同一动作，
@@ -499,8 +634,8 @@
       renderGoals(s,locked);
       const reusedDependencies=draftDependencies(s).length;
       if(reusedDependencies)host.append(node('p','oi-dependency-note',`将复用所选草案中已有的 ${reusedDependencies} 条关联实体，与本次选择一起核对；不会重复创建实体。`));
-      const actions=node('div','oi-actions');actions.append(node('strong',null,`已选 ${s.selected.length} 条`));
-      const missing=s.selected.filter(id=>!s.mappings[id]).length;actions.append(node('span',null,!s.target?'下一步先选择处理方式和目标草案，再预览。':s.target==='reuse'?`已确认类型 ${s.selected.length-missing} 条 · 尚待映射 ${missing} 条`:'预览后加入草案，审核发布后才处理关联知识'));
+      const actions=node('div','oi-actions');actions.append(node('strong',null,`已选 ${s.selected.length} 条 · 已确认复用 ${confirmed} 条 · 待核对 ${missing} 条`));
+      actions.append(node('span',null,!s.target?'选择处理方式后预览。':s.target==='reuse'&&missing?'直接确认知识前，每条所选候选都需要映射。':''));
       const preview=button(s.busy?'正在处理…':!s.target?'下一步：选择处理方式':'预览选中内容（只读）',async()=>{
         if(!s.target){const goal=doc.getElementById('oi-processing-goal');revealInDrawer(goal);goal?.focus({preventScroll:true});return;}
         await controller.preview();revealInDrawer(doc.getElementById('oi-selection-preview'));
